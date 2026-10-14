@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -143,7 +144,7 @@ async function startDaemon(
     },
   };
   daemon = createDaemonWithAdapters(
-    config,
+    { storage: { scratchRoot: testScratchRoot() }, ...(config) },
     [new StubRuntimeAdapter('pi')],
     longPoll
       ? { longPoll: { retryDelayMs: 10, idleDelayMs: 10, } }

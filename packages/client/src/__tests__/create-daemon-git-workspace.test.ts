@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,7 +10,7 @@ import { GitWorkspaceManager, type GitCommandResult, type GitRunner } from '../d
 import { GitWorkspaceStore } from '../daemon/git-workspace-store';
 import { SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
 import { isSqliteAvailable } from '../daemon/journal/sqlite-support';
-import { LocalStoragePressureEngine } from '../daemon/journal/storage-policy';
+import { RetentionSweeper } from '../daemon/retention/sweeper';
 import type { DaemonEvent } from '../daemon/observer';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
@@ -74,7 +75,7 @@ describe('daemon Git workspace startup/local-event boundary', () => {
     const reconcile = vi.spyOn(store, 'reconcile');
 
     daemon = createDaemonWithAdapters(
-      baseConfig(server.url, workspaceRoot, storeDir),
+      { storage: { scratchRoot: testScratchRoot(), budget: { maxStoreBytes: 1024 * 1024 * 1024, minFreeBytes: 16 * 1024 * 1024 } }, ...(baseConfig(server.url, workspaceRoot, storeDir)) },
       [new StubRuntimeAdapter()],
       daemonOverrides(manager, store),
     );
@@ -101,16 +102,15 @@ describe('daemon Git workspace startup/local-event boundary', () => {
     });
     const manager = new GitWorkspaceManager(workspaceRoot, { run, ownerId: `failure-${process.pid}` });
     const store = new GitWorkspaceStore(storeDir);
-    const pressureStart = vi.spyOn(LocalStoragePressureEngine.prototype, 'start');
-    const pressureStop = vi.spyOn(LocalStoragePressureEngine.prototype, 'stop');
+    const pressureStart = vi.spyOn(RetentionSweeper.prototype, 'start');
+    const pressureStop = vi.spyOn(RetentionSweeper.prototype, 'stop');
     const journalClose = vi.spyOn(SqliteLocalTaskJournal.prototype, 'close');
     daemon = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot(), budget: { maxStoreBytes: 1024 * 1024 * 1024, minFreeBytes: 16 * 1024 * 1024 } },
         ...baseConfig(server.url, workspaceRoot, storeDir),
         gitWorkspace: { mode: 'local-checkpoints' },
         hostedJournal: {
           mode: 'sqlite',
-          storagePolicy: { maxStoreBytes: 1024 * 1024 * 1024, minFreeBytes: 16 * 1024 * 1024 },
         },
       },
       [new StubRuntimeAdapter()],
@@ -156,7 +156,7 @@ describe('daemon Git workspace startup/local-event boundary', () => {
       await originalReconcile();
     });
     daemon = createDaemonWithAdapters(
-      { ...baseConfig(server.url, workspaceRoot, storeDir), gitWorkspace: { mode: 'local-checkpoints' } },
+      { storage: { scratchRoot: testScratchRoot(), budget: { maxStoreBytes: 1024 * 1024 * 1024, minFreeBytes: 16 * 1024 * 1024 } },  ...baseConfig(server.url, workspaceRoot, storeDir), gitWorkspace: { mode: 'local-checkpoints' } },
       [new StubRuntimeAdapter()],
       daemonOverrides(manager, store),
     );
@@ -179,7 +179,7 @@ describe('daemon Git workspace startup/local-event boundary', () => {
     const adapter = new StubRuntimeAdapter();
     const events: DaemonEvent[] = [];
     daemon = createDaemonWithAdapters(
-      { ...baseConfig(server.url, workspaceRoot, storeDir), gitWorkspace: { mode: 'local-checkpoints' } },
+      { storage: { scratchRoot: testScratchRoot(), budget: { maxStoreBytes: 1024 * 1024 * 1024, minFreeBytes: 16 * 1024 * 1024 } },  ...baseConfig(server.url, workspaceRoot, storeDir), gitWorkspace: { mode: 'local-checkpoints' } },
       [adapter],
       daemonOverrides(manager, store),
     );

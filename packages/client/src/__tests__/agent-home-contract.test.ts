@@ -1,3 +1,4 @@
+import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs, readFileSync } from 'node:fs';
 import { spawn as realSpawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -321,7 +322,7 @@ describe('SDK-owned Agent home contract', () => {
       resolveInstruction: async () => { throw new Error('not used'); },
       uploadArtifact: async () => { throw new Error('not used'); },
     };
-    const deps: TaskRunnerDeps = {
+    const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
       adapters: [adapter],
       workspaceRoot,
       agentHome,
@@ -363,7 +364,7 @@ describe('SDK-owned Agent home contract', () => {
     const storeDir = await makeRoot();
     const adapter = new StubRuntimeAdapter('pi');
     const sent: Envelope[] = [];
-    const runner = new TaskRunner({
+    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
       adapters: [adapter],
       workspaceRoot: await makeRoot(),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
@@ -450,7 +451,7 @@ describe('SDK-owned Agent home contract', () => {
       expect(sent.some((entry) => entry.type === 'task.fail')).toBe(false);
       return realRecordTaskTerminal(...args);
     });
-    const runner = new TaskRunner({
+    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
       adapters: [adapter],
       workspaceRoot: await makeRoot(),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
@@ -502,7 +503,7 @@ describe('SDK-owned Agent home contract', () => {
       expect(sent.some((entry) => entry.type === 'task.fail')).toBe(false);
       return realRecordTaskTerminal(...args);
     });
-    const runner = new TaskRunner({
+    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
       adapters: [adapter],
       workspaceRoot: await makeRoot(),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
@@ -563,7 +564,7 @@ describe('SDK-owned Agent home contract', () => {
       return realRecordTaskTerminal(...args);
     });
     const agentHome = new AgentHomeManager({ hostStorageRoot });
-    const runner = new TaskRunner({
+    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
       adapters: [adapter],
       workspaceRoot: await makeRoot(),
       agentHome,
@@ -614,7 +615,7 @@ describe('SDK-owned Agent home contract', () => {
     const evidenceFailures: NonNullable<TaskRunnerDeps['onAgentTerminalEvidenceFailure']> extends (event: infer T) => void ? T[] : never = [];
     const agentHome = new AgentHomeManager({ hostStorageRoot });
     const agentRef = ref('agent-permanent-prestart-failure', 'profile-1');
-    const runner = new TaskRunner({
+    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
       adapters: [adapter],
       workspaceRoot: await makeRoot(),
       agentHome,
@@ -658,7 +659,7 @@ describe('SDK-owned Agent home contract', () => {
     const evidenceFailures: NonNullable<TaskRunnerDeps['onAgentTerminalEvidenceFailure']> extends (event: infer T) => void ? T[] : never = [];
     const agentHome = new AgentHomeManager({ hostStorageRoot });
     const agentRef = ref('agent-permanent-active-failure', 'profile-1');
-    const runner = new TaskRunner({
+    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
       adapters: [adapter],
       workspaceRoot: await makeRoot(),
       agentHome,
@@ -715,7 +716,7 @@ describe('SDK-owned Agent home contract', () => {
 
     const adapter = new StubRuntimeAdapter('pi');
     const sent: Envelope[] = [];
-    const runner = new TaskRunner({
+    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
       adapters: [adapter],
       workspaceRoot,
       agentHome: manager,
@@ -765,7 +766,7 @@ describe('SDK-owned Agent home contract', () => {
     const adapter = new StubRuntimeAdapter('pi');
     const manager = new AgentHomeManager({ hostStorageRoot });
     const agentRef = ref('agent-release-conflict', 'profile-1');
-    const runner = new TaskRunner({
+    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
       adapters: [adapter],
       workspaceRoot: await makeRoot(),
       agentHome: manager,

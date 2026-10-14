@@ -1,3 +1,4 @@
+import { testScratchOwner } from "./fixtures/execution-scratch";
 import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -32,7 +33,7 @@ describe('Salesko fake connector MCP end to end', () => {
     const adapter = new ClaudeAdapter({
       resolveBin: () => ({ command: CLAUDE_FIXTURE, source: 'path' }),
     });
-    const deps: TaskRunnerDeps = {
+    const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
       adapters: [adapter],
       runtimeAllowlist: ['claude'],
       workspaceRoot: await tmpDir('byok-salesko-e2e-workspace-'),

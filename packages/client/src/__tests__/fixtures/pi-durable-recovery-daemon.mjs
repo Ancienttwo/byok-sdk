@@ -8,7 +8,7 @@ const store = new FixtureDeviceStore(config.storeDir, undefined, config.productI
 if (enrollment.record) await store.credentials.replace(enrollment.record);
 const daemon = createDaemon({
   localAgentRelease:{version:'0.0.0-durable-recovery-test'},productName:'Durable recovery',productId:config.productId,serverUrl:config.serverUrl,
-  storeDir:config.storeDir, workspaceRoot:config.workspaceRoot, runtimeAllowlist:['pi'],durablePi:true,hostedJournal:{mode:'sqlite'},
+  storage:{scratchRoot:config.scratchRoot},storeDir:config.storeDir, workspaceRoot:config.workspaceRoot, runtimeAllowlist:['pi'],durablePi:true,hostedJournal:{mode:'sqlite'},
   agentHome:{hostStorageRoot:config.homeRoot},
   piByokLauncher:{command:process.execPath,args:[config.launcherEntry],profileDbPath:config.profilePath,sessionDir:config.sessionDir},
 });

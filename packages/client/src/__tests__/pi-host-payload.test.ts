@@ -1,3 +1,4 @@
+import { testScratchRoot } from './fixtures/execution-scratch';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import { createServer, type ServerResponse } from 'node:http';
@@ -84,13 +85,14 @@ if (process.argv[2] !== 'task') {
     const prepared = await adapter.prepare({ offer: { instruction: input.instruction }, descriptor: adapter.descriptor,
       requiredToolsetIds: [], mcpServers: {}, mcpToolsetTools: {} });
     if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
+    const scratch=await sdk.createExecutionScratch({root:input.scratchRoot});
     report.stage = 'resolve';
-    const runtime = await prepared.operation.resolveRuntimeLaunch({ kind: 'instruction', cwd: input.cwd, env: input.env, projectionRoot: input.projectionRoot });
+    const runtime = await prepared.operation.resolveRuntimeLaunch({ kind: 'instruction', cwd: input.cwd, env: input.env, scratch });
     report.launch = { command: runtime.command, entry: runtime.entry, fixedArgs: runtime.fixedArgs };
     report.stage = 'start';
     const manifest = sdk.sealRuntimeOperationManifest({ taskId: 'host-payload', runtimeId: 'pi', descriptor: adapter.descriptor,
       requiredToolsetIds: [], workspace: { workspaceDir: input.cwd }, forwardedEnvironmentNames: Object.keys(runtime.env).sort() });
-    const session = await prepared.operation.start({ kind: 'instruction', instruction: input.instruction, manifest, runtimeLaunch: runtime,
+    const session = await prepared.operation.start({ scratch, kind: 'instruction', instruction: input.instruction, manifest, runtimeLaunch: runtime,
       env: runtime.env, mcpEnv: { PATH: input.env.PATH }, mcpServers: {}, mcpToolsetTools: {} });
     report.stage = 'events'; report.events = [];
     // A session stays open for follow-ups; the task's turn ends at turn_end.
@@ -247,7 +249,7 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
         ...(host.piPackageDir === undefined ? {} : { PI_PACKAGE_DIR: host.piPackageDir }) };
       const reportPath = path.join(runDir, 'report.json'); const inputPath = path.join(runDir, 'input.json');
       await fs.writeFile(inputPath, JSON.stringify({ piSpecifier: PI_SPECIFIER, instruction: 'Reply with the host payload marker.',
-        bundleEntry: host.entry !== undefined, cwd, env, projectionRoot: path.join(runDir, 'projections'), report: reportPath }));
+        bundleEntry: host.entry !== undefined, cwd, env, scratchRoot: testScratchRoot(), report: reportPath }));
 
       await execFileAsync(host.command, [...host.prefix, 'task', inputPath], { cwd: runDir, env, timeout: 60_000 }).catch(async (error: unknown) => {
         throw new Error(`host task failed: ${String(error)}\nreport: ${await fs.readFile(reportPath, 'utf8').catch(() => 'none')}`);

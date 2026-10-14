@@ -1,3 +1,4 @@
+import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_IDS, type RetentionClassId, type RetentionTrigger } from '../daemon/retention/registry';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { TASK_STATES, type TaskState, OUTBOUND_REFUSAL_REASONS, type OutboundRefusalReason } from '@byok-sdk/protocol';
@@ -299,6 +300,21 @@ function parseRecordLine(line: string | undefined): DaemonRecord | undefined {
         return { ...record, terminal: true, taskState: raw.taskState as TaskState };
       }
       return { ...record, terminal: false };
+    }
+    case 'retention-sweep': {
+      if (typeof raw.trigger !== 'string' || !['startup', 'periodic', 'pressure', 'home-lease'].includes(raw.trigger)
+        || !['deleted', 'bytesReclaimed', 'failures', 'durationMs'].every(key => typeof raw[key] === 'number' && Number.isFinite(raw[key]) && (raw[key] as number) >= 0)
+        || typeof raw.truncated !== 'boolean' || raw.at !== raw.ts) return undefined;
+      return { kind: 'retention-sweep', ts: raw.ts, trigger: raw.trigger as RetentionTrigger, at: raw.at,
+        deleted: raw.deleted as number, bytesReclaimed: raw.bytesReclaimed as number, failures: raw.failures as number,
+        truncated: raw.truncated, durationMs: raw.durationMs as number };
+    }
+    case 'retention-failure': {
+      if (typeof raw.trigger !== 'string' || !['startup', 'periodic', 'pressure', 'home-lease'].includes(raw.trigger)
+        || ![...EXPIRING_CLASS_IDS, ...PROTECTED_CLASS_IDS].includes(raw.classId as RetentionClassId)
+        || typeof raw.code !== 'string' || !['sweep_failed', 'measurement_failed'].includes(raw.code) || !Number.isSafeInteger(raw.count) || (raw.count as number) < 0) return undefined;
+      return { kind: 'retention-failure', ts: raw.ts, trigger: raw.trigger as RetentionTrigger, classId: raw.classId as RetentionClassId,
+        code: raw.code as string, count: raw.count as number };
     }
     case 'lifecycle': {
       const lifecycle = parseDaemonLifecycle(raw.lifecycle);

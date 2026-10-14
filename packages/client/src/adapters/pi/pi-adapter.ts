@@ -1,3 +1,4 @@
+import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import { startDurablePi } from '../pi-durable/session';
 import { serializePiHostConfig } from './runtime-host-binding';
 import { parsePiMcpEnvironment } from './mcp-environment';
@@ -5,7 +6,6 @@ import { piLaunchCommand, resolvePiRuntimeLaunch, type PiRuntimeLaunchResources 
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
-import os from 'node:os';
 import path, { isAbsolute } from 'node:path';
 import { promisify } from 'node:util';
 import type {
@@ -34,7 +34,7 @@ import {
   INPUT_PREPARATION_ARTIFACT_FORMAT,
   INPUT_PREPARATION_VERSION,
 } from '../../input-preparation';
-import { RuntimeDisposalFailure, RuntimeExecutionFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
+import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartupDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
 import { clientPackageRoot, readClientPiRuntimePin } from './client-manifest';
 import { locateBundledPiAssets } from './todo-locale-assets';
 import { BYOK_SDK_HELPER_SUBCOMMAND, resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
@@ -47,6 +47,16 @@ import {
   withoutProviderCredentials,
 } from '../provider-credential-environment';
 import { probePiAuthPresent } from './auth-presence';
+
+async function disposePiStartup(rpc: PiRpcClient | undefined, scratch: ExecutionScratch, cause?: unknown): Promise<void> {
+  const retry = async (): Promise<void> => {
+    if (isRuntimeStartupDisposalFailure(cause)) await cause.retryDisposal();
+    await rpc?.dispose();
+    await scratch.release();
+  };
+  try { await retry(); }
+  catch (error) { throw new RuntimeStartupDisposalFailure(retry, { cause: new AggregateError([cause, error], 'Pi startup disposal did not complete') }); }
+}
 
 const execFileAsync = promisify(execFile);
 const DETECT_TIMEOUT_MS = 5_000;
@@ -62,29 +72,10 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Task-owned cleanup is part of the close receipt and must fail visibly. */
-async function cleanupMcpConfigDir(dir: string | undefined): Promise<void> {
-  if (!dir) return;
-  try {
-    await fs.rm(dir, { recursive: true, force: true });
-  } catch (cause) {
-    throw new RuntimeDisposalFailure({
-      stage: 'cleanup',
-      reason: 'pi task-scoped MCP configuration could not be removed',
-    }, { cause });
-  }
-}
-
-/**
- * `detect()`'s `authPresent` is pi's non-secret login-state observation
- * (`./auth-presence.ts`): a known provider credential env var *name*, or a
- * usable login record in pi's agent-dir `auth.json` for the configured
- * default provider. It never returns or logs a credential value — see the
- * credential-isolation rule on `RuntimeAdapter`.
- */
+/** Pi launch options; execution scratch and replica authority come from start input. */
 export interface PiAdapterOptions {
   /** Opt-in ordinary, lease-bound durable worker. */
-  durablePi?: { readonly replicaRoot: string };
+  durablePi?: boolean;
   /** Override bin resolution — tests substitute the fake-pi fixture script. */
   resolveBin?: () => ResolvedBin;
   /** Override process spawning — tests substitute a fake spawn. */
@@ -212,7 +203,8 @@ export class PiAdapter implements RuntimeAdapter {
   });
 
   constructor(private readonly options: PiAdapterOptions = {}) {
-    if (options.durablePi !== undefined) this.descriptor = freezeRuntimeAdapterDescriptor({ ...this.descriptor, capabilities: { ...this.descriptor.capabilities, durablePi: true, steer: false, resume: false } });
+    if (options.durablePi !== undefined && typeof options.durablePi !== 'boolean') throw new Error('PiAdapterOptions.durablePi must be boolean; pass replicaRoot through durableContext');
+    if (options.durablePi === true) this.descriptor = freezeRuntimeAdapterDescriptor({ ...this.descriptor, capabilities: { ...this.descriptor.capabilities, durablePi: true, steer: false, resume: false } });
     validatePiByokLauncherConfig(options.byokLauncher);
     if (options.sdkHelperHost !== undefined) resolveSdkReservedHelperBin('pi-rpc', options.sdkHelperHost);
   }
@@ -248,8 +240,8 @@ export class PiAdapter implements RuntimeAdapter {
   }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
-    if (this.options.durablePi !== undefined && process.platform === 'win32') return { kind: 'reject', reason: 'durable Pi is unavailable on Windows until parent-death Job Object recovery is validated', retryable: false };
-    if (this.options.durablePi !== undefined && input.offer.dispatchSelection === undefined) {
+    if (this.options.durablePi === true && process.platform === 'win32') return { kind: 'reject', reason: 'durable Pi is unavailable on Windows until parent-death Job Object recovery is validated', retryable: false };
+    if (this.options.durablePi === true && input.offer.dispatchSelection === undefined) {
       return { kind: 'reject', reason: 'durable Pi requires an ordinary BYOK selection', retryable: false };
     }
     // Fail closed BEFORE anything is spawned. pi registers one tool per
@@ -361,8 +353,8 @@ export class PiAdapter implements RuntimeAdapter {
       operation: {
         resolveRuntimeLaunch: async (resources) => {
           if (boundRuntime !== undefined) throw authorityFailure('runtime launch resources were already resolved');
-          if (this.options.durablePi !== undefined && resources.kind === 'prepared') throw authorityFailure('durable Pi does not admit the prepared lane');
-          const kind = this.options.durablePi !== undefined ? 'pi-durable' : resources.kind === 'prepared' ? 'pi-prepared' : 'pi-rpc';
+          if (this.options.durablePi === true && resources.kind === 'prepared') throw authorityFailure('durable Pi does not admit the prepared lane');
+          const kind = this.options.durablePi === true ? 'pi-durable' : resources.kind === 'prepared' ? 'pi-prepared' : 'pi-rpc';
           boundRuntime = await resolvePiRuntimeLaunch({
             ...resources, sessionCwd: resources.cwd, kind,
             env: pinnedSelection === undefined ? resources.env : withoutProviderCredentials(resources.env),
@@ -398,7 +390,8 @@ export class PiAdapter implements RuntimeAdapter {
         start: async (startInput: RuntimeOperationStartInput): Promise<Session> => {
           const runtimeLaunch = startInput.runtimeLaunch;
           if (runtimeLaunch === undefined || runtimeLaunch !== boundRuntime) throw authorityFailure('Pi start requires its resolved runtime launch');
-          if (runtimeLaunch.kind !== (this.options.durablePi !== undefined ? 'pi-durable' : startInput.kind === 'prepared' ? 'pi-prepared' : 'pi-rpc')) throw authorityFailure('Pi start lane differs from runtime launch');
+          if (runtimeLaunch.scratch !== startInput.scratch) throw authorityFailure('Pi start scratch differs from runtime launch');
+          if (runtimeLaunch.kind !== (this.options.durablePi === true ? 'pi-durable' : startInput.kind === 'prepared' ? 'pi-prepared' : 'pi-rpc')) throw authorityFailure('Pi start lane differs from runtime launch');
           if (runtimeLaunch.sessionCwd !== startInput.manifest.cwd) throw authorityFailure('Pi runtime session cwd differs from manifest');
           parsePiMcpEnvironment(startInput.mcpEnv);
           const mcpEnv = startInput.mcpEnv!; // Preserve the daemon admission object through serialization.
@@ -436,14 +429,16 @@ export class PiAdapter implements RuntimeAdapter {
           // `pi --mode rpc` can never consume a prepared request, so this branch
           // launches the SDK-owned in-process host instead
           // (`../../bin/byok-pi-prepared.ts`).
-          if (this.options.durablePi !== undefined) {
+          if (this.options.durablePi === true) {
             if (startInput.kind !== 'instruction' || launcherArgs === undefined || this.options.byokLauncher === undefined) throw authorityFailure('durable Pi requires ordinary custody launch');
-            return await startDurablePi({ input: startInput, runtimeLaunch, replicaRoot: this.options.durablePi.replicaRoot,
+            if (startInput.durableContext === undefined) throw authorityFailure('durable Pi requires replica and journal context');
+            return await startDurablePi({ input: startInput, runtimeLaunch, replicaRoot: startInput.durableContext.replicaRoot,
               launcher: this.options.byokLauncher, launcherArgs, spawnFn: this.options.spawnFn });
           }
           if (startInput.kind === 'prepared') {
             return await startPreparedPiOperation({
               runtimeLaunch,
+              scratch: startInput.scratch,
               mcpEnv,
               preparation: startInput.preparation,
               manifest: startInput.manifest,
@@ -484,7 +479,7 @@ export class PiAdapter implements RuntimeAdapter {
             // and is removed on every start failure and on close. It holds
             // `mcpEnv`, which already has no provider credential names
             // (`projectPiMcpEnvironment`).
-            mcpConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-mcp-'));
+            mcpConfigDir = startInput.scratch.sdkDir;
             await fs.chmod(mcpConfigDir, 0o700).catch(() => {});
             hostConfigPath = path.join(mcpConfigDir, 'rpc-launch.json');
             // The daemon's observation travels WITH the servers: the extension
@@ -512,7 +507,7 @@ export class PiAdapter implements RuntimeAdapter {
             hostConfigDigest = serialized.digest;
             await fs.writeFile(hostConfigPath, serialized.bytes, { mode: 0o600, flag: 'wx' });
           } catch (cause) {
-            await cleanupMcpConfigDir(mcpConfigDir);
+            await startInput.scratch.release();
             throw new RuntimeExecutionFailure({
               phase: 'start', category: 'infrastructure', retry: 'retryable',
               reason: 'pi task-scoped MCP configuration could not be created',
@@ -536,7 +531,7 @@ export class PiAdapter implements RuntimeAdapter {
               spawnFn: this.options.spawnFn,
             });
           } catch (cause) {
-            await cleanupMcpConfigDir(mcpConfigDir);
+            await disposePiStartup(undefined, startInput.scratch, cause);
             if (cause instanceof RuntimeExecutionFailure) throw cause;
             throw new RuntimeExecutionFailure({
               phase: 'start', category: 'infrastructure', retry: 'retryable',
@@ -548,16 +543,14 @@ export class PiAdapter implements RuntimeAdapter {
           try {
             response = await rpc.send({ type: 'prompt', message: startInput.instruction });
           } catch (cause) {
-            rpc.kill();
-            await cleanupMcpConfigDir(mcpConfigDir);
+            await disposePiStartup(rpc, startInput.scratch);
             throw new RuntimeExecutionFailure({
               phase: 'start', category: 'infrastructure', retry: 'retryable',
               reason: `pi initial prompt transport failed: ${errorMessage(cause)}`,
             }, { cause });
           }
           if (response.success === false) {
-            rpc.kill();
-            await cleanupMcpConfigDir(mcpConfigDir);
+            await disposePiStartup(rpc, startInput.scratch);
             throw new RuntimeExecutionFailure({
               phase: 'start', category: 'semantic', retry: 'non-retryable',
               reason: typeof response.error === 'string' ? response.error : 'pi rejected the initial prompt',
@@ -568,19 +561,17 @@ export class PiAdapter implements RuntimeAdapter {
           try {
             sessionRef = await resolveAuthoritativeSessionId(rpc);
           } catch (err) {
-            rpc.kill();
-            await cleanupMcpConfigDir(mcpConfigDir);
+            await disposePiStartup(rpc, startInput.scratch);
             throw err;
           }
           if (resumeSessionId !== undefined && sessionRef !== resumeSessionId) {
-            rpc.kill();
-            await cleanupMcpConfigDir(mcpConfigDir);
+            await disposePiStartup(rpc, startInput.scratch);
             throw new RuntimeExecutionFailure({
               phase: 'start', category: 'authority', retry: 'non-retryable',
               reason: 'pi resumed a different authoritative session than requested',
             });
           }
-          return new PiSession(sessionRef, rpc, manifestSelection, mcpConfigDir, runtimeLaunch.release);
+          return new PiSession(sessionRef, rpc, manifestSelection, startInput.scratch);
         },
       },
     };
@@ -627,6 +618,7 @@ function piMcpToolNames(
  * checks have already passed.
  */
 interface PreparedPiLaunchInput {
+  readonly scratch: ExecutionScratch;
   readonly mcpEnv: Readonly<Record<string, string>>;
   readonly runtimeLaunch: PiRuntimeLaunchResources;
   readonly preparation: RuntimePreparedLaunchV1;
@@ -782,7 +774,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
   let configPath: string;
   let configDigest: string;
   try {
-    configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-prepared-'));
+    configDir = input.scratch.sdkDir;
     await fs.chmod(configDir, 0o700).catch(() => {});
     configPath = path.join(configDir, 'prepared-launch.json');
     const serialized = serializePiHostConfig({
@@ -815,7 +807,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
     configDigest = serialized.digest;
     await fs.writeFile(configPath, serialized.bytes, { mode: 0o600 });
   } catch (cause) {
-    await cleanupMcpConfigDir(configDir);
+    await input.scratch.release();
     throw new RuntimeExecutionFailure({
       phase: 'start', category: 'infrastructure', retry: 'retryable',
       reason: 'pi prepared launch configuration could not be created',
@@ -836,7 +828,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
       ...(input.spawnFn === undefined ? {} : { spawnFn: input.spawnFn }),
     });
   } catch (cause) {
-    await cleanupMcpConfigDir(configDir);
+    await disposePiStartup(undefined, input.scratch, cause);
     if (cause instanceof RuntimeExecutionFailure) throw cause;
     throw new RuntimeExecutionFailure({
       phase: 'start', category: 'infrastructure', retry: 'retryable',
@@ -852,16 +844,14 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
     // that is written.
     response = await rpc.send(buildPreparedPromptCommand(envelope, preparation.expected, PREPARED_PROMPT_COMMAND_ID));
   } catch (cause) {
-    rpc.kill();
-    await cleanupMcpConfigDir(configDir);
+    await disposePiStartup(rpc, input.scratch);
     throw new RuntimeExecutionFailure({
       phase: 'start', category: 'infrastructure', retry: 'retryable',
       reason: `pi prepared request transport failed: ${errorMessage(cause)}`,
     }, { cause });
   }
   if (response.success === false) {
-    rpc.kill();
-    await cleanupMcpConfigDir(configDir);
+    await disposePiStartup(rpc, input.scratch);
     // The native code is reported verbatim. Every one of them is terminal for
     // this artifact — nothing here retries, and nothing here may re-send a
     // DIFFERENT input under the same accounting.
@@ -874,13 +864,11 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
 
   const data = response.data as { sessionId?: unknown; preparedDigest?: unknown } | undefined;
   if (typeof data?.sessionId !== 'string' || data.sessionId.length === 0) {
-    rpc.kill();
-    await cleanupMcpConfigDir(configDir);
+    await disposePiStartup(rpc, input.scratch);
     throw authorityFailure('pi admitted the prepared request without reporting an authoritative session id');
   }
   if (data.preparedDigest !== preparation.expected.envelopeDigest) {
-    rpc.kill();
-    await cleanupMcpConfigDir(configDir);
+    await disposePiStartup(rpc, input.scratch);
     throw authorityFailure('pi admitted a prepared request whose digest is not the one this operation counted');
   }
   const sessionRef = data.sessionId;
@@ -889,8 +877,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
   try {
     state = await rpc.send({ type: 'get_state' });
   } catch (cause) {
-    rpc.kill();
-    await cleanupMcpConfigDir(configDir);
+    await disposePiStartup(rpc, input.scratch);
     throw new RuntimeExecutionFailure({
       phase: 'start', category: 'infrastructure', retry: 'retryable',
       reason: `pi transport ended before confirming the prepared session id: ${errorMessage(cause)}`,
@@ -898,12 +885,11 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
   }
   const stateData = state.data as { sessionId?: unknown } | undefined;
   if (state.success === false || stateData?.sessionId !== sessionRef) {
-    rpc.kill();
-    await cleanupMcpConfigDir(configDir);
+    await disposePiStartup(rpc, input.scratch);
     throw authorityFailure('pi reported a different session id than the one that admitted the prepared request');
   }
 
-  return new PiSession(sessionRef, rpc, input.manifestSelection, configDir, input.runtimeLaunch.release, preparation.expected.model.contextWindow);
+  return new PiSession(sessionRef, rpc, input.manifestSelection, input.scratch, preparation.expected.model.contextWindow);
 }
 
 /**
@@ -1051,8 +1037,7 @@ class PiSession implements Session {
     private readonly rpc: PiRpcClient,
     private readonly selection: TaskOfferPayload['dispatchSelection'],
     /** Task-scoped isolated MCP extension configuration, removed in close(). */
-    private readonly mcpConfigDir?: string,
-    private readonly releaseRuntime?: () => Promise<void>,
+    private readonly scratch: ExecutionScratch,
     private readonly hostContextWindow?: number,
   ) {}
 
@@ -1171,8 +1156,7 @@ class PiSession implements Session {
     if (!this.closeAttempt) {
       const attempt = (async () => {
         await this.rpc.dispose();
-        await cleanupMcpConfigDir(this.mcpConfigDir);
-        await this.releaseRuntime?.();
+        await this.scratch.release();
       })();
       this.closeAttempt = attempt.catch((error: unknown) => {
         this.closeAttempt = undefined;

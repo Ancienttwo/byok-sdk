@@ -1,3 +1,4 @@
+import { testScratchOwner } from "./fixtures/execution-scratch";
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -132,7 +133,7 @@ async function harness() {
   // Exercise the actual TaskRunner terminal-release helper against its real
   // held-pin map. Admission/runtime launching is outside this retention test;
   // no launch ownership guard or provider is mocked/bypassed.
-  const runner = new TaskRunner({ adapters: [], deviceId: 'device-1', workspaceRoot: path.join(dir, 'workspace'), storeDir: dir, productId: 'retention-test', send: () => {},
+  const runner = new TaskRunner({ scratchRoot: testScratchOwner(),  adapters: [], deviceId: 'device-1', workspaceRoot: path.join(dir, 'workspace'), storeDir: dir, productId: 'retention-test', send: () => {},
     blobClient: { resolveInstruction: async () => { throw new Error('unused'); }, uploadArtifact: async () => { throw new Error('unused'); } },
     sessionWorkspaces: new SessionWorkspaceStore(path.join(dir, 'sessions')), approvalRegistry: new ApprovalRegistry(),
     inputPreparationLane: { store: service.store, open: () => service.open(), authorizeAgentMemory: async () => {}, runtime: compiler.runtime, policyRevision: LIMITS.revision, toolsetDefinitionRevisions: () => new Map() },
@@ -143,7 +144,7 @@ async function harness() {
     await Promise.all(gc.mock.results.filter(result => result.type === 'return').map(result => result.value));
     await new Promise<void>(resolve => setImmediate(resolve));
   }
-  async function tick(ms: number) { await vi.advanceTimersByTimeAsync(ms); await settleGc(); }
+  async function tick(ms: number) { await vi.advanceTimersByTimeAsync(ms); await service.collectExpired(Date.now(), 32); await settleGc(); }
   return { service, compiler, gc, recordId, artifactPath, taskId, terminal, tick, settleGc,
     release: () => terminal.releasePreparationPin(taskId),
     async expectCollected() {
@@ -154,165 +155,53 @@ async function harness() {
   };
 }
 
-describe('S11-F2 pin release rearms owned retention GC', () => {
-  it('collects after the last pin releases beyond both horizons, through the real terminal-release helper', async () => {
-    const h = await harness();
-    await h.tick(201);
+describe('S11-F2 pins under unified maintenance', () => {
+  it('collects after the final TaskRunner pin releases without a private timer', async () => {
+    const h = await harness(); await h.tick(201);
     expect(h.service.store.get(h.recordId)?.pin?.taskId).toBe(h.taskId);
-    expect((await fs.stat(h.artifactPath)).size).toBeGreaterThan(0);
-    expect(vi.getTimerCount()).toBe(0); // The wholly pinned store is dormant.
-    await h.release();
-    expect(h.service.store.get(h.recordId)?.pin).toBeUndefined();
-    expect(h.terminal.preparationPinsByTask.has(h.taskId)).toBe(false);
-    await h.tick(1);
-    await h.expectCollected();
-    expect(vi.getTimerCount()).toBe(0);
+    await h.release(); expect(h.terminal.preparationPinsByTask.has(h.taskId)).toBe(false);
+    await h.tick(1); await h.expectCollected(); expect(vi.getTimerCount()).toBe(0);
   });
-
-  it('collects an expired artifact immediately after release but preserves the tombstone to its own horizon', async () => {
-    const h = await harness();
-    await h.tick(125);
-    expect(vi.getTimerCount()).toBe(0);
-    await h.release();
-    await h.tick(1);
-    await expect(fs.stat(h.artifactPath)).rejects.toMatchObject({ code: 'ENOENT' });
-    expect(h.service.store.get(h.recordId)?.artifactBytes).toBe(0);
-    await h.tick(73);
-    expect(h.service.store.get(h.recordId)).toBeDefined();
-    await h.tick(1);
-    await h.expectCollected();
+  it('expires artifacts before tombstones and preserves both absolute horizons', async () => {
+    const h = await harness(); await h.tick(50); await h.release(); await h.tick(49);
+    expect((await fs.stat(h.artifactPath)).size).toBeGreaterThan(0); await h.tick(1);
+    expect(h.service.store.get(h.recordId)?.artifactBytes).toBe(0); await h.tick(99);
+    expect(h.service.store.get(h.recordId)).toBeDefined(); await h.tick(1); await h.expectCollected();
   });
-
-  it('does not shorten either horizon when a pin releases before expiry', async () => {
-    const h = await harness();
-    await h.tick(50);
-    await h.release();
-    await h.tick(49);
-    expect((await fs.stat(h.artifactPath)).size).toBeGreaterThan(0);
-    await h.tick(1);
-    expect(h.service.store.get(h.recordId)?.artifactBytes).toBe(0);
-    await h.tick(99);
-    expect(h.service.store.get(h.recordId)).toBeDefined();
-    await h.tick(1);
-    await h.expectCollected();
-  });
-
-  it('retains the rearm when unpin commits while a completed GC scan is still in flight', async () => {
-    const h = await harness();
-    const scanned = deferred(); const releaseGc = deferred();
-    const realGc = h.service.store.gc.bind(h.service.store);
-    h.gc.mockRestore();
-    const gc = vi.spyOn(h.service.store, 'gc').mockImplementationOnce(async (...args) => {
-      const result = await realGc(...args); scanned.resolve(); await releaseGc.promise; return result;
-    });
-    cleanups.push(async () => { releaseGc.resolve(); });
-    await vi.advanceTimersByTimeAsync(201);
-    await scanned.promise;
-    await h.release();
-    expect(vi.getTimerCount()).toBe(0); // Existing GC owns the next scheduling pass.
-    releaseGc.resolve();
-    await gc.mock.results[0]!.value;
-    await new Promise<void>(resolve => setImmediate(resolve));
-    await vi.advanceTimersByTimeAsync(1);
-    await gc.mock.results.at(-1)!.value;
-    await h.expectCollected();
-  });
-
-  it('rearms when GC observes the pin and unpin is queued behind that serialized scan', async () => {
-    const h = await harness();
-    const gate = deferred(); const entered = deferred();
-    const serialized = h.service.store as unknown as { enqueue: (work: () => Promise<void>) => Promise<void> };
+  it('a scan observes the pin when unpin is queued behind it; the next pass collects', async () => {
+    const h = await harness(); vi.setSystemTime(Date.now() + 201);
+    const gate = deferred(), entered = deferred();
+    const serialized = h.service.store as unknown as { enqueue(work: () => Promise<void>): Promise<void> };
     const blocker = serialized.enqueue(async () => { entered.resolve(); await gate.promise; });
-    cleanups.push(async () => { gate.resolve(); });
-    await entered.promise;
-    await vi.advanceTimersByTimeAsync(201); // GC queued behind the held mutation.
-    const released = h.release(); // Unpin queued behind GC.
-    gate.resolve();
-    await blocker; await released; await h.settleGc();
-    expect(h.service.store.get(h.recordId)?.pin).toBeUndefined();
-    await h.tick(1);
-    await h.expectCollected();
+    cleanups.push(async () => gate.resolve()); await entered.promise;
+    const scan = h.service.collectExpired(Date.now(), 32), released = h.release(); gate.resolve();
+    await blocker; await scan; await released;
+    expect(h.service.store.get(h.recordId)?.pin).toBeUndefined(); await h.tick(1); await h.expectCollected();
   });
-
-  it('leaves a different holder protected and schedules nothing for a failed release', async () => {
-    const h = await harness();
-    await h.tick(201);
+  it('keeps a different pin holder protected', async () => {
+    const h = await harness(); await h.tick(201);
     await expect(h.service.store.unpin(h.recordId, 'other-task')).rejects.toThrow('cannot be released');
-    expect(vi.getTimerCount()).toBe(0);
-    expect(h.service.store.get(h.recordId)?.pin?.taskId).toBe(h.taskId);
+    await h.tick(1); expect(h.service.store.get(h.recordId)?.pin?.taskId).toBe(h.taskId);
     expect((await fs.stat(h.artifactPath)).size).toBeGreaterThan(0);
   });
-
-  it('does not revive timers after service stop; reopen applies overdue retention', async () => {
-    const h = await harness();
-    await h.tick(201);
-    await h.service.stop();
-    await h.release();
-    expect(vi.getTimerCount()).toBe(0);
-    expect((await fs.stat(h.artifactPath)).size).toBeGreaterThan(0);
-    await h.service.open();
-    await h.expectCollected();
-    expect(vi.getTimerCount()).toBe(0);
+  it('does not revive timers after stop; reopen applies overdue retention', async () => {
+    const h = await harness(); await h.tick(201); await h.service.stop(); await h.release();
+    expect(vi.getTimerCount()).toBe(0); expect((await fs.stat(h.artifactPath)).size).toBeGreaterThan(0);
+    await h.service.open(); await h.expectCollected();
   });
-
-  it('does not publish a retention change when the durable unpin append fails', async () => {
-    const h = await harness();
-    await h.tick(201);
-    const durable = h.service.store as unknown as { log: { append: (body: string) => Promise<void> } };
+  it('does not expose an unpin whose durable append failed', async () => {
+    const h = await harness(); await h.tick(201);
+    const durable = h.service.store as unknown as { log: { append(body: string): Promise<void> } };
     const append = vi.spyOn(durable.log, 'append').mockRejectedValueOnce(new Error('fixture write failure'));
     await expect(h.service.store.unpin(h.recordId, h.taskId)).rejects.toThrow('could not be durably written');
     expect(h.service.store.get(h.recordId)?.pin?.taskId).toBe(h.taskId);
-    expect(vi.getTimerCount()).toBe(0);
-    expect((await fs.stat(h.artifactPath)).size).toBeGreaterThan(0);
-    append.mockRestore();
-    await h.release();
-    await h.tick(1);
-    await h.expectCollected();
+    append.mockRestore(); await h.release(); await h.tick(1); await h.expectCollected();
   });
-
-  it('does not mask a committed unpin if scheduling fails; the service exposes its GC fault', async () => {
-    const h = await harness();
-    await h.tick(201);
-    const fault = new Error('fixture scheduling scan failure');
-    const list = vi.spyOn(h.service.store, 'list').mockImplementationOnce(() => { throw fault; });
-    await expect(h.service.store.unpin(h.recordId, h.taskId)).resolves.toMatchObject({ recordId: h.recordId });
-    expect(h.service.store.get(h.recordId)?.pin).toBeUndefined();
-    list.mockRestore();
+  it('idempotent concurrent unpins create no timer and a bounded pass reports physical bytes', async () => {
+    const h = await harness(); await h.tick(125); const bytes = (await fs.stat(h.artifactPath)).size;
+    await Promise.all([h.service.store.unpin(h.recordId,h.taskId), h.service.store.unpin(h.recordId,h.taskId)]);
     expect(vi.getTimerCount()).toBe(0);
-    await expect(h.service.lookup({ requestId: request().requestId, scope: request().scope })).rejects.toBe(fault);
-    await expect(h.service.stop()).rejects.toBe(fault);
+    expect(await h.service.collectExpired(Date.now(), 1)).toMatchObject({ artifactsRemoved: 1, recordsRemoved: 0, bytesReclaimed: bytes });
+    await h.tick(75); await h.expectCollected();
   });
-
-  it('cannot resurrect the scheduler when stop races a queued durable unpin', async () => {
-    const h = await harness();
-    await h.tick(201);
-    const gate = deferred(); const entered = deferred();
-    const serialized = h.service.store as unknown as { enqueue: (work: () => Promise<void>) => Promise<void> };
-    const blocker = serialized.enqueue(async () => { entered.resolve(); await gate.promise; });
-    cleanups.push(async () => { gate.resolve(); });
-    await entered.promise;
-    const unpin = h.release();
-    await h.service.stop();
-    gate.resolve();
-    await blocker; await unpin;
-    expect(h.service.store.get(h.recordId)?.pin).toBeUndefined();
-    expect(vi.getTimerCount()).toBe(0);
-    expect((await fs.stat(h.artifactPath)).size).toBeGreaterThan(0);
-    await h.service.open();
-    await h.expectCollected();
-  });
-
-  it('keeps one absolute-expiry timer across concurrent idempotent unpin retries', async () => {
-    const h = await harness();
-    await h.tick(125);
-    await Promise.all([h.service.store.unpin(h.recordId, h.taskId), h.service.store.unpin(h.recordId, h.taskId)]);
-    expect(vi.getTimerCount()).toBe(1);
-    await h.tick(1);
-    expect(h.service.store.get(h.recordId)?.artifactBytes).toBe(0);
-    expect(vi.getTimerCount()).toBe(1);
-    await h.tick(74);
-    await h.expectCollected();
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
 });

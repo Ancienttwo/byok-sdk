@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,7 +27,7 @@ describe('strict Agent-only daemon admission', () => {
     const storeDir = await temp('byok-strict-store-');
     const hostStorageRoot = await temp('byok-strict-home-');
     const adapter = new StubRuntimeAdapter('pi');
-    daemon = createDaemonWithAdapters({
+    daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' },
       productName: 'Strict test',
       productId: `strict-${path.basename(storeDir)}`,
@@ -46,7 +47,7 @@ describe('strict Agent-only daemon admission', () => {
   }
 
   it('fails construction closed when strict Agent-only has no preflightable Agent home', async () => {
-    expect(() => createDaemonWithAdapters({
+    expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Strict test', productId: 'strict-no-home',
       serverUrl: server.url, workspaceRoot: awaitablePath(), strictAgentOnly: true,
     }, [new StubRuntimeAdapter('pi')])).toThrow(/strictAgentOnly requires.*agentHome/i);
@@ -54,7 +55,7 @@ describe('strict Agent-only daemon admission', () => {
 
   it('requires workspaceRoot for a daemon that is not strict Agent-only (#319)', async () => {
     const hostStorageRoot = await temp('byok-non-strict-home-');
-    expect(() => createDaemonWithAdapters({
+    expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Non-strict test', productId: 'non-strict-no-root',
       serverUrl: server.url, agentHome: { hostStorageRoot },
     }, [new StubRuntimeAdapter('pi')])).toThrow('DaemonConfig.workspaceRoot is required unless DaemonConfig.strictAgentOnly is true');
@@ -63,7 +64,7 @@ describe('strict Agent-only daemon admission', () => {
   it('keeps strict construction filesystem-free until daemon ownership and async preflight', async () => {
     const root = await temp('byok-strict-construction-');
     const hostStorageRoot = path.join(root, 'not-created-yet');
-    daemon = createDaemonWithAdapters({
+    daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' },
       productName: 'Strict test',
       productId: `strict-construction-${path.basename(root)}`,

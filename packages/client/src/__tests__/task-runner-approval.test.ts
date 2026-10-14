@@ -1,3 +1,4 @@
+import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -54,7 +55,7 @@ async function makeRunner(
   overrides: Partial<Pick<TaskRunnerDeps, 'approvalTimeoutMs' | 'approvalRegistry' | 'onApprovalDispatched'>> = {},
 ): Promise<{ runner: TaskRunner; approvalRegistry: ApprovalRegistry }> {
   const approvalRegistry = overrides.approvalRegistry ?? new ApprovalRegistry();
-  const deps: TaskRunnerDeps = {
+  const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-taskrunner-approval-workspace-'),
     deviceId: 'device-1',
@@ -154,7 +155,7 @@ async function makeChannelRunner(
   sent: Envelope[],
 ): Promise<{ runner: TaskRunner; approvalRegistry: ApprovalRegistry }> {
   const approvalRegistry = new ApprovalRegistry();
-  const deps: TaskRunnerDeps = {
+  const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-taskrunner-approval-channel-workspace-'),
     deviceId: 'device-1',

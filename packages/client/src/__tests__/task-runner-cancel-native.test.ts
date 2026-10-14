@@ -1,3 +1,4 @@
+import { testScratchOwner, testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -129,7 +130,7 @@ async function setup(runtime: RuntimeId, scenario: string, {
   });
   const sent: Envelope[] = [];
   const terminalPublished = deferred();
-  const runner = new TaskRunner({
+  const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
     adapters: [adapter], deviceId: 't1-native-device', workspaceRoot: path.join(dir, 'workspace'), storeDir: dir, productId: 't1-cancel',
     send: event => {
       timing.observeTerminal(event); sent.push(event);
@@ -307,7 +308,7 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
   it('delivers Host cancellation across the daemon transport to the native tree and returns metering once', async () => {
     const c = await setup(runtime, 'tool');
     const server = await TestServer.start();
-    const daemon = createDaemonWithAdapters({
+    const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
       productName: 'T1 cancellation integration', productId: 't1-native-host', serverUrl: server.url,
       workspaceRoot: path.join(c.dir, 'host-workspace'), storeDir: path.join(c.dir, 'host-store'),
       localAgentRelease: { version: '0.24.0-rc.1' },

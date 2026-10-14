@@ -1,3 +1,4 @@
+import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -87,7 +88,7 @@ describe('unknown AgentEvent tolerance on the client inbound path (pre-freeze pr
 
   it('TaskRunner.handleEnvelope processes an inbound task.progress carrying an unknown-type event as a no-op, never throwing', async () => {
     const sent: Envelope[] = [];
-    const deps: TaskRunnerDeps = {
+    const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
       adapters: [], // never consulted — task.progress touches no adapter/session machinery
       workspaceRoot: await tmpDir('byok-envelope-tolerance-workspace-'),
       deviceId: 'device-1',

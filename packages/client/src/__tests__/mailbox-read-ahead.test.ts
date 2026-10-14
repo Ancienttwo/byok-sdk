@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -59,7 +60,7 @@ it('R5/R6: real paginated cancel retires never-returning prepare and permits sam
   cleanup.push(() => cloud.close());
   const root = await mkdtemp(path.join(os.tmpdir(), 'byok-read-ahead-')); cleanup.push(() => rm(root, { recursive: true, force: true }));
   const adapter = new StubRuntimeAdapter('acme-harness');
-  const daemon = createDaemonWithAdapters({ productId: 'read-ahead', productName: 'Read ahead',
+  const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },  productId: 'read-ahead', productName: 'Read ahead',
     localAgentRelease: { version: '0.0.0-test' }, serverUrl: cloud.url, storeDir: root,
     workspaceRoot: path.join(root, 'work'), agentHome: { hostStorageRoot: path.join(root, 'home') },
     startupTimeoutMs: 10000,

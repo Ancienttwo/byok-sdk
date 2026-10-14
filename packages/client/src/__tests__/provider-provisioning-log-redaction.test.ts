@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs, readdirSync, readFileSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -211,7 +212,7 @@ describe('daemon log chain for a failing provisioning handler', () => {
     roots.push(storeDir, workspaceRoot);
     let deviceId = '';
     const daemon = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' },
         productName: 'Test',
         productId: 'test-product',

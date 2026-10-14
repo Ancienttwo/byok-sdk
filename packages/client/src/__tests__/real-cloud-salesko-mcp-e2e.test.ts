@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -35,7 +36,7 @@ describe('hosted Salesko MCP toolset over the real cloud transport', () => {
       resolveBin: () => ({ command: CLAUDE_FIXTURE, source: 'path' }),
     });
     daemon = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Salesko Personal Agent',
         productId: 'salesko',
         serverUrl: cloud.url,

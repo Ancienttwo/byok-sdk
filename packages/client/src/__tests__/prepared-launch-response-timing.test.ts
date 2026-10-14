@@ -1,3 +1,4 @@
+import { testExecutionScratch } from "./fixtures/execution-scratch";
 import { spawn, type SpawnOptions } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -116,6 +117,8 @@ async function prepareArtifact(cwd: string, artifactPath: string): Promise<Runti
 
 /** The real adapter start path, with only the prepared runtime child substituted. */
 async function startPrepared(refuse: boolean): Promise<{ close: () => Promise<void>; events: AsyncIterable<AgentEvent> }> {
+const __executionScratch = await testExecutionScratch();
+
   const workspace = await tmpDir('byok-prepared-timing-cwd-');
   const recordDir = await tmpDir('byok-prepared-timing-record-');
   const env: NodeJS.ProcessEnv = {
@@ -156,13 +159,13 @@ async function startPrepared(refuse: boolean): Promise<{ close: () => Promise<vo
     forwardedEnvironmentNames: Object.keys(env).sort(),
   });
   const preparation = await prepareArtifact(workspace, path.join(recordDir, 'artifact.json'));
-  const runtimeLaunch = await prepared.operation.resolveRuntimeLaunch!({
+  const runtimeLaunch = await prepared.operation.resolveRuntimeLaunch!({ scratch: __executionScratch,
     kind: 'prepared',
     cwd: workspace,
     env,
-    projectionRoot: path.join(recordDir, 'projections'),
+
   });
-  const session = await prepared.operation.start({
+  const session = await prepared.operation.start({ scratch: (runtimeLaunch).scratch,
     runtimeLaunch,
     kind: 'prepared',
     preparation,

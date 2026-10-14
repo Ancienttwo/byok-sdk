@@ -1,3 +1,4 @@
+import { testScratchOwner, testScratchRoot } from "./fixtures/execution-scratch";
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import { TestServer } from './fixtures/test-server';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
@@ -354,7 +355,7 @@ async function lane(options: {
 
 async function makeRunner(built: Lane, adapter: StubRuntimeAdapter, sent: Envelope[], extra: Partial<TaskRunnerDeps> = {}): Promise<TaskRunner> {
   const storeDir = await tempDir('byok-prepared-runner-store-');
-  return new TaskRunner({
+  return new TaskRunner({ scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await tempDir('byok-prepared-workspace-'),
     deviceId: DEVICE_ID,
@@ -2040,7 +2041,7 @@ it('the real daemon sends prepared Agent egress to the Host as the runtime produ
     runtime: RUNTIME, compile: async () => { throw new Error('fixture is already prepared'); },
   } as never);
   vi.spyOn(mcpProbe, 'probeMcpServer').mockImplementation(async () => built.observation[SERVER_NAME]!);
-  const daemon = createDaemonWithAdapters({
+  const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Prepared egress', productId: 'prepared-egress-transport',
     serverUrl: server.url, storeDir: built.storeDir, workspaceRoot: await tempDir('prepared-wire-workspace-'),
     agentHome: { hostStorageRoot: await tempDir('prepared-wire-home-') },

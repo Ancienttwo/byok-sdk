@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -23,7 +24,7 @@ for (const phase of ['detect', 'prepare'] as const) {
       const root = await mkdtemp(path.join(os.tmpdir(), 'byok-admission-'));
       cleanup.push(() => rm(root, { recursive: true, force: true }));
       const adapter = new StubRuntimeAdapter('acme-harness');
-      const daemon = createDaemonWithAdapters({
+      const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
         productId: `admission-${path.basename(root)}`, productName: 'Admission', localAgentRelease: { version: '0.0.0-test' },
         serverUrl: server.url, storeDir: path.join(root, 'store'), workspaceRoot: path.join(root, 'work'),
         agentHome: { hostStorageRoot: path.join(root, 'home') }, startupTimeoutMs: action === 'deadline' ? 250 : 5000,

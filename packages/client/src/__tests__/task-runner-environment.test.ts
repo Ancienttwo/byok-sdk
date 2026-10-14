@@ -1,3 +1,4 @@
+import { testScratchOwner } from "./fixtures/execution-scratch";
 import { spawn as realSpawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -86,7 +87,7 @@ async function makeHarness(): Promise<Harness> {
   });
 
   const sent: Envelope[] = [];
-  const deps: TaskRunnerDeps = {
+  const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
     adapters: [piAdapter, claudeAdapter, codexAdapter],
     workspaceRoot: await tmpDir('byok-taskrunner-env-workspace-'),
     deviceId: 'device-1',

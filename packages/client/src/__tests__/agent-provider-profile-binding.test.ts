@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -94,7 +95,7 @@ describe('Agent provider profile binding admission', () => {
         throw new Error('provider profile hash mismatch');
       },
     });
-    const daemon = createDaemonWithAdapters({
+    const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' },
       productName: 'Provider binding test',
       productId: 'provider-binding-test',

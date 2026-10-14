@@ -376,10 +376,15 @@ export class AgentSessionHandoffStore {
    * directories until the record is older than the age limit. A corrupt
    * ledger throws, and the caller then skips retention.
    */
-  async readerRunReferences(home: string): Promise<ReadonlyMap<string, number>> {
+  readerRunReferences(home: string): Promise<ReadonlyMap<string, number>>;
+  readerRunReferences(home: string, canContinue: () => boolean): Promise<ReadonlyMap<string, number> | undefined>;
+  async readerRunReferences(home: string, canContinue?: () => boolean): Promise<ReadonlyMap<string, number> | undefined> {
     const directory = await evidenceDirectory(home);
     const references = new Map<string, number>();
-    for (const name of await fs.readdir(directory)) {
+    const cursor = await fs.opendir(directory);
+    for await (const dirent of cursor) {
+      if (canContinue?.() === false) return undefined;
+      const name = dirent.name;
       if (!name.endsWith('.jsonl')) continue;
       const filePath = path.join(directory, name);
       const entry = await this.enqueue(filePath, () => this.loadSessionLedger(filePath));

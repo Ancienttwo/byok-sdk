@@ -52,18 +52,23 @@ export async function pruneReaderRuns(input: {
   readonly nowMs: number;
   readonly maxRetained?: number;
   readonly maxAgeMs?: number;
+  readonly maxDeletions?: number;
+  readonly entries?: AsyncIterable<import('node:fs').Dirent>;
+  readonly canRemove?: () => boolean;
+  readonly beforeRemove?: (directory: string) => Promise<void>;
+  readonly afterRemove?: (directory: string) => void;
 }): Promise<readonly string[]> {
   const maxRetained = input.maxRetained ?? AGENT_HOME_READER_RUN_MAX_RETAINED;
   const cutoff = input.nowMs - (input.maxAgeMs ?? AGENT_HOME_READER_RUN_MAX_AGE_MS);
-  let entries: import('node:fs').Dirent[];
+  let entries: AsyncIterable<import('node:fs').Dirent> | import('node:fs').Dirent[];
   try {
-    entries = await fs.readdir(input.runsRoot, { withFileTypes: true });
+    entries = input.entries ?? await fs.readdir(input.runsRoot, { withFileTypes: true });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
     throw error;
   }
   const runs: { readonly dir: string; readonly mtimeMs: number; readonly protected: boolean }[] = [];
-  for (const entry of entries) {
+  for await (const entry of entries) {
     if (!entry.isDirectory() || !isReaderRunName(entry.name)) continue;
     const dir = path.join(input.runsRoot, entry.name);
     const stat = await fs.lstat(dir);
@@ -76,12 +81,16 @@ export async function pruneReaderRuns(input: {
     });
   }
   const removed: string[] = [];
-  const remove = async (dir: string): Promise<void> => {
+  const remove = async (dir: string): Promise<boolean> => {
+    if (removed.length >= (input.maxDeletions ?? Number.MAX_SAFE_INTEGER) || input.canRemove?.() === false) return false;
     if (await fs.realpath(input.runsRoot) !== input.runsRoot) {
       throw new Error('the reader runs directory changed through a symbolic link during retention');
     }
+    await input.beforeRemove?.(dir);
     await fs.rm(dir, { recursive: true, force: true });
     removed.push(dir);
+    input.afterRemove?.(dir);
+    return true;
   };
   const kept: typeof runs = [];
   for (const run of runs) {
@@ -92,8 +101,7 @@ export async function pruneReaderRuns(input: {
   let retained = kept.length;
   for (const run of overflow) {
     if (retained <= maxRetained) break;
-    await remove(run.dir);
-    retained -= 1;
+    if (await remove(run.dir)) retained -= 1;
   }
   return removed;
 }

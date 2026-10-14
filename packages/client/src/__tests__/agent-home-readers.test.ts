@@ -1,3 +1,4 @@
+import { testScratchRoot, testScratchOwner } from "./fixtures/execution-scratch";
 import { execFileSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -67,7 +68,7 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     const storeDir = await temp('byok-readers-store-');
     const hostStorageRoot = await temp('byok-readers-home-');
     const pi = new StubRuntimeAdapter('pi');
-    const started = createDaemonWithAdapters({
+    const started = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' },
       productName: 'Readers',
       productId: `readers-${path.basename(storeDir)}`,
@@ -435,7 +436,7 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     await waitUntil(() => harness.daemon.status().agentHomeExecution.activeAttempts === 0, 'the reader lease to release');
   });
 
-  it('retention at a fresh reader start keeps active and recently resumable runs and removes stale ones', async () => {
+  it('fresh reader starts preserve every run while its home base lease is active', async () => {
     const harness = await start();
     const home = await harness.home('retained');
     const runs = path.join(home, '.byok', 'runs');
@@ -460,7 +461,7 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
 
     offer('retained-new', 'retained', { reader: true });
     await claimed('retained-new');
-    expect((await fs.readdir(runs)).sort()).toEqual(['retained-active', 'retained-new', 'retained-resumable']);
+    expect((await fs.readdir(runs)).sort()).toEqual(['retained-active', 'retained-new', 'retained-resumable', 'stale-a', 'stale-b']);
   });
 
   it('keeps the base lease while a reader runs, so a task-free projection waits', async () => {
@@ -615,7 +616,7 @@ describe('durable Pi and memory-reader Attempts (#317)', () => {
     });
     const sent: Envelope[] = [];
     const agentHome = new AgentHomeManager({ hostStorageRoot });
-    const runner = new TaskRunner({
+    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
       adapters: [durable],
       workspaceRoot: await temp('byok-readers-durable-workspace-'),
       agentHome,

@@ -66,6 +66,33 @@ Agent files remain opaque. BYOK does not parse, index, classify, rename, scan,
 or infer business meaning from them. The `.byok` namespace is the sole
 SDK-reserved namespace in the Agent home.
 
+## Store-owned intermediate artifacts (#399)
+
+```text
+<storeDir>/
+  tmp/
+    owner.json                       exclusive scratch ownership
+    exec/<12-hex-token>/
+      sdk/                           secrets/config/projection; disposal receipt removes it
+      runtime/                       child TMPDIR/TEMP/TMP; default 24h after release
+      released                       TTL origin (restart time for crashed executions)
+    daemon/                          diagnostics and Windows bridges; 1h residual TTL
+  durable-replicas/<agent-binding>/   terminal-only cleanup under exclusive replica lock
+  owned-processes/                   protected process-reconciliation authority
+```
+
+An explicit `storage.scratchRoot` moves exec scratch to one short private root;
+daemon temps remain in the store. A shared external root is refused. Each
+retention class records its root, SDK/Host owner, store/home/replica scope and
+TTL/count limit. The registry serves GC, pressure, status and support readback.
+The store lease covers scratch recovery; the shared home base lease plus the
+agents-root mutation gate covers readers and exact memory/projection temp
+names. Gate acquisition is per home with a bounded walk and round-robin
+cursor, so maintenance does not reserve the entire root for a full pass.
+Memory-delete tombstones, opaque Agent files and `.byok` records are protected.
+Skill-pack roots outside the store must be listed in `storage.skillPackDataDirs`;
+only non-current hash revisions past 24h are deleted under the install gate.
+
 ## Responsibility matrix
 
 | Concern | BYOK SDK | Salesko / embedding host |
