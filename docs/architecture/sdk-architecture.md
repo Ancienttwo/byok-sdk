@@ -357,17 +357,18 @@ no deletion/TTL path and outlive mailbox retention. Disk capacity is the first
 scaling limit; deleting receipts is not an admission strategy. Unredeemed pairing
 codes, nonces, presence and other ports remain in-memory.
 
-Schema v4 fences old writers and adds nullable harness identity to the atomic
-claim and every task read model. Explicit `v1-to-v4`/`v2-to-v4` adoption requires
+Schema v5 fences old writers and adds nullable harness identity to the atomic
+claim and every task read model. Explicit `v1-to-v5`/`v2-to-v5` adoption requires
 all writers stopped and a consistent backup. It rejects existing task/message/
 agent-admission or advanced cursor history because prior receipt authority was
 in-memory and cannot be reconstructed. Eligible v1 adoption adds an empty device
-directory; v2 preserves enrollment. `v3-to-v4` retains receipts, unclaimed offers
+directory; v2 preserves enrollment. `v3-to-v5` retains receipts, unclaimed offers
 and identified built-in claims, but rejects owned rows with no claimed runtime:
 legacy identity-free claims and lost custom identities are indistinguishable.
 Migration never derives actual claim identity from requested offers or current
-inventory. All DDL and version changes commit atomically. Target-v3 selectors
-are replaced, not reinterpreted. See `packages/server/README.md`.
+inventory. All DDL and version changes commit atomically. Target-v4 selectors
+are replaced, not reinterpreted. The server-local wake table is added for every
+source; `v4-to-v5` adds only that table and its indexes, preserving existing rows. See `packages/server/README.md`.
 SQLite restores durable records, not process-owned promises, subscriptions or
 provider processes. The façade accepts a pre-persisted caller taskId with an
 explicit deviceId. `tasks.offer` projects `cloud.readTaskOffer` from immutable
