@@ -220,6 +220,33 @@ describe('owned ACL probe (synthetic handles only)', () => {
     expect(await f.observer.command(otherRunner, undefined, args)).toBe(result); f.observer.assertIdle();
   });
 
+  it('counts only ACL queries handed to the original runner, owned or not, without changing results', async () => {
+    const f = setup(); const otherRunner = vi.fn(() => Promise.resolve(result));
+    expect(f.observer.matchingInvocations).toBe(0);
+    expect(await f.observer.command(otherRunner, undefined, args)).toBe(result);
+    expect(f.observer.matchingInvocations).toBe(1);
+    expect(await f.observer.command(otherRunner, undefined, ['other', [], 'other'])).toBe(result);
+    expect(await f.observer.command(otherRunner, undefined, ['C:\\pwsh.exe', args[1], args[2]])).toBe(result);
+    expect(await f.observer.command(otherRunner, undefined, [args[0], ['-NoProfile', '-Command', 'exit 0'], args[2]])).toBe(result);
+    expect(f.observer.matchingInvocations).toBe(1);
+    let unowned: ReturnType<CommandRunner> | undefined;
+    const operation = f.probe.run(() => {
+      // An ACL query for another target inside the owned context is unowned but still counted.
+      unowned = f.observer.command(otherRunner, undefined, [args[0], args[1], '{"path":"C:\\\\other"}']);
+      const promise = f.command(); expect(promise).toBe(f.completion.promise); return promise;
+    });
+    expect(await unowned).toBe(result);
+    f.completion.resolve(result); f.child.close(); expect(await operation).toBe(result);
+    await f.probe.dispose(100, async () => {});
+    expect(f.observer.matchingInvocations).toBe(3);
+    const late = setup(f.observer); const filesystem = deferred<void>(); const deadline = new Error('deadline before spawn');
+    const suppressed = late.probe.run(async () => { await filesystem.promise; return late.command(); }).catch(error => error);
+    late.probe.cancel(deadline); filesystem.resolve(); expect(await suppressed).toBe(deadline);
+    await late.probe.dispose(100, async () => {});
+    expect(late.originalRunner).not.toHaveBeenCalled(); expect(f.observer.matchingInvocations).toBe(3);
+    expect(otherRunner).toHaveBeenCalledTimes(5); f.observer.assertIdle();
+  });
+
   it('original command throw restores capture and cannot be mistaken for a child close receipt', async () => {
     vi.useFakeTimers(); const f = setup(); const failure = new Error('original command throw');
     await expect(f.probe.run(() => f.observer.command(() => { throw failure; }, undefined, args))).rejects.toBe(failure);

@@ -55,6 +55,11 @@ async function createPrivateFixture(directory: string): Promise<void> {
 const PHASE_LOG_PREFIX = '[pi-acl-positive]';
 const ICACLS_DEADLINE_MS = 2_000;
 const TEST_EVIDENCE_BUDGET_MS = 4_800;
+// The product's real deadline for the first ACL query is the client's task
+// startup timeout (`startupTimeoutMs ?? 30_000` in
+// packages/client/src/daemon/task-runner.ts). The cold case is bound to it.
+const CLIENT_DEFAULT_STARTUP_DEADLINE_MS = 30_000;
+const COLD_EVIDENCE_BUDGET_MS = CLIENT_DEFAULT_STARTUP_DEADLINE_MS - 200;
 // Report unresolved disposal inside Vitest's unchanged 10s default hook budget.
 // This does not extend either the existing 4.8s evidence or 5s test budget.
 const TEARDOWN_EVIDENCE_BUDGET_MS = 9_800;
@@ -116,10 +121,14 @@ describe.skipIf(process.platform !== 'win32')('real Windows keys projection ACL'
     pendingCleanup = undefined;
     nativeAclProbeObserver.assertIdle();
   });
-  it('accepts a private empty directory with the approved ACL', async () => {
+  // The owned positive case. `label` names its log prefix; `evidenceBudgetMs`
+  // is the whole-case evidence budget the watchdog enforces inside the test's
+  // own timeout. Ownership, cancellation and disposal are identical for both uses.
+  async function runOwnedPositiveCase({ label, evidenceBudgetMs }: { label: string; evidenceBudgetMs: number }): Promise<void> {
+    const logPrefix = `${PHASE_LOG_PREFIX.slice(0, -1)}-${label}]`;
     const testStart = Date.now();
     const logPhase = (phase: string, message: string): void => {
-      console.log(`${PHASE_LOG_PREFIX} phase=${phase} t+${Date.now() - testStart}ms ${message}`);
+      console.log(`${logPrefix} phase=${phase} t+${Date.now() - testStart}ms ${message}`);
     };
 
     const tmpdirStarted = Date.now();
@@ -131,10 +140,10 @@ describe.skipIf(process.platform !== 'win32')('real Windows keys projection ACL'
       const fixture = await execFileBounded('icacls', privateFixtureArgs(directory), ICACLS_DEADLINE_MS);
       logPhase('process-spawn', `icacls fixture ${describeBoundedResult(fixture)}`);
       if (fixture.timedOut) {
-        throw new Error(`${PHASE_LOG_PREFIX} fixture icacls exceeded its ${ICACLS_DEADLINE_MS}ms sub-deadline and was killed; no ACL was ever asserted`);
+        throw new Error(`${logPrefix} fixture icacls exceeded its ${ICACLS_DEADLINE_MS}ms sub-deadline and was killed; no ACL was ever asserted`);
       }
       if (fixture.exitCode !== 0) {
-        throw new Error(`${PHASE_LOG_PREFIX} fixture icacls failed (exit ${fixture.exitCode}): ${fixture.stderr}`);
+        throw new Error(`${logPrefix} fixture icacls failed (exit ${fixture.exitCode}): ${fixture.stderr}`);
       }
 
       // Phase: icacls read-back -- diagnostic only. It prints the ACL the
@@ -146,16 +155,16 @@ describe.skipIf(process.platform !== 'win32')('real Windows keys projection ACL'
         logPhase('icacls-readback', `DIAGNOSTIC ONLY, timed out and was killed: ${describeBoundedResult(readBack)}`);
       } else {
         logPhase('icacls-readback', `elapsed=${readBack.elapsedMs}ms exitCode=${readBack.exitCode}`);
-        console.log(`${PHASE_LOG_PREFIX} icacls read-back of the fixture:\n${readBack.stdout}`);
+        console.log(`${logPrefix} icacls read-back of the fixture:\n${readBack.stdout}`);
       }
 
       // Phase: ACL probe + assertion -- the powershell Get-Acl child inside
       // assertWindowsPiProjectionAcl, then the full approval checks. The
-      // watchdog fires just inside vitest's 5000ms budget so a hung probe
+      // watchdog fires just inside the test's own timeout so a hung probe
       // fails with the phase log above instead of a bare vitest timeout. The
       // probe is invocation-owned. Expiry cancels the captured child (or
       // suppresses a late native start); afterEach awaits its disposal receipt.
-      const probeBudgetMs = Math.max(TEST_EVIDENCE_BUDGET_MS - (Date.now() - testStart), 0);
+      const probeBudgetMs = Math.max(evidenceBudgetMs - (Date.now() - testStart), 0);
       const probeStarted = Date.now();
       owner = nativeAclProbeObserver.create({
         executable: path.win32.join(process.env.SystemRoot!, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
@@ -167,7 +176,7 @@ describe.skipIf(process.platform !== 'win32')('real Windows keys projection ACL'
       const watchdogPromise = new Promise<never>((_resolve, reject) => {
         watchdog = setTimeout(() => {
           const failure = new Error(
-            `${PHASE_LOG_PREFIX} phase=acl-probe+assertion exceeded its ${probeBudgetMs}ms evidence budget `
+            `${logPrefix} phase=acl-probe+assertion exceeded its ${probeBudgetMs}ms evidence budget `
             + `(probe started at t+${probeStarted - testStart}ms); the phases above show where the time went; `
             + 'this is instrumentation, the approval checks themselves are unchanged',
           );
@@ -189,6 +198,21 @@ describe.skipIf(process.platform !== 'win32')('real Windows keys projection ACL'
         logPhase('cleanup', `elapsed=${Date.now() - rmStarted}ms (fixture setup failed before probe)`);
       }
     }
+  }
+
+  // Cold first use: the account's first Windows PowerShell 5.1 start, which the
+  // product pays inside the client's startup deadline. CI runs no prepay before
+  // this suite, so this case must be the process's first ACL query; the counter
+  // checks that precondition instead of trusting declaration order.
+  it('accepts a private empty directory on the account\'s first Windows PowerShell use (cold, client startup deadline)', async () => {
+    expect(nativeAclProbeObserver.matchingInvocations, 'the cold first-use case must be the first ACL query').toBe(0);
+    await runOwnedPositiveCase({ label: 'cold', evidenceBudgetMs: COLD_EVIDENCE_BUDGET_MS });
+  }, CLIENT_DEFAULT_STARTUP_DEADLINE_MS);
+  // Warm steady state: a fresh directory, after first use was paid above, under
+  // the original 4.8s evidence budget and the default 5s test timeout.
+  it('accepts a private empty directory with the approved ACL', async () => {
+    expect(nativeAclProbeObserver.matchingInvocations, 'the cold first-use case must run first').toBeGreaterThanOrEqual(1);
+    await runOwnedPositiveCase({ label: 'warm', evidenceBudgetMs: TEST_EVIDENCE_BUDGET_MS });
   });
   it('refuses a real external Allow ACE', async () => {
     const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pi-acl-foreign-')));
