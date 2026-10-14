@@ -7,7 +7,9 @@ or stronger assertions and unchanged freeze goldens. Patrol 12:45 restricts
 subsequent verification to targeted tests. Worktree is
 `/private/tmp/worktrees/byok-sdk-398-deps`, branch
 `fix/398-entry-dependency-closure`. `origin/main@5ef13002` was merged normally
-in `eecb46e6`; no PR merge or main push was performed.
+in `eecb46e6`; the subsequent `origin/main@a10c67a0` (published-release wire
+compatibility, #447) was merged normally in `892f3e6b` before final targeted
+evidence. No PR merge or main push was performed.
 
 ## P1 map
 
@@ -66,16 +68,24 @@ not a runtime sandbox guarantee.
 ## Verified evidence
 
 - Build: passed after recreating an interrupted dependency install from cache.
-- Full typecheck: passed before the patrol restriction; the later source change
-  was a type-only import spelling, with client declaration emission passed.
+  After merging a10c67a0, protocol/cloud/client builds passed again; the two new
+  published-protocol test dependencies were installed with the frozen lockfile
+  and a protocol workspace filter.
+- Full typecheck: passed before the patrol restriction. After the latest main
+  merge, protocol/cloud/client typechecks passed.
 - Script suite at its recorded boundary: 102 passed; final focused script
   verification covers the changed entry scanner/closure and declaration checks.
 - Final entry fixtures: 25 passed. Declaration API fixtures: 13 passed.
   Cloud-do declaration fixtures: 7 passed.
 - API surface: 35 entry policies/facts/table passed; only protocol declaration
   golden changes. Version authority and release graph passed.
-- Freeze guard: 56 passed; no freeze golden edits.
+- Latest protocol targets: 194 passed (18 freeze guards, 163 published-release
+  compatibility cases, 4 version cases and 9 version-negotiation cases).
+  Main's #447 migrated the freeze fixtures; this branch has no freeze/golden
+  changes relative to a10c67a0. Cloud wire-admission targets: 92 passed.
 - Client source/public-surface and private lazy-edge tests: 12 passed.
+  Real descriptor/compiler prepared-memory target: 1 passed after resuming
+  through the authenticated Herdr terminal.
 - Node load probes: Agent memory/adapters/MCP server each 0 Zod files;
   assertion-client 79, disclosed through core.
 - Agent memory workspace closure: 54872 bytes, budget 60360. MCP helpers:
@@ -87,17 +97,28 @@ not a runtime sandbox guarantee.
 The pre-patrol full client suite reported 3809 passed, 29 skipped and one
 recovery fixture close-RPC timeout. No full suite was started after patrol.
 A targeted attempt overlapped a client clean build and could not resolve a
-private dist asset; that setup result is not a regression verdict. Subsequent
-isolated runs could not access the real OS credential provider, and the
-prepared-memory process could not resolve OS homedir. These tests and their
-assertions were not modified. UID 501 cannot resolve its account name, and an
-independent Node homedir probe without HOME reproduces ENOENT.
+private dist asset; that setup result is not a regression verdict.
 
-GitHub gh reads fail connecting to api.github.com. Non-draft PR creation and
-branch publication remain pending connectivity. Full release-pack was not run
-because it invokes whole-repository build/smoke work under the patrol limit.
-Do not claim full runtime acceptance, release, or CI success from the static
-and targeted checks. Preserve the worktree until these blockers clear.
+After re-login, the command-tool process still could not resolve OS user
+information or reach GitHub, while an identity-verified Herdr shell resolved
+the username and homedir without HOME and authenticated gh as Ancienttwo.
+Verification therefore continued in that shell, with no credential/config
+changes and no OS authority replacement. The prepared-memory target passes.
+Its child deliberately receives PATH only, so exporting HOME in the parent
+would not have fixed that earlier failure.
+
+The isolated recovery case still fails before pairing completes:
+`DeviceCredentialStoreError: operating-system credential provider could not
+replace device credentials`. It has not reached the original close-RPC
+assertion, so that failure remains unverified. The fixture intentionally removes
+the process-local credential double to exercise the shipped OS authority
+across process deaths. The credential provider, fixture and recovery test are
+unchanged relative to latest main; do not inject a double or weaken assertions.
+
+Full release-pack was not run because it invokes whole-repository build/smoke
+work under the patrol limit. Do not claim full runtime acceptance, release, or
+CI success from the static and targeted checks. Preserve the worktree while
+the native recovery verification or PR checks remain unresolved.
 
 Known downstream source searches (Salesko packages/apps and the available
 AiphaBee worktree) found no former preparation-version subpath imports. No
