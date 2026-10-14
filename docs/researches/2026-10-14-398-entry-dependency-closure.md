@@ -31,6 +31,11 @@ edges. Unused protocol-root imports disappear without changing wire values.
 
 ## P3 decisions
 
+A tenfold increase in an existing entry's workspace bytes first fails its
+committed budget; the updater cannot raise that policy. At tenfold inventory
+size, parser CPU/heap is the next verification bottleneck, mitigated by one
+file cache shared by all entries.
+
 Issue recommendations are implemented: replace the old version subpath in one
 cut; retain protocol root re-exports; report assertion-client's protected Zod
 codegen probes; record current UI runtime closure; set integer budgets to
@@ -93,3 +98,7 @@ branch publication remain pending connectivity. Full release-pack was not run
 because it invokes whole-repository build/smoke work under the patrol limit.
 Do not claim full runtime acceptance, release, or CI success from the static
 and targeted checks. Preserve the worktree until these blockers clear.
+
+Known downstream source searches (Salesko packages/apps and the available
+AiphaBee worktree) found no former preparation-version subpath imports. No
+downstream upgrade or deployment was performed.
