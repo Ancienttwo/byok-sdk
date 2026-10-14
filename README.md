@@ -165,11 +165,12 @@ Workers. See
 The planned work for Bot routines, Bot collaboration, storage accounting and
 idle cost is in the
 [Bot platform PRD](docs/researches/2026-10-13_bot-platform-prd.md). It
-includes three planned breaking cuts: `executions.submit` replaces
-`recurring.submit` and `dispatchFreshAgentEgress`, home-busy declines carry a
-typed `code`, and the reserved `submit_result` tool replaces the device-side
-result-document extractor. The last cut moves the wire to protocol v3 with no
-v2 reader, so servers and daemons drain first and upgrade together.
+includes three breaking cuts. The first has landed: fresh Agent submission
+uses `executions.submit` with a Host-persisted `AgentExecutionInput`, and
+`messageEgress` is optional. The planned cuts give home-busy declines a typed
+`code` and replace the device-side result-document extractor with the reserved
+`submit_result` tool. That last cut moves the wire to protocol v3 with no v2
+reader, so servers and daemons drain first and upgrade together.
 
 ## Agent-first local homes and egress
 
@@ -221,7 +222,7 @@ second acceptance ledger:
 
 | Layer | Authority |
 |---|---|
-| SDK product truth | [`docs/spec.md`](docs/spec.md) — [Durable Agent homes](docs/spec.md#durable-agent-homes), [Fresh Agent egress versus exact resume](docs/spec.md#fresh-agent-egress-versus-exact-resume), [Host exact Agent message disposition readback](docs/spec.md#host-exact-agent-message-disposition-readback), [Recurring Host composition requirements](docs/spec.md#recurring-host-composition-requirements) |
+| SDK product truth | [`docs/spec.md`](docs/spec.md) — [Durable Agent homes](docs/spec.md#durable-agent-homes), [Fresh Agent egress versus exact resume](docs/spec.md#fresh-agent-egress-versus-exact-resume), [Host exact Agent message disposition readback](docs/spec.md#host-exact-agent-message-disposition-readback), [Fresh Agent execution Host composition requirements](docs/spec.md#fresh-agent-execution-host-composition-requirements) |
 | Host composition requirements (approved) | [Conversation-turn Fresh MVP PRD](docs/researches/2026-09-09_conversation-turn-fresh-mvp-prd.md) and the [Host Reliability Addendum](docs/researches/2026-09-09_conversation-turn-mode-host-reliability-addendum.md) |
 | Design history | [Original design draft](docs/researches/2026-09-09_conversation-turn-mode-design.md) — historical draft; its open questions, hybrid/resume outlook, and simplified completion bridge are superseded (see the qualifier at its top) |
 | Sole acceptance ledger | [Salesko Host reliability Sprint plan](https://github.com/Ancienttwo/salesko-new/blob/codex/recurring-sdk-adoption-test/plans/plan-20260909-private-agent-chat-host-reliability-sprints.md) (external repo, draft branch), with the internal SDK-first plan (`plans/plan-20260910-conversation-turn-sdk-first.md`, not tracked in this repository) as the stage entry |

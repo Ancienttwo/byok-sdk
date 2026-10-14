@@ -3,11 +3,12 @@ import type { WakeRecord, WakeScheduleInput, WakeScheduleResult } from './wakes/
 export { WakeHookMissingError, WakeConflictError, WakeInputError, WakeClosedError } from './wakes/types';
 export type { DueWake, WakeRecord, WakeScheduleInput, WakeScheduleResult, WakeConsumer, WakeInputErrorCode } from './wakes/types';
 import { type MaintenanceReport } from '@byok-sdk/cloud';
+export type { AgentExecutionInput } from '@byok-sdk/cloud';
 import { Hono } from 'hono';
-import { type EnqueuedOffer, type PairingCodeInfo, type TaskAttempt } from '@byok-sdk/cloud';
+import { type AgentExecutionInput, type EnqueuedOffer, type PairingCodeInfo, type TaskAttempt } from '@byok-sdk/cloud';
 import { type AgentRef, type AgentMessagePublishPayload, type AgentMessageDispositionPayload } from '@byok-sdk/protocol';
-import type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, FreshAgentEgressDispatchInput, HubStats, MachineInfo, TaskHandle, TaskSnapshot } from './types';
-export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, ByokServerStorage, CreateByokServerOptions, DispatchInput, FreshAgentEgressDispatchInput, HubStats, MachineInfo, ServerTaskEvent, TaskHandle, TaskResult, TaskSnapshot, } from './types';
+import type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, TaskHandle, TaskSnapshot } from './types';
+export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, ByokServerStorage, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, ServerTaskEvent, TaskHandle, TaskResult, TaskSnapshot, } from './types';
 export type { InboundRefusalReason, TaskOfferReadback } from '@byok-sdk/cloud';
 /**
  * M5 (approval targeting, docs/protocol.md §5.3): `TaskHandle.approve`/`reject`'s
@@ -93,12 +94,11 @@ export interface ByokServer {
         createPairingCode(input: CreatePairingCodeInput): Promise<PairingCodeInfo>;
     };
     /** Durable recurring submission; no TaskHandle is needed to recover after restart. */
-    recurring: {
-        submit(input: import('@byok-sdk/cloud').RecurringExecutionInput): Promise<EnqueuedOffer>;
+    readonly executions: {
+        /** Persist input before submitting; use tasks.offer for exact recovery after a conflict. */
+        submit(input: AgentExecutionInput): Promise<EnqueuedOffer>;
     };
     dispatch(input: DispatchInput): Promise<TaskHandle>;
-    /** Dispatch a fresh Agent execution whose runtime will mint its session after start. */
-    dispatchFreshAgentEgress(input: FreshAgentEgressDispatchInput): Promise<TaskHandle>;
     /** Enqueue one capability-gated, exact-identity content-read request. */
     requestAgentContentRead(input: AgentContentReadRequest): Promise<void>;
     /** Enqueue one task-free, exact-device Agent-home projection. */
@@ -813,18 +813,6 @@ export interface DispatchInput {
      */
     homeAccess?: AgentHomeAccess;
     /** Host-only product destination/freshness authority; never serialized to the daemon. */
-    agentMessageContext?: AgentMessageServerContext;
-}
-/** Input to the distinct fresh-session Agent egress dispatch surface. */
-export interface FreshAgentEgressDispatchInput extends Omit<DispatchInput, 'deviceId' | 'sessionRef' | 'agentRef' | 'egressPolicy'> {
-    /** Exact target; fresh Agent dispatch never selects an ambient device. */
-    deviceId: string;
-    /** Exact durable Agent identity for the canonical-home execution. */
-    agentRef: AgentRef;
-    /** Exact policy revision consumed by the fresh execution. */
-    egressPolicy: AgentEgressPolicy;
-    messageEgress?: AgentMessageEgressRequirement;
-    terminalProjection?: TerminalProjectionSelection;
     agentMessageContext?: AgentMessageServerContext;
 }
 /** Host control-plane input for one exact content-read request. */

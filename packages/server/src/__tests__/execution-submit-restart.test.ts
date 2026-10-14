@@ -10,12 +10,12 @@ import { createByokServer, createHmacTokenSigner } from '../index';
 import { connectFakeDaemonLongPoll, startServer, stopServer } from './test-support';
 
 it('recovers recurring admission and independent observations through a recreated SQLite facade', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'byok-recurring-restart-'));
+  const root = mkdtempSync(join(tmpdir(), 'byok-execution-submit-restart-'));
   const path = join(root, 'sdk.sqlite');
   const inputPath = join(root, 'host-input.json');
   let consumed = 0;
   const options = {
-    productId: 'recurring-restart', storage: { kind: 'sqlite' as const, path }, longPollHoldMs: 20,
+    productId: 'execution-submit-restart', storage: { kind: 'sqlite' as const, path }, longPollHoldMs: 20,
     tokenSigner: createHmacTokenSigner(randomBytes(32), { now: () => new Date() }),
     agentMessage: { consume: async () => { consumed++; return { outcome: 'accepted' as const }; } },
   };

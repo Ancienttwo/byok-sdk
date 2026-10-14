@@ -1,5 +1,5 @@
 /**
- * Recurring packed smoke, run against INSTALLED tarballs from an isolated npm
+ * Fresh Agent execution packed smoke, run against INSTALLED tarballs from an isolated npm
  * install (see pack-and-smoke.mjs, which copies this file next to
  * `node_modules`). Two legs, and neither is allowed to silently stand in for
  * the other (issue #196):
@@ -17,7 +17,7 @@
  *   different tenant/device/task/AgentRef/body. The same accepted/held
  *   scenarios also run end-to-end through the EMBEDDED public façade
  *   (`createByokServer`: pairing, `conn.hello` capability declaration,
- *   `recurring.submit`, `POST /byok/messages` over `server.hono`, read-back
+ *   `executions.submit`, `POST /byok/messages` over `server.hono`, read-back
  *   through `tasks.messageDisposition`/`tasks.agentMessage`), and the
  *   embedded read-back must match the cloud projection exactly.
  * - **Durable restart leg (only when the dataplane substrate is configured).**
@@ -729,7 +729,7 @@ if (substrateConfigured) {
 
     // Independent process, SAME store: fresh pool, fresh composition, shared
     // identity (signer secret + access token travel in the handoff file).
-    const handoffDir = mkdtempSync(path.join(os.tmpdir(), 'byok-recurring-restart-'));
+    const handoffDir = mkdtempSync(path.join(os.tmpdir(), 'byok-execution-submit-restart-'));
     const handoffPath = path.join(handoffDir, 'handoff.json');
     writeFileSync(handoffPath, JSON.stringify({
       databaseUrl: databaseUrl.toString(),

@@ -12,20 +12,20 @@ import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { OPEN_LIFECYCLE } from './fixtures/lifecycle-barrier';
 
 it('runs two recurring executions through real HTTP and TaskRunner with distinct fresh sessions', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-recurring-integration-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-execution-submit-integration-'));
   const accepted: Array<{ taskId: string; payload: AgentMessagePublishPayload }> = [];
-  const sdk = createByokServer({ productId: 'recurring-integration', longPollHoldMs: 50,
+  const sdk = createByokServer({ productId: 'execution-submit-integration', longPollHoldMs: 50,
     agentMessage: { consume: async ({ taskId, payload }) => { accepted.push({ taskId, payload }); return { outcome: 'accepted' }; } } });
   const http = await startServer(sdk);
   const adapter = new StubRuntimeAdapter('pi');
   const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
-    localAgentRelease: { version: '0.0.0-recurring-test' }, productName: 'recurring test', productId: 'recurring-integration',
+    localAgentRelease: { version: '0.0.0-recurring-test' }, productName: 'recurring test', productId: 'execution-submit-integration',
     serverUrl: http.baseUrl, workspaceRoot: path.join(root, 'workspace'), storeDir: path.join(root, 'store'),
     agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
   }, [adapter]);
   let releaseClose: (() => void) | undefined;
   try {
-    const pairing = await sdk.pairing.createPairingCode({ productId: 'recurring-integration' });
+    const pairing = await sdk.pairing.createPairingCode({ productId: 'execution-submit-integration' });
     const { deviceId } = await daemon.pair(pairing.code);
     await daemon.start();
     await vi.waitFor(() => expect(daemon.status().lifecycle).toEqual(OPEN_LIFECYCLE));
