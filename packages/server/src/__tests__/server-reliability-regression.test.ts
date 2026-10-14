@@ -106,7 +106,11 @@ describe('issues #141-#144 server reliability regressions', () => {
     const taskId = 'task-legacy-retry';
     const input = { taskId, payload: { instruction: 'first body' } };
 
-    await expect(cloud.enqueueOffer(TENANT, 'device-a', input)).rejects.toThrow('injected mailbox append failure');
+    await expect(cloud.enqueueOffer(TENANT, 'device-a', input)).rejects.toMatchObject({
+      code: 'task_offer_append_refused',
+      taskId,
+      cause: new Error('injected mailbox append failure'),
+    });
     expect(await cloud.readTaskAttempt(TENANT, taskId)).toMatchObject({ taskId, deviceId: 'device-a' });
 
     await expect(

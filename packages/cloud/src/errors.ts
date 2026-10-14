@@ -63,6 +63,14 @@ export const CLOUD_ERROR_CODES = {
   agent_ref_mismatch: 'agent_ref_mismatch',
   /** A strict Agent task id already names a durable attempt and cannot be re-enqueued. */
   agent_task_already_exists: 'agent_task_already_exists',
+  /**
+   * A task attempt was opened but the mailbox refused its offer append, so the
+   * device never saw it. Raised as {@link TaskOfferAppendRefusedError}, which
+   * names the task so the Host can retry with that `taskId` (the retry
+   * converges on the one offer) or cancel it; `cause` is the store's refusal,
+   * e.g. a core `storage_quota_exceeded`.
+   */
+  task_offer_append_refused: 'task_offer_append_refused',
   /** A first-write-wins Agent control record was replayed with a different body. */
   agent_content_request_mismatch: 'agent_content_request_mismatch',
   /** A durable mailbox receipt id resolved to an envelope other than its exact acknowledgement. */
@@ -114,6 +122,25 @@ export class ByokCloudError extends Error {
     super(message, options);
     this.name = 'ByokCloudError';
     this.code = code;
+  }
+}
+
+/**
+ * The one cloud error that carries a task identity: a refused offer append
+ * after the attempt opened. Without `taskId` a Host that let cloud allocate the
+ * id could neither retry nor cancel the attempt it now owns.
+ */
+export class TaskOfferAppendRefusedError extends ByokCloudError {
+  public readonly taskId: string;
+
+  constructor(taskId: string, cause: unknown) {
+    super(
+      'task_offer_append_refused',
+      `Task ${taskId} is open but its offer append was refused (${cause instanceof Error ? cause.message : String(cause)}); retry with this taskId or cancel it.`,
+      { cause },
+    );
+    this.name = 'TaskOfferAppendRefusedError';
+    this.taskId = taskId;
   }
 }
 
