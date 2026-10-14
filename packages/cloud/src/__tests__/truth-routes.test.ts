@@ -178,6 +178,7 @@ describe('proof-only truth routes', () => {
       createByokCloud({
         core: composition.core,
         cloud: composition.stores,
+        mailboxWake: composition.mailboxWake,
         blobContentProxy: composition.blobContentProxy,
         crypto,
         tokenSigner: { sign: async () => '', verify: async () => undefined },

@@ -7,7 +7,7 @@ import { createHarness, offerPayload, TENANT_A } from './support/harness';
 function storesFor(harness: ReturnType<typeof createHarness>, deviceId: string) {
   return tenantStoresFor(
     { kind: 'device', tenantId: TENANT_A, productId: 'test-product', deviceId },
-    { core: harness.core, cloud: harness.stores },
+    { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake },
   );
 }
 

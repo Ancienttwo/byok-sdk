@@ -64,6 +64,7 @@ describe('host task cancellation', () => {
     const stores = tenantStoresFor(devicePrincipal(TENANT_A, device.deviceId), {
       core: harness.core,
       cloud: harness.stores,
+      mailboxWake: harness.mailboxWake,
     });
     await handleInboundEnvelope(
       stores,
@@ -108,6 +109,7 @@ describe('host task cancellation', () => {
     const stores = tenantStoresFor(devicePrincipal(TENANT_A, device.deviceId), {
       core: harness.core,
       cloud: harness.stores,
+      mailboxWake: harness.mailboxWake,
     });
     await harness.cloud.createBoardItem(TENANT_A, {
       itemId: offer.taskId,
@@ -165,6 +167,7 @@ describe('host task cancellation', () => {
     const stores = tenantStoresFor(devicePrincipal(TENANT_A, device.deviceId), {
       core: harness.core,
       cloud: harness.stores,
+      mailboxWake: harness.mailboxWake,
     });
     await handleInboundEnvelope(
       stores,
@@ -202,6 +205,7 @@ describe('host task cancellation', () => {
     const stores = tenantStoresFor(devicePrincipal(TENANT_A, device.deviceId), {
       core: harness.core,
       cloud: harness.stores,
+      mailboxWake: harness.mailboxWake,
     });
     await harness.cloud.createBoardItem(TENANT_A, {
       itemId: offer.taskId,

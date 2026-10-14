@@ -35,8 +35,10 @@ satisfies that contract directly.
 ```ts
 const stores = createPostgresCloudStores(options);
 const truthCommitter = new PostgresTruthCommitter({ pool, clock, crypto });
+const mailboxWake = createPostgresMailboxWake({ connectionString: sessionDsn, onError: reportWakeError });
 
 createByokCloud({
+  mailboxWake,
   // core, cloud: stores, crypto, tokenSigner, clock, capabilities, ...
   truthCommitter,
   truthObjectDownloads: stores.blobs,
@@ -353,5 +355,39 @@ test rather than a step someone remembers. What runs:
 ## License
 
 MIT. Node.js 24.15.0 or newer.
+
+## Wake-driven long-poll migration (#410)
+
+Apply `0024_mailbox_wake.sql` through the package migration runner. Its
+`outbox` AFTER INSERT trigger signals pending rows at commit, covering normal
+append, atomic cancellation and dead-letter replay. Rollback does not notify.
+The fixed-size `md5(tenant_id || '\n' || device_id)` payload contains no ids or
+message contents. Hash collisions cause extra reads, never a lost delivery.
+
+On Node, import `createPostgresMailboxWake` from the package root, create one
+instance per process with a **session-mode DSN**, and inject it into
+`createByokCloud({ mailboxWake, ... })`. It owns one dedicated `pg.Client` and
+never takes a pool slot, even with many simultaneous holds. Add one connection
+per process to the `max_connections` budget. At shutdown await
+`mailboxWake.close()` as well as `pool.end()`.
+
+The listener reconnects with bounded exponential backoff and wakes every local
+subscription after each successful LISTEN. A self-NOTIFY probe checks each new
+connection; missing notifications and connection failures go to `onError`, or
+to the default labelled console error. `probeTimeoutMs` defaults to 5 seconds.
+`onError` must not throw. A transaction-mode PgBouncer DSN cannot keep a LISTEN
+session; the probe reports this configuration failure. Hints may be lost or
+repeated, so `fallbackMs` (default 5 seconds) still bounds delivery latency.
+
+The listener is Node-only and absent from `./runtime`. Hyperdrive cannot carry
+LISTEN/NOTIFY. Workers Hosts import the portable runtime stores and inject a
+new `createInProcessMailboxWake({ fallbackMs: 1_000 })` from `@byok-sdk/cloud`
+per invocation; cross-isolate writes are observed within that interval.
+A low-latency Durable Object wake is outside this package's current scope.
+
+Deployment order is independent of correctness: new code without the trigger
+uses fallback reads; the trigger without listeners only emits unused hints.
+`longPollIntervalMs` and `DEFAULT_LONG_POLL_INTERVAL_MS` are deleted. Do not
+carry the old hold loop alongside the wake port.
 
 Runtime dependencies and size budgets: [entry dependency contract](../../README.md#entry-dependencies).

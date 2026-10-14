@@ -45,6 +45,7 @@ function storesFor(harness: CloudHarness, deviceId: string): TenantStores {
   return tenantStoresFor(devicePrincipal(TENANT_A, deviceId), {
     core: harness.core,
     cloud: harness.stores,
+    mailboxWake: harness.mailboxWake,
   });
 }
 
@@ -120,7 +121,7 @@ describe('observer.onInboundCommitted', () => {
     const limiter: InboundRateLimiter = { async consume() { return false; } };
     const limited = tenantStoresFor(devicePrincipal(TENANT_A, device.deviceId), {
       core: harness.core,
-      cloud: { ...harness.stores, rateLimiter: limiter },
+      mailboxWake: harness.mailboxWake, cloud: { ...harness.stores, rateLimiter: limiter },
     });
     const { seen, observer } = recorder();
 
@@ -267,6 +268,7 @@ describe('observer.onInboundCommitted', () => {
       tenantStoresFor(devicePrincipal(other, deviceB.deviceId), {
         core: harness.core,
         cloud: harness.stores,
+        mailboxWake: harness.mailboxWake,
       }),
       deviceB.deviceId,
       claim(offerB.taskId, deviceB.deviceId),

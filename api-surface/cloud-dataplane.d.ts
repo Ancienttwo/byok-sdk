@@ -152,6 +152,25 @@ export { CLOUD_CLEANUP_ERROR_CODES, CloudCleanupError, PostgresCloudCleanup, cre
 export type { CleanupJobState, CloudCleanupErrorCode, CloudCleanupResult, DeadLetterPage, DeadLetterQuery, DeadLetterRef, DeadLetterReplayInput, ObjectUsageRebuildResult, PostgresCloudCleanupOptions, PostgresCloudMaintenanceOptions, TenantRetentionPolicy, TenantRetentionPolicyInput, } from './cleanup';
 export { TENANT_ERASURE_ERROR_CODES, TENANT_ERASURE_TABLES, PostgresTenantErasure, TenantErasureError, createPostgresTenantErasure, } from './tenant-erasure';
 export type { PostgresTenantErasureCompositionOptions, PostgresTenantErasureOptions, TenantErasureConflict, TenantErasureErrorCode, TenantErasureReadback, TenantErasureResult, TenantErasureStatus, } from './tenant-erasure';
+export { createPostgresMailboxWake } from './mailbox-wake';
+export type { PostgresMailboxWake, PostgresMailboxWakeOptions } from './mailbox-wake';
+// ==== @byok-sdk/cloud-dataplane dist/mailbox-wake.d.ts ====
+import { type MailboxWake } from '@byok-sdk/cloud';
+export interface PostgresMailboxWakeOptions {
+    /** Session-mode DSN. Hyperdrive and transaction-mode poolers cannot carry LISTEN. */
+    readonly connectionString: string;
+    readonly fallbackMs?: number;
+    /** Missing probe or connection failure; default reports to console.error. Must not throw. */
+    readonly onError?: (error: Error) => void;
+    /** Self-NOTIFY observation deadline; defaults to 5 seconds. */
+    readonly probeTimeoutMs?: number;
+}
+export interface PostgresMailboxWake extends MailboxWake {
+    /** Host-owned lifetime, like pool.end(). Closes all outstanding subscriptions. */
+    close(): Promise<void>;
+}
+/** One resident Node listener, independent of the request pool and the mailbox authority. */
+export declare function createPostgresMailboxWake(options: PostgresMailboxWakeOptions): PostgresMailboxWake;
 // ==== @byok-sdk/cloud-dataplane dist/migrate.d.ts ====
 import type { Pool } from 'pg';
 /** One file on disk, already ordered and checksummed. */

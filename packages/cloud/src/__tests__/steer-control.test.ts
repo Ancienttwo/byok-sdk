@@ -51,6 +51,7 @@ function deviceStores(harness: CloudHarness, device: PairedDevice) {
   return tenantStoresFor(devicePrincipal(TENANT_A, device.deviceId), {
     core: harness.core,
     cloud: harness.stores,
+    mailboxWake: harness.mailboxWake,
   });
 }
 

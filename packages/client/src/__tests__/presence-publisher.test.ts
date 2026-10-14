@@ -307,7 +307,7 @@ describe('daemon presence wiring against the real @byok-sdk/cloud', () => {
     cloud = await startRealCloud({
       productId: 'test-product',
       longPollHoldMs: 200,
-      longPollIntervalMs: 20,
+      mailboxFallbackMs: 20,
       presenceTtlMs: 1_000,
       presenceMinimumIntervalMs: 0,
     });
@@ -346,7 +346,7 @@ describe('daemon presence wiring against the real @byok-sdk/cloud', () => {
     cloud = await startRealCloud({
       productId: 'test-product',
       longPollHoldMs: 200,
-      longPollIntervalMs: 20,
+      mailboxFallbackMs: 20,
       omitCapabilities: ['presence.hints'],
     });
     daemon = (await startDaemon(cloud)).daemon;
@@ -367,7 +367,7 @@ describe('daemon presence wiring against the real @byok-sdk/cloud', () => {
       return originalFetch(input, init);
     }) as typeof globalThis.fetch;
 
-    cloud = await startRealCloud({ productId: 'test-product', longPollHoldMs: 200, longPollIntervalMs: 20 });
+    cloud = await startRealCloud({ productId: 'test-product', longPollHoldMs: 200, mailboxFallbackMs: 20 });
     const started = await startDaemon(cloud);
     daemon = started.daemon;
 

@@ -123,12 +123,6 @@ const DEFAULT_LONG_POLL_HOLD_MS = 50_000;
  * (reconnect, retry jitter) to stay connected.
  */
 const DEFAULT_PRESENCE_GRACE_MS = 15_000;
-/** Ceiling on how often a held poll re-reads the mailbox, ms. */
-const MAX_LONG_POLL_INTERVAL_MS = 250;
-/** Floor on the same, so a short test hold still re-reads several times. */
-const MIN_LONG_POLL_INTERVAL_MS = 5;
-/** Attempts a held poll makes across its window; sets the re-read interval with the hold. */
-const LONG_POLL_READS_PER_HOLD = 8;
 /** Bytes of HMAC secret minted when an embedder supplies no {@link TokenSigner}. */
 const TOKEN_SECRET_BYTES = 32;
 /** Page size `tasks.list()` uses when the caller names none. */
@@ -381,7 +375,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     presenceTtlMs,
     // Transport observations and heartbeat publications renew the same lease.
     presenceMinimumIntervalMs: 0,
-    longPollIntervalMs: longPollInterval(longPollHoldMs),
+    mailboxWake: composition.mailboxWake,
   });
 
   const hono = new Hono();
@@ -885,14 +879,4 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       };
     },
   };
-}
-
-/**
- * A held poll re-reads the mailbox on a fraction of its own window, clamped so
- * a long production hold does not busy-loop and a short test hold still gets
- * several reads instead of exactly one.
- */
-function longPollInterval(holdMs: number): number {
-  const derived = Math.floor(holdMs / LONG_POLL_READS_PER_HOLD);
-  return Math.max(MIN_LONG_POLL_INTERVAL_MS, Math.min(MAX_LONG_POLL_INTERVAL_MS, derived));
 }

@@ -6,6 +6,31 @@ import type { CloudToolDispatcher } from '../src/tools';
 export class DeliveryAuditDO extends AgentDO {
   private held: ReadableStreamDefaultReader<Uint8Array>[] = [];
   private closedResponses = 0;
+  private expiredEntry?: { now: number; executionDeadline: number; invocationDeadline: number };
+  private restoreClock?: () => void;
+
+  /** Let the durable invocation commit, then cross the execution deadline before its entry check. */
+  expireAtInvocationEntry() {
+    const runtime = this.sessionRuntime();
+    const begin = runtime.ledger.begin.bind(runtime.ledger);
+    runtime.ledger.begin = (input) => {
+      const begun = begin(input);
+      if (begun.kind !== 'started') return begun;
+      runtime.ledger.begin = begin;
+      const execution = runtime.ledger.execution(begun.row.conversationId)!;
+      const now = execution.deadlineAt + 1;
+      this.expiredEntry = { now, executionDeadline: execution.deadlineAt, invocationDeadline: begun.row.deadlineAt };
+      // #runInvocation starts synchronously after begin returns. Deliver the
+      // delayed execution cancellation after that entry check, like a timer
+      // becoming runnable once native work gives the event loop control back.
+      const lease = runtime.activeLease!;
+      queueMicrotask(() => runtime.cancel(lease, 'CLOUD_EXECUTION_TIMEOUT'));
+      const realNow = Date.now;
+      Date.now = () => Math.max(realNow(), now);
+      this.restoreClock = () => { Date.now = realNow; this.restoreClock = undefined; };
+      return begun;
+    };
+  }
 
   protected override createDispatcher(id: string): CloudToolDispatcher | undefined {
     if (id !== 'delivery-fixture') return undefined;
@@ -56,7 +81,8 @@ export class DeliveryAuditDO extends AgentDO {
     catch (error) { return { alarm: error instanceof CloudDoError ? error.code : 'raw' }; }
   }
   async discard() {
-    await Promise.all(this.held.splice(0).map(reader => reader.cancel().catch(() => undefined)));
+    try { await Promise.all(this.held.splice(0).map(reader => reader.cancel().catch(() => undefined))); }
+    finally { this.restoreClock?.(); }
   }
   async repair() {
     this.ctx.storage.sql.exec('DROP TRIGGER fixture_settlement_failure');
@@ -65,6 +91,7 @@ export class DeliveryAuditDO extends AgentDO {
   status() {
     const runtime = this.sessionRuntime();
     return { liveOwner: runtime.hasLiveOwner, busy: runtime.busy, closedResponses: this.closedResponses,
+      expiredEntry: this.expiredEntry,
       settled: runtime.activeLease?.settled, aborted: runtime.activeLease?.controller.signal.aborted,
       runs: this.ctx.storage.sql.exec('SELECT state,errorCode FROM cloud_executions ORDER BY conversationId DESC').toArray(), invocations: this.ctx.storage.sql.exec('SELECT state,errorCode FROM cloud_invocations').toArray() };
   }
@@ -82,6 +109,7 @@ export default { async fetch(request: Request, env: Env) {
     });
     case 'hold': return Response.json(await agent.hold(body.instruction!));
     case 'status': return Response.json(await agent.status());
+    case 'expireAtEntry': await agent.expireAtInvocationEntry(); return Response.json({ armed: true });
     case 'cancel': return agent.cancelActiveRun();
     case 'repair': await agent.repair(); return Response.json({ repaired: true });
     case 'discard': await agent.discard(); return Response.json({ discarded: true });
