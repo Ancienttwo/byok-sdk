@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createMutableClock, tenantId } from '@byok-sdk/core';
+import { CollectExpiredFailure, createMutableClock, tenantId } from '@byok-sdk/core';
 import { createInMemoryByokCloud } from '../composition/in-memory';
 import { ByokCloudError } from '../errors';
 import { DEFAULT_RETENTION_POLICY, MAINTENANCE_STEPS, resolveRetentionPolicy } from '../maintenance';
@@ -31,9 +31,36 @@ describe('cloud maintenance', () => {
     vi.spyOn(composition.core.presence, 'collectExpired').mockResolvedValue({ removed: 3, expired: 0, releasedBytes: 0n, more: false });
     const report = await composition.cloud.runMaintenance({ tenant, now: composition.clock.now().toISOString(), policy: DEFAULT_RETENTION_POLICY, limit: 2 });
     expect(report.steps).toHaveLength(10);
-    expect(report.steps[1]).toEqual({ step: 'receipts', status: 'failed', errorCode: 'maintenance_step_failed', failures: 1 });
-    expect(report.steps[4]).toEqual({ step: 'presence', status: 'failed', errorCode: 'maintenance_result_invalid', failures: 1 });
+    expect(report.steps[1]).toEqual({ step: 'receipts', status: 'failed', errorCode: 'maintenance_step_failed', failedRows: 0 });
+    expect(report.steps[4]).toEqual({ step: 'presence', status: 'failed', errorCode: 'maintenance_result_invalid', failedRows: 0 });
     expect(report.steps[9]).toMatchObject({ step: 'objects', status: 'ok' });
+  });
+  it('preserves a full committed budget when only the remainder observation fails', async () => {
+    const composition = setup();
+    vi.spyOn(composition.core.objects, 'collectExpired').mockRejectedValue(new CollectExpiredFailure(
+      { removed: 2, expired: 0, releasedBytes: 30n }, 0, undefined, { cause: new Error('probe failed') },
+    ));
+    const report = await composition.cloud.runMaintenance({ tenant, now: composition.clock.now().toISOString(), policy: DEFAULT_RETENTION_POLICY, limit: 2 });
+    expect(report.steps[9]).toEqual({ step: 'objects', status: 'failed', errorCode: 'retention_collect_failed',
+      failedRows: 0, committed: { removed: 2, expired: 0, releasedBytes: 30n } });
+    expect(report.steps[9]).not.toHaveProperty('more');
+  });
+  it('counts a failed row inside the same budget as confirmed commits', async () => {
+    const composition = setup();
+    vi.spyOn(composition.core.objects, 'collectExpired').mockRejectedValue(new CollectExpiredFailure(
+      { removed: 1, expired: 0, releasedBytes: 10n }, 1, true, { cause: new Error('delete failed') },
+    ));
+    const report = await composition.cloud.runMaintenance({ tenant, now: composition.clock.now().toISOString(), policy: DEFAULT_RETENTION_POLICY, limit: 2 });
+    expect(report.steps[9]).toEqual({ step: 'objects', status: 'failed', errorCode: 'retention_collect_failed',
+      failedRows: 1, committed: { removed: 1, expired: 0, releasedBytes: 10n }, more: true });
+  });
+  it('rejects a failure whose committed and failed rows exceed the budget', async () => {
+    const composition = setup();
+    vi.spyOn(composition.core.objects, 'collectExpired').mockRejectedValue(new CollectExpiredFailure(
+      { removed: 2, expired: 0, releasedBytes: 20n }, 1, true,
+    ));
+    const report = await composition.cloud.runMaintenance({ tenant, now: composition.clock.now().toISOString(), policy: DEFAULT_RETENTION_POLICY, limit: 2 });
+    expect(report.steps[9]).toEqual({ step: 'objects', status: 'failed', errorCode: 'maintenance_result_invalid', failedRows: 0 });
   });
   it.each([0n, -1n, BigInt(Number.MAX_SAFE_INTEGER) + 1n, 24 as unknown as bigint])('rejects a disabled or invalid retention duration %s', value => {
     expect(() => resolveRetentionPolicy({ mailboxAckedRetentionMs: value })).toThrow(ByokCloudError);

@@ -8,8 +8,8 @@ Operational contract for S4B-c on the Postgres + R2 composition. Authorities:
 
 1. Apply the ordered migrations and write the tenant's retention policy.
    `storage_entitlement.retention_policy_id` selects that policy. A missing
-   policy fails with `cleanup_policy_missing`; a stored zero duration fails
-   `runMaintenance` with `maintenance_invalid_input`.
+   policy fails with `cleanup_policy_missing`; an invalid stored duration fails
+   the policy read with `cleanup_invalid_input`.
 2. Bind real bytes into the serving core composition:
    `createPostgresCoreStores({ pool, clock, objectStorage })` accepts the same
    immutable R2 configuration/key prefix as the blob store. Standalone
@@ -17,7 +17,10 @@ Operational contract for S4B-c on the Postgres + R2 composition. Authorities:
 3. Call the kernel from one hosted scheduler per tenant:
 
 ```ts
-const policy = await maintenance.readRetentionPolicy(tenant);
+import { PostgresRetentionPolicyStore } from '@byok-sdk/cloud-dataplane/runtime';
+
+const policies = new PostgresRetentionPolicyStore(pool, clock);
+const policy = await policies.readRetentionPolicy(tenant);
 const report = await cloud.runMaintenance({ tenant, now, policy, limit: 500 });
 ```
 
@@ -108,7 +111,9 @@ That is the accepted tenant-internal risk in ADR-024.
 Use `MaintenanceReport.steps` and `observer.onMaintenance` as the current
 counts-only readback. The server emits `maintenance.completed`, or
 `maintenance.failed` if any step failed. Failed object collection includes
-committed partial counts plus `failures`; failed deletions retain tombstones.
+`committed` counts plus `failedRows`; failed deletions retain tombstones. A
+step-level fault reports `failedRows: 0`. Counts and `more` are omitted when
+unknown; a failed final remainder probe preserves already committed counts.
 Report tenant, step, counts, bytes and typed error code, never object keys or
 bodies. Alert on any expired mailbox work, repeated failed steps, or a growing
 `more` backlog that the configured schedule cannot drain.

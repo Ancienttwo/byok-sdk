@@ -278,6 +278,7 @@ describe('hosted task assertion authentication', () => {
 
   it('rejects rather than degrading when the replay store is unavailable', async () => {
     const broken: DeviceAssertionReplayAuthority = {
+      collectExpired: async () => { throw new Error('replay store unavailable'); },
       consume: () => Promise.reject(new Error('replay store unavailable')),
     };
     await expect(authenticateHostedTaskAssertion(taskEnvelope(), deps(broken))).rejects.toThrow(

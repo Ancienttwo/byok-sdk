@@ -2124,7 +2124,9 @@ of ten tenant-first `collectExpired` ports: mailbox, receipts, nonces, pairing
 codes, presence, activity, approvals, device assertion replay, quota and
 objects. Every step has one batch budget, returns removed/expired counts,
 released bigint bytes and an eligible-remainder flag, and commits independently.
-Failures retain committed partial counts; observers receive the same report.
+Failures retain confirmed `committed` counts and `failedRows`; step faults use
+`failedRows: 0`. Unknown counts and `more` are omitted. A remainder-probe fault
+cannot erase prior committed counts. Observers receive the same report.
 
 The reference server always schedules one non-overlapping pass every five
 minutes with ±20% jitter, defaults to 500 rows/objects per step, and exposes
@@ -2146,7 +2148,8 @@ holds the manifest row through physical deletion, and SQLite commits its SQL
 and process-local ledger release without an asynchronous gap.
 
 The old mailbox façade, `collectRetired`, replay `deleteExpired`, public
-`expireReservations` and Postgres `runTenant` are removed. Operator policy,
+`expireReservations` and Postgres `runTenant` are removed. Hosted policy lives on `PostgresRetentionPolicyStore` in the
+Worker-loadable dataplane runtime entry. Operator
 dead-letter, reconciliation and usage-rebuild APIs remain. Installed
 `cleanup_job` rows are historical; no current code writes them. Client artifact
 retention and cloud-do alarms retain their own ownership boundaries.

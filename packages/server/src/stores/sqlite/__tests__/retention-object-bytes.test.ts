@@ -21,6 +21,24 @@ async function setup() {
 }
 afterEach(() => vi.restoreAllMocks());
 describe.skipIf(!isSqliteAvailable())('SQLite physical object retention', () => {
+  it('preserves committed deletion counts when the final remainder query fails', async () => {
+    const composition = await setup();
+    const prepare = DatabaseSync.prototype.prepare;
+    const hook = vi.spyOn(DatabaseSync.prototype, 'prepare').mockImplementation(function(this: DatabaseSync, sql) {
+      if (sql.startsWith('SELECT 1 FROM object_manifest m WHERE')) throw new Error('injected remainder query failure');
+      return prepare.call(this, sql);
+    });
+    try {
+      const failure = await composition.core.objects.collectExpired(tenant, composition.input).then(
+        () => { throw new Error('Expected the remainder probe to fail.'); }, error => error,
+      );
+      hook.mockRestore();
+      expect(await composition.blobContentProxy.readContent(composition.grant.blobId)).toBeUndefined();
+      expect(await composition.core.quota.readUsage(tenant)).toMatchObject({ committedObjectBytes: 0n, objectCount: 0n });
+      expect(failure).toMatchObject({ failedRows: 0, committed: { removed: 1, expired: 0, releasedBytes: composition.size } });
+      expect(failure.more).toBeUndefined();
+    } finally { hook.mockRestore(); await composition.close(); }
+  });
   it('commits bytes, manifest and process-local accounting together', async () => {
     const composition = await setup();
     try {
@@ -34,9 +52,9 @@ describe.skipIf(!isSqliteAvailable())('SQLite physical object retention', () => 
     const exec = DatabaseSync.prototype.exec;
     let commits = 0;
     let fail = true;
-    const hook = vi.spyOn(DatabaseSync.prototype, 'exec').mockImplementation(function(sql) { if (sql === 'COMMIT' && ++commits === 2 && fail) { fail = false; throw new Error('injected COMMIT failure'); } return exec.call(this, sql); });
+    const hook = vi.spyOn(DatabaseSync.prototype, 'exec').mockImplementation(function(this: DatabaseSync, sql) { if (sql === 'COMMIT' && ++commits === 2 && fail) { fail = false; throw new Error('injected COMMIT failure'); } return exec.call(this, sql); });
     try {
-      await expect(composition.core.objects.collectExpired(tenant, composition.input)).rejects.toMatchObject({ partial: { removed: 0, releasedBytes: 0n }, failures: 1 });
+      await expect(composition.core.objects.collectExpired(tenant, composition.input)).rejects.toMatchObject({ committed: { removed: 0, releasedBytes: 0n }, failedRows: 1 });
       expect(await composition.core.quota.readUsage(tenant)).toMatchObject({ committedObjectBytes: composition.size, objectCount: 1n });
       expect(await composition.blobContentProxy.readContent(composition.grant.blobId)).toBeDefined();
       hook.mockRestore();

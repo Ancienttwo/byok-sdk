@@ -16,6 +16,7 @@ import { CLOUD_CAPABILITIES, fullCapabilityDeclaration, type CloudCapability } f
 import { createByokCloud } from '../cloud';
 import { createWebCrypto } from '../crypto/web-crypto';
 import { CloudRouteRegistry, ROUTE_CLASSES, routeKey, type RouteClass } from '../router/registry';
+import { createInMemoryBlobBytes } from '../stores/in-memory/blobs';
 import { createInMemoryCloudStores } from '../stores/in-memory/index';
 import { CLOUD_ORIGIN, createHarness, offerPayload, TENANT_A, TENANT_B, type CloudHarness, type PairedDevice } from './support/harness';
 

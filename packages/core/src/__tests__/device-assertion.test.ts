@@ -680,7 +680,7 @@ describe('authenticateDeviceAssertion', () => {
       let consumed = false;
       await expect(
         authenticateDeviceAssertion(envelope, {
-          ...deps({
+          ...deps({ collectExpired: async () => { throw new Error('maintenance not used by this authentication fixture'); },
             consume: () => {
               consumed = true;
               return Promise.resolve(true);
@@ -720,7 +720,7 @@ describe('authenticateDeviceAssertion', () => {
     await expect(
       authenticateDeviceAssertion(
         envelope,
-        deps({
+        deps({ collectExpired: async () => { throw new Error('maintenance not used by this authentication fixture'); },
           consume: () => Promise.reject(new Error('replay authority unavailable')),
         }),
       ),
@@ -1254,7 +1254,7 @@ describe('authenticateTaskAssertion', () => {
     await expect(
       authenticateTaskAssertion(
         envelope,
-        deps({
+        deps({ collectExpired: async () => { throw new Error('maintenance not used by this authentication fixture'); },
           consume: (input) => {
             consumed.push(input);
             return Promise.resolve(true);
@@ -1293,7 +1293,7 @@ describe('authenticateTaskAssertion', () => {
       let consumed = false;
       await expect(
         authenticateTaskAssertion(envelope, {
-          ...deps({
+          ...deps({ collectExpired: async () => { throw new Error('maintenance not used by this authentication fixture'); },
             consume: () => {
               consumed = true;
               return Promise.resolve(true);
@@ -1326,7 +1326,7 @@ describe('authenticateTaskAssertion', () => {
       let consumed = false;
       await expect(
         authenticateTaskAssertion(envelope, {
-          ...deps({
+          ...deps({ collectExpired: async () => { throw new Error('maintenance not used by this authentication fixture'); },
             consume: () => {
               consumed = true;
               return Promise.resolve(true);
@@ -1353,7 +1353,7 @@ describe('authenticateTaskAssertion', () => {
     await expect(
       authenticateTaskAssertion(
         device,
-        deps({
+        deps({ collectExpired: async () => { throw new Error('maintenance not used by this authentication fixture'); },
           consume: () => {
             consumed = true;
             return Promise.resolve(true);
@@ -1370,7 +1370,7 @@ describe('authenticateTaskAssertion', () => {
     await expect(
       authenticateDeviceAssertion(
         task,
-        deps({
+        deps({ collectExpired: async () => { throw new Error('maintenance not used by this authentication fixture'); },
           consume: () => {
             consumed = true;
             return Promise.resolve(true);
@@ -1386,7 +1386,7 @@ describe('authenticateTaskAssertion', () => {
     await expect(
       authenticateTaskAssertion(
         envelope,
-        deps({ consume: () => Promise.reject(new Error('replay authority unavailable')) }),
+        deps({ collectExpired: async () => { throw new Error('maintenance not used by this authentication fixture'); }, consume: () => Promise.reject(new Error('replay authority unavailable')) }),
       ),
     ).rejects.toThrow('replay authority unavailable');
   });

@@ -1,0 +1,40 @@
+import { describe, expect, it, vi } from 'vitest';
+import type { Pool } from 'pg';
+import { createMutableClock, tenantId } from '@byok-sdk/core';
+import { PostgresRetentionPolicyStore, type TenantRetentionPolicyInput } from '../runtime';
+
+const tenant = tenantId('maintenance-policy');
+const input: TenantRetentionPolicyInput = {
+  policyId: 'tenant-policy', mailboxAckedRetentionMs: 1n, mailboxUnackedRetentionMs: 2n,
+  requestReceiptRetentionMs: 3n, objectOrphanGraceMs: 4n,
+};
+const row = {
+  tenant_id: tenant, policy_id: input.policyId, mailbox_acked_retention_ms: 1n,
+  mailbox_unacked_retention_ms: 2n, request_receipt_retention_ms: 3n,
+  object_orphan_grace_ms: 4n, updated_at: '2026-10-14T00:00:00.000Z',
+};
+
+describe('Worker retention policy authority', () => {
+  it('fails closed when the entitlement has no matching policy', async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const store = new PostgresRetentionPolicyStore({ query } as unknown as Pool, createMutableClock());
+    await expect(store.readRetentionPolicy(tenant)).rejects.toMatchObject({ code: 'cleanup_policy_missing' });
+    expect(query).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('JOIN tenant_retention_policy'), [tenant]);
+  });
+  it('reads the four authoritative durations without defaults', async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [row] });
+    const store = new PostgresRetentionPolicyStore({ query } as unknown as Pool, createMutableClock());
+    expect(await store.readRetentionPolicy(tenant)).toEqual({ ...input, tenantId: tenant, updatedAt: row.updated_at });
+  });
+  it.each([undefined, 0n, -1n, 1, BigInt(Number.MAX_SAFE_INTEGER) + 1n])('rejects incomplete or invalid writes before SQL: %s', duration => {
+    const query = vi.fn();
+    const store = new PostgresRetentionPolicyStore({ query } as unknown as Pool, createMutableClock());
+    return expect(store.writeRetentionPolicy(tenant, { ...input, objectOrphanGraceMs: duration } as TenantRetentionPolicyInput))
+      .rejects.toMatchObject({ code: 'cleanup_invalid_input' }).then(() => { expect(query).not.toHaveBeenCalled(); });
+  });
+  it('rejects invalid stored policy rather than synthesizing a duration', async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [{ ...row, request_receipt_retention_ms: 0n }] });
+    const store = new PostgresRetentionPolicyStore({ query } as unknown as Pool, createMutableClock());
+    await expect(store.readRetentionPolicy(tenant)).rejects.toMatchObject({ code: 'cleanup_invalid_input' });
+  });
+});

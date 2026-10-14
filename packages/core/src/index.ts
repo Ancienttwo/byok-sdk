@@ -385,7 +385,7 @@ export {
 export type { InMemoryCoreComposition, InMemoryCoreOptions } from './in-memory/index';
 
 export { assertCollectExpiredInput, CollectExpiredFailure } from './retention';
-export type { CollectExpiredInput, CollectExpiredResult } from './retention';
+export type { CollectExpiredInput, CollectExpiredCounts, CollectExpiredResult } from './retention';
 export type { QuotaCollectExpiredInput } from './quota';
 export type { ObjectCollectExpiredInput } from './blob';
 

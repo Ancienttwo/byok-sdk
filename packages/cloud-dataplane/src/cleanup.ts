@@ -6,7 +6,7 @@ import { settleDeletedObject } from './stores/core/object-gc';
  * a durable `delete_pending` tombstone, and a missing object is an idempotent
  * DELETE replay — never evidence that a committed manifest was truthful.
  */
-import type { RetentionPolicy } from '@byok-sdk/cloud';
+import { CloudCleanupError } from './maintenance-errors';
 import { createHash } from 'node:crypto';
 import {
   contentHash,
@@ -30,35 +30,6 @@ const DEFAULT_BATCH_SIZE = 100;
 const MAX_BATCH_SIZE = 1000;
 const OUTBOX_COLUMNS =
   'tenant_id, device_id, seq, message_id, body, body_hash, byte_size, state, appended_at, replay_source_seq';
-
-export const CLOUD_CLEANUP_ERROR_CODES = {
-  cleanup_invalid_input: 'cleanup_invalid_input',
-  cleanup_policy_missing: 'cleanup_policy_missing',
-  cleanup_dead_letter_not_found: 'cleanup_dead_letter_not_found',
-  cleanup_accounting_drift: 'cleanup_accounting_drift',
-} as const;
-
-export type CloudCleanupErrorCode =
-  (typeof CLOUD_CLEANUP_ERROR_CODES)[keyof typeof CLOUD_CLEANUP_ERROR_CODES];
-
-export class CloudCleanupError extends Error {
-  readonly code: CloudCleanupErrorCode;
-
-  constructor(code: CloudCleanupErrorCode, message: string, options?: ErrorOptions) {
-    super(message, options);
-    this.name = 'CloudCleanupError';
-    this.code = code;
-  }
-}
-
-export interface TenantRetentionPolicyInput extends RetentionPolicy {
-  readonly policyId: string;
-}
-
-export interface TenantRetentionPolicy extends TenantRetentionPolicyInput {
-  readonly tenantId: TenantId;
-  readonly updatedAt: string;
-}
 
 export interface ObjectStorageReconcileResult {
   readonly objectsDeleted: bigint;
@@ -114,16 +85,6 @@ export interface PostgresCloudMaintenanceOptions {
   readonly batchSize?: number;
 }
 
-interface RetentionPolicyRow {
-  readonly tenant_id: string;
-  readonly policy_id: string;
-  readonly mailbox_acked_retention_ms: bigint;
-  readonly mailbox_unacked_retention_ms: bigint;
-  readonly request_receipt_retention_ms: bigint;
-  readonly object_orphan_grace_ms: bigint;
-  readonly updated_at: string;
-}
-
 interface ManifestMaintenanceRow {
   readonly hash: string;
   readonly byte_size: bigint;
@@ -169,44 +130,7 @@ export class PostgresCloudCleanup {
     this.#batchSize = assertBatchSize(options.batchSize ?? DEFAULT_BATCH_SIZE);
   }
 
-  async writeRetentionPolicy(
-    tenant: TenantId,
-    input: TenantRetentionPolicyInput,
-  ): Promise<TenantRetentionPolicy> {
-    assertPolicy(input);
-    const written = await this.#pool.query<RetentionPolicyRow>(
-       `INSERT INTO tenant_retention_policy (
-         tenant_id, policy_id, mailbox_acked_retention_ms,
-         mailbox_unacked_retention_ms, request_receipt_retention_ms,
-         object_orphan_grace_ms, updated_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-       ON CONFLICT (tenant_id, policy_id) DO UPDATE
-          SET mailbox_acked_retention_ms = EXCLUDED.mailbox_acked_retention_ms,
-              mailbox_unacked_retention_ms = EXCLUDED.mailbox_unacked_retention_ms,
-              request_receipt_retention_ms = EXCLUDED.request_receipt_retention_ms,
-              object_orphan_grace_ms = EXCLUDED.object_orphan_grace_ms,
-              updated_at = EXCLUDED.updated_at
-       RETURNING tenant_id, policy_id, mailbox_acked_retention_ms,
-                 mailbox_unacked_retention_ms, request_receipt_retention_ms,
-                 object_orphan_grace_ms, updated_at`,
-      [
-        tenant,
-        input.policyId,
-        input.mailboxAckedRetentionMs,
-        input.mailboxUnackedRetentionMs,
-        input.requestReceiptRetentionMs,
-        input.objectOrphanGraceMs,
-        this.#now(),
-      ],
-    );
-    return toPolicy(written.rows[0]!);
-  }
-
-  async readRetentionPolicy(tenant: TenantId): Promise<TenantRetentionPolicy> {
-    return this.#readRetentionPolicy(this.#pool, tenant);
-  }
-
-  /** Run one bounded tenant maintenance cycle. Completed job ids are replay-safe. */
+  /** Reconcile manifest/R2 observations as an explicit operator action. */
   async reconcileObjectStorage(tenant: TenantId): Promise<ObjectStorageReconcileResult> {
     const client = await this.#pool.connect();
     try {
@@ -394,32 +318,6 @@ export class PostgresCloudCleanup {
     } finally {
       client.release();
     }
-  }
-
-  async #readRetentionPolicy(
-    queryable: Pick<Pool, 'query'> | Pick<PoolClient, 'query'>,
-    tenant: TenantId,
-  ): Promise<TenantRetentionPolicy> {
-    const result = await queryable.query<RetentionPolicyRow>(
-      `SELECT p.tenant_id, p.policy_id, p.mailbox_acked_retention_ms,
-              p.mailbox_unacked_retention_ms, p.request_receipt_retention_ms,
-              p.object_orphan_grace_ms, p.updated_at
-         FROM storage_entitlement e
-         JOIN tenant_retention_policy p
-           ON p.tenant_id = e.tenant_id AND p.policy_id = e.retention_policy_id
-        WHERE e.tenant_id = $1`,
-      [tenant],
-    );
-    const row = result.rows[0];
-    if (row === undefined) {
-      throw new CloudCleanupError(
-        'cleanup_policy_missing',
-        `Tenant ${tenant} has no retention policy matching its entitlement.`,
-      );
-    }
-    const policy = toPolicy(row);
-    assertPolicy(policy);
-    return policy;
   }
 
   async #reconcileManifests(
@@ -612,18 +510,6 @@ function emptyCounts(): MutableCounts {
   };
 }
 
-function toPolicy(row: RetentionPolicyRow): TenantRetentionPolicy {
-  return {
-    tenantId: tenantId(row.tenant_id),
-    policyId: row.policy_id,
-    mailboxAckedRetentionMs: row.mailbox_acked_retention_ms,
-    mailboxUnackedRetentionMs: row.mailbox_unacked_retention_ms,
-    requestReceiptRetentionMs: row.request_receipt_retention_ms,
-    objectOrphanGraceMs: row.object_orphan_grace_ms,
-    updatedAt: row.updated_at,
-  };
-}
-
 function toMailboxMessage(row: OutboxRow): MailboxMessage {
   return {
     tenantId: tenantId(row.tenant_id),
@@ -675,23 +561,6 @@ function replayMatches(row: OutboxRow, original: OutboxRow): boolean {
     row.body_hash === expected.bodyHash &&
     row.byte_size === expected.byteSize
   );
-}
-
-function assertPolicy(input: TenantRetentionPolicyInput): void {
-  assertIdentifier(input.policyId, 'policyId');
-  for (const [field, value] of [
-    ['mailboxAckedRetentionMs', input.mailboxAckedRetentionMs],
-    ['mailboxUnackedRetentionMs', input.mailboxUnackedRetentionMs],
-    ['requestReceiptRetentionMs', input.requestReceiptRetentionMs],
-    ['objectOrphanGraceMs', input.objectOrphanGraceMs],
-  ] as const) {
-    if (typeof value !== 'bigint' || value <= 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) {
-      throw new CloudCleanupError(
-        'cleanup_invalid_input',
-        `${field} must be a positive bigint duration no larger than Number.MAX_SAFE_INTEGER milliseconds.`,
-      );
-    }
-  }
 }
 
 function assertBatchSize(value: number): number {

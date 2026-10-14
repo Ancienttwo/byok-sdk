@@ -1,3 +1,4 @@
+import { CollectExpiredFailure } from '../retention';
 import { assertCollectExpiredInput, type CollectExpiredResult } from '../retention';
 /**
  * In-memory {@link MailboxStore} reference (§12.7.3).
@@ -198,31 +199,35 @@ export class InMemoryMailboxStore implements MailboxStore {
     assertCanonicalTimestamp(input.ackedBefore, 'ackedBefore');
     assertCanonicalTimestamp(input.expireUnackedBefore, 'expireUnackedBefore');
     let removed = 0, expired = 0, more = false;
-    phases: for (const phase of ['acked', 'pending'] as const) {
-      for (const [key, device] of this.#devices) {
-        if (!key.startsWith(tenantKey(tenant, ''))) continue;
-        const collected = device.mutationTail.then(() => {
-          for (let index = 0; index < device.messages.length;) {
-            const message = device.messages[index]!;
-            const cutoff = phase === 'acked' ? input.ackedBefore : input.expireUnackedBefore;
-            if (message.state !== phase || message.appendedAt >= cutoff) { index++; continue; }
-            if (removed + expired === input.limit) { more = true; return; }
-            if (phase === 'acked') {
-              device.messages.splice(index, 1);
-              device.byMessageId.delete(message.messageId);
-              removed++;
-            } else {
-              const retired: MailboxMessage = { ...message, state: 'expired' };
-              device.messages[index] = retired;
-              device.byMessageId.set(retired.messageId, retired);
-              expired++; index++;
+    try {
+      phases: for (const phase of ['acked', 'pending'] as const) {
+        for (const [key, device] of this.#devices) {
+          if (!key.startsWith(tenantKey(tenant, ''))) continue;
+          const collected = device.mutationTail.then(() => {
+            for (let index = 0; index < device.messages.length;) {
+              const message = device.messages[index]!;
+              const cutoff = phase === 'acked' ? input.ackedBefore : input.expireUnackedBefore;
+              if (message.state !== phase || message.appendedAt >= cutoff) { index++; continue; }
+              if (removed + expired === input.limit) { more = true; return; }
+              if (phase === 'acked') {
+                device.messages.splice(index, 1);
+                device.byMessageId.delete(message.messageId);
+                removed++;
+              } else {
+                const retired: MailboxMessage = { ...message, state: 'expired' };
+                device.messages[index] = retired;
+                device.byMessageId.set(retired.messageId, retired);
+                expired++; index++;
+              }
             }
-          }
-        });
-        device.mutationTail = collected.then(() => undefined, () => undefined);
-        await collected;
-        if (more) break phases;
+          });
+          device.mutationTail = collected.then(() => undefined, () => undefined);
+          await collected;
+          if (more) break phases;
+        }
       }
+    } catch (cause) {
+      throw new CollectExpiredFailure({ removed, expired, releasedBytes: 0n }, 0, undefined, { cause });
     }
     // Mailbox usage is the retained rows, never a mutable accounting counter.
     return { removed, expired, releasedBytes: 0n, more };

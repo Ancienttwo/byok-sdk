@@ -1,3 +1,4 @@
+import { CollectExpiredFailure } from '../retention';
 import { InMemoryStorageLedger, type ReservationRecord } from './storage-ledger';
 import { assertCollectExpiredInput, type CollectExpiredResult } from '../retention';
 import type { QuotaCollectExpiredInput } from '../quota';
@@ -127,7 +128,8 @@ export class InMemoryQuotaStore implements QuotaStore {
     // Admission is the bounded product-side reap point. A daemon may die
     // after receiving a grant and never call finalize/abort; expired holds
     // therefore have to be settled before they can deny the next write.
-    await this.#expireReservations(tenant);
+    // Exhaust the same expiry iterator used by the bounded maintenance pass.
+    await Array.from(this.#expireReservations(tenant));
     const key = tenantKey(tenant, input.reservationId);
     const existing = this.ledger.readReservation(key);
     if (existing !== undefined) {
@@ -294,36 +296,43 @@ export class InMemoryQuotaStore implements QuotaStore {
     return this.#settle(tenant, key, record, 'aborted');
   }
 
-  async #expireReservations(tenant: TenantId, now = this.#now(), limit = Number.MAX_SAFE_INTEGER): Promise<readonly StorageReservation[]> {
+  *#expireReservations(tenant: TenantId, now = this.#now(), limit = Number.MAX_SAFE_INTEGER): IterableIterator<StorageReservation> {
     const prefix = tenantKey(tenant, '');
-    const expired: StorageReservation[] = [];
-    for (const [key, record] of [...this.ledger.reservations()]) {
-      if (!key.startsWith(prefix)) continue;
-      if (record.reservation.state !== 'reserved') continue;
-      if (now < record.reservation.expiresAt) continue;
-      expired.push(this.#settle(tenant, key, record, 'expired', false, now));
-      if (expired.length === limit) break;
+    let expired = 0;
+    for (const [key, record] of this.ledger.reservations()) {
+      if (!key.startsWith(prefix) || record.reservation.state !== 'reserved' || now < record.reservation.expiresAt) continue;
+      yield this.#settle(tenant, key, record, 'expired', false, now);
+      if (++expired === limit) return;
     }
-    return expired;
   }
 
   async collectExpired(tenant: TenantId, input: QuotaCollectExpiredInput): Promise<CollectExpiredResult> {
     assertCollectExpiredInput(input);
     assertCanonicalTimestamp(input.settledBefore, 'settledBefore');
-    const expired = await this.#expireReservations(tenant, input.now, input.limit);
-    const releasedBytes = expired.reduce((sum, row) => sum + row.expectedBytes, 0n);
-    let removed = 0, more = false;
-    const prefix = tenantKey(tenant, '');
-    for (const [key, record] of this.ledger.reservations()) {
-      if (!key.startsWith(prefix)) continue;
-      const row = record.reservation;
-      const shouldExpire = row.state === 'reserved' && row.expiresAt <= input.now;
-      const shouldRemove = (row.state === 'expired' || row.state === 'aborted') && row.settledAt !== undefined && row.settledAt < input.settledBefore;
-      if (!shouldExpire && !shouldRemove) continue;
-      if (shouldExpire || removed + expired.length === input.limit) { more = true; continue; }
-      this.ledger.deleteReservation(key); removed++;
+    let expired = 0, releasedBytes = 0n, removed = 0, more = false;
+    try {
+      for (const reservation of this.#expireReservations(tenant, input.now, input.limit)) {
+        expired++;
+        releasedBytes += reservation.expectedBytes;
+      }
+    } catch (cause) {
+      throw new CollectExpiredFailure({ removed, expired, releasedBytes }, 1, true, { cause });
     }
-    return { removed, expired: expired.length, releasedBytes, more };
+    const prefix = tenantKey(tenant, '');
+    try {
+      for (const [key, record] of this.ledger.reservations()) {
+        if (!key.startsWith(prefix)) continue;
+        const row = record.reservation;
+        const shouldExpire = row.state === 'reserved' && row.expiresAt <= input.now;
+        const shouldRemove = (row.state === 'expired' || row.state === 'aborted') && row.settledAt !== undefined && row.settledAt < input.settledBefore;
+        if (!shouldExpire && !shouldRemove) continue;
+        if (shouldExpire || removed + expired === input.limit) { more = true; continue; }
+        this.ledger.deleteReservation(key); removed++;
+      }
+    } catch (cause) {
+      throw new CollectExpiredFailure({ removed, expired, releasedBytes }, 0, undefined, { cause });
+    }
+    return { removed, expired, releasedBytes, more };
   }
 
   #settle(

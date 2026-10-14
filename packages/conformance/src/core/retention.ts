@@ -15,7 +15,7 @@ export function runCoreRetentionConformance(name: string, factory: CoreCompositi
         await stores.mailbox.advanceCursor(TENANT_A, { deviceId: 'retention-device', ackedSeq: 1 });
         await handle.advanceTime(1);
         const input = { now: handle.now(), limit: 2, ackedBefore: handle.now(), expireUnackedBefore: handle.now() };
-        expect(await stores.mailbox.collectExpired(TENANT_A, { ...input, limit: 1 })).toEqual({ removed: 1, expired: 1, releasedBytes: 0n, more: true });
+        expect(await stores.mailbox.collectExpired(TENANT_A, input)).toEqual({ removed: 1, expired: 1, releasedBytes: 0n, more: true });
         expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(2n);
         expect(await stores.mailbox.collectExpired(TENANT_A, { ...input, limit: 1 })).toEqual({ removed: 0, expired: 1, releasedBytes: 0n, more: false });
         expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(2n);
@@ -24,8 +24,8 @@ export function runCoreRetentionConformance(name: string, factory: CoreCompositi
     });
     it('bounds presence expiry and preserves another tenant at the exact TTL boundary', async () => {
       await withComposition(factory, async handle => {
-        for (let n = 1; n <= 3; n++) await handle.stores.presence.publish(TENANT_A, { deviceId: `device-${n}`, level: 'idle', ttlMs: 1000 });
-        await handle.stores.presence.publish(TENANT_B, { deviceId: 'other', level: 'idle', ttlMs: 1000 });
+        for (let n = 1; n <= 3; n++) await handle.stores.presence.publish(TENANT_A, { deviceId: `device-${n}`, level: 'online', ttlMs: 1000, minimumIntervalMs: 0 });
+        await handle.stores.presence.publish(TENANT_B, { deviceId: 'other', level: 'online', ttlMs: 1000, minimumIntervalMs: 0 });
         await handle.advanceTime(1000);
         const input = { now: handle.now(), limit: 2 };
         expect(await handle.stores.presence.collectExpired(TENANT_A, input)).toEqual({ removed: 2, expired: 0, releasedBytes: 0n, more: true });
@@ -61,8 +61,9 @@ export function runCoreRetentionConformance(name: string, factory: CoreCompositi
         const object = await stores.quota.finalizeReservation(TENANT_A, { reservationId: 'object-identity', observedByteSize: 10n, observedContentType: 'text/plain' });
         await handle.advanceTime(1000);
         expect(await stores.quota.collectExpired(TENANT_A, { now: handle.now(), settledBefore: handle.now(), limit: 1 })).toEqual({ removed: 0, expired: 0, releasedBytes: 0n, more: false });
-        expect(await stores.quota.finalizeReservation(TENANT_A, { reservationId: 'inline-identity', observedByteSize: 10n, observedContentType: 'text/plain' })).toEqual(inline);
-        expect(await stores.quota.finalizeReservation(TENANT_A, { reservationId: 'object-identity', observedByteSize: 10n, observedContentType: 'text/plain' })).toEqual(object);
+        const retainedUsage = await stores.quota.readUsage(TENANT_A);
+        expect(await stores.quota.finalizeReservation(TENANT_A, { reservationId: 'inline-identity', observedByteSize: 10n, observedContentType: 'text/plain' })).toEqual({ ...inline, usage: retainedUsage });
+        expect(await stores.quota.finalizeReservation(TENANT_A, { reservationId: 'object-identity', observedByteSize: 10n, observedContentType: 'text/plain' })).toEqual({ ...object, usage: retainedUsage });
         await stores.quota.reserve(TENANT_A, { reservationId: 'inline-repeat', kind: 'inline', expectedBytes: 10n, contentHash: hashOf(10), contentType: 'text/plain', ttlMs: 60_000 });
         expect(await stores.quota.finalizeReservation(TENANT_A, { reservationId: 'inline-repeat', observedByteSize: 10n, observedContentType: 'text/plain' })).toMatchObject({ deduplicated: true });
         expect(await stores.quota.readUsage(TENANT_A)).toMatchObject({ committedObjectBytes: 10n, committedInlineBytes: 10n, objectCount: 1n });

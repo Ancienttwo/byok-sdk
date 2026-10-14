@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import type { BodyInit } from 'undici';
+import { describe, expect, it, vi } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { contentHash, createMutableClock, tenantId } from '@byok-sdk/core';
 import { createWebCrypto } from '@byok-sdk/cloud';
@@ -45,6 +46,27 @@ async function until(predicate: () => Promise<boolean>): Promise<void> {
   }
 }
 describe.skipIf(SKIP_DATAPLANE)('PG and independent S3 physical object retention', () => {
+  it('preserves committed deletion counts when the final remainder query fails', async () => {
+    const composition = await setup();
+    const query = composition.scope.pool.query;
+    const hook = vi.spyOn(composition.scope.pool, 'query').mockImplementation((...args: unknown[]) => {
+      if (typeof args[0] === 'string' && args[0].startsWith('SELECT 1 FROM object_manifest m WHERE')) {
+        return Promise.reject(new Error('injected remainder query failure'));
+      }
+      return Reflect.apply(query, composition.scope.pool, args);
+    });
+    try {
+      const failure = await composition.collector.collectExpired(tenant, composition.bounds).then(
+        () => { throw new Error('Expected the remainder probe to fail.'); }, error => error,
+      );
+      hook.mockRestore();
+      expect(await composition.core.objects.get(tenant, composition.hash)).toMatchObject({ state: 'deleted' });
+      expect(await composition.storage.inspectObject(tenant, composition.hash)).toBeUndefined();
+      expect(await composition.core.quota.readUsage(tenant)).toMatchObject({ committedObjectBytes: 0n, objectCount: 0n });
+      expect(failure).toMatchObject({ failedRows: 0, committed: { removed: 1, expired: 0, releasedBytes: composition.size } });
+      expect(failure.more).toBeUndefined();
+    } finally { hook.mockRestore(); await composition.scope.dispose(); }
+  });
   it('deletes bytes and settles accounted storage exactly once through the deployed factory', async () => {
     const composition = await setup();
     try {
@@ -62,7 +84,7 @@ describe.skipIf(SKIP_DATAPLANE)('PG and independent S3 physical object retention
       return response;
     });
     try {
-      await expect(composition.collector.collectExpired(tenant, composition.bounds)).rejects.toMatchObject({ failures: 1, partial: { removed: 0, releasedBytes: 0n, more: true } });
+      await expect(composition.collector.collectExpired(tenant, composition.bounds)).rejects.toMatchObject({ failedRows: 1, committed: { removed: 0, releasedBytes: 0n }, more: true });
       expect(await composition.storage.inspectObject(tenant, composition.hash)).toBeUndefined();
       expect(await composition.core.objects.get(tenant, composition.hash)).toMatchObject({ state: 'delete_pending' });
       expect(await composition.core.quota.readUsage(tenant)).toMatchObject({ committedObjectBytes: composition.size });

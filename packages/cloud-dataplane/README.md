@@ -156,12 +156,15 @@ observes existence, size and content type; it never verifies SHA-256.
 
 `createPostgresCloudMaintenance` builds the separate host-operations
 composition. It intentionally does not add methods to the conformance-certified
-`CloudBlobStore`: LIST/HEAD/DELETE, retention policy, dead-letter replay and
+`CloudBlobStore`: LIST/HEAD/DELETE, dead-letter replay and
 usage rebuild are host operations, not device blob capabilities.
 
 The Host scheduler calls `cloud.runMaintenance({ tenant, now, policy, limit })`.
-Read the existing policy with `maintenance.readRetentionPolicy(tenant)` and
-pass it directly: its four fields use the kernel's bigint milliseconds.
+Read the existing policy with
+`new PostgresRetentionPolicyStore(pool, clock).readRetentionPolicy(tenant)`
+from `@byok-sdk/cloud-dataplane/runtime` and pass it directly: its four fields
+use the kernel's bigint milliseconds. Policy writes use the same store; a missing
+entitlement-selected policy fails closed.
 `createPostgresCoreStores` requires the real `objectStorage` configuration;
 standalone `PostgresObjectStore` requires a physical deletion authority.
 Each port has one bounded `collectExpired`, and each object consumes one

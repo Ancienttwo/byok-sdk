@@ -1782,7 +1782,7 @@ R2 GC 使用 tombstone 加 reconcile：
 
 当前 retention 入口是 `ByokCloud.runMaintenance`，按固定十步调用各端口
 的 tenant-first `collectExpired`；每步共享一个 limit，独立 commit，错误保留
-partial counts 后继续其他步骤。reference server 默认每 5 分钟 ±20% 调度一次，
+`committed` counts 与 `failedRows` 后继续其他步骤；未知 remainder 不伪造。reference server 默认每 5 分钟 ±20% 调度一次，
 `maintenance.runNow()` 加入正在运行的 pass；close 等待 pass 后释放 SQLite。
 Host 调度同一 kernel 入口并显式读取已有 bigint retention policy。
 
@@ -1795,7 +1795,8 @@ mailbox 只删 acked；unacked 只标 expired，`releasedBytes` 恒为 0，不�
 budget；PG 在删除期间持有 manifest row lock，SQLite 同步 commit SQL 与 ledger
 release，避免同 hash 重建或 reservation 插入观察到半完成状态。
 
-`PostgresCloudCleanup` 保留显式 policy、dead-letter、`reconcileObjectStorage`
+`PostgresRetentionPolicyStore` 从 Worker runtime 读取/写入 policy，缺失时 fail closed。
+`PostgresCloudCleanup` 保留显式 dead-letter、`reconcileObjectStorage`
 与 `rebuildObjectUsage` operator APIs；`runTenant` 和 `cleanup_job` writers 已移除，
 历史 schema 保留到后续 forward migration。未追踪但 key 合法的 R2 object 先成为
 `pending` witness 并重新等待 grace。完整 reports、crash/rollback/rebuild 流程见

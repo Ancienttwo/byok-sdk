@@ -37,7 +37,7 @@ export class InMemoryObjectStore implements ObjectStore {
   constructor(clock: Clock, private readonly maintenance: { readonly ledger: InMemoryStorageLedger; readonly bytes: InMemoryObjectBytes }) {
     this.#clock = clock;
     if (maintenance === undefined || maintenance.ledger === undefined ||
-      (maintenance.bytes !== 'metadata-only' && typeof maintenance.bytes?.deleteObject !== 'function')) {
+      typeof maintenance.bytes?.deleteObject !== 'function') {
       throw new ByokCoreError('retention_input_invalid', 'ObjectStore requires its shared ledger and an explicit byte authority.');
     }
   }
@@ -187,7 +187,7 @@ export class InMemoryObjectStore implements ObjectStore {
       try {
         // No await may split protection, byte deletion and accounting.
         const release = this.maintenance.ledger.prepareCollectedObjectRelease(tenant, entry.hash, entry.byteSize, input.now);
-        if (this.maintenance.bytes !== 'metadata-only') this.maintenance.bytes.deleteObject(tenant, entry.hash);
+        this.maintenance.bytes.deleteObject(tenant, entry.hash);
         release.commit();
         const released = release.releasedBytes;
         this.#manifest.set(tenantKey(tenant, entry.hash), { ...pending, state: 'deleted', updatedAt: input.now });
@@ -197,7 +197,7 @@ export class InMemoryObjectStore implements ObjectStore {
       }
     }
     this.#deleteCursor.set(tenant, wrapped.at(-1)?.hash ?? first.at(-1)?.hash ?? '');
-    if (failures > 0) throw new CollectExpiredFailure({ removed, expired: 0, releasedBytes, more: true }, { cause: firstFailure }, failures);
+    if (failures > 0) throw new CollectExpiredFailure({ removed, expired: 0, releasedBytes }, failures, true, { cause: firstFailure });
     return { removed, expired: 0, releasedBytes, more };
   }
 
@@ -250,4 +250,6 @@ export class InMemoryObjectStore implements ObjectStore {
   }
 }
 
-export type InMemoryObjectBytes = 'metadata-only' | { deleteObject(tenant: TenantId, hash: ContentHash): void };
+export interface InMemoryObjectBytes {
+  deleteObject(tenant: TenantId, hash: ContentHash): void;
+}

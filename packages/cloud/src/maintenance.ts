@@ -1,6 +1,6 @@
 import {
   assertCollectExpiredInput, assertCanonicalTimestamp, ByokCoreError, CollectExpiredFailure,
-  type CollectExpiredResult, type CoreStores, type DeviceAssertionReplayAuthority,
+  type CollectExpiredCounts, type CollectExpiredResult, type CoreStores, type DeviceAssertionReplayAuthority,
   type Clock, type TenantId,
 } from '@byok-sdk/core';
 import { ByokCloudError } from './errors';
@@ -26,7 +26,16 @@ export const MAINTENANCE_STEPS = Object.freeze([
 export type MaintenanceStep = typeof MAINTENANCE_STEPS[number];
 export type MaintenanceStepReport =
   | ({ readonly step: MaintenanceStep; readonly status: 'ok' } & CollectExpiredResult)
-  | { readonly step: MaintenanceStep; readonly status: 'failed'; readonly errorCode: string; readonly failures: number; readonly partial?: CollectExpiredResult }
+  | {
+      readonly step: MaintenanceStep;
+      readonly status: 'failed';
+      readonly errorCode: string;
+      readonly failedRows: number;
+      /** Confirmed commits only; absent when the port could not report them. */
+      readonly committed?: CollectExpiredCounts;
+      /** Absent when a failed remainder probe left this unknown. */
+      readonly more?: boolean;
+    }
   | { readonly step: 'deviceAssertionReplay'; readonly status: 'not-configured' };
 export interface MaintenanceReport {
   readonly tenantId: TenantId;
@@ -54,13 +63,18 @@ export function resolveRetentionPolicy(input: Partial<RetentionPolicy> = {}): Re
   }
   return Object.freeze(policy);
 }
-function assertResult(result: CollectExpiredResult, limit: number): void {
+function assertCounts(result: CollectExpiredCounts, limit: number): void {
   if (result === null || typeof result !== 'object' || !Number.isSafeInteger(result.removed) || result.removed < 0
     || !Number.isSafeInteger(result.expired) || result.expired < 0
     || result.removed + result.expired > limit
-    || typeof result.releasedBytes !== 'bigint' || result.releasedBytes < 0n
-    || typeof result.more !== 'boolean') {
+    || typeof result.releasedBytes !== 'bigint' || result.releasedBytes < 0n) {
     throw new ByokCloudError('maintenance_result_invalid', 'collectExpired returned invalid counts or exceeded its batch limit.');
+  }
+}
+function assertResult(result: CollectExpiredResult, limit: number): void {
+  assertCounts(result, limit);
+  if (typeof result.more !== 'boolean') {
+    throw new ByokCloudError('maintenance_result_invalid', 'collectExpired must report whether eligible rows remain.');
   }
 }
 export async function runMaintenanceSteps(
@@ -119,13 +133,18 @@ export async function runMaintenanceSteps(
         ? error.code : 'maintenance_step_failed';
       if (error instanceof CollectExpiredFailure) {
         try {
-          assertResult(error.partial, limit);
-          if (!Number.isSafeInteger(error.failures) || error.failures < 1 || error.failures + error.partial.removed + error.partial.expired > limit) throw new ByokCloudError('maintenance_result_invalid', 'Partial failure exceeds its distinct-row budget.');
-          steps.push({ step, status: 'failed', errorCode, failures: error.failures, partial: error.partial });
+          assertCounts(error.committed, limit);
+          if (!Number.isSafeInteger(error.failedRows) || error.failedRows < 0
+            || error.failedRows + error.committed.removed + error.committed.expired > limit
+            || (error.more !== undefined && typeof error.more !== 'boolean')) {
+            throw new ByokCloudError('maintenance_result_invalid', 'Partial failure exceeds its distinct-row budget.');
+          }
+          steps.push({ step, status: 'failed', errorCode, failedRows: error.failedRows,
+            committed: { ...error.committed }, ...(error.more === undefined ? {} : { more: error.more }) });
         } catch {
-          steps.push({ step, status: 'failed', errorCode: 'maintenance_result_invalid', failures: 1 });
+          steps.push({ step, status: 'failed', errorCode: 'maintenance_result_invalid', failedRows: 0 });
         }
-      } else steps.push({ step, status: 'failed', errorCode, failures: 1 });
+      } else steps.push({ step, status: 'failed', errorCode, failedRows: 0 });
     }
   }
   return { tenantId: tenant, now, startedAt, finishedAt: ports.clock.now().toISOString(), steps };

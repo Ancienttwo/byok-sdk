@@ -368,15 +368,6 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     longPollIntervalMs: longPollInterval(longPollHoldMs),
   });
 
-  const scheduler = new MaintenanceScheduler(async () => {
-    const report = await cloud.runMaintenance({ tenant, now: composition.clock.now().toISOString(), policy, limit: maintenanceLimit });
-    relay.emitServerEvent(report.steps.some(step => step.status === 'failed') ? { kind: 'maintenance.failed', report } : { kind: 'maintenance.completed', report });
-    return report;
-  }, maintenanceIntervalMs, (error) => relay.emitServerEvent({ kind: 'maintenance.failed', errorCode: error instanceof ByokCloudError ? error.code : 'maintenance_step_failed' }));
-  let closePromise: Promise<void> | undefined;
-  function close(): Promise<void> {
-    return closePromise ??= scheduler.close().finally(async () => { relay.stop(); await wakes.close(); await composition.close(); });
-  }
   const hono = new Hono();
   if (opts.healthzRoute === true) {
     // Deliberately UNAUTHENTICATED and minimal: a liveness probe must not need
@@ -670,6 +661,16 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       readState: readTaskState,
       readResult: async (id) => toTaskResult(await readTerminal(id)),
     });
+  }
+
+  const scheduler = new MaintenanceScheduler(async () => {
+    const report = await cloud.runMaintenance({ tenant, now: composition.clock.now().toISOString(), policy, limit: maintenanceLimit });
+    relay.emitServerEvent(report.steps.some(step => step.status === 'failed') ? { kind: 'maintenance.failed', report } : { kind: 'maintenance.completed', report });
+    return report;
+  }, maintenanceIntervalMs, (error) => relay.emitServerEvent({ kind: 'maintenance.failed', errorCode: error instanceof ByokCloudError ? error.code : 'maintenance_step_failed' }));
+  let closePromise: Promise<void> | undefined;
+  function close(): Promise<void> {
+    return closePromise ??= scheduler.close().finally(async () => { relay.stop(); await wakes.close(); await composition.close(); });
   }
 
   return {

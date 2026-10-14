@@ -62,12 +62,12 @@ export function createInMemoryCoreStores(
 }
 
 /** Convenience for tests that need to move time: returns the composition and its mutable clock. */
-export function createInMemoryCoreCompositionWithClock(): {
+export function createInMemoryCoreCompositionWithClock(objectBytes: InMemoryObjectBytes): {
   readonly stores: CoreStores;
   readonly clock: MutableClock;
 } {
   const clock = createMutableClock();
-  return { stores: createInMemoryCoreStores({ clock, objectBytes: 'metadata-only' }).stores, clock };
+  return { stores: createInMemoryCoreStores({ clock, objectBytes }).stores, clock };
 }
 
 export { InMemoryStorageLedger } from './storage-ledger';

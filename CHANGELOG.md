@@ -137,7 +137,9 @@
   `runTenant` calls with the unified contract. Supply positive bigint policy
   durations and bind object-byte deletion when constructing core stores.
   `reconcileObjectStorage` remains an explicit hosted operator action; the
-  historical `cleanup_job` table is retained without a new writer.
+  historical `cleanup_job` table is retained without a new writer. Hosted policy
+  reads/writes move to Worker-loadable `PostgresRetentionPolicyStore`. See
+  [migration notes](docs/migrations/412-retention-maintenance.md).
 - **Breaking (client, 0.x)** — daemon readiness and halts are one lifecycle
   model (#391, #394). `daemon.start()` now resolves once local startup is done
   and never waits for the network; the server accepting this session's lone

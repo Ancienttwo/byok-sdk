@@ -16,7 +16,7 @@
  *
  * - `.` (this file) is the superset: the online request path plus the Node-only
  *   operations — the migration runner, the migrations directory, and the
- *   cleanup/maintenance composition — that a resident Node/VPS service runs
+ *   dead-letter replay and reconciliation — that a resident Node/VPS service runs
  *   in-process.
  * - `./runtime` is the Worker-loadable online surface alone, and is the single
  *   authority for the online export list: this file re-exports it wholesale
@@ -54,14 +54,11 @@ export { migrationsDir } from './migrations-dir';
 // from CoreStores because it coordinates one concrete SQL authority with one
 // concrete byte store; it is not a domain port every composition must fake.
 export {
-  CLOUD_CLEANUP_ERROR_CODES,
-  CloudCleanupError,
   PostgresCloudCleanup,
   createPostgresCloudMaintenance,
 } from './cleanup';
 
 export type {
-  CloudCleanupErrorCode,
   ObjectStorageReconcileResult,
   DeadLetterPage,
   DeadLetterQuery,
@@ -70,8 +67,6 @@ export type {
   ObjectUsageRebuildResult,
   PostgresCloudCleanupOptions,
   PostgresCloudMaintenanceOptions,
-  TenantRetentionPolicy,
-  TenantRetentionPolicyInput,
 } from './cleanup';
 
 // Package-owned destructive maintenance. This is intentionally Node-only: an

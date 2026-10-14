@@ -406,8 +406,8 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
   //
   // Every assertion below is on the same public surface as before
   // (`GET /byok/events` status + body). `byok.maintenance.runNow` is the
-  // host control-plane sweep core defines and this façade forwards verbatim —
-  // it names no policy, and nothing in the stack runs it on a timer.
+  // policy-owned maintenance pass also run by the server scheduler. The test
+  // advances its clock explicitly to make the retention boundary deterministic.
   // -------------------------------------------------------------------
 
   it('case 7: reading does not ack, an ack is irreversible, and a cursor below rows lost to expiry fails closed with 409 cursor_too_old', async () => {

@@ -36,9 +36,9 @@ describe('in-memory object retention', () => {
     await stores.objects.markDeletePending(tenant, hashes[0]!);
     clock.advance(1);
     const input = { now: clock.now().toISOString(), orphanBefore: clock.now().toISOString(), limit: 1 };
-    await expect(stores.objects.collectExpired(tenant, input)).rejects.toMatchObject({ partial: { removed: 0, releasedBytes: 0n, more: true }, failures: 1 });
+    await expect(stores.objects.collectExpired(tenant, input)).rejects.toMatchObject({ committed: { removed: 0, releasedBytes: 0n }, more: true, failedRows: 1 });
     expect(await stores.objects.collectExpired(tenant, input)).toMatchObject({ removed: 1, releasedBytes: 10n, more: true });
-    await expect(stores.objects.collectExpired(tenant, input)).rejects.toMatchObject({ failures: 1 });
+    await expect(stores.objects.collectExpired(tenant, input)).rejects.toMatchObject({ failedRows: 1 });
     expect(await stores.objects.collectExpired(tenant, input)).toMatchObject({ removed: 1, releasedBytes: 10n, more: true });
     expect(calls).toEqual([hashes[0], hashes[1], hashes[0], hashes[2]]);
     poison = false;

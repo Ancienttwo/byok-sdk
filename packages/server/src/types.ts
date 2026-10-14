@@ -444,6 +444,7 @@ export interface TaskSnapshot {
  * publish transitions no device ever made. `machines.list()` reports the
  * observation itself instead.
  */
+/** A failed event has a report for step failures, or errorCode for a pass fault. */
 export type ByokServerEvent =
   | { readonly kind: 'maintenance.completed'; readonly report: MaintenanceReport }
   | { readonly kind: 'maintenance.failed'; readonly report: MaintenanceReport }

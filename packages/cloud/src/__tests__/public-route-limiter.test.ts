@@ -10,6 +10,7 @@ import { createHmacTokenSigner } from '../auth/tokens';
 import { fullCapabilityDeclaration } from '../capabilities';
 import { createByokCloud, type LimitedPublicRoute, type PublicRouteLimiter } from '../cloud';
 import { createWebCrypto } from '../crypto/web-crypto';
+import { createInMemoryBlobBytes } from '../stores/in-memory/blobs';
 import { createInMemoryCloudStores } from '../stores/in-memory/index';
 import type { CloudStores } from '../stores/ports';
 import { CLOUD_ORIGIN, TENANT_A, createHarness } from './support/harness';

@@ -28,7 +28,8 @@ export class MaintenanceScheduler {
     this.#closed = true;
     if (this.#timer !== undefined) clearTimeout(this.#timer);
     this.#timer = undefined;
-    await this.#inFlight;
+    // The pass reports its failure to its caller or onError; close only waits.
+    await this.#inFlight?.then(() => undefined, () => undefined);
   }
   #finished(): void {
     this.#inFlight = undefined;

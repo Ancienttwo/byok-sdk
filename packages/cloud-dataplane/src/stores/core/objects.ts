@@ -138,11 +138,15 @@ export class PostgresObjectStore implements ObjectStore {
       wrapped.push(...retryWrapped.rows.map(row => row.hash));
       work.push(...wrapped);
     }
+    // Persist selection progress before any physical deletion commits.
+    if (work.length > 0) await this.#pool.query(`INSERT INTO gc_cursor (tenant_id, cursor_kind, cursor_value, updated_at)
+      VALUES ($1, 'delete', $2, $3) ON CONFLICT (tenant_id, cursor_kind) DO UPDATE SET cursor_value = EXCLUDED.cursor_value, updated_at = EXCLUDED.updated_at`, [tenant, wrapped.at(-1) ?? firstRetry.at(-1) ?? '', input.now]);
     let removed = 0, releasedBytes = 0n, failures = 0;
     let firstFailure: unknown;
     for (const hash of work) {
-      const client = await this.#pool.connect();
+      let client: PoolClient | undefined;
       try {
+        client = await this.#pool.connect();
         await client.query('BEGIN');
         // Every DP exit updates this row. Hold it through physical deletion so
         // another collector or operator cannot permit same-hash recreation.
@@ -157,18 +161,25 @@ export class PostgresObjectStore implements ObjectStore {
         const released = await settleDeletedObject(client, tenant, hash as ContentHash, input.now);
         await client.query('COMMIT');
         if (released !== undefined) { removed++; releasedBytes += released; }
-      } catch (cause) { await client.query('ROLLBACK').catch(() => {}); failures++; firstFailure ??= cause; }
-      finally { client.release(); }
+      } catch (cause) {
+        if (client !== undefined) await client.query('ROLLBACK').catch(() => {});
+        failures++; firstFailure ??= cause;
+      } finally { client?.release(); }
     }
-    if (work.length > 0) await this.#pool.query(`INSERT INTO gc_cursor (tenant_id, cursor_kind, cursor_value, updated_at)
-      VALUES ($1, 'delete', $2, $3) ON CONFLICT (tenant_id, cursor_kind) DO UPDATE SET cursor_value = EXCLUDED.cursor_value, updated_at = EXCLUDED.updated_at`, [tenant, wrapped.at(-1) ?? firstRetry.at(-1) ?? '', input.now]);
-    const remainder = await this.#pool.query(`SELECT 1 FROM object_manifest m WHERE m.tenant_id = $1 AND m.ref_count = 0
+    const committed = { removed, expired: 0, releasedBytes };
+    let more: boolean;
+    try {
+      const remainder = await this.#pool.query(`SELECT 1 FROM object_manifest m WHERE m.tenant_id = $1 AND m.ref_count = 0
       AND (m.state = 'delete_pending' OR (m.state IN ('pending', 'committed') AND m.updated_at < $2))
       AND NOT EXISTS (SELECT 1 FROM object_reference r WHERE r.tenant_id = m.tenant_id AND r.hash = m.hash)
       AND NOT EXISTS (SELECT 1 FROM storage_reservation s WHERE s.tenant_id = m.tenant_id AND s.content_hash = m.hash AND s.state = 'reserved') LIMIT 1`, [tenant, input.orphanBefore]);
-    const result = { removed, expired: 0, releasedBytes, more: remainder.rowCount !== 0 };
-    if (failures > 0) throw new CollectExpiredFailure(result, { cause: firstFailure }, failures);
-    return result;
+      more = remainder.rowCount !== 0;
+    } catch (cause) {
+      // Confirmed units survive a failed remainder observation. Do not invent `more`.
+      throw new CollectExpiredFailure(committed, failures, undefined, { cause });
+    }
+    if (failures > 0) throw new CollectExpiredFailure(committed, failures, more, { cause: firstFailure });
+    return { ...committed, more };
   }
 
   async putManifest(

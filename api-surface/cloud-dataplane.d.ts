@@ -1,43 +1,8 @@
 // ==== @byok-sdk/cloud-dataplane dist/cleanup.d.ts ====
 import { type Clock, type MailboxMessage, type TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
-import { type R2BlobStoreOptions, type R2ObjectMaintenance } from './stores/r2-blobs';
-export declare const CLOUD_CLEANUP_ERROR_CODES: {
-    readonly cleanup_invalid_input: 'cleanup_invalid_input';
-    readonly cleanup_policy_missing: 'cleanup_policy_missing';
-    readonly cleanup_job_running: 'cleanup_job_running';
-    readonly cleanup_dead_letter_not_found: 'cleanup_dead_letter_not_found';
-    readonly cleanup_accounting_drift: 'cleanup_accounting_drift';
-};
-export type CloudCleanupErrorCode = (typeof CLOUD_CLEANUP_ERROR_CODES)[keyof typeof CLOUD_CLEANUP_ERROR_CODES];
-export declare class CloudCleanupError extends Error {
-    readonly code: CloudCleanupErrorCode;
-    constructor(code: CloudCleanupErrorCode, message: string, options?: ErrorOptions);
-}
-export interface TenantRetentionPolicyInput {
-    readonly policyId: string;
-    readonly mailboxAckedRetentionMs: bigint;
-    readonly mailboxUnackedRetentionMs: bigint;
-    readonly requestReceiptRetentionMs: bigint;
-    readonly objectOrphanGraceMs: bigint;
-}
-export interface TenantRetentionPolicy extends TenantRetentionPolicyInput {
-    readonly tenantId: TenantId;
-    readonly updatedAt: string;
-}
-export type CleanupJobState = 'running' | 'completed' | 'completed_with_errors' | 'failed';
-export interface CloudCleanupResult {
-    readonly tenantId: TenantId;
-    readonly jobId: string;
-    readonly state: CleanupJobState;
-    readonly startedAt: string;
-    readonly finishedAt?: string;
-    readonly mailboxDeletedCount: bigint;
-    readonly mailboxExpiredCount: bigint;
-    readonly mailboxReleasedBytes: bigint;
-    readonly reservationsExpired: bigint;
-    readonly ttlRowsDeleted: bigint;
-    readonly objectsTombstoned: bigint;
+import { type R2ObjectMaintenance, type R2ObjectMaintenanceOptions } from './stores/r2-blobs';
+export interface ObjectStorageReconcileResult {
     readonly objectsDeleted: bigint;
     readonly objectReleasedBytes: bigint;
     readonly orphanWitnessesCreated: bigint;
@@ -45,7 +10,6 @@ export interface CloudCleanupResult {
     readonly shapeDrift: bigint;
     readonly invalidObjectKeys: bigint;
     readonly operationErrors: bigint;
-    readonly errorMessage?: string;
 }
 export interface DeadLetterQuery {
     readonly deviceId?: string;
@@ -81,16 +45,14 @@ export interface PostgresCloudCleanupOptions {
 export interface PostgresCloudMaintenanceOptions {
     readonly pool: Pool;
     readonly clock: Clock;
-    readonly objectStorage: Omit<R2BlobStoreOptions, 'objects'>;
+    readonly objectStorage: R2ObjectMaintenanceOptions;
     readonly batchSize?: number;
 }
 export declare class PostgresCloudCleanup {
     #private;
     constructor(options: PostgresCloudCleanupOptions);
-    writeRetentionPolicy(tenant: TenantId, input: TenantRetentionPolicyInput): Promise<TenantRetentionPolicy>;
-    readRetentionPolicy(tenant: TenantId): Promise<TenantRetentionPolicy>;
-    /** Run one bounded tenant maintenance cycle. Completed job ids are replay-safe. */
-    runTenant(tenant: TenantId, jobId: string): Promise<CloudCleanupResult>;
+    /** Reconcile manifest/R2 observations as an explicit operator action. */
+    reconcileObjectStorage(tenant: TenantId): Promise<ObjectStorageReconcileResult>;
     listDeadLetters(tenant: TenantId, query?: DeadLetterQuery): Promise<DeadLetterPage>;
     /**
      * Clone an expired row to a new monotonic seq. The original remains evidence.
@@ -134,7 +96,7 @@ export declare function createPostgresCloudMaintenance(options: PostgresCloudMai
  *
  * - `.` (this file) is the superset: the online request path plus the Node-only
  *   operations — the migration runner, the migrations directory, and the
- *   cleanup/maintenance composition — that a resident Node/VPS service runs
+ *   dead-letter replay and reconciliation — that a resident Node/VPS service runs
  *   in-process.
  * - `./runtime` is the Worker-loadable online surface alone, and is the single
  *   authority for the online export list: this file re-exports it wholesale
@@ -148,10 +110,22 @@ export * from './runtime';
 export { MigrationChecksumMismatchError, MigrationFilenameError, MigrationStateMismatchError, migrate, readMigrationFiles, verifyMigrations, } from './migrate';
 export type { MigrationFile, MigrationResult, MigrationStateIssue, MigrationVerificationRow, } from './migrate';
 export { migrationsDir } from './migrations-dir';
-export { CLOUD_CLEANUP_ERROR_CODES, CloudCleanupError, PostgresCloudCleanup, createPostgresCloudMaintenance, } from './cleanup';
-export type { CleanupJobState, CloudCleanupErrorCode, CloudCleanupResult, DeadLetterPage, DeadLetterQuery, DeadLetterRef, DeadLetterReplayInput, ObjectUsageRebuildResult, PostgresCloudCleanupOptions, PostgresCloudMaintenanceOptions, TenantRetentionPolicy, TenantRetentionPolicyInput, } from './cleanup';
+export { PostgresCloudCleanup, createPostgresCloudMaintenance, } from './cleanup';
+export type { ObjectStorageReconcileResult, DeadLetterPage, DeadLetterQuery, DeadLetterRef, DeadLetterReplayInput, ObjectUsageRebuildResult, PostgresCloudCleanupOptions, PostgresCloudMaintenanceOptions, } from './cleanup';
 export { TENANT_ERASURE_ERROR_CODES, TENANT_ERASURE_TABLES, PostgresTenantErasure, TenantErasureError, createPostgresTenantErasure, } from './tenant-erasure';
 export type { PostgresTenantErasureCompositionOptions, PostgresTenantErasureOptions, TenantErasureConflict, TenantErasureErrorCode, TenantErasureReadback, TenantErasureResult, TenantErasureStatus, } from './tenant-erasure';
+// ==== @byok-sdk/cloud-dataplane dist/maintenance-errors.d.ts ====
+export declare const CLOUD_CLEANUP_ERROR_CODES: {
+    readonly cleanup_invalid_input: 'cleanup_invalid_input';
+    readonly cleanup_policy_missing: 'cleanup_policy_missing';
+    readonly cleanup_dead_letter_not_found: 'cleanup_dead_letter_not_found';
+    readonly cleanup_accounting_drift: 'cleanup_accounting_drift';
+};
+export type CloudCleanupErrorCode = (typeof CLOUD_CLEANUP_ERROR_CODES)[keyof typeof CLOUD_CLEANUP_ERROR_CODES];
+export declare class CloudCleanupError extends Error {
+    readonly code: CloudCleanupErrorCode;
+    constructor(code: CloudCleanupErrorCode, message: string, options?: ErrorOptions);
+}
 // ==== @byok-sdk/cloud-dataplane dist/migrate.d.ts ====
 import type { Pool } from 'pg';
 /** One file on disk, already ordered and checksummed. */
@@ -303,14 +277,14 @@ export declare function createByokPool(options: ByokPoolOptions): Pool;
  *
  * This entry is the single authority for the online request-path exports:
  * the pool factory, the cloud-local stores (including the R2 blob exports),
- * the core stores, and the truth committer. Everything reachable from here
+ * the core stores, the retention policy store, and the truth committer. Everything reachable from here
  * is the portable half of the package — `pg` over TCP, `aws4fetch` over
  * `fetch`, and nothing else — so the same bundle loads on Cloudflare Workers
  * (`nodejs_compat` + Hyperdrive, with `pg` left external to the host bundler)
  * as well as on Node.
  *
- * The Node-only operations — `migrate`, `migrationsDir`, and the cleanup /
- * maintenance composition — deliberately stay on the package root
+ * The Node-only operations — `migrate`, `migrationsDir`, dead-letter replay
+ * and object reconciliation — deliberately stay on the package root
  * (`./index.ts`) and never appear here. They read migration files off disk
  * and hash with `node:crypto`, none of which exists on a Worker. The host
  * picks the composition explicitly at wiring time: a Worker imports
@@ -335,7 +309,12 @@ export { PostgresBoardStore, PostgresMailboxStore, PostgresObjectStore, Postgres
 export type { PostgresCoreStoreOptions } from './stores/core/index';
 export { PostgresTruthCommitter } from './truth-committer';
 export type { PostgresTruthCommitterOptions } from './truth-committer';
+export { PostgresRetentionPolicyStore } from './stores/retention-policy';
+export type { TenantRetentionPolicy, TenantRetentionPolicyInput } from './stores/retention-policy';
+export { CLOUD_CLEANUP_ERROR_CODES, CloudCleanupError } from './maintenance-errors';
+export type { CloudCleanupErrorCode } from './maintenance-errors';
 // ==== @byok-sdk/cloud-dataplane dist/stores/activity.d.ts ====
+import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 import { type ActivityAppendInput, type ActivityStore, type ActivityTail } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
@@ -343,6 +322,7 @@ export declare class PostgresActivityStore implements ActivityStore {
     private readonly pool;
     private readonly clock;
     constructor(pool: Pool, clock: Clock);
+    collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
     append(tenant: TenantId, input: ActivityAppendInput): Promise<ActivityTail>;
     read(tenant: TenantId, taskId: string): Promise<ActivityTail | undefined>;
 }
@@ -398,6 +378,7 @@ export declare class PostgresAgentMemoryProjectionStore implements AgentMemoryPr
 /** Build the runtime-safe Postgres implementation of the optional cloud port. */
 export declare function createPostgresAgentMemoryProjectionStore(options: PostgresAgentMemoryProjectionStoreOptions): AgentMemoryProjectionStore;
 // ==== @byok-sdk/cloud-dataplane dist/stores/approval-timeline.d.ts ====
+import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 import { type ApprovalTimelineAppendInput, type ApprovalTimelineResolvePendingInput, type ApprovalTimelineResolvePendingResult, type ApprovalTimelineStore, type ApprovalTimelineTail } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
@@ -405,6 +386,7 @@ export declare class PostgresApprovalTimelineStore implements ApprovalTimelineSt
     private readonly pool;
     private readonly clock;
     constructor(pool: Pool, clock: Clock);
+    collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
     append(tenant: TenantId, input: ApprovalTimelineAppendInput): Promise<ApprovalTimelineTail>;
     resolvePending(tenant: TenantId, input: ApprovalTimelineResolvePendingInput): Promise<ApprovalTimelineResolvePendingResult>;
     read(tenant: TenantId, taskId: string): Promise<ApprovalTimelineTail | undefined>;
@@ -449,6 +431,7 @@ export declare class PostgresBoardStore implements BoardStore {
     updateStatus(tenant: TenantId, input: BoardStatusUpdateInput): Promise<BoardItem>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/core/index.d.ts ====
+import { type R2ObjectMaintenanceOptions } from '../r2-blobs';
 /**
  * The Postgres composition of the seven `@byok-sdk/core` ports.
  *
@@ -477,6 +460,7 @@ export { PostgresObjectStore } from './objects';
 export { PostgresQuotaStore } from './quota';
 export { PostgresSkillPackStore } from './skill-pack';
 export interface PostgresCoreStoreOptions {
+    readonly objectStorage: R2ObjectMaintenanceOptions;
     readonly pool: Pool;
     /**
      * The clock every TTL and timestamp in this composition reads. Injected, not
@@ -497,7 +481,7 @@ export declare function createPostgresCoreStores(options: PostgresCoreStoreOptio
  * regression and future cursors are refused with the cursor state they lost
  * to rather than re-delivering or silently skipping work.
  *
- * `collectRetired` deletes acked rows and **marks** unacked ones `expired`. It
+ * `collectExpired` deletes acked rows and **marks** unacked ones `expired`. It
  * never deletes an unacked row. §12.7.5 requires an envelope that aged out
  * before anyone consumed it to stay visible; deleting it would make "we dropped
  * work" indistinguishable from "there was no work", and dead-lettering those
@@ -512,7 +496,7 @@ export declare function createPostgresCoreStores(options: PostgresCoreStoreOptio
  * the SQL expression of §12.6.2 layer 3: there is no bare device index to
  * accidentally query.
  */
-import { type Clock, type MailboxAdvanceCursorInput, type MailboxAppendInput, type MailboxCursorState, type MailboxMessage, type MailboxPage, type MailboxReadQuery, type MailboxRecordDeliveryInput, type MailboxRetentionInput, type MailboxRetentionResult, type MailboxStore, type MailboxUsage, type TenantId } from '@byok-sdk/core';
+import { type Clock, type MailboxAdvanceCursorInput, type MailboxAppendInput, type MailboxCursorState, type MailboxMessage, type MailboxPage, type MailboxReadQuery, type MailboxRecordDeliveryInput, type MailboxCollectExpiredInput, type CollectExpiredResult, type MailboxStore, type MailboxUsage, type TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
 export declare const OUTBOX_COLUMNS = "tenant_id, device_id, seq, message_id, body, body_hash, byte_size, state, appended_at";
 export interface OutboxRow {
@@ -536,15 +520,18 @@ export declare class PostgresMailboxStore implements MailboxStore {
     advanceCursor(tenant: TenantId, input: MailboxAdvanceCursorInput): Promise<MailboxCursorState>;
     recordDelivery(tenant: TenantId, input: MailboxRecordDeliveryInput): Promise<MailboxCursorState>;
     readCursor(tenant: TenantId, deviceId: string): Promise<MailboxCursorState>;
-    collectRetired(tenant: TenantId, input: MailboxRetentionInput): Promise<MailboxRetentionResult>;
+    collectExpired(tenant: TenantId, input: MailboxCollectExpiredInput): Promise<CollectExpiredResult>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/core/objects.d.ts ====
+import { type CollectExpiredResult, type ObjectCollectExpiredInput } from '@byok-sdk/core';
+import type { R2ObjectMaintenance } from '../r2-blobs';
 /**
  * Postgres {@link ObjectStore} — the manifest, and only the manifest
  * (§12.7.4, §12.7.8).
  *
- * Zero bytes cross this file. The manifest is the transaction authority and the
- * object store holds the payload; the R2 adapter that moves bytes is S4A-c.
+ * The manifest is the transaction authority and the object store holds the
+ * payload. Collection calls the bound R2 byte owner while holding the tombstone
+ * row so a concurrent same-hash recreation cannot lose its uploaded bytes.
  * What lives here is the state machine that stands between a failed object-store
  * delete and either a leaked object or a deleted one a truth record still points
  * at.
@@ -578,7 +565,9 @@ import { type Clock, type ContentHash, type ObjectCommitInput, type ObjectListQu
 import type { Pool } from 'pg';
 export declare class PostgresObjectStore implements ObjectStore {
     #private;
-    constructor(pool: Pool, clock: Clock);
+    private readonly objectStorage;
+    constructor(pool: Pool, clock: Clock, objectStorage: Pick<R2ObjectMaintenance, 'deleteObject'>);
+    collectExpired(tenant: TenantId, input: ObjectCollectExpiredInput): Promise<CollectExpiredResult>;
     putManifest(tenant: TenantId, input: ObjectManifestInput): Promise<ObjectManifestEntry>;
     commit(tenant: TenantId, input: ObjectCommitInput): Promise<ObjectManifestEntry>;
     get(tenant: TenantId, hash: ContentHash): Promise<ObjectManifestEntry | undefined>;
@@ -589,6 +578,7 @@ export declare class PostgresObjectStore implements ObjectStore {
     markDeleted(tenant: TenantId, hash: ContentHash): Promise<ObjectManifestEntry>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/core/presence.d.ts ====
+import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 /**
  * Postgres {@link PresenceStore} (§12.3).
  *
@@ -613,11 +603,13 @@ import type { Pool } from 'pg';
 export declare class PostgresPresenceStore implements PresenceStore {
     #private;
     constructor(pool: Pool, clock: Clock);
+    collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
     publish(tenant: TenantId, input: PresenceHintInput): Promise<PresenceHint>;
     read(tenant: TenantId, deviceId: string): Promise<PresenceHint | undefined>;
     list(tenant: TenantId): Promise<readonly PresenceHint[]>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/core/quota.d.ts ====
+import { type QuotaCollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 /**
  * Postgres {@link QuotaStore} — entitlement, usage, reservation (§12.7.6-12.7.7).
  *
@@ -671,7 +663,7 @@ export declare class PostgresQuotaStore implements QuotaStore {
     reserve(tenant: TenantId, input: StorageReservationInput): Promise<StorageReservation>;
     finalizeReservation(tenant: TenantId, input: StorageFinalizeInput): Promise<StorageFinalizeResult>;
     abortReservation(tenant: TenantId, reservationId: string): Promise<StorageReservation>;
-    expireReservations(tenant: TenantId): Promise<readonly StorageReservation[]>;
+    collectExpired(tenant: TenantId, input: QuotaCollectExpiredInput): Promise<CollectExpiredResult>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/core/skill-pack.d.ts ====
 /**
@@ -775,6 +767,7 @@ export declare class PostgresInboundDedupStore implements InboundDedupStore {
     checkAndRecordAgent(tenant: TenantId, deviceId: string, agentRef: AgentRef, envelopeId: string): Promise<boolean>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/device-assertion-replay.d.ts ====
+import { type CollectExpiredInput, type CollectExpiredResult, type TenantId } from '@byok-sdk/core';
 import type { DeviceAssertionReplayAuthority, DeviceAssertionReplayConsumeInput } from '@byok-sdk/core';
 import type { Pool } from 'pg';
 /** Durable atomic replay authority for hosted device-assertion exchange. */
@@ -782,8 +775,7 @@ export declare class PostgresDeviceAssertionReplayAuthority implements DeviceAss
     #private;
     constructor(pool: Pool);
     consume(input: DeviceAssertionReplayConsumeInput): Promise<boolean>;
-    /** Bounded retention cleanup; callers choose cadence and batch size. */
-    deleteExpired(before: Date, limit: number): Promise<number>;
+    collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/devices.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
@@ -908,6 +900,7 @@ export interface PostgresCloudStoreOptions {
 }
 export declare function createPostgresCloudStores(options: PostgresCloudStoreOptions): PostgresCloudStores;
 // ==== @byok-sdk/cloud-dataplane dist/stores/nonces.d.ts ====
+import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 /**
  * Postgres {@link NonceStore}: single-use challenge nonces bound to the
  * (tenant, device) they were issued for, expiring after `NONCE_TTL_MS`
@@ -930,10 +923,12 @@ import type { Pool } from 'pg';
 export declare class PostgresNonceStore implements NonceStore {
     #private;
     constructor(pool: Pool, clock: Clock, crypto: CloudCrypto, ttlMs?: number);
+    collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
     issue(tenant: TenantId, deviceId: string): Promise<string>;
     consumeIfValid(tenant: TenantId, deviceId: string, nonce: string): Promise<boolean>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/pairing-codes.d.ts ====
+import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 /**
  * Postgres {@link PairingCodeStore}: single-use codes bound to the tenant and
  * product they were minted for.
@@ -956,6 +951,7 @@ import type { Pool } from 'pg';
 export declare class PostgresPairingCodeStore implements PairingCodeStore {
     #private;
     constructor(pool: Pool, clock: Clock);
+    collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
     issue(tenant: TenantId, input: PairingCodeIssueInput): Promise<PairingCodeInfo>;
     redeemAndRegister(input: {
         readonly pairingCode: string;
@@ -1214,7 +1210,9 @@ export declare class R2CloudBlobStore implements CloudBlobStore {
      */
     getDownloadUrl(tenant: TenantId, blobId: string): Promise<string | undefined>;
 }
-export type R2ObjectMaintenanceOptions = Omit<R2BlobStoreOptions, 'objects' | 'presignTtlSeconds'>;
+export type R2ObjectMaintenanceOptions = Omit<R2BlobStoreOptions, 'objects' | 'presignTtlSeconds'> & {
+    readonly requestTimeoutMs?: number;
+};
 /**
  * R2 maintenance adapter kept deliberately outside `CloudBlobStore`.
  *
@@ -1231,6 +1229,8 @@ export declare class R2ObjectMaintenanceStore implements R2ObjectMaintenance {
     listTenantObjects(tenant: TenantId, continuationToken?: string, limit?: number): Promise<R2ObjectPage>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/receipts.d.ts ====
+import { type ReceiptCollectExpiredInput } from '@byok-sdk/cloud';
+import { type CollectExpiredResult } from '@byok-sdk/core';
 /**
  * Postgres {@link RequestReceiptStore}: the first write is the fact.
  *
@@ -1247,6 +1247,7 @@ import type { Pool } from 'pg';
 export declare class PostgresRequestReceiptStore implements RequestReceiptStore {
     #private;
     constructor(pool: Pool, clock: Clock);
+    collectExpired(tenant: TenantId, input: ReceiptCollectExpiredInput): Promise<CollectExpiredResult>;
     record(tenant: TenantId, input: {
         readonly key: string;
         readonly body: string;
@@ -1255,6 +1256,25 @@ export declare class PostgresRequestReceiptStore implements RequestReceiptStore 
         readonly created: boolean;
     }>;
     get(tenant: TenantId, key: string): Promise<RequestReceipt | undefined>;
+}
+// ==== @byok-sdk/cloud-dataplane dist/stores/retention-policy.d.ts ====
+import type { RetentionPolicy } from '@byok-sdk/cloud';
+import { type Clock, type TenantId } from '@byok-sdk/core';
+import type { Pool } from 'pg';
+export interface TenantRetentionPolicyInput extends RetentionPolicy {
+    readonly policyId: string;
+}
+export interface TenantRetentionPolicy extends TenantRetentionPolicyInput {
+    readonly tenantId: TenantId;
+    readonly updatedAt: string;
+}
+/** Tenant-owned policy on the Worker-loadable maintenance surface; no defaults. */
+export declare class PostgresRetentionPolicyStore {
+    #private;
+    private readonly clock;
+    constructor(pool: Pool, clock: Clock);
+    writeRetentionPolicy(tenant: TenantId, input: TenantRetentionPolicyInput): Promise<TenantRetentionPolicy>;
+    readRetentionPolicy(tenant: TenantId): Promise<TenantRetentionPolicy>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/task-attempts.d.ts ====
 /**

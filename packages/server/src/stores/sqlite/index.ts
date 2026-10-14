@@ -5,7 +5,10 @@ import {
   CoreConflictError,
   InMemoryQuotaStore,
   assertCanonicalTimestamp,
-  createInMemoryCoreStores,
+  InMemoryBoardStore,
+  InMemoryTruthStore,
+  InMemoryPresenceStore,
+  InMemorySkillPackStore,
   isLegalObjectTransition,
   type Clock,
   type ContentHash,
@@ -1082,15 +1085,20 @@ export class SqliteObjectStore implements ObjectStore {
         if (result !== undefined) { removed++; releasedBytes += result.releasedBytes; }
       } catch (cause) { failures++; firstFailure ??= cause; }
     }
-    const selected = candidates.slice(0, input.limit).filter(row => row.state === 'delete_pending');
-    const wrapped = selected.filter(row => row.hash <= cursor);
-    const first = selected.filter(row => row.hash > cursor);
-    this.#deleteCursor.set(tenant, wrapped.at(-1)?.hash ?? first.at(-1)?.hash ?? '');
-    const more = await this.coordinator.run(db => db.prepare(`SELECT 1 FROM object_manifest m WHERE ${predicate} LIMIT 1`)
-      .get(tenant, input.orphanBefore, JSON.stringify(this.ledger.reservedObjectHashes(tenant))) !== undefined);
-    const result = { removed, expired: 0, releasedBytes, more };
-    if (failures > 0) throw new CollectExpiredFailure(result, { cause: firstFailure }, failures);
-    return result;
+    const committed = { removed, expired: 0, releasedBytes };
+    let more: boolean;
+    try {
+      const selected = candidates.slice(0, input.limit).filter(row => row.state === 'delete_pending');
+      const wrapped = selected.filter(row => row.hash <= cursor);
+      const first = selected.filter(row => row.hash > cursor);
+      this.#deleteCursor.set(tenant, wrapped.at(-1)?.hash ?? first.at(-1)?.hash ?? '');
+      more = await this.coordinator.run(db => db.prepare(`SELECT 1 FROM object_manifest m WHERE ${predicate} LIMIT 1`)
+        .get(tenant, input.orphanBefore, JSON.stringify(this.ledger.reservedObjectHashes(tenant))) !== undefined);
+    } catch (cause) {
+      throw new CollectExpiredFailure(committed, failures, undefined, { cause });
+    }
+    if (failures > 0) throw new CollectExpiredFailure(committed, failures, more, { cause: firstFailure });
+    return { ...committed, more };
   }
 
   putManifest(tenant: TenantId, input: ObjectManifestInput): Promise<ObjectManifestEntry> {
@@ -1373,9 +1381,11 @@ export function createSqliteEmbeddedStores(
   const blobs = new SqliteCloudBlobStore(registry);
   const blobContentProxy = new SqliteBlobContentProxy(registry);
 
-  const inMemoryCore = createInMemoryCoreStores({ clock: dependencies.clock, objectBytes: 'metadata-only' }).stores;
   const core: CoreStores = {
-    ...inMemoryCore,
+    board: new InMemoryBoardStore(dependencies.clock),
+    truth: new InMemoryTruthStore(dependencies.clock),
+    presence: new InMemoryPresenceStore(dependencies.clock),
+    skillPacks: new InMemorySkillPackStore(),
     mailbox,
     objects,
     quota,

@@ -1,3 +1,4 @@
+import type { BodyInit } from 'undici';
 import { vi } from 'vitest';
 const { requestPrefix } = vi.hoisted(() => ({ requestPrefix: 'test-request:' }));
 vi.mock('@byok-sdk/cloud', async original => ({ ...await original<typeof import('@byok-sdk/cloud')>(), REQUEST_RECEIPT_PREFIXES: Object.freeze([requestPrefix]) }));
