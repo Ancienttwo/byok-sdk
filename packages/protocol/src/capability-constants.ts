@@ -1,0 +1,62 @@
+/**
+ * The ONE version of the input-preparation contract, shared by this relay wire
+ * (the `agent.input.preparation` payload and the completion receipt summary)
+ * and by the device-local request, receipt and artifact
+ * (`@byok-sdk/client`'s `INPUT_PREPARATION_VERSION`, which is this value).
+ *
+ * The relay wire carries no version field of its own, so a version change is
+ * made visible where admission actually happens: in the capability token
+ * below. See `INPUT_PREPARATION_VERSION` in the client for what each version
+ * changed.
+ */
+export const INPUT_PREPARATION_WIRE_VERSION = 9 as const;
+
+
+/** Additive daemon capability names. Server/cloud admission consumes these exactly. */
+export const AGENT_EGRESS_POLICY_CAPABILITY = 'agent-egress-policy' as const;
+
+export const AGENT_EGRESS_RELIABLE_ACK_CAPABILITY = 'agent-egress-reliable-ack' as const;
+
+/** Admits the distinct offer whose runtime mints its session only after start. */
+export const AGENT_EGRESS_FRESH_SESSION_CAPABILITY = 'agent-egress-fresh-session' as const;
+
+/** Admits the distinct Agent-authored message lane; activity policy remains independent. */
+export const AGENT_MESSAGE_EGRESS_CAPABILITY = 'agent-message-egress' as const;
+
+export const AGENT_CONTENT_WORKSPACE_READ_CAPABILITY = 'agent-content-workspace-read' as const;
+
+export const AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY = 'agent-content-transcript-read' as const;
+
+export const AGENT_CONTENT_ARTIFACT_READ_CAPABILITY = 'agent-content-artifact-read' as const;
+
+/** Capability required before a task-free Agent-home projection is admitted. */
+export const AGENT_HOME_PROJECTION_CAPABILITY = 'agent-home-projection' as const;
+
+/** Capability required before an offer may select terminal projection behavior. */
+export const TERMINAL_PROJECTION_SELECTION_CAPABILITY = 'terminal-projection-selection' as const;
+
+/** Contract §8.1's capability gate for `byok-task-assertion-v1` tool authority. */
+export const HOST_MCP_TASK_CONTEXT_CAPABILITY = 'host-mcp-task-context' as const;
+
+/** Daemon capability required before an exact local provider profile may be offered. */
+export const PROVIDER_PROFILE_BINDING_CAPABILITY = 'provider-profile-binding' as const;
+
+/** Device capability required before a Host may enqueue `provider.provisioning.available`. */
+export const PROVIDER_PROVISIONING_CAPABILITY = 'provider-provisioning.v1' as const;
+
+/** Device capability required before a Host may enqueue `agent.memory.intent.available`. */
+export const AGENT_MEMORY_INTENT_CAPABILITY = 'agent-memory-intent.v1' as const;
+
+/** Capability required before the optional hosted Agent-memory projection can be used. */
+export const AGENT_MEMORY_PROJECTION_CAPABILITY = 'agent.memory.projection' as const;
+
+/** Exact capability of the single input-preparation wire authority. */
+export const AGENT_INPUT_PREPARATION_CAPABILITY =
+  `agent-input-preparation-v${INPUT_PREPARATION_WIRE_VERSION}` as const;
+
+/** Single value authority shared by schema validation and schema-free consumers. */
+export const PREPARED_AGENT_MEMORY_MODES = ['none', 'read', 'read-write'] as const;
+
+export function isPreparedAgentMemoryMode(value: unknown): value is (typeof PREPARED_AGENT_MEMORY_MODES)[number] {
+  return typeof value === 'string' && PREPARED_AGENT_MEMORY_MODES.some(mode => mode === value);
+}

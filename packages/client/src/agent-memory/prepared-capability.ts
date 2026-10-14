@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from '@byok-sdk/protocol';
+import { type PreparedAgentMemoryMode } from '@byok-sdk/protocol';
+import { isPreparedAgentMemoryMode } from '@byok-sdk/protocol/constants';
 import {
   AGENT_MEMORY_MCP_SERVER_INFO,
   AGENT_MEMORY_TOOLS,
@@ -31,8 +32,8 @@ export interface PreparedAgentMemorySelectedTool {
 }
 
 export function parsePreparedAgentMemoryMode(value: unknown): PreparedAgentMemoryMode {
-  if (!PreparedAgentMemoryModeSchema.safeParse(value).success) throw new Error('prepared Agent memory mode must be none, read, or read-write');
-  return value as PreparedAgentMemoryMode;
+  if (!isPreparedAgentMemoryMode(value)) throw new Error('prepared Agent memory mode must be none, read, or read-write');
+  return value;
 }
 
 export function preparedAgentMemoryModeAllowsOperation(mode: PreparedAgentMemoryMode, operation: AgentMemoryOperation): boolean {

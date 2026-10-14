@@ -21,3 +21,5 @@ import { encodeEnvelope, decodeEnvelope } from '@byok-sdk/protocol';
 ```
 
 MIT licensed. Node.js 24.15.0 or newer.
+
+Runtime dependencies and size budgets: [entry dependency contract](../../README.md#entry-dependencies).
