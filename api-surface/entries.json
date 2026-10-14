@@ -1672,6 +1672,7 @@
         "@byok-sdk/cloud",
         "@byok-sdk/core",
         "@byok-sdk/protocol",
+        "crypto",
         "fs",
         "hono",
         "module",
@@ -1687,6 +1688,7 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
+          "crypto",
           "fs",
           "module",
           "path"

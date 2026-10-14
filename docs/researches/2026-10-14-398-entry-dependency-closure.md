@@ -11,6 +11,11 @@ in `eecb46e6`; the subsequent `origin/main@a10c67a0` (published-release wire
 compatibility, #447) was merged normally in `892f3e6b` before final targeted
 evidence. No PR merge or main push was performed.
 
+Patrol 14:20 subsequently requested rebase. The feature was rebased onto
+`origin/main@6c3b31df` after the CI fixes below; its complete tree was identical
+before and after that rebase. Only the feature ref is eligible for a lease
+push. Main and PR merge remain outside authorization.
+
 ## P1 map
 
 The nine published package manifests own exports, bins and private imports.
@@ -123,3 +128,44 @@ the native recovery verification or PR checks remain unresolved.
 Known downstream source searches (Salesko packages/apps and the available
 AiphaBee worktree) found no former preparation-version subpath imports. No
 downstream upgrade or deployment was performed.
+
+## PR #453 CI repair, 2026-10-14
+
+All eight red jobs at published head `a6884ace` were inspected through gh.
+`gh run view --log-failed` could not return logs while the containing runs
+were unfinished, so completed job logs were read with `gh api` instead.
+Six Linux jobs (dataplane, npm release pack/install, and packed Postgres,
+across push and PR runs) passed their database tests and then failed because
+the manifest-derived Node smoke imported a Worker entry requiring
+`cloudflare:`. Both Windows pack jobs rejected CRLF declaration goldens and
+misclassified root manifests as files outside dist.
+The two subsequently completed macOS pack jobs showed the same Node/Worker
+scheme error; they do not add a separate root cause.
+
+P1: release-pack already has separate Node and Wrangler/workerd consumers;
+the validated entry facts and package manifests remain their sole inventory.
+P2: API gate -> validated `bareImports` -> runtime smoke lane -> actual consumer
+imports. A `cloudflare:` static edge selects the Worker lane. Its set must
+equal the imports parsed from the existing Worker consumer source; an uncovered
+Worker entry fails before execution. No package-name exemption is introduced.
+P3: preserve the existing runtime contract and canonical authored bytes.
+Only the real package-root manifest may leave dist, using realpath equality.
+Narrow LF attributes cover declaration goldens, root README and package
+manifests; the checker still compares exact bytes and existing budgets.
+
+No policy, budget, test assertion or golden was changed in this repair.
+The fact updater added only `crypto` to the server bare-import/workspace-builtin
+facts, reflecting main's wake store. Its 590112-byte closure remains within
+the existing 628548-byte budget.
+
+After rebase, server build/typecheck and 52 targeted script tests passed. All 14 projected
+Node exports imported successfully. The existing Worker consumer passed its
+typecheck and real workerd DO RPC, hook, identity and SQLite assertions using
+the workspace package; this is not a packed-install claim. An extra Worker
+entry was refused before execution, and an unpublished source package.json
+was refused while the exact root manifest was accepted. A real Git
+autocrlf checkout reproduced the golden refusal; the narrow attributes fixed
+it, and a changed declaration remained refused. API surface, version authority
+and release graph passed. No full local suites were run under the patrol limit.
+Hosted Linux/Windows packed-install verification remains required on the
+published rebased tip.
