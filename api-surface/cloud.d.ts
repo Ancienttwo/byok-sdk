@@ -939,19 +939,19 @@ import { type InputPreparationReceiptInput } from './input-preparations';
 import type { AgentMemoryProjectionAuthorizer, AgentMemoryProjectionStore } from './agent-memory-projection';
 import type { BlobContentProxy, CloudStores, DeviceRecord, AgentEgressRecord, PairingCodeInfo, RequestReceipt, TaskAttempt, TaskAttemptListQuery, TaskAttemptPage } from './stores/ports';
 import { type DeviceTerminal, type TerminalResult } from './terminal-result';
+import type { MailboxWake } from './mailbox-wake';
 import type { TruthCommitter, TruthObjectDownloads } from './truth/contract';
 /** Matches the reference server's ceiling (§7). */
 export declare const DEFAULT_MAX_BLOB_SIZE_BYTES: number;
 /** Matches the reference server's hold (§8). */
 export declare const DEFAULT_LONG_POLL_HOLD_MS = 50000;
-/** How often a held poll re-reads the mailbox. */
-export declare const DEFAULT_LONG_POLL_INTERVAL_MS = 250;
 /** Rows per `GET /byok/events` response. */
 export declare const DEFAULT_EVENTS_PAGE_LIMIT = 50;
 /** Device capability required by the strict Agent offer path. */
 export declare const AGENT_HOME_CONTRACT_CAPABILITY = "agent-home-contract";
 export interface ByokCloudOptions {
     readonly deviceAssertionReplay?: DeviceAssertionReplayAuthority;
+    readonly mailboxWake: MailboxWake;
     readonly core: CoreStores;
     readonly cloud: CloudStores;
     /**
@@ -1039,7 +1039,6 @@ export interface ByokCloudOptions {
     readonly agentMemoryProjectionStore?: AgentMemoryProjectionStore;
     readonly maxBlobSizeBytes?: number;
     readonly longPollHoldMs?: number;
-    readonly longPollIntervalMs?: number;
     readonly eventsPageLimit?: number;
     readonly accessTokenTtlSeconds?: number;
     readonly boardPageLimit?: number;
@@ -1447,6 +1446,7 @@ import { type CapabilityDeclaration, type Clock, type CoreStores, type SkillPack
 import { type TokenSigner } from '../auth/tokens';
 import type { CloudCrypto } from '../crypto/port';
 import { type ByokCloud, type ByokCloudOptions } from '../cloud';
+import type { MailboxWake } from '../mailbox-wake';
 import type { BlobContentProxy, CloudStores } from '../stores/ports';
 import type { TruthCommitter, TruthObjectDownloads } from '../truth/contract';
 import type { AgentMemoryProjectionAuthorizer, AgentMemoryProjectionStore } from '../agent-memory-projection';
@@ -1460,7 +1460,7 @@ export interface InMemoryByokCloudOptions {
     readonly instanceProductId?: string;
     readonly maxBlobSizeBytes?: number;
     readonly longPollHoldMs?: number;
-    readonly longPollIntervalMs?: number;
+    readonly mailboxWake?: MailboxWake;
     readonly eventsPageLimit?: number;
     readonly accessTokenTtlSeconds?: number;
     readonly boardPageLimit?: number;
@@ -1497,6 +1497,7 @@ export interface InMemoryByokCloudOptions {
     readonly agentMemoryProjectionStore?: AgentMemoryProjectionStore;
 }
 export interface InMemoryByokCloud {
+    readonly mailboxWake: MailboxWake;
     readonly cloud: ByokCloud;
     /** The naked stores, for a host that wants to inspect or seed state directly. */
     readonly core: CoreStores;
@@ -2107,7 +2108,7 @@ export { agentHomeProjectionCompletionKey, agentHomeProjectionRequestKey, readAg
 export type { AgentHomeProjectionReceiptInput } from './agent-home-projections';
 export { inputPreparationCompletionKey, inputPreparationRequestKey, readInputPreparationStatus, recordInputPreparationCompletion, sameInputPreparationRequest, } from './input-preparations';
 export type { InputPreparationReceiptInput } from './input-preparations';
-export { AGENT_HOME_CONTRACT_CAPABILITY, DEFAULT_EVENTS_PAGE_LIMIT, DEFAULT_LONG_POLL_HOLD_MS, DEFAULT_LONG_POLL_INTERVAL_MS, DEFAULT_MAX_BLOB_SIZE_BYTES, } from './cloud';
+export { AGENT_HOME_CONTRACT_CAPABILITY, DEFAULT_EVENTS_PAGE_LIMIT, DEFAULT_LONG_POLL_HOLD_MS, DEFAULT_MAX_BLOB_SIZE_BYTES, } from './cloud';
 export { DEFAULT_BOARD_PAGE_LIMIT, DEFAULT_BOARD_STREAM_HEARTBEAT_INTERVAL_MS, DEFAULT_BOARD_STREAM_QUERY_INTERVAL_MS, DEFAULT_BOARD_STREAM_RECONCILIATION_INTERVAL_MS, } from './handlers/board';
 export { DEFAULT_SKILL_PACK_PAGE_LIMIT } from './handlers/skill-packs';
 export { createInMemoryByokCloud } from './composition/in-memory';
@@ -2168,6 +2169,9 @@ export type { RetentionPolicy, MaintenanceInput, MaintenanceReport, MaintenanceS
 export { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES, receiptRetentionClass } from './receipt-retention';
 export type { ReceiptRetentionClass } from './receipt-retention';
 export type { ReceiptCollectExpiredInput } from './stores/ports';
+export type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake';
+export { createInProcessMailboxWake, DEFAULT_MAILBOX_WAKE_FALLBACK_MS } from './stores/in-memory/mailbox-wake';
+export type { InProcessMailboxWakeOptions } from './stores/in-memory/mailbox-wake';
 // ==== @byok-sdk/cloud dist/input-preparations.d.ts ====
 /**
  * Durable remote input-preparation facts.
@@ -2211,6 +2215,20 @@ export declare function receiptMatchesInputPreparation(request: AgentInputPrepar
 export declare function statusInputMatchesInputPreparation(request: AgentInputPreparationPayload, input: InputPreparationReceiptInput): boolean;
 export declare function readInputPreparationStatus(receipts: TenantBoundReceipts, tenant: TenantId, deviceId: string, input: InputPreparationReceiptInput): Promise<InputPreparationReadback | undefined>;
 export declare function recordInputPreparationCompletion(receipts: TenantBoundReceipts, tenant: TenantId, deviceId: string, receiptInput: InputPreparationCompletionRequest): Promise<InputPreparationReadback>;
+// ==== @byok-sdk/cloud dist/mailbox-wake.d.ts ====
+import type { TenantId } from '@byok-sdk/core';
+/** A lossy hint over the durable mailbox, never a delivery or cursor authority. */
+export interface MailboxWake {
+    /** Called after a mailbox commit. Synchronous and non-throwing. */
+    appended(tenant: TenantId, deviceId: string): void;
+    /** Subscribe before reading so an append between the read and next() is retained. */
+    subscribe(tenant: TenantId, deviceId: string, signal: AbortSignal): MailboxWakeSubscription;
+}
+export interface MailboxWakeSubscription {
+    /** Resolves on a hint, the fallback interval, maxWaitMs, abort, or close. */
+    next(maxWaitMs: number): Promise<void>;
+    close(): void;
+}
 // ==== @byok-sdk/cloud dist/maintenance.d.ts ====
 import { type CollectExpiredCounts, type CollectExpiredResult, type CoreStores, type DeviceAssertionReplayAuthority, type Clock, type TenantId } from '@byok-sdk/core';
 import type { CloudStores } from './stores/ports';
@@ -2788,6 +2806,15 @@ export interface InMemoryCloudComposition {
     readonly blobContentProxy: BlobContentProxy;
 }
 export declare function createInMemoryCloudStores(clock: Clock, crypto: CloudCrypto, objects: ObjectStore, mailbox: import('@byok-sdk/core').MailboxStore, objectBytes: InMemoryBlobBytes): InMemoryCloudComposition;
+// ==== @byok-sdk/cloud dist/stores/in-memory/mailbox-wake.d.ts ====
+import type { MailboxWake } from '../../mailbox-wake';
+export declare const DEFAULT_MAILBOX_WAKE_FALLBACK_MS = 5000;
+export interface InProcessMailboxWakeOptions {
+    /** Bounds delivery latency when all hints are lost. Defaults to 5 seconds. */
+    readonly fallbackMs?: number;
+}
+/** Request-local subscriptions behind a port; losing the table only delays reads. */
+export declare function createInProcessMailboxWake(options?: InProcessMailboxWakeOptions): MailboxWake;
 // ==== @byok-sdk/cloud dist/stores/in-memory/nonces.d.ts ====
 import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 /**
@@ -3679,10 +3706,13 @@ import type { HarnessInfo } from '@byok-sdk/protocol';
  */
 import { type BoardClaimInput, type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type BoardStatusUpdateInput, type BoardUnclaimInput, type CoreStores, type MailboxAdvanceCursorInput, type MailboxAppendInput, type MailboxCursorState, type MailboxMessage, type MailboxPage, type MailboxReadQuery, type MailboxRecordDeliveryInput, type Principal, type PresenceHint, type PresenceHintInput, type TenantReadiness, type StorageFinalizeInput, type StorageFinalizeResult, type StorageReservation, type StorageReservationInput, type TenantId } from '@byok-sdk/core';
 import type { AgentRef, RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
+import type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake';
 import type { ActivityAppendInput, ActivityTail } from './activity';
 import type { ApprovalTimelineAppendInput, ApprovalTimelineTail } from './approval-timeline';
 import type { BlobObservation, CloudStores, DeviceRecord, AgentEgressRecord, RequestReceipt, TaskCancellationMutation, TaskCancellationRequest, TaskAttempt, TaskAttemptStatus } from './stores/ports';
 export interface TenantBoundMailbox {
+    /** Subscribe before reading; hints never replace durable mailbox reads. */
+    watch(deviceId: string, signal: AbortSignal): MailboxWakeSubscription;
     append(input: MailboxAppendInput): Promise<MailboxMessage>;
     /** Pure read. Never advances the cursor — the daemon's next poll is the only ack. */
     readAfter(query: MailboxReadQuery): Promise<MailboxPage>;
@@ -3842,6 +3872,7 @@ export interface TenantStores {
 export interface CloudRootStores {
     readonly core: CoreStores;
     readonly cloud: CloudStores;
+    readonly mailboxWake: MailboxWake;
 }
 export declare function tenantStoresFor(principal: Principal, root: CloudRootStores): TenantStores;
 // ==== @byok-sdk/cloud dist/terminal-result.d.ts ====

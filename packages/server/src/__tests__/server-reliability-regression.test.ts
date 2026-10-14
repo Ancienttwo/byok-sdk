@@ -1,3 +1,4 @@
+import { createInProcessMailboxWake } from '@byok-sdk/cloud';
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -67,6 +68,7 @@ async function cloudWithFirstMailboxAppendFailure() {
   };
   return {
     cloud: createByokCloud({
+        mailboxWake: createInProcessMailboxWake(),
       core: { ...base, mailbox },
       cloud: composition.stores,
       blobContentProxy: composition.blobContentProxy,

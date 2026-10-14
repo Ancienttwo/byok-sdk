@@ -31,7 +31,7 @@ const KIB = 1024;
 function storesFor(harness: CloudHarness, deviceId: string): TenantStores {
   return tenantStoresFor(
     { kind: 'device', tenantId: TENANT_A, productId: 'test-product', deviceId },
-    { core: harness.core, cloud: harness.stores },
+    { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake },
   );
 }
 
@@ -152,7 +152,7 @@ describe('observer.onInboundRefused', () => {
     const limiter: InboundRateLimiter = { async consume() { return false; } };
     const limited = tenantStoresFor(
       { kind: 'device', tenantId: TENANT_A, productId: 'test-product', deviceId: device.deviceId },
-      { core: harness.core, cloud: { ...harness.stores, rateLimiter: limiter } },
+      { core: harness.core, mailboxWake: harness.mailboxWake, cloud: { ...harness.stores, rateLimiter: limiter } },
     );
     expect(await handleInboundEnvelope(limited, device.deviceId, claim, undefined, undefined, observer).then((result) => result.outcome)).toBe(
       'rate_limited',

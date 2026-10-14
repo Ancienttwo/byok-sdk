@@ -1,3 +1,4 @@
+import { createInProcessMailboxWake } from '@byok-sdk/cloud';
 import { WAKE_SCHEMA } from '../stores/sqlite/wakes';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -26,7 +27,8 @@ describe('SQLite receipt recovery', () => {
     const crypto = createWebCrypto();
     const path = join(root, 'server.sqlite');
     function open(migration?: 'v1-to-v5' | 'v2-to-v5') {
-      const stores = createSqliteEmbeddedStores({ path, ...(migration === undefined ? {} : { migration }) }, { clock, crypto });
+      const embedded = createSqliteEmbeddedStores({ path, ...(migration === undefined ? {} : { migration }) }, { clock, crypto });
+      const stores = { ...embedded, mailboxWake: createInProcessMailboxWake() };
       // Quota is process memory here; issue the entitlement on every open, as the
       // embedded server does, so limited mailbox appends are admitted (#411).
       void stores.core.quota.writeEntitlement(tenant, {

@@ -1,3 +1,4 @@
+import { createInProcessMailboxWake } from '@byok-sdk/cloud';
 /**
  * The Postgres composition running the complete cloud-local conformance suite.
  *
@@ -120,6 +121,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres offer delivery composition', () => {
       });
       const full = fullCapabilityDeclaration();
       const cloud = createByokCloud({
+        mailboxWake: createInProcessMailboxWake(),
         core,
         cloud: stores,
         crypto,

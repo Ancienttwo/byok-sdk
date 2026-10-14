@@ -11,6 +11,7 @@ let serial = 0;
 let storageFaultRequests = 0;
 const sse = (delta: Record<string, unknown>, finish: string | null = null) => `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
 interface Status { liveOwner: boolean; busy: boolean; closedResponses: number; settled?: boolean; aborted?: boolean;
+  expiredEntry?: { now: number; executionDeadline: number; invocationDeadline: number };
   runs: { state: string; errorCode: string | null }[]; invocations: { state: string }[] }
 
 beforeAll(async () => {
@@ -56,6 +57,24 @@ async function nextSubmit(name: string) {
 }
 
 describe('F06-1 submit delivery ownership in real workerd', () => {
+  it('classifies an invocation entered after the execution deadline before the timer callback', async () => {
+    const name = await setup(5000);
+    try {
+      await json(name, 'expireAtEntry');
+      expect(await json(name, 'hold', { instruction: 'pause after safe text' })).toEqual({ status: 200 });
+      await vi.waitFor(async () => {
+        const current = await status(name);
+        expect(current.expiredEntry).toBeDefined();
+        expect(current.expiredEntry!.now).toBeGreaterThan(current.expiredEntry!.executionDeadline);
+        expect(current.expiredEntry!.invocationDeadline).toBe(current.expiredEntry!.executionDeadline);
+        expect(current.liveOwner).toBe(false);
+        expect(current.runs).toMatchObject([{ state: 'failed', errorCode: 'CLOUD_EXECUTION_TIMEOUT' }]);
+      }, { timeout: 2500 });
+      await nextSubmit(name);
+      await vi.waitFor(async () => expect((await status(name)).closedResponses).toBe(1), { timeout: 1000 });
+    } finally { await json(name, 'discard'); }
+  });
+
   it('releases an unread text response on the execution deadline without resuming the reader', async () => {
     const name = await setup(300);
     try {

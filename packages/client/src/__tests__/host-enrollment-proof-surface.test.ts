@@ -1,3 +1,4 @@
+import { createInProcessMailboxWake } from '../../../cloud/src/index';
 import { createPublicKey, generateKeyPairSync, verify } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import type { Server as HttpServer } from 'node:http';
@@ -64,7 +65,7 @@ interface HostedCloud {
 }
 
 async function startCloud(): Promise<HostedCloud> {
-  const hosted = createInMemoryByokCloud({ longPollHoldMs: 50, longPollIntervalMs: 10 });
+  const hosted = createInMemoryByokCloud({ longPollHoldMs: 50, mailboxWake: createInProcessMailboxWake({ fallbackMs: 10 }) });
   const server = await new Promise<{ http: HttpServer; url: string }>((resolve) => {
     const http = serve({ fetch: (request: Request) => hosted.cloud.fetch(request), port: 0, hostname: '127.0.0.1' }, (info) => {
       resolve({ http: http as unknown as HttpServer, url: `http://127.0.0.1:${info.port}` });

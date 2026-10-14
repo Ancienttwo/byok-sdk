@@ -1,3 +1,4 @@
+import { createInProcessMailboxWake } from '@byok-sdk/cloud';
 /**
  * I1: the route inventory, closed in both directions, plus tenant B driven
  * against every one of tenant A's resources.
@@ -287,6 +288,7 @@ function cloudWith(options: { readonly capabilities: CapabilityDeclaration; read
     objectBytes,
   );
   return createByokCloud({
+        mailboxWake: createInProcessMailboxWake(),
     core,
     cloud: composition.stores,
     ...(options.withProxy ? { blobContentProxy: composition.blobContentProxy } : {}),

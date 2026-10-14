@@ -67,7 +67,6 @@ export {
   AGENT_HOME_CONTRACT_CAPABILITY,
   DEFAULT_EVENTS_PAGE_LIMIT,
   DEFAULT_LONG_POLL_HOLD_MS,
-  DEFAULT_LONG_POLL_INTERVAL_MS,
   DEFAULT_MAX_BLOB_SIZE_BYTES,
 } from './cloud';
 export {
@@ -380,3 +379,6 @@ export type { RetentionPolicy, MaintenanceInput, MaintenanceReport, MaintenanceS
 export { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES, receiptRetentionClass } from './receipt-retention';
 export type { ReceiptRetentionClass } from './receipt-retention';
 export type { ReceiptCollectExpiredInput } from './stores/ports';
+export type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake';
+export { createInProcessMailboxWake, DEFAULT_MAILBOX_WAKE_FALLBACK_MS } from './stores/in-memory/mailbox-wake';
+export type { InProcessMailboxWakeOptions } from './stores/in-memory/mailbox-wake';

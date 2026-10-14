@@ -1,4 +1,4 @@
-import { createByokCloud, createWebCrypto, createHmacTokenSigner, type MaintenanceReport } from '@byok-sdk/cloud';
+import { createByokCloud, createInProcessMailboxWake, createWebCrypto, createHmacTokenSigner, type MaintenanceReport } from '@byok-sdk/cloud';
 import { createPostgresCoreStores } from '../stores/core';
 import { createPostgresCloudStores } from '../stores';
 /** S4B-c retention, tombstone, crash and reconciliation matrix. */
@@ -225,6 +225,7 @@ async function maintenanceCloud(pool: Pool, clock: Clock, storage: R2ObjectMaint
   const objectStorage = (await createObjectStorageScope()).config;
   const core = createPostgresCoreStores({ pool, clock, objectStorage });
   return createByokCloud({
+    mailboxWake: createInProcessMailboxWake(),
     core: { ...core, objects: new PostgresObjectStore(pool, clock, storage) },
     cloud: createPostgresCloudStores({ pool, clock, crypto: createWebCrypto(), objectStorage }),
     clock, crypto: createWebCrypto(), tokenSigner: createHmacTokenSigner(new Uint8Array(32).fill(7), clock),
