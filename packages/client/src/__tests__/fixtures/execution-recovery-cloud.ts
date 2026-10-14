@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../../daemon/agent-egress-policy';
 import { createInterface } from 'node:readline';
+import type { Server as HttpServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { serve } from '@hono/node-server';
 import {
@@ -383,7 +384,7 @@ const httpServer = serve({
     }
     return response;
   },
-});
+}) as HttpServer;
 
 function respond(id: number, result?: unknown, error?: unknown): void {
   process.stdout.write(`${JSON.stringify(error === undefined ? { id, result } : { id, error: String(error) })}\n`);
@@ -435,7 +436,8 @@ lines.on('line', (line) => {
       case 'close':
         await new Promise<void>((resolve) => {
           httpServer.close(() => resolve());
-          (httpServer as import('node:http').Server).closeAllConnections();
+          // The live daemon can keep a polling connection open after listener shutdown.
+          httpServer.closeAllConnections();
         });
         await embedded.close();
         lines.close();
