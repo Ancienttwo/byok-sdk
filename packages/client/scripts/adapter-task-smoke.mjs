@@ -301,6 +301,12 @@ try {
     Promise.all([rejectedEventsPromise, rejected.result()]),
     'Pi BYOK missing-launcher lifecycle',
   );
+  // Server terminal receipt precedes the HTTP answer and the daemon's
+  // journal-backed settlement. Observe the Host independently before reading it.
+  await waitFor(
+    () => localEvents.some((event) => event.taskId === rejected.taskId && event.kind === 'failed'),
+    'Pi BYOK missing-launcher Host settlement',
+  );
   const rejectedSnapshot = await byok.tasks.get(rejected.taskId);
   const rejectedLocalKinds = localEvents
     .filter((event) => event.taskId === rejected.taskId)
@@ -322,6 +328,10 @@ try {
     const [serverEvents, result] = await withTimeout(
       Promise.all([taskEventsPromise, handle.result()]),
       `${runtime} task lifecycle`,
+    );
+    await waitFor(
+      () => localEvents.some((event) => event.taskId === handle.taskId && event.kind === 'completed'),
+      `${runtime} Host terminal settlement`,
     );
     const snapshot = await byok.tasks.get(handle.taskId);
     const serverStates = stateNames(serverEvents);

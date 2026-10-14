@@ -10,7 +10,7 @@
  *   operators will see);
  * - **it observes, it does not decide** — a throwing observer changes nothing,
  *   and `accepted` / `duplicate` / `rate_limited` never reach it;
- * - **the wire is untouched** — `POST /byok/messages` still answers
+ * - **the wire reports the same authoritative result** — `POST /byok/messages` still answers
  *   `{ accepted, rejected }` and nothing about the reason.
  */
 import { createEnvelope, PROTOCOL_VERSION, type Envelope } from '@byok-sdk/protocol';
@@ -72,7 +72,7 @@ describe('observer.onInboundRefused', () => {
     });
     const envelope = oversizedProgress(taskId);
 
-    expect(await handleInboundEnvelope(stores, device.deviceId, envelope, undefined, undefined, observer)).toBe(
+    expect(await handleInboundEnvelope(stores, device.deviceId, envelope, undefined, undefined, observer).then((result) => result.outcome)).toBe(
       'rejected',
     );
     expect(refused).toEqual([
@@ -93,7 +93,7 @@ describe('observer.onInboundRefused', () => {
     const stores = storesFor(harness, deviceId);
     const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, deviceId, { payload: offerPayload() });
     // Claimed without a harness, so a terminal echoing one is a mismatch.
-    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId }, { taskId }))).toBe(
+    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId }, { taskId })).then((result) => result.outcome)).toBe(
       'accepted',
     );
     const unclaimed = await harness.cloud.enqueueOffer(TENANT_A, deviceId, { payload: offerPayload('second') });
@@ -126,7 +126,7 @@ describe('observer.onInboundRefused', () => {
       expect(INBOUND_REFUSAL_REASONS).toContain(reason);
       const { refused, observer } = refusalRecorder();
       expect(
-        await handleInboundEnvelope(stores, deviceId, envelope, undefined, undefined, observer),
+        await handleInboundEnvelope(stores, deviceId, envelope, undefined, undefined, observer).then((result) => result.outcome),
         reason,
       ).toBe('rejected');
       expect(refused.map((entry) => entry.reason), reason).toEqual([reason]);
@@ -147,14 +147,14 @@ describe('observer.onInboundRefused', () => {
     const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
     const claim = createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId });
 
-    expect(await handleInboundEnvelope(stores, device.deviceId, claim, undefined, undefined, observer)).toBe('accepted');
-    expect(await handleInboundEnvelope(stores, device.deviceId, claim, undefined, undefined, observer)).toBe('duplicate');
+    expect(await handleInboundEnvelope(stores, device.deviceId, claim, undefined, undefined, observer).then((result) => result.outcome)).toBe('accepted');
+    expect(await handleInboundEnvelope(stores, device.deviceId, claim, undefined, undefined, observer).then((result) => result.outcome)).toBe('duplicate');
     const limiter: InboundRateLimiter = { async consume() { return false; } };
     const limited = tenantStoresFor(
       { kind: 'device', tenantId: TENANT_A, productId: 'test-product', deviceId: device.deviceId },
       { core: harness.core, cloud: { ...harness.stores, rateLimiter: limiter } },
     );
-    expect(await handleInboundEnvelope(limited, device.deviceId, claim, undefined, undefined, observer)).toBe(
+    expect(await handleInboundEnvelope(limited, device.deviceId, claim, undefined, undefined, observer).then((result) => result.outcome)).toBe(
       'rate_limited',
     );
 
@@ -175,7 +175,7 @@ describe('observer.onInboundRefused', () => {
     };
     const wrongDirection = createEnvelope('task.cancel', {}, { taskId: 'task-1', seq: 1 });
 
-    expect(await handleInboundEnvelope(stores, device.deviceId, wrongDirection, undefined, undefined, thrower)).toBe(
+    expect(await handleInboundEnvelope(stores, device.deviceId, wrongDirection, undefined, undefined, thrower).then((result) => result.outcome)).toBe(
       'rejected',
     );
     expect(calls).toBe(1);
@@ -188,12 +188,12 @@ describe('observer.onInboundRefused', () => {
     const commitOnly: ByokCloudObserver = { onInboundCommitted() {} };
     const wrongDirection = createEnvelope('task.cancel', {}, { taskId: 'task-1', seq: 1 });
 
-    expect(await handleInboundEnvelope(stores, device.deviceId, wrongDirection, undefined, undefined, commitOnly)).toBe(
+    expect(await handleInboundEnvelope(stores, device.deviceId, wrongDirection, undefined, undefined, commitOnly).then((result) => result.outcome)).toBe(
       'rejected',
     );
   });
 
-  it('keeps the POST /byok/messages response shape, with or without a (throwing) refusal observer', async () => {
+  it('reports counts and coarse outcomes, independently of a throwing refusal observer', async () => {
     const thrower: ByokCloudObserver = {
       onInboundCommitted() {},
       onInboundRefused() {
@@ -206,23 +206,37 @@ describe('observer.onInboundRefused', () => {
       const harness = createHarness(candidate === undefined ? {} : { observer: candidate });
       const device = await harness.pairDevice(TENANT_A);
       const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
+      const messages = [oversizedProgress(taskId), createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId })];
       const response = await harness.request('/byok/messages', {
         method: 'POST',
         headers: { ...device.authorization, 'content-type': 'application/json' },
         body: JSON.stringify({
-          messages: [oversizedProgress(taskId), createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId })],
+          messages,
         }),
       });
       expect(response.status).toBe(200);
-      answers.push(await response.json());
+      const answer = await response.json();
+      expect(answer).toEqual({ accepted: 1, rejected: 1, outcomes: [
+        { id: messages[0]!.id, outcome: 'rejected', reason: 'limit_exceeded' },
+        { id: messages[1]!.id, outcome: 'accepted' },
+      ] });
+      answers.push(answer);
     }
 
-    // Counts only: no reason, no per-envelope detail on the wire.
-    expect(answers).toEqual([
-      { accepted: 1, rejected: 1 },
-      { accepted: 1, rejected: 1 },
-      { accepted: 1, rejected: 1 },
-    ]);
+    expect(answers).toHaveLength(3);
     expect(refused.map((entry) => entry.reason)).toEqual(['activity_batch_too_large']);
   });
+});
+
+
+it('hides missing tasks and another device target behind not_permitted and advertises deployed ingress', async () => {
+  const harness = createHarness({ activityMaxEvents: 7, activityMaxBytes: 4096 });
+  const device = await harness.pairDevice(TENANT_A);
+  const other = await harness.pairDevice(TENANT_A);
+  const foreign = await harness.cloud.enqueueOffer(TENANT_A, other.deviceId, { payload: offerPayload() });
+  const messages = [createEnvelope('task.started', {}, { taskId: 'missing' }), createEnvelope('task.started', {}, { taskId: foreign.taskId })];
+  const response = await harness.request('/byok/messages', { method: 'POST', headers: { ...device.authorization, 'content-type': 'application/json' }, body: JSON.stringify({ messages }) });
+  expect(await response.json()).toEqual({ accepted: 0, rejected: 2, outcomes: messages.map((message) => ({ id: message.id, outcome: 'rejected', reason: 'not_permitted' })) });
+  const poll = await harness.request('/byok/events?cursor=0', { headers: device.authorization });
+  expect(await poll.json()).toMatchObject({ ingress: { activityMaxEvents: 7, activityMaxBytes: 4096 } });
 });

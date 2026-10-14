@@ -150,6 +150,7 @@ describe('tenant isolation across every device-class resource', () => {
     const events = await harness.json('/byok/events', { headers: mallory.authorization });
     expect(events.status).toBe(200);
     expect(events.body).toEqual({
+      ingress: { activityMaxEvents: 50, activityMaxBytes: 65536 },
       events: [],
       cursor: 0,
       capabilities: [

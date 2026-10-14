@@ -64,7 +64,7 @@ it('recovers recurring admission and independent observations through a recreate
     const publish = () => fetch(`${http.baseUrl}/byok/messages`, { method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${device.accessToken}` },
       body: JSON.stringify({ messages: [message] }) });
-    expect(await (await publish()).json()).toEqual({ accepted: 1 });
+    expect(await (await publish()).json()).toMatchObject({ accepted: 1 });
     const receipt = await instance.tasks.messageDisposition(restored.taskId, restored.deviceId, message.payload);
     expect(receipt).toMatchObject({ outcome: 'accepted' });
     await instance.tasks.cancel(restored.taskId, 'stop remaining');
@@ -77,7 +77,7 @@ it('recovers recurring admission and independent observations through a recreate
       .toEqual({ payload: message.payload, context: restored.agentMessageContext, disposition: receipt });
     expect(await instance.tasks.agentMessage(restored.taskId, restored.deviceId, { ...restored.payload.agentRef, agentId: 'wrong' })).toBeUndefined();
     expect(await instance.tasks.deviceTerminal(restored.taskId)).toBeUndefined();
-    expect(await (await publish()).json()).toEqual({ accepted: 1 });
+    expect(await (await publish()).json()).toMatchObject({ accepted: 1 });
     expect(consumed).toBe(1);
   } finally {
     await stopServer(http.server); await instance.close(); rmSync(root, { recursive: true, force: true });

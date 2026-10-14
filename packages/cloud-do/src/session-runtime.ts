@@ -832,7 +832,7 @@ export class SessionRuntime {
     let removeAbort: (() => void) | undefined;
     try {
       deadline = Math.min(row.deadlineAt, this.ledger.execution(row.conversationId)?.deadlineAt ?? row.deadlineAt);
-      if (Date.now() >= deadline) throw new CloudDoError('CLOUD_TOOL_TIMEOUT');
+      if (Date.now() >= deadline) throw new CloudDoError(this.#timeoutCode(row.conversationId));
       if (!this.#config || !this.#dispatcher) throw new CloudDoError('CLOUD_EXECUTION_INTERRUPTED');
       if (!recovery && this.fatal(row.conversationId)) throw new CloudDoError(this.fatal(row.conversationId)!);
       const args = JSON.parse(row.argsJson) as Record<string, unknown>;

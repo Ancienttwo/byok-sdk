@@ -58,7 +58,7 @@ describe('M5 (claimed runtime): task.claim.runtime -> TaskSnapshot.claimedRuntim
       daemon,
       createEnvelope('task.claim', { deviceId: daemon.deviceId, runtime: 'pi' }, { taskId: handle.taskId }),
     );
-    expect(claim).toEqual({ status: 200, body: { accepted: 1 } });
+    expect(claim).toMatchObject({ status: 200, body: { accepted: 1 } });
 
     const snapshot = await instance.tasks.get(handle.taskId);
     expect(snapshot?.state).toBe('Claimed');
@@ -74,7 +74,7 @@ describe('M5 (claimed runtime): task.claim.runtime -> TaskSnapshot.claimedRuntim
       daemon,
       createEnvelope('task.claim', { deviceId: daemon.deviceId, runtime: 'claude' }, { taskId: handle.taskId }),
     );
-    expect(claim).toEqual({ status: 200, body: { accepted: 1 } });
+    expect(claim).toMatchObject({ status: 200, body: { accepted: 1 } });
 
     expect((await instance.tasks.get(handle.taskId))?.claimedRuntime).toBe('claude');
   });
@@ -89,7 +89,7 @@ describe('M5 (claimed runtime): task.claim.runtime -> TaskSnapshot.claimedRuntim
       daemon,
       createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId }),
     );
-    expect(claim).toEqual({ status: 200, body: { accepted: 1 } });
+    expect(claim).toMatchObject({ status: 200, body: { accepted: 1 } });
 
     const snapshot = await instance.tasks.get(handle.taskId);
     expect(snapshot?.state).toBe('Claimed'); // nothing breaks

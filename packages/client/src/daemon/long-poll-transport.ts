@@ -1,4 +1,6 @@
 import {
+  ActivityIngressSchema,
+  type ActivityIngress,
   BYOK_EVENTS_PATH,
   MAILBOX_READ_AHEAD_CAPABILITY,
   MAILBOX_READ_AHEAD_MAX_SEQS,
@@ -63,6 +65,7 @@ export interface LongPollClientOptions {
    * response. Called before any envelopes from that response are delivered.
    * An older responder omitting the additive field is reported as `[]`.
    */
+  onIngress?: (ingress: ActivityIngress) => void;
   onServerCapabilities?: (capabilities: string[]) => void;
   /**
    * The poll failed — an HTTP status, a network failure, an unusable body or
@@ -112,10 +115,13 @@ interface LooseEventsPollResponse {
   events: unknown[];
   cursor: number;
   capabilities: string[];
+  ingress?: ActivityIngress;
 }
 
-/** A fully-read frozen-v1 count acknowledgement for the batch that was posted. */
+/** A validated v2 acknowledgement for the posted batch; outcomes are optional until v3. */
 export interface MessageBatchPostResult {
+  readonly ingress?: ActivityIngress;
+  readonly outcomes?: MessagesSendResponse['outcomes'];
   readonly accepted: number;
   readonly rejected?: number;
   /** The server's advertisement, when it sent one (a handshake answer); absence means "no update". */
@@ -144,10 +150,11 @@ function parseLooseEventsPollResponse(raw: unknown, requestedCursor: number): Lo
   if (typeof raw !== 'object' || raw === null) {
     throw new Error('events poll response is not an object');
   }
-  const { events, cursor, capabilities } = raw as {
+  const { events, cursor, capabilities, ingress } = raw as {
     events?: unknown;
     cursor?: unknown;
     capabilities?: unknown;
+    ingress?: unknown;
   };
   if (!Array.isArray(events)) {
     throw new Error('events poll response.events is not an array');
@@ -164,7 +171,7 @@ function parseLooseEventsPollResponse(raw: unknown, requestedCursor: number): Lo
   ) {
     throw new Error('events poll response.capabilities is not an array of strings');
   }
-  return { events, cursor, capabilities: capabilities ?? [] };
+  return { events, cursor, capabilities: capabilities ?? [], ...(ingress === undefined ? {} : { ingress: ActivityIngressSchema.parse(ingress) }) };
 }
 
 function isSafeNonnegativeInteger(value: unknown): value is number {
@@ -368,6 +375,20 @@ export class LongPollClient {
       if (response.accepted + (response.rejected ?? 0) !== envelopes.length) {
         throw new Error('messages response counts do not match the posted batch length');
       }
+      if (response.outcomes !== undefined) {
+        const expected = new Set(envelopes.map((envelope) => envelope.id));
+        let accepted = 0;
+        let rejected = 0;
+        for (const settlement of response.outcomes) {
+          if (settlement.outcome !== 'rejected' && settlement.reason !== undefined) throw new Error('messages response reason belongs only to rejected outcomes');
+          if (!expected.delete(settlement.id)) throw new Error('messages response has an unknown or repeated outcome id');
+          if (settlement.outcome === 'rejected') rejected += 1;
+          else accepted += 1;
+        }
+        if (expected.size !== 0 || accepted !== response.accepted || rejected !== (response.rejected ?? 0)) {
+          throw new Error('messages response outcomes do not match the posted ids and counts');
+        }
+      }
       return response;
     } catch (err) {
       if (signal?.aborted) return undefined;
@@ -469,6 +490,7 @@ export class LongPollClient {
         readAheadSupported = parsed.capabilities.includes(MAILBOX_READ_AHEAD_CAPABILITY);
         const madeReadProgress = parsed.cursor > afterSeq;
         readCursor = parsed.cursor;
+        if (parsed.ingress !== undefined) this.opts.onIngress?.(parsed.ingress);
         this.opts.onServerCapabilities?.(parsed.capabilities);
         // Finding R1 (Codex's new P2): true the moment THIS batch contains
         // at least one validation-failed entry — used below to apply the

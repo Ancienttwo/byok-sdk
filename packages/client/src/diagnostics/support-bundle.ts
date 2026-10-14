@@ -51,6 +51,7 @@ export interface SupportBundle {
               currentRunStartedAt?: string;
             };
         storagePresent: boolean;
+        outbound?: Pick<import('../daemon/outbound-settlement').OutboundStatus, 'accepted' | 'duplicate' | 'rejected' | 'rejectedByReason' | 'rejectedTerminals'>;
       };
   /** Issue #394: phase, connection and halt reason — closed enums only. */
   lifecycle:
@@ -191,6 +192,7 @@ function projectControl(control: DiagnosticsSnapshot['control']): SupportBundle[
     pendingApprovalCount: control.pendingApprovalCount,
     operationalHealth,
     storagePresent: control.storage !== undefined,
+    ...(control.outbound === undefined ? {} : { outbound: { accepted: control.outbound.accepted, duplicate: control.outbound.duplicate, rejected: control.outbound.rejected, rejectedByReason: { ...control.outbound.rejectedByReason }, rejectedTerminals: control.outbound.rejectedTerminals } }),
   };
 }
 

@@ -1,3 +1,4 @@
+import { DEFAULT_ACTIVITY_INGRESS, type ActivityIngress } from '@byok-sdk/protocol';
 import { observePreparedMemory, type PreparedAgentMemoryState } from './prepared-agent-memory';
 import { InputPreparationRequestError } from './input-preparation-service';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
@@ -248,8 +249,8 @@ export const MAX_DURATION_EXCEEDED_REASON_PREFIX = 'resource limit exceeded: max
 export const MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX = 'resource limit exceeded: maxTaskOutputBytes';
 
 /** Stable fail-closed reason for one normalized event that cannot fit the configured activity batch budget. */
-export const MAX_PROGRESS_BATCH_BYTES_EXCEEDED_REASON_PREFIX =
-  'resource limit exceeded: progressBatch.maxBatchBytes';
+export const ACTIVITY_INGRESS_EXCEEDED_REASON_PREFIX =
+  'resource limit exceeded: activity ingress budget';
 
 /**
  * additive-minor (`task.complete.document`): same stable-PREFIX contract as
@@ -637,6 +638,7 @@ export interface TaskRunnerDeps {
    * capabilities" when absent, so a minimal test harness that doesn't care
    * about this gate isn't forced to supply one — see `sendApprovalResolved`.
    */
+  getIngressBudget?: () => Readonly<ActivityIngress>;
   getServerCapabilities?: () => readonly string[];
   /**
    * Contract §8.1 / §8.3: is the task lane's capability gate in place right
@@ -1560,9 +1562,13 @@ export class TaskRunner {
     return this.deps.maxTaskOutputBytes ?? DEFAULT_MAX_TASK_OUTPUT_BYTES;
   }
 
+  private get ingressBudget(): Readonly<ActivityIngress> {
+    return this.deps.getIngressBudget?.() ?? { activityMaxEvents: DEFAULT_ACTIVITY_INGRESS.maxEvents, activityMaxBytes: DEFAULT_ACTIVITY_INGRESS.maxBytes };
+  }
+
   /** Effective per-event inline ceiling for this daemon — see `DaemonConfig.maxInlineEventBytes`. */
   private get maxInlineEventBytes(): number {
-    return this.deps.maxInlineEventBytes ?? DEFAULT_MAX_INLINE_EVENT_BYTES;
+    return Math.min(this.deps.maxInlineEventBytes ?? DEFAULT_MAX_INLINE_EVENT_BYTES, this.ingressBudget.activityMaxBytes - 2);
   }
 
   /** Effective per-canonical-Agent-home reader cap — see {@link DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME}. */
@@ -2900,6 +2906,7 @@ export class TaskRunner {
             if (projected.length > 0) this.deps.send(createEnvelope('task.progress', { seq, events: [...projected] }, { taskId, seq }));
           },
           this.deps.batcherOptions,
+          () => this.ingressBudget,
         ),
         approvalQueue: [],
         outputBytesSoFar: 0,
@@ -4083,7 +4090,7 @@ export class TaskRunner {
       if (err instanceof ProgressEventTooLargeError) {
         await this.failActiveTaskForResourceLimit(
           active.taskId,
-          `${MAX_PROGRESS_BATCH_BYTES_EXCEEDED_REASON_PREFIX}: event requires ${err.actualBytes} UTF-8 bytes, exceeding the configured limit of ${err.maxBatchBytes} bytes`,
+          `${ACTIVITY_INGRESS_EXCEEDED_REASON_PREFIX}: event requires ${err.actualBytes} UTF-8 bytes, exceeding the advertised activity ingress limit of ${err.maxBytes} bytes`,
           false,
         );
         return;
