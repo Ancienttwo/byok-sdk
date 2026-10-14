@@ -1069,7 +1069,11 @@ export declare class AgentHomeExecutionLeaseManager {
      * `release()`, which the task runner calls after the attempt is terminal
      * AND `Session.close()` resolved. A failed disposal never reaches
      * `release()`, so the slot stays held — fail closed, the same posture as
-     * `runtime-disposal-failed`. Crash residue: a restarted daemon starts with
+     * `runtime-disposal-failed`. Because `release()` comes after the semantic
+     * terminal is published, the admission gate may wait once for this
+     * runner's already-finishing Attempts of the same home to settle and then
+     * read this count again (#476); the count itself stays the only authority
+     * on whether a slot is free. Crash residue: a restarted daemon starts with
      * an empty registry and reclaims the on-disk marker only under the same
      * stable owner identity (`openLeaseMarker`), after its start ended the
      * crashed run's owned runtime processes (`OwnedProcessLedger.reconcile`).
@@ -9294,6 +9298,13 @@ export declare class TaskRunner {
     private reportAgentTerminalEvidenceFailure;
     retryTerminalFinalization(taskId: string): Promise<void>;
     private readonly finalizationAttempts;
+    /**
+     * In-flight finalization attempts of this runner's Attempts that hold a
+     * lease of `homeAccess` on `canonicalHome` and are already finishing. See
+     * `reserveOfferHome` (#476): only these are worth waiting on; a finished
+     * Attempt without an in-flight attempt keeps its slot as a live holder.
+     */
+    private homeFinalizations;
     private finish;
     private finishOnce;
     private settleSemanticTerminal;

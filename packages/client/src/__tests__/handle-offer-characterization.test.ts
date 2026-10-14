@@ -591,6 +591,30 @@ describe('same-home admission after a published terminal (#476)', () => {
     });
   });
 
+  it('an offer received after stopAcceptingOffers does not park on a finishing Attempt', async () => {
+    const adapter = new StubRuntimeAdapter('pi');
+    const { runner, agentHome, sent } = await agentRunner(adapter);
+    await runner.handleEnvelope(agentOffer('first', 1));
+    const releaseClose = adapter.sessions[0]!.blockClose();
+    await publishFirstTerminal(adapter, sent, agentHome);
+    // The sweep runs before `second` exists, so `second`'s admission signal is never aborted.
+    runner.stopAcceptingOffers();
+
+    const counted = vi.spyOn(agentHome.executionLeaseManager, 'activeAttemptCount');
+    const offer = runner.handleEnvelope(agentOffer('second', 2));
+    await vi.waitFor(() => expect(counted).toHaveBeenCalled());
+    // Declined on the same synchronous path as the count, while `first`'s close is still held.
+    expect(declines(sent, 'second').map((entry) => entry.payload)).toEqual([
+      { reason: BUSY_WRITER, retryable: true, agentRef: AGENT },
+    ]);
+    await offer;
+    expect(claimed(sent, 'second')).toBe(0);
+    expect(adapter.startCalls).toHaveLength(1);
+    releaseClose();
+    await runner.shutdownActiveTasks('daemon stopping');
+    expect(runner.activeTaskCount).toBe(0);
+  });
+
   it('a live, not finishing Attempt is busy at once: no wait', async () => {
     const adapter = new StubRuntimeAdapter('pi');
     const { runner, sent } = await agentRunner(adapter);

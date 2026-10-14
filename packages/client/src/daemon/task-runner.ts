@@ -3166,6 +3166,7 @@ export class TaskRunner {
     // from the lease registry and reserves or declines exactly as without the
     // wait. A finished Attempt with no in-flight finalization (failed
     // disposal, retained ownership) is a live holder and is never waited on.
+    // Once offers are stopping, there is no wait at all.
     // The lease registry stays the only admission authority; the wait only
     // decides when to read it.
     //
@@ -3200,7 +3201,10 @@ export class TaskRunner {
     const countHome = (): number => this.deps.agentHome!.executionLeaseManager.activeAttemptCount(canonicalHome, homeAccess)
       + (this.homeReservations.get(reservationKey) ?? 0);
     let active = countHome();
-    if (active >= limit) {
+    // A daemon that is stopping never parks an offer: `stopAcceptingOffers`
+    // aborts only the admission signals that existed when it ran, so an offer
+    // that arrived after it would otherwise wait on a finishing Attempt.
+    if (active >= limit && !this.stoppingOffers) {
       const finishing = this.homeFinalizations(canonicalHome, homeAccess);
       if (finishing.length > 0 && active - finishing.length < limit) {
         await settledOrWithdrawn(finishing, admissionSignal);

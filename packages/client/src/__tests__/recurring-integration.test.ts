@@ -6,7 +6,7 @@ import { expect, it, vi } from 'vitest';
 import { createByokServer } from '@byok-sdk/server';
 import type { AgentMessagePublishPayload } from '@byok-sdk/protocol';
 import { startServer, stopServer } from '../../../server/src/__tests__/test-support';
-import { createDaemonWithAdapters } from '@byok-sdk/client';
+import { AgentHomeManager, createDaemonWithAdapters } from '@byok-sdk/client';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { OPEN_LIFECYCLE } from './fixtures/lifecycle-barrier';
@@ -164,10 +164,22 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
     if (outcome === 'document') {
       expect(terminal).toMatchObject({ envelope: { payload: { document } } });
       // Deliberate competing probe, not Host scheduling or automatic retry.
+      // #476: an offer for the same home that arrives while the Summary's
+      // Session.close() is held waits for that finishing Attempt instead of
+      // being declined busy, and no second writer starts until close resolves.
+      // The daemon's busy gate is its only reader of this count, so a call
+      // proves the competing offer reached admission before close is released.
+      const leaseManagerPrototype = Object.getPrototypeOf(
+        new AgentHomeManager({ hostStorageRoot: path.join(root, 'probe-home') }).executionLeaseManager,
+      ) as { activeAttemptCount(canonicalHome: string, homeAccess: string): number };
+      const admissionCounts = vi.spyOn(leaseManagerPrototype, 'activeAttemptCount');
+      frozenInstructions.set('competing-before-close', summaryInstruction);
       await sdk.dispatchFreshAgentEgress({ ...input, taskId: 'competing-before-close' });
-      await vi.waitFor(async () => expect(await sdk.tasks.deviceTerminal('competing-before-close')).toMatchObject({
-        envelope: { type: 'task.decline', payload: { retryable: true } },
-      }), { timeout: 10000 });
+      await vi.waitFor(async () => expect(await sdk.tasks.offer('competing-before-close')).toMatchObject({ delivered: true }),
+        { timeout: 10000 });
+      await vi.waitFor(() => expect(admissionCounts).toHaveBeenCalled(), { timeout: 10000 });
+      admissionCounts.mockRestore();
+      expect(await sdk.tasks.deviceTerminal('competing-before-close')).toBeUndefined();
       expect(adapter.sessions).toHaveLength(precedingTurns + 1);
       expect(adapter.startCalls).toHaveLength(precedingTurns + 1);
     } else {
@@ -175,6 +187,19 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
       expect(terminal?.envelope.payload).not.toHaveProperty('document');
     }
     releaseClose(); releaseClose = undefined;
+    if (outcome === 'document') {
+      // The parked competing offer is admitted once the Summary released the home.
+      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(precedingTurns + 2), { timeout: 10000 });
+      expect(adapter.startCalls).toHaveLength(precedingTurns + 2);
+      expect(adapter.startCalls[precedingTurns + 1]?.task.sessionRef).toBeUndefined();
+      expect(adapter.startCalls[precedingTurns + 1]?.ctx.workspaceDir).toBe(adapter.startCalls[precedingTurns]?.ctx.workspaceDir);
+      const competingSession = adapter.sessions[precedingTurns + 1]!;
+      competingSession.emit({ type: 'progress', text: JSON.stringify(document) });
+      competingSession.emit({ type: 'turn_end' });
+      await vi.waitFor(async () => expect(await sdk.tasks.deviceTerminal('competing-before-close')).toMatchObject({
+        envelope: { type: 'task.complete', payload: { document } },
+      }), { timeout: 10000 });
+    }
     await vi.waitFor(() => expect(daemon.status().activeTaskCount).toBe(0));
     if (outcome === 'document') {
       if (terminal?.envelope.type !== 'task.complete') throw new Error('Missing Summary terminal');
@@ -182,17 +207,17 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
       expect(recoveredDocument).toEqual(document);
       const instruction = JSON.stringify({ summary: recoveredDocument, recentHistory: [], input: 'Current user request' });
       frozenInstructions.set('dependent-user-turn', instruction);
-      // New explicit user execution after Summary, not a retry of the decline.
+      // New explicit user execution after Summary, not a retry of the competing probe.
       await sdk.recurring.submit({ taskId: 'dependent-user-turn', deviceId, payload: {
         agentRef, runtime: 'pi', instruction,
         egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: { mode: 'none' },
         messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },
       }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'user-turn' } });
-      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(precedingTurns + 2), { timeout: 10000 });
-      const dependentSession = adapter.sessions[precedingTurns + 1]!;
-      expect(adapter.startCalls[precedingTurns + 1]?.task.sessionRef).toBeUndefined();
-      expect(adapter.startCalls[precedingTurns + 1]?.task.instruction).toContain(instruction);
-      expect(new Set(adapter.sessions.map(item => item.sessionRef)).size).toBe(3);
+      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(precedingTurns + 3), { timeout: 10000 });
+      const dependentSession = adapter.sessions[precedingTurns + 2]!;
+      expect(adapter.startCalls[precedingTurns + 2]?.task.sessionRef).toBeUndefined();
+      expect(adapter.startCalls[precedingTurns + 2]?.task.instruction).toContain(instruction);
+      expect(new Set(adapter.sessions.map(item => item.sessionRef)).size).toBe(4);
       expect(new Set(adapter.startCalls.map(item => item.ctx.workspaceDir)).size).toBe(1);
       dependentSession.emit({ type: 'progress', text: 'User answer' });
       dependentSession.emit({ type: 'turn_end' });
@@ -201,7 +226,8 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
       }), { timeout: 10000 });
       await vi.waitFor(() => expect(daemon.status().activeTaskCount).toBe(0));
       expect(messages).toEqual(['preceding-user-turn', 'dependent-user-turn']);
-      expect(extracts).toHaveLength(1);
+      // The Summary and the competing probe each carried the result-document projection.
+      expect(extracts.map(item => item.taskId)).toEqual([taskId, 'competing-before-close']);
     }
     await daemon.stop(); daemonStopped = true;
     await stopServer(http.server); httpStopped = true;
@@ -221,7 +247,7 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
       expect((await sdk.tasks.agentMessage('dependent-user-turn', deviceId, agentRef))?.payload.body).toBe('User answer');
     }
     expect(await sdk.tasks.deviceTerminal('nonexistent-summary')).toBeUndefined();
-    expect(adapter.sessions).toHaveLength(outcome === 'document' ? 3 : 1);
+    expect(adapter.sessions).toHaveLength(outcome === 'document' ? 4 : 1);
   } finally {
     releaseClose?.();
     if (!daemonStopped) await daemon.stop();
