@@ -3,14 +3,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  appendAuditEvent,
+  appendAuditRecord,
   AUDIT_LOG_TRIM_TARGET_LINES,
   auditLogPath,
   MAX_AUDIT_LOG_BYTES,
   MAX_LIVE_TASK_ANCHORS,
-  readAuditEvents,
+  readAuditRecords,
 } from '../bin/audit-log';
-import { deriveTasksFromEvents } from '../bin/tasks-view';
+import { deriveTasksFromRecords } from '../bin/tasks-view';
 
 const stores: string[] = [];
 afterEach(async () => {
@@ -25,7 +25,7 @@ describe('19.2: audit rotation retains state-bearing lifecycle anchors', () => {
       stores.push(storeDir);
       const ts = '2026-01-01T00:00:00.000Z';
       const artifact = (taskId: string) => JSON.stringify({
-        kind: 'artifact', ts, taskId, name: 'result.txt', contentType: 'text/plain', inlineSize: 4,
+        kind: 'artifact', ts, taskId, nameBytes: 10, contentType: 'text/plain', inlineBytes: 4,
       });
       const observations = [artifact('still-running'), artifact('artifact-only')];
       const lines = [
@@ -38,7 +38,7 @@ describe('19.2: audit rotation retains state-bearing lifecycle anchors', () => {
       const fillerCount = AUDIT_LOG_TRIM_TARGET_LINES * 5;
       for (let i = 0; i < fillerCount; i++) {
         lines.push(JSON.stringify({
-          kind: 'completed', ts, taskId: `filler-${i}`, summarySize: 4,
+          kind: 'completed', ts, taskId: `filler-${i}`, summaryBytes: 4,
           sessionRef: 'fixture-session', padding: 'x'.repeat(500),
         }));
       }
@@ -47,9 +47,9 @@ describe('19.2: audit rotation retains state-bearing lifecycle anchors', () => {
       await fs.writeFile(filePath, `${lines.join('\n')}\n`, { mode: 0o600 });
       expect((await fs.stat(filePath)).size).toBeGreaterThan(MAX_AUDIT_LOG_BYTES);
 
-      await appendAuditEvent(storeDir, { kind: 'unpaired', ts });
-      const events = await readAuditEvents(storeDir);
-      const tasks = deriveTasksFromEvents(events);
+      await appendAuditRecord(storeDir, { kind: 'unpaired', ts });
+      const events = await readAuditRecords(storeDir);
+      const tasks = deriveTasksFromRecords(events);
       expect(tasks.find((task) => task.taskId === 'still-running')?.state).toBe('Running');
       expect(events[0]).toMatchObject({ kind: 'started', taskId: 'still-running' });
       expect(events.some((event) => event.kind === 'artifact')).toBe(artifactPosition === 'retained tail');

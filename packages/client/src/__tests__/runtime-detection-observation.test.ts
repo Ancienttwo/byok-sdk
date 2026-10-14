@@ -13,7 +13,8 @@ import { runRuntimesCommand } from '../bin/commands/runtimes';
 import { runStatusCommand } from '../bin/commands/status';
 import { runDoctorCommand } from '../bin/commands/doctor';
 import { collectDiagnostics } from '../diagnostics/diagnostics';
-import { appendAuditEvent } from '../bin/audit-log';
+import { createDaemonRecordProjector } from '../daemon/daemon-record';
+import { appendAuditRecord } from '../bin/audit-log';
 import { projectRuntimeObservation, validateRuntimeDetectResult } from '../runtime-detection';
 import type { RuntimeDetectResult } from '../types';
 import type { DaemonConfig } from '../daemon/create-daemon';
@@ -235,7 +236,7 @@ it('carries failure outcomes through runtimes/status and doctor JSON/text withou
   const lines: string[] = [];
   const log = (line: string) => { lines.push(line); };
   await runRuntimesCommand(config, { adapters, log });
-  await appendAuditEvent(dir, { kind: 'runtimes-detected', ts: '2026-10-14T00:00:00.000Z', runtimes: await Promise.all(adapters.map(async adapter => projectRuntimeObservation(adapter.descriptor, await adapter.detect()))) });
+  await appendAuditRecord(dir, createDaemonRecordProjector().project({ kind: 'runtimes-detected', ts: '2026-10-14T00:00:00.000Z', runtimes: await Promise.all(adapters.map(async adapter => projectRuntimeObservation(adapter.descriptor, await adapter.detect()))) })[0]!);
   await runStatusCommand(config, { log, connectControl });
   for (const kind of kinds.filter((kind) => kind !== 'available')) {
     expect(lines).toContain(`${kind}: ${kind}`);

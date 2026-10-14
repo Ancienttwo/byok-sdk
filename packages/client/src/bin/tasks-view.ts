@@ -1,6 +1,7 @@
 import { TASK_STATES, type TaskState } from '@byok-sdk/protocol';
-import { type DaemonEvent, type DaemonTaskInfo } from '../index';
+import { type DaemonTaskInfo } from '../index';
 import type { DaemonLifecycle } from '../daemon/daemon-lifecycle';
+import type { DaemonRecord } from '../daemon/daemon-record';
 import { GIT_ERROR_CATEGORIES, GIT_WORKSPACE_PHASES } from '../daemon/git-workspace';
 
 export interface TaskGitStatus {
@@ -13,7 +14,12 @@ export interface TaskGitStatus {
   errorCategory?: string;
 }
 
-export type DerivedTaskInfo = DaemonTaskInfo & { git?: TaskGitStatus };
+/**
+ * A task as the audit log describes it: `DaemonTaskInfo`'s lifecycle fields,
+ * with the free-form `summary` replaced by its byte count (the log never holds
+ * the text — issue #395) and the last Git observation.
+ */
+export type DerivedTaskInfo = Omit<DaemonTaskInfo, 'summary'> & { summaryBytes?: number; git?: TaskGitStatus };
 
 /**
  * Both stable-set filters below are projected from `daemon/git-workspace.ts`'s
@@ -33,7 +39,7 @@ function nonNegativeSafeInteger(value: number | undefined): number | undefined {
   return value !== undefined && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
-function deriveGitStatus(event: Extract<DaemonEvent, { kind: 'git-workspace' }>): TaskGitStatus {
+function deriveGitStatus(event: Extract<DaemonRecord, { kind: 'git-workspace' }>): TaskGitStatus {
   const dirty = event.dirty
     ? {
         staged: nonNegativeSafeInteger(event.dirty.staged),
@@ -60,19 +66,14 @@ function deriveGitStatus(event: Extract<DaemonEvent, { kind: 'git-workspace' }>)
 }
 
 /**
- * Reconstructs the same shape `DaemonObserver.tasks()` exposes to a LIVE
- * in-process daemon, but from a REPLAYED sequence of already-logged
- * `DaemonEvent`s instead — this is what lets a separate, short-lived
- * `byok-agent tasks`/`status` invocation show task state without attaching
- * to the `start` process that actually observed it (see `byok-agent.ts`'s
- * header comment). Deliberately a standalone reducer, not a call into
- * `DaemonObserver` itself: `DaemonObserver`'s own public methods
- * (`handleInboundEnvelope`/`handleOutboundEnvelope`) take a raw protocol
- * `Envelope`, not the already-normalized `DaemonEvent` this module receives
- * from the audit log — the two shapes don't line up, so this mirrors that
- * reducer's logic operating on `DaemonEvent.kind` directly instead.
+ * Reconstructs the shape `DaemonObserver.tasks()` exposes to a LIVE
+ * in-process daemon from the records a `byok-agent start` appended to the
+ * audit log — this is what lets a separate, short-lived `byok-agent
+ * tasks`/`status` invocation show task state without attaching to that
+ * process (see `byok-agent.ts`'s header comment). A standalone reducer over
+ * `DaemonRecord.kind`, mirroring the observer's own transitions.
  */
-export function deriveTasksFromEvents(events: readonly DaemonEvent[]): DerivedTaskInfo[] {
+export function deriveTasksFromRecords(records: readonly DaemonRecord[]): DerivedTaskInfo[] {
   const tasks = new Map<string, DerivedTaskInfo>();
 
   function upsert(
@@ -84,7 +85,7 @@ export function deriveTasksFromEvents(events: readonly DaemonEvent[]): DerivedTa
     tasks.set(taskId, { ...existing, ...patch, taskId, updatedAt: ts });
   }
 
-  for (const event of events) {
+  for (const event of records) {
     switch (event.kind) {
       case 'offered':
         upsert(event.taskId, event.ts, { state: 'Offered', runtime: event.runtime });
@@ -98,24 +99,24 @@ export function deriveTasksFromEvents(events: readonly DaemonEvent[]): DerivedTa
       case 'started':
         upsert(event.taskId, event.ts, { state: 'Running' });
         break;
-      case 'progress':
+      case 'turn':
         upsert(event.taskId, event.ts, { state: 'Running' });
         break;
       case 'awaiting-approval':
-        upsert(event.taskId, event.ts, { state: 'AwaitApproval', summary: event.summary });
+        upsert(event.taskId, event.ts, { state: 'AwaitApproval', summaryBytes: event.summaryBytes });
         break;
       case 'completed':
-        upsert(event.taskId, event.ts, { state: 'Complete', summary: event.summary, sessionRef: event.sessionRef });
+        upsert(event.taskId, event.ts, { state: 'Complete', summaryBytes: event.summaryBytes, sessionRef: event.sessionRef });
         break;
       case 'failed':
         upsert(event.taskId, event.ts, {
           state: 'Failed',
-          summary: event.reason,
+          summaryBytes: event.reasonBytes,
           ...(event.preClaim ? { declined: true } : {}),
         });
         break;
       case 'cancelled':
-        upsert(event.taskId, event.ts, { state: 'Cancelled', summary: event.reason });
+        upsert(event.taskId, event.ts, { state: 'Cancelled', summaryBytes: event.reasonBytes });
         break;
       case 'git-workspace': {
         const existing = tasks.get(event.taskId);
@@ -132,9 +133,8 @@ export function deriveTasksFromEvents(events: readonly DaemonEvent[]): DerivedTa
         break;
       }
       // 'artifact' carries no task-STATE transition of its own (observer.ts
-      // never calls its own upsertTask for it either); 'lifecycle'/
-      // 'paired'/'unpaired'/'runtimes-detected' are daemon-level, not
-      // per-task.
+      // never calls its own upsertTask for it either); the remaining kinds
+      // are daemon-level, not per-task.
       default:
         break;
     }
@@ -144,15 +144,15 @@ export function deriveTasksFromEvents(events: readonly DaemonEvent[]): DerivedTa
 }
 
 /**
- * Most recent `lifecycle` DaemonEvent, if the log has any — used by `status`,
+ * Most recent `lifecycle` record, if the log has any — used by `status`,
  * `doctor` and `service-status` to show the last-known lifecycle, including a
  * halt and its reason. Never a live/current guarantee: if `start` isn't
  * running right now, this is simply whatever it last reported before exiting
  * (or nothing, if it never ran at all) — see `byok-agent.ts`'s header comment.
  */
-export function lastLifecycle(events: readonly DaemonEvent[]): { lifecycle: DaemonLifecycle; ts: string } | undefined {
+export function lastLifecycle(records: readonly DaemonRecord[]): { lifecycle: DaemonLifecycle; ts: string } | undefined {
   let last: { lifecycle: DaemonLifecycle; ts: string } | undefined;
-  for (const event of events) {
+  for (const event of records) {
     if (event.kind === 'lifecycle') last = { lifecycle: event.lifecycle, ts: event.ts };
   }
   return last;
@@ -161,7 +161,7 @@ export function lastLifecycle(events: readonly DaemonEvent[]): { lifecycle: Daem
 export type TaskCounts = Record<TaskState, number> & { total: number };
 
 /** Zero-filled over every `TaskState` (via `TASK_STATES`, the single authority — not a hand-maintained list) so a state with zero current tasks still renders instead of being silently absent. */
-export function tallyTaskStates(tasks: readonly DaemonTaskInfo[]): TaskCounts {
+export function tallyTaskStates(tasks: readonly Pick<DaemonTaskInfo, 'state'>[]): TaskCounts {
   const counts = Object.fromEntries(TASK_STATES.map((state) => [state, 0])) as TaskCounts;
   counts.total = tasks.length;
   for (const task of tasks) counts[task.state] += 1;
