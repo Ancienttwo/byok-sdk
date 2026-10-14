@@ -184,6 +184,18 @@ describe('input-preparation support set: the official projection (A2\')', () => 
     expect(project([USER, local, USER]).slice(1)).toEqual([user, native, user]);
   });
 
+  it('refuses non-text host-canonical assistant content with host_assistant_not_text', () => {
+    const message = { ...HOST_CANONICAL, content: [{ type: 'text', text: 'hi' }] };
+    let caught: unknown;
+    try {
+      project([USER, message as unknown as InputPreparationMessageV1, USER]);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(PreparedRequestError);
+    expect((caught as PreparedRequestError).code).toBe('host_assistant_not_text');
+  });
+
   it('is exhaustive over the whole support set', () => {
     // Every member, driven through the projection; no supported member falls
     // through to the refusal branch.
