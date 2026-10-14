@@ -1316,7 +1316,10 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
    */
   async function assertLegacyAdmission(tenant: TenantId, deviceId: string): Promise<void> {
     const device = await options.cloud.devices.get(tenant, deviceId);
-    if (device?.capabilities?.includes(STRICT_AGENT_ONLY_CAPABILITY) === true) {
+    if (device === undefined || device.revoked) {
+      throw new ByokCloudError('device_not_found', `Device ${deviceId} is not registered in this tenant.`);
+    }
+    if (device.capabilities?.includes(STRICT_AGENT_ONLY_CAPABILITY) === true) {
       throw new ByokCloudError(
         'agent_capability_missing',
         `Device ${deviceId} advertises strict-agent-only; refusing legacy offer before mailbox append.`,

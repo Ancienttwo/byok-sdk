@@ -43,8 +43,8 @@ describe('public task handle event retention', () => {
     });
     const started = await startServer(byok);
     server = started.server;
-    await connectFakeDaemonLongPoll(started.baseUrl, byok, { productId: 'event-retention' });
-    const handle = await byok.dispatch({ instruction: 'retention fixture' });
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, byok, { productId: 'event-retention' });
+    const handle = await byok.dispatch({ deviceId: daemon.deviceId, instruction: 'retention fixture' });
     // Pairing/dispatch use real local HTTP. Only the subsequent host-side
     // cancellation and relay reclamation run under controlled timers.
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });

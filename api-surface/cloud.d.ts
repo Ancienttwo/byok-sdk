@@ -1748,6 +1748,8 @@ export declare const CLOUD_ERROR_CODES: {
     readonly activity_batch_too_large: 'activity_batch_too_large';
     /** Host control-plane task lookup is tenant-closed and found no task. */
     readonly task_not_found: 'task_not_found';
+    /** Explicit legacy dispatch target is unknown or revoked in this tenant. */
+    readonly device_not_found: 'device_not_found';
     /**
      * A host `approveTask`/`rejectTask` names a task with no approval to
      * resolve: the durable timeline holds no unresolved `approval_requested`

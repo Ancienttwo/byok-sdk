@@ -36,6 +36,25 @@ function sha256(data: Uint8Array): string {
   return `sha256:${createHash('sha256').update(data).digest('hex')}`;
 }
 
+describe('explicit legacy offer admission', () => {
+  it('refuses unknown, wrong-tenant and revoked devices without task or mailbox writes', async () => {
+    const h = createHarness();
+    const device = await h.pairDevice(TENANT_A);
+    for (const [tenant, deviceId, taskId] of [
+      [TENANT_A, 'dev_ghost', 'unknown'],
+      [TENANT_B, device.deviceId, 'wrong-tenant'],
+    ] as const) {
+      await expect(h.cloud.enqueueOffer(tenant, deviceId, { taskId, payload: offerPayload() })).rejects.toMatchObject({ code: 'device_not_found' });
+      expect(await h.cloud.readTaskAttempt(tenant, taskId)).toBeUndefined();
+      expect((await h.core.mailbox.readAfter(tenant, { deviceId, afterSeq: 0 })).messages).toEqual([]);
+    }
+    await h.cloud.revokeDevice(TENANT_A, device.deviceId);
+    await expect(h.cloud.enqueueOffer(TENANT_A, device.deviceId, { taskId: 'revoked', payload: offerPayload() })).rejects.toMatchObject({ code: 'device_not_found' });
+    expect(await h.cloud.readTaskAttempt(TENANT_A, 'revoked')).toBeUndefined();
+    expect((await h.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 })).messages).toEqual([]);
+  });
+});
+
 describe('POST /byok/messages', () => {
   it('counts accepted envelopes and omits `rejected` entirely when nothing was rejected', async () => {
     const harness = createHarness();

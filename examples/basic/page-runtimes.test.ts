@@ -149,11 +149,13 @@ describe('examples/basic page runtime list', () => {
     await page.settled();
     (page.document.getElementById('instruction') as unknown as InputEl).value = 'say hi';
     page.choose('claude');
+    const devices = page.document.getElementById('device') as unknown as SelectEl;
+    for (const option of [...devices.options]) option.selected = option.value === 'd1';
     const submit = () => (page.document.getElementById('task-form') as unknown as FormEl)
       .dispatchEvent(new page.window.Event('submit', { cancelable: true }));
     submit();
     await vi.waitFor(() => expect(page.requests.some((request) => request.url === '/api/tasks')).toBe(true));
-    expect(JSON.parse(page.requests.find((request) => request.url === '/api/tasks')!.body!)).toEqual({ instruction: 'say hi', runtime: 'claude' });
+    expect(JSON.parse(page.requests.find((request) => request.url === '/api/tasks')!.body!)).toEqual({ instruction: 'say hi', runtime: 'claude', deviceId: 'd1' });
 
     await page.refresh([device('d1', true, [])]);
     expect(page.options()).toEqual([{ value: '', text: 'no runtime reported' }]);
