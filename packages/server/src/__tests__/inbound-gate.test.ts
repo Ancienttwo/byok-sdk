@@ -79,7 +79,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       const started = await start();
       const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-      const handle = await started.byok.dispatch({ instruction: 'needs a human ok' });
+      const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
       const iter = handle.events()[Symbol.asyncIterator]();
       const offered = await iter.next();
       expect(offered.value).toMatchObject({ kind: 'state', state: 'Offered' });
@@ -146,7 +146,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       const started = await start();
       const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-      const handle = await started.byok.dispatch({ instruction: 'x' });
+      const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'x' });
       await claimAndStart(daemon, handle);
       await daemon.send(createEnvelope('task.await_approval', { summary: 'first' }, { taskId: handle.taskId }));
       await waitForTaskEvent(handle, (e) => e.kind === 'await_approval');
@@ -176,7 +176,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       const started = await start();
       const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-      const handle = await started.byok.dispatch({ instruction: 'x' });
+      const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'x' });
       await claimAndStart(daemon, handle);
       await daemon.send(createEnvelope('task.await_approval', { summary: 'first' }, { taskId: handle.taskId }));
       await waitForTaskEvent(handle, (e) => e.kind === 'await_approval');
@@ -271,7 +271,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       const started = await start();
       const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-      const handle = await started.byok.dispatch({ instruction: 'x' });
+      const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'x' });
       const claim = createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId });
       const forgedOffer = createEnvelope(
         'task.offer',
@@ -304,7 +304,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       });
 
       // task1: Running -> steer (non-exempt, non-terminal at send time) -> cancel (exempt, terminal at send time).
-      const handle1 = await started.byok.dispatch({ instruction: 'task one' });
+      const handle1 = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'task one' });
       await claimAndStart(daemon, handle1, 'pi', PI_RUNTIME_INFO.capabilities);
       await handle1.steer('keep going');
       await handle1.cancel('changed my mind');
@@ -316,7 +316,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       // approve's exemption would be moot (it's never sent on an
       // already-terminal task) while still confirming it doesn't survive the
       // filter once the task later goes terminal for an unrelated reason.
-      const handle2 = await started.byok.dispatch({ instruction: 'task two' });
+      const handle2 = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'task two' });
       await claimAndStart(daemon, handle2);
       await daemon.send(
         createEnvelope('task.await_approval', { summary: 'need ok', approvalId: 'appr-task2' }, { taskId: handle2.taskId }),
@@ -358,13 +358,13 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
         runtimes: [PI_RUNTIME_INFO],
       });
 
-      const handle1 = await started.byok.dispatch({ instruction: 'task one' });
+      const handle1 = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'task one' });
       await claimAndStart(daemon, handle1, 'pi', PI_RUNTIME_INFO.capabilities);
       await handle1.steer('keep going');
       await handle1.cancel('changed my mind');
       await handle1.result();
 
-      const handle2 = await started.byok.dispatch({ instruction: 'task two' });
+      const handle2 = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'task two' });
       await claimAndStart(daemon, handle2);
       await daemon.send(
         createEnvelope('task.await_approval', { summary: 'need ok', approvalId: 'appr-task2' }, { taskId: handle2.taskId }),

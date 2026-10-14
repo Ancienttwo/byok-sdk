@@ -14,7 +14,6 @@ import type {
   DispatchSelection,
   RuntimeCapabilities,
   RuntimeId,
-  RuntimeInfo,
   TaskApprovalResolvedPayload,
   TaskArtifactPayload,
   TaskState,
@@ -23,6 +22,7 @@ import type {
   AgentHomeAccess,
 } from '@byok-sdk/protocol';
 import type { InboundRefusalReason, TenantId, TokenSigner } from '@byok-sdk/cloud';
+import type { PresenceRuntimeFact } from '@byok-sdk/core';
 import type { RateLimiterOptions } from './rate-limiter';
 
 /** Mutually-exclusive storage authority for the embedded reference server. */
@@ -60,8 +60,7 @@ export interface CreateByokServerOptions {
    * (`conn.hello`, any accepted envelope, or the start of a `GET /byok/events`
    * poll) is at most this old. Default `longPollHoldMs + 15_000`. Must exceed
    * `longPollHoldMs`, because a held poll does not renew the lease; construction
-   * throws otherwise. Governs `MachineInfo.connected`, ambient device selection,
-   * the "not connected" dispatch gate and `HubStats.connectedDeviceCount`.
+   * throws otherwise. Presence is discovery only; dispatch never reads it.
    */
   presenceTtlMs?: number;
   /** Per-product blob size ceiling in bytes (§7). Default 100MB. */
@@ -158,7 +157,8 @@ export interface DispatchInput {
   dispatchSelection?: DispatchSelection;
   runtime?: RuntimeId;
   harnessId?: string;
-  deviceId?: string;
+  /** Explicit target; registered offline devices may receive queued work. */
+  deviceId: string;
   sessionRef?: string;
   /** Logical device-local MCP toolsets required for this task; never executable definitions. */
   requiredToolsets?: ToolsetId[];
@@ -312,25 +312,18 @@ export interface TaskHandle {
   result(): Promise<TaskResult>;
 }
 
-/** A device known to this server, joined from pairing identity + live connection state. */
+/** Durable device identity plus its optional, unexpired presence lease. */
 export interface MachineInfo {
   deviceId: string;
   deviceName: string;
-  /**
-   * Presence lease: `lastSeen` is at most `CreateByokServerOptions.presenceTtlMs`
-   * old (default `longPollHoldMs + 15s`). A device that stops polling reads
-   * `false` once the lease lapses; it is never cleared any other way except by
-   * revocation.
-   */
+  /** True exactly while the single TTL observation is unexpired; never an admission gate. */
   connected: boolean;
+  /** Most recent live observation. Omitted when the lease is absent or expired. */
   lastSeen?: string;
-  /** Process-immutable Local Agent release from the current/last `conn.hello`; omission means legacy/unknown. */
   clientVersion?: string;
-  /** Runtimes detected on this device, as reported in its last `conn.hello` (M1: typed, replaces the old untyped `agents`). */
-  runtimes?: RuntimeInfo[];
+  runtimes?: readonly PresenceRuntimeFact[];
   harnesses?: readonly HarnessInfo[];
-  /** Logical toolset IDs reported by the current daemon; omission means legacy/unknown. */
-  configuredToolsets?: ToolsetId[];
+  configuredToolsets?: readonly string[];
 }
 
 /**

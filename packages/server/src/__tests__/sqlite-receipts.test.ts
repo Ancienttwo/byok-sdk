@@ -148,6 +148,8 @@ describe('SQLite receipt recovery', () => {
     const { open } = fixture(); let runtime = open();
     const taskId = 'completed-task'; const input = { taskId, payload };
     try {
+      await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
+        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
       const first = await runtime.cloud.enqueueOffer(tenant, deviceId, input);
       expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.claim', { deviceId }, { taskId }))).toBe('accepted');
       expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.complete', { summary: 'first', sessionRef: 'session-first' }, { taskId }))).toBe('accepted');
@@ -234,6 +236,8 @@ describe('SQLite receipt recovery', () => {
     runtime = open();
     const input = { taskId: 'pre-append', payload };
     try {
+      await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
+        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
       await expect(runtime.cloud.enqueueOffer(tenant, deviceId, input)).rejects.toThrow('injected append failure');
       expect(await runtime.cloud.readTaskOffer(tenant, input.taskId)).toMatchObject({ delivered: false, payload });
       await runtime.stores.close();
@@ -253,6 +257,8 @@ describe('SQLite receipt recovery', () => {
     runtime = open();
     const input = { taskId: 'post-append', payload };
     try {
+      await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
+        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
       await expect(runtime.cloud.enqueueOffer(tenant, deviceId, input)).rejects.toThrow('injected delivered failure');
       const before = (await runtime.stores.core.mailbox.readAfter(tenant, { deviceId, afterSeq: 0 })).messages;
       expect(before).toHaveLength(1);
@@ -283,6 +289,8 @@ describe('SQLite receipt recovery', () => {
   it('keeps cancellation result authority after reopen', async () => {
     const { open } = fixture(); let runtime = open();
     try {
+      await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
+        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
       await runtime.cloud.enqueueOffer(tenant, deviceId, { taskId: 'cancelled-task', payload });
       await runtime.cloud.cancelTask(tenant, 'cancelled-task', 'host-cancel');
       const result = await runtime.cloud.readTaskResult(tenant, 'cancelled-task');
@@ -297,6 +305,8 @@ describe('SQLite receipt recovery', () => {
     const { open, path } = fixture(); let runtime = open();
     const taskId = 'offer-readback';
     try {
+      await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
+        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
       await runtime.stores.cloud.tasks.open(tenant, { taskId: 'unsubmitted', deviceId });
       expect(await runtime.cloud.readTaskOffer(tenant, 'unsubmitted')).toBeUndefined();
       const enqueued = await runtime.cloud.enqueueOffer(tenant, deviceId, { taskId, payload });

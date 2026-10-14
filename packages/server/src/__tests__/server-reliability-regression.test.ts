@@ -10,7 +10,6 @@ import {
 } from '@byok-sdk/cloud';
 import { createInMemoryCoreStores, tenantId, type Clock, type MailboxStore } from '@byok-sdk/core';
 import { createEnvelope } from '@byok-sdk/protocol';
-import { DeviceConnections } from '../connections';
 import { createByokServer, type ByokServer, type TaskHandle } from '../index';
 import { TaskEventRelay } from '../relay';
 import { createTaskHandle } from '../task-handle';
@@ -31,7 +30,7 @@ function fixedClock(): Clock {
   return { now: () => new Date('2026-09-05T00:00:00.000Z') };
 }
 
-function cloudWithFirstMailboxAppendFailure() {
+async function cloudWithFirstMailboxAppendFailure() {
   const clock = fixedClock();
   const crypto = createWebCrypto();
   const base = createInMemoryCoreStores({ clock }).stores;
@@ -45,6 +44,10 @@ function cloudWithFirstMailboxAppendFailure() {
     retentionPolicyId: 'test',
   });
   const composition = createInMemoryCloudStores(clock, crypto, base.objects, base.mailbox);
+  await composition.stores.devices.register(TENANT, {
+    productId: PRODUCT_ID, deviceId: 'device-a', deviceName: 'mailbox-retry-fixture',
+    devicePublicKey: 'fixture-key', proofKeyId: 'fixture-proof', proofKeyEpoch: 1,
+  });
   let fail = true;
   const mailbox: MailboxStore = {
     append: async (tenant, input) => {
@@ -96,7 +99,7 @@ describe('issues #141-#144 server reliability regressions', () => {
   }
 
   it('#141 reserves a legacy attempt before mailbox visibility and retries one stable offer only', async () => {
-    const { cloud, base } = cloudWithFirstMailboxAppendFailure();
+    const { cloud, base } = await cloudWithFirstMailboxAppendFailure();
     const taskId = 'task-legacy-retry';
     const input = { taskId, payload: { instruction: 'first body' } };
 
@@ -122,7 +125,7 @@ describe('issues #141-#144 server reliability regressions', () => {
   });
 
   it('#142 result() returns an already-durable terminal without waiting for a relay notification', async () => {
-    const relay = new TaskEventRelay({ connections: new DeviceConnections({ presenceTtlMs: 65_000 }) });
+    const relay = new TaskEventRelay({});
     const handle = createTaskHandle('task-terminal-before-handle', {
       tenant: TENANT,
       cloud: {} as ByokCloud,
@@ -141,7 +144,7 @@ describe('issues #141-#144 server reliability regressions', () => {
   });
 
   it('#142 buffers a terminal committed during provisional enqueue and replays it after offer activation', async () => {
-    const relay = new TaskEventRelay({ connections: new DeviceConnections({ presenceTtlMs: 65_000 }) });
+    const relay = new TaskEventRelay({});
     const taskId = 'task-provisional-terminal';
     relay.provision(taskId);
     relay.onInboundCommitted({
@@ -167,7 +170,7 @@ describe('issues #141-#144 server reliability regressions', () => {
 
   it('#143 retries the same host rejection payload and does not enqueue another executable control', async () => {
     const { byok: instance, daemon } = await start();
-    const handle = await instance.dispatch({ instruction: 'approval retry' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'approval retry' });
     await claimAndStart(instance, daemon, handle);
     await moveToAwaitApproval(instance, daemon, handle, { approvalId: 'approval-retry' });
 
@@ -184,7 +187,7 @@ describe('issues #141-#144 server reliability regressions', () => {
 
   it('#144 keeps host approval id-less when a pre-M5 request had no native approvalId', async () => {
     const { byok: instance, daemon } = await start();
-    const handle = await instance.dispatch({ instruction: 'id-less host approval' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'id-less host approval' });
     await claimAndStart(instance, daemon, handle);
     await moveToAwaitApproval(instance, daemon, handle);
 
@@ -197,7 +200,7 @@ describe('issues #141-#144 server reliability regressions', () => {
 
   it('#144 resolves an id-less pending approval only after a later committed activity', async () => {
     const { byok: instance, daemon } = await start();
-    const handle: TaskHandle = await instance.dispatch({ instruction: 'id-less approval' });
+    const handle: TaskHandle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'id-less approval' });
     await claimAndStart(instance, daemon, handle);
     await moveToAwaitApproval(instance, daemon, handle);
 

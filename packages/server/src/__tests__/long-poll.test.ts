@@ -43,12 +43,9 @@ describe('long-poll transport (§8)', () => {
     const { code } = await instance.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { deviceId, accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
-    // Start the poll before there's anything to deliver, then confirm the
-    // server has actually registered this device as long-polling (so
-    // dispatch() below is targeting a "connected" device) before triggering
-    // the event — avoids racing the HTTP request's own arrival. No
-    // `conn.hello` is published here on purpose: polling ALONE must establish
-    // presence.
+    // Start the poll before dispatch to exercise immediate delivery into a
+    // held read. Its TTL observation is the synchronization barrier only;
+    // dispatch does not gate on that observation.
     const pollPromise = fetch(`${started.baseUrl}/byok/events?cursor=0`, {
       headers: { authorization: `Bearer ${accessToken}` },
     });
@@ -125,7 +122,7 @@ describe('POST /byok/messages (§8, finding F6)', () => {
       announce: false,
     });
 
-    // A device only counts as "connected" (and thus dispatchable) once it has
+    // A device has an observed presence lease once it has
     // actually shown up — with no `conn.hello` published, a poll is the only
     // signal, so drive one (not awaited directly: with nothing yet to deliver
     // it would otherwise hold for the full hold duration).

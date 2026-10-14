@@ -45,6 +45,9 @@
     <textarea id="instruction" rows="3" required
       placeholder="Create a file named hello.txt containing 'hello from pi' in the workspace"></textarea>
     <p>
+      <label>Device
+        <select id="device" required></select>
+      </label>
       <label>Runtime
         <!-- Options are filled by renderRuntimeOptions() from the runtimes the
              connected machines report in /api/machines; nothing is hard-coded. -->
@@ -117,7 +120,7 @@
   // server's read-only machine view) has no `revoked` field of its own —
   // revocation (protocol §6.3) is server-side-only with no wire message, so
   // the only observable proof is the daemon's *next* challenge/token/WS
-  // attempt getting a 401 (visible as `connected` staying/going false, and
+  // attempt getting a 401 (visible as presence disappearing, and
   // in the daemon's own `byok-agent start` status log as `"revoked": true`).
   // This tag just marks "we asked the server to revoke this one."
   const revokedDevices = new Set();
@@ -177,6 +180,21 @@
   async function refreshMachines() {
     const machines = await (await fetch('/api/machines')).json();
     renderRuntimeOptions(machines);
+    const deviceSelect = $('device');
+    const selectedDeviceId = deviceSelect.value;
+    deviceSelect.innerHTML = '';
+    const chooseDevice = document.createElement('option');
+    chooseDevice.value = '';
+    chooseDevice.textContent = 'Choose a device';
+    chooseDevice.selected = !machines.some(machine => machine.deviceId === selectedDeviceId);
+    deviceSelect.appendChild(chooseDevice);
+    for (const machine of machines) {
+      const option = document.createElement('option');
+      option.value = machine.deviceId;
+      option.textContent = machine.deviceName;
+      option.selected = machine.deviceId === selectedDeviceId;
+      deviceSelect.appendChild(option);
+    }
     const list = $('machine-list');
     list.innerHTML = '';
     if (machines.length === 0) {
@@ -203,11 +221,7 @@
     try {
       await fetch(`/api/machines/${encodeURIComponent(deviceId)}/revoke`, { method: 'POST' });
       revokedDevices.add(deviceId);
-      // The daemon's live WS connection isn't force-dropped (protocol §6.3 —
-      // revocation only bites on the *next* auth-requiring call), so
-      // "connected" may still read true here; the revoked tag stays visible
-      // regardless, and connected will flip once that daemon reconnects or
-      // renews and gets its 401.
+      // Revoked devices disappear from the durable directory immediately.
       await refreshMachines();
     } finally {
       button.disabled = false;
@@ -297,7 +311,8 @@
     ev.preventDefault();
     const instruction = $('instruction').value.trim();
     const runtime = $('runtime').value;
-    if (!instruction || $('dispatch-btn').disabled) return;
+    const deviceId = $('device').value;
+    if (!instruction || !deviceId || $('dispatch-btn').disabled) return;
 
     $('feed').textContent = '';
     $('artifacts').innerHTML = '';
@@ -306,7 +321,7 @@
     const res = await fetch('/api/tasks', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(runtime ? { instruction, runtime } : { instruction }),
+      body: JSON.stringify(runtime ? { instruction, runtime, deviceId } : { instruction, deviceId }),
     });
     const body = await res.json();
     if (!res.ok) {

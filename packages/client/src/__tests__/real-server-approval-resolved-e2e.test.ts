@@ -81,7 +81,7 @@ describe('M4 (additive-minor) end-to-end: local CLI approve -> task.approval_res
       expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
     });
 
-    const handle = await real.byok.dispatch({
+    const handle = await real.byok.dispatch({ deviceId: record.deviceId,
       instruction: 'do a thing that needs approval',
     });
     const taskId = handle.taskId;

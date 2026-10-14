@@ -1,6 +1,6 @@
 import type { DeviceRecord, PendingApproval, TaskAttempt, TaskAttemptStatus, TaskOfferReadback, TerminalResult } from '@byok-sdk/cloud';
 import type { TaskState } from '@byok-sdk/protocol';
-import type { DeviceConnection } from './connections';
+import type { TenantReadinessPresence } from '@byok-sdk/core';
 import type { MachineInfo, TaskResult, TaskSnapshot } from './types';
 
 /**
@@ -107,29 +107,19 @@ export function toTaskSnapshot(
   };
 }
 
-/**
- * A device row joined with what this process observed of its connection.
- *
- * The identity half is durable and tenant-owned; the connection half is an
- * in-process observation that dies with the server — see `connections.ts` for
- * why `conn.hello`'s runtime discovery block is deliberately not persisted.
- * `connected` is passed in rather than derived here: presence is a lease judged
- * against a clock, and `DeviceConnections.isConnected` is its only rule.
- */
+/** Durable identity projected with the kernel's unexpired TTL observation. */
 export function toMachineInfo(
-  device: DeviceRecord,
-  connection: DeviceConnection | undefined,
-  connected: boolean,
+  device: Pick<DeviceRecord, 'deviceId' | 'deviceName' | 'harnesses'>,
+  presence: TenantReadinessPresence | undefined,
 ): MachineInfo {
   return {
     deviceId: device.deviceId,
     deviceName: device.deviceName,
-    connected,
-    lastSeen: connection?.lastSeen,
-    ...(connection?.clientVersion === undefined ? {} : { clientVersion: connection.clientVersion }),
+    connected: presence !== undefined,
+    lastSeen: presence?.observedAt,
+    ...(presence?.clientVersion === undefined ? {} : { clientVersion: presence.clientVersion }),
+    runtimes: presence?.runtimes,
     harnesses: device.harnesses,
-    runtimes: connection?.runtimes === undefined ? undefined : [...connection.runtimes],
-    configuredToolsets:
-      connection?.configuredToolsets === undefined ? undefined : [...connection.configuredToolsets],
+    configuredToolsets: presence?.configuredToolsets,
   };
 }
