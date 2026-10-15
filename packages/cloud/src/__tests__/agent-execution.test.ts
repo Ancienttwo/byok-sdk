@@ -87,6 +87,47 @@ describe('fresh Agent execution submission', () => {
     expect((await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 })).messages).toHaveLength(1);
   });
 
+  it('accepts a harnessId-only fresh payload without runtime', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await harness.stores.devices.recordCapabilities(TENANT_A, {
+      deviceId: device.deviceId,
+      capabilities: [
+        'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session',
+        'terminal-projection-selection', 'toolset-selection', 'custom-harness',
+      ],
+      harnesses: [{ id: 'acme-harness', version: '1.0.0', capabilities: { steer: true, resume: true, approvalInteractive: false } }],
+    });
+    const { messageEgress: _messageEgress, runtime: _runtime, ...payload } = input.payload;
+    const persisted = AgentExecutionInputSchema.parse({
+      taskId: input.taskId,
+      deviceId: device.deviceId,
+      payload: { ...payload, harnessId: 'acme-harness', requiredToolsets: ['example.tools'], terminalProjection: { mode: 'none' } },
+    });
+    expect(persisted.payload).not.toHaveProperty('runtime');
+    expect(persisted.payload.harnessId).toBe('acme-harness');
+    const offered = await harness.cloud.submitAgentExecution(TENANT_A, persisted);
+    expect(offered.envelope.payload).toMatchObject({ harnessId: 'acme-harness', requiredToolsets: ['example.tools'] });
+    expect(offered.envelope.payload).not.toHaveProperty('runtime');
+    expect(offered.envelope.payload).not.toHaveProperty('dispatchSelection');
+  });
+
+  it('rejects harnessId together with runtime or dispatchSelection', () => {
+    const { messageEgress: _messageEgress, runtime: _runtime, ...payload } = input.payload;
+    expect(AgentExecutionInputSchema.safeParse({
+      taskId: input.taskId, deviceId: 'device',
+      payload: { ...payload, runtime: 'codex', harnessId: 'acme-harness', terminalProjection: { mode: 'none' } },
+    }).success).toBe(false);
+    expect(AgentExecutionInputSchema.safeParse({
+      taskId: input.taskId, deviceId: 'device',
+      payload: {
+        ...payload, harnessId: 'acme-harness',
+        dispatchSelection: { lane: 'subscription', runtimeId: 'codex', providerId: null, modelId: 'gpt-5' },
+        terminalProjection: { mode: 'none' },
+      },
+    }).success).toBe(false);
+  });
+
   describe('selection admission', () => {
     const BASE_CAPABILITIES = [
       'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session', 'terminal-projection-selection',

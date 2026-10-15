@@ -42,6 +42,8 @@ export type WireAddition =
   | { readonly kind: 'http'; readonly rule: 'strip-safe'; readonly surface: HttpWireSurface; readonly field: string };
 
 const AGENT_OFFER_FIELDS = (surface: MessageType): readonly WireAddition[] => [
+  { kind: 'envelope', rule: 'gated', surface, field: 'dispatchSelection', capability: 'dispatch-selection', advertisedBy: 'device' },
+  { kind: 'envelope', rule: 'gated', surface, field: 'requiredToolsets', capability: 'toolset-selection', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface, field: 'terminalProjection', capability: 'terminal-projection-selection', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface, field: 'homeAccess', capability: 'agent-home-readers', advertisedBy: 'device' },
 ];
@@ -101,6 +103,12 @@ export const WIRE_ADDITIONS: readonly WireAddition[] = Object.freeze([
   // HTTP response metadata: old schemas retain the authoritative counts,
   // and strip only the optional capability advertisement.
   { kind: 'http', rule: 'strip-safe', surface: 'MessagesSendResponse', field: 'capabilities' },
+  // Per-envelope outcomes and the activity-ingress advertisement are
+  // observation only: `accepted`/`rejected` stay the acknowledgement authority,
+  // and the server enforces activity bounds per envelope itself.
+  { kind: 'http', rule: 'strip-safe', surface: 'MessagesSendResponse', field: 'outcomes' },
+  { kind: 'http', rule: 'strip-safe', surface: 'MessagesSendResponse', field: 'ingress' },
+  { kind: 'http', rule: 'strip-safe', surface: 'EventsPollResponse', field: 'ingress' },
 ] satisfies readonly WireAddition[]);
 
 /**

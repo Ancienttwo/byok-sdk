@@ -218,7 +218,14 @@ export declare function activityCursor(entries: readonly TimelineEvent[]): Activ
 export declare function activityTailKey(tenant: TenantId, taskId: string): string;
 // ==== @byok-sdk/cloud dist/agent-execution.d.ts ====
 import { z } from 'zod';
-/** Persist this validated input before dispatch; the Host owns Turn/generation and outbox. */
+/**
+ * Persist this validated input before dispatch; the Host owns Turn/generation and outbox.
+ *
+ * `terminalProjection` is always required (#470). Execution targets either a built-in
+ * `runtime` or a device-advertised `harnessId` (not both; harnessId also excludes
+ * `dispatchSelection`), so corpus hosted entries that carry only `harnessId` stay
+ * expressible through `submitAgentExecution`.
+ */
 export declare const AgentExecutionInputSchema: z.ZodObject<{
     taskId: z.ZodString;
     deviceId: z.ZodString;
@@ -238,11 +245,11 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
         }, z.core.$strict>;
         homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        runtime: z.ZodNonOptional<z.ZodOptional<z.ZodEnum<{
+        runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
             codex: "codex";
             pi: "pi";
-        }>>>;
+        }>>;
         harnessId: z.ZodOptional<z.ZodString>;
         dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
             lane: z.ZodLiteral<"subscription">;

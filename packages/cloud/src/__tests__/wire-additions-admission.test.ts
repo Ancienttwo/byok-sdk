@@ -102,9 +102,13 @@ describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
     expect(union(fresh.filter(submitExpressible))).toEqual(table);
     // The hosted entry requires an explicit terminal projection (#470), so the
     // fresh lines without one stay inexpressible rather than being reclassified.
+    // HarnessId-only lines (no runtime) with a projection are expressible.
     const withoutProjection = fresh.filter((entry) => entry.payload.terminalProjection === undefined);
     expect(withoutProjection.length).toBeGreaterThan(0);
     expect(withoutProjection.filter(submitExpressible)).toEqual([]);
+    const harnessOnly = fresh.filter((entry) => entry.payload.harnessId !== undefined && entry.payload.runtime === undefined);
+    expect(harnessOnly.length).toBeGreaterThan(0);
+    expect(harnessOnly.filter(submitExpressible)).toEqual(harnessOnly);
   });
 
   it.each(gatedLines.flatMap((entry) => entry.flags.map((flag) => [entry.line, entry.type, flag, entry] as const)))(
