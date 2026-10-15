@@ -65,7 +65,16 @@ async function fixture(serverUrl: string): Promise<{ home: string; storeDir: str
 function minimalEnv(home: string, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   // launchd also gives a user agent its per-user TMPDIR; keeping the suite's
   // short TMPDIR keeps socket paths short and avoids crawling a huge default one.
-  return { HOME: home, ZDOTDIR: home, PATH: '/usr/bin:/bin', ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}), ...extra };
+  // A Linux user session carries its D-Bus address; the Secret Service the
+  // device credential store uses is reachable only through it.
+  return {
+    HOME: home,
+    ZDOTDIR: home,
+    PATH: '/usr/bin:/bin',
+    ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}),
+    ...(process.env.DBUS_SESSION_BUS_ADDRESS ? { DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS } : {}),
+    ...extra,
+  };
 }
 
 interface ChildReport {
@@ -138,9 +147,10 @@ describe.runIf(supportedShell)('service login-shell environment, end to end (iss
     const { home, storeDir, configPath } = await fixture('http://127.0.0.1:9');
     // Unpaired, so start halts right after the capture; the CLI wiring is what is under test.
     const run = spawnSync(process.execPath, [path.resolve('dist/bin/byok-agent.js'), 'start', '--config', configPath, '--service'], {
-      // The test credential store makes the unpaired halt reachable on hosts
-      // without an OS credential provider (Linux CI), where start would
-      // otherwise crash on the missing provider first (#394 tells the two apart).
+      // The built CLI uses the real OS credential provider (#487): an empty
+      // one reads as unpaired. A host without one crashes on the missing
+      // provider first (#394 tells the two apart), so Linux CI runs this suite
+      // under an ephemeral Secret Service (scripts/ci/with-secret-service.sh).
       env: minimalEnv(home, { BYOK_TEST_ENV_MARKER: '1' }),
       encoding: 'utf8',
       timeout: 30_000,

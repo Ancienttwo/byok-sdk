@@ -117,8 +117,14 @@ jobs:
         id: tmpdir-snapshot
         run: node scripts/ci/check-tmpdir-leaks.mjs snapshot "$RUNNER_TEMP/tmpdir-before.txt"
 
+      # The dist CLI e2e uses the real device credential provider (#487).
+      - name: Install isolated credential-provider dependencies on Linux
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends dbus-x11 gnome-keyring libsecret-tools
+
       - name: Test
-        run: bun run test
+        run: bash scripts/ci/with-secret-service.sh bun run test
 
       - name: Check tests left no byok-* entries in TMPDIR
         if: ${{ always() && steps.tmpdir-snapshot.outcome == 'success' }}
