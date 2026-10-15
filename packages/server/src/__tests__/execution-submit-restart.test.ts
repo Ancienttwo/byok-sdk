@@ -4,18 +4,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { expect, it } from 'vitest';
-import { RecurringExecutionInputSchema } from '@byok-sdk/cloud';
+import { AgentExecutionInputSchema } from '@byok-sdk/cloud';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { createByokServer, createHmacTokenSigner } from '../index';
 import { connectFakeDaemonLongPoll, startServer, stopServer } from './test-support';
 
 it('recovers recurring admission and independent observations through a recreated SQLite facade', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'byok-recurring-restart-'));
+  const root = mkdtempSync(join(tmpdir(), 'byok-execution-submit-restart-'));
   const path = join(root, 'sdk.sqlite');
   const inputPath = join(root, 'host-input.json');
   let consumed = 0;
   const options = {
-    productId: 'recurring-restart', storage: { kind: 'sqlite' as const, path }, longPollHoldMs: 20,
+    productId: 'execution-submit-restart', storage: { kind: 'sqlite' as const, path }, longPollHoldMs: 20,
     tokenSigner: createHmacTokenSigner(randomBytes(32), { now: () => new Date() }),
     agentMessage: { consume: async () => { consumed++; return { outcome: 'accepted' as const }; } },
   };
@@ -30,7 +30,7 @@ it('recovers recurring admission and independent observations through a recreate
       'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-message-egress',
       'terminal-projection-selection', 'agent-egress-fresh-session',
     ] });
-    const input = RecurringExecutionInputSchema.parse({ taskId: 'persisted-execution', deviceId: device.deviceId,
+    const input = AgentExecutionInputSchema.parse({ taskId: 'persisted-execution', deviceId: device.deviceId,
       payload: { instruction: '历史与当前输入', runtime: 'codex',
         agentRef: { agentId: 'recurring-agent', profileRevision: '1' },
         egressPolicy: { policyRevision: '1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
@@ -46,16 +46,16 @@ it('recovers recurring admission and independent observations through a recreate
     fault.exec("CREATE TRIGGER fail_append BEFORE INSERT ON mailbox_message BEGIN SELECT RAISE(ABORT, 'restart append fault'); END;");
     fault.close();
     instance = createByokServer(options); http = await startServer(instance);
-    await expect(instance.recurring.submit(input)).rejects.toThrow('restart append fault');
+    await expect(instance.executions.submit(input)).rejects.toThrow('restart append fault');
     expect(await instance.tasks.attempt(input.taskId)).toBeDefined();
     expect(await instance.tasks.offer(input.taskId)).toMatchObject({ delivered: false });
     await stopServer(http.server); await instance.close();
     const repair = new DatabaseSync(path); repair.exec('DROP TRIGGER fail_append'); repair.close();
     instance = createByokServer(options); http = await startServer(instance);
-    const restored = RecurringExecutionInputSchema.parse(JSON.parse(readFileSync(inputPath, 'utf8')));
-    await instance.recurring.submit(restored);
+    const restored = AgentExecutionInputSchema.parse(JSON.parse(readFileSync(inputPath, 'utf8')));
+    await instance.executions.submit(restored);
     expect(await instance.tasks.offer(restored.taskId)).toMatchObject({ delivered: true, payload: restored.payload });
-    await expect(instance.recurring.submit(restored)).rejects.toThrow();
+    await expect(instance.executions.submit(restored)).rejects.toMatchObject({ code: 'agent_task_already_exists' });
     const message = createEnvelope('agent.message.publish', {
       agentRef: restored.payload.agentRef, sessionRef: 'native-session', contract: 'conversation-turn/v1',
       messageId: '10000000-0000-4000-8000-000000000099', cursor: 1, contentType: 'text/markdown', body: 'hello', byteCount: 5,

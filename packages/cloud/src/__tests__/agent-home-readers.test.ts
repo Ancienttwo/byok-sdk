@@ -25,6 +25,7 @@ const BASE_CAPABILITIES = [
   'agent-egress-policy',
   'agent-egress-reliable-ack',
   'agent-egress-fresh-session',
+  'terminal-projection-selection',
 ];
 
 type ReaderOffer = (harness: CloudHarness, deviceId: string, taskId: string) => Promise<unknown>;
@@ -40,9 +41,9 @@ const readerOffers: ReadonlyArray<readonly [string, ReaderOffer]> = [
       instruction: 'read memory', agentRef: AGENT_REF, sessionRef: 'reader-session', egressPolicy: POLICY, homeAccess: 'memory-reader',
     },
   })],
-  ['enqueueFreshAgentEgressOffer', (harness, deviceId, taskId) => harness.cloud.enqueueFreshAgentEgressOffer(TENANT_A, deviceId, {
+  ['submitAgentExecution', (harness, deviceId, taskId) => harness.cloud.submitAgentExecution(TENANT_A, { deviceId: deviceId,
     taskId,
-    payload: { instruction: 'read memory', agentRef: AGENT_REF, egressPolicy: POLICY, homeAccess: 'memory-reader' },
+    payload: { instruction: 'read memory', runtime: 'codex', terminalProjection: { mode: 'none' }, agentRef: AGENT_REF, egressPolicy: POLICY, homeAccess: 'memory-reader' },
   })],
 ];
 
