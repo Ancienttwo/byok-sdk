@@ -1,3 +1,4 @@
+import { preparedResultProjection } from './prepared-agent-result';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import { observePreparedMemory, preparedMemoryProjection, type PreparedAgentMemoryHelper, type PreparedAgentMemoryState } from './prepared-agent-memory';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
@@ -120,6 +121,7 @@ export interface PreparedToolSurfaceAssembler {
 }
 
 export interface PreparedToolSurfaceInput {
+  readonly terminalProjection?: import('@byok-sdk/protocol').TerminalProjectionSelection;
   readonly agentMemory: PreparedAgentMemoryMode;
   readonly requiredToolsets: readonly string[];
   /** The resolved native runtime identity string every fingerprint binds. */
@@ -306,6 +308,7 @@ export async function assemblePreparedToolSurface(
   }
   const fingerprinted = await fingerprintPreparedToolSurface({
     agentMemory: input.agentMemory, memory,
+    terminalProjection: input.terminalProjection,
     observation,
     runtimeIdentity: input.runtimeIdentity,
     toolsetDefinitionRevisions: binding.toolsetDefinitionRevisions,
@@ -332,6 +335,7 @@ export async function assemblePreparedToolSurface(
 
 /** Everything the fingerprint binds, for one already-probed observation. */
 export interface PreparedToolSurfaceFingerprintInput {
+  readonly terminalProjection?: import('@byok-sdk/protocol').TerminalProjectionSelection;
   readonly agentMemory: PreparedAgentMemoryMode;
   readonly memory: PreparedAgentMemoryState | null;
   /** The live `tools/list` answer for exactly the projected servers. */
@@ -418,7 +422,12 @@ export async function fingerprintPreparedToolSurface(
     if (tools.some(existing => existing.name === tool.name)) return refuse('unsupported_input', 'tool_name_collision', 'memory tool name collision');
     tools.push(tool);
   }
-  toolExecutors = Object.freeze({...toolExecutors, ...memoryProjection.toolExecutors});
+  const resultProjection = preparedResultProjection(input.terminalProjection, input.runtimeIdentity);
+  for (const tool of resultProjection.tools) {
+    if (tools.some(existing => existing.name === tool.name)) return refuse('unsupported_input', 'tool_name_collision', 'result tool name collision');
+    tools.push(tool);
+  }
+  toolExecutors = Object.freeze({...toolExecutors, ...memoryProjection.toolExecutors, ...resultProjection.toolExecutors});
   const observationDigest = preparedToolSurfaceObservationDigest({
     agentMemory: input.agentMemory, memory: input.memory,
     runtimeIdentity: input.runtimeIdentity,

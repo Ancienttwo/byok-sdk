@@ -7,6 +7,7 @@ export const AGENT_TEAM_MCP_SERVER_NAME = 'byokagentteam';
 export const AGENT_RESULT_MCP_SERVER_NAME = 'byokagentresult';
 /** Its one tool; the `inputSchema` it advertises is the offer's frozen result schema. */
 export const AGENT_RESULT_TOOL_NAME = 'submit_result';
+export const AGENT_RESULT_TOOL_DESCRIPTION = 'Submit the structured outcome required by this execution. A staged receipt confirms durable storage, not execution success.';
 
 /**
  * Every MCP server name the SDK owns. A server under one of these names is

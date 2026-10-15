@@ -27,7 +27,7 @@ import {
   type RuntimePreparedLaunchV1,
   type Session,
 } from '../../types';
-import { AGENT_MEMORY_MCP_SERVER_NAME, isReservedMcpServerName } from '../../sdk-reserved-mcp';
+import { AGENT_MEMORY_MCP_SERVER_NAME, AGENT_RESULT_MCP_SERVER_NAME, isReservedMcpServerName } from '../../sdk-reserved-mcp';
 import { McpAuthorityError } from '../../mcp/authority-error';
 import { projectMcpTools, qualifiedMcpToolName } from '../../mcp/projection';
 import {
@@ -647,12 +647,14 @@ interface PreparedPiLaunchInput {
  * descriptor lives on the prepared-memory branch; it cannot acquire a
  * synthetic Host toolset identity by entering the pool map.
  */
-function splitPreparedMemoryServer(
+function splitPreparedSdkServers(
   servers: Readonly<Record<string, McpStdioServerConfig>> | undefined,
   mode: RuntimePreparedLaunchV1['agentMemory'],
+  terminalProjection: RuntimePreparedLaunchV1['terminalProjection'],
 ): {
   readonly hostServers: Readonly<Record<string, McpStdioServerConfig>>;
   readonly memoryCall: McpStdioServerConfig | null;
+  readonly resultCall: McpStdioServerConfig | null;
 } {
   const memoryCall = servers?.[AGENT_MEMORY_MCP_SERVER_NAME] ?? null;
   if (mode === 'none') {
@@ -660,11 +662,15 @@ function splitPreparedMemoryServer(
   } else if (memoryCall === null) {
     throw authorityFailure('prepared pi operation received no task-bound Agent memory helper for its sealed memory selection');
   }
+  const resultCall = servers?.[AGENT_RESULT_MCP_SERVER_NAME] ?? null;
+  if (terminalProjection?.mode === 'result-document' ? resultCall === null : resultCall !== null) {
+    throw authorityFailure('prepared pi result helper does not agree with its frozen result selection');
+  }
   const hostServers: Record<string, McpStdioServerConfig> = {};
   for (const [name, server] of Object.entries(servers ?? {})) {
-    if (name !== AGENT_MEMORY_MCP_SERVER_NAME) hostServers[name] = server;
+    if (name !== AGENT_MEMORY_MCP_SERVER_NAME && name !== AGENT_RESULT_MCP_SERVER_NAME) hostServers[name] = server;
   }
-  return Object.freeze({ hostServers: Object.freeze(hostServers), memoryCall });
+  return Object.freeze({ hostServers: Object.freeze(hostServers), memoryCall, resultCall });
 }
 
 function authorityFailure(reason: string, cause?: unknown): RuntimeExecutionFailure {
@@ -750,7 +756,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
   if (input.manifest.agentMemory !== preparation.agentMemory) {
     throw authorityFailure('prepared pi operation received a manifest whose Agent memory selection differs from its sealed preparation');
   }
-  const memoryServer = splitPreparedMemoryServer(input.mcpServers, preparation.agentMemory);
+  const memoryServer = splitPreparedSdkServers(input.mcpServers, preparation.agentMemory, preparation.terminalProjection);
 
   // The launch resources and the pinned selection must agree about where this
   // operation's credential comes from. `resolvePiRuntimeLaunch` derives
@@ -779,7 +785,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
     configPath = path.join(configDir, 'prepared-launch.json');
     const serialized = serializePiHostConfig({
         format: 'byok.pi.prepared-launch',
-        version: 5,
+        version: 6,
         // The host's single branch switch. It is not a second opinion about
         // the launch: it is `resolvePiRuntimeLaunch`'s own decision carried to
         // the process that must act on it, and it travels inside the
@@ -794,6 +800,8 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
         agentMemory: preparation.agentMemory,
         memory: preparation.memory,
         memoryCall: memoryServer.memoryCall,
+        terminalProjection: preparation.terminalProjection ?? null,
+        resultCall: memoryServer.resultCall,
         // The SAME task-scoped MCP shape the ordinary extension reads, written
         // by the same adapter from the same resources. The prepared host parses
         // it with the same parser and reaches the servers through the same pool.

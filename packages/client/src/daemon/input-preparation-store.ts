@@ -106,11 +106,15 @@ import {
  * implementation kinds, and the digests carry no identity. A version-9 record
  * digests fields this build no longer has; retire it the same way.
  *
+ * 11 binds the optional frozen result selection in the request/receipt and
+ * counts submit_result in the model-visible manifest. Version-10 records
+ * cannot acquire this tool after counting; drain and recreate them with v3.
+ *
  * A record at any other version is refused — see
  * {@link InputPreparationUnsupportedRecordVersionError}. There is no
  * compatibility read.
  */
-export const INPUT_PREPARATION_RECORD_VERSION = 10;
+export const INPUT_PREPARATION_RECORD_VERSION = 11;
 
 /** The durable idempotency key. Never a task id, and never caller-asserted: `scopeId` comes from the trusted authority grant. */
 export interface InputPreparationRecordKey {

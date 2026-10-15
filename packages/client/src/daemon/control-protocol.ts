@@ -1,4 +1,4 @@
-import { PreparedAgentMemoryModeSchema } from '@byok-sdk/protocol';
+import { PreparedAgentMemoryModeSchema, TerminalProjectionSelectionSchema } from '@byok-sdk/protocol';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import type { TaskState } from '@byok-sdk/protocol';
@@ -1320,6 +1320,7 @@ export function parseInputPreparationRequestParams(value: unknown): InputPrepara
       'requiredToolsets',
       'snapshot',
       'accountingPolicyRef',
+      'terminalProjection',
     ])
   ) {
     return badRequest('the params carry a field this request shape does not define');
@@ -1353,6 +1354,8 @@ export function parseInputPreparationRequestParams(value: unknown): InputPrepara
   if (!requiredToolsets) {
     return badRequest('requiredToolsets must be an array of distinct configured toolset ids');
   }
+  const terminalProjection = value.terminalProjection === undefined ? undefined : TerminalProjectionSelectionSchema.safeParse(value.terminalProjection);
+  if (terminalProjection !== undefined && !terminalProjection.success) return badRequest('terminalProjection is outside the result-document contract');
   const snapshot = parseSnapshot(value.snapshot);
   if (!snapshot) return badRequest('snapshot must be exactly {prompt, messages}');
   let accountingPolicyRef: InputPreparationAccountingPolicyRefV1 | undefined;
@@ -1377,6 +1380,7 @@ export function parseInputPreparationRequestParams(value: unknown): InputPrepara
       agentMemory: memory.data,
       requiredToolsets: Object.freeze(requiredToolsets),
       snapshot,
+      ...(terminalProjection?.success === true ? { terminalProjection: terminalProjection.data } : {}),
       ...(accountingPolicyRef === undefined ? {} : { accountingPolicyRef }),
     },
   };

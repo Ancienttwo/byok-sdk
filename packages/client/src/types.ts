@@ -376,6 +376,7 @@ export interface RuntimePreparedLaunchExpectationV1 {
  * separate instruction would have two answers to what it is about to send.
  */
 export interface RuntimePreparedLaunchV1 {
+  readonly terminalProjection?: import('@byok-sdk/protocol').TerminalProjectionSelection;
   readonly agentMemory: PreparedAgentMemoryMode;
   readonly memory: PreparedAgentMemoryState | null;
   readonly reference: RuntimePreparedLaunchReferenceV1;

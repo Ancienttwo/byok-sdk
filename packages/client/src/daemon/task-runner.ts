@@ -123,6 +123,7 @@ import {
   AGENT_MESSAGE_MCP_SERVER_NAME,
   AGENT_RESULT_MCP_SERVER_NAME,
   AGENT_RESULT_TOOL_NAME,
+  AGENT_RESULT_TOOL_DESCRIPTION,
 } from '../sdk-reserved-mcp';
 import { AgentResultStore, type AgentResultRecord } from './agent-result-store';
 import {
@@ -1642,10 +1643,7 @@ export class TaskRunner {
     }
     return {
       name: AGENT_RESULT_TOOL_NAME,
-      description: `Submit this task's one structured result (contract ${context.contract}) as the arguments of this call; they must satisfy the input schema. `
-        + 'A successful call returns a receipt: the result is staged and is delivered when your turn ends. '
-        + 'A rejected call stores nothing and lists the problems; correct the arguments and call again. '
-        + 'Once staged, the result is immutable: a different result for the same task is refused.',
+      description: AGENT_RESULT_TOOL_DESCRIPTION,
       inputSchema: context.schema as Record<string, unknown>,
     };
   }
@@ -2212,10 +2210,6 @@ export class TaskRunner {
         decline('offer requires a result document but this daemon has no durable terminal journal', false);
         return;
       }
-      if (preparation !== undefined) {
-        decline('offer requires a result document but the prepared lane does not host the submit_result channel', false);
-        return;
-      }
       if (agentRef === undefined || this.deps.tenantId === undefined || this.deps.agentResultMcpBin === undefined) {
         decline('offer requires a result document but this daemon cannot host the submit_result channel: it needs an Agent offer, an enrolled tenant and the SDK result helper', false);
         return;
@@ -2587,6 +2581,7 @@ export class TaskRunner {
         }
         const admitted = await admitPreparedOffer({
           offeredAgentMemory: agentMemory, memory,
+          terminalProjection,
           record,
           artifactPath: lane.store.artifactPathOf(record),
           offered: preparation,
@@ -3431,8 +3426,8 @@ export class TaskRunner {
       : undefined;
     if (preparation === undefined) {
       taskMcpServers = this.withAgentMessageMcp(taskMcpServers, taskId, messageRequirement);
-      taskMcpServers = this.withAgentResultMcp(taskMcpServers, taskId, terminalProjection);
     }
+    taskMcpServers = this.withAgentResultMcp(taskMcpServers, taskId, terminalProjection);
     // Only the adapters that register projected toolset tools themselves
     // need the daemon's `tools/list` observation (see
     // `RuntimeAdapterDescriptor.requiresMcpToolsetToolObservation`). An

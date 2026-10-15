@@ -20,7 +20,7 @@ import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import {
   PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX,
   PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX,
-  RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX,
+  RESULT_NOT_SUBMITTED_REASON_PREFIX,
   TaskRunner,
   type TaskRunnerDeps,
 } from '../daemon/task-runner';
@@ -95,6 +95,10 @@ const unusedBlobClient: BlobResolver = {
 };
 
 const AGENT_REF = { agentId: 'agent-prepared-1', profileRevision: 'profile-rev-1' } as const;
+const SUMMARY_SELECTION = { mode: 'result-document' as const, contract: 'test.internal-summary.v1', schema: {
+  type: 'object' as const, additionalProperties: false as const, required: ['schemaVersion', 'text'],
+  properties: { schemaVersion: { const: 'test.internal-summary.v1' }, text: { type: 'string' as const } },
+} };
 const DEVICE_ID = 'device-prepared-1';
 const SCOPE_ID = 'scope-prepared-1';
 const REQUEST_ID = 'prep-request-1';
@@ -365,6 +369,8 @@ async function makeRunner(built: Lane, adapter: StubRuntimeAdapter, sent: Envelo
     approvalRegistry: new ApprovalRegistry(),
     storeDir,
     productId: 'prepared-offer-lane',
+    tenantId: 'tenant-prepared', terminalJournal: true,
+    agentResultMcpBin: { command: process.execPath, args: ['result-helper'] },
     agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
     agentHome: new AgentHomeManager({ hostStorageRoot: await tempDir('byok-prepared-home-') }),
     agentSessionHandoffs: new AgentSessionHandoffStore(),
@@ -476,14 +482,14 @@ async function toollessRecord(options: {
   });
   await store.open();
   const fingerprinted = await fingerprintPreparedToolSurface({
-    agentMemory: 'none', memory: null, observation: {},
+    agentMemory: 'none', memory: null, observation: {}, terminalProjection: SUMMARY_SELECTION,
     runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME),
     toolsetDefinitionRevisions: {},
   });
   if (!fingerprinted.ok) throw new Error(fingerprinted.message);
   const reserved = await store.reserve({
     key: { scopeId: SCOPE_ID, agentRef: AGENT_REF.agentId, requestId: 'toolless-request' },
-    requestDigest: REQUEST_DIGEST, binding: binding(), model: MODEL, maxInFlight: 8,
+    requestDigest: REQUEST_DIGEST, binding: binding({ terminalProjection: SUMMARY_SELECTION }), model: MODEL, maxInFlight: 8,
   });
   if (reserved.kind !== 'created') throw new Error('toolless record was not created');
   const summary: InputPreparationArtifactSummaryV1 = {
@@ -528,14 +534,13 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
     await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-unrelated-registry-toolset', seq: 2 }));
   });
 
-  it('runs a tool-less result-document offer with no requiredToolsets and no message egress to a document terminal', async () => {
+  it('runs a single-tool result-document offer with no requiredToolsets and no message egress to a document terminal', async () => {
     const record = await toollessRecord();
     const support = await lane();
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
     const sent: Envelope[] = [];
-    const selector = { mode: 'result-document' as const, contract: 'test.internal-summary.v1' };
+    const selector = SUMMARY_SELECTION;
     const document = { schemaVersion: 'test.internal-summary.v1', text: 'Frozen input summary.' };
-    const extracts: unknown[] = [];
     const order: string[] = [];
     const runner = await makeRunner(support, adapter, sent, {
       send: (envelope) => {
@@ -545,11 +550,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
       beforeClaim: async () => {
         order.push(record.store.get(record.recordId)?.pin === undefined ? 'unpinned-at-claim' : 'pin');
       },
-      getServerCapabilities: () => ['result-document'],
-      resultDocument: { extract: (output, task) => {
-        extracts.push(task.terminalProjection);
-        return JSON.parse(output);
-      } },
+      getServerCapabilities: () => [],
       inputPreparationLane: {
         store: record.store,
         authorizeAgentMemory: async () => {},
@@ -576,14 +577,16 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
     expect(adapter.startCalls).toHaveLength(0);
     expect(adapter.preparedStartCalls).toHaveLength(1);
     const start = adapter.preparedStartCalls[0]!;
-    // Zero tools: no MCP server map, no Agent memory server, no toolset tool list.
-    expect(Object.keys(start.input.mcpServers ?? {})).toEqual([]);
+    // Exactly one SDK result tool; no Host MCP or Agent memory tools.
+    expect(Object.keys(start.input.mcpServers ?? {})).toEqual(['byokagentresult']);
+    expect(record.store.get(record.recordId)?.artifact?.toolNames).toEqual(['submit_result']);
     expect(start.input.mcpToolsetTools).toBeUndefined();
     expect(start.preparation.agentMemory).toBe('none');
     expect(start.preparation.toolsetDefinitionRevisions).toEqual({});
 
     const session = adapter.sessions[0]!;
-    session.emit({ type: 'progress', text: JSON.stringify(document) });
+    const staged = await runner.submitAgentResult({ contextToken: start.input.mcpServers!.byokagentresult!.env!.BYOK_AGENT_RESULT_CONTEXT!, outcome: document });
+    expect(staged.state).toBe('staged');
     session.emit({ type: 'usage', inputTokens: 1_000, outputTokens: 10 });
     session.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(true));
@@ -591,7 +594,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
     const completed = sent.find((envelope) => envelope.type === 'task.complete');
     if (completed?.type !== 'task.complete') throw new Error('no task.complete');
     expect(completed.payload.document).toEqual(document);
-    expect(extracts).toEqual([selector]);
+    expect(start.preparation.terminalProjection).toEqual(selector);
     // No message egress: nothing was published on the Agent message lane.
     expect(sent.some((envelope) => envelope.type === 'agent.message.publish')).toBe(false);
     await vi.waitFor(() => expect(record.store.get(record.recordId)?.pin).toBeUndefined());
@@ -1831,7 +1834,7 @@ describe('prepared daemon-authored message egress', () => {
 
 describe('a tool-less prepared record (requiredToolsets [], agentMemory none, the offer omits requiredToolsets)', () => {
   const ALL_MODES: RuntimeCapabilities = { ...MCP_CAPABLE };
-  const selector = { mode: 'result-document' as const, contract: 'test.internal-summary.v1' };
+  const selector = SUMMARY_SELECTION;
   const document = { schemaVersion: 'test.internal-summary.v1', text: 'Frozen input summary.' };
 
   function toollessLane(
@@ -1882,8 +1885,7 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
     const sent: Envelope[] = [];
     const pin = vi.spyOn(record.store, 'pin');
     const runner = await makeRunner(support, adapter, sent, {
-      getServerCapabilities: () => ['result-document'],
-      resultDocument: { extract: (output) => JSON.parse(output) },
+      getServerCapabilities: () => [],
       inputPreparationLane: toollessLane(record, options.revisions),
       ...options.extra,
     });
@@ -1898,7 +1900,7 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
       }),
       runtimeEnv: () => ({ PATH: process.env.PATH ?? '' }),
     }).assemble({
-      agentMemory: 'none', requiredToolsets: [],
+      agentMemory: 'none', requiredToolsets: [], terminalProjection: SUMMARY_SELECTION,
       runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME),
     });
     if (!counted.ok) throw new Error(`${counted.code}: ${counted.detail}`);
@@ -1909,7 +1911,7 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
       record: stored, artifactPath: record.store.artifactPathOf(stored),
       offered: { reference: record.recordId, requestDigest: REQUEST_DIGEST, artifactDigest: ENVELOPE_DIGEST },
       agentRef: AGENT_REF, deviceId: DEVICE_ID, policyRevision: POLICY_REVISION, runtime: RUNTIME,
-      offeredAgentMemory: 'none', memory: null,
+      offeredAgentMemory: 'none', memory: null, terminalProjection: SUMMARY_SELECTION,
       observation: {}, servers: [], toolsetDefinitionRevisions: {}, nowMs: Date.now(),
     });
     if (!admitted.ok) throw new Error(`${admitted.reason}: ${admitted.detail}`);
@@ -1940,7 +1942,7 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
   it('declines a tool-bearing record for a tool-less offer (preparation_tool_set_mismatch), before any pin', async () => {
     const built = await lane();
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, ALL_MODES);
-    const { sent, pin } = await run(built, (id) => toollessOffer(id, 'task-toolbearing-for-toolless'), { adapter, support: built });
+    const { sent, pin } = await run(built, (id) => toollessOffer(id, 'task-toolbearing-for-toolless', { terminalProjection: undefined }), { adapter, support: built });
     expect(declineReason(sent)).toContain('preparation_tool_set_mismatch');
     expectNothingCommitted(sent, adapter, built);
     expect(pin).not.toHaveBeenCalled();
@@ -1981,34 +1983,39 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
     expect(parsed.success).toBe(false);
   });
 
-  it('declines an offer that selects a result document when the daemon has no extractor', async () => {
+  it('declines an offer that selects a result document when the daemon has no durable terminal journal', async () => {
     const record = await toollessRecord();
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, ALL_MODES);
-    const { sent, pin } = await run(record, (id) => toollessOffer(id, 'task-toolless-no-extractor'), { adapter, extra: { resultDocument: undefined } });
-    expect(declineReason(sent)).toContain('resultDocument extractor');
+    const { sent, pin } = await run(record, (id) => toollessOffer(id, 'task-toolless-no-extractor'), { adapter, extra: { terminalJournal: false } });
+    expect(declineReason(sent)).toContain('no durable terminal journal');
     expectNothingCommitted(sent, adapter, record);
     expect(pin).not.toHaveBeenCalled();
   });
 
-  it('fails the task, never completing with a silent gap, when the server lacks result-document or the extractor yields none', async () => {
-    for (const [name, extra] of [
-      ['capability', { getServerCapabilities: () => [] as string[] }],
-      ['undefined-document', { resultDocument: { extract: () => undefined } }],
-    ] as const) {
-      const record = await toollessRecord();
-      const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, ALL_MODES);
-      const { sent } = await run(record, (id) => toollessOffer(id, `task-toolless-${name}`), { adapter, extra });
-      expect(sent.some((envelope) => envelope.type === 'task.decline')).toBe(false);
-      const session = adapter.sessions[0]!;
-      session.emit({ type: 'progress', text: JSON.stringify(document) });
-      session.emit({ type: 'usage', inputTokens: 1_000, outputTokens: 10 });
-      session.emit({ type: 'turn_end' });
-      await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.fail' || envelope.type === 'task.complete')).toBe(true));
-      const failed = sent.find((envelope) => envelope.type === 'task.fail');
-      if (failed?.type !== 'task.fail') throw new Error(`${name}: expected task.fail`);
-      expect(failed.payload.reason.startsWith(RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX)).toBe(true);
-      expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(false);
-    }
+  it('fails without a submitted outcome even on a v3 server with no result-document capability flag', async () => {
+    const record = await toollessRecord();
+    const { sent, adapter } = await run(record, id => toollessOffer(id, 'task-no-submission'));
+    expect(sent.some(envelope => envelope.type === 'task.decline')).toBe(false);
+    const session = adapter.sessions[0]!;
+    session.emit({ type: 'progress', text: JSON.stringify(document) });
+    session.emit({ type: 'usage', inputTokens: 1_000, outputTokens: 10 });
+    session.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(sent.some(envelope => envelope.type === 'task.fail')).toBe(true));
+    const failed = sent.find(envelope => envelope.type === 'task.fail');
+    if (failed?.type !== 'task.fail') throw new Error('expected task.fail');
+    expect(failed.payload.reason.startsWith(RESULT_NOT_SUBMITTED_REASON_PREFIX)).toBe(true);
+    expect(failed.payload.retryable).toBe(false);
+    expect(sent.some(envelope => envelope.type === 'task.complete')).toBe(false);
+  });
+
+  it('declines a different frozen result schema before pin, claim or launch', async () => {
+    const record = await toollessRecord();
+    const { sent, adapter, pin } = await run(record, id => toollessOffer(id, 'task-schema-drift', {
+      terminalProjection: { ...selector, schema: { ...selector.schema, required: ['schemaVersion'] } },
+    }));
+    expect(declineReason(sent)).toContain('preparation_result_schema_mismatch');
+    expectNothingCommitted(sent, adapter, record);
+    expect(pin).not.toHaveBeenCalled();
   });
 
   it('fails usage_unavailable and completes nothing when no usage was observed before turn_end', async () => {

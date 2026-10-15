@@ -45,7 +45,7 @@ import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
 
 import { createHash } from 'node:crypto';
 import { INPUT_PREPARATION_WIRE_VERSION } from '@byok-sdk/protocol/constants';
-import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
+import type { PreparedAgentMemoryMode, TerminalProjectionSelection } from '@byok-sdk/protocol';
 
 // ---------------------------------------------------------------------------
 // Format identifiers
@@ -496,6 +496,8 @@ export interface InputPreparationCompiledSnapshotV1 extends Omit<InputPreparatio
  * daemon's own configured policy, never from caller text.
  */
 export interface InputPreparationRequestV1 {
+  /** Frozen result selection; its tool schema participates in the counted manifest. */
+  readonly terminalProjection?: TerminalProjectionSelection;
   readonly agentMemory: PreparedAgentMemoryMode;
   readonly format: typeof INPUT_PREPARATION_REQUEST_FORMAT;
   readonly version: typeof INPUT_PREPARATION_VERSION;
@@ -979,6 +981,7 @@ export interface InputPreparationArtifactSummaryV1 {
 
 /** The immutable binding a receipt carries and a later consumer must re-present. */
 export interface InputPreparationBindingV1 {
+  readonly terminalProjection?: TerminalProjectionSelection;
   readonly agentMemory: PreparedAgentMemoryMode;
   readonly scopeId: string;
   readonly deviceId: string;
