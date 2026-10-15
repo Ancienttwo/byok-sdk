@@ -13,15 +13,16 @@ import {
   createEnvelope,
   decodeEnvelope,
   type AgentEgressPolicy,
-  type EventsPollResponse,
 } from '@byok-sdk/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import { TaskOfferAppendRefusedError } from '../errors';
 import {
   TENANT_A,
   createHarness,
+  decodeEventsPage,
   offerPayload,
   type CloudHarness,
+  type DecodedEventsPage,
   type PairedDevice,
 } from './support/harness';
 
@@ -64,10 +65,10 @@ async function fillMailbox(harness: CloudHarness, tenant: TenantId, version: big
   await limitMailbox(harness, tenant, version, bytes);
 }
 
-async function poll(harness: CloudHarness, device: PairedDevice): Promise<EventsPollResponse> {
+async function poll(harness: CloudHarness, device: PairedDevice): Promise<DecodedEventsPage> {
   const response = await harness.request('/byok/events?cursor=0', { headers: device.authorization });
   expect(response.status).toBe(200);
-  return (await response.json()) as EventsPollResponse;
+  return decodeEventsPage(await response.json());
 }
 
 async function captureError(promise: Promise<unknown>): Promise<unknown> {

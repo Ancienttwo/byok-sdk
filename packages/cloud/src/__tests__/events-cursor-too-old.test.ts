@@ -16,9 +16,8 @@
  * lower cannot.
  */
 import { createMutableClock } from '@byok-sdk/core';
-import type { EventsPollResponse } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
-import { TENANT_A, createHarness, offerPayload } from './support/harness';
+import { TENANT_A, createHarness, decodeEventsPage, offerPayload } from './support/harness';
 
 describe('GET /byok/events cursor_too_old', () => {
   it('refuses a cursor below rows lost to expiry, and serves the one at the floor', async () => {
@@ -59,7 +58,7 @@ describe('GET /byok/events cursor_too_old', () => {
       headers: device.authorization,
     });
     expect(atFloor.status).toBe(200);
-    expect((atFloor.body as EventsPollResponse).events.map((event) => event.seq)).toEqual([
+    expect(decodeEventsPage(atFloor.body).events.map((event) => event.seq)).toEqual([
       three.seq,
       four.seq,
     ]);
@@ -82,7 +81,7 @@ describe('GET /byok/events cursor_too_old', () => {
       headers: device.authorization,
     });
     expect(acked.status).toBe(200);
-    expect((acked.body as EventsPollResponse).events).toEqual([]);
+    expect(decodeEventsPage(acked.body).events).toEqual([]);
     const swept = await harness.core.mailbox.collectExpired(TENANT_A, { now: '2999-01-01T00:00:00.000Z', limit: 500,
       ackedBefore: '2999-01-01T00:00:00.000Z',
       expireUnackedBefore: '2999-01-01T00:00:00.000Z',
@@ -96,7 +95,7 @@ describe('GET /byok/events cursor_too_old', () => {
       headers: device.authorization,
     });
     expect(replay.status).toBe(200);
-    expect((replay.body as EventsPollResponse).events).toEqual([]);
+    expect(decodeEventsPage(replay.body).events).toEqual([]);
     expect((await harness.core.mailbox.readCursor(TENANT_A, device.deviceId)).ackedSeq).toBe(two.seq);
   });
 
@@ -122,6 +121,6 @@ describe('GET /byok/events cursor_too_old', () => {
     const page = await harness.json('/byok/events?cursor=0', { headers: device.authorization });
 
     expect(page.status).toBe(200);
-    expect((page.body as EventsPollResponse).events.map((event) => event.seq)).toEqual([offer.seq]);
+    expect(decodeEventsPage(page.body).events.map((event) => event.seq)).toEqual([offer.seq]);
   });
 });

@@ -25,7 +25,6 @@ import type { TenantId } from '@byok-sdk/core';
 import {
   PROTOCOL_VERSION,
   createEnvelope,
-  type EventsPollResponse,
   type RuntimeCapabilities,
   type RuntimeId,
 } from '@byok-sdk/protocol';
@@ -38,8 +37,10 @@ import {
   PRODUCT_ID,
   TENANT_A,
   createHarness,
+  decodeEventsPage,
   offerPayload,
   type CloudHarness,
+  type DecodedEventsPage,
   type PairedDevice,
 } from './support/harness';
 
@@ -55,12 +56,12 @@ function deviceStores(harness: CloudHarness, device: PairedDevice) {
   });
 }
 
-async function poll(harness: CloudHarness, device: PairedDevice, cursor: number): Promise<EventsPollResponse> {
+async function poll(harness: CloudHarness, device: PairedDevice, cursor: number): Promise<DecodedEventsPage> {
   const response = await harness.request(`/byok/events?cursor=${cursor}`, {
     headers: device.authorization,
   });
   expect(response.status).toBe(200);
-  return (await response.json()) as EventsPollResponse;
+  return decodeEventsPage(await response.json());
 }
 
 interface OfferedTask {

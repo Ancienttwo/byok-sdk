@@ -14,8 +14,9 @@ import { createInProcessMailboxWake } from '@byok-sdk/cloud';
  * `packages/client/src/__tests__/real-cloud-longpoll.test.ts`.
  */
 import { generateKeyPairSync, sign } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { tenantId, type Clock, type TenantId } from '@byok-sdk/core';
-import type { PairResponse } from '@byok-sdk/protocol';
+import { EventsPollResponseSchema, parseMessage, type Envelope, type EventsPollResponse, type PairResponse } from '@byok-sdk/protocol';
 import { NONCE_SIGNING_DOMAIN } from '../../auth/verify';
 import { createInMemoryByokCloud, type InMemoryByokCloud, type InMemoryByokCloudOptions } from '../../composition/in-memory';
 
@@ -115,4 +116,23 @@ export function createHarness(options: InMemoryByokCloudOptions = {}): CloudHarn
 /** The minimal valid `task.offer` payload — an instruction plus an auto policy. */
 export function offerPayload(instruction = 'do the thing') {
   return { instruction };
+}
+
+/** An events page whose entries were each decoded on their own, as the daemon does (#386). */
+export type DecodedEventsPage = Omit<EventsPollResponse, 'events'> & { readonly events: Envelope[] };
+
+/**
+ * Decode a `GET /byok/events` body: the page with `EventsPollResponseSchema`,
+ * each entry with `parseMessage`. An entry must decode to exactly its wire
+ * value, so a field the decoder would strip still fails the suite instead of
+ * disappearing before a byte-level assertion sees it.
+ */
+export function decodeEventsPage(body: unknown): DecodedEventsPage {
+  const page = EventsPollResponseSchema.parse(body);
+  const events = page.events.map((entry, index) => {
+    const envelope = parseMessage(entry);
+    if (!isDeepStrictEqual(envelope, entry)) throw new Error(`events page entry ${index} does not decode to its wire value`);
+    return envelope;
+  });
+  return { ...page, events };
 }

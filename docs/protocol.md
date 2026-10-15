@@ -124,10 +124,14 @@ preparation, provisioning, memory intents), and the server
   branch) and every enum or literal value of each current payload schema
   appears in an envelope corpus line, and likewise for each scoped HTTP body
   schema in the HTTP corpus. The required set is derived from the current
-  schemas' input JSON Schema. Envelopes nested in events pages and send
-  batches are exempt from the HTTP side, because the envelope corpus already
-  covers them; any further exemption must be typed and explained, and must
-  prune at least one required path.
+  schemas' input JSON Schema. Envelopes nested in send batches are exempt
+  from the HTTP side, because the envelope corpus already covers them; any
+  further exemption must be typed and explained, and must prune at least one
+  required path. The events page schema carries its entries undecoded
+  (`events: unknown[]`, #386), so there is nothing below them to exempt: the
+  suite pins that one undecoded path and decodes each page entry with
+  `parseMessage`, both when reading the v3 corpus back and when rejecting the
+  v2 one.
 
 That the server and hosted cloud actually refuse an undeclared receiver is
 tested at the senders (for example
@@ -138,6 +142,10 @@ ledger entries are frozen envelope-only history; they never gain HTTP hashes.
 The v2 suite's three typed private-client exclusions (`EventsPollResponse`,
 `ChallengeResponse`, `TokenResponse`, bounded through 0.26.1) applied only to
 running v2 HTTP bodies through published v2 decoders, which v3 no longer does.
+Those exclusions named the client-private parsers that releases through 0.26.1
+still run on deployed devices. The current client has none: since #386 it
+decodes the events page, the challenge response and the token response with
+the protocol schemas.
 Registration belongs to stable release preparation, not a feature-PR version
 bump (see `docs/releases/README.md`).
 
@@ -1454,6 +1462,11 @@ POST /byok/token
   Response (TokenResponseSchema): { accessToken, expiresAt }
 ```
 
+The reference client decodes both responses with these schemas (#386).
+`expiresAt` must be an ISO 8601 timestamp with `Z` or a numeric UTC offset. A
+response that fails its schema fails the renewal and leaves the prior
+credential unchanged; it is not treated as a revocation.
+
 `signature` is the Ed25519 signature over the **domain-separated** nonce,
 base64url-encoded. **Pinned encoding (changed 2026-08-07, S1 — this replaces
 the previous raw-nonce pin and is a breaking change): the signed message is
@@ -1822,8 +1835,14 @@ path.
 ```
 GET /byok/events?cursor=N
   Query    (EventsPollQuerySchema):    { cursor?, afterSeq? }
-  Response (EventsPollResponseSchema): { events: Envelope[], cursor, capabilities?: string[] }
+  Response (EventsPollResponseSchema): { events: unknown[], cursor, capabilities?: string[], ingress? }
 ```
+
+The page schema decodes the page only. Each `events` entry is decoded on its
+own with `parseMessage` (#386), so one unknown or invalid entry stalls its own
+sequence (§13) instead of failing the page. The client also refuses a page
+`cursor` that is not a safe nonnegative integer or that is below the requested
+cursor.
 
 Authed (bearer access token); holds the request open for ~50 seconds waiting
 for new events before returning an empty `events` array. Every poll holds;
@@ -2617,7 +2636,8 @@ each with its real evidence:
    `packages/protocol/src/__tests__/version-negotiation-drill.test.ts` and
    the adjacent AgentEvent-variant case already in `freeze-guard.test.ts`.
 2. **Unknown executable message types remain unacknowledged:** the outer poll
-   page is validated before each entry is parsed. Unknown types and known types
+   page is validated (`EventsPollResponseSchema`) before each entry is parsed
+   (`parseMessage`). Unknown types and known types
    with invalid payloads engage the same ordered `stalledAtSeq`. Later valid
    handlers may run, but cannot advance the durable cursor across undisposed
    work. A corrected redelivery can clear that exact gap. Connection-level

@@ -155,7 +155,8 @@ describe('LongPollRouteError names the failing route', () => {
     expect(error?.status).toBe(200);
     expect(error?.endpoint.path).toBe('/byok/events');
     expect(error?.message).toContain('failed with HTTP 200');
-    expect((error?.cause as Error).message).toContain('events poll response.events is not an array');
+    // #386: the page is decoded by protocol's EventsPollResponseSchema; its schema failure rides in `cause`.
+    expect(error?.cause).toMatchObject({ name: 'ZodError', issues: [expect.objectContaining({ path: ['events'] })] });
   });
 
   it('reports a revoked device through onRevoked only, never as a route failure', async () => {

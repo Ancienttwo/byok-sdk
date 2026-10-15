@@ -6,7 +6,7 @@ Assessment baseline: `origin/main@76e59b217e4fa6caf2c2ab7e7e1d1017c6ad337c` (202
 
 Keep #386 open. #447 delivered the production envelope-additions table, published-decoder checks, append-only envelope corpus/release-prefix registry, sender admission integration and the single freeze rule. Its description explicitly deferred HTTP corpus/registry evidence, recursive path and enum completeness, client decoder unification/exemptions, and the constants entry. Current main still has those gaps.
 
-The immediate independent slice is compatibility evidence for the HTTP bodies already present on main. The public `EventsPollResponse.events` cutover remains an owner decision; adding the HTTP evidence must not silently choose it. Full issue completion also needs the later completeness and decoder slices.
+The immediate independent slice is compatibility evidence for the HTTP bodies already present on main. At this assessment the public `EventsPollResponse.events` cutover was an open owner decision, and adding the HTTP evidence had to not silently choose it. The owner has since decided it (decision 5 from #447: cut over now, in one work-package); see "Decoder cutover and constants entry: decided" below. Full issue completion also needed the later completeness and decoder slices.
 
 ## P1: current boundary and authority
 
@@ -44,8 +44,8 @@ Renewal is separately challenge JSON → nonce signature → token JSON → atom
 | Explain each deleted assertion | #447 contains an explicit replacement table; it intentionally retained the negotiation drill and HTTP additive-poll block. These retain receiver-policy evidence, not an alternative mutable fingerprint authority. |
 | HTTP corpus and HTTP prefix ledger / batchLength | Still missing. |
 | Every recursive payload/body path and enum value | Still missing; existing completeness is narrower. |
-| Client unified events/challenge/token decoders and typed release exemptions | Still missing; owner decision 5 remains open in #447. |
-| Constants entry | Still pending #398. |
+| Client unified events/challenge/token decoders and typed release exemptions | Missing at this baseline. Decided since (owner decision 5 from #447) and cut over on the #386 decoder-cutover branch; see below. |
+| Constants entry | Pending #398 at this baseline. Decided since (S2): dropped from #386 scope; see below. |
 
 Evidence freshness: `git diff --quiet 89ade4de2380818b48d2ca63eff80e505f84434b..76e59b217e4fa6caf2c2ab7e7e1d1017c6ad337c -- packages/protocol` returns 0. Protocol source/tests are identical to the #447 head whose CI completed successfully. This is reuse of that exact protocol evidence, not a claim of a fresh full-workspace run on this assessment branch.
 
@@ -86,7 +86,7 @@ Required implementation verification follows #386: protocol compat/freeze/http r
 
 ## Following slices and issue closure
 
-After the HTTP ledger/corpus slice, add recursive property-path and enum completeness over both corpora using the real current schema surface. Then resolve the owner decision for the one-shot client decoder cutover, remove the private parser/casts in that same work-package, and preserve stall/cursor/auth refusal behaviour. Coordinate #398's constants export independently.
+After the HTTP ledger/corpus slice, add recursive property-path and enum completeness over both corpora using the real current schema surface. Then resolve the owner decision for the one-shot client decoder cutover, remove the private parser/casts in that same work-package, and preserve stall/cursor/auth refusal behaviour. Coordinate #398's constants export independently. Both are now decided; see the last section.
 
 Close #386 only when the actual full-scheme rows above have completion evidence or an explicit owner-approved scope change. Successful #447 CI and six delivered acceptance bullets do not make its listed Deferred work complete. This Draft is a staging artifact, not a close comment or implementation acceptance.
 
@@ -100,10 +100,22 @@ Implementation base: `origin/main@c6af648d021da61aefe07f72c58f06bd7a41eb06`, mer
 - HTTP release entries are optional only on the three literally pinned legacy entries. Every later entry requires an immutable, monotonic HTTP prefix. The first such entry defines the boundary; there is no parallel `httpCorpus.state`/`firstVersion` authority. No legacy entry or published corpus prefix was changed.
 - The manifest remains 0.26.1. The public metadata type delta is recorded under Unreleased for the next MINOR; stable release preparation owns the bump and both prefix registrations. Current HTTP fixture equality is not described as historical byte proof before that first registration.
 
-The original remaining recursive-path/enum completeness, client decoder cutover and constants-entry rows stay open. This slice is not full #386 closure. Verification and mutation results are recorded in the Draft PR description after code freeze.
+At that point the recursive-path/enum completeness, client decoder cutover and constants-entry rows stayed open; the last two are decided in the section below. This slice is not full #386 closure. Verification and mutation results are recorded in the Draft PR description after code freeze.
 
 ### Local verification after implementation freeze
 
 Shared serial lock: frozen install, workspace build/typecheck passed; the final protocol test-only byte guard also passed protocol typecheck. API surface (9 built goldens), version authority, release graph and 80 script tests passed. All 15 workspace package/example test scripts exited 0: 8070 passed, 0 failed, 172 skipped; the two real-Keychain-writing client files were excluded and client workers bounded to 2, with existing deadlines/assertions unchanged. Optional Docker dataplane coverage accounts for 113 skips. Protocol passed 680 tests; the three retained client unknown-type/stall/reliability suites passed 22 tests.
 
 Three restored file-level mutations exercised the actual compat suite: changing an HTTP literal body failed 4 tests, removing its HTTP declaration failed 2, and changing a batch count failed 4. Synthetic ledger negatives additionally reject legacy backfill, a missing first HTTP prefix, shrinking prefixes and changed prefix bytes. No candidate release was written to the actual ledger. These results validate this staged slice only; hosted CI and full issue closure remain separate.
+
+## Decoder cutover and constants entry: decided
+
+**Client decoder cutover (owner decision 5 from #447): decided, one cut.** The #386 decoder-cutover branch (base `origin/main@1519d53c`) implements it:
+
+- `EventsPollResponseSchema.events` is `z.array(z.unknown())`, so `EventsPollResponse.events` is `unknown[]`. `cursor` keeps its released `z.number().int()` shape. The CHANGELOG records the breaking type change and its migration (decode each entry with `parseMessage`).
+- The client's private page parser is deleted. The daemon decodes the page with `EventsPollResponseSchema` and each entry with `parseMessage`, so unknown/invalid-entry stall behaviour is unchanged. The safe-nonnegative and no-regression cursor checks stay client-local.
+- Challenge and token renewal responses decode with `ChallengeResponseSchema` / `TokenResponseSchema`. A body that is not JSON or fails its schema throws `AuthResponseInvalidError` (exported from the client package root) through the existing renewal error path and keeps the prior credential. Host-visible tightening: a token `expiresAt` that is not an ISO 8601 timestamp with `Z` or a numeric offset now fails.
+- The compat suite pins the events page as the one body whose entries its schema leaves undecoded (required, plain `unknown[]`, no default). It decodes each entry with `parseMessage` for v3 read-back and v2 rejection, and drops the events-page completeness exemption that no longer applies. Released ≤0.26.1 client-private parsers still run on deployed devices; v3 no longer runs v2 HTTP bodies through published decoders, so they have no live exclusion.
+
+**Constants entry (S2): decided, dropped from #386 scope.** `WIRE_ADDITIONS` stays exported from the protocol root entry only. The `./constants` subpath wiring is dropped: no consumer needs a zod-free entry for it, and wiring it adds about 2.4 KB of dead bytes to each MCP bin. #398 owns any later constants entry independently.
+

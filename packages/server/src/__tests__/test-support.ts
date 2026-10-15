@@ -1,11 +1,13 @@
 import type { Server as HttpServer } from 'node:http';
 import { generateKeyPairSync, sign as signEd25519 } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { serve } from '@hono/node-server';
 import {
   createEnvelope,
+  EventsPollResponseSchema,
+  parseMessage,
   PROTOCOL_VERSION,
   type Envelope,
-  type EventsPollResponse,
   type RuntimeCapabilities,
   type RuntimeId,
   type RuntimeInfo,
@@ -356,13 +358,27 @@ export async function connectFakeDaemonLongPoll(
       if (res.status !== 200) {
         throw new Error(`long-poll failed: ${res.status} ${await res.text()}`);
       }
-      const body = (await res.json()) as EventsPollResponse;
+      const body = EventsPollResponseSchema.parse(await res.json());
+      const events = body.events.map((entry, index) => decodeExactPageEntry(entry, index));
       cursor = body.cursor;
-      return body.events;
+      return events;
     },
     replay,
     send,
   };
+}
+
+/**
+ * Decode one `GET /byok/events` entry with `parseMessage` (#386) and require it
+ * to equal its wire value, so a field the server sends but the decoder would
+ * strip fails the suite instead of vanishing before an assertion such as
+ * `not.toHaveProperty` sees it. Mirrors `decodeEventsPage` in the cloud test
+ * harness; neither is a shipped surface, so there is no shared home for it.
+ */
+function decodeExactPageEntry(entry: unknown, index: number): Envelope {
+  const envelope = parseMessage(entry);
+  if (!isDeepStrictEqual(envelope, entry)) throw new Error(`events page entry ${index} does not decode to its wire value`);
+  return envelope;
 }
 
 /**

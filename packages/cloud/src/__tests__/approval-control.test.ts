@@ -15,7 +15,7 @@
  * behind for the runtime to act on later.
  */
 import type { TenantId } from '@byok-sdk/core';
-import { createEnvelope, type EventsPollResponse } from '@byok-sdk/protocol';
+import { createEnvelope } from '@byok-sdk/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import { StaleApprovalError } from '../approval-control';
 import { isCloudError } from '../errors';
@@ -26,8 +26,10 @@ import {
   TENANT_A,
   TENANT_B,
   createHarness,
+  decodeEventsPage,
   offerPayload,
   type CloudHarness,
+  type DecodedEventsPage,
   type PairedDevice,
 } from './support/harness';
 
@@ -43,12 +45,12 @@ function deviceStores(harness: CloudHarness, device: PairedDevice) {
   });
 }
 
-async function poll(harness: CloudHarness, device: PairedDevice, cursor: number): Promise<EventsPollResponse> {
+async function poll(harness: CloudHarness, device: PairedDevice, cursor: number): Promise<DecodedEventsPage> {
   const response = await harness.request(`/byok/events?cursor=${cursor}`, {
     headers: device.authorization,
   });
   expect(response.status).toBe(200);
-  return (await response.json()) as EventsPollResponse;
+  return decodeEventsPage(await response.json());
 }
 
 interface PausedTask {

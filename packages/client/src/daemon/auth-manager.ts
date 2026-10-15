@@ -1,6 +1,12 @@
 import os from 'node:os';
-import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, PairResponseSchema } from '@byok-sdk/protocol';
-import type { ChallengeResponse, TokenResponse } from '@byok-sdk/protocol';
+import {
+  BYOK_CHALLENGE_PATH,
+  BYOK_PAIR_PATH,
+  BYOK_TOKEN_PATH,
+  ChallengeResponseSchema,
+  PairResponseSchema,
+  TokenResponseSchema,
+} from '@byok-sdk/protocol';
 import { DeviceRecordRePairRequiredError, DeviceStore, type DeviceMetadata, type DeviceRecord } from './store';
 import type { DeviceCredentialBackend } from './device-credential-store';
 import { generateDeviceKeyPair, exportPrivateKeyPem, importPrivateKeyPem, signNonce } from './device-keys';
@@ -28,6 +34,39 @@ export class AuthRequestAbortedError extends Error {
   constructor(readonly reason: 'deadline' | 'stopped') {
     super(reason === 'deadline' ? 'authentication request exceeded its deadline' : 'authentication request was cancelled during shutdown');
     this.name = 'AuthRequestAbortedError';
+  }
+}
+
+/**
+ * Thrown when a successful `/byok/challenge` or `/byok/token` response body
+ * is not valid JSON or does not satisfy its protocol schema
+ * (`ChallengeResponseSchema` / `TokenResponseSchema`, #386) — for example a
+ * truncated body, a missing field, or a token `expiresAt` that is not an ISO
+ * timestamp with an offset. The renewal fails and the prior credential is kept
+ * unchanged; nothing is inferred from the malformed body. The JSON
+ * `SyntaxError` or the schema failure rides in `cause`. Not a revocation.
+ */
+export class AuthResponseInvalidError extends Error {
+  constructor(
+    readonly route: 'challenge' | 'token',
+    options: { cause: unknown },
+  ) {
+    super(`token renewal (${route}) failed: the server response does not match the protocol schema`, options);
+    this.name = 'AuthResponseInvalidError';
+  }
+}
+
+/**
+ * Reads a successful renewal body as JSON. A body read failure (abort,
+ * network) propagates unchanged so `runRequest` still classifies it; only a
+ * body that is not JSON becomes {@link AuthResponseInvalidError}.
+ */
+async function readAuthResponseJson(response: Response, route: 'challenge' | 'token'): Promise<unknown> {
+  const text = await response.text();
+  try {
+    return JSON.parse(text) as unknown;
+  } catch (cause) {
+    throw new AuthResponseInvalidError(route, { cause });
   }
 }
 
@@ -281,7 +320,9 @@ export class AuthManager {
           `token renewal (challenge) failed: HTTP ${challengeRes.status} ${await safeErrorText(challengeRes)}`.trimEnd(),
         );
       }
-      return (await challengeRes.json()) as ChallengeResponse;
+      const challenge = ChallengeResponseSchema.safeParse(await readAuthResponseJson(challengeRes, 'challenge'));
+      if (!challenge.success) throw new AuthResponseInvalidError('challenge', { cause: challenge.error });
+      return challenge.data;
     });
     const signature = signNonce(privateKey, nonce);
 
@@ -296,7 +337,9 @@ export class AuthManager {
       if (!tokenRes.ok) {
         throw new Error(`token renewal (token) failed: HTTP ${tokenRes.status} ${await safeErrorText(tokenRes)}`.trimEnd());
       }
-      return (await tokenRes.json()) as TokenResponse;
+      const token = TokenResponseSchema.safeParse(await readAuthResponseJson(tokenRes, 'token'));
+      if (!token.success) throw new AuthResponseInvalidError('token', { cause: token.error });
+      return token.data;
     });
     const updated: DeviceRecord = {
       ...record,
