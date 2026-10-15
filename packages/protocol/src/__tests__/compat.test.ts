@@ -10,6 +10,7 @@ import * as currentModule from '../index';
 import {
   CAPABILITY_FLAGS,
   CONTENT_HASH_RE,
+  EnvelopeSchema,
   KNOWN_AGENT_EVENT_TYPES,
   MAX_MESSAGES_PER_BATCH,
   MESSAGE_PAYLOAD_SCHEMAS,
@@ -774,18 +775,92 @@ function observedCoverage(root: SchemaNode, prefix: string, samples: readonly un
 /**
  * Subtrees no corpus line of this surface needs to carry. Each names the exact
  * required path whose descendants it exempts (the path itself stays required)
- * and why. It stays bounded: an exemption that prunes nothing fails.
+ * and why. The reason is enforced mechanically, not trusted: the test pins the
+ * exact set of exempted paths, requires the JSON Schema node at each one (and
+ * the definitions it resolves against) to deep-equal the `EnvelopeSchema`
+ * derivation, and requires the envelope corpus to cover every payload path
+ * and value (per message type) and every header path and value (the
+ * `envelope-header` surface). An exemption that prunes nothing also fails.
  */
 const COMPLETENESS_EXEMPTIONS: readonly { readonly below: string; readonly reason: string }[] = [
   {
     below: 'http:EventsPollResponse.events[]',
-    reason: 'Envelopes inside a poll page are the envelope corpus\'s surface; its completeness proves every payload path and value.',
+    reason: 'The node is exactly EnvelopeSchema; the envelope corpus covers every payload path/value per message type and every header path/value.',
   },
   {
     below: 'http:MessagesSendRequest.messages[]',
-    reason: 'Envelopes inside a send batch are the envelope corpus\'s surface; its completeness proves every payload path and value.',
+    reason: 'The node is exactly EnvelopeSchema; the envelope corpus covers every payload path/value per message type and every header path/value.',
   },
 ];
+
+const EXPECTED_EXEMPTION_PATHS: readonly string[] = [
+  'http:EventsPollResponse.events[]',
+  'http:MessagesSendRequest.messages[]',
+];
+
+const HEADER_PREFIX = 'envelope-header';
+
+/** Resolve a `.key` / `[]` path (the only segments exemptions use) inside a surface schema. */
+function nodeAtPath(root: SchemaNode, relative: string): SchemaNode {
+  let node = root;
+  for (const segment of relative.match(/\.[^.[\]|#]+|\[\]/g) ?? []) {
+    const next = segment === '[]' ? schemaNode(node.items) : schemaNode(schemaNode(node.properties)?.[segment.slice(1)]);
+    if (next === undefined) throw new Error(`exemption path does not resolve at ${segment}`);
+    node = next;
+  }
+  return node;
+}
+
+/** Exemptions whose stated reason ("the node is exactly EnvelopeSchema") does not hold. */
+function exemptionMismatches(): string[] {
+  const { $schema: _schema, $defs: envelopeDefs, ...envelopeNode } = jsonSchema(EnvelopeSchema) as SchemaNode;
+  const problems: string[] = [];
+  for (const entry of COMPLETENESS_EXEMPTIONS) {
+    const match = /^http:([A-Za-z]+)(.*)$/.exec(entry.below);
+    if (match === null || (match[2] ?? '') === '') {
+      problems.push(`${entry.below}: not an http surface sub-path`);
+      continue;
+    }
+    const root = schemaNode(jsonSchema(httpSchema(currentModule, match[1]! as HttpSurface)))!;
+    let node: SchemaNode;
+    try {
+      node = nodeAtPath(root, match[2]!);
+    } catch (error) {
+      problems.push(`${entry.below}: ${(error as Error).message}`);
+      continue;
+    }
+    if (JSON.stringify(node) !== JSON.stringify(envelopeNode)) problems.push(`${entry.below}: node differs from the EnvelopeSchema JSON Schema`);
+    if (JSON.stringify(root.$defs) !== JSON.stringify(envelopeDefs)) problems.push(`${entry.below}: definitions differ from the EnvelopeSchema JSON Schema`);
+  }
+  return problems;
+}
+
+/**
+ * The envelope header (every EnvelopeSchema field except `payload`, which is
+ * covered per message type) as one object schema. Branch headers differ only
+ * in `type` (merged into one enum) and in `task_id` requiredness/forbiddance
+ * (a forbidden `task_id` can never be present, so it is not a path to carry).
+ */
+function envelopeHeaderRoot(): SchemaNode {
+  const schema = schemaNode(jsonSchema(EnvelopeSchema))!;
+  const properties: Record<string, Json[]> = {};
+  for (const branch of branches(schema)) {
+    for (const [key, property] of Object.entries(schemaNode(branch.properties) ?? {})) {
+      if (key === 'payload' || JSON.stringify(property) === '{"not":{}}') continue;
+      (properties[key] ??= []).push(property);
+    }
+  }
+  const merged: Record<string, Json> = {};
+  for (const [key, nodes] of Object.entries(properties)) {
+    if (key === 'type') {
+      merged[key] = { enum: nodes.map((node) => schemaNode(node)!.const!) };
+      continue;
+    }
+    const distinct = [...new Map(nodes.map((node) => [JSON.stringify(node), node])).values()];
+    merged[key] = distinct.length === 1 ? distinct[0]! : { anyOf: distinct };
+  }
+  return { type: 'object', properties: merged };
+}
 
 function isBelow(path: string, ancestor: string): boolean {
   return path.length > ancestor.length && path.startsWith(ancestor) && '.|[#'.includes(path[ancestor.length]!);
@@ -810,6 +885,12 @@ function completeness(): { missingPaths: string[]; missingValues: string[]; unus
     merge(required, requiredCoverage(root, prefix, exempt));
     merge(seen, observedCoverage(root, prefix, corpus.filter((line) => line.type === type).map((line) => line.payload)));
   }
+  const header = envelopeHeaderRoot();
+  merge(required, requiredCoverage(header, HEADER_PREFIX, () => false));
+  merge(seen, observedCoverage(header, HEADER_PREFIX, corpus.map((line) => {
+    const { payload: _payload, ...fields } = JSON.parse(line.raw) as Record<string, unknown>;
+    return fields;
+  })));
   for (const surface of [...new Set(httpCorpus.map((line) => line.surface))]) {
     const root = schemaNode(jsonSchema(httpSchema(currentModule, surface)))!;
     const prefix = `http:${surface}`;
@@ -824,8 +905,10 @@ function completeness(): { missingPaths: string[]; missingValues: string[]; unus
 }
 
 describe('compat: corpus completeness', () => {
-  it('every recursive payload/body path and every enum or literal value appears in at least one corpus line', () => {
+  it('every recursive payload/header/body path and every enum or literal value appears in at least one corpus line', () => {
     const result = completeness();
+    expect(COMPLETENESS_EXEMPTIONS.map((entry) => entry.below), 'the exempted subtrees are pinned; adding one needs a reviewed change here').toEqual(EXPECTED_EXEMPTION_PATHS);
+    expect(exemptionMismatches(), 'an exempted node must be exactly the envelope schema the envelope corpus proves').toEqual([]);
     expect(result.unusedExemptions, 'a completeness exemption no longer matches any required path; delete it').toEqual([]);
     expect(result.missingPaths, 'append a corpus line carrying each path (both corpora are append-only)').toEqual([]);
     expect(result.missingValues, 'append a corpus line carrying each enum/literal value').toEqual([]);
