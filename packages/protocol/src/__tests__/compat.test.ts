@@ -740,5 +740,7 @@ describe('compat: corpus completeness', () => {
     expect(ENTRY_DECODED_ENVELOPES, 'adding an undecoded envelope path needs a reviewed change here').toEqual({ EventsPollResponse: 'events' });
     const root = schemaNode(jsonSchema(httpSchema(currentModule, 'EventsPollResponse')))!;
     expect(nodeAtPath(root, '.events[]'), 'the page schema must not decode, narrow or default its entries').toEqual({});
+    expect(root.required, 'events stays a required page field').toContain('events');
+    expect(nodeAtPath(root, '.events'), 'events is a plain array: no default, bound or other constraint').toEqual({ type: 'array', items: {} });
   });
 });

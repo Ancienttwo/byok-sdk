@@ -111,7 +111,6 @@ export interface LongPollClientOptions {
   idleDelayMs?: number;
 }
 
-
 /** A validated v2 acknowledgement for the posted batch; outcomes are optional until v3. */
 export interface MessageBatchPostResult {
   readonly ingress?: ActivityIngress;
