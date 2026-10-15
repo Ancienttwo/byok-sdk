@@ -33,7 +33,7 @@ type ReaderOffer = (harness: CloudHarness, deviceId: string, taskId: string) => 
 const readerOffers: ReadonlyArray<readonly [string, ReaderOffer]> = [
   ['enqueueAgentOffer', (harness, deviceId, taskId) => harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, {
     taskId,
-    payload: { instruction: 'read memory', agentRef: AGENT_REF, homeAccess: 'memory-reader' },
+    payload: { instruction: 'read memory', agentRef: AGENT_REF, sessionRef: 'reader-session', homeAccess: 'memory-reader' },
   })],
   ['enqueueAgentEgressOffer', (harness, deviceId, taskId) => harness.cloud.enqueueAgentEgressOffer(TENANT_A, deviceId, {
     taskId,
@@ -85,7 +85,7 @@ describe('hosted memory-reader Agent offers (#317)', () => {
 
     await harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, {
       taskId: 'writer-admitted',
-      payload: { instruction: 'write memory', agentRef: AGENT_REF },
+      payload: { instruction: 'write memory', agentRef: AGENT_REF, sessionRef: 'writer-session' },
     });
     expect(await mailboxTypes(harness, deviceId)).toEqual(['task.offer_for_agent']);
   });

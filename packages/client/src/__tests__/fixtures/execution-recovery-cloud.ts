@@ -410,6 +410,7 @@ lines.on('line', (line) => {
           payload: {
             instruction: String(params.instruction),
             agentRef: params.agentRef as { agentId: string; profileRevision: string },
+            sessionRef: String(params.sessionRef),
           },
         });
       case 'enqueueMessageOffer':

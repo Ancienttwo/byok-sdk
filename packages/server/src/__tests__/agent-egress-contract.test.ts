@@ -292,7 +292,8 @@ describe('reference-server Agent egress contract', () => {
       instruction: 'must not reinterpret resume as fresh',
       agentRef: AGENT_REF,
       egressPolicy: POLICY,
-    })).rejects.toThrow(/executions.submit/);
+      // A JS caller omits the required sessionRef; the runtime guard still refuses.
+    } as never)).rejects.toThrow(/executions.submit/);
     expect((await instance.tasks.list()).tasks).toHaveLength(0);
 
     const offered = await instance.executions.submit({

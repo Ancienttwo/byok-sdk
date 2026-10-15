@@ -170,6 +170,7 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
       deviceId: record.deviceId,
       instruction: 'admitted right after open',
       agentRef: { agentId: 'agent-hello-gate', profileRevision: 'profile-1' },
+      sessionRef: 'session-hello-gate',
     })).resolves.toBeDefined();
   }, 15_000);
 
@@ -292,6 +293,7 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
         deviceId: record.deviceId,
         instruction: 'run in the durable Agent home over long-poll',
         agentRef: { agentId: 'agent-longpoll', profileRevision: 'profile-1' },
+        sessionRef: 'session-longpoll',
       });
       expect(handle).toBeDefined();
     }, { timeout: 5000, interval: 20 });

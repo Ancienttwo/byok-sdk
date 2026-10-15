@@ -22,6 +22,7 @@ function agentPayload() {
   return {
     instruction: 'remember this Agent task',
     agentRef: AGENT_REF,
+    sessionRef: 'session-resume-1',
   };
 }
 
@@ -284,6 +285,42 @@ describe('hosted Agent-home contract', () => {
     ).toHaveLength(0);
     expect(await harness.cloud.readTaskAttempt(TENANT_A, 'agent-malformed')).toBeUndefined();
     expect(await harness.cloud.readTaskAttempt(TENANT_A, 'agent-oversized')).toBeUndefined();
+  });
+
+  it('refuses a fresh Agent offer without an exact sessionRef before any durable write (#484)', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await harness.stores.devices.recordCapabilities(TENANT_A, {
+      deviceId: device.deviceId,
+      capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
+    });
+    const { sessionRef: _sessionRef, ...fresh } = agentPayload();
+
+    // A JS caller bypasses the required static type; the runtime guard holds.
+    await expect(
+      harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
+        taskId: 'agent-fresh-refused',
+        payload: fresh as never,
+      }),
+    ).rejects.toMatchObject({
+      name: 'ByokCloudError',
+      code: 'coordination_input_invalid',
+      message: 'Agent resume offer requires an exact sessionRef; use submitAgentExecution for fresh execution',
+    });
+
+    expect(await harness.cloud.readTaskAttempt(TENANT_A, 'agent-fresh-refused')).toBeUndefined();
+    expect(
+      (await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0, limit: 10 }))
+        .messages,
+    ).toHaveLength(0);
+
+    // The refusal left nothing behind: the same id still admits a real resume.
+    await expect(
+      harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
+        taskId: 'agent-fresh-refused',
+        payload: agentPayload(),
+      }),
+    ).resolves.toMatchObject({ taskId: 'agent-fresh-refused', seq: 1 });
   });
 
   it('keeps a reserved Agent attempt retryable when mailbox append fails', async () => {

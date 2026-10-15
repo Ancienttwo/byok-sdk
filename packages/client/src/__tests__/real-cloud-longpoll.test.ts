@@ -137,6 +137,7 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
         instruction: 'run the durable Agent over hosted long-poll',
         runtime: 'pi',
         agentRef: { agentId: 'agent-hosted-longpoll', profileRevision: 'profile-1' },
+        sessionRef: 'session-hosted-longpoll',
       });
       expect(offer).toBeDefined();
     }, { timeout: 5000, interval: 20 });

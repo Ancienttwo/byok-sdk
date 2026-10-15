@@ -569,7 +569,7 @@ describe.skipIf(process.platform !== 'darwin')('compiled daemon SIGKILL executio
     const cloud = await startCloud();
     const { daemon, deviceId } = await pair(cloud, { agentHome: true });
     const agentRef = { agentId: 'agent-overflow', profileRevision: 'profile-v1' };
-    const offer = await cloud.rpc('enqueueAgentOffer', { deviceId, instruction: 'produce an oversized result', agentRef }) as { taskId: string };
+    const offer = await cloud.rpc('enqueueAgentOffer', { deviceId, instruction: 'produce an oversized result', agentRef, sessionRef: 'session-oversized-resume' }) as { taskId: string };
     await waitForFile(path.join(current!.daemonBase.controlDir, 'runtime-starts.jsonl'));
     await finish(offer.taskId, 'x'.repeat(300 * 1024));
     const attempt = await waitForAttempt(cloud, offer.taskId, 'failed');

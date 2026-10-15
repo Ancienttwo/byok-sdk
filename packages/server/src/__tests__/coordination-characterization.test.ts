@@ -556,6 +556,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
         deviceId: daemon.deviceId,
         instruction: 'agent work',
         agentRef: { agentId: 'agent-1', profileRevision: 'profile-r7' },
+        sessionRef: 'sess-resume-1',
       }),
     ).rejects.toThrow(/agent-home-contract/);
 

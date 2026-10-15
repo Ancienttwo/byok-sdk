@@ -57,7 +57,7 @@ export interface RealCloudHandle {
   /** Additive hosted offer whose logical toolset ids must resolve on the target device before claim. */
   enqueueToolsetOffer(deviceId: string, payload: TaskOfferWithToolsetsPayload): Promise<EnqueuedOffer>;
   /** Strict Agent offer admitted only after the daemon's authenticated capability snapshot is durable. */
-  enqueueAgentOffer(deviceId: string, payload: TaskOfferForAgentPayload): Promise<EnqueuedOffer>;
+  enqueueAgentOffer(deviceId: string, payload: TaskOfferForAgentPayload & { readonly sessionRef: string }): Promise<EnqueuedOffer>;
   /** Accept a host cancellation and durably enqueue the frozen-v1 `task.cancel` message. */
   cancelTask(taskId: string, reason?: string): ReturnType<ByokCloud['cancelTask']>;
   readTaskAttempt(taskId: string): Promise<TaskAttempt | undefined>;
