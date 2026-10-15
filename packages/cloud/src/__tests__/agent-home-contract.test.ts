@@ -1,4 +1,4 @@
-import { createEnvelope, decodeEnvelope } from '@byok-sdk/protocol';
+import { createEnvelope, decodeEnvelope, PROTOCOL_VERSION } from '@byok-sdk/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import {
   AGENT_HOME_CONTRACT_CAPABILITY,
@@ -188,7 +188,7 @@ describe('hosted Agent-home contract', () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     const hello = createEnvelope('conn.hello', {
-      protocolVersions: [2],
+      protocolVersions: [PROTOCOL_VERSION],
       capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
       deviceId: device.deviceId,
       productId: 'test-product',
@@ -220,7 +220,7 @@ describe('hosted Agent-home contract', () => {
       capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
     });
     const downgradedHello = createEnvelope('conn.hello', {
-      protocolVersions: [2],
+      protocolVersions: [PROTOCOL_VERSION],
       capabilities: [],
       deviceId: device.deviceId,
       productId: 'test-product',

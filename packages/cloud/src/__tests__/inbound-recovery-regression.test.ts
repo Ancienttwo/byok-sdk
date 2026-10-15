@@ -7,7 +7,7 @@
  * marker.
  */
 import type { TenantId } from '@byok-sdk/core';
-import { createEnvelope, encodeEnvelope, type Envelope } from '@byok-sdk/protocol';
+import { createEnvelope, encodeEnvelope, PROTOCOL_VERSION, type Envelope } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { handleInboundEnvelope, terminalReceiptKey } from '../inbound';
 import { tenantStoresFor, type TenantStores } from '../tenant-stores';
@@ -50,7 +50,7 @@ describe('inbound lifecycle recovery', () => {
       deviceId: device.deviceId,
       productId: 'test-product',
       clientVersion: '0.0.0-test',
-      protocolVersions: [2],
+      protocolVersions: [PROTOCOL_VERSION],
       runtimes: [],
       capabilities: ['recovered-capability'],
     });

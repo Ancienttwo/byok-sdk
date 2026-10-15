@@ -1,6 +1,6 @@
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import { RESULT_DOCUMENT_MAX_BYTES, createEnvelope } from '@byok-sdk/protocol';
+import { PROTOCOL_VERSION, RESULT_DOCUMENT_MAX_BYTES, createEnvelope } from '@byok-sdk/protocol';
 import { createByokServer, type ByokServer, type TaskHandle } from '../index';
 import {
   connectFakeDaemonLongPoll,
@@ -24,10 +24,11 @@ async function claimAndStart(byok: ByokServer, daemon: FakeLongPollDaemon, handl
 }
 
 /**
- * additive-minor (`task.complete.document`): the projection of the daemon's
- * structured terminal result into `TaskResult.document`, the `result-document`
- * capability advertisement that gates a daemon into sending one at all, and the
- * unchanged behavior of every `task.complete` that carries no document.
+ * `task.complete.document` (wire v3 baseline): the projection of the daemon's
+ * structured terminal result into `TaskResult.document`, the absence of the
+ * retired v2 `result-document` capability flag (v3 folded it into the
+ * baseline), and the unchanged behavior of every `task.complete` that carries
+ * no document.
  */
 describe('additive-minor: task.complete.document projection', () => {
   let server: HttpServer | undefined;
@@ -49,12 +50,13 @@ describe('additive-minor: task.complete.document projection', () => {
     return { byok: instance, baseUrl: started.baseUrl, daemon };
   }
 
-  it('advertises the result-document capability flag on the long-poll transport', async () => {
+  it('no longer advertises the retired result-document capability flag on the long-poll transport', async () => {
     const { daemon } = await startWithDaemon();
     const res = await daemon.replay(0);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { capabilities?: string[] };
-    expect(body.capabilities).toContain('result-document');
+    expect(body.capabilities).toBeInstanceOf(Array);
+    expect(body.capabilities).not.toContain('result-document');
   });
 
   it('projects payload.document verbatim into TaskResult.document', async () => {
@@ -105,7 +107,7 @@ describe('additive-minor: task.complete.document projection', () => {
     expect(result.document).toEqual([1, 'two', null]);
   });
 
-  it('leaves TaskResult.document absent when the daemon sends no document (an old daemon, or one with no extractor configured) — byte-identical to the pre-change result', async () => {
+  it('leaves TaskResult.document absent when the daemon sends no document (an offer with no result-document terminal projection) — byte-identical to the pre-change result', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
     const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'no structured result' });
     await claimAndStart(instance, daemon, handle);
@@ -146,7 +148,7 @@ describe('additive-minor: task.complete.document projection', () => {
     // this codec can put an over-cap document on the wire, so that is exactly
     // what this test has to imitate.
     const oversized = {
-      v: 2,
+      v: PROTOCOL_VERSION,
       id: '00000000-0000-4000-8000-0000000000f1',
       ts: new Date().toISOString(),
       type: 'task.complete',

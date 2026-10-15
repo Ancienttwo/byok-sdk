@@ -11,6 +11,7 @@ import { createInProcessMailboxWake } from '@byok-sdk/cloud';
  * in the inventory) or fails this suite.
  */
 import { createInMemoryCoreStores, createMutableClock, type CapabilityDeclaration } from '@byok-sdk/core';
+import { PROTOCOL_VERSION } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { createHmacTokenSigner } from '../auth/tokens';
 import { CLOUD_CAPABILITIES, fullCapabilityDeclaration, type CloudCapability } from '../capabilities';
@@ -158,7 +159,6 @@ describe('tenant isolation across every device-class resource', () => {
       capabilities: [
         'custom-harness',
         'mailbox-read-ahead',
-        'result-document',
         'approval_resolved',
         'agent-home-contract',
         'agent-home-projection',
@@ -182,7 +182,7 @@ describe('tenant isolation across every device-class resource', () => {
       body: JSON.stringify({
         messages: [
           {
-            v: 2,
+            v: PROTOCOL_VERSION,
             id: crypto.randomUUID(),
             ts: new Date().toISOString(),
             type: 'task.claim',

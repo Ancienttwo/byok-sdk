@@ -1,6 +1,6 @@
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
+import { createEnvelope, PROTOCOL_VERSION, type Envelope } from '@byok-sdk/protocol';
 import { createByokServer, type ByokServer } from '../index';
 import {
   connectFakeDaemonLongPoll,
@@ -101,7 +101,7 @@ describe('agent-home-contract reference server', () => {
     const { code } = await started.byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await pairFakeDaemon(started.baseUrl, code);
     const hello = createEnvelope('conn.hello', {
-      protocolVersions: [2],
+      protocolVersions: [PROTOCOL_VERSION],
       capabilities: ['agent-home-contract'],
       deviceId: daemon.deviceId,
       productId: PRODUCT_ID,
