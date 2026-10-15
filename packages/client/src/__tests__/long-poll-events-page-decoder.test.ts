@@ -198,6 +198,6 @@ describe('LongPollClient decodes the events page with EventsPollResponseSchema (
     expect(warnedRouteErrors()).toEqual([]);
     // The entry stalls its own sequence; the page itself was valid, so the loop goes on polling.
     expect(onLoopFailure).not.toHaveBeenCalled();
-    expect(warnMock.mock.calls.some((call) => String(call[0]).includes('unknown or invalid executable message at seq=1'))).toBe(true);
+    expect((warnMock.mock.calls as unknown[][]).some((call) => String(call[0]).includes('unknown or invalid executable message at seq=1'))).toBe(true);
   });
 });
