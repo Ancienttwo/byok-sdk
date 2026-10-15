@@ -425,6 +425,21 @@ lines.on('line', (line) => {
             terminalProjection: { mode: 'none' },
           },
         }));
+      case 'enqueueResultOffer':
+        // Wire v3 result-document offer: the frozen schema rides in the offer.
+        return cloud.submitAgentExecution(tenant, AgentExecutionInputSchema.parse({
+          taskId: params.taskId,
+          deviceId: params.deviceId,
+          payload: {
+            instruction: 'submit one structured result', runtime: 'pi',
+            agentRef: { agentId: 'agent-result', profileRevision: 'profile-v1' },
+            egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+            terminalProjection: { mode: 'result-document', contract: 'fixture.result.v1', schema: {
+              type: 'object', additionalProperties: false, required: ['verdict'],
+              properties: { verdict: { type: 'string', enum: ['pass', 'fail'] }, score: { type: 'integer', minimum: 0 } },
+            } },
+          },
+        }));
       case 'readMessages':
         return ownerWrite(() => db.prepare('SELECT * FROM fixture_message').all());
       case 'readWire':

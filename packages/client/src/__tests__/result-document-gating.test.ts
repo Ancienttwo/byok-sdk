@@ -4,7 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createEnvelope, encodeEnvelope, PROTOCOL_VERSION } from '@byok-sdk/protocol';
+import { createEnvelope, decodeEnvelope, encodeEnvelope, PROTOCOL_VERSION } from '@byok-sdk/protocol';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+import { AgentResultStore } from '../daemon/agent-result-store';
 import { createDaemon, createDaemonWithAdapters, type DaemonConfig } from '../daemon/create-daemon';
 import { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError } from '../daemon/daemon-errors';
 import { journalHash } from '../daemon/journal/journal';
@@ -135,5 +137,87 @@ describe('startup refuses a journal of another wire major', () => {
     await journal.close();
     await expectStartupRefused(config, { taskId: 'done-task', record: 'pending-terminal' });
     expect(server.received.some((envelope) => envelope.type === 'task.complete')).toBe(false);
+  });
+});
+
+/**
+ * The two restart points of a result-document task, driven in process from a
+ * journal image a daemon death leaves behind (the compiled SIGKILL variants
+ * live in `execution-recovery-kill.test.ts`). The journal is the only
+ * terminal authority: a staged outcome never becomes a document on restart,
+ * and a recorded `task.complete` is replayed byte-for-byte.
+ */
+describe('result-document recovery from the journal', () => {
+  const agentRef = { agentId: 'agent-result', profileRevision: 'profile-v1' } as const;
+  const selection = { mode: 'result-document', contract: 'fixture.result.v1', schema: {
+    type: 'object', additionalProperties: false, required: ['verdict'], properties: { verdict: { type: 'string' } },
+  } } as const;
+
+  async function pairedAgentStore() {
+    const server = await TestServer.start(); cleanup.push(() => server.close());
+    const root = await tmpDir('byok-result-recovery-');
+    const config: DaemonConfig = { ...(await baseConfig(server.url)), hostedJournal: { mode: 'sqlite' },
+      agentHome: { hostStorageRoot: path.join(root, 'agent-home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } };
+    await createDaemonWithAdapters(config, [new StubRuntimeAdapter()]).pair('pairing-code');
+    const device = (await new DeviceStore(config.storeDir!, undefined, config.productId).credentials.read())!;
+    const identity = { tenantId: device.tenantId, productId: config.productId, deviceId: device.deviceId };
+    const offerBytes = (taskId: string) => encodeEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+      instruction: 'submit one result', runtime: 'pi', agentRef, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: selection,
+    }, { taskId, seq: 1 }));
+    const home = path.join(config.agentHome!.hostStorageRoot, 'agents', agentRef.agentId);
+    return { server, config, identity, offerBytes, home };
+  }
+
+  async function startWith(config: DaemonConfig, journal: SqliteLocalTaskJournal) {
+    const daemon = createDaemonWithAdapters(config, [new StubRuntimeAdapter()], { hostedJournal: { journal } });
+    cleanup.push(async () => { await daemon.stop().catch(() => {}); await journal.close().catch(() => {}); });
+    await daemon.start();
+    return daemon;
+  }
+
+  it('an interrupted task with a staged outcome recovers as daemon_interrupted with no document; the staged record stays as audit', async () => {
+    const { server, config, identity, offerBytes, home } = await pairedAgentStore();
+    const taskId = 'staged-then-killed';
+    let journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
+    const bytes = offerBytes(taskId);
+    await journal.appendEnvelope({ identity, taskId, envelopeId: (JSON.parse(bytes) as { id: string }).id, seq: 1, bytes,
+      bytesHash: journalHash(bytes), opensTask: true, receivedAt: new Date().toISOString() });
+    await journal.recordAdmission({ taskId, admitted: true, claimedRuntime: 'pi', decidedAt: new Date().toISOString() });
+    await journal.close();
+    await fs.mkdir(home, { recursive: true });
+    const staged = await (await AgentResultStore.open(home)).stage({ taskId, tenantId: identity.tenantId, agentRef,
+      contract: selection.contract, schema: selection.schema, outcome: { verdict: 'pass' }, byteCount: 18 });
+
+    journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
+    await startWith(config, journal);
+    const terminal = await server.waitFor((envelope) => envelope.task_id === taskId && envelope.type === 'task.fail', 5000);
+    expect(terminal.payload).toMatchObject({ reason: 'daemon_interrupted', retryable: false, agentRef });
+    expect(JSON.stringify(terminal)).not.toContain('"document"');
+    expect(server.received.some((envelope) => envelope.type === 'task.complete')).toBe(false);
+    expect(await (await AgentResultStore.open(home)).get(taskId)).toEqual(staged);
+  });
+
+  it('a task.complete with its document recorded before send is replayed once, byte-identical', async () => {
+    const { server, config, identity, offerBytes } = await pairedAgentStore();
+    const taskId = 'complete-before-send';
+    let journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
+    const bytes = offerBytes(taskId);
+    await journal.appendEnvelope({ identity, taskId, envelopeId: (JSON.parse(bytes) as { id: string }).id, seq: 1, bytes,
+      bytesHash: journalHash(bytes), opensTask: true, receivedAt: new Date().toISOString() });
+    await journal.recordAdmission({ taskId, admitted: true, claimedRuntime: 'pi', decidedAt: new Date().toISOString() });
+    const complete = encodeEnvelope(createEnvelope('task.complete', {
+      summary: 'submitted', sessionRef: 'session-1', document: { verdict: 'pass' }, agentRef, runtime: 'pi',
+    }, { taskId, sessionRef: 'session-1' }));
+    await journal.recordTerminal({ taskId, terminalType: 'complete', bytes: complete, payloadHash: journalHash(complete),
+      truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });
+    await journal.close();
+
+    journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
+    await startWith(config, journal);
+    const delivered = await server.waitFor((envelope) => envelope.task_id === taskId && envelope.type === 'task.complete', 5000);
+    expect(encodeEnvelope(delivered)).toBe(complete);
+    expect(decodeEnvelope(complete).payload).toMatchObject({ document: { verdict: 'pass' } });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(server.received.filter((envelope) => envelope.task_id === taskId)).toHaveLength(1);
   });
 });
