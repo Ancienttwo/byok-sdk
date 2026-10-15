@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Changed (client)** — update the private OAR source from 0.62.1 to 0.66.0
+  (`beea52c`). Five selected files changed upstream. All five keep upstream
+  bytes. The five maintained BYOK deltas and the import closure stay the same.
+  A Codex session open now refuses an MCP server named `__proto__`,
+  `__defineGetter__`, `__defineSetter__`, `__lookupGetter__` or
+  `__lookupSetter__` with `UnsupportedOptionError`. No public API change. See
+  `docs/notes/2026-10-16-oar-0.66-upgrade.md`.
 - **Breaking (protocol type, client; #386)** — the daemon decodes its HTTP
   reads with the protocol schemas only. `EventsPollResponse.events` is now
   `unknown[]` (`EventsPollResponseSchema.events` is `z.array(z.unknown())`):

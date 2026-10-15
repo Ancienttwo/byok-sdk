@@ -1,12 +1,12 @@
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { codexSession } from '../../vendor/oar/bf55fd6/runtimes/codex/session';
-import * as projection from '../../vendor/oar/bf55fd6/runtimes/codex/projection';
-import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/bf55fd6/runtimes/codex/app-server-client';
-import { SessionNotFoundError } from '../../vendor/oar/bf55fd6/contracts/session-not-found-error';
-import { SessionUnavailableError } from '../../vendor/oar/bf55fd6/contracts/session-unavailable-error';
-import { UnsupportedOptionError } from '../../vendor/oar/bf55fd6/contracts/errors';
-import { inputImagesRefusal } from '../../vendor/oar/bf55fd6/shared/input-images';
+import { codexSession } from '../../vendor/oar/beea52c/runtimes/codex/session';
+import * as projection from '../../vendor/oar/beea52c/runtimes/codex/projection';
+import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/beea52c/runtimes/codex/app-server-client';
+import { SessionNotFoundError } from '../../vendor/oar/beea52c/contracts/session-not-found-error';
+import { SessionUnavailableError } from '../../vendor/oar/beea52c/contracts/session-unavailable-error';
+import { UnsupportedOptionError } from '../../vendor/oar/beea52c/contracts/errors';
+import { inputImagesRefusal } from '../../vendor/oar/beea52c/shared/input-images';
 
 function fakeServer(openReply: Record<string, unknown> = {}) {
   let receive!: (line: string) => void;
@@ -340,6 +340,14 @@ describe('unconnected OAR Codex adapter', () => {
     await expect(codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, {
       cwd: '/workspace', env: { HOME: '/home' }, name,
     })).rejects.toBeInstanceOf(UnsupportedOptionError);
+    expect(fake.spawn).not.toHaveBeenCalled();
+  });
+
+  it.each(['__proto__', '__lookupSetter__'])('refuses a reserved MCP server name before spawning: %j', async name => {
+    const fake = fakeServer();
+    await expect(codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, {
+      cwd: '/workspace', env: { HOME: '/home' }, mcpServers: [{ name, command: 'mcp-fake' }],
+    })).rejects.toMatchObject({ name: 'UnsupportedOptionError', option: 'mcpServers' });
     expect(fake.spawn).not.toHaveBeenCalled();
   });
 
