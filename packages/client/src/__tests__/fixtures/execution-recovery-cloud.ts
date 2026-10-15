@@ -405,14 +405,18 @@ lines.on('line', (line) => {
           ...(params.taskId === undefined ? {} : { taskId: String(params.taskId) }),
           payload: { instruction: String(params.instruction), ...(params.agentRef === undefined ? {} : { agentRef: params.agentRef }) },
         });
-      case 'enqueueAgentOffer':
-        return cloud.enqueueAgentOffer(tenant, String(params.deviceId), {
+      case 'enqueueFreshOffer':
+        // Fresh Agent execution has one entry (#470/#484): submitAgentExecution.
+        return cloud.submitAgentExecution(tenant, AgentExecutionInputSchema.parse({
+          taskId: params.taskId,
+          deviceId: params.deviceId,
           payload: {
-            instruction: String(params.instruction),
-            agentRef: params.agentRef as { agentId: string; profileRevision: string },
-            sessionRef: String(params.sessionRef),
+            instruction: String(params.instruction), runtime: 'pi',
+            agentRef: params.agentRef,
+            egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+            terminalProjection: { mode: 'none' },
           },
-        });
+        }));
       case 'enqueueMessageOffer':
         return cloud.submitAgentExecution(tenant, AgentExecutionInputSchema.parse({
           taskId: params.taskId,
