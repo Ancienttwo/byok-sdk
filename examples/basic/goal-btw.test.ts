@@ -7,7 +7,7 @@ import { createDaemonWithAdapters, type Daemon, type AgentEgressPolicy } from '@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GoalBtwHost, GOAL_RESULT_CONTRACT, BTW_RESULT_CONTRACT, extractBotResult, type BotTarget } from './goal-btw';
 import { SqliteGoalBtwStore, HostRevisionConflict } from './goal-btw-store';
-import { BotStubAdapter, waitForReady } from './goal-btw.test-support';
+import { BotStubAdapter, waitForReady, waitForTaskCleanup } from './goal-btw.test-support';
 
 const policy: AgentEgressPolicy = {
   policyRevision: 'example-bot-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
@@ -79,7 +79,7 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
     adapter.sessions.get('step-1')!.finish(result('continue')); await terminal('step-1');
     const continued = await host.reconcileGoal('goal', sent.revision);
     expect(continued.value).toMatchObject({ status: 'active', steps: 1, lastTaskId: 'step-1', pending: null });
-    await vi.waitFor(() => expect(adapter.sessions.get('step-1')!.closed).toBe(true), { timeout: 5000 });
+    await waitForTaskCleanup(daemon, adapter.sessions.get('step-1')!);
     const second = host.reserveGoalStep('goal', continued.revision, 'step-2', 'Host accepted the first step');
     const sent2 = await host.sendGoalStep('goal', second.revision); await running('step-2');
     adapter.sessions.get('step-2')!.finish(result('complete')); await terminal('step-2');
