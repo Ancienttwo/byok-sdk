@@ -100,15 +100,16 @@ describe('LongPollClient decodes the events page with EventsPollResponseSchema (
   };
 
   it.each([
-    ['events is not an array', { events: { 0: validOffer }, cursor: 1, ingress }, ['events']],
-    ['events is missing', { cursor: 1, ingress }, ['events']],
-    ['cursor is not an integer', { events: [validOffer], cursor: 1.5, ingress }, ['cursor']],
-    ['cursor is a string', { events: [validOffer], cursor: '1', ingress }, ['cursor']],
-    ['cursor is not a safe integer', { events: [], cursor: Number.MAX_SAFE_INTEGER + 1, ingress }, ['cursor']],
+    ['events is not an array', { events: { 0: validOffer }, cursor: 1, capabilities: [], ingress }, ['events']],
+    ['events is missing', { cursor: 1, capabilities: [], ingress }, ['events']],
+    ['cursor is not an integer', { events: [validOffer], cursor: 1.5, capabilities: [], ingress }, ['cursor']],
+    ['cursor is a string', { events: [validOffer], cursor: '1', capabilities: [], ingress }, ['cursor']],
+    ['cursor is not a safe integer', { events: [], cursor: Number.MAX_SAFE_INTEGER + 1, capabilities: [], ingress }, ['cursor']],
     ['capabilities is not a string array', { events: [validOffer], cursor: 1, capabilities: [7], ingress }, ['capabilities', 0]],
-    // Wire v3: the activity ingress advertisement is required on every page.
-    ['ingress is missing', { events: [validOffer], cursor: 1 }, ['ingress']],
-    ['ingress is malformed', { events: [validOffer], cursor: 1, ingress: { activityMaxEvents: 0, activityMaxBytes: 65536 } }, ['ingress', 'activityMaxEvents']],
+    // Wire v3: the capability and activity ingress advertisements are required on every page.
+    ['capabilities is missing', { events: [validOffer], cursor: 1, ingress }, ['capabilities']],
+    ['ingress is missing', { events: [validOffer], cursor: 1, capabilities: [] }, ['ingress']],
+    ['ingress is malformed', { events: [validOffer], cursor: 1, capabilities: [], ingress: { activityMaxEvents: 0, activityMaxBytes: 65536 } }, ['ingress', 'activityMaxEvents']],
   ])('rejects a page whose %s through the outer schema, as a route failure on its 200', async (_case, body, issuePath) => {
     const { onEnvelope, onValidationFailedSeq, onServerCapabilities, outcomes, error } = await pollOnce(body);
     expect(error?.endpoint.path).toBe('/byok/events');
@@ -122,7 +123,7 @@ describe('LongPollClient decodes the events page with EventsPollResponseSchema (
   });
 
   it('keeps the client-local nonnegative cursor check: the schema admits a negative integer, the client refuses it', async () => {
-    const { onEnvelope, outcomes, error } = await pollOnce({ events: [], cursor: -1, ingress });
+    const { onEnvelope, outcomes, error } = await pollOnce({ events: [], cursor: -1, capabilities: [], ingress });
     expect(error?.status).toBe(200);
     expect((error?.cause as Error).message).toBe('events poll response.cursor is not a safe nonnegative integer');
     expect(onEnvelope).not.toHaveBeenCalled();

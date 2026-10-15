@@ -1835,7 +1835,7 @@ path.
 ```
 GET /byok/events?cursor=N
   Query    (EventsPollQuerySchema):    { cursor?, afterSeq? }
-  Response (EventsPollResponseSchema): { events: unknown[], cursor, capabilities?: string[], ingress: ActivityIngress }
+  Response (EventsPollResponseSchema): { events: unknown[], cursor, capabilities: string[], ingress: ActivityIngress }
 ```
 
 The page schema decodes the page only. Each `events` entry is decoded on its
@@ -1877,8 +1877,8 @@ daemon's run as halted instead; it does not reconnect.
 
 `capabilities` on a poll is the server capability advertisement for THIS
 response, is refreshed on every successful poll, and is applied before the
-response's events are delivered. The field is additive and optional only for N/N-1 wire
-tolerance; a new daemon reads absence as `[]`, never as an assumed default.
+response's events are delivered. It is required on wire v3; an empty list
+advertises nothing, and a page without it is a route failure.
 An HTTP/network/response-validation failure ends the session and withdraws
 the last advertisement immediately: no earlier request remains authoritative
 after that failure.

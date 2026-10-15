@@ -3,8 +3,10 @@
 ## Unreleased
 
 - **Breaking (protocol, client, cloud; #397 v3 cleanup)** — wire v3 drops the
-  v2 settlement fallbacks. `MessagesSendResponseSchema.outcomes` and
-  `EventsPollResponseSchema.ingress` are required; the client also refuses a
+  v2 settlement fallbacks. `MessagesSendResponseSchema.outcomes`,
+  `EventsPollResponseSchema.ingress` and `EventsPollResponseSchema.capabilities`
+  are required (the client no longer reads a missing page advertisement as
+  `[]`; an empty list still advertises nothing); the client also refuses a
   rejected outcome without its `reason` and an answer that accepts (or
   deduplicates) a `conn.hello` without `ingress`. Each is an unusable response
   on the existing route-failure path, and the batch is retained for retry.

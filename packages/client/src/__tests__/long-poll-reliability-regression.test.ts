@@ -299,8 +299,8 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
     }],
   ])('#137 rejects an invalid trusted page: %s', async (_label, body) => {
     const auth = await seededAuth();
-    // Each page carries the required ingress, so it fails for its labelled reason.
-    const fetchMock = vi.fn().mockImplementation(() => new Response(JSON.stringify({ ...body, ingress: TEST_ACTIVITY_INGRESS }), { status: 200 }));
+    // Each page carries the required advertisements, so it fails for its labelled reason.
+    const fetchMock = vi.fn().mockImplementation(() => new Response(JSON.stringify({ ...body, capabilities: [], ingress: TEST_ACTIVITY_INGRESS }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     let cursor = 0;
     const skipped = vi.fn((seq: number) => {
@@ -335,7 +335,7 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
 
   it('unknown executable work keeps the durable cursor unchanged', async () => {
     const auth = await seededAuth();
-    const body = { events: [{ type: 'task.future', seq: 1 }], cursor: 1, ingress: TEST_ACTIVITY_INGRESS };
+    const body = { events: [{ type: 'task.future', seq: 1 }], cursor: 1, capabilities: [], ingress: TEST_ACTIVITY_INGRESS };
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     let cursor = 0;

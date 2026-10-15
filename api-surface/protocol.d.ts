@@ -3118,7 +3118,7 @@ export type MessageSendOutcome = z.infer<typeof MessageSendOutcomeSchema>;
 export declare const EventsPollResponseSchema: z.ZodObject<{
     events: z.ZodArray<z.ZodUnknown>;
     cursor: z.ZodNumber;
-    capabilities: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    capabilities: z.ZodArray<z.ZodString>;
     ingress: z.ZodObject<{
         activityMaxEvents: z.ZodNumber;
         activityMaxBytes: z.ZodNumber;

@@ -111,7 +111,6 @@ export class TestServer {
     version: 1,
     capabilities: [HOST_MCP_TASK_CONTEXT_CAPABILITY],
   };
-  private advertiseLongPollCapabilities = true;
 
   private constructor(private readonly httpServer: http.Server) {}
 
@@ -155,11 +154,6 @@ export class TestServer {
    */
   setCapabilityDeclaration(declaration: unknown): void {
     this.capabilityDeclaration = declaration;
-  }
-
-  /** Simulate an N-1 responder whose additive events and handshake responses predate `capabilities`. */
-  setAdvertiseLongPollCapabilities(advertise: boolean): void {
-    this.advertiseLongPollCapabilities = advertise;
   }
 
   /** Return 500 from every events poll while true, without changing auth. */
@@ -591,7 +585,7 @@ export class TestServer {
     respondJson(res, 200, {
       events: entries,
       cursor: this.longPollCursor,
-      ...(this.advertiseLongPollCapabilities ? { capabilities: this.advertisedCapabilities() } : {}),
+      capabilities: this.advertisedCapabilities(),
       ingress: TEST_ACTIVITY_INGRESS,
     });
   }
@@ -639,14 +633,12 @@ export class TestServer {
     // Test hook (see `holdNextMessagesResponse`): recorded above, acceptance held here.
     if (holdGate) await holdGate;
     // Like the hosted cloud (#391 Phase 2): a handshake's answer carries the
-    // advertisement; an N-1 responder (`setAdvertiseLongPollCapabilities(false)`) omits
-    // capabilities. Outcomes and the handshake's ingress are required on wire v3.
+    // advertisement and ingress; every answer carries outcomes (wire v3).
     respondJson(res, 200, {
       accepted,
       outcomes,
       ...(rejected > 0 ? { rejected } : {}),
-      ...(handshake && this.advertiseLongPollCapabilities ? { capabilities: this.advertisedCapabilities() } : {}),
-      ...(handshake ? { ingress: TEST_ACTIVITY_INGRESS } : {}),
+      ...(handshake ? { capabilities: this.advertisedCapabilities(), ingress: TEST_ACTIVITY_INGRESS } : {}),
     });
   }
 

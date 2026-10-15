@@ -31,9 +31,10 @@ import {
 
 const INGRESS = { activityMaxEvents: 50, activityMaxBytes: 65536 } as const;
 
-describe('events poll capability advertisement is additive', () => {
-  it('accepts both an N-1 response without capabilities and a new response with unknown future flags', () => {
-    expect(EventsPollResponseSchema.parse({ events: [], cursor: 0, ingress: INGRESS })).toEqual({ events: [], cursor: 0, ingress: INGRESS });
+describe('events poll capability advertisement (wire v3)', () => {
+  it('requires the advertisement and keeps unknown future flags', () => {
+    expect(() => EventsPollResponseSchema.parse({ events: [], cursor: 0, ingress: INGRESS }), 'a page without capabilities is not a v3 response').toThrow();
+    expect(EventsPollResponseSchema.parse({ events: [], cursor: 0, capabilities: [], ingress: INGRESS })).toEqual({ events: [], cursor: 0, capabilities: [], ingress: INGRESS });
     expect(
       EventsPollResponseSchema.parse({ events: [], cursor: 0, capabilities: ['result-document', 'future-flag'], ingress: INGRESS }),
     ).toEqual({ events: [], cursor: 0, capabilities: ['result-document', 'future-flag'], ingress: INGRESS });
@@ -134,7 +135,7 @@ describe('outbound settlement on wire v3 (#397)', () => {
   });
 
   it('requires the activity ingress advertisement on every events page', () => {
-    expect(() => EventsPollResponseSchema.parse({ events: [], cursor: 0 }), 'an events page without ingress is not a v3 response').toThrow();
-    expect(EventsPollResponseSchema.parse({ events: [], cursor: 0, ingress: INGRESS }).ingress).toEqual(INGRESS);
+    expect(() => EventsPollResponseSchema.parse({ events: [], cursor: 0, capabilities: [] }), 'an events page without ingress is not a v3 response').toThrow();
+    expect(EventsPollResponseSchema.parse({ events: [], cursor: 0, capabilities: [], ingress: INGRESS }).ingress).toEqual(INGRESS);
   });
 });

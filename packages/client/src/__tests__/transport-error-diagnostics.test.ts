@@ -134,7 +134,7 @@ describe('LongPollRouteError names the failing route', () => {
     fetchMock.mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ events: 'not-an-array', cursor: 1, ingress: { activityMaxEvents: 50, activityMaxBytes: 65536 } }),
+      json: async () => ({ events: 'not-an-array', cursor: 1, capabilities: [], ingress: { activityMaxEvents: 50, activityMaxBytes: 65536 } }),
     } as unknown as Response);
 
     const client = new LongPollClient({

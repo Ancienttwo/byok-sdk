@@ -236,12 +236,11 @@ export const EventsPollResponseSchema = z.object({
   events: z.array(z.unknown()),
   cursor: z.number().int(),
   /**
-   * Server capabilities for THIS long-poll response. This is the HTTP
-   * transport's equivalent of `conn.ack.capabilities`: a new daemon treats
-   * absence as no advertised capabilities, so old responders remain
-   * fail-closed for gated daemon -> server fields and messages.
+   * Required in v3: the server capabilities for THIS long-poll response, the
+   * HTTP transport's equivalent of `conn.ack.capabilities`. Each page replaces
+   * the daemon's advertisement; an empty list advertises nothing.
    */
-  capabilities: z.array(z.string()).optional(),
+  capabilities: z.array(z.string()),
   /** Required in v3: the activity limits that apply to new progress pushes. */
   ingress: ActivityIngressSchema,
 });

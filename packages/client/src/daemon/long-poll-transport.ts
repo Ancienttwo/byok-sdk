@@ -66,7 +66,6 @@ export interface LongPollClientOptions {
   /**
    * Capabilities advertised by the server that produced the current poll
    * response. Called before any envelopes from that response are delivered.
-   * An older responder omitting the additive field is reported as `[]`.
    */
   onServerCapabilities?: (capabilities: string[]) => void;
   /**
@@ -132,9 +131,6 @@ const MAX_TRACKED_VALIDATION_FAILURE_WARNINGS = 1000;
 /** Same soft-cap discipline as {@link MAX_TRACKED_VALIDATION_FAILURE_WARNINGS}, for `warnedRouteFailures` — see that field's own doc comment. */
 const MAX_TRACKED_ROUTE_FAILURE_WARNINGS = 1000;
 
-/** An absent page advertisement is no advertised capabilities. */
-type DecodedEventsPage = EventsPollResponse & { capabilities: string[] };
-
 /**
  * Decodes the outer `/byok/events` page with the protocol's
  * `EventsPollResponseSchema` (#386), whose `events` entries are not yet
@@ -144,7 +140,7 @@ type DecodedEventsPage = EventsPollResponse & { capabilities: string[] };
  * trusts only as a safe nonnegative integer that never moves below the
  * requested cursor; those two checks are client-local.
  */
-function decodeEventsPage(raw: unknown, requestedCursor: number): DecodedEventsPage {
+function decodeEventsPage(raw: unknown, requestedCursor: number): EventsPollResponse {
   const page = EventsPollResponseSchema.parse(raw);
   if (!isSafeNonnegativeInteger(page.cursor)) {
     throw new Error('events poll response.cursor is not a safe nonnegative integer');
@@ -152,7 +148,7 @@ function decodeEventsPage(raw: unknown, requestedCursor: number): DecodedEventsP
   if (page.cursor < requestedCursor) {
     throw new Error('events poll response.cursor regressed below the requested cursor');
   }
-  return { ...page, capabilities: page.capabilities ?? [] };
+  return page;
 }
 
 function isSafeNonnegativeInteger(value: unknown): value is number {
@@ -463,7 +459,7 @@ export class LongPollClient {
         // Validate each executable envelope independently. Both unknown types
         // and invalid payloads freeze their sequence; neither has a durable
         // disposition that would authorize acknowledging it.
-        let parsed: DecodedEventsPage;
+        let parsed: EventsPollResponse;
         try {
           parsed = decodeEventsPage(await res.json(), afterSeq);
           validateTrustedEventsPage(parsed.events, afterSeq, parsed.cursor);
