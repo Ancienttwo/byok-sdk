@@ -1,10 +1,43 @@
 // Test-only stub implements the exported client contract. No internal SDK imports.
+import { spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
 import { freezeRuntimeAdapterDescriptor, type Daemon, type RuntimeAdapter, type RuntimeAdapterPrepareInput,
   type RuntimeAdapterPrepareResult, type RuntimeOperationStartInput, type RuntimeDetectResult, type Session } from '@byok-sdk/client';
 import { expect, vi } from 'vitest';
 type Event = Session['events'] extends AsyncIterable<infer E> ? E : never;
+async function submitResult(input: RuntimeOperationStartInput, outcome: unknown): Promise<unknown> {
+  const server = input.mcpServers?.byokagentresult;
+  if (!server) throw new Error('result-document fixture did not receive byokagentresult');
+  const child = spawn(server.command, [...(server.args ?? [])], { env: { ...process.env, ...server.env }, stdio: ['pipe', 'pipe', 'pipe'] });
+  const lines = createInterface({ input: child.stdout });
+  let nextId = 0;
+  const pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>();
+  const ended = new Promise<void>(resolve => child.once('exit', () => resolve()));
+  child.on('error', error => { for (const request of pending.values()) request.reject(error); pending.clear(); });
+  child.on('exit', () => { for (const request of pending.values()) request.reject(new Error('result helper exited before response')); pending.clear(); });
+  child.stderr.resume();
+  lines.on('line', line => {
+    const response = JSON.parse(line) as { id?: number; result?: unknown; error?: { message: string } };
+    if (response.id === undefined) return;
+    const request = pending.get(response.id); if (!request) return;
+    pending.delete(response.id);
+    if (response.error) request.reject(new Error(response.error.message)); else request.resolve(response.result);
+  });
+  const request = (method: string, params: unknown): Promise<unknown> => new Promise((resolve, reject) => {
+    const id = ++nextId; pending.set(id, { resolve, reject });
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
+  });
+  try {
+    await request('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'example-stub', version: '1' } });
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
+    return await request('tools/call', { name: 'submit_result', arguments: outcome });
+  } finally { lines.close(); child.kill(); await ended; }
+}
+
 export class BotStubSession implements Session {
+  constructor(private readonly input: RuntimeOperationStartInput) {}
+
   readonly sessionRef = randomUUID();
   interrupted = false; closed = false; steered = 0; followedUp = 0;
   private pending: Event[] = [];
@@ -21,7 +54,12 @@ export class BotStubSession implements Session {
     }.bind(this),
   };
   emit(event: Event): void { this.pending.push(event); this.wake?.(); this.wake = undefined; }
-  finish(document: unknown): void { this.emit({ type: 'progress', text: JSON.stringify(document) }); this.emit({ type: 'turn_end' }); }
+  finish(document: unknown, submit = true): void {
+    void (async () => {
+      if (submit && this.input.mcpServers?.byokagentresult) await submitResult(this.input, document);
+      this.emit({ type: 'progress', text: JSON.stringify(document) }); this.emit({ type: 'turn_end' });
+    })().catch(error => { this.failure = error; this.wake?.(); this.wake = undefined; });
+  }
   fail(): void { this.failure = new Error('stub failed'); this.wake?.(); this.wake = undefined; }
   async steer(): Promise<void> { this.steered += 1; }
   async followUp(): Promise<void> { this.followedUp += 1; }
@@ -42,7 +80,7 @@ export class BotStubAdapter implements RuntimeAdapter {
   async prepare(_input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
     if (this.rejectNext) { this.rejectNext = false; return { kind: 'reject', reason: 'stub declined', retryable: true }; }
     return { kind: 'prepared', operation: { start: async input => {
-      const session = new BotStubSession(); this.starts.push(input);
+      const session = new BotStubSession(input); this.starts.push(input);
       this.sessions.set(input.manifest.taskId, session); return session;
     } } };
   }

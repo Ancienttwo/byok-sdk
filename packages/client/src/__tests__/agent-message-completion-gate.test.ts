@@ -529,9 +529,6 @@ describe('required Agent message completion gate', () => {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
-    const researchExtractor = vi.fn(() => {
-      throw new Error('message-only output is not a research document');
-    });
     const helperPreflight = vi.fn<NonNullable<TaskRunnerDeps['agentMessageMcpPreflight']>>(async () => {});
     const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
       adapters: [adapter], workspaceRoot: await temporary('byok-message-workspace-'),
@@ -544,7 +541,9 @@ describe('required Agent message completion gate', () => {
       storeDir, productId: 'message-test', tenantId: 'tenant-message-test',
       agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
       agentMessageMcpPreflight: helperPreflight,
-      resultDocument: { extract: researchExtractor },
+      // Configured, but a message-only offer must never use it.
+      terminalJournal: true,
+      agentResultMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-result-mcp.js'] },
     });
     const taskId = 'message-task';
     const agentRef = { agentId: 'agent-message', profileRevision: 'profile-r1' } as const;
@@ -603,7 +602,9 @@ describe('required Agent message completion gate', () => {
       ...exact, outcome: 'accepted', receiptId: '10000000-0000-4000-8000-000000000002',
     }, { taskId, seq: 3 }));
     await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(true));
-    expect(researchExtractor).not.toHaveBeenCalled();
+    // A message-only offer has no result channel and carries no document.
+    expect(adapter.startCalls[0]?.ctx.mcpServers).not.toHaveProperty('byokagentresult');
+    expect(sent.find((envelope) => envelope.type === 'task.complete')?.payload).not.toHaveProperty('document');
     await expect(runner.publishAgentMessage({ contextToken: contextToken!, contentType: 'text/markdown', body: '**hello**' }))
       .rejects.toThrow(/invalid or expired/);
 

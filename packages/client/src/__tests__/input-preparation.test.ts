@@ -1,3 +1,5 @@
+import { createPreparedToolSurfaceAssembler } from '../daemon/prepared-tool-surface';
+import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -26,6 +28,8 @@ import {
 } from '../daemon/input-preparation-service';
 import { recordingToolSurface, type RecordingToolSurface } from './fixtures/prepared-tool-surface';
 import {
+  createPiInputPreparationCompiler,
+  resolvePinnedPiRuntimeIdentity,
   InputPreparationCompileError,
   InputPreparationRuntimeIdentityError,
   SUPPORTED_PREPARED_COMPILER_VERSION,
@@ -1614,4 +1618,36 @@ describe('PR187 shutdown admission race', () => {
     expect(service.store.list()[0]?.state).toBe('cancelled');
     expect(counter.calls).toEqual([]);
   });
+});
+
+// K7: the production assembler/compiler must bind the model-visible schema,
+// not a test-side reconstruction of its manifest digest.
+it('K7 binds a single submit_result schema in the real compiled request and durable preparation', async () => {
+  const compiler = createPiInputPreparationCompiler(resolvePinnedPiRuntimeIdentity());
+  const service = createInputPreparationService({
+    storeDir: await tmpStoreDir(), limits: LIMITS, authorityResolver: ALWAYS_AUTHORIZED,
+    compiler, toolSurface: createPreparedToolSurfaceAssembler({
+      toolsetRegistry: new McpToolsetRegistry({}), runtimeEnv: () => ({ PATH: process.env.PATH ?? '' }),
+    }),
+  });
+  await service.open(); cleanups.push(() => service.stop());
+  const terminalProjection = { mode: 'result-document' as const, contract: 'test.summary.v1', schema: {
+    type: 'object' as const, additionalProperties: false as const, required: ['summary'],
+    properties: { summary: { type: 'string' as const, minLength: 1 } },
+  } };
+  const input = request({ requiredToolsets: [], terminalProjection });
+  const receipt = await service.prepare(input);
+  expect(receipt.binding.terminalProjection).toEqual(terminalProjection);
+  expect(receipt.artifact?.toolNames).toEqual(['submit_result']);
+  const record = service.store.get(receipt.reference)!;
+  const artifact = JSON.parse(await fs.readFile(service.store.artifactPathOf(record), 'utf8')) as { requestBody: string };
+  const body = JSON.parse(artifact.requestBody) as { tools: Array<{ function: { name: string; parameters: unknown } }> };
+  expect(body.tools).toHaveLength(1);
+  expect(body.tools[0]!.function.name).toBe('submit_result');
+  expect(body.tools[0]!.function.parameters).toEqual(terminalProjection.schema);
+  const changed = { ...terminalProjection, schema: { ...terminalProjection.schema, properties: { summary: { type: 'string' as const, minLength: 2 } } } };
+  expect(await codeOf(service.prepare({ ...input, terminalProjection: changed }))).toBe('request_conflict');
+  const second = await service.prepare({ ...input, requestId: 'prep-schema-2', terminalProjection: changed });
+  expect(second.binding.requestDigest).not.toBe(receipt.binding.requestDigest);
+  expect(second.artifact?.toolManifestDigest).not.toBe(receipt.artifact?.toolManifestDigest);
 });

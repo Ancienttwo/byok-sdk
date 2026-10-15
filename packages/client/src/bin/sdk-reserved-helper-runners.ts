@@ -1,6 +1,7 @@
 import type { Readable } from 'node:stream';
 import { connectControlClient, type ControlClient } from './control-client';
 import { serveAgentMessageMcpOverStdio, type AgentMessageMcpDeps } from './agent-message-mcp-server';
+import { serveAgentResultMcpOverStdio, type AgentResultMcpDeps } from './agent-result-mcp-server';
 import { serveAgentMemoryDescriptorOverStdio, serveAgentMemoryMcpOverStdio, type AgentMemoryMcpDeps } from './agent-memory-mcp-server';
 import { parsePreparedAgentMemoryMode } from '../agent-memory/prepared-capability';
 import { serveTeamMcpOverStdio, type TeamMcpDeps } from './team-mcp-server';
@@ -43,6 +44,30 @@ async function runAgentMessageMcp(): Promise<void> {
   };
   serveAgentMessageMcpOverStdio({ deps });
   await waitForInputClose();
+}
+
+/** The context token arrives by env, as for the message helper; the frozen schema only over the control socket. */
+async function runAgentResultMcp(): Promise<void> {
+  const storeDir = required('BYOK_STORE_DIR');
+  const productId = required('BYOK_PRODUCT_ID');
+  const contextToken = required('BYOK_AGENT_RESULT_CONTEXT');
+  let clientPromise: Promise<ControlClient> | undefined;
+  const client = async (): Promise<ControlClient> => {
+    if (!clientPromise) clientPromise = connectControlClient({ storeDir, productId }).then((result) => {
+      if (!result.ok) throw new Error(result.reason);
+      return result.client;
+    });
+    return clientPromise;
+  };
+  const deps: AgentResultMcpDeps = {
+    describe: async () => (await client()).request('agent_results.describe', { contextToken }),
+    submit: async (outcome) => (await client()).request('agent_results.submit', { contextToken, outcome }),
+  };
+  await serveAgentResultMcpOverStdio({ deps });
+  await waitForInputClose();
+  // describe opened the control connection at startup; an open socket would
+  // keep the helper alive after its MCP client closed stdin.
+  (await clientPromise?.catch(() => undefined))?.close();
 }
 
 async function runAgentMemoryMcp(): Promise<void> {
@@ -113,6 +138,9 @@ export async function runSdkReservedHelper(kind: SdkReservedHelperKind, argv: re
       return;
     case 'agent-message-mcp':
       await runAgentMessageMcp();
+      return;
+    case 'agent-result-mcp':
+      await runAgentResultMcp();
       return;
     case 'agent-memory-mcp':
       await runAgentMemoryMcp();

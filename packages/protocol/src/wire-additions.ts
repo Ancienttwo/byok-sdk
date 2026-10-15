@@ -1,12 +1,10 @@
 /**
- * The one table of v2 wire additions that an older receiver may not decode
+ * The one table of receiver-capability gates and wire additions
  * (docs/protocol.md "Freeze rule").
  *
- * A v2 change takes exactly one of three paths: a version bump, a gated
+ * A v3 change takes exactly one of three paths: a version bump, a gated
  * addition, or a strip-safe addition. Envelope and HTTP rows have explicit
- * kinds. The last two are declared here, and
- * `src/__tests__/compat.test.ts` proves every declaration against the
- * published envelope and HTTP decoders pinned in package.json.
+ * kinds. The last two are declared here.
  *
  * - `gated`: the sender must not emit the surface unless the receiver
  *   durably advertised `capability`. A field entry applies when the payload
@@ -15,6 +13,16 @@
  *   are gated by a device flag, daemon-to-server surfaces by a server flag.
  * - `strip-safe`: an optional field an older receiver drops without changing
  *   what it executes or acknowledges.
+ *
+ * v3 baseline: every v3 decoder reads every surface v2 had, so the v2
+ * strip-safe rows and the v2 `result-document` gate are gone. The device
+ * gates kept below name capabilities a daemon advertises only when it is
+ * configured for them (Agent home, egress, input preparation, provisioning,
+ * memory intents and so on): they gate on the receiver's configuration. The
+ * server-advertised `approval_resolved` gate is kept as the daemon's sending
+ * condition for `task.approval_resolved`. No v3 release has been
+ * published, so no row is proven against a published v3 decoder yet
+ * (`src/__tests__/compat.test.ts`).
  *
  * Senders derive their admission flags from {@link requiredReceiverCapabilities}
  * and nowhere else, so a gate cannot exist in one place and be missing in
@@ -53,11 +61,6 @@ const EGRESS_OFFER_FIELDS = (surface: MessageType): readonly WireAddition[] => [
   ...AGENT_OFFER_FIELDS(surface),
 ];
 
-const TERMINAL_STRIP_SAFE = (surface: MessageType): readonly WireAddition[] => [
-  { kind: 'envelope', rule: 'strip-safe', surface, field: 'agentHomeProjection' },
-  { kind: 'envelope', rule: 'strip-safe', surface, field: 'agentHomeMemoryChange' },
-];
-
 export const WIRE_ADDITIONS: readonly WireAddition[] = Object.freeze([
   // Server to daemon: offers.
   { kind: 'envelope', rule: 'gated', surface: 'task.offer', field: 'harnessId', capability: 'custom-harness', advertisedBy: 'device' },
@@ -93,22 +96,7 @@ export const WIRE_ADDITIONS: readonly WireAddition[] = Object.freeze([
   { kind: 'envelope', rule: 'gated', surface: 'provider.provisioning.available', capability: 'provider-provisioning.v1', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface: 'agent.memory.intent.available', capability: 'agent-memory-intent.v1', advertisedBy: 'device' },
   // Daemon to server.
-  { kind: 'envelope', rule: 'strip-safe', surface: 'task.decline', field: 'code' },
   { kind: 'envelope', rule: 'gated', surface: 'task.approval_resolved', capability: 'approval_resolved', advertisedBy: 'server' },
-  { kind: 'envelope', rule: 'gated', surface: 'task.complete', field: 'document', capability: 'result-document', advertisedBy: 'server' },
-  { kind: 'envelope', rule: 'strip-safe', surface: 'task.complete', field: 'finalMessage' },
-  ...TERMINAL_STRIP_SAFE('task.complete'),
-  ...TERMINAL_STRIP_SAFE('task.fail'),
-  ...TERMINAL_STRIP_SAFE('task.cancelled'),
-  // HTTP response metadata: old schemas retain the authoritative counts,
-  // and strip only the optional capability advertisement.
-  { kind: 'http', rule: 'strip-safe', surface: 'MessagesSendResponse', field: 'capabilities' },
-  // Per-envelope outcomes and the activity-ingress advertisement are
-  // observation only: `accepted`/`rejected` stay the acknowledgement authority,
-  // and the server enforces activity bounds per envelope itself.
-  { kind: 'http', rule: 'strip-safe', surface: 'MessagesSendResponse', field: 'outcomes' },
-  { kind: 'http', rule: 'strip-safe', surface: 'MessagesSendResponse', field: 'ingress' },
-  { kind: 'http', rule: 'strip-safe', surface: 'EventsPollResponse', field: 'ingress' },
 ] satisfies readonly WireAddition[]);
 
 /**

@@ -38,7 +38,6 @@ import { authenticateDevice, type DeviceRouteDeps } from './shared';
  * is no WS `conn.ack` on this transport — and the daemon hard-gates outgoing
  * messages on it (`TaskRunner.sendApprovalResolved`,
  * `packages/client/src/daemon/task-runner.ts:3319`;
- * `TaskRunner.resultDocumentSupported`, same file `:3849`;
  * `AgentEgressController`,
  * `packages/client/src/daemon/agent-egress-controller.ts:122,285`). An entry
  * missing here is therefore not cosmetic: it silently disables an inbound wire
@@ -61,12 +60,14 @@ import { authenticateDevice, type DeviceRouteDeps } from './shared';
  * - flags with no kernel implementation at all — `dispatch-selection`,
  *   `provider-profile-binding`.
  *
+ * `task.complete.document` needs no entry: wire v3 folded the former
+ * `result-document` flag into the baseline, so every v3 peer may send it.
+ *
  * Exact-list drift guard: `packages/cloud/src/__tests__/protocol-capabilities.test.ts`.
  */
 export const CLOUD_PROTOCOL_CAPABILITIES = [
   'custom-harness',
   MAILBOX_READ_AHEAD_CAPABILITY,
-  'result-document',
   // The kernel's inbound handles `task.approval_resolved` on both the plain
   // and the approval-timeline paths (`packages/cloud/src/inbound.ts:576,610`).
   // Without this flag `TaskRunner.sendApprovalResolved` returns early and a

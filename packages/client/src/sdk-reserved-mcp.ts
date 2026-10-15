@@ -3,6 +3,11 @@ export const AGENT_MESSAGE_MCP_SERVER_NAME = 'byokagentmessage';
 export const AGENT_MESSAGE_TOOL_NAME = 'send_agent_message';
 export const AGENT_MEMORY_MCP_SERVER_NAME = 'byokagentmemory';
 export const AGENT_TEAM_MCP_SERVER_NAME = 'byokagentteam';
+/** The structured outcome channel of a `terminalProjection.mode: 'result-document'` offer (wire v3). */
+export const AGENT_RESULT_MCP_SERVER_NAME = 'byokagentresult';
+/** Its one tool; the `inputSchema` it advertises is the offer's frozen result schema. */
+export const AGENT_RESULT_TOOL_NAME = 'submit_result';
+export const AGENT_RESULT_TOOL_DESCRIPTION = 'Submit the structured outcome required by this execution. A staged receipt confirms durable storage, not execution success.';
 
 /**
  * Every MCP server name the SDK owns. A server under one of these names is
@@ -12,7 +17,7 @@ export const AGENT_TEAM_MCP_SERVER_NAME = 'byokagentteam';
  *
  * A frozen tuple rather than a `Set`: `Object.freeze` on a `Set` freezes the
  * object's own properties and leaves `add`/`delete` fully functional, so the
- * previous shape advertised an immutability it did not have. Three entries
+ * previous shape advertised an immutability it did not have. Four entries
  * make `includes` the same cost as a hash lookup, and the array really is
  * immutable. Use {@link isReservedMcpServerName} rather than reaching for
  * membership directly.
@@ -21,6 +26,7 @@ export const RESERVED_MCP_SERVER_NAMES = Object.freeze([
   AGENT_MESSAGE_MCP_SERVER_NAME,
   AGENT_MEMORY_MCP_SERVER_NAME,
   AGENT_TEAM_MCP_SERVER_NAME,
+  AGENT_RESULT_MCP_SERVER_NAME,
 ] as const) satisfies readonly string[];
 
 /** Whether `name` is one of the SDK-owned MCP server names above. */

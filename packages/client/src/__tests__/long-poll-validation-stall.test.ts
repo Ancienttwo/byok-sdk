@@ -1,4 +1,5 @@
 import { createTestDeviceStore } from './fixtures/device-credentials';
+import { PROTOCOL_VERSION } from '@byok-sdk/protocol';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -87,7 +88,7 @@ describe('LongPollClient: validation-failure backoff (finding R1, Codex P2)', ()
 
   it('backs off by retryDelayMs on the VERY SAME cycle a validation-failed entry is first discovered — no full-RTT-speed hot loop', async () => {
     const badKnownType = {
-      v: 2,
+      v: PROTOCOL_VERSION,
       id: 'ffffffff-ffff-4fff-8fff-ffffffffff30',
       ts: new Date().toISOString(),
       type: 'task.offer', // recognized type ...
@@ -96,7 +97,7 @@ describe('LongPollClient: validation-failure backoff (finding R1, Codex P2)', ()
       payload: {}, // ... but missing required fields -> EnvelopeValidationError
     };
     const validEnvelope = {
-      v: 2,
+      v: PROTOCOL_VERSION,
       id: 'ffffffff-ffff-4fff-8fff-ffffffffff31',
       ts: new Date().toISOString(),
       type: 'task.offer',
@@ -168,7 +169,7 @@ describe('LongPollClient: validation-failure backoff (finding R1, Codex P2)', ()
 
   it('unknown executable messages back off without acknowledging their sequence', async () => {
     const unknownType = {
-      v: 2,
+      v: PROTOCOL_VERSION,
       id: 'ffffffff-ffff-4fff-8fff-ffffffffff32',
       ts: new Date().toISOString(),
       type: 'task.some_future_type',

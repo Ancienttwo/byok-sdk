@@ -15,14 +15,14 @@ input. Product authentication must supply `Principal`; the stored respondent is
 one authorized user in this minimal reference (team membership is Host policy).
 
 ```ts
-import { ClarificationHost, extractClarification } from './clarification';
+import { ClarificationHost } from './clarification';
 import { SqliteClarificationStore } from './clarification-store';
 
 const store = new SqliteClarificationStore(hostDatabasePath, authenticatedTenantId, 100);
 const host = new ClarificationHost(tenantScopedByokServer, store, () => Date.now());
-// Configure the daemon: resultDocument: { extract: extractClarification }.
+// Configure agentHome and hostedJournal: { mode: 'sqlite' }; the runtime calls submit_result.
 // Its agentEgress.policy must exactly match target.egressPolicy; it must
-// advertise result-document, terminal-projection-selection,
+// advertise terminal-projection-selection,
 // agent-egress-fresh-session and agent-home-contract support.
 ```
 
@@ -111,7 +111,7 @@ reference performs structural validation and correlation, not semantic proof.
 
 `bun run --cwd examples/basic test` exercises real HTTP + embedded server + stub
 daemon with SQLite and injected time, including binding/CAS, restart, notification
-retry, cancelled/failed/declined, home-busy, parser/extractor/egress gates and TTL.
+retry, cancelled/failed/declined, home-busy, Host parser/result-schema/egress gates and TTL.
 The shared stub declares `mcpToolsets: true`; tests explicitly inject an
 in-memory enrollment backend through `DaemonOverrides.deviceCredentials`.
 Agent-memory MCP projection and enrollment remain part of real admission.

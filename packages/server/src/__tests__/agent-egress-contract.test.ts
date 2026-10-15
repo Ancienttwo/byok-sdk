@@ -2,6 +2,7 @@ import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
+  RESULT_SCHEMA_MAX_BYTES,
   createEnvelope,
   type AgentEgressPolicy,
   type Envelope,
@@ -85,6 +86,37 @@ describe('reference-server Agent egress contract', () => {
     await instance.tasks.cancel(input.taskId, 'stop remaining');
     expect(await instance.tasks.attempt(input.taskId)).toMatchObject({ cancellation: { reason: 'stop remaining', requestedAt: expect.any(String) } });
     expect(await instance.tasks.deviceTerminal(input.taskId)).toBeUndefined();
+  });
+
+  it('admits a result-document execution only with a subset schema, refusing others before any row is written', async () => {
+    const { byok: instance, daemon } = await start([
+      'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack',
+      'terminal-projection-selection', AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
+    ]);
+    const schema = { type: 'object', properties: { answer: { type: 'string' } }, required: ['answer'], additionalProperties: false };
+    const submission = (taskId: string, resultSchema: any) => ({ taskId, deviceId: daemon.deviceId, payload: {
+      instruction: 'frozen context', runtime: 'codex' as const, agentRef: AGENT_REF, egressPolicy: POLICY,
+      terminalProjection: { mode: 'result-document' as const, contract: 'example.result.v1', schema: resultSchema },
+    } });
+    const refused: ReadonlyArray<readonly [string, unknown]> = [
+      ['outside-subset', { ...schema, properties: { answer: { type: 'string', format: 'email' } } }],
+      ['open-object', { ...schema, additionalProperties: true }],
+      ['over-cap', { ...schema, description: 'x'.repeat(RESULT_SCHEMA_MAX_BYTES) }],
+      ['missing', undefined],
+    ];
+    for (const [label, resultSchema] of refused) {
+      const taskId = `result-schema-${label}`;
+      await expect(instance.executions.submit(submission(taskId, resultSchema) as never), label).rejects.toThrow();
+      expect(await instance.tasks.attempt(taskId), label).toBeUndefined();
+      expect(await instance.tasks.offer(taskId), label).toBeUndefined();
+    }
+
+    const accepted = submission('result-schema-subset', schema);
+    const offered = await instance.executions.submit(accepted);
+    expect(offered.taskId).toBe('result-schema-subset');
+    // Only the admitted execution ever reaches the device mailbox.
+    const delivered = await awaitEnvelope(daemon, (e) => e.type === 'task.offer_for_agent_with_egress_fresh');
+    expect(delivered).toMatchObject({ task_id: 'result-schema-subset', payload: { terminalProjection: accepted.payload.terminalProjection } });
   });
 
   it('keeps user-visible message delivery outside activity and acks the exact authenticated task binding', async () => {

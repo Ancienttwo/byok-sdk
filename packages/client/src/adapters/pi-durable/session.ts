@@ -1,7 +1,6 @@
 import { assertDurableShellOwner, disposeDurableShellGroups } from './process-groups';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { isDeepStrictEqual } from 'node:util';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import type { RuntimeOperationInstructionStartInput, Session } from '../../types';
 import { piLaunchCommand, type PiRuntimeLaunchResources } from '../pi/runtime-launch';
@@ -50,7 +49,6 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
   const recovery = new DurableRecovery(context.lifecycle);
   let rpc: PiRpcClient | undefined;
   let closing = false, completed = false;
-  let document: unknown;
   let failure: RuntimeExecutionFailure | undefined;
   let projectionDigest: string | undefined;
   const seenUsage = new Set<string>();
@@ -90,7 +88,6 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
       try {
         for (;;) {
           let fatal = false;
-          let receivedResult = false;
           for await (const frame of child.events) {
             if (closing) return;
             if(frame.type==='tool_process'){
@@ -117,19 +114,9 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
               }
               if (event.type === 'error') { fatal = true; break; }
               queue.push(event);
-            } else if (frame.type === 'durable_result') {
-              if (receivedResult || !frame.document || typeof frame.document !== 'object') throw new Error('invalid durable result');
-              receivedResult = true;
-              if (document !== undefined) {
-                // A replacement may redeliver a persisted result whose completion
-                // frame was lost. Keep the first document and artifact immutable.
-                if (!isDeepStrictEqual(document, frame.document)) throw new Error('conflicting durable result');
-              } else {
-                document = frame.document;
-                queue.push({ type: 'artifact', name: 'byok.result', contentType: 'application/json' });
-              }
             } else if (frame.type === 'durable_complete') {
-              if (document === undefined) throw new Error('durable completion missing result');
+              // The terminal rule is the daemon's: a result-document outcome
+              // was staged through submit_result, never carried by this frame.
               completed = true; recovery.stop(); queue.push({ type: 'turn_end' }); queue.end(); return;
             } else if (frame.type === 'durable_failed') { fatal = true; break; }
             else throw new Error('unknown durable frame');
@@ -150,6 +137,5 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
     steer: async () => { throw new Error('durable steering is outside slice 1'); },
     followUp: async () => { throw new Error('durable continuation requires a new Host execution'); },
     interrupt: async () => { closing = true; recovery.stop(); rpc?.kill(); try { if(rpc)await rpc.dispose(); } finally { await disposeDurableShellGroups(shellGroups); } queue.end(); }, close,
-    resultDocument: () => { if (!completed) throw new Error('durable result is not terminal'); return document; },
   };
 }

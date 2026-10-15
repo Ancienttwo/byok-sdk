@@ -17,8 +17,9 @@ import { OPEN_LIFECYCLE } from './fixtures/lifecycle-barrier';
 // #195 S2: a synthetic Host. Everything Host-owned below (transcript,
 // Summary, SummaryJob, CAS, ContextPack) lives only in this file; the SDK is
 // exercised through its public server surfaces. Source-level evidence, not
-// Host acceptance. K7 (submit_result, wire v3) migrates the Summary from the
-// zero-tool + resultDocument.extract shape used here.
+// Host acceptance. Wire v3 (K7): the Summary is a result-document offer with
+// a frozen schema; the runtime submits it through the daemon's submit_result
+// route, never as text the Host or SDK parses.
 
 type TurnOutcome =
   | { kind: 'reply'; text: string; executionTerminal: 'task.complete' | 'task.fail' | 'task.cancelled' }
@@ -108,22 +109,25 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
   let sdk = createByokServer(options);
   const http = await startServer(sdk);
   const adapter = new StubRuntimeAdapter('pi');
-  const selector = { mode: 'result-document' as const, contract: 'synthetic-host.summary.v1' };
+  const selector = { mode: 'result-document' as const, contract: 'synthetic-host.summary.v1', schema: {
+    type: 'object' as const, additionalProperties: false as const,
+    required: ['schemaVersion', 'jobId', 'coveredThroughTurnSeq', 'text'],
+    properties: {
+      schemaVersion: { const: 'synthetic-host.summary.v1' },
+      jobId: { type: 'string' as const, minLength: 1 },
+      coveredThroughTurnSeq: { type: 'integer' as const, minimum: 0 },
+      text: { type: 'string' as const },
+    },
+  } };
   const agentRef = { agentId: 'summary-boundary-agent', profileRevision: 'profile-v1' };
   const storeDir = path.join(root, 'store');
-  const extracts: string[] = [];
   const daemon = createDaemonWithAdapters({
     storage: { scratchRoot: testScratchRoot() },
     localAgentRelease: { version: '0.0.0-summary-boundary-test' }, productName: 'summary boundary test', productId: options.productId,
     serverUrl: http.baseUrl, workspaceRoot: path.join(root, 'workspace'), storeDir,
     agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
-    resultDocument: { extract: (output, task) => {
-      if (task.terminalProjection?.mode !== selector.mode || task.terminalProjection.contract !== selector.contract) {
-        throw new Error('Unexpected internal result contract');
-      }
-      extracts.push(task.taskId);
-      return JSON.parse(output);
-    } },
+    // A result-document offer is admitted only by a daemon that journals its terminals.
+    hostedJournal: { mode: 'sqlite' },
   }, [adapter], { deviceCredentials: testDeviceCredentials(options.productId) });
   const host = new SyntheticHost();
   const summaryTaskIds: string[] = [];
@@ -243,7 +247,16 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
       expect(offer.payload).not.toHaveProperty('messageEgress');
       const document: SummaryDocument = { schemaVersion: 'synthetic-host.summary.v1', jobId: job.jobId,
         coveredThroughTurnSeq: job.targetCoveredThrough, text };
-      adapter.sessions[index]!.emit({ type: 'progress', text: JSON.stringify(document) });
+      // The runtime submits the Summary through the route the SDK result helper uses.
+      const token = adapter.startCalls[index]?.ctx.mcpServers?.byokagentresult?.env?.BYOK_AGENT_RESULT_CONTEXT;
+      if (!token) throw new Error('synthetic Host: missing Agent result context');
+      const connected = await connectControlClient({ storeDir, productId: options.productId });
+      if (!connected.ok) throw new Error(connected.reason);
+      try {
+        expect(await connected.client.request('agent_results.submit', { contextToken: token, outcome: document }))
+          .toMatchObject({ state: 'staged' });
+      } finally { connected.client.close(); }
+      adapter.sessions[index]!.emit({ type: 'progress', text: 'summary submitted' });
       adapter.sessions[index]!.emit({ type: 'turn_end' });
       const terminal = await settledTerminal(job.taskId, 'task.complete');
       expect(await sdk.tasks.agentMessage(job.taskId, deviceId, agentRef)).toBeUndefined();
@@ -333,7 +346,7 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
     expect(new Set(adapter.startCalls.map(call => call.ctx.workspaceDir)).size).toBe(1);
     expect(new Set(adapter.sessions.map(session => session.sessionRef)).size).toBe(adapter.sessions.length);
     expect(adapter.startCalls).toHaveLength(host.transcript.length + summaryTaskIds.length);
-    expect(extracts).toEqual(summaryTaskIds);
+    expect(adapter.startCalls.filter(call => call.ctx.mcpServers?.byokagentresult !== undefined)).toHaveLength(summaryTaskIds.length);
     expect(accepted.map(item => item.taskId)).toEqual(['user-turn-1', 'user-turn-3', 'user-turn-4', 'user-turn-5', 'user-turn-6', 'user-turn-7', 'user-turn-8']);
 
     // (d) Restart on the same SQLite file: offers, terminals and frozen bytes read back identically.

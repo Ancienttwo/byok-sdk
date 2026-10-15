@@ -773,10 +773,11 @@ export interface ByokCloud {
    * prose. An accepted host cancellation tombstone outranks a later device
    * receipt; the raw receipt remains readable as device evidence through
    * {@link ByokCloud.readTerminalReceipt}. `undefined` means neither fact
-   * exists. An absent `document` covers both a legacy
-   * pre-`result-document` daemon build and a daemon with no `resultDocument`
-   * extractor; a receipt whose body is not a terminal envelope throws rather
-   * than returning a best-effort shape.
+   * exists. An absent `document` means the winning terminal carried none (a
+   * non-complete terminal, or an offer with no `result-document` terminal
+   * projection); a
+   * receipt whose body is not a terminal envelope throws rather than
+   * returning a best-effort shape.
    */
   readTaskResult(tenant: TenantId, taskId: string): Promise<TerminalResult | undefined>;
   listDevices(tenant: TenantId): Promise<readonly DeviceRecord[]>;

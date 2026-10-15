@@ -757,6 +757,71 @@ describe.skipIf(process.platform !== 'darwin')('compiled daemon SIGKILL executio
     ]);
   }, 30_000);
 
+  // Wire v3 result channel (#468): staged outcomes are local audit only; the
+  // journal stays the only terminal authority across daemon death.
+  async function stagedResults(): Promise<Array<Record<string, unknown>>> {
+    const dir = path.join(current!.daemonBase.storeDir, 'agent-home', 'agents', 'agent-result', '.byok', 'results');
+    const names = await fs.readdir(dir).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return []; throw error; });
+    return Promise.all(names.map(async (name) => JSON.parse(await fs.readFile(path.join(dir, name), 'utf8')) as Record<string, unknown>));
+  }
+
+  async function submitResult(taskId: string, outcome: unknown): Promise<{ receiptId: string; state: string }> {
+    const control = current!.daemonBase.controlDir;
+    await fs.writeFile(path.join(control, `${taskId}.submit.json.tmp`), JSON.stringify(outcome));
+    await fs.rename(path.join(control, `${taskId}.submit.json.tmp`), path.join(control, `${taskId}.submit.json`));
+    await waitForFile(path.join(control, `${taskId}.receipt.json`));
+    return JSON.parse(await fs.readFile(path.join(control, `${taskId}.receipt.json`), 'utf8')) as { receiptId: string; state: string };
+  }
+
+  it('#468: SIGKILL after submit_result staged but before turn_end recovers as daemon_interrupted with no document and keeps the audit record', async () => {
+    const cloud = await startCloud();
+    const { daemon, deviceId } = await pair(cloud, { agentHome: true });
+    const offer = await cloud.rpc('enqueueResultOffer', { deviceId, taskId: globalThis.crypto.randomUUID() }) as { taskId: string };
+    await waitForAttempt(cloud, offer.taskId, 'running');
+    const receipt = await submitResult(offer.taskId, { verdict: 'pass', score: 7 });
+    expect(receipt).toMatchObject({ state: 'staged', receiptId: expect.any(String) });
+    daemon.kill();
+    expect((await daemon.exited()).signal).toBe('SIGKILL');
+    expect(journalRows('SELECT * FROM journal_terminal')).toHaveLength(0);
+
+    await startDaemon({ agentHome: true });
+    const attempt = await waitForAttempt(cloud, offer.taskId, 'failed');
+    expect(attempt.terminalCause).toBe('daemon_interrupted');
+    const body = String(await cloud.rpc('readTerminalBody', { taskId: offer.taskId }));
+    const terminal = decodeEnvelope(body);
+    expect(terminal.type).toBe('task.fail');
+    if (terminal.type === 'task.fail') expect(terminal.payload).toMatchObject({ reason: 'daemon_interrupted', retryable: false });
+    expect(body).not.toContain('"document"');
+    expect(await stagedResults()).toEqual([expect.objectContaining({
+      taskId: offer.taskId, receiptId: receipt.receiptId, contract: 'fixture.result.v1', outcome: { verdict: 'pass', score: 7 },
+    })]);
+    expect(starts()).toHaveLength(1);
+  }, 30_000);
+
+  it('#468: a task.complete with the staged document recorded before send is delivered exactly once after SIGKILL', async () => {
+    const cloud = await startCloud();
+    const { daemon, deviceId } = await pair(cloud, { agentHome: true, recoveryFault: 'terminal:before-send' });
+    const offer = await cloud.rpc('enqueueResultOffer', { deviceId, taskId: globalThis.crypto.randomUUID() }) as { taskId: string };
+    await waitForAttempt(cloud, offer.taskId, 'running');
+    expect(await submitResult(offer.taskId, { score: 3, verdict: 'fail' })).toMatchObject({ state: 'staged' });
+    await arm('terminal:before-send');
+    await finish(offer.taskId, 'result submitted');
+    expect((await daemon.exited()).signal).toBe('SIGKILL');
+    const [pending] = journalRows('SELECT bytes, truth_state FROM journal_terminal');
+    expect(pending?.truth_state).toBe('pending');
+    const recorded = decodeEnvelope(String(pending?.bytes));
+    expect(recorded.type).toBe('task.complete');
+    if (recorded.type === 'task.complete') expect(recorded.payload.document).toEqual({ score: 3, verdict: 'fail' });
+
+    await startDaemon({ agentHome: true });
+    await waitForAttempt(cloud, offer.taskId, 'complete');
+    await waitForJournalTruth('confirmed');
+    expect(await cloud.rpc('readTerminalBody', { taskId: offer.taskId })).toBe(pending?.bytes);
+    const wire = await cloud.rpc('readWire') as Array<{ type: string; task_id?: string }>;
+    expect(wire.filter((row) => row.type === 'task.complete' && row.task_id === offer.taskId)).toHaveLength(1);
+    expect(starts()).toHaveLength(1);
+  }, 30_000);
+
   it('redelivers an offer killed before local append commit and starts runtime exactly once', async () => {
     const cloud = await startCloud();
     const { daemon, deviceId } = await pair(cloud, { journalFault: 'append:before-commit' });

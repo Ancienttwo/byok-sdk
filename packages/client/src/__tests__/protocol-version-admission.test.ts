@@ -1,4 +1,5 @@
 import { createTestDeviceStore } from './fixtures/device-credentials';
+import { PROTOCOL_VERSION } from '@byok-sdk/protocol';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -88,7 +89,7 @@ describe('protocol-version admission at real long-poll receive', () => {
     // The same retained offer becomes deliverable once its wire major is the
     // supported one; rejection did not consume its cursor or task semantics.
     rewriteStale = false;
-    await vi.waitFor(() => expect(received).toEqual([2]));
+    await vi.waitFor(() => expect(received).toEqual([PROTOCOL_VERSION]));
     await vi.waitFor(async () => expect(await cursorStore.load(real!.url, record.deviceId)).toBeGreaterThan(0));
   }, 10_000);
 });

@@ -59,7 +59,8 @@ describe('GET /byok/events cursor semantics', () => {
     });
 
     const page = await poll(harness, device.authorization);
-    expect(page.capabilities).toContain('result-document');
+    // Wire v3 folded the former `result-document` flag into the baseline.
+    expect(page.capabilities).not.toContain('result-document');
     expect(page.events).toHaveLength(1);
     expect(page.events[0]?.type).toBe('task.offer_with_toolsets');
     expect(page.events[0]).toEqual(enqueued.envelope);

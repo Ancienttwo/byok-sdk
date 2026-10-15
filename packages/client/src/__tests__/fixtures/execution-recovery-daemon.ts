@@ -93,7 +93,23 @@ class ControlledSession implements Session {
           } finally { connected.client.close(); }
         }
         const finishFile = path.join(config.controlDir, `${self.taskId}.finish.json`);
+        // A result-document task submits through the same control route the
+        // SDK result helper's submit_result forwards to, when the test asks.
+        const resultServer = self.input.mcpServers?.byokagentresult;
+        const submitFile = path.join(config.controlDir, `${self.taskId}.submit.json`);
+        let submitted = false;
         while (!self.closed) {
+          if (resultServer !== undefined && !submitted && existsSync(submitFile)) {
+            submitted = true;
+            const outcome = JSON.parse(await fs.readFile(submitFile, 'utf8')) as unknown;
+            const connected = await connectControlClient({ storeDir: config.storeDir, productId: config.productId });
+            if (!connected.ok) throw new Error(connected.reason);
+            try {
+              const receipt = await connected.client.request('agent_results.submit', { contextToken: resultServer.env!.BYOK_AGENT_RESULT_CONTEXT, outcome });
+              writeFileSync(path.join(config.controlDir, `${self.taskId}.receipt.json`), JSON.stringify(receipt));
+              checkpoint('result-staged');
+            } finally { connected.client.close(); }
+          }
           if (existsSync(finishFile)) {
             const finish = JSON.parse(await fs.readFile(finishFile, 'utf8')) as { summary?: string };
             if (finish.summary !== undefined) yield { type: 'progress', text: finish.summary };

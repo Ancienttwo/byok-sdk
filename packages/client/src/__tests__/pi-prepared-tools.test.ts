@@ -320,3 +320,29 @@ describe('a tool-less prepared surface (requiredToolsets [] and agentMemory none
 it('resolves its MCP fixture server', async () => {
   await expect(fs.access(FIXTURE)).resolves.toBeUndefined();
 });
+
+
+it('K7 launches exactly the counted submit_result tool and dispatches through its SDK helper', async () => {
+  const selection = { mode: 'result-document' as const, contract: 'test.summary.v1', schema: {
+    type: 'object' as const, additionalProperties: false as const, required: ['summary'],
+    properties: { summary: { type: 'string' as const } },
+  } };
+  const assembled = await createPreparedToolSurfaceAssembler({
+    toolsetRegistry: new McpToolsetRegistry({}), runtimeEnv: () => ({ PATH: process.env.PATH ?? '' }),
+  }).assemble({ agentMemory: 'none', requiredToolsets: [], runtimeIdentity: RUNTIME_IDENTITY, terminalProjection: selection });
+  if (!assembled.ok) throw new Error(assembled.message);
+  expect(assembled.surface.toolNames).toEqual(['submit_result']);
+  const call = vi.fn(async () => ({ content: [{ type: 'text' as const, text: '{"state":"staged","receiptId":"same-receipt"}' }] }));
+  const surface = await assemblePreparedPiToolSurface({
+    agentMemory: 'none', memory: null, terminalProjection: selection, resultCall: { call },
+    observation: {}, toolsetDefinitionRevisions: {}, servers: [], runtimeIdentity: RUNTIME_IDENTITY,
+    expectedToolBindingDigest: assembled.surface.toolBindingDigest,
+    expectedObservationDigest: assembled.surface.observationDigest, host: UNUSED_HOST,
+  });
+  if (!surface.ok) throw new Error(surface.message);
+  expect(surface.toolNames).toEqual(['submit_result']);
+  expect(surface.tools[0]!.tool.parameters).toEqual(selection.schema);
+  const outcome = { summary: 'unchanged structured outcome' };
+  await surface.tools[0]!.tool.execute('result-call', outcome, undefined);
+  expect(call).toHaveBeenCalledWith('submit_result', outcome, undefined);
+});

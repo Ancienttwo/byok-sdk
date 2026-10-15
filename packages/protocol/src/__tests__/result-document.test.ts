@@ -1,4 +1,3 @@
-import { z } from 'zod';
 import { describe, expect, it } from 'vitest';
 import {
   CAPABILITY_FLAGS,
@@ -9,14 +8,13 @@ import {
   createEnvelope,
   decodeEnvelope,
   encodeEnvelope,
+  requiredReceiverCapabilities,
 } from '../index';
-import { BlobRefSchema } from '../blob';
 
 /**
- * `task.complete.document` (additive-minor) — the bounded, schema-neutral
- * structured-result channel, its cap semantics, and the capability flag that
- * gates its emission. See `messages.ts`'s `RESULT_DOCUMENT_MAX_BYTES` /
- * `checkResultDocument` and `version.ts`'s `result-document` flag.
+ * `task.complete.document` — the bounded structured-result channel and its
+ * cap semantics. See `messages.ts`'s `RESULT_DOCUMENT_MAX_BYTES` /
+ * `checkResultDocument`. In wire v3 no capability flag gates it.
  */
 
 /**
@@ -28,57 +26,6 @@ function documentOfExactJsonBytes(bytes: number): unknown {
   const framing = JSON.stringify({ a: '' }).length; // 8
   return { a: 'x'.repeat(bytes - framing) };
 }
-
-// ---------------------------------------------------------------------------
-// Falsifier — the premise the capability gate rests on
-// ---------------------------------------------------------------------------
-
-/**
- * The whole reason `document` emission is gated on a capability flag (rather
- * than sent unconditionally the way `task.await_approval.approvalId` is) is
- * that a PRE-`document` server does not reject the field — it silently
- * strips it, so the task's primary structured result would vanish with no
- * error anywhere. That premise is a claim about zod's default (non-`.strict()`)
- * object behavior, so it is pinned here directly instead of assumed.
- *
- * `PreDocumentTaskCompletePayloadSchema` is a verbatim replica of
- * `TaskCompletePayloadSchema` as it stood immediately before this change —
- * an old server's parser, reconstructed. The same assertion was first run
- * against the REAL pre-change `TaskCompletePayloadSchema` (green: the field
- * was stripped) before the field was added, and against the post-change
- * schema (red: the field survives) — see
- * `tasks/notes/20260812-0351-result-document-channel.notes.md`. Keeping the
- * replica is what lets both halves of that story stay asserted forever in
- * one file.
- */
-const PreDocumentTaskCompletePayloadSchema = z.object({
-  summary: z.string(),
-  sessionRef: z.string(),
-  artifactRefs: z.array(BlobRefSchema).optional(),
-});
-
-describe('falsifier: the old-server strip premise behind the capability gate', () => {
-  it('a pre-`document` server SILENTLY STRIPS the field — it does not reject it, and does not pass it through', () => {
-    const parsed = PreDocumentTaskCompletePayloadSchema.parse({
-      summary: 'done',
-      sessionRef: 'sess-1',
-      document: { kind: 'invoice', total: 42 },
-    });
-
-    expect('document' in parsed).toBe(false);
-    expect(parsed).toEqual({ summary: 'done', sessionRef: 'sess-1' });
-  });
-
-  it('a `result-document`-capable server retains it — the exact behavior difference the flag advertises', () => {
-    const parsed = TaskCompletePayloadSchema.parse({
-      summary: 'done',
-      sessionRef: 'sess-1',
-      document: { kind: 'invoice', total: 42 },
-    });
-
-    expect(parsed.document).toEqual({ kind: 'invoice', total: 42 });
-  });
-});
 
 // ---------------------------------------------------------------------------
 // Cap boundary — the four cases
@@ -381,15 +328,13 @@ describe('task.complete.document on the wire', () => {
   });
 });
 
-describe('result-document capability flag', () => {
-  it('is present in CAPABILITY_FLAGS', () => {
-    expect(CAPABILITY_FLAGS).toContain('result-document');
+describe('task.complete.document is v3 baseline (no capability flag)', () => {
+  it('the v2 result-document flag is gone and no receiver capability gates document', () => {
+    expect(CAPABILITY_FLAGS).not.toContain('result-document');
+    expect(requiredReceiverCapabilities('task.complete', { summary: 'done', sessionRef: 'sess-1', document: { a: 1 } })).toEqual([]);
   });
 
-  it('did not disturb any pre-existing flag (additive only)', () => {
-    // The five flags that existed before this slice, unchanged and in order,
-    // as an exact prefix — later additive flags (result-document here, plus
-    // any landed concurrently) may follow but must not reorder or drop these.
+  it('kept every other pre-existing flag in order', () => {
     expect([...CAPABILITY_FLAGS].slice(0, 5)).toEqual([
       'steer',
       'blob-upload',
@@ -397,6 +342,5 @@ describe('result-document capability flag', () => {
       'approval_resolved',
       'approval-targeting',
     ]);
-    expect(CAPABILITY_FLAGS).toContain('result-document');
   });
 });

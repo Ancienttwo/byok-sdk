@@ -68,9 +68,10 @@ export interface TerminalResult {
   readonly artifactRefs?: readonly BlobRef[];
   /**
    * The product's structured terminal result, verbatim `task.complete.document`.
-   * Absent — key missing, never null — when the daemon sent none, which covers
-   * both a legacy pre-`result-document` build and a daemon with no
-   * `resultDocument` extractor.
+   * Absent — key missing, never null — when the daemon sent none: on every
+   * non-complete terminal, and on a completion whose offer selected no
+   * `result-document` terminal projection (a result-document run without a
+   * submitted outcome ends in `task.fail`, not a document-less completion).
    */
   readonly document?: unknown;
   /**

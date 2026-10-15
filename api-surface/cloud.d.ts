@@ -282,6 +282,7 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"result-document">;
             contract: z.ZodString;
+            schema: z.ZodCustom<import("@byok-sdk/protocol").ResultSchema, import("@byok-sdk/protocol").ResultSchema>;
         }, z.core.$strict>], "mode">>>;
         limits: z.ZodOptional<z.ZodObject<{
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
@@ -1514,10 +1515,11 @@ export interface ByokCloud {
      * prose. An accepted host cancellation tombstone outranks a later device
      * receipt; the raw receipt remains readable as device evidence through
      * {@link ByokCloud.readTerminalReceipt}. `undefined` means neither fact
-     * exists. An absent `document` covers both a legacy
-     * pre-`result-document` daemon build and a daemon with no `resultDocument`
-     * extractor; a receipt whose body is not a terminal envelope throws rather
-     * than returning a best-effort shape.
+     * exists. An absent `document` means the winning terminal carried none (a
+     * non-complete terminal, or an offer with no `result-document` terminal
+     * projection); a
+     * receipt whose body is not a terminal envelope throws rather than
+     * returning a best-effort shape.
      */
     readTaskResult(tenant: TenantId, taskId: string): Promise<TerminalResult | undefined>;
     listDevices(tenant: TenantId): Promise<readonly DeviceRecord[]>;
@@ -3937,9 +3939,10 @@ export interface TerminalResult {
     readonly artifactRefs?: readonly BlobRef[];
     /**
      * The product's structured terminal result, verbatim `task.complete.document`.
-     * Absent — key missing, never null — when the daemon sent none, which covers
-     * both a legacy pre-`result-document` build and a daemon with no
-     * `resultDocument` extractor.
+     * Absent — key missing, never null — when the daemon sent none: on every
+     * non-complete terminal, and on a completion whose offer selected no
+     * `result-document` terminal projection (a result-document run without a
+     * submitted outcome ends in `task.fail`, not a document-less completion).
      */
     readonly document?: unknown;
     /**

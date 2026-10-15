@@ -33,7 +33,7 @@ authority; `R2CloudBlobStore` uses the content hash as its blob id, so it
 satisfies that contract directly.
 
 ```ts
-const stores = createPostgresCloudStores(options);
+const stores = await createPostgresCloudStores(options);
 const truthCommitter = new PostgresTruthCommitter({ pool, clock, crypto });
 const mailboxWake = createPostgresMailboxWake({ connectionString: sessionDsn, onError: reportWakeError });
 
@@ -53,6 +53,29 @@ and token routes reach Postgres on every request and need an edge limit (or
 `createByokCloud`'s `publicRouteLimiter`) — see
 `deploy/runbooks/hosted-operations.md`, "Public routes and edge rate limits".
 `blobs` is the R2 adapter described below.
+
+### Wire-major startup fence
+
+`createPostgresCloudStores` is async. Before it returns any store it reads every
+pending mailbox (`outbox`) row and rejects with
+`PostgresMailboxProtocolUnsupportedError` (`code`
+`POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED`, plus `requiredVersion`, `tenantId`,
+`deviceId` and `seq` of the first offending row) if any body is not a wire
+envelope of the build's `PROTOCOL_VERSION` (3). Acked and expired rows are
+history and are not inspected. The check is read-only: no row is rewritten,
+reclassified or deleted, and there is no synchronous variant that skips it.
+
+When it fails, keep the database and drain the mailbox with the previous SDK
+(stop new submissions, let every pending row be delivered and acked), then
+upgrade; or start a new database and re-enroll devices, with the Host
+resubmitting unfinished work from its own intent. `createPostgresCoreStores`
+carries no fence: the core `MailboxStore` port treats bodies as opaque, and only
+the cloud composition gives them wire-envelope meaning.
+
+The scan walks the pending rows of every tenant in primary-key pages, so it
+costs one read of the pending mailbox per composition. On Workers the
+composition is built per invocation (see below), so that read happens on every
+invocation.
 
 ## Deployment compositions
 

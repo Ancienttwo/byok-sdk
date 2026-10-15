@@ -1,4 +1,4 @@
-import type { AgentRef, InputPreparationOfferBinding, PreparedAgentMemoryMode } from '@byok-sdk/protocol';
+import type { AgentRef, InputPreparationOfferBinding, PreparedAgentMemoryMode, TerminalProjectionSelection } from '@byok-sdk/protocol';
 import {
   inputPreparationDigest,
   inputPreparationRuntimeIdentityString,
@@ -58,6 +58,7 @@ import type { PreparedAgentMemoryState } from './prepared-agent-memory';
 export type PreparedOfferDeclineReason =
   /** This daemon has no input-preparation lane at all, so it can consume none. */
   | 'preparation_lane_unconfigured'
+  | 'preparation_result_schema_mismatch'
   /** No record under this reference in this daemon's durable store. */
   | 'preparation_not_found'
   /** The record exists but is not ready to admit an Execution; the detail names every reason. */
@@ -118,6 +119,7 @@ export interface PreparedOfferServerProjection {
 }
 
 export interface PreparedOfferAdmissionInput {
+  readonly terminalProjection?: TerminalProjectionSelection;
   /** The durable record this offer names, already looked up by reference. */
   readonly record: InputPreparationRecord;
   /** The absolute path of the record's retained artifact (`InputPreparationStore.artifactPathOf`). */
@@ -238,6 +240,9 @@ export async function admitPreparedOffer(
       'the prepared Agent memory selection or its sealed descriptor state differs from the named preparation',
     );
   }
+  if (inputPreparationDigest(binding.terminalProjection ?? null) !== inputPreparationDigest(input.terminalProjection ?? null)) {
+    return decline('preparation_result_schema_mismatch', 'the offered result selection differs from the schema and contract frozen by this preparation');
+  }
   const runtimeIdentity = inputPreparationRuntimeIdentityString(input.runtime);
   if (inputPreparationDigest(binding.runtime) !== inputPreparationDigest(input.runtime)) {
     return decline(
@@ -257,6 +262,7 @@ export async function admitPreparedOffer(
   // --- the concrete tool set --------------------------------------------
   const fingerprinted = await fingerprintPreparedToolSurface({
     agentMemory: binding.agentMemory,
+    terminalProjection: binding.terminalProjection,
     memory: input.memory,
     observation: input.observation,
     runtimeIdentity,
@@ -341,6 +347,7 @@ export async function admitPreparedOffer(
         }),
       }),
       agentMemory: binding.agentMemory,
+      ...(binding.terminalProjection === undefined ? {} : { terminalProjection: binding.terminalProjection }),
       memory: input.memory,
       toolBindingDigest: summary.toolBindingDigest,
       observationDigest: summary.observationDigest,

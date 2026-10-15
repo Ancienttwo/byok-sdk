@@ -80,13 +80,14 @@ const __executionScratch = await testExecutionScratch();
 function liveGroup(pgid:number):number[] {return execFileSync('ps',['-eo','pid=,pgid=,stat='],{encoding:'utf8'}).trim().split('\n').map(line=>line.trim().split(/\s+/u)).filter(([,group,stat])=>Number(group)===pgid&&!stat!.startsWith('Z')).map(([pid])=>Number(pid));}
 // Windows durable execution is fail-closed pending a validated parent-death Job Object design.
 describe.skipIf(process.platform === 'win32')('durable ordinary worker through custody argv', () => {
-  it('real worker sends Host input and reports selected result and ordinary usage', async () => {
+  it('real worker sends Host input and reports completion and ordinary usage', async () => {
     const f = await fixture(res => finish(res, 'complete'));
     const events:AgentEvent[] = []; for await (const event of f.session.events) events.push(event);
     expect(events.some(event => event.type === 'error')).toBe(false);
     expect(events.at(-1)).toEqual({ type: 'turn_end' });
     expect(events.filter(event => event.type === 'usage')).toEqual([{ type: 'usage', inputTokens: 3, cachedInputTokens: 0, outputTokens: 2, totalTokens: 5 }]);
-    expect(f.session.resultDocument!()).toEqual({ text: 'complete' });
+    // Wire v3: no in-replica result document; a result-document outcome goes through submit_result.
+    expect(f.session).not.toHaveProperty('resultDocument'); expect(events.some(event => event.type === 'artifact')).toBe(false);
     expect(f.bodies[0]).toContain('Host authority input'); expect(JSON.parse(f.bodies[0]!).messages.some((message: {content:unknown}) => typeof message.content === 'string' && message.content.includes('Host context second line'))).toBe(true); expect(f.authorizations).toEqual(['Bearer DURABLE_PROVIDER_SENTINEL']);
     expect(f.bodies.join('')).not.toContain('DURABLE_PROVIDER_SENTINEL'); expect(f.calls()).toBe(1);
   });
@@ -169,7 +170,7 @@ describe.skipIf(process.platform === 'win32')('durable ordinary worker through c
     const events:AgentEvent[] = []; for await (const event of f.session.events) events.push(event);
     expect(f.calls()).toBe(2); expect(f.journal).toEqual(['respawn-intent:1']);
     expect(events.some(event => event.type === 'error')).toBe(false); expect(events.at(-1)).toEqual({ type: 'turn_end' });
-    expect(f.session.resultDocument!()).toEqual({ text: 'resumed' });
+    expect(f.session).not.toHaveProperty('resultDocument');
     expect(events.filter(event => event.type === 'usage')).toHaveLength(1); // interrupted attempt supplied no usage
   });
   it('third respawn is refused after two checkpoint recoveries without more model activity', async () => {

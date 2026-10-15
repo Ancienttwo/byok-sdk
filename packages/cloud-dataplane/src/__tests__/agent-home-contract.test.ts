@@ -41,7 +41,7 @@ if (POSTGRES_URL === undefined) {
         });
         await devices.recordCapabilities(TENANT, {
           deviceId: 'agent-home-device',
-          capabilities: [AGENT_HOME_CONTRACT_CAPABILITY, 'result-document'],
+          capabilities: [AGENT_HOME_CONTRACT_CAPABILITY, 'terminal-projection-selection'],
         });
         await expect(tasks.open(TENANT, {
           taskId: 'agent-home-invalid-backslash',
@@ -117,7 +117,7 @@ if (POSTGRES_URL === undefined) {
         const restartedTasks = new PostgresTaskAttemptStore(restartedPool, clock);
 
         await expect(restartedDevices.get(TENANT, 'agent-home-device')).resolves.toMatchObject({
-          capabilities: [AGENT_HOME_CONTRACT_CAPABILITY, 'result-document'],
+          capabilities: [AGENT_HOME_CONTRACT_CAPABILITY, 'terminal-projection-selection'],
         });
         await expect(restartedTasks.get(TENANT, 'agent-home-task')).resolves.toMatchObject({
           agentRef: AGENT_REF,

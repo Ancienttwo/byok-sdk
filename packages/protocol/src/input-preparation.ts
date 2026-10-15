@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TerminalProjectionSelectionSchema } from './terminal-projection';
 import { AgentEgressContentHashSchema } from './agent-egress';
 
 /**
@@ -566,6 +567,7 @@ export const InputPreparationArtifactSummarySchema = z
 /** The immutable binding a receipt carries and a later consumer must re-present. */
 export const InputPreparationBindingSchema = z
   .object({
+    terminalProjection: TerminalProjectionSelectionSchema.optional(),
     agentMemory: PreparedAgentMemoryModeSchema,
     scopeId: OPAQUE_ID,
     deviceId: OPAQUE_ID,

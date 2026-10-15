@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope, decodeEnvelope, encodeEnvelope, type Envelope } from '@byok-sdk/protocol';
+import { createEnvelope, decodeEnvelope, encodeEnvelope, PROTOCOL_VERSION, type Envelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type DaemonConfig } from '../daemon/create-daemon';
 import { SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
 import { journalHash, type LocalTerminalRecord } from '../daemon/journal/journal';
@@ -87,7 +87,7 @@ describe('terminal durability and actual harness boundaries', () => {
         await daemon.pair(pairing.code);
         const device = (await createTestDeviceStore(cfg.storeDir!, undefined, cfg.productId).credentials.read())!;
         await post(cloud.url, device.accessToken, createEnvelope('conn.hello', {
-          deviceId: device.deviceId, productId: cfg.productId, protocolVersions: [2],
+          deviceId: device.deviceId, productId: cfg.productId, protocolVersions: [PROTOCOL_VERSION],
           capabilities: ['custom-harness'], runtimes: [], harnesses: [{ id: 'acme-harness', capabilities: { ...adapter.descriptor.capabilities } }],
         }));
         const offer = await cloud.cloud.enqueueOffer(cloud.tenant, device.deviceId, { payload: {

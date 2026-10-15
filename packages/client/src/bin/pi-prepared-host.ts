@@ -1,3 +1,5 @@
+import { TerminalProjectionSelectionSchema, type TerminalProjectionSelection } from '@byok-sdk/protocol';
+import { AGENT_RESULT_TOOL_NAME } from '../sdk-reserved-mcp';
 import { PI_PROJECTED_KEY_ENV } from '../adapters/provider-credential-environment';
 import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding';
 import { readFileSync } from 'node:fs';
@@ -85,7 +87,7 @@ import {
  */
 
 const CONFIG_FORMAT = 'byok.pi.prepared-launch';
-const CONFIG_VERSION = 5;
+const CONFIG_VERSION = 6;
 /**
  * Where this process's provider credential comes from, and the ONE switch the
  * rest of this file branches on. Written by the adapter from
@@ -474,6 +476,8 @@ function admitPreparedProviderProjection(
 
 /** What the pi adapter writes for exactly one prepared operation. */
 interface PreparedLaunchConfig {
+  readonly terminalProjection?: TerminalProjectionSelection;
+  readonly resultCall: McpStdioServerSpec | null;
   readonly credentialSource: CredentialSource;
   readonly cwd: string;
   readonly model: InputPreparationModelV1;
@@ -495,7 +499,7 @@ function loadConfig(configPath: string, digest: string): PreparedLaunchConfig {
     fail(`${configPath} could not be read as JSON: ${cause instanceof Error ? cause.message : String(cause)}`);
   }
   if (!isPlainObject(parsed)) fail('the prepared launch configuration must be an object');
-  const keys = ['format','version','credentialSource','cwd','expected','toolBindingDigest','observationDigest','toolsetDefinitionRevisions','agentMemory','memory','memoryCall','mcp'];
+  const keys = ['format','version','credentialSource','cwd','expected','toolBindingDigest','observationDigest','toolsetDefinitionRevisions','agentMemory','memory','memoryCall','terminalProjection','resultCall','mcp'];
   if (Object.keys(parsed).length !== keys.length || !keys.every(key => Object.hasOwn(parsed, key))) fail('prepared config has missing or unknown keys');
   if (parsed.format !== CONFIG_FORMAT) fail(`the prepared launch configuration must declare format ${CONFIG_FORMAT}`);
   if (parsed.version !== CONFIG_VERSION) fail(`the prepared launch configuration must declare version ${CONFIG_VERSION}`);
@@ -533,7 +537,14 @@ function loadConfig(configPath: string, digest: string): PreparedLaunchConfig {
     fail('agentMemory does not agree with its sealed memory state and private execution helper');
   }
 
+  const terminalProjection = parsed.terminalProjection === null ? undefined : TerminalProjectionSelectionSchema.parse(parsed.terminalProjection);
+  const resultCall = parsed.resultCall === null ? null : parseMcpServerSpec('resultCall', parsed.resultCall, fail);
+  if (terminalProjection?.mode === 'result-document' ? resultCall === null : resultCall !== null) {
+    fail('result helper does not agree with the frozen result selection');
+  }
   return Object.freeze({
+    ...(terminalProjection === undefined ? {} : { terminalProjection }),
+    resultCall,
     credentialSource: credentialSource as CredentialSource,
     cwd,
     model: parsePreparedExpectedModel(parsed.expected.model),
@@ -547,7 +558,7 @@ function loadConfig(configPath: string, digest: string): PreparedLaunchConfig {
   });
 }
 
-interface PreparedMemoryCall {
+interface PreparedHelperCall {
   call(
     toolName: string,
     args: Readonly<Record<string, unknown>>,
@@ -561,7 +572,7 @@ interface PreparedMemoryCall {
  * descriptor must equal the prepared task-free descriptor exactly. It is not
  * added to the Host MCP pool or its observation map.
  */
-export async function openPreparedMemoryCall(config: PreparedLaunchConfig): Promise<PreparedMemoryCall | undefined> {
+export async function openPreparedMemoryCall(config: Pick<PreparedLaunchConfig, 'agentMemory' | 'memory' | 'memoryCall' | 'mcp' | 'cwd'>): Promise<PreparedHelperCall | undefined> {
   if (config.agentMemory === 'none') return undefined;
   const memory = config.memory;
   const server = config.memoryCall;
@@ -597,8 +608,29 @@ export async function openPreparedMemoryCall(config: PreparedLaunchConfig): Prom
   });
 }
 
-async function closePreparedMcpResources(pool: McpServerPool, memoryCall: PreparedMemoryCall | undefined): Promise<void> {
-  await Promise.all([pool.close(), memoryCall?.close()]);
+async function openPreparedResultCall(config: PreparedLaunchConfig): Promise<PreparedHelperCall | undefined> {
+  if (config.terminalProjection?.mode !== 'result-document') return undefined;
+  if (config.resultCall === null) fail('selected result document has no execution helper');
+  const client = new McpStdioClient(config.resultCall, {
+    label: 'prepared result helper', env: config.mcp.mcpEnv, cwd: config.cwd,
+    maxStdoutBytes: MCP_OBSERVATION_MAX_STDOUT_BYTES, timeoutMs: 10_000,
+  });
+  try {
+    await client.connect();
+    const tools = await client.listTools();
+    if (tools.length !== 1 || tools[0]!.name !== AGENT_RESULT_TOOL_NAME
+      || canonicalPreparedValue(tools[0]!.inputSchema) !== canonicalPreparedValue(config.terminalProjection.schema)) {
+      throw new Error('prepared result helper differs from the frozen result schema');
+    }
+  } catch (error) { await client.close(); throw error; }
+  return Object.freeze({
+    call: (toolName: string, args: Readonly<Record<string, unknown>>, signal?: AbortSignal) => client.callTool(toolName, args, signal === undefined ? undefined : { signal }),
+    close: () => client.close(),
+  });
+}
+
+async function closePreparedMcpResources(pool: McpServerPool, memoryCall: PreparedHelperCall | undefined, resultCall: PreparedHelperCall | undefined): Promise<void> {
+  await Promise.all([pool.close(), memoryCall?.close(), resultCall?.close()]);
 }
 
 /**
@@ -645,19 +677,23 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
   }
 
   const pool = new McpServerPool(config.mcp, fail);
-  let memoryCall: PreparedMemoryCall | undefined;
+  let memoryCall: PreparedHelperCall | undefined;
+  let resultCall: PreparedHelperCall | undefined;
   try {
     // This opens the execution helper and checks its raw
     // initialize/tools/list answer before a provider or model is constructed.
     memoryCall = await openPreparedMemoryCall(config);
+    resultCall = await openPreparedResultCall(config);
   } catch (cause) {
-    await pool.close();
-    fail('prepared Agent memory helper could not be verified: ' + (cause instanceof Error ? cause.message : String(cause)));
+    await closePreparedMcpResources(pool, memoryCall, resultCall);
+    fail('prepared SDK helper could not be verified: ' + (cause instanceof Error ? cause.message : String(cause)));
   }
   try {
   const surface = await assemblePreparedPiToolSurface({
     agentMemory: config.agentMemory,
     memory: config.memory,
+    terminalProjection: config.terminalProjection,
+    ...(resultCall === undefined ? {} : { resultCall }),
     observation: config.mcp.observation,
     toolsetDefinitionRevisions: config.toolsetDefinitionRevisions,
     servers: projectedServerBindings(config.mcp),
@@ -668,7 +704,7 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
     ...(memoryCall === undefined ? {} : { memoryCall }),
   });
   if (!surface.ok) {
-    await closePreparedMcpResources(pool, memoryCall);
+    await closePreparedMcpResources(pool, memoryCall, resultCall);
     fail(`${surface.code}: ${surface.message}`);
   }
 
@@ -760,12 +796,12 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
   try {
     line = await readFirstJsonlFrame(process.stdin, RPC_MAX_FRAME_BYTES);
   } catch (cause) {
-    await closePreparedMcpResources(pool, memoryCall);
+    await closePreparedMcpResources(pool, memoryCall, resultCall);
     fail(`prepared_input_invalid: ${cause instanceof Error ? cause.message : String(cause)}`);
   }
   const command = parsePreparedPromptCommand(line);
   if ('error' in command) {
-    await closePreparedMcpResources(pool, memoryCall);
+    await closePreparedMcpResources(pool, memoryCall, resultCall);
     return refuseCommand(command.id, 'prepared_input_invalid', command.error);
   }
   let envelope: PreparedPiInputV1;
@@ -778,7 +814,7 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
     }
     envelope = await verifyPreparedPiInput(command.input, command.expected);
   } catch (cause) {
-    await closePreparedMcpResources(pool, memoryCall);
+    await closePreparedMcpResources(pool, memoryCall, resultCall);
     return refuseCommand(command.id, preparedSessionErrorCode(cause), cause instanceof Error ? cause.message : String(cause));
   }
 
@@ -814,7 +850,7 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
       },
     });
   } catch (cause) {
-    await closePreparedMcpResources(pool, memoryCall);
+    await closePreparedMcpResources(pool, memoryCall, resultCall);
     return refuseCommand(command.id, preparedSessionErrorCode(cause), cause instanceof Error ? cause.message : String(cause));
   }
   const { session } = handle;
@@ -868,6 +904,6 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
     // The process normally owns this tree for its lifetime, but every
     // pre-model refusal and any unexpected runRpcMode return/rejection must
     // still release both independently opened MCP resources.
-    await closePreparedMcpResources(pool, memoryCall);
+    await closePreparedMcpResources(pool, memoryCall, resultCall);
   }
 }

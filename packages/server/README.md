@@ -2,7 +2,7 @@
 
 Embed the `@byok-sdk/cloud` coordination kernel in a Node.js process serving
 one product and one tenant. The server handles pairing, device authentication,
-dispatch, approvals, cancellation and device discovery over protocol v2.
+dispatch, approvals, cancellation and device discovery over protocol v3.
 Use `@byok-sdk/cloud` with `@byok-sdk/cloud-dataplane` for a multi-instance
 hosted deployment.
 
@@ -320,8 +320,10 @@ Schema refusals at open are a `SqliteSchemaError` with `foundVersion` and
   preserve the file.
 - `SQLITE_SCHEMA_INVALID`: the file contradicts its declared schema or is not a
   BYOK database.
-- `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`: pending mailbox rows use an unsupported
-  wire major. Drain them with the previous compatible SDK before upgrading.
+- `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`: a pending mailbox row is not a wire v3
+  envelope (for example a v2 offer left undrained). Nothing is rewritten or
+  deleted; drain it with the previous compatible SDK before upgrading, or use a
+  new state directory and enrollment.
 
 ```ts
 const server = createByokServer({
@@ -351,7 +353,10 @@ Before enqueue, durably bind the authenticated scope and external execution key
 (including cycle/pass where applicable) to one taskId, explicit deviceId and
 immutable execution input. Fresh Agent work uses `executions.submit(input)` and
 requires the Host-owned taskId. Its strict nested payload names runtime,
-AgentRef, egressPolicy and terminalProjection. messageEgress is optional;
+AgentRef, egressPolicy and terminalProjection. A `result-document`
+terminalProjection carries its frozen outcome `schema` (the wire v3 JSON Schema
+subset, at most 16 KiB); a schema outside the subset is refused before any row
+is written. messageEgress is optional;
 selecting it requires agentMessageContext and a registered Agent message consumer.
 The return is EnqueuedOffer, with durable recovery through tasks.offer; no fresh
 egress TaskHandle is returned. Resubmitting a delivered taskId throws

@@ -252,7 +252,7 @@ async function composeReopened(handoff, consume, finalizeProbePath) {
   const tokenSecret = new Uint8Array(Buffer.from(handoff.tokenSecretB64, 'base64'));
   // A NEW pool and NEW store objects over the SAME database.
   const pool = createByokPool({ connectionString: handoff.databaseUrl });
-  const cloudStores = createPostgresCloudStores({ pool, clock, crypto, objectStorage: handoff.objectStorage });
+  const cloudStores = await createPostgresCloudStores({ pool, clock, crypto, objectStorage: handoff.objectStorage });
   if (finalizeProbePath !== undefined) {
     const realFinalize = cloudStores.tasks.finalizeAgentMessage.bind(cloudStores.tasks);
     cloudStores.tasks.finalizeAgentMessage = async (...args) => {
@@ -710,7 +710,7 @@ if (substrateConfigured) {
     await migrate(pool, migrationsDir());
 
     const coreA = createPostgresCoreStores({ pool, clock, objectStorage });
-    const storesA = createPostgresCloudStores({ pool, clock, crypto, objectStorage });
+    const storesA = await createPostgresCloudStores({ pool, clock, crypto, objectStorage });
     const consumer = createProductConsumer({});
     const cloudA = composeDurable(coreA, storesA, createHmacTokenSigner(tokenSecret, clock), consumer);
     const device = await pairCapableDevice({ core: coreA, cloud: cloudA, stores: storesA }, durableTenant, 'packed-durable-device');

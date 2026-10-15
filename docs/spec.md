@@ -718,7 +718,7 @@ The host registers no uncounted native tool, no message tool, and loads no devic
 extensions, skills, context files or prompt templates. Its resource loader loads
 only the owned inline extension. MCP calls use the existing task-scoped pool.
 A zero-tool session is supported: it is a record whose counted
-manifest is empty (`requiredToolsets: []` with `agentMemory: 'none'`) (see the lifecycle below).
+manifest is empty (`requiredToolsets: []`, `agentMemory: 'none'`, and no result-document selection) (see the lifecycle below).
 
 One refusal is structural rather than incidental. A prepared Execution never
 resumes: a sealed `sessionRef` and a preparation reference together fail closed,
@@ -726,7 +726,7 @@ because resuming binds the frozen request to a history nobody counted.
 
 A prepared session launches no native tool. A preparation observes and counts
 MCP tools only. `requiredToolsets: []` is valid on preparation. With
-`agentMemory: 'none'` that record counts zero tools at all, and the record is admitted and launched with zero tools from 0.24.0; earlier
+`agentMemory: 'none'` and no result-document selection that record counts zero tools at all, and the record is admitted and launched with zero tools from 0.24.0; earlier
 releases refused it at three points (preparation, admission and the Pi launch) even
 though the protocol accepted it. The prepared offer for such a record omits
 `requiredToolsets`, because an offer's own `requiredToolsets` stays non-empty
@@ -793,7 +793,7 @@ A tool-less record (an empty counted manifest, no memory) binds no toolset at al
 
 Prepared execution injects no message MCP helper. Memory uses the explicit
 `agentMemory` selection described below; `none` starts no memory helper, so a tool-less
-prepared start launches no MCP server. Message context remains server-only;
+prepared start without a result-document selection launches no MCP server. A result-document selection adds the one SDK `submit_result` tool to both the counted and launched manifest. Message context remains server-only;
 `messageEgress` enables the existing durable outbox. The daemon collects Pi text
 progress into the final reply. Overflow or missing/unreadable usage fails before
 any body can be published. At turn end it checks usage first, extracts any selected
@@ -2386,7 +2386,15 @@ status, is not evidence of mailbox delivery or physical Agent-home release.
 
 ### Explicit internal result projection under Agent egress
 
-A strict fresh Agent task may select `terminalProjection: { mode: 'result-document', contract }` without user `messageEgress`. That frozen task selection makes the extracted document a separate internal result. The daemon must not deliver document-less success. Existing extractor validation and server capability gates remain applicable. This is an execution/result primitive: Host owns SummaryJob, coverage/version CAS, budgets and scheduling; schema support alone is not native-runtime or tool-isolation acceptance. On the prepared lane the same primitive runs with zero tools (a tool-less record, an offer that omits `requiredToolsets`, no `messageEgress`); the extractor and the server `result-document` capability remain required.
+A strict fresh Agent task selects `terminalProjection: { mode: 'result-document', contract, schema }` for a structured internal outcome, or `{mode:'none'}` when none is required. User-facing `messageEgress` is independent. The Host freezes the schema in the offer; SDK validates its restricted JSON Schema 2020-12 subset at Host submission and daemon admission. Schemas are at most 16 KiB and outcomes at most 64 KiB. The allowed keywords and rejection rules are in [PRD §8.3](researches/2026-10-13_bot-platform-prd.md#83-k7结构化-outcome-通道).
+
+The SDK-reserved `byokagentresult` MCP server advertises exactly one `submit_result` tool, with the offer's schema verbatim as its `inputSchema`. An authenticated task context binds it to one execution. The daemon validates the arguments and fsyncs the canonical outcome under the Agent home's `.byok/results/` before returning a staged receipt. Invalid arguments store nothing and return bounded issues for correction. Repeating the same outcome returns the same receipt; a different outcome for the same execution is refused. A staged receipt does not mean execution success.
+
+Only successful runtime completion with a staged outcome produces `task.complete.document`. The terminal is journaled before publication and recovery replays only those durable terminal bytes. Successful completion without `submit_result` fails non-retryably as `result_not_submitted`. Failure, cancellation and interruption carry no document; staged outcomes remain local audit records under the same protection as the task's other Agent-home evidence. Durable Pi uses the same tool and daemon validator; it no longer creates `{text}` documents. `DaemonConfig.resultDocument`, `ResultDocumentExtractor` and `Session.resultDocument()` are removed; supplying the old config field throws `DaemonConfigFieldRemovedError`. Result-document offers require an enrolled Agent home, the reserved helper, an eligible runtime and a durable terminal journal. There is no `result-document` capability negotiation in v3.
+
+On the prepared lane, the preparation request carries the same `terminalProjection` as the offer. Its exact schema and contract are retained in the durable binding, covered by the request digest, and represented by a schema-bound executor identity in `toolManifestDigest`. Admission compares the selection before pinning or claiming. A SummaryJob with `requiredToolsets: []` and `agentMemory:'none'` now counts and launches exactly one tool, `submit_result`; it omits `requiredToolsets` on the offer and needs no user `messageEgress`. The worker verifies the task-bound result helper's schema before constructing the model. The durable record version is 11; no version-10 record is read forward. Records and wire v3 share one drain-then-upgrade cut. Other preparations that select no result still support zero tools.
+
+This is an execution/result primitive. Host owns semantic outcome acceptance, SummaryJob coverage/version CAS, budgets and scheduling. See [the K7 migration and release note](releases/k7-wire-v3.md) for the coordinated server/client upgrade and pending-v2 startup fences.
 
 ### Fresh Agent execution Host composition requirements
 
@@ -2405,7 +2413,7 @@ user Turns, settled no-reply history policy and same-home internal Summary
 ordering are Host product choices, not mandatory SDK policies for every embedder.
 Summary uses a separate strict fresh task with explicit result-document and no
 user messageEgress, followed by its dependent user Execution under the same home
-admission limit; on the prepared lane that task can run with zero tools. Host coverage/CAS, input/output budgets, tool authorization and
+admission limit; on the prepared lane that task freezes exactly the `submit_result` tool. Host coverage/CAS, input/output budgets, tool authorization and
 summary quality must be validated separately from the SDK result primitive.
 
 Requirements and local acceptance have separate authorities: the existing

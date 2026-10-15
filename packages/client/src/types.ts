@@ -163,8 +163,6 @@ export interface ApprovalChannel {
 export interface Session {
   /** Process-generation-bound native requests. Never reconstructed from a resumed transcript. */
   readonly interactions?: NativeInteractionChannel;
-  /** Current execution artifact, available only after terminal success. */
-  resultDocument?(): unknown;
   /** Opaque runtime session id, reported back to the server via `task.complete.sessionRef`. */
   sessionRef: string;
   /** Normalized events for this session; the daemon batches these into `task.progress`. */
@@ -378,6 +376,7 @@ export interface RuntimePreparedLaunchExpectationV1 {
  * separate instruction would have two answers to what it is about to send.
  */
 export interface RuntimePreparedLaunchV1 {
+  readonly terminalProjection?: import('@byok-sdk/protocol').TerminalProjectionSelection;
   readonly agentMemory: PreparedAgentMemoryMode;
   readonly memory: PreparedAgentMemoryState | null;
   readonly reference: RuntimePreparedLaunchReferenceV1;

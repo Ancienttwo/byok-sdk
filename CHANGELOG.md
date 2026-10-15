@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Breaking (protocol/client/server/cloud, #468)** — wire major 3 replaces
+  result extractors with the schema-bound `submit_result` outcome channel.
+  Outcomes stage durably before acknowledgement and are delivered only by a
+  journaled successful terminal. Prepared SummaryJobs freeze one result tool;
+  record version 11 refuses older records. `createPostgresCloudStores` is now
+  async and refuses pending old-major envelopes before composition. Drain
+  server mailboxes and daemon terminals before the coordinated upgrade; see
+  [the migration and release note](docs/releases/k7-wire-v3.md).
+
 - **Breaking (server, cloud; #470)** — fresh Agent work uses
   `executions.submit(AgentExecutionInput)` / `submitAgentExecution(tenant, input)`.
   `recurring.submit`, `submitRecurringExecution`, `RecurringExecutionInputSchema`,

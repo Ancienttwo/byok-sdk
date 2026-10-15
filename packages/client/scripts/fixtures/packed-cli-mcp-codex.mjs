@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { AGENT_MEMORY_GUIDANCE } from '../../src/daemon/memory-guidance.ts';
 
 // Packed-artifact probe: emulate the qualified app-server transport, but call
 // the actual projected MCP child. No model request or exec compatibility lane.
@@ -25,12 +26,13 @@ assert.equal(overrides.get('sandbox_mode'), 'danger-full-access');
 // OAR `mcpServers`, never in argv. No per-tool grant or approval mode.
 assert.ok(![...overrides.keys()].some(key => key.startsWith('mcp_servers')), 'MCP servers must not be in argv');
 let echoServer;
+let resultServer;
 
-async function callEcho() {
-  assert.ok(echoServer, 'the open request carried no echo MCP server');
-  assert.equal(echoServer.enabled, true);
-  const env = { ...process.env, ...echoServer.env };
-  const child = spawn(echoServer.command, echoServer.args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
+async function callTool(server, tool, args) {
+  assert.ok(server, 'the open request carried no requested MCP server');
+  assert.equal(server.enabled, true);
+  const env = { ...process.env, ...server.env };
+  const child = spawn(server.command, server.args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
   let stderr = '';
   child.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-4096); });
   const requests = new Map();
@@ -52,7 +54,7 @@ async function callEcho() {
   const prematureExit = exit.then(() => { throw new Error('MCP helper exited before its response'); });
   let timer;
   const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => { child.kill(); reject(new Error('MCP helper response timed out')); }, 5000);
+    timer = setTimeout(() => { child.kill(); reject(new Error(`MCP helper response timed out (${tool}): ${stderr}`)); }, 5000);
   });
   const request = (...args) => Promise.race([rpc(...args), prematureExit, timeout]);
   try {
@@ -60,10 +62,15 @@ async function callEcho() {
     assert.ok(initialized.result);
     child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
     const tools = await request(2, 'tools/list', {});
-    assert.ok(tools.result.tools.some(tool => tool.name === 'echo'));
-    const reply = await request(3, 'tools/call', { name: 'echo', arguments: { text: 'CLI_MCP_OK' } });
+    assert.ok(tools.result.tools.some(entry => entry.name === tool));
+    const reply = await request(3, 'tools/call', { name: tool, arguments: args });
     assert.notEqual(reply.result?.isError, true);
-    assert.ok(reply.result.content.some(item => item.type === 'text' && item.text === 'byok-echo:CLI_MCP_OK'));
+    if (tool === 'echo') assert.ok(reply.result.content.some(item => item.type === 'text' && item.text === 'byok-echo:CLI_MCP_OK'));
+    else {
+      assert.equal(tool, 'submit_result');
+      const receipt = JSON.parse(reply.result.content.find(item => item.type === 'text').text);
+      assert.equal(receipt.state, 'staged'); assert.match(receipt.receiptId, /^[0-9a-f-]{36}$/);
+    }
     child.stdin.end(); await Promise.race([exit, timeout]);
     return reply.result;
   } finally {
@@ -86,7 +93,8 @@ async function runTurn(turnId) {
   const item = { id: `echo-${turn}`, type: 'mcpToolCall', server: 'echo', tool: 'echo', arguments: { text: 'CLI_MCP_OK' } };
   notify('item/started', { threadId, turnId, item: { ...item, status: 'inProgress' } });
   try {
-    const result = await callEcho();
+    const result = await callTool(echoServer, 'echo', { text: 'CLI_MCP_OK' });
+    if (resultServer) await callTool(resultServer, 'submit_result', { verdict: 'pass', source: 'packed-cli' });
     notify('item/completed', { threadId, turnId, item: { ...item, status: 'completed', result } });
     notify('item/completed', { threadId, turnId, item: { id: `reply-${turn}`, type: 'agentMessage', text: 'CLI_MCP_OK' } });
     notify('thread/tokenUsage/updated', { threadId, turnId, tokenUsage: {
@@ -114,12 +122,16 @@ createInterface({ input: process.stdin }).on('line', line => {
     const servers = params.config?.mcp_servers ?? {};
     assert.ok(Object.values(servers).every(server => server.enabled_tools === undefined && server.tools === undefined));
     echoServer = servers.echo;
+    resultServer = servers.byokagentresult;
     opened = true;
     send({ jsonrpc: '2.0', id, result: { thread: { id: threadId }, model: params.model ?? 'packed-probe', reasoningEffort: null } }); return;
   }
   if (method === 'turn/start') {
     assert.ok(opened); assert.equal(params.threadId, threadId); assert.equal(active, false);
-    assert.ok(params.input.some(item => item.type === 'text' && item.text === 'call echo'));
+    // Only the Agent execution leg carries the result server; the daemon
+    // prefixes an Agent task's instruction with its memory guidance.
+    const instruction = resultServer ? `${AGENT_MEMORY_GUIDANCE}\n\ncall echo` : 'call echo';
+    assert.ok(params.input.some(item => item.type === 'text' && item.text === instruction));
     active = true; const turnId = `turn-${++turn}`;
     send({ jsonrpc: '2.0', id, result: { turn: { id: turnId } } });
     void runTurn(turnId); return;

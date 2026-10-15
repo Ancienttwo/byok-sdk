@@ -17,7 +17,7 @@
  * justified against the kernel's inbound, in both directions (a removal breaks
  * a daemon path; an addition promises acceptance the kernel may not implement).
  */
-import { createEnvelope, type EventsPollResponse, type MessagesSendResponse } from '@byok-sdk/protocol';
+import { createEnvelope, PROTOCOL_VERSION, type EventsPollResponse, type MessagesSendResponse } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { TENANT_A, createHarness, offerPayload } from './support/harness';
 
@@ -29,7 +29,6 @@ import { TENANT_A, createHarness, offerPayload } from './support/harness';
 const EXPECTED_CAPABILITIES = [
   'custom-harness',
   'mailbox-read-ahead',
-  'result-document',
   'approval_resolved',
   'agent-home-contract',
   'agent-home-projection',
@@ -89,7 +88,7 @@ describe('GET /byok/events protocol capability advertisement', () => {
 
     // The handshake answer is how a device learns the advertisement without
     // waiting out a held poll.
-    const handshake = await post([hello([2])]);
+    const handshake = await post([hello([PROTOCOL_VERSION])]);
     expect(handshake.status).toBe(200);
     expect(handshake.body as MessagesSendResponse).toMatchObject({ accepted: 1, capabilities: EXPECTED_CAPABILITIES });
 
@@ -98,8 +97,9 @@ describe('GET /byok/events protocol capability advertisement', () => {
     expect(other.status).toBe(200);
     expect(Object.hasOwn(other.body as object, 'capabilities')).toBe(false);
 
-    // A rejected hello opens nothing, so it advertises nothing.
-    const refused = await post([hello([1])]);
+    // A rejected hello opens nothing, so it advertises nothing. A v2-only
+    // daemon is refused here: wire v3 has no v2 reader.
+    const refused = await post([hello([2])]);
     expect(refused.status).toBe(200);
     expect(refused.body as MessagesSendResponse).toMatchObject({ accepted: 0, rejected: 1 });
   });

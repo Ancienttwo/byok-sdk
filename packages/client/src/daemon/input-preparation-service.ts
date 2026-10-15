@@ -1,4 +1,5 @@
 import { awaitAdmission } from './admission-wait';
+import { TerminalProjectionSelectionSchema } from '@byok-sdk/protocol';
 import { preparedAgentMemoryModeWithinCeiling } from '../agent-memory/prepared-capability';
 import { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import {
@@ -616,6 +617,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
   ): InputPreparationBindingV1 {
     return {
       agentMemory: request.agentMemory,
+      ...(request.terminalProjection === undefined ? {} : { terminalProjection: request.terminalProjection }),
       scopeId: grant.scopeId,
       deviceId: grant.deviceId,
       agentRef: grant.agentRef,
@@ -685,6 +687,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     {
       const assembled = await options.toolSurface.assemble({
         requiredToolsets: request.requiredToolsets,
+        terminalProjection: request.terminalProjection,
         agentMemory: request.agentMemory,
         runtimeIdentity: inputPreparationRuntimeIdentityString(options.compiler.runtime),
       });
@@ -1022,6 +1025,9 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       checkActive();
       // Copy before the first await. Everything below reads this copy only.
       const request = structuredClone(rawRequest) as InputPreparationRequestV1;
+      if (request.terminalProjection !== undefined && !TerminalProjectionSelectionSchema.safeParse(request.terminalProjection).success) {
+        throw new InputPreparationRequestError('unsupported_input', 'terminalProjection is outside the result-document contract');
+      }
       // Store initialization/maintenance has its own shared lifetime (stop waits
       // for it); aborting this caller does not abandon those durable writes.
       await admit(() => ensureOpen());

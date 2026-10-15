@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createEnvelope, HarnessIdSchema, HarnessInventorySchema, type TaskClaimPayload } from '@byok-sdk/protocol';
+import { createEnvelope, PROTOCOL_VERSION, HarnessIdSchema, HarnessInventorySchema, type TaskClaimPayload } from '@byok-sdk/protocol';
 import { projectTerminalResult } from '../terminal-result';
 import { handleInboundEnvelope } from '../inbound';
 import { tenantStoresFor } from '../tenant-stores';
@@ -73,7 +73,7 @@ describe('custom harness protocol authority', () => {
     await stores.devices.recordCapabilities({ capabilities: ['custom-harness'], harnesses: inventory });
     await expect(h.cloud.enqueueOffer(TENANT_A, deviceId, { payload: { ...offerPayload(), harnessId: 'other' } })).rejects.toThrow();
     await expect(h.cloud.enqueueOffer(TENANT_A, deviceId, { payload: { ...offerPayload(), harnessId: 'acme-harness', runtime: 'pi' } })).rejects.toThrow();
-    const hello = createEnvelope('conn.hello', { deviceId, productId: 'test-product', protocolVersions: [2], capabilities: [], runtimes: [], harnesses: inventory });
+    const hello = createEnvelope('conn.hello', { deviceId, productId: 'test-product', protocolVersions: [PROTOCOL_VERSION], capabilities: [], runtimes: [], harnesses: inventory });
     expect(await handleInboundEnvelope(stores, deviceId, hello).then((result) => result.outcome)).toBe('rejected');
   });
 

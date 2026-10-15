@@ -319,7 +319,7 @@ export declare function createByokPool(options: ByokPoolOptions): Pool;
  */
 export { createByokPool } from './pool';
 export type { ByokPoolOptions } from './pool';
-export { PostgresDeviceDirectory, PostgresInboundDedupStore, PostgresNonceStore, PostgresPairingCodeStore, PostgresProofRequestReceiptStore, PostgresRequestReceiptStore, PostgresTaskAttemptStore, PostgresTaskCancellationStore, PostgresActivityStore, PostgresApprovalTimelineStore, PostgresDeviceAssertionReplayAuthority, PostgresAgentMemoryProjectionStore, createPostgresAgentMemoryProjectionStore, createPostgresCloudStores, } from './stores/index';
+export { PostgresDeviceDirectory, PostgresInboundDedupStore, PostgresNonceStore, PostgresPairingCodeStore, PostgresProofRequestReceiptStore, PostgresRequestReceiptStore, PostgresTaskAttemptStore, PostgresTaskCancellationStore, PostgresActivityStore, PostgresApprovalTimelineStore, PostgresDeviceAssertionReplayAuthority, PostgresAgentMemoryProjectionStore, createPostgresAgentMemoryProjectionStore, createPostgresCloudStores, POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED, PostgresMailboxProtocolUnsupportedError, } from './stores/index';
 export type { PostgresCloudStoreOptions, PostgresCloudStores, PostgresObjectStorageOptions, PostgresAgentMemoryProjectionStoreOptions, } from './stores/index';
 export { DEFAULT_MAX_ATTEMPTS, DEFAULT_PRESIGN_TTL_SECONDS, DEFAULT_RETRY_DELAY_MS, MAX_PRESIGN_TTL_SECONDS, MIN_PRESIGN_TTL_SECONDS, ObjectStoreRequestError, R2_BLOB_ERROR_CODES, R2BlobStoreError, R2CloudBlobStore, R2ObjectMaintenanceStore, } from './stores/index';
 export type { ObjectStoreFetch, R2BlobErrorCode, R2BlobStoreOptions } from './stores/index';
@@ -891,6 +891,7 @@ export { PostgresTaskCancellationStore } from './task-cancellations';
 export { PostgresActivityStore } from './activity';
 export { PostgresApprovalTimelineStore } from './approval-timeline';
 export { PostgresAgentEgressStore } from './agent-egress';
+export { POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED, PostgresMailboxProtocolUnsupportedError, } from './mailbox-protocol';
 export { PostgresAgentMemoryProjectionStore, createPostgresAgentMemoryProjectionStore, } from './agent-memory-projection';
 export type { PostgresAgentMemoryProjectionStoreOptions } from './agent-memory-projection';
 export { PostgresDeviceAssertionReplayAuthority } from './device-assertion-replay';
@@ -917,7 +918,51 @@ export interface PostgresCloudStoreOptions {
      */
     readonly objectStorage: PostgresObjectStorageOptions;
 }
-export declare function createPostgresCloudStores(options: PostgresCloudStoreOptions): PostgresCloudStores;
+/**
+ * Compose the cloud-local ports over one pool.
+ *
+ * Async because it first fences the wire major (PRD §8.3): if any pending
+ * mailbox row is not a `PROTOCOL_VERSION` envelope it rejects with
+ * {@link PostgresMailboxProtocolUnsupportedError} and returns no stores. The
+ * check is read-only — no row is rewritten or deleted — and there is no
+ * synchronous variant that skips it.
+ *
+ * The fence lives here, on the cloud composition, and not on
+ * `createPostgresCoreStores`: the core `MailboxStore` port carries opaque
+ * bodies (its conformance suite appends non-envelope strings), and only the
+ * cloud layer gives those bodies wire-envelope meaning. A hosted cloud is
+ * always composed with this factory, so it cannot start over an undrained v2
+ * mailbox.
+ */
+export declare function createPostgresCloudStores(options: PostgresCloudStoreOptions): Promise<PostgresCloudStores>;
+// ==== @byok-sdk/cloud-dataplane dist/stores/mailbox-protocol.d.ts ====
+import type { Pool } from 'pg';
+export declare const POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED: 'POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED';
+/**
+ * A pending mailbox row is not a wire envelope of this build's
+ * `PROTOCOL_VERSION`. Thrown by `createPostgresCloudStores` before any store is
+ * returned; the database is left exactly as it was.
+ */
+export declare class PostgresMailboxProtocolUnsupportedError extends Error {
+    readonly code: "POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED";
+    /** The wire major every pending row must carry (`PROTOCOL_VERSION`). */
+    readonly requiredVersion: number;
+    /** The first offending row, in `(tenant_id, device_id, seq)` order. */
+    readonly tenantId: string;
+    readonly deviceId: string;
+    readonly seq: bigint;
+    constructor(row: {
+        readonly tenantId: string;
+        readonly deviceId: string;
+        readonly seq: bigint;
+    });
+}
+/**
+ * Refuse with {@link PostgresMailboxProtocolUnsupportedError} if any pending
+ * `outbox` row is not a current-major envelope. Keyset pagination over the
+ * primary key keeps each page bounded; the first offender stops the scan.
+ */
+export declare function assertPendingMailboxProtocol(pool: Pool): Promise<void>;
 // ==== @byok-sdk/cloud-dataplane dist/stores/nonces.d.ts ====
 import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 /**

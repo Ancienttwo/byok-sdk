@@ -10,7 +10,7 @@ import { BotStubAdapter, waitForReady, waitForTaskCleanup } from './goal-btw.tes
 import { HostRevisionConflict } from './goal-btw-store';
 import type { BotTarget } from './goal-btw';
 import { SqliteClarificationStore } from './clarification-store';
-import { ClarificationHost, CLARIFICATION_CONTRACT, extractClarification, parseClarification, type QuestionBinding } from './clarification';
+import { ClarificationHost, CLARIFICATION_CONTRACT, CLARIFICATION_SCHEMA, parseClarification, type QuestionBinding } from './clarification';
 
 const policy: AgentEgressPolicy = {
   policyRevision: 'clarification-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
@@ -58,7 +58,7 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
     }); closeHttp = listening.close; fixtureUrl = listening.url;
     adapter = new BotStubAdapter();
     daemon = createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-example-stub' },productName: 'Example Bot',productId: 'clarification-test',serverUrl: listening.url,
-      workspaceRoot: path.join(root,'ws'),storeDir: path.join(root,'sdk'),agentHome: { hostStorageRoot: path.join(root,'homes') },agentEgress: { policy },resultDocument: { extract: extractClarification },
+      workspaceRoot: path.join(root,'ws'),storeDir: path.join(root,'sdk'),agentHome: { hostStorageRoot: path.join(root,'homes') },agentEgress: { policy },hostedJournal: { mode: 'sqlite' },
     },[adapter],{ deviceCredentials: new InMemoryDeviceCredentialStore(), longPoll: { retryDelayMs: 10,idleDelayMs: 10 } });
     const pair = await byok.pairing.createPairingCode({ productId: 'clarification-test' }); deviceId = (await daemon.pair(pair.code)).deviceId;
     await daemon.start(); await waitForReady(daemon);
@@ -266,16 +266,15 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
     adapter.sessions.get('step-1')!.finish(question()); await terminal('step-1');
     expect((await host.reconcile('run',row().revision)).value).toMatchObject({ status: 'blocked',reason: 'execution_budget_exhausted',tickets: [] });
   });
-  it('malformed terminal is rejected by the real extractor and blocks Host', async () => {
+  it('malformed terminal is rejected by the frozen result schema and blocks Host', async () => {
     await first(); adapter.sessions.get('step-1')!.finish(result('needs_input',{ question: 'missing fields' })); await terminal('step-1');
     expect((await host.reconcile('run',row().revision)).value.status).toBe('blocked'); expect(row().value.tickets).toHaveLength(0);
   });
-  it.each(['missing','empty','unchecked','capability'] as const)('extractor %s fails closed with zero tickets', async mode => {
+  it.each(['missing','empty','unchecked','capability'] as const)('result channel %s fails closed with zero tickets', async mode => {
     await daemon.stop();
     const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-example-stub' },productName: 'Example Bot',productId: 'clarification-test',serverUrl: fixtureUrl,
       workspaceRoot: path.join(root,'second-ws'),storeDir: path.join(root,'second-sdk'),...(mode !== 'capability' ? { agentHome: { hostStorageRoot: path.join(root,'second-homes') },agentEgress: { policy } } : {}),
-      ...(mode === 'empty' ? { resultDocument: { extract: () => undefined } } : {}),
-      ...(mode === 'unchecked' || mode === 'capability' ? { resultDocument: { extract: (output: string) => JSON.parse(output) as unknown } } : {}),
+      ...(mode === 'missing' ? {} : { hostedJournal: { mode: 'sqlite' } }),
     };
     daemon = createDaemonWithAdapters(config,[adapter],{ deviceCredentials: new InMemoryDeviceCredentialStore(), longPoll: { retryDelayMs: 10,idleDelayMs: 10 } });
     const code = await byok.pairing.createPairingCode({ productId: 'clarification-test' }); deviceId = (await daemon.pair(code.code)).deviceId;
@@ -286,7 +285,7 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
       expect(await byok.tasks.offer('step-1')).toBeUndefined(); expect(adapter.starts).toHaveLength(0);
     } else {
       await host.send('run',row().revision);
-      if (mode !== 'missing') { await running('step-1'); adapter.sessions.get('step-1')!.finish(mode === 'unchecked' ? result('complete',{ extra: true }) : question()); }
+      if (mode !== 'missing') { await running('step-1'); adapter.sessions.get('step-1')!.finish(mode === 'unchecked' ? { ...question(), options: [{ id: 'same', label: 'one' }, { id: 'same', label: 'two' }] } : question(), mode !== 'empty'); }
       await terminal('step-1');
       if (mode !== 'unchecked') expect((await byok.tasks.deviceTerminal('step-1'))?.envelope.type).not.toBe('task.complete');
       if (mode === 'missing') expect(adapter.starts).toHaveLength(0);
@@ -300,7 +299,7 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
     // Egress mismatch is a frozen offer admission failure on the running fixture.
     start('other','other-task','agent-b');
     const { deviceId, ...selection } = target('agent-b');
-    const bad = { deviceId, taskId: 'bad-egress', payload: { ...selection,egressPolicy: { ...policy,policyRevision: 'different' },instruction: 'test',terminalProjection: { mode: 'result-document' as const,contract: CLARIFICATION_CONTRACT } } };
+    const bad = { deviceId, taskId: 'bad-egress', payload: { ...selection,egressPolicy: { ...policy,policyRevision: 'different' },instruction: 'test',terminalProjection: { mode: 'result-document' as const,contract: CLARIFICATION_CONTRACT, schema: CLARIFICATION_SCHEMA } } };
     await byok.executions.submit(bad); await terminal('bad-egress');
     expect((await byok.tasks.deviceTerminal('bad-egress'))?.envelope.type).not.toBe('task.complete'); expect(adapter.sessions.has('bad-egress')).toBe(false);
   });
@@ -313,8 +312,8 @@ describe('strict clarification parser / contract dispatch', () => {
     { ...question('text'),options: [] },{ ...question('text'),question: 'q'.repeat(4097) },
     { ...question(),contract: 'Unknown.v1' },
   ])('rejects invalid JSON document %#', doc => { expect(() => parseClarification(doc)).toThrow(); });
-  it('rejects non-JSON text and leaves unknown contracts unhandled', () => {
-    expect(() => extractClarification('prefix '+JSON.stringify(result('complete')),{ taskId: 'x',sessionRef: 'stub-session',terminalProjection: { mode: 'result-document',contract: CLARIFICATION_CONTRACT } })).toThrow();
-    expect(extractClarification('invalid',{ taskId: 'x',sessionRef: 'stub-session',terminalProjection: { mode: 'result-document',contract: 'another.v1' } })).toBeUndefined();
+  it('rejects non-document text and unknown contracts', () => {
+    expect(() => parseClarification('prefix '+JSON.stringify(result('complete')))).toThrow();
+    expect(() => parseClarification({ contract: 'another.v1', outcome: 'complete' })).toThrow();
   });
 });

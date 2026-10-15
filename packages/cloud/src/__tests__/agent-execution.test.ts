@@ -1,6 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
+import { RESULT_SCHEMA_MAX_BYTES, checkResultSchema } from '@byok-sdk/protocol';
 import { AgentExecutionInputSchema } from '../agent-execution';
 import { TENANT_A, createHarness } from './support/harness';
+
+/** A subset-valid frozen outcome schema (wire v3 `terminalProjection.schema`). */
+const RESULT_SCHEMA = {
+  type: 'object', properties: { answer: { type: 'string', maxLength: 200 } }, required: ['answer'], additionalProperties: false,
+} as const;
+const RESULT_CAPABILITIES = [
+  'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session', 'terminal-projection-selection',
+];
 
 const input = {
   taskId: 'turn-execution-1', deviceId: 'device',
@@ -58,7 +67,7 @@ describe('fresh Agent execution submission', () => {
     ] });
     const { messageEgress: _messageEgress, ...payload } = input.payload;
     const persisted = AgentExecutionInputSchema.parse({ taskId: input.taskId, deviceId: device.deviceId,
-      payload: { ...payload, terminalProjection: { mode: 'result-document', contract: 'test.result.v1' } } });
+      payload: { ...payload, terminalProjection: { mode: 'result-document', contract: 'test.result.v1', schema: RESULT_SCHEMA } } });
     const offered = await harness.cloud.submitAgentExecution(TENANT_A, persisted);
     expect(offered.taskId).toBe(input.taskId);
     expect(offered.envelope).toMatchObject({ type: 'task.offer_for_agent_with_egress_fresh',
@@ -66,6 +75,41 @@ describe('fresh Agent execution submission', () => {
     expect(offered.envelope.payload).not.toHaveProperty('messageEgress');
     expect(await harness.cloud.readTaskOffer(TENANT_A, input.taskId)).toMatchObject({ delivered: true, payload: persisted.payload });
     expect((await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 })).messages).toHaveLength(1);
+  });
+
+  it('refuses a result-document terminalProjection without a frozen schema before any durable admission', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: RESULT_CAPABILITIES });
+    const { messageEgress: _messageEgress, ...payload } = input.payload;
+    const candidate = { taskId: input.taskId, deviceId: device.deviceId,
+      payload: { ...payload, terminalProjection: { mode: 'result-document', contract: 'test.result.v1' } } };
+    expect(AgentExecutionInputSchema.safeParse(candidate).success).toBe(false);
+    await expect(harness.cloud.submitAgentExecution(TENANT_A, candidate as never)).rejects.toThrow();
+    expect(await harness.cloud.readTaskAttempt(TENANT_A, input.taskId)).toBeUndefined();
+    expect((await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 })).messages).toEqual([]);
+  });
+
+  it.each([
+    ['a keyword outside the subset', { ...RESULT_SCHEMA, properties: { answer: { type: 'string', pattern: '^a' } } }],
+    ['a non-object root', { type: 'array', items: { type: 'string' } }],
+    ['additionalProperties other than false', { ...RESULT_SCHEMA, additionalProperties: true }],
+    ['a schema over 16 KiB', { ...RESULT_SCHEMA, description: 'x'.repeat(RESULT_SCHEMA_MAX_BYTES) }],
+  ])('refuses a result-document schema with %s before any durable admission', async (_label, schema) => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: RESULT_CAPABILITIES });
+    const record = vi.spyOn(harness.stores.receipts, 'record');
+    expect(checkResultSchema(schema).ok).toBe(false);
+    const { messageEgress: _messageEgress, ...payload } = input.payload;
+    const candidate = { taskId: input.taskId, deviceId: device.deviceId,
+      payload: { ...payload, terminalProjection: { mode: 'result-document', contract: 'test.result.v1', schema } } };
+    expect(AgentExecutionInputSchema.safeParse(candidate).success).toBe(false);
+    await expect(harness.cloud.submitAgentExecution(TENANT_A, candidate as never)).rejects.toThrow(/result schema/);
+    expect(record).not.toHaveBeenCalled();
+    expect(await harness.cloud.readTaskAttempt(TENANT_A, input.taskId)).toBeUndefined();
+    expect(await harness.cloud.readTaskOffer(TENANT_A, input.taskId)).toBeUndefined();
+    expect((await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 })).messages).toEqual([]);
   });
 
   it('dispatches the persisted shape as fresh and retains original task identity', async () => {

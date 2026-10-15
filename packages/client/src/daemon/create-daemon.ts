@@ -92,6 +92,8 @@ import {
   ENROLLMENT_PAIRING_CODE_MAX_BYTES,
   parseApprovalsRequestParams,
   parseAgentMessagePublishParams,
+  parseAgentResultDescribeParams,
+  parseAgentResultSubmitParams,
   parseAgentMemoryRecallParams,
   parseAgentMemorySaveParams,
   parseApprovalsResolveParams,
@@ -168,7 +170,6 @@ import {
   DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME,
   DEFAULT_MAX_TASK_OUTPUT_BYTES,
   TaskRunner,
-  type ResultDocumentExtractor,
   type TaskRunnerDeps,
 } from './task-runner';
 import {
@@ -192,6 +193,8 @@ import { createPreparedToolSurfaceAssembler } from './prepared-tool-surface';
 import { buildRuntimeEnv } from './environment';
 import { resolveAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
 import { preflightAgentMessageMcp } from './agent-message-mcp-preflight';
+import { preflightAgentResultMcp } from './agent-result-mcp-preflight';
+import { assertJournalEnvelopeProtocol, DaemonConfigFieldRemovedError } from './daemon-errors';
 import { resolveAgentMemoryDescribeBin, resolveAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
 import { resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
 import {
@@ -534,46 +537,6 @@ export interface DaemonConfig {
    * Timing and event-count batching policy. The server owns the byte ceiling.
    */
   progressBatch?: ProgressBatcherOptions;
-  /**
-   * additive-minor (`task.complete.document`): the seam through which this
-   * product turns a finished task's final output text into the STRUCTURED
-   * terminal result the wire carries as `task.complete.document`, and the
-   * server projects into `TaskResult.document`.
-   *
-   * `extract(finalOutput, task)` is called exactly once per task, at the
-   * moment `task.complete` is built, with the same text that becomes
-   * `summary` (the concatenated `progress` events for that task) plus the
-   * task's `taskId`/`sessionRef`. Return `undefined` for "no structured
-   * result this time". Everything about the document's SHAPE is the
-   * product's business — the SDK never inspects, validates, or transforms
-   * it; extraction logic (prompting for JSON, parsing a fenced block,
-   * validating against the product's own schema) is product glue and belongs
-   * in this callback, not in the SDK.
-   *
-   * The SDK enforces exactly two wire rules, via the protocol's own
-   * `checkResultDocument`: the value must be JSON-serializable, and at most
-   * `RESULT_DOCUMENT_MAX_BYTES` (1 MiB) as canonical JSON. Stay under ~512
-   * KiB in practice (docs/protocol.md); a bigger result belongs in an
-   * artifact, not here.
-   *
-   * FAIL-CLOSED, never silent: if the extractor throws, returns a promise
-   * (the seam is synchronous and the runtime enforces it — an unawaited
-   * promise would be encoded as an empty document), produces something
-   * unsendable, or produces a document while the connected server never
-   * advertised the `result-document` capability (an old server would strip
-   * the field on arrival without a word), the task is reported as
-   * `task.fail` with `retryable: false` and a reason prefixed
-   * `result document undeliverable` — see
-   * `RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX` (`task-runner.ts`).
-   * Completing a task while quietly discarding the structured result it
-   * exists to produce is not an option this SDK offers.
-   *
-   * Omitted entirely by default, in which case the completion path is
-   * unchanged in every respect — no extractor call, no capability check, and
-   * a `task.complete` payload byte-identical to the one sent before this
-   * field existed.
-   */
-  resultDocument?: { readonly extract: ResultDocumentExtractor };
   /**
    * M5 batch-3 (workstream 2): deadline bound on the graceful-shutdown
    * sequence's own wait for `TaskRunner.shutdownActiveTasks` to finish
@@ -1313,16 +1276,19 @@ export function buildDaemonWithAdapters(
     throw new TypeError('configure OS deviceCredentials or inject a credential backend, not both');
   }
   if (Object.hasOwn(config, 'permissionDefaults')) {
-    throw new Error('DaemonConfig.permissionDefaults was removed: the local agent\'s own permission settings apply');
+    throw new DaemonConfigFieldRemovedError('permissionDefaults', 'DaemonConfig.permissionDefaults was removed: the local agent\'s own permission settings apply');
   }
   if (config.agentEgress !== undefined && Object.hasOwn(config.agentEgress, 'sanitizer')) {
-    throw new Error('DaemonConfig.agentEgress.sanitizer was removed: Agent egress goes to the Host as is');
+    throw new DaemonConfigFieldRemovedError('agentEgress.sanitizer', 'DaemonConfig.agentEgress.sanitizer was removed: Agent egress goes to the Host as is');
   }
   if (Object.hasOwn(config, 'mcpLaunchCwd')) {
-    throw new Error('DaemonConfig.mcpLaunchCwd was removed: MCP servers start in the session cwd, as the agent runtime does');
+    throw new DaemonConfigFieldRemovedError('mcpLaunchCwd', 'DaemonConfig.mcpLaunchCwd was removed: MCP servers start in the session cwd, as the agent runtime does');
   }
   if (Object.hasOwn(config, 'toolImplementationAuthority')) {
-    throw new Error('DaemonConfig.toolImplementationAuthority was removed: the SDK does not attest tool or runtime executables');
+    throw new DaemonConfigFieldRemovedError('toolImplementationAuthority', 'DaemonConfig.toolImplementationAuthority was removed: the SDK does not attest tool or runtime executables');
+  }
+  if (Object.hasOwn(config, 'resultDocument')) {
+    throw new DaemonConfigFieldRemovedError('resultDocument', 'DaemonConfig.resultDocument was removed: a result-document offer carries its frozen schema and the runtime submits the outcome through the SDK-reserved submit_result tool');
   }
   if (config.providerProvisioning !== undefined && typeof config.providerProvisioning !== 'function') {
     throw new Error('DaemonConfig.providerProvisioning must be a handler function when present');
@@ -1424,7 +1390,8 @@ export function buildDaemonWithAdapters(
   // `Number.POSITIVE_INFINITY` opt-out here: "no cap" is exactly the
   // co-writing state this exists to prevent.
   if (Object.prototype.hasOwnProperty.call(config, 'maxConcurrentMutableSessionsPerAgentHome')) {
-    throw new Error(
+    throw new DaemonConfigFieldRemovedError(
+      'maxConcurrentMutableSessionsPerAgentHome',
       'DaemonConfig.maxConcurrentMutableSessionsPerAgentHome was removed. A home has one writer Attempt; send concurrent tasks as homeAccess: \'memory-reader\' offers and set maxConcurrentReaderAttemptsPerAgentHome to limit them.',
     );
   }
@@ -2112,7 +2079,15 @@ export function buildDaemonWithAdapters(
       : undefined;
     if (activeJournal && journalIdentity) {
       const durableCursor = await cursorStore.load(config.serverUrl, record.deviceId) ?? 0;
-      for (const task of await activeJournal.listRecoveryTasks(journalIdentity)) {
+      const recoveryTasks = await activeJournal.listRecoveryTasks(journalIdentity);
+      // Scan every stored envelope before acting on any: a row of another
+      // wire major stops startup with no journal row written, rewritten or
+      // deleted (no daemon_interrupted terminal for a v2 offer, no replay).
+      for (const task of recoveryTasks) assertJournalEnvelopeProtocol(task.envelopeBytes, task.taskId, 'recovery-offer');
+      for (const terminal of await activeJournal.listPendingTerminals(journalIdentity)) {
+        assertJournalEnvelopeProtocol(terminal.bytes, terminal.taskId, 'pending-terminal');
+      }
+      for (const task of recoveryTasks) {
         // No execution commitment and no local ack: let the authoritative cloud
         // mailbox redeliver (or suppress a cancelled offer). Never replay a cached
         // offer independently of cancellation/placement authority.
@@ -2431,11 +2406,16 @@ export function buildDaemonWithAdapters(
       startupTimeoutMs: config.startupTimeoutMs,
       // See DaemonConfig.maxInlineEventBytes's own doc comment — already validated above.
       maxInlineEventBytes: config.maxInlineEventBytes,
-      // additive-minor (`task.complete.document`): passed through verbatim,
-      // absent when unconfigured — see `DaemonConfig.resultDocument`'s own
-      // doc comment. Spread rather than assigned so an unconfigured daemon
-      // builds the exact `deps` object it did before this seam existed.
-      ...(config.resultDocument ? { resultDocument: config.resultDocument } : {}),
+      // Result-document offers need persist-before-send (R8): only a daemon
+      // whose terminals go through the journal below may admit them.
+      terminalJournal: activeJournal !== undefined,
+      ...(config.agentHome === undefined ? {} : {
+        agentResultMcpBin: (() => {
+          const resolved = resolveSdkReservedHelperBin('agent-result-mcp', config.sdkHelperHost);
+          return Object.freeze({ command: resolved.command, args: resolved.args });
+        })(),
+        agentResultMcpPreflight: preflightAgentResultMcp,
+      }),
       ...(agentMemoryMcpBin === undefined ? {} : { agentMemoryMcpBin }),
       ...(agentMemoryDescribeBin === undefined ? {} : { agentMemoryDescribeBin }),
       ...(config.agentMemoryFilesystem === undefined ? {} : { agentMemoryFilesystemHelperBin: path.resolve(config.agentMemoryFilesystem.helperBin) }),
@@ -2493,6 +2473,7 @@ export function buildDaemonWithAdapters(
       for (const terminal of await activeJournal.listPendingTerminals(journalIdentity)) {
         if (terminal.truthState !== 'pending' || (taskId !== undefined && terminal.taskId !== taskId)) continue;
         if (runner?.hasPendingRecoveredAgentMessage(terminal.taskId)) continue;
+        assertJournalEnvelopeProtocol(terminal.bytes, terminal.taskId, 'pending-terminal');
         const envelope = decodeEnvelope(terminal.bytes);
         if (envelope.task_id !== terminal.taskId || terminalKindOf(envelope.type) !== terminal.terminalType) {
           throw new Error('durable terminal execution binding mismatch');
@@ -3696,6 +3677,18 @@ export function buildDaemonWithAdapters(
         if (!parsed) throw new ControlError('bad_request', 'agent_messages.publish requires exactly {contextToken,contentType,body}');
         if (!runner) throw new ControlError('not_found', 'daemon is not started');
         return runner.publishAgentMessage(parsed);
+      },
+      'agent_results.describe': (params) => {
+        const parsed = parseAgentResultDescribeParams(params);
+        if (!parsed) throw new ControlError('bad_request', 'agent_results.describe requires exactly {contextToken}');
+        if (!runner) throw new ControlError('not_found', 'daemon is not started');
+        return runner.describeAgentResult(parsed);
+      },
+      'agent_results.submit': (params) => {
+        const parsed = parseAgentResultSubmitParams(params);
+        if (!parsed) throw new ControlError('bad_request', 'agent_results.submit requires exactly {contextToken,outcome}');
+        if (!runner) throw new ControlError('not_found', 'daemon is not started');
+        return runner.submitAgentResult(parsed);
       },
       'agent_memory.recall': (params) => {
         const parsed = parseAgentMemoryRecallParams(params);

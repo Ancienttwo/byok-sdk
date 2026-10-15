@@ -1,4 +1,4 @@
-import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
+import type { PreparedAgentMemoryMode, TerminalProjectionSelection } from '@byok-sdk/protocol';
 import type { CallToolResult } from '@modelcontextprotocol/client';
 import {
   preparedToolBindingDigest,
@@ -12,6 +12,8 @@ import { projectMcpTools, qualifiedMcpToolName, type McpToolProjection } from '.
 import { buildToolExecutorsFromObservation, InputPreparationCompileError } from './input-preparation';
 import { createPiMcpTools, type McpToolCallHost, type PiMcpToolDefinition } from './mcp-tools';
 import { preparedMemoryProjection, type PreparedAgentMemoryState } from '../../daemon/prepared-agent-memory';
+import { preparedResultProjection } from '../../daemon/prepared-agent-result';
+import { AGENT_RESULT_MCP_SERVER_NAME, AGENT_RESULT_TOOL_NAME } from '../../sdk-reserved-mcp';
 import { preparedAgentMemoryTools } from '../../agent-memory/prepared-capability';
 
 /**
@@ -83,6 +85,8 @@ export interface PreparedPiServerBinding {
 }
 
 export interface PreparedPiToolSurfaceInput {
+  readonly terminalProjection?: TerminalProjectionSelection;
+  readonly resultCall?: PreparedPiHelperCall;
   /** Sealed SDK-owned memory selection; it is distinct from Host MCP toolsets. */
   readonly agentMemory: PreparedAgentMemoryMode;
   /** The descriptor observation counted with the artifact. */
@@ -101,11 +105,11 @@ export interface PreparedPiToolSurfaceInput {
   /** How a registered tool reaches its server — the shared pool, never a second client. */
   readonly host: McpToolCallHost;
   /** Runtime-worker dispatch for the selected SDK memory helper, never the Host MCP pool. */
-  readonly memoryCall?: PreparedPiMemoryCall;
+  readonly memoryCall?: PreparedPiHelperCall;
 }
 
 /** The task-bound execution helper dispatch; its names are fixed SDK vocabulary. */
-export interface PreparedPiMemoryCall {
+export interface PreparedPiHelperCall {
   call(
     toolName: string,
     args: Readonly<Record<string, unknown>>,
@@ -119,7 +123,7 @@ const SDK_MEMORY_SERVER_NAME = 'byokagentmemory';
 function createPreparedMemoryTools(
   mode: PreparedAgentMemoryMode,
   memory: PreparedAgentMemoryState,
-  memoryCall: PreparedPiMemoryCall,
+  memoryCall: PreparedPiHelperCall,
 ): readonly PiMcpToolDefinition[] {
   // This is an SDK-owned projection used only to reuse Pi's result renderer.
   // It never enters the Host registry/fingerprint and cannot select a Host
@@ -157,6 +161,10 @@ export async function assemblePreparedPiToolSurface(
   }
   if (input.agentMemory !== 'none' && input.memoryCall === undefined) {
     return refuse('tool_surface_unfingerprintable', 'the prepared Agent memory selection has no execution helper dispatch');
+  }
+
+  if (input.terminalProjection?.mode === 'result-document' && input.resultCall === undefined) {
+    return refuse('tool_surface_unfingerprintable', 'the prepared result selection has no execution helper dispatch');
   }
 
   // The SAME projection, in the SAME order, that the preparation counted and
@@ -198,7 +206,12 @@ export async function assemblePreparedPiToolSurface(
     }
     tools.push(tool);
   }
-  toolExecutors = Object.freeze({ ...toolExecutors, ...memoryProjection.toolExecutors });
+  const resultProjection = preparedResultProjection(input.terminalProjection, input.runtimeIdentity);
+  for (const tool of resultProjection.tools) {
+    if (tools.some(existing => existing.name === tool.name)) return refuse('tool_surface_unfingerprintable', 'result tool name collision');
+    tools.push(tool);
+  }
+  toolExecutors = Object.freeze({ ...toolExecutors, ...memoryProjection.toolExecutors, ...resultProjection.toolExecutors });
 
   const bindingServers: PreparedToolBindingServerDigestInputV1[] = input.servers.map((server) => ({
     serverName: server.serverName,
@@ -239,6 +252,10 @@ export async function assemblePreparedPiToolSurface(
   // already been refused.
   const piTools = [
     ...createPiMcpTools(projected, input.host, 'qualified'),
+    ...createPiMcpTools(resultProjection.tools.map(tool => ({
+      toolsetId: '@byok-sdk/agent-result', serverName: AGENT_RESULT_MCP_SERVER_NAME,
+      toolName: AGENT_RESULT_TOOL_NAME, description: tool.description, inputSchema: tool.parameters,
+    })), { call: (tool, args, signal) => input.resultCall!.call(tool.toolName, args, signal) }, 'bare'),
     ...(input.agentMemory === 'none' ? [] : createPreparedMemoryTools(input.agentMemory, input.memory!, input.memoryCall!)),
   ];
   const authorized: PreparedPiAuthorizedTool[] = [];

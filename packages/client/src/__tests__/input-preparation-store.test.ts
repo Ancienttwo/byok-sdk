@@ -358,13 +358,37 @@ describe('B-P2 store: restart roundtrip', () => {
     expect(() => restarted.list()).toThrow(InputPreparationDurabilityError);
   });
 
+  it('refuses a log written at the previous record version (10, before the one-tool submit_result record) with no migration', async () => {
+    const storeDir = await tmpStoreDir();
+    const store = await openStore(storeDir);
+    const created = await store.reserve(reserve());
+    await store.commitCounterReservation(commit(created.record.recordId));
+    const logPath = path.join(storeDir, 'input-preparation', 'records.jsonl');
+    const recorded = store.get(created.record.recordId)!;
+    await fs.writeFile(
+      logPath,
+      `${JSON.stringify({ ...recorded, format: INPUT_PREPARATION_RECORD_FORMAT, version: INPUT_PREPARATION_RECORD_VERSION - 1 })}\n`,
+      'utf8',
+    );
+    const before = await fs.readFile(logPath);
+
+    const restarted = new InputPreparationStore({ storeDir, retentionMs: 60_000, retryHorizonMs: 30_000 });
+    const refusal = await restarted.open().then(() => undefined, (error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(InputPreparationUnsupportedRecordVersionError);
+    expect((refusal as InputPreparationUnsupportedRecordVersionError).reason).toBe('unsupported_record_version');
+    expect((refusal as InputPreparationUnsupportedRecordVersionError).recordVersion).toBe(10);
+    expect(await fs.readFile(logPath)).toEqual(before);
+    expect(() => restarted.list()).toThrow(InputPreparationDurabilityError);
+  });
+
   it('stamps the record schema version, which is independent of the wire version', async () => {
     const storeDir = await tmpStoreDir();
     const store = await openStore(storeDir);
     const created = await store.reserve(reserve());
 
     expect(created.record.version).toBe(INPUT_PREPARATION_RECORD_VERSION);
-    expect(INPUT_PREPARATION_RECORD_VERSION).toBe(10);
+    expect(INPUT_PREPARATION_RECORD_VERSION).toBe(11);
     // The wire version is a different agreement, moved by a different reason.
     expect(INPUT_PREPARATION_VERSION).toBe(9);
     expect((await openStore(storeDir)).get(created.record.recordId)?.version).toBe(INPUT_PREPARATION_RECORD_VERSION);

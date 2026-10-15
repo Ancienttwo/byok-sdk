@@ -255,8 +255,31 @@ export type {
 export {
   TerminalProjectionContractSchema,
   TerminalProjectionSelectionSchema,
+  ResultDocumentSchemaSchema,
 } from './terminal-projection';
 export type { TerminalProjectionSelection } from './terminal-projection';
+
+export {
+  RESULT_SCHEMA_MAX_BYTES,
+  RESULT_OUTCOME_MAX_BYTES,
+  RESULT_SCHEMA_MAX_DEPTH,
+  RESULT_JSON_MAX_DEPTH,
+  RESULT_ISSUES_MAX_COUNT,
+  RESULT_ISSUES_MAX_BYTES,
+  RESULT_SCHEMA_KEYWORDS,
+  RESULT_SCHEMA_INSTANCE_TYPES,
+  checkResultSchema,
+  validateResultOutcome,
+} from './result-schema';
+export type {
+  ResultSchema,
+  ResultSchemaKeyword,
+  ResultSchemaInstanceType,
+  ResultIssue,
+  ResultDocumentFailureReason,
+  ResultSchemaCheck,
+  ResultOutcomeCheck,
+} from './result-schema';
 
 export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
 export type { TaskState } from './task-state';

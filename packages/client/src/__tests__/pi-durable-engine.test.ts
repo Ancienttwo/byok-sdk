@@ -28,11 +28,11 @@ async function fixture() {
   return { file, replicaRoot, binding, models, model: { provider: 'probe', modelId: 'test' }, instruction: 'Reply', ambient: process.env, calls: () => calls };
 }
 describe('real Pi 1.0 durable engine', () => {
-  it('persists current result and projects final ordinary usage exactly once', async () => {
-    const input = await fixture(); const events: unknown[] = []; let result: unknown;
-    const engine = await openDurableEngine({ ...input, resume: false, beforeTool: async () => {}, events: async batch => { events.push(...batch.flatMap(projectDurableEvent)); }, result: async value => { result = value; } });
+  it('reports completion once and projects final ordinary usage exactly once', async () => {
+    const input = await fixture(); const events: unknown[] = []; let completed = 0;
+    const engine = await openDurableEngine({ ...input, resume: false, beforeTool: async () => {}, events: async batch => { events.push(...batch.flatMap(projectDurableEvent)); }, completed: async () => { completed += 1; } });
     try { await engine.run(); } finally { await engine.close(); }
-    expect(input.calls()).toBe(1); expect(result).toEqual({ text: 'finished' });
+    expect(input.calls()).toBe(1); expect(completed).toBe(1);
     expect(events.filter((event: any) => event.type === 'usage')).toEqual([{ type: 'usage', inputTokens: 3, cachedInputTokens: 2, outputTokens: 1, totalTokens: 4 }]);
   });
   it('fresh execution discards a real stale pending tool checkpoint BEFORE any old model request can resume', async () => {
@@ -41,18 +41,19 @@ describe('real Pi 1.0 durable engine', () => {
     try {
       await new Promise<void>((resolve,reject) => { child.stdout.once('data', () => resolve()); child.once('error',reject); child.once('exit', () => reject(new Error('pending fixture exited'))); });
       child.kill('SIGKILL'); await once(child, 'close');
-      const engine = await openDurableEngine({ ...input, resume: false, beforeTool: async () => {}, events: async () => {}, result: async () => {} });
+      const engine = await openDurableEngine({ ...input, resume: false, beforeTool: async () => {}, events: async () => {}, completed: async () => {} });
       try { await engine.run(); } finally { await engine.close(); }
       expect(input.calls()).toBe(1); expect(await readFile(receipt, 'utf8')).toBe('old-model-call\n');
       await expect(readFile(path.join(path.dirname(input.file), 'old-effect'))).rejects.toThrow();
     } finally { if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await once(child,'close'); } }
   });
   it('reacquires a settled execution after reopen without adding Host input or calling the model', async () => {
-    const input = await fixture(); let result: unknown;
-    const callbacks = { beforeTool: async () => {}, events: async () => {}, result: async (value: unknown) => { result = value; } };
+    const input = await fixture(); let completed = 0;
+    const callbacks = { beforeTool: async () => {}, events: async () => {}, completed: async () => { completed += 1; } };
     const first = await openDurableEngine({ ...input, ...callbacks, resume: false }); await first.run(); await first.close();
     const second = await openDurableEngine({ ...input, ...callbacks, resume: true });
     try { await second.run(); } finally { await second.close(); }
-    expect(input.calls()).toBe(1); expect(result).toEqual({ text: 'finished' });
+    // Each run reports its settled completion; no Host input is added and no model call repeats.
+    expect(input.calls()).toBe(1); expect(completed).toBe(2);
   });
 });
