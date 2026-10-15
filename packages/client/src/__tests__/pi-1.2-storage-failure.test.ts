@@ -48,10 +48,10 @@ const settleWithin = <T>(promise: Promise<T>, ms: number) => Promise.race([
 ]);
 
 describe('Pi 1.2 storage failure fails the durable engine closed', () => {
-  it('rejects run() with SessionFailed carrying the storage error and never persists a result', async () => {
+  it('rejects run() with SessionFailed carrying the storage error and never reports completion', async () => {
     const { storageError, thrown, ...input } = await fixture();
-    let result: unknown;
-    const engine = await openDurableEngine({ ...input, resume: false, beforeTool: async () => {}, events: async () => {}, result: async value => { result = value; } });
+    let completed = 0;
+    const engine = await openDurableEngine({ ...input, resume: false, beforeTool: async () => {}, events: async () => {}, completed: async () => { completed += 1; } });
     const ran = await settleWithin(engine.run(), 5000);
     const closed = await settleWithin(engine.close(), 5000);
     expect(thrown()).toBe(1);
@@ -59,7 +59,7 @@ describe('Pi 1.2 storage failure fails the durable engine closed', () => {
     const error = (ran as { error: unknown }).error;
     expect(error).toBeInstanceOf(SessionFailed);
     expect((error as Error).cause).toBe(storageError);
-    expect(result).toBeUndefined();
+    expect(completed).toBe(0);
     // Pre-fix observation (pi-durable 1.2.0): run() rejects with SessionFailed(cause = storage error)
     // before stop() is reached, and close() resolves on the failed Session, releasing the replica lock.
     expect(closed.outcome).toBe('resolved');

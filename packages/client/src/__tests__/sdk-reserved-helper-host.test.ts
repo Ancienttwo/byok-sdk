@@ -37,7 +37,7 @@ describe('SDK-reserved helper host composition', () => {
   it('keeps normal product argv untouched and resolves one explicit self-executable shape for all helpers', async () => {
     await expect(runSdkReservedHelperCommand(['status'])).resolves.toBe(false);
     await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'unknown'])).rejects.toThrow(/invalid/);
-    for (const kind of ['agent-message-mcp', 'agent-memory-mcp', 'agent-memory-describe', 'agent-team-mcp'] as const) {
+    for (const kind of ['agent-message-mcp', 'agent-result-mcp', 'agent-memory-mcp', 'agent-memory-describe', 'agent-team-mcp'] as const) {
       expect(resolveSdkReservedHelperBin(kind, { mode: 'self-executable', executable: '/product/salesko-agent' }))
         .toEqual({
           command: '/product/salesko-agent',
@@ -51,7 +51,7 @@ describe('SDK-reserved helper host composition', () => {
   });
 
   it('inserts an explicit interpreter entry before the same fixed helper prefix', () => {
-    for (const kind of ['agent-message-mcp', 'agent-memory-mcp', 'agent-memory-describe', 'agent-team-mcp', 'pi-rpc', 'pi-prepared'] as const) {
+    for (const kind of ['agent-message-mcp', 'agent-result-mcp', 'agent-memory-mcp', 'agent-memory-describe', 'agent-team-mcp', 'pi-rpc', 'pi-prepared'] as const) {
       expect(resolveSdkReservedHelperBin(kind, {
         mode: 'self-executable', executable: '/runtime/bun', entry: '/release with spaces/sdk.js',
       })).toEqual({command:'/runtime/bun', args:['/release with spaces/sdk.js', BYOK_SDK_HELPER_SUBCOMMAND, kind], source:'self-executable'});
@@ -97,7 +97,7 @@ describe('SDK-reserved helper host composition', () => {
   });
 
   it('retains exact MCP arity at both dispatch boundaries', async () => {
-    for (const kind of ['agent-message-mcp', 'agent-memory-mcp', 'agent-memory-describe', 'agent-team-mcp'] as const) {
+    for (const kind of ['agent-message-mcp', 'agent-result-mcp', 'agent-memory-mcp', 'agent-memory-describe', 'agent-team-mcp'] as const) {
       await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, kind, '--config', '/x'])).rejects.toThrow(/invalid/);
       await expect(runSdkReservedHelper(kind, ['extra'])).rejects.toThrow(/do not accept arguments/);
     }
@@ -176,7 +176,7 @@ describe('SDK-reserved helper host composition', () => {
    * registry rule exists to prevent.
    */
   it('builds every reserved helper command absolute by construction, in both host modes', () => {
-    for (const kind of ['agent-message-mcp', 'agent-memory-mcp', 'agent-memory-describe', 'agent-team-mcp'] as const) {
+    for (const kind of ['agent-message-mcp', 'agent-result-mcp', 'agent-memory-mcp', 'agent-memory-describe', 'agent-team-mcp'] as const) {
       const distScript = resolveSdkReservedHelperBin(kind);
       expect(distScript.source).toBe('dist-script');
       // `process.execPath` is the absolute path of the running executable,

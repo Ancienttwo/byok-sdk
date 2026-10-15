@@ -8,7 +8,7 @@ import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
-import { TaskRunner, type ResultDocumentTask, type TaskRunnerDeps } from '../daemon/task-runner';
+import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { freezeRuntimeAdapterDescriptor } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
@@ -141,31 +141,5 @@ describe('TaskRunner task.complete.finalMessage (#322)', () => {
     const payload = await completion(sent, 'all-blank');
     expect(payload.summary).toBe(' \n');
     expect(Object.hasOwn(payload, 'finalMessage')).toBe(false);
-  });
-
-  it('passes the same closing reply to the result-document extractor', async () => {
-    const adapter = wholeMessageAdapter();
-    const sent: Envelope[] = [];
-    const seen: Array<{ finalOutput: string; task: ResultDocumentTask }> = [];
-    const runner = await makeRunner(adapter, sent, {
-      resultDocument: {
-        extract: (finalOutput, task) => {
-          seen.push({ finalOutput, task });
-          return undefined;
-        },
-      },
-    });
-    await startTask(runner, 'extractor-input', 'codex');
-    const session = adapter.sessions[0]!;
-
-    session.emit({ type: 'progress', text: 'I will consolidate memory.' });
-    session.emit({ type: 'progress', text: 'CONSOLIDATED' });
-    session.emit({ type: 'turn_end' });
-
-    const payload = await completion(sent, 'extractor-input');
-    expect(seen).toHaveLength(1);
-    expect(seen[0]!.finalOutput).toBe('I will consolidate memory.CONSOLIDATED');
-    expect(seen[0]!.task.finalMessage).toBe('CONSOLIDATED');
-    expect(payload.finalMessage).toBe(seen[0]!.task.finalMessage);
   });
 });

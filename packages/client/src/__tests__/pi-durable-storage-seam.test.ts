@@ -20,7 +20,7 @@ it('injects native Storage only after acquiring the existing lock and resetting 
   let opened = 0;
   const engine = await openDurableEngine({
     file, replicaRoot, binding, models: createModels(), model: { provider: 'test', modelId: 'test' }, instruction: '', resume: false, ambient: {},
-    beforeTool: async () => {}, events: async () => {}, result: async () => {},
+    beforeTool: async () => {}, events: async () => {}, completed: async () => {},
     storageFactory: async location => {
       opened++; expect(location).toBe(file);
       await expect(readFile(file)).rejects.toThrow('ENOENT');

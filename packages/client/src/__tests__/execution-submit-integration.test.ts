@@ -8,6 +8,7 @@ import type { AgentMessagePublishPayload } from '@byok-sdk/protocol';
 import { startServer, stopServer } from '../../../server/src/__tests__/test-support';
 import { AgentHomeManager, createDaemonWithAdapters } from '@byok-sdk/client';
 import { InMemoryDeviceCredentialStore } from './fixtures/device-credentials';
+import { connectControlClient } from '../bin/control-client';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { OPEN_LIFECYCLE } from './fixtures/lifecycle-barrier';
@@ -81,26 +82,32 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
   let sdk = createByokServer(options);
   const http = await startServer(sdk);
   const adapter = new StubRuntimeAdapter('pi');
-  const selector = { mode: 'result-document' as const, contract: 'test.internal-summary.v1' };
+  const selector = { mode: 'result-document' as const, contract: 'test.internal-summary.v1', schema: {
+    type: 'object' as const, additionalProperties: false as const, required: ['schemaVersion', 'text'],
+    properties: { schemaVersion: { const: 'test.internal-summary.v1' }, text: { type: 'string' as const, minLength: 1 } },
+  } };
   const agentRef = { agentId: 'shared-summary-agent', profileRevision: 'profile-v1' };
   const frozenInstructions = new Map<string, string>();
   const precedingTurns = outcome === 'document' ? 1 : 0;
   // Synthetic model output, not a production Summary schema/quality assessment.
   const document = { schemaVersion: 'test.internal-summary.v1', text: 'User constraint: 中文 🐝, no external tools.' };
-  const extracts: Array<{ taskId: string; sessionRef: string; terminalProjection?: unknown; finalMessage?: string }> = [];
+  const storeDir = path.join(root, 'store');
   const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
     localAgentRelease: { version: '0.0.0-summary-test' }, productName: 'summary test', productId: options.productId,
-    serverUrl: http.baseUrl, workspaceRoot: path.join(root, 'workspace'), storeDir: path.join(root, 'store'),
+    serverUrl: http.baseUrl, workspaceRoot: path.join(root, 'workspace'), storeDir,
     agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
-    resultDocument: { extract: (output, task) => {
-      extracts.push(task);
-      if (task.terminalProjection?.mode !== selector.mode || task.terminalProjection.contract !== selector.contract) {
-        throw new Error('Unexpected internal result contract');
-      }
-      if (outcome === 'missing') return undefined;
-      return JSON.parse(output);
-    } },
+    // A result-document offer is admitted only by a daemon that journals its terminals.
+    hostedJournal: { mode: 'sqlite' },
   }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });
+  /** The route the SDK result helper's submit_result forwards to. */
+  const submit = async (index: number, value: unknown): Promise<unknown> => {
+    const token = adapter.startCalls[index]?.ctx.mcpServers?.byokagentresult?.env?.BYOK_AGENT_RESULT_CONTEXT;
+    if (!token) throw new Error('missing Agent result context');
+    const connected = await connectControlClient({ storeDir, productId: options.productId });
+    if (!connected.ok) throw new Error(connected.reason);
+    try { return await connected.client.request('agent_results.submit', { contextToken: token, outcome: value }); }
+    finally { connected.client.close(); }
+  };
   let releaseClose: (() => void) | undefined;
   let daemonStopped = false;
   let httpStopped = false;
@@ -150,15 +157,17 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
     expect(offer?.payload).not.toHaveProperty('sessionRef');
     expect(offer?.payload).not.toHaveProperty('messageEgress');
     releaseClose = session.blockClose();
-    const replyText = outcome === 'invalid' ? '{invalid-json' : JSON.stringify(document);
-    session.emit({ type: 'progress', text: replyText });
+    if (outcome === 'document') expect(await submit(precedingTurns, document)).toMatchObject({ state: 'staged' });
+    // An outcome outside the frozen schema is refused and nothing is staged.
+    if (outcome === 'invalid') expect(await submit(precedingTurns, { schemaVersion: 'other', text: '' })).toMatchObject({ state: 'rejected' });
+    // Text that happens to be the document is never parsed into one.
+    session.emit({ type: 'progress', text: JSON.stringify(document) });
     session.emit({ type: 'turn_end' });
     await vi.waitFor(async () => expect(await sdk.tasks.deviceTerminal(taskId)).toMatchObject({
       envelope: { type: outcome === 'document' ? 'task.complete' : 'task.fail' },
     }), { timeout: 10000 });
     const terminal = await sdk.tasks.deviceTerminal(taskId);
-    // #322: the extractor also receives the closing reply, here the only text.
-    expect(extracts).toEqual([{ taskId, sessionRef: session.sessionRef, terminalProjection: selector, finalMessage: replyText }]);
+    expect(adapter.startCalls[precedingTurns]?.ctx.mcpServers?.byokagentresult).toBeDefined();
     expect(messages).toEqual(precedingTurns ? ['preceding-user-turn'] : []);
     expect(await sdk.tasks.agentMessage(taskId, deviceId, agentRef)).toBeUndefined();
     expect(daemon.status().activeTaskCount).toBeGreaterThan(0);
@@ -184,7 +193,7 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
       expect(adapter.sessions).toHaveLength(precedingTurns + 1);
       expect(adapter.startCalls).toHaveLength(precedingTurns + 1);
     } else {
-      expect(terminal).toMatchObject({ envelope: { payload: { retryable: false } } });
+      expect(terminal).toMatchObject({ envelope: { payload: { retryable: false, reason: expect.stringContaining('result_not_submitted') } } });
       expect(terminal?.envelope.payload).not.toHaveProperty('document');
     }
     releaseClose(); releaseClose = undefined;
@@ -195,6 +204,7 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
       expect(adapter.startCalls[precedingTurns + 1]?.task.sessionRef).toBeUndefined();
       expect(adapter.startCalls[precedingTurns + 1]?.ctx.workspaceDir).toBe(adapter.startCalls[precedingTurns]?.ctx.workspaceDir);
       const competingSession = adapter.sessions[precedingTurns + 1]!;
+      expect(await submit(precedingTurns + 1, document)).toMatchObject({ state: 'staged' });
       competingSession.emit({ type: 'progress', text: JSON.stringify(document) });
       competingSession.emit({ type: 'turn_end' });
       await vi.waitFor(async () => expect(await sdk.tasks.deviceTerminal('competing-before-close')).toMatchObject({
@@ -227,8 +237,9 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
       }), { timeout: 10000 });
       await vi.waitFor(() => expect(daemon.status().activeTaskCount).toBe(0));
       expect(messages).toEqual(['preceding-user-turn', 'dependent-user-turn']);
-      // The Summary and the competing probe each carried the result-document projection.
-      expect(extracts.map(item => item.taskId)).toEqual([taskId, 'competing-before-close']);
+      // The Summary and the competing probe each carried the result-document channel; user turns did not.
+      expect(adapter.startCalls.map(item => item.ctx.mcpServers?.byokagentresult !== undefined))
+        .toEqual([false, true, true, false]);
     }
     await daemon.stop(); daemonStopped = true;
     await stopServer(http.server); httpStopped = true;

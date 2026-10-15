@@ -1,521 +1,139 @@
-import { testScratchOwner, testScratchRoot } from "./fixtures/execution-scratch";
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope, RESULT_DOCUMENT_MAX_BYTES, type Envelope } from '@byok-sdk/protocol';
-import { ApprovalRegistry } from '../daemon/approvals';
-import type { BlobResolver } from '../daemon/blob-client';
-import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
-import {
-  RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX,
-  TaskRunner,
-  type ResultDocumentTask,
-  type TaskRunnerDeps,
-} from '../daemon/task-runner';
+import { DatabaseSync } from 'node:sqlite';
+import { afterEach, describe, expect, it } from 'vitest';
+import { createEnvelope, encodeEnvelope, PROTOCOL_VERSION } from '@byok-sdk/protocol';
+import { createDaemon, createDaemonWithAdapters, type DaemonConfig } from '../daemon/create-daemon';
+import { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError } from '../daemon/daemon-errors';
+import { journalHash } from '../daemon/journal/journal';
+import { JOURNAL_DB_FILENAME, SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
+import { DeviceStore } from '../daemon/store';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 
 /**
- * additive-minor (`task.complete.document`): the daemon-side seam between a
- * host-configured `resultDocument.extract` and the wire —
- * `TaskRunner.resolveResultDocument`'s cap gate, capability gate, and three
- * fail-closed branches, driven directly (no control socket, no real
- * connection) the same way `task-runner-resource-limits.test.ts` drives the
- * other local enforcement paths.
- *
- * The last describe block closes the loop through a real daemon and the
- * in-process `TestServer`, which is what actually proves `DaemonConfig
- * .resultDocument` reaches `TaskRunnerDeps` and that the capability read is
- * the negotiated `conn.ack.capabilities`, not a value a test handed in.
+ * Wire v3 result channel, daemon construction and startup:
+ * - TE-B: every removed `DaemonConfig` field, `resultDocument` included,
+ *   throws the typed {@link DaemonConfigFieldRemovedError}.
+ * - A journal holding envelope bytes of another wire major stops startup
+ *   with {@link DaemonJournalProtocolUnsupportedError} before any recovery
+ *   write: the journal is byte-identical afterwards.
  */
+
+const cleanup: Array<() => Promise<unknown>> = [];
+afterEach(async () => { for (const fn of cleanup.reverse()) await fn(); cleanup.length = 0; });
 
 async function tmpDir(prefix: string): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  cleanup.push(() => fs.rm(dir, { recursive: true, force: true }));
+  return dir;
 }
 
-const unusedBlobClient: BlobResolver = {
-  resolveInstruction: async () => {
-    throw new Error('not used in this test');
-  },
-  uploadArtifact: async () => {
-    throw new Error('not used in this test');
-  },
-};
-
-async function makeRunner(
-  adapter: StubRuntimeAdapter,
-  sent: Envelope[],
-  overrides: Partial<Pick<TaskRunnerDeps, 'resultDocument' | 'getServerCapabilities'>> = {},
-): Promise<TaskRunner> {
-  const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
-    adapters: [adapter],
-    workspaceRoot: await tmpDir('byok-result-document-workspace-'),
-    deviceId: 'device-1',
-    send: (envelope) => {
-      sent.push(envelope);
-    },
-    blobClient: unusedBlobClient,
-    sessionWorkspaces: new SessionWorkspaceStore(await tmpDir('byok-result-document-store-')),
-    approvalRegistry: new ApprovalRegistry(),
-    storeDir: 'unused-store-dir',
-    productId: 'unused-product-id',
-    getServerCapabilities: overrides.getServerCapabilities,
-    ...(overrides.resultDocument ? { resultDocument: overrides.resultDocument } : {}),
+async function baseConfig(serverUrl = 'http://127.0.0.1:9'): Promise<DaemonConfig> {
+  return {
+    storage: { scratchRoot: testScratchRoot() },
+    localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'result-gating',
+    serverUrl,
+    workspaceRoot: await tmpDir('byok-result-gating-workspace-'),
+    storeDir: await tmpDir('byok-result-gating-store-'),
   };
-  return new TaskRunner(deps);
 }
 
-async function runToTurnEnd(
-  runner: TaskRunner,
-  adapter: StubRuntimeAdapter,
-  taskId: string,
-  outputChunks: string[] = ['all ', 'done'],
-): Promise<void> {
-  await runner.handleEnvelope(
-    createEnvelope('task.offer', { instruction: 'do the thing' }, { taskId, seq: 1 }),
-  );
-  const session = adapter.sessions[0]!;
-  for (const text of outputChunks) session.emit({ type: 'progress', text });
-  session.emit({ type: 'turn_end' });
+function expectRemoved(build: () => unknown, field: string): void {
+  let thrown: unknown;
+  try { build(); } catch (error) { thrown = error; }
+  expect(thrown).toBeInstanceOf(DaemonConfigFieldRemovedError);
+  expect(thrown).toMatchObject({ code: 'daemon_config_field_removed', field, name: 'DaemonConfigFieldRemovedError' });
+  expect((thrown as Error).message).toContain(`DaemonConfig.${field} was removed`);
 }
 
-function terminal(sent: Envelope[]): Envelope | undefined {
-  return sent.find((e) => e.type === 'task.complete' || e.type === 'task.fail' || e.type === 'task.cancelled');
-}
-
-async function waitForTerminal(sent: Envelope[]): Promise<Envelope> {
-  await vi.waitFor(() => expect(terminal(sent)).toBeDefined());
-  return terminal(sent)!;
-}
-
-/**
- * The FULL fail-closed contract every rejection branch must satisfy, asserted
- * in one place so no branch can drift into checking less than its siblings
- * (gatekeeper addendum): `task.fail` with the stable prefix and the branch's
- * own detail, `retryable: false`, NO `task.complete` at all, and no envelope
- * anywhere carrying a `document`.
- */
-function expectFailClosed(sent: Envelope[], outcome: Envelope, detail: string): void {
-  expect(outcome.type).toBe('task.fail');
-  if (outcome.type !== 'task.fail') throw new Error('unreachable');
-  expect(outcome.payload.retryable).toBe(false);
-  expect(outcome.payload.reason.startsWith(RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX)).toBe(true);
-  expect(outcome.payload.reason).toContain(detail);
-  expect(sent.some((e) => e.type === 'task.complete')).toBe(false);
-  expect(sent.some((e) => JSON.stringify(e).includes('"document"'))).toBe(false);
-}
-
-const CAPABLE = () => ['steer', 'result-document'];
-const NOT_CAPABLE = () => ['steer', 'approval_resolved'];
-
-describe('TaskRunner: result document, flag-gated send', () => {
-  it('sends the extracted document on task.complete when the server advertised result-document', async () => {
-    const adapter = new StubRuntimeAdapter();
-    const sent: Envelope[] = [];
-    const runner = await makeRunner(adapter, sent, {
-      getServerCapabilities: CAPABLE,
-      resultDocument: { extract: () => ({ kind: 'invoice', total: 42 }) },
-    });
-
-    await runToTurnEnd(runner, adapter, 'task-1');
-
-    const done = await waitForTerminal(sent);
-    expect(done.type).toBe('task.complete');
-    if (done.type !== 'task.complete') throw new Error('unreachable');
-    expect(done.payload.document).toEqual({ kind: 'invoice', total: 42 });
-    // The pre-existing fields are untouched by the addition.
-    expect(done.payload.summary).toBe('all done');
-    expect(done.payload.sessionRef).toBe(adapter.sessions[0]!.sessionRef);
+describe('removed DaemonConfig fields (TE-B)', () => {
+  it('createDaemon and createDaemonWithAdapters refuse resultDocument with the typed error', async () => {
+    const config = { ...(await baseConfig()), resultDocument: { extract: () => ({}) } } as unknown as DaemonConfig;
+    expectRemoved(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter()]), 'resultDocument');
+    expectRemoved(() => createDaemon(config), 'resultDocument');
   });
 
-  it('passes the final output text and the task identity to the extractor', async () => {
-    const adapter = new StubRuntimeAdapter();
-    const sent: Envelope[] = [];
-    const calls: Array<{ finalOutput: string; task: ResultDocumentTask }> = [];
-    const runner = await makeRunner(adapter, sent, {
-      getServerCapabilities: CAPABLE,
-      resultDocument: {
-        extract: (finalOutput, task) => {
-          calls.push({ finalOutput, task });
-          return { ok: true };
-        },
-      },
-    });
-
-    await runToTurnEnd(runner, adapter, 'task-1', ['part one, ', 'part two']);
-    await waitForTerminal(sent);
-
-    expect(calls).toHaveLength(1);
-    expect(calls[0]!.finalOutput).toBe('part one, part two');
-    // #322: the stub emits deltas with no tool call, so the closing reply is the whole text.
-    expect(calls[0]!.task).toEqual({ taskId: 'task-1', sessionRef: adapter.sessions[0]!.sessionRef, finalMessage: 'part one, part two' });
-  });
-
-  it('sends NO document when the extractor returns undefined — completion is identical to having no extractor at all', async () => {
-    const adapter = new StubRuntimeAdapter();
-    const sent: Envelope[] = [];
-    const runner = await makeRunner(adapter, sent, {
-      getServerCapabilities: CAPABLE,
-      resultDocument: { extract: () => undefined },
-    });
-
-    await runToTurnEnd(runner, adapter, 'task-1');
-
-    const done = await waitForTerminal(sent);
-    expect(done.type).toBe('task.complete');
-    expect('document' in done.payload).toBe(false);
-  });
-
-  it('never consults the capability list when the extractor produced nothing (no document, nothing to gate)', async () => {
-    const adapter = new StubRuntimeAdapter();
-    const sent: Envelope[] = [];
-    const getServerCapabilities = vi.fn(NOT_CAPABLE);
-    const runner = await makeRunner(adapter, sent, {
-      getServerCapabilities,
-      resultDocument: { extract: () => undefined },
-    });
-
-    await runToTurnEnd(runner, adapter, 'task-1');
-
-    const done = await waitForTerminal(sent);
-    expect(done.type).toBe('task.complete');
-    expect(getServerCapabilities).not.toHaveBeenCalled();
+  it.each([
+    ['permissionDefaults', { permissionDefaults: {} }],
+    ['agentEgress.sanitizer', { agentEgress: { sanitizer: () => undefined } }],
+    ['mcpLaunchCwd', { mcpLaunchCwd: '/tmp' }],
+    ['toolImplementationAuthority', { toolImplementationAuthority: {} }],
+    ['maxConcurrentMutableSessionsPerAgentHome', { maxConcurrentMutableSessionsPerAgentHome: 1 }],
+  ])('%s throws DaemonConfigFieldRemovedError with its path', async (field, extra) => {
+    const config = { ...(await baseConfig()), ...extra } as unknown as DaemonConfig;
+    expectRemoved(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter()]), field);
   });
 });
 
-describe('TaskRunner: result document, fail-closed branches', () => {
-  it('fails the task (retryable:false) when the document is over the cap — and never truncates it', async () => {
-    const adapter = new StubRuntimeAdapter();
-    const sent: Envelope[] = [];
-    const framing = JSON.stringify({ a: '' }).length;
-    const overCap = { a: 'x'.repeat(RESULT_DOCUMENT_MAX_BYTES + 1 - framing) };
-    const runner = await makeRunner(adapter, sent, {
-      getServerCapabilities: CAPABLE,
-      resultDocument: { extract: () => overCap },
-    });
+function v2Bytes(bytes: string): string {
+  const parsed = JSON.parse(bytes) as { v: number };
+  expect(parsed.v).toBe(PROTOCOL_VERSION);
+  return `${JSON.stringify({ ...parsed, v: 2 })}\n`;
+}
 
-    await runToTurnEnd(runner, adapter, 'task-1');
+function snapshot(storeDir: string): Record<string, unknown[]> {
+  const db = new DatabaseSync(path.join(storeDir, JOURNAL_DB_FILENAME), { readOnly: true });
+  try {
+    const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all() as Array<{ name: string }>)
+      .map((row) => row.name);
+    return Object.fromEntries(tables.map((table) => [table, db.prepare(`SELECT * FROM "${table}"`).all()]));
+  } finally { db.close(); }
+}
 
-    const outcome = await waitForTerminal(sent);
-    // The reason names the measured size and the limit — an operator can act
-    // on it without reproducing the task.
-    expectFailClosed(sent, outcome, String(RESULT_DOCUMENT_MAX_BYTES + 1));
-    if (outcome.type !== 'task.fail') throw new Error('unreachable');
-    expect(outcome.payload.reason).toContain(String(RESULT_DOCUMENT_MAX_BYTES));
-  });
-
-  it('accepts a document sitting EXACTLY on the cap (the boundary is inclusive, and the daemon agrees with the wire)', async () => {
-    const adapter = new StubRuntimeAdapter();
-    const sent: Envelope[] = [];
-    const framing = JSON.stringify({ a: '' }).length;
-    const atCap = { a: 'x'.repeat(RESULT_DOCUMENT_MAX_BYTES - framing) };
-    const runner = await makeRunner(adapter, sent, {
-      getServerCapabilities: CAPABLE,
-      resultDocument: { extract: () => atCap },
-    });
-
-    await runToTurnEnd(runner, adapter, 'task-1');
-
-    const done = await waitForTerminal(sent);
-    expect(done.type).toBe('task.complete');
-    if (done.type !== 'task.complete') throw new Error('unreachable');
-    expect(done.payload.document).toEqual(atCap);
-  });
-
-  it('fails the task (retryable:false) when the document is not JSON-serializable', async () => {
-    const adapter = new StubRuntimeAdapter();
-    const sent: Envelope[] = [];
-    const circular: Record<string, unknown> = { name: 'loop' };
-    circular.self = circular;
-    const runner = await makeRunner(adapter, sent, {
-      getServerCapabilities: CAPABLE,
-      resultDocument: { extract: () => circular },
-    });
-
-    await runToTurnEnd(runner, adapter, 'task-1');
-
-    expectFailClosed(sent, await waitForTerminal(sent), 'not JSON-serializable');
-  });
-
-  it('fails the task (retryable:false) when the document is not plain JSON data — it would be silently transformed on the way out (F1/F2)', async () => {
-    // Every one of these JSON.stringify-es "successfully" into something the
-    // producer never had: a dropped key, `null` for NaN, a string for a Date,
-    // and (the contextual-toJSON smuggler) a different value entirely
-    // depending on the key it is serialized under.
-    const cases: Record<string, unknown> = {
-      'undefined-valued key / NaN / hole in an array': { required: undefined, n: NaN, arr: [undefined] },
-      'Date instance': { at: new Date('2026-01-01T00:00:00.000Z') },
-      'contextual toJSON(key)': { toJSON: (key: string) => (key === '' ? { tiny: true } : { a: 'x'.repeat(RESULT_DOCUMENT_MAX_BYTES * 2) }) },
-    };
-
-    for (const [label, document] of Object.entries(cases)) {
-      const perCaseSent: Envelope[] = [];
-      const perCaseAdapter = new StubRuntimeAdapter();
-      const runner = await makeRunner(perCaseAdapter, perCaseSent, {
-        getServerCapabilities: CAPABLE,
-        resultDocument: { extract: () => document },
-      });
-
-      await runToTurnEnd(runner, perCaseAdapter, `task-${label.length}`);
-
-      expectFailClosed(perCaseSent, await waitForTerminal(perCaseSent), 'not plain JSON data');
-    }
-  });
-
-  it('sends the CANONICAL SNAPSHOT, not the extractor\'s object — a stable getter is neutralized into pure data', async () => {
-    const adapter = new StubRuntimeAdapter();
-    const sent: Envelope[] = [];
-    const runner = await makeRunner(adapter, sent, {
-      getServerCapabilities: CAPABLE,
-      resultDocument: {
-        extract: () => ({
-          get answer(): number {
-            return 42;
-          },
-          plain: 'data',
-        }),
-      },
-    });
-
-    await runToTurnEnd(runner, adapter, 'task-1');
-
-    const done = await waitForTerminal(sent);
-    expect(done.type).toBe('task.complete');
-    if (done.type !== 'task.complete') throw new Error('unreachable');
-    expect(done.payload.document).toEqual({ answer: 42, plain: 'data' });
-    // What is on the wire is pure data — no accessor survived the snapshot,
-    // so the bytes measured by the cap gate are necessarily the bytes sent.
-    expect(Object.getOwnPropertyDescriptor(done.payload.document as object, 'answer')?.get).toBeUndefined();
-  });
-
-  it('fails the task (retryable:false) when the extractor throws — the error is surfaced, not swallowed', async () => {
-    const adapter = new StubRuntimeAdapter();
-    const sent: Envelope[] = [];
-    const runner = await makeRunner(adapter, sent, {
-      getServerCapabilities: CAPABLE,
-      resultDocument: {
-        extract: () => {
-          throw new Error('no JSON block in the model output');
-        },
-      },
-    });
-
-    await runToTurnEnd(runner, adapter, 'task-1');
-
-    expectFailClosed(sent, await waitForTerminal(sent), 'no JSON block in the model output');
-  });
-
-  it('fails the task (retryable:false) when the extractor is async — a promise would encode to an empty document, a confidently wrong result', async () => {
-    const adapter = new StubRuntimeAdapter();
-    const sent: Envelope[] = [];
-    const runner = await makeRunner(adapter, sent, {
-      getServerCapabilities: CAPABLE,
-      // Typed as returning `unknown`, so an async function is type-legal —
-      // which is exactly why the runtime has to catch it.
-      resultDocument: { extract: async () => ({ kind: 'invoice' }) },
-    });
-
-    await runToTurnEnd(runner, adapter, 'task-1');
-
-    // The outcome this branch exists to prevent: a completion carrying `{}`
-    // as though it were the product's real structured result.
-    expectFailClosed(sent, await waitForTerminal(sent), 'returned a promise; the contract is synchronous');
-  });
-
-  it('fails the task (retryable:false) when the capability DISAPPEARS between the gate and the send — a reconnect to an older server mid-completion (F3)', async () => {
-    const adapter = new StubRuntimeAdapter();
-    const sent: Envelope[] = [];
-    // Capable when `resolveResultDocument` asks, gone by the time the
-    // envelope is actually handed to `send` — exactly what a reconnect does
-    // (`ConnectionManager.onWsOutcome` clears the learned capabilities on an
-    // acked-then-closed connection). Without the post-await re-check, the
-    // completion would be queued carrying a document for a server that
-    // strips it.
-    let reads = 0;
-    const runner = await makeRunner(adapter, sent, {
-      getServerCapabilities: () => {
-        reads += 1;
-        return reads === 1 ? ['result-document'] : [];
-      },
-      resultDocument: { extract: () => ({ kind: 'invoice' }) },
-    });
-
-    await runToTurnEnd(runner, adapter, 'task-1');
-
-    expectFailClosed(sent, await waitForTerminal(sent), 'stopped advertising the result-document capability');
-    // Both the gate and the pre-send re-check ran — the second is what
-    // caught it.
-    expect(reads).toBeGreaterThanOrEqual(2);
-  });
-
-  it('fails the task (retryable:false) when a document exists but the server never advertised result-document — it is never silently omitted', async () => {
-    const adapter = new StubRuntimeAdapter();
-    const sent: Envelope[] = [];
-    const runner = await makeRunner(adapter, sent, {
-      getServerCapabilities: NOT_CAPABLE,
-      resultDocument: { extract: () => ({ kind: 'invoice' }) },
-    });
-
-    await runToTurnEnd(runner, adapter, 'task-1');
-
-    // The forbidden outcome this whole gate exists to prevent: a completion
-    // that quietly dropped the task's structured result.
-    expectFailClosed(sent, await waitForTerminal(sent), 'result-document capability');
-  });
-
-  it('treats an absent capability list the same as one without the flag (fail-closed, not fail-open)', async () => {
-    const adapter = new StubRuntimeAdapter();
-    const sent: Envelope[] = [];
-    const runner = await makeRunner(adapter, sent, {
-      // getServerCapabilities omitted entirely — a harness or a daemon that
-      // has not completed a handshake knows of no capability at all.
-      resultDocument: { extract: () => ({ kind: 'invoice' }) },
-    });
-
-    await runToTurnEnd(runner, adapter, 'task-1');
-
-    expectFailClosed(sent, await waitForTerminal(sent), 'result-document capability');
-  });
-});
-
-describe('TaskRunner: no extractor configured', () => {
-  it('adds no document-feature fields to the payload, consulting neither extractor nor capabilities', async () => {
-    const adapter = new StubRuntimeAdapter();
-    const sent: Envelope[] = [];
-    const getServerCapabilities = vi.fn(CAPABLE);
-    const runner = await makeRunner(adapter, sent, { getServerCapabilities });
-
-    await runToTurnEnd(runner, adapter, 'task-1');
-
-    const done = await waitForTerminal(sent);
-    expect(done.type).toBe('task.complete');
-    if (done.type !== 'task.complete') throw new Error('unreachable');
-    // #322 adds the closing reply; the document feature still adds nothing here.
-    expect(done.payload).toEqual({ summary: 'all done', finalMessage: 'all done', sessionRef: adapter.sessions[0]!.sessionRef });
-    expect('document' in done.payload).toBe(false);
-    expect(getServerCapabilities).not.toHaveBeenCalled();
-  });
-});
-
-describe('DaemonConfig.resultDocument end to end (real daemon + in-process server)', () => {
-  let server: TestServer;
-  let daemon: Daemon | undefined;
-
-  beforeEach(async () => {
-    server = await TestServer.start();
-  });
-
-  afterEach(async () => {
-    await daemon?.stop();
-    await server.close();
-    daemon = undefined;
-  });
-
-  async function setupDaemon(
-    adapter: StubRuntimeAdapter,
-    configOverrides: Partial<Parameters<typeof createDaemonWithAdapters>[0]> = {},
-  ): Promise<Daemon> {
-    daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },
-        localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
-        productId: 'test-product',
-        serverUrl: server.url,
-        workspaceRoot: await tmpDir('byok-result-document-e2e-workspace-'),
-        storeDir: await tmpDir('byok-result-document-e2e-store-'),
-        ...configOverrides,
-      },
-      [adapter],
-    );
-    await daemon.pair('pairing-code');
-    await daemon.start();
-    return daemon;
+describe('startup refuses a journal of another wire major', () => {
+  async function pairedDaemonStore() {
+    const server = await TestServer.start(); cleanup.push(() => server.close());
+    const config = { ...(await baseConfig(server.url)), hostedJournal: { mode: 'sqlite' as const } };
+    const pairing = createDaemonWithAdapters(config, [new StubRuntimeAdapter()]);
+    await pairing.pair('pairing-code');
+    const device = (await new DeviceStore(config.storeDir!, undefined, config.productId).credentials.read())!;
+    const identity = { tenantId: device.tenantId, productId: config.productId, deviceId: device.deviceId };
+    return { server, config, identity };
   }
 
-  async function driveOneTask(adapter: StubRuntimeAdapter): Promise<Envelope> {
-    server.send(
-      createEnvelope('task.offer', { instruction: 'do the thing' }, { taskId: 'task-1', seq: server.nextSeq() }),
-    );
-    await server.waitFor((e) => e.type === 'task.started');
-    const session = adapter.sessions[0]!;
-    session.emit({ type: 'progress', text: 'all done' });
-    session.emit({ type: 'turn_end' });
-    return server.waitFor((e) => e.type === 'task.complete' || e.type === 'task.fail');
+  async function seedOffer(journal: SqliteLocalTaskJournal, identity: { tenantId: string; productId: string; deviceId: string }, taskId: string, seq: number, bytes: string): Promise<void> {
+    await journal.appendEnvelope({ identity, taskId, envelopeId: (JSON.parse(bytes) as { id: string }).id, seq, bytes,
+      bytesHash: journalHash(bytes), opensTask: true, receivedAt: new Date().toISOString() });
+    await journal.recordAdmission({ taskId, admitted: true, claimedRuntime: 'pi', decidedAt: new Date().toISOString() });
   }
 
-  it('carries the configured extractor through DaemonConfig to the wire when the negotiated conn.ack advertises result-document', async () => {
-    server.setAckCapabilities(['result-document']);
-    const adapter = new StubRuntimeAdapter();
-    await setupDaemon(adapter, { resultDocument: { extract: (finalOutput) => ({ echoed: finalOutput }) } });
+  async function expectStartupRefused(config: DaemonConfig, expected: Partial<DaemonJournalProtocolUnsupportedError>): Promise<void> {
+    const before = snapshot(config.storeDir!);
+    const journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
+    const daemon = createDaemonWithAdapters(config, [new StubRuntimeAdapter()], { hostedJournal: { journal } });
+    cleanup.push(async () => { await daemon.stop().catch(() => {}); await journal.close().catch(() => {}); });
+    let thrown: unknown;
+    try { await daemon.start(); } catch (error) { thrown = error; }
+    expect(thrown).toBeInstanceOf(DaemonJournalProtocolUnsupportedError);
+    expect(thrown).toMatchObject({ code: 'daemon_journal_protocol_unsupported', found: 2, expected: PROTOCOL_VERSION, ...expected });
+    await daemon.stop().catch(() => {});
+    await journal.close();
+    expect(snapshot(config.storeDir!)).toEqual(before);
+  }
 
-    const terminalEnvelope = await driveOneTask(adapter);
-    expect(terminalEnvelope.type).toBe('task.complete');
-    if (terminalEnvelope.type !== 'task.complete') throw new Error('unreachable');
-    expect(terminalEnvelope.payload.document).toEqual({ echoed: 'all done' });
+  it('a v2 recovery offer stops startup before any daemon_interrupted terminal is written', async () => {
+    const { config, identity } = await pairedDaemonStore();
+    const journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
+    // A v3 row first: scanning before acting means it gets no terminal either.
+    await seedOffer(journal, identity, 'v3-task', 1, encodeEnvelope(createEnvelope('task.offer', { instruction: 'current' }, { taskId: 'v3-task', seq: 1 })));
+    await seedOffer(journal, identity, 'v2-task', 2, v2Bytes(encodeEnvelope(createEnvelope('task.offer', { instruction: 'old' }, { taskId: 'v2-task', seq: 2 }))));
+    await journal.close();
+    await expectStartupRefused(config, { taskId: 'v2-task', record: 'recovery-offer' });
+    expect(snapshot(config.storeDir!).journal_terminal).toEqual([]);
   });
 
-  it('fails the task against a server whose real handshake advertised no result-document', async () => {
-    server.setAckCapabilities([]);
-    const adapter = new StubRuntimeAdapter();
-    await setupDaemon(adapter, { resultDocument: { extract: () => ({ kind: 'invoice' }) } });
-
-    const terminalEnvelope = await driveOneTask(adapter);
-    expect(terminalEnvelope.type).toBe('task.fail');
-    if (terminalEnvelope.type !== 'task.fail') throw new Error('unreachable');
-    expect(terminalEnvelope.payload.retryable).toBe(false);
-    expect(terminalEnvelope.payload.reason.startsWith(RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX)).toBe(true);
-  });
-
-  it('completes normally with no resultDocument configured, even against a result-document-capable server', async () => {
-    server.setAckCapabilities(['result-document']);
-    const adapter = new StubRuntimeAdapter();
-    await setupDaemon(adapter);
-
-    const terminalEnvelope = await driveOneTask(adapter);
-    expect(terminalEnvelope.type).toBe('task.complete');
-    if (terminalEnvelope.type !== 'task.complete') throw new Error('unreachable');
-    expect('document' in terminalEnvelope.payload).toBe(false);
-  });
-
-  it('fails the task when the server rolls back mid-task — capable at claim, not capable at completion', async () => {
-    // Capable when the task starts...
-    server.setAckCapabilities(['result-document']);
-    const adapter = new StubRuntimeAdapter();
-    await setupDaemon(adapter, { resultDocument: { extract: () => ({ kind: 'invoice' }) } });
-
-    server.send(
-      createEnvelope('task.offer', { instruction: 'do the thing' }, { taskId: 'task-1', seq: server.nextSeq() }),
-    );
-    await server.waitFor((e) => e.type === 'task.started');
-
-    // ...and rolled back to an older build before the task finishes. The next
-    // successful events response is the server capability authority.
-    //
-    // `httpRequests` records a poll when the server RECEIVES it, which is
-    // before the daemon has read that poll's response. The first poll counted
-    // after the rollback is answered with the rolled-back capabilities, but
-    // seeing it here does not prove the daemon has applied them. The daemon
-    // polls one request at a time and applies a response's capabilities before
-    // it sends the next poll, so a SECOND poll after the rollback proves the
-    // daemon has already applied the rolled-back answer.
-    const pollsBeforeRollback = server.httpRequests.filter((request) => request.pathname === '/byok/events').length;
-    server.setAckCapabilities([]);
-    await vi.waitFor(
-      () => expect(server.httpRequests.filter((request) => request.pathname === '/byok/events').length).toBeGreaterThanOrEqual(pollsBeforeRollback + 2),
-      { timeout: 5000 },
-    );
-
-    const session = adapter.sessions[0]!;
-    session.emit({ type: 'progress', text: 'all done' });
-    session.emit({ type: 'turn_end' });
-
-    const terminalEnvelope = await server.waitFor((e) => e.type === 'task.complete' || e.type === 'task.fail');
-    expect(terminalEnvelope.type).toBe('task.fail');
-    if (terminalEnvelope.type !== 'task.fail') throw new Error('unreachable');
-    expect(terminalEnvelope.payload.retryable).toBe(false);
-    expect(terminalEnvelope.payload.reason.startsWith(RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX)).toBe(true);
-    // The document never reached the rolled-back server in any frame.
-    expect(server.received.some((e) => JSON.stringify(e).includes('"document"'))).toBe(false);
+  it('a v2 pending terminal stops startup before replay', async () => {
+    const { server, config, identity } = await pairedDaemonStore();
+    const journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
+    await seedOffer(journal, identity, 'done-task', 1, encodeEnvelope(createEnvelope('task.offer', { instruction: 'done' }, { taskId: 'done-task', seq: 1 })));
+    const terminal = v2Bytes(encodeEnvelope(createEnvelope('task.complete', { summary: 'old', sessionRef: 's' }, { taskId: 'done-task', sessionRef: 's' })));
+    await journal.recordTerminal({ taskId: 'done-task', terminalType: 'complete', bytes: terminal, payloadHash: journalHash(terminal),
+      truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });
+    await journal.close();
+    await expectStartupRefused(config, { taskId: 'done-task', record: 'pending-terminal' });
+    expect(server.received.some((envelope) => envelope.type === 'task.complete')).toBe(false);
   });
 });

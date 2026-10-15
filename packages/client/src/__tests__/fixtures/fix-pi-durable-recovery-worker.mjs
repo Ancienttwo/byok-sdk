@@ -1,6 +1,6 @@
 // Inert JSONL worker: no Pi runtime, provider, tools, credentials, or network.
-// A tiny local checkpoint makes redelivery read saved data without new work.
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+// A resumed generation reads the local checkpoint instead of calling the model again.
+import { appendFileSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import path from 'node:path';
 
@@ -13,19 +13,11 @@ createInterface({ input: process.stdin }).on('line', line => {
   const command = JSON.parse(line);
   if (command.type !== 'start') throw new Error('unexpected command');
   appendFileSync(path.join(root, 'starts.jsonl'), `${JSON.stringify(command)}\n`);
-  if (!command.resume) {
-    appendFileSync(path.join(root, 'model-calls'), 'synthetic-model-call\n');
-    writeFileSync(path.join(root, 'checkpoint.json'), JSON.stringify({ text: 'finished', detail: { count: 1, labels: ['a', 'b'] } }));
-  }
+  if (!command.resume) appendFileSync(path.join(root, 'model-calls'), 'synthetic-model-call\n');
   send({ type: 'response', id: command.id, success: true, workerPid: process.pid,
     projectionDigest: plan.projectionDigest ?? 'a'.repeat(64) });
-  const saved = JSON.parse(readFileSync(path.join(root, 'checkpoint.json'), 'utf8'));
-  const document = plan.result === 'conflict' ? { ...saved, text: 'changed' }
-    : plan.result === 'nested-conflict' ? { ...saved, detail: { ...saved.detail, count: 2 } }
-    : plan.result === 'reordered' ? { detail: { labels: saved.detail.labels, count: saved.detail.count }, text: saved.text }
-    : plan.result === 'invalid' ? null : saved;
-  if (plan.result !== 'none') send({ type: 'durable_result', document });
-  if (plan.duplicate) send({ type: 'durable_result', document });
+  // The retired wire v2 frame: a durable worker no longer carries a result document.
+  if (plan.retiredResultFrame) send({ type: 'durable_result', document: { text: 'finished' } });
   if (plan.complete) send({ type: 'durable_complete' });
   if (plan.crash) process.stdout.write('', () => process.exit(73));
 });

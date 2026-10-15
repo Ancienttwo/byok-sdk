@@ -9,10 +9,9 @@ import { startDurablePi, type DurableStart } from '../adapters/pi-durable/sessio
 import type { Session } from '../types';
 
 interface WorkerPlan {
-  result?: 'saved' | 'reordered' | 'conflict' | 'nested-conflict' | 'invalid' | 'none';
   complete?: boolean;
-  duplicate?: boolean;
   crash?: boolean;
+  retiredResultFrame?: boolean;
   projectionDigest?: string;
 }
 const roots: string[] = [];
@@ -21,7 +20,6 @@ afterEach(async () => {
   for (const session of sessions.splice(0)) await session.close();
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
-const expectedDocument = { text: 'finished', detail: { count: 1, labels: ['a', 'b'] } };
 async function fixture(plan: WorkerPlan[]) {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'fix-pi-durable-recovery-')));
   roots.push(root);
@@ -70,21 +68,20 @@ function assertFailed(f: Awaited<ReturnType<typeof fixture>>) {
   expect(f.failure()).toMatchObject({ phase: 'run', category: 'authority', retry: 'non-retryable' });
   expect(f.events.filter(event => event.type === 'error')).toHaveLength(1);
   expect(f.events.filter(event => event.type === 'turn_end')).toHaveLength(0);
-  expect(() => f.session.resultDocument!()).toThrow('not terminal');
+  expect(f.events.filter(event => event.type === 'artifact')).toHaveLength(0);
 }
 
 // Durable admission is POSIX-only; native Windows ownership is outside this test.
-describe.skipIf(process.platform === 'win32')('F16-1 durable result redelivery across worker generations', () => {
-  it.each(['saved', 'reordered'] as const)('recovers a %s document after death between result and completion', async result => {
-    const f = await fixture([{ crash: true }, { result, complete: true }]);
+// Wire v3: completion is the worker's durable_complete alone. A result-document
+// outcome is staged by the daemon through submit_result, so no generation
+// carries or redelivers a document and the Session exposes none.
+describe.skipIf(process.platform === 'win32')('F16-1 durable completion across worker generations', () => {
+  it('recovers a completion after death before it, without a second model call', async () => {
+    const f = await fixture([{ crash: true }, { complete: true }]);
     await f.collect();
     expect(f.failure()).toBeUndefined();
-    expect(f.events).toEqual([
-      { type: 'artifact', name: 'byok.result', contentType: 'application/json' },
-      { type: 'turn_end' },
-    ]);
-    expect(f.session.resultDocument!()).toEqual(expectedDocument);
-    expect(Object.keys(f.session.resultDocument!() as object)).toEqual(['text', 'detail']);
+    expect(f.events).toEqual([{ type: 'turn_end' }]);
+    expect(f.session).not.toHaveProperty('resultDocument');
     expect(f.journal).toEqual(['respawn-intent:1']);
     expect(f.children).toHaveLength(2);
     expect((await f.starts()).map(command => ({ resume: command.resume, projectionDigest: command.projectionDigest }))).toEqual([
@@ -96,66 +93,46 @@ describe.skipIf(process.platform === 'win32')('F16-1 durable result redelivery a
     expect(f.children.every(child => child.exitCode !== null || child.signalCode !== null)).toBe(true);
   });
 
-  it.each([false, true])('accepts the first result normally (crashed before result: %s)', async crashed => {
-    const f = await fixture([...(crashed ? [{ result: 'none' as const, crash: true }] : []), { complete: true }]);
+  it('completes in the first generation', async () => {
+    const f = await fixture([{ complete: true }]);
     await f.collect();
     expect(f.failure()).toBeUndefined();
-    expect(f.events.map(event => event.type)).toEqual(['artifact', 'turn_end']);
-    expect(f.session.resultDocument!()).toEqual(expectedDocument);
-    expect(f.children).toHaveLength(crashed ? 2 : 1);
+    expect(f.events.map(event => event.type)).toEqual(['turn_end']);
+    expect(f.children).toHaveLength(1);
     expect(await f.modelCalls()).toHaveLength(1);
   });
 
-  it('accepts the same result through both permitted crash recoveries', async () => {
+  it('completes through both permitted crash recoveries', async () => {
     const f = await fixture([{ crash: true }, { crash: true }, { complete: true }]);
     await f.collect();
     expect(f.failure()).toBeUndefined();
-    expect(f.events.map(event => event.type)).toEqual(['artifact', 'turn_end']);
-    expect(f.session.resultDocument!()).toEqual(expectedDocument);
+    expect(f.events.map(event => event.type)).toEqual(['turn_end']);
     expect(f.journal).toEqual(['respawn-intent:1', 'respawn-intent:2']);
     expect(await f.modelCalls()).toHaveLength(1);
   });
 
-  it.each(['conflict', 'nested-conflict', 'invalid'] as const)('rejects a recovered %s result without exposing a terminal document', async result => {
-    const f = await fixture([{ crash: true }, { result, complete: true }]);
+  it.each([false, true])('refuses the retired durable_result frame (recovered: %s)', async recovered => {
+    const f = await fixture([...(recovered ? [{ crash: true }] : []), { retiredResultFrame: true, complete: true }]);
     await f.collect();
     assertFailed(f);
-    expect(f.events.filter(event => event.type === 'artifact')).toHaveLength(1);
-    expect(f.children).toHaveLength(2);
-    expect(await f.modelCalls()).toHaveLength(1);
-  });
-
-  it.each([false, true])('rejects repeated result frames within one generation (recovered: %s)', async recovered => {
-    const f = await fixture([...(recovered ? [{ crash: true }] : []), { duplicate: true, complete: true }]);
-    await f.collect();
-    assertFailed(f);
-    expect(f.events.filter(event => event.type === 'artifact')).toHaveLength(1);
     expect(f.children).toHaveLength(recovered ? 2 : 1);
   });
 
-  it('still requires completion and fails once the two respawns are exhausted', async () => {
+  it('fails once the two respawns are exhausted', async () => {
     const f = await fixture([{ crash: true }, { crash: true }, { crash: true }]);
     await f.collect();
     assertFailed(f);
-    expect(f.events.map(event => event.type)).toEqual(['artifact', 'error']);
+    expect(f.events.map(event => event.type)).toEqual(['error']);
     expect(f.journal).toEqual(['respawn-intent:1', 'respawn-intent:2']);
     expect(f.children).toHaveLength(3);
     expect(await f.modelCalls()).toHaveLength(1);
   });
 
-  it('still rejects completion without any result', async () => {
-    const f = await fixture([{ result: 'none', complete: true }]);
-    await f.collect();
-    assertFailed(f);
-    expect(f.events.map(event => event.type)).toEqual(['error']);
-    expect(f.journal).toEqual([]);
-  });
-
-  it('still refuses a changed provider projection before accepting redelivery', async () => {
+  it('still refuses a changed provider projection on recovery', async () => {
     const f = await fixture([{ crash: true }, { complete: true, projectionDigest: 'b'.repeat(64) }]);
     await f.collect();
     assertFailed(f);
-    expect(f.events.map(event => event.type)).toEqual(['artifact', 'error']);
+    expect(f.events.map(event => event.type)).toEqual(['error']);
     expect(f.children).toHaveLength(2);
   });
 });
