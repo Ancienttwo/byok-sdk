@@ -486,8 +486,8 @@ try {
     );
     run(nodeBin, ['smoke.mjs'], smokeDir);
     await cloudDoConsumerSmoke(smokeDir, smokeImports.worker);
-    copyFileSync(path.join(repoRoot, 'scripts/release/recurring-smoke.mjs'), path.join(smokeDir, 'recurring-smoke.mjs'));
-    run(nodeBin, ['recurring-smoke.mjs'], smokeDir);
+    copyFileSync(path.join(repoRoot, 'scripts/release/execution-submit-smoke.mjs'), path.join(smokeDir, 'execution-submit-smoke.mjs'));
+    run(nodeBin, ['execution-submit-smoke.mjs'], smokeDir);
     // Preserve the verifier's relative module graph in the isolated fixture.
     // These are test-oracle files, not a replacement runtime or mutable install evidence.
     for (const relative of [

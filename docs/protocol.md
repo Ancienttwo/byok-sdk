@@ -473,9 +473,13 @@ exact-resume-only and never falls back to this path when its handoff is absent
 or mismatched.
 
 Host-facing APIs mirror those two wire facts. Hosted cloud exposes
-`enqueueFreshAgentEgressOffer`, and the reference server exposes
-`dispatchFreshAgentEgress`; the existing resume dispatch rejects a missing
-`sessionRef` instead of selecting the fresh message.
+`submitAgentExecution(tenant, input)`, and the reference server exposes
+`executions.submit(input)`, both using AgentExecutionInputSchema. The Host supplies
+and persists taskId, exact deviceId, runtime, AgentRef, egressPolicy and
+terminalProjection; messageEgress is optional, with message context and consumer
+required only when selected. Existing egress resume dispatch rejects a missing
+sessionRef instead of selecting the fresh message. This control-plane refactor
+does not change the wire schema, envelope kinds or protocol version 2.
 
 The policy has one exact `policyRevision`. Activity is `latest-value` with
 positive coalesce and event-byte bounds. The daemon sends Agent events as the

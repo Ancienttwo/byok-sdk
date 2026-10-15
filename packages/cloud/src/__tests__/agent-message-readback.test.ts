@@ -19,7 +19,7 @@ describe('Host exact Agent message disposition readback', () => {
     const input = {
       taskId,
       payload: {
-        instruction: 'reply', agentRef,
+        instruction: 'reply', agentRef, runtime: 'codex',
         egressPolicy: {
           policyRevision: 'policy-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
           reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
@@ -30,7 +30,7 @@ describe('Host exact Agent message disposition readback', () => {
       },
       agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'turn' },
     } as const;
-    if (mode === 'fresh') await harness.cloud.enqueueFreshAgentEgressOffer(TENANT_A, device.deviceId, input);
+    if (mode === 'fresh') await harness.cloud.submitAgentExecution(TENANT_A, { ...input, deviceId: device.deviceId });
     else await harness.cloud.enqueueAgentEgressOffer(TENANT_A, device.deviceId, { ...input, payload: { ...input.payload, sessionRef: 'native-session' } });
     const message = createEnvelope('agent.message.publish', {
       agentRef, sessionRef: 'native-session', contract: 'conversation-turn/v1',

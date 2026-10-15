@@ -6,6 +6,7 @@ import type { Server as HttpServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { serve } from '@hono/node-server';
 import {
+  AgentExecutionInputSchema,
   createByokCloud,
   createHmacTokenSigner,
   createWebCrypto,
@@ -412,7 +413,9 @@ lines.on('line', (line) => {
           },
         });
       case 'enqueueMessageOffer':
-        return cloud.enqueueFreshAgentEgressOffer(tenant, String(params.deviceId), {
+        return cloud.submitAgentExecution(tenant, AgentExecutionInputSchema.parse({
+          taskId: params.taskId,
+          deviceId: params.deviceId,
           agentMessageContext: { destinationBinding: 'fixture-conversation', freshnessCursor: 'fixture-turn' },
           payload: {
             instruction: 'publish durable reply', runtime: 'pi',
@@ -421,7 +424,7 @@ lines.on('line', (line) => {
             messageEgress: { mode: 'required', contract: 'fixture.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
             terminalProjection: { mode: 'none' },
           },
-        });
+        }));
       case 'readMessages':
         return ownerWrite(() => db.prepare('SELECT * FROM fixture_message').all());
       case 'readWire':

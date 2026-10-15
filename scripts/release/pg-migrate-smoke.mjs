@@ -145,7 +145,7 @@ try {
       `    pool.query("SELECT tenant_id, task_id, device_id, owner_device_id, status, updated_at FROM task WHERE tenant_id = 'tenant-upgrade'"),\n` +
       `    pool.query("SELECT tenant_id, kind, subject_id, rev, content_hash, byte_size, body_kind, body_inline, written_at FROM attested_record WHERE tenant_id = 'tenant-upgrade'"),\n` +
       `    pool.query("SELECT tenant_id, version, hard_limit_bytes, max_object_bytes, max_inline_bytes, mailbox_limit_bytes, retention_policy_id FROM storage_entitlement WHERE tenant_id = 'tenant-upgrade'"),\n` +
-      `    pool.query("SELECT tenant_id, committed_object_bytes, committed_inline_bytes, mailbox_bytes, object_count, updated_at FROM storage_usage WHERE tenant_id = 'tenant-upgrade'"),\n` +
+      `    pool.query("SELECT tenant_id, committed_object_bytes, committed_inline_bytes, object_count, updated_at FROM storage_usage WHERE tenant_id = 'tenant-upgrade'"),\n` +
       `  ]);\n` +
       `  return { stream: stream.rows, mailbox: mailbox.rows, task: task.rows, truth: truth.rows, entitlement: entitlement.rows, usage: usage.rows };\n` +
       `}\n` +
@@ -208,6 +208,13 @@ try {
       `  assert.deepEqual([...upgraded.applied], expected.slice(baseline.length), 'candidate must apply only migrations newer than v0.4.2');\n` +
       `  assert.deepEqual([...upgraded.alreadyApplied], baseline, 'candidate must retain the v0.4.2 ledger');\n` +
       `  assert.deepEqual(await readSeedRows(upgradePool), before, 'candidate migration changed existing stream/mailbox/task/truth/quota rows');\n` +
+      // v0.4.2 seeded the retired counter with a non-zero value; the candidate
+      // drops the column (0025, #387) instead of leaving a second mailbox
+      // authority behind, on the upgraded schema and the empty install alike.
+      `  for (const [label, pool] of [['empty', emptyPool], ['upgraded', upgradePool]]) {\n` +
+      `    const columns = await pool.query("SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'storage_usage' ORDER BY column_name");\n` +
+      `    assert.deepEqual(columns.rows.map((row) => row.column_name), ['committed_inline_bytes', 'committed_object_bytes', 'object_count', 'tenant_id', 'updated_at'], label + ' storage_usage must not keep the retired mailbox_bytes counter');\n` +
+      `  }\n` +
       `  const replayTable = await upgradePool.query("SELECT indexname FROM pg_indexes WHERE schemaname = 'byok_upgrade_v042' AND tablename = 'device_assertion_replay' ORDER BY indexname");\n` +
       `  assert.deepEqual(replayTable.rows.map((row) => row.indexname), ['device_assertion_replay_expiry_idx', 'device_assertion_replay_pkey']);\n` +
       `  const replay = new PostgresDeviceAssertionReplayAuthority(upgradePool);\n` +

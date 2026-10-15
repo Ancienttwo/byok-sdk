@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createMutableClock, tenantId } from '@byok-sdk/core';
-import { createByokCloud, createHmacTokenSigner, createWebCrypto, fullCapabilityDeclaration, RecurringExecutionInputSchema } from '@byok-sdk/cloud';
+import { createByokCloud, createHmacTokenSigner, createWebCrypto, fullCapabilityDeclaration, AgentExecutionInputSchema } from '@byok-sdk/cloud';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { handleInboundEnvelope } from '../../../cloud/src/inbound';
 import { tenantStoresFor } from '../../../cloud/src/tenant-stores';
@@ -69,7 +69,7 @@ describe('SQLite receipt recovery', () => {
         'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-message-egress',
         'terminal-projection-selection', 'agent-egress-fresh-session',
       ] });
-      const execution = RecurringExecutionInputSchema.parse({ taskId, deviceId, payload: {
+      const execution = AgentExecutionInputSchema.parse({ taskId, deviceId, payload: {
         instruction: 'reply', runtime: 'codex', agentRef,
         egressPolicy: { policyRevision: 'policy-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
           reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
@@ -83,14 +83,14 @@ describe('SQLite receipt recovery', () => {
       appendFault.exec("CREATE TRIGGER fail_recurring_append BEFORE INSERT ON mailbox_message BEGIN SELECT RAISE(ABORT, 'injected recurring append'); END;");
       appendFault.close();
       runtime = open();
-      await expect(runtime.cloud.submitRecurringExecution(tenant, JSON.parse(persistedInput))).rejects.toThrow('injected recurring append');
+      await expect(runtime.cloud.submitAgentExecution(tenant, JSON.parse(persistedInput))).rejects.toThrow('injected recurring append');
       expect(await runtime.cloud.readTaskOffer(tenant, taskId)).toMatchObject({ delivered: false });
       await runtime.stores.close();
       const removeAppendFault = new DatabaseSync(path); removeAppendFault.exec('DROP TRIGGER fail_recurring_append'); removeAppendFault.close();
       runtime = open();
-      await expect(runtime.cloud.submitRecurringExecution(tenant, { ...execution,
+      await expect(runtime.cloud.submitAgentExecution(tenant, { ...execution,
         agentMessageContext: { destinationBinding: 'different' } })).rejects.toThrow();
-      await runtime.cloud.submitRecurringExecution(tenant, JSON.parse(persistedInput));
+      await runtime.cloud.submitAgentExecution(tenant, JSON.parse(persistedInput));
       expect(await runtime.cloud.readTaskOffer(tenant, taskId)).toMatchObject({ delivered: true, payload: execution.payload });
       expect((await runtime.stores.core.mailbox.readAfter(tenant, { deviceId, afterSeq: 0 })).messages).toHaveLength(1);
 
