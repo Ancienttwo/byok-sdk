@@ -38,6 +38,20 @@ plain text/Markdown; authenticated task, Agent, session, device, tenant, and
 destination facts remain daemon/server authority and are never model input.
 The helper receives only a daemon-issued single-task sealed context token;
 it cannot select a task id or product destination.
+
+It also installs the SDK-reserved `byok-agent-result-mcp` helper, the
+structured outcome channel of a `terminalProjection.mode: 'result-document'`
+offer (wire v3). Its one tool, `submit_result`, advertises the offer's frozen
+schema, which the helper fetches from the daemon over the authenticated
+control socket under its single-task context token; it forwards the model's
+arguments unvalidated. The daemon validates them against that schema, stages
+the canonical outcome in the Agent home (`.byok/results/`, fsynced before the
+tool returns its `staged` receipt) and sends it as `task.complete.document` at
+the end of the turn. A turn that ends with nothing staged fails with
+`result_not_submitted` (`retryable: false`); failure, cancellation and restart
+never deliver a staged outcome. Result-document offers need an Agent home and
+the hosted journal; `DaemonConfig.resultDocument` no longer exists and is
+refused with `DaemonConfigFieldRemovedError`.
 Provider
 credentials are not read by the dispatch plane; `@byok-sdk/keys` is a separate
 install and keeps a zero dependency edge to this package.
@@ -364,8 +378,8 @@ authority. See the [entry dependency contract](../../README.md#entry-dependencie
 
 `@byok-sdk/client/mcp-server` is the server counterpart to this package's MCP
 client authority: a tools-only stdio MCP server, transport and baseline only,
-with no product semantics in it. The four SDK-reserved helpers
-(`byok-agent-message-mcp`, `byok-agent-memory-mcp`,
+with no product semantics in it. The SDK-reserved helpers
+(`byok-agent-message-mcp`, `byok-agent-result-mcp`, `byok-agent-memory-mcp`,
 `byok-agent-team-mcp`) are served through it, and a host that spawns its own
 toolset server can use the same entry.
 
