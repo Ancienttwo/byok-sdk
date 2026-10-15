@@ -43,6 +43,7 @@ import {
 // off the peer. `util/rpc-frame.ts` is the one authority for the cap and the
 // length function.
 import { fitsRpcFrame, rpcFrameByteLength, RPC_MAX_FRAME_BYTES } from '../util/rpc-frame';
+import { MAX_TIMER_DELAY_MS } from '../util/timer-delay';
 import type {
   PreparedToolSurface,
   PreparedToolSurfaceAssembler,
@@ -1018,7 +1019,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     }, controller.signal);
     owner?.addEventListener('abort', cancel, { once: true });
     if (owner?.aborted) cancel();
-    const deadline = setTimeout(expire, Math.min(Math.max(0, deadlineAt - now()), 2_147_483_647));
+    const deadline = setTimeout(expire, Math.min(Math.max(0, deadlineAt - now()), MAX_TIMER_DELAY_MS));
     deadline.unref?.();
     preparationControllers.add(controller);
     try {

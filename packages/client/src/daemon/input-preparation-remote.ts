@@ -25,6 +25,7 @@ import {
   type InputPreparationService,
 } from './input-preparation-service';
 import type { InputPreparationCompletionClient } from './input-preparation-completion-client';
+import { MAX_TIMER_DELAY_MS } from '../util/timer-delay';
 
 /**
  * C07 G4-remote, device half: turn one `agent.input.preparation` envelope into
@@ -346,7 +347,7 @@ export function createRemoteInputPreparationHandler(deps: RemoteInputPreparation
       };
       owner?.addEventListener('abort', cancel, { once: true });
       if (owner?.aborted) cancel();
-      const deadline = setTimeout(expire, Math.min(Math.max(0, deadlineAt - now()), 2_147_483_647));
+      const deadline = setTimeout(expire, Math.min(Math.max(0, deadlineAt - now()), MAX_TIMER_DELAY_MS));
       deadline.unref?.();
       try {
         checkActive();

@@ -214,22 +214,30 @@ describe('access token renewal (protocol §6.2)', () => {
       return realSetTimeout(handler, delay);
     }) as typeof setTimeout);
     const tokenRequests = () => server.httpRequests.filter((r) => r.pathname === '/byok/token').length;
+    // Fake timers clamp an over-range delay to 1 ms exactly as the runtime does,
+    // so renewal starting early is observed on `renew` itself (it runs
+    // synchronously from the timer callback), before any HTTP is involved.
+    const renewSpy = vi.spyOn(auth as unknown as { renew(): Promise<string> }, 'renew');
     try {
       // The timer armed by pair() predates fake timers; re-arm under them.
       await auth.loadExisting();
       const startedAt = Date.now();
+      expect(delays.length).toBeGreaterThan(0);
+      expect(Math.max(...delays)).toBeLessThanOrEqual(MAX_TIMER_DELAY_MS);
 
       await vi.advanceTimersByTimeAsync(1);
-      expect(tokenRequests()).toBe(0);
+      expect(renewSpy).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(MAX_TIMER_DELAY_MS);
-      expect(tokenRequests()).toBe(0);
+      expect(renewSpy).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(MAX_TIMER_DELAY_MS);
+      expect(renewSpy).not.toHaveBeenCalled();
       expect(tokenRequests()).toBe(0);
 
       const remaining = startedAt + ttlMs - RENEW_MARGIN_MS - Date.now();
       await vi.advanceTimersByTimeAsync(remaining - 1_000);
-      expect(tokenRequests()).toBe(0);
+      expect(renewSpy).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1_000);
+      expect(renewSpy).toHaveBeenCalledTimes(1);
       await vi.waitFor(() => expect(tokenRequests()).toBeGreaterThan(0));
 
       expect(Math.max(...delays)).toBeLessThanOrEqual(MAX_TIMER_DELAY_MS);
@@ -237,6 +245,7 @@ describe('access token renewal (protocol §6.2)', () => {
       expect(warnings).not.toContain('TimeoutOverflowWarning');
     } finally {
       process.off('warning', onWarning);
+      renewSpy.mockRestore();
       setTimeoutSpy.mockRestore();
       await auth.stop();
       vi.useRealTimers();

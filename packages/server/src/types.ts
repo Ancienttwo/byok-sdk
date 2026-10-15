@@ -91,6 +91,9 @@ export interface CreateByokServerOptions {
    * Retention never decides when a feed ENDS: {@link TaskHandle.events}
    * completes at the terminal event itself, whenever that happens, so a
    * `for await` over it is never left waiting on this timer.
+   *
+   * A positive integer of at most `2_147_483_647` (the largest delay one
+   * timer can hold, ~24.8 days); a larger value is refused at construction.
    */
   taskEventRetentionMs?: number;
   /**
