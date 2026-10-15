@@ -2,7 +2,7 @@ import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { decodeEnvelope } from '@byok-sdk/protocol';
+import { decodeEnvelope, PROTOCOL_VERSION } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -99,7 +99,7 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
     const envelope = decodeEnvelope(terminal ?? '');
     expect(envelope.type).toBe('task.complete');
     expect(envelope.task_id).toBe(offer.taskId);
-    expect(envelope.v).toBe(2);
+    expect(envelope.v).toBe(PROTOCOL_VERSION);
     if (envelope.type === 'task.complete') {
       expect(envelope.payload.summary).toBe('working over long-poll');
     }

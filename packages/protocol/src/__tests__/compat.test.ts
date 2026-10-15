@@ -178,7 +178,7 @@ describe('compat: the current (v3) decoder rejects every v2 envelope on its prot
         error = caught;
       }
       expect(error, 'there is no v2 reader').toBeInstanceOf(EnvelopeValidationError);
-      expect((error as EnvelopeValidationError).issues.some((issue) => issue.path[0] === 'v')).toBe(true);
+      expect((error as EnvelopeValidationError).issues.issues.some((issue) => issue.path[0] === 'v')).toBe(true);
     },
   );
 
