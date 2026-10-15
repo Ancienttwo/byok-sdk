@@ -437,7 +437,9 @@ immutable message requirement and is never sent to the daemon.
 The v8 cut retains Host-owned `prompt.systemPrompt`, official closure identity and
 envelope v4, and requires explicit `agentMemory`. The v9 cut (ADR-037) removes
 `permissionMode`, replaces `toolImplementationKinds` with `toolNames` and removes
-`executor_identity_unproven`; the device record is version 10. Memory-only
+`executor_identity_unproven`; the device record was version 10. K7 wire v3 advances the record to 11,
+retaining the optional frozen result selection and its one schema-bound
+`submit_result` tool; admission compares the selection before pin or claim. Memory-only
 preparation accepts empty requiredToolsets; the corresponding offer omits that field.
 From 0.24.0 the same holds with `agentMemory: 'none'`: a tool-less preparation (empty
 requiredToolsets, no memory) is admitted and launched with zero tools, and its offer
@@ -2011,8 +2013,7 @@ option is removed; timing and a smaller event count remain Host choices.
 
 These response-only optional additions are strip-safe in protocol v2 and need no
 capability gate. Counts-only v2 servers still use client bisection with reason
-`unspecified`, and cannot distinguish duplicate from accepted. At protocol v3,
-make `outcomes` and `ingress` required and delete bisection and default ingress.
+`unspecified`, and cannot distinguish duplicate from accepted. Making `outcomes` and `ingress` required, and deleting bisection/default ingress, is a separate planned contract change; K7 wire v3 leaves those fields optional and keeps the existing acknowledgement authority.
 
 A daemon sends every D→S envelope this way; there is no alternate socket
 queue or transport selection to reconcile.

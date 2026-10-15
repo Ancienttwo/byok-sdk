@@ -425,7 +425,7 @@ interface ByokServer {
 契约：
 
 - offer：result-document 的 `terminalProjection` 增加必填字段 `schema`，形状是 `{ mode: 'result-document', contract, schema }`。
-- wire：这改了现有的 strict schema，按冻结规则属于破坏性变更。K7 把 wire major 从 2 升到 3（`PROTOCOL_VERSION = 3`），没有 v2 reader，做法和 v1→v2 相同（[docs/protocol.md](../protocol.md) 开头一段）。freeze-guard golden 按 v3 重新生成。不用 capability 协商，也不新增 mode：那样新旧两种 result-document 会同时存在，违反 O10。
+- wire：这改了现有的 strict schema，按冻结规则属于破坏性变更。K7 把 wire major 从 2 升到 3（`PROTOCOL_VERSION = 3`），没有 v2 reader，做法和 v1→v2 相同（[docs/protocol.md](../protocol.md) 开头一段）。保留已发布 v2 corpus 和 release hash 原字节，新增 v3 corpus 与空 release registry；没有已发布 v3 decoder 时仅声明 self-consistency，不伪造跨版本证明。不用 capability 协商，也不新增 mode：那样新旧两种 result-document 会同时存在，违反 O10。
 - `schema` 是 JSON Schema 2020-12 的受限子集，最大 16 KiB。允许的关键字：`type`、`properties`、`required`、`additionalProperties`（只能为 `false`）、`items`、`enum`、`const`、`oneOf`、`minLength`、`maxLength`、`minItems`、`maxItems`、`minimum`、`maximum`、`description`。其他关键字在提交时（Host 侧）和 daemon 准入时都拒绝。
 - outcome 文档最大 64 KiB，在现有 `task.complete.document` 的 1 MiB 上限之内。
 - 设备：SDK 新增保留的 MCP server `byokagentresult`，只有一个工具 `submit_result`，`inputSchema` 就是 offer 里的 `schema`。

@@ -43,6 +43,13 @@ const runCli = (args, env) => new Promise((resolve, reject) => {
   let output = ''; child.stdout.on('data', chunk => { output += chunk; }); child.stderr.on('data', chunk => { output += chunk; });
   child.once('error', reject); child.once('close', code => code === 0 ? resolve(output) : reject(new Error(output)));
 });
+const resultSelection = { mode: 'result-document', contract: 'packed.cli-result.v1', schema: {
+  type: 'object', additionalProperties: false, required: ['verdict', 'source'],
+  properties: { verdict: { const: 'pass' }, source: { const: 'packed-cli' } },
+} };
+const policy = { policyRevision: 'packed-result-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
+  reliable: { maxPendingEventsPerAgent: 16, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 16384 },
+  transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' } };
 const previous = { bin: process.env.BYOK_CODEX_BIN };
 process.env.BYOK_CODEX_BIN = fakeCodex;
 try {
@@ -52,6 +59,7 @@ try {
     const audit = path.join(root, `${entry}-mcp.jsonl`);
     const config = { productId: `packed-${entry}-${randomUUID()}`, productName: 'Packed MCP', serverUrl, storeDir,
       ...(keychain === undefined ? {} : { deviceCredentials: { macosKeychainPath: keychain.path } }),
+      ...(entry === 'cli' ? { agentHome: { hostStorageRoot: path.join(root, 'homes') }, agentEgress: { policy }, hostedJournal: { mode: 'sqlite' } } : {}),
       workspaceRoot: path.join(storeDir, 'work'), runtimeAllowlist: ['codex'], serviceEnrollment: { enabled: true },
       mcpToolsets: { probe: { mcpServers: { echo: { command: process.execPath,
         args: [fileURLToPath(new URL('../src/__tests__/fixtures/toolset-echo-mcp.mjs', import.meta.url)), audit] } } } } };
@@ -71,7 +79,12 @@ try {
         await daemon.pair(pairing.code); await daemon.start();
       }
       const device = await wait(async () => (await cloud.listDevices(tenant)).find(device => device.productId === config.productId && device.capabilities?.includes('toolset-selection')), `${entry} discovery`);
-      const offer = await cloud.enqueueToolsetOffer(tenant, device.deviceId, { payload: { instruction: 'call echo', runtime: 'codex', requiredToolsets: ['probe'] } });
+      const offer = entry === 'cli'
+        ? await cloud.submitAgentExecution(tenant, { taskId: 'packed-cli-result', deviceId: device.deviceId, payload: {
+          instruction: 'call echo', runtime: 'codex', requiredToolsets: ['probe'],
+          agentRef: { agentId: 'packed-agent', profileRevision: '1' }, egressPolicy: policy, terminalProjection: resultSelection,
+        } })
+        : await cloud.enqueueToolsetOffer(tenant, device.deviceId, { payload: { instruction: 'call echo', runtime: 'codex', requiredToolsets: ['probe'] } });
       await wait(async () => {
         const attempt = await cloud.readTaskAttempt(tenant, offer.taskId);
         if (attempt?.status === 'failed') throw new Error(`${entry}: ${JSON.stringify(await cloud.readTerminalReceipt(tenant, offer.taskId))}\n${output}`);
@@ -81,7 +94,12 @@ try {
       assert.equal(calls.length, 1, `${entry}: expected exactly one real tools/call`);
       assert.equal(calls[0].name, 'echo');
       assert.deepEqual(calls[0].arguments, { text: 'CLI_MCP_OK' });
-      console.log(`[packed-cli-mcp] ${entry}: actual MCP tools/call passed`);
+      if (entry === 'cli') {
+        const terminal = await cloud.readDeviceTerminal(tenant, offer.taskId);
+        assert.equal(terminal?.envelope.type, 'task.complete');
+        assert.deepEqual(terminal.envelope.payload.document, { verdict: 'pass', source: 'packed-cli' });
+      }
+      console.log(`[packed-cli-mcp] ${entry}: actual MCP tools/call passed${entry === 'cli' ? ' with submit_result document' : ''}`);
     } finally {
       try {
         await daemon?.stop();
