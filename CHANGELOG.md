@@ -429,6 +429,15 @@
     blocks outbox writes while it builds). Run the pre-upgrade audit in
     `deploy/runbooks/cloud-cleanup.md` first.
 
+- **Fixed (client, server)** — timers armed from a far-future deadline no
+  longer fire immediately. A token whose `expiresAt` is more than ~24.8 days
+  away used to renew at once (Node and Bun clamp longer `setTimeout` delays to
+  1 ms); proactive renewal now steps in capped intervals and renews only at
+  expiry minus the margin. The same fix applies to a server-supplied
+  `limits.maxDurationMs` above that range, which used to fail the task
+  immediately. `taskEventRetentionMs` above `2_147_483_647` is now refused at
+  construction instead of reclaiming retained events at once.
+
 ## 0.26.1 / @byok-sdk/keys 0.11.1 (published, 2026-10-12)
 
 - **Client cleanup:** release the Git lease when runtime launch admission fails

@@ -192,6 +192,66 @@ describe('access token renewal (protocol §6.2)', () => {
     auth.stop();
   });
 
+  it('keeps proactive renewal at the renewal point for a token that expires beyond one timer range', async () => {
+    const MAX_TIMER_DELAY_MS = 2_147_483_647;
+    const RENEW_MARGIN_MS = 60 * 1000;
+    const ttlMs = 60 * 24 * 60 * 60 * 1000; // 60 days
+    server.setTokenTtlMs(ttlMs);
+    const storeDir = await tmpDir('byok-auth-store-');
+    const auth = new AuthManager({ serverUrl: server.url, store: createTestDeviceStore(storeDir) });
+    const warnings: string[] = [];
+    const onWarning = (warning: Error) => warnings.push(warning.name);
+    process.on('warning', onWarning);
+
+    await auth.pair('pairing-code');
+    expect(server.httpRequests.some((r) => r.pathname === '/byok/token')).toBe(false);
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const delays: number[] = [];
+    const realSetTimeout = globalThis.setTimeout;
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((handler: () => void, delay?: number) => {
+      delays.push(delay ?? 0);
+      return realSetTimeout(handler, delay);
+    }) as typeof setTimeout);
+    const tokenRequests = () => server.httpRequests.filter((r) => r.pathname === '/byok/token').length;
+    // Fake timers clamp an over-range delay to 1 ms exactly as the runtime does,
+    // so renewal starting early is observed on `renew` itself (it runs
+    // synchronously from the timer callback), before any HTTP is involved.
+    const renewSpy = vi.spyOn(auth as unknown as { renew(): Promise<string> }, 'renew');
+    try {
+      // The timer armed by pair() predates fake timers; re-arm under them.
+      await auth.loadExisting();
+      const startedAt = Date.now();
+      expect(delays.length).toBeGreaterThan(0);
+      expect(Math.max(...delays)).toBeLessThanOrEqual(MAX_TIMER_DELAY_MS);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(renewSpy).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(MAX_TIMER_DELAY_MS);
+      expect(renewSpy).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(MAX_TIMER_DELAY_MS);
+      expect(renewSpy).not.toHaveBeenCalled();
+      expect(tokenRequests()).toBe(0);
+
+      const remaining = startedAt + ttlMs - RENEW_MARGIN_MS - Date.now();
+      await vi.advanceTimersByTimeAsync(remaining - 1_000);
+      expect(renewSpy).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(renewSpy).toHaveBeenCalledTimes(1);
+      await vi.waitFor(() => expect(tokenRequests()).toBeGreaterThan(0));
+
+      expect(Math.max(...delays)).toBeLessThanOrEqual(MAX_TIMER_DELAY_MS);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(warnings).not.toContain('TimeoutOverflowWarning');
+    } finally {
+      process.off('warning', onWarning);
+      renewSpy.mockRestore();
+      setTimeoutSpy.mockRestore();
+      await auth.stop();
+      vi.useRealTimers();
+    }
+  });
+
   it('reactively renews via handleUnauthorized() after a 401, independent of the cached token\'s believed expiry', async () => {
     server.setTokenTtlMs(60 * 60 * 1000); // long-lived — no proactive renewal should fire on its own
     const storeDir = await tmpDir('byok-auth-store-');

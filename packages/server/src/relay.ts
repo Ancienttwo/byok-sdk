@@ -7,6 +7,8 @@ import type { ByokServerEvent, ServerTaskEvent } from './types';
 export const DEFAULT_TASK_EVENT_BUFFER_LIMIT = 1000;
 /** How long a terminal task's relay state is retained before reclamation, ms. */
 export const DEFAULT_TASK_EVENT_RETENTION_MS = 5 * 60_000;
+/** Largest delay `setTimeout` honors; a longer one fires after 1 ms. */
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 /**
  * The relay's own truncation marker. A single `error` entry, appended once, is
@@ -87,7 +89,9 @@ export class TaskEventRelay implements ByokCloudObserver {
 
   constructor(options: TaskEventRelayOptions) {
     this.#bufferLimit = positiveLimit(options.taskEventBufferLimit ?? DEFAULT_TASK_EVENT_BUFFER_LIMIT, 'taskEventBufferLimit');
-    this.#retentionMs = positiveLimit(options.taskEventRetentionMs ?? DEFAULT_TASK_EVENT_RETENTION_MS, 'taskEventRetentionMs');
+    // Reclamation is one `setTimeout`; a longer delay fires at 1 ms and would
+    // drop retained events immediately, so refuse it instead of clamping.
+    this.#retentionMs = positiveLimit(options.taskEventRetentionMs ?? DEFAULT_TASK_EVENT_RETENTION_MS, 'taskEventRetentionMs', MAX_TIMER_DELAY_MS);
     // The cross-task feed is long-lived and never closed, so it is bounded on
     // the same budget. It drops silently: `ByokServerEvent` has no member that
     // could carry a truncation notice, and inventing one would be a wire-shaped
@@ -339,9 +343,9 @@ export class TaskEventRelay implements ByokCloudObserver {
   }
 }
 
-function positiveLimit(value: number, name: string): number {
-  if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new TypeError(`${name} must be a positive safe integer`);
+function positiveLimit(value: number, name: string, max = Number.MAX_SAFE_INTEGER): number {
+  if (!Number.isSafeInteger(value) || value <= 0 || value > max) {
+    throw new TypeError(`${name} must be a positive safe integer${max === Number.MAX_SAFE_INTEGER ? '' : ` of at most ${max}`}`);
   }
   return value;
 }

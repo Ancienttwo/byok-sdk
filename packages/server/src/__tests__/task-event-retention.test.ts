@@ -1,5 +1,6 @@
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { TaskEventRelay } from '../relay';
 import { createByokServer, type ByokServer, type ServerTaskEvent } from '../index';
 import { connectFakeDaemonLongPoll, startServer, stopServer } from './test-support';
 
@@ -50,6 +51,11 @@ describe('public task handle event retention', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     return handle;
   }
+
+  it('refuses a retention window a single timer cannot hold instead of reclaiming at once', () => {
+    expect(() => new TaskEventRelay({ taskEventRetentionMs: 2_147_483_648 })).toThrow(/taskEventRetentionMs/);
+    expect(() => new TaskEventRelay({ taskEventRetentionMs: 2_147_483_647 })).not.toThrow();
+  });
 
   it('ends live and retained readers, then returns empty reads after reclamation without recreating state', async () => {
     const handle = await dispatch();
