@@ -115,7 +115,8 @@ export class GoalBtwHost {
       nonempty(input.taskId, 'reserved taskId'); nonempty(input.payload.instruction, 'reserved instruction');
       const contract = value.kind === 'goal' ? GOAL_RESULT_CONTRACT : BTW_RESULT_CONTRACT;
       const { instruction: _text, terminalProjection: projection, ...selection } = input.payload;
-      const target = { deviceId: input.deviceId, ...selection };
+      if (selection.runtime === undefined) throw new Error('Select an explicit runtime and egress policy');
+      const target = { deviceId: input.deviceId, ...selection, runtime: selection.runtime };
       validateTarget(target);
       if (projection?.mode !== 'result-document' || projection.contract !== contract) throw new Error('Invalid reserved result authority');
       if (value.kind === 'goal') {

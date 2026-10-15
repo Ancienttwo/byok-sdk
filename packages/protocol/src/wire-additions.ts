@@ -42,6 +42,8 @@ export type WireAddition =
   | { readonly kind: 'http'; readonly rule: 'strip-safe'; readonly surface: HttpWireSurface; readonly field: string };
 
 const AGENT_OFFER_FIELDS = (surface: MessageType): readonly WireAddition[] => [
+  { kind: 'envelope', rule: 'gated', surface, field: 'dispatchSelection', capability: 'dispatch-selection', advertisedBy: 'device' },
+  { kind: 'envelope', rule: 'gated', surface, field: 'requiredToolsets', capability: 'toolset-selection', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface, field: 'terminalProjection', capability: 'terminal-projection-selection', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface, field: 'homeAccess', capability: 'agent-home-readers', advertisedBy: 'device' },
 ];
