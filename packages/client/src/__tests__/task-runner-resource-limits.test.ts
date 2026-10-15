@@ -111,6 +111,37 @@ describe('TaskRunner: maxDurationMs wall-clock enforcement (M5 batch-3, workstre
     expect(sent.some((e) => e.type === 'task.cancelled')).toBe(false);
   });
 
+  it('honors a maxDurationMs beyond one timer range: no early failure, fails once the real limit elapses', async () => {
+    const MAX_TIMER_DELAY_MS = 2_147_483_647;
+    const limitMs = 30 * 24 * 60 * 60 * 1000; // 30 days, above what a single setTimeout can hold
+    const adapter = new StubRuntimeAdapter();
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(adapter, sent);
+
+    await runner.handleEnvelope(
+      createEnvelope(
+        'task.offer',
+        { instruction: 'x', limits: { maxDurationMs: limitMs } },
+        { taskId: 'task-long', seq: 1 },
+      ),
+    );
+    const session = adapter.sessions[0];
+    expect(session).toBeDefined();
+
+    // An unclamped delay would have fired at 1 ms.
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(session?.interruptCalled).toBe(false);
+    await vi.advanceTimersByTimeAsync(MAX_TIMER_DELAY_MS);
+    expect(session?.interruptCalled).toBe(false);
+    expect(runner.activeTaskCount).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(limitMs - MAX_TIMER_DELAY_MS - 1_000);
+    expect(session?.interruptCalled).toBe(true);
+    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
+    const fail = sent.find((e) => e.type === 'task.fail' && e.task_id === 'task-long');
+    expect((fail?.payload as { reason: string }).reason.startsWith(MAX_DURATION_EXCEEDED_REASON_PREFIX)).toBe(true);
+  });
+
   it('escalates to a hard kill (session.close()) when interrupt() itself hangs past the grace window', async () => {
     const adapter = new StubRuntimeAdapter();
     const sent: Envelope[] = [];

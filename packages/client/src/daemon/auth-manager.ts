@@ -11,6 +11,7 @@ import { DeviceRecordRePairRequiredError, DeviceStore, type DeviceMetadata, type
 import type { DeviceCredentialBackend } from './device-credential-store';
 import { generateDeviceKeyPair, exportPrivateKeyPem, importPrivateKeyPem, signNonce } from './device-keys';
 import { toHttpBase } from './url';
+import { MAX_TIMER_DELAY_MS } from '../util/timer-delay';
 
 /**
  * Thrown when the server has revoked this device: a 401 on `/byok/challenge`
@@ -367,13 +368,21 @@ export class AuthManager {
     this.proactiveTimer = undefined;
     if (!this.record || this.revoked || this.stopped || this.pairing) return;
     const delay = Math.max(0, msUntilExpiry(this.record.expiresAt) - RENEW_MARGIN_MS);
+    // A far-future expiry exceeds what one timer can hold (it would fire at
+    // 1 ms). Arm a capped step and re-derive the delay from `expiresAt` when
+    // it elapses; renewal only runs once the real renewal point is reached.
+    const capped = delay > MAX_TIMER_DELAY_MS;
     const timer = setTimeout(() => {
+      if (capped) {
+        this.scheduleProactiveRenewal();
+        return;
+      }
       this.renew().catch(() => {
         // Best-effort background renewal; a real failure (including
         // DeviceRevokedError) surfaces to whoever next calls
         // getValidAccessToken()/handleUnauthorized() instead of being lost here.
       });
-    }, delay);
+    }, capped ? MAX_TIMER_DELAY_MS : delay);
     timer.unref?.();
     this.proactiveTimer = timer;
   }

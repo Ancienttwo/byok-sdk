@@ -151,6 +151,7 @@ import {
 } from './agent-memory';
 import { openAgentMemoryFilesystemHelper } from './agent-memory-fs-helper';
 import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
+import { MAX_TIMER_DELAY_MS } from '../util/timer-delay';
 
 /**
  * M4 Phase 3: default wait for `requestApproval` (see its own doc comment)
@@ -2050,14 +2051,27 @@ export class TaskRunner {
    * `finish()` had a chance to clear it.
    */
   private armMaxDurationTimer(active: ActiveTask, maxDurationMs: number): void {
-    const timer = setTimeout(() => {
-      void this.failActiveTaskForResourceLimit(
-        active.taskId,
-        `${MAX_DURATION_EXCEEDED_REASON_PREFIX}: task exceeded its configured wall-clock limit of ${maxDurationMs}ms`,
-      );
-    }, maxDurationMs);
-    timer.unref?.();
-    active.maxDurationTimer = timer;
+    // `maxDurationMs` is server-supplied and unbounded above; a limit beyond
+    // one timer's range (~24.8 days) is armed in capped steps so it still
+    // fires at the real limit instead of immediately. Each step replaces
+    // `active.maxDurationTimer`, so `finish()` always clears the live one.
+    const limitAt = Date.now() + maxDurationMs;
+    const arm = (remainingMs: number): void => {
+      const capped = remainingMs > MAX_TIMER_DELAY_MS;
+      const timer = setTimeout(() => {
+        if (capped) {
+          if (!active.finalizationStarted) arm(Math.max(0, limitAt - Date.now()));
+          return;
+        }
+        void this.failActiveTaskForResourceLimit(
+          active.taskId,
+          `${MAX_DURATION_EXCEEDED_REASON_PREFIX}: task exceeded its configured wall-clock limit of ${maxDurationMs}ms`,
+        );
+      }, capped ? MAX_TIMER_DELAY_MS : remainingMs);
+      timer.unref?.();
+      active.maxDurationTimer = timer;
+    };
+    arm(maxDurationMs);
   }
 
   async handleEnvelope(envelope: Envelope): Promise<void> {
