@@ -4,7 +4,7 @@
 // No per-step timer: Host must call tick/recover. Notification is at-least-once;
 // the receiver must durably deduplicate deliveryId. Never use SDK/Agent DBs here.
 import { randomUUID } from 'node:crypto';
-import type { ByokServer, FreshAgentEgressDispatchInput } from '@byok-sdk/server';
+import type { ByokServer, AgentExecutionInput } from '@byok-sdk/server';
 import type { DaemonConfig } from '@byok-sdk/client';
 import { HostRevisionConflict, type HostSnapshot } from './goal-btw-store';
 import type { BotTarget } from './goal-btw';
@@ -16,7 +16,7 @@ export type ClarificationResult =
   | { contract: typeof CLARIFICATION_CONTRACT; outcome: 'blocked'; reason: string }
   | { contract: typeof CLARIFICATION_CONTRACT; outcome: 'needs_input'; questionId: string; question: string; checkpoint: string; answerKind: 'text' }
   | { contract: typeof CLARIFICATION_CONTRACT; outcome: 'needs_input'; questionId: string; question: string; checkpoint: string; answerKind: 'single_choice'; options: { id: string; label: string }[] };
-type Input = FreshAgentEgressDispatchInput & { taskId: string; instruction: string };
+type Input = AgentExecutionInput & { payload: AgentExecutionInput['payload'] & { instruction: string } };
 export interface QuestionBinding {
   tenantId: string; runId: string; sessionId: string; sourceTaskId: string; generation: number;
   contextRevision: string; questionId: string; questionRevision: number;
@@ -36,7 +36,7 @@ export interface ClarificationRun {
   pending: { input: Input; phase: 'reserved' | 'sending' } | null;
   tickets: Ticket[]; reason: string | null;
 }
-type Server = Pick<ByokServer, 'dispatchFreshAgentEgress' | 'tasks'>;
+type Server = Pick<ByokServer, 'executions' | 'tasks'>;
 export interface Principal { tenantId: string; userId: string; }
 function text(value: unknown, label: string, max = 4096): asserts value is string {
   if (typeof value !== 'string' || !value.trim() || value.length > max) throw new Error(`Invalid ${label}`);
@@ -103,7 +103,8 @@ export class ClarificationHost {
   private input(run: ClarificationRun, taskId: string, answer?: { ticket: Ticket; value: string }): Input {
     text(taskId,'taskId',200);
     const instruction = `Objective:\n${run.objective}\nHost-selected context (${run.contextRevision}):\n${run.context}\n${answer ? `Validated clarification answer:\n${JSON.stringify({ question: answer.ticket.result, answer: answer.value })}\n` : ''}Return only JSON with contract "${CLARIFICATION_CONTRACT}" and outcome complete, blocked (reason), or needs_input (questionId, question, checkpoint, answerKind). answerKind text has no options; single_choice requires 2-8 unique {id,label} options. No additional fields. Clarification never grants tool permission.`;
-    return { ...run.target, taskId, instruction, terminalProjection: { mode: 'result-document', contract: CLARIFICATION_CONTRACT } };
+    const { deviceId, ...selection } = run.target;
+    return { taskId, deviceId, payload: { ...selection, instruction, terminalProjection: { mode: 'result-document', contract: CLARIFICATION_CONTRACT } } };
   }
   start(input: Omit<ClarificationRun, 'tenantId'|'status'|'generation'|'pending'|'tickets'|'reason'>, taskId: string): HostSnapshot<ClarificationRun> {
     for (const key of ['id','sessionId','respondentId','destination','contextRevision','objective'] as const) text(input[key],key);
@@ -116,7 +117,7 @@ export class ClarificationHost {
   private async offer(input: Input): Promise<boolean> {
     const offer = await this.server.tasks.offer(input.taskId);
     if (!offer) return false;
-    const { taskId: _id, deviceId: _device, ...payload } = input;
+    const { payload } = input;
     if (offer.taskId !== input.taskId || offer.deviceId !== input.deviceId || offer.type !== 'task.offer_for_agent_with_egress_fresh' || canonical(offer.payload) !== canonical(payload)) throw new Error('SDK offer differs from reserved input');
     return offer.delivered;
   }
@@ -124,7 +125,7 @@ export class ClarificationHost {
     if (!run.pending) return;
     const input = run.pending.input; const attempt = await this.server.tasks.attempt(input.taskId);
     if (!attempt) return;
-    if (attempt.taskId !== input.taskId || attempt.deviceId !== input.deviceId || canonical(attempt.agentRef) !== canonical(input.agentRef)) throw new Error('SDK cancellation binding mismatch');
+    if (attempt.taskId !== input.taskId || attempt.deviceId !== input.deviceId || canonical(attempt.agentRef) !== canonical(input.payload.agentRef)) throw new Error('SDK cancellation binding mismatch');
     await this.offer(input); await this.server.tasks.cancel(input.taskId,'Host clarification stopped');
   }
   async recover(id: string, revision: number): Promise<HostSnapshot<ClarificationRun>> { return this.send(id,revision,true); }
@@ -141,7 +142,7 @@ export class ClarificationHost {
     if (!await this.offer(input)) {
       const latest = this.run(id);
       if (stopped(latest.value)) { await this.cancelPending(latest.value); return latest; }
-      try { await this.server.dispatchFreshAgentEgress(input); }
+      try { await this.server.executions.submit(input); }
       catch (error) { if (!await this.offer(input)) throw error; }
     }
     const latest = this.run(id);
@@ -157,7 +158,7 @@ export class ClarificationHost {
     await this.offer(input);
     const attempt = await this.server.tasks.attempt(input.taskId);
     if (!attempt) return row;
-    if (attempt.deviceId !== input.deviceId || canonical(attempt.agentRef) !== canonical(input.agentRef)) throw new Error('SDK terminal binding mismatch');
+    if (attempt.deviceId !== input.deviceId || canonical(attempt.agentRef) !== canonical(input.payload.agentRef)) throw new Error('SDK terminal binding mismatch');
     const terminal = await this.server.tasks.deviceTerminal(input.taskId);
     const latest = await this.server.tasks.attempt(input.taskId);
     if (latest?.cancellation) { run.status = 'blocked'; run.reason = 'execution_cancelled'; }
@@ -175,7 +176,7 @@ export class ClarificationHost {
         const expiresAt = Math.min(run.deadline,this.clock() + run.questionTtlMs); time(expiresAt);
         run.tickets.push({ binding: { tenantId: run.tenantId,runId: run.id,sessionId: run.sessionId,sourceTaskId: input.taskId,generation: run.generation,
           contextRevision: run.contextRevision,questionId: randomUUID(),questionRevision: 1,deviceId: input.deviceId,
-          agentId: input.agentRef.agentId,profileRevision: input.agentRef.profileRevision,destination: run.destination },
+          agentId: input.payload.agentRef.agentId,profileRevision: input.payload.agentRef.profileRevision,destination: run.destination },
           result,expiresAt,state: 'open',notification: 'pending',receipt: null });
         run.status = 'waiting_input';
       }

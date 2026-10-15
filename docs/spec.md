@@ -1952,10 +1952,11 @@ separate:
   fallback for a missing or mismatched resume.
 
 The host APIs preserve the same distinction: hosted composition uses
-`enqueueFreshAgentEgressOffer`, the reference server uses
-`dispatchFreshAgentEgress`, and the existing resume surfaces continue to
-require the exact session. A caller cannot obtain fresh semantics by omitting
-`sessionRef` from a resume call.
+`submitAgentExecution(tenant, input)`, and the reference server uses
+`executions.submit(input)`. The Host persists its complete
+`AgentExecutionInput` first, including its own taskId, exact deviceId, explicit
+runtime and terminal projection. Existing egress resume calls continue to
+require the exact session; omitting sessionRef does not select fresh execution.
 
 The fresh trace is `claim` → start the runtime without resume arguments → runtime
 issues its real session → SDK fsyncs the exact AgentRef/runtime/cwd/session
@@ -2329,23 +2330,29 @@ and the original payload. Host cancellation alone returns no device terminal.
 A terminal stored under a different task key or with a non-terminal type is an
 error. This observation does not prove native Session.close or home release.
 
-Recurring execution submission uses one public `RecurringExecutionInputSchema`
-for both Cloud `submitRecurringExecution(tenant, input)` and embedded
-`recurring.submit(input)`. The Host persists the validated input before dispatch:
+Fresh Agent execution submission uses one public `AgentExecutionInputSchema`
+for both Cloud `submitAgentExecution(tenant, input)` and embedded
+`executions.submit(input)`. The Host persists the validated input before dispatch:
 taskId, exact deviceId, fresh payload with explicit runtime, AgentRef,
-egress policy, required message and terminal projection, plus server-held
-message context. SessionRef and unknown fields are rejected. The input may
+egress policy and terminal projection. messageEgress is optional; selecting it
+requires server-held agentMessageContext and a registered Agent message consumer.
+SessionRef and unknown fields are rejected. The input may
 carry the existing instruction blob reference; this does not waive Host context
 budgets or blob retention. No task identity, target or execution mode is inferred.
 Submission returns the existing EnqueuedOffer; recovery reads the same durable
-task/offer rather than a process-owned TaskHandle. Already delivered duplicates
-remain conflicts requiring exact readback; they do not create new executions.
+task/offer rather than a process-owned TaskHandle. Resubmitting a taskId whose
+offer is already delivered fails with `agent_task_already_exists` and creates no
+new execution; the Host recovers through exact `tasks.offer(taskId)` (Cloud
+`readTaskOffer(tenant, taskId)`) readback. Delivered means durably enqueued, not
+received: a registered device that is offline is enqueued normally.
 
-Recurring submission requires a registered Agent message consumer before any
-admission side effect. An unavailable consumer after restart blocks submission
-until registration is restored; it does not clear persisted cancellation or
-message evidence. Partial initial admission can recover using exactly the
-persisted input, including server-held context. Changed context cannot reuse
+Submission with messageEgress requires a registered Agent message consumer before
+any admission side effect. An unavailable consumer after restart blocks that
+submission until registration is restored; it does not clear persisted
+cancellation or message evidence. A result-document execution without messageEgress
+needs neither that consumer nor message context. Context without messageEgress is
+rejected. Partial initial admission can recover using exactly the
+persisted input, including any selected server-held context. Changed context cannot reuse
 the execution identity. This does not authorize a new execution after failure.
 
 Embedded `tasks.attempt(taskId)` returns the same canonical durable TaskAttempt
@@ -2360,10 +2367,12 @@ status, is not evidence of mailbox delivery or physical Agent-home release.
 
 A strict fresh Agent task may select `terminalProjection: { mode: 'result-document', contract }` without user `messageEgress`. That frozen task selection makes the extracted document a separate internal result. The daemon must not deliver document-less success. Existing extractor validation and server capability gates remain applicable. This is an execution/result primitive: Host owns SummaryJob, coverage/version CAS, budgets and scheduling; schema support alone is not native-runtime or tool-isolation acceptance. On the prepared lane the same primitive runs with zero tools (a tool-less record, an offer that omits `requiredToolsets`, no `messageEgress`); the extractor and the server `result-document` capability remain required.
 
-### Recurring Host composition requirements
+### Fresh Agent execution Host composition requirements
 
 Device-local Hosts can use the embedded wake queue for the one-shot clock;
 periodic rules, occurrence dedup and execution settlement remain Host-owned.
+User input, routine and Bot triggers use the same executions.submit contract;
+the SDK does not own the Host FIFO, generation or periodic rule.
 
 The [Conversation-turn Fresh MVP PRD](researches/2026-09-09_conversation-turn-fresh-mvp-prd.md)
 defines the approved Host composition below this SDK product authority. Recurring

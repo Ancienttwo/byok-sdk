@@ -93,8 +93,9 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
     await startStep(); const main = host.goal('goal'); const sent = await side();
     expect((await byok.tasks.attempt('step-1'))?.status).toBe('running');
     const starts = adapter.starts.length;
-    await byok.dispatchFreshAgentEgress({ ...target('main-agent'), taskId: 'same-home-side', instruction: 'side question',
-      terminalProjection: { mode: 'result-document', contract: BTW_RESULT_CONTRACT } });
+    const { deviceId, ...selection } = target('main-agent');
+    await byok.executions.submit({ deviceId, taskId: 'same-home-side', payload: { ...selection, instruction: 'side question',
+      terminalProjection: { mode: 'result-document', contract: BTW_RESULT_CONTRACT } } });
     await terminal('same-home-side');
     expect((await byok.tasks.deviceTerminal('same-home-side'))?.envelope).toMatchObject({ type: 'task.decline', payload: { reason: 'agent home busy: 1 active attempt(s)' } });
     expect(adapter.starts).toHaveLength(starts);
@@ -147,7 +148,7 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
     const goal = newGoal(); const reserved = host.reserveGoalStep('goal', goal.revision, 'lost-ack', 'frozen');
     reserved.value.pending!.phase = 'sending';
     const sending = store.write('goal:goal', reserved.revision, reserved.value);
-    await byok.dispatchFreshAgentEgress(sending.value.pending!.input); await running('lost-ack');
+    await byok.executions.submit(sending.value.pending!.input); await running('lost-ack');
     store.close(); store = new SqliteGoalBtwStore(dbPath, 'goal-btw-test'); host = new GoalBtwHost(byok, store, () => now, () => true);
     await host.recoverGoalStep('goal', sending.revision);
     expect(adapter.starts).toHaveLength(1); expect((await byok.tasks.offer('lost-ack'))?.delivered).toBe(true);
@@ -232,9 +233,9 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
   it('cancel in sending-before-offer window is persisted and replayed to exactly that task', async () => {
     let enter!: () => void; let release!: () => void;
     const entered = new Promise<void>(resolve => { enter = resolve; }); const gate = new Promise<void>(resolve => { release = resolve; });
-    const delayed = new GoalBtwHost({ tasks: byok.tasks, dispatchFreshAgentEgress: async input => {
-      enter(); await gate; return byok.dispatchFreshAgentEgress(input);
-    } }, store, () => now, () => true);
+    const delayed = new GoalBtwHost({ tasks: byok.tasks, executions: { submit: async input => {
+      enter(); await gate; return byok.executions.submit(input);
+    }  }}, store, () => now, () => true);
     const goal = newGoal(); const reservation = host.reserveGoalStep('goal', goal.revision, 'cancel-before-offer', '');
     const pending = delayed.sendGoalStep('goal', reservation.revision); await entered;
     expect(await byok.tasks.offer('cancel-before-offer')).toBeUndefined();
@@ -292,7 +293,7 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
 
   it('explicit recovery refuses an existing SDK offer whose frozen input changed', async () => {
     const sent = await startStep(); const changed = structuredClone(sent.value);
-    changed.pending!.input.instruction = 'a different instruction';
+    changed.pending!.input.payload.instruction = 'a different instruction';
     const corrupt = store.write('goal:goal', sent.revision, changed);
     await expect(host.recoverGoalStep('goal', corrupt.revision)).rejects.toThrow('differs from the reserved');
     expect(adapter.starts).toHaveLength(1);
@@ -323,10 +324,10 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
 
   it('synchronous public dispatch rejection retains sending input for exact-ID recovery', async () => {
     let reject = true;
-    const onceRejected = new GoalBtwHost({ tasks: byok.tasks, dispatchFreshAgentEgress: input => {
+    const onceRejected = new GoalBtwHost({ tasks: byok.tasks, executions: { submit: input => {
       if (reject) { reject = false; throw new Error('simulated pre-submit rejection'); }
-      return byok.dispatchFreshAgentEgress(input);
-    } }, store, () => now, () => true);
+      return byok.executions.submit(input);
+    }  }}, store, () => now, () => true);
     const goal = newGoal(); const reserved = host.reserveGoalStep('goal', goal.revision, 'retry-same-id', 'immutable context');
     await expect(onceRejected.sendGoalStep('goal', reserved.revision)).rejects.toThrow('simulated pre-submit rejection');
     const unknown = host.goal('goal'); expect(unknown.value.pending!.phase).toBe('sending');
