@@ -61,12 +61,13 @@ export interface LongPollClientOptions {
   getCursor: () => number | undefined;
   /** Returns false when the envelope was a local duplicate and no handler was queued. */
   onEnvelope: (envelope: Envelope) => boolean | void;
+  /** The activity ingress every events page advertises, applied before its envelopes are delivered. */
+  onIngress?: (ingress: ActivityIngress) => void;
   /**
    * Capabilities advertised by the server that produced the current poll
    * response. Called before any envelopes from that response are delivered.
    * An older responder omitting the additive field is reported as `[]`.
    */
-  onIngress?: (ingress: ActivityIngress) => void;
   onServerCapabilities?: (capabilities: string[]) => void;
   /**
    * The poll failed — an HTTP status, a network failure, an unusable body or
@@ -111,10 +112,14 @@ export interface LongPollClientOptions {
   idleDelayMs?: number;
 }
 
-/** A validated v2 acknowledgement for the posted batch; outcomes are optional until v3. */
+/**
+ * A validated v3 acknowledgement for the posted batch: one outcome per posted
+ * envelope, a reason on every rejected one, and `ingress` whenever a posted
+ * `conn.hello` was accepted or deduplicated.
+ */
 export interface MessageBatchPostResult {
   readonly ingress?: ActivityIngress;
-  readonly outcomes?: MessagesSendResponse['outcomes'];
+  readonly outcomes: MessagesSendResponse['outcomes'];
   readonly accepted: number;
   readonly rejected?: number;
   /** The server's advertisement, when it sent one (a handshake answer); absence means "no update". */
@@ -351,19 +356,27 @@ export class LongPollClient {
       if (response.accepted + (response.rejected ?? 0) !== envelopes.length) {
         throw new Error('messages response counts do not match the posted batch length');
       }
-      if (response.outcomes !== undefined) {
-        const expected = new Set(envelopes.map((envelope) => envelope.id));
-        let accepted = 0;
-        let rejected = 0;
-        for (const settlement of response.outcomes) {
-          if (settlement.outcome !== 'rejected' && settlement.reason !== undefined) throw new Error('messages response reason belongs only to rejected outcomes');
-          if (!expected.delete(settlement.id)) throw new Error('messages response has an unknown or repeated outcome id');
-          if (settlement.outcome === 'rejected') rejected += 1;
-          else accepted += 1;
+      const expected = new Map(envelopes.map((envelope) => [envelope.id, envelope]));
+      let accepted = 0;
+      let rejected = 0;
+      let handshakeAccepted = false;
+      for (const settlement of response.outcomes) {
+        if (settlement.outcome !== 'rejected' && settlement.reason !== undefined) throw new Error('messages response reason belongs only to rejected outcomes');
+        if (settlement.outcome === 'rejected' && settlement.reason === undefined) throw new Error('messages response rejected outcome lacks its reason');
+        const envelope = expected.get(settlement.id);
+        if (envelope === undefined) throw new Error('messages response has an unknown or repeated outcome id');
+        expected.delete(settlement.id);
+        if (settlement.outcome === 'rejected') rejected += 1;
+        else {
+          accepted += 1;
+          if (envelope.type === 'conn.hello') handshakeAccepted = true;
         }
-        if (expected.size !== 0 || accepted !== response.accepted || rejected !== (response.rejected ?? 0)) {
-          throw new Error('messages response outcomes do not match the posted ids and counts');
-        }
+      }
+      if (expected.size !== 0 || accepted !== response.accepted || rejected !== (response.rejected ?? 0)) {
+        throw new Error('messages response outcomes do not match the posted ids and counts');
+      }
+      if (handshakeAccepted && response.ingress === undefined) {
+        throw new Error('messages response accepted conn.hello without the activity ingress advertisement');
       }
       return response;
     } catch (err) {
@@ -466,7 +479,7 @@ export class LongPollClient {
         readAheadSupported = parsed.capabilities.includes(MAILBOX_READ_AHEAD_CAPABILITY);
         const madeReadProgress = parsed.cursor > afterSeq;
         readCursor = parsed.cursor;
-        if (parsed.ingress !== undefined) this.opts.onIngress?.(parsed.ingress);
+        this.opts.onIngress?.(parsed.ingress);
         this.opts.onServerCapabilities?.(parsed.capabilities);
         // Finding R1 (Codex's new P2): true the moment THIS batch contains
         // at least one validation-failed entry — used below to apply the

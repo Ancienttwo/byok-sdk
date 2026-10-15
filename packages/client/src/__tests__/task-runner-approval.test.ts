@@ -24,6 +24,7 @@ import {
 } from '../types';
 import { AsyncQueue } from '../util/async-queue';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { testIngressBudget } from './fixtures/activity-ingress';
 
 /**
  * M4 Phase 3: `TaskRunner.requestApproval` in isolation — the daemon-side
@@ -55,7 +56,7 @@ async function makeRunner(
   overrides: Partial<Pick<TaskRunnerDeps, 'approvalTimeoutMs' | 'approvalRegistry' | 'onApprovalDispatched'>> = {},
 ): Promise<{ runner: TaskRunner; approvalRegistry: ApprovalRegistry }> {
   const approvalRegistry = overrides.approvalRegistry ?? new ApprovalRegistry();
-  const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-taskrunner-approval-workspace-'),
     deviceId: 'device-1',
@@ -155,7 +156,7 @@ async function makeChannelRunner(
   sent: Envelope[],
 ): Promise<{ runner: TaskRunner; approvalRegistry: ApprovalRegistry }> {
   const approvalRegistry = new ApprovalRegistry();
-  const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-taskrunner-approval-channel-workspace-'),
     deviceId: 'device-1',

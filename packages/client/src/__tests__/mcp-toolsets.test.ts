@@ -22,6 +22,7 @@ import { McpToolsetRegistry, McpToolsetRevisionConflictError } from '../daemon/t
 import type { McpToolsetConfig, RuntimeCapabilities } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { observationOf } from './fixtures/mcp-observation';
+import { testIngressBudget } from './fixtures/activity-ingress';
 
 const MCP_CAPABLE: RuntimeCapabilities = {
   steer: false,
@@ -72,7 +73,7 @@ async function makeRunner(
   getMcpToolsets?: () => ReadonlyMap<string, McpToolsetConfig>,
   mcpToolsetToolsProbe: NonNullable<TaskRunnerDeps['mcpToolsetToolsProbe']> = stubToolsProbe,
 ): Promise<TaskRunner> {
-  const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     mcpToolsetToolsProbe,
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-mcp-toolsets-workspace-'),
@@ -686,7 +687,7 @@ describe('TaskRunner host toolset context nonce injection', () => {
     extra: Partial<TaskRunnerDeps> = {},
   ): Promise<TaskRunner> {
     const storeDir = await tmpDir('byok-host-toolset-store-');
-    const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
+    const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       mcpToolsetToolsProbe: stubToolsProbe,
       adapters: [adapter],
       workspaceRoot: await tmpDir('byok-host-toolset-workspace-'),

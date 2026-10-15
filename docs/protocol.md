@@ -1835,7 +1835,7 @@ path.
 ```
 GET /byok/events?cursor=N
   Query    (EventsPollQuerySchema):    { cursor?, afterSeq? }
-  Response (EventsPollResponseSchema): { events: unknown[], cursor, capabilities?: string[], ingress? }
+  Response (EventsPollResponseSchema): { events: unknown[], cursor, capabilities?: string[], ingress: ActivityIngress }
 ```
 
 The page schema decodes the page only. Each `events` entry is decoded on its
@@ -1912,7 +1912,7 @@ Presence remains a lossy TTL hint and is not an execution or admission signal.
 ```
 POST /byok/messages
   Request  (MessagesSendRequestSchema):  { messages: Envelope[] }   // capped at 256 per batch
-  Response (MessagesSendResponseSchema): { accepted: number, rejected?: number, capabilities?: string[], outcomes?: Outcome[], ingress?: ActivityIngress }
+  Response (MessagesSendResponseSchema): { accepted: number, rejected?: number, capabilities?: string[], outcomes: Outcome[], ingress?: ActivityIngress }
 ```
 
 `capabilities` is present only on the answer to a batch whose `conn.hello`
@@ -1995,8 +1995,8 @@ id)` dedup window). It does not mean "freshly processed": a redelivered or
 retried envelope this device already sent once is counted `accepted` again
 on retry, even though no handler reran for it that second time. `rejected`
 is a separate, additive count — every envelope the server refused — present
-in the response only when nonzero. Existing counts-only v2 responders retain
-the `{ accepted }` shape; newer responders add optional metadata. The type-allow check above and the ownership check
+in the response only when nonzero. Every v3 answer also carries `outcomes`
+(below); a counts-only answer is not a v3 response. The type-allow check above and the ownership check
 (§9) are only two of the causes. An envelope is also rejected, among other
 reasons, for an unsupported protocol version; for a device that is revoked or lacks the
 capability the type requires; for a missing or mismatched Agent or harness
@@ -2010,29 +2010,34 @@ mismatch, `byteCount` over `maxBytes`, a reservation conflict, or admission
 that cannot be confirmed); for a `task.fail` whose recovery report is
 refused; and for a `conn.hello` with a product mismatch or whose
 capabilities the server fails to record. These are examples, not an
-exhaustive list. `outcomes`, when present, contains exactly one result per
+exhaustive list. `outcomes` is required and contains exactly one result per
 request envelope: `{ id: uuid, outcome: 'accepted' | 'duplicate' | 'rejected', reason?: string }`.
 Its id set and counts must match the request and the aggregate counts (duplicates
-count as accepted). An unreadable or inconsistent answer retains the original
-bytes for retry. `outcome` is closed control data; an unknown refusal reason is
+count as accepted). `reason` is required on a rejected outcome and absent on any
+other. An answer without `outcomes`, or one that is unreadable or inconsistent,
+is a route failure: the client retains the original bytes for retry. `outcome` is closed control data; an unknown refusal reason is
 observational and becomes `unknown`. Reason strings are bounded to 64 characters.
 The coarse wire reasons are `payload_invalid`, `not_permitted`, `limit_exceeded`,
 `state_conflict`, and `unsupported`. Unknown tasks, wrong owners, harness and
 Agent identity mismatches all use `not_permitted`; internal reason names remain
 server-local in `ByokCloudObserver.onInboundRefused`.
 
-A successful hello answer and every events response advertise optional `ingress`:
+Every events response, and every answer whose `conn.hello` the server accepted
+(or recognized as a duplicate), carries the required `ingress`
 `{ activityMaxEvents, activityMaxBytes }`, derived from the same bounds the gate
-enforces. Bytes mean UTF-8 `JSON.stringify(events)`, including array brackets.
-Before any advertisement the v2 client uses `DEFAULT_ACTIVITY_INGRESS` (50 events,
-65536 bytes). The latest advertisement applies to new progress pushes; oversized
+enforces. A page or handshake answer without it is a route failure. Bytes mean
+UTF-8 `JSON.stringify(events)`, including array brackets. There is no
+client-side default: a session opens only on an accepted handshake, so work
+never runs before an advertisement. The reference cloud's deployment default is
+50 events and 65536 bytes (`DEFAULT_ACTIVITY_BOUNDS`). The latest advertisement applies to new progress pushes; oversized
 progress text splits at code point boundaries, preserving the concatenated text.
 Non-splittable oversized events fail explicitly. The public Host byte-budget
 option is removed; timing and a smaller event count remain Host choices.
 
-These response-only optional additions are strip-safe in protocol v2 and need no
-capability gate. Counts-only v2 servers still use client bisection with reason
-`unspecified`, and cannot distinguish duplicate from accepted. Making `outcomes` and `ingress` required, and deleting bisection/default ingress, is a separate planned contract change; K7 wire v3 leaves those fields optional and keeps the existing acknowledgement authority.
+Wire v3 makes `outcomes` and `ingress` required where the server produces them
+and removes the v2 fallbacks: there is no counts-only bisection, no `unspecified`
+refusal reason and no default ingress. An unrecognized reason string is still
+tolerated and becomes `unknown`.
 
 A daemon sends every D→S envelope this way; there is no alternate socket
 queue or transport selection to reconcile.

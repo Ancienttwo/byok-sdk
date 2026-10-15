@@ -1728,6 +1728,11 @@ export interface ActivityBounds {
     readonly capacity: number;
     readonly ttlMs: number;
 }
+/**
+ * The deployment's default activity limits. The device surface advertises the
+ * effective `maxEvents`/`maxBytes` as `ingress` (events pages and accepted
+ * handshake answers); daemons have no default of their own.
+ */
 export declare const DEFAULT_ACTIVITY_BOUNDS: ActivityBounds;
 export declare function assertBoardLabels(channel: string, title: string, limits: {
     readonly channelMaxBytes: number;

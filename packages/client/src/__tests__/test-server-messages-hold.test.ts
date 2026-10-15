@@ -41,11 +41,11 @@ describe('TestServer message response holds', () => {
     const response = send('held').then((body) => { accepted = true; return body; });
     try {
       await server.waitFor((event) => event.task_id === 'held');
-      expect(await send('unmatched')).toEqual({ accepted: 1 });
+      expect(await send('unmatched')).toMatchObject({ accepted: 1, outcomes: [{ outcome: 'accepted' }] });
       expect(accepted).toBe(false);
       release();
-      expect(await response).toEqual({ accepted: 1 });
-      expect(await send('held')).toEqual({ accepted: 1 });
+      expect(await response).toMatchObject({ accepted: 1, outcomes: [{ outcome: 'accepted' }] });
+      expect(await send('held')).toMatchObject({ accepted: 1, outcomes: [{ outcome: 'accepted' }] });
     } finally {
       release();
       await response;
@@ -65,7 +65,7 @@ describe('TestServer message response holds', () => {
       let closed = false;
       closing = server.close().then(() => { closed = true; });
       await vi.waitFor(() => expect(closed).toBe(true));
-      expect(await Promise.all(responses)).toEqual([{ accepted: 1 }, { accepted: 1 }]);
+      expect(await Promise.all(responses)).toMatchObject([{ accepted: 1 }, { accepted: 1 }]);
     } finally {
       for (const release of releases) release();
       await Promise.all(responses);

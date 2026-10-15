@@ -18,6 +18,7 @@ import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
+import { testIngressBudget } from './fixtures/activity-ingress';
 
 /**
  * `TaskRunner` hands every runtime the daemon's full environment minus the
@@ -87,7 +88,7 @@ async function makeHarness(): Promise<Harness> {
   });
 
   const sent: Envelope[] = [];
-  const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [piAdapter, claudeAdapter, codexAdapter],
     workspaceRoot: await tmpDir('byok-taskrunner-env-workspace-'),
     deviceId: 'device-1',

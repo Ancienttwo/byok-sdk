@@ -1,4 +1,4 @@
-import { DEFAULT_ACTIVITY_INGRESS, type ActivityIngress } from '@byok-sdk/protocol';
+import type { ActivityIngress } from '@byok-sdk/protocol';
 import type { ScratchRoot, ExecutionScratch } from './retention/scratch';
 import { observePreparedMemory, type PreparedAgentMemoryState } from './prepared-agent-memory';
 import { InputPreparationRequestError } from './input-preparation-service';
@@ -589,8 +589,14 @@ export interface TaskRunnerDeps {
    * capabilities" when absent, so a minimal test harness that doesn't care
    * about this gate isn't forced to supply one — see `sendApprovalResolved`.
    */
-  getIngressBudget?: () => Readonly<ActivityIngress>;
   getServerCapabilities?: () => readonly string[];
+  /**
+   * The server-advertised activity ingress (protocol v3), read fresh at each
+   * progress push. `create-daemon.ts` wires it to
+   * `ConnectionManager.getIngressBudget`. There is no default: a task only
+   * runs after an accepted handshake, which always carries one.
+   */
+  getIngressBudget: () => Readonly<ActivityIngress>;
   /**
    * Contract §8.1 / §8.3: is the task lane's capability gate in place right
    * now — this daemon can sign, AND it has read a deployment declaration naming
@@ -1556,7 +1562,7 @@ export class TaskRunner {
   }
 
   private get ingressBudget(): Readonly<ActivityIngress> {
-    return this.deps.getIngressBudget?.() ?? { activityMaxEvents: DEFAULT_ACTIVITY_INGRESS.maxEvents, activityMaxBytes: DEFAULT_ACTIVITY_INGRESS.maxBytes };
+    return this.deps.getIngressBudget();
   }
 
   /** Effective per-event inline ceiling for this daemon — see `DaemonConfig.maxInlineEventBytes`. */

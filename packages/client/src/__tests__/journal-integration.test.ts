@@ -32,6 +32,7 @@ import { isSqliteAvailable, openJournalDatabase } from '../daemon/journal/sqlite
 import type { JournalIdentity, JournalReceipt, LocalTaskJournal, LocalTerminalRecord, ReceivedEnvelopeRecord, RecoverableTask } from '../daemon/journal/journal';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import { testIngressBudget } from './fixtures/activity-ingress';
 
 /**
  * Counts every `SqliteLocalTaskJournal` construction while leaving the real
@@ -487,7 +488,7 @@ async function makeRunner(
   sent: Envelope[],
   admissionGuard?: TaskRunnerDeps['admissionGuard'],
 ): Promise<TaskRunner> {
-  const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-guard-workspace-'),
     deviceId: 'device-1',

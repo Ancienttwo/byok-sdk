@@ -428,7 +428,6 @@ export {
   CreateBlobResponseSchema,
   BlobDownloadUrlResponseSchema,
   EventsPollQuerySchema,
-  DEFAULT_ACTIVITY_INGRESS,
   ActivityIngressSchema,
   MessageSendOutcomeSchema,
   OUTBOUND_REFUSAL_REASONS,

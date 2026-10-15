@@ -4,6 +4,7 @@ import {
   ProgressBatcher,
   ProgressEventTooLargeError,
 } from '../daemon/progress-batcher';
+import { testIngressBudget } from './fixtures/activity-ingress';
 
 const encoder = new TextEncoder();
 
@@ -25,7 +26,7 @@ describe('ProgressBatcher', () => {
     const batcher = new ProgressBatcher((seq, events) => emitted.push({ seq, events }), {
       maxBatchSize: 3,
       flushIntervalMs: 1000,
-    });
+    }, testIngressBudget);
 
     batcher.push({ type: 'progress', text: 'a' });
     batcher.push({ type: 'progress', text: 'b' });
@@ -48,7 +49,7 @@ describe('ProgressBatcher', () => {
     const batcher = new ProgressBatcher((seq, events) => emitted.push({ seq, events }), {
       maxBatchSize: 10,
       flushIntervalMs: 250,
-    });
+    }, testIngressBudget);
 
     batcher.push({ type: 'progress', text: 'a' });
     expect(emitted).toHaveLength(0);
@@ -62,7 +63,7 @@ describe('ProgressBatcher', () => {
     const batcher = new ProgressBatcher((seq, events) => emitted.push({ seq, events }), {
       maxBatchSize: 1,
       flushIntervalMs: 250,
-    });
+    }, testIngressBudget);
 
     batcher.push({ type: 'progress', text: 'a' });
     batcher.push({ type: 'progress', text: 'b' });
@@ -75,7 +76,7 @@ describe('ProgressBatcher', () => {
     const emitted: unknown[] = [];
     const batcher = new ProgressBatcher((seq, events) => emitted.push({ seq, events }), {
       flushIntervalMs: 100,
-    });
+    }, testIngressBudget);
     vi.advanceTimersByTime(500);
     expect(emitted).toHaveLength(0);
     batcher.stop();
@@ -83,16 +84,16 @@ describe('ProgressBatcher', () => {
 
   it('manual flush() is idempotent when nothing is buffered', () => {
     const emitted: unknown[] = [];
-    const batcher = new ProgressBatcher((seq, events) => emitted.push({ seq, events }));
+    const batcher = new ProgressBatcher((seq, events) => emitted.push({ seq, events }), undefined, testIngressBudget);
     batcher.flush();
     batcher.flush();
     expect(emitted).toHaveLength(0);
   });
 
   describe('server activity ingress', () => {
-    it('batches two 40 KiB results separately under the default budget', () => {
+    it('batches two 40 KiB results separately under the reference advertised budget', () => {
       const emitted: AgentEvent[][] = [];
-      const batcher = new ProgressBatcher((_seq, events) => emitted.push(events));
+      const batcher = new ProgressBatcher((_seq, events) => emitted.push(events), undefined, testIngressBudget);
       const event: AgentEvent = { type: 'tool_result', tool: 'read', output: 'x'.repeat(40 * 1024) };
       batcher.push(event); batcher.push(event); batcher.flush();
       expect(emitted).toEqual([[event], [event]]);
@@ -123,13 +124,13 @@ describe('ProgressBatcher', () => {
     it('rejects an unsplittable event and rejects the removed Host option', () => {
       const batcher = new ProgressBatcher(() => {}, {}, () => ({ activityMaxEvents: 1, activityMaxBytes: 50 }));
       expect(() => batcher.push({ type: 'error', message: 'x'.repeat(100) })).toThrow(ProgressEventTooLargeError);
-      expect(() => new ProgressBatcher(() => {}, { maxBatchBytes: 50 } as never)).toThrow(/Unknown progressBatch option/);
+      expect(() => new ProgressBatcher(() => {}, { maxBatchBytes: 50 } as never, testIngressBudget)).toThrow(/Unknown progressBatch option/);
     });
   });
 
   describe('pendingCount (M4 Phase 4, part B.3: observability watermark)', () => {
     it('starts at 0 and grows with each buffered (not-yet-flushed) push', () => {
-      const batcher = new ProgressBatcher(() => {}, { maxBatchSize: 5, flushIntervalMs: 1000 });
+      const batcher = new ProgressBatcher(() => {}, { maxBatchSize: 5, flushIntervalMs: 1000 }, testIngressBudget);
       expect(batcher.pendingCount).toBe(0);
 
       batcher.push({ type: 'progress', text: 'a' });
@@ -139,14 +140,14 @@ describe('ProgressBatcher', () => {
     });
 
     it('drops back to 0 once flushed manually', () => {
-      const batcher = new ProgressBatcher(() => {}, { maxBatchSize: 5, flushIntervalMs: 1000 });
+      const batcher = new ProgressBatcher(() => {}, { maxBatchSize: 5, flushIntervalMs: 1000 }, testIngressBudget);
       batcher.push({ type: 'progress', text: 'a' });
       batcher.flush();
       expect(batcher.pendingCount).toBe(0);
     });
 
     it('drops back to 0 once maxBatchSize triggers an automatic flush', () => {
-      const batcher = new ProgressBatcher(() => {}, { maxBatchSize: 2, flushIntervalMs: 1000 });
+      const batcher = new ProgressBatcher(() => {}, { maxBatchSize: 2, flushIntervalMs: 1000 }, testIngressBudget);
       batcher.push({ type: 'progress', text: 'a' });
       expect(batcher.pendingCount).toBe(1);
       batcher.push({ type: 'progress', text: 'b' });
@@ -154,7 +155,7 @@ describe('ProgressBatcher', () => {
     });
 
     it('drops back to 0 once the interval timer flushes', () => {
-      const batcher = new ProgressBatcher(() => {}, { maxBatchSize: 10, flushIntervalMs: 250 });
+      const batcher = new ProgressBatcher(() => {}, { maxBatchSize: 10, flushIntervalMs: 250 }, testIngressBudget);
       batcher.push({ type: 'progress', text: 'a' });
       expect(batcher.pendingCount).toBe(1);
       vi.advanceTimersByTime(250);

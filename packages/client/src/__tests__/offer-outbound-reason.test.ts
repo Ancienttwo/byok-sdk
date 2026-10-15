@@ -15,6 +15,7 @@ import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { DurableJsonlFile } from '../util/durable-jsonl';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { testIngressBudget } from './fixtures/activity-ingress';
 
 /**
  * `task.decline`, `task.fail` and `task.progress` leave this device. These
@@ -81,7 +82,7 @@ async function runner(adapter: StubRuntimeAdapter, extra: Partial<TaskRunnerDeps
   const workspaceRoot = await temporary('byok outbound offer workspace-');
   const agentHome = new AgentHomeManager({ hostStorageRoot });
   const sent: Envelope[] = [];
-  const taskRunner = new TaskRunner({ scratchRoot: testScratchOwner(),
+  const taskRunner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot,
     agentHome,

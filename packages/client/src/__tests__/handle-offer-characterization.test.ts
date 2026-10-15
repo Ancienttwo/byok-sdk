@@ -17,6 +17,7 @@ import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { RuntimeDisposalFailure } from '../runtime-failure';
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult } from '../types';
 import { StubRuntimeAdapter, StubSession } from './fixtures/stub-adapter';
+import { testIngressBudget } from './fixtures/activity-ingress';
 
 /**
  * Characterization of `TaskRunner.handleOffer` exits that no other test pins
@@ -82,7 +83,7 @@ async function agentRunner(
   const agentHome = new AgentHomeManager({ hostStorageRoot: await temporary('byok-offer-char-home-') });
   const sent: Envelope[] = [];
   // Held by reference: the runner re-reads `startupTimeoutMs` per offer.
-  const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await temporary('byok-offer-char-workspace-'),
     agentHome,
@@ -115,7 +116,7 @@ async function gitRunner(
   await manager.preflight();
   const sessionStore = new SessionWorkspaceStore(storeDir);
   const sent: Envelope[] = [];
-  const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+  const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: root,
     deviceId: 'device-offer-char',
@@ -336,7 +337,7 @@ describe('handleOffer exit characterization (before the phase split)', () => {
     const root = await temporary('byok-offer-char-half-git-root-');
     const storeDir = await temporary('byok-offer-char-half-git-store-');
     const sent: Envelope[] = [];
-    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       workspaceRoot: root,
       deviceId: 'device-offer-char',

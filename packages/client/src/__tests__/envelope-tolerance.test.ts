@@ -15,6 +15,7 @@ import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
+import { testIngressBudget } from './fixtures/activity-ingress';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -88,7 +89,7 @@ describe('unknown AgentEvent tolerance on the client inbound path (pre-freeze pr
 
   it('TaskRunner.handleEnvelope processes an inbound task.progress carrying an unknown-type event as a no-op, never throwing', async () => {
     const sent: Envelope[] = [];
-    const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
+    const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [], // never consulted — task.progress touches no adapter/session machinery
       workspaceRoot: await tmpDir('byok-envelope-tolerance-workspace-'),
       deviceId: 'device-1',

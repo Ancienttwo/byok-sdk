@@ -12,7 +12,6 @@ import {
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
-  DEFAULT_ACTIVITY_INGRESS,
   createEnvelope,
   decodeEnvelope,
   encodeEnvelope,
@@ -2446,7 +2445,12 @@ export function buildDaemonWithAdapters(
       // capability is only known once the handshake completes, strictly
       // after this `deps` object is constructed.
       getServerCapabilities: () => connection?.getServerCapabilities() ?? [],
-      getIngressBudget: () => connection?.getIngressBudget() ?? { activityMaxEvents: DEFAULT_ACTIVITY_INGRESS.maxEvents, activityMaxBytes: DEFAULT_ACTIVITY_INGRESS.maxBytes },
+      // Same late-binding closure as `getServerCapabilities`; with no
+      // connection yet there is no advertisement, and that is an error.
+      getIngressBudget: () => {
+        if (connection === undefined) throw new Error('no activity ingress has been advertised; the connection is not started');
+        return connection.getIngressBudget();
+      },
       // Contract §8.1: the nonce injection asks the SAME gate the RPC and the
       // hello advertisement ask, read fresh at offer time for the same reason
       // `getServerCapabilities` is — the declaration lands after this `deps`

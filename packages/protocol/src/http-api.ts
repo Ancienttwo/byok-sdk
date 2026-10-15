@@ -205,15 +205,19 @@ export const EventsPollQuerySchema = z.object({
 });
 export type EventsPollQuery = z.infer<typeof EventsPollQuerySchema>;
 
-/** Deployment-owned activity limits; v2 responders may omit the advertisement. Remove the default in v3. */
-export const DEFAULT_ACTIVITY_INGRESS = { maxEvents: 50, maxBytes: 65536 } as const;
+/**
+ * Deployment-owned activity limits. A v3 responder advertises them on every
+ * events page and on every answer whose `conn.hello` it accepted; there is no
+ * client-side default.
+ */
 export const ActivityIngressSchema = z.object({
   activityMaxEvents: z.number().int().positive(),
   activityMaxBytes: z.number().int().min(2),
 });
 export type ActivityIngress = z.infer<typeof ActivityIngressSchema>;
 export const OUTBOUND_REFUSAL_REASONS = ['payload_invalid', 'not_permitted', 'limit_exceeded', 'state_conflict', 'unsupported'] as const;
-export type OutboundRefusalReason = typeof OUTBOUND_REFUSAL_REASONS[number] | 'unknown' | 'unspecified';
+/** `unknown` is an unrecognized wire reason string, kept as an observation. */
+export type OutboundRefusalReason = typeof OUTBOUND_REFUSAL_REASONS[number] | 'unknown';
 export const MessageSendOutcomeSchema = z.object({
   id: z.uuid(),
   outcome: z.enum(['accepted', 'duplicate', 'rejected']),
@@ -238,7 +242,8 @@ export const EventsPollResponseSchema = z.object({
    * fail-closed for gated daemon -> server fields and messages.
    */
   capabilities: z.array(z.string()).optional(),
-  ingress: ActivityIngressSchema.optional(),
+  /** Required in v3: the activity limits that apply to new progress pushes. */
+  ingress: ActivityIngressSchema,
 });
 export type EventsPollResponse = z.infer<typeof EventsPollResponseSchema>;
 
@@ -271,8 +276,11 @@ export type MessagesSendRequest = z.infer<typeof MessagesSendRequestSchema>;
  * `accepted` counts every envelope `ConnectionHub.handleInbound` returned
  * `'accepted'` *or* `'duplicate'` for — a deduped replay is a wire-level
  * success even though the business mutation did not run a second time.
- * `rejected` is omitted when zero. v2 retains counts and adds optional
- * correlated outcomes and ingress; counts-only responders remain valid.
+ * `rejected` is omitted when zero. `outcomes` is required and correlates
+ * exactly one result with each posted envelope; a rejected outcome carries its
+ * reason. `ingress` is required on an answer whose `conn.hello` was accepted
+ * (or deduplicated). The client enforces the per-envelope rules against the
+ * posted batch and treats a violation as an unusable response.
  *
  * `capabilities` (additive) is the same server capability advertisement a
  * `GET /byok/events` response carries. A server includes it when the batch
@@ -286,7 +294,7 @@ export const MessagesSendResponseSchema = z.object({
   rejected: z.number().int().nonnegative().optional(),
   capabilities: z.array(z.string()).optional(),
   ingress: ActivityIngressSchema.optional(),
-  outcomes: z.array(MessageSendOutcomeSchema).max(MAX_MESSAGES_PER_BATCH).optional(),
+  outcomes: z.array(MessageSendOutcomeSchema).max(MAX_MESSAGES_PER_BATCH),
 });
 export type MessagesSendResponse = z.infer<typeof MessagesSendResponseSchema>;
 

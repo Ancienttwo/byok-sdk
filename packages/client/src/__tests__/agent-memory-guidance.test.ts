@@ -17,6 +17,7 @@ import { AGENT_MEMORY_GUIDANCE, prependAgentMemoryGuidance } from '../daemon/mem
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { testIngressBudget } from './fixtures/activity-ingress';
 
 const roots: string[] = [];
 
@@ -69,7 +70,7 @@ describe('Agent memory guidance', () => {
         throw new Error('not used in this test');
       },
     };
-    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters,
       workspaceRoot,
       agentHome: new AgentHomeManager({ hostStorageRoot }),

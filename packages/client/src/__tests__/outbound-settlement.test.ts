@@ -3,11 +3,12 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
+import { createEnvelope, PROTOCOL_VERSION, type Envelope } from '@byok-sdk/protocol';
 import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager, type OutboundSettlement } from '../daemon/connection-manager';
-import { LongPollClient } from '../daemon/long-poll-transport';
+import { LongPollClient, LongPollRouteError } from '../daemon/long-poll-transport';
 import { seedDeviceEnrollment } from './fixtures/device-enrollment';
+import { TEST_ACTIVITY_INGRESS } from './fixtures/activity-ingress';
 
 const dirs: string[] = [];
 let connection: ConnectionManager | undefined;
@@ -41,6 +42,17 @@ async function open(onOutboundSettled: (batch: readonly OutboundSettlement[]) =>
   return connection;
 }
 
+function helloEnvelope(): Envelope {
+  return createEnvelope('conn.hello', {
+    deviceId: 'settlement-device', productId: 'test', protocolVersions: [PROTOCOL_VERSION], capabilities: [], runtimes: [],
+  });
+}
+
+/** The v3 answer to an accepted lone `conn.hello`. */
+function helloAccepted(hello: Envelope) {
+  return { accepted: 1, outcomes: [{ id: hello.id, outcome: 'accepted' as const }], ingress: TEST_ACTIVITY_INGRESS };
+}
+
 function outcomes(batch: readonly Envelope[]) {
   return batch.map((envelope, index) => ({ id: envelope.id, outcome: index < 2 ? 'rejected' as const : 'accepted' as const,
     ...(index < 2 ? { reason: 'limit_exceeded' } : {}) }));
@@ -52,7 +64,7 @@ describe('outbound settlement contract #397', () => {
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const settled: OutboundSettlement[] = [];
     const post = vi.spyOn(LongPollClient.prototype, 'postBatch').mockImplementation(async (batch) =>
-      batch[0]?.type === 'conn.hello' ? { accepted: 1 } : { accepted: 2, rejected: 2, outcomes: outcomes(batch) });
+      batch[0]?.type === 'conn.hello' ? helloAccepted(batch[0]) : { accepted: 2, rejected: 2, outcomes: outcomes(batch) });
     const batch = Array.from({ length: 4 }, (_, index) => createEnvelope('task.started', {}, { taskId: `task-${index}` }));
     const connection = await open(async (batch) => {
       if (batch[0]?.envelope.type !== 'conn.hello') { await gate; settled.push(...batch); }
@@ -70,7 +82,7 @@ describe('outbound settlement contract #397', () => {
   it('retains identical envelope bytes when the awaited local settlement fails', async () => {
     const business: readonly Envelope[][] = [] as Envelope[][];
     const post = vi.spyOn(LongPollClient.prototype, 'postBatch').mockImplementation(async (batch) => {
-      if (batch[0]?.type === 'conn.hello') return { accepted: 1 };
+      if (batch[0]?.type === 'conn.hello') return helloAccepted(batch[0]);
       (business as Envelope[][]).push([...batch]);
       return { accepted: 1, outcomes: [{ id: batch[0]!.id, outcome: business.length === 1 ? 'accepted' : 'duplicate' }] };
     });
@@ -109,5 +121,50 @@ describe('outbound settlement contract #397', () => {
     }
     response.mockResolvedValueOnce(new Response(JSON.stringify({ accepted: 0, rejected: 1, outcomes: [{ id: envelope.id, outcome: 'rejected', reason: 'future_observation' }] }), { status: 200 }));
     expect(await client.postBatch([envelope])).toEqual({ accepted: 0, rejected: 1, outcomes: [{ id: envelope.id, outcome: 'rejected', reason: 'unknown' }] });
+  });
+
+  it.each([
+    ['a counts-only answer without outcomes', 'business', (_id: string) => ({ accepted: 1 }), /outcomes/],
+    ['a counts-only rejection without outcomes', 'business', (_id: string) => ({ accepted: 0, rejected: 1 }), /outcomes/],
+    ['a rejected outcome without its reason', 'business', (id: string) => ({ accepted: 0, rejected: 1, outcomes: [{ id, outcome: 'rejected' }] }), /lacks its reason/],
+    ['an accepted conn.hello without ingress', 'hello', (id: string) => ({ accepted: 1, outcomes: [{ id, outcome: 'accepted' }], capabilities: [] }), /ingress/],
+    ['a deduplicated conn.hello without ingress', 'hello', (id: string) => ({ accepted: 1, outcomes: [{ id, outcome: 'duplicate' }] }), /ingress/],
+  ] as const)('rejects %s through the route-failure path (wire v3)', async (_label, kind, body, cause) => {
+    const client = new LongPollClient({ serverUrl: 'http://example.invalid', auth: await auth(), getCursor: () => 0, onEnvelope: () => {} });
+    const envelope = kind === 'hello'
+      ? helloEnvelope()
+      : createEnvelope('task.started', {}, { taskId: 'task' });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body(envelope.id)), { status: 200 })));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(await client.postBatch([envelope])).toBeUndefined();
+    const failure = warn.mock.calls.map(([, error]) => error).find((error) => error instanceof LongPollRouteError) as LongPollRouteError | undefined;
+    expect(failure?.status).toBe(200);
+    expect(String((failure?.cause as Error | undefined)?.message ?? failure?.cause)).toMatch(cause);
+  });
+
+  it('has no activity ingress before the accepted handshake and adopts the handshake advertisement', async () => {
+    const advertised = { activityMaxEvents: 7, activityMaxBytes: 4096 };
+    vi.spyOn(LongPollClient.prototype, 'postBatch').mockImplementation(async (batch) => ({ ...helloAccepted(batch[0]!), ingress: advertised }));
+    vi.spyOn(LongPollClient.prototype, 'start').mockImplementation(() => {});
+    vi.spyOn(LongPollClient.prototype, 'stop').mockImplementation(() => {});
+    connection = new ConnectionManager({ serverUrl: 'http://example.invalid', deviceId: 'settlement-device', productId: 'test',
+      capabilities: [], runtimes: [], auth: await auth(), cursorStore: { load: async () => undefined, save: async () => {} } as never,
+      onEnvelope: () => {}, longPollRetryDelayMs: 1,
+    });
+    expect(() => connection!.getIngressBudget()).toThrow(/no activity ingress has been advertised/);
+    await connection.start();
+    await vi.waitFor(() => expect(connection!.isOpen()).toBe(true));
+    expect(connection.getIngressBudget()).toEqual(advertised);
+  });
+
+  it('accepts a handshake answer that carries ingress and a rejected hello answer that carries none', async () => {
+    const client = new LongPollClient({ serverUrl: 'http://example.invalid', auth: await auth(), getCursor: () => 0, onEnvelope: () => {} });
+    const hello = helloEnvelope();
+    const response = vi.fn(); vi.stubGlobal('fetch', response);
+    response.mockResolvedValueOnce(new Response(JSON.stringify(helloAccepted(hello)), { status: 200 }));
+    expect(await client.postBatch([hello])).toEqual(helloAccepted(hello));
+    const refused = { accepted: 0, rejected: 1, outcomes: [{ id: hello.id, outcome: 'rejected', reason: 'unsupported' }] };
+    response.mockResolvedValueOnce(new Response(JSON.stringify(refused), { status: 200 }));
+    expect(await client.postBatch([hello])).toEqual(refused);
   });
 });

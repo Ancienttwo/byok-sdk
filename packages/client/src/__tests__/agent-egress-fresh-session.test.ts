@@ -13,6 +13,7 @@ import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import { testIngressBudget } from './fixtures/activity-ingress';
 
 const roots: string[] = [];
 let server: TestServer | undefined;
@@ -204,7 +205,7 @@ describe('fresh Agent egress session authority', () => {
     const handoffs = new AgentSessionHandoffStore();
     vi.spyOn(handoffs, 'record').mockRejectedValueOnce(new Error('fsync unavailable'));
     const sent: Envelope[] = [];
-    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       workspaceRoot: await tmpDir('byok-fresh-fsync-workspace-'),
       agentHome: new AgentHomeManager({ hostStorageRoot }),

@@ -33,6 +33,7 @@ import { startPreparedOperation } from './fixtures/prepared-operation';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
+import { testIngressBudget } from './fixtures/activity-ingress';
 
 const RUNTIME_FIXTURES = {
   pi: fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url)),
@@ -322,7 +323,7 @@ describe('SDK-owned Agent home contract', () => {
       resolveInstruction: async () => { throw new Error('not used'); },
       uploadArtifact: async () => { throw new Error('not used'); },
     };
-    const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
+    const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       workspaceRoot,
       agentHome,
@@ -364,7 +365,7 @@ describe('SDK-owned Agent home contract', () => {
     const storeDir = await makeRoot();
     const adapter = new StubRuntimeAdapter('pi');
     const sent: Envelope[] = [];
-    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       workspaceRoot: await makeRoot(),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
@@ -451,7 +452,7 @@ describe('SDK-owned Agent home contract', () => {
       expect(sent.some((entry) => entry.type === 'task.fail')).toBe(false);
       return realRecordTaskTerminal(...args);
     });
-    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       workspaceRoot: await makeRoot(),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
@@ -503,7 +504,7 @@ describe('SDK-owned Agent home contract', () => {
       expect(sent.some((entry) => entry.type === 'task.fail')).toBe(false);
       return realRecordTaskTerminal(...args);
     });
-    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       workspaceRoot: await makeRoot(),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
@@ -564,7 +565,7 @@ describe('SDK-owned Agent home contract', () => {
       return realRecordTaskTerminal(...args);
     });
     const agentHome = new AgentHomeManager({ hostStorageRoot });
-    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       workspaceRoot: await makeRoot(),
       agentHome,
@@ -615,7 +616,7 @@ describe('SDK-owned Agent home contract', () => {
     const evidenceFailures: NonNullable<TaskRunnerDeps['onAgentTerminalEvidenceFailure']> extends (event: infer T) => void ? T[] : never = [];
     const agentHome = new AgentHomeManager({ hostStorageRoot });
     const agentRef = ref('agent-permanent-prestart-failure', 'profile-1');
-    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       workspaceRoot: await makeRoot(),
       agentHome,
@@ -659,7 +660,7 @@ describe('SDK-owned Agent home contract', () => {
     const evidenceFailures: NonNullable<TaskRunnerDeps['onAgentTerminalEvidenceFailure']> extends (event: infer T) => void ? T[] : never = [];
     const agentHome = new AgentHomeManager({ hostStorageRoot });
     const agentRef = ref('agent-permanent-active-failure', 'profile-1');
-    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       workspaceRoot: await makeRoot(),
       agentHome,
@@ -716,7 +717,7 @@ describe('SDK-owned Agent home contract', () => {
 
     const adapter = new StubRuntimeAdapter('pi');
     const sent: Envelope[] = [];
-    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       workspaceRoot,
       agentHome: manager,
@@ -766,7 +767,7 @@ describe('SDK-owned Agent home contract', () => {
     const adapter = new StubRuntimeAdapter('pi');
     const manager = new AgentHomeManager({ hostStorageRoot });
     const agentRef = ref('agent-release-conflict', 'profile-1');
-    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       workspaceRoot: await makeRoot(),
       agentHome: manager,
