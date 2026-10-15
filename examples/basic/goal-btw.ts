@@ -3,17 +3,17 @@
 // There is no per-step time limit; a stuck step is bounded by the goal deadline,
 // and only when the Host calls tickGoal. No background timer is installed. The Host
 // owns authentication, selected context, semantic acceptance and scheduling.
-import type { ByokServer, FreshAgentEgressDispatchInput } from '@byok-sdk/server';
+import type { ByokServer, AgentExecutionInput } from '@byok-sdk/server';
 import type { DaemonConfig } from '@byok-sdk/client';
 import { HostRevisionConflict, SqliteGoalBtwStore, type HostSnapshot } from './goal-btw-store';
 
 export const GOAL_RESULT_CONTRACT = 'host-goal-step-v1';
 export const BTW_RESULT_CONTRACT = 'host-btw-answer-v1';
-export type BotTarget = Pick<FreshAgentEgressDispatchInput, 'deviceId' | 'agentRef' | 'egressPolicy'> & {
+export type BotTarget = Pick<AgentExecutionInput, 'deviceId'> & Pick<AgentExecutionInput['payload'], 'agentRef' | 'egressPolicy'> & {
   runtime: 'pi' | 'claude' | 'codex';
-  requiredToolsets?: FreshAgentEgressDispatchInput['requiredToolsets'];
+  requiredToolsets?: AgentExecutionInput['payload']['requiredToolsets'];
 };
-type Input = BotTarget & { taskId: string; instruction: string; terminalProjection: NonNullable<FreshAgentEgressDispatchInput['terminalProjection']> };
+type Input = AgentExecutionInput & { payload: AgentExecutionInput['payload'] & { instruction: string } };
 type Pending = { input: Input; phase: 'reserved' | 'sending' };
 export type GoalDecision =
   | { outcome: 'continue' | 'complete' }
@@ -32,7 +32,7 @@ export interface HostBtw {
   pending: Pending; answer: string | null; reason: string | null;
 }
 type Record = HostGoal | HostBtw;
-type Server = Pick<ByokServer, 'dispatchFreshAgentEgress' | 'tasks'>;
+type Server = Pick<ByokServer, 'executions' | 'tasks'>;
 
 function nonempty(value: unknown, label: string): asserts value is string {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${label} must be non-empty`);
@@ -111,9 +111,11 @@ export class GoalBtwHost {
       const execution = value.pending;
       if (!execution.input || !['reserved', 'sending'].includes(execution.phase)) throw new Error('Invalid reserved execution');
       const input = execution.input;
-      nonempty(input.taskId, 'reserved taskId'); nonempty(input.instruction, 'reserved instruction');
+      if (Object.keys(input).some(key => !['taskId', 'deviceId', 'payload'].includes(key)) || !input.payload) throw new Error('Reserved execution contains undeclared authority');
+      nonempty(input.taskId, 'reserved taskId'); nonempty(input.payload.instruction, 'reserved instruction');
       const contract = value.kind === 'goal' ? GOAL_RESULT_CONTRACT : BTW_RESULT_CONTRACT;
-      const { taskId: _id, instruction: _text, terminalProjection: projection, ...target } = input;
+      const { instruction: _text, terminalProjection: projection, ...selection } = input.payload;
+      const target = { deviceId: input.deviceId, ...selection };
       validateTarget(target);
       if (projection?.mode !== 'result-document' || projection.contract !== contract) throw new Error('Invalid reserved result authority');
       if (value.kind === 'goal') {
@@ -148,14 +150,15 @@ export class GoalBtwHost {
     if (goal.status !== 'active') throw new Error('Goal is not active');
     if (goal.steps >= goal.maxSteps || now >= goal.deadline) throw new Error('Goal budget exhausted');
     const instruction = `Objective:\n${goal.objective}\n\nHost-selected context:\n${context}\n\nReturn only a JSON document with contract "${GOAL_RESULT_CONTRACT}" and outcome "continue", "complete", "blocked" or "wait". blocked requires reason; wait requires reason and resumeAt (future epoch milliseconds or null for an external event). Report complete only with evidence that the objective is fulfilled.`;
-    const input: Input = { ...goal.target, taskId, instruction, terminalProjection: { mode: 'result-document', contract: GOAL_RESULT_CONTRACT } };
+    const { deviceId, ...selection } = goal.target;
+    const input: Input = { taskId, deviceId, payload: { ...selection, instruction, terminalProjection: { mode: 'result-document', contract: GOAL_RESULT_CONTRACT } } };
     goal.pending = { input, phase: 'reserved' }; goal.steps += 1; goal.resumeAt = null; goal.reason = null;
     return this.store.write(`goal:${id}`, revision, goal, taskId);
   }
   private async verifyOffer(input: Input): Promise<boolean> {
     const offer = await this.server.tasks.offer(input.taskId);
     if (!offer) return false;
-    const { taskId: _taskId, deviceId: _deviceId, ...payload } = input;
+    const { payload } = input;
     if (offer.taskId !== input.taskId || offer.deviceId !== input.deviceId || offer.type !== 'task.offer_for_agent_with_egress_fresh' || canonical(offer.payload) !== canonical(payload)) {
       throw new Error('Persisted SDK offer differs from the reserved Host input');
     }
@@ -166,7 +169,7 @@ export class GoalBtwHost {
     const attempt = await this.server.tasks.attempt(record.pending.input.taskId);
     if (attempt) {
       const input = record.pending.input;
-      if (attempt.taskId !== input.taskId || attempt.deviceId !== input.deviceId || !attempt.agentRef || !sameAgent(attempt.agentRef, input.agentRef)) throw new Error('Cancellation target differs from the reservation');
+      if (attempt.taskId !== input.taskId || attempt.deviceId !== input.deviceId || !attempt.agentRef || !sameAgent(attempt.agentRef, input.payload.agentRef)) throw new Error('Cancellation target differs from the reservation');
       await this.verifyOffer(input);
       await this.server.tasks.cancel(input.taskId, 'Host stopped this execution');
     }
@@ -196,7 +199,7 @@ export class GoalBtwHost {
       const latest = this.read<T>(kind, id);
       if (this.stopped(latest.value)) { await this.flushCancellation(latest.value); return latest; }
       if (latest.value.kind === 'goal' && latest.value.status !== 'active') return latest;
-      try { await this.server.dispatchFreshAgentEgress(input); }
+      try { await this.server.executions.submit(input); }
       catch (error) { if (!await this.verifyOffer(input)) throw error; }
     }
     const latest = this.read<T>(kind, id);
@@ -209,7 +212,7 @@ export class GoalBtwHost {
   private async terminal(input: Input) {
     const attempt = await this.server.tasks.attempt(input.taskId);
     if (!attempt) return undefined;
-    if (attempt.taskId !== input.taskId || attempt.deviceId !== input.deviceId || !attempt.agentRef || !sameAgent(attempt.agentRef, input.agentRef)) throw new Error('SDK attempt differs from the reservation');
+    if (attempt.taskId !== input.taskId || attempt.deviceId !== input.deviceId || !attempt.agentRef || !sameAgent(attempt.agentRef, input.payload.agentRef)) throw new Error('SDK attempt differs from the reservation');
     const terminal = await this.server.tasks.deviceTerminal(input.taskId);
     // Cancellation intent is authoritative even when a late complete exists.
     const latest = await this.server.tasks.attempt(input.taskId);
@@ -280,9 +283,10 @@ export class GoalBtwHost {
     if (!main?.agentRef || main.status !== 'running' || main.cancellation) throw new Error('The main task is not running');
     if (input.target.agentRef.agentId === main.agentRef.agentId) throw new Error('btw requires a different Agent home, not a different profileRevision');
     if (input.destination === input.mainDestination || input.taskId === input.mainTaskId) throw new Error('btw requires an independent task and destination');
-    const execution: Input = { ...input.target, taskId: input.taskId,
+    const { deviceId, ...selection } = input.target;
+    const execution: Input = { taskId: input.taskId, deviceId, payload: { ...selection,
       instruction: `Host-selected main-thread snapshot (${input.snapshotRevision}):\n${input.snapshot}\n\nSide question:\n${input.question}\n\nAnswer independently. Do not change or steer the main task. Return only JSON {"contract":"${BTW_RESULT_CONTRACT}","answer":"your answer"}.`,
-      terminalProjection: { mode: 'result-document', contract: BTW_RESULT_CONTRACT } };
+      terminalProjection: { mode: 'result-document', contract: BTW_RESULT_CONTRACT } } };
     return this.store.write(`btw:${input.id}`, null, {
       kind: 'btw', id: input.id, mainTaskId: input.mainTaskId, mainAgentId: main.agentRef.agentId,
       mainDestination: input.mainDestination, destination: input.destination, snapshotRevision: input.snapshotRevision,

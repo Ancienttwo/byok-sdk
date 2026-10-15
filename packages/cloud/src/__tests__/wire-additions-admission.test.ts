@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { WIRE_ADDITIONS, isServerToDaemonType, requiredReceiverCapabilities, type MessageType } from '@byok-sdk/protocol';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { ZodError } from 'zod';
+import { AgentExecutionInputSchema } from '../agent-execution';
 import { TENANT_A, createHarness, type CloudHarness } from './support/harness';
 
 /**
@@ -10,17 +12,31 @@ import { TENANT_A, createHarness, type CloudHarness } from './support/harness';
  * the protocol corpus, a device missing any one flag the table requires is
  * refused before task or mailbox state, and a device with every flag is not
  * refused for a capability.
+ *
+ * #470: fresh Agent offers have one hosted entry, `submitAgentExecution`. A
+ * corpus line that entry cannot express is refused by its schema before any
+ * device read; the closure case proves the expressible lines still exercise
+ * every fresh-surface flag.
  */
 
 type Enqueue = (harness: CloudHarness, deviceId: string, payload: never) => Promise<unknown>;
+
+const FRESH = 'task.offer_for_agent_with_egress_fresh' satisfies MessageType;
+/** Host input, not wire data: passed only when the payload selects `messageEgress`. */
+const CONTEXT = { destinationBinding: 'conversation/386/turn/1' };
 
 const ENQUEUE: Partial<Record<MessageType, Enqueue>> = {
   'task.offer': (h, d, payload) => h.cloud.enqueueOffer(TENANT_A, d, { taskId: 'gated', payload }),
   'task.offer_with_toolsets': (h, d, payload) => h.cloud.enqueueToolsetOffer(TENANT_A, d, { taskId: 'gated', payload }),
   'task.offer_for_agent': (h, d, payload) => h.cloud.enqueueAgentOffer(TENANT_A, d, { taskId: 'gated', payload }),
   'task.offer_for_agent_with_egress': (h, d, payload) => h.cloud.enqueueAgentEgressOffer(TENANT_A, d, { taskId: 'gated', payload }),
-  'task.offer_for_agent_with_egress_fresh': (h, d, payload) =>
-    h.cloud.enqueueFreshAgentEgressOffer(TENANT_A, d, { taskId: 'gated', payload }),
+  [FRESH]: (h, d, payload: { messageEgress?: unknown }) =>
+    h.cloud.submitAgentExecution(TENANT_A, {
+      taskId: 'gated',
+      deviceId: d,
+      payload: payload as never,
+      ...(payload.messageEgress === undefined ? {} : { agentMessageContext: CONTEXT }),
+    }),
   'task.offer_prepared': (h, d, payload) => h.cloud.enqueuePreparedOffer(TENANT_A, d, { taskId: 'gated', payload }),
   'agent.content.read': (h, d, payload) => h.cloud.enqueueAgentContentRead(TENANT_A, d, { payload }),
   'agent.home.projection': (h, d, payload) => h.cloud.enqueueAgentHomeProjection(TENANT_A, d, payload),
@@ -39,8 +55,12 @@ const gatedLines = readFileSync(corpusPath, 'utf8')
   })
   .filter((entry) => isServerToDaemonType(entry.type) && entry.flags.length > 0);
 
+/** Whether the line's surface has a hosted entry that accepts its payload. */
+const submitExpressible = (entry: (typeof gatedLines)[number]): boolean =>
+  entry.type !== FRESH || AgentExecutionInputSchema.shape.payload.safeParse(entry.payload).success;
+
 async function deviceWith(capabilities: readonly string[]): Promise<{ harness: CloudHarness; deviceId: string }> {
-  const harness = createHarness();
+  const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
   const device = await harness.pairDevice(TENANT_A);
   await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: [...capabilities] });
   return { harness, deviceId: device.deviceId };
@@ -55,6 +75,15 @@ async function errorCode(run: Promise<unknown>): Promise<string | undefined> {
   }
 }
 
+/** The fresh payload schema's one refusal for a corpus line without `terminalProjection`. */
+async function expectTerminalProjectionRequired(run: Promise<unknown>): Promise<void> {
+  const error = await run.then(() => undefined, (caught: unknown) => caught);
+  expect(error).toBeInstanceOf(ZodError);
+  expect((error as ZodError).issues).toEqual([
+    expect.objectContaining({ code: 'invalid_type', path: ['payload', 'terminalProjection'] }),
+  ]);
+}
+
 describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
   it('every device-advertised gated surface has a hosted enqueue path under test', () => {
     const surfaces = new Set(WIRE_ADDITIONS.flatMap((entry) =>
@@ -63,15 +92,37 @@ describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
     expect(new Set(gatedLines.map((entry) => entry.type))).toEqual(surfaces);
   });
 
+  it('every fresh-surface flag stays exercised through the hosted API', () => {
+    const union = (entries: readonly (typeof gatedLines)[number][]) => new Set(entries.flatMap((entry) => entry.flags));
+    const fresh = gatedLines.filter((entry) => entry.type === FRESH);
+    const table = new Set(
+      WIRE_ADDITIONS.flatMap((entry) => (entry.rule === 'gated' && entry.advertisedBy === 'device' && entry.surface === FRESH ? [entry.capability] : [])),
+    );
+    expect(union(fresh)).toEqual(table);
+    expect(union(fresh.filter(submitExpressible))).toEqual(table);
+    // The hosted entry requires an explicit terminal projection (#470), so the
+    // fresh lines without one stay inexpressible rather than being reclassified.
+    const withoutProjection = fresh.filter((entry) => entry.payload.terminalProjection === undefined);
+    expect(withoutProjection.length).toBeGreaterThan(0);
+    expect(withoutProjection.filter(submitExpressible)).toEqual([]);
+  });
+
   it.each(gatedLines.flatMap((entry) => entry.flags.map((flag) => [entry.line, entry.type, flag, entry] as const)))(
     'corpus line %i (%s) is refused without %s, before task or mailbox state',
     async (_line, type, flag, entry) => {
       const { harness, deviceId } = await deviceWith(entry.flags.filter((candidate) => candidate !== flag));
+      const capabilityReads = vi.spyOn(harness.stores.devices, 'get');
 
-      await expect(ENQUEUE[type]!(harness, deviceId, entry.payload as never)).rejects.toMatchObject({
-        code: 'agent_capability_missing',
-        message: expect.stringContaining(flag),
-      });
+      const run = ENQUEUE[type]!(harness, deviceId, entry.payload as never);
+      if (submitExpressible(entry)) {
+        await expect(run).rejects.toMatchObject({
+          code: 'agent_capability_missing',
+          message: expect.stringContaining(flag),
+        });
+      } else {
+        await expectTerminalProjectionRequired(run);
+        expect(capabilityReads).toHaveBeenCalledTimes(0);
+      }
       expect(await harness.cloud.readTaskAttempt(TENANT_A, 'gated')).toBeUndefined();
       const page = await harness.core.mailbox.readAfter(TENANT_A, { deviceId, afterSeq: 0, limit: 10 });
       expect(page.messages).toEqual([]);
@@ -82,7 +133,9 @@ describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
     'corpus line %i (%s) is not refused for a capability when the device advertises every flag the table requires',
     async (_line, type, entry) => {
       const { harness, deviceId } = await deviceWith(entry.flags);
-      expect(await errorCode(ENQUEUE[type]!(harness, deviceId, entry.payload as never))).not.toBe('agent_capability_missing');
+      const run = ENQUEUE[type]!(harness, deviceId, entry.payload as never);
+      if (submitExpressible(entry)) expect(await errorCode(run)).not.toBe('agent_capability_missing');
+      else await expectTerminalProjectionRequired(run);
     },
   );
 });

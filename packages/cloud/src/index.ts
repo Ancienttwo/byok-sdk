@@ -30,7 +30,6 @@ export type {
   PublicRouteLimiter,
   AgentDispatchInput,
   AgentEgressDispatchInput,
-  AgentEgressFreshSessionDispatchInput,
   AgentContentReadInput,
   AgentHomeProjectionInput,
   ProviderProvisioningNoticeInput,
@@ -372,7 +371,7 @@ export type {
 
 export type { DeviceTerminal } from './terminal-result';
 
-export { RecurringExecutionInputSchema, type RecurringExecutionInput } from './recurring';
+export { AgentExecutionInputSchema, type AgentExecutionInput } from './agent-execution';
 
 export { DEFAULT_RETENTION_POLICY, DEFAULT_MAINTENANCE_LIMIT, MAINTENANCE_STEPS, resolveRetentionPolicy } from './maintenance';
 export type { RetentionPolicy, MaintenanceInput, MaintenanceReport, MaintenanceStep, MaintenanceStepReport } from './maintenance';
