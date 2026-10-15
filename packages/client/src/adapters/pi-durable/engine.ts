@@ -1,5 +1,5 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import { Harness, createRegistry, defineExtension, defineDoc, hook, ToolTask, ROOT_CONVERSATION_ID, watchEvents, type AgentEvent, type ToolRegistration } from '@earendil-works/pi-durable';
+import { Harness, createRegistry, defineExtension, hook, ToolTask, ROOT_CONVERSATION_ID, watchEvents, type AgentEvent, type ToolRegistration } from '@earendil-works/pi-durable';
 import { CodingTools } from '@earendil-works/pi-durable/tools';
 import type { ToolCall } from '@earendil-works/pi-ai';
 import type { Models } from '@earendil-works/pi-ai/models';
@@ -8,7 +8,6 @@ import { durableToolDenial } from './guard';
 import { acquireReplicaLock, resetReplica, type DurableReplicaBinding } from './replica';
 import { openLocalDurableStorage, type DurableStorageFactory } from './storage';
 
-export const DurableResult = defineDoc({ kind: 'byok.result', version: 1, scope: 'conversation', history: 'latest', fork: 'initial', initial: () => ({ text: '' }) });
 export interface DurableEngineInput {
   file: string; replicaRoot: string; binding: DurableReplicaBinding;
   models: Models; model: { provider: string; modelId: string }; instruction: string;
@@ -17,7 +16,8 @@ export interface DurableEngineInput {
   shellOwnership?: { own(pid:number):Promise<void>; released(pid:number):void };
   beforeTool(id: string, taskId: string, call: ToolCall): Promise<void>;
   events(events: readonly AgentEvent[]): Promise<void>;
-  result(value: Readonly<{ text: string }>): Promise<void>;
+  /** Called once the durable run settled successfully. The structured outcome, if any, went through `submit_result`. */
+  completed(): Promise<void>;
 }
 /** The worker owns the lock until Harness, tools and storage have quiesced. */
 export async function openDurableEngine(input: DurableEngineInput) {
@@ -58,44 +58,28 @@ export async function openDurableEngine(input: DurableEngineInput) {
     stream = await watchEvents(harness, root.id, ctx);
     // Only final persisted usage is additive on attachment; transcript/tool history stays silent.
     if (input.resume) for (const entry of stream.snapshot.entries) if (entry.kind === 'pi.assistant') await input.events([{ type: 'message_end', entry }]);
-    let answer = '';
     let failed = false;
     stream.start(async events => {
       for (const event of events) {
         if (event.type === 'snapshot') continue;
         if (event.type === 'task_failed' || event.type === 'auto_retry_start' || event.type === 'compaction_start') failed = true;
-        if (event.type === 'message_end' && event.entry.kind === 'pi.assistant') {
-          const message = event.entry.model?.[0];
-          if (message?.role === 'assistant' && message.stopReason === 'stop') answer = message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('');
-        }
-        // Result persistence and task success are decided after idle, never by a per-model turn.
+        // Task success is decided after idle, never by a per-model turn.
         if (event.type !== 'run_end') await input.events([event]);
       }
     });
     const run = async () => {
-      if (input.resume) {
-        // Repeat submit with stable requestId: reacquires an existing settlement after a crash at run_end.
-        const submission = await root.submit({ type: 'input', content: input.instruction, requestId: input.binding.taskId, whenBusy: 'reject' }, ctx);
-        const settlement = await submission.wait(ctx);
-        if (settlement.status !== 'done') throw new Error('durable submission did not finish');
-      } else {
-        const submission = await root.submit({ type: 'input', content: input.instruction, requestId: input.binding.taskId, whenBusy: 'reject' }, ctx);
-        const settlement = await submission.wait(ctx);
-        if (settlement.status !== 'done') throw new Error('durable submission did not finish');
-      }
+      // Stable requestId: a repeat submit after a crash at run_end reacquires the existing settlement.
+      const submission = await root.submit({ type: 'input', content: input.instruction, requestId: input.binding.taskId, whenBusy: 'reject' }, ctx);
+      const settlement = await submission.wait(ctx);
+      if (settlement.status !== 'done') throw new Error('durable submission did not finish');
       await root.waitForIdle(ctx);
-      const stopped = await stream!.stop(); // joins delivered terminal entries before selecting the result
+      const stopped = await stream!.stop(); // joins delivered terminal entries before reporting completion
       if (stopped.reason === 'listener_error') throw stopped.error;
       if (failed) throw new Error('durable run failed');
-      // A settled answer can be in the ignored attachment snapshot after child recovery.
-      if (!answer) {
-        const context = await root.context(ctx);
-        const last = [...context.messages].reverse().find(message => message.role === 'assistant' && message.stopReason === 'stop');
-        if (last?.role === 'assistant') answer = last.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('');
-      }
-      const result = await root.commit(async tx => { const doc = await tx.doc(DurableResult, root.id); doc.text = answer; return { text: doc.text }; }, ctx);
-      if (!result) throw new Error('durable result document missing');
-      await input.result(result);
+      // No in-replica result document: a result-document offer's outcome is
+      // staged by the daemon through the reserved submit_result tool, and the
+      // daemon decides the terminal at turn_end.
+      await input.completed();
     };
     return { run, close, abort: () => root.abort(ctx) };
   } catch (error) { await close(); throw error; }

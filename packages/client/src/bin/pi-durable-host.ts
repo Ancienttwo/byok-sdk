@@ -118,7 +118,7 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
             write({ type: 'agent_event', event: normalized, ...(event.type === 'message_end' ? { usageId: String(event.entry.id) } : {}) });
           }
         } },
-        result: async document => { write({ type: 'durable_result', document }); write({ type: 'durable_complete' }); },
+        completed: async () => { write({ type: 'durable_complete' }); },
       });
       write({ type: 'response', id, success: true, projectionDigest, workerPid:process.pid });
       void engine.run().catch(() => { write({ type: 'durable_failed' }); });

@@ -561,6 +561,60 @@ export interface AgentMessagePublishResult {
   state: 'staged' | 'pending';
 }
 
+/**
+ * `agent_results.describe`: the SDK result helper asks, by its per-task
+ * context token, for the one tool it advertises. The schema is the offer's
+ * frozen result schema and travels only over this authenticated socket,
+ * never through the helper's environment or argv.
+ */
+export interface AgentResultDescribeParams {
+  contextToken: string;
+}
+
+export function parseAgentResultDescribeParams(value: unknown): AgentResultDescribeParams | undefined {
+  if (!isRecord(value) || Object.keys(value).some((key) => key !== 'contextToken')) return undefined;
+  if (typeof value.contextToken !== 'string' || value.contextToken.length < 32 || value.contextToken.length > 160) return undefined;
+  return { contextToken: value.contextToken };
+}
+
+export interface AgentResultDescribeResult {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}
+
+/**
+ * `agent_results.submit`: the helper forwards the model's raw `submit_result`
+ * arguments as `outcome`. The daemon is the only validator.
+ */
+export interface AgentResultSubmitParams {
+  contextToken: string;
+  outcome: unknown;
+}
+
+export function parseAgentResultSubmitParams(value: unknown): AgentResultSubmitParams | undefined {
+  if (!isRecord(value) || Object.keys(value).some((key) => key !== 'contextToken' && key !== 'outcome')) return undefined;
+  if (typeof value.contextToken !== 'string' || value.contextToken.length < 32 || value.contextToken.length > 160) return undefined;
+  if (!Object.hasOwn(value, 'outcome')) return undefined;
+  return { contextToken: value.contextToken, outcome: value.outcome };
+}
+
+/** One bounded validation issue, as the protocol's `validateResultOutcome` reports it. */
+export interface AgentResultIssue {
+  pointer: string;
+  keyword: string;
+  message: string;
+}
+
+/**
+ * `staged` means only that the canonical outcome is durably recorded for this
+ * task; delivery is decided at `turn_end`. `rejected` stores nothing and the
+ * runtime may submit again.
+ */
+export type AgentResultSubmitResult =
+  | { state: 'staged'; receiptId: string }
+  | { state: 'rejected'; reason: string; issues: AgentResultIssue[]; truncated: boolean };
+
 export interface AgentMemoryRecallParams {
   contextToken: string;
   path: string;

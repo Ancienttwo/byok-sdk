@@ -15,9 +15,7 @@ import { promises as fs, constants as fsConstants } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import {
-  checkResultDocument,
   createEnvelope,
-  RESULT_DOCUMENT_MAX_BYTES,
   RuntimeIdSchema,
   PreparedAgentMemoryModeSchema,
   TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS,
@@ -30,7 +28,6 @@ import {
   type BlobRef,
   type Envelope,
   type PreparedAgentMemoryMode,
-  type ResultDocumentCheck,
   type RuntimeId,
   type TerminalInferenceUsage,
   type TerminalPreparedObservation,
@@ -46,6 +43,7 @@ import {
   type TaskOfferWithToolsetsPayload,
   type InputPreparationOfferBinding,
   requiredReceiverCapabilities,
+  validateResultOutcome,
 } from '@byok-sdk/protocol';
 import {
   SteerUnsupportedError,
@@ -98,7 +96,13 @@ import {
 } from '../runtime-failure';
 import { ApprovalNotFoundError, type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
-import type { TaskQueueWatermark } from './control-protocol';
+import type {
+  AgentResultDescribeParams,
+  AgentResultDescribeResult,
+  AgentResultSubmitParams,
+  AgentResultSubmitResult,
+  TaskQueueWatermark,
+} from './control-protocol';
 import { DEFAULT_MAX_INLINE_EVENT_BYTES, spillOversizedEvent } from './event-spill';
 import { buildRuntimeEnv } from './environment';
 import { toRuntimeInfoCapabilities } from './runtime-capabilities';
@@ -114,7 +118,13 @@ import { prependGitWorkspaceGuidance } from './git-workspace';
 import type { GitWorkspaceStore, GitWorkspaceLedgerRecord, GitWorkspacePhase } from './git-workspace-store';
 import type { AgentEgressController } from './agent-egress-controller';
 import { AgentMessageOutbox, type AgentMessageOutboxRecord } from './agent-message-outbox';
-import { AGENT_MEMORY_MCP_SERVER_NAME, AGENT_MESSAGE_MCP_SERVER_NAME } from '../sdk-reserved-mcp';
+import {
+  AGENT_MEMORY_MCP_SERVER_NAME,
+  AGENT_MESSAGE_MCP_SERVER_NAME,
+  AGENT_RESULT_MCP_SERVER_NAME,
+  AGENT_RESULT_TOOL_NAME,
+} from '../sdk-reserved-mcp';
+import { AgentResultStore, type AgentResultRecord } from './agent-result-store';
 import {
   McpAuthorityError,
   MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS,
@@ -255,23 +265,23 @@ export const ACTIVITY_INGRESS_EXCEEDED_REASON_PREFIX =
   'resource limit exceeded: activity ingress budget';
 
 /**
- * additive-minor (`task.complete.document`): same stable-PREFIX contract as
- * {@link MAX_DURATION_EXCEEDED_REASON_PREFIX} above, carried by every
- * `task.fail` this daemon reports because a configured
- * `DaemonConfig.resultDocument` extractor produced a document that could not
- * be delivered — over the cap, not JSON-serializable, or destined for a
- * server that never advertised the `result-document` capability. All three
- * are `retryable: false`: none of them can come out differently on a retry
- * against the same server with the same extractor. Everything after the
- * prefix is human-readable detail (including the measured size), not part of
- * the stable shape.
- *
- * There is deliberately no "send it anyway" or "send it truncated" path.
- * A document is the task's PRIMARY structured result, so quietly dropping or
- * mangling it would report success while destroying the thing the task
- * existed to produce.
+ * Wire v3 result channel: the stable reason PREFIX of the `task.fail` a
+ * `terminalProjection.mode: 'result-document'` task gets when its runtime
+ * ended the turn without a staged `submit_result` outcome. Same
+ * stable-prefix contract as {@link MAX_DURATION_EXCEEDED_REASON_PREFIX};
+ * `retryable: false`, because the same offer on the same runtime has no
+ * reason to submit on a second attempt. The SDK never derives the outcome
+ * from the runtime's text.
  */
-export const RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX = 'result document undeliverable';
+export const RESULT_NOT_SUBMITTED_REASON_PREFIX = 'result_not_submitted';
+
+/**
+ * Stable reason PREFIX of the `task.fail` a result-document task gets when
+ * its staged outcome cannot be read back at `turn_end` (an unreadable or
+ * mismatched record in the Agent home). `retryable: false`; the record is
+ * preserved for repair.
+ */
+export const RESULT_UNREADABLE_REASON_PREFIX = 'result_unreadable';
 
 /**
  * Bounded admission: the stable reason PREFIX a prepared Execution's
@@ -355,70 +365,6 @@ function observePreparedCall(
   return undefined;
 }
 
-/**
- * The task identity handed to a {@link ResultDocumentExtractor} alongside the
- * final output text. Deliberately minimal — identity only, no session
- * handle, no workspace path, no adapter: this seam exists to turn text the
- * runtime already produced into the product's own JSON, not to become a
- * general-purpose end-of-task callback with access to the daemon's innards.
- */
-export interface ResultDocumentTask {
-  readonly taskId: string;
-  readonly sessionRef: string;
-  /** Exact offer-scoped second projection; absent for legacy and message-only offers. */
-  readonly terminalProjection?: Readonly<TerminalProjectionSelection>;
-  /**
-   * The runtime's closing reply, the same text as `task.complete.finalMessage`.
-   * `finalOutput` stays the whole run's text. Absent when the run ended with
-   * no closing text.
-   */
-  readonly finalMessage?: string;
-}
-
-/**
- * Host-supplied glue that turns a finished task's final output into the
- * product's structured terminal result (`task.complete.document`). Returning
- * `undefined` means "this task has no structured result" for legacy offers.
- * An explicit `terminalProjection.mode: 'result-document'` instead treats
- * `undefined` as a fail-closed missing required document.
- *
- * SYNCHRONOUS by contract, like every other single-purpose callback on
- * `TaskRunnerDeps`, and the runtime ENFORCES that rather than trusting it:
- * the returned value is treated as data and JSON-encoded as-is, never
- * awaited, so a returned promise would encode to an empty document (`{}`) —
- * a well-formed, under-cap, and completely WRONG result. A thenable return
- * is therefore rejected exactly like a throw (`task.fail`, `retryable:
- * false`), because delivering a confidently wrong terminal result is worse
- * than delivering none.
- *
- * Throwing is a real outcome, not a nuisance: it fails the task
- * (`retryable: false`) rather than completing it without the result the
- * extractor was supposed to produce — see {@link
- * RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX}.
- */
-export type ResultDocumentExtractor = (finalOutput: string, task: ResultDocumentTask) => unknown;
-
-/**
- * Human-readable detail for a rejected document, one branch per rejection
- * reason the protocol's own {@link checkResultDocument} can return. Kept
- * exhaustive over the union (the `never` default) so a new rejection reason
- * added upstream fails this package's typecheck instead of silently
- * degrading into a vague catch-all message.
- */
-function resultDocumentRejectionDetail(check: Extract<ResultDocumentCheck, { ok: false }>): string {
-  switch (check.reason) {
-    case 'over-cap':
-      return `${check.bytes} bytes as canonical JSON, over the ${RESULT_DOCUMENT_MAX_BYTES}-byte limit (it is never truncated — a truncated JSON document is not valid JSON; use artifactRefs for a result this size)`;
-    case 'not-serializable':
-      return 'not JSON-serializable (JSON.stringify threw, or produced no output at all)';
-    case 'not-plain-json':
-      return 'not plain JSON data: it does not equal its own JSON round trip, so serializing it would silently change it (an undefined-valued key, NaN, a function or symbol value, a Date, a toJSON that rewrites the value, or a getter that answers differently on a second read)';
-    default: {
-      const exhaustive: never = check;
-      throw new Error(`unhandled result document rejection: ${JSON.stringify(exhaustive)}`);
-    }
-  }
-}
 
 /**
  * M5 batch-3 (workstream 2): default cap (64 MiB) on accumulated
@@ -684,21 +630,23 @@ export interface TaskRunnerDeps {
    */
   admissionGuard?: (offer: { readonly taskId: string; readonly payload: AcceptedOfferPayload }) => AdmissionGuardDecision;
   /**
-   * additive-minor (`task.complete.document`): the host's structured-result
-   * extractor, consulted once per task at the moment `task.complete` is
-   * built — see {@link ResultDocumentExtractor} and `DaemonConfig
-   * .resultDocument` (`create-daemon.ts`) for the full contract.
-   *
-   * Optional, and absent by default: with no extractor supplied, the
-   * completion path is byte-identical to what it was before this seam
-   * existed — no document is computed, no capability is consulted, and
-   * `task.complete` carries exactly the fields it always did.
+   * True only when every terminal envelope this runner sends is recorded in
+   * the durable local journal before it reaches the transport. A
+   * result-document offer needs that persist-before-send boundary, so a
+   * runner without it declines such offers.
    */
-  resultDocument?: { readonly extract: ResultDocumentExtractor };
+  terminalJournal?: boolean;
   durablePi?: boolean;
   recordDurableTransition?(taskId: string, leaseId: string, kind: string, ordinal: number): Promise<void>;
   /** SDK-owned, task-scoped MCP helper. Required only for offers declaring messageEgress. */
   agentMessageMcpBin?: Readonly<ResolvedAgentMessageMcpBin>;
+  /** SDK-owned, task-scoped `submit_result` helper. Required only for result-document offers. */
+  agentResultMcpBin?: Readonly<ResolvedAgentMessageMcpBin>;
+  /** Pre-runtime handshake gate for the exact result helper config; same contract as `agentMessageMcpPreflight`. */
+  agentResultMcpPreflight?: (
+    server: Readonly<McpStdioServerConfig>,
+    env: Readonly<Record<string, string>>,
+  ) => Promise<void>;
   /**
    * Production pre-runtime executability/handshake gate for the exact message
    * helper config. `env` is the same child environment the runtime
@@ -786,8 +734,7 @@ interface ActiveTask {
    * user-visible reply is the model's closing answer rather than its
    * intermediate narration ("let me read X first…") glued in front of it.
    *
-   * The same slice is `task.complete.finalMessage` and the extractor's
-   * `ResultDocumentTask.finalMessage`, so the host reads the same closing reply
+   * The same slice is `task.complete.finalMessage`, so the host reads the same closing reply
    * the daemon would publish. An adapter whose descriptor sets
    * `progressEventsAreMessages` (Codex) also resets it at each `progress`
    * event, so the slice is that runtime's last whole message.
@@ -867,12 +814,28 @@ interface ActiveTask {
   disposalAttempt?: Promise<void>;
   messageRequirement?: Readonly<AgentMessageEgressRequirement>;
   terminalProjection?: Readonly<TerminalProjectionSelection>;
+  /** Present exactly for a result-document task: where its `submit_result` outcome is staged. */
+  resultStore?: AgentResultStore;
   messageOutbox?: AgentMessageOutbox;
   /** A send attempt may already have entered transport; failure must preserve its admission recovery. */
   messageSendAttempted?: boolean;
   messageAccepted?: boolean;
   pendingMessageCompletion?: { readonly finalOutput: string; readonly document?: unknown };
   messageRetryTimer?: ReturnType<typeof setTimeout>;
+}
+
+/**
+ * One result-document task's `submit_result` binding. The schema and contract
+ * are the offer's frozen selection; `store`/`agentRef` are bound once the
+ * Agent home is initialized, before the runtime starts.
+ */
+interface AgentResultContext {
+  readonly taskId: string;
+  readonly token: string;
+  readonly contract: string;
+  readonly schema: unknown;
+  store?: AgentResultStore;
+  agentRef?: AgentRef;
 }
 
 interface PendingMessageTask {
@@ -1394,6 +1357,10 @@ export class TaskRunner {
   private readonly messageOutboxesByHome = new Map<string, Promise<AgentMessageOutbox>>();
   private readonly messageContextByToken = new Map<string, string>();
   private readonly messageContextByTask = new Map<string, string>();
+  /** Per-task `submit_result` authority, minted at injection and revoked at `turn_end` or teardown. */
+  private readonly resultContextByToken = new Map<string, AgentResultContext>();
+  private readonly resultContextByTask = new Map<string, AgentResultContext>();
+  private readonly resultStoresByHome = new Map<string, Promise<AgentResultStore>>();
   private readonly memoryContextByToken = new Map<string, { readonly taskId: string; readonly agentRef: AgentRef; readonly mode: 'read' | 'read-write' }>();
   private readonly memoryContextByTask = new Map<string, string>();
   private readonly memoryInFlightByTask = new Map<string, Set<Promise<unknown>>>();
@@ -1561,6 +1528,7 @@ export class TaskRunner {
       onDisposed: taskId => {
         this.pendingMessageTasks.delete(taskId);
         this.revokeAgentMessageContext(taskId);
+        this.revokeAgentResultContext(taskId);
         this.revokeAgentMemoryContext(taskId);
         this.deleteHostToolsetContexts(taskId);
       },
@@ -1659,6 +1627,74 @@ export class TaskRunner {
     if (activated === undefined) throw new Error('Agent message draft disappeared before activation');
     this.sendAgentMessageRecord(context.outbox, activated);
     return { messageId: activated.messageId, state: 'pending' };
+  }
+
+  /**
+   * Authenticated control-socket entry used only by the SDK result helper:
+   * the one tool it advertises, whose `inputSchema` is the offer's frozen
+   * result schema. Valid from injection (the helper preflight lists tools
+   * before the runtime starts) until `turn_end` or teardown revokes it.
+   */
+  describeAgentResult(input: AgentResultDescribeParams): AgentResultDescribeResult {
+    const context = this.resultContextByToken.get(input.contextToken);
+    if (context === undefined || this.resultContextByTask.get(context.taskId) !== context || this.pendingCancelled.has(context.taskId)) {
+      throw new Error('invalid or expired Agent result task context');
+    }
+    return {
+      name: AGENT_RESULT_TOOL_NAME,
+      description: `Submit this task's one structured result (contract ${context.contract}) as the arguments of this call; they must satisfy the input schema. `
+        + 'A successful call returns a receipt: the result is staged and is delivered when your turn ends. '
+        + 'A rejected call stores nothing and lists the problems; correct the arguments and call again. '
+        + 'Once staged, the result is immutable: a different result for the same task is refused.',
+      inputSchema: context.schema as Record<string, unknown>,
+    };
+  }
+
+  /**
+   * Authenticated control-socket entry used only by the SDK result helper.
+   * Validates the raw outcome against the frozen schema, then stages the
+   * canonical snapshot durably before answering. `staged` is the only ack;
+   * delivery happens at `turn_end`. A rejected outcome stores nothing.
+   */
+  async submitAgentResult(input: AgentResultSubmitParams): Promise<AgentResultSubmitResult> {
+    const context = this.resultContextByToken.get(input.contextToken);
+    if (context === undefined || this.resultContextByTask.get(context.taskId) !== context) {
+      throw new Error('invalid or expired Agent result task context');
+    }
+    const { taskId } = context;
+    const active = this.tasks.get(taskId);
+    const isCurrent = (): boolean => {
+      if (this.resultContextByToken.get(input.contextToken) !== context
+        || this.resultContextByTask.get(taskId) !== context || this.pendingCancelled.has(taskId)) return false;
+      const current = this.tasks.get(taskId);
+      return current === undefined ? active === undefined : (active === undefined || current === active) && this.canPublishAgentMessage(current);
+    };
+    if (!isCurrent()) throw new Error('invalid or expired Agent result task context');
+    const { store, agentRef } = context;
+    const tenantId = this.deps.tenantId;
+    if (store === undefined || agentRef === undefined || tenantId === undefined) {
+      throw new Error('the Agent result store is not bound for this task');
+    }
+    const check = validateResultOutcome(context.schema, input.outcome);
+    if (!check.ok) {
+      return {
+        state: 'rejected',
+        reason: check.reason,
+        issues: check.issues.map((issue) => ({ pointer: issue.pointer, keyword: issue.keyword, message: issue.message })),
+        truncated: check.truncated,
+      };
+    }
+    const record = await store.stage({
+      taskId,
+      tenantId,
+      agentRef,
+      contract: context.contract,
+      schema: context.schema,
+      outcome: check.canonical,
+      byteCount: check.bytes,
+    });
+    if (!isCurrent()) throw new Error('invalid or expired Agent result task context');
+    return { state: 'staged', receiptId: record.receiptId };
   }
 
   /** Authenticated control-socket entry used only by the SDK-owned memory MCP helper. */
@@ -2169,9 +2205,21 @@ export class TaskRunner {
       decline('required Agent message egress is unavailable on this daemon', false);
       return;
     }
-    if (terminalProjection?.mode === 'result-document' && this.deps.resultDocument === undefined && this.deps.durablePi !== true) {
-      decline('offer requires a result document but this daemon has no resultDocument extractor', false);
-      return;
+    if (terminalProjection?.mode === 'result-document') {
+      // Persist-before-send: without the journal there is no store that makes
+      // a delivered outcome durable before the transport sees it.
+      if (this.deps.terminalJournal !== true) {
+        decline('offer requires a result document but this daemon has no durable terminal journal', false);
+        return;
+      }
+      if (preparation !== undefined) {
+        decline('offer requires a result document but the prepared lane does not host the submit_result channel', false);
+        return;
+      }
+      if (agentRef === undefined || this.deps.tenantId === undefined || this.deps.agentResultMcpBin === undefined) {
+        decline('offer requires a result document but this daemon cannot host the submit_result channel: it needs an Agent offer, an enrolled tenant and the SDK result helper', false);
+        return;
+      }
     }
 
     // Finding #5: mark this taskId as "in-flight" for the entire remainder
@@ -2354,6 +2402,20 @@ export class TaskRunner {
             await agentBinding.lease.release().catch(() => {});
             agentBinding = undefined;
             decline(`Agent message outbox initialization failed: ${outboundErrorMessage(error)}`, true);
+            return;
+          }
+        }
+        if (terminalProjection?.mode === 'result-document') {
+          try {
+            const store = await this.agentResultStore(agentBinding.resolution.canonicalHome);
+            const context = this.resultContextByTask.get(taskId);
+            if (context === undefined) throw new Error('the task result context was revoked before its Agent home was bound');
+            context.store = store;
+            context.agentRef = agentBinding.resolution.agentRef;
+          } catch (error) {
+            await agentBinding.lease.release().catch(() => {});
+            agentBinding = undefined;
+            decline(`Agent result store initialization failed: ${outboundErrorMessage(error)}`, true);
             return;
           }
         }
@@ -2798,7 +2860,10 @@ export class TaskRunner {
         const disposalFailure = isRuntimeStartupDisposalFailure(err);
         const cancelled = this.pendingCancelled.has(taskId);
         if (disposalFailure || cancelled) {
-          if (cancelled) this.revokeAgentMessageContext(taskId);
+          if (cancelled) {
+            this.revokeAgentMessageContext(taskId);
+            this.revokeAgentResultContext(taskId);
+          }
           const ownedBinding = agentBinding;
           const cancellation = createEnvelope('task.cancelled', {
             reason: this.pendingCancelled.get(taskId),
@@ -2942,6 +3007,7 @@ export class TaskRunner {
           messageOutbox: this.pendingMessageTasks.get(taskId)!.outbox,
         }),
         ...(terminalProjection === undefined ? {} : { terminalProjection }),
+        ...(terminalProjection?.mode !== 'result-document' ? {} : { resultStore: this.resultContextByTask.get(taskId)?.store }),
       };
 
       // A strict Agent handoff is the local restart authority. It is
@@ -3084,6 +3150,7 @@ export class TaskRunner {
           // its would-be children die with it.
           this.pendingMessageTasks.delete(taskId);
           this.revokeAgentMessageContext(taskId);
+          this.revokeAgentResultContext(taskId);
           this.revokeAgentMemoryContext(taskId);
           this.deleteHostToolsetContexts(taskId);
           await agentBinding?.lease.release().catch(() => {});
@@ -3316,7 +3383,9 @@ export class TaskRunner {
     try {
       pick = await this.pickAdapter(
         requestedRuntime,
-        requiredToolsets !== undefined || (preparation === undefined && messageRequirement !== undefined) || requiresAgentMemoryMcp || preparedMemorySelected,
+        requiredToolsets !== undefined
+          || (preparation === undefined && (messageRequirement !== undefined || terminalProjection?.mode === 'result-document'))
+          || requiresAgentMemoryMcp || preparedMemorySelected,
         blobAbort.signal,
       );
     } catch (error) {
@@ -3328,7 +3397,6 @@ export class TaskRunner {
       decline(pick.reason, pick.retryable);
       return undefined;
     }
-    if (terminalProjection?.mode === 'result-document' && !this.deps.resultDocument && pick.descriptor.capabilities.durablePi !== true) { decline('selected runtime has no result document extractor', false); return undefined; }
     if (readerAttempt && pick.descriptor.capabilities.durablePi === true) {
       // Durable Pi binds its replica to the canonical home as its cwd.
       decline('durable Pi runs only in the canonical Agent home; it does not run memory-reader Attempts', false);
@@ -3363,6 +3431,7 @@ export class TaskRunner {
       : undefined;
     if (preparation === undefined) {
       taskMcpServers = this.withAgentMessageMcp(taskMcpServers, taskId, messageRequirement);
+      taskMcpServers = this.withAgentResultMcp(taskMcpServers, taskId, terminalProjection);
     }
     // Only the adapters that register projected toolset tools themselves
     // need the daemon's `tools/list` observation (see
@@ -3376,6 +3445,14 @@ export class TaskRunner {
         await this.deps.agentMessageMcpPreflight(taskMcpServers![AGENT_MESSAGE_MCP_SERVER_NAME]!, mcpEnv);
       } catch (error) {
         decline(`required Agent message helper preflight failed: ${outboundErrorMessage(error)}`, false);
+        return undefined;
+      }
+    }
+    if (preparation === undefined && terminalProjection?.mode === 'result-document' && this.deps.agentResultMcpPreflight !== undefined) {
+      try {
+        await this.deps.agentResultMcpPreflight(taskMcpServers![AGENT_RESULT_MCP_SERVER_NAME]!, mcpEnv);
+      } catch (error) {
+        decline(`required Agent result helper preflight failed: ${outboundErrorMessage(error)}`, false);
         return undefined;
       }
     }
@@ -3490,6 +3567,49 @@ export class TaskRunner {
         }),
       }),
     });
+  }
+
+  private withAgentResultMcp(
+    existing: Readonly<Record<string, McpStdioServerConfig>> | undefined,
+    taskId: string,
+    selection: Readonly<TerminalProjectionSelection> | undefined,
+  ): Readonly<Record<string, McpStdioServerConfig>> | undefined {
+    if (selection?.mode !== 'result-document') return existing;
+    const bin = this.deps.agentResultMcpBin!;
+    const contextToken = `${randomUUID()}.${randomUUID()}`;
+    this.revokeAgentResultContext(taskId);
+    const context: AgentResultContext = { taskId, token: contextToken, contract: selection.contract, schema: selection.schema };
+    this.resultContextByToken.set(contextToken, context);
+    this.resultContextByTask.set(taskId, context);
+    return Object.freeze({
+      ...(existing ?? {}),
+      [AGENT_RESULT_MCP_SERVER_NAME]: Object.freeze({
+        command: bin.command,
+        args: Object.freeze([...bin.args]),
+        env: Object.freeze({
+          BYOK_STORE_DIR: this.deps.storeDir,
+          BYOK_PRODUCT_ID: this.deps.productId,
+          BYOK_AGENT_RESULT_CONTEXT: contextToken,
+        }),
+      }),
+    });
+  }
+
+  private revokeAgentResultContext(taskId: string): void {
+    const context = this.resultContextByTask.get(taskId);
+    if (context !== undefined) this.resultContextByToken.delete(context.token);
+    this.resultContextByTask.delete(taskId);
+  }
+
+  private agentResultStore(homeDir: string): Promise<AgentResultStore> {
+    const existing = this.resultStoresByHome.get(homeDir);
+    if (existing !== undefined) return existing;
+    const opened = AgentResultStore.open(homeDir);
+    this.resultStoresByHome.set(homeDir, opened);
+    void opened.catch(() => {
+      if (this.resultStoresByHome.get(homeDir) === opened) this.resultStoresByHome.delete(homeDir);
+    });
+    return opened;
   }
 
   private revokeAgentMessageContext(taskId: string): void {
@@ -4024,12 +4144,11 @@ export class TaskRunner {
           active.batcher.push(event);
           active.batcher.flush();
           const finalOutput = active.summaryParts.join('');
-          // additive-minor (`task.complete.document`): resolved BEFORE the
-          // 'completed' git observation below, so a task that cannot deliver
-          // its structured result takes the salvage path `fail()` already
-          // applies to every other failure — rather than being observed as
-          // completed and only then failed.
-          const outcome = await this.resolveResultDocument(active, finalOutput);
+          // Resolved BEFORE the 'completed' git observation below, so a task
+          // that cannot deliver its required result takes the salvage path
+          // `fail()` already applies to every other failure — rather than
+          // being observed as completed and only then failed.
+          const outcome = await this.resolveStagedResult(active);
           if (!outcome.deliver) return; // already reported task.fail and finished
           await this.observeGit(active, 'completed');
           if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
@@ -4175,14 +4294,6 @@ export class TaskRunner {
   }
 
   private async publishSuccessfulCompletion(active: ActiveTask, finalOutput: string, document?: unknown): Promise<void> {
-    if (document !== undefined && !this.hasResultDocumentCapability()) {
-      await this.fail(
-        active.taskId,
-        `${RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX}: the connected server stopped advertising the result-document capability before this completion could be sent (a reconnect to an older server), so it would silently discard this document`,
-        false,
-      );
-      return;
-    }
     await this.settleSemanticTerminal(active, async () => {
       await this.persistAgentTerminalEvidence(active, 'complete');
       const finalMessage = closingReply(active);
@@ -5002,157 +5113,51 @@ export class TaskRunner {
   }
 
   /**
-   * additive-minor (`task.complete.document`): the whole daemon-side gate
-   * between a configured {@link ResultDocumentExtractor} and the wire —
-   * called once, from the `turn_end` completion path, immediately before
-   * `task.complete` is built.
+   * Wire v3 result channel, at `turn_end`: the one place a staged
+   * `submit_result` outcome becomes `task.complete.document`.
    *
-   * `{deliver: true}` means "go on and send `task.complete`", carrying the
-   * document when there is one. `{deliver: false}` means this method has
-   * ALREADY reported `task.fail` and finished the task; the caller must
-   * return without sending anything further.
+   * `{deliver: true}` means "go on and send `task.complete`", with the staged
+   * canonical outcome when the offer is `mode: 'result-document'`.
+   * `{deliver: false}` means this method has ALREADY reported `task.fail`
+   * (or the task was finished meanwhile by someone else); the caller returns.
    *
-   * Four fail-closed branches, all `retryable: false` (see
-   * {@link RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX} for why none of them
-   * can succeed on a retry):
-   *
-   *   1. The extractor threw — its error is surfaced, never swallowed.
-   *   2. The extractor returned a thenable, violating the synchronous
-   *      contract in the one way that would otherwise ship a wrong answer.
-   *   3. The document is over the cap, not JSON-serializable, or not plain
-   *      JSON data, per `checkResultDocument` — the protocol's OWN check,
-   *      imported rather than reimplemented, so this gate and the server's
-   *      schema validation can never disagree about what is legal.
-   *   4. The connected server never advertised `result-document`. Its
-   *      tolerant `z.object()` would silently strip the field on arrival
-   *      (`version.ts`'s own flag doc comment), so "send anyway" is not a
-   *      degraded-but-working path — it is the task's primary structured
-   *      result being deleted in transit with nothing reported anywhere.
-   *
-   * The capability is checked LAST, deliberately: a document that is itself
-   * invalid is the host's own bug and is worth reporting as such even when
-   * the connected server could not have accepted any document at all. It is
-   * then re-checked once more by the caller after its own last await, since
-   * a reconnect can invalidate this answer in between (F3).
-   *
-   * **Residual window (bounded, deliberately not hacked around).** Even the
-   * caller's re-check happens before `ConnectionManager.send` hands the
-   * envelope to a transport, and a queued envelope can outlive the
-   * connection it was queued for: a reconnect between `send()` and the
-   * outbox actually draining could still deliver this `task.complete` to a
-   * rolled-back N-1 server that strips the document. Closing that would
-   * mean teaching the transport outbox to inspect payload semantics and
-   * mint a substitute `task.fail` for a task this runner already finished —
-   * a second authority over terminal outcomes living in the queue, which is
-   * worse than the window it closes. Documented instead, here and in
-   * docs/protocol.md §7.2.
+   * The result context is revoked first, so no new submit is accepted, and
+   * the read queues behind any stage already writing: the record read here is
+   * final. Offers without a result-document projection (`mode: 'none'`,
+   * message-only and legacy offers) never read the store and carry no
+   * document. Failure, cancel and interrupt paths never come here.
    */
-  private async resolveResultDocument(
+  private async resolveStagedResult(
     active: ActiveTask,
-    finalOutput: string,
   ): Promise<{ deliver: true; document?: unknown } | { deliver: false }> {
-    // The established required-message offer is itself exact message-only
-    // terminal authority unless the offer explicitly opts into a result
-    // document as a second terminal projection lane.
-    if (
-      active.terminalProjection?.mode === 'none' ||
-      (active.messageRequirement !== undefined && active.terminalProjection === undefined)
-    ) return { deliver: true };
-    const extract = active.terminalProjection?.mode === 'result-document' && active.session.resultDocument !== undefined
-      ? () => active.session.resultDocument!() : this.deps.resultDocument?.extract;
-    if (!extract) {
-      if (active.terminalProjection?.mode === 'result-document') {
-        await this.fail(
-          active.taskId,
-          `${RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX}: the offer requires result contract ${active.terminalProjection.contract} but this daemon has no extractor`,
-          false,
-        );
-        return { deliver: false };
-      }
-      return { deliver: true };
-    }
-
-    let document: unknown;
+    const selection = active.terminalProjection;
+    if (selection?.mode !== 'result-document') return { deliver: true };
+    this.revokeAgentResultContext(active.taskId);
+    let record: AgentResultRecord | undefined;
     try {
-      const finalMessage = closingReply(active);
-      document = extract(finalOutput, {
-        taskId: active.taskId,
-        sessionRef: active.session.sessionRef,
-        ...(finalMessage === undefined ? {} : { finalMessage }),
-        ...(active.terminalProjection === undefined ? {} : { terminalProjection: active.terminalProjection }),
-      });
+      if (active.resultStore === undefined) throw new Error('the task has no Agent result store');
+      record = await active.resultStore.get(active.taskId);
     } catch (err) {
+      if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return { deliver: false };
+      await this.fail(active.taskId, `${RESULT_UNREADABLE_REASON_PREFIX}: the staged result for contract ${selection.contract} could not be read: ${errorMessage(err)}`, false);
+      return { deliver: false };
+    }
+    if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return { deliver: false };
+    if (record === undefined) {
       await this.fail(
         active.taskId,
-        `${RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX}: the configured resultDocument.extract threw: ${errorMessage(err)}`,
+        `${RESULT_NOT_SUBMITTED_REASON_PREFIX}: the offer requires result contract ${selection.contract}, but the runtime ended its turn without a staged ${AGENT_RESULT_TOOL_NAME} outcome`,
         false,
       );
       return { deliver: false };
     }
-
-    // A thenable is the one violation of the synchronous contract that would
-    // otherwise pass every check below and ship a WRONG answer: a promise
-    // JSON-stringifies to `{}` — a well-formed, comfortably-under-cap
-    // document that the server accepts, persists, and hands the product as
-    // its truthful terminal result. Silently delivering `{}` where the real
-    // document should be is strictly worse than failing, so this is
-    // fail-closed alongside the throw branch above rather than left to the
-    // documented contract alone.
-    if (typeof (document as { then?: unknown } | null | undefined)?.then === 'function') {
-      await this.fail(
-        active.taskId,
-        `${RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX}: the configured resultDocument.extract returned a promise; the contract is synchronous (an awaited value is never read, and a promise encodes to an empty document)`,
-        false,
-      );
+    if (record.contract !== selection.contract || record.tenantId !== this.deps.tenantId
+      || active.agentRef === undefined || record.agentRef.agentId !== active.agentRef.agentId
+      || record.agentRef.profileRevision !== active.agentRef.profileRevision) {
+      await this.fail(active.taskId, `${RESULT_UNREADABLE_REASON_PREFIX}: the staged result does not belong to this task's contract and Agent`, false);
       return { deliver: false };
     }
-
-    // "This task has no structured result" — indistinguishable, on the wire
-    // and to the server, from no extractor being configured at all.
-    if (document === undefined) {
-      if (active.terminalProjection?.mode === 'result-document') {
-        await this.fail(
-          active.taskId,
-          `${RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX}: the required result contract ${active.terminalProjection.contract} produced no document`,
-          false,
-        );
-        return { deliver: false };
-      }
-      return { deliver: true };
-    }
-
-    const check = checkResultDocument(document);
-    if (!check.ok) {
-      const detail = resultDocumentRejectionDetail(check);
-      await this.fail(active.taskId, `${RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX}: ${detail}`, false);
-      return { deliver: false };
-    }
-
-    if (!this.hasResultDocumentCapability()) {
-      await this.fail(
-        active.taskId,
-        `${RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX}: the connected server did not advertise the result-document capability, so it would silently discard this ${check.bytes}-byte document`,
-        false,
-      );
-      return { deliver: false };
-    }
-
-    // The CANONICAL SNAPSHOT, not the object the extractor returned — see
-    // `checkResultDocument` and the send site in `pump`.
-    return { deliver: true, document: check.canonical };
-  }
-
-  /**
-   * Whether the CURRENTLY connected server advertised `result-document` —
-   * read fresh on every call, never captured, because the answer changes
-   * across a reconnect or transport switch (`ConnectionManager` clears the
-   * old advertisement at the boundary, then repopulates it from a fresh WS
-   * ack or successful poll response). An absent `getServerCapabilities` seam is
-   * "no capabilities", the fail-closed reading.
-   */
-  private hasResultDocumentCapability(): boolean {
-    const capabilities = this.deps.getServerCapabilities?.() ?? [];
-    return requiredReceiverCapabilities('task.complete', { document: {} }).every((flag) => capabilities.includes(flag));
+    return { deliver: true, document: record.outcome };
   }
 
   private async observeGit(active: ActiveTask, phase: GitWorkspacePhase): Promise<void> {
@@ -5438,6 +5443,7 @@ export class TaskRunner {
       await this.releasePreparationPin(taskId);
       this.tasks.delete(taskId);
       this.revokeAgentMessageContext(taskId);
+      this.revokeAgentResultContext(taskId);
       this.revokeAgentMemoryContext(taskId);
       this.deleteHostToolsetContexts(taskId);
       return leaseReleased;
@@ -5446,6 +5452,7 @@ export class TaskRunner {
     await this.releasePreparationPin(taskId);
     this.tasks.delete(taskId);
     this.revokeAgentMessageContext(taskId);
+    this.revokeAgentResultContext(taskId);
     this.revokeAgentMemoryContext(taskId);
     this.deleteHostToolsetContexts(taskId);
     return true;

@@ -120,6 +120,12 @@ export type { GitWorkspaceLedger, GitWorkspaceLedgerRecord, GitWorkspacePhase } 
 
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
 export {
+  DaemonConfigFieldRemovedError,
+  DaemonJournalProtocolUnsupportedError,
+  type DaemonJournalProtocolRecord,
+} from './daemon/daemon-errors';
+export { RESULT_NOT_SUBMITTED_REASON_PREFIX, RESULT_UNREADABLE_REASON_PREFIX } from './daemon/task-runner';
+export {
   LocalTeamWorkspace,
   LocalTeamWorkspaceService,
   TeamWorkspaceError,

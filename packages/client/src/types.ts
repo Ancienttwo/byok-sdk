@@ -163,8 +163,6 @@ export interface ApprovalChannel {
 export interface Session {
   /** Process-generation-bound native requests. Never reconstructed from a resumed transcript. */
   readonly interactions?: NativeInteractionChannel;
-  /** Current execution artifact, available only after terminal success. */
-  resultDocument?(): unknown;
   /** Opaque runtime session id, reported back to the server via `task.complete.sessionRef`. */
   sessionRef: string;
   /** Normalized events for this session; the daemon batches these into `task.progress`. */
