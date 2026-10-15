@@ -10,6 +10,7 @@ import type { BlobResolver } from '../daemon/blob-client';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { testIngressBudget } from './fixtures/activity-ingress';
 
 /**
  * `DaemonConfig.maxInlineEventBytes` end to end through `TaskRunner.pump`:
@@ -62,7 +63,7 @@ async function makeRunner(
   blobClient: BlobResolver,
   overrides: Partial<Pick<TaskRunnerDeps, 'maxInlineEventBytes' | 'maxTaskOutputBytes'>> = {},
 ): Promise<TaskRunner> {
-  const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-taskrunner-spill-workspace-'),
     deviceId: 'device-1',

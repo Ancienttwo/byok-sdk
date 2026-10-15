@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- **Breaking (protocol, client, cloud; #397 v3 cleanup)** — wire v3 drops the
+  v2 settlement fallbacks. `MessagesSendResponseSchema.outcomes`,
+  `EventsPollResponseSchema.ingress` and `EventsPollResponseSchema.capabilities`
+  are required (the client no longer reads a missing page advertisement as
+  `[]`; an empty list still advertises nothing); the client also refuses a
+  rejected outcome without its `reason` and an answer that accepts (or
+  deduplicates) a `conn.hello` without `ingress`. Each is an unusable response
+  on the existing route-failure path, and the batch is retained for retry.
+  Counts-only bisection is gone: one POST settles each envelope by its own
+  outcome. `DEFAULT_ACTIVITY_INGRESS` and the `'unspecified'`
+  `OutboundRefusalReason` are removed; `'unknown'` still marks an unrecognized
+  reason. `ConnectionManager.getIngressBudget()` throws before the first
+  advertisement, `TaskRunnerDeps.getIngressBudget` is required, and
+  `ProgressBatcher` takes its ingress source without a default.
+  `OutboundSettlement` is a discriminated union whose rejected case has a
+  required `reason`, and `MessageSendOutcomeSchema.reason` decodes to
+  `OutboundRefusalReason`. Audit-log lines written by older daemons with
+  reason `'unspecified'` no longer parse: `readAuditRecords` skips them and
+  compaction no longer recognizes them as terminal records. The cloud's own
+  default (50 events, 65536 bytes) is `DEFAULT_ACTIVITY_BOUNDS`, unchanged.
+  Unregistered v3 HTTP corpus lines were corrected in place under the
+  pre-registration exception (`docs/releases/README.md`): events pages 7 and
+  8 gained `ingress` and line 7 also `capabilities`; send responses 11–14
+  gained `outcomes`.
+
 - **Breaking (protocol type, client; #386)** — the daemon decodes its HTTP
   reads with the protocol schemas only. `EventsPollResponse.events` is now
   `unknown[]` (`EventsPollResponseSchema.events` is `z.array(z.unknown())`):
@@ -167,8 +192,8 @@
 - **Outbound settlement (#397)** — protocol v2 keeps aggregate counts and adds
   optional per-envelope `outcomes` plus server-owned `ingress` advertisements.
   Unknown refusal observations become `unknown`; invalid control outcomes or
-  inconsistent ids/counts retain the original bytes for retry. Counts-only v2
-  bisection uses `unspecified` and is removed with the ingress default at v3.
+  inconsistent ids/counts retain the original bytes for retry. Wire v3 makes
+  both required (see the #397 v3 cleanup entry above).
 - **Breaking (client/cloud, 0.x)** — replace outbound quarantine and accepted/
   rejected callbacks with awaited `onOutboundSettled`; local activity events now
   follow successful settlement. Inspect rejection via `outbound-rejected`,
@@ -181,8 +206,8 @@
   `MAX_PROGRESS_BATCH_BYTES_EXCEEDED_REASON_PREFIX` with
   `ACTIVITY_INGRESS_EXCEEDED_REASON_PREFIX`. `handleInboundEnvelope` returns
   discriminated `InboundResult` (read `.outcome` and rejected `.reason`);
-  `DEFAULT_ACTIVITY_MAX_*` cloud exports are removed; use protocol
-  `DEFAULT_ACTIVITY_INGRESS` only before server advertisement.
+  `DEFAULT_ACTIVITY_MAX_*` cloud exports are removed; the cloud default is
+  `DEFAULT_ACTIVITY_BOUNDS`.
 - **Breaking (client, 0.x)** — every sink that outlives the process holds
   only content-free records (#395, parent #384). `byok-agent start` now
   writes one JSON Lines `DaemonRecord` per line to stdout, byte-identical to

@@ -10,7 +10,7 @@ import {
   parseMessage,
   type Envelope,
   type EventsPollResponse,
-  type MessagesSendResponse,
+  type OutboundRefusalReason,
 } from '@byok-sdk/protocol';
 import { AuthManager, DeviceRevokedError } from './auth-manager';
 import { authedFetch } from './http-client';
@@ -61,12 +61,12 @@ export interface LongPollClientOptions {
   getCursor: () => number | undefined;
   /** Returns false when the envelope was a local duplicate and no handler was queued. */
   onEnvelope: (envelope: Envelope) => boolean | void;
+  /** The activity ingress every events page advertises, applied before its envelopes are delivered. */
+  onIngress?: (ingress: ActivityIngress) => void;
   /**
    * Capabilities advertised by the server that produced the current poll
    * response. Called before any envelopes from that response are delivered.
-   * An older responder omitting the additive field is reported as `[]`.
    */
-  onIngress?: (ingress: ActivityIngress) => void;
   onServerCapabilities?: (capabilities: string[]) => void;
   /**
    * The poll failed — an HTTP status, a network failure, an unusable body or
@@ -111,10 +111,19 @@ export interface LongPollClientOptions {
   idleDelayMs?: number;
 }
 
-/** A validated v2 acknowledgement for the posted batch; outcomes are optional until v3. */
+/** One posted envelope's validated v3 outcome: a rejection always carries its reason. */
+export type CorrelatedOutcome =
+  | { readonly id: string; readonly outcome: 'accepted' | 'duplicate' }
+  | { readonly id: string; readonly outcome: 'rejected'; readonly reason: OutboundRefusalReason };
+
+/**
+ * A validated v3 acknowledgement for the posted batch: one outcome per posted
+ * envelope, a reason on every rejected one, and `ingress` whenever a posted
+ * `conn.hello` was accepted or deduplicated.
+ */
 export interface MessageBatchPostResult {
   readonly ingress?: ActivityIngress;
-  readonly outcomes?: MessagesSendResponse['outcomes'];
+  readonly outcomes: readonly CorrelatedOutcome[];
   readonly accepted: number;
   readonly rejected?: number;
   /** The server's advertisement, when it sent one (a handshake answer); absence means "no update". */
@@ -127,9 +136,6 @@ const MAX_TRACKED_VALIDATION_FAILURE_WARNINGS = 1000;
 /** Same soft-cap discipline as {@link MAX_TRACKED_VALIDATION_FAILURE_WARNINGS}, for `warnedRouteFailures` — see that field's own doc comment. */
 const MAX_TRACKED_ROUTE_FAILURE_WARNINGS = 1000;
 
-/** An absent page advertisement is no advertised capabilities. */
-type DecodedEventsPage = EventsPollResponse & { capabilities: string[] };
-
 /**
  * Decodes the outer `/byok/events` page with the protocol's
  * `EventsPollResponseSchema` (#386), whose `events` entries are not yet
@@ -139,7 +145,7 @@ type DecodedEventsPage = EventsPollResponse & { capabilities: string[] };
  * trusts only as a safe nonnegative integer that never moves below the
  * requested cursor; those two checks are client-local.
  */
-function decodeEventsPage(raw: unknown, requestedCursor: number): DecodedEventsPage {
+function decodeEventsPage(raw: unknown, requestedCursor: number): EventsPollResponse {
   const page = EventsPollResponseSchema.parse(raw);
   if (!isSafeNonnegativeInteger(page.cursor)) {
     throw new Error('events poll response.cursor is not a safe nonnegative integer');
@@ -147,7 +153,7 @@ function decodeEventsPage(raw: unknown, requestedCursor: number): DecodedEventsP
   if (page.cursor < requestedCursor) {
     throw new Error('events poll response.cursor regressed below the requested cursor');
   }
-  return { ...page, capabilities: page.capabilities ?? [] };
+  return page;
 }
 
 function isSafeNonnegativeInteger(value: unknown): value is number {
@@ -351,21 +357,33 @@ export class LongPollClient {
       if (response.accepted + (response.rejected ?? 0) !== envelopes.length) {
         throw new Error('messages response counts do not match the posted batch length');
       }
-      if (response.outcomes !== undefined) {
-        const expected = new Set(envelopes.map((envelope) => envelope.id));
-        let accepted = 0;
-        let rejected = 0;
-        for (const settlement of response.outcomes) {
-          if (settlement.outcome !== 'rejected' && settlement.reason !== undefined) throw new Error('messages response reason belongs only to rejected outcomes');
-          if (!expected.delete(settlement.id)) throw new Error('messages response has an unknown or repeated outcome id');
-          if (settlement.outcome === 'rejected') rejected += 1;
-          else accepted += 1;
-        }
-        if (expected.size !== 0 || accepted !== response.accepted || rejected !== (response.rejected ?? 0)) {
-          throw new Error('messages response outcomes do not match the posted ids and counts');
+      const expected = new Map(envelopes.map((envelope) => [envelope.id, envelope]));
+      let accepted = 0;
+      let rejected = 0;
+      let handshakeAccepted = false;
+      const outcomes: CorrelatedOutcome[] = [];
+      for (const settlement of response.outcomes) {
+        const envelope = expected.get(settlement.id);
+        if (envelope === undefined) throw new Error('messages response has an unknown or repeated outcome id');
+        expected.delete(settlement.id);
+        if (settlement.outcome === 'rejected') {
+          if (settlement.reason === undefined) throw new Error('messages response rejected outcome lacks its reason');
+          rejected += 1;
+          outcomes.push({ id: settlement.id, outcome: 'rejected', reason: settlement.reason });
+        } else {
+          if (settlement.reason !== undefined) throw new Error('messages response reason belongs only to rejected outcomes');
+          accepted += 1;
+          if (envelope.type === 'conn.hello') handshakeAccepted = true;
+          outcomes.push({ id: settlement.id, outcome: settlement.outcome });
         }
       }
-      return response;
+      if (expected.size !== 0 || accepted !== response.accepted || rejected !== (response.rejected ?? 0)) {
+        throw new Error('messages response outcomes do not match the posted ids and counts');
+      }
+      if (handshakeAccepted && response.ingress === undefined) {
+        throw new Error('messages response accepted conn.hello without the activity ingress advertisement');
+      }
+      return { ...response, outcomes };
     } catch (err) {
       if (signal?.aborted) return undefined;
       // The response DID exist and the server DID accept the request line —
@@ -450,7 +468,7 @@ export class LongPollClient {
         // Validate each executable envelope independently. Both unknown types
         // and invalid payloads freeze their sequence; neither has a durable
         // disposition that would authorize acknowledging it.
-        let parsed: DecodedEventsPage;
+        let parsed: EventsPollResponse;
         try {
           parsed = decodeEventsPage(await res.json(), afterSeq);
           validateTrustedEventsPage(parsed.events, afterSeq, parsed.cursor);
@@ -466,7 +484,7 @@ export class LongPollClient {
         readAheadSupported = parsed.capabilities.includes(MAILBOX_READ_AHEAD_CAPABILITY);
         const madeReadProgress = parsed.cursor > afterSeq;
         readCursor = parsed.cursor;
-        if (parsed.ingress !== undefined) this.opts.onIngress?.(parsed.ingress);
+        this.opts.onIngress?.(parsed.ingress);
         this.opts.onServerCapabilities?.(parsed.capabilities);
         // Finding R1 (Codex's new P2): true the moment THIS batch contains
         // at least one validation-failed entry — used below to apply the

@@ -96,8 +96,13 @@ for (const selection of ['claude', 'pi-exact', 'pi-historical-flat'] as const) f
   const payload = { agentRef: binding.agentRef, sessionRef: 'native-session', contract: C.PrivateAgentChatMessageContract,
     messageId: '10000000-0000-4000-8000-000000000099', cursor: 1, contentType: 'text/markdown' as const, body: 'A1', byteCount: 2,
     contentHash: `sha256:${createHash('sha256').update('A1').digest('hex')}` as `sha256:${string}` };
-  const publish = () => request('/byok/messages', { method: 'POST', headers: { authorization: `Bearer ${device.accessToken}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ messages: [createEnvelope('agent.message.publish', payload, { taskId })] }) });
+  const publish = (envelope = createEnvelope('agent.message.publish', payload, { taskId })) => request('/byok/messages', { method: 'POST', headers: { authorization: `Bearer ${device.accessToken}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ messages: [envelope] }) });
+  // Wire v3 send answer: counts plus one correlated outcome per posted envelope.
+  const publishAccepted = async () => {
+    const envelope = createEnvelope('agent.message.publish', payload, { taskId });
+    expect(await (await publish(envelope)).json()).toEqual({ accepted: 1, outcomes: [{ id: envelope.id, outcome: 'accepted' }] });
+  };
   if (cancelFirst) await repository.requestCancel({ tenantId, userId, conversationId, turnId, now });
   else {
     expect((await publish()).status).toBeGreaterThanOrEqual(500);
@@ -106,10 +111,10 @@ for (const selection of ['claude', 'pi-exact', 'pi-historical-flat'] as const) f
     expect(committed.messages.filter((m: { role: string }) => m.role === 'assistant')).toHaveLength(1);
     await repository.requestCancel({ tenantId, userId, conversationId, turnId, now });
   }
-  expect(await (await publish()).json()).toEqual({ accepted: 1 });
+  await publishAccepted();
   expect(await harness.cloud.readAgentMessageDisposition(tenant, device.deviceId, taskId, payload)).toMatchObject({ outcome: cancelFirst ? 'refused' : 'accepted' });
   const receipt = await harness.cloud.readAgentMessageDisposition(tenant, device.deviceId, taskId, payload);
-  expect(await (await publish()).json()).toEqual({ accepted: 1 });
+  await publishAccepted();
   expect(await harness.cloud.readAgentMessageDisposition(tenant, device.deviceId, taskId, payload)).toEqual(receipt);
   const observed = await reconcilePrivateAgentChat(port, dispatchInput);
   expect(observed.messageReceipt).toEqual({ schemaVersion: 'salesko.sdk_message_receipt.v1', payload, disposition: receipt });

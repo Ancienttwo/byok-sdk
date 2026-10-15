@@ -229,8 +229,8 @@ Outbound rejections are visible through `daemon.subscribe()` (`outbound-rejected
 event/counter rather than a terminal delivery mark. Terminal refusals are durable journal failures with their wire
 reason. These events and counters contain no envelope payload. Activity observer
 events are emitted after successful settlement; partial refusal leaves liveness
-health healthy. Older counts-only v2 responders use `unspecified` refusal reasons
-and bisection until protocol v3.
+health healthy. The server reports every refusal with its own wire reason; an
+unrecognized reason is reported as `unknown`.
 
 ## Durable Agent homes
 

@@ -69,26 +69,25 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
     expect(connection!.getServerCapabilities()).toEqual(['approval_resolved', 'mailbox-read-ahead']);
   });
 
-  it('a response that omits capabilities clears the prior advertisement and keeps it empty', async () => {
+  it('a response that advertises fewer capabilities replaces the prior advertisement', async () => {
     await connectAndAck();
     expect(connection!.getServerCapabilities()).toEqual(['approval_resolved', 'mailbox-read-ahead']);
 
-    // Model an N-1 HTTP responder. The old advertisement must not leak into
-    // its responses; a later response's explicit advertisement is covered
-    // below.
-    server.setAdvertiseLongPollCapabilities(false);
+    // The responder withdraws `approval_resolved`; the old advertisement must
+    // not leak into its responses. A later explicit advertisement is covered below.
+    server.setAckCapabilities([]);
 
-    await vi.waitFor(() => expect(connection!.getServerCapabilities()).toEqual([]));
-    // Held empty across a real wait, not just caught mid-flicker.
+    await vi.waitFor(() => expect(connection!.getServerCapabilities()).toEqual(['mailbox-read-ahead']));
+    // Held across a real wait, not just caught mid-flicker.
     await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(connection!.getServerCapabilities()).toEqual([]);
+    expect(connection!.getServerCapabilities()).toEqual(['mailbox-read-ahead']);
   });
 
   it('a later poll response can advertise capabilities again', async () => {
     await connectAndAck();
-    server.setAdvertiseLongPollCapabilities(false);
-    await vi.waitFor(() => expect(connection!.getServerCapabilities()).toEqual([]));
-    server.setAdvertiseLongPollCapabilities(true);
+    server.setAckCapabilities([]);
+    await vi.waitFor(() => expect(connection!.getServerCapabilities()).toEqual(['mailbox-read-ahead']));
+    server.setAckCapabilities(['approval_resolved', 'mailbox-read-ahead']);
     await vi.waitFor(() => expect(connection!.getServerCapabilities()).toEqual(['approval_resolved', 'mailbox-read-ahead']), { timeout: 5000 });
     expect(connection!.isOpen()).toBe(true);
   });
@@ -171,34 +170,6 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
         capabilities: ['agent-home-contract'],
       },
     });
-  });
-
-  it('an N-1 long-poll responder that omits capabilities remains fail-closed', async () => {
-    server = await TestServer.start();
-    server.setAckCapabilities(['approval_resolved', 'mailbox-read-ahead']);
-    server.setAdvertiseLongPollCapabilities(false);
-    const storeDir = await tmpDir('byok-server-caps-old-long-poll-');
-    const auth = new AuthManager({ serverUrl: server.url, store: createTestDeviceStore(storeDir) });
-    const record = await auth.pair('pairing-code');
-
-    connection = new ConnectionManager({
-      serverUrl: server.url,
-      deviceId: record.deviceId,
-      productId: 'test-product',
-      capabilities: [],
-      runtimes: [],
-      auth,
-      cursorStore: new CursorStore(storeDir),
-      onEnvelope: () => {},
-      longPollRetryDelayMs: 20,
-      longPollIdleDelayMs: 20,
-    });
-    await connection.start();
-    await waitForOpen(connection);
-    await vi.waitFor(() =>
-      expect(server.httpRequests.some((request) => request.pathname === '/byok/events')).toBe(true),
-    );
-    expect(connection.getServerCapabilities()).toEqual([]);
   });
 
   it('stop() also clears capabilities (defensive — nothing left to gate a send against)', async () => {

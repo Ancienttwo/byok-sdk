@@ -1,4 +1,3 @@
-import { DEFAULT_ACTIVITY_INGRESS } from '@byok-sdk/protocol';
 import { runMaintenanceSteps, type MaintenanceInput, type MaintenanceReport } from './maintenance';
 import type { DeviceAssertionReplayAuthority } from '@byok-sdk/core';
 import { readTaskAgentMessage, type TaskAgentMessage } from './task-agent-message';
@@ -122,8 +121,7 @@ import type { TokenSigner } from './auth/tokens';
 import { CLOUD_CAPABILITIES, declares } from './capabilities';
 import {
   assertBoardLabels,
-  DEFAULT_ACTIVITY_CAPACITY,
-  DEFAULT_ACTIVITY_TTL_MS,
+  DEFAULT_ACTIVITY_BOUNDS,
   DEFAULT_BOARD_CHANNEL_MAX_BYTES,
   DEFAULT_BOARD_TITLE_MAX_BYTES,
   DEFAULT_PRESENCE_DETAIL_MAX_BYTES,
@@ -842,10 +840,10 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
   const registry = new CloudRouteRegistry();
   const activityBounds: ActivityBounds = {
-    maxEvents: options.activityMaxEvents ?? DEFAULT_ACTIVITY_INGRESS.maxEvents,
-    maxBytes: options.activityMaxBytes ?? DEFAULT_ACTIVITY_INGRESS.maxBytes,
-    capacity: options.activityCapacity ?? DEFAULT_ACTIVITY_CAPACITY,
-    ttlMs: options.activityTtlMs ?? DEFAULT_ACTIVITY_TTL_MS,
+    maxEvents: options.activityMaxEvents ?? DEFAULT_ACTIVITY_BOUNDS.maxEvents,
+    maxBytes: options.activityMaxBytes ?? DEFAULT_ACTIVITY_BOUNDS.maxBytes,
+    capacity: options.activityCapacity ?? DEFAULT_ACTIVITY_BOUNDS.capacity,
+    ttlMs: options.activityTtlMs ?? DEFAULT_ACTIVITY_BOUNDS.ttlMs,
   };
 
   // Auth v2 (§6) — always mounted: without pairing there is no deployment.

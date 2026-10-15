@@ -11,6 +11,7 @@ import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { freezeRuntimeAdapterDescriptor } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { testIngressBudget } from './fixtures/activity-ingress';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -39,7 +40,7 @@ async function makeRunner(
   sent: Envelope[],
   extra: Partial<TaskRunnerDeps> = {},
 ): Promise<TaskRunner> {
-  return new TaskRunner({ scratchRoot: testScratchOwner(),
+  return new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-final-message-workspace-'),
     deviceId: 'device-final-message',

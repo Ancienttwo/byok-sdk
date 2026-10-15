@@ -284,7 +284,7 @@ function parseRecordLine(line: string | undefined): DaemonRecord | undefined {
   switch (raw.kind) {
     case 'outbound-rejected': {
       const reason = raw.reason;
-      if (typeof reason !== 'string' || !([...OUTBOUND_REFUSAL_REASONS, 'unknown', 'unspecified'] as readonly string[]).includes(reason)
+      if (typeof reason !== 'string' || !([...OUTBOUND_REFUSAL_REASONS, 'unknown'] as readonly string[]).includes(reason)
         || typeof raw.envelopeId !== 'string' || typeof raw.type !== 'string' || typeof raw.terminal !== 'boolean'
         || (raw.taskId !== undefined && typeof raw.taskId !== 'string')) return undefined;
       const record = {

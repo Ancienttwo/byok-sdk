@@ -12,6 +12,7 @@ import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult } from '../types';
 import { StubRuntimeAdapter, StubSession } from './fixtures/stub-adapter';
+import { testIngressBudget } from './fixtures/activity-ingress';
 
 /**
  * `task.decline` and `task.fail` leave this device. Agent-home errors name the
@@ -82,7 +83,7 @@ async function readerRunner(adapter: StubRuntimeAdapter): Promise<{
   const storeDir = await temporary('byok-outbound-reason-store-');
   const hostStorageRoot = await temporary('byok outbound reason home-');
   const sent: Envelope[] = [];
-  const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+  const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await temporary('byok-outbound-reason-workspace-'),
     agentHome: new AgentHomeManager({ hostStorageRoot }),

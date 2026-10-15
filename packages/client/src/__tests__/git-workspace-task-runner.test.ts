@@ -13,6 +13,7 @@ import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, Session } from '../types';
 import { RuntimeDisposalFailure } from '../runtime-failure';
 import { StubRuntimeAdapter, StubSession } from './fixtures/stub-adapter';
+import { testIngressBudget } from './fixtures/activity-ingress';
 
 const dirs: string[] = [];
 async function tempDir(prefix: string): Promise<string> {
@@ -51,7 +52,7 @@ async function makeDeps(options: {
   if (store) await store.initialize();
   const manager = options.enabled ? (options.manager ?? new GitWorkspaceManager(root, { ownerId: `test-${Math.random()}` })) : undefined;
   if (manager) await manager.preflight();
-  const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [options.adapter ?? new StubRuntimeAdapter()],
     workspaceRoot: root,
     deviceId: 'device',

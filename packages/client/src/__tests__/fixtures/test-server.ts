@@ -9,6 +9,7 @@ import {
   type Envelope,
 } from '@byok-sdk/protocol';
 import { NONCE_SIGNING_DOMAIN } from '../../daemon/device-keys';
+import { TEST_ACTIVITY_INGRESS } from './activity-ingress';
 
 interface Waiter {
   predicate: (envelope: Envelope) => boolean;
@@ -110,7 +111,6 @@ export class TestServer {
     version: 1,
     capabilities: [HOST_MCP_TASK_CONTEXT_CAPABILITY],
   };
-  private advertiseLongPollCapabilities = true;
 
   private constructor(private readonly httpServer: http.Server) {}
 
@@ -154,11 +154,6 @@ export class TestServer {
    */
   setCapabilityDeclaration(declaration: unknown): void {
     this.capabilityDeclaration = declaration;
-  }
-
-  /** Simulate an N-1 responder whose additive events and handshake responses predate `capabilities`. */
-  setAdvertiseLongPollCapabilities(advertise: boolean): void {
-    this.advertiseLongPollCapabilities = advertise;
   }
 
   /** Return 500 from every events poll while true, without changing auth. */
@@ -590,7 +585,8 @@ export class TestServer {
     respondJson(res, 200, {
       events: entries,
       cursor: this.longPollCursor,
-      ...(this.advertiseLongPollCapabilities ? { capabilities: this.advertisedCapabilities() } : {}),
+      capabilities: this.advertisedCapabilities(),
+      ingress: TEST_ACTIVITY_INGRESS,
     });
   }
 
@@ -611,6 +607,7 @@ export class TestServer {
     let accepted = 0;
     let rejected = 0;
     let handshake = false;
+    const outcomes: Array<{ id: string; outcome: 'accepted' | 'rejected'; reason?: string }> = [];
     let holdGate: Promise<void> | undefined;
     for (const raw of rawMessages) {
       let envelope: Envelope;
@@ -622,9 +619,11 @@ export class TestServer {
       this.recordReceivedEnvelope(envelope);
       if (envelope.type === 'conn.hello' && this.rejectHello) {
         rejected += 1;
+        outcomes.push({ id: envelope.id, outcome: 'rejected', reason: 'not_permitted' });
         continue;
       }
       accepted += 1;
+      outcomes.push({ id: envelope.id, outcome: 'accepted' });
       if (envelope.type === 'conn.hello') handshake = true;
       if (this.messagesHold?.predicate(envelope)) {
         holdGate = this.messagesHold.gate;
@@ -634,11 +633,12 @@ export class TestServer {
     // Test hook (see `holdNextMessagesResponse`): recorded above, acceptance held here.
     if (holdGate) await holdGate;
     // Like the hosted cloud (#391 Phase 2): a handshake's answer carries the
-    // advertisement; an N-1 responder (`setAdvertiseLongPollCapabilities(false)`) omits it.
+    // advertisement and ingress; every answer carries outcomes (wire v3).
     respondJson(res, 200, {
       accepted,
+      outcomes,
       ...(rejected > 0 ? { rejected } : {}),
-      ...(handshake && this.advertiseLongPollCapabilities ? { capabilities: this.advertisedCapabilities() } : {}),
+      ...(handshake ? { capabilities: this.advertisedCapabilities(), ingress: TEST_ACTIVITY_INGRESS } : {}),
     });
   }
 
