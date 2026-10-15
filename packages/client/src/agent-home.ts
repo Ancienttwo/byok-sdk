@@ -873,7 +873,11 @@ export class AgentHomeExecutionLeaseManager {
    * `release()`, which the task runner calls after the attempt is terminal
    * AND `Session.close()` resolved. A failed disposal never reaches
    * `release()`, so the slot stays held — fail closed, the same posture as
-   * `runtime-disposal-failed`. Crash residue: a restarted daemon starts with
+   * `runtime-disposal-failed`. Because `release()` comes after the semantic
+   * terminal is published, the admission gate may wait once for this
+   * runner's already-finishing Attempts of the same home to settle and then
+   * read this count again (#476); the count itself stays the only authority
+   * on whether a slot is free. Crash residue: a restarted daemon starts with
    * an empty registry and reclaims the on-disk marker only under the same
    * stable owner identity (`openLeaseMarker`), after its start ended the
    * crashed run's owned runtime processes (`OwnedProcessLedger.reconcile`).
