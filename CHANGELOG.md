@@ -15,8 +15,6 @@ devices and the Host upgrade together.
   0.27.0-rc.1.
 - The lock workspace records, current version documents and the reviewed
   registry baseline (prior `latest` 0.26.1 / keys 0.11.1) move together.
-- The client keychain custody change of #489 (#487) has no entry below; the
-  release notes describe it.
 - [Release notes](docs/releases/v0.27.0.md) describe the rc.1 changes and the
   Host upgrade.
 
@@ -52,6 +50,61 @@ devices and the Host upgrade together.
   `__defineGetter__`, `__defineSetter__`, `__lookupGetter__` or
   `__lookupSetter__` with `UnsupportedOptionError`. No public API change. See
   `docs/notes/2026-10-16-oar-0.66-upgrade.md`.
+
+- **Breaking (server, 0.x; #413, PR #443)** — the reference server has one TTL
+  presence lease. `DispatchInput.deviceId` is required on every `dispatch()`;
+  the SDK never picks a target, registered offline devices receive queued
+  offers, and unknown or revoked targets throw `ByokCloudError`
+  `device_not_found` before any task or mailbox row. See
+  [the migration note](docs/migrations/413-single-presence-lease.md).
+
+- **Breaking (client, 0.x; #399, PR #437)** — unified intermediate artifact
+  retention. `hostedJournal.storagePolicy` becomes `DaemonConfig.storage`
+  (`budget`, `retention`, optional `scratchRoot` / `skillPackDataDirs`);
+  every adapter start requires an `ExecutionScratch`
+  (`createExecutionScratch`); `PiAdapterOptions.durablePi` is a boolean.
+  `LocalStoragePressureEngine`, `LocalStoragePolicy` and the cleanup
+  candidate/result helpers are removed, as is
+  `DaemonOverrides.hostedJournal.pressureEngine`. Custom `LocalTaskJournal`
+  implementations add the prune methods. See
+  [the migration note](docs/migrations/client-retention-399.md).
+
+- **Breaking / Added (client, 0.x; #487, PR #489)** — device enrollment
+  custody takes an injected backend. The `DeviceStore` constructor is
+  `(storeDir, credentials: DeviceCredentialBackend, secureDirOptions?)`, and
+  the `InMemoryDeviceCredentialStore` double is removed from product code.
+  `createDaemon(config, overrides?)` accepts `DaemonOverrides.deviceCredentials`,
+  a complete backend the caller owns; `DaemonConfig.deviceCredentials:
+  { macosKeychainPath }` instead selects one explicit macOS keychain (the two
+  are mutually exclusive). New root exports: `DeviceCredentialStoreError`,
+  `DeviceCredentialStoreUnavailableError`,
+  `DeviceCredentialInteractionRequiredError` (macOS exit 36) and the types
+  `DeviceCredentialBackend` / `DeviceCredentialConfig`. See
+  `packages/client/README.md`.
+
+- **Added (cloud; PR #400)** — `ByokCloudObserver.onInboundRefused` reports
+  each rejected inbound envelope with its closed `InboundRefusalReason`, and
+  the optional `ByokCloudOptions.publicRouteLimiter(route, request)` guards
+  the pair / challenge / token routes (a `false` answer is 429 before the
+  handler runs). The `POST /byok/messages` wire format is unchanged.
+
+- **Fixed (client; PR #406)** — on POSIX a restarted daemon ends the owned
+  runtime process groups of a crashed run, from an owned-process ledger under
+  the store directory, before lease reclaim, and refuses to start while one
+  survives.
+
+- **Fixed (client; #476, PR #478)** — an offer for a home whose Attempts have
+  published their terminal but still hold the lease no longer races that
+  release: admission waits once for this runner's finishing Attempts, then
+  recounts from the lease registry and reserves or declines as before.
+
+- **Fixed (keys, Windows; #423, #426)** — the Pi projection ACL query no
+  longer depends on PowerShell module auto-load (under an inherited
+  PowerShell 7 module path every BYOK Pi launch was refused), and the ACL
+  script, the Credential Manager bridge and the client device credential
+  compiler read stdin as UTF-8. A missing assembly is reported as
+  `unexpected`, not `path_not_found`.
+
 - **Breaking (protocol type, client; #386)** — the daemon decodes its HTTP
   reads with the protocol schemas only. `EventsPollResponse.events` is now
   `unknown[]` (`EventsPollResponseSchema.events` is `z.array(z.unknown())`):
