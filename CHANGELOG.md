@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 0.27.0-rc.1 / @byok-sdk/keys 0.12.0-rc.1 — 2026-10-16 (prepared; not published)
+
+The owner approved rc.1 and the dist-tag `rc`; npm execution is a separate
+step. `latest` stays 0.26.1 / keys 0.11.1. This is the first wire-v3
+(protocol major 3) train: v2 daemons and v3 servers do not interoperate, so
+devices and the Host upgrade together.
+
+- The eight aligned package manifests move to 0.27.0-rc.1.
+- keys moves to 0.12.0-rc.1, a MINOR for its breaking
+  `buildPiProviderProjection` cut (#385). Its packed core edge is exactly
+  0.27.0-rc.1.
+- The lock workspace records, current version documents and the reviewed
+  registry baseline (prior `latest` 0.26.1 / keys 0.11.1) move together.
+- The client keychain custody change of #489 (#487) has no entry below; the
+  release notes describe it.
+- [Release notes](docs/releases/v0.27.0.md) describe the rc.1 changes and the
+  Host upgrade.
+
 - **Breaking (protocol, client, cloud; #397 v3 cleanup)** — wire v3 drops the
   v2 settlement fallbacks. `MessagesSendResponseSchema.outcomes`,
   `EventsPollResponseSchema.ingress` and `EventsPollResponseSchema.capabilities`
