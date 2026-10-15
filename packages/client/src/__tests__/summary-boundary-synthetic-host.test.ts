@@ -155,15 +155,20 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
       expectContiguous(pack, seq, host.transcript);
       const instruction = host.freeze(taskId, pack);
       const index = adapter.sessions.length;
-      await sdk.recurring.submit({ taskId, deviceId, payload: {
+      const messageEgress = { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 } as const;
+      const enqueued = await sdk.executions.submit({ taskId, deviceId, payload: {
         agentRef, runtime: 'pi', instruction,
-        egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: { mode: 'none' },
-        messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },
+        egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: { mode: 'none' }, messageEgress,
       }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: `turn-${seq}` } });
+      expect(enqueued).toMatchObject({ taskId, envelope: { type: 'task.offer_for_agent_with_egress_fresh' } });
       await vi.waitFor(() => expect(adapter.sessions).toHaveLength(index + 1), { timeout: 10000 });
       expect(adapter.startCalls[index]?.task.sessionRef).toBeUndefined();
       expect(adapter.startCalls[index]?.task.instruction).toContain(instruction);
-      await expectFrozenOffer(taskId);
+      // User turns and SummaryJobs share the one fresh submit path; only the projection/egress differ.
+      const offer = await expectFrozenOffer(taskId);
+      expect(offer).toMatchObject({ type: 'task.offer_for_agent_with_egress_fresh',
+        payload: { agentRef, terminalProjection: { mode: 'none' }, messageEgress } });
+      expect(offer.payload).not.toHaveProperty('sessionRef');
       const session = adapter.sessions[index]!;
       const reply = `A${seq}`;
       let outcome: TurnOutcome;
@@ -212,8 +217,10 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
       const instruction = host.freeze(job.taskId, input);
       const index = adapter.sessions.length;
       summaryTaskIds.push(job.taskId);
-      await sdk.dispatchFreshAgentEgress({ taskId: job.taskId, deviceId, agentRef, runtime: 'pi', instruction,
-        egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: selector });
+      const enqueued = await sdk.executions.submit({ taskId: job.taskId, deviceId, payload: {
+        agentRef, runtime: 'pi', instruction, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: selector,
+      } });
+      expect(enqueued).toMatchObject({ taskId: job.taskId, envelope: { type: 'task.offer_for_agent_with_egress_fresh' } });
       await vi.waitFor(() => expect(adapter.sessions).toHaveLength(index + 1), { timeout: 10000 });
       expect(adapter.startCalls[index]?.task.sessionRef).toBeUndefined();
       expect(adapter.startCalls[index]?.task.instruction).toContain(instruction);
