@@ -1,3 +1,4 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 /**
  * Sprint S3.4's crash matrix, points 1-6 (P-007).
@@ -32,7 +33,6 @@ import path from 'node:path';
 import { decodeEnvelope, encodeEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
-import { DeviceStore } from '../daemon/store';
 import { journalHash, type JournalIdentity, type ReceivedEnvelopeRecord } from '../daemon/journal/journal';
 import {
   JOURNAL_DB_FILENAME,
@@ -312,7 +312,7 @@ describe.skipIf(!isSqliteAvailable())('S3.4 crash matrix, points 1-6', () => {
       }, { timeout: 10_000 });
 
       const body = await cloud.readTerminalBody(offer.taskId);
-      const credentials = await new DeviceStore(storeDir, undefined, 'test-product').credentials.read();
+      const credentials = await createTestDeviceStore(storeDir, undefined, 'test-product').credentials.read();
       return {
         taskId: offer.taskId,
         storeDir,

@@ -1,3 +1,4 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -5,7 +6,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthManager } from '../daemon/auth-manager';
 import { BlobClient } from '../daemon/blob-client';
 import { LongPollClient } from '../daemon/long-poll-transport';
-import { DeviceStore } from '../daemon/store';
 import { formatServerUrl } from '../daemon/url';
 
 async function tmpDir(prefix: string): Promise<string> {
@@ -25,7 +25,7 @@ describe('Issues #112/#113/#116/#121 client security and reliability guards', ()
   });
 
   it('#112 preserves the first pairing key across a failed first-pair response, so an exact server retry receives the same public key', async () => {
-    const store = new DeviceStore(await tmpDir('byok-first-pair-recovery-'));
+    const store = createTestDeviceStore(await tmpDir('byok-first-pair-recovery-'));
     const firstAttempt = new AuthManager({ serverUrl: 'https://byok.test', store });
     const publicKeys: string[] = [];
     const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {

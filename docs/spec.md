@@ -2015,11 +2015,23 @@ Operational rollback is deliberately simple: remove `gitWorkspace` from the loca
 complete paired enrollment: authenticated device/tenant/public-key metadata,
 access token, expiry, and device private key. It uses macOS Keychain, Windows
 Credential Manager, or Linux Secret Service; provider unavailability is typed
-and fail-closed, and there is no file, path-injection, or `@byok-sdk/keys`
+and fail-closed, and there is no file or `@byok-sdk/keys`
 fallback. `<storeDir>/device.json` is only a bounded non-secret projection
 `{deviceId, tenantId, devicePublicKey}`. A legacy secret-bearing JSON record is
 never imported, parsed as a JWT, or dual-read: normal load/start/status reports
 `re_pair_required`, and explicit re-pair is the default recovery.
+
+macOS custody may select an explicit absolute keychain file through
+`deviceCredentials.macosKeychainPath`; the daemon, cold enrollment reads,
+stored proof signer and repair use the same selection. Without it the OS
+default applies. Exit 36 is a typed `DeviceCredentialInteractionRequiredError`,
+with no automatic unlock, retry or fallback. Real-OS tests use per-test
+temporary keychains, including every child of a crash-recovery scenario.
+`DeviceStore` requires an injected custody backend. Embedded daemon composition
+may supply one explicitly through `DaemonOverrides.deviceCredentials`, whose
+storage and lifetime the caller owns; it cannot also configure OS selection.
+Test doubles live exclusively in test support, with no environment-selected
+backend in product code. Public enrollment observations remain credential-blind.
 
 The public enrollment boundary is credential-blind: `Daemon.pair()` returns
 `{deviceId}`, while the cold read model is exactly `unpaired | paired{deviceId}
@@ -2040,8 +2052,8 @@ authority for each signature and refuses (`enrollment_changed`) unless it
 still equals `identity`, and signs core's canonical device-proof bytes; errors
 are closed codes with no cause. The allowlist scopes one signer instance and is
 not a sandbox against code already running as the device account. Auth, store,
-record, and the stored-signer internals remain non-exports, and no public API
-returns the access token or a key. Pair writes the deterministic metadata projection before
+record, and the stored-signer internals remain non-exports, and no SDK enrollment
+observation returns the access token or a key. Pair writes the deterministic metadata projection before
 atomically replacing the complete OS authority; if the authoritative replace
 fails, restart repairs the projection from the previous OS record. Renewal
 replaces the whole OS entry before changing cache, and a signer reads the

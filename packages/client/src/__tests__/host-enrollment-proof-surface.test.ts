@@ -1,3 +1,4 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { createInProcessMailboxWake } from '../../../cloud/src/index';
 import { createPublicKey, generateKeyPairSync, verify } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -50,7 +51,7 @@ const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
   while (cleanups.length > 0) await cleanups.pop()?.();
   // OS credentials belong to the product, not to each removed temp directory.
-  await new DeviceStore(os.tmpdir(), undefined, PRODUCT).credentials.clear();
+  await createTestDeviceStore(os.tmpdir(), undefined, PRODUCT).credentials.clear();
 });
 
 async function tmpDir(prefix: string): Promise<string> {
@@ -80,7 +81,7 @@ async function startCloud(): Promise<HostedCloud> {
 
 async function pairAgainst(cloud: HostedCloud, storeDir: string): Promise<DeviceRecord> {
   const code = await cloud.hosted.cloud.createPairingCode(tenantId(TENANT), { productId: PRODUCT });
-  const auth = new AuthManager({ serverUrl: cloud.url, store: new DeviceStore(storeDir, undefined, PRODUCT) });
+  const auth = new AuthManager({ serverUrl: cloud.url, store: createTestDeviceStore(storeDir, undefined, PRODUCT) });
   const record = await auth.pair(code.code);
   await auth.stop();
   return record;
@@ -112,7 +113,7 @@ async function seedLocal(storeDir: string, overrides: Partial<DeviceRecord> = {}
     devicePublicKey: x,
     ...overrides,
   };
-  await seedDeviceEnrollment(new DeviceStore(storeDir, undefined, PRODUCT), record);
+  await seedDeviceEnrollment(createTestDeviceStore(storeDir, undefined, PRODUCT), record);
   return { record, publicKey: keys.publicKey };
 }
 
@@ -191,7 +192,7 @@ describe('readDeviceEnrollmentIdentity', () => {
     expect(await fs.readFile(path.join(storeDir, 'device.json'), 'utf8')).toBe(before);
 
     // Projection without OS authority, and a legacy secret-bearing file: explicit re-pair.
-    await new DeviceStore(storeDir, undefined, PRODUCT).credentials.clear();
+    await createTestDeviceStore(storeDir, undefined, PRODUCT).credentials.clear();
     expect(await readDeviceEnrollmentIdentity(options)).toEqual({ state: 're_pair_required' });
     await fs.writeFile(path.join(storeDir, 'device.json'), JSON.stringify({
       deviceId: 'legacy', accessToken: 't', expiresAt: '2030-01-01T00:00:00.000Z', devicePrivateKeyPem: 'p', devicePublicKey: 'k',
@@ -290,7 +291,7 @@ describe('createStoredDeviceProofSigner', () => {
 
     expect(await signerFailure(signer.sign(registerRequest(body, { operation: 'truth.write' })))).toBe('operation_not_allowed');
     // Even with the enrollment gone the answer stays the allowlist refusal: the key is never consulted.
-    await clearDeviceEnrollment(new DeviceStore(storeDir, undefined, PRODUCT));
+    await clearDeviceEnrollment(createTestDeviceStore(storeDir, undefined, PRODUCT));
     expect(await signerFailure(signer.sign(registerRequest(body, { operation: 'truth.write' })))).toBe('operation_not_allowed');
     expect(await signerFailure(signer.sign(registerRequest(body)))).toBe('unpaired');
   });

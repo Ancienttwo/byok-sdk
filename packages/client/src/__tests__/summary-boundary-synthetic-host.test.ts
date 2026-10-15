@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { testScratchRoot } from './fixtures/execution-scratch';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,6 +8,7 @@ import { createByokServer } from '@byok-sdk/server';
 import type { AgentMessagePublishPayload } from '@byok-sdk/protocol';
 import { startServer, stopServer } from '../../../server/src/__tests__/test-support';
 import { createDaemonWithAdapters } from '@byok-sdk/client';
+import { testDeviceCredentials } from './fixtures/device-credentials';
 import { connectControlClient } from '../bin/control-client';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -111,6 +113,7 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
   const storeDir = path.join(root, 'store');
   const extracts: string[] = [];
   const daemon = createDaemonWithAdapters({
+    storage: { scratchRoot: testScratchRoot() },
     localAgentRelease: { version: '0.0.0-summary-boundary-test' }, productName: 'summary boundary test', productId: options.productId,
     serverUrl: http.baseUrl, workspaceRoot: path.join(root, 'workspace'), storeDir,
     agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
@@ -121,7 +124,7 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
       extracts.push(task.taskId);
       return JSON.parse(output);
     } },
-  }, [adapter]);
+  }, [adapter], { deviceCredentials: testDeviceCredentials(options.productId) });
   const host = new SyntheticHost();
   const summaryTaskIds: string[] = [];
   let daemonStopped = false;

@@ -1,3 +1,4 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,7 +7,6 @@ import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
-import { DeviceStore } from '../daemon/store';
 import { TestServer } from './fixtures/test-server';
 import { waitForOpen } from './fixtures/lifecycle-barrier';
 
@@ -44,7 +44,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
   it('a handler that throws once leaves the cursor unadvanced, so the same envelope is safely reprocessed on redelivery and only then advances it', async () => {
     server = await TestServer.start();
     const storeDir = await tmpDir('byok-cm-store-');
-    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
+    const auth = new AuthManager({ serverUrl: server.url, store: createTestDeviceStore(storeDir) });
     const record = await auth.pair('pairing-code');
     const cursorStore = new CursorStore(storeDir);
 
@@ -121,7 +121,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
   it.each([[[1]], [[1, 2]]])('acks a finite successful tail without reexecuting it after failures at %j', async (failures) => {
     server = await TestServer.start();
     const storeDir = await tmpDir('byok-finite-tail-');
-    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
+    const auth = new AuthManager({ serverUrl: server.url, store: createTestDeviceStore(storeDir) });
     const record = await auth.pair('pairing-code');
     const cursorStore = new CursorStore(storeDir);
     const attempts = new Map<number, number>();
@@ -151,7 +151,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
   it('retries cursor persistence without repeating successful side effects', async () => {
     server = await TestServer.start();
     const storeDir = await tmpDir('byok-cursor-save-');
-    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
+    const auth = new AuthManager({ serverUrl: server.url, store: createTestDeviceStore(storeDir) });
     const record = await auth.pair('pairing-code');
     const cursorStore = new CursorStore(storeDir);
     const save = cursorStore.save.bind(cursorStore);
@@ -179,7 +179,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
   it('tracks agent.egress.ack and agent.content.read while excluding conn.ack, then retries a failed content read', async () => {
     server = await TestServer.start();
     const storeDir = await tmpDir('byok-cm-content-cursor-store-');
-    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
+    const auth = new AuthManager({ serverUrl: server.url, store: createTestDeviceStore(storeDir) });
     const record = await auth.pair('pairing-code');
     const cursorStore = new CursorStore(storeDir);
     let contentAttempts = 0;

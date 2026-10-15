@@ -79,7 +79,7 @@ interface ChildReport {
 
 async function runChild(home: string, configPath: string, service: boolean): Promise<{ report: ChildReport; child: ChildProcess }> {
   const child = spawn(process.execPath, [CHILD, configPath, ...(service ? ['--service'] : [])], {
-    env: minimalEnv(home, { BYOK_TEST_DEVICE_CREDENTIAL_STORE: '1' }),
+    env: minimalEnv(home, { BYOK_TEST_ENV_MARKER: '1' }),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   cleanups.push(async () => {
@@ -113,7 +113,7 @@ describe.runIf(supportedShell)('service login-shell environment, end to end (iss
     expect(report.pathHasFakeBin).toBe(true);
     expect(report.detected).toEqual(['claude']);
     expect(report.runtimes).toMatchObject([{ id: 'claude', outcome: 'available' }]);
-    expect(report.byokNames).toEqual(['BYOK_TEST_DEVICE_CREDENTIAL_STORE']);
+    expect(report.byokNames).toEqual(['BYOK_TEST_ENV_MARKER']);
     const hello = await server.waitFor((envelope) => envelope.type === 'conn.hello', 10_000);
     expect((hello.payload as { runtimes: Array<{ id: string }> }).runtimes.map((runtime) => runtime.id)).toEqual(['claude']);
     expect(await stop(child)).toBe(0);
@@ -141,7 +141,7 @@ describe.runIf(supportedShell)('service login-shell environment, end to end (iss
       // The test credential store makes the unpaired halt reachable on hosts
       // without an OS credential provider (Linux CI), where start would
       // otherwise crash on the missing provider first (#394 tells the two apart).
-      env: minimalEnv(home, { BYOK_TEST_DEVICE_CREDENTIAL_STORE: '1' }),
+      env: minimalEnv(home, { BYOK_TEST_ENV_MARKER: '1' }),
       encoding: 'utf8',
       timeout: 30_000,
     });

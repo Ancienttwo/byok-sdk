@@ -1,3 +1,4 @@
+import { createTestDeviceStore, testDeviceCredentials } from './fixtures/device-credentials';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -57,7 +58,7 @@ describe('device pairing + Ed25519 keypair (protocol §6.1)', () => {
 
   it('generates a device keypair on first pair and persists only metadata in device.json', async () => {
     const storeDir = await tmpDir('byok-auth-store-');
-    const store = new DeviceStore(storeDir);
+    const store = createTestDeviceStore(storeDir);
     const auth = new AuthManager({ serverUrl: server.url, store });
 
     const record = await auth.pair('pairing-code');
@@ -94,13 +95,13 @@ describe('device pairing + Ed25519 keypair (protocol §6.1)', () => {
     }));
     await fs.symlink(outside, path.join(storeDir, 'device.json'));
 
-    await expect(new DeviceStore(storeDir).load()).rejects.toThrow(/not a real regular file|opened safely/);
+    await expect(createTestDeviceStore(storeDir).load()).rejects.toThrow(/not a real regular file|opened safely/);
     expect(JSON.parse(await fs.readFile(outside, 'utf8'))).toMatchObject({ accessToken: 'external-token' });
   });
 
   it('sends the public key base64url-encoded in the pair request', async () => {
     const storeDir = await tmpDir('byok-auth-store-');
-    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
+    const auth = new AuthManager({ serverUrl: server.url, store: createTestDeviceStore(storeDir) });
     const record = await auth.pair('pairing-code');
     // base64url alphabet only (no '+', '/', or padding '=').
     expect(record.devicePublicKey).toMatch(/^[A-Za-z0-9_-]+$/);
@@ -117,7 +118,7 @@ describe('device pairing + Ed25519 keypair (protocol §6.1)', () => {
     const machineId = 'a'.repeat(64);
     const withProbe = new AuthManager({
       serverUrl: server.url,
-      store: new DeviceStore(await tmpDir('byok-auth-machine-')),
+      store: createTestDeviceStore(await tmpDir('byok-auth-machine-')),
       machineId: async () => machineId,
     });
     await withProbe.pair('pairing-code');
@@ -127,7 +128,7 @@ describe('device pairing + Ed25519 keypair (protocol §6.1)', () => {
 
     const withoutProbe = new AuthManager({
       serverUrl: server.url,
-      store: new DeviceStore(await tmpDir('byok-auth-machine-none-')),
+      store: createTestDeviceStore(await tmpDir('byok-auth-machine-none-')),
       machineId: async () => undefined,
     });
     await withoutProbe.pair('pairing-code-2');
@@ -138,7 +139,7 @@ describe('device pairing + Ed25519 keypair (protocol §6.1)', () => {
     // No option at all behaves exactly like an unresolved probe.
     const noOption = new AuthManager({
       serverUrl: server.url,
-      store: new DeviceStore(await tmpDir('byok-auth-machine-absent-')),
+      store: createTestDeviceStore(await tmpDir('byok-auth-machine-absent-')),
     });
     await noOption.pair('pairing-code-3');
     noOption.stop();
@@ -148,7 +149,7 @@ describe('device pairing + Ed25519 keypair (protocol §6.1)', () => {
 
   it('reuses the existing keypair (does not regenerate) across a second pair() call', async () => {
     const storeDir = await tmpDir('byok-auth-store-');
-    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
+    const auth = new AuthManager({ serverUrl: server.url, store: createTestDeviceStore(storeDir) });
 
     const first = await auth.pair('pairing-code');
     const second = await auth.pair('pairing-code-2');
@@ -177,7 +178,7 @@ describe('access token renewal (protocol §6.2)', () => {
     // token, which is exactly what isolates "proactive" from "lazy/reactive".
     server.setTokenTtlMs(2000);
     const storeDir = await tmpDir('byok-auth-store-');
-    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
+    const auth = new AuthManager({ serverUrl: server.url, store: createTestDeviceStore(storeDir) });
 
     await auth.pair('pairing-code');
     await auth.loadExisting();
@@ -194,7 +195,7 @@ describe('access token renewal (protocol §6.2)', () => {
   it('reactively renews via handleUnauthorized() after a 401, independent of the cached token\'s believed expiry', async () => {
     server.setTokenTtlMs(60 * 60 * 1000); // long-lived — no proactive renewal should fire on its own
     const storeDir = await tmpDir('byok-auth-store-');
-    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
+    const auth = new AuthManager({ serverUrl: server.url, store: createTestDeviceStore(storeDir) });
 
     const record = await auth.pair('pairing-code');
     const staleToken = record.accessToken;
@@ -216,7 +217,7 @@ describe('access token renewal (protocol §6.2)', () => {
   it('waits for an in-flight reactive renewal instead of returning the stale cached token', async () => {
     server.setTokenTtlMs(60 * 60 * 1000);
     const storeDir = await tmpDir('byok-auth-read-during-renewal-');
-    const store = new DeviceStore(storeDir);
+    const store = createTestDeviceStore(storeDir);
     const auth = new AuthManager({ serverUrl: server.url, store });
     const record = await auth.pair('pairing-code');
     server.rotateDeviceToken(record.deviceId);
@@ -259,7 +260,7 @@ describe('access token renewal (protocol §6.2)', () => {
   it('stop waits for an already-started renewal writer before it resolves', async () => {
     server.setTokenTtlMs(60 * 60 * 1000);
     const storeDir = await tmpDir('byok-auth-stop-barrier-');
-    const store = new DeviceStore(storeDir);
+    const store = createTestDeviceStore(storeDir);
     const auth = new AuthManager({ serverUrl: server.url, store });
     const record = await auth.pair('pairing-code');
     server.rotateDeviceToken(record.deviceId);
@@ -291,7 +292,7 @@ describe('access token renewal (protocol §6.2)', () => {
   it('serializes pair behind an in-flight renewal so the old identity cannot overwrite the new pair', async () => {
     server.setTokenTtlMs(60 * 60 * 1000);
     const storeDir = await tmpDir('byok-auth-pair-renewal-race-');
-    const store = new DeviceStore(storeDir);
+    const store = createTestDeviceStore(storeDir);
     const auth = new AuthManager({ serverUrl: server.url, store });
     const first = await auth.pair('pairing-code');
     server.rotateDeviceToken(first.deviceId);
@@ -333,7 +334,7 @@ describe('access token renewal (protocol §6.2)', () => {
 
   it('a device revoked at the server surfaces DeviceRevokedError from handleUnauthorized(), not a retryable error', async () => {
     const storeDir = await tmpDir('byok-auth-store-');
-    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
+    const auth = new AuthManager({ serverUrl: server.url, store: createTestDeviceStore(storeDir) });
     const record = await auth.pair('pairing-code');
 
     server.revokeDevice(record.deviceId);
@@ -344,7 +345,7 @@ describe('access token renewal (protocol §6.2)', () => {
   });
 
   it('bounds a hung pairing response without persisting a partial credential or treating it as revocation', async () => {
-    const store = new DeviceStore(await tmpDir('byok-auth-pair-deadline-'));
+    const store = createTestDeviceStore(await tmpDir('byok-auth-pair-deadline-'));
     const auth = authWithDeadline(server.url, store, 40);
     const releasePair = server.blockNextPair();
     try {
@@ -363,7 +364,7 @@ describe('access token renewal (protocol §6.2)', () => {
 
   it('stop aborts a hung challenge before waiting for the credential mutation tail', async () => {
     server.setTokenTtlMs(60 * 60 * 1000);
-    const store = new DeviceStore(await tmpDir('byok-auth-stop-deadline-'));
+    const store = createTestDeviceStore(await tmpDir('byok-auth-stop-deadline-'));
     const auth = authWithDeadline(server.url, store, 500);
     const record = await auth.pair('pairing-code');
     const before = await store.credentials.read();
@@ -388,7 +389,7 @@ describe('access token renewal (protocol §6.2)', () => {
 
   it('bounds a hung token response body and preserves the complete prior credential', async () => {
     server.setTokenTtlMs(60 * 60 * 1000);
-    const store = new DeviceStore(await tmpDir('byok-auth-token-body-deadline-'));
+    const store = createTestDeviceStore(await tmpDir('byok-auth-token-body-deadline-'));
     const auth = authWithDeadline(server.url, store, 40);
     const record = await auth.pair('pairing-code');
     const before = await store.credentials.read();
@@ -421,7 +422,7 @@ describe('access token renewal (protocol §6.2)', () => {
   });
 
   it('bounds a hung error body instead of leaving safeErrorText unbounded', async () => {
-    const store = new DeviceStore(await tmpDir('byok-auth-error-body-deadline-'));
+    const store = createTestDeviceStore(await tmpDir('byok-auth-error-body-deadline-'));
     const auth = authWithDeadline(server.url, store, 40);
     const realFetch = globalThis.fetch;
     const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
@@ -444,7 +445,7 @@ describe('access token renewal (protocol §6.2)', () => {
   });
 
   it('allows a pairing response released close to the configured deadline to complete', async () => {
-    const store = new DeviceStore(await tmpDir('byok-auth-near-deadline-'));
+    const store = createTestDeviceStore(await tmpDir('byok-auth-near-deadline-'));
     const auth = authWithDeadline(server.url, store, 500);
     const releasePair = server.blockNextPair();
     let signalIssued!: () => void;
@@ -562,11 +563,9 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     await rejected.stop();
   });
 
-  // The isolated in-memory credential double deliberately has no cross-process
-  // persistence. This process-bound SQLite-owner probe continues on a real OS
-  // credential-provider run; same-process owner rejection remains covered in
-  // this suite without touching a user's credential entry.
-  it.skipIf(!isSqliteAvailable() || process.env.BYOK_TEST_DEVICE_CREDENTIAL_STORE === '1')('a separate hosted daemon owns SQLite before any contender can open or quarantine it', async () => {
+  // This probe tests SQLite ownership. Transfer its synthetic enrollment over
+  // IPC and explicitly inject custody in the child; no OS provider is needed.
+  it.skipIf(!isSqliteAvailable())('a separate hosted daemon owns SQLite before any contender can open or quarantine it', async () => {
     const workspaceRoot = await tmpDir('byok-client-hosted-owner-workspace-');
     const storeDir = await tmpDir('byok-client-hosted-owner-store-');
     const config = {
@@ -584,6 +583,9 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     const distEntry = new URL('../../dist/index.js', import.meta.url).href;
     const childSource = `
       const { createDaemonWithAdapters } = await import(process.argv[1]);
+      const { InMemoryDeviceCredentialStore } = await import(process.argv[3]);
+      const credentials = new InMemoryDeviceCredentialStore();
+      await credentials.replace(await new Promise(resolve => process.once('message', resolve)));
       const config = JSON.parse(Buffer.from(process.argv[2], 'base64url').toString('utf8'));
       const adapter = {
         descriptor: Object.freeze({
@@ -594,7 +596,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
         detect: async () => ({ kind: 'available', version: 'test', authPresent: true }),
         prepare: async () => ({ kind: 'prepared', operation: { start: async () => { throw new Error('not used'); } } }),
       };
-      const daemon = createDaemonWithAdapters(config, [adapter]);
+      const daemon = createDaemonWithAdapters(config, [adapter], { deviceCredentials: credentials });
       try {
         await daemon.start();
         process.send?.({ kind: 'started' });
@@ -604,9 +606,13 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     `;
     const child = spawn(
       process.execPath,
-      ['-e', childSource, distEntry, Buffer.from(JSON.stringify(config)).toString('base64url')],
+      ['-e', childSource, distEntry, Buffer.from(JSON.stringify(config)).toString('base64url'), new URL('../../../../scripts/testing/device-credentials.mjs', import.meta.url).href],
       { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] },
     );
+    const enrollment = await testDeviceCredentials(config.productId).read();
+    expect(enrollment).toBeDefined();
+    if (enrollment === undefined) throw new Error('paired owner fixture is missing its enrollment');
+    child.send(enrollment);
     let childStderr = '';
     child.stderr?.setEncoding('utf8');
     child.stderr?.on('data', (chunk: string) => { childStderr += chunk; });
@@ -622,7 +628,10 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
       });
 
       daemon = createDaemonWithAdapters(config, [new StubRuntimeAdapter()]);
-      await expect(daemon.start()).rejects.toBeInstanceOf(DaemonOwnerActiveError);
+      const error = await daemon.start().then(() => undefined, (failure: unknown) => failure);
+      expect(error).toBeInstanceOf(DaemonHaltError);
+      expect((error as DaemonHaltError).reason).toBe('store_owned');
+      expect((error as DaemonHaltError).cause).toBeInstanceOf(DaemonOwnerActiveError);
       await expect(quarantineCorruptOperationalHealth(storeDir)).rejects.toBeInstanceOf(DaemonOwnerActiveError);
       // A live SQLite owner may legitimately append/checkpoint WAL bytes
       // while these refusals execute, so byte-for-byte WAL snapshots cannot

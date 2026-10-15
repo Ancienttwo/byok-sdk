@@ -1,3 +1,4 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { createHash, generateKeyPairSync } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -25,7 +26,6 @@ import {
 import { StoredDeviceProofSigner, type DeviceProofRequest, type DeviceProofSigner } from '../daemon/device-proof-signer';
 import { AuthManager } from '../daemon/auth-manager';
 import { exportPrivateKeyPem } from '../daemon/device-keys';
-import { DeviceStore } from '../daemon/store';
 import { seedDeviceEnrollment } from './fixtures/device-enrollment';
 import {
   TruthMemoryClient,
@@ -465,7 +465,7 @@ describe('truth memory client', () => {
       capabilities: fullCapabilityDeclaration(1, { includeTruthRecords: true }),
     });
     const directory = await temporaryDirectory();
-    const store = new DeviceStore(directory);
+    const store = createTestDeviceStore(directory);
     const keys = generateKeyPairSync('ed25519');
     const publicJwk = keys.publicKey.export({ format: 'jwk' });
     if (publicJwk.x === undefined) throw new Error('test key has no public x coordinate');

@@ -1,3 +1,4 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { generateKeyPairSync } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -17,7 +18,6 @@ import {
   type RetireInputPreparationTarget,
 } from '../index';
 import { exportPrivateKeyPem } from '../daemon/device-keys';
-import { DeviceStore } from '../daemon/store';
 import { clearDeviceEnrollment, seedDeviceEnrollment } from './fixtures/device-enrollment';
 
 /**
@@ -46,7 +46,7 @@ async function pairedStore(): Promise<{ storeDir: string; identity: CreateStored
   const keys = generateKeyPairSync('ed25519');
   const x = keys.publicKey.export({ format: 'jwk' }).x;
   if (x === undefined) throw new Error('test key has no public x coordinate');
-  await seedDeviceEnrollment(new DeviceStore(storeDir, undefined, PRODUCT), {
+  await seedDeviceEnrollment(createTestDeviceStore(storeDir, undefined, PRODUCT), {
     deviceId: 'device-snapshot',
     tenantId: TENANT,
     accessToken: 'secret-access-token',
@@ -138,7 +138,7 @@ describe('host device-proof signer: request snapshot (S4-F1)', () => {
   it('refuses an accessor request before reading the enrollment', async () => {
     const { storeDir, identity } = await pairedStore();
     const signer = createStoredDeviceProofSigner({ productId: PRODUCT, storeDir, identity, operations: [ALLOWED] });
-    await clearDeviceEnrollment(new DeviceStore(storeDir, undefined, PRODUCT));
+    await clearDeviceEnrollment(createTestDeviceStore(storeDir, undefined, PRODUCT));
     const request = { ...plainRequest() } as Record<string, unknown>;
     Object.defineProperty(request, 'operation', { enumerable: true, get: () => ALLOWED });
     // `unpaired` would mean the enrollment had been consulted.
@@ -264,7 +264,7 @@ describe('host device-proof signer: closed codes for hostile inputs (S4-F2)', ()
 describe('host device-proof signer: preserved closed paths', () => {
   it('still maps a malformed stored key to signing_failed with no cause', async () => {
     const { storeDir, identity } = await pairedStore();
-    const store = new DeviceStore(storeDir, undefined, PRODUCT);
+    const store = createTestDeviceStore(storeDir, undefined, PRODUCT);
     const record = await store.credentials.read();
     if (record === undefined) throw new Error('seeded enrollment is missing');
     await store.credentials.replace({ ...record, devicePrivateKeyPem: `not a pem ${MARKER}` });

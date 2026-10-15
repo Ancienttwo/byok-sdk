@@ -1,3 +1,4 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,7 +8,6 @@ import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
 import { LongPollClient } from '../daemon/long-poll-transport';
-import { DeviceStore } from '../daemon/store';
 import { TestServer } from './fixtures/test-server';
 import { waitForOpen } from './fixtures/lifecycle-barrier';
 
@@ -46,7 +46,7 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
     server = await TestServer.start();
     server.setAckCapabilities(['approval_resolved', 'mailbox-read-ahead']);
     const storeDir = await tmpDir('byok-server-caps-store-');
-    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
+    const auth = new AuthManager({ serverUrl: server.url, store: createTestDeviceStore(storeDir) });
     const record = await auth.pair('pairing-code');
     const cursorStore = new CursorStore(storeDir);
 
@@ -97,7 +97,7 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
     server = await TestServer.start();
     server.setAckCapabilities(['approval_resolved', 'mailbox-read-ahead']);
     const storeDir = await tmpDir('byok-server-caps-degraded-store-');
-    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
+    const auth = new AuthManager({ serverUrl: server.url, store: createTestDeviceStore(storeDir) });
     const record = await auth.pair('pairing-code');
     const cursorStore = new CursorStore(storeDir);
     let capabilitiesSeenByHandler: readonly string[] | undefined;
@@ -135,7 +135,7 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
   it('publishes the exact daemon conn.hello snapshot before task messages', async () => {
     server = await TestServer.start();
     const storeDir = await tmpDir('byok-agent-capability-longpoll-');
-    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
+    const auth = new AuthManager({ serverUrl: server.url, store: createTestDeviceStore(storeDir) });
     const record = await auth.pair('pairing-code');
     const postBatch = vi.spyOn(LongPollClient.prototype, 'postBatch');
 
@@ -178,7 +178,7 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
     server.setAckCapabilities(['approval_resolved', 'mailbox-read-ahead']);
     server.setAdvertiseLongPollCapabilities(false);
     const storeDir = await tmpDir('byok-server-caps-old-long-poll-');
-    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
+    const auth = new AuthManager({ serverUrl: server.url, store: createTestDeviceStore(storeDir) });
     const record = await auth.pair('pairing-code');
 
     connection = new ConnectionManager({

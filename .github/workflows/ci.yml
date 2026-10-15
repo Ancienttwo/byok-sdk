@@ -483,9 +483,24 @@ jobs:
       - name: Install dependencies
         run: bun ci
 
+      - name: Install isolated credential-provider dependencies on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends dbus-x11 gnome-keyring libsecret-tools
+
       - name: Check graph, pack exact tarballs, and import from an isolated npm install
-        if: matrix.os != 'windows-latest'
+        if: runner.os == 'macOS'
         run: bun run check:release-pack -- --out-dir .ci-artifacts/release-pack
+
+      - name: Check packed CLI with an ephemeral Secret Service on Linux
+        if: runner.os == 'Linux'
+        run: |
+          dbus-run-session -- bash -euo pipefail -c '
+            printf "%s" "byok-ci-ephemeral" | gnome-keyring-daemon --unlock >/dev/null
+            gnome-keyring-daemon --start --components=secrets >/dev/null
+            bun run check:release-pack -- --out-dir .ci-artifacts/release-pack
+          '
 
       # The hosted windows-latest runner is an ADMINISTRATOR. This leg runs the
       # SAME driver, with the same arguments, as the other two legs, but under a

@@ -8,6 +8,7 @@ import { acquireDaemonOwner, DaemonOwnerActiveError } from '../daemon/daemon-own
 import { OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger';
 import { AgentMessageOutbox, AGENT_MESSAGE_DIRECTORY, AGENT_MESSAGE_OUTBOX_FILENAME } from '../daemon/agent-message-outbox';
 import { DeviceStore } from '../daemon/store';
+import { createDeviceCredentialStore } from '../daemon/device-credential-provider';
 import type { DaemonConfig } from '../daemon/create-daemon';
 import { quarantineCorruptOperationalHealth } from './diagnostics';
 import type { OperationalHealthFixResult } from './types';
@@ -151,7 +152,7 @@ export async function archiveAgentTerminalMessages(
       // daemon start does (#393).
       await new OwnedProcessLedger(storeDir).reconcile();
       // Credential-blind metadata; callers supply an authenticated target, never infer it here.
-      const metadata = await new DeviceStore(storeDir, undefined, config.productId).load();
+      const metadata = await new DeviceStore(storeDir, createDeviceCredentialStore({ productId: config.productId, storeDir, deviceCredentials: config.deviceCredentials })).load();
       if (!metadata || metadata.deviceId !== input.expectedDeviceId || metadata.tenantId !== input.expectedTenantId) {
         throw new DeviceOperatorError('target-mismatch');
       }

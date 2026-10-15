@@ -1,3 +1,4 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,7 +7,6 @@ import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
-import { DeviceStore } from '../daemon/store';
 import { TestServer } from './fixtures/test-server';
 import { waitForOpen } from './fixtures/lifecycle-barrier';
 
@@ -61,7 +61,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
   }> {
     server = await TestServer.start();
     const storeDir = await tmpDir(prefix);
-    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
+    const auth = new AuthManager({ serverUrl: server.url, store: createTestDeviceStore(storeDir) });
     const record = await auth.pair('pairing-code');
     const cursorStore = new CursorStore(storeDir);
 
@@ -445,7 +445,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
   it('CRITICAL fix: an in-flight real envelope in the SAME batch as a later skip is never masked — the durable cursor stays behind a still-unresolved failure, a redelivery is retried and succeeds, and only THEN does the cursor advance past both', async () => {
     server = await TestServer.start();
     const storeDir = await tmpDir('byok-critical-skip-order-store-');
-    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
+    const auth = new AuthManager({ serverUrl: server.url, store: createTestDeviceStore(storeDir) });
     const record = await auth.pair('pairing-code');
     const cursorStore = new CursorStore(storeDir);
 

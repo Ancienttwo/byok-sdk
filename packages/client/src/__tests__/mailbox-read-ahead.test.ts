@@ -1,3 +1,4 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -7,7 +8,6 @@ import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
-import { DeviceStore } from '../daemon/store';
 import { startRealCloud } from './fixtures/real-cloud';
 
 const cleanup: Array<() => Promise<unknown>> = [];
@@ -17,7 +17,7 @@ it('real pageLimit=2 reaches approve/cancel behind an unfinished offer without a
   const cloud = await startRealCloud({ productId: 'read-ahead', eventsPageLimit: 2, longPollHoldMs: 20, mailboxFallbackMs: 5 });
   cleanup.push(() => cloud.close());
   const root = await mkdtemp(path.join(os.tmpdir(), 'byok-read-ahead-')); cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const auth = new AuthManager({ serverUrl: cloud.url, store: new DeviceStore(root) });
+  const auth = new AuthManager({ serverUrl: cloud.url, store: createTestDeviceStore(root) });
   const device = await auth.pair((await cloud.createPairingCode()).code);
   const a = await cloud.enqueueOffer(device.deviceId, 'slow A');
   const b = await cloud.enqueueOffer(device.deviceId, 'fast B');

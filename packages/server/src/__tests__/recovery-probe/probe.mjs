@@ -12,6 +12,7 @@ import { serve } from '@hono/node-server';
 import { createByokServer, createHmacTokenSigner } from '@byok-sdk/server';
 import { encodeEnvelope } from '@byok-sdk/protocol';
 import { validateStarts, hasAcknowledgedOffer } from './evidence.mjs';
+import { createTestKeychain } from '../../../../../scripts/testing/macos-keychain.mjs';
 
 process.umask(0o077);
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -142,6 +143,7 @@ async function child(stage, root) {
     } } }; },
   };
   const daemonConfig = { productId: config.productId, productName: 'BYOK attribution probe',
+    deviceCredentials: config.deviceCredentials,
     localAgentRelease: { version: '0.0.0-attribution' }, serverUrl,
     storeDir: path.join(root, 'device'), workspaceRoot: path.join(root, 'workspace'),
     allowedRuntimes: ['pi'],
@@ -304,9 +306,15 @@ function launch(stage, root) {
   return { process: processChild, response, exit };
 }
 async function runScenario(scenario, outDir) {
+  const keychain = process.platform === 'darwin' ? await createTestKeychain() : undefined;
+  try {
+    return await runScenarioWithCustody(scenario, outDir, keychain === undefined ? undefined : { macosKeychainPath: keychain.path });
+  } finally { await keychain?.dispose(); }
+}
+async function runScenarioWithCustody(scenario, outDir, deviceCredentials) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-attribution-')); await fs.chmod(root, 0o700);
   const [firstUrl, alternateUrl] = await allocateUrls();
-  const config = { ...scenario, productId: `probe-${randomUUID()}`, hostRequestId: randomUUID(), firstUrl,
+  const config = { ...scenario, deviceCredentials, productId: `probe-${randomUUID()}`, hostRequestId: randomUUID(), firstUrl,
     recoverUrl: scenario.changeUrl ? alternateUrl : firstUrl };
   await fs.writeFile(path.join(root, 'config.json'), JSON.stringify(config), { mode: 0o600 });
   await fs.writeFile(path.join(root, 'signer.key'), randomBytes(32), { mode: 0o600 });
@@ -369,7 +377,6 @@ if (process.argv[2] === '--child') {
   catch (error) { process.send?.({ kind: 'error', message: String(error.message).replaceAll(process.argv[4], '<test-root>') }); process.exitCode = 1; }
   finally { process.disconnect?.(); }
 } else if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  assert.equal(process.env.BYOK_TEST_DEVICE_CREDENTIAL_STORE, undefined, 'probe requires actual OS test enrollment');
   const outAt = process.argv.indexOf('--out'); assert.ok(outAt >= 0 && process.argv[outAt + 1], '--out <new evidence directory> required');
   const outDir = path.resolve(process.argv[outAt + 1]); await fs.mkdir(outDir, { recursive: false, mode: 0o700 });
   const onlyAt = process.argv.indexOf('--scenario'); const chosen = onlyAt < 0 ? scenarios : scenarios.filter(scenario => scenario.name === process.argv[onlyAt + 1]);

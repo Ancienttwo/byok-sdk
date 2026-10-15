@@ -1,3 +1,4 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { generateKeyPairSync, verify } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -7,7 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { StoredDeviceProofSigner } from '../daemon/device-proof-signer';
 import { exportPrivateKeyPem } from '../daemon/device-keys';
 import { AuthManager } from '../daemon/auth-manager';
-import { DeviceStore, type DeviceRecord } from '../daemon/store';
+import { type DeviceRecord } from '../daemon/store';
 import { clearDeviceEnrollment, seedDeviceEnrollment } from './fixtures/device-enrollment';
 
 const temporaryDirectories: string[] = [];
@@ -19,7 +20,7 @@ afterEach(async () => {
 describe('stored device proof signer', () => {
   it('uses core canonical bytes and binds explicit identity, request line and body', async () => {
     const directory = await temporaryDirectory();
-    const store = new DeviceStore(directory);
+    const store = createTestDeviceStore(directory);
     const keys = generateKeyPairSync('ed25519');
     const publicJwk = keys.publicKey.export({ format: 'jwk' });
     if (publicJwk.x === undefined) throw new Error('test key has no public x coordinate');
@@ -80,7 +81,7 @@ describe('stored device proof signer', () => {
 
   it('reads the paired record for every signature so unpair removes local authority', async () => {
     const directory = await temporaryDirectory();
-    const store = new DeviceStore(directory);
+    const store = createTestDeviceStore(directory);
     const keys = generateKeyPairSync('ed25519');
     const publicJwk = keys.publicKey.export({ format: 'jwk' });
     if (publicJwk.x === undefined) throw new Error('test key has no public x coordinate');

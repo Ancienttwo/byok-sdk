@@ -7,6 +7,7 @@ import { createByokServer } from '@byok-sdk/server';
 import type { AgentMessagePublishPayload } from '@byok-sdk/protocol';
 import { startServer, stopServer } from '../../../server/src/__tests__/test-support';
 import { AgentHomeManager, createDaemonWithAdapters } from '@byok-sdk/client';
+import { InMemoryDeviceCredentialStore } from './fixtures/device-credentials';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { OPEN_LIFECYCLE } from './fixtures/lifecycle-barrier';
@@ -22,7 +23,7 @@ it('runs two recurring executions through real HTTP and TaskRunner with distinct
     localAgentRelease: { version: '0.0.0-recurring-test' }, productName: 'recurring test', productId: 'execution-submit-integration',
     serverUrl: http.baseUrl, workspaceRoot: path.join(root, 'workspace'), storeDir: path.join(root, 'store'),
     agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
-  }, [adapter]);
+  }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });
   let releaseClose: (() => void) | undefined;
   try {
     const pairing = await sdk.pairing.createPairingCode({ productId: 'execution-submit-integration' });
@@ -99,7 +100,7 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
       if (outcome === 'missing') return undefined;
       return JSON.parse(output);
     } },
-  }, [adapter]);
+  }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });
   let releaseClose: (() => void) | undefined;
   let daemonStopped = false;
   let httpStopped = false;

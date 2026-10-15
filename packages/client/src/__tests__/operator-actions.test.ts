@@ -1,3 +1,4 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -9,7 +10,6 @@ import {
 } from '../index';
 import { connectControlClient } from '../bin/control-client';
 import { acquireDaemonOwner } from '../daemon/daemon-owner';
-import { DeviceStore } from '../daemon/store';
 import { AgentMessageOutbox } from '../daemon/agent-message-outbox';
 import { OPERATIONAL_HEALTH_FILENAME } from '../daemon/operational-health';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -32,7 +32,7 @@ beforeEach(async () => {
 });
 afterEach(async () => { vi.restoreAllMocks(); await fs.rm(root, { recursive: true, force: true }); });
 async function seed() {
-  await new DeviceStore(config.storeDir!, undefined, config.productId).save({ deviceId: 'device-a', tenantId: 'tenant-a', devicePublicKey: 'public' });
+  await createTestDeviceStore(config.storeDir!, undefined, config.productId).save({ deviceId: 'device-a', tenantId: 'tenant-a', devicePublicKey: 'public' });
   const binding = await new AgentHomeManager(config.agentHome!).acquire(agentRef);
   const home = binding.lease.cwd;
   await binding.lease.release();

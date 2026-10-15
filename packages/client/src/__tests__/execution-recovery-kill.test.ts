@@ -1,4 +1,5 @@
 import { testScratchRoot } from './fixtures/execution-scratch';
+import { createTestKeychain, type TestKeychain } from '../../../../scripts/testing/macos-keychain.mjs';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { promises as fs, readFileSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
@@ -10,6 +11,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { decodeEnvelope } from '@byok-sdk/protocol';
 
 interface ChildConfig {
+  readonly deviceCredentials?: { readonly macosKeychainPath: string };
   readonly scratchRoot: string;
   readonly productId: string;
   readonly serverUrl: string;
@@ -45,10 +47,8 @@ class JsonChild {
 
   constructor(executable: string, configPath: string) {
     const childEnv = { ...process.env };
-    // The ordinary client test suite selects a process-local credential double.
-    // This fixture deliberately crosses real process deaths, so it must exercise
-    // the shipped OS credential authority that survives those deaths.
-    delete childEnv.BYOK_TEST_DEVICE_CREDENTIAL_STORE;
+    // The compiled fixture uses its explicit per-test OS keychain, shared
+    // across these real process deaths and the final unpair child.
     this.child = spawn(executable, [configPath], { env: childEnv, stdio: ['pipe', 'pipe', 'pipe'] });
     this.child.stdout.setEncoding('utf8');
     this.child.stderr.setEncoding('utf8');
@@ -117,6 +117,7 @@ class JsonChild {
 let suiteRoot: string;
 let daemonBin: string;
 let cloudBin: string;
+let keychain: TestKeychain | undefined;
 let current: {
   root: string;
   productId: string;
@@ -315,6 +316,7 @@ beforeEach(async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-execution-recovery-kill-'));
   const port = await freePort();
   const productId = `execution-recovery-${randomUUID()}`;
+  if (process.platform === 'darwin') keychain = await createTestKeychain();
   const cloudDb = path.join(root, 'cloud.db');
   const faultFile = path.join(root, 'cloud-after-commit.arm');
   const faultReachedFile = path.join(root, 'cloud-after-commit.reached');
@@ -337,6 +339,7 @@ beforeEach(async () => {
     cloudDb,
     cloudConfig,
     daemonBase: { scratchRoot: testScratchRoot(),
+      ...(keychain === undefined ? {} : { deviceCredentials: { macosKeychainPath: keychain.path } }),
       productId,
       serverUrl: `http://127.0.0.1:${port}`,
       storeDir: path.join(root, 'daemon-store'),
@@ -349,13 +352,17 @@ beforeEach(async () => {
 
 afterEach(async () => {
   if (current === undefined) return;
-  for (const child of current.children) child.kill();
-  await Promise.all(current.children.map((child) => child.exited().catch(() => undefined)));
-  const unpair = new JsonChild(daemonBin, await writeConfig('unpair', { ...current.daemonBase, action: 'unpair' }));
-  const cleanup = await unpair.exited();
-  if (cleanup.code !== 0) throw new Error(`fixture credential cleanup failed (${cleanup.code ?? cleanup.signal}): ${unpair.stderr}`);
-  await fs.rm(current.root, { recursive: true, force: true });
-  current = undefined;
+  try {
+    for (const child of current.children) child.kill();
+    await Promise.all(current.children.map((child) => child.exited().catch(() => undefined)));
+    const unpair = new JsonChild(daemonBin, await writeConfig('unpair', { ...current.daemonBase, action: 'unpair' }));
+    const cleanup = await unpair.exited();
+    if (cleanup.code !== 0) throw new Error(`fixture credential cleanup failed (${cleanup.code ?? cleanup.signal}): ${unpair.stderr}`);
+  } finally {
+    await keychain?.dispose(); keychain = undefined;
+    await fs.rm(current.root, { recursive: true, force: true });
+    current = undefined;
+  }
 });
 
 afterAll(async () => {

@@ -1,3 +1,4 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -5,7 +6,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
-import { DeviceStore } from '../daemon/store';
 import { startRealServer, type RealServerHandle } from './fixtures/real-server';
 import { waitForOpen } from './fixtures/lifecycle-barrier';
 
@@ -34,7 +34,7 @@ describe('protocol-version admission at real long-poll receive', () => {
       rateLimit: { messagesPerSecond: 10_000, burst: 10_000 },
     });
     storeDir = await tmpDir('byok-version-admission-client-');
-    auth = new AuthManager({ serverUrl: real.url, store: new DeviceStore(storeDir) });
+    auth = new AuthManager({ serverUrl: real.url, store: createTestDeviceStore(storeDir) });
     const record = await auth.pair((await real.createPairingCode()).code);
     const cursorStore = new CursorStore(storeDir);
     const received: number[] = [];

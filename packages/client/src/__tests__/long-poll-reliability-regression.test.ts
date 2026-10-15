@@ -1,10 +1,10 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import type { CursorStore } from '../daemon/cursor-store';
 import { LongPollClient } from '../daemon/long-poll-transport';
-import { DeviceStore } from '../daemon/store';
 import { seedDeviceEnrollment } from './fixtures/device-enrollment';
 import { TestServer } from './fixtures/test-server';
 import { promises as fs } from 'node:fs';
@@ -34,7 +34,7 @@ function offer(taskId: string, seq: number): Envelope {
 
 async function seededAuth(): Promise<AuthManager> {
   const storeDir = await tmpDir('byok-long-poll-reliability-auth-');
-  const store = new DeviceStore(storeDir);
+  const store = createTestDeviceStore(storeDir);
   await seedDeviceEnrollment(store, {
     deviceId: 'device-reliability',
     tenantId: 'tenant-reliability',
@@ -66,7 +66,7 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
     settlements = [];
     server = await TestServer.start();
     const storeDir = await tmpDir('byok-long-poll-reliability-connection-');
-    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
+    const auth = new AuthManager({ serverUrl: server.url, store: createTestDeviceStore(storeDir) });
     const paired = await auth.pair('pairing-code');
     const nativeFetch = globalThis.fetch;
     const pollCursors: Array<string | null> = [];

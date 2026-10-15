@@ -1,3 +1,4 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -21,7 +22,6 @@ import {
   UnpairUnknownDaemonStateError,
 } from '../bin/commands/unpair';
 import { appendAuditRecord, auditLogPath } from '../bin/audit-log';
-import { DeviceStore } from '../daemon/store';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
 /** Fake `connectControlClient` returning an unreachable result — the default for tests below that don't care about the live control socket. */
@@ -104,7 +104,7 @@ describe('bin/commands/status: runStatusCommand', () => {
       tenantId: 'tenant-status',
       devicePublicKey: 'pub',
     };
-    await new DeviceStore(storeDir).save(record);
+    await createTestDeviceStore(storeDir).save(record);
 
     const { log, lines } = collectLog();
     await runStatusCommand(baseConfig(storeDir), { log });

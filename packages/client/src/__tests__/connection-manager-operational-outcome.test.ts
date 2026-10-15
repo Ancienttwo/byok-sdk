@@ -1,3 +1,4 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,7 +8,6 @@ import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager, type ConnectionManagerOptions, type OutboundSettlement } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
 import { LongPollClient } from '../daemon/long-poll-transport';
-import { DeviceStore } from '../daemon/store';
 import { seedDeviceEnrollment } from './fixtures/device-enrollment';
 
 type Scenario = 'handshake-route-failure' | 'handshake-settlement-failure' | 'poll-success' | 'poll-failure'
@@ -30,7 +30,7 @@ afterEach(async () => {
 async function setup(scenario: Scenario, onOperationalOutcome: ConnectionManagerOptions['onOperationalOutcome']) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-operational-observer-'));
   roots.push(root);
-  const store = new DeviceStore(root);
+  const store = createTestDeviceStore(root);
   await seedDeviceEnrollment(store, {
     deviceId, tenantId: 'observer-tenant', accessToken: 'fixture-token',
     expiresAt: new Date(Date.now() + 3_600_000).toISOString(),

@@ -152,6 +152,7 @@ import { AgentSessionHandoffStore } from './agent-session-handoff-store';
 import { GitWorkspaceManager, stableGitWorkspaceOwnerId } from './git-workspace';
 import { GitWorkspaceStore } from './git-workspace-store';
 import { DeviceRecordRePairRequiredError, DeviceStore, type DeviceEnrollment, type DeviceRecord } from './store';
+import { createDeviceCredentialStore } from './device-credential-provider';
 import { JournalRecordTooLargeError, JournalUnavailableError, journalHash, type JournalIdentity, type LocalTaskJournal, type ReceivedEnvelopeRecord } from './journal/journal';
 import { JournalHandleCleanupError, SqliteLocalTaskJournal } from './journal/sqlite-journal';
 import { isSqliteAvailable, type JournalOpenFaultSeam } from './journal/sqlite-support';
@@ -292,6 +293,8 @@ export interface HostedJournalConfig {
 }
 
 export interface DaemonConfig {
+  /** Select an explicit macOS keychain for device enrollment custody. */
+  deviceCredentials?: import('./device-credential-store').DeviceCredentialConfig;
   storage?: StorageConfig;
   /** Distribution-owned application release; observability only, never a protocol/capability gate. */
   localAgentRelease: LocalAgentReleaseIdentity;
@@ -881,6 +884,11 @@ export interface Daemon {
 /** Custom adapter composition. Available custom descriptors are published through
  * the capability-gated harness inventory; built-in RuntimeId remains closed. */
 export interface DaemonOverrides {
+  /**
+   * Explicit enrollment-custody dependency. The caller owns its secret storage
+   * and lifetime; omission composes the platform OS credential store.
+   */
+  deviceCredentials?: import('./device-credential-store').DeviceCredentialBackend;
   retention?: { clock?: () => Date; timers?: RetentionTimers; freeBytesProvider?: () => Promise<number> };
   /** Test-only synchronous kill points; never supplied by production configuration. */
   executionRecoveryFault?: (step: 'terminal:before-send' | 'terminal:queued' | 'outbound:before-post' | 'outbound:after-ack') => void;
@@ -1301,6 +1309,9 @@ export function buildDaemonWithAdapters(
   overrides: DaemonOverrides = {},
   assertionProbe?: AssertionIssueProbe,
 ): Daemon {
+  if (overrides.deviceCredentials !== undefined && config.deviceCredentials !== undefined) {
+    throw new TypeError('configure OS deviceCredentials or inject a credential backend, not both');
+  }
   if (Object.hasOwn(config, 'permissionDefaults')) {
     throw new Error('DaemonConfig.permissionDefaults was removed: the local agent\'s own permission settings apply');
   }
@@ -1569,7 +1580,9 @@ export function buildDaemonWithAdapters(
     }
   }
   const teamWorkspaces = new LocalTeamWorkspace(storeDir);
-  const store = new DeviceStore(storeDir, undefined, config.productId);
+  const store = new DeviceStore(storeDir, overrides.deviceCredentials === undefined ? createDeviceCredentialStore({
+    productId: config.productId, storeDir, deviceCredentials: config.deviceCredentials,
+  }) : overrides.deviceCredentials);
   const operationalHealth = new OperationalHealthTracker(storeDir);
   const ownedProcessLedger = new OwnedProcessLedger(storeDir);
   let detachOwnedProcessGroupLedger: (() => void) | undefined;
@@ -4251,7 +4264,7 @@ export function buildDaemonWithAdapters(
  * needing something this can't build (custom adapter options, a fourth
  * in-house runtime, test stubs) use `createDaemonWithAdapters` directly.
  */
-export function createDaemon(config: DaemonConfig): Daemon {
+export function createDaemon(config: DaemonConfig, overrides: DaemonOverrides = {}): Daemon {
   if (config.codexSandbox !== undefined) assertCodexSandboxSetting(config.codexSandbox, 'DaemonConfig.codexSandbox');
-  return buildDaemonWithAdapters(config, buildDefaultAdapters(config));
+  return buildDaemonWithAdapters(config, buildDefaultAdapters(config), overrides);
 }

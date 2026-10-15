@@ -8,6 +8,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const clientDir = path.resolve(scriptDir, '..');
@@ -177,10 +178,6 @@ try {
     PATH: hostPath,
     HOME: home,
     ...platformEnvironment,
-    // This is a hermetic test process, not a product daemon. Pairing must not
-    // depend on or mutate the runner's real Keychain/Credential Manager/Secret
-    // Service, which may be absent (as on a fresh Linux CI host).
-    BYOK_TEST_DEVICE_CREDENTIAL_STORE: '1',
     LANG: 'C',
     LC_ALL: 'C',
     TZ: 'UTC',
@@ -265,6 +262,7 @@ try {
     },
     adapters,
     {
+      deviceCredentials: new InMemoryDeviceCredentialStore(),
       backoff: { baseMs: 10, maxMs: 100, factor: 1.5 },
       liveness: { timeoutMs: 5_000, checkIntervalMs: 250 },
       longPoll: { retryDelayMs: 10, idleDelayMs: 10 },

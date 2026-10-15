@@ -14,11 +14,12 @@ import { atomicWriteFile } from '../util/atomic-write';
 import { pickPlainDataProperties } from '../util/plain-data';
 import { ensureSecureDir, type EnsureSecureDirOptions } from '../util/secure-dir';
 import {
-  DeviceCredentialStore,
-  InMemoryDeviceCredentialStore,
+  type DeviceCredentialBackend,
+  type DeviceCredentialConfig,
   type DeviceMetadata,
   type DeviceRecord,
 } from './device-credential-store';
+import { createDeviceCredentialStore } from './device-credential-provider';
 
 export type { DeviceMetadata, DeviceRecord } from './device-credential-store';
 
@@ -39,6 +40,7 @@ export interface DeviceEnrollment {
 export interface DeviceEnrollmentStatusOptions {
   productId: string;
   storeDir?: string;
+  deviceCredentials?: DeviceCredentialConfig;
 }
 
 /** Credential-blind cold read model for host setup and diagnostics. */
@@ -178,11 +180,7 @@ function parseDeviceMetadata(raw: string): DeviceMetadata {
  * OS DeviceCredentialStore.
  */
 export class DeviceStore {
-  /** Process-local keyed doubles preserve restart semantics in isolated tests. */
-  private static readonly testCredentials = new Map<string, InMemoryDeviceCredentialStore>();
   private readonly filePath: string;
-  /** Internal test seam. Product construction always supplies productId and gets an OS store. */
-  readonly credentials: DeviceCredentialStore | InMemoryDeviceCredentialStore;
 
   /**
    * `secureDirOptions` is a test-only DI seam (mirrors `EnsureSecureDirOptions`'s
@@ -196,23 +194,15 @@ export class DeviceStore {
    */
   constructor(
     storeDir: string,
+    readonly credentials: DeviceCredentialBackend,
     private readonly secureDirOptions?: EnsureSecureDirOptions,
-    productId?: string,
   ) {
-    this.filePath = path.join(storeDir, 'device.json');
-    if (productId === undefined) {
-      this.credentials = new InMemoryDeviceCredentialStore();
-    } else if (process.env.BYOK_TEST_DEVICE_CREDENTIAL_STORE === '1') {
-      const key = productId;
-      let credentials = DeviceStore.testCredentials.get(key);
-      if (credentials === undefined) {
-        credentials = new InMemoryDeviceCredentialStore();
-        DeviceStore.testCredentials.set(key, credentials);
-      }
-      this.credentials = credentials;
-    } else {
-      this.credentials = new DeviceCredentialStore({ productId, storeDir });
+    if (credentials === null || (typeof credentials !== 'object' && typeof credentials !== 'function') ||
+        (['read', 'readFirstPairingAttempt', 'saveFirstPairingAttempt', 'replace', 'clear'] as const)
+          .some((method) => typeof credentials[method] !== 'function')) {
+      throw new TypeError('device credential backend must implement complete enrollment custody');
     }
+    this.filePath = path.join(storeDir, 'device.json');
   }
 
   static defaultDir(productId: string): string {
@@ -380,10 +370,10 @@ export class DeviceStore {
 export async function readEnrollmentAuthority(
   options: DeviceEnrollmentStatusOptions,
 ): Promise<EnrollmentAuthorityRead> {
-  const { productId, storeDir: configuredStoreDir } = readEnrollmentOptions(options);
+  const { productId, storeDir: configuredStoreDir, deviceCredentials } = readEnrollmentOptions(options);
   const storeDir = DeviceStore.resolveDir(productId, configuredStoreDir);
   try {
-    const store = new DeviceStore(storeDir, undefined, productId);
+    const store = new DeviceStore(storeDir, createDeviceCredentialStore({ productId, storeDir, deviceCredentials }));
     // Inspect the bounded projection even when the OS authority exists. A
     // legacy secret-bearing or otherwise invalid file is an explicit
     // re-pair-required state; steady-state reads must never hide or repair it.
@@ -410,12 +400,12 @@ export async function readEnrollmentAuthority(
  * read. An accessor, Proxy, non-plain prototype or wrong type is a
  * `TypeError` with no cause, before any filesystem or credential access.
  */
-function readEnrollmentOptions(options: unknown): { productId: string; storeDir: string | undefined } {
+function readEnrollmentOptions(options: unknown): { productId: string; storeDir: string | undefined; deviceCredentials: DeviceCredentialConfig | undefined } {
   const invalid = (): TypeError =>
     new TypeError('device enrollment reads require a non-empty productId and an optional storeDir string, as plain data properties');
-  let picked: Record<'productId' | 'storeDir', unknown>;
+  let picked: Record<'productId' | 'storeDir' | 'deviceCredentials', unknown>;
   try {
-    picked = pickPlainDataProperties(options, ['productId', 'storeDir']);
+    picked = pickPlainDataProperties(options, ['productId', 'storeDir', 'deviceCredentials'], { maxDepth: 1, allowUndefined: true });
   } catch {
     throw invalid();
   }
@@ -423,7 +413,15 @@ function readEnrollmentOptions(options: unknown): { productId: string; storeDir:
   if (typeof productId !== 'string' || productId.length === 0 || (storeDir !== undefined && typeof storeDir !== 'string')) {
     throw invalid();
   }
-  return { productId, storeDir };
+  let deviceCredentials: DeviceCredentialConfig | undefined;
+  if (picked.deviceCredentials !== undefined) {
+    let config: Record<'macosKeychainPath', unknown>;
+    try { config = pickPlainDataProperties(picked.deviceCredentials, ['macosKeychainPath']); }
+    catch { throw invalid(); }
+    if (config.macosKeychainPath !== undefined && typeof config.macosKeychainPath !== 'string') throw invalid();
+    deviceCredentials = { macosKeychainPath: config.macosKeychainPath };
+  }
+  return { productId, storeDir, deviceCredentials };
 }
 
 /** The public non-secret identity projection of one enrollment record. */

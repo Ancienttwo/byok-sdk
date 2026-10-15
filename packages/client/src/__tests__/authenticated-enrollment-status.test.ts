@@ -1,9 +1,9 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { readDeviceEnrollmentStatus } from '../index';
-import { DeviceStore } from '../daemon/store';
 import { seedDeviceEnrollment } from './fixtures/device-enrollment';
 
 const roots: string[] = [];
@@ -32,7 +32,7 @@ describe('credential-blind authenticated enrollment status', () => {
       devicePrivateKeyPem: 'secret-private-key',
       devicePublicKey: 'public-key',
     };
-    await seedDeviceEnrollment(new DeviceStore(storeDir, undefined, options.productId), record);
+    await seedDeviceEnrollment(createTestDeviceStore(storeDir, undefined, options.productId), record);
 
     const paired = await readDeviceEnrollmentStatus(options);
     expect(paired).toEqual({ state: 'paired', deviceId: 'device-status' });
@@ -49,16 +49,16 @@ describe('credential-blind authenticated enrollment status', () => {
     }));
     expect(await readDeviceEnrollmentStatus(options)).toEqual({ state: 're_pair_required' });
 
-    await new DeviceStore(storeDir, undefined, options.productId).save({
+    await createTestDeviceStore(storeDir, undefined, options.productId).save({
       deviceId: record.deviceId,
       tenantId: record.tenantId,
       devicePublicKey: record.devicePublicKey,
     });
 
-    await new DeviceStore(storeDir, undefined, options.productId).remove();
+    await createTestDeviceStore(storeDir, undefined, options.productId).remove();
     expect(await readDeviceEnrollmentStatus(options)).toEqual({ state: 'paired', deviceId: 'device-status' });
 
-    await new DeviceStore(storeDir, undefined, options.productId).credentials.clear();
+    await createTestDeviceStore(storeDir, undefined, options.productId).credentials.clear();
     expect(await readDeviceEnrollmentStatus(options)).toEqual({ state: 'unpaired' });
 
     await fs.writeFile(path.join(storeDir, 'device.json'), JSON.stringify({

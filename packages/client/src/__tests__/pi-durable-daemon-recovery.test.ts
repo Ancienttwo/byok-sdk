@@ -1,4 +1,5 @@
 import { testExecutionScratch, testScratchRoot } from "./fixtures/execution-scratch";
+import { createTestKeychain } from '../../../../scripts/testing/macos-keychain.mjs';
 import { afterEach, expect, it, vi } from 'vitest';
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { existsSync, promises as fs } from 'node:fs';
@@ -51,7 +52,7 @@ afterEach(async () => {
   for (const root of roots) for (const entry of await rows(path.join(root,'control','launches.jsonl'))) launcherPids.push(Number(entry.launcherPid));
   for (const pid of new Set(launcherPids.splice(0))) {for(const child of processTree([pid]))ownedPids.add(child);kill(pid,true);}
   for(const pid of ownedPids)kill(pid);ownedPids.clear();
-  for(const cleanup of secretCleanup.splice(0))await cleanup();
+  for(const cleanup of secretCleanup.splice(0).reverse())await cleanup();
   await server?.close(); provider?.closeAllConnections(); if (provider) await new Promise<void>(resolve => provider!.close(() => resolve()));
   server=undefined; provider=undefined; logs.length=0;
   for (const root of roots.splice(0)) await fs.rm(root,{recursive:true,force:true});
@@ -98,7 +99,7 @@ async function recoveryScenario(daemonOnly: boolean, interpreter = process.execP
   const audit=path.join(control,'sqlite-opens.jsonl');
   const index=path.join(isolated,'dist/index.js'), worker=path.join(isolated,'dist/bin/byok-pi-durable.js');
   const originalIndex=await fs.readFile(index), originalWorker=await fs.readFile(worker,'utf8');
-  await fs.writeFile(index,auditPrelude(audit,'daemon')+originalIndex.toString()+'\nexport {DeviceStore as FixtureDeviceStore};\n');
+  await fs.writeFile(index,auditPrelude(audit,'daemon')+originalIndex.toString());
   await fs.writeFile(worker,auditPrelude(audit,'worker')+originalWorker.replace(/^#![^\n]*\n/u,''));
   // Assert the real execution modules remain unchanged by the observational fixture.
   for (const relative of ['dist/bin/pi-runtime-host.js','dist/adapters/index.js']) {
@@ -118,7 +119,7 @@ async function recoveryScenario(daemonOnly: boolean, interpreter = process.execP
   const configPath=path.join(root,'daemon.json'); await fs.writeFile(configPath,JSON.stringify(config));
   let enrollment:unknown;
   const start=async () => {
-    const child=spawn(interpreter,[path.resolve(import.meta.dirname,'fixtures/pi-durable-recovery-daemon.mjs'),configPath],{env:{...process.env,BYOK_TEST_DEVICE_CREDENTIAL_STORE:'1'},stdio:['pipe','pipe','pipe','ipc']});children.push(child);
+    const child=spawn(interpreter,[path.resolve(import.meta.dirname,'fixtures/pi-durable-recovery-daemon.mjs'),configPath],{env:{...process.env},stdio:['pipe','pipe','pipe','ipc']});children.push(child);
     let stdout='';child.stdout!.on('data',chunk=>{stdout+=chunk;logs.push(String(chunk));});child.stderr!.on('data',chunk=>logs.push(String(chunk)));
     child.on('message',value=>{enrollment=(value as {record:unknown}).record;});child.send({record:enrollment});
     await vi.waitFor(()=>{if(child.exitCode!==null) throw new Error(logs.join(''));expect(stdout).toContain('"ready":true');},PROCESS_WAIT);return child;
@@ -218,15 +219,16 @@ it.skipIf(process.platform !== 'darwin')('real built keys launcher bin completes
 const __executionScratch = await testExecutionScratch();
 
   const {SqliteProviderProfileStore,parseModelProviderProfile,MacOsKeychainSecretStore,modelProviderSecretName}=await import('../../../keys/src/index');
-  const servicePrefix=`byok-knife5-${randomUUID()}`;const secrets=new MacOsKeychainSecretStore({servicePrefix});const secretName=modelProviderSecretName('probe');
-  secretCleanup.push(async()=>{await secrets.delete(secretName);});await secrets.set(secretName,SENTINEL);
+  const keychain = await createTestKeychain();
+  const servicePrefix=`byok-knife5-${randomUUID()}`;const secrets=new MacOsKeychainSecretStore({servicePrefix,keychainPath:keychain.path});const secretName=modelProviderSecretName('probe');
+  secretCleanup.push(async()=>{try { await secrets.delete(secretName); } finally { await keychain.dispose(); }});await secrets.set(secretName,SENTINEL);
   const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'byok-durable-real-bin-')));roots.push(root);
   const home=path.join(root,'home'),store=path.join(root,'store');await Promise.all([home,store].map(dir=>fs.mkdir(dir)));
   const headers:unknown[]=[];provider=createServer((req,res)=>{req.resume();req.on('end',()=>{headers.push(req.headers.authorization);reply(res,'real CLI result');});});
   await new Promise<void>(resolve=>provider!.listen(0,'127.0.0.1',resolve));const address=provider.address();if(!address||typeof address==='string')throw new Error('no port');
   const profilePath=path.join(root,'profiles.db');const profiles=new SqliteProviderProfileStore({path:profilePath});
   try{await profiles.save(parseModelProviderProfile({adapter:'openai_compatible',auth_mode:'bearer',base_url:`http://127.0.0.1:${address.port}/v1`,capabilities:[],created_at:'2026-10-03T00:00:00.000Z',updated_at:'2026-10-03T00:00:00.000Z',display_name:'OS custody fixture',enabled:true,kind:'model',model:'probe',profile_ref:'probe',provider_kind:'custom',pi_model:{...PI_MODEL_FIXTURE,reasoning:false,thinkingLevel:'off'}}));}finally{await profiles.close();}
-  const adapter=new PiAdapter({durablePi:true,byokLauncher:{command:process.execPath,args:[path.resolve(clientRoot,'../keys/dist/bin/pi-provider-launcher.js')],profileDbPath:profilePath,sessionDir:path.join(root,'sessions'),secretServicePrefix:servicePrefix}});
+  const adapter=new PiAdapter({durablePi:true,byokLauncher:{command:process.execPath,args:[path.resolve(clientRoot,'../keys/dist/bin/pi-provider-launcher.js')],profileDbPath:profilePath,sessionDir:path.join(root,'sessions'),secretServicePrefix:servicePrefix,macosKeychainPath:keychain.path}});
   const selection={lane:'byok' as const,runtimeId:'pi' as const,providerId:'probe',modelId:'probe'};const prepared=await adapter.prepare({offer:{instruction:'real bin',dispatchSelection:selection}} as never);if(prepared.kind!=='prepared')throw new Error(prepared.reason);
   const env=buildRuntimeEnv({ ambient: process.env });const launch=await prepared.operation.resolveRuntimeLaunch!({ scratch: __executionScratch, kind:'instruction',cwd:home,env,});
   const manifest=sealRuntimeOperationManifest({taskId:'real-bin',runtimeId:'pi',descriptor:adapter.descriptor,dispatchSelection:selection,requiredToolsetIds:[],cwd:home,workspace:{workspaceDir:home},agentRef:{agentId:'real-bin-agent',profileRevision:'1'},lease:{leaseId:'real-bin-lease',canonicalHome:home},forwardedEnvironmentNames:Object.keys(env)});

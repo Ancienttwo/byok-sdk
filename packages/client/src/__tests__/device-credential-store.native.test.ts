@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { createTestKeychain } from '../../../../scripts/testing/macos-keychain.mjs';
 import {
   DeviceCredentialStore,
   type DeviceCommandRunner,
@@ -12,6 +13,25 @@ import {
 
 const nativeWindowsSmoke =
   process.platform === 'win32' && process.env.BYOK_NATIVE_WINDOWS_CREDENTIAL_SMOKE === '1';
+
+it.runIf(process.platform === 'darwin')('real macOS credentials survive fresh readers only in their explicit test keychain', async () => {
+  const keychain = await createTestKeychain();
+  const storeDir = await mkdtemp(path.join(os.tmpdir(), 'byok-native-device-'));
+  const options = { productId: 'isolated-native-custody', storeDir, macosKeychainPath: keychain.path };
+  const record = { deviceId: 'device', tenantId: 'tenant', devicePublicKey: 'public',
+    accessToken: 'synthetic-test-token', expiresAt: '2030-01-01T00:00:00.000Z', devicePrivateKeyPem: 'synthetic-private' };
+  try {
+    const store = new DeviceCredentialStore(options);
+    expect(await store.read()).toBeUndefined();
+    await store.replace(record);
+    expect(await new DeviceCredentialStore(options).read()).toEqual(record);
+    expect(await new DeviceCredentialStore(options).clear()).toBe(true);
+    expect(await store.read()).toBeUndefined();
+  } finally {
+    await keychain.dispose();
+    await rm(storeDir, { recursive: true, force: true });
+  }
+});
 
 const COMMAND_TIMEOUT_MS = 20_000;
 const PHASE_TIMEOUT_MS = 25_000;

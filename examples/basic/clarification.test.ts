@@ -1,3 +1,4 @@
+import { InMemoryDeviceCredentialStore } from '../../scripts/testing/device-credentials.mjs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -58,7 +59,7 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
     adapter = new BotStubAdapter();
     daemon = createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-example-stub' },productName: 'Example Bot',productId: 'clarification-test',serverUrl: listening.url,
       workspaceRoot: path.join(root,'ws'),storeDir: path.join(root,'sdk'),agentHome: { hostStorageRoot: path.join(root,'homes') },agentEgress: { policy },resultDocument: { extract: extractClarification },
-    },[adapter],{ longPoll: { retryDelayMs: 10,idleDelayMs: 10 } });
+    },[adapter],{ deviceCredentials: new InMemoryDeviceCredentialStore(), longPoll: { retryDelayMs: 10,idleDelayMs: 10 } });
     const pair = await byok.pairing.createPairingCode({ productId: 'clarification-test' }); deviceId = (await daemon.pair(pair.code)).deviceId;
     await daemon.start(); await waitForReady(daemon);
     store = new SqliteClarificationStore(db,'tenant-a'); host = new ClarificationHost(byok,store,() => now);
@@ -276,7 +277,7 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
       ...(mode === 'empty' ? { resultDocument: { extract: () => undefined } } : {}),
       ...(mode === 'unchecked' || mode === 'capability' ? { resultDocument: { extract: (output: string) => JSON.parse(output) as unknown } } : {}),
     };
-    daemon = createDaemonWithAdapters(config,[adapter],{ longPoll: { retryDelayMs: 10,idleDelayMs: 10 } });
+    daemon = createDaemonWithAdapters(config,[adapter],{ deviceCredentials: new InMemoryDeviceCredentialStore(), longPoll: { retryDelayMs: 10,idleDelayMs: 10 } });
     const code = await byok.pairing.createPairingCode({ productId: 'clarification-test' }); deviceId = (await daemon.pair(code.code)).deviceId;
     await daemon.start(); await waitForReady(daemon);
     start();

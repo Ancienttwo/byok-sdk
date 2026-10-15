@@ -5,6 +5,8 @@ import { spawn, spawnSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { createTestKeychain } from '../../../scripts/testing/macos-keychain.mjs';
 const installRoot = path.resolve(process.argv[process.argv.indexOf('--install-root') + 1]);
 const load = (pkg, entry = 'index.js') => import(pathToFileURL(path.join(installRoot, 'node_modules', '@byok-sdk', pkg, 'dist', entry)).href);
 const { createInMemoryByokCloud, tenantId } = await load('cloud');
@@ -41,14 +43,15 @@ const runCli = (args, env) => new Promise((resolve, reject) => {
   let output = ''; child.stdout.on('data', chunk => { output += chunk; }); child.stderr.on('data', chunk => { output += chunk; });
   child.once('error', reject); child.once('close', code => code === 0 ? resolve(output) : reject(new Error(output)));
 });
-const previous = { bin: process.env.BYOK_CODEX_BIN, testStore: process.env.BYOK_TEST_DEVICE_CREDENTIAL_STORE };
+const previous = { bin: process.env.BYOK_CODEX_BIN };
 process.env.BYOK_CODEX_BIN = fakeCodex;
-process.env.BYOK_TEST_DEVICE_CREDENTIAL_STORE = '1';
 try {
   for (const entry of ['root', 'adapters', 'cli']) {
+    const keychain = process.platform === 'darwin' ? await createTestKeychain() : undefined;
     const storeDir = path.join(root, entry);
     const audit = path.join(root, `${entry}-mcp.jsonl`);
-    const config = { productId: `packed-${entry}`, productName: 'Packed MCP', serverUrl, storeDir,
+    const config = { productId: `packed-${entry}-${randomUUID()}`, productName: 'Packed MCP', serverUrl, storeDir,
+      ...(keychain === undefined ? {} : { deviceCredentials: { macosKeychainPath: keychain.path } }),
       workspaceRoot: path.join(storeDir, 'work'), runtimeAllowlist: ['codex'], serviceEnrollment: { enabled: true },
       mcpToolsets: { probe: { mcpServers: { echo: { command: process.execPath,
         args: [fileURLToPath(new URL('../src/__tests__/fixtures/toolset-echo-mcp.mjs', import.meta.url)), audit] } } } } };
@@ -80,16 +83,18 @@ try {
       assert.deepEqual(calls[0].arguments, { text: 'CLI_MCP_OK' });
       console.log(`[packed-cli-mcp] ${entry}: actual MCP tools/call passed`);
     } finally {
-      await daemon?.stop();
-      if (processChild && processChild.exitCode === null) {
-        const exited = new Promise(resolve => processChild.once('close', resolve));
-        processChild.kill(); await exited;
-      }
+      try {
+        await daemon?.stop();
+        if (processChild && processChild.exitCode === null) {
+          const exited = new Promise(resolve => processChild.once('close', resolve));
+          processChild.kill(); await exited;
+        }
+        await (daemon ?? client.createDaemon({ ...config, localAgentRelease: { version: '0.0.0-test' } })).unpair();
+      } finally { await keychain?.dispose(); }
     }
   }
 } finally {
   if (previous.bin === undefined) delete process.env.BYOK_CODEX_BIN; else process.env.BYOK_CODEX_BIN = previous.bin;
-  if (previous.testStore === undefined) delete process.env.BYOK_TEST_DEVICE_CREDENTIAL_STORE; else process.env.BYOK_TEST_DEVICE_CREDENTIAL_STORE = previous.testStore;
   await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
   rmSync(root, { recursive: true, force: true });
 }
