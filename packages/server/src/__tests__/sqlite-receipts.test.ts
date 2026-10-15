@@ -147,6 +147,28 @@ describe('SQLite receipt recovery', () => {
     } finally { await reopened.stores.close(); }
   });
 
+  it.each(['agent_home_writer_busy', 'agent_home_reader_busy', undefined] as const)(
+    'preserves decline code %s through SQLite restart', async (code) => {
+      const { open } = fixture(); let runtime = open();
+      const taskId = 'busy-decline';
+      const terminal = createEnvelope('task.decline', {
+        reason: 'display only', retryable: true, ...(code === undefined ? {} : { code }),
+      }, { taskId });
+      try {
+        await runtime.stores.cloud.tasks.open(tenant, { taskId, deviceId });
+        expect(await handleInboundEnvelope(runtime.bound, deviceId, terminal).then(r => r.outcome)).toBe('accepted');
+        const first = await runtime.cloud.readDeviceTerminal(tenant, taskId);
+        expect(first).toMatchObject({ envelope: terminal });
+        await runtime.stores.close(); runtime = open();
+        expect(await runtime.cloud.readDeviceTerminal(tenant, taskId)).toEqual(first);
+        const result = await runtime.cloud.readTaskResult(tenant, taskId);
+        expect(result).toMatchObject({ state: 'failed', ...terminal.payload });
+        if (code === undefined) expect(result).not.toHaveProperty('code');
+        expect(await runtime.cloud.readDeviceTerminal(other, taskId)).toBeUndefined();
+      } finally { await runtime.stores.close(); }
+    },
+  );
+
   it('preserves canonical terminal and refuses same or changed offers after ACK, retention and restart', async () => {
     const { open } = fixture(); let runtime = open();
     const taskId = 'completed-task'; const input = { taskId, payload };

@@ -165,6 +165,13 @@ async function setup(runtime: RuntimeId, scenario: string, {
     await assertTreeReaped();
     expect(runner.activeTaskCount).toBe(0);
   };
+  // Ownership ends only after the terminal publishes and session.close()
+  // returns its receipt. Await those two events instead of polling a fixed
+  // budget that would also have to cover native detect/spawn time.
+  const waitForRuntimeRelease = async () => {
+    await terminalPublished.promise;
+    await timing.waitFor(event => event.event === 'disposal.settled' || event.event === 'disposal.rejected');
+  };
   const assertStartupReceiptRetained = async () => {
     if (runtime === 'claude') {
       await startupDisposed.promise;
@@ -176,7 +183,7 @@ async function setup(runtime: RuntimeId, scenario: string, {
   const c = { runtime, dir, tree, gate, resultGate, adapter, runner, sent, sessions, startSettled, hasStarted: () => started,
     offer, cancel, terminals, events, trace, assertReaped, assertStartupReceiptRetained, releaseStartupReceipt,
     timing, synchronizeInterruptClock, restoreClock,
-    stopTimers: timing.stopTimers, waitForTerminal: () => terminalPublished.promise,
+    stopTimers: timing.stopTimers, waitForTerminal: () => terminalPublished.promise, waitForRuntimeRelease,
     saveEvidence: () => timing.save(dir, childTiming, expect.getState().currentTestName) };
   cases.push(c);
   return c;
@@ -383,7 +390,8 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
   });
 
   it('repeated cancel after completion cannot change its result or charge twice', async () => {
-    const c = await setup(runtime, 'complete'); await c.offer(); await vi.waitFor(() => expect(c.runner.activeTaskCount).toBe(0));
+    const c = await setup(runtime, 'complete'); await c.offer();
+    await c.waitForRuntimeRelease(); await vi.waitFor(() => expect(c.runner.activeTaskCount).toBe(0));
     expect(c.terminals().map(event => event.type)).toEqual(['task.complete']); expectUsage(c, 123, 17);
     await Promise.all([c.cancel(), c.cancel(), c.runner.shutdownActiveTasks('already ended')]); await c.offer();
     expect(c.terminals()).toHaveLength(1); expectNoErrors(c); await c.assertReaped();
@@ -403,7 +411,7 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
 
   it('native interruption alone retains the existing turn_end contract without inventing Host cancellation', async () => {
     const c = await setup(runtime, 'native-abort'); await c.offer();
-    await vi.waitFor(() => expect(c.runner.activeTaskCount).toBe(0));
+    await c.waitForRuntimeRelease(); await vi.waitFor(() => expect(c.runner.activeTaskCount).toBe(0));
     // The frozen AgentEvent turn_end has no cancellation cause. Only a Host
     // task.cancel reserves task.cancelled; preserve the bundled contract here.
     expect(c.terminals().map(event => event.type)).toEqual(['task.complete']);

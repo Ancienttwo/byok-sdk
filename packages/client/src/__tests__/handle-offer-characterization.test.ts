@@ -14,6 +14,7 @@ import { GitWorkspaceManager } from '../daemon/git-workspace';
 import { GitWorkspaceStore } from '../daemon/git-workspace-store';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
+import { RuntimeDisposalFailure } from '../runtime-failure';
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult } from '../types';
 import { StubRuntimeAdapter, StubSession } from './fixtures/stub-adapter';
 
@@ -76,11 +77,12 @@ function plainOffer(taskId: string, seq: number, sessionRef?: string): Envelope 
 async function agentRunner(
   adapter: StubRuntimeAdapter,
   extra: Partial<TaskRunnerDeps> = {},
-): Promise<{ runner: TaskRunner; agentHome: AgentHomeManager; sent: Envelope[] }> {
+): Promise<{ runner: TaskRunner; agentHome: AgentHomeManager; sent: Envelope[]; deps: TaskRunnerDeps }> {
   const storeDir = await temporary('byok-offer-char-store-');
   const agentHome = new AgentHomeManager({ hostStorageRoot: await temporary('byok-offer-char-home-') });
   const sent: Envelope[] = [];
-  const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+  // Held by reference: the runner re-reads `startupTimeoutMs` per offer.
+  const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await temporary('byok-offer-char-workspace-'),
     agentHome,
@@ -93,8 +95,9 @@ async function agentRunner(
     storeDir,
     productId: 'offer-characterization',
     ...extra,
-  });
-  return { runner, agentHome, sent };
+  };
+  const runner = new TaskRunner(deps);
+  return { runner, agentHome, sent, deps };
 }
 
 async function gitRunner(
@@ -416,5 +419,214 @@ describe('handleOffer exit characterization (before the phase split)', () => {
     expect(runner.activeTaskCount).toBe(0);
     const lease = await manager.acquireLease(path.join(root, taskId));
     lease.release();
+  });
+});
+
+/** A promise a test settles by hand. */
+function gate(): { readonly promise: Promise<void>; readonly open: () => void } {
+  let open!: () => void;
+  const promise = new Promise<void>((resolve) => { open = resolve; });
+  return { promise, open };
+}
+
+/**
+ * #476 trigger: the next busy-gate count opens `open` on the following
+ * microtask. Without the admission wait the busy decline is sent
+ * synchronously after that count, before the gate opens; with it the offer
+ * parks on the finishing Attempt and resumes once the gate opened.
+ */
+function openOnNextCount(agentHome: AgentHomeManager, open: () => void): void {
+  const manager = agentHome.executionLeaseManager;
+  const original = manager.activeAttemptCount.bind(manager);
+  let armed = true;
+  vi.spyOn(manager, 'activeAttemptCount').mockImplementation((home, access) => {
+    const count = original(home, access);
+    if (armed) { armed = false; queueMicrotask(open); }
+    return count;
+  });
+}
+
+/** Ends `first`'s turn and waits for its published terminal; its cleanup is what the caller holds. */
+async function publishFirstTerminal(adapter: StubRuntimeAdapter, sent: Envelope[], agentHome: AgentHomeManager): Promise<void> {
+  adapter.sessions[0]!.emit({ type: 'turn_end' });
+  await vi.waitFor(() => expect(terminals(sent, 'first').map((entry) => entry.type)).toEqual(['task.complete']));
+  // The terminal is on the wire, the writer lease is not yet released.
+  expect(agentHome.executionLeaseManager.activeAttemptSummary()).toMatchObject({ homes: 1, attempts: 1 });
+}
+
+const BUSY_WRITER = 'agent home busy: 1 active attempt(s)';
+
+describe('same-home admission after a published terminal (#476)', () => {
+  it('waits for a finishing Attempt held at its terminal commit, then admits the same-home offer', async () => {
+    const adapter = new StubRuntimeAdapter('pi');
+    const commit = gate();
+    const { runner, agentHome, sent } = await agentRunner(adapter, {
+      awaitTerminalCommit: (taskId) => (taskId === 'first' ? commit.promise : Promise.resolve()),
+    });
+    await runner.handleEnvelope(agentOffer('first', 1));
+    await publishFirstTerminal(adapter, sent, agentHome);
+
+    openOnNextCount(agentHome, commit.open);
+    await runner.handleEnvelope(agentOffer('second', 2));
+
+    expect(declines(sent, 'second')).toEqual([]);
+    expect(claimed(sent, 'second')).toBe(1);
+    expect(adapter.startCalls).toHaveLength(2);
+    expect(agentHome.executionLeaseManager.activeAttemptSummary()).toMatchObject({ homes: 1, attempts: 1 });
+    await completeAdmitted(runner, adapter, sent, 'second');
+  });
+
+  it('waits for a finishing Attempt held in Session.close(), then admits the same-home offer', async () => {
+    const adapter = new StubRuntimeAdapter('pi');
+    const { runner, agentHome, sent } = await agentRunner(adapter);
+    await runner.handleEnvelope(agentOffer('first', 1));
+    const releaseClose = adapter.sessions[0]!.blockClose();
+    await publishFirstTerminal(adapter, sent, agentHome);
+
+    openOnNextCount(agentHome, releaseClose);
+    await runner.handleEnvelope(agentOffer('second', 2));
+
+    expect(adapter.sessions[0]!.closeCalled).toBe(true);
+    expect(declines(sent, 'second')).toEqual([]);
+    expect(claimed(sent, 'second')).toBe(1);
+    expect(adapter.startCalls).toHaveLength(2);
+    await completeAdmitted(runner, adapter, sent, 'second');
+  });
+
+  it('a finishing Attempt whose close fails keeps the slot: the parked offer is declined busy after the wait', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const adapter = new StubRuntimeAdapter('pi');
+    const { runner, agentHome, sent } = await agentRunner(adapter);
+    await runner.handleEnvelope(agentOffer('first', 1));
+    const session = adapter.sessions[0]!;
+    const originalClose = session.close.bind(session);
+    const close = gate();
+    session.close = async () => {
+      await close.promise;
+      throw new RuntimeDisposalFailure({ stage: 'cleanup', reason: 'held close fixture failed' });
+    };
+    await publishFirstTerminal(adapter, sent, agentHome);
+
+    const counted = vi.spyOn(agentHome.executionLeaseManager, 'activeAttemptCount');
+    const offer = runner.handleEnvelope(agentOffer('second', 2));
+    await vi.waitFor(() => expect(counted).toHaveBeenCalled());
+    expect(declines(sent, 'second')).toEqual([]);
+    close.open();
+    await offer;
+
+    expect(declines(sent, 'second').map((entry) => entry.payload)).toEqual([
+      { reason: BUSY_WRITER, retryable: true, agentRef: AGENT, code: 'agent_home_writer_busy' },
+    ]);
+    expect(claimed(sent, 'second')).toBe(0);
+    expect(adapter.startCalls).toHaveLength(1);
+    expect(runner.activeTaskCount).toBe(1);
+
+    session.close = originalClose;
+    await runner.retryTerminalFinalization('first');
+    expect(runner.activeTaskCount).toBe(0);
+  });
+
+  describe('a parked offer is withdrawn without waiting for the finishing Attempt', () => {
+    async function parkSecondBehindHeldClose(secondStartupTimeoutMs?: number) {
+      const adapter = new StubRuntimeAdapter('pi');
+      const harness = await agentRunner(adapter);
+      const { runner, agentHome, sent, deps } = harness;
+      await runner.handleEnvelope(agentOffer('first', 1));
+      const releaseClose = adapter.sessions[0]!.blockClose();
+      await publishFirstTerminal(adapter, sent, agentHome);
+      // Read per offer at receipt: `first` started under the default budget.
+      if (secondStartupTimeoutMs !== undefined) deps.startupTimeoutMs = secondStartupTimeoutMs;
+      const counted = vi.spyOn(agentHome.executionLeaseManager, 'activeAttemptCount');
+      const offer = runner.handleEnvelope(agentOffer('second', 2));
+      await vi.waitFor(() => expect(counted).toHaveBeenCalled());
+      expect(declines(sent, 'second')).toEqual([]);
+      return { ...harness, adapter, releaseClose, offer };
+    }
+
+    it('task.cancel declines it as cancelled before claim', async () => {
+      const { runner, sent, adapter, releaseClose, offer } = await parkSecondBehindHeldClose();
+      await runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'host withdrew' }, { taskId: 'second', seq: 3 }));
+      await offer;
+
+      expect(declines(sent, 'second').map((entry) => entry.payload)).toEqual([
+        { reason: 'cancelled before claim', retryable: false, agentRef: AGENT },
+      ]);
+      expect(claimed(sent, 'second')).toBe(0);
+      expect(adapter.startCalls).toHaveLength(1);
+      releaseClose();
+      await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
+    });
+
+    it('stopAcceptingOffers declines it as shutting down, and shutdown completes once the close resolves', async () => {
+      const { runner, sent, adapter, releaseClose, offer } = await parkSecondBehindHeldClose();
+      runner.stopAcceptingOffers();
+      await offer;
+
+      expect(declines(sent, 'second').map((entry) => entry.payload)).toEqual([
+        { reason: 'daemon is shutting down', retryable: true, agentRef: AGENT },
+      ]);
+      expect(adapter.startCalls).toHaveLength(1);
+      let shutDown = false;
+      const shutdown = runner.shutdownActiveTasks('daemon stopping').then(() => { shutDown = true; });
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(shutDown).toBe(false);
+      releaseClose();
+      await shutdown;
+      expect(runner.activeTaskCount).toBe(0);
+    });
+
+    it('the startup deadline declines it retryably', async () => {
+      // Bounds the product's own abort timer while `first`'s close is held; not a test wait.
+      const { runner, sent, adapter, releaseClose, offer } = await parkSecondBehindHeldClose(500);
+      await offer;
+
+      expect(declines(sent, 'second').map((entry) => entry.payload)).toEqual([
+        { reason: 'runtime startup deadline exceeded', retryable: true, agentRef: AGENT },
+      ]);
+      expect(claimed(sent, 'second')).toBe(0);
+      expect(adapter.startCalls).toHaveLength(1);
+      releaseClose();
+      await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
+    });
+  });
+
+  it('an offer received after stopAcceptingOffers does not park on a finishing Attempt', async () => {
+    const adapter = new StubRuntimeAdapter('pi');
+    const { runner, agentHome, sent } = await agentRunner(adapter);
+    await runner.handleEnvelope(agentOffer('first', 1));
+    const releaseClose = adapter.sessions[0]!.blockClose();
+    await publishFirstTerminal(adapter, sent, agentHome);
+    // The sweep runs before `second` exists, so `second`'s admission signal is never aborted.
+    runner.stopAcceptingOffers();
+
+    const counted = vi.spyOn(agentHome.executionLeaseManager, 'activeAttemptCount');
+    const offer = runner.handleEnvelope(agentOffer('second', 2));
+    await vi.waitFor(() => expect(counted).toHaveBeenCalled());
+    // Declined on the same synchronous path as the count, while `first`'s close is still held.
+    expect(declines(sent, 'second').map((entry) => entry.payload)).toEqual([
+      { reason: BUSY_WRITER, retryable: true, agentRef: AGENT, code: 'agent_home_writer_busy' },
+    ]);
+    await offer;
+    expect(claimed(sent, 'second')).toBe(0);
+    expect(adapter.startCalls).toHaveLength(1);
+    releaseClose();
+    await runner.shutdownActiveTasks('daemon stopping');
+    expect(runner.activeTaskCount).toBe(0);
+  });
+
+  it('a live, not finishing Attempt is busy at once: no wait', async () => {
+    const adapter = new StubRuntimeAdapter('pi');
+    const { runner, sent } = await agentRunner(adapter);
+    await runner.handleEnvelope(agentOffer('first', 1));
+
+    await runner.handleEnvelope(agentOffer('second', 2));
+
+    expect(declines(sent, 'second').map((entry) => entry.payload)).toEqual([
+      { reason: BUSY_WRITER, retryable: true, agentRef: AGENT, code: 'agent_home_writer_busy' },
+    ]);
+    expect(claimed(sent, 'second')).toBe(0);
+    expect(adapter.startCalls).toHaveLength(1);
+    await completeAdmitted(runner, adapter, sent, 'first');
   });
 });

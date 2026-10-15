@@ -5,7 +5,7 @@ import { serve } from '@hono/node-server';
 import { createByokServer, type ByokServer } from '@byok-sdk/server';
 import { createDaemonWithAdapters, type Daemon, type AgentEgressPolicy, type DaemonConfig } from '@byok-sdk/client';
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
-import { BotStubAdapter, waitForReady } from './goal-btw.test-support';
+import { BotStubAdapter, waitForReady, waitForTaskCleanup } from './goal-btw.test-support';
 import { HostRevisionConflict } from './goal-btw-store';
 import type { BotTarget } from './goal-btw';
 import { SqliteClarificationStore } from './clarification-store';
@@ -40,7 +40,7 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
   async function waiting(kind: 'text'|'single_choice' = 'single_choice') {
     await first(); adapter.sessions.get('step-1')!.finish(question(kind)); await terminal('step-1');
     const r = await host.reconcile('run',row().revision);
-    await vi.waitFor(() => expect(adapter.sessions.get('step-1')!.closed).toBe(true),{ timeout: 5000 }); return r;
+    await waitForTaskCleanup(daemon,adapter.sessions.get('step-1')!); return r;
   }
   function reopen() {
     store.close(); store = new SqliteClarificationStore(db,'tenant-a'); host = new ClarificationHost(byok,store,() => now);
@@ -153,7 +153,7 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
     start(); reopen(); await host.recover('run',row().revision); await running('step-1');
     await host.recover('run',row().revision); expect(adapter.starts).toHaveLength(1);
     adapter.sessions.get('step-1')!.finish(question()); await terminal('step-1'); await host.reconcile('run',row().revision);
-    await vi.waitFor(() => expect(adapter.sessions.get('step-1')!.closed).toBe(true),{ timeout: 5000 });
+    await waitForTaskCleanup(daemon,adapter.sessions.get('step-1')!);
     answer(); const saved = row(); reopen(); expect(row()).toEqual(saved);
     await host.recover('run',row().revision); await running('step-2'); await host.recover('run',row().revision);
     expect(adapter.starts.map(s => s.manifest.taskId)).toEqual(['step-1','step-2']);
@@ -229,9 +229,35 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
     expect(row().value.status).toBe('blocked'); expect(row().value.tickets).toHaveLength(0); expect(adapter.starts).toHaveLength(kind === 'declined' ? 0 : 1);
     expect(await byok.tasks.offer('step-2')).toBeUndefined();
   });
+  it('waits for daemon cleanup after session close before the next same-Agent step', async () => {
+    await first();
+    const session = adapter.sessions.get('step-1')!;
+    const close = session.close.bind(session);
+    let release!: () => void;
+    let entered!: () => void;
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    const closed = new Promise<void>(resolve => { entered = resolve; });
+    session.close = async () => { await close(); entered(); await blocked; };
+    let cleanup: Promise<void> | undefined;
+    try {
+      session.finish(question()); await terminal('step-1');
+      await host.reconcile('run',row().revision); await closed;
+      expect(session.closed).toBe(true);
+      expect(daemon.status().activeTaskCount).toBe(1);
+      let cleaned = false;
+      cleanup = waitForTaskCleanup(daemon,session).then(() => { cleaned = true; });
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(cleaned).toBe(false);
+      release(); await cleanup;
+      expect(cleaned).toBe(true);
+      expect(daemon.status().activeTaskCount).toBe(0);
+      answer(); await host.send('run',row().revision); await running('step-2');
+      expect(adapter.starts.map(start => start.manifest.taskId)).toEqual(['step-1','step-2']);
+    } finally { release(); await cleanup; }
+  });
   it('real home busy decline blocks before stub starts; no lane/Agent fallback', async () => {
     await first(); start('other','other-task'); await host.send('other',host.run('other').revision); await terminal('other-task');
-    expect((await byok.tasks.deviceTerminal('other-task'))?.envelope).toMatchObject({ type: 'task.decline',payload: { reason: 'agent home busy: 1 active attempt(s)' } });
+    expect((await byok.tasks.deviceTerminal('other-task'))?.envelope).toMatchObject({ type: 'task.decline',payload: { reason: 'agent home busy: 1 active attempt(s)', code: 'agent_home_writer_busy' } });
     expect((await host.reconcile('other',host.run('other').revision)).value.status).toBe('blocked'); expect(adapter.starts).toHaveLength(1);
   });
   it('execution budget prevents an unbounded question/answer loop', async () => {

@@ -2485,6 +2485,10 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>>;
+        code: z.ZodOptional<z.ZodEnum<{
+            agent_home_reader_busy: "agent_home_reader_busy";
+            agent_home_writer_busy: "agent_home_writer_busy";
+        }>>;
     }, z.core.$strip>;
 }, z.core.$strip>, z.ZodObject<{
     v: z.ZodNumber;
@@ -4012,6 +4016,10 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
             }, z.core.$strict>>;
+            code: z.ZodOptional<z.ZodEnum<{
+                agent_home_reader_busy: "agent_home_reader_busy";
+                agent_home_writer_busy: "agent_home_writer_busy";
+            }>>;
         }, z.core.$strip>;
     }, z.core.$strip>, z.ZodObject<{
         v: z.ZodNumber;
@@ -5393,6 +5401,10 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
             }, z.core.$strict>>;
+            code: z.ZodOptional<z.ZodEnum<{
+                agent_home_reader_busy: "agent_home_reader_busy";
+                agent_home_writer_busy: "agent_home_writer_busy";
+            }>>;
         }, z.core.$strip>;
     }, z.core.$strip>, z.ZodObject<{
         v: z.ZodNumber;
@@ -8488,7 +8500,7 @@ export type TaskStartedPayload = z.infer<typeof TaskStartedPayloadSchema>;
  * writeup): declining does *not* introduce a new `Declined` terminal state.
  * It maps onto the existing `Failed` state via a new `Offered -> Failed`
  * transition. `reason`/`retryable` intentionally mirror `TaskFailPayload`
- * exactly, because a pre-claim decline and a post-claim failure are the same
+ * semantics, because a pre-claim decline and a post-claim failure are the same
  * outcome from the dispatcher's point of view (this attempt produced no
  * result; here's whether retrying — e.g. offering to a different device —
  * makes sense), and keeping the state machine minimal avoids forking every
@@ -8501,6 +8513,10 @@ export declare const TaskDeclinePayloadSchema: z.ZodObject<{
         agentId: z.ZodString;
         profileRevision: z.ZodString;
     }, z.core.$strict>>;
+    code: z.ZodOptional<z.ZodEnum<{
+        agent_home_reader_busy: "agent_home_reader_busy";
+        agent_home_writer_busy: "agent_home_writer_busy";
+    }>>;
 }, z.core.$strip>;
 export type TaskDeclinePayload = z.infer<typeof TaskDeclinePayloadSchema>;
 /**
@@ -10379,6 +10395,10 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>>;
+        code: z.ZodOptional<z.ZodEnum<{
+            agent_home_reader_busy: "agent_home_reader_busy";
+            agent_home_writer_busy: "agent_home_writer_busy";
+        }>>;
     }, z.core.$strip>;
     readonly 'task.progress': z.ZodObject<{
         seq: z.ZodNumber;

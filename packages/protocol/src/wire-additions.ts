@@ -91,6 +91,7 @@ export const WIRE_ADDITIONS: readonly WireAddition[] = Object.freeze([
   { kind: 'envelope', rule: 'gated', surface: 'provider.provisioning.available', capability: 'provider-provisioning.v1', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface: 'agent.memory.intent.available', capability: 'agent-memory-intent.v1', advertisedBy: 'device' },
   // Daemon to server.
+  { kind: 'envelope', rule: 'strip-safe', surface: 'task.decline', field: 'code' },
   { kind: 'envelope', rule: 'gated', surface: 'task.approval_resolved', capability: 'approval_resolved', advertisedBy: 'server' },
   { kind: 'envelope', rule: 'gated', surface: 'task.complete', field: 'document', capability: 'result-document', advertisedBy: 'server' },
   { kind: 'envelope', rule: 'strip-safe', surface: 'task.complete', field: 'finalMessage' },

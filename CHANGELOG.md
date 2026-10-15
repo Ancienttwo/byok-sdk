@@ -36,6 +36,12 @@
   Retry with that `taskId` and the same payload to converge on the one offer, or
   `cancelTask` it; cancellation is exempt from the mailbox limit.
 
+- **Protocol/client/cloud (#471)** — Home-busy `task.decline` now carries
+  `agent_home_writer_busy` or `agent_home_reader_busy` in optional `code`.
+  Cloud terminal results and canonical `tasks.deviceTerminal` envelopes
+  preserve it; Hosts classify busy by code instead of parsing display reasons.
+  Protocol version remains 2.
+
 - **Breaking (cloud, 0.x; #410)** — `ByokCloudOptions` and `CloudRootStores`
   require `mailboxWake`. Replace `longPollIntervalMs` (and the removed
   `DEFAULT_LONG_POLL_INTERVAL_MS`) with a wake composition; held polls now
@@ -49,6 +55,13 @@
   accept delivery latency up to that interval. There is one hold mode; wire,
   acknowledgement and replay-floor contracts are unchanged. See the dataplane
   README and hosted operations runbook for migration details.
+
+- **Client observer crash boundary (#384)** — a throwing
+  `ConnectionManager.onOperationalOutcome` now uses the existing `notify()` /
+  `onCrashed` path for reconnect, poll and upload observations. Detached poll
+  and upload drain promises do not leak unhandled rejections; unsettled batches
+  retain their exact envelopes. Handshake, settlement, cursor and retry
+  contracts and public signatures are unchanged.
 
 - **Breaking (protocol; #398)** — `@byok-sdk/protocol/constants` replaces the
   preparation-version subpath. Import `INPUT_PREPARATION_WIRE_VERSION` from

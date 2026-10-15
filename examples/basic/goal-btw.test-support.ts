@@ -59,3 +59,15 @@ export async function waitForReady(daemon: Pick<Daemon, 'status'>, timeoutMs = 5
     expect(daemon.status().lifecycle).toEqual({ phase: 'running', connection: 'open' });
   }, { timeout: timeoutMs, interval: 25 });
 }
+
+/**
+ * Single-active-task fixtures must wait for daemon cleanup before reusing the
+ * Agent home. Session.close() precedes the memory snapshot and writer-lease
+ * release; a fresh offer during that cleanup is correctly declined as busy.
+ */
+export async function waitForTaskCleanup(daemon: Pick<Daemon, 'status'>, session: Pick<BotStubSession, 'closed'>): Promise<void> {
+  await vi.waitFor(() => {
+    expect(session.closed).toBe(true);
+    expect(daemon.status().activeTaskCount).toBe(0);
+  }, { timeout: 5000 });
+}

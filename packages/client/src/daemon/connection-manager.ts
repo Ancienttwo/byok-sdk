@@ -244,7 +244,7 @@ export class ConnectionManager {
       retryDelayForAttempt: (attempt, baseMs) => this.fleetJitter.delay('reconnect', attempt, baseMs),
       onOperationalOutcome: (outcome) => {
         if (outcome === 'success') this.reconnectAttempt = 0;
-        opts.onOperationalOutcome?.(outcome, 'reconnect');
+        this.notify(() => opts.onOperationalOutcome?.(outcome, 'reconnect'));
       },
       idleDelayMs: opts.longPollIdleDelayMs,
     });
@@ -281,7 +281,7 @@ export class ConnectionManager {
           const outcome = answer.outcomes?.[0];
           await this.opts.onOutboundSettled?.([{ envelope: hello, outcome: outcome?.outcome ?? ((answer.rejected ?? 0) > 0 ? 'rejected' : 'accepted'), ...((answer.rejected ?? 0) > 0 ? { reason: (outcome?.reason ?? 'unspecified') as OutboundRefusalReason } : {}) }]);
         } catch {
-          this.opts.onOperationalOutcome?.('failure', 'reconnect');
+          this.notify(() => this.opts.onOperationalOutcome?.('failure', 'reconnect'));
           await sleep(this.fleetJitter.delay('reconnect', this.reconnectAttempt++, this.opts.longPollRetryDelayMs ?? 2000), signal);
           continue;
         }
@@ -292,7 +292,7 @@ export class ConnectionManager {
         return;
       }
       if (answer === undefined) {
-        this.opts.onOperationalOutcome?.('failure', 'reconnect');
+        this.notify(() => this.opts.onOperationalOutcome?.('failure', 'reconnect'));
       } else {
         await this.serveSession(answer);
         hello = undefined;
@@ -491,11 +491,11 @@ export class ConnectionManager {
         if (retained === undefined) {
           if (this.isEnded()) return;
           this.uploadRetryAttempt = 0;
-          this.opts.onOperationalOutcome?.('success', 'upload');
+          this.notify(() => this.opts.onOperationalOutcome?.('success', 'upload'));
           continue;
         }
 
-        this.opts.onOperationalOutcome?.('failure', 'upload');
+        this.notify(() => this.opts.onOperationalOutcome?.('failure', 'upload'));
 
         this.outbox.unshift(...retained.envelopes); // retry, preserving order — same objects, same ids (finding F1)
         // Finding P3: a halted session (a revoked device, say) can never
