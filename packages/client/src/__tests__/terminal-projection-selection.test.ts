@@ -284,7 +284,7 @@ describe('submit_result: one document shape for every runtime lane', () => {
       await runner.submitAgentResult({ contextToken: resultToken(adapter), outcome: { notes: ['a', 'b'], score: 5, verdict: 'pass' } });
       adapter.sessions[0]!.emit({ type: 'turn_end' });
       const done = await waitForTerminal(sent, taskId);
-      expect(done.type).toBe('task.complete');
+      if (done.type !== 'task.complete') throw new Error(`expected task.complete, got ${done.type}`);
       documents.push(done.payload.document);
     }
     expect(documents[1]).toEqual(documents[0]);

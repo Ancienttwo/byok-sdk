@@ -206,7 +206,7 @@ describe('result-document recovery from the journal', () => {
       bytesHash: journalHash(bytes), opensTask: true, receivedAt: new Date().toISOString() });
     await journal.recordAdmission({ taskId, admitted: true, claimedRuntime: 'pi', decidedAt: new Date().toISOString() });
     const complete = encodeEnvelope(createEnvelope('task.complete', {
-      summary: 'submitted', sessionRef: 'session-1', document: { verdict: 'pass' }, agentRef, runtime: 'pi',
+      summary: 'submitted', sessionRef: 'session-1', document: { verdict: 'pass' }, agentRef,
     }, { taskId, sessionRef: 'session-1' }));
     await journal.recordTerminal({ taskId, terminalType: 'complete', bytes: complete, payloadHash: journalHash(complete),
       truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });
