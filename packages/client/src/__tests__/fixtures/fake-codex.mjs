@@ -60,7 +60,7 @@ let sessionMcpServers = {};
 /**
  * A real MCP stdio client, the way codex calls a session server's tool:
  * spawn it with its configured command/args/env, initialize, list tools,
- * call one tool, then close stdin.
+ * call one tool, then close stdin and require the server to exit.
  */
 async function callSessionMcpTool(name, tool, args) {
   const server = sessionMcpServers[name];
@@ -90,7 +90,18 @@ async function callSessionMcpTool(name, tool, args) {
     const listed = await rpc('tools/list', {});
     if (process.env.FAKE_CODEX_MCP_TOOLS_RECEIPT) writeFileSync(process.env.FAKE_CODEX_MCP_TOOLS_RECEIPT, JSON.stringify(listed.result));
     return await rpc('tools/call', { name: tool, arguments: args });
-  } finally { child.stdin.end(); }
+  } finally {
+    child.stdin.end();
+    // A stdio MCP server exits once its client closes stdin; codex does not reap it.
+    const exited = child.exitCode !== null || child.signalCode !== null || await new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(false), 5_000);
+      child.once('exit', () => { clearTimeout(timer); resolve(true); });
+    });
+    if (!exited) {
+      child.kill('SIGKILL');
+      throw new Error(`session MCP server ${name} did not exit after its stdin closed`);
+    }
+  }
 }
 let turn = 0;
 let active = null;

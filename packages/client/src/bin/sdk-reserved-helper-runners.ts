@@ -65,6 +65,9 @@ async function runAgentResultMcp(): Promise<void> {
   };
   await serveAgentResultMcpOverStdio({ deps });
   await waitForInputClose();
+  // describe opened the control connection at startup; an open socket would
+  // keep the helper alive after its MCP client closed stdin.
+  (await clientPromise?.catch(() => undefined))?.close();
 }
 
 async function runAgentMemoryMcp(): Promise<void> {
