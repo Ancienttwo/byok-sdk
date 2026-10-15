@@ -9,6 +9,7 @@ import {
   AGENT_HOME_DIRECTORY,
   AgentHomeBusyError,
   AgentHomeManager,
+  AgentHomeLayout,
   createAgentHomeProjectionConsumer,
 } from '../agent-home';
 import {
@@ -55,6 +56,7 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     await daemon?.stop();
     daemon = undefined;
     await server.close();
+    vi.restoreAllMocks();
   });
 
   interface Harness {
@@ -108,10 +110,10 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     await server.waitFor((entry) => entry.type === 'task.started' && entry.task_id === taskId);
   }
 
-  async function declined(taskId: string): Promise<{ reason: string; retryable: boolean }> {
+  async function declined(taskId: string): Promise<{ reason: string; retryable: boolean; code?: string }> {
     const envelope = await server.waitFor((entry) => entry.type === 'task.decline' && entry.task_id === taskId);
-    const { reason, retryable } = envelope.payload as { reason: string; retryable: boolean };
-    return { reason, retryable };
+    const { reason, retryable, code } = envelope.payload as { reason: string; retryable: boolean; code?: string };
+    return { reason, retryable, ...(code === undefined ? {} : { code }) };
   }
 
   async function complete(harness: Harness, sessionIndex: number, taskId: string): Promise<Envelope> {
@@ -127,6 +129,49 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     }
     throw new Error(`timed out waiting for ${label}`);
   }
+
+  it.each([
+    ['acquireExecution', false, 'agent_home_writer_busy'],
+    ['acquireExecution', true, 'agent_home_reader_busy'],
+    ['initializeExecution', false, 'agent_home_writer_busy'],
+    ['initializeExecution', true, 'agent_home_reader_busy'],
+  ] as const)('tags a %s busy error for reader=%s before claim', async (method, reader, code) => {
+    const harness = await start();
+    const busy = vi.spyOn(AgentHomeManager.prototype, method)
+      .mockRejectedValueOnce(new AgentHomeBusyError('display text without a busy prefix'));
+    offer('lease-busy', 'lease-agent', { reader });
+    expect(await declined('lease-busy')).toMatchObject({ retryable: true, code });
+    expect(busy).toHaveBeenCalledOnce();
+    expect(harness.pi.startCalls).toHaveLength(0);
+    expect(server.received.some(entry => entry.type === 'task.claim' && entry.task_id === 'lease-busy')).toBe(false);
+    expect(harness.daemon.status().agentHomeExecution.activeAttempts).toBe(0);
+  });
+
+  it('tags a reader-resume home-resolution conflict before handoff lookup', async () => {
+    const harness = await start();
+    offer('reader-first', 'resumed', { reader: true });
+    await claimed('reader-first');
+    const sessionRef = harness.pi.sessions[0]!.sessionRef;
+    await complete(harness, 0, 'reader-first');
+    await waitUntil(() => harness.daemon.status().agentHomeExecution.activeAttempts === 0, 'reader release');
+    const resolution = vi.spyOn(AgentHomeLayout.prototype, 'resolve')
+      .mockRejectedValueOnce(new AgentHomeBusyError('root relocation is in progress'));
+    offer('reader-resume-busy', 'resumed', { reader: true, sessionRef });
+    expect(await declined('reader-resume-busy')).toMatchObject({ retryable: true, code: 'agent_home_reader_busy' });
+    expect(resolution).toHaveBeenCalledOnce();
+    expect(harness.pi.startCalls).toHaveLength(1);
+    expect(server.received.some(e => e.type === 'task.claim' && e.task_id === 'reader-resume-busy')).toBe(false);
+  });
+
+  it('does not label a non-busy initialization failure as home contention', async () => {
+    const harness = await start();
+    vi.spyOn(AgentHomeManager.prototype, 'initializeExecution').mockRejectedValueOnce(new Error('initialization rejected'));
+    offer('init-failed', 'init-agent');
+    const decline = await declined('init-failed');
+    expect(decline.retryable).toBe(false);
+    expect(decline).not.toHaveProperty('code');
+    expect(harness.pi.startCalls).toHaveLength(0);
+  });
 
   it('advertises agent-home-readers with the Agent home', async () => {
     await start();
@@ -146,9 +191,9 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     }
 
     offer('reader-5', 'shared', { reader: true });
-    expect(await declined('reader-5')).toEqual({ reason: 'agent home busy: 4 active reader attempt(s)', retryable: true });
+    expect(await declined('reader-5')).toEqual({ reason: 'agent home busy: 4 active reader attempt(s)', retryable: true, code: 'agent_home_reader_busy' });
     offer('writer-2', 'shared');
-    expect(await declined('writer-2')).toEqual({ reason: 'agent home busy: 1 active attempt(s)', retryable: true });
+    expect(await declined('writer-2')).toEqual({ reason: 'agent home busy: 1 active attempt(s)', retryable: true, code: 'agent_home_writer_busy' });
 
     const cwds = harness.pi.startCalls.map((call) => call.ctx.workspaceDir);
     expect(cwds).toEqual([
@@ -182,7 +227,7 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     offer('limit-reader-2', 'limited', { reader: true });
     await claimed('limit-reader-2');
     offer('limit-reader-3', 'limited', { reader: true });
-    expect(await declined('limit-reader-3')).toEqual({ reason: 'agent home busy: 2 active reader attempt(s)', retryable: true });
+    expect(await declined('limit-reader-3')).toEqual({ reason: 'agent home busy: 2 active reader attempt(s)', retryable: true, code: 'agent_home_reader_busy' });
     offer('limit-writer', 'limited');
     await claimed('limit-writer');
     expect(harness.daemon.status().agentHomeExecution.maxConcurrentReaderAttemptsPerAgentHome).toBe(2);
@@ -418,6 +463,7 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     expect(decline).toEqual({
       reason: 'Agent reader run directory preparation failed: the reader run directory of this task exists and is not empty',
       retryable: true,
+      code: 'agent_home_reader_busy',
     });
     expect(harness.pi.startCalls).toHaveLength(0);
     expect(await fs.readdir(runDirectory)).toEqual(['left-over.txt']);

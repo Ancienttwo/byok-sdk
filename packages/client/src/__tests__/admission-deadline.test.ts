@@ -117,7 +117,9 @@ for (const phase of ['detect', 'prepare'] as const) {
             throw new Error(`replacement reached no terminal observation; last stage: ${stages.at(-1) ?? '(none)'} (stages: ${stages.join(' -> ') || 'none'})`);
           }, { timeout: 2000 });
           // (a) whatever the outcome, the released reservation is non-negotiable.
-          for (const reason of replacementDeclineReasons()) expect(reason.startsWith('agent home busy')).toBe(false);
+          for (const entry of server.received.filter(e => e.type === 'task.decline' && e.task_id === 'replacement')) {
+            expect(entry.payload).not.toHaveProperty('code');
+          }
           // (b) exactly one of the two accepted terminal observations.
           if (outcome!.kind === 'declined') expect(outcome!.reason).toBe('runtime startup deadline exceeded');
           else {

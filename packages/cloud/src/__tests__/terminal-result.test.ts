@@ -45,6 +45,19 @@ describe('readTaskResult', () => {
   let stores: TenantStores;
   let deviceId: string;
 
+  it.each(['agent_home_writer_busy', 'agent_home_reader_busy', undefined] as const)(
+    'projects decline code %s verbatim from the winning terminal', async (code) => {
+      const taskId = 'typed-decline';
+      await harness.cloud.enqueueOffer(TENANT_A, deviceId, { taskId, payload: offerPayload() });
+      const payload = { reason: 'display only', retryable: true, ...(code === undefined ? {} : { code }) };
+      const envelope = createEnvelope('task.decline', payload, { taskId });
+      expect(await handleInboundEnvelope(stores, deviceId, envelope).then(r => r.outcome)).toBe('accepted');
+      expect(await harness.cloud.readTaskResult(TENANT_A, taskId)).toMatchObject({ state: 'failed', ...payload });
+      expect(await harness.cloud.readDeviceTerminal(TENANT_A, taskId)).toMatchObject({ envelope });
+      if (code === undefined) expect(await harness.cloud.readTaskResult(TENANT_A, taskId)).not.toHaveProperty('code');
+    },
+  );
+
   it('keeps host cancel separate from typed device terminal evidence', async () => {
     const taskId = 'cancel-before-terminal';
     await harness.cloud.enqueueOffer(TENANT_A, deviceId, { taskId, payload: offerPayload() });

@@ -515,7 +515,7 @@ describe('same-home admission after a published terminal (#476)', () => {
     await offer;
 
     expect(declines(sent, 'second').map((entry) => entry.payload)).toEqual([
-      { reason: BUSY_WRITER, retryable: true, agentRef: AGENT },
+      { reason: BUSY_WRITER, retryable: true, agentRef: AGENT, code: 'agent_home_writer_busy' },
     ]);
     expect(claimed(sent, 'second')).toBe(0);
     expect(adapter.startCalls).toHaveLength(1);
@@ -605,7 +605,7 @@ describe('same-home admission after a published terminal (#476)', () => {
     await vi.waitFor(() => expect(counted).toHaveBeenCalled());
     // Declined on the same synchronous path as the count, while `first`'s close is still held.
     expect(declines(sent, 'second').map((entry) => entry.payload)).toEqual([
-      { reason: BUSY_WRITER, retryable: true, agentRef: AGENT },
+      { reason: BUSY_WRITER, retryable: true, agentRef: AGENT, code: 'agent_home_writer_busy' },
     ]);
     await offer;
     expect(claimed(sent, 'second')).toBe(0);
@@ -623,7 +623,7 @@ describe('same-home admission after a published terminal (#476)', () => {
     await runner.handleEnvelope(agentOffer('second', 2));
 
     expect(declines(sent, 'second').map((entry) => entry.payload)).toEqual([
-      { reason: BUSY_WRITER, retryable: true, agentRef: AGENT },
+      { reason: BUSY_WRITER, retryable: true, agentRef: AGENT, code: 'agent_home_writer_busy' },
     ]);
     expect(claimed(sent, 'second')).toBe(0);
     expect(adapter.startCalls).toHaveLength(1);

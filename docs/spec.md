@@ -2326,7 +2326,16 @@ identity; this API does not convert either execution mode.
 For recurring execution reconciliation, Cloud `readDeviceTerminal` and embedded
 `tasks.deviceTerminal` return the canonical device terminal envelope plus its
 receipt recordedAt. The discriminated envelope preserves decline versus fail
-and the original payload. Host cancellation alone returns no device terminal.
+and the original payload. Home-busy `task.decline` carries optional `code`,
+a closed enum of `agent_home_writer_busy` and `agent_home_reader_busy` selected
+from the rejected Attempt's requested home access. Capacity rejection and
+every pre-claim `AgentHomeBusyError` decline carry it; other declines omit it.
+Cloud `readTaskResult` copies the code verbatim. Hosts classify busy through
+this code on the cloud result or the canonical `tasks.deviceTerminal` envelope,
+never by parsing `reason`. The embedded `TaskResult` is a narrower display
+projection; it is not the busy-classification API. This is an additive optional
+protocol v2 field; `PROTOCOL_VERSION` stays 2.
+Host cancellation alone returns no device terminal.
 A terminal stored under a different task key or with a non-terminal type is an
 error. This observation does not prove native Session.close or home release.
 

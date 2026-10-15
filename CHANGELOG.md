@@ -36,6 +36,12 @@
   Retry with that `taskId` and the same payload to converge on the one offer, or
   `cancelTask` it; cancellation is exempt from the mailbox limit.
 
+- **Protocol/client/cloud (#471)** — Home-busy `task.decline` now carries
+  `agent_home_writer_busy` or `agent_home_reader_busy` in optional `code`.
+  Cloud terminal results and canonical `tasks.deviceTerminal` envelopes
+  preserve it; Hosts classify busy by code instead of parsing display reasons.
+  Protocol version remains 2.
+
 - **Breaking (cloud, 0.x; #410)** — `ByokCloudOptions` and `CloudRootStores`
   require `mailboxWake`. Replace `longPollIntervalMs` (and the removed
   `DEFAULT_LONG_POLL_INTERVAL_MS`) with a wake composition; held polls now

@@ -385,7 +385,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `task.steer` | S→D | **required** | **required** | `text` | `TaskHandle.steer()` while `Running` |
 | `task.claim` | D→S | **required** | optional | `deviceId`, `agentId?`, `agentRef?`, `runtime?` (M5, additive — §3.1), `capabilities?` (S0, additive — §11.5) | Daemon accepts an offer (idempotent CAS) |
 | `task.started` | D→S | **required** | optional | `{}` | Daemon actually starts the runtime session — `Claimed → Running` |
-| `task.decline` | D→S | **required** | optional | `reason`, `retryable?`, `agentRef?` | Daemon fail-closed-rejects an offer *before* claiming — `Offered → Failed` |
+| `task.decline` | D→S | **required** | optional | `reason`, `retryable?`, `agentRef?`, `code?` | Daemon fail-closed-rejects an offer *before* claiming — `Offered → Failed` |
 | `task.progress` | D→S | **required** | optional | `seq` (payload-level batch order — §1.2), `events[]` | Batches of normalized `AgentEvent`s |
 | `task.artifact` | D→S | **required** | optional | `name`, `contentType`, `inline?`, `blobRef?` | An artifact is produced |
 | `task.await_approval` | D→S | **required** | optional | `summary`, `approvalId?` (M5, additive — §5.3) | Runtime raised `needs_approval` |
@@ -1031,8 +1031,8 @@ have somewhere to report failure.
 
 **Decision: declining does not introduce a new `Declined` terminal state.**
 It maps onto the existing `Failed` state via a new `Offered → Failed`
-transition, and `TaskDeclinePayload` intentionally mirrors `TaskFailPayload`
-exactly (`reason` + `retryable`). Rationale: a pre-claim decline and a
+transition. Both `TaskDeclinePayload` and `TaskFailPayload` carry
+`reason` and optional `retryable`. Rationale: a pre-claim decline and a
 post-claim failure are the same outcome from the dispatcher's point of view —
 this attempt produced no result, here's why, here's whether retrying (e.g.
 offering to a different device) makes sense. Adding a distinct `Declined`
@@ -1040,6 +1040,19 @@ state would fork every terminal-state consumer (dashboards, retry logic,
 `TaskSnapshot` readers) into "handle `Failed` *and* `Declined`, identically"
 for no behavioral gain. Keeping the state machine at 7 states (not 8) was the
 deciding factor.
+
+Home-busy declines carry optional `code`, a closed enum:
+`agent_home_writer_busy` or `agent_home_reader_busy`, selected by the rejected
+Attempt's requested home access. This includes capacity, lease acquisition,
+reader resume/run-directory and home initialization conflicts reported as
+`AgentHomeBusyError`. Other declines omit `code`. Hosts classify busy by
+`code`; `reason` is display text only. Cloud `readTaskResult` copies the code
+verbatim, and `readDeviceTerminal` / embedded `tasks.deviceTerminal` preserve
+it in the canonical envelope.
+
+Landed additive minor: `task.decline.code` (#471) is an optional v2 field,
+registered as strip-safe in `WIRE_ADDITIONS`. Published golden lines remain
+unchanged; new examples are appended. `PROTOCOL_VERSION` remains 2.
 
 ### 3.3 Cancelled is its own message, not `task.fail(reason:'cancelled')` (M1 gap #6)
 

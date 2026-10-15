@@ -38,6 +38,7 @@ import {
   type TerminalAgentHomeMemoryChange,
   type TerminalProjectionSelection,
   type TaskOfferPayload,
+  type TaskDeclinePayload,
   type TaskOfferForAgentPayload,
   type TaskOfferForAgentWithEgressPayload,
   type TaskOfferForAgentWithEgressFreshPayload,
@@ -906,7 +907,7 @@ type PickResult =
 /** The closures that handleOffer builds once and gives to its phase methods. */
 interface OfferPhaseContext {
   readonly taskId: string;
-  readonly decline: (reason: string, retryable: boolean) => void;
+  readonly decline: (reason: string, retryable: boolean, code?: TaskDeclinePayload['code']) => void;
   readonly admissionWithdrawn: () => boolean;
   /** Aborted exactly when `admissionWithdrawn()` would decline: cancel, shutdown, or the startup deadline. */
   readonly admissionSignal: AbortSignal;
@@ -2101,12 +2102,13 @@ export class TaskRunner {
         return;
       }
     }
-    const decline = (reason: string, retryable: boolean): void => {
-      this.decline(taskId, reason, retryable, agentRef);
+    const decline = (reason: string, retryable: boolean, code?: TaskDeclinePayload['code']): void => {
+      this.decline(taskId, reason, retryable, agentRef, code);
     };
     const sessionRef = offeredSessionRef(payload);
     const homeAccess = offeredHomeAccess(payload);
     const readerAttempt = homeAccess === 'memory-reader';
+    const homeBusyCode = readerAttempt ? 'agent_home_reader_busy' : 'agent_home_writer_busy';
     // The prepared lane is selected by the presence of this value and nothing
     // else. Absent for every ordinary offer, so every branch below that does
     // not mention it behaves exactly as it did before this lane existed.
@@ -2252,7 +2254,8 @@ export class TaskRunner {
               home: resolution.canonicalHome,
             });
           } catch (error) {
-            decline(`Agent session handoff mismatch: ${outboundErrorMessage(error)}`, false);
+            decline(`Agent session handoff mismatch: ${outboundErrorMessage(error)}`, error instanceof AgentHomeBusyError,
+              error instanceof AgentHomeBusyError ? homeBusyCode : undefined);
             return;
           }
         }
@@ -2268,6 +2271,7 @@ export class TaskRunner {
           decline(
             `Agent home admission failed: ${outboundErrorMessage(error)}`,
             error instanceof AgentHomeBusyError || !(error instanceof AgentHomeResolutionError),
+            error instanceof AgentHomeBusyError ? homeBusyCode : undefined,
           );
           return;
         }
@@ -2311,7 +2315,9 @@ export class TaskRunner {
             // cannot reuse) may clear; every other failure is permanent.
             decline(error instanceof AgentHomeReaderRunMissingError
               ? `Agent session ${sessionRef} cannot resume: its reader run directory no longer exists`
-              : `Agent reader run directory preparation failed: ${outboundErrorMessage(error)}`, error instanceof AgentHomeBusyError);
+              : `Agent reader run directory preparation failed: ${outboundErrorMessage(error)}`,
+              error instanceof AgentHomeBusyError,
+              error instanceof AgentHomeBusyError ? homeBusyCode : undefined);
             return;
           }
         }
@@ -2320,7 +2326,8 @@ export class TaskRunner {
         } catch (error) {
           await agentBinding.lease.release().catch(() => {});
           agentBinding = undefined;
-          decline(`Agent home initialization failed: ${outboundErrorMessage(error)}`, false);
+          decline(`Agent home initialization failed: ${outboundErrorMessage(error)}`, error instanceof AgentHomeBusyError,
+            error instanceof AgentHomeBusyError ? homeBusyCode : undefined);
           return;
         }
         // Terminal evidence only (#318): an unreadable projection record must not
@@ -3193,6 +3200,9 @@ export class TaskRunner {
       decline(
         `Agent home admission failed: ${outboundErrorMessage(error)}`,
         !(error instanceof AgentHomeResolutionError),
+        error instanceof AgentHomeBusyError
+          ? readerAttempt ? 'agent_home_reader_busy' : 'agent_home_writer_busy'
+          : undefined,
       );
       return undefined;
     }
@@ -3213,7 +3223,8 @@ export class TaskRunner {
       }
     }
     if (active >= limit) {
-      decline(`agent home busy: ${active} active ${readerAttempt ? 'reader ' : ''}attempt(s)`, true);
+      decline(`agent home busy: ${active} active ${readerAttempt ? 'reader ' : ''}attempt(s)`, true,
+        readerAttempt ? 'agent_home_reader_busy' : 'agent_home_writer_busy');
       return undefined;
     }
     // Check and reserve are synchronous at the canonical-home authority.
@@ -4837,10 +4848,10 @@ export class TaskRunner {
   }
 
   /** Pre-claim, fail-closed rejection (protocol §3.2) — never claims first. */
-  private decline(taskId: string, reason: string, retryable: boolean, agentRef?: AgentRef): void {
+  private decline(taskId: string, reason: string, retryable: boolean, agentRef?: AgentRef, code?: TaskDeclinePayload['code']): void {
     this.deps.send(createEnvelope(
       'task.decline',
-      { reason, retryable, ...(agentRef === undefined ? {} : { agentRef }) },
+      { reason, retryable, ...(agentRef === undefined ? {} : { agentRef }), ...(code === undefined ? {} : { code }) },
       { taskId },
     ));
   }

@@ -257,7 +257,7 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
   });
   it('real home busy decline blocks before stub starts; no lane/Agent fallback', async () => {
     await first(); start('other','other-task'); await host.send('other',host.run('other').revision); await terminal('other-task');
-    expect((await byok.tasks.deviceTerminal('other-task'))?.envelope).toMatchObject({ type: 'task.decline',payload: { reason: 'agent home busy: 1 active attempt(s)' } });
+    expect((await byok.tasks.deviceTerminal('other-task'))?.envelope).toMatchObject({ type: 'task.decline',payload: { reason: 'agent home busy: 1 active attempt(s)', code: 'agent_home_writer_busy' } });
     expect((await host.reconcile('other',host.run('other').revision)).value.status).toBe('blocked'); expect(adapter.starts).toHaveLength(1);
   });
   it('execution budget prevents an unbounded question/answer loop', async () => {
