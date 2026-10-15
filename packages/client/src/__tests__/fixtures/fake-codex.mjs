@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Qualified app-server JSON-RPC fixture. No exec parser or exec event compatibility lane.
+import { spawn } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -54,6 +55,43 @@ if (process.env.FAKE_CODEX_CRASH_WITH_STDERR) {
 const send = (value) => console.log(JSON.stringify(value));
 const notify = (method, params) => send({ method, params });
 let threadId = process.env.FAKE_CODEX_THREAD_ID ?? 'fake-thread-1';
+/** Session MCP launch configs from the thread open, as real codex receives them. */
+let sessionMcpServers = {};
+/**
+ * A real MCP stdio client, the way codex calls a session server's tool:
+ * spawn it with its configured command/args/env, initialize, list tools,
+ * call one tool, then close stdin.
+ */
+async function callSessionMcpTool(name, tool, args) {
+  const server = sessionMcpServers[name];
+  if (!server) throw new Error(`no session MCP server ${name}`);
+  const child = spawn(server.command, server.args ?? [], { env: { ...process.env, ...(server.env ?? {}) }, stdio: ['pipe', 'pipe', 'inherit'] });
+  const pending = new Map();
+  let buffer = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => {
+    buffer += chunk;
+    for (let newline = buffer.indexOf('\n'); newline >= 0; newline = buffer.indexOf('\n')) {
+      const frame = JSON.parse(buffer.slice(0, newline));
+      buffer = buffer.slice(newline + 1);
+      pending.get(frame.id)?.(frame);
+      pending.delete(frame.id);
+    }
+  });
+  let next = 1;
+  const rpc = (method, params) => new Promise((resolve) => {
+    const id = next++;
+    pending.set(id, resolve);
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
+  });
+  try {
+    await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'fake-codex', version: '1' } });
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
+    const listed = await rpc('tools/list', {});
+    if (process.env.FAKE_CODEX_MCP_TOOLS_RECEIPT) writeFileSync(process.env.FAKE_CODEX_MCP_TOOLS_RECEIPT, JSON.stringify(listed.result));
+    return await rpc('tools/call', { name: tool, arguments: args });
+  } finally { child.stdin.end(); }
+}
 let turn = 0;
 let active = null;
 const receipt = (frame) => {
@@ -140,6 +178,19 @@ async function runTurn(id, input) {
         type: 'fileChange',
         changes: [{ path: path.resolve(process.cwd(), name), kind: 'add' }],
         status: 'completed',
+      },
+    });
+  }
+  if (process.env.FAKE_CODEX_SUBMIT_RESULT) {
+    const args = JSON.parse(process.env.FAKE_CODEX_SUBMIT_RESULT);
+    const response = await callSessionMcpTool('byokagentresult', 'submit_result', args);
+    notify('item/completed', {
+      threadId,
+      turnId: id,
+      item: {
+        id: 'mcp-result-1', type: 'mcpToolCall', server: 'byokagentresult', tool: 'submit_result', arguments: args,
+        ...(response.error === undefined ? { result: response.result } : { error: response.error }),
+        status: response.error === undefined && response.result?.isError !== true ? 'completed' : 'failed',
       },
     });
   }
@@ -234,6 +285,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     // the user's own config field by field.
     for (const [name, server] of Object.entries(params.config?.mcp_servers ?? {}))
       config[`mcp_servers.${name}.command`] = JSON.stringify(server.command);
+    sessionMcpServers = { ...sessionMcpServers, ...(params.config?.mcp_servers ?? {}) };
     if (method === 'thread/resume' && params.threadId !== threadId) {
       send({
         id,

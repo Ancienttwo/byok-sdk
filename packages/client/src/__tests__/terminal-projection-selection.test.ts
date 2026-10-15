@@ -266,6 +266,32 @@ describe('submit_result: stage, ack and turn_end', () => {
   });
 });
 
+describe('submit_result: one document shape for every runtime lane', () => {
+  // Durable Pi gets the same reserved helper (pi-durable-host registers every
+  // reserved server's tools as bare durable tools) and the same daemon
+  // resolution, so the document is the staged canonical outcome either way.
+  it('durable Pi and a CLI runtime produce the identical task.complete document', async () => {
+    const documents: unknown[] = [];
+    for (const durablePi of [false, true]) {
+      const { adapter, runner, sent } = await harness();
+      if (durablePi) {
+        Object.defineProperty(adapter, 'descriptor', { value: Object.freeze({ ...adapter.descriptor,
+          capabilities: Object.freeze({ ...adapter.descriptor.capabilities, durablePi: true }) }) });
+      }
+      const taskId = durablePi ? 'durable-shape' : 'cli-shape';
+      await offerResult(runner, taskId);
+      expect(adapter.startCalls[0]!.ctx.mcpServers?.byokagentresult).toBeDefined();
+      await runner.submitAgentResult({ contextToken: resultToken(adapter), outcome: { notes: ['a', 'b'], score: 5, verdict: 'pass' } });
+      adapter.sessions[0]!.emit({ type: 'turn_end' });
+      const done = await waitForTerminal(sent, taskId);
+      expect(done.type).toBe('task.complete');
+      documents.push(done.payload.document);
+    }
+    expect(documents[1]).toEqual(documents[0]);
+    expect(JSON.stringify(documents[1])).toBe(JSON.stringify(documents[0]));
+  });
+});
+
 describe('submit_result with a required Agent message (R10)', () => {
   it('parks the staged document behind the message gate and delivers both', async () => {
     const { adapter, runner, sent } = await harness({
