@@ -54,8 +54,17 @@ describe('Agent-initiated message egress protocol', () => {
     }).success).toBe(true);
     expect(TaskOfferForAgentWithEgressFreshPayloadSchema.safeParse({
       ...shared,
-      terminalProjection: { mode: 'result-document', contract: 'example.research.v1' },
+      terminalProjection: {
+        mode: 'result-document',
+        contract: 'example.research.v1',
+        schema: { type: 'object', properties: { answer: { type: 'string' } }, required: ['answer'], additionalProperties: false },
+      },
     }).success).toBe(true);
+    // Wire v3: the result-document arm carries its frozen outcome schema.
+    expect(TaskOfferForAgentWithEgressFreshPayloadSchema.safeParse({
+      ...shared,
+      terminalProjection: { mode: 'result-document', contract: 'example.research.v1' },
+    }).success).toBe(false);
   });
 
   test('keeps model-authored routing and unknown message contracts out of the strict declaration', () => {

@@ -35,6 +35,7 @@ import {
 } from './input-preparation';
 import { ProviderProfileBindingSchema } from './provider-profile-binding';
 import { TerminalProjectionSelectionSchema } from './terminal-projection';
+import { canonicalizePlainJson, type PlainJsonCheck } from './plain-json';
 
 /** Max size of an inlined artifact payload, per the delivery-model spec (<=64KB). */
 const MAX_INLINE_BYTES = 64 * 1024;
@@ -952,92 +953,7 @@ export const RESULT_DOCUMENT_MAX_BYTES = 1_048_576;
  * in a failure reason. `canonical` is the CANONICAL SNAPSHOT — the value a
  * sender must actually put on the wire; see {@link checkResultDocument}.
  */
-export type ResultDocumentCheck =
-  | { readonly ok: true; readonly bytes: number; readonly canonical: unknown }
-  | { readonly ok: false; readonly reason: 'not-serializable' }
-  | { readonly ok: false; readonly reason: 'over-cap'; readonly bytes: number }
-  | { readonly ok: false; readonly reason: 'not-plain-json' };
-
-/**
- * Structural equality between a value and its own JSON round trip, written
- * out by hand (no node builtins — this package deliberately has none) over
- * exactly the three shapes pure JSON data can take.
- *
- * The asymmetry is the point: `a` is the CALLER's object, which may contain
- * anything JavaScript allows, while `b` is always the output of
- * `JSON.parse` — pure data. So every case where `a` is something JSON cannot
- * represent (a `Date`, a function, `undefined`, `NaN`, a symbol, a getter
- * that answers differently the second time, an object whose `toJSON` rewrote
- * it) shows up here as a shape or value mismatch against `b`, and is
- * rejected. `NaN !== NaN` falls out of strict equality for free, which is
- * exactly what we want: `NaN` serializes to `null`, so it is not
- * representable and must not pass.
- *
- * The one case structural comparison alone cannot see — an object whose data
- * lives somewhere other than its own enumerable string keys, e.g. a
- * populated `Map` — gets its own explicit rejection in the object branch
- * below.
- */
-function isSameJsonData(a: unknown, b: unknown): boolean {
-  if (a === null || b === null) return a === b;
-
-  const typeOfA = typeof a;
-  if (typeOfA !== typeof b) return false;
-
-  if (typeOfA !== 'object') {
-    // string | number | boolean. Anything else (function, symbol, bigint,
-    // undefined) can never equal a JSON.parse output, and `NaN === NaN` is
-    // false, so this single comparison covers every primitive case.
-    return a === b;
-  }
-
-  const aIsArray = Array.isArray(a);
-  if (aIsArray !== Array.isArray(b)) return false;
-
-  if (aIsArray) {
-    const arrayA = a as unknown[];
-    const arrayB = b as unknown[];
-    if (arrayA.length !== arrayB.length) return false;
-    for (let index = 0; index < arrayA.length; index += 1) {
-      if (!isSameJsonData(arrayA[index], arrayB[index])) return false;
-    }
-    return true;
-  }
-
-  const objectA = a as Record<string, unknown>;
-  const objectB = b as Record<string, unknown>;
-  const keysA = Object.keys(objectA); // own enumerable string keys
-  const keysB = Object.keys(objectB);
-
-  // An object whose data does NOT live in its own enumerable string keys is
-  // invisible to both `JSON.stringify` and the key comparison below — a
-  // populated `Map`/`Set` serializes to `{}` and would otherwise compare
-  // EQUAL to that `{}`, delivering an empty document as the task's truthful
-  // structured result. That is the same silent-wrong-output class the whole
-  // plain-data contract exists to stop, so a container-shaped value with no
-  // own enumerable string keys and a non-plain prototype is rejected here.
-  // Applied at every object node (this function recurses), so a nested
-  // `Map`/`Set`/exotic instance dies exactly like a top-level one.
-  //
-  // The boundary this deliberately draws: a class instance WITH own
-  // enumerable fields still passes, because its data really is in those
-  // fields and survives the round trip intact. A class whose values come
-  // from PROTOTYPE-level getters does not — those are invisible to JSON, so
-  // such an instance is not plain JSON data and is outside this contract by
-  // definition (docs/protocol.md §7.2). `Object.create(null)` is explicitly
-  // fine: a null prototype is plain data, just without `Object.prototype`.
-  if (keysA.length === 0) {
-    const prototypeA: unknown = Object.getPrototypeOf(objectA);
-    if (prototypeA !== Object.prototype && prototypeA !== null) return false;
-  }
-
-  if (keysA.length !== keysB.length) return false;
-  for (const key of keysA) {
-    if (!Object.prototype.hasOwnProperty.call(objectB, key)) return false;
-    if (!isSameJsonData(objectA[key], objectB[key])) return false;
-  }
-  return true;
-}
+export type ResultDocumentCheck = PlainJsonCheck;
 
 /**
  * THE single authority for "is this a legal `task.complete.document`", and
@@ -1076,7 +992,7 @@ function isSameJsonData(a: unknown, b: unknown): boolean {
  *      no `toJSON`, no getters, no prototype, nothing left that can answer
  *      differently a second time.
  *   4. The original must be structurally equal to the snapshot
- *      ({@link isSameJsonData}). Any mismatch means the value was not plain
+ *      (`isSameJsonData`, `plain-json.ts`). Any mismatch means the value was not plain
  *      JSON data, and it is rejected rather than silently transformed.
  *
  * On success the snapshot is returned as `canonical`, and **every sender
@@ -1088,21 +1004,7 @@ function isSameJsonData(a: unknown, b: unknown): boolean {
  * agrees.
  */
 export function checkResultDocument(document: unknown): ResultDocumentCheck {
-  let json: string | undefined;
-  try {
-    json = JSON.stringify(document);
-  } catch {
-    return { ok: false, reason: 'not-serializable' };
-  }
-  if (json === undefined) return { ok: false, reason: 'not-serializable' };
-
-  const bytes = new TextEncoder().encode(json).length;
-  if (bytes > RESULT_DOCUMENT_MAX_BYTES) return { ok: false, reason: 'over-cap', bytes };
-
-  const canonical: unknown = JSON.parse(json);
-  if (!isSameJsonData(document, canonical)) return { ok: false, reason: 'not-plain-json' };
-
-  return { ok: true, bytes, canonical };
+  return canonicalizePlainJson(document, RESULT_DOCUMENT_MAX_BYTES);
 }
 
 /** Maximum provider-reported prompt or completion token count retained in one terminal observation. */
@@ -1254,7 +1156,7 @@ export type TerminalAgentHomeMemoryChange = z.infer<typeof TerminalAgentHomeMemo
 /**
  * daemon -> server: task finished successfully.
  *
- * `document` (additive-minor, docs/protocol.md "Freeze rule"): the OPTIONAL
+ * `document` (docs/protocol.md §7.2): the OPTIONAL
  * structured terminal result of the task — one JSON value the product on the
  * other side consumes as the task's actual output, as opposed to `summary`
  * (human-readable prose) or `artifactRefs` (files). Deliberately
@@ -1268,14 +1170,12 @@ export type TerminalAgentHomeMemoryChange = z.infer<typeof TerminalAgentHomeMemo
  * never truncated (see that constant's own doc comment). A sender puts the
  * check's `canonical` snapshot on the wire, never the original object.
  *
- * Unlike `approvalId` on `task.await_approval` above, emitting this field IS
- * gated on a capability flag (`result-document`, `version.ts`): a pre-
- * `result-document` server strips it silently as an unknown key (the
- * tolerant `z.object()` behavior §1 mandates), and silently losing the
- * task's primary structured result is not a tolerable degradation the way
- * losing an observability hint is. So a daemon sends `document` only to a
- * server that advertised the flag, and fails the task loudly otherwise —
- * see `packages/client`'s `task-runner.ts`.
+ * Wire v3: every v3 server keeps this field, so no capability flag gates it
+ * (the v2 `result-document` flag is gone). For a
+ * `terminalProjection.mode: 'result-document'` offer it carries the outcome
+ * the daemon validated against the offer's frozen schema
+ * (`validateResultOutcome`, `result-schema.ts`, at most
+ * `RESULT_OUTCOME_MAX_BYTES`).
  */
 export const TaskCompletePayloadSchema = z.object({
   harnessId: HarnessIdSchema.optional(),

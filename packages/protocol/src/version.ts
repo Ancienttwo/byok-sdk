@@ -3,11 +3,22 @@ export const MAILBOX_READ_AHEAD_MAX_SEQS = 4096;
 export const MAILBOX_READ_AHEAD_CAPABILITY = 'mailbox-read-ahead';
 
 /**
- * Wire protocol version. Every v2 change is a version bump, a gated addition
+ * Wire protocol version. Every v3 change is a version bump, a gated addition
  * or a strip-safe addition: see docs/protocol.md "Freeze rule", which is the
  * one statement of the rule, and `src/wire-additions.ts`, which declares the
- * additions. `src/__tests__/compat.test.ts` proves them against published
- * releases.
+ * receiver-capability gates and additions. No v3 release has been published
+ * yet, so `src/__tests__/compat.test.ts` has no published v3 decoder to prove
+ * additions against; cross-release gates stay unproven until one exists.
+ *
+ * v3 makes `schema` required on the `terminalProjection.mode:
+ * 'result-document'` arm (`terminal-projection.ts`, `result-schema.ts`): the
+ * offer freezes the outcome schema, and the outcome reaches the Host only as
+ * `task.complete.document`. That narrows a strict shape, so it is a wire
+ * major. A v2 envelope is rejected; there is no v2 reader and no capability
+ * negotiation between the two result-document shapes. Drain, then upgrade
+ * server and client together. Every addition v2 declared is part of the v3
+ * baseline, and the v2 `result-document` capability flag is gone: every v3
+ * server keeps `task.complete.document`.
  *
  * v2 removed the task offer's `policy` (`PermissionPolicy`), the runtime
  * capability `permissionModes` and the input-preparation `permissionMode`.
@@ -21,7 +32,7 @@ export const MAILBOX_READ_AHEAD_CAPABILITY = 'mailbox-read-ahead';
  * attest tool executables. The artifact names its counted tools in
  * `toolNames`.
  */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 /** Host declares that this device accepts only Agent-bound offer variants. */
 export const STRICT_AGENT_ONLY_CAPABILITY = 'strict-agent-only' as const;
@@ -79,27 +90,6 @@ export const AGENT_HOME_READERS_CAPABILITY = 'agent-home-readers' as const;
  * other flag here, just consumed for observability instead of gating.
  */
 /**
- * `result-document` (additive-minor): a SERVER-advertised flag meaning "I
- * understand the optional `task.complete.document` field" (`messages.ts`).
- * Functionally gating, like `approval_resolved` and unlike
- * `approval-targeting`.
- *
- * This is the N/N-1 answer for that new daemon -> server FIELD. An old
- * server's transport advertisement (`conn.ack.capabilities` on WS or
- * `EventsPollResponse.capabilities` on long-poll) never includes it, and
- * its `TaskCompletePayloadSchema` is a tolerant (non-`.strict()`)
- * `z.object()`, so a `document` sent to it would be silently STRIPPED on
- * parse and vanish without a trace. That is exactly why emission is gated
- * here rather than sent unconditionally the way `approvalId` is: `document`
- * carries the task's primary structured RESULT, so losing it silently is
- * data loss, not a missed observability hint. A new daemon talking to an old
- * server therefore never sends `document` at all, and — if its configured
- * extractor did produce one — reports `task.fail` (retryable: false; the
- * same server will strip it on every retry too) instead of completing the
- * task with its main result quietly deleted (`packages/client`'s
- * `task-runner.ts`). A new server talking to an old daemon is unaffected:
- * the field is optional, and an old daemon simply never sets it.
- *
  * `dispatch-selection` (additive-minor) is a correctness gate for the
  * optional `task.offer.dispatchSelection` control field. An older v1 daemon
  * legally strips unknown optional fields, so a server must never send an
@@ -121,7 +111,6 @@ export const CAPABILITY_FLAGS = [
   'interactive-approval',
   'approval_resolved',
   'approval-targeting',
-  'result-document',
   'dispatch-selection',
   PROVIDER_PROFILE_BINDING_CAPABILITY,
   'toolset-selection',

@@ -277,7 +277,7 @@ describe('taskId placement: envelope task_id is the sole routing key (M1 gap #7)
     // payload, and the envelope never sets task_id. M1 requires the envelope
     // field, so this must now be rejected rather than silently unroutable.
     const raw = {
-      v: 2,
+      v: 3,
       id: '11111111-1111-4111-8111-111111111111',
       ts: new Date().toISOString(),
       type: 'task.claim',

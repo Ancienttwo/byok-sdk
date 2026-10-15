@@ -16,15 +16,17 @@ import {
 } from '../index';
 
 /**
- * FREEZE GUARD — local invariants of the frozen wire (docs/protocol.md
- * "Freeze rule"). Compatibility with PUBLISHED releases (the released
- * corpus, the never-narrowed surface, and what old decoders do with new
- * bytes) lives in `compat.test.ts`. This file keeps the checks that need no
+ * FREEZE GUARD — local invariants of the frozen wire, major 3 (docs/protocol.md
+ * "Freeze rule"). Release evidence (the retired v2 corpus as a negative
+ * oracle, the v3 corpus and registry, and the published-decoder rejection
+ * oracle) lives in `compat.test.ts`. This file keeps the checks that need no
  * released decoder:
  *
  *   1. The per-type `task_id`/`seq` requiredness table, typed against
  *      codec.ts's `CreateEnvelopeOptions<T>`.
- *   2. Behavior assertions for the freeze rule's own asymmetry: unknown is
+ *   2. Behavior assertions for the freeze rule's own asymmetry (and the
+ *      v3 wire-major cut: v1/v2 envelopes and the schema-less v2
+ *      result-document projection are rejected): unknown is
  *      TOLERATED for observability data, FAIL-CLOSED for control/security
  *      data — including that an unrecognized field on an otherwise
  *      well-formed `instruction` blob-ref is rejected outright (`.strict()`),
@@ -281,9 +283,32 @@ describe('freeze guard: behavior assertions (unknown tolerance vs. fail-closed)'
     expect(result.success).toBe(false);
   });
 
-  it('a v1 envelope is REJECTED: v2 removed `policy`, and there is no v1 reader', () => {
+  it('the current wire major is 3', () => {
+    expect(PROTOCOL_VERSION).toBe(3);
+    expect(createEnvelope('task.started', {}, { taskId: 'task-1' }).v).toBe(3);
+  });
+
+  it.each([1, 2])('a v%i envelope is REJECTED: there is no v1 or v2 reader', (v) => {
     const envelope = createEnvelope('task.started', {}, { taskId: 'task-1' });
-    expect(() => parseMessage({ ...envelope, v: 1 })).toThrow(EnvelopeValidationError);
+    expect(() => parseMessage({ ...envelope, v })).toThrow(EnvelopeValidationError);
+  });
+
+  it.each([
+    'task.offer_for_agent',
+    'task.offer_for_agent_with_egress',
+    'task.offer_for_agent_with_egress_fresh',
+    'task.offer_prepared',
+  ] as const)('a strict %s whose result-document projection lacks `schema` (the v2 shape) is REJECTED', (type) => {
+    const payload = minimalPayloadForProbe(type) as Record<string, unknown>;
+    const schema = { type: 'object', properties: { answer: { type: 'string' } }, required: ['answer'], additionalProperties: false };
+    const v3 = { ...payload, terminalProjection: { mode: 'result-document', contract: 'example.answer.v1', schema } };
+    expect(MESSAGE_PAYLOAD_SCHEMAS[type].safeParse(v3).success).toBe(true);
+    const v2Shape = { ...payload, terminalProjection: { mode: 'result-document', contract: 'example.answer.v1' } };
+    expect(MESSAGE_PAYLOAD_SCHEMAS[type].safeParse(v2Shape).success).toBe(false);
+    const outsideSubset = { ...payload, terminalProjection: { mode: 'result-document', contract: 'example.answer.v1', schema: { ...schema, $defs: {} } } };
+    expect(MESSAGE_PAYLOAD_SCHEMAS[type].safeParse(outsideSubset).success).toBe(false);
+    const raw = { v: PROTOCOL_VERSION, id: '00000000-0000-4000-8000-000000000103', ts: '2026-01-01T00:00:00.000Z', type, task_id: 'task-1', seq: 1, payload: v2Shape };
+    expect(() => parseMessage(raw)).toThrow(EnvelopeValidationError);
   });
 
   it.each([

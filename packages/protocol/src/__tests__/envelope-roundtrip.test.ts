@@ -632,7 +632,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
 describe('createEnvelope defaults', () => {
   it('fills v, id, ts when not supplied', () => {
     const envelope = createEnvelope('task.steer', { text: 'hi' }, { taskId: 'task-1', seq: 1 });
-    expect(envelope.v).toBe(2);
+    expect(envelope.v).toBe(3);
     expect(envelope.id).toMatch(UUID_RE);
     expect(() => new Date(envelope.ts).toISOString()).not.toThrow();
     expect(Number.isNaN(new Date(envelope.ts).getTime())).toBe(false);
@@ -642,7 +642,7 @@ describe('createEnvelope defaults', () => {
     const envelope = createEnvelope(
       'task.steer',
       { text: 'hi' },
-      { v: 2, id: '11111111-1111-4111-8111-111111111111', ts: '2026-07-16T00:00:00.000Z', taskId: 'task-1', seq: 7 },
+      { v: 3, id: '11111111-1111-4111-8111-111111111111', ts: '2026-07-16T00:00:00.000Z', taskId: 'task-1', seq: 7 },
     );
     expect(envelope.id).toBe('11111111-1111-4111-8111-111111111111');
     expect(envelope.ts).toBe('2026-07-16T00:00:00.000Z');
