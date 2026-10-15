@@ -621,3 +621,213 @@ function topLevelKeys(schema: unknown): string[] {
   if (def.type !== 'object') throw new Error(`unsupported payload schema kind: ${def.type}`);
   return Object.keys((schema as { shape: Record<string, unknown> }).shape);
 }
+
+// ---------------------------------------------------------------------------
+// Corpus completeness: every recursive path and every enum/literal value
+// ---------------------------------------------------------------------------
+
+/**
+ * Paths are derived from the real current schemas (`z.toJSONSchema`, input
+ * mode), never hand-maintained. Segments: `.key` for a property, `[]` for array
+ * items, `.*` for record values, `|i` for union branch `i` (anyOf/oneOf), and
+ * `#name` for a shared/recursive definition, which is enumerated once and
+ * covered by every value that reaches it. `path=<json>` is an enum or literal
+ * value. A value counts toward the first union branch that structurally
+ * accepts it (types, literals, required keys, patterns and bounds; refinements
+ * are not representable), mirroring zod's ordered union decoding.
+ */
+interface SchemaCoverage {
+  readonly paths: Set<string>;
+  readonly values: Set<string>;
+}
+
+type SchemaNode = { [key: string]: Json };
+
+function schemaNode(node: Json | undefined): SchemaNode | undefined {
+  return node !== null && typeof node === 'object' && !Array.isArray(node) ? node : undefined;
+}
+
+function definition(root: SchemaNode, ref: Json): { name: string; node: SchemaNode } {
+  const match = typeof ref === 'string' ? /^#\/\$defs\/(.+)$/.exec(ref) : null;
+  const node = match === null ? undefined : schemaNode(schemaNode(root.$defs)?.[match[1]!]);
+  if (match === null || node === undefined) throw new Error(`unresolvable $ref ${JSON.stringify(ref)}`);
+  return { name: match[1]!, node };
+}
+
+function recordValues(node: SchemaNode): SchemaNode | undefined {
+  const values = schemaNode(node.additionalProperties);
+  if (values === undefined) return undefined;
+  return 'propertyNames' in node || Object.keys(values).length > 0 ? values : undefined;
+}
+
+function branches(node: SchemaNode): readonly SchemaNode[] {
+  return [...(Array.isArray(node.anyOf) ? node.anyOf : []), ...(Array.isArray(node.oneOf) ? node.oneOf : [])]
+    .map((branch) => schemaNode(branch)!);
+}
+
+function requiredCoverage(root: SchemaNode, prefix: string, exempt: (path: string) => boolean): SchemaCoverage {
+  const required: SchemaCoverage = { paths: new Set(), values: new Set() };
+  const visit = (node: SchemaNode, path: string): void => {
+    // An exempt subtree is not enumerated, so neither are definitions only it reaches.
+    if (exempt(path)) return;
+    required.paths.add(path);
+    if (node.$ref !== undefined) {
+      const { name, node: target } = definition(root, node.$ref);
+      const canonical = `${prefix}#${name}`;
+      if (!required.paths.has(canonical)) visit(target, canonical);
+    }
+    for (const part of Array.isArray(node.allOf) ? node.allOf : []) visit(schemaNode(part)!, path);
+    branches(node).forEach((branch, index) => visit(branch, `${path}|${index}`));
+    if ('const' in node) required.values.add(`${path}=${JSON.stringify(node.const)}`);
+    if (Array.isArray(node.enum)) for (const member of node.enum) required.values.add(`${path}=${JSON.stringify(member)}`);
+    for (const [key, property] of Object.entries(schemaNode(node.properties) ?? {})) visit(schemaNode(property)!, `${path}.${key}`);
+    const items = schemaNode(node.items);
+    if (items !== undefined) visit(items, `${path}[]`);
+    const values = recordValues(node);
+    if (values !== undefined) visit(values, `${path}.*`);
+  };
+  visit(root, prefix);
+  return required;
+}
+
+/** Structural acceptance, used only to attribute a value to union branches. */
+function accepts(root: SchemaNode, node: SchemaNode, value: unknown): boolean {
+  if (node.$ref !== undefined && !accepts(root, definition(root, node.$ref).node, value)) return false;
+  if (Array.isArray(node.allOf) && !node.allOf.every((part) => accepts(root, schemaNode(part)!, value))) return false;
+  const options = branches(node);
+  if (options.length > 0 && !options.some((branch) => accepts(root, branch, value))) return false;
+  if ('const' in node && JSON.stringify(node.const) !== JSON.stringify(value)) return false;
+  if (Array.isArray(node.enum) && !node.enum.some((member) => JSON.stringify(member) === JSON.stringify(value))) return false;
+  if (typeof node.type === 'string') {
+    const kind = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
+    const ok = node.type === 'integer' ? Number.isInteger(value) : node.type === 'number' ? typeof value === 'number' : node.type === kind;
+    if (!ok) return false;
+  }
+  if (typeof value === 'string') {
+    if (typeof node.pattern === 'string' && !new RegExp(node.pattern, 'u').test(value)) return false;
+    if (typeof node.minLength === 'number' && [...value].length < node.minLength) return false;
+    if (typeof node.maxLength === 'number' && [...value].length > node.maxLength) return false;
+  }
+  if (typeof value === 'number') {
+    if (typeof node.minimum === 'number' && value < node.minimum) return false;
+    if (typeof node.maximum === 'number' && value > node.maximum) return false;
+    if (typeof node.exclusiveMinimum === 'number' && value <= node.exclusiveMinimum) return false;
+    if (typeof node.exclusiveMaximum === 'number' && value >= node.exclusiveMaximum) return false;
+  }
+  if (Array.isArray(value)) {
+    if (typeof node.minItems === 'number' && value.length < node.minItems) return false;
+    if (typeof node.maxItems === 'number' && value.length > node.maxItems) return false;
+    const items = schemaNode(node.items);
+    if (items !== undefined && !value.every((item) => accepts(root, items, item))) return false;
+  } else if (value !== null && typeof value === 'object') {
+    const fields = value as Record<string, unknown>;
+    if (Array.isArray(node.required) && !node.required.every((key) => typeof key === 'string' && key in fields)) return false;
+    const properties = schemaNode(node.properties) ?? {};
+    for (const [key, field] of Object.entries(fields)) {
+      const property = schemaNode(properties[key]);
+      if (property !== undefined) {
+        if (!accepts(root, property, field)) return false;
+      } else if (node.additionalProperties === false) {
+        return false;
+      } else {
+        const values = schemaNode(node.additionalProperties);
+        if (values !== undefined && !accepts(root, values, field)) return false;
+      }
+    }
+  }
+  return true;
+}
+
+function observedCoverage(root: SchemaNode, prefix: string, samples: readonly unknown[]): SchemaCoverage {
+  const seen: SchemaCoverage = { paths: new Set(), values: new Set() };
+  const visit = (node: SchemaNode, value: unknown, path: string): void => {
+    seen.paths.add(path);
+    if (node.$ref !== undefined) {
+      const { name, node: target } = definition(root, node.$ref);
+      visit(target, value, `${prefix}#${name}`);
+    }
+    for (const part of Array.isArray(node.allOf) ? node.allOf : []) visit(schemaNode(part)!, value, path);
+    // zod tries union options in order, so a value exercises the first accepting branch.
+    const options = branches(node);
+    const chosen = options.findIndex((branch) => accepts(root, branch, value));
+    if (chosen >= 0) visit(options[chosen]!, value, `${path}|${chosen}`);
+    if (('const' in node || Array.isArray(node.enum)) && accepts(root, { ...node, anyOf: [], oneOf: [] }, value)) {
+      seen.values.add(`${path}=${JSON.stringify(value)}`);
+    }
+    if (Array.isArray(value)) {
+      const items = schemaNode(node.items);
+      if (items !== undefined) for (const item of value) visit(items, item, `${path}[]`);
+    } else if (value !== null && typeof value === 'object') {
+      const properties = schemaNode(node.properties) ?? {};
+      const values = recordValues(node);
+      for (const [key, field] of Object.entries(value as Record<string, unknown>)) {
+        const property = schemaNode(properties[key]);
+        if (property !== undefined) visit(property, field, `${path}.${key}`);
+        else if (values !== undefined) visit(values, field, `${path}.*`);
+      }
+    }
+  };
+  for (const sample of samples) visit(root, sample, prefix);
+  return seen;
+}
+
+/**
+ * Subtrees no corpus line of this surface needs to carry. Each names the exact
+ * required path whose descendants it exempts (the path itself stays required)
+ * and why. It stays bounded: an exemption that prunes nothing fails.
+ */
+const COMPLETENESS_EXEMPTIONS: readonly { readonly below: string; readonly reason: string }[] = [
+  {
+    below: 'http:EventsPollResponse.events[]',
+    reason: 'Envelopes inside a poll page are the envelope corpus\'s surface; its completeness proves every payload path and value.',
+  },
+  {
+    below: 'http:MessagesSendRequest.messages[]',
+    reason: 'Envelopes inside a send batch are the envelope corpus\'s surface; its completeness proves every payload path and value.',
+  },
+];
+
+function isBelow(path: string, ancestor: string): boolean {
+  return path.length > ancestor.length && path.startsWith(ancestor) && '.|[#'.includes(path[ancestor.length]!);
+}
+
+function completeness(): { missingPaths: string[]; missingValues: string[]; unusedExemptions: string[] } {
+  const required: SchemaCoverage = { paths: new Set(), values: new Set() };
+  const seen: SchemaCoverage = { paths: new Set(), values: new Set() };
+  const used = new Set<number>();
+  const exempt = (path: string): boolean => {
+    const index = COMPLETENESS_EXEMPTIONS.findIndex((entry) => isBelow(path, entry.below));
+    if (index >= 0) used.add(index);
+    return index >= 0;
+  };
+  const merge = (into: SchemaCoverage, from: SchemaCoverage) => {
+    for (const path of from.paths) into.paths.add(path);
+    for (const value of from.values) into.values.add(value);
+  };
+  for (const type of MESSAGE_TYPES) {
+    const root = schemaNode(jsonSchema(MESSAGE_PAYLOAD_SCHEMAS[type]))!;
+    const prefix = `envelope:${type}`;
+    merge(required, requiredCoverage(root, prefix, exempt));
+    merge(seen, observedCoverage(root, prefix, corpus.filter((line) => line.type === type).map((line) => line.payload)));
+  }
+  for (const surface of [...new Set(httpCorpus.map((line) => line.surface))]) {
+    const root = schemaNode(jsonSchema(httpSchema(currentModule, surface)))!;
+    const prefix = `http:${surface}`;
+    merge(required, requiredCoverage(root, prefix, exempt));
+    merge(seen, observedCoverage(root, prefix, httpCorpus.filter((line) => line.surface === surface).map((line) => JSON.parse(line.body) as unknown)));
+  }
+  return {
+    missingPaths: [...required.paths].filter((path) => !seen.paths.has(path)).sort(),
+    missingValues: [...required.values].filter((value) => !seen.values.has(value)).sort(),
+    unusedExemptions: COMPLETENESS_EXEMPTIONS.filter((_, index) => !used.has(index)).map((entry) => entry.below),
+  };
+}
+
+describe('compat: corpus completeness', () => {
+  it('every recursive payload/body path and every enum or literal value appears in at least one corpus line', () => {
+    const result = completeness();
+    expect(result.unusedExemptions, 'a completeness exemption no longer matches any required path; delete it').toEqual([]);
+    expect(result.missingPaths, 'append a corpus line carrying each path (both corpora are append-only)').toEqual([]);
+    expect(result.missingValues, 'append a corpus line carrying each enum/literal value').toEqual([]);
+  });
+});
