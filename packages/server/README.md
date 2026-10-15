@@ -349,8 +349,16 @@ storage paths.
 
 Before enqueue, durably bind the authenticated scope and external execution key
 (including cycle/pass where applicable) to one taskId, explicit deviceId and
-immutable dispatch input. Pass that taskId to `dispatch` or
-`dispatchFreshAgentEgress`. Omitting taskId retains fresh-task semantics.
+immutable execution input. Fresh Agent work uses `executions.submit(input)` and
+requires the Host-owned taskId. Its strict nested payload names runtime,
+AgentRef, egressPolicy and terminalProjection. messageEgress is optional;
+selecting it requires agentMessageContext and a registered Agent message consumer.
+The return is EnqueuedOffer, with durable recovery through tasks.offer; no fresh
+egress TaskHandle is returned. Resubmitting a delivered taskId throws
+`agent_task_already_exists`; recover through exact `tasks.offer(taskId)` readback.
+A registered device that is offline is enqueued normally. Exact resume and
+prepared submission retain their existing contracts. Other `dispatch` calls may
+still omit taskId.
 A caller taskId requires an explicit device; the façade never reselects a
 missing device for that identity. Initial dispatch requires a registered
 device. Concurrent calls for one caller identity in one façade are rejected
