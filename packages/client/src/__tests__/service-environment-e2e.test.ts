@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createTestKeychain } from '../../../../scripts/testing/macos-keychain.mjs';
 import { readLastEnvironmentRecord } from '../bin/audit-log';
 import { TestServer } from './fixtures/test-server';
 
@@ -36,7 +37,7 @@ async function tmpDir(prefix: string): Promise<string> {
   return dir;
 }
 
-async function fixture(serverUrl: string): Promise<{ home: string; storeDir: string; configPath: string }> {
+async function fixture(serverUrl: string, macosKeychainPath?: string): Promise<{ home: string; storeDir: string; configPath: string }> {
   const home = await tmpDir('byok-lse-home-');
   const storeDir = await tmpDir('byok-lse-st-');
   const fakeBin = path.join(home, 'fakebin');
@@ -58,6 +59,7 @@ async function fixture(serverUrl: string): Promise<{ home: string; storeDir: str
     workspaceRoot: home,
     storeDir,
     runtimeAllowlist: ['claude'],
+    ...(macosKeychainPath === undefined ? {} : { deviceCredentials: { macosKeychainPath } }),
   }));
   return { home, storeDir, configPath };
 }
@@ -144,7 +146,9 @@ describe.runIf(supportedShell)('service login-shell environment, end to end (iss
   }, 60_000);
 
   it('dist byok-agent start --service applies the capture before anything else (service log line, no paths)', async () => {
-    const { home, storeDir, configPath } = await fixture('http://127.0.0.1:9');
+    const keychain = process.platform === 'darwin' ? await createTestKeychain() : undefined;
+    if (keychain) cleanups.push(() => keychain.dispose());
+    const { home, storeDir, configPath } = await fixture('http://127.0.0.1:9', keychain?.path);
     // Unpaired, so start halts right after the capture; the CLI wiring is what is under test.
     const run = spawnSync(process.execPath, [path.resolve('dist/bin/byok-agent.js'), 'start', '--config', configPath, '--service'], {
       // The built CLI uses the real OS credential provider (#487): an empty
