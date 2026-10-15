@@ -2770,22 +2770,24 @@ export function buildDaemonWithAdapters(
         // All terminal fsyncs must succeed before publishing any observation.
         // A retry after a partial local write can repeat the idempotent journal
         // operation, without double-counting an earlier part of this batch.
-        for (const { envelope, outcome, reason } of settlements) {
+        for (const settlement of settlements) {
+          const { envelope } = settlement;
           if (!activeJournal || terminalKindOf(envelope.type) === undefined || envelope.task_id === undefined) continue;
           const hash = journalHash(encodeEnvelope(envelope));
-          if (outcome === 'rejected') await activeJournal.rejectTerminal(envelope.task_id, hash, reason ?? 'unknown');
+          if (settlement.outcome === 'rejected') await activeJournal.rejectTerminal(envelope.task_id, hash, settlement.reason);
           else {
             overrides.executionRecoveryFault?.('outbound:after-ack');
             await activeJournal.confirmTerminal(envelope.task_id, hash);
           }
         }
-        for (const { envelope, outcome, reason } of settlements) {
-          outbound[outcome] += 1;
-          if (outcome !== 'rejected') { observer.handleOutboundEnvelope(envelope); continue; }
+        for (const settlement of settlements) {
+          const { envelope } = settlement;
+          outbound[settlement.outcome] += 1;
+          if (settlement.outcome !== 'rejected') { observer.handleOutboundEnvelope(envelope); continue; }
           const rejection = {
             envelopeId: envelope.id, type: envelope.type,
             ...(envelope.task_id === undefined ? {} : { taskId: envelope.task_id }),
-            reason: reason ?? 'unknown', terminal: terminalKindOf(envelope.type) !== undefined,
+            reason: settlement.reason, terminal: terminalKindOf(envelope.type) !== undefined,
           };
           outbound.rejectedByReason[rejection.reason] = (outbound.rejectedByReason[rejection.reason] ?? 0) + 1;
           if (rejection.terminal) outbound.rejectedTerminals += 1;

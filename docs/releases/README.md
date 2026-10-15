@@ -17,7 +17,11 @@ a negative oracle: the v3 decoder rejects every v2 envelope. Do not edit,
 append to, or register anything in them.
 
 v3 evidence. `golden/v3.envelopes.ndjson` and `golden/v3.http.ndjson` are
-append-only. `golden/v3.releases.json` records each stable v3 release's
+append-only, with one narrow exception: before the first v3 release is
+registered in `golden/v3.releases.json`, a v3 corpus line that no registered
+entry covers may be corrected in place when a pre-release v3 tightening makes
+it undecodable. Once any v3 release is registered, the lines it covers are
+immutable and the rest stays append-only. `golden/v3.releases.json` records each stable v3 release's
 corpus line counts and SHA-256 prefixes; it has no releases and no `floor`
 yet. Every v3 entry, from the first, pins both `envelopes` and `http`.
 Prereleases are not registered and are outside the guarantee. Until a v3

@@ -218,12 +218,14 @@ export type ActivityIngress = z.infer<typeof ActivityIngressSchema>;
 export const OUTBOUND_REFUSAL_REASONS = ['payload_invalid', 'not_permitted', 'limit_exceeded', 'state_conflict', 'unsupported'] as const;
 /** `unknown` is an unrecognized wire reason string, kept as an observation. */
 export type OutboundRefusalReason = typeof OUTBOUND_REFUSAL_REASONS[number] | 'unknown';
+function isOutboundRefusalCode(value: string): value is typeof OUTBOUND_REFUSAL_REASONS[number] {
+  return (OUTBOUND_REFUSAL_REASONS as readonly string[]).includes(value);
+}
 export const MessageSendOutcomeSchema = z.object({
   id: z.uuid(),
   outcome: z.enum(['accepted', 'duplicate', 'rejected']),
-  reason: z.string().max(64).overwrite((value) =>
-    (OUTBOUND_REFUSAL_REASONS as readonly string[]).includes(value) ? value as OutboundRefusalReason : 'unknown',
-  ).optional(),
+  /** Decodes to an {@link OutboundRefusalReason}; an unrecognized string becomes `unknown`. */
+  reason: z.string().max(64).transform((value): OutboundRefusalReason => (isOutboundRefusalCode(value) ? value : 'unknown')).optional(),
 });
 export type MessageSendOutcome = z.infer<typeof MessageSendOutcomeSchema>;
 

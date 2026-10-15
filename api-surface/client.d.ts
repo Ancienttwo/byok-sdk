@@ -2876,7 +2876,7 @@ export declare class BlobClient implements BlobResolver {
 }
 // ==== @byok-sdk/client dist/daemon/connection-manager.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
-import { type OutboundRefusalReason, type MessageSendOutcome, type ActivityIngress, type CapabilityFlag, type Envelope, type RuntimeInfo, type ToolsetId } from '@byok-sdk/protocol';
+import { type OutboundRefusalReason, type ActivityIngress, type CapabilityFlag, type Envelope, type RuntimeInfo, type ToolsetId } from '@byok-sdk/protocol';
 import { AuthManager } from './auth-manager';
 import type { CursorStore } from './cursor-store';
 import type { DaemonHaltReason } from './daemon-lifecycle';
@@ -2936,11 +2936,15 @@ export interface ConnectionManagerOptions {
      */
     onCrashed?: (error: unknown) => void;
 }
-export interface OutboundSettlement {
+/** One outbound envelope's settlement; only a rejection has a reason, and it always has one. */
+export type OutboundSettlement = {
     readonly envelope: Envelope;
-    readonly outcome: MessageSendOutcome['outcome'];
-    readonly reason?: OutboundRefusalReason;
-}
+    readonly outcome: 'accepted' | 'duplicate';
+} | {
+    readonly envelope: Envelope;
+    readonly outcome: 'rejected';
+    readonly reason: OutboundRefusalReason;
+};
 /**
  * Owns the daemon's one authenticated long-poll session with the server.
  * Every received envelope passes through the same cursor-dedupe/persistence

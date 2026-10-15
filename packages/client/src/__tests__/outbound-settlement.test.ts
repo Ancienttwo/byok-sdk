@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope, PROTOCOL_VERSION, type Envelope } from '@byok-sdk/protocol';
 import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager, type OutboundSettlement } from '../daemon/connection-manager';
-import { LongPollClient, LongPollRouteError } from '../daemon/long-poll-transport';
+import { LongPollClient, LongPollRouteError, type CorrelatedOutcome } from '../daemon/long-poll-transport';
 import { seedDeviceEnrollment } from './fixtures/device-enrollment';
 import { TEST_ACTIVITY_INGRESS } from './fixtures/activity-ingress';
 
@@ -53,9 +53,10 @@ function helloAccepted(hello: Envelope) {
   return { accepted: 1, outcomes: [{ id: hello.id, outcome: 'accepted' as const }], ingress: TEST_ACTIVITY_INGRESS };
 }
 
-function outcomes(batch: readonly Envelope[]) {
-  return batch.map((envelope, index) => ({ id: envelope.id, outcome: index < 2 ? 'rejected' as const : 'accepted' as const,
-    ...(index < 2 ? { reason: 'limit_exceeded' } : {}) }));
+function outcomes(batch: readonly Envelope[]): CorrelatedOutcome[] {
+  return batch.map((envelope, index) => index < 2
+    ? { id: envelope.id, outcome: 'rejected', reason: 'limit_exceeded' }
+    : { id: envelope.id, outcome: 'accepted' });
 }
 
 describe('outbound settlement contract #397', () => {
@@ -74,7 +75,7 @@ describe('outbound settlement contract #397', () => {
     expect(settled).toEqual([]);
     release();
     await vi.waitFor(() => expect(connection.outboxLength()).toBe(0));
-    expect(settled.map(({ envelope, outcome, reason }) => [envelope.id, outcome, reason])).toEqual(batch.map((envelope, index) =>
+    expect(settled.map((item) => [item.envelope.id, item.outcome, item.outcome === 'rejected' ? item.reason : undefined])).toEqual(batch.map((envelope, index) =>
       [envelope.id, index < 2 ? 'rejected' : 'accepted', index < 2 ? 'limit_exceeded' : undefined]));
     expect(post.mock.calls.filter(([messages]) => messages[0]?.type !== 'conn.hello')).toHaveLength(1);
   });

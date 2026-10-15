@@ -15,9 +15,17 @@
   `OutboundRefusalReason` are removed; `'unknown'` still marks an unrecognized
   reason. `ConnectionManager.getIngressBudget()` throws before the first
   advertisement, `TaskRunnerDeps.getIngressBudget` is required, and
-  `ProgressBatcher` takes its ingress source without a default. The cloud's own default (50 events, 65536 bytes) is
-  `DEFAULT_ACTIVITY_BOUNDS`, unchanged. Unregistered v3 HTTP corpus lines were
-  completed with the now-required fields.
+  `ProgressBatcher` takes its ingress source without a default.
+  `OutboundSettlement` is a discriminated union whose rejected case has a
+  required `reason`, and `MessageSendOutcomeSchema.reason` decodes to
+  `OutboundRefusalReason`. Audit-log lines written by older daemons with
+  reason `'unspecified'` no longer parse: `readAuditRecords` skips them and
+  compaction no longer recognizes them as terminal records. The cloud's own
+  default (50 events, 65536 bytes) is `DEFAULT_ACTIVITY_BOUNDS`, unchanged.
+  Unregistered v3 HTTP corpus lines were corrected in place under the
+  pre-registration exception (`docs/releases/README.md`): events pages 7 and
+  8 gained `ingress` and line 7 also `capabilities`; send responses 11–14
+  gained `outcomes`.
 
 - **Breaking (protocol type, client; #386)** — the daemon decodes its HTTP
   reads with the protocol schemas only. `EventsPollResponse.events` is now

@@ -10,7 +10,7 @@ import {
   parseMessage,
   type Envelope,
   type EventsPollResponse,
-  type MessagesSendResponse,
+  type OutboundRefusalReason,
 } from '@byok-sdk/protocol';
 import { AuthManager, DeviceRevokedError } from './auth-manager';
 import { authedFetch } from './http-client';
@@ -111,6 +111,11 @@ export interface LongPollClientOptions {
   idleDelayMs?: number;
 }
 
+/** One posted envelope's validated v3 outcome: a rejection always carries its reason. */
+export type CorrelatedOutcome =
+  | { readonly id: string; readonly outcome: 'accepted' | 'duplicate' }
+  | { readonly id: string; readonly outcome: 'rejected'; readonly reason: OutboundRefusalReason };
+
 /**
  * A validated v3 acknowledgement for the posted batch: one outcome per posted
  * envelope, a reason on every rejected one, and `ingress` whenever a posted
@@ -118,7 +123,7 @@ export interface LongPollClientOptions {
  */
 export interface MessageBatchPostResult {
   readonly ingress?: ActivityIngress;
-  readonly outcomes: MessagesSendResponse['outcomes'];
+  readonly outcomes: readonly CorrelatedOutcome[];
   readonly accepted: number;
   readonly rejected?: number;
   /** The server's advertisement, when it sent one (a handshake answer); absence means "no update". */
@@ -356,16 +361,20 @@ export class LongPollClient {
       let accepted = 0;
       let rejected = 0;
       let handshakeAccepted = false;
+      const outcomes: CorrelatedOutcome[] = [];
       for (const settlement of response.outcomes) {
-        if (settlement.outcome !== 'rejected' && settlement.reason !== undefined) throw new Error('messages response reason belongs only to rejected outcomes');
-        if (settlement.outcome === 'rejected' && settlement.reason === undefined) throw new Error('messages response rejected outcome lacks its reason');
         const envelope = expected.get(settlement.id);
         if (envelope === undefined) throw new Error('messages response has an unknown or repeated outcome id');
         expected.delete(settlement.id);
-        if (settlement.outcome === 'rejected') rejected += 1;
-        else {
+        if (settlement.outcome === 'rejected') {
+          if (settlement.reason === undefined) throw new Error('messages response rejected outcome lacks its reason');
+          rejected += 1;
+          outcomes.push({ id: settlement.id, outcome: 'rejected', reason: settlement.reason });
+        } else {
+          if (settlement.reason !== undefined) throw new Error('messages response reason belongs only to rejected outcomes');
           accepted += 1;
           if (envelope.type === 'conn.hello') handshakeAccepted = true;
+          outcomes.push({ id: settlement.id, outcome: settlement.outcome });
         }
       }
       if (expected.size !== 0 || accepted !== response.accepted || rejected !== (response.rejected ?? 0)) {
@@ -374,7 +383,7 @@ export class LongPollClient {
       if (handshakeAccepted && response.ingress === undefined) {
         throw new Error('messages response accepted conn.hello without the activity ingress advertisement');
       }
-      return response;
+      return { ...response, outcomes };
     } catch (err) {
       if (signal?.aborted) return undefined;
       // The response DID exist and the server DID accept the request line —

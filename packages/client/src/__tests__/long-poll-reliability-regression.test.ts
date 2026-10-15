@@ -4,7 +4,7 @@ import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import type { CursorStore } from '../daemon/cursor-store';
-import { LongPollClient } from '../daemon/long-poll-transport';
+import { LongPollClient, type CorrelatedOutcome } from '../daemon/long-poll-transport';
 import { seedDeviceEnrollment } from './fixtures/device-enrollment';
 import { TestServer } from './fixtures/test-server';
 import { promises as fs } from 'node:fs';
@@ -223,7 +223,7 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
 
       let acceptedCount = 0;
       let rejectedCount = 0;
-      const outcomes: Array<{ id: string; outcome: 'accepted' | 'rejected'; reason?: string }> = [];
+      const outcomes: CorrelatedOutcome[] = [];
       for (const envelope of batch) {
         if (poisonIds.has(envelope.id)) {
           rejectedCount += 1;

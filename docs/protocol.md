@@ -97,7 +97,12 @@ unproven (see the evidence list below).
   requires a result schema, so rewriting only the version is not an upgrade.
   The v2 HTTP lines that carry envelopes are rejected too.
 - **v3 self-consistency.** `golden/v3.envelopes.ndjson` and
-  `golden/v3.http.ndjson` are append-only. The current decoder reads every
+  `golden/v3.http.ndjson` are append-only, with one narrow exception: before
+  the first v3 release is registered in `golden/v3.releases.json`, a v3 corpus
+  line that no registered entry covers may be corrected in place when a
+  pre-release v3 tightening makes it undecodable. Once any v3 release is
+  registered, the lines it covers are immutable and the rest stays
+  append-only. The current decoder reads every
   line back to the committed JSON, and the current HTTP decoders read every
   literal body to its independently authored value (messages responses must
   account for their `batchLength`). The v3 corpus carries every message type,

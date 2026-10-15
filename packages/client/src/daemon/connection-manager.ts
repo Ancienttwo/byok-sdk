@@ -1,7 +1,6 @@
 import type { HarnessInfo } from '@byok-sdk/protocol';
 import {
   type OutboundRefusalReason,
-  type MessageSendOutcome,
   type ActivityIngress,
   MAX_MESSAGES_PER_BATCH,
   createEnvelope,
@@ -16,7 +15,7 @@ import { AuthManager } from './auth-manager';
 import type { CursorStore } from './cursor-store';
 import type { DaemonHaltReason } from './daemon-lifecycle';
 import { createFleetJitter, type FleetJitter } from './deterministic-jitter';
-import { LongPollClient, type MessageBatchPostResult } from './long-poll-transport';
+import { LongPollClient, type CorrelatedOutcome, type MessageBatchPostResult } from './long-poll-transport';
 
 export { ReplayCursorTooOldError } from './replay-cursor';
 
@@ -107,16 +106,14 @@ export interface ConnectionManagerOptions {
   onCrashed?: (error: unknown) => void;
 }
 
-export interface OutboundSettlement {
-  readonly envelope: Envelope;
-  readonly outcome: MessageSendOutcome['outcome'];
-  readonly reason?: OutboundRefusalReason;
-}
+/** One outbound envelope's settlement; only a rejection has a reason, and it always has one. */
+export type OutboundSettlement =
+  | { readonly envelope: Envelope; readonly outcome: 'accepted' | 'duplicate' }
+  | { readonly envelope: Envelope; readonly outcome: 'rejected'; readonly reason: OutboundRefusalReason };
 
-/** `postBatch` has already proven that every rejected outcome carries its reason. */
-function settlementFor(envelope: Envelope, outcome: MessageSendOutcome): OutboundSettlement {
+function settlementFor(envelope: Envelope, outcome: CorrelatedOutcome): OutboundSettlement {
   return outcome.outcome === 'rejected'
-    ? { envelope, outcome: outcome.outcome, reason: outcome.reason as OutboundRefusalReason }
+    ? { envelope, outcome: 'rejected', reason: outcome.reason }
     : { envelope, outcome: outcome.outcome };
 }
 

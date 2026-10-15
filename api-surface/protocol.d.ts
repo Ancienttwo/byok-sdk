@@ -3112,7 +3112,7 @@ export declare const MessageSendOutcomeSchema: z.ZodObject<{
         duplicate: "duplicate";
         rejected: "rejected";
     }>;
-    reason: z.ZodOptional<z.ZodString>;
+    reason: z.ZodOptional<z.ZodPipe<z.ZodString, z.ZodTransform<"limit_exceeded" | "not_permitted" | "payload_invalid" | "state_conflict" | "unknown" | "unsupported", string>>>;
 }, z.core.$strip>;
 export type MessageSendOutcome = z.infer<typeof MessageSendOutcomeSchema>;
 export declare const EventsPollResponseSchema: z.ZodObject<{
@@ -4540,7 +4540,7 @@ export declare const MessagesSendResponseSchema: z.ZodObject<{
             duplicate: "duplicate";
             rejected: "rejected";
         }>;
-        reason: z.ZodOptional<z.ZodString>;
+        reason: z.ZodOptional<z.ZodPipe<z.ZodString, z.ZodTransform<"limit_exceeded" | "not_permitted" | "payload_invalid" | "state_conflict" | "unknown" | "unsupported", string>>>;
     }, z.core.$strip>>;
 }, z.core.$strip>;
 export type MessagesSendResponse = z.infer<typeof MessagesSendResponseSchema>;
