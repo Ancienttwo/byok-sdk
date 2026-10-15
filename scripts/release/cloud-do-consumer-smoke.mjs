@@ -151,7 +151,16 @@ export default {
     assert.deepEqual(result.valid, { ok: true, bytes: 35, canonical: { answer: result.hook } });
     assert.equal(result.invalid.ok, false);
     assert.equal(result.invalid.reason, 'schema-mismatch');
-    assert.deepEqual(result.invalid.issues.map(issue => [issue.pointer, issue.keyword]), [['/answer', 'type']]);
+    // The validator reports the failing path from the root applicator down to
+    // the leaf keyword.
+    assert.deepEqual(result.invalid.issues.map(issue => [issue.pointer, issue.keyword]), [['', 'properties'], ['/answer', 'type']]);
+    // The Worker bundle must decide exactly as the same installed package does on Node.
+    const protocolManifestPath = installedRequire.resolve('@byok-sdk/protocol/package.json');
+    const protocolEntry = JSON.parse(readFileSync(protocolManifestPath, 'utf8')).exports['.'].import;
+    const { validateResultOutcome } = await import(pathToFileURL(path.join(path.dirname(protocolManifestPath), protocolEntry)).href);
+    const schema = { type: 'object', required: ['answer'], additionalProperties: false, properties: { answer: { type: 'string' } } };
+    assert.deepEqual(result.valid, validateResultOutcome(schema, { answer: result.hook }));
+    assert.deepEqual(result.invalid, validateResultOutcome(schema, { answer: 1 }));
     console.log(`[cloud-do-consumer] ${process.platform}: installed Worker bundle, DO RPC, hook, identity, SQLite and shared outcome validation passed`);
   } finally {
     await deadline(mf.dispose(), 10_000, 'workerd disposal');
