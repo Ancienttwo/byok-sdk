@@ -9,6 +9,7 @@ import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
 import { startRealCloud } from './fixtures/real-cloud';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 
 const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const clean of cleanup.reverse()) await clean(); cleanup.length = 0; });
@@ -62,7 +63,7 @@ it('R5/R6: real paginated cancel retires never-returning prepare and permits sam
   const adapter = new StubRuntimeAdapter('acme-harness');
   const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },  productId: 'read-ahead', productName: 'Read ahead',
     localAgentRelease: { version: '0.0.0-test' }, serverUrl: cloud.url, storeDir: root,
-    workspaceRoot: path.join(root, 'work'), agentHome: { hostStorageRoot: path.join(root, 'home') },
+    workspaceRoot: path.join(root, 'work'), agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
     startupTimeoutMs: 10000,
   }, [adapter], { longPoll: { idleDelayMs: 5, retryDelayMs: 5 } });
   let release!: () => void;
@@ -77,14 +78,14 @@ it('R5/R6: real paginated cancel retires never-returning prepare and permits sam
     return prepare(input);
   });
   const payload = (agentId: string) => ({ instruction: 'work', harnessId: 'acme-harness', agentRef: { agentId, profileRevision: 'r1' } });
-  const a = await cloud.enqueueAgentOffer(device.deviceId, payload('a'));
+  const a = await cloud.submitFreshAgent(device.deviceId, payload('a'));
   await vi.waitFor(() => expect(blocked).toBe(true));
-  const b = await cloud.enqueueAgentOffer(device.deviceId, payload('b'));
+  const b = await cloud.submitFreshAgent(device.deviceId, payload('b'));
   await vi.waitFor(async () => expect((await cloud.readTaskAttempt(b.taskId))?.status).toBe('running'));
   await cloud.cancelTask(a.taskId, 'cancel blocked prepare');
   await vi.waitFor(async () => expect(await cloud.readTerminalBody(a.taskId)).toContain('cancelled before claim'), { timeout: 1500 });
   expect(adapter.startCalls).toHaveLength(1);
-  const replacement = await cloud.enqueueAgentOffer(device.deviceId, payload('a'));
+  const replacement = await cloud.submitFreshAgent(device.deviceId, payload('a'));
   await vi.waitFor(async () => expect((await cloud.readTaskAttempt(replacement.taskId))?.status).toBe('running'));
   release(); await gate; await new Promise(resolve => setImmediate(resolve));
   expect(adapter.startCalls).toHaveLength(2);

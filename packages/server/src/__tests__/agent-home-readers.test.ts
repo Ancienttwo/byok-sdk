@@ -50,6 +50,7 @@ describe('reference-server memory-reader dispatch (#317)', () => {
       taskId: 'reader-refused',
       instruction: 'read memory',
       agentRef: AGENT_REF,
+      sessionRef: 'reader-session',
       homeAccess: 'memory-reader',
     })).rejects.toMatchObject({ code: 'agent_capability_missing' });
     expect(await started.byok.tasks.attempt('reader-refused')).toBeUndefined();
@@ -65,6 +66,7 @@ describe('reference-server memory-reader dispatch (#317)', () => {
       deviceId: daemon.deviceId,
       instruction: 'read memory',
       agentRef: AGENT_REF,
+      sessionRef: 'reader-session',
       homeAccess: 'memory-reader',
     });
     const offered = await nextEnvelope(daemon);

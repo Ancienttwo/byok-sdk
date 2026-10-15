@@ -49,6 +49,7 @@ describe('strict-agent-only producer scheduling defence', () => {
       deviceId: strict.deviceId,
       instruction: 'Agent work',
       agentRef: { agentId: 'agent-1', profileRevision: 'r1' },
+      sessionRef: 'sess-resume-1',
     });
     expect((await started.byok.tasks.get(agent.taskId))?.deviceId).toBe(strict.deviceId);
     await expect(nextEnvelope(strict)).resolves.toMatchObject({ type: 'task.offer_for_agent' });

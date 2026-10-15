@@ -24,6 +24,7 @@ function agentPayload() {
   return {
     instruction: 'run an Agent memory task',
     agentRef: AGENT_REF,
+    sessionRef: 'session-resume-1',
   };
 }
 

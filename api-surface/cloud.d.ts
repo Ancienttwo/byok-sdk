@@ -1204,8 +1204,15 @@ export interface EnqueueToolsetOfferInput {
 export interface AgentDispatchInput {
     /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
     readonly taskId?: string;
-    /** Strict Agent payload carrying the exact opaque AgentRef. */
-    readonly payload: TaskOfferForAgentPayload;
+    /**
+     * Strict Agent resume payload carrying the exact opaque AgentRef and the
+     * exact `sessionRef` being resumed. The wire message keeps `sessionRef`
+     * optional; this host lane does not: a fresh Agent execution is admitted only
+     * through {@link ByokCloud.submitAgentExecution}.
+     */
+    readonly payload: TaskOfferForAgentPayload & {
+        readonly sessionRef: string;
+    };
 }
 /**
  * Strict dispatch of an already-counted preparation back to the device that
@@ -1332,7 +1339,11 @@ export interface ByokCloud {
     /** Host control plane: enqueue the additive fail-closed offer variant that requires local MCP toolsets. */
     enqueueToolsetOffer(tenant: TenantId, deviceId: string, input: EnqueueToolsetOfferInput): Promise<EnqueuedOffer>;
     /**
-     * Host control plane: enqueue a strict Agent offer to an explicit device.
+     * Host control plane: enqueue a strict Agent resume offer to an explicit
+     * device. Resume-only: the payload must carry an exact `sessionRef`, and one
+     * without it is refused with `coordination_input_invalid` before any attempt,
+     * receipt or mailbox write. A fresh Agent execution is admitted only through
+     * {@link ByokCloud.submitAgentExecution}.
      * Capability admission is read from the durable authenticated device row
      * before either the mailbox append or task-attempt open.
      */

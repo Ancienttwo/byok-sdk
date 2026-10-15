@@ -22,6 +22,7 @@ function agentPayload() {
   return {
     instruction: 'remember this Agent task',
     agentRef: AGENT_REF,
+    sessionRef: 'session-resume-1',
   };
 }
 
@@ -284,6 +285,102 @@ describe('hosted Agent-home contract', () => {
     ).toHaveLength(0);
     expect(await harness.cloud.readTaskAttempt(TENANT_A, 'agent-malformed')).toBeUndefined();
     expect(await harness.cloud.readTaskAttempt(TENANT_A, 'agent-oversized')).toBeUndefined();
+  });
+
+  it('refuses a fresh Agent offer without an exact sessionRef before any durable write (#484)', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await harness.stores.devices.recordCapabilities(TENANT_A, {
+      deviceId: device.deviceId,
+      capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
+    });
+    const { sessionRef: _sessionRef, ...fresh } = agentPayload();
+
+    // The required static type refuses this at compile time; a JS caller still meets the runtime guard.
+    await expect(
+      harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
+        taskId: 'agent-fresh-refused',
+        // @ts-expect-error sessionRef is required on the resume lane (#484)
+        payload: fresh,
+      }),
+    ).rejects.toMatchObject({
+      name: 'ByokCloudError',
+      code: 'coordination_input_invalid',
+      message: 'Agent resume offer requires an exact sessionRef; use submitAgentExecution for fresh execution',
+    });
+
+    expect(await harness.cloud.readTaskAttempt(TENANT_A, 'agent-fresh-refused')).toBeUndefined();
+    expect(
+      (await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0, limit: 10 }))
+        .messages,
+    ).toHaveLength(0);
+
+    // The refusal left nothing behind: the same id still admits a real resume.
+    await expect(
+      harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
+        taskId: 'agent-fresh-refused',
+        payload: agentPayload(),
+      }),
+    ).resolves.toMatchObject({ taskId: 'agent-fresh-refused', seq: 1 });
+  });
+
+  it('refuses an empty sessionRef before any durable write (#484)', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await harness.stores.devices.recordCapabilities(TENANT_A, {
+      deviceId: device.deviceId,
+      capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
+    });
+
+    await expect(
+      harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
+        taskId: 'agent-empty-session',
+        payload: { ...agentPayload(), sessionRef: '' },
+      }),
+    ).rejects.toMatchObject({
+      name: 'ByokCloudError',
+      code: 'coordination_input_invalid',
+      message: 'Agent resume offer requires an exact sessionRef; use submitAgentExecution for fresh execution',
+    });
+
+    expect(await harness.cloud.readTaskAttempt(TENANT_A, 'agent-empty-session')).toBeUndefined();
+    expect(
+      (await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0, limit: 10 }))
+        .messages,
+    ).toHaveLength(0);
+  });
+
+  it('refuses a missing or empty sessionRef before capability admission (#484)', async () => {
+    const harness = createHarness();
+    // Paired but has advertised no capabilities, so admission alone would refuse it.
+    const bare = await harness.pairDevice(TENANT_A);
+    const { sessionRef: _sessionRef, ...fresh } = agentPayload();
+    const refused = {
+      name: 'ByokCloudError',
+      code: 'coordination_input_invalid',
+      message: 'Agent resume offer requires an exact sessionRef; use submitAgentExecution for fresh execution',
+    };
+
+    for (const [deviceId, taskId, payload] of [
+      ['device-not-registered', 'agent-missing-unknown-device', fresh],
+      ['device-not-registered', 'agent-empty-unknown-device', { ...fresh, sessionRef: '' }],
+      [bare.deviceId, 'agent-missing-bare-device', fresh],
+      [bare.deviceId, 'agent-empty-bare-device', { ...fresh, sessionRef: '' }],
+    ] as const) {
+      await expect(
+        // @ts-expect-error a JS caller may omit sessionRef on the resume lane (#484)
+        harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, { taskId, payload }),
+      ).rejects.toMatchObject(refused);
+      expect(await harness.cloud.readTaskAttempt(TENANT_A, taskId)).toBeUndefined();
+    }
+    expect(
+      (await harness.core.mailbox.readAfter(TENANT_A, { deviceId: bare.deviceId, afterSeq: 0, limit: 10 })).messages,
+    ).toHaveLength(0);
+
+    // The same bare device with a real sessionRef reaches capability admission.
+    await expect(
+      harness.cloud.enqueueAgentOffer(TENANT_A, bare.deviceId, { taskId: 'agent-resume-bare-device', payload: agentPayload() }),
+    ).rejects.toMatchObject({ name: 'ByokCloudError', code: 'agent_capability_missing' });
   });
 
   it('keeps a reserved Agent attempt retryable when mailbox append fails', async () => {

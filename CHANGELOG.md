@@ -27,6 +27,18 @@
   change or protocol-version bump. See
   `docs/releases/470-executions-submit.md`.
 
+- **Breaking (server, cloud; #484)** — `dispatch({ agentRef })` without
+  `egressPolicy` and `enqueueAgentOffer` are exact-resume-only, like their egress
+  counterpart. A payload without `sessionRef` is refused before any task,
+  receipt or mailbox write: the server throws `Agent resume dispatch requires an
+  exact sessionRef; use executions.submit for fresh execution`; cloud throws
+  `ByokCloudError` `coordination_input_invalid`. `DispatchInput` is now the union
+  `LegacyDispatchInput | AgentResumeDispatchInput` (the latter requires
+  `sessionRef`), and `AgentDispatchInput.payload` requires `sessionRef`. The wire
+  message keeps `sessionRef` optional; no protocol schema or version change.
+  Migrate fresh Agent work to `executions.submit` / `submitAgentExecution`; see
+  `docs/releases/470-executions-submit.md`.
+
 - **Breaking (cloud-dataplane, 0.x; #387)** — new migration
   `deploy/sql/0025_drop_storage_usage_mailbox_bytes.sql` drops the retired
   `storage_usage.mailbox_bytes` column; the retained outbox rows (#411) are the

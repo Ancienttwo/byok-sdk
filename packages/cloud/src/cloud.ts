@@ -389,8 +389,13 @@ export interface EnqueueToolsetOfferInput {
 export interface AgentDispatchInput {
   /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
   readonly taskId?: string;
-  /** Strict Agent payload carrying the exact opaque AgentRef. */
-  readonly payload: TaskOfferForAgentPayload;
+  /**
+   * Strict Agent resume payload carrying the exact opaque AgentRef and the
+   * exact `sessionRef` being resumed. The wire message keeps `sessionRef`
+   * optional; this host lane does not: a fresh Agent execution is admitted only
+   * through {@link ByokCloud.submitAgentExecution}.
+   */
+  readonly payload: TaskOfferForAgentPayload & { readonly sessionRef: string };
 }
 
 /**
@@ -526,7 +531,11 @@ export interface ByokCloud {
   /** Host control plane: enqueue the additive fail-closed offer variant that requires local MCP toolsets. */
   enqueueToolsetOffer(tenant: TenantId, deviceId: string, input: EnqueueToolsetOfferInput): Promise<EnqueuedOffer>;
   /**
-   * Host control plane: enqueue a strict Agent offer to an explicit device.
+   * Host control plane: enqueue a strict Agent resume offer to an explicit
+   * device. Resume-only: the payload must carry an exact `sessionRef`, and one
+   * without it is refused with `coordination_input_invalid` before any attempt,
+   * receipt or mailbox write. A fresh Agent execution is admitted only through
+   * {@link ByokCloud.submitAgentExecution}.
    * Capability admission is read from the durable authenticated device row
    * before either the mailbox append or task-attempt open.
    */
@@ -1984,6 +1993,18 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     },
 
     async enqueueAgentOffer(tenant, deviceId, input) {
+      // Resume-only: the wire keeps `sessionRef` optional, but this lane never
+      // starts a fresh Agent execution; that has exactly one authority,
+      // `submitAgentExecution`. Checked first, before capability admission and
+      // any attempt, receipt or mailbox write, so a JS caller always gets the
+      // same code whatever the target device's state.
+      const sessionRef: unknown = input.payload.sessionRef;
+      if (typeof sessionRef !== 'string' || sessionRef.length === 0) {
+        throw new ByokCloudError(
+          'coordination_input_invalid',
+          'Agent resume offer requires an exact sessionRef; use submitAgentExecution for fresh execution',
+        );
+      }
       await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer_for_agent', input.payload));
       // Parse the strict control payload before reserving a mailbox sequence.
       // A malformed/oversized AgentRef therefore cannot leave a durable

@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { startRealServer, waitForTaskEvent, type RealServerHandle } from './fixtures/real-server';
@@ -153,6 +154,7 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
         workspaceRoot,
         storeDir,
         agentHome: { hostStorageRoot },
+        agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
       },
       [new StubRuntimeAdapter('pi')],
     );
@@ -166,10 +168,16 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
     expect(helloAnsweredAt).toBeDefined();
     expect(openedAt).toBeGreaterThanOrEqual(helloAnsweredAt!);
     // No retry loop: the server already holds the device's Agent capabilities.
-    await expect(real.byok.dispatch({
+    await expect(real.byok.executions.submit({
+      taskId: 'task-hello-gate',
       deviceId: record.deviceId,
-      instruction: 'admitted right after open',
-      agentRef: { agentId: 'agent-hello-gate', profileRevision: 'profile-1' },
+      payload: {
+        instruction: 'admitted right after open',
+        runtime: 'pi',
+        agentRef: { agentId: 'agent-hello-gate', profileRevision: 'profile-1' },
+        egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+        terminalProjection: { mode: 'none' },
+      },
     })).resolves.toBeDefined();
   }, 15_000);
 
@@ -276,6 +284,7 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
         workspaceRoot,
         storeDir,
         agentHome: { hostStorageRoot },
+        agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
       },
       [adapter],
       {
@@ -286,20 +295,27 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
     const record = await daemon.pair((await real.createPairingCode()).code);
     await daemon.start();
 
-    let handle: Awaited<ReturnType<typeof real.byok.dispatch>> | undefined;
+    // Fresh Agent execution has one entry (#470/#484). A refused submit writes
+    // nothing, so the same host-owned taskId is retried until admission.
+    const taskId = 'task-agent-longpoll';
     await vi.waitFor(async () => {
-      handle = await real.byok.dispatch({
+      expect(await real.byok.executions.submit({
+        taskId,
         deviceId: record.deviceId,
-        instruction: 'run in the durable Agent home over long-poll',
-        agentRef: { agentId: 'agent-longpoll', profileRevision: 'profile-1' },
-      });
-      expect(handle).toBeDefined();
+        payload: {
+          instruction: 'run in the durable Agent home over long-poll',
+          runtime: 'pi',
+          agentRef: { agentId: 'agent-longpoll', profileRevision: 'profile-1' },
+          egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+          terminalProjection: { mode: 'none' },
+        },
+      })).toMatchObject({ taskId });
     }, { timeout: 5000, interval: 20 });
 
-    await waitForTaskEvent(handle!, (event) => event.kind === 'state' && event.state === 'Running');
+    await vi.waitFor(async () => expect((await real.byok.tasks.get(taskId))?.state).toBe('Running'), { timeout: 10_000, interval: 20 });
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     adapter.sessions[0]!.emit({ type: 'turn_end' });
-    await expect(handle!.result()).resolves.toMatchObject({ state: 'Complete' });
+    await vi.waitFor(async () => expect((await real.byok.tasks.get(taskId))?.result).toMatchObject({ state: 'Complete' }), { timeout: 10_000, interval: 20 });
     expect(adapter.startCalls[0]?.ctx.workspaceDir).toBe(
       path.join(await fs.realpath(hostStorageRoot), 'agents', 'agent-longpoll'),
     );

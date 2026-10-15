@@ -287,6 +287,8 @@ describe('reference-server Agent egress contract', () => {
       'terminal-projection-selection',
     ]);
 
+    // The required static type refuses this at compile time; a JS caller still meets the runtime guard.
+    // @ts-expect-error sessionRef is required on the Agent resume dispatch (#484)
     await expect(instance.dispatch({
       deviceId: daemon.deviceId,
       instruction: 'must not reinterpret resume as fresh',

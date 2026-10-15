@@ -8,6 +8,7 @@ import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { startRealCloud, type RealCloudHandle } from './fixtures/real-cloud';
 import { OPEN_LIFECYCLE, waitForDaemonOpen } from './fixtures/lifecycle-barrier';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -122,6 +123,7 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
         workspaceRoot,
         storeDir,
         agentHome: { hostStorageRoot },
+        agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
       },
       [adapter],
       {
@@ -131,9 +133,9 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
 
     const record = await daemon.pair((await cloud.createPairingCode()).code);
     await daemon.start();
-    let offer: Awaited<ReturnType<RealCloudHandle['enqueueAgentOffer']>> | undefined;
+    let offer: Awaited<ReturnType<RealCloudHandle['submitFreshAgent']>> | undefined;
     await vi.waitFor(async () => {
-      offer = await cloud.enqueueAgentOffer(record.deviceId, {
+      offer = await cloud.submitFreshAgent(record.deviceId, {
         instruction: 'run the durable Agent over hosted long-poll',
         runtime: 'pi',
         agentRef: { agentId: 'agent-hosted-longpoll', profileRevision: 'profile-1' },
