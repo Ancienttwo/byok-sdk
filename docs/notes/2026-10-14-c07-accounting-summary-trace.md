@@ -12,6 +12,8 @@
 
 **P3 — 决定。** 保留这一个 D/record/readiness authority，不重新计数、添加 serializer、兼容 reader、feature flag 或生产 Conversation store。采用计划推荐的 S1 → K7 → S2 → S3 顺序：当前 `recurring.submit` 仍存在，TaskRunner 仍调用 `resultDocument.extract`，prepared Summary 仍是零工具，所以不提前写将在 `submit_result` / v3 切换时整段重做的 S2 fixture。10× 历史规模首先压力落在 Host ContextPack/Summary 调度与输入大小，不以这张表冒充性能或生产启用证明。
 
+> 2026-10-15 更新：上面的顺序后来有变。#474 已用 `executions.submit` 取代 `recurring.submit`；S2 的 synthetic Host fixture 在 K7 之前先合入（#466），并补了已接受回复后被 Host cancel 的一轮。K7 落地后该 fixture 仍要迁到 `submit_result`。
+
 ## 拒绝追溯表
 
 AC 数字对应 #194 原 issue 的六条验收。每行同时给出源条件与**实际 assertion**；用例标题按源码记录，parameterized 标题保留占位符。测试触发 SDK 实现后断言 code/detail/reason 才算直接覆盖。仅引用一个分支不宣称穷举全部分支；state assertion 不替代 readiness assertion，外层 `unsupported_input` / `preparation_not_ready` 不替代内层 detail。

@@ -19,7 +19,7 @@ import { OPEN_LIFECYCLE } from './fixtures/lifecycle-barrier';
 // zero-tool + resultDocument.extract shape used here.
 
 type TurnOutcome =
-  | { kind: 'reply'; text: string; executionTerminal: 'task.complete' | 'task.fail' }
+  | { kind: 'reply'; text: string; executionTerminal: 'task.complete' | 'task.fail' | 'task.cancelled' }
   | { kind: 'settled-without-reply'; executionTerminal: 'task.fail'; reason: string; retryable: boolean | undefined };
 interface Turn { seq: number; taskId: string; input: string; outcome: TurnOutcome }
 interface Summary { version: number; coveredThroughTurnSeq: number; text: string }
@@ -142,13 +142,13 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
       expect(sha256(bytes)).toBe(host.frozen.get(taskId)!.sha256);
       return offer;
     };
-    const settledTerminal = async (taskId: string, type: 'task.complete' | 'task.fail') => {
+    const settledTerminal = async (taskId: string, type: 'task.complete' | 'task.fail' | 'task.cancelled') => {
       await vi.waitFor(async () => expect(await sdk.tasks.deviceTerminal(taskId)).toMatchObject({ envelope: { type } }), { timeout: 10000 });
       await vi.waitFor(() => expect(daemon.status().activeTaskCount).toBe(0));
       return (await sdk.tasks.deviceTerminal(taskId))!;
     };
 
-    const runUserTurn = async (input: string, mode: 'reply' | 'no-reply' | 'reply-then-fail') => {
+    const runUserTurn = async (input: string, mode: 'reply' | 'no-reply' | 'reply-then-fail' | 'reply-then-cancel') => {
       const seq = host.transcript.length + 1;
       const taskId = `user-turn-${seq}`;
       const pack = host.contextPack(input);
@@ -186,7 +186,8 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
           reason: terminal.envelope.payload.reason, retryable: terminal.envelope.payload.retryable };
       } else {
         // The runtime authors its reply through the same daemon control route
-        // the shipped message helper uses, then the execution fails.
+        // the shipped message helper uses, then the execution fails or the
+        // Host cancels it.
         const token = adapter.startCalls[index]?.ctx.mcpServers?.byokagentmessage?.env?.BYOK_AGENT_MESSAGE_CONTEXT;
         if (!token) throw new Error('synthetic Host: missing Agent message context');
         const connected = await connectControlClient({ storeDir, productId: options.productId });
@@ -197,9 +198,18 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
         await vi.waitFor(async () => expect(await sdk.tasks.agentMessage(taskId, deviceId, agentRef)).toMatchObject({
           payload: { body: reply }, disposition: { outcome: 'accepted' },
         }), { timeout: 10000 });
-        session.fail(new Error('synthetic Host: runtime failed after its reply was accepted'));
-        await settledTerminal(taskId, 'task.fail');
-        outcome = { kind: 'reply', text: reply, executionTerminal: 'task.fail' };
+        if (mode === 'reply-then-fail') {
+          session.fail(new Error('synthetic Host: runtime failed after its reply was accepted'));
+          await settledTerminal(taskId, 'task.fail');
+          outcome = { kind: 'reply', text: reply, executionTerminal: 'task.fail' };
+        } else {
+          // Host cancellation reaches the native session; the runtime ends the turn as an interrupt would.
+          await sdk.tasks.cancel(taskId, 'synthetic Host: user cancelled after the reply was accepted');
+          await vi.waitFor(() => expect(session.interruptCalled).toBe(true), { timeout: 10000 });
+          session.emit({ type: 'turn_end' });
+          await settledTerminal(taskId, 'task.cancelled');
+          outcome = { kind: 'reply', text: reply, executionTerminal: 'task.cancelled' };
+        }
       }
       if (outcome.kind === 'reply') {
         const message = await sdk.tasks.agentMessage(taskId, deviceId, agentRef);
@@ -305,12 +315,23 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
     expect(pack6.summary).toEqual({ version: 2, coveredThroughTurnSeq: 5, text: 'S3: through turn 5.' });
     expect(pack6.recentHistory).toEqual([]);
 
+    // An accepted reply survives a later Host cancel: it is settled as a reply and
+    // is carried in the next ContextPack's recent history, never as a pending command.
+    await runUserTurn('U7: draft the follow-up email', 'reply-then-cancel');
+    expect(host.transcript.at(-1)?.outcome).toEqual({ kind: 'reply', text: 'A7', executionTerminal: 'task.cancelled' });
+    const pack8 = await runUserTurn('U8: send what you drafted', 'reply');
+    expect(pack8.summary.coveredThroughTurnSeq).toBe(5);
+    expect(pack8.recentHistory.map(turn => [turn.seq, turn.outcome])).toEqual([
+      [6, { kind: 'reply', text: 'A6', executionTerminal: 'task.complete' }],
+      [7, { kind: 'reply', text: 'A7', executionTerminal: 'task.cancelled' }],
+    ]);
+
     // Same-home single writer: every execution ran in one workspace, each a fresh session.
     expect(new Set(adapter.startCalls.map(call => call.ctx.workspaceDir)).size).toBe(1);
     expect(new Set(adapter.sessions.map(session => session.sessionRef)).size).toBe(adapter.sessions.length);
     expect(adapter.startCalls).toHaveLength(host.transcript.length + summaryTaskIds.length);
     expect(extracts).toEqual(summaryTaskIds);
-    expect(accepted.map(item => item.taskId)).toEqual(['user-turn-1', 'user-turn-3', 'user-turn-4', 'user-turn-5', 'user-turn-6']);
+    expect(accepted.map(item => item.taskId)).toEqual(['user-turn-1', 'user-turn-3', 'user-turn-4', 'user-turn-5', 'user-turn-6', 'user-turn-7', 'user-turn-8']);
 
     // (d) Restart on the same SQLite file: offers, terminals and frozen bytes read back identically.
     const taskIds = [...host.frozen.keys()];
@@ -319,6 +340,7 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
       before.set(taskId, { offer: await sdk.tasks.offer(taskId), terminal: await sdk.tasks.deviceTerminal(taskId) });
     }
     const replyMessage = await sdk.tasks.agentMessage('user-turn-3', deviceId, agentRef);
+    const cancelledReply = await sdk.tasks.agentMessage('user-turn-7', deviceId, agentRef);
     await daemon.stop(); daemonStopped = true;
     await stopServer(http.server); httpStopped = true;
     await sdk.close();
@@ -329,6 +351,8 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
     }
     for (const taskId of summaryTaskIds) expect(await sdk.tasks.agentMessage(taskId, deviceId, agentRef)).toBeUndefined();
     expect(await sdk.tasks.agentMessage('user-turn-3', deviceId, agentRef)).toEqual(replyMessage);
+    expect(await sdk.tasks.agentMessage('user-turn-7', deviceId, agentRef)).toEqual(cancelledReply);
+    expect(cancelledReply).toMatchObject({ payload: { body: 'A7' }, disposition: { outcome: 'accepted' } });
     expect(await sdk.tasks.agentMessage('user-turn-2', deviceId, agentRef)).toBeUndefined();
   } finally {
     if (!daemonStopped) await daemon.stop();
