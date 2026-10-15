@@ -39,7 +39,7 @@ if (SKIP_DATAPLANE) {
         const clock = createMutableClock();
         const crypto = createWebCrypto();
         const objectStorage = await createObjectStorageScope();
-        const stores = createPostgresCloudStores({
+        const stores = await createPostgresCloudStores({
           pool: scope.pool,
           clock,
           crypto,

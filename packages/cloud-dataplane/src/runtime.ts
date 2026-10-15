@@ -45,6 +45,8 @@ export {
   PostgresAgentMemoryProjectionStore,
   createPostgresAgentMemoryProjectionStore,
   createPostgresCloudStores,
+  POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED,
+  PostgresMailboxProtocolUnsupportedError,
 } from './stores/index';
 export type {
   PostgresCloudStoreOptions,

@@ -28,9 +28,9 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres home-busy terminal — ${SKIP_REASON}`
         const { config: objectStorage } = await createObjectStorageScope();
         const declared = fullCapabilityDeclaration();
         const capabilities = { ...declared, capabilities: declared.capabilities.filter(cap => cap !== 'blobs.contentproxy') };
-        function open(pool: Pool) {
+        async function open(pool: Pool) {
           const core = createPostgresCoreStores({ pool, clock, objectStorage });
-          const stores = createPostgresCloudStores({ pool, clock, crypto, objectStorage });
+          const stores = await createPostgresCloudStores({ pool, clock, crypto, objectStorage });
           const mailboxWake = createInProcessMailboxWake();
           const cloud = createByokCloud({
             core, cloud: stores, mailboxWake, clock, crypto,
@@ -41,7 +41,7 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres home-busy terminal — ${SKIP_REASON}`
             { core, cloud: stores, mailboxWake });
           return { cloud, stores, bound };
         }
-        const first = open(scope.pool);
+        const first = await open(scope.pool);
         const taskId = 'declined-task';
         await first.stores.tasks.open(tenant, { taskId, deviceId });
         const payload = { reason: 'display only', retryable: true, ...(code === undefined ? {} : { code }) };
@@ -50,7 +50,7 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres home-busy terminal — ${SKIP_REASON}`
         const beforeRestart = await first.cloud.readDeviceTerminal(tenant, taskId);
         expect(beforeRestart).toMatchObject({ envelope: terminal });
         restarted = scope.openRestartPool();
-        const afterRestart = open(restarted);
+        const afterRestart = await open(restarted);
         expect(await afterRestart.cloud.readDeviceTerminal(tenant, taskId)).toEqual(beforeRestart);
         const result = await afterRestart.cloud.readTaskResult(tenant, taskId);
         expect(result).toMatchObject({ state: 'failed', ...payload });

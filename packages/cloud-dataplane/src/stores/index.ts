@@ -36,6 +36,7 @@ import { PostgresTaskCancellationStore } from './task-cancellations';
 import { PostgresActivityStore } from './activity';
 import { PostgresApprovalTimelineStore } from './approval-timeline';
 import { PostgresAgentEgressStore } from './agent-egress';
+import { assertPendingMailboxProtocol } from './mailbox-protocol';
 
 export { PostgresDeviceDirectory } from './devices';
 export { PostgresInboundDedupStore } from './dedup';
@@ -48,6 +49,10 @@ export { PostgresTaskCancellationStore } from './task-cancellations';
 export { PostgresActivityStore } from './activity';
 export { PostgresApprovalTimelineStore } from './approval-timeline';
 export { PostgresAgentEgressStore } from './agent-egress';
+export {
+  POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED,
+  PostgresMailboxProtocolUnsupportedError,
+} from './mailbox-protocol';
 export {
   PostgresAgentMemoryProjectionStore,
   createPostgresAgentMemoryProjectionStore,
@@ -98,10 +103,27 @@ export interface PostgresCloudStoreOptions {
   readonly objectStorage: PostgresObjectStorageOptions;
 }
 
-export function createPostgresCloudStores(
+/**
+ * Compose the cloud-local ports over one pool.
+ *
+ * Async because it first fences the wire major (PRD §8.3): if any pending
+ * mailbox row is not a `PROTOCOL_VERSION` envelope it rejects with
+ * {@link PostgresMailboxProtocolUnsupportedError} and returns no stores. The
+ * check is read-only — no row is rewritten or deleted — and there is no
+ * synchronous variant that skips it.
+ *
+ * The fence lives here, on the cloud composition, and not on
+ * `createPostgresCoreStores`: the core `MailboxStore` port carries opaque
+ * bodies (its conformance suite appends non-envelope strings), and only the
+ * cloud layer gives those bodies wire-envelope meaning. A hosted cloud is
+ * always composed with this factory, so it cannot start over an undrained v2
+ * mailbox.
+ */
+export async function createPostgresCloudStores(
   options: PostgresCloudStoreOptions,
-): PostgresCloudStores {
+): Promise<PostgresCloudStores> {
   const { pool, clock, crypto } = options;
+  await assertPendingMailboxProtocol(pool);
   const devices = new PostgresDeviceDirectory(pool, clock);
   const pairing = new PostgresPairingCodeStore(pool, clock);
   return {

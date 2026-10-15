@@ -53,6 +53,9 @@ const ONLINE_EXPORTS = [
   'PostgresAgentMemoryProjectionStore',
   'createPostgresAgentMemoryProjectionStore',
   'createPostgresCloudStores',
+  // the composition's pending-mailbox wire-major fence
+  'POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED',
+  'PostgresMailboxProtocolUnsupportedError',
   // R2 blobs
   'DEFAULT_MAX_ATTEMPTS',
   'DEFAULT_PRESIGN_TTL_SECONDS',
