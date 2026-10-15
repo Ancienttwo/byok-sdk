@@ -8,8 +8,8 @@ import { TENANT_A, createHarness, type CloudHarness } from './support/harness';
 
 /**
  * #386: hosted admission reads `WIRE_ADDITIONS`, the table the protocol compat
- * suite proves against published decoders. For every server-to-daemon line of
- * the protocol corpus, a device missing any one flag the table requires is
+ * suite checks as live v3 configuration gates. For every server-to-daemon line of
+ * the active v3 protocol corpus, a device missing any one flag the table requires is
  * refused before task or mailbox state, and a device with every flag is not
  * refused for a capability.
  *
@@ -45,7 +45,7 @@ const ENQUEUE: Partial<Record<MessageType, Enqueue>> = {
   'agent.memory.intent.available': (h, d, payload) => h.cloud.enqueueAgentMemoryIntentNotice(TENANT_A, d, payload),
 };
 
-const corpusPath = fileURLToPath(new URL('../../../protocol/src/__tests__/golden/v2.envelopes.ndjson', import.meta.url));
+const corpusPath = fileURLToPath(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url));
 const gatedLines = readFileSync(corpusPath, 'utf8')
   .split('\n')
   .filter((line) => line.length > 0)
