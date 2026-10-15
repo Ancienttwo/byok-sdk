@@ -2361,8 +2361,9 @@ every pre-claim `AgentHomeBusyError` decline carry it; other declines omit it.
 Cloud `readTaskResult` copies the code verbatim. Hosts classify busy through
 this code on the cloud result or the canonical `tasks.deviceTerminal` envelope,
 never by parsing `reason`. The embedded `TaskResult` is a narrower display
-projection; it is not the busy-classification API. This is an additive optional
-protocol v2 field; `PROTOCOL_VERSION` stays 2.
+projection; it is not the busy-classification API. It landed as an additive
+optional field on wire v2 and is carried unchanged on wire v3 (K7 moved
+`PROTOCOL_VERSION` to 3).
 Host cancellation alone returns no device terminal.
 A terminal stored under a different task key or with a non-terminal type is an
 error. This observation does not prove native Session.close or home release.

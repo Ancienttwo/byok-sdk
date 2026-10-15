@@ -240,7 +240,7 @@ flowchart TB
 
 | 文件 | 主要 exports / 功能 |
 | --- | --- |
-| `version.ts` | `PROTOCOL_VERSION = 2`、`CAPABILITY_FLAGS` |
+| `version.ts` | `PROTOCOL_VERSION = 3`、`CAPABILITY_FLAGS` |
 | `messages.ts` | runtime info、18 个 payload schemas、direction type lists、`MESSAGE_PAYLOAD_SCHEMAS` 单一来源 |
 | `envelope.ts` | discriminated union；所有 `task.*` 必须有 `task_id`，server→daemon 必须有 envelope `seq` |
 | `codec.ts` | `parseMessage`、`decodeEnvelope`、`encodeEnvelope`、`createEnvelope` |
@@ -307,8 +307,8 @@ stateDiagram-v2
 
 ### 2.4 Freeze 与兼容边界
 
-- wire `v2` 已冻结。ADR-037 删除 offer 的 `PermissionPolicy`、runtime capability `permissionModes` 与 input-preparation `permissionMode`，因此 `PROTOCOL_VERSION` 由 1 升到 2，没有 v1 reader。
-- 规则只写在 [protocol.md "Freeze rule"](../protocol.md#freeze-rule)：每个 v2 变更走 version bump、gated addition、strip-safe addition 三条路之一。后两条在 `packages/protocol/src/wire-additions.ts` 的 `WIRE_ADDITIONS` 里声明，cloud admission 读同一张表；`compat.test.ts` 用 npm 上已发布的 floor 与 previous decoder 证明这些声明。
+- 当前 wire 是 `v3`：K7（#468）把 `PROTOCOL_VERSION` 由 2 升到 3，v3 端点拒绝 v2 对端，设备与 Host 须先排空再一起升级。v2 由 ADR-037 从 1 升到 2（删除 offer 的 `PermissionPolicy`、runtime capability `permissionModes` 与 input-preparation `permissionMode`），没有 v1 reader；v2 corpus 与 registry 只读，只作负向 oracle。
+- 规则只写在 [protocol.md "Freeze rule"](../protocol.md#freeze-rule)：每个 v3 变更走 version bump、gated addition、strip-safe addition 三条路之一。后两条在 `packages/protocol/src/wire-additions.ts` 的 `WIRE_ADDITIONS` 里声明，cloud admission 读同一张表；`compat.test.ts` 用 npm 上已发布的 floor 与 previous decoder 证明这些声明。
 - observability unknown 可忽略；control/security unknown 必须 fail-closed。
 - server 只接受当前 major（v2）。v1 envelope 被拒绝；没有 N-1 reader，所以 server 与 client 必须一起升级。
 
@@ -1063,7 +1063,7 @@ GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口，GAP-007 在 S4
 
 ## 12. 平台架构（S0–S7 与 release/registry closeout 已落地）
 
-本节沿用 `ARCHITECTURE-PROPOSAL-byok-platform.md`（#390 后不再跟踪）的 final 裁定并记录执行状态。`@byok-sdk/core`（S2）已实现并被 cloud/client 消费；`@byok-sdk/cloud` 已具无状态 device surface、board/presence/activity、S6 proof verifier 与 proof-only truth routes；`@byok-sdk/cloud-dataplane` 已具 Postgres+R2 数据面、quota/GC 与 atomic truth authority；S6-c 已在 client 侧落 proof signer、manifest selector、selected fetch/rehash/filter 与 proof-bound write。S7-a/S7-b 已交付 fleet health、doctor/quarantine/support bundle 与 operations runbook；S7-c 已交付 public identity、umbrella、跨平台 packageability 与 `v0.1.0` registry release，随后 adapter-only security closeout 已发布同一七包 dispatch graph 的 `v0.1.1` tag/Release。`@byok-sdk/keys` 当时独立为 `0.1.0`，wire 当时是冻结的 v1。当前 wire 是 v2（ADR-037，`PROTOCOL_VERSION = 2`）；`byok-sdk` umbrella 已于 0.21.0 按 ADR-035 退役。
+本节沿用 `ARCHITECTURE-PROPOSAL-byok-platform.md`（#390 后不再跟踪）的 final 裁定并记录执行状态。`@byok-sdk/core`（S2）已实现并被 cloud/client 消费；`@byok-sdk/cloud` 已具无状态 device surface、board/presence/activity、S6 proof verifier 与 proof-only truth routes；`@byok-sdk/cloud-dataplane` 已具 Postgres+R2 数据面、quota/GC 与 atomic truth authority；S6-c 已在 client 侧落 proof signer、manifest selector、selected fetch/rehash/filter 与 proof-bound write。S7-a/S7-b 已交付 fleet health、doctor/quarantine/support bundle 与 operations runbook；S7-c 已交付 public identity、umbrella、跨平台 packageability 与 `v0.1.0` registry release，随后 adapter-only security closeout 已发布同一七包 dispatch graph 的 `v0.1.1` tag/Release。`@byok-sdk/keys` 当时独立为 `0.1.0`，wire 当时是冻结的 v1。wire v2 由 ADR-037 落地，当前 wire 是 v3（K7，`PROTOCOL_VERSION = 3`）；`byok-sdk` umbrella 已于 0.21.0 按 ADR-035 退役。
 
 ### 12.1 目标 package graph
 
@@ -1074,7 +1074,7 @@ flowchart TB
   classDef isolated fill:#9a3412,stroke:#fed7aa,stroke-width:2px,color:#fff
   classDef deploy fill:#0f766e,stroke:#99f6e4,stroke-width:2px,color:#fff
 
-  Protocol(["@byok-sdk/protocol<br/>existing, frozen wire v2"]):::existing
+  Protocol(["@byok-sdk/protocol<br/>existing, wire v3"]):::existing
   Core(["@byok-sdk/core<br/>implemented, consumed by cloud<br/>zod-only, protocol-free, Node-free"]):::existing
   Cloud(["@byok-sdk/cloud<br/>stateless device + board + truth surface<br/>InMemory composition"]):::existing
   CloudPg(["@byok-sdk/cloud-dataplane<br/>Postgres + R2 production composition"]):::existing
@@ -2161,7 +2161,7 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 
 帐本状态注记（2026-10-13 核对，基线 `b597b93e`）：
 
-- wire v2 随 ADR-037 落地（`PROTOCOL_VERSION = 2`，`packages/protocol/src/version.ts`）；ADR-034 设想的那次 cutover 没有发生。
+- wire v2 随 ADR-037 落地（`PROTOCOL_VERSION = 2`，`packages/protocol/src/version.ts`）；ADR-034 设想的那次 cutover 没有发生。2026-10-16 注：K7（#468）随后把 wire 升到 v3（`PROTOCOL_VERSION = 3`）。
 - ADR-034 列出的删除项尚未执行：legacy `task.offer` / `task.offer_with_toolsets` 仍在 `packages/protocol/src/envelope.ts`，`strictAgentOnly` 仍在 `packages/client/src/daemon/create-daemon.ts`。
 - ADR-028/029/030/033 看不到对应实现：`FeatureRegistry`、`SessionResultCommitter`、`local-first-v1`、`leaseEpoch` 在 `packages/` 源码中没有命中；ADR-028 的 `session.mode` 也没有出现在 protocol 中。
 - `Accepted` 不等于已实现。是否继续执行这些删除与实现，由 owner 决定。
