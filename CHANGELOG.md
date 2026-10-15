@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Breaking (server, cloud; #470)** — fresh Agent work uses
+  `executions.submit(AgentExecutionInput)` / `submitAgentExecution(tenant, input)`.
+  `recurring.submit`, `submitRecurringExecution`, `RecurringExecutionInputSchema`,
+  `dispatchFreshAgentEgress` and public `enqueueFreshAgentEgressOffer` are removed,
+  with `RecurringExecutionInput`, `FreshAgentEgressDispatchInput` and
+  `AgentEgressFreshSessionDispatchInput`. Host-owned taskId, exact deviceId,
+  runtime, AgentRef, egressPolicy and terminalProjection are required.
+  messageEgress is optional; context and a registered consumer are required only
+  when selected, and context without messageEgress is rejected. Submission returns
+  EnqueuedOffer and provisions the server relay. Resubmitting a delivered taskId
+  throws `agent_task_already_exists`; recover through exact `tasks.offer(taskId)`
+  readback. A registered offline device is enqueued normally. No aliases, wire
+  change or protocol-version bump. See
+  `docs/releases/470-executions-submit.md`.
+
 - **Breaking (cloud-dataplane, 0.x; #387)** — new migration
   `deploy/sql/0025_drop_storage_usage_mailbox_bytes.sql` drops the retired
   `storage_usage.mailbox_bytes` column; the retained outbox rows (#411) are the
