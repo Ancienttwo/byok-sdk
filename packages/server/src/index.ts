@@ -4,8 +4,10 @@ export { WakeHookMissingError, WakeConflictError, WakeInputError, WakeClosedErro
 export type { DueWake, WakeRecord, WakeScheduleInput, WakeScheduleResult, WakeConsumer, WakeInputErrorCode } from './wakes/types';
 import { MaintenanceScheduler, assertMaintenanceInterval, DEFAULT_MAINTENANCE_INTERVAL_MS } from './maintenance-scheduler';
 import { resolveRetentionPolicy, DEFAULT_MAINTENANCE_LIMIT, ByokCloudError, type MaintenanceReport } from '@byok-sdk/cloud';
+export type { AgentExecutionInput } from '@byok-sdk/cloud';
 import { Hono } from 'hono';
 import {
+  AgentExecutionInputSchema,
   agentHomeProjectionRequestKey,
   createByokCloud,
   createHmacTokenSigner,
@@ -15,6 +17,7 @@ import {
   TASK_ATTEMPT_STATUSES,
   pendingApproval,
   type ByokCloud,
+  type AgentExecutionInput,
   type EnqueuedOffer,
   type InboundRefusalReason,
   type PairingCodeInfo,
@@ -55,7 +58,6 @@ import type {
   ByokServerStorage,
   CreateByokServerOptions,
   DispatchInput,
-  FreshAgentEgressDispatchInput,
   HubStats,
   MachineInfo,
   TaskHandle,
@@ -72,7 +74,6 @@ export type {
   ByokServerStorage,
   CreateByokServerOptions,
   DispatchInput,
-  FreshAgentEgressDispatchInput,
   HubStats,
   MachineInfo,
   ServerTaskEvent,
@@ -179,13 +180,12 @@ export interface ByokServer {
     /** Mint a single-use pairing code for this server's product and tenant (docs/protocol.md §6.1). */
     createPairingCode(input: CreatePairingCodeInput): Promise<PairingCodeInfo>;
   };
-  /** Durable recurring submission; no TaskHandle is needed to recover after restart. */
-  recurring: {
-    submit(input: import('@byok-sdk/cloud').RecurringExecutionInput): Promise<EnqueuedOffer>;
+  /** Submit one fresh Agent execution: persist the input first; a delivered taskId conflicts (`agent_task_already_exists`), recover via `tasks.offer`. */
+  readonly executions: {
+    /** Persist input before submitting; use tasks.offer for exact recovery after a conflict. */
+    submit(input: AgentExecutionInput): Promise<EnqueuedOffer>;
   };
   dispatch(input: DispatchInput): Promise<TaskHandle>;
-  /** Dispatch a fresh Agent execution whose runtime will mint its session after start. */
-  dispatchFreshAgentEgress(input: FreshAgentEgressDispatchInput): Promise<TaskHandle>;
   /** Enqueue one capability-gated, exact-identity content-read request. */
   requestAgentContentRead(input: AgentContentReadRequest): Promise<void>;
   /** Enqueue one task-free, exact-device Agent-home projection. */
@@ -476,20 +476,19 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
 
   // An in-flight exclusion only; persisted task and receipt stores own identity.
   const dispatching = new Set<string>();
-  async function dispatchWithIdentity(input: DispatchInput | FreshAgentEgressDispatchInput, fresh: boolean): Promise<TaskHandle> {
+  async function dispatchWithIdentity(input: DispatchInput): Promise<TaskHandle> {
     const submission = { ...input };
     const taskId = submission.taskId;
-    if (taskId === undefined) return dispatchInternal(submission, fresh);
+    if (taskId === undefined) return dispatchInternal(submission);
     if (typeof taskId !== 'string' || taskId.length === 0) throw new Error('taskId must be a non-empty string');
     if (dispatching.has(taskId)) throw new Error('dispatch for this taskId is already in progress; retain the original binding');
     dispatching.add(taskId);
-    try { return await dispatchInternal(submission, fresh); }
+    try { return await dispatchInternal(submission); }
     finally { dispatching.delete(taskId); }
   }
 
   async function dispatchInternal(
-    input: DispatchInput | FreshAgentEgressDispatchInput,
-    freshAgentEgress: boolean,
+    input: DispatchInput,
   ): Promise<TaskHandle> {
     const sessionRef = 'sessionRef' in input ? input.sessionRef : undefined;
     const agentRef = input.agentRef === undefined ? undefined : AgentRefSchema.parse(input.agentRef);
@@ -575,25 +574,10 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     let enqueued: EnqueuedOffer;
     try {
       enqueued = await (async () => {
-        if (agentRef !== undefined && egressPolicy !== undefined && freshAgentEgress) {
-          return cloud.enqueueFreshAgentEgressOffer(tenant, deviceId, {
-            taskId,
-            payload: {
-              ...common,
-              agentRef,
-              egressPolicy,
-              ...(terminalProjection === undefined ? {} : { terminalProjection }),
-              ...(homeAccess === undefined ? {} : { homeAccess }),
-              ...(messageEgress === undefined ? {} : { messageEgress }),
-              ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
-            },
-            ...(agentMessageContext === undefined ? {} : { agentMessageContext }),
-          });
-        }
         if (agentRef !== undefined && egressPolicy !== undefined) {
           if (sessionRef === undefined) {
             throw new Error(
-              'Agent egress resume dispatch requires an exact sessionRef; use dispatchFreshAgentEgress for fresh execution',
+              'Agent egress resume dispatch requires an exact sessionRef; use executions.submit for fresh execution',
             );
           }
           return cloud.enqueueAgentEgressOffer(tenant, deviceId, {
@@ -697,20 +681,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     },
 
     dispatch(input: DispatchInput): Promise<TaskHandle> {
-      return dispatchWithIdentity(input, false);
-    },
-
-    dispatchFreshAgentEgress(input: FreshAgentEgressDispatchInput): Promise<TaskHandle> {
-      if (Object.prototype.hasOwnProperty.call(input, 'sessionRef')) {
-        throw new Error('fresh Agent egress dispatch must not carry sessionRef');
-      }
-      if (typeof input.deviceId !== 'string' || input.deviceId.length === 0) {
-        throw new Error('fresh Agent egress dispatch requires an explicit deviceId');
-      }
-      if (input.agentRef === undefined || input.egressPolicy === undefined) {
-        throw new Error('fresh Agent egress dispatch requires exact AgentRef and egress policy');
-      }
-      return dispatchWithIdentity(input, true);
+      return dispatchWithIdentity(input);
     },
 
     async requestAgentContentRead(input: AgentContentReadRequest): Promise<void> {
@@ -750,7 +721,25 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       });
     },
 
-    recurring: { submit(input) { return cloud.submitRecurringExecution(tenant, input); } },
+    executions: {
+      async submit(input) {
+        const submission = AgentExecutionInputSchema.parse(input);
+        const { taskId } = submission;
+        if (dispatching.has(taskId)) throw new Error('submission for this taskId is already in progress; retain the original binding');
+        dispatching.add(taskId);
+        try {
+          relay.provision(taskId);
+          const enqueued = await cloud.submitAgentExecution(tenant, submission);
+          relay.noteDispatched(taskId, enqueued.envelope.ts);
+          return enqueued;
+        } catch (error) {
+          relay.abort(taskId);
+          throw error;
+        } finally {
+          dispatching.delete(taskId);
+        }
+      },
+    },
 
     tasks: {
       attempt(taskId) { return cloud.readTaskAttempt(tenant, taskId); },

@@ -40,6 +40,8 @@ function egressOfferPayload() {
 
 function freshEgressOfferPayload() {
   return {
+    runtime: 'codex' as const,
+    terminalProjection: { mode: 'none' as const },
     instruction: 'start a fresh runtime with egress policy',
     agentRef: AGENT_REF,
     egressPolicy: POLICY,
@@ -220,7 +222,7 @@ describe('hosted Agent egress contract', () => {
     await admitFullEgress(harness, device.deviceId);
 
     await expect(
-      harness.cloud.enqueueFreshAgentEgressOffer(TENANT_A, device.deviceId, {
+      harness.cloud.submitAgentExecution(TENANT_A, { deviceId: device.deviceId,
         taskId: 'fresh-missing-capability',
         payload: freshEgressOfferPayload(),
       }),
@@ -237,9 +239,10 @@ describe('hosted Agent egress contract', () => {
         'agent-egress-policy',
         'agent-egress-reliable-ack',
         'agent-egress-fresh-session',
+        'terminal-projection-selection',
       ],
     });
-    const offered = await harness.cloud.enqueueFreshAgentEgressOffer(TENANT_A, device.deviceId, {
+    const offered = await harness.cloud.submitAgentExecution(TENANT_A, { deviceId: device.deviceId,
       taskId: 'fresh-agent-egress-task',
       payload: freshEgressOfferPayload(),
     });

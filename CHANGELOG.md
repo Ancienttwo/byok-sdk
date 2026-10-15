@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Breaking (server, cloud; #470)** — fresh Agent work uses
+  `executions.submit(AgentExecutionInput)` / `submitAgentExecution(tenant, input)`.
+  `recurring.submit`, `submitRecurringExecution`, `RecurringExecutionInputSchema`,
+  `dispatchFreshAgentEgress` and public `enqueueFreshAgentEgressOffer` are removed,
+  with `RecurringExecutionInput`, `FreshAgentEgressDispatchInput` and
+  `AgentEgressFreshSessionDispatchInput`. Host-owned taskId, exact deviceId,
+  runtime, AgentRef, egressPolicy and terminalProjection are required.
+  messageEgress is optional; context and a registered consumer are required only
+  when selected, and context without messageEgress is rejected. Submission returns
+  EnqueuedOffer and provisions the server relay. Resubmitting a delivered taskId
+  throws `agent_task_already_exists`; recover through exact `tasks.offer(taskId)`
+  readback. A registered offline device is enqueued normally. No aliases, wire
+  change or protocol-version bump. See
+  `docs/releases/470-executions-submit.md`.
+
 - **Breaking (cloud, 0.x; #387)** — a refused offer append now throws
   `TaskOfferAppendRefusedError` (code `task_offer_append_refused`) from every
   `enqueue*Offer` path and the server's `dispatch`, instead of the store's raw

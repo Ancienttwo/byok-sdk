@@ -216,6 +216,113 @@ export declare function parseTimelineEvents(value: unknown): readonly TimelineEv
 export declare function compareTimelineEvents(left: TimelineEvent, right: TimelineEvent): number;
 export declare function activityCursor(entries: readonly TimelineEvent[]): ActivityCursor | undefined;
 export declare function activityTailKey(tenant: TenantId, taskId: string): string;
+// ==== @byok-sdk/cloud dist/agent-execution.d.ts ====
+import { z } from 'zod';
+/** Persist this validated input before dispatch; the Host owns Turn/generation and outbox. */
+export declare const AgentExecutionInputSchema: z.ZodObject<{
+    taskId: z.ZodString;
+    deviceId: z.ZodString;
+    payload: z.ZodObject<{
+        instruction: z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+            blobRef: z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+        }, z.core.$strict>]>;
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+        requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        runtime: z.ZodNonOptional<z.ZodOptional<z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            pi: "pi";
+        }>>>;
+        harnessId: z.ZodOptional<z.ZodString>;
+        dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            lane: z.ZodLiteral<"subscription">;
+            runtimeId: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+            }>;
+            providerId: z.ZodNull;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerId: z.ZodString;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok-profile">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerProfile: z.ZodObject<{
+                profileRef: z.ZodString;
+                profileRevision: z.ZodString;
+                profileHash: z.ZodString;
+                modelId: z.ZodString;
+                requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                    "image-input": "image-input";
+                }>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>], "lane">>;
+        terminalProjection: z.ZodNonOptional<z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            mode: z.ZodLiteral<"none">;
+        }, z.core.$strict>, z.ZodObject<{
+            mode: z.ZodLiteral<"result-document">;
+            contract: z.ZodString;
+        }, z.core.$strict>], "mode">>>;
+        limits: z.ZodOptional<z.ZodObject<{
+            maxDurationMs: z.ZodOptional<z.ZodNumber>;
+            maxTokens: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>;
+        egressPolicy: z.ZodObject<{
+            policyRevision: z.ZodString;
+            activity: z.ZodObject<{
+                delivery: z.ZodLiteral<"latest-value">;
+                maxCoalesceMs: z.ZodNumber;
+                maxEventBytes: z.ZodNumber;
+            }, z.core.$strict>;
+            reliable: z.ZodObject<{
+                maxPendingEventsPerAgent: z.ZodNumber;
+                maxPendingBytesPerAgent: z.ZodNumber;
+                maxPendingBytesPerTenant: z.ZodNumber;
+            }, z.core.$strict>;
+            transfers: z.ZodObject<{
+                workspace: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+                transcript: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+                artifact: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
+        messageEgress: z.ZodOptional<z.ZodObject<{
+            mode: z.ZodLiteral<"required">;
+            contract: z.ZodString;
+            contentType: z.ZodEnum<{
+                "text/markdown": "text/markdown";
+                "text/plain": "text/plain";
+            }>;
+            maxBytes: z.ZodNumber;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+    agentMessageContext: z.ZodOptional<z.ZodObject<{
+        destinationBinding: z.ZodString;
+        freshnessCursor: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
+export type AgentExecutionInput = z.infer<typeof AgentExecutionInputSchema>;
 // ==== @byok-sdk/cloud dist/agent-home-projections.d.ts ====
 /**
  * Durable task-free Agent-home projection facts.
@@ -909,7 +1016,7 @@ export declare function declares(declaration: CapabilityDeclaration, capability:
 import { type MaintenanceInput, type MaintenanceReport } from './maintenance';
 import type { DeviceAssertionReplayAuthority } from '@byok-sdk/core';
 import { type TaskAgentMessage } from './task-agent-message';
-import { type RecurringExecutionInput } from './recurring';
+import { type AgentExecutionInput } from './agent-execution';
 /**
  * `createByokCloud` — the hosted device surface, assembled.
  *
@@ -929,7 +1036,7 @@ import { type RecurringExecutionInput } from './recurring';
 import { type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { ActivityTail } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
-import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskSteerPayload, type TaskOfferForAgentPayload, type TaskOfferPreparedPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
+import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskSteerPayload, type TaskOfferForAgentPayload, type TaskOfferPreparedPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
 import type { TokenSigner } from './auth/tokens';
 import type { CloudCrypto } from './crypto/port';
 import { type RouteDescriptor } from './router/registry';
@@ -1118,15 +1225,6 @@ export interface AgentEgressDispatchInput {
     /** Host-only product destination/freshness authority; never serialized to the daemon. */
     readonly agentMessageContext?: AgentMessageServerContext;
 }
-/** Strict Agent dispatch whose selected runtime mints its session after start. */
-export interface AgentEgressFreshSessionDispatchInput {
-    /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
-    readonly taskId?: string;
-    /** Deliberately session-free strict payload for the fresh-runtime path. */
-    readonly payload: TaskOfferForAgentWithEgressFreshPayload;
-    /** Host-only product destination/freshness authority; never serialized to the daemon. */
-    readonly agentMessageContext?: AgentMessageServerContext;
-}
 /** A task-free, independently capability-gated Agent content read. */
 export interface AgentContentReadInput {
     readonly payload: AgentContentReadPayload;
@@ -1248,13 +1346,10 @@ export interface ByokCloud {
      */
     enqueueAgentEgressOffer(tenant: TenantId, deviceId: string, input: AgentEgressDispatchInput): Promise<EnqueuedOffer>;
     /**
-     * Host control plane: enqueue the distinct fresh-session egress offer.
-     * The device must durably advertise fresh-session support before task or
-     * mailbox reservation, so older resume-only daemons never receive it.
+     * Submit one fresh Agent execution from the Host's persisted input.
+     * A delivered taskId conflicts; recover through exact offer readback.
      */
-    enqueueFreshAgentEgressOffer(tenant: TenantId, deviceId: string, input: AgentEgressFreshSessionDispatchInput): Promise<EnqueuedOffer>;
-    /** Strict recurring execution: caller persists the complete input before submission. */
-    submitRecurringExecution(tenant: TenantId, input: RecurringExecutionInput): Promise<EnqueuedOffer>;
+    submitAgentExecution(tenant: TenantId, input: AgentExecutionInput): Promise<EnqueuedOffer>;
     /** Host control plane: request one policy-bound content read without a task fallback. */
     enqueueAgentContentRead(tenant: TenantId, deviceId: string, input: AgentContentReadInput): Promise<EnqueuedAgentControl>;
     /** Durable, task-free projection request for precisely one admitted device. */
@@ -2120,7 +2215,7 @@ export { isTenantId, tenantId } from '@byok-sdk/core';
 export type { TenantId } from '@byok-sdk/core';
 export { createByokCloud } from './cloud';
 export type { TaskAgentMessage } from './task-agent-message';
-export type { ByokCloud, ByokCloudOptions, LimitedPublicRoute, PublicRouteLimiter, AgentDispatchInput, AgentEgressDispatchInput, AgentEgressFreshSessionDispatchInput, AgentContentReadInput, AgentHomeProjectionInput, ProviderProvisioningNoticeInput, AgentMemoryIntentNoticeInput, AgentHomeProjectionStatusInput, InputPreparationInput, InputPreparationStatusInput, ApproveTaskOptions, EnqueueOfferInput, EnqueueToolsetOfferInput, RejectTaskOptions, EnqueuedAgentControl, EnqueuedAgentHomeProjection, EnqueuedInputPreparation, EnqueuedOffer, TaskOfferReadback, } from './cloud';
+export type { ByokCloud, ByokCloudOptions, LimitedPublicRoute, PublicRouteLimiter, AgentDispatchInput, AgentEgressDispatchInput, AgentContentReadInput, AgentHomeProjectionInput, ProviderProvisioningNoticeInput, AgentMemoryIntentNoticeInput, AgentHomeProjectionStatusInput, InputPreparationInput, InputPreparationStatusInput, ApproveTaskOptions, EnqueueOfferInput, EnqueueToolsetOfferInput, RejectTaskOptions, EnqueuedAgentControl, EnqueuedAgentHomeProjection, EnqueuedInputPreparation, EnqueuedOffer, TaskOfferReadback, } from './cloud';
 export { agentHomeProjectionCompletionKey, agentHomeProjectionRequestKey, readAgentHomeProjectionStatus, recordAgentHomeProjectionCompletion, } from './agent-home-projections';
 export type { AgentHomeProjectionReceiptInput } from './agent-home-projections';
 export { inputPreparationCompletionKey, inputPreparationRequestKey, readInputPreparationStatus, recordInputPreparationCompletion, sameInputPreparationRequest, } from './input-preparations';
@@ -2180,7 +2275,7 @@ export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, B
 export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlobContentProxy, InMemoryCloudBlobStore, InMemoryActivityStore, InMemoryDeviceDirectory, InMemoryInboundDedupStore, InMemoryNonceStore, InMemoryPairingCodeStore, InMemoryRequestReceiptStore, InMemoryAgentEgressStore, InMemoryProofRequestReceiptStore, InMemoryTaskAttemptStore, InMemoryTaskCancellationStore, NONCE_TTL_MS, createInMemoryBlobs, createInMemoryCloudStores, createInMemoryBlobBytes, InMemoryBlobBytes, } from './stores/in-memory/index';
 export type { InMemoryBlobStoreOptions, InMemoryBlobs, InMemoryCloudComposition, } from './stores/in-memory/index';
 export type { DeviceTerminal } from './terminal-result';
-export { RecurringExecutionInputSchema, type RecurringExecutionInput } from './recurring';
+export { AgentExecutionInputSchema, type AgentExecutionInput } from './agent-execution';
 export { DEFAULT_RETENTION_POLICY, DEFAULT_MAINTENANCE_LIMIT, MAINTENANCE_STEPS, resolveRetentionPolicy } from './maintenance';
 export type { RetentionPolicy, MaintenanceInput, MaintenanceReport, MaintenanceStep, MaintenanceStepReport } from './maintenance';
 export { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES, receiptRetentionClass } from './receipt-retention';
@@ -2305,113 +2400,6 @@ export declare const RECEIPT_RETENTION: readonly Readonly<{
 }>[];
 export declare const REQUEST_RECEIPT_PREFIXES: readonly string[];
 export declare function receiptRetentionClass(key: string): ReceiptRetentionClass;
-// ==== @byok-sdk/cloud dist/recurring.d.ts ====
-import { z } from 'zod';
-/** Persist this validated input before dispatch; the Host owns Turn/generation and outbox. */
-export declare const RecurringExecutionInputSchema: z.ZodObject<{
-    taskId: z.ZodString;
-    deviceId: z.ZodString;
-    payload: z.ZodObject<{
-        instruction: z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
-            blobRef: z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-                url: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-        }, z.core.$strict>]>;
-        agentRef: z.ZodObject<{
-            agentId: z.ZodString;
-            profileRevision: z.ZodString;
-        }, z.core.$strict>;
-        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
-        requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        runtime: z.ZodNonOptional<z.ZodOptional<z.ZodEnum<{
-            claude: "claude";
-            codex: "codex";
-            pi: "pi";
-        }>>>;
-        harnessId: z.ZodOptional<z.ZodString>;
-        dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
-            lane: z.ZodLiteral<"subscription">;
-            runtimeId: z.ZodEnum<{
-                claude: "claude";
-                codex: "codex";
-            }>;
-            providerId: z.ZodNull;
-            modelId: z.ZodString;
-        }, z.core.$strict>, z.ZodObject<{
-            lane: z.ZodLiteral<"byok">;
-            runtimeId: z.ZodLiteral<"pi">;
-            providerId: z.ZodString;
-            modelId: z.ZodString;
-        }, z.core.$strict>, z.ZodObject<{
-            lane: z.ZodLiteral<"byok-profile">;
-            runtimeId: z.ZodLiteral<"pi">;
-            providerProfile: z.ZodObject<{
-                profileRef: z.ZodString;
-                profileRevision: z.ZodString;
-                profileHash: z.ZodString;
-                modelId: z.ZodString;
-                requiredCapabilities: z.ZodArray<z.ZodEnum<{
-                    "image-input": "image-input";
-                }>>;
-            }, z.core.$strict>;
-        }, z.core.$strict>], "lane">>;
-        terminalProjection: z.ZodNonOptional<z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
-            mode: z.ZodLiteral<"none">;
-        }, z.core.$strict>, z.ZodObject<{
-            mode: z.ZodLiteral<"result-document">;
-            contract: z.ZodString;
-        }, z.core.$strict>], "mode">>>;
-        limits: z.ZodOptional<z.ZodObject<{
-            maxDurationMs: z.ZodOptional<z.ZodNumber>;
-            maxTokens: z.ZodOptional<z.ZodNumber>;
-        }, z.core.$strip>>;
-        egressPolicy: z.ZodObject<{
-            policyRevision: z.ZodString;
-            activity: z.ZodObject<{
-                delivery: z.ZodLiteral<"latest-value">;
-                maxCoalesceMs: z.ZodNumber;
-                maxEventBytes: z.ZodNumber;
-            }, z.core.$strict>;
-            reliable: z.ZodObject<{
-                maxPendingEventsPerAgent: z.ZodNumber;
-                maxPendingBytesPerAgent: z.ZodNumber;
-                maxPendingBytesPerTenant: z.ZodNumber;
-            }, z.core.$strict>;
-            transfers: z.ZodObject<{
-                workspace: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
-                    maxBytes: z.ZodNumber;
-                    allowedMimeTypes: z.ZodArray<z.ZodString>;
-                }, z.core.$strict>]>;
-                transcript: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
-                    maxBytes: z.ZodNumber;
-                    allowedMimeTypes: z.ZodArray<z.ZodString>;
-                }, z.core.$strict>]>;
-                artifact: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
-                    maxBytes: z.ZodNumber;
-                    allowedMimeTypes: z.ZodArray<z.ZodString>;
-                }, z.core.$strict>]>;
-            }, z.core.$strict>;
-        }, z.core.$strict>;
-        messageEgress: z.ZodNonOptional<z.ZodOptional<z.ZodObject<{
-            mode: z.ZodLiteral<"required">;
-            contract: z.ZodString;
-            contentType: z.ZodEnum<{
-                "text/markdown": "text/markdown";
-                "text/plain": "text/plain";
-            }>;
-            maxBytes: z.ZodNumber;
-        }, z.core.$strict>>>;
-    }, z.core.$strict>;
-    agentMessageContext: z.ZodObject<{
-        destinationBinding: z.ZodString;
-        freshnessCursor: z.ZodOptional<z.ZodString>;
-    }, z.core.$strict>;
-}, z.core.$strict>;
-export type RecurringExecutionInput = z.infer<typeof RecurringExecutionInputSchema>;
 // ==== @byok-sdk/cloud dist/router/registry.d.ts ====
 /**
  * The route inventory (sprint I1).

@@ -91,7 +91,7 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
     expect(() => answer({ value: ' '.repeat(2) },b)).toThrow('Invalid answer');
     expect(() => answer({ value: 'a'.repeat(4097) },b)).toThrow('Invalid answer');
     answer({ value: 'Only approved invoices' },b);
-    expect(row().value.pending?.input.instruction).toContain('Only approved invoices');
+    expect(row().value.pending?.input.payload.instruction).toContain('Only approved invoices');
     expect(() => answer({ value: 'different body' },b)).toThrow('Answer id conflicts');
   });
   it('two SQLite connections admit exactly one answer/continuation and reject revision CAS replay', async () => {
@@ -159,26 +159,26 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
     expect(adapter.starts.map(s => s.manifest.taskId)).toEqual(['step-1','step-2']);
   });
   it('synchronous dispatch failure leaves sending; exact recovery creates one offer/start', async () => {
-    const dispatch = byok.dispatchFreshAgentEgress.bind(byok); let reject = true;
-    host = new ClarificationHost({ tasks: byok.tasks,dispatchFreshAgentEgress: async input => { if (reject) { reject = false; throw new Error('pre-offer failure'); } return dispatch(input); } },store,() => now);
+    const dispatch = byok.executions.submit.bind(byok.executions); let reject = true;
+    host = new ClarificationHost({ tasks: byok.tasks,executions: { submit: async input => { if (reject) { reject = false; throw new Error('pre-offer failure'); } return dispatch(input); }  }},store,() => now);
     start(); await expect(host.send('run',row().revision)).rejects.toThrow('pre-offer failure');
     expect(row().value.pending?.phase).toBe('sending'); expect(await byok.tasks.offer('step-1')).toBeUndefined();
     await host.recover('run',row().revision); await running('step-1'); await host.recover('run',row().revision);
     expect(adapter.starts).toHaveLength(1); expect((await byok.tasks.offer('step-1'))?.taskId).toBe('step-1');
   });
   it('restart after offer delivery but before Host dispatch returns does not duplicate start', async () => {
-    const dispatch = byok.dispatchFreshAgentEgress.bind(byok);
-    host = new ClarificationHost({ tasks: byok.tasks,dispatchFreshAgentEgress: async input => { await dispatch(input); throw new Error('response lost'); } },store,() => now);
+    const dispatch = byok.executions.submit.bind(byok.executions);
+    host = new ClarificationHost({ tasks: byok.tasks,executions: { submit: async input => { await dispatch(input); throw new Error('response lost'); }  }},store,() => now);
     start(); await host.send('run',row().revision); await running('step-1'); reopen(); await host.recover('run',row().revision);
     expect(adapter.starts).toHaveLength(1);
   });
   it.each(['before_offer','after_offer'] as const)('cancel in sending %s hits exact task or zero starts', async window => {
-    const dispatch = byok.dispatchFreshAgentEgress.bind(byok); let release!: () => void; let entered!: () => void;
+    const dispatch = byok.executions.submit.bind(byok.executions); let release!: () => void; let entered!: () => void;
     const gate = new Promise<void>(r => { release = r; }); const seen = new Promise<void>(r => { entered = r; });
-    host = new ClarificationHost({ tasks: byok.tasks,dispatchFreshAgentEgress: async input => {
+    host = new ClarificationHost({ tasks: byok.tasks,executions: { submit: async input => {
       const handle = window === 'after_offer' ? await dispatch(input) : undefined; entered(); await gate;
       return handle ?? await dispatch(input);
-    } },store,() => now);
+    }  }},store,() => now);
     start(); const sending = host.send('run',row().revision); await seen;
     await host.cancel('run',row().revision); release(); await sending;
     await vi.waitFor(async () => expect((await byok.tasks.attempt('step-1'))?.cancellation).toBeDefined(),{ timeout: 5000 });
@@ -272,8 +272,9 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
     await first(); adapter.sessions.get('step-1')!.finish(result('complete')); await terminal('step-1');
     // Egress mismatch is a frozen offer admission failure on the running fixture.
     start('other','other-task','agent-b');
-    const bad = { ...target('agent-b'),egressPolicy: { ...policy,policyRevision: 'different' },taskId: 'bad-egress',instruction: 'test',terminalProjection: { mode: 'result-document' as const,contract: CLARIFICATION_CONTRACT } };
-    await byok.dispatchFreshAgentEgress(bad); await terminal('bad-egress');
+    const { deviceId, ...selection } = target('agent-b');
+    const bad = { deviceId, taskId: 'bad-egress', payload: { ...selection,egressPolicy: { ...policy,policyRevision: 'different' },instruction: 'test',terminalProjection: { mode: 'result-document' as const,contract: CLARIFICATION_CONTRACT } } };
+    await byok.executions.submit(bad); await terminal('bad-egress');
     expect((await byok.tasks.deviceTerminal('bad-egress'))?.envelope.type).not.toBe('task.complete'); expect(adapter.sessions.has('bad-egress')).toBe(false);
   });
 });
