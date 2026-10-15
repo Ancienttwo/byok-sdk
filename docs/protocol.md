@@ -83,9 +83,11 @@ latest or second-latest release, not by author judgment.
   request/response schemas. Current and both published protocol decoders read
   them. HTTP loss requires a `kind: 'http'` strip-safe row in `WIRE_ADDITIONS`;
   envelope rows have `kind: 'envelope'`. The optional messages capability
-  advertisement is strip-safe for 0.25.0/0.26.1; acknowledgement counts are not.
-  Each messages response carries its submitted `batchLength`, and all three
-  decoders must retain counts summing to it.
+  advertisement, per-envelope `outcomes`, and the messages and events `ingress`
+  advertisements are strip-safe for 0.25.0/0.26.1; acknowledgement counts are
+  not. Each messages response carries its submitted `batchLength`, all three
+  decoders must retain counts summing to it, and decoded `outcomes` must agree
+  with those counts.
 - Every `WIRE_ADDITIONS` entry, every message type, and every top-level key a
   payload gained since the floor release appears in a corpus line.
 

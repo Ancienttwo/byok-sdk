@@ -234,6 +234,14 @@ function assertBatchCounts(line: HttpCorpusLine, decoded: Record<string, unknown
   if (line.surface !== 'MessagesSendResponse') return;
   expect((decoded.accepted as number) + (decoded.rejected === undefined ? 0 : decoded.rejected as number),
     'accepted + rejected must account for the entire submitted batch').toBe(line.batchLength);
+  const outcomes = decoded.outcomes as readonly { readonly outcome: string }[] | undefined;
+  if (outcomes === undefined) return;
+  // Outcomes are observation only; they must agree with the authoritative counts.
+  expect(outcomes.length, 'outcomes must correlate every submitted envelope').toBe(line.batchLength);
+  expect(outcomes.filter((entry) => entry.outcome !== 'rejected').length,
+    'accepted counts accepted and duplicate outcomes').toBe(decoded.accepted);
+  expect(outcomes.filter((entry) => entry.outcome === 'rejected').length,
+    'rejected counts rejected outcomes').toBe(decoded.rejected ?? 0);
 }
 
 function assertCurrentHttp(line: HttpCorpusLine): void {
