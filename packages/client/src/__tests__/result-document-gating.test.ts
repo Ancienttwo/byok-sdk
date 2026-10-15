@@ -11,7 +11,7 @@ import { createDaemon, createDaemonWithAdapters, type DaemonConfig } from '../da
 import { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError } from '../daemon/daemon-errors';
 import { journalHash } from '../daemon/journal/journal';
 import { JOURNAL_DB_FILENAME, SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
-import { DeviceStore } from '../daemon/store';
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 
@@ -91,7 +91,7 @@ describe('startup refuses a journal of another wire major', () => {
     const config = { ...(await baseConfig(server.url)), hostedJournal: { mode: 'sqlite' as const } };
     const pairing = createDaemonWithAdapters(config, [new StubRuntimeAdapter()]);
     await pairing.pair('pairing-code');
-    const device = (await new DeviceStore(config.storeDir!, undefined, config.productId).credentials.read())!;
+    const device = (await createTestDeviceStore(config.storeDir!, undefined, config.productId).credentials.read())!;
     const identity = { tenantId: device.tenantId, productId: config.productId, deviceId: device.deviceId };
     return { server, config, identity };
   }
@@ -159,7 +159,7 @@ describe('result-document recovery from the journal', () => {
     const config: DaemonConfig = { ...(await baseConfig(server.url)), hostedJournal: { mode: 'sqlite' },
       agentHome: { hostStorageRoot: path.join(root, 'agent-home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } };
     await createDaemonWithAdapters(config, [new StubRuntimeAdapter()]).pair('pairing-code');
-    const device = (await new DeviceStore(config.storeDir!, undefined, config.productId).credentials.read())!;
+    const device = (await createTestDeviceStore(config.storeDir!, undefined, config.productId).credentials.read())!;
     const identity = { tenantId: device.tenantId, productId: config.productId, deviceId: device.deviceId };
     const offerBytes = (taskId: string) => encodeEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
       instruction: 'submit one result', runtime: 'pi', agentRef, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: selection,
