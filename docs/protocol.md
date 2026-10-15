@@ -5,14 +5,34 @@ the M1-2 (server) and M1-3 (client) implementers — the schemas in
 `packages/protocol/src/` are authoritative; this document explains the rules
 those schemas encode and why.
 
-Status: wire version `v:2`, **FROZEN**. The pi, claude, and codex runtime
+Status: wire version `v:3`, **FROZEN**. The pi, claude, and codex runtime
 adapters have all exercised the wire (M2); every M1/M2 protocol gap identified
 along the way has been closed in place. From this point forward, this
 document and the schemas in `packages/protocol/src/` describe a closed
 contract — see "Freeze rule" immediately below for exactly what "frozen"
 does and doesn't allow.
 
-Only wire major `2` is currently supported. v2 removed the task offer's
+Only wire major `3` is currently supported. v3 makes `schema` required on the
+`terminalProjection.mode: 'result-document'` arm of the Agent offers: the
+offer freezes a JSON Schema subset for the task's structured outcome
+([§7.2](#72-taskcompletedocument--bounded-structured-terminal-result-additive-minor)). That
+narrows a strict shape, so it is a wire major. There is no v2 reader and no
+capability negotiation between the two result-document shapes; the v2
+`result-document` capability flag is gone. **Drain before upgrading:** stop new
+submissions on the old version, let every pending mailbox row be processed and
+acknowledged, every in-flight execution reach a terminal, and every daemon
+pending terminal be acknowledged by the server. Then upgrade the server side
+(embedded server, `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`) and the
+daemons together. A v2 daemon is refused at `conn.hello`
+(`hello_protocol_version_unsupported`) and receives no v3 offer; a v3 daemon
+cannot use a v2 server. Every envelope must carry major `3`. Schema decode
+rejects another major with `EnvelopeValidationError`, and the HTTP messages
+boundary, the cloud inbound gate and client long-poll treat it exactly as the
+v1 → v2 note below describes. The embedded server refuses to open a store
+with pending v2 rows ([SQLite startup check](#sqlite-startup-check-for-wire-major-upgrades));
+nothing rewrites or deletes them.
+
+History: v2 removed the task offer's
 `policy` (`PermissionPolicy`), the runtime capability `permissionModes`, the
 input-preparation `permissionMode`, the egress `metadata-status` activity mode
 and the `sanitizer_rejected` drop reason
@@ -34,10 +54,12 @@ envelope as v2. Package/application SemVer remains unrelated to wire admission.
 
 ## Freeze rule
 
-`PROTOCOL_VERSION` is `2`. Every v2 change takes exactly one of three paths.
+`PROTOCOL_VERSION` is `3`. Every v3 change takes exactly one of three paths.
 Compatibility is decided by `packages/protocol/src/__tests__/compat.test.ts`,
-which runs the published decoders of the oldest supported release and of the
-latest or second-latest release, not by author judgment.
+not by author judgment. No v3 release has been published yet, so there is no
+published v3 decoder to run: until the first v3 release is registered and
+pinned, the suite proves v3 self-consistency only and cross-release gates are
+unproven (see the evidence list below).
 
 1. **Version bump.** Bump `PROTOCOL_VERSION`; server and client upgrade
    together under "Server supports N and N-1" below. This is the only path
@@ -66,30 +88,38 @@ latest or second-latest release, not by author judgment.
    declaration says dropping it does not change what the receiver executes or
    acknowledges.
 
-`compat.test.ts` enforces the three paths:
+`compat.test.ts` holds three kinds of evidence:
 
-- The released surface is never narrowed: message types, their direction,
-  capability flags, task states and transitions, AgentEvent types, batch and
-  hash bounds, and the JSON Schema of every exported schema, compared against
-  each pinned release.
-- `golden/v2.envelopes.ndjson` is append-only. `golden/releases.json` pins,
-  per stable release, the sha256 of the corpus prefix it shipped with. The
-  current decoder must decode every line back to the committed JSON.
-- Each pinned released decoder reads every corpus line. A rejected line must
-  be explained by a gate the release does not know; a silently dropped field
-  must be declared strip-safe or gated.
-- `golden/v2.http.ndjson` carries literal HTTP bodies and independently authored
-  expected decoded values for challenge/token, events query/page and messages
-  request/response schemas. Current and both published protocol decoders read
-  them. HTTP loss requires a `kind: 'http'` strip-safe row in `WIRE_ADDITIONS`;
-  envelope rows have `kind: 'envelope'`. The optional messages capability
-  advertisement, per-envelope `outcomes`, and the messages and events `ingress`
-  advertisements are strip-safe for 0.25.0/0.26.1; acknowledgement counts are
-  not. Each messages response carries its submitted `batchLength`, all three
-  decoders must retain counts summing to it, and decoded `outcomes` must agree
-  with those counts.
-- Every `WIRE_ADDITIONS` entry, every message type, and every top-level key a
-  payload gained since the floor release appears in a corpus line.
+- **Retired v2 evidence (negative oracle).** `golden/v2.envelopes.ndjson`,
+  `golden/v2.http.ndjson` and the v2 registry `golden/releases.json` are
+  byte-identical to the v2 cut and read-only. The current decoder rejects
+  every v2 envelope line at the version boundary. The v3 contract also
+  requires a result schema, so rewriting only the version is not an upgrade.
+  The v2 HTTP lines that carry envelopes are rejected too.
+- **v3 self-consistency.** `golden/v3.envelopes.ndjson` and
+  `golden/v3.http.ndjson` are append-only. The current decoder reads every
+  line back to the committed JSON, and the current HTTP decoders read every
+  literal body to its independently authored value (messages responses must
+  account for their `batchLength`). The v3 corpus carries every message type,
+  every `WIRE_ADDITIONS` entry and a result-document offer with `schema` on
+  each Agent offer type. `golden/v3.releases.json` has `releases: []` and no
+  `floor`. Every v3 entry, from the first, pins both corpus prefixes.
+- **Published rejection oracle.** `byok-protocol-previous` (0.26.1, the last
+  registered v2 release) rejects every v3 corpus line, a v3 `conn.hello` and
+  the v3 HTTP lines that carry envelopes. Nothing it produces is v3 evidence.
+
+When the first v3 release is registered, pin it as a published decoder and
+restore the cross-release checks (never-narrowed surface, released decoders
+read current bytes, strip-safe and gated declarations) against it.
+
+v3 starts from a reset table: the v2 strip-safe rows and the v2
+`result-document` gate are baseline and gone. `WIRE_ADDITIONS` keeps the
+`gated` device rows, most of which name capabilities a daemon advertises only
+when it is configured for the surface (Agent home, readers, egress, input
+preparation, provisioning, memory intents), and the server
+`approval_resolved` gate. Senders still take admission flags from
+`requiredReceiverCapabilities`.
+
 - Every recursive property path (array items, record values, each union
   branch) and every enum or literal value of each current payload schema
   appears in an envelope corpus line, and likewise for each scoped HTTP body
@@ -103,25 +133,13 @@ That the server and hosted cloud actually refuse an undeclared receiver is
 tested at the senders (for example
 `packages/cloud/src/__tests__/wire-additions-admission.test.ts`).
 
-**HTTP release evidence boundary.** The 0.25.0, 0.26.0 and 0.26.1 ledger entries
-are frozen envelope-only history. Do not backfill HTTP hashes into them. Every
-subsequent entry must pin both corpus prefixes; the first such entry defines
-the first HTTP-corpus release, without a separate state/version marker. Until
-that registration, literal body/expected-value equality proves current decoder
-behaviour, not historical HTTP byte immutability. Running those bodies through
-the actually published aliases already proves cross-version protocol decoding.
+**v2 HTTP release evidence (retired).** The 0.25.0, 0.26.0 and 0.26.1 v2
+ledger entries are frozen envelope-only history; they never gain HTTP hashes.
+The v2 suite's three typed private-client exclusions (`EventsPollResponse`,
+`ChallengeResponse`, `TokenResponse`, bounded through 0.26.1) applied only to
+running v2 HTTP bodies through published v2 decoders, which v3 no longer does.
 Registration belongs to stable release preparation, not a feature-PR version
 bump (see `docs/releases/README.md`).
-
-**Private-client evidence exclusions.** Published protocol decoders do not
-execute old client-private parsers. The suite names three typed exclusions,
-bounded through 0.26.1: `EventsPollResponse` (private outer-page validation and
-per-entry decoding preserve unknown-event cursor stalls), `ChallengeResponse`
-and `TokenResponse` (AuthManager response casts). Advancing either alias past
-that bound requires reviewing/removing the exclusions. Remove them when the
-supported floor excludes those clients or an approved decoder cutover supplies
-the actual replacement proof. This slice neither unifies those parsers nor
-changes `EventsPollResponse.events` from `EnvelopeSchema[]`.
 
 **History note.** The "Landed additive minor" entries in this document, and
 other sections that say a change landed with "no `PROTOCOL_VERSION` bump" or
@@ -150,7 +168,8 @@ protocol version common to its own supported set and the daemon's
 `conn.hello.protocolVersions[]` list, and must continue accepting the
 immediately-prior major version so a fleet of daemons can roll forward
 without a hard cutover. (The v1 → v2 cut deliberately has no N-1 reader:
-the server accepts only `v:2`, so server and client upgrade together.)
+the server accepts only `v:2`, so server and client upgrade together. The
+v2 → v3 cut is the same: the server accepts only `v:3`.)
 
 **The observability-vs-control asymmetry.** Unknown is TOLERATED for
 observability data, but FAIL-CLOSED for control/security data:
@@ -208,7 +227,8 @@ message, or a daemon talking to an old server that never advertises
 keeps inferring exactly as it did before this section's previous wording.
 
 **Landed additive minor: `task.complete.document` + the `result-document`
-capability flag.** A new OPTIONAL field on an existing payload plus a new
+capability flag (v1; the flag is retired in v3, where every server keeps
+`document`).** A new OPTIONAL field on an existing payload plus a new
 capability flag — the first and fourth bullets at the top of this section —
 so both landed with `PROTOCOL_VERSION` still `1`. `document` carries the
 task's structured terminal result (one JSON value the product consumes as
@@ -217,7 +237,7 @@ server-advertised `result-document` flag (`CAPABILITY_FLAGS`, `version.ts`)
 is what tells a daemon the other side will actually keep the field instead
 of stripping it. Full contract, cap semantics, and the
 `document`-vs-`artifactRefs` boundary: §7.2. The golden fixtures
-(`packages/protocol/src/__tests__/golden/v1.frozen.json`, since replaced by `v2.frozen.json`) were regenerated
+(`packages/protocol/src/__tests__/golden/v1.frozen.json`, later `v2.frozen.json`, both since removed) were regenerated
 deliberately for the fingerprint change, with the additive-only diff
 recorded in `tasks/notes/20260812-0351-result-document-channel.notes.md` (untracked since #390);
 the historical envelope corpus (`v1.envelopes.ndjson`) was NOT touched,
@@ -1058,9 +1078,8 @@ reader resume/run-directory and home initialization conflicts reported as
 verbatim, and `readDeviceTerminal` / embedded `tasks.deviceTerminal` preserve
 it in the canonical envelope.
 
-Landed additive minor: `task.decline.code` (#471) is an optional v2 field,
-registered as strip-safe in `WIRE_ADDITIONS`. Published golden lines remain
-unchanged; new examples are appended. `PROTOCOL_VERSION` remains 2.
+Landed additive minor: `task.decline.code` (#471) was an optional v2 field,
+registered as strip-safe in `WIRE_ADDITIONS`. It is part of the v3 baseline.
 
 ### 3.3 Cancelled is its own message, not `task.fail(reason:'cancelled')` (M1 gap #6)
 
@@ -1594,28 +1613,68 @@ matters:
 | `artifactRefs[]` | Files (inline or blob) | Multi-file, binary, or oversized output |
 | `document` | ONE JSON value | The product's structured terminal result |
 
-**`document` is schema-neutral and stays that way.** It is typed
-`z.unknown()` (`TaskCompletePayloadSchema`, `messages.ts`): this SDK never
-inspects, validates, or transforms the product's own document shape, and
-never will — that validation belongs to the consumer that defined the shape.
-Any JSON root is legal (object, array, string, number, boolean, `null`), not
-just an object. Producing it is product glue: a daemon supplies
-`DaemonConfig.resultDocument.extract(finalOutput, task)`
-(`create-daemon.ts`), which turns the same text that becomes `summary` into
-the product's JSON, or returns `undefined` for "no structured result this
-time".
+**The `document` field is schema-neutral on the wire.** It is typed
+`z.unknown()` (`TaskCompletePayloadSchema`, `messages.ts`). Any JSON root is
+legal there (object, array, string, number, boolean, `null`), bounded only by
+the plain-JSON rule and the 1 MiB cap below. What a document must look like is
+decided per offer, by the offer's frozen schema.
 
-Strict Agent offers may additionally carry an offer-scoped
-`terminalProjection`. `{mode:'none'}` explicitly bypasses the host extractor;
-`{mode:'result-document', contract}` requires the extractor to return one
-document and passes that opaque contract to `ResultDocumentTask`. Missing
-extractor, missing document, invalid document, or missing server capability
-fails closed. Sending this field is gated by
-`terminal-projection-selection`, so an older daemon cannot strip it and run
-under the host-global default. A `messageEgress.mode:'required'` offer with no
-second terminal selection is itself message-only authority and therefore
-bypasses the extractor; an offer can request both lanes only by explicitly
-selecting `result-document`. Delivery of that one required message is the
+**Result-document offers freeze a schema (wire v3).** Strict Agent offers may
+carry an offer-scoped `terminalProjection`. `{mode:'none'}` selects no
+structured result. `{mode:'result-document', contract, schema}` requires one:
+`contract` is an opaque lowercase id, and `schema` (required since v3) is the
+JSON Schema the outcome must satisfy. The daemon exposes that schema to the
+runtime as the `inputSchema` of the SDK-reserved `submit_result` tool, stages
+the validated outcome, and delivers it only as `task.complete.document`
+([ADR-038 decision 12](architecture/adr-2026-10-13-bot-platform.md)). A
+successful runtime that staged no outcome ends in a non-retryable `task.fail`;
+failure, cancellation and interruption never carry a document.
+
+`schema` is a restricted subset of JSON Schema 2020-12, checked by one guard,
+`checkResultSchema` (`result-schema.ts`). The zod refinement on the offer calls
+it, so every decode (Host submit, server and cloud parse, daemon admission)
+applies the same rule:
+
+- Allowed keywords only: `type`, `properties`, `required`,
+  `additionalProperties`, `items`, `enum`, `const`, `oneOf`, `minLength`,
+  `maxLength`, `minItems`, `maxItems`, `minimum`, `maximum`, `description`.
+  Anything else (`$ref`, `$defs`, `$schema`, `pattern`, `format`,
+  `patternProperties`, `allOf`, `anyOf`, `not`, `if`, `title`, `default` …) is
+  refused at any depth. `const` and `enum` values are data and are not
+  inspected as schemas; `properties` keys are names, not keywords.
+- `additionalProperties` may only be `false`, wherever it appears.
+- The root must declare `type: 'object'`. A root `oneOf` beside it is allowed.
+- Every subschema is a JSON object (no boolean schemas). `items` is one
+  subschema; `oneOf` and `enum` are non-empty arrays; the length and item
+  bounds are non-negative integers; `minimum` and `maximum` are numbers; `type`
+  is a type name or a non-empty array of unique type names.
+- The schema is plain JSON data in well-formed Unicode, at most
+  `RESULT_SCHEMA_MAX_BYTES` = 16 KiB (16 384) of canonical JSON UTF-8, with
+  subschema nesting at most `RESULT_SCHEMA_MAX_DEPTH` = 32 below the root and
+  JSON container nesting at most `RESULT_JSON_MAX_DEPTH` = 128.
+
+A failed check returns capped issues: at most `RESULT_ISSUES_MAX_COUNT` = 20
+and `RESULT_ISSUES_MAX_BYTES` = 4 KiB as JSON. Each issue is
+`{ pointer, keyword, message }` with an RFC 6901 pointer into the checked
+document; `truncated` says issues were dropped.
+
+`validateResultOutcome(schema, outcome)` is the outcome check. It re-runs the
+guard first (a refused schema is `schema-not-admitted` and never reaches the
+validator). The outcome must then be plain JSON data in well-formed Unicode of
+at most `RESULT_OUTCOME_MAX_BYTES` = 64 KiB (65 536) canonical JSON UTF-8 and
+JSON nesting at most 128. Only then is it validated with
+`@cfworker/json-schema` (exact pin 4.1.1, draft 2020-12, interpreted: no code
+generation and no Node builtins in the protocol closure). Property presence is
+own-property only. Validation stops at the first failing path at each level,
+so the issue list stays short. Input size and depth are bounded; the CPU cost
+of nested `oneOf` over a 64 KiB outcome is bounded by schema nodes times
+outcome nodes, not by a measured timing.
+
+Sending `terminalProjection` is gated by the device capability
+`terminal-projection-selection` (`WIRE_ADDITIONS`). A
+`messageEgress.mode:'required'` offer with no second terminal selection is
+itself message-only authority; an offer can request both lanes only by
+explicitly selecting `result-document`. Delivery of that one required message is the
 daemon's obligation, not the model's: when the runtime never publishes
 through the SDK-owned tool, the daemon sends on the message lane the
 assistant text after the last tool interaction (falling back to the whole
@@ -1690,53 +1749,13 @@ is not valid JSON, so "shrinking to fit" can only deliver garbage to a
 consumer that has no way to tell. A result genuinely too big for this
 channel is an artifact, not a document.
 
-**Emission is gated on the server-advertised `result-document` capability
-flag** (`CAPABILITY_FLAGS`, `version.ts`), unlike `approvalId` (§5.3) which
-ships unconditionally. The difference is what an old peer does with the
-field: `TaskCompletePayloadSchema` is a tolerant `z.object()`, so a
-pre-`document` server SILENTLY STRIPS it (§1's forward-compat rule, working
-exactly as designed) — and silently losing the task's primary structured
-result is data loss, not the harmless dropped-observability-hint case that
-tolerance exists for. So:
-
-- Old server, new daemon: the flag is absent from the long-poll response's
-  advertisement (`EventsPollResponse.capabilities`), so the daemon never sends
-  `document`. If its extractor did produce one,
-  the daemon reports `task.fail` (`retryable: false` — the same server will
-  strip it on every retry too) with a reason prefixed `result document
-  undeliverable`, rather than reporting a success that quietly deleted the
-  result. There is no silent-omission path.
-- New server, old daemon: unaffected. The field is optional and an old
-  daemon simply never sets it.
-- No extractor configured: unchanged in every respect — no document is
-  computed, no capability is consulted, and the payload is byte-identical to
-  the one sent before this field existed.
-
-The capability is read fresh at BOTH ends of the completion path — once when
-the document is resolved, and again immediately before the envelope is handed
-to the transport — because a reconnect in between can replace the long-poll
-session with one whose current response never advertised the flag. A rollback
-caught in that window is the same fail-closed `task.fail`, not a silent send.
-
-**Residual window (known, bounded, deliberately not worked around).** Even
-the second check runs before the envelope leaves the daemon's outbox. A
-server rolled back to a pre-`document` build *while a queued `task.complete`
-is still draining* can therefore still receive — and silently strip — a
-document. Closing this would mean teaching the transport outbox to inspect
-payload semantics and mint a substitute `task.fail` for a task the daemon
-already considers finished: a second authority over terminal outcomes living
-in the queue, which is worse than the window it closes. The bound is a
-rollback landing inside a single in-flight send.
-
-The other fail-closed daemon-side branches share that same reason prefix and
-`retryable: false`: an extractor that throws; one that returns a promise
-(the seam is synchronous and the runtime ENFORCES that — an unawaited
-promise encodes to `{}`, a well-formed, under-cap, and completely wrong
-result, which is worse than no result at all); and a document that is
-over-cap, non-serializable, or not plain JSON data. On the server, `document` is projected
-verbatim into `TaskResult.document` (`hub.ts`) and persists inside the same
-`result_json` record that already carries `summary`/`artifactRefs` — no new
-column, no migration, no second authority.
+**No capability gate (wire v3).** v1 and v2 gated emission of `document` on a
+server-advertised `result-document` flag, because a pre-`document` server
+silently strips the field. Every v3 server keeps it, and v3 has no reader for
+another major, so the flag and its gate are gone. On the server, `document` is
+projected verbatim into `TaskResult.document` (`hub.ts`) and persists inside
+the same `result_json` record that already carries `summary`/`artifactRefs`:
+no new column, no migration, no second authority.
 
 ### 7.3 Terminal inference usage — bounded observation, never accounting (additive minor)
 
@@ -1931,9 +1950,10 @@ process restart only while no exact disposition has resolved transport delivery.
 
 Required-message tasks are message-only at terminal projection unless the
 offer also supplies an explicit `terminalProjection.mode:'result-document'`.
-This prevents a daemon-wide structured-result extractor from interpreting
-Chat output, while preserving a typed, fail-closed path for a task that
-genuinely requires both an accepted message and a structured result.
+A structured outcome is therefore a per-offer choice: only an offer that
+selects `result-document`, with its frozen `schema`, produces one, and a task
+that genuinely requires both an accepted message and a structured result keeps
+a typed, fail-closed path.
 
 **Only daemon → server `task.*` types are accepted here.** A `type` outside
 that set — a server → daemon type (`task.offer`, `conn.ack`, etc.) arriving
@@ -2583,9 +2603,9 @@ a normal slow turn.
 ## 13. Compatibility suite
 
 Compatibility between releases is decided by
-`packages/protocol/src/__tests__/compat.test.ts`, which runs the published
-decoders of the floor release and the previous release against the
-append-only corpus (see "Freeze rule"). It replaces the hand-built
+`packages/protocol/src/__tests__/compat.test.ts` (see "Freeze rule"; until a
+v3 release is published it proves v3 self-consistency and that the last v2
+release rejects v3 bytes). It replaces the hand-built
 future-peer simulation this section used to describe. What remains below is
 the receiver policy that the suite and the behavioural tests rely on: which
 unknowns a current receiver tolerates and which it refuses. Four scenarios,
@@ -2619,15 +2639,15 @@ each with its real evidence:
    through the real end-to-end `decodeEnvelope` entrypoint (not just the
    isolated payload schema) to close the loop.
 4. **Handshake version negotiation: a daemon advertising a set that contains
-   the server's single `PROTOCOL_VERSION` (today `2`) agrees on it; a set
-   without it (e.g. `[1]`) gets a clean, typed failure, not a hang.** The schema half (`conn.hello` accepts
+   the server's single `PROTOCOL_VERSION` (today `3`) agrees on it; a set
+   without it (e.g. `[2]`) gets a clean, typed failure, not a hang.** The schema half (`conn.hello` accepts
    either shape; `conn.ack` can only ever express one resolved version) is in
    `version-negotiation-drill.test.ts`. The negotiated version is selected at
    long-poll admission by checking whether the daemon advertises the server's
    single `PROTOCOL_VERSION`; a disjoint set is rejected before any task
    message is accepted. The real integration test exercises the rejection
    path and a timeout race, so incompatibility is observable rather than a
-   hanging request. The v1 → v2 cut has no N-1 reader, so the "highest common
+   hanging request. The v1 → v2 and v2 → v3 cuts have no N-1 reader, so the "highest common
    version across an N/N-1 range" policy remains future work.
 
 **Adjacent honest note (gatekeeper advisory, docs-only, no code change): an
@@ -2745,9 +2765,10 @@ these optional fields.
 ## SQLite startup check for wire-major upgrades
 
 The embedded server checks every pending mailbox row when it opens SQLite.
-A non-v2 major, missing major, or malformed JSON causes `SqliteSchemaError` with
-code `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`. SQLite schema version 4 alone does
-not prove that the pending wire rows use v2. Retained `acked` and `expired` rows
+A major other than the current `PROTOCOL_VERSION` (3), a missing major, or
+malformed JSON causes `SqliteSchemaError` with code
+`SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`. SQLite schema version 4 alone does not
+prove that the pending wire rows use v3. Retained `acked` and `expired` rows
 do not block startup. The check does not change or retire mailbox rows.
 
 Before upgrading, stop new dispatch and let the previous server and clients
@@ -2758,7 +2779,7 @@ SELECT tenant_id, device_id, seq, message_id
 FROM mailbox_message
 WHERE state = 'pending'
   AND CASE WHEN json_valid(body)
-    THEN json_type(body, '$.v') IS NOT 'integer' OR json_extract(body, '$.v') <> 2
+    THEN json_type(body, '$.v') IS NOT 'integer' OR json_extract(body, '$.v') <> 3
     ELSE 1 END;
 ```
 
