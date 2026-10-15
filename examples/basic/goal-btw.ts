@@ -4,11 +4,27 @@
 // and only when the Host calls tickGoal. No background timer is installed. The Host
 // owns authentication, selected context, semantic acceptance and scheduling.
 import type { ByokServer, AgentExecutionInput } from '@byok-sdk/server';
-import type { DaemonConfig } from '@byok-sdk/client';
+import type { ResultSchema } from '@byok-sdk/protocol';
 import { HostRevisionConflict, SqliteGoalBtwStore, type HostSnapshot } from './goal-btw-store';
 
 export const GOAL_RESULT_CONTRACT = 'host-goal-step-v1';
 export const BTW_RESULT_CONTRACT = 'host-btw-answer-v1';
+/** Frozen model-visible shapes; Host semantic acceptance still runs after delivery. */
+export const GOAL_RESULT_SCHEMA = {
+  type: 'object', oneOf: [
+    { type: 'object', additionalProperties: false, required: ['contract', 'outcome'],
+      properties: { contract: { const: GOAL_RESULT_CONTRACT }, outcome: { enum: ['continue', 'complete'] } } },
+    { type: 'object', additionalProperties: false, required: ['contract', 'outcome', 'reason'],
+      properties: { contract: { const: GOAL_RESULT_CONTRACT }, outcome: { const: 'blocked' }, reason: { type: 'string', minLength: 1 } } },
+    { type: 'object', additionalProperties: false, required: ['contract', 'outcome', 'reason', 'resumeAt'],
+      properties: { contract: { const: GOAL_RESULT_CONTRACT }, outcome: { const: 'wait' }, reason: { type: 'string', minLength: 1 },
+        resumeAt: { type: ['integer', 'null'], minimum: 0, maximum: Number.MAX_SAFE_INTEGER } } },
+  ],
+} as const satisfies ResultSchema;
+export const BTW_RESULT_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['contract', 'answer'],
+  properties: { contract: { const: BTW_RESULT_CONTRACT }, answer: { type: 'string', minLength: 1 } },
+} as const satisfies ResultSchema;
 export type BotTarget = Pick<AgentExecutionInput, 'deviceId'> & Pick<AgentExecutionInput['payload'], 'agentRef' | 'egressPolicy'> & {
   runtime: 'pi' | 'claude' | 'codex';
   requiredToolsets?: AgentExecutionInput['payload']['requiredToolsets'];
@@ -78,21 +94,6 @@ function parseDecision(document: unknown, now: number): GoalDecision {
   throw new Error('Unknown goal verdict');
 }
 
-type ResultTask = Parameters<NonNullable<DaemonConfig['resultDocument']>['extract']>[1];
-/** Use the existing daemon resultDocument.extract seam; unknown contracts are not handled. */
-export function extractBotResult(output: string, task: ResultTask): unknown {
-  const contract = task.terminalProjection?.mode === 'result-document' ? task.terminalProjection.contract : undefined;
-  if (contract !== GOAL_RESULT_CONTRACT && contract !== BTW_RESULT_CONTRACT) return undefined;
-  const document: unknown = JSON.parse(output);
-  if (contract === GOAL_RESULT_CONTRACT) parseDecision(document, -1);
-  else {
-    if (!document || typeof document !== 'object' || Array.isArray(document)) throw new Error('Invalid side result');
-    const doc = document as { contract?: unknown; answer?: unknown };
-    if (Object.keys(doc).sort().join(',') !== 'answer,contract' || doc.contract !== contract || typeof doc.answer !== 'string' || !doc.answer.trim()) throw new Error('Invalid side result');
-  }
-  return document;
-}
-
 export class GoalBtwHost {
   constructor(private readonly server: Server, private readonly store: SqliteGoalBtwStore, private readonly now: () => number,
     private readonly acceptGoalResult: (goal: Readonly<HostGoal>, decision: GoalDecision) => boolean | Promise<boolean>) {}
@@ -150,9 +151,9 @@ export class GoalBtwHost {
     if (goal.status === 'waiting' && goal.resumeAt !== null && now >= goal.resumeAt) goal.status = 'active';
     if (goal.status !== 'active') throw new Error('Goal is not active');
     if (goal.steps >= goal.maxSteps || now >= goal.deadline) throw new Error('Goal budget exhausted');
-    const instruction = `Objective:\n${goal.objective}\n\nHost-selected context:\n${context}\n\nReturn only a JSON document with contract "${GOAL_RESULT_CONTRACT}" and outcome "continue", "complete", "blocked" or "wait". blocked requires reason; wait requires reason and resumeAt (future epoch milliseconds or null for an external event). Report complete only with evidence that the objective is fulfilled.`;
+    const instruction = `Objective:\n${goal.objective}\n\nHost-selected context:\n${context}\n\nCall submit_result with a JSON document with contract "${GOAL_RESULT_CONTRACT}" and outcome "continue", "complete", "blocked" or "wait". blocked requires reason; wait requires reason and resumeAt (future epoch milliseconds or null for an external event). Report complete only with evidence that the objective is fulfilled.`;
     const { deviceId, ...selection } = goal.target;
-    const input: Input = { taskId, deviceId, payload: { ...selection, instruction, terminalProjection: { mode: 'result-document', contract: GOAL_RESULT_CONTRACT } } };
+    const input: Input = { taskId, deviceId, payload: { ...selection, instruction, terminalProjection: { mode: 'result-document', contract: GOAL_RESULT_CONTRACT, schema: GOAL_RESULT_SCHEMA } } };
     goal.pending = { input, phase: 'reserved' }; goal.steps += 1; goal.resumeAt = null; goal.reason = null;
     return this.store.write(`goal:${id}`, revision, goal, taskId);
   }
@@ -286,8 +287,8 @@ export class GoalBtwHost {
     if (input.destination === input.mainDestination || input.taskId === input.mainTaskId) throw new Error('btw requires an independent task and destination');
     const { deviceId, ...selection } = input.target;
     const execution: Input = { taskId: input.taskId, deviceId, payload: { ...selection,
-      instruction: `Host-selected main-thread snapshot (${input.snapshotRevision}):\n${input.snapshot}\n\nSide question:\n${input.question}\n\nAnswer independently. Do not change or steer the main task. Return only JSON {"contract":"${BTW_RESULT_CONTRACT}","answer":"your answer"}.`,
-      terminalProjection: { mode: 'result-document', contract: BTW_RESULT_CONTRACT } } };
+      instruction: `Host-selected main-thread snapshot (${input.snapshotRevision}):\n${input.snapshot}\n\nSide question:\n${input.question}\n\nAnswer independently. Do not change or steer the main task. Call submit_result with JSON {"contract":"${BTW_RESULT_CONTRACT}","answer":"your answer"}.`,
+      terminalProjection: { mode: 'result-document', contract: BTW_RESULT_CONTRACT, schema: BTW_RESULT_SCHEMA } } };
     return this.store.write(`btw:${input.id}`, null, {
       kind: 'btw', id: input.id, mainTaskId: input.mainTaskId, mainAgentId: main.agentRef.agentId,
       mainDestination: input.mainDestination, destination: input.destination, snapshotRevision: input.snapshotRevision,

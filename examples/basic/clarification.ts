@@ -5,12 +5,32 @@
 // the receiver must durably deduplicate deliveryId. Never use SDK/Agent DBs here.
 import { randomUUID } from 'node:crypto';
 import type { ByokServer, AgentExecutionInput } from '@byok-sdk/server';
-import type { DaemonConfig } from '@byok-sdk/client';
+import type { ResultSchema } from '@byok-sdk/protocol';
 import { HostRevisionConflict, type HostSnapshot } from './goal-btw-store';
 import type { BotTarget } from './goal-btw';
 import { SqliteClarificationStore } from './clarification-store';
 
 export const CLARIFICATION_CONTRACT = 'clarification-step.v1';
+const questionProperties = {
+  contract: { const: CLARIFICATION_CONTRACT }, outcome: { const: 'needs_input' },
+  questionId: { type: 'string', minLength: 1, maxLength: 200 }, question: { type: 'string', minLength: 1, maxLength: 4096 },
+  checkpoint: { type: 'string', minLength: 1, maxLength: 4096 },
+} as const;
+const questionFields = ['contract', 'outcome', 'questionId', 'question', 'checkpoint', 'answerKind'] as const;
+export const CLARIFICATION_SCHEMA = {
+  type: 'object', oneOf: [
+    { type: 'object', additionalProperties: false, required: ['contract', 'outcome'],
+      properties: { contract: { const: CLARIFICATION_CONTRACT }, outcome: { const: 'complete' } } },
+    { type: 'object', additionalProperties: false, required: ['contract', 'outcome', 'reason'],
+      properties: { contract: { const: CLARIFICATION_CONTRACT }, outcome: { const: 'blocked' }, reason: { type: 'string', minLength: 1, maxLength: 4096 } } },
+    { type: 'object', additionalProperties: false, required: questionFields,
+      properties: { ...questionProperties, answerKind: { const: 'text' } } },
+    { type: 'object', additionalProperties: false, required: [...questionFields, 'options'],
+      properties: { ...questionProperties, answerKind: { const: 'single_choice' }, options: { type: 'array', minItems: 2, maxItems: 8,
+        items: { type: 'object', additionalProperties: false, required: ['id', 'label'],
+          properties: { id: { type: 'string', minLength: 1, maxLength: 100 }, label: { type: 'string', minLength: 1, maxLength: 500 } } } } } },
+  ],
+} as const satisfies ResultSchema;
 export type ClarificationResult =
   | { contract: typeof CLARIFICATION_CONTRACT; outcome: 'complete' }
   | { contract: typeof CLARIFICATION_CONTRACT; outcome: 'blocked'; reason: string }
@@ -81,11 +101,6 @@ export function parseClarification(document: unknown): ClarificationResult {
   } else throw new Error('Unknown clarification outcome');
   return structuredClone(document) as ClarificationResult;
 }
-type ResultTask = Parameters<NonNullable<DaemonConfig['resultDocument']>['extract']>[1];
-export function extractClarification(output: string, task: ResultTask): unknown {
-  if (task.terminalProjection?.mode !== 'result-document' || task.terminalProjection.contract !== CLARIFICATION_CONTRACT) return undefined;
-  return parseClarification(JSON.parse(output));
-}
 const stopped = (run: ClarificationRun) => ['cancelled','expired','obsolete','blocked','complete'].includes(run.status);
 
 export class ClarificationHost {
@@ -102,9 +117,9 @@ export class ClarificationHost {
   }
   private input(run: ClarificationRun, taskId: string, answer?: { ticket: Ticket; value: string }): Input {
     text(taskId,'taskId',200);
-    const instruction = `Objective:\n${run.objective}\nHost-selected context (${run.contextRevision}):\n${run.context}\n${answer ? `Validated clarification answer:\n${JSON.stringify({ question: answer.ticket.result, answer: answer.value })}\n` : ''}Return only JSON with contract "${CLARIFICATION_CONTRACT}" and outcome complete, blocked (reason), or needs_input (questionId, question, checkpoint, answerKind). answerKind text has no options; single_choice requires 2-8 unique {id,label} options. No additional fields. Clarification never grants tool permission.`;
+    const instruction = `Objective:\n${run.objective}\nHost-selected context (${run.contextRevision}):\n${run.context}\n${answer ? `Validated clarification answer:\n${JSON.stringify({ question: answer.ticket.result, answer: answer.value })}\n` : ''}Call submit_result with JSON with contract "${CLARIFICATION_CONTRACT}" and outcome complete, blocked (reason), or needs_input (questionId, question, checkpoint, answerKind). answerKind text has no options; single_choice requires 2-8 unique {id,label} options. No additional fields. Clarification never grants tool permission.`;
     const { deviceId, ...selection } = run.target;
-    return { taskId, deviceId, payload: { ...selection, instruction, terminalProjection: { mode: 'result-document', contract: CLARIFICATION_CONTRACT } } };
+    return { taskId, deviceId, payload: { ...selection, instruction, terminalProjection: { mode: 'result-document', contract: CLARIFICATION_CONTRACT, schema: CLARIFICATION_SCHEMA } } };
   }
   start(input: Omit<ClarificationRun, 'tenantId'|'status'|'generation'|'pending'|'tickets'|'reason'>, taskId: string): HostSnapshot<ClarificationRun> {
     for (const key of ['id','sessionId','respondentId','destination','contextRevision','objective'] as const) text(input[key],key);

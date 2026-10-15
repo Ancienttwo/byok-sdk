@@ -9,7 +9,7 @@ Bot adoption still require acceptance.
 ## Composition
 
 ```ts
-import { GoalBtwHost, extractBotResult } from './goal-btw';
+import { GoalBtwHost } from './goal-btw';
 import { SqliteGoalBtwStore } from './goal-btw-store';
 
 // Select a separate Host database and namespace matching your server product.
@@ -19,7 +19,7 @@ const bot = new GoalBtwHost(byokServer, hostState, () => Date.now(),
   async (goal, decision) => verifyProductAcceptance(goal.lastTaskId, decision));
 
 // On the device: configure the same egressPolicy selected in the target,
-// agentHome, and resultDocument: { extract: extractBotResult }.
+// agentHome, and hostedJournal: { mode: 'sqlite' }. The runtime calls submit_result.
 const goal = bot.startGoal({
   id: hostGoalId, objective, target, maxSteps: 8, deadline: Date.now() + 600_000,
 });
@@ -38,8 +38,7 @@ const settled = await bot.reconcileGoal(hostGoalId, latest.revision);
 
 `target` supplies exact deviceId, AgentRef, runtime and egressPolicy;
 requiredToolsets may be selected explicitly. The example uses one internal
-result-document channel and no user messageEgress. Fresh result-document support
-must be advertised by both ends. The SDK still applies canonical-home admission:
+result-document channel and no user messageEgress. Wire v3 carries the frozen result schema; no result-document capability flag is negotiated. The SDK still applies canonical-home admission:
 no positive physical release receipt is inferred from a terminal. A busy home
 can decline the next step; that is a blocked goal, not an automatic retry.
 
@@ -47,7 +46,7 @@ The Host is responsible for authenticated entrypoints, context budgets, SQL
 ownership/permissions/retention, goal-result semantic acceptance and scheduling.
 The fixture acceptance callback is not a production goal-quality check. A JSON
 `complete` from the model alone is not enough: `acceptGoalResult` must establish
-product-specific evidence and be idempotent: a crash/CAS race may evaluate the same terminal again. Unknown contracts are ignored by the extractor;
+product-specific evidence and be idempotent: a crash/CAS race may evaluate the same terminal again. Unknown or malformed result documents are refused by the frozen schema;
 recognized contracts demand strict JSON and exact fields.
 
 ## Result documents and waiting

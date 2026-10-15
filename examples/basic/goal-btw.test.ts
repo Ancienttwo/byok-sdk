@@ -1,4 +1,5 @@
 import { InMemoryDeviceCredentialStore } from '../../scripts/testing/device-credentials.mjs';
+import { validateResultOutcome } from '@byok-sdk/protocol';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -6,7 +7,7 @@ import { serve } from '@hono/node-server';
 import { createByokServer, type ByokServer } from '@byok-sdk/server';
 import { createDaemonWithAdapters, type Daemon, type AgentEgressPolicy } from '@byok-sdk/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GoalBtwHost, GOAL_RESULT_CONTRACT, BTW_RESULT_CONTRACT, extractBotResult, type BotTarget } from './goal-btw';
+import { GoalBtwHost, GOAL_RESULT_CONTRACT, BTW_RESULT_CONTRACT, GOAL_RESULT_SCHEMA, BTW_RESULT_SCHEMA, type BotTarget } from './goal-btw';
 import { SqliteGoalBtwStore, HostRevisionConflict } from './goal-btw-store';
 import { BotStubAdapter, waitForReady, waitForTaskCleanup } from './goal-btw.test-support';
 
@@ -58,7 +59,7 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
     adapter = new BotStubAdapter();
     daemon = createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-example-stub' }, productName: 'Example Bot',
       productId: 'goal-btw-test', serverUrl: listening.url, workspaceRoot: path.join(root, 'ws'), storeDir: path.join(root, 'sdk'),
-      agentHome: { hostStorageRoot: path.join(root, 'homes') }, agentEgress: { policy }, resultDocument: { extract: extractBotResult },
+      agentHome: { hostStorageRoot: path.join(root, 'homes') }, agentEgress: { policy }, hostedJournal: { mode: 'sqlite' },
     }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore(), longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
     const pair = await byok.pairing.createPairingCode({ productId: 'goal-btw-test' });
     deviceId = (await daemon.pair(pair.code)).deviceId;
@@ -75,7 +76,7 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
     const sent = await startStep();
     const offer = await byok.tasks.offer('step-1');
     expect(offer).toMatchObject({ taskId: 'step-1', deviceId, type: 'task.offer_for_agent_with_egress_fresh', delivered: true,
-      payload: { runtime: 'pi', agentRef: target().agentRef, terminalProjection: { mode: 'result-document', contract: GOAL_RESULT_CONTRACT } } });
+      payload: { runtime: 'pi', agentRef: target().agentRef, terminalProjection: { mode: 'result-document', contract: GOAL_RESULT_CONTRACT, schema: GOAL_RESULT_SCHEMA } } });
     expect(offer?.payload).not.toHaveProperty('sessionRef'); expect(offer?.payload).not.toHaveProperty('messageEgress');
     adapter.sessions.get('step-1')!.finish(result('continue')); await terminal('step-1');
     const continued = await host.reconcileGoal('goal', sent.revision);
@@ -96,7 +97,7 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
     const starts = adapter.starts.length;
     const { deviceId, ...selection } = target('main-agent');
     await byok.executions.submit({ deviceId, taskId: 'same-home-side', payload: { ...selection, instruction: 'side question',
-      terminalProjection: { mode: 'result-document', contract: BTW_RESULT_CONTRACT } } });
+      terminalProjection: { mode: 'result-document', contract: BTW_RESULT_CONTRACT, schema: BTW_RESULT_SCHEMA } } });
     await terminal('same-home-side');
     expect((await byok.tasks.deviceTerminal('same-home-side'))?.envelope).toMatchObject({ type: 'task.decline', payload: { reason: 'agent home busy: 1 active attempt(s)', code: 'agent_home_writer_busy' } });
     expect(adapter.starts).toHaveLength(starts);
@@ -248,7 +249,7 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
     expect(adapter.sessions.get('cancel-before-offer')?.steered ?? 0).toBe(0);
   });
 
-  it('malformed verdict is blocked by the real result extractor', async () => {
+  it('malformed verdict is blocked by the frozen result schema', async () => {
     const sent = await startStep(); adapter.sessions.get('step-1')!.finish({ contract: GOAL_RESULT_CONTRACT, outcome: 'complete', surprise: true }); await terminal('step-1');
     expect((await byok.tasks.deviceTerminal('step-1'))?.envelope.type).toBe('task.fail');
     expect((await host.reconcileGoal('goal', sent.revision)).value.status).toBe('blocked');
@@ -260,12 +261,14 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
     expect((await refusing.reconcileGoal('goal', sent.revision)).value).toMatchObject({ status: 'blocked', reason: 'goal_result_not_accepted' });
   });
 
-  it('extractor dispatches exact contract and refuses non-JSON/unknown fields', () => {
-    const task = (contract: string) => ({ taskId: 't', sessionRef: 's', terminalProjection: { mode: 'result-document' as const, contract } });
-    expect(extractBotResult('not JSON', task('some-other-contract'))).toBeUndefined();
-    expect(() => extractBotResult('```json\n{}\n```', task(GOAL_RESULT_CONTRACT))).toThrow();
-    expect(() => extractBotResult(JSON.stringify({ contract: BTW_RESULT_CONTRACT, answer: 'x', extra: 1 }), task(BTW_RESULT_CONTRACT))).toThrow();
-    expect(extractBotResult(JSON.stringify(result('complete')), task(GOAL_RESULT_CONTRACT))).toEqual(result('complete'));
+  it('frozen schemas require the exact contract, JSON data and declared fields', () => {
+    expect(validateResultOutcome(GOAL_RESULT_SCHEMA, { contract: 'some-other-contract', outcome: 'complete' }).ok).toBe(false);
+    expect(validateResultOutcome(GOAL_RESULT_SCHEMA, '```json\n{}\n```').ok).toBe(false);
+    expect(validateResultOutcome(BTW_RESULT_SCHEMA, { contract: BTW_RESULT_CONTRACT, answer: 'x', extra: 1 }).ok).toBe(false);
+    const valid = validateResultOutcome(GOAL_RESULT_SCHEMA, result('complete'));
+    expect(valid.ok).toBe(true);
+    if (!valid.ok) throw new Error('valid goal outcome was refused');
+    expect(valid.canonical).toEqual(result('complete'));
   });
 
   it('sending a reserved step after its deadline never creates an SDK offer', async () => {
