@@ -8,7 +8,8 @@
   `dispatchFreshAgentEgress` and public `enqueueFreshAgentEgressOffer` are removed,
   with `RecurringExecutionInput`, `FreshAgentEgressDispatchInput` and
   `AgentEgressFreshSessionDispatchInput`. Host-owned taskId, exact deviceId,
-  runtime, AgentRef, egressPolicy and terminalProjection are required.
+  runtime or harnessId (#386), AgentRef, egressPolicy and terminalProjection are
+  required.
   messageEgress is optional; context and a registered consumer are required only
   when selected, and context without messageEgress is rejected. Submission returns
   EnqueuedOffer and provisions the server relay. Resubmitting a delivered taskId
@@ -73,8 +74,17 @@
 
 - **Protocol public metadata change (next MINOR; #386)** — `WireAddition` is a
   closed union with required `kind: 'envelope' | 'http'`; `surface`/`field`
-  remain available and `requiredReceiverCapabilities` keeps its signature and
-  envelope admission behaviour. The single `WIRE_ADDITIONS` table now declares
+  remain available and `requiredReceiverCapabilities` keeps its signature.
+  Admission is tighter (#480): `dispatchSelection` and `requiredToolsets` are
+  gated rows on `task.offer_for_agent`, `task.offer_for_agent_with_egress`,
+  `task.offer_for_agent_with_egress_fresh` and `task.offer_prepared`, so a
+  cloud offer carrying either field is refused before any mailbox write unless
+  the device durably advertised `dispatch-selection` / `toolset-selection`.
+  Hosts that ship toolsets to those offers must target devices advertising
+  `toolset-selection`. `AgentExecutionInput` now accepts a payload with
+  `harnessId` and no `runtime`; exactly one of `runtime` or `harnessId` is
+  required, and `harnessId` cannot be combined with `dispatchSelection`. The
+  single `WIRE_ADDITIONS` table now declares
   `MessagesSendResponse.capabilities`, `MessagesSendResponse.outcomes`,
   `MessagesSendResponse.ingress` and `EventsPollResponse.ingress` strip-safe
   against published 0.25.0/0.26.1 decoders; `accepted`/`rejected` counts stay
