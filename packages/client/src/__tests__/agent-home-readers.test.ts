@@ -693,3 +693,66 @@ describe('durable Pi and memory-reader Attempts (#317)', () => {
     expect(agentHome.executionLeaseManager.activeAttemptSummary()).toEqual({ homes: 0, attempts: 0, readerAttempts: 0 });
   });
 });
+
+describe('reader admission after a published reader terminal (#476)', () => {
+  it('a fifth reader waits for a finishing reader and is admitted once its lease is released', async () => {
+    const hostStorageRoot = await temp('byok-readers-finishing-home-');
+    const storeDir = await temp('byok-readers-finishing-store-');
+    const pi = new StubRuntimeAdapter('pi');
+    const sent: Envelope[] = [];
+    const agentHome = new AgentHomeManager({ hostStorageRoot });
+    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+      adapters: [pi],
+      workspaceRoot: await temp('byok-readers-finishing-workspace-'),
+      agentHome,
+      agentSessionHandoffs: new AgentSessionHandoffStore(),
+      deviceId: 'device-1',
+      send: (envelope) => sent.push(envelope),
+      blobClient: {
+        resolveInstruction: async () => { throw new Error('not used'); },
+        uploadArtifact: async () => { throw new Error('not used'); },
+      },
+      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
+      approvalRegistry: new ApprovalRegistry(),
+      storeDir,
+      productId: 'product-1',
+      maxConcurrentReaderAttemptsPerAgentHome: 4,
+    });
+    const readerOffer = (taskId: string, seq: number): Envelope => createEnvelope('task.offer_for_agent', {
+      instruction: 'read', runtime: 'pi', agentRef: { agentId: 'finishing-readers', profileRevision: 'r1' },
+      homeAccess: 'memory-reader',
+    }, { taskId, seq });
+    const declinesOf = (taskId: string) => sent.filter((entry) => entry.type === 'task.decline' && entry.task_id === taskId);
+
+    for (const [index, taskId] of ['reader-1', 'reader-2', 'reader-3', 'reader-4'].entries()) {
+      await runner.handleEnvelope(readerOffer(taskId, index + 1));
+    }
+    expect(pi.startCalls).toHaveLength(4);
+
+    // reader-1 publishes its terminal; its close, and so its lease release, is held.
+    const releaseClose = pi.sessions[0]!.blockClose();
+    pi.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(sent.some((entry) => entry.type === 'task.complete' && entry.task_id === 'reader-1')).toBe(true));
+    expect(agentHome.executionLeaseManager.activeAttemptSummary()).toMatchObject({ readerAttempts: 4 });
+
+    // The next busy-gate count opens the held close on the following microtask.
+    const manager = agentHome.executionLeaseManager;
+    const original = manager.activeAttemptCount.bind(manager);
+    let armed = true;
+    vi.spyOn(manager, 'activeAttemptCount').mockImplementation((home, access) => {
+      const count = original(home, access);
+      if (armed) { armed = false; queueMicrotask(releaseClose); }
+      return count;
+    });
+    await runner.handleEnvelope(readerOffer('reader-5', 5));
+
+    expect(declinesOf('reader-5')).toEqual([]);
+    expect(pi.startCalls).toHaveLength(5);
+    expect(path.basename(pi.startCalls[4]!.ctx.workspaceDir)).toBe('reader-5');
+    expect(agentHome.executionLeaseManager.activeAttemptSummary()).toMatchObject({ readerAttempts: 4 });
+
+    vi.restoreAllMocks();
+    for (const session of pi.sessions.slice(1)) session.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
+  });
+});

@@ -909,6 +909,8 @@ interface OfferPhaseContext {
   readonly taskId: string;
   readonly decline: (reason: string, retryable: boolean, code?: TaskDeclinePayload['code']) => void;
   readonly admissionWithdrawn: () => boolean;
+  /** Aborted exactly when `admissionWithdrawn()` would decline: cancel, shutdown, or the startup deadline. */
+  readonly admissionSignal: AbortSignal;
   readonly releaseReservation: () => void;
   readonly reserveHome: (reservationKey: string) => void;
 }
@@ -926,6 +928,22 @@ interface OfferRuntimeInput {
   readonly requiredToolsets: readonly string[] | undefined;
   readonly resolvedMcp: ReturnType<TaskRunner['resolveMcpServers']> | undefined;
   readonly blobAbort: AbortController;
+}
+
+/**
+ * Resolves once every attempt settled or `signal` aborted, whichever is first.
+ * Never rejects and leaves no listener behind. See `reserveOfferHome` (#476).
+ */
+async function settledOrWithdrawn(attempts: readonly Promise<unknown>[], signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return;
+  let onAbort!: () => void;
+  const withdrawn = new Promise<void>((resolve) => { onAbort = resolve; });
+  signal.addEventListener('abort', onAbort, { once: true });
+  try {
+    await Promise.race([Promise.allSettled(attempts), withdrawn]);
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+  }
 }
 
 /** The closing reply (`ActiveTask.finalTextParts`), or `undefined` when it holds only whitespace. */
@@ -2196,7 +2214,9 @@ export class TaskRunner {
       this.homeReservations.set(reservationKey, (this.homeReservations.get(reservationKey) ?? 0) + 1);
       reservedHome = reservationKey;
     };
-    const phase: OfferPhaseContext = { taskId, decline, admissionWithdrawn, releaseReservation, reserveHome };
+    const phase: OfferPhaseContext = {
+      taskId, decline, admissionWithdrawn, admissionSignal: blobAbort.signal, releaseReservation, reserveHome,
+    };
     try {
       if (this.admitOffer(phase, strictAgentOffer) === undefined) return;
 
@@ -3124,7 +3144,7 @@ export class TaskRunner {
     sessionRef: string | undefined,
     homeAccess: AgentHomeAccessMode,
   ): Promise<true | undefined> {
-    const { taskId, decline, admissionWithdrawn, reserveHome } = phase;
+    const { taskId, decline, admissionWithdrawn, admissionSignal, reserveHome } = phase;
     // WP0 (canonical Agent home single writer): execution is serialized per
     // canonical Agent home. Placed exactly here — after the receive, dedup,
     // pre-cancel and strict-Agent-only precedence above, before adapter
@@ -3141,6 +3161,21 @@ export class TaskRunner {
     //
     // Canonical-home reservations bridge this check and lease acquisition.
     // Different homes may start concurrently; check-and-reserve has no await.
+    //
+    // #476: an Attempt whose semantic terminal is already published still
+    // holds its lease until `finishOnce` releases it after `Session.close()`,
+    // the terminal commit and the memory snapshot. A Host that offers the
+    // same home right after observing that terminal would otherwise race the
+    // release. So when the count is at the limit and enough of it belongs to
+    // this runner's Attempts that are already finishing (finalization started
+    // and an in-flight finalization attempt), admission waits ONCE for those
+    // attempts to settle (or for the offer to be withdrawn), then recounts
+    // from the lease registry and reserves or declines exactly as without the
+    // wait. A finished Attempt with no in-flight finalization (failed
+    // disposal, retained ownership) is a live holder and is never waited on.
+    // Once offers are stopping, there is no wait at all.
+    // The lease registry stays the only admission authority; the wait only
+    // decides when to read it.
     //
     // The count key is derived with `canonicalHomePath()`, NOT `resolve()`:
     // this gate runs before the host's own admission veto, so it must not
@@ -3173,8 +3208,20 @@ export class TaskRunner {
     }
     if (admissionWithdrawn()) return undefined;
     const reservationKey = `${homeAccess}\0${canonicalHome}`;
-    const active = this.deps.agentHome!.executionLeaseManager.activeAttemptCount(canonicalHome, homeAccess)
+    const countHome = (): number => this.deps.agentHome!.executionLeaseManager.activeAttemptCount(canonicalHome, homeAccess)
       + (this.homeReservations.get(reservationKey) ?? 0);
+    let active = countHome();
+    // A daemon that is stopping never parks an offer: `stopAcceptingOffers`
+    // aborts only the admission signals that existed when it ran, so an offer
+    // that arrived after it would otherwise wait on a finishing Attempt.
+    if (active >= limit && !this.stoppingOffers) {
+      const finishing = this.homeFinalizations(canonicalHome, homeAccess);
+      if (finishing.length > 0 && active - finishing.length < limit) {
+        await settledOrWithdrawn(finishing, admissionSignal);
+        if (admissionWithdrawn()) return undefined;
+        active = countHome();
+      }
+    }
     if (active >= limit) {
       decline(`agent home busy: ${active} active ${readerAttempt ? 'reader ' : ''}attempt(s)`, true,
         readerAttempt ? 'agent_home_reader_busy' : 'agent_home_writer_busy');
@@ -5251,6 +5298,25 @@ export class TaskRunner {
   }
 
   private readonly finalizationAttempts = new Map<string, Promise<boolean>>();
+
+  /**
+   * In-flight finalization attempts of this runner's Attempts that hold a
+   * lease of `homeAccess` on `canonicalHome` and are already finishing. See
+   * `reserveOfferHome` (#476): only these are worth waiting on; a finished
+   * Attempt without an in-flight attempt keeps its slot as a live holder.
+   */
+  private homeFinalizations(canonicalHome: string, homeAccess: AgentHomeAccessMode): Promise<boolean>[] {
+    const attempts: Promise<boolean>[] = [];
+    for (const active of this.tasks.values()) {
+      if (!active.finalizationStarted) continue;
+      const binding = active.agentBinding;
+      if (binding === undefined || binding.resolution.canonicalHome !== canonicalHome
+        || binding.lease.homeAccess !== homeAccess) continue;
+      const attempt = this.finalizationAttempts.get(active.taskId);
+      if (attempt !== undefined) attempts.push(attempt);
+    }
+    return attempts;
+  }
 
   private finish(taskId: string): Promise<boolean> {
     const existing = this.finalizationAttempts.get(taskId);
