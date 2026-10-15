@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { AGENT_MEMORY_GUIDANCE } from '../../src/daemon/memory-guidance.ts';
 
 // Packed-artifact probe: emulate the qualified app-server transport, but call
 // the actual projected MCP child. No model request or exec compatibility lane.
@@ -53,7 +54,7 @@ async function callTool(server, tool, args) {
   const prematureExit = exit.then(() => { throw new Error('MCP helper exited before its response'); });
   let timer;
   const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => { child.kill(); reject(new Error('MCP helper response timed out')); }, 5000);
+    timer = setTimeout(() => { child.kill(); reject(new Error(`MCP helper response timed out (${tool}): ${stderr}`)); }, 5000);
   });
   const request = (...args) => Promise.race([rpc(...args), prematureExit, timeout]);
   try {
@@ -127,7 +128,10 @@ createInterface({ input: process.stdin }).on('line', line => {
   }
   if (method === 'turn/start') {
     assert.ok(opened); assert.equal(params.threadId, threadId); assert.equal(active, false);
-    assert.ok(params.input.some(item => item.type === 'text' && item.text === 'call echo'));
+    // Only the Agent execution leg carries the result server; the daemon
+    // prefixes an Agent task's instruction with its memory guidance.
+    const instruction = resultServer ? `${AGENT_MEMORY_GUIDANCE}\n\ncall echo` : 'call echo';
+    assert.ok(params.input.some(item => item.type === 'text' && item.text === instruction));
     active = true; const turnId = `turn-${++turn}`;
     send({ jsonrpc: '2.0', id, result: { turn: { id: turnId } } });
     void runTurn(turnId); return;
