@@ -89,14 +89,15 @@ describe('agent-home-contract reference server', () => {
       capabilities: ['agent-home-contract'],
     });
 
-    // A JS caller bypasses the required static type; the runtime guard holds.
+    // The required static type refuses this at compile time; a JS caller still meets the runtime guard.
     await expect(
+      // @ts-expect-error sessionRef is required on the Agent resume dispatch (#484)
       started.byok.dispatch({
         deviceId: daemon.deviceId,
         taskId: 'fresh-refused',
         instruction: 'fresh Agent work',
         agentRef,
-      } as never),
+      }),
     ).rejects.toThrow(
       'Agent resume dispatch requires an exact sessionRef; use executions.submit for fresh execution',
     );
@@ -118,6 +119,32 @@ describe('agent-home-contract reference server', () => {
     });
     expect(handle.taskId).toBe('fresh-refused');
     await awaitEnvelope(daemon, (e) => e.task_id === 'fresh-refused');
+  });
+
+  it('refuses an empty sessionRef before any durable write (#484)', async () => {
+    const started = await start();
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
+      productId: PRODUCT_ID,
+      capabilities: ['agent-home-contract'],
+    });
+
+    await expect(
+      started.byok.dispatch({
+        deviceId: daemon.deviceId,
+        taskId: 'empty-session-refused',
+        instruction: 'fresh Agent work',
+        agentRef,
+        sessionRef: '',
+      }),
+    ).rejects.toThrow(
+      'Agent resume dispatch requires an exact sessionRef; use executions.submit for fresh execution',
+    );
+
+    expect(await started.byok.tasks.attempt('empty-session-refused')).toBeUndefined();
+    expect(await started.byok.tasks.get('empty-session-refused')).toBeUndefined();
+    expect((await started.byok.tasks.list()).tasks).toHaveLength(0);
+    expect(await daemon.next()).toEqual([]);
+    expect(daemon.cursor()).toBe(0);
   });
 
   it('sends task.offer_for_agent and persists the exact AgentRef', async () => {

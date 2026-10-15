@@ -600,7 +600,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
           });
         }
         if (agentRef !== undefined) {
-          if (sessionRef === undefined) {
+          if (sessionRef === undefined || sessionRef.length === 0) {
             throw new Error(
               'Agent resume dispatch requires an exact sessionRef; use executions.submit for fresh execution',
             );

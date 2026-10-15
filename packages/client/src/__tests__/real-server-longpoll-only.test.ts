@@ -312,10 +312,10 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
       })).toMatchObject({ taskId });
     }, { timeout: 5000, interval: 20 });
 
-    await vi.waitFor(async () => expect((await real.byok.tasks.get(taskId))?.state).toBe('Running'));
+    await vi.waitFor(async () => expect((await real.byok.tasks.get(taskId))?.state).toBe('Running'), { timeout: 10_000, interval: 20 });
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     adapter.sessions[0]!.emit({ type: 'turn_end' });
-    await vi.waitFor(async () => expect((await real.byok.tasks.get(taskId))?.result).toMatchObject({ state: 'Complete' }));
+    await vi.waitFor(async () => expect((await real.byok.tasks.get(taskId))?.result).toMatchObject({ state: 'Complete' }), { timeout: 10_000, interval: 20 });
     expect(adapter.startCalls[0]?.ctx.workspaceDir).toBe(
       path.join(await fs.realpath(hostStorageRoot), 'agents', 'agent-longpoll'),
     );

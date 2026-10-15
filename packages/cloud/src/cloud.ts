@@ -2002,7 +2002,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       // starts a fresh Agent execution; that has exactly one authority,
       // `submitAgentExecution`. Refused before any attempt, receipt or mailbox
       // write, so a JS caller cannot leave a row behind.
-      if (payload.sessionRef === undefined) {
+      if (payload.sessionRef === undefined || payload.sessionRef.length === 0) {
         throw new ByokCloudError(
           'coordination_input_invalid',
           'Agent resume offer requires an exact sessionRef; use submitAgentExecution for fresh execution',
