@@ -18,6 +18,7 @@ import {
   decodeEnvelope,
   encodeEnvelope,
   isServerToDaemonType,
+  parseMessage,
   requiredReceiverCapabilities,
   type MessageType,
   type WireAddition,
@@ -126,6 +127,24 @@ function carriesEnvelopes(line: HttpCorpusLine): boolean {
   return Array.isArray(envelopes) && envelopes.length > 0;
 }
 
+/**
+ * #386: the one HTTP body whose envelopes its own schema leaves undecoded. The
+ * events page schema carries `events` as `unknown[]`; the client decodes each
+ * entry on its own with `parseMessage`, so one unknown or invalid entry stalls
+ * only its own sequence. Every envelope assertion on such a body therefore runs
+ * `parseMessage` over each entry. Pinned: any other surface still decodes its
+ * envelopes in the body schema.
+ */
+const ENTRY_DECODED_ENVELOPES: Readonly<Partial<Record<HttpSurface, 'events'>>> = { EventsPollResponse: 'events' };
+
+function undecodedEntries(line: HttpCorpusLine, decoded: Record<string, unknown>): readonly unknown[] | undefined {
+  const key = ENTRY_DECODED_ENVELOPES[line.surface];
+  if (key === undefined) return undefined;
+  const entries = decoded[key];
+  if (!Array.isArray(entries)) throw new Error(`${line.surface}.${key} did not decode to an array`);
+  return entries;
+}
+
 // ---------------------------------------------------------------------------
 // 1. Retired v2 evidence: frozen bytes, negative oracle
 // ---------------------------------------------------------------------------
@@ -185,7 +204,24 @@ describe('compat: the current (v3) decoder rejects every v2 envelope on its prot
   it.each(v2HttpCorpus.filter(carriesEnvelopes).map((line) => [line.index + 1, line.surface, line] as const))(
     'v2 HTTP line %i (%s) carries v2 envelopes and is rejected by the current HTTP decoder',
     (_n, surface, line) => {
-      expect(httpSchema(currentModule, surface).safeParse(JSON.parse(line.body)).success).toBe(false);
+      const page = httpSchema(currentModule, surface).safeParse(JSON.parse(line.body));
+      const entries = page.success ? undecodedEntries(line, page.data as Record<string, unknown>) : undefined;
+      if (entries === undefined) {
+        expect(page.success, 'the body schema decodes its envelopes').toBe(false);
+        return;
+      }
+      // The page carries its entries undecoded; each v2 entry is rejected on its own.
+      expect(entries.length).toBeGreaterThan(0);
+      for (const entry of entries) {
+        let error: unknown;
+        try {
+          parseMessage(entry);
+        } catch (caught) {
+          error = caught;
+        }
+        expect(error, 'there is no v2 reader').toBeInstanceOf(EnvelopeValidationError);
+        expect((error as EnvelopeValidationError).issues.issues.some((issue) => issue.path[0] === 'v')).toBe(true);
+      }
     },
   );
 });
@@ -332,6 +368,9 @@ function assertBatchCounts(line: HttpCorpusLine, decoded: Record<string, unknown
 function assertCurrentHttp(line: HttpCorpusLine): void {
   const decoded = httpSchema(currentModule, line.surface).parse(JSON.parse(line.body));
   expect(decoded, 'the current HTTP decoder dropped or changed the independently committed value').toEqual(line.value);
+  for (const entry of undecodedEntries(line, decoded) ?? []) {
+    expect(parseMessage(entry), 'the current envelope decoder dropped or changed a committed page entry').toEqual(entry);
+  }
   assertBatchCounts(line, decoded);
 }
 
@@ -572,17 +611,12 @@ function observedCoverage(root: SchemaNode, prefix: string, samples: readonly un
  */
 const COMPLETENESS_EXEMPTIONS: readonly { readonly below: string; readonly reason: string }[] = [
   {
-    below: 'http:EventsPollResponse.events[]',
-    reason: 'The node is exactly EnvelopeSchema; the envelope corpus covers every payload path/value per message type and every header path/value.',
-  },
-  {
     below: 'http:MessagesSendRequest.messages[]',
     reason: 'The node is exactly EnvelopeSchema; the envelope corpus covers every payload path/value per message type and every header path/value.',
   },
 ];
 
 const EXPECTED_EXEMPTION_PATHS: readonly string[] = [
-  'http:EventsPollResponse.events[]',
   'http:MessagesSendRequest.messages[]',
 ];
 
@@ -700,5 +734,11 @@ describe('compat: corpus completeness', () => {
     expect(result.unusedExemptions, 'a completeness exemption no longer matches any required path; delete it').toEqual([]);
     expect(result.missingPaths, 'append a corpus line carrying each path (both corpora are append-only)').toEqual([]);
     expect(result.missingValues, 'append a corpus line carrying each enum/literal value').toEqual([]);
+  });
+
+  it('the events page is the only body carrying undecoded entries, and they are exactly unknown (#386)', () => {
+    expect(ENTRY_DECODED_ENVELOPES, 'adding an undecoded envelope path needs a reviewed change here').toEqual({ EventsPollResponse: 'events' });
+    const root = schemaNode(jsonSchema(httpSchema(currentModule, 'EventsPollResponse')))!;
+    expect(nodeAtPath(root, '.events[]'), 'the page schema must not decode, narrow or default its entries').toEqual({});
   });
 });

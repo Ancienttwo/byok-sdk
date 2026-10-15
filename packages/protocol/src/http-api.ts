@@ -224,7 +224,12 @@ export const MessageSendOutcomeSchema = z.object({
 export type MessageSendOutcome = z.infer<typeof MessageSendOutcomeSchema>;
 
 export const EventsPollResponseSchema = z.object({
-  events: z.array(EnvelopeSchema),
+  /**
+   * Not-yet-decoded entries (#386). This schema decodes the page only; each
+   * entry is decoded on its own with `parseMessage`, so one unknown or invalid
+   * entry stalls its own sequence instead of failing every entry in the page.
+   */
+  events: z.array(z.unknown()),
   cursor: z.number().int(),
   /**
    * Server capabilities for THIS long-poll response. This is the HTTP

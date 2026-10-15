@@ -3,9 +3,10 @@ import { generateKeyPairSync, sign as signEd25519 } from 'node:crypto';
 import { serve } from '@hono/node-server';
 import {
   createEnvelope,
+  EventsPollResponseSchema,
+  parseMessage,
   PROTOCOL_VERSION,
   type Envelope,
-  type EventsPollResponse,
   type RuntimeCapabilities,
   type RuntimeId,
   type RuntimeInfo,
@@ -356,9 +357,9 @@ export async function connectFakeDaemonLongPoll(
       if (res.status !== 200) {
         throw new Error(`long-poll failed: ${res.status} ${await res.text()}`);
       }
-      const body = (await res.json()) as EventsPollResponse;
+      const body = EventsPollResponseSchema.parse(await res.json());
       cursor = body.cursor;
-      return body.events;
+      return body.events.map(parseMessage);
     },
     replay,
     send,

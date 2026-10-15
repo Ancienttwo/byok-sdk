@@ -9,24 +9,24 @@ import { createInProcessMailboxWake } from '@byok-sdk/cloud';
  * daemon crashed between receiving an envelope and journaling it.
  */
 import { createMutableClock, isCoreConflictError, type CoreStores } from '@byok-sdk/core';
-import { decodeEnvelope, type EventsPollResponse } from '@byok-sdk/protocol';
+import { decodeEnvelope } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { createHmacTokenSigner } from '../auth/tokens';
 import { fullCapabilityDeclaration } from '../capabilities';
 import { createByokCloud } from '../cloud';
 import { createInMemoryByokCloud } from '../composition/in-memory';
 import { isCloudError } from '../errors';
-import { TENANT_A, createHarness, offerPayload } from './support/harness';
+import { TENANT_A, createHarness, decodeEventsPage, offerPayload, type DecodedEventsPage } from './support/harness';
 
 async function poll(
   harness: ReturnType<typeof createHarness>,
   authorization: { authorization: string },
   cursor?: number,
-): Promise<EventsPollResponse> {
+): Promise<DecodedEventsPage> {
   const query = cursor === undefined ? '' : `?cursor=${cursor}`;
   const response = await harness.request(`/byok/events${query}`, { headers: authorization });
   expect(response.status).toBe(200);
-  return (await response.json()) as EventsPollResponse;
+  return decodeEventsPage(await response.json());
 }
 
 describe('GET /byok/events cursor semantics', () => {
@@ -364,7 +364,7 @@ describe('bounded read-ahead navigation', () => {
     expect(first.events.map(event => event.seq)).toEqual([1, 2]);
     const second = await harness.request('/byok/events?cursor=0&afterSeq=2', { headers: device.authorization });
     expect(second.status).toBe(200);
-    expect((await second.json() as EventsPollResponse).events.map(event => event.seq)).toEqual([3, 4]);
+    expect(decodeEventsPage(await second.json()).events.map(event => event.seq)).toEqual([3, 4]);
     expect((await harness.core.mailbox.readCursor(TENANT_A, device.deviceId)).ackedSeq).toBe(0);
     expect((await poll(harness, device.authorization, 0)).events).toEqual(first.events);
     const empty = await harness.request('/byok/events?cursor=0&afterSeq=4', { headers: device.authorization });

@@ -3,13 +3,12 @@ import {
   decodeEnvelope,
   type AgentEgressPolicy,
   type AgentRef,
-  type EventsPollResponse,
 } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { agentReliabilityKey } from '../agent-reliability';
 import { handleInboundEnvelope } from '../inbound';
 import { tenantStoresFor } from '../tenant-stores';
-import { TENANT_A, createHarness, type CloudHarness } from './support/harness';
+import { TENANT_A, createHarness, decodeEventsPage, type CloudHarness } from './support/harness';
 
 const AGENT_REF = { agentId: 'agent-egress', profileRevision: 'profile-egress' } as const;
 const OTHER_AGENT_REF = { agentId: 'agent-egress-other', profileRevision: 'profile-egress' } as const;
@@ -365,7 +364,7 @@ describe('hosted Agent egress contract', () => {
     await harness.cloud.cancelTask(TENANT_A, offered.taskId, 'stop before lease');
 
     const polled = await harness.request('/byok/events?cursor=0', { headers: device.authorization });
-    const pollBody = (await polled.json()) as EventsPollResponse;
+    const pollBody = decodeEventsPage(await polled.json());
     expect(pollBody.events.map((event) => event.type)).toEqual(['task.cancel']);
     expect(pollBody.events[0]).toMatchObject({ task_id: offered.taskId });
   });

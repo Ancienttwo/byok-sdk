@@ -1,7 +1,7 @@
 import {
-  ActivityIngressSchema,
   type ActivityIngress,
   BYOK_EVENTS_PATH,
+  EventsPollResponseSchema,
   MAILBOX_READ_AHEAD_CAPABILITY,
   MAILBOX_READ_AHEAD_MAX_SEQS,
   BYOK_MESSAGES_PATH,
@@ -9,6 +9,7 @@ import {
   MessagesSendResponseSchema,
   parseMessage,
   type Envelope,
+  type EventsPollResponse,
   type MessagesSendResponse,
 } from '@byok-sdk/protocol';
 import { AuthManager, DeviceRevokedError } from './auth-manager';
@@ -110,13 +111,6 @@ export interface LongPollClientOptions {
   idleDelayMs?: number;
 }
 
-interface LooseEventsPollResponse {
-  /** Raw, not-yet-validated entries — see `parseLooseEventsPollResponse`'s own doc comment for why each is validated individually, not as one array. */
-  events: unknown[];
-  cursor: number;
-  capabilities: string[];
-  ingress?: ActivityIngress;
-}
 
 /** A validated v2 acknowledgement for the posted batch; outcomes are optional until v3. */
 export interface MessageBatchPostResult {
@@ -134,44 +128,27 @@ const MAX_TRACKED_VALIDATION_FAILURE_WARNINGS = 1000;
 /** Same soft-cap discipline as {@link MAX_TRACKED_VALIDATION_FAILURE_WARNINGS}, for `warnedRouteFailures` — see that field's own doc comment. */
 const MAX_TRACKED_ROUTE_FAILURE_WARNINGS = 1000;
 
+/** An absent page advertisement is no advertised capabilities. */
+type DecodedEventsPage = EventsPollResponse & { capabilities: string[] };
+
 /**
- * M4 Phase 4 (version-negotiation drill fix): validates ONLY the OUTER shape
- * of a `/byok/events` response — `events` is an array of not-yet-validated
- * entries, `cursor` is an integer. Deliberately does NOT validate each
- * entry against the frozen `EnvelopeSchema` here the way the protocol
- * package's own `EventsPollResponseSchema` (`z.array(EnvelopeSchema)`)
- * used to be applied in one shot: that meant a SINGLE unrecognized-type
- * entry anywhere in the batch failed the ENTIRE `.parse()` call, silently
- * discarding every other, otherwise-valid entry right alongside it. Each
- * entry is now validated individually, right where it's consumed
- * (`LongPollClient.loop`, below), via `parseMessage`.
+ * Decodes the outer `/byok/events` page with the protocol's
+ * `EventsPollResponseSchema` (#386), whose `events` entries are not yet
+ * decoded: each entry is decoded individually where it is consumed
+ * (`LongPollClient.loop`), via `parseMessage`, so one unknown or invalid entry
+ * stalls only its own sequence. The page cursor is navigation the client
+ * trusts only as a safe nonnegative integer that never moves below the
+ * requested cursor; those two checks are client-local.
  */
-function parseLooseEventsPollResponse(raw: unknown, requestedCursor: number): LooseEventsPollResponse {
-  if (typeof raw !== 'object' || raw === null) {
-    throw new Error('events poll response is not an object');
-  }
-  const { events, cursor, capabilities, ingress } = raw as {
-    events?: unknown;
-    cursor?: unknown;
-    capabilities?: unknown;
-    ingress?: unknown;
-  };
-  if (!Array.isArray(events)) {
-    throw new Error('events poll response.events is not an array');
-  }
-  if (!isSafeNonnegativeInteger(cursor)) {
+function decodeEventsPage(raw: unknown, requestedCursor: number): DecodedEventsPage {
+  const page = EventsPollResponseSchema.parse(raw);
+  if (!isSafeNonnegativeInteger(page.cursor)) {
     throw new Error('events poll response.cursor is not a safe nonnegative integer');
   }
-  if (cursor < requestedCursor) {
+  if (page.cursor < requestedCursor) {
     throw new Error('events poll response.cursor regressed below the requested cursor');
   }
-  if (
-    capabilities !== undefined &&
-    (!Array.isArray(capabilities) || capabilities.some((flag) => typeof flag !== 'string'))
-  ) {
-    throw new Error('events poll response.capabilities is not an array of strings');
-  }
-  return { events, cursor, capabilities: capabilities ?? [], ...(ingress === undefined ? {} : { ingress: ActivityIngressSchema.parse(ingress) }) };
+  return { ...page, capabilities: page.capabilities ?? [] };
 }
 
 function isSafeNonnegativeInteger(value: unknown): value is number {
@@ -474,9 +451,9 @@ export class LongPollClient {
         // Validate each executable envelope independently. Both unknown types
         // and invalid payloads freeze their sequence; neither has a durable
         // disposition that would authorize acknowledging it.
-        let parsed: LooseEventsPollResponse;
+        let parsed: DecodedEventsPage;
         try {
-          parsed = parseLooseEventsPollResponse(await res.json(), afterSeq);
+          parsed = decodeEventsPage(await res.json(), afterSeq);
           validateTrustedEventsPage(parsed.events, afterSeq, parsed.cursor);
           if (afterSeq > ack && !parsed.capabilities.includes(MAILBOX_READ_AHEAD_CAPABILITY)) throw new Error('mailbox read-ahead capability was withdrawn');
         } catch (err) {

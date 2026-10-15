@@ -17,9 +17,9 @@
  * justified against the kernel's inbound, in both directions (a removal breaks
  * a daemon path; an addition promises acceptance the kernel may not implement).
  */
-import { createEnvelope, PROTOCOL_VERSION, type EventsPollResponse, type MessagesSendResponse } from '@byok-sdk/protocol';
+import { createEnvelope, PROTOCOL_VERSION, type MessagesSendResponse } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
-import { TENANT_A, createHarness, offerPayload } from './support/harness';
+import { TENANT_A, createHarness, decodeEventsPage, offerPayload } from './support/harness';
 
 /**
  * The exact advertisement, in declaration order
@@ -49,7 +49,7 @@ describe('GET /byok/events protocol capability advertisement', () => {
     const poll = await harness.json('/byok/events?cursor=0', { headers: device.authorization });
 
     expect(poll.status).toBe(200);
-    expect((poll.body as EventsPollResponse).capabilities).toEqual(EXPECTED_CAPABILITIES);
+    expect(decodeEventsPage(poll.body).capabilities).toEqual(EXPECTED_CAPABILITIES);
   });
 
   it('serves the same list on the delivered-page path', async () => {
@@ -62,7 +62,7 @@ describe('GET /byok/events protocol capability advertisement', () => {
     const poll = await harness.json('/byok/events?cursor=0', { headers: device.authorization });
 
     expect(poll.status).toBe(200);
-    const body = poll.body as EventsPollResponse;
+    const body = decodeEventsPage(poll.body);
     expect(body.events.map((event) => event.seq)).toEqual([offer.seq]);
     // A daemon that only ever sees non-empty polls must negotiate the same
     // contract as one that only ever sees empty ones.
@@ -115,7 +115,7 @@ describe('GET /byok/events protocol capability advertisement', () => {
     // locally-resolved approval is never reported at all and the server is left
     // to infer the resume. `packages/cloud/src/inbound.ts:576,610` handles the
     // message the flag unlocks.
-    expect((poll.body as EventsPollResponse).capabilities).toContain('approval_resolved');
+    expect(decodeEventsPage(poll.body).capabilities).toContain('approval_resolved');
   });
 
   it('keeps protocol flags off the deployment declaration route', async () => {

@@ -1,5 +1,5 @@
 import type { TenantId } from '@byok-sdk/core';
-import { createEnvelope, decodeEnvelope, type EventsPollResponse } from '@byok-sdk/protocol';
+import { createEnvelope, decodeEnvelope } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { handleInboundEnvelope } from '../inbound';
 import { tenantStoresFor } from '../tenant-stores';
@@ -7,8 +7,10 @@ import {
   TENANT_A,
   TENANT_B,
   createHarness,
+  decodeEventsPage,
   offerPayload,
   type CloudHarness,
+  type DecodedEventsPage,
   type PairedDevice,
 } from './support/harness';
 
@@ -20,12 +22,12 @@ async function poll(
   harness: CloudHarness,
   device: PairedDevice,
   cursor = 0,
-): Promise<EventsPollResponse> {
+): Promise<DecodedEventsPage> {
   const response = await harness.request(`/byok/events?cursor=${cursor}`, {
     headers: device.authorization,
   });
   expect(response.status).toBe(200);
-  return (await response.json()) as EventsPollResponse;
+  return decodeEventsPage(await response.json());
 }
 
 describe('host task cancellation', () => {
