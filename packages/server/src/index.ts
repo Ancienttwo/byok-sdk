@@ -56,9 +56,11 @@ import type {
   AgentHomeProjectionStatusReadback,
   AgentEgressReceipt,
   ByokServerStorage,
+  AgentResumeDispatchInput,
   CreateByokServerOptions,
   DispatchInput,
   HubStats,
+  LegacyDispatchInput,
   MachineInfo,
   TaskHandle,
   TaskResult,
@@ -72,9 +74,11 @@ export type {
   AgentHomeProjectionStatusReadback,
   AgentEgressReceipt,
   ByokServerStorage,
+  AgentResumeDispatchInput,
   CreateByokServerOptions,
   DispatchInput,
   HubStats,
+  LegacyDispatchInput,
   MachineInfo,
   ServerTaskEvent,
   TaskHandle,
@@ -596,12 +600,17 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
           });
         }
         if (agentRef !== undefined) {
+          if (sessionRef === undefined) {
+            throw new Error(
+              'Agent resume dispatch requires an exact sessionRef; use executions.submit for fresh execution',
+            );
+          }
           return cloud.enqueueAgentOffer(tenant, deviceId, {
             taskId,
             payload: {
               ...common,
               agentRef,
-              ...(sessionRef === undefined ? {} : { sessionRef }),
+              sessionRef,
               ...(terminalProjection === undefined ? {} : { terminalProjection }),
               ...(homeAccess === undefined ? {} : { homeAccess }),
               ...(requiredToolsets === undefined ? {} : { requiredToolsets }),

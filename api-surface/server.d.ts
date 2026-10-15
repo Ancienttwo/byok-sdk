@@ -8,7 +8,7 @@ import { Hono } from 'hono';
 import { type AgentExecutionInput, type EnqueuedOffer, type PairingCodeInfo, type TaskAttempt } from '@byok-sdk/cloud';
 import { type AgentRef, type AgentMessagePublishPayload, type AgentMessageDispositionPayload } from '@byok-sdk/protocol';
 import type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, TaskHandle, TaskSnapshot } from './types';
-export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, ByokServerStorage, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, ServerTaskEvent, TaskHandle, TaskResult, TaskSnapshot, } from './types';
+export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, ByokServerStorage, AgentResumeDispatchInput, CreateByokServerOptions, DispatchInput, HubStats, LegacyDispatchInput, MachineInfo, ServerTaskEvent, TaskHandle, TaskResult, TaskSnapshot, } from './types';
 export type { InboundRefusalReason, TaskOfferReadback } from '@byok-sdk/cloud';
 /**
  * M5 (approval targeting, docs/protocol.md §5.3): `TaskHandle.approve`/`reject`'s
@@ -777,8 +777,8 @@ export interface CreateByokServerOptions {
         }>;
     };
 }
-/** Input to {@link ByokServer.dispatch}. */
-export interface DispatchInput {
+/** Fields shared by every {@link DispatchInput} variant. */
+interface DispatchInputBase {
     /** Pre-persisted execution identity. Requires explicit deviceId; retries may report a kernel conflict. */
     taskId?: string;
     instruction: string;
@@ -791,11 +791,8 @@ export interface DispatchInput {
     harnessId?: string;
     /** Explicit target; registered offline devices may receive queued work. */
     deviceId: string;
-    sessionRef?: string;
     /** Logical device-local MCP toolsets required for this task; never executable definitions. */
     requiredToolsets?: ToolsetId[];
-    /** Explicit durable Agent identity; dispatches through task.offer_for_agent. */
-    agentRef?: AgentRef;
     /**
      * An explicit, consumed Agent egress policy. This may only travel with an
      * Agent-bound offer on the distinct egress-aware wire message.
@@ -815,6 +812,24 @@ export interface DispatchInput {
     /** Host-only product destination/freshness authority; never serialized to the daemon. */
     agentMessageContext?: AgentMessageServerContext;
 }
+/** Legacy or toolset dispatch: no Agent identity. */
+export interface LegacyDispatchInput extends DispatchInputBase {
+    agentRef?: undefined;
+    sessionRef?: string;
+}
+/**
+ * Agent resume dispatch: an explicit durable Agent identity plus the exact
+ * session being resumed, via task.offer_for_agent (or its egress variant). A
+ * fresh Agent execution is not a dispatch; it has the single authority
+ * `executions.submit`. The wire keeps `sessionRef` optional; the Host API does
+ * not, and the runtime refuses its absence regardless of the static type.
+ */
+export interface AgentResumeDispatchInput extends DispatchInputBase {
+    agentRef: AgentRef;
+    sessionRef: string;
+}
+/** Input to {@link ByokServer.dispatch}. */
+export type DispatchInput = LegacyDispatchInput | AgentResumeDispatchInput;
 /** Host control-plane input for one exact content-read request. */
 export interface AgentContentReadRequest {
     readonly deviceId: string;
@@ -1199,6 +1214,7 @@ export interface HubStats {
     /** Milliseconds since `createByokServer` returned this instance. */
     uptimeMs: number;
 }
+export {};
 // ==== @byok-sdk/server dist/wakes/types.d.ts ====
 /** One Host-owned, one-shot wall-clock wake. Periodic rules remain in the Host. */
 export interface WakeScheduleInput {
