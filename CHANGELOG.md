@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Breaking (protocol type, client; #386)** — the daemon decodes its HTTP
+  reads with the protocol schemas only. `EventsPollResponse.events` is now
+  `unknown[]` (`EventsPollResponseSchema.events` is `z.array(z.unknown())`):
+  the page schema no longer decodes entries. Migration: decode each entry with
+  `parseMessage` (or `decodeEnvelope` for a raw line), as the client does, so
+  one unknown or invalid entry stalls only its own sequence. The page `cursor`
+  shape is unchanged. Token renewal decodes `/byok/challenge` and
+  `/byok/token` with `ChallengeResponseSchema` / `TokenResponseSchema`; a body
+  that fails its schema throws the new `AuthResponseInvalidError` (`route`,
+  `cause`) and keeps the prior credential. Host-visible tightening: a token
+  `expiresAt` that is not an ISO 8601 timestamp with `Z` or a numeric offset
+  now fails renewal instead of being stored. No wire or protocol-version
+  change.
+
 - **Breaking (protocol/client/server/cloud, #468)** — wire major 3 replaces
   result extractors with the schema-bound `submit_result` outcome channel.
   Outcomes stage durably before acknowledgement and are delivered only by a

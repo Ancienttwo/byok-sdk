@@ -2746,6 +2746,20 @@ export declare class AuthRequestAbortedError extends Error {
     readonly reason: 'deadline' | 'stopped';
     constructor(reason: 'deadline' | 'stopped');
 }
+/**
+ * Thrown when a successful `/byok/challenge` or `/byok/token` response body
+ * does not satisfy its protocol schema (`ChallengeResponseSchema` /
+ * `TokenResponseSchema`, #386) — for example a missing field or a token
+ * `expiresAt` that is not an ISO timestamp with an offset. The renewal fails
+ * and the prior credential is kept unchanged; nothing is inferred from the
+ * malformed body. The schema failure rides in `cause`. Not a revocation.
+ */
+export declare class AuthResponseInvalidError extends Error {
+    readonly route: 'challenge' | 'token';
+    constructor(route: 'challenge' | 'token', options: {
+        cause: unknown;
+    });
+}
 export interface AuthManagerOptions {
     serverUrl: string;
     store: DeviceStore;
