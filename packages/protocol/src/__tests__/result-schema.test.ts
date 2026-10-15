@@ -324,6 +324,24 @@ describe('result schema subset: bounded depth and bounded issues', () => {
     expect(validateResultOutcome(outcomeSchema, { value: [[[1]]] }).ok).toBe(true);
   });
 
+  it('validates a broad outcome through nested oneOf at the admitted depth limit', () => {
+    // 15 oneOf/items pairs + properties + the leaf items = 32 subschema levels.
+    // This exercises the interpreted validator, not just the admission guard.
+    let node: Record<string, unknown> = { type: 'array', items: { type: 'integer' } };
+    let valid: unknown = Array.from({ length: 4_096 }, (_, index) => index);
+    let invalid: unknown = [...valid as number[], 'invalid'];
+    for (let index = 0; index < 15; index += 1) {
+      node = { oneOf: [{ type: 'array', items: node }, { type: 'null' }] };
+      valid = [valid];
+      invalid = [invalid];
+    }
+    const schema = root({ properties: { value: node }, required: ['value'] });
+    expect(checkResultSchema(schema).ok).toBe(true);
+    expect(byteLength({ value: valid })).toBeLessThan(RESULT_OUTCOME_MAX_BYTES);
+    expect(validateResultOutcome(schema, { value: valid }).ok).toBe(true);
+    expect(rejected(validateResultOutcome(schema, { value: invalid })).reason).toBe('schema-mismatch');
+  });
+
   it(`caps the issue list at ${RESULT_ISSUES_MAX_COUNT} entries and marks the cut`, () => {
     const properties = Object.fromEntries(Array.from({ length: 50 }, (_, index) => [`p${index}`, { pattern: 'x' }]));
     const refused = rejected(checkResultSchema(root({ properties })));

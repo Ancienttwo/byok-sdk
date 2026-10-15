@@ -3537,6 +3537,50 @@ export interface AgentMessagePublishResult {
     messageId: string;
     state: 'staged' | 'pending';
 }
+/**
+ * `agent_results.describe`: the SDK result helper asks, by its per-task
+ * context token, for the one tool it advertises. The schema is the offer's
+ * frozen result schema and travels only over this authenticated socket,
+ * never through the helper's environment or argv.
+ */
+export interface AgentResultDescribeParams {
+    contextToken: string;
+}
+export declare function parseAgentResultDescribeParams(value: unknown): AgentResultDescribeParams | undefined;
+export interface AgentResultDescribeResult {
+    name: string;
+    description: string;
+    inputSchema: Record<string, unknown>;
+}
+/**
+ * `agent_results.submit`: the helper forwards the model's raw `submit_result`
+ * arguments as `outcome`. The daemon is the only validator.
+ */
+export interface AgentResultSubmitParams {
+    contextToken: string;
+    outcome: unknown;
+}
+export declare function parseAgentResultSubmitParams(value: unknown): AgentResultSubmitParams | undefined;
+/** One bounded validation issue, as the protocol's `validateResultOutcome` reports it. */
+export interface AgentResultIssue {
+    pointer: string;
+    keyword: string;
+    message: string;
+}
+/**
+ * `staged` means only that the canonical outcome is durably recorded for this
+ * task; delivery is decided at `turn_end`. `rejected` stores nothing and the
+ * runtime may submit again.
+ */
+export type AgentResultSubmitResult = {
+    state: 'staged';
+    receiptId: string;
+} | {
+    state: 'rejected';
+    reason: string;
+    issues: AgentResultIssue[];
+    truncated: boolean;
+};
 export interface AgentMemoryRecallParams {
     contextToken: string;
     path: string;
@@ -3823,7 +3867,6 @@ import { type LocalTaskJournal } from './journal/journal';
 import { type JournalOpenFaultSeam } from './journal/sqlite-support';
 import { type StorageConfig } from './retention/config';
 import { type RetentionTimers } from './retention/sweeper';
-import { type ResultDocumentExtractor } from './task-runner';
 import { type ProgressBatcherOptions } from './progress-batcher';
 import { type AgentEgressReliableAppendResult } from './agent-egress-controller';
 import { type AgentEgressStatus } from './agent-egress-policy';
@@ -4128,48 +4171,6 @@ export interface DaemonConfig {
      * Timing and event-count batching policy. The server owns the byte ceiling.
      */
     progressBatch?: ProgressBatcherOptions;
-    /**
-     * additive-minor (`task.complete.document`): the seam through which this
-     * product turns a finished task's final output text into the STRUCTURED
-     * terminal result the wire carries as `task.complete.document`, and the
-     * server projects into `TaskResult.document`.
-     *
-     * `extract(finalOutput, task)` is called exactly once per task, at the
-     * moment `task.complete` is built, with the same text that becomes
-     * `summary` (the concatenated `progress` events for that task) plus the
-     * task's `taskId`/`sessionRef`. Return `undefined` for "no structured
-     * result this time". Everything about the document's SHAPE is the
-     * product's business — the SDK never inspects, validates, or transforms
-     * it; extraction logic (prompting for JSON, parsing a fenced block,
-     * validating against the product's own schema) is product glue and belongs
-     * in this callback, not in the SDK.
-     *
-     * The SDK enforces exactly two wire rules, via the protocol's own
-     * `checkResultDocument`: the value must be JSON-serializable, and at most
-     * `RESULT_DOCUMENT_MAX_BYTES` (1 MiB) as canonical JSON. Stay under ~512
-     * KiB in practice (docs/protocol.md); a bigger result belongs in an
-     * artifact, not here.
-     *
-     * FAIL-CLOSED, never silent: if the extractor throws, returns a promise
-     * (the seam is synchronous and the runtime enforces it — an unawaited
-     * promise would be encoded as an empty document), produces something
-     * unsendable, or produces a document while the connected server never
-     * advertised the `result-document` capability (an old server would strip
-     * the field on arrival without a word), the task is reported as
-     * `task.fail` with `retryable: false` and a reason prefixed
-     * `result document undeliverable` — see
-     * `RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX` (`task-runner.ts`).
-     * Completing a task while quietly discarding the structured result it
-     * exists to produce is not an option this SDK offers.
-     *
-     * Omitted entirely by default, in which case the completion path is
-     * unchanged in every respect — no extractor call, no capability check, and
-     * a `task.complete` payload byte-identical to the one sent before this
-     * field existed.
-     */
-    resultDocument?: {
-        readonly extract: ResultDocumentExtractor;
-    };
     /**
      * M5 batch-3 (workstream 2): deadline bound on the graceful-shutdown
      * sequence's own wait for `TaskRunner.shutdownActiveTasks` to finish
@@ -4603,6 +4604,41 @@ export declare class CursorStore {
     /** Remove any persisted cursor for (serverUrl, deviceId) — a no-op if none exists. Called from `pair()` (finding F5) so a device that's about to be replaced never leaves a cursor a future, unrelated device could somehow inherit. */
     clear(serverUrl: string, deviceId: string): Promise<void>;
 }
+// ==== @byok-sdk/client dist/daemon/daemon-errors.d.ts ====
+/**
+ * A `DaemonConfig` field that no longer exists was supplied. Construction
+ * refuses it rather than ignoring it, so a host upgrading across a removal
+ * learns at startup which seam is gone instead of silently losing behavior.
+ */
+export declare class DaemonConfigFieldRemovedError extends Error {
+    /** The removed path, e.g. `resultDocument` or `agentEgress.sanitizer`. */
+    readonly field: string;
+    readonly code: 'daemon_config_field_removed';
+    constructor(
+    /** The removed path, e.g. `resultDocument` or `agentEgress.sanitizer`. */
+    field: string, message: string);
+}
+export type DaemonJournalProtocolRecord = 'recovery-offer' | 'pending-terminal';
+/**
+ * The local journal holds envelope bytes of another wire major. This daemon
+ * has no reader for them, so startup stops before it writes, rewrites or
+ * deletes any journal row: an operator drains or removes the old journal
+ * with the release that wrote it (drain-then-upgrade).
+ */
+export declare class DaemonJournalProtocolUnsupportedError extends Error {
+    readonly taskId: string;
+    readonly record: DaemonJournalProtocolRecord;
+    readonly found: unknown;
+    readonly expected: number;
+    readonly code: 'daemon_journal_protocol_unsupported';
+    constructor(taskId: string, record: DaemonJournalProtocolRecord, found: unknown, expected?: number);
+}
+/**
+ * Classify stored envelope bytes by wire major only. Bytes that are not a
+ * JSON object are left to the regular decoder, which reports them as it
+ * always did; this check never repairs or reinterprets a row.
+ */
+export declare function assertJournalEnvelopeProtocol(bytes: string, taskId: string, record: DaemonJournalProtocolRecord): void;
 // ==== @byok-sdk/client dist/daemon/daemon-lifecycle.d.ts ====
 /**
  * The daemon's one lifecycle model (issues #391 and #394).
@@ -5587,11 +5623,15 @@ import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INP
  * implementation kinds, and the digests carry no identity. A version-9 record
  * digests fields this build no longer has; retire it the same way.
  *
+ * 11 binds the optional frozen result selection in the request/receipt and
+ * counts submit_result in the model-visible manifest. Version-10 records
+ * cannot acquire this tool after counting; drain and recreate them with v3.
+ *
  * A record at any other version is refused — see
  * {@link InputPreparationUnsupportedRecordVersionError}. There is no
  * compatibility read.
  */
-export declare const INPUT_PREPARATION_RECORD_VERSION = 10;
+export declare const INPUT_PREPARATION_RECORD_VERSION = 11;
 /** The durable idempotency key. Never a task id, and never caller-asserted: `scopeId` comes from the trusted authority grant. */
 export interface InputPreparationRecordKey {
     readonly scopeId: string;
@@ -7935,7 +7975,7 @@ export declare function readDeviceEnrollmentIdentity(options: DeviceEnrollmentSt
 // ==== @byok-sdk/client dist/daemon/task-runner.d.ts ====
 import { type ActivityIngress } from '@byok-sdk/protocol';
 import type { ScratchRoot } from './retention/scratch';
-import { type AgentMessageContentType, type AgentEgressPolicy, type Envelope, type RuntimeId, type TerminalProjectionSelection, type TaskOfferPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferPreparedPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
+import { type AgentMessageContentType, type AgentEgressPolicy, type Envelope, type RuntimeId, type TaskOfferPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferPreparedPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
 import { type McpStdioServerConfig, type McpToolsetConfig, type RuntimeAdapter } from '../types';
 import type { InputPreparationStore } from './input-preparation-store';
 import { type InputPreparationRuntimeIdentityV1, type InputPreparationBindingV1 } from '../input-preparation';
@@ -7944,7 +7984,7 @@ import { AgentSessionHandoffStore, type AgentTerminalCause } from './agent-sessi
 import { type RuntimeDisposalStage } from '../runtime-failure';
 import { type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
-import type { TaskQueueWatermark } from './control-protocol';
+import type { AgentResultDescribeParams, AgentResultDescribeResult, AgentResultSubmitParams, AgentResultSubmitResult, TaskQueueWatermark } from './control-protocol';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
 import { type ProgressBatcherOptions } from './progress-batcher';
 import type { SessionWorkspaceStore } from './session-workspace-store';
@@ -8051,23 +8091,22 @@ export declare const MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX = "resource limit e
 /** Stable fail-closed reason for one normalized event that cannot fit the configured activity batch budget. */
 export declare const ACTIVITY_INGRESS_EXCEEDED_REASON_PREFIX = "resource limit exceeded: activity ingress budget";
 /**
- * additive-minor (`task.complete.document`): same stable-PREFIX contract as
- * {@link MAX_DURATION_EXCEEDED_REASON_PREFIX} above, carried by every
- * `task.fail` this daemon reports because a configured
- * `DaemonConfig.resultDocument` extractor produced a document that could not
- * be delivered — over the cap, not JSON-serializable, or destined for a
- * server that never advertised the `result-document` capability. All three
- * are `retryable: false`: none of them can come out differently on a retry
- * against the same server with the same extractor. Everything after the
- * prefix is human-readable detail (including the measured size), not part of
- * the stable shape.
- *
- * There is deliberately no "send it anyway" or "send it truncated" path.
- * A document is the task's PRIMARY structured result, so quietly dropping or
- * mangling it would report success while destroying the thing the task
- * existed to produce.
+ * Wire v3 result channel: the stable reason PREFIX of the `task.fail` a
+ * `terminalProjection.mode: 'result-document'` task gets when its runtime
+ * ended the turn without a staged `submit_result` outcome. Same
+ * stable-prefix contract as {@link MAX_DURATION_EXCEEDED_REASON_PREFIX};
+ * `retryable: false`, because the same offer on the same runtime has no
+ * reason to submit on a second attempt. The SDK never derives the outcome
+ * from the runtime's text.
  */
-export declare const RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX = "result document undeliverable";
+export declare const RESULT_NOT_SUBMITTED_REASON_PREFIX = "result_not_submitted";
+/**
+ * Stable reason PREFIX of the `task.fail` a result-document task gets when
+ * its staged outcome cannot be read back at `turn_end` (an unreadable or
+ * mismatched record in the Agent home). `retryable: false`; the record is
+ * preserved for repair.
+ */
+export declare const RESULT_UNREADABLE_REASON_PREFIX = "result_unreadable";
 /**
  * Bounded admission: the stable reason PREFIX a prepared Execution's
  * `task.fail` carries when any one of its provider calls reported prompt
@@ -8095,47 +8134,6 @@ export declare const PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX = "context_overflow
  * the provider streams no usage.
  */
 export declare const PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX = "usage_unavailable";
-/**
- * The task identity handed to a {@link ResultDocumentExtractor} alongside the
- * final output text. Deliberately minimal — identity only, no session
- * handle, no workspace path, no adapter: this seam exists to turn text the
- * runtime already produced into the product's own JSON, not to become a
- * general-purpose end-of-task callback with access to the daemon's innards.
- */
-export interface ResultDocumentTask {
-    readonly taskId: string;
-    readonly sessionRef: string;
-    /** Exact offer-scoped second projection; absent for legacy and message-only offers. */
-    readonly terminalProjection?: Readonly<TerminalProjectionSelection>;
-    /**
-     * The runtime's closing reply, the same text as `task.complete.finalMessage`.
-     * `finalOutput` stays the whole run's text. Absent when the run ended with
-     * no closing text.
-     */
-    readonly finalMessage?: string;
-}
-/**
- * Host-supplied glue that turns a finished task's final output into the
- * product's structured terminal result (`task.complete.document`). Returning
- * `undefined` means "this task has no structured result" for legacy offers.
- * An explicit `terminalProjection.mode: 'result-document'` instead treats
- * `undefined` as a fail-closed missing required document.
- *
- * SYNCHRONOUS by contract, like every other single-purpose callback on
- * `TaskRunnerDeps`, and the runtime ENFORCES that rather than trusting it:
- * the returned value is treated as data and JSON-encoded as-is, never
- * awaited, so a returned promise would encode to an empty document (`{}`) —
- * a well-formed, under-cap, and completely WRONG result. A thenable return
- * is therefore rejected exactly like a throw (`task.fail`, `retryable:
- * false`), because delivering a confidently wrong terminal result is worse
- * than delivering none.
- *
- * Throwing is a real outcome, not a nuisance: it fails the task
- * (`retryable: false`) rather than completing it without the result the
- * extractor was supposed to produce — see {@link
- * RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX}.
- */
-export type ResultDocumentExtractor = (finalOutput: string, task: ResultDocumentTask) => unknown;
 /**
  * M5 batch-3 (workstream 2): default cap (64 MiB) on accumulated
  * (approximate) agent-event output bytes this daemon tolerates for a single
@@ -8404,23 +8402,20 @@ export interface TaskRunnerDeps {
         readonly payload: AcceptedOfferPayload;
     }) => AdmissionGuardDecision;
     /**
-     * additive-minor (`task.complete.document`): the host's structured-result
-     * extractor, consulted once per task at the moment `task.complete` is
-     * built — see {@link ResultDocumentExtractor} and `DaemonConfig
-     * .resultDocument` (`create-daemon.ts`) for the full contract.
-     *
-     * Optional, and absent by default: with no extractor supplied, the
-     * completion path is byte-identical to what it was before this seam
-     * existed — no document is computed, no capability is consulted, and
-     * `task.complete` carries exactly the fields it always did.
+     * True only when every terminal envelope this runner sends is recorded in
+     * the durable local journal before it reaches the transport. A
+     * result-document offer needs that persist-before-send boundary, so a
+     * runner without it declines such offers.
      */
-    resultDocument?: {
-        readonly extract: ResultDocumentExtractor;
-    };
+    terminalJournal?: boolean;
     durablePi?: boolean;
     recordDurableTransition?(taskId: string, leaseId: string, kind: string, ordinal: number): Promise<void>;
     /** SDK-owned, task-scoped MCP helper. Required only for offers declaring messageEgress. */
     agentMessageMcpBin?: Readonly<ResolvedAgentMessageMcpBin>;
+    /** SDK-owned, task-scoped `submit_result` helper. Required only for result-document offers. */
+    agentResultMcpBin?: Readonly<ResolvedAgentMessageMcpBin>;
+    /** Pre-runtime handshake gate for the exact result helper config; same contract as `agentMessageMcpPreflight`. */
+    agentResultMcpPreflight?: (server: Readonly<McpStdioServerConfig>, env: Readonly<Record<string, string>>) => Promise<void>;
     /**
      * Production pre-runtime executability/handshake gate for the exact message
      * helper config. `env` is the same child environment the runtime
@@ -8507,6 +8502,10 @@ export declare class TaskRunner {
     private readonly messageOutboxesByHome;
     private readonly messageContextByToken;
     private readonly messageContextByTask;
+    /** Per-task `submit_result` authority, minted at injection and revoked at `turn_end` or teardown. */
+    private readonly resultContextByToken;
+    private readonly resultContextByTask;
+    private readonly resultStoresByHome;
     private readonly memoryContextByToken;
     private readonly memoryContextByTask;
     private readonly memoryInFlightByTask;
@@ -8690,6 +8689,20 @@ export declare class TaskRunner {
         messageId: string;
         state: 'staged' | 'pending';
     }>;
+    /**
+     * Authenticated control-socket entry used only by the SDK result helper:
+     * the one tool it advertises, whose `inputSchema` is the offer's frozen
+     * result schema. Valid from injection (the helper preflight lists tools
+     * before the runtime starts) until `turn_end` or teardown revokes it.
+     */
+    describeAgentResult(input: AgentResultDescribeParams): AgentResultDescribeResult;
+    /**
+     * Authenticated control-socket entry used only by the SDK result helper.
+     * Validates the raw outcome against the frozen schema, then stages the
+     * canonical snapshot durably before answering. `staged` is the only ack;
+     * delivery happens at `turn_end`. A rejected outcome stores nothing.
+     */
+    submitAgentResult(input: AgentResultSubmitParams): Promise<AgentResultSubmitResult>;
     /** Authenticated control-socket entry used only by the SDK-owned memory MCP helper. */
     recallAgentMemory(input: {
         readonly contextToken: string;
@@ -8838,6 +8851,9 @@ export declare class TaskRunner {
     private admitOfferLimits;
     private prepareOfferRuntime;
     private withAgentMessageMcp;
+    private withAgentResultMcp;
+    private revokeAgentResultContext;
+    private agentResultStore;
     private revokeAgentMessageContext;
     /** Injected only after strict Agent admission; a host registry may never replace this reserved name. */
     private withAgentMemoryMcp;
@@ -9241,61 +9257,21 @@ export declare class TaskRunner {
     /** Exact Agent identity projection for claim/terminal wire payloads. */
     private agentTerminalPayload;
     /**
-     * additive-minor (`task.complete.document`): the whole daemon-side gate
-     * between a configured {@link ResultDocumentExtractor} and the wire —
-     * called once, from the `turn_end` completion path, immediately before
-     * `task.complete` is built.
+     * Wire v3 result channel, at `turn_end`: the one place a staged
+     * `submit_result` outcome becomes `task.complete.document`.
      *
-     * `{deliver: true}` means "go on and send `task.complete`", carrying the
-     * document when there is one. `{deliver: false}` means this method has
-     * ALREADY reported `task.fail` and finished the task; the caller must
-     * return without sending anything further.
+     * `{deliver: true}` means "go on and send `task.complete`", with the staged
+     * canonical outcome when the offer is `mode: 'result-document'`.
+     * `{deliver: false}` means this method has ALREADY reported `task.fail`
+     * (or the task was finished meanwhile by someone else); the caller returns.
      *
-     * Four fail-closed branches, all `retryable: false` (see
-     * {@link RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX} for why none of them
-     * can succeed on a retry):
-     *
-     *   1. The extractor threw — its error is surfaced, never swallowed.
-     *   2. The extractor returned a thenable, violating the synchronous
-     *      contract in the one way that would otherwise ship a wrong answer.
-     *   3. The document is over the cap, not JSON-serializable, or not plain
-     *      JSON data, per `checkResultDocument` — the protocol's OWN check,
-     *      imported rather than reimplemented, so this gate and the server's
-     *      schema validation can never disagree about what is legal.
-     *   4. The connected server never advertised `result-document`. Its
-     *      tolerant `z.object()` would silently strip the field on arrival
-     *      (`version.ts`'s own flag doc comment), so "send anyway" is not a
-     *      degraded-but-working path — it is the task's primary structured
-     *      result being deleted in transit with nothing reported anywhere.
-     *
-     * The capability is checked LAST, deliberately: a document that is itself
-     * invalid is the host's own bug and is worth reporting as such even when
-     * the connected server could not have accepted any document at all. It is
-     * then re-checked once more by the caller after its own last await, since
-     * a reconnect can invalidate this answer in between (F3).
-     *
-     * **Residual window (bounded, deliberately not hacked around).** Even the
-     * caller's re-check happens before `ConnectionManager.send` hands the
-     * envelope to a transport, and a queued envelope can outlive the
-     * connection it was queued for: a reconnect between `send()` and the
-     * outbox actually draining could still deliver this `task.complete` to a
-     * rolled-back N-1 server that strips the document. Closing that would
-     * mean teaching the transport outbox to inspect payload semantics and
-     * mint a substitute `task.fail` for a task this runner already finished —
-     * a second authority over terminal outcomes living in the queue, which is
-     * worse than the window it closes. Documented instead, here and in
-     * docs/protocol.md §7.2.
+     * The result context is revoked first, so no new submit is accepted, and
+     * the read queues behind any stage already writing: the record read here is
+     * final. Offers without a result-document projection (`mode: 'none'`,
+     * message-only and legacy offers) never read the store and carry no
+     * document. Failure, cancel and interrupt paths never come here.
      */
-    private resolveResultDocument;
-    /**
-     * Whether the CURRENTLY connected server advertised `result-document` —
-     * read fresh on every call, never captured, because the answer changes
-     * across a reconnect or transport switch (`ConnectionManager` clears the
-     * old advertisement at the boundary, then repopulates it from a fresh WS
-     * ack or successful poll response). An absent `getServerCapabilities` seam is
-     * "no capabilities", the fail-closed reading.
-     */
-    private hasResultDocumentCapability;
+    private resolveStagedResult;
     private observeGit;
     private updateGitPhaseBestEffort;
     /** Persist Agent terminal truth before wire when local storage is available. */
@@ -9943,6 +9919,8 @@ export type { GitWorkspaceObservation, GitWorkspaceLease, GitWorkspaceOptions, G
 export { GitWorkspaceStore } from './daemon/git-workspace-store';
 export type { GitWorkspaceLedger, GitWorkspaceLedgerRecord, GitWorkspacePhase } from './daemon/git-workspace-store';
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
+export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors';
+export { RESULT_NOT_SUBMITTED_REASON_PREFIX, RESULT_UNREADABLE_REASON_PREFIX } from './daemon/task-runner';
 export { LocalTeamWorkspace, LocalTeamWorkspaceService, TeamWorkspaceError, TeamWorkspaceValidationError, TeamWorkspaceNotFoundError, TeamWorkspaceConflictError, TeamWorkspaceQuotaError, TeamWorkspaceLeaseError, TeamWorkspaceReceiptError, TeamWorkspaceCorruptError, encodeTeamMemberContext, decodeTeamMemberContext, type TeamWorkspaceDefinition, type TeamWorkspaceLimits, type TeamMessage, type TeamMemberLease, type TeamWorkspaceMemberReceipt, } from './daemon/team-workspace';
 export { openTeamTmuxView, TeamTmuxViewError, type OpenTeamTmuxViewInput } from './bin/team-tmux-view';
 export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBranding, HostedJournalConfig, DeviceAssertionConfig, InputPreparationDaemonConfig, AgentEgressConfig, AgentContentReadConfig, AgentContentReadSurfaceConfig, AgentReliableEgressInput, } from './daemon/create-daemon';
@@ -10077,7 +10055,7 @@ export { createExecutionScratch, ScratchRootPathError } from './daemon/retention
 export type { ExecutionScratch } from './daemon/retention/scratch';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====
 import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
-import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
+import type { PreparedAgentMemoryMode, TerminalProjectionSelection } from '@byok-sdk/protocol';
 /** Wire format tag for a preparation request. One strict shape, one version. */
 export declare const INPUT_PREPARATION_REQUEST_FORMAT = "byok.input-preparation.request";
 /** Wire format tag for a preparation receipt. */
@@ -10445,6 +10423,8 @@ export interface InputPreparationCompiledSnapshotV1 extends Omit<InputPreparatio
  * daemon's own configured policy, never from caller text.
  */
 export interface InputPreparationRequestV1 {
+    /** Frozen result selection; its tool schema participates in the counted manifest. */
+    readonly terminalProjection?: TerminalProjectionSelection;
     readonly agentMemory: PreparedAgentMemoryMode;
     readonly format: typeof INPUT_PREPARATION_REQUEST_FORMAT;
     readonly version: typeof INPUT_PREPARATION_VERSION;
@@ -10816,6 +10796,7 @@ export interface InputPreparationArtifactSummaryV1 {
 }
 /** The immutable binding a receipt carries and a later consumer must re-present. */
 export interface InputPreparationBindingV1 {
+    readonly terminalProjection?: TerminalProjectionSelection;
     readonly agentMemory: PreparedAgentMemoryMode;
     readonly scopeId: string;
     readonly deviceId: string;
@@ -12445,7 +12426,7 @@ export declare class RuntimeStartupDisposalFailure extends Error {
 export declare function isRuntimeStartupDisposalFailure(value: unknown): value is RuntimeStartupDisposalFailure;
 // ==== @byok-sdk/client dist/sdk-reserved-helper-host.d.ts ====
 export declare const BYOK_SDK_HELPER_SUBCOMMAND = "__byok_sdk_helper";
-export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-memory-mcp' | 'agent-memory-describe' | 'agent-team-mcp' | 'pi-rpc' | 'pi-prepared' | 'pi-durable';
+export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-result-mcp' | 'agent-memory-mcp' | 'agent-memory-describe' | 'agent-team-mcp' | 'pi-rpc' | 'pi-prepared' | 'pi-durable';
 export interface SdkHelperHostConfig {
     /**
      * Run SDK-reserved helpers by re-entering the product's single-file/SEA
@@ -12612,8 +12593,6 @@ export interface ApprovalChannel {
 export interface Session {
     /** Process-generation-bound native requests. Never reconstructed from a resumed transcript. */
     readonly interactions?: NativeInteractionChannel;
-    /** Current execution artifact, available only after terminal success. */
-    resultDocument?(): unknown;
     /** Opaque runtime session id, reported back to the server via `task.complete.sessionRef`. */
     sessionRef: string;
     /** Normalized events for this session; the daemon batches these into `task.progress`. */
@@ -12817,6 +12796,7 @@ export interface RuntimePreparedLaunchExpectationV1 {
  * separate instruction would have two answers to what it is about to send.
  */
 export interface RuntimePreparedLaunchV1 {
+    readonly terminalProjection?: import('@byok-sdk/protocol').TerminalProjectionSelection;
     readonly agentMemory: PreparedAgentMemoryMode;
     readonly memory: PreparedAgentMemoryState | null;
     readonly reference: RuntimePreparedLaunchReferenceV1;

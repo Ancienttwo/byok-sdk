@@ -23,6 +23,7 @@
         "@byok-sdk/core",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/constants",
+        "@cfworker/json-schema",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/client/validators/cf-worker",
         "child_process",
@@ -44,6 +45,7 @@
         "koffi"
       ],
       "thirdParty": [
+        "@cfworker/json-schema",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/core",
         "eventsource",
@@ -328,6 +330,7 @@
       "bareImports": [
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/constants",
+        "@cfworker/json-schema",
         "@earendil-works/chord/context",
         "@earendil-works/pi-agent-core",
         "@earendil-works/pi-ai",
@@ -387,6 +390,7 @@
         "unpdf/pdfjs"
       ],
       "thirdParty": [
+        "@cfworker/json-schema",
         "@earendil-works/chord",
         "@earendil-works/pi-agent-core",
         "@earendil-works/pi-ai",
@@ -604,7 +608,7 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 96216,
+          "line": 96287,
           "rule": "opaque import()"
         },
         {
@@ -658,6 +662,7 @@
       "bareImports": [
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/constants",
+        "@cfworker/json-schema",
         "@earendil-works/chord/context",
         "@earendil-works/pi-agent-core",
         "@earendil-works/pi-ai",
@@ -715,6 +720,7 @@
         "unpdf/pdfjs"
       ],
       "thirdParty": [
+        "@cfworker/json-schema",
         "@earendil-works/chord",
         "@earendil-works/pi-agent-core",
         "@earendil-works/pi-ai",
@@ -927,7 +933,7 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host-sealed.js",
-          "line": 95487,
+          "line": 95558,
           "rule": "opaque import()"
         },
         {
@@ -1023,11 +1029,13 @@
       "bareImports": [
         "@byok-sdk/core",
         "@byok-sdk/protocol",
+        "@cfworker/json-schema",
         "hono",
         "zod"
       ],
       "lazyImports": [],
       "thirdParty": [
+        "@cfworker/json-schema",
         "hono",
         "zod"
       ],
@@ -1075,6 +1083,7 @@
         "@byok-sdk/cloud",
         "@byok-sdk/core",
         "@byok-sdk/protocol",
+        "@cfworker/json-schema",
         "aws4fetch",
         "crypto",
         "fast-xml-parser",
@@ -1087,6 +1096,7 @@
       ],
       "lazyImports": [],
       "thirdParty": [
+        "@cfworker/json-schema",
         "@nodable/entities",
         "anynum",
         "aws4fetch",
@@ -1178,7 +1188,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Worker online stores; pg requires nodejs_compat",
-      "budgetBytes": 706695,
+      "budgetBytes": 777868,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1198,6 +1208,7 @@
         "@byok-sdk/cloud",
         "@byok-sdk/core",
         "@byok-sdk/protocol",
+        "@cfworker/json-schema",
         "aws4fetch",
         "fast-xml-parser",
         "hono",
@@ -1206,6 +1217,7 @@
       ],
       "lazyImports": [],
       "thirdParty": [
+        "@cfworker/json-schema",
         "@nodable/entities",
         "anynum",
         "aws4fetch",
@@ -1545,7 +1557,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Wire schemas and codecs; codegen negative control",
-      "budgetBytes": 106000,
+      "budgetBytes": 125395,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1562,10 +1574,12 @@
         "packages/protocol/dist/index.d.ts"
       ],
       "bareImports": [
+        "@cfworker/json-schema",
         "zod"
       ],
       "lazyImports": [],
       "thirdParty": [
+        "@cfworker/json-schema",
         "zod"
       ],
       "unavailableOptional": [],
@@ -1652,7 +1666,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 628548,
+      "budgetBytes": 700489,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1672,6 +1686,7 @@
         "@byok-sdk/cloud",
         "@byok-sdk/core",
         "@byok-sdk/protocol",
+        "@cfworker/json-schema",
         "crypto",
         "fs",
         "hono",
@@ -1681,6 +1696,7 @@
       ],
       "lazyImports": [],
       "thirdParty": [
+        "@cfworker/json-schema",
         "hono",
         "zod"
       ],
@@ -1761,11 +1777,13 @@
         "@byok-sdk/cloud",
         "@byok-sdk/core",
         "@byok-sdk/protocol",
+        "@cfworker/json-schema",
         "hono",
         "zod"
       ],
       "lazyImports": [],
       "thirdParty": [
+        "@cfworker/json-schema",
         "hono",
         "zod"
       ],
@@ -1837,6 +1855,7 @@
         "@byok-sdk/core",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/constants",
+        "@cfworker/json-schema",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/client/validators/cf-worker",
         "child_process",
@@ -1860,6 +1879,7 @@
         "koffi"
       ],
       "thirdParty": [
+        "@cfworker/json-schema",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/core",
         "eventsource",
@@ -1962,6 +1982,47 @@
     },
     "facts": {
       "target": "packages/client/dist/bin/byok-agent-message-mcp.js",
+      "conditions": [],
+      "types": [],
+      "bareImports": [
+        "@byok-sdk/protocol/constants",
+        "crypto",
+        "fs",
+        "net",
+        "path"
+      ],
+      "lazyImports": [
+        "#byok-pi-runtime-host"
+      ],
+      "thirdParty": [],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [
+          "crypto",
+          "fs",
+          "net",
+          "path"
+        ],
+        "thirdParty": []
+      },
+      "codegen": []
+    }
+  },
+  "bin:byok-agent-result-mcp": {
+    "kind": "bin",
+    "policy": {
+      "purpose": "Task-bound structured outcome MCP helper",
+      "budgetBytes": 52457,
+      "zod": false,
+      "codegen": false,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": true
+      }
+    },
+    "facts": {
+      "target": "packages/client/dist/bin/byok-agent-result-mcp.js",
       "conditions": [],
       "types": [],
       "bareImports": [

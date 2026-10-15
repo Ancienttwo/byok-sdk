@@ -855,15 +855,16 @@ export interface TaskResult {
      * The task's structured terminal result, projected verbatim from
      * `task.complete.document` (`@byok-sdk/protocol`'s `messages.ts`) — the
      * product's own JSON output, as opposed to `summary` (prose for a human)
-     * or `artifactRefs` (files). `unknown` deliberately: this SDK never
-     * understands or transforms the embedder's document schema. The wire
-     * schema already enforced the only two rules there are (JSON-serializable,
-     * within `RESULT_DOCUMENT_MAX_BYTES`) before this value ever reached the
-     * hub, so the projection neither re-validates nor re-measures it.
+     * or `artifactRefs` (files). `unknown` deliberately: the document's shape
+     * is the offer's frozen `terminalProjection.schema`, which the daemon
+     * validated the runtime's `submit_result` outcome against before staging
+     * it. The wire schema enforced plain JSON within `RESULT_DOCUMENT_MAX_BYTES`
+     * before this value ever reached the hub, so the projection neither
+     * re-validates nor re-measures it.
      *
-     * Absent whenever the daemon sent none — which covers both a daemon with
-     * no `resultDocument` extractor configured and a pre-`result-document`
-     * daemon build that has no notion of the field at all.
+     * Absent whenever the daemon sent none: on every non-complete terminal, and
+     * on a completion whose offer selected no `result-document` terminal
+     * projection.
      *
      * Not stored by this package at all: the durable fact is the first terminal
      * receipt the kernel recorded (`readTerminalReceipt`/`readTaskResult`,

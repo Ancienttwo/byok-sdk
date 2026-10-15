@@ -54,3 +54,15 @@ The v2 corpus and published release hashes remain immutable. The new v3
 corpora prove current-decoder self-consistency and v2 rejection. The v3
 release registry starts empty; cross-release compatibility remains unproven
 until an actual v3 artifact is published and pinned.
+
+## Entry closure
+
+The integrated build measures 113,995 B for `@byok-sdk/protocol`, 636,808 B
+for `@byok-sdk/server` and 707,152 B for `@byok-sdk/cloud-dataplane/runtime`.
+Their reviewed budgets become 125,395 B, 700,489 B and 777,868 B respectively
+(measured workspace bytes plus 10% headroom). The new result helper measures
+47,688 B with a 52,457 B budget; it has no Zod, code generation or third-party
+runtime dependency. The interpreted validator adds no code-generation evidence
+or Node builtin dependency; the protocol root retains its existing Zod policy.
+Byte/depth caps bound admitted input size, not worst-case validation time. Nested
+`oneOf` validation and fsync latency remain resource pressure points.

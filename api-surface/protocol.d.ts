@@ -1811,6 +1811,7 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"result-document">;
             contract: z.ZodString;
+            schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
         }, z.core.$strict>], "mode">>;
         sessionRef: z.ZodOptional<z.ZodString>;
         limits: z.ZodOptional<z.ZodObject<{
@@ -1879,6 +1880,7 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"result-document">;
             contract: z.ZodString;
+            schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
         }, z.core.$strict>], "mode">>;
         limits: z.ZodOptional<z.ZodObject<{
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
@@ -1983,6 +1985,7 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"result-document">;
             contract: z.ZodString;
+            schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
         }, z.core.$strict>], "mode">>;
         limits: z.ZodOptional<z.ZodObject<{
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
@@ -2077,6 +2080,7 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"result-document">;
             contract: z.ZodString;
+            schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
         }, z.core.$strict>], "mode">>;
         limits: z.ZodOptional<z.ZodObject<{
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
@@ -3342,6 +3346,7 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
             }, z.core.$strict>, z.ZodObject<{
                 mode: z.ZodLiteral<"result-document">;
                 contract: z.ZodString;
+                schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
             }, z.core.$strict>], "mode">>;
             sessionRef: z.ZodOptional<z.ZodString>;
             limits: z.ZodOptional<z.ZodObject<{
@@ -3410,6 +3415,7 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
             }, z.core.$strict>, z.ZodObject<{
                 mode: z.ZodLiteral<"result-document">;
                 contract: z.ZodString;
+                schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
             }, z.core.$strict>], "mode">>;
             limits: z.ZodOptional<z.ZodObject<{
                 maxDurationMs: z.ZodOptional<z.ZodNumber>;
@@ -3514,6 +3520,7 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
             }, z.core.$strict>, z.ZodObject<{
                 mode: z.ZodLiteral<"result-document">;
                 contract: z.ZodString;
+                schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
             }, z.core.$strict>], "mode">>;
             limits: z.ZodOptional<z.ZodObject<{
                 maxDurationMs: z.ZodOptional<z.ZodNumber>;
@@ -3608,6 +3615,7 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
             }, z.core.$strict>, z.ZodObject<{
                 mode: z.ZodLiteral<"result-document">;
                 contract: z.ZodString;
+                schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
             }, z.core.$strict>], "mode">>;
             limits: z.ZodOptional<z.ZodObject<{
                 maxDurationMs: z.ZodOptional<z.ZodNumber>;
@@ -4727,6 +4735,7 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
             }, z.core.$strict>, z.ZodObject<{
                 mode: z.ZodLiteral<"result-document">;
                 contract: z.ZodString;
+                schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
             }, z.core.$strict>], "mode">>;
             sessionRef: z.ZodOptional<z.ZodString>;
             limits: z.ZodOptional<z.ZodObject<{
@@ -4795,6 +4804,7 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
             }, z.core.$strict>, z.ZodObject<{
                 mode: z.ZodLiteral<"result-document">;
                 contract: z.ZodString;
+                schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
             }, z.core.$strict>], "mode">>;
             limits: z.ZodOptional<z.ZodObject<{
                 maxDurationMs: z.ZodOptional<z.ZodNumber>;
@@ -4899,6 +4909,7 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
             }, z.core.$strict>, z.ZodObject<{
                 mode: z.ZodLiteral<"result-document">;
                 contract: z.ZodString;
+                schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
             }, z.core.$strict>], "mode">>;
             limits: z.ZodOptional<z.ZodObject<{
                 maxDurationMs: z.ZodOptional<z.ZodNumber>;
@@ -4993,6 +5004,7 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
             }, z.core.$strict>, z.ZodObject<{
                 mode: z.ZodLiteral<"result-document">;
                 contract: z.ZodString;
+                schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
             }, z.core.$strict>], "mode">>;
             limits: z.ZodOptional<z.ZodObject<{
                 maxDurationMs: z.ZodOptional<z.ZodNumber>;
@@ -5960,6 +5972,13 @@ export declare const InputPreparationCompletionRequestSchema: z.ZodDiscriminated
             reserved: "reserved";
         }>;
         binding: z.ZodObject<{
+            terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                mode: z.ZodLiteral<"none">;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"result-document">;
+                contract: z.ZodString;
+                schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
+            }, z.core.$strict>], "mode">>;
             agentMemory: z.ZodEnum<{
                 none: "none";
                 read: "read";
@@ -6152,6 +6171,13 @@ export declare const InputPreparationReadbackSchema: z.ZodObject<{
             reserved: "reserved";
         }>;
         binding: z.ZodObject<{
+            terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                mode: z.ZodLiteral<"none">;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"result-document">;
+                contract: z.ZodString;
+                schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
+            }, z.core.$strict>], "mode">>;
             agentMemory: z.ZodEnum<{
                 none: "none";
                 read: "read";
@@ -6458,8 +6484,10 @@ export { InputPreparationContentHashSchema, InputPreparationPolicyRevisionSchema
 export type { InputPreparationSource, InputPreparationModel, InputPreparationOptions, InputPreparationSelection, InputPreparationMessage, InputPreparationContextDocument, InputPreparationState, InputPreparationReadinessReason, InputPreparationAccountingPolicyRef, InputPreparationResidualValueClass, InputPreparationRuntimeIdentity, InputPreparationReceiptSummary, InputPreparationOfferBinding, InputPreparationRejectionReason, } from './input-preparation';
 export { AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES, AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE, AgentMemoryProjectionGrantRefSchema, AgentMemoryProjectionSessionRefSchema, AgentMemoryProjectionWriterEpochSchema, AgentMemoryProjectionSourceSeqSchema, AgentMemoryProjectionSnapshotSchema, AgentMemoryProjectionMeteringReceiptSchema, AgentMemoryProjectionMutationSchema, AgentMemoryProjectionReceiptSchema, AgentMemoryProjectionEraseResultSchema, agentMemoryProjectionBase64UrlByteLength, } from './agent-memory-projection';
 export type { AgentMemoryProjectionGrantRef, AgentMemoryProjectionSessionRef, AgentMemoryProjectionWriterEpoch, AgentMemoryProjectionSourceSeq, AgentMemoryProjectionSnapshot, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionEraseResult, } from './agent-memory-projection';
-export { TerminalProjectionContractSchema, TerminalProjectionSelectionSchema, } from './terminal-projection';
+export { TerminalProjectionContractSchema, TerminalProjectionSelectionSchema, ResultDocumentSchemaSchema, } from './terminal-projection';
 export type { TerminalProjectionSelection } from './terminal-projection';
+export { RESULT_SCHEMA_MAX_BYTES, RESULT_OUTCOME_MAX_BYTES, RESULT_SCHEMA_MAX_DEPTH, RESULT_JSON_MAX_DEPTH, RESULT_ISSUES_MAX_COUNT, RESULT_ISSUES_MAX_BYTES, RESULT_SCHEMA_KEYWORDS, RESULT_SCHEMA_INSTANCE_TYPES, checkResultSchema, validateResultOutcome, } from './result-schema';
+export type { ResultSchema, ResultSchemaKeyword, ResultSchemaInstanceType, ResultIssue, ResultDocumentFailureReason, ResultSchemaCheck, ResultOutcomeCheck, } from './result-schema';
 export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
 export type { TaskState } from './task-state';
 export { MESSAGE_TYPES, TASK_OFFER_TYPES, isTaskOfferType, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, ConnAckPayloadSchema, TaskOfferPayloadSchema, TaskOfferWithToolsetsPayloadSchema, AgentHomeAccessSchema, TaskOfferForAgentPayloadSchema, TaskOfferForAgentWithEgressPayloadSchema, TaskOfferForAgentWithEgressFreshPayloadSchema, TaskOfferPreparedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskClaimPayloadSchema, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TerminalAgentHomeProjectionSchema, TerminalAgentHomeMemoryChangeSchema, AGENT_HOME_MEMORY_DIGEST_MAX_FILES, AGENT_HOME_MEMORY_DIGEST_MAX_BYTES, AGENT_HOME_MEMORY_PATH_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
@@ -7031,6 +7059,13 @@ export declare const InputPreparationArtifactSummarySchema: z.ZodObject<{
 }, z.core.$strict>;
 /** The immutable binding a receipt carries and a later consumer must re-present. */
 export declare const InputPreparationBindingSchema: z.ZodObject<{
+    terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+        mode: z.ZodLiteral<"none">;
+    }, z.core.$strict>, z.ZodObject<{
+        mode: z.ZodLiteral<"result-document">;
+        contract: z.ZodString;
+        schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
+    }, z.core.$strict>], "mode">>;
     agentMemory: z.ZodEnum<{
         none: "none";
         read: "read";
@@ -7090,6 +7125,13 @@ export declare const InputPreparationReceiptSummarySchema: z.ZodObject<{
         reserved: "reserved";
     }>;
     binding: z.ZodObject<{
+        terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            mode: z.ZodLiteral<"none">;
+        }, z.core.$strict>, z.ZodObject<{
+            mode: z.ZodLiteral<"result-document">;
+            contract: z.ZodString;
+            schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
+        }, z.core.$strict>], "mode">>;
         agentMemory: z.ZodEnum<{
             none: "none";
             read: "read";
@@ -7277,6 +7319,7 @@ export declare const InputPreparationRejectionReasonSchema: z.ZodEnum<{
 export type InputPreparationRejectionReason = z.infer<typeof InputPreparationRejectionReasonSchema>;
 // ==== @byok-sdk/protocol dist/messages.d.ts ====
 import { z } from 'zod';
+import { type PlainJsonCheck } from './plain-json';
 export declare const RuntimeIdSchema: z.ZodEnum<{
     claude: "claude";
     codex: "codex";
@@ -7650,6 +7693,7 @@ export declare const TaskOfferForAgentPayloadSchema: z.ZodObject<{
     }, z.core.$strict>, z.ZodObject<{
         mode: z.ZodLiteral<"result-document">;
         contract: z.ZodString;
+        schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
     }, z.core.$strict>], "mode">>;
     sessionRef: z.ZodOptional<z.ZodString>;
     limits: z.ZodOptional<z.ZodObject<{
@@ -7716,6 +7760,7 @@ export declare const TaskOfferForAgentWithEgressPayloadSchema: z.ZodObject<{
     }, z.core.$strict>, z.ZodObject<{
         mode: z.ZodLiteral<"result-document">;
         contract: z.ZodString;
+        schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
     }, z.core.$strict>], "mode">>;
     limits: z.ZodOptional<z.ZodObject<{
         maxDurationMs: z.ZodOptional<z.ZodNumber>;
@@ -7819,6 +7864,7 @@ export declare const TaskOfferForAgentWithEgressFreshPayloadSchema: z.ZodObject<
     }, z.core.$strict>, z.ZodObject<{
         mode: z.ZodLiteral<"result-document">;
         contract: z.ZodString;
+        schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
     }, z.core.$strict>], "mode">>;
     limits: z.ZodOptional<z.ZodObject<{
         maxDurationMs: z.ZodOptional<z.ZodNumber>;
@@ -7926,6 +7972,7 @@ export declare const TaskOfferPreparedPayloadSchema: z.ZodObject<{
     }, z.core.$strict>, z.ZodObject<{
         mode: z.ZodLiteral<"result-document">;
         contract: z.ZodString;
+        schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
     }, z.core.$strict>], "mode">>;
     limits: z.ZodOptional<z.ZodObject<{
         maxDurationMs: z.ZodOptional<z.ZodNumber>;
@@ -8674,21 +8721,7 @@ export declare const RESULT_DOCUMENT_MAX_BYTES = 1048576;
  * in a failure reason. `canonical` is the CANONICAL SNAPSHOT — the value a
  * sender must actually put on the wire; see {@link checkResultDocument}.
  */
-export type ResultDocumentCheck = {
-    readonly ok: true;
-    readonly bytes: number;
-    readonly canonical: unknown;
-} | {
-    readonly ok: false;
-    readonly reason: 'not-serializable';
-} | {
-    readonly ok: false;
-    readonly reason: 'over-cap';
-    readonly bytes: number;
-} | {
-    readonly ok: false;
-    readonly reason: 'not-plain-json';
-};
+export type ResultDocumentCheck = PlainJsonCheck;
 /**
  * THE single authority for "is this a legal `task.complete.document`", and
  * the one place its canonical form is produced. `TaskCompletePayloadSchema`'s
@@ -8726,7 +8759,7 @@ export type ResultDocumentCheck = {
  *      no `toJSON`, no getters, no prototype, nothing left that can answer
  *      differently a second time.
  *   4. The original must be structurally equal to the snapshot
- *      ({@link isSameJsonData}). Any mismatch means the value was not plain
+ *      (`isSameJsonData`, `plain-json.ts`). Any mismatch means the value was not plain
  *      JSON data, and it is rejected rather than silently transformed.
  *
  * On success the snapshot is returned as `canonical`, and **every sender
@@ -8848,7 +8881,7 @@ export type TerminalAgentHomeMemoryChange = z.infer<typeof TerminalAgentHomeMemo
 /**
  * daemon -> server: task finished successfully.
  *
- * `document` (additive-minor, docs/protocol.md "Freeze rule"): the OPTIONAL
+ * `document` (docs/protocol.md §7.2): the OPTIONAL
  * structured terminal result of the task — one JSON value the product on the
  * other side consumes as the task's actual output, as opposed to `summary`
  * (human-readable prose) or `artifactRefs` (files). Deliberately
@@ -8862,14 +8895,12 @@ export type TerminalAgentHomeMemoryChange = z.infer<typeof TerminalAgentHomeMemo
  * never truncated (see that constant's own doc comment). A sender puts the
  * check's `canonical` snapshot on the wire, never the original object.
  *
- * Unlike `approvalId` on `task.await_approval` above, emitting this field IS
- * gated on a capability flag (`result-document`, `version.ts`): a pre-
- * `result-document` server strips it silently as an unknown key (the
- * tolerant `z.object()` behavior §1 mandates), and silently losing the
- * task's primary structured result is not a tolerable degradation the way
- * losing an observability hint is. So a daemon sends `document` only to a
- * server that advertised the flag, and fails the task loudly otherwise —
- * see `packages/client`'s `task-runner.ts`.
+ * Wire v3: every v3 server keeps this field, so no capability flag gates it
+ * (the v2 `result-document` flag is gone). For a
+ * `terminalProjection.mode: 'result-document'` offer it carries the outcome
+ * the daemon validated against the offer's frozen schema
+ * (`validateResultOutcome`, `result-schema.ts`, at most
+ * `RESULT_OUTCOME_MAX_BYTES`).
  */
 export declare const TaskCompletePayloadSchema: z.ZodObject<{
     harnessId: z.ZodOptional<z.ZodString>;
@@ -9232,6 +9263,7 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"result-document">;
             contract: z.ZodString;
+            schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
         }, z.core.$strict>], "mode">>;
         sessionRef: z.ZodOptional<z.ZodString>;
         limits: z.ZodOptional<z.ZodObject<{
@@ -9292,6 +9324,7 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"result-document">;
             contract: z.ZodString;
+            schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
         }, z.core.$strict>], "mode">>;
         limits: z.ZodOptional<z.ZodObject<{
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
@@ -9388,6 +9421,7 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"result-document">;
             contract: z.ZodString;
+            schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
         }, z.core.$strict>], "mode">>;
         limits: z.ZodOptional<z.ZodObject<{
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
@@ -9474,6 +9508,7 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"result-document">;
             contract: z.ZodString;
+            schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
         }, z.core.$strict>], "mode">>;
         limits: z.ZodOptional<z.ZodObject<{
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
@@ -9684,6 +9719,7 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"result-document">;
             contract: z.ZodString;
+            schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
         }, z.core.$strict>], "mode">>;
         sessionRef: z.ZodOptional<z.ZodString>;
         limits: z.ZodOptional<z.ZodObject<{
@@ -9744,6 +9780,7 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"result-document">;
             contract: z.ZodString;
+            schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
         }, z.core.$strict>], "mode">>;
         limits: z.ZodOptional<z.ZodObject<{
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
@@ -9840,6 +9877,7 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"result-document">;
             contract: z.ZodString;
+            schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
         }, z.core.$strict>], "mode">>;
         limits: z.ZodOptional<z.ZodObject<{
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
@@ -9926,6 +9964,7 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"result-document">;
             contract: z.ZodString;
+            schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
         }, z.core.$strict>], "mode">>;
         limits: z.ZodOptional<z.ZodObject<{
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
@@ -10665,6 +10704,61 @@ export declare const SERVER_TO_DAEMON_TYPES: readonly ["conn.ack", "task.offer",
  */
 export declare const DAEMON_TO_SERVER_TYPES: readonly ["task.claim", "task.started", "task.decline", "task.progress", "task.artifact", "task.await_approval", "task.complete", "task.fail", "task.cancelled", "task.approval_resolved", "agent.egress.reliable", "agent.message.publish", "agent.content.receipt"];
 export {};
+// ==== @byok-sdk/protocol dist/plain-json.d.ts ====
+/**
+ * Plain-JSON-data canonicalization shared by every bounded JSON channel of
+ * the wire: `task.complete.document` (`checkResultDocument`, messages.ts) and
+ * the result-document schema and outcome (`result-schema.ts`). One rule, one
+ * implementation, so the channels cannot disagree about what "plain JSON
+ * data" means or how its canonical UTF-8 size is measured.
+ *
+ * Zod-free and free of node builtins.
+ */
+/** Outcome of {@link canonicalizePlainJson} without a depth bound. */
+export type PlainJsonCheck = {
+    readonly ok: true;
+    readonly bytes: number;
+    readonly canonical: unknown;
+} | {
+    readonly ok: false;
+    readonly reason: 'not-serializable';
+} | {
+    readonly ok: false;
+    readonly reason: 'over-cap';
+    readonly bytes: number;
+} | {
+    readonly ok: false;
+    readonly reason: 'not-plain-json';
+};
+/** Outcome of {@link canonicalizePlainJson} with a container-nesting bound. */
+export type BoundedPlainJsonCheck = PlainJsonCheck | {
+    readonly ok: false;
+    readonly reason: 'too-deep';
+    readonly bytes: number;
+};
+/**
+ * Container nesting depth of pure JSON data (a `JSON.parse` output), computed
+ * iteratively so no input can exhaust the call stack. A scalar is depth 0,
+ * `{}` and `[]` are depth 1. Stops as soon as `limit` is exceeded.
+ */
+export declare function jsonDepthExceeds(value: unknown, limit: number): boolean;
+/**
+ * Canonicalize `value` as plain JSON data within `maxBytes` canonical UTF-8
+ * bytes:
+ *
+ *   1. `JSON.stringify` must succeed and not return `undefined`.
+ *   2. Its UTF-8 byte length must be at most `maxBytes`.
+ *   3. `JSON.parse` that string: the CANONICAL SNAPSHOT (pure data).
+ *   4. With `maxDepth`, the snapshot's container nesting must be at most
+ *      `maxDepth`. This runs before step 5, so the recursive comparison
+ *      below is bounded by it.
+ *   5. The original must be structurally equal to the snapshot
+ *      (`isSameJsonData`).
+ *
+ * On success a sender uses `canonical`, never the original reference.
+ */
+export declare function canonicalizePlainJson(value: unknown, maxBytes: number): PlainJsonCheck;
+export declare function canonicalizePlainJson(value: unknown, maxBytes: number, maxDepth: number): BoundedPlainJsonCheck;
 // ==== @byok-sdk/protocol dist/provider-profile-binding.d.ts ====
 import { z } from 'zod';
 /** Opaque, portable local profile identity. It is one logical id, never a path. */
@@ -11063,6 +11157,102 @@ export declare const ProviderProvisioningReadbackSchema: z.ZodObject<{
     completedAt: z.ZodISODateTime;
 }, z.core.$strict>;
 export type ProviderProvisioningReadback = z.infer<typeof ProviderProvisioningReadbackSchema>;
+// ==== @byok-sdk/protocol dist/result-schema.d.ts ====
+/** Maximum canonical JSON UTF-8 size of a result-document schema. */
+export declare const RESULT_SCHEMA_MAX_BYTES = 16384;
+/** Maximum canonical JSON UTF-8 size of a submitted outcome document. */
+export declare const RESULT_OUTCOME_MAX_BYTES = 65536;
+/**
+ * Maximum subschema nesting below the root (each `properties` member, `items`
+ * and `oneOf` branch is one level). With the 16 KiB cap this bounds how much
+ * schema structure one validation walks.
+ */
+export declare const RESULT_SCHEMA_MAX_DEPTH = 32;
+/**
+ * Maximum JSON container nesting of a schema or outcome document, checked
+ * iteratively before any recursive routine runs on it.
+ */
+export declare const RESULT_JSON_MAX_DEPTH = 128;
+/** Maximum number of issues one failed check reports. */
+export declare const RESULT_ISSUES_MAX_COUNT = 20;
+/** Maximum UTF-8 size of the reported issue list, as JSON. */
+export declare const RESULT_ISSUES_MAX_BYTES = 4096;
+export declare const RESULT_SCHEMA_KEYWORDS: readonly ["type", "properties", "required", "additionalProperties", "items", "enum", "const", "oneOf", "minLength", "maxLength", "minItems", "maxItems", "minimum", "maximum", "description"];
+export type ResultSchemaKeyword = (typeof RESULT_SCHEMA_KEYWORDS)[number];
+export declare const RESULT_SCHEMA_INSTANCE_TYPES: readonly ["object", "array", "string", "number", "integer", "boolean", "null"];
+export type ResultSchemaInstanceType = (typeof RESULT_SCHEMA_INSTANCE_TYPES)[number];
+/** A schema inside the admitted subset. Only {@link checkResultSchema} proves a value is one. */
+export interface ResultSchema {
+    readonly type?: ResultSchemaInstanceType | readonly ResultSchemaInstanceType[];
+    readonly properties?: {
+        readonly [name: string]: ResultSchema;
+    };
+    readonly required?: readonly string[];
+    readonly additionalProperties?: false;
+    readonly items?: ResultSchema;
+    readonly enum?: readonly unknown[];
+    readonly const?: unknown;
+    readonly oneOf?: readonly ResultSchema[];
+    readonly minLength?: number;
+    readonly maxLength?: number;
+    readonly minItems?: number;
+    readonly maxItems?: number;
+    readonly minimum?: number;
+    readonly maximum?: number;
+    readonly description?: string;
+}
+/**
+ * One bounded failure detail. `pointer` is an RFC 6901 JSON Pointer into the
+ * checked document: the schema for admission issues, the outcome for
+ * validation issues (`''` is the document root). `keyword` is the JSON Schema
+ * keyword at fault, or a document-level code: `not-serializable`,
+ * `not-plain-json`, `over-cap`, `too-deep` (JSON nesting), `schema` (a
+ * subschema that is not an object) or `depth` (subschema nesting).
+ */
+export interface ResultIssue {
+    readonly pointer: string;
+    readonly keyword: string;
+    readonly message: string;
+}
+/** Document-level failure shared by the schema and outcome checks. */
+export type ResultDocumentFailureReason = 'not-serializable' | 'not-plain-json' | 'over-cap' | 'too-deep';
+interface ResultFailure<Reason extends string> {
+    readonly ok: false;
+    readonly reason: Reason;
+    /** Canonical UTF-8 size, when it was measured. */
+    readonly bytes?: number;
+    /** At least one issue; at most {@link RESULT_ISSUES_MAX_COUNT} and {@link RESULT_ISSUES_MAX_BYTES}. */
+    readonly issues: readonly ResultIssue[];
+    /** True when issues were dropped to respect the caps. */
+    readonly truncated: boolean;
+}
+export type ResultSchemaCheck = {
+    readonly ok: true;
+    readonly bytes: number;
+    readonly canonical: ResultSchema;
+} | ResultFailure<ResultDocumentFailureReason | 'not-subset'>;
+export type ResultOutcomeCheck = {
+    readonly ok: true;
+    readonly bytes: number;
+    readonly canonical: unknown;
+} | ResultFailure<'schema-not-admitted' | ResultDocumentFailureReason | 'schema-mismatch'>;
+/**
+ * The admission guard for a result-document schema. Accepts only plain JSON
+ * data of at most {@link RESULT_SCHEMA_MAX_BYTES} canonical UTF-8 bytes that
+ * lies inside the subset (module comment). On success, `canonical` is the
+ * snapshot every party freezes and validates against.
+ */
+export declare function checkResultSchema(schema: unknown): ResultSchemaCheck;
+/**
+ * Validate one outcome document against a result schema. The guard
+ * ({@link checkResultSchema}) always runs first; a schema it refuses is
+ * `schema-not-admitted` and never reaches the library. The outcome must be
+ * plain JSON data of at most {@link RESULT_OUTCOME_MAX_BYTES} canonical UTF-8
+ * bytes, checked before validation. On success, `canonical` is the snapshot
+ * a sender stages and puts on the wire.
+ */
+export declare function validateResultOutcome(schema: unknown, outcome: unknown): ResultOutcomeCheck;
+export {};
 // ==== @byok-sdk/protocol dist/task-state.d.ts ====
 export declare const TASK_STATES: readonly ['Offered', 'Claimed', 'Running', 'AwaitApproval', 'Complete', 'Failed', 'Cancelled'];
 export type TaskState = (typeof TASK_STATES)[number];
@@ -11087,13 +11277,22 @@ export declare const TASK_TRANSITIONS: Readonly<Record<TaskState, readonly TaskS
 export declare function canTransition(from: TaskState, to: TaskState): boolean;
 // ==== @byok-sdk/protocol dist/terminal-projection.d.ts ====
 import { z } from 'zod';
+import { type ResultSchema } from './result-schema';
 export declare const TerminalProjectionContractSchema: z.ZodString;
-/** Offer-scoped authority: explicit bypass or one required structured result. */
+/**
+ * The frozen outcome schema of a result-document offer (wire v3). The value
+ * is kept exactly as sent; {@link checkResultSchema} decides admission, so
+ * every decode (Host submit, server/cloud parse, daemon admission) applies
+ * the one subset guard and reports its capped issues.
+ */
+export declare const ResultDocumentSchemaSchema: z.ZodCustom<ResultSchema, ResultSchema>;
+/** Offer-scoped authority: explicit bypass or one required structured result with its frozen schema. */
 export declare const TerminalProjectionSelectionSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     mode: z.ZodLiteral<"none">;
 }, z.core.$strict>, z.ZodObject<{
     mode: z.ZodLiteral<"result-document">;
     contract: z.ZodString;
+    schema: z.ZodCustom<ResultSchema, ResultSchema>;
 }, z.core.$strict>], "mode">;
 export type TerminalProjectionSelection = z.infer<typeof TerminalProjectionSelectionSchema>;
 // ==== @byok-sdk/protocol dist/version.d.ts ====
@@ -11101,11 +11300,22 @@ export type TerminalProjectionSelection = z.infer<typeof TerminalProjectionSelec
 export declare const MAILBOX_READ_AHEAD_MAX_SEQS = 4096;
 export declare const MAILBOX_READ_AHEAD_CAPABILITY = "mailbox-read-ahead";
 /**
- * Wire protocol version. Every v2 change is a version bump, a gated addition
+ * Wire protocol version. Every v3 change is a version bump, a gated addition
  * or a strip-safe addition: see docs/protocol.md "Freeze rule", which is the
  * one statement of the rule, and `src/wire-additions.ts`, which declares the
- * additions. `src/__tests__/compat.test.ts` proves them against published
- * releases.
+ * receiver-capability gates and additions. No v3 release has been published
+ * yet, so `src/__tests__/compat.test.ts` has no published v3 decoder to prove
+ * additions against; cross-release gates stay unproven until one exists.
+ *
+ * v3 makes `schema` required on the `terminalProjection.mode:
+ * 'result-document'` arm (`terminal-projection.ts`, `result-schema.ts`): the
+ * offer freezes the outcome schema, and the outcome reaches the Host only as
+ * `task.complete.document`. That narrows a strict shape, so it is a wire
+ * major. A v2 envelope is rejected; there is no v2 reader and no capability
+ * negotiation between the two result-document shapes. Drain, then upgrade
+ * server and client together. Every addition v2 declared is part of the v3
+ * baseline, and the v2 `result-document` capability flag is gone: every v3
+ * server keeps `task.complete.document`.
  *
  * v2 removed the task offer's `policy` (`PermissionPolicy`), the runtime
  * capability `permissionModes` and the input-preparation `permissionMode`.
@@ -11119,7 +11329,7 @@ export declare const MAILBOX_READ_AHEAD_CAPABILITY = "mailbox-read-ahead";
  * attest tool executables. The artifact names its counted tools in
  * `toolNames`.
  */
-export declare const PROTOCOL_VERSION = 2;
+export declare const PROTOCOL_VERSION = 3;
 /** Host declares that this device accepts only Agent-bound offer variants. */
 export declare const STRICT_AGENT_ONLY_CAPABILITY: 'strict-agent-only';
 /**
@@ -11174,27 +11384,6 @@ export declare const AGENT_HOME_READERS_CAPABILITY: 'agent-home-readers';
  * other flag here, just consumed for observability instead of gating.
  */
 /**
- * `result-document` (additive-minor): a SERVER-advertised flag meaning "I
- * understand the optional `task.complete.document` field" (`messages.ts`).
- * Functionally gating, like `approval_resolved` and unlike
- * `approval-targeting`.
- *
- * This is the N/N-1 answer for that new daemon -> server FIELD. An old
- * server's transport advertisement (`conn.ack.capabilities` on WS or
- * `EventsPollResponse.capabilities` on long-poll) never includes it, and
- * its `TaskCompletePayloadSchema` is a tolerant (non-`.strict()`)
- * `z.object()`, so a `document` sent to it would be silently STRIPPED on
- * parse and vanish without a trace. That is exactly why emission is gated
- * here rather than sent unconditionally the way `approvalId` is: `document`
- * carries the task's primary structured RESULT, so losing it silently is
- * data loss, not a missed observability hint. A new daemon talking to an old
- * server therefore never sends `document` at all, and — if its configured
- * extractor did produce one — reports `task.fail` (retryable: false; the
- * same server will strip it on every retry too) instead of completing the
- * task with its main result quietly deleted (`packages/client`'s
- * `task-runner.ts`). A new server talking to an old daemon is unaffected:
- * the field is optional, and an old daemon simply never sets it.
- *
  * `dispatch-selection` (additive-minor) is a correctness gate for the
  * optional `task.offer.dispatchSelection` control field. An older v1 daemon
  * legally strips unknown optional fields, so a server must never send an
@@ -11209,18 +11398,16 @@ export declare const AGENT_HOME_READERS_CAPABILITY: 'agent-home-readers';
  * cannot accidentally execute the instruction without the required tools.
  */
 export declare const CUSTOM_HARNESS_CAPABILITY: 'custom-harness';
-export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'result-document', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1"];
+export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1"];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
 // ==== @byok-sdk/protocol dist/wire-additions.d.ts ====
 /**
- * The one table of v2 wire additions that an older receiver may not decode
+ * The one table of receiver-capability gates and wire additions
  * (docs/protocol.md "Freeze rule").
  *
- * A v2 change takes exactly one of three paths: a version bump, a gated
+ * A v3 change takes exactly one of three paths: a version bump, a gated
  * addition, or a strip-safe addition. Envelope and HTTP rows have explicit
- * kinds. The last two are declared here, and
- * `src/__tests__/compat.test.ts` proves every declaration against the
- * published envelope and HTTP decoders pinned in package.json.
+ * kinds. The last two are declared here.
  *
  * - `gated`: the sender must not emit the surface unless the receiver
  *   durably advertised `capability`. A field entry applies when the payload
@@ -11229,6 +11416,16 @@ export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
  *   are gated by a device flag, daemon-to-server surfaces by a server flag.
  * - `strip-safe`: an optional field an older receiver drops without changing
  *   what it executes or acknowledges.
+ *
+ * v3 baseline: every v3 decoder reads every surface v2 had, so the v2
+ * strip-safe rows and the v2 `result-document` gate are gone. The device
+ * gates kept below name capabilities a daemon advertises only when it is
+ * configured for them (Agent home, egress, input preparation, provisioning,
+ * memory intents and so on): they gate on the receiver's configuration. The
+ * server-advertised `approval_resolved` gate is kept as the daemon's sending
+ * condition for `task.approval_resolved`. No v3 release has been
+ * published, so no row is proven against a published v3 decoder yet
+ * (`src/__tests__/compat.test.ts`).
  *
  * Senders derive their admission flags from {@link requiredReceiverCapabilities}
  * and nowhere else, so a gate cannot exist in one place and be missing in

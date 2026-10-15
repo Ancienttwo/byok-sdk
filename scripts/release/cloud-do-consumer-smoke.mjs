@@ -79,6 +79,7 @@ export async function cloudDoConsumerSmoke(installRoot, workerImports) {
     include: ['worker.ts'],
   }, null, 2) + '\n');
   const workerSource = `import { AgentDO, DurableObjectSqliteDatabase, sessionObjectName } from '@byok-sdk/cloud-do';
+import { validateResultOutcome } from '@byok-sdk/protocol';
 
 export class ConsumerDO extends AgentDO {
   protected instructions(): string { return 'Consumer hook reached.'; }
@@ -91,7 +92,10 @@ export class ConsumerDO extends AgentDO {
       await database.run('INSERT INTO consumer_probe (value) VALUES (?)', hook);
       const row = await database.get<{ value: string }>('SELECT value FROM consumer_probe LIMIT 1');
       const objectName = await sessionObjectName({ tenantId: 'consumer', workspaceId: 'workspace', agentId: 'agent', sessionId: 'session' });
-      return { hook, stored: row?.value, objectName };
+      const schema = { type: 'object', required: ['answer'], additionalProperties: false, properties: { answer: { type: 'string' } } };
+      const valid = validateResultOutcome(schema, { answer: hook });
+      const invalid = validateResultOutcome(schema, { answer: 1 });
+      return { hook, stored: row?.value, objectName, valid, invalid };
     } finally { await database.close(); }
   }
 }
@@ -103,8 +107,8 @@ export default {
 };
 `;
   const consumerImports = scanModule(workerSource, { declaration: true }).imports.map(edge => edge.specifier);
-  assert.deepEqual([...new Set(workerImports)].sort(), [...new Set(consumerImports)].sort(),
-    'every Worker export must be covered by the installed consumer imports');
+  assert.deepEqual([...new Set([...workerImports, '@byok-sdk/protocol'])].sort(), [...new Set(consumerImports)].sort(),
+    'every Worker export and the shared outcome validator must be covered by the installed consumer imports');
   writeFileSync(path.join(consumer, 'worker.ts'), workerSource);
   const flags = ['no_nodejs_compat', 'no_nodejs_compat_v2'];
   writeFileSync(path.join(consumer, 'wrangler.jsonc'), JSON.stringify({
@@ -144,7 +148,11 @@ export default {
     assert.equal(result.hook, 'Consumer hook reached.');
     assert.equal(result.stored, result.hook);
     assert.match(result.objectName, /^session:[a-f0-9]{64}$/);
-    console.log(`[cloud-do-consumer] ${process.platform}: installed Worker bundle, DO RPC, hook, identity and SQLite passed`);
+    assert.deepEqual(result.valid, { ok: true, bytes: 35, canonical: { answer: result.hook } });
+    assert.equal(result.invalid.ok, false);
+    assert.equal(result.invalid.reason, 'schema-mismatch');
+    assert.deepEqual(result.invalid.issues.map(issue => [issue.pointer, issue.keyword]), [['/answer', 'type']]);
+    console.log(`[cloud-do-consumer] ${process.platform}: installed Worker bundle, DO RPC, hook, identity, SQLite and shared outcome validation passed`);
   } finally {
     await deadline(mf.dispose(), 10_000, 'workerd disposal');
   }

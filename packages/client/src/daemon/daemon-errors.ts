@@ -32,7 +32,7 @@ export class DaemonJournalProtocolUnsupportedError extends Error {
   constructor(
     readonly taskId: string,
     readonly record: DaemonJournalProtocolRecord,
-    /** The envelope's `v`, as stored (absent when the row has none). */
+    // The envelope's `v`, as stored (absent when the row has none).
     readonly found: unknown,
     readonly expected: number = PROTOCOL_VERSION,
   ) {
