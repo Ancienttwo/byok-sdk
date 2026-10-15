@@ -83,15 +83,27 @@ const INSTRUCTION_A = 'Frozen input A: 中文 🐝 café';
 const INSTRUCTION_B = 'Frozen input B: 中文 🐝 café, extended';
 
 // #474 unified the former recurring.submit and dispatchFreshAgentEgress routes into the
-// single executions.submit entry, so the duplicate-taskId case runs once on that entry.
-it('rejects a second executions.submit with different instruction bytes for the same taskId and leaves the first offer untouched', async () => {
+// single executions.submit entry. Both former payload shapes remain reachable on it: with
+// conversation message egress (the old recurring shape) and result-document only, without
+// messageEgress or context (the old fresh-dispatch shape).
+it.each([
+  { shape: 'with message egress', withMessageEgress: true, expectedAccepted: 1 },
+  { shape: 'without message egress', withMessageEgress: false, expectedAccepted: 0 },
+] as const)(
+  'rejects a second executions.submit ($shape) with different instruction bytes for the same taskId and leaves the first offer untouched',
+  async ({ withMessageEgress, expectedAccepted }) => {
   await withHarness(DEFAULT_AGENT_EGRESS_POLICY, async ({ sdk, adapter, deviceId, accepted }) => {
-    const taskId = 'same-id-executions-submit';
-    const submit = (instruction: string) => sdk.executions.submit({ taskId, deviceId, payload: {
-      instruction, runtime: 'pi', agentRef: AGENT_REF, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
-      messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },
-      terminalProjection: { mode: 'none' },
-    }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'turn-0' } });
+    const taskId = `same-id-${withMessageEgress ? 'message-egress' : 'result-document'}`;
+    const submit = (instruction: string) => sdk.executions.submit(withMessageEgress
+      ? { taskId, deviceId, payload: {
+        instruction, runtime: 'pi', agentRef: AGENT_REF, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+        messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },
+        terminalProjection: { mode: 'none' },
+      }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'turn-0' } }
+      : { taskId, deviceId, payload: {
+        instruction, runtime: 'pi', agentRef: AGENT_REF, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+        terminalProjection: { mode: 'none' },
+      } });
 
     await submit(INSTRUCTION_A);
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), { timeout: 10000 });
@@ -121,9 +133,11 @@ it('rejects a second executions.submit with different instruction bytes for the 
     expect(adapter.startCalls).toHaveLength(1);
     expect(adapter.sessions).toHaveLength(1);
     expect(adapter.startCalls[0]?.task.instruction).not.toContain(INSTRUCTION_B);
-    expect(accepted.length).toBe(1);
+    expect(accepted.length).toBe(expectedAccepted);
   });
-}, 30000);
+  },
+  30000,
+);
 
 it('declines a fresh Agent egress offer whose policy is not exactly the daemon policy, non-retryably and without a runtime start', async () => {
   const daemonPolicy: AgentEgressPolicy = { ...DEFAULT_AGENT_EGRESS_POLICY, policyRevision: 'daemon-v2' };
