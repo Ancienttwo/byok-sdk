@@ -10,6 +10,7 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type DaemonOverrides } from '../../daemon/create-daemon';
 import { SqliteLocalTaskJournal, type JournalFaultStep } from '../../daemon/journal/sqlite-journal';
 import { DeviceStore } from '../../daemon/store';
+import { createDeviceCredentialStore } from '../../daemon/device-credential-provider';
 import { waitForDaemonOpen } from './lifecycle-barrier';
 import {
   freezeRuntimeAdapterDescriptor,
@@ -21,6 +22,7 @@ import {
 } from '../../types';
 
 interface Config {
+  readonly deviceCredentials?: { readonly macosKeychainPath: string };
   readonly scratchRoot: string;
   readonly productId: string;
   readonly serverUrl: string;
@@ -210,6 +212,7 @@ const daemon = createDaemonWithAdapters(
     serverUrl: config.serverUrl,
     workspaceRoot: config.workspaceRoot,
     storage: { scratchRoot: config.scratchRoot }, storeDir: config.storeDir,
+    deviceCredentials: config.deviceCredentials,
     hostedJournal: { mode: 'sqlite' },
     sdkHelperHost: { mode: 'self-executable' },
     ...(config.agentHome === true ? { agentHome: { hostStorageRoot: path.join(config.storeDir, 'agent-home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } } : {}),
@@ -233,7 +236,7 @@ const paired = config.pairingCode === undefined ? undefined : await daemon.pair(
 await daemon.start();
 // #391: start() is local startup only; "ready" means the cloud accepted this run's hello.
 await waitForDaemonOpen(daemon);
-const device = paired ?? await new DeviceStore(config.storeDir, undefined, config.productId).load();
+const device = paired ?? await new DeviceStore(config.storeDir, createDeviceCredentialStore(config)).load();
 process.stdout.write(`${JSON.stringify({ ready: true, pid: process.pid, deviceId: device?.deviceId })}\n`);
 
 const lines = createInterface({ input: process.stdin });

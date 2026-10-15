@@ -117,8 +117,14 @@ jobs:
         id: tmpdir-snapshot
         run: node scripts/ci/check-tmpdir-leaks.mjs snapshot "$RUNNER_TEMP/tmpdir-before.txt"
 
+      # The dist CLI e2e uses the real device credential provider (#487).
+      - name: Install isolated credential-provider dependencies on Linux
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends dbus-x11 gnome-keyring libsecret-tools
+
       - name: Test
-        run: bun run test
+        run: bash scripts/ci/with-secret-service.sh bun run test
 
       - name: Check tests left no byok-* entries in TMPDIR
         if: ${{ always() && steps.tmpdir-snapshot.outcome == 'success' }}
@@ -331,8 +337,13 @@ jobs:
       # exists, never skipped-while-counting-as-covered. The run's
       # release-manifest.json (printed to the log) carries the source SHA and
       # per-tarball hashes the smoke evidence refers to.
+      - name: Install isolated credential-provider dependencies on Linux
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends dbus-x11 gnome-keyring libsecret-tools
+
       - name: Recurring smoke durable restart leg from packed tarballs
-        run: bun run check:release-pack -- --out-dir .ci-artifacts/release-pack
+        run: bash scripts/ci/with-secret-service.sh bun run check:release-pack -- --out-dir .ci-artifacts/release-pack
 
       # repo-harness stays outside the dependency graph and is fetched at the
       # pinned tool version only for this check.
@@ -483,9 +494,19 @@ jobs:
       - name: Install dependencies
         run: bun ci
 
+      - name: Install isolated credential-provider dependencies on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends dbus-x11 gnome-keyring libsecret-tools
+
       - name: Check graph, pack exact tarballs, and import from an isolated npm install
-        if: matrix.os != 'windows-latest'
+        if: runner.os == 'macOS'
         run: bun run check:release-pack -- --out-dir .ci-artifacts/release-pack
+
+      - name: Check packed CLI with an ephemeral Secret Service on Linux
+        if: runner.os == 'Linux'
+        run: bash scripts/ci/with-secret-service.sh bun run check:release-pack -- --out-dir .ci-artifacts/release-pack
 
       # The hosted windows-latest runner is an ADMINISTRATOR. This leg runs the
       # SAME driver, with the same arguments, as the other two legs, but under a
@@ -980,8 +1001,13 @@ jobs:
       - name: Install dependencies
         run: bun ci
 
+      - name: Install isolated credential-provider dependencies on Linux
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends dbus-x11 gnome-keyring libsecret-tools
+
       - name: Pack the exact tarballs a consumer would install
-        run: bun run check:release-pack -- --out-dir .ci-artifacts/release-pack
+        run: bash scripts/ci/with-secret-service.sh bun run check:release-pack -- --out-dir .ci-artifacts/release-pack
 
       - name: Prove empty install and v0.4.2-to-candidate upgrade from packed tarballs
         run: node scripts/release/pg-migrate-smoke.mjs --artifacts .ci-artifacts/release-pack

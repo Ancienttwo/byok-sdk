@@ -1,3 +1,4 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 /**
  * The device half of the skill-pack channel, end to end against the REAL
  * `@byok-sdk/cloud` surface over a real loopback socket, a real paired device,
@@ -45,7 +46,6 @@ import {
   tenantId,
 } from '../../../cloud/src/index';
 import { AuthManager } from '../daemon/auth-manager';
-import { DeviceStore } from '../daemon/store';
 import {
   SKILL_PACK_AUDIT_FILENAME,
   SKILL_PACK_LOCK_FILENAME,
@@ -198,7 +198,7 @@ async function startCloud(options: {
 }
 
 async function pairedAuth(cloud: CloudHandle, storeDir: string): Promise<AuthManager> {
-  const auth = new AuthManager({ serverUrl: cloud.url, store: new DeviceStore(storeDir) });
+  const auth = new AuthManager({ serverUrl: cloud.url, store: createTestDeviceStore(storeDir) });
   const pairing = await cloud.createPairingCode();
   await auth.pair(pairing.code);
   return auth;

@@ -1,3 +1,4 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { promises as fs } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
@@ -28,7 +29,7 @@ beforeEach(async () => {
     productId: 'doctor-test', productName: 'Doctor test', localAgentRelease: { version: '0.0.0-test' },
     storeDir: root, workspaceRoot: root, serverUrl: 'https://unused.invalid',
   };
-  store = new DeviceStore(root, undefined, config.productId);
+  store = createTestDeviceStore(root, undefined, config.productId);
   vi.mocked(connectControlClient).mockReset();
   vi.mocked(connectControlClient).mockResolvedValue({ ok: false, reason: 'offline' });
   vi.stubGlobal('fetch', vi.fn(() => { throw new Error('network must not be used'); }));
@@ -191,7 +192,7 @@ describe('public diagnostics and CLI consumers', () => {
     const command = spawnSync(process.execPath, [
       path.resolve('dist/bin/byok-agent.js'), 'doctor', '--repair', 'restore-enrollment-metadata',
       '--expected-device-id', 'device-a', '--expected-tenant-id', 'tenant-a', '--json', '--config', configPath,
-    ], { encoding: 'utf8', env: { ...process.env, BYOK_TEST_DEVICE_CREDENTIAL_STORE: '1' }, timeout: 10_000 });
+    ], { encoding: 'utf8', env: { ...process.env }, timeout: 10_000 });
     expect(command.status).toBe(1);
     expect(command.stderr).toContain('Explicit confirmation');
     expect(JSON.parse(command.stdout)).toMatchObject({ repair: { status: 'failed', code: 'confirmation-required' } });

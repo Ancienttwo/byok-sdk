@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createTestKeychain } from '../../../../scripts/testing/macos-keychain.mjs';
 import { readLastEnvironmentRecord } from '../bin/audit-log';
 import { TestServer } from './fixtures/test-server';
 
@@ -36,7 +37,7 @@ async function tmpDir(prefix: string): Promise<string> {
   return dir;
 }
 
-async function fixture(serverUrl: string): Promise<{ home: string; storeDir: string; configPath: string }> {
+async function fixture(serverUrl: string, macosKeychainPath?: string): Promise<{ home: string; storeDir: string; configPath: string }> {
   const home = await tmpDir('byok-lse-home-');
   const storeDir = await tmpDir('byok-lse-st-');
   const fakeBin = path.join(home, 'fakebin');
@@ -58,6 +59,7 @@ async function fixture(serverUrl: string): Promise<{ home: string; storeDir: str
     workspaceRoot: home,
     storeDir,
     runtimeAllowlist: ['claude'],
+    ...(macosKeychainPath === undefined ? {} : { deviceCredentials: { macosKeychainPath } }),
   }));
   return { home, storeDir, configPath };
 }
@@ -65,7 +67,16 @@ async function fixture(serverUrl: string): Promise<{ home: string; storeDir: str
 function minimalEnv(home: string, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   // launchd also gives a user agent its per-user TMPDIR; keeping the suite's
   // short TMPDIR keeps socket paths short and avoids crawling a huge default one.
-  return { HOME: home, ZDOTDIR: home, PATH: '/usr/bin:/bin', ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}), ...extra };
+  // A Linux user session carries its D-Bus address; the Secret Service the
+  // device credential store uses is reachable only through it.
+  return {
+    HOME: home,
+    ZDOTDIR: home,
+    PATH: '/usr/bin:/bin',
+    ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}),
+    ...(process.env.DBUS_SESSION_BUS_ADDRESS ? { DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS } : {}),
+    ...extra,
+  };
 }
 
 interface ChildReport {
@@ -79,7 +90,7 @@ interface ChildReport {
 
 async function runChild(home: string, configPath: string, service: boolean): Promise<{ report: ChildReport; child: ChildProcess }> {
   const child = spawn(process.execPath, [CHILD, configPath, ...(service ? ['--service'] : [])], {
-    env: minimalEnv(home, { BYOK_TEST_DEVICE_CREDENTIAL_STORE: '1' }),
+    env: minimalEnv(home, { BYOK_TEST_ENV_MARKER: '1' }),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   cleanups.push(async () => {
@@ -113,7 +124,7 @@ describe.runIf(supportedShell)('service login-shell environment, end to end (iss
     expect(report.pathHasFakeBin).toBe(true);
     expect(report.detected).toEqual(['claude']);
     expect(report.runtimes).toMatchObject([{ id: 'claude', outcome: 'available' }]);
-    expect(report.byokNames).toEqual(['BYOK_TEST_DEVICE_CREDENTIAL_STORE']);
+    expect(report.byokNames).toEqual(['BYOK_TEST_ENV_MARKER']);
     const hello = await server.waitFor((envelope) => envelope.type === 'conn.hello', 10_000);
     expect((hello.payload as { runtimes: Array<{ id: string }> }).runtimes.map((runtime) => runtime.id)).toEqual(['claude']);
     expect(await stop(child)).toBe(0);
@@ -135,13 +146,16 @@ describe.runIf(supportedShell)('service login-shell environment, end to end (iss
   }, 60_000);
 
   it('dist byok-agent start --service applies the capture before anything else (service log line, no paths)', async () => {
-    const { home, storeDir, configPath } = await fixture('http://127.0.0.1:9');
+    const keychain = process.platform === 'darwin' ? await createTestKeychain() : undefined;
+    if (keychain) cleanups.push(() => keychain.dispose());
+    const { home, storeDir, configPath } = await fixture('http://127.0.0.1:9', keychain?.path);
     // Unpaired, so start halts right after the capture; the CLI wiring is what is under test.
     const run = spawnSync(process.execPath, [path.resolve('dist/bin/byok-agent.js'), 'start', '--config', configPath, '--service'], {
-      // The test credential store makes the unpaired halt reachable on hosts
-      // without an OS credential provider (Linux CI), where start would
-      // otherwise crash on the missing provider first (#394 tells the two apart).
-      env: minimalEnv(home, { BYOK_TEST_DEVICE_CREDENTIAL_STORE: '1' }),
+      // The built CLI uses the real OS credential provider (#487): an empty
+      // one reads as unpaired. A host without one crashes on the missing
+      // provider first (#394 tells the two apart), so Linux CI runs this suite
+      // under an ephemeral Secret Service (scripts/ci/with-secret-service.sh).
+      env: minimalEnv(home, { BYOK_TEST_ENV_MARKER: '1' }),
       encoding: 'utf8',
       timeout: 30_000,
     });

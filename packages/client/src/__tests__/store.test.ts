@@ -1,3 +1,4 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -33,7 +34,7 @@ describe('DeviceStore (atomic write path)', () => {
 
   it('round-trips a bounded non-secret DeviceMetadata projection through save()/load()', async () => {
     storeDir = await tmpDir('byok-device-store-');
-    const store = new DeviceStore(storeDir);
+    const store = createTestDeviceStore(storeDir);
 
     expect(await store.load()).toBeUndefined();
 
@@ -52,7 +53,7 @@ describe('DeviceStore (atomic write path)', () => {
     await fs.mkdir(storeDir, { recursive: true });
     await fs.writeFile(filePath, '{}', { mode: 0o644 });
 
-    const store = new DeviceStore(storeDir);
+    const store = createTestDeviceStore(storeDir);
     await store.save(record);
 
     const stat = await fs.stat(filePath);
@@ -75,7 +76,7 @@ describe('DeviceStore (atomic write path)', () => {
     const before = await fs.stat(storeDir);
     expect(before.mode & 0o777).toBe(0o755);
 
-    const store = new DeviceStore(storeDir);
+    const store = createTestDeviceStore(storeDir);
     await store.save(record);
 
     const after = await fs.stat(storeDir);
@@ -85,7 +86,7 @@ describe('DeviceStore (atomic write path)', () => {
 
   it('leaves no leftover atomic-write temp file behind after save()', async () => {
     storeDir = await tmpDir('byok-device-store-');
-    const store = new DeviceStore(storeDir);
+    const store = createTestDeviceStore(storeDir);
 
     await store.save(record);
 
@@ -95,7 +96,7 @@ describe('DeviceStore (atomic write path)', () => {
 
   it('remove() removes device.json so a subsequent load() sees undefined again', async () => {
     storeDir = await tmpDir('byok-device-store-');
-    const store = new DeviceStore(storeDir);
+    const store = createTestDeviceStore(storeDir);
 
     await store.save(record);
     expect(await store.load()).toEqual(record);
@@ -112,7 +113,7 @@ describe('DeviceStore (atomic write path)', () => {
   it('finding R4: on win32, an icacls failure makes save() reject with SecureDirHardeningError and device.json is never written', async () => {
     storeDir = await tmpDir('byok-device-store-r4-');
     const run = vi.fn<Runner>().mockResolvedValue({ code: 5, stdout: '', stderr: 'Access is denied.' });
-    const store = new DeviceStore(storeDir, { platform: 'win32', run });
+    const store = createTestDeviceStore(storeDir, { platform: 'win32', run });
 
     await expect(store.save(record)).rejects.toBeInstanceOf(SecureDirHardeningError);
     expect(await store.load()).toBeUndefined(); // device.json was never persisted
@@ -123,7 +124,7 @@ describe('DeviceStore (atomic write path)', () => {
     storeDir = await tmpDir('byok-device-store-r4-mkdir-');
     const nestedStoreDir = path.join(storeDir, 'nested-product-id');
     const run = vi.fn<Runner>().mockRejectedValue(Object.assign(new Error('spawn icacls ENOENT'), { code: 'ENOENT' }));
-    const store = new DeviceStore(nestedStoreDir, { platform: 'win32', run });
+    const store = createTestDeviceStore(nestedStoreDir, { platform: 'win32', run });
 
     await expect(store.save(record)).rejects.toBeInstanceOf(SecureDirHardeningError);
     const stat = await fs.stat(nestedStoreDir);

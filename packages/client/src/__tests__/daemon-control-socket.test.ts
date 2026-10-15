@@ -1,3 +1,4 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -8,7 +9,6 @@ import { createDaemonWithAdapters, type Daemon, type DaemonConfig, type DaemonOv
 import { controlSocketPath, controlTokenPath, type ControlStatusResult } from '../daemon/control-protocol';
 import { connectControlClient } from '../bin/control-client';
 import { LongPollClient } from '../daemon/long-poll-transport';
-import { DeviceStore } from '../daemon/store';
 import type { DaemonEvent } from '../daemon/observer';
 import { runStartCommand } from '../bin/commands/start';
 import { runStatusCommand } from '../bin/commands/status';
@@ -115,7 +115,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
       }
     }, { timeout: 5000 });
 
-    const projection = await new DeviceStore(storeDir).load();
+    const projection = await createTestDeviceStore(storeDir).load();
     expect(projection?.deviceId).toBe(receipt.deviceId);
   }, 10000);
 

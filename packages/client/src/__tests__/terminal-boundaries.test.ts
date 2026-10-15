@@ -1,3 +1,4 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -7,7 +8,6 @@ import { createEnvelope, decodeEnvelope, encodeEnvelope, type Envelope } from '@
 import { createDaemonWithAdapters, type DaemonConfig } from '../daemon/create-daemon';
 import { SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
 import { journalHash, type LocalTerminalRecord } from '../daemon/journal/journal';
-import { DeviceStore } from '../daemon/store';
 import { CursorStore } from '../daemon/cursor-store';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
@@ -49,7 +49,7 @@ describe('terminal durability and actual harness boundaries', () => {
     const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(cfg) }, [adapter], { hostedJournal: { journal }, longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
     cleanup.push(async () => { fail = false; await daemon.stop(); await journal.close(); });
     await daemon.pair('pairing-code');
-    const record = (await new DeviceStore(cfg.storeDir!, undefined, cfg.productId).credentials.read())!;
+    const record = (await createTestDeviceStore(cfg.storeDir!, undefined, cfg.productId).credentials.read())!;
     await daemon.start();
     const identity = { tenantId: record.tenantId, deviceId: record.deviceId, productId: cfg.productId };
     const seq = server.nextSeq();
@@ -85,7 +85,7 @@ describe('terminal durability and actual harness boundaries', () => {
         const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(cfg) }, [adapter]); cleanup.push(() => daemon.stop());
         const pairing = await cloud.createPairingCode();
         await daemon.pair(pairing.code);
-        const device = (await new DeviceStore(cfg.storeDir!, undefined, cfg.productId).credentials.read())!;
+        const device = (await createTestDeviceStore(cfg.storeDir!, undefined, cfg.productId).credentials.read())!;
         await post(cloud.url, device.accessToken, createEnvelope('conn.hello', {
           deviceId: device.deviceId, productId: cfg.productId, protocolVersions: [2],
           capabilities: ['custom-harness'], runtimes: [], harnesses: [{ id: 'acme-harness', capabilities: { ...adapter.descriptor.capabilities } }],

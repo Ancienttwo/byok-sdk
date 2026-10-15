@@ -2,7 +2,7 @@ import os from 'node:os';
 import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, PairResponseSchema } from '@byok-sdk/protocol';
 import type { ChallengeResponse, TokenResponse } from '@byok-sdk/protocol';
 import { DeviceRecordRePairRequiredError, DeviceStore, type DeviceMetadata, type DeviceRecord } from './store';
-import type { DeviceCredentialStore, InMemoryDeviceCredentialStore } from './device-credential-store';
+import type { DeviceCredentialBackend } from './device-credential-store';
 import { generateDeviceKeyPair, exportPrivateKeyPem, importPrivateKeyPem, signNonce } from './device-keys';
 import { toHttpBase } from './url';
 
@@ -48,7 +48,7 @@ export interface AuthManagerOptions {
   serverUrl: string;
   store: DeviceStore;
   /** Internal-only credential custody seam. Product construction uses store.credentials. */
-  credentials?: DeviceCredentialStore | InMemoryDeviceCredentialStore;
+  credentials?: DeviceCredentialBackend;
   deviceName?: string;
   /**
    * Optional resolver for the client-hashed physical machine identity sent
@@ -82,7 +82,7 @@ export class AuthManager {
   /** The sole cancellation authority for the request currently inside the serialized credential mutation. */
   private activeRequest: AbortController | undefined;
 
-  private readonly credentials: DeviceCredentialStore | InMemoryDeviceCredentialStore;
+  private readonly credentials: DeviceCredentialBackend;
   private readonly requestDeadlineMs: number;
 
   constructor(private readonly opts: AuthManagerOptions) {

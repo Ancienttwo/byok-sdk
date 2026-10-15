@@ -1,3 +1,4 @@
+import { InMemoryDeviceCredentialStore } from '../../scripts/testing/device-credentials.mjs';
 // Quickstart smoke (#389 item 2, #384 item 1, #418): the README's "Run it" loop
 // against the unmodified `server.ts`, with every network and lifecycle default
 // left alone and a stub runtime in place of a real agent. No `longPollHoldMs`
@@ -82,7 +83,7 @@ describe('examples/basic quickstart with default settings', () => {
     // Under the per-run TMPDIR root of scripts/vitest/tmp-root.mjs.
     root = await mkdtemp(path.join(tmpdir(), 'qs-'));
     const adapter = new BotStubAdapter();
-    // The README daemon config; no network or lifecycle overrides (third argument omitted).
+    // The README daemon config; no network or lifecycle overrides.
     daemon = createDaemonWithAdapters({
       localAgentRelease: { version: '0.0.0-example-stub' },
       productName: 'BYOK Example',
@@ -90,7 +91,7 @@ describe('examples/basic quickstart with default settings', () => {
       serverUrl: server.url,
       workspaceRoot: path.join(root, 'workspace'),
       storeDir: path.join(root, 'store'),
-    }, [adapter]);
+    }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });
 
     // Step 1 of the README: the page's "Create pairing code" button.
     const pairing = await fetch(`${server.url}/api/pair`, { method: 'POST' });

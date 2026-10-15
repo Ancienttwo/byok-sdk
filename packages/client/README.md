@@ -427,6 +427,21 @@ product and unpair with the old configuration (`byok-agent unpair --config <path
 Alternatively, use a new `productId` for an independent enrollment. Unpair clears
 the shared credential for every directory of that product.
 
+On macOS, `deviceCredentials: { macosKeychainPath: '/absolute/path/test.keychain-db' }`
+selects one explicit keychain for all enrollment reads, writes and deletion.
+Pass the same selection to cold enrollment reads, `createStoredDeviceProofSigner`
+and offline repair configuration. Omission uses the OS default keychain. An
+operation refused by macOS with exit 36 throws
+`DeviceCredentialInteractionRequiredError`; it never unlocks a keychain or
+switches credential authorities. Non-interactive custody tests create and
+unlock their own temporary keychain and delete it after all children exit.
+
+Embedded composition can explicitly inject its own complete custody backend
+through `DaemonOverrides.deviceCredentials` (the optional second argument to
+`createDaemon`, or third to `createDaemonWithAdapters`). The caller owns that
+backend's secret storage and lifetime. OS selection and an injected backend
+are mutually exclusive; no environment variable selects a test backend.
+
 Hosts that need cold setup or diagnostic state use
 `readDeviceEnrollmentStatus({ productId, storeDir })`. It validates the
 complete SDK-owned record but returns only `unpaired`, `paired` with

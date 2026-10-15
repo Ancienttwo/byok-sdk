@@ -1,3 +1,4 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 /**
  * Typed long-poll route diagnostics prove a route failure carries its
  * credential-free `{transport, host, path}` endpoint projection. The tests
@@ -13,7 +14,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthManager } from '../daemon/auth-manager';
 import { exportPrivateKeyPem } from '../daemon/device-keys';
 import { LongPollClient, LongPollRouteError } from '../daemon/long-poll-transport';
-import { DeviceStore } from '../daemon/store';
 import { seedDeviceEnrollment } from './fixtures/device-enrollment';
 import { describeEndpoint } from '../daemon/url';
 
@@ -28,7 +28,7 @@ describe('LongPollRouteError names the failing route', () => {
 
   beforeEach(async () => {
     const storeDir = await tmpDir('byok-transport-diagnostics-store-');
-    const store = new DeviceStore(storeDir);
+    const store = createTestDeviceStore(storeDir);
     await seedDeviceEnrollment(store, {
       deviceId: 'dev-1',
       tenantId: 'tenant-transport',
@@ -59,7 +59,7 @@ describe('LongPollRouteError names the failing route', () => {
    */
   async function expiredTokenAuth(): Promise<AuthManager> {
     const storeDir = await tmpDir('byok-transport-diagnostics-expired-');
-    const store = new DeviceStore(storeDir);
+    const store = createTestDeviceStore(storeDir);
     const keys = generateKeyPairSync('ed25519');
     const publicJwk = keys.publicKey.export({ format: 'jwk' });
     await seedDeviceEnrollment(store, {

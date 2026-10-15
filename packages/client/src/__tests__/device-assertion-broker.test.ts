@@ -1,3 +1,4 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { createPublicKey, generateKeyPairSync, sign as edSign, verify as edVerify } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -27,7 +28,6 @@ import { createAuditAppender, auditLogPath } from '../bin/audit-log';
 import { createDaemonRecordProjector } from '../daemon/daemon-record';
 import { formatDaemonEventLine } from '../bin/format';
 import { NONCE_SIGNING_DOMAIN } from '../daemon/device-keys';
-import { DeviceStore } from '../daemon/store';
 import type { DaemonEvent } from '../daemon/observer';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
@@ -343,7 +343,7 @@ describe('device assertion broker: assertion.issue', () => {
     // Proves the OS authority is genuinely re-read per call rather than cached
     // at start. device.json alone is only a repairable non-secret projection.
     await client.request<AssertionIssueResult>('assertion.issue', { audience: ALLOWED_AUDIENCE });
-    await new DeviceStore(built.storeDir, undefined, built.config.productId).credentials.clear();
+    await createTestDeviceStore(built.storeDir, undefined, built.config.productId).credentials.clear();
 
     const err = await expectControlError(client.request('assertion.issue', { audience: ALLOWED_AUDIENCE }));
     expect(err.code).toBe('not_paired');

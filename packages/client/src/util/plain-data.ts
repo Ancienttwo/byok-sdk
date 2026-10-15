@@ -113,8 +113,10 @@ function snapshot(value: unknown, options: PlainDataSnapshotOptions, depth: numb
  * host may pass a larger configuration object. A Proxy, a non-plain
  * prototype, an accessor on a named key, or a non-primitive value throws
  * {@link PLAIN_DATA_REJECTED}.
+ * With explicit `nested` options, object values are copied through the same
+ * bounded plain-data validator; no live object or accessor is returned.
  */
-export function pickPlainDataProperties<K extends string>(value: unknown, keys: readonly K[]): Record<K, unknown> {
+export function pickPlainDataProperties<K extends string>(value: unknown, keys: readonly K[], nested?: PlainDataSnapshotOptions): Record<K, unknown> {
   if (typeof value !== 'object' || value === null || utilTypes.isProxy(value)) throw PLAIN_DATA_REJECTED;
   const prototype = Object.getPrototypeOf(value) as unknown;
   if (prototype !== Object.prototype && prototype !== null) throw PLAIN_DATA_REJECTED;
@@ -127,6 +129,10 @@ export function pickPlainDataProperties<K extends string>(value: unknown, keys: 
     }
     if (!('value' in descriptor)) throw PLAIN_DATA_REJECTED;
     const field: unknown = descriptor.value;
+    if (nested !== undefined && typeof field === 'object' && field !== null) {
+      out[key] = snapshotPlainData(field, nested);
+      continue;
+    }
     if (field !== undefined && field !== null && typeof field !== 'string' && typeof field !== 'boolean' &&
         !(typeof field === 'number' && Number.isFinite(field))) {
       throw PLAIN_DATA_REJECTED;

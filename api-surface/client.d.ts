@@ -2727,7 +2727,7 @@ export type RequestTaskAssertionResult = {
 export declare function requestTaskAssertion(options: RequestTaskAssertionOptions): Promise<RequestTaskAssertionResult>;
 // ==== @byok-sdk/client dist/daemon/auth-manager.d.ts ====
 import { DeviceStore, type DeviceRecord } from './store';
-import type { DeviceCredentialStore, InMemoryDeviceCredentialStore } from './device-credential-store';
+import type { DeviceCredentialBackend } from './device-credential-store';
 /**
  * Thrown when the server has revoked this device: a 401 on `/byok/challenge`
  * or `/byok/token` (protocol §6.3). The only recourse is a fresh
@@ -2750,7 +2750,7 @@ export interface AuthManagerOptions {
     serverUrl: string;
     store: DeviceStore;
     /** Internal-only credential custody seam. Product construction uses store.credentials. */
-    credentials?: DeviceCredentialStore | InMemoryDeviceCredentialStore;
+    credentials?: DeviceCredentialBackend;
     deviceName?: string;
     /**
      * Optional resolver for the client-hashed physical machine identity sent
@@ -3882,6 +3882,8 @@ export interface HostedJournalConfig {
     maxRecordBytes?: number;
 }
 export interface DaemonConfig {
+    /** Select an explicit macOS keychain for device enrollment custody. */
+    deviceCredentials?: import('./device-credential-store').DeviceCredentialConfig;
     storage?: StorageConfig;
     /** Distribution-owned application release; observability only, never a protocol/capability gate. */
     localAgentRelease: LocalAgentReleaseIdentity;
@@ -4461,6 +4463,11 @@ export interface Daemon {
 /** Custom adapter composition. Available custom descriptors are published through
  * the capability-gated harness inventory; built-in RuntimeId remains closed. */
 export interface DaemonOverrides {
+    /**
+     * Explicit enrollment-custody dependency. The caller owns its secret storage
+     * and lifetime; omission composes the platform OS credential store.
+     */
+    deviceCredentials?: import('./device-credential-store').DeviceCredentialBackend;
     retention?: {
         clock?: () => Date;
         timers?: RetentionTimers;
@@ -4564,7 +4571,7 @@ export declare function buildDaemonWithAdapters(config: DaemonConfig, adapters: 
  * needing something this can't build (custom adapter options, a fourth
  * in-house runtime, test stubs) use `createDaemonWithAdapters` directly.
  */
-export declare function createDaemon(config: DaemonConfig): Daemon;
+export declare function createDaemon(config: DaemonConfig, overrides?: DaemonOverrides): Daemon;
 // ==== @byok-sdk/client dist/daemon/cursor-store.d.ts ====
 /**
  * Persists the highest processed server->daemon envelope `seq` per
@@ -4952,7 +4959,23 @@ export declare class DeviceCredentialStoreUnavailableError extends Error {
 export declare class DeviceCredentialStoreError extends Error {
     constructor(message: string);
 }
-export interface DeviceCredentialStoreOptions {
+/** macOS refused an operation that requires unavailable user interaction. */
+export declare class DeviceCredentialInteractionRequiredError extends DeviceCredentialStoreError {
+    constructor();
+}
+/** Complete enrollment custody. An injected implementation owns secret storage and its lifetime. */
+export interface DeviceCredentialBackend {
+    read(): Promise<DeviceRecord | undefined>;
+    readFirstPairingAttempt(): Promise<FirstPairingAttempt | undefined>;
+    saveFirstPairingAttempt(attempt: FirstPairingAttempt): Promise<void>;
+    replace(record: DeviceRecord): Promise<void>;
+    clear(): Promise<boolean>;
+}
+export interface DeviceCredentialConfig {
+    /** Explicit macOS keychain file; omitted uses the operating system's default keychain. */
+    readonly macosKeychainPath?: string;
+}
+export interface DeviceCredentialStoreOptions extends DeviceCredentialConfig {
     readonly storeDir: string;
     readonly productId: string;
     readonly platform?: NodeJS.Platform;
@@ -4960,11 +4983,10 @@ export interface DeviceCredentialStoreOptions {
 }
 /**
  * Internal OS-backed authority for the bearer token and device private key.
- * The constructor deliberately accepts no path or backend selector: real
- * callers get the platform provider; tests import this internal module and
- * inject a double directly.
+ * Every operation targets the selected platform provider. An explicit macOS
+ * keychain selects custody within that provider, without a file fallback.
  */
-export declare class DeviceCredentialStore {
+export declare class DeviceCredentialStore implements DeviceCredentialBackend {
     #private;
     constructor(options: DeviceCredentialStoreOptions);
     read(): Promise<DeviceRecord | undefined>;
@@ -4972,15 +4994,6 @@ export declare class DeviceCredentialStore {
     saveFirstPairingAttempt(attempt: FirstPairingAttempt): Promise<void>;
     replace(record: DeviceRecord): Promise<void>;
     /** Returns true only after the sole secret authority is confirmed absent. */
-    clear(): Promise<boolean>;
-}
-/** Test-only double; it is intentionally internal and never selected by a production config. */
-export declare class InMemoryDeviceCredentialStore {
-    #private;
-    read(): Promise<DeviceRecord | undefined>;
-    readFirstPairingAttempt(): Promise<FirstPairingAttempt | undefined>;
-    saveFirstPairingAttempt(attempt: FirstPairingAttempt): Promise<void>;
-    replace(record: DeviceRecord): Promise<void>;
     clear(): Promise<boolean>;
 }
 export declare function runDeviceCommand(executable: string, args: readonly string[], stdin?: string): Promise<DeviceCommandResult>;
@@ -5049,6 +5062,8 @@ export declare class DeviceProofSignerError extends Error {
 }
 export interface CreateStoredDeviceProofSignerOptions {
     readonly productId: string;
+    /** Same OS keychain selection as the daemon and enrollment identity read. */
+    readonly deviceCredentials?: import('./device-credential-store').DeviceCredentialConfig;
     /** Same store directory the daemon uses; omitted resolves the product default. */
     readonly storeDir?: string;
     /**
@@ -7759,7 +7774,7 @@ export interface ProjectedSkillPack {
 export declare function projectSkillPack(dataDir: string, name: string, targetDir: string): Promise<ProjectedSkillPack>;
 // ==== @byok-sdk/client dist/daemon/store.d.ts ====
 import { type EnsureSecureDirOptions } from '../util/secure-dir';
-import { DeviceCredentialStore, InMemoryDeviceCredentialStore, type DeviceMetadata, type DeviceRecord } from './device-credential-store';
+import { type DeviceCredentialBackend, type DeviceCredentialConfig, type DeviceMetadata, type DeviceRecord } from './device-credential-store';
 export type { DeviceMetadata, DeviceRecord } from './device-credential-store';
 /**
  * Non-secret projection of an authenticated device enrollment. This is the
@@ -7777,6 +7792,7 @@ export interface DeviceEnrollment {
 export interface DeviceEnrollmentStatusOptions {
     productId: string;
     storeDir?: string;
+    deviceCredentials?: DeviceCredentialConfig;
 }
 /** Credential-blind cold read model for host setup and diagnostics. */
 export type DeviceEnrollmentStatus = {
@@ -7858,12 +7874,9 @@ export declare class DeviceRecordRePairRequiredError extends Error {
  * OS DeviceCredentialStore.
  */
 export declare class DeviceStore {
+    readonly credentials: DeviceCredentialBackend;
     private readonly secureDirOptions?;
-    /** Process-local keyed doubles preserve restart semantics in isolated tests. */
-    private static readonly testCredentials;
     private readonly filePath;
-    /** Internal test seam. Product construction always supplies productId and gets an OS store. */
-    readonly credentials: DeviceCredentialStore | InMemoryDeviceCredentialStore;
     /**
      * `secureDirOptions` is a test-only DI seam (mirrors `EnsureSecureDirOptions`'s
      * own `run`/`platform` overrides) — every real caller omits it, getting
@@ -7874,7 +7887,7 @@ export declare class DeviceStore {
      * ACL-unprotected credential") is verifiable from a real `darwin`/`linux`
      * CI/dev machine, not just asserted.
      */
-    constructor(storeDir: string, secureDirOptions?: EnsureSecureDirOptions | undefined, productId?: string);
+    constructor(storeDir: string, credentials: DeviceCredentialBackend, secureDirOptions?: EnsureSecureDirOptions | undefined);
     static defaultDir(productId: string): string;
     /**
      * Resolve the one store pathname every daemon/CLI component must share.
@@ -9999,6 +10012,8 @@ export { LocalStorageEmergencyError } from './daemon/retention/pressure';
 export type { StoragePressureState } from './daemon/retention/pressure';
 export type { ExpiringClassId, ProtectedClassId, RetentionClassId, ClassUsage, SweepReport } from './daemon/retention/registry';
 export { readDeviceEnrollmentStatus, readDeviceEnrollmentIdentity } from './daemon/store';
+export { DeviceCredentialStoreError, DeviceCredentialStoreUnavailableError, DeviceCredentialInteractionRequiredError } from './daemon/device-credential-store';
+export type { DeviceCredentialBackend, DeviceCredentialConfig } from './daemon/device-credential-store';
 export type { DeviceEnrollment, DeviceEnrollmentIdentity, DeviceEnrollmentIdentityStatus, DeviceEnrollmentStatus, DeviceEnrollmentStatusOptions, } from './daemon/store';
 /**
  * Host device proofs signed with the stored enrollment key, scoped to one

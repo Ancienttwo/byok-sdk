@@ -112,8 +112,8 @@ reference performs structural validation and correlation, not semantic proof.
 `bun run --cwd examples/basic test` exercises real HTTP + embedded server + stub
 daemon with SQLite and injected time, including binding/CAS, restart, notification
 retry, cancelled/failed/declined, home-busy, parser/extractor/egress gates and TTL.
-The shared stub declares `mcpToolsets: true`; `vitest.config.ts` sets
-`BYOK_TEST_DEVICE_CREDENTIAL_STORE=1` for CI. Non-root Linux needs both because
-Agent-memory MCP projection/credentials are part of real admission.
+The shared stub declares `mcpToolsets: true`; tests explicitly inject an
+in-memory enrollment backend through `DaemonOverrides.deviceCredentials`.
+Agent-memory MCP projection and enrollment remain part of real admission.
 No pi-ask or real provider calls. Prepared Pi continuity and first-request
 bytes (§9.6 of the design) remain unproven and require a separate acceptance.

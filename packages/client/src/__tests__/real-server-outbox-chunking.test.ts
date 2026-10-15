@@ -1,3 +1,4 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,7 +7,6 @@ import { createEnvelope, MAX_MESSAGES_PER_BATCH } from '@byok-sdk/protocol';
 import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
-import { DeviceStore } from '../daemon/store';
 import { startRealServer, type RealServerHandle } from './fixtures/real-server';
 import { waitForOpen } from './fixtures/lifecycle-barrier';
 
@@ -60,7 +60,7 @@ describe('drainOutbox chunks outbound sends to the server batch cap (finding P1,
     });
 
     const storeDir = await tmpDir('byok-outbox-chunk-store-');
-    const auth = new AuthManager({ serverUrl: real.url, store: new DeviceStore(storeDir) });
+    const auth = new AuthManager({ serverUrl: real.url, store: createTestDeviceStore(storeDir) });
     const pairing = await real.createPairingCode();
     const record = await auth.pair(pairing.code);
     const cursorStore = new CursorStore(storeDir);

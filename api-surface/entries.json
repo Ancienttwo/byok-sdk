@@ -209,7 +209,6 @@
         "child_process",
         "crypto",
         "fs",
-        "fs/promises",
         "net",
         "os",
         "path",
@@ -226,7 +225,6 @@
           "child_process",
           "crypto",
           "fs",
-          "fs/promises",
           "net",
           "os",
           "path"

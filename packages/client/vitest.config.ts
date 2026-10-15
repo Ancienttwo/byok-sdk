@@ -15,11 +15,7 @@ export default defineConfig({
   test: {
     // One short per-run TMPDIR, removed in teardown; see scripts/vitest/tmp-root.mjs.
     globalSetup: ['../../scripts/vitest/tmp-root.mjs'],
-    env: {
-      // Test-only in-memory credential authority. Product construction never
-      // gets this flag from public DaemonConfig and has no filesystem fallback.
-      BYOK_TEST_DEVICE_CREDENTIAL_STORE: '1',
-    },
+    setupFiles: ['./src/__tests__/setup-device-credentials.ts'],
     maxWorkers: 4,
     testTimeout: 10_000,
   },

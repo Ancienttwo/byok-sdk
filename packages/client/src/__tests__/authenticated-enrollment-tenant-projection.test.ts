@@ -1,3 +1,4 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -9,7 +10,6 @@ import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import type { JournalReceipt, LocalTaskJournal, ReceivedEnvelopeRecord } from '../daemon/journal/journal';
-import { DeviceStore } from '../daemon/store';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 
@@ -67,7 +67,7 @@ describe('authenticated enrollment tenant projection', () => {
   it('persists exact tenant binding and reads it unchanged after restart', async () => {
     server = await TestServer.start();
     server.setPairingTenantId('restart-code', 'tenant-restart');
-    const store = new DeviceStore(await tmpDir('byok-enrollment-restart-'));
+    const store = createTestDeviceStore(await tmpDir('byok-enrollment-restart-'));
     const paired = await new AuthManager({ serverUrl: server.url, store }).pair('restart-code');
 
     const restarted = await new AuthManager({ serverUrl: server.url, store }).loadExisting();
@@ -87,7 +87,7 @@ describe('authenticated enrollment tenant projection', () => {
       devicePublicKey: 'public-key',
     }));
 
-    const store = new DeviceStore(storeDir);
+    const store = createTestDeviceStore(storeDir);
     await expect(store.load()).rejects.toThrow(/re-pair required/);
 
     await fs.writeFile(filePath, JSON.stringify({
@@ -128,7 +128,7 @@ describe('authenticated enrollment tenant projection', () => {
     await expect(daemon.start()).rejects.toMatchObject({ reason: 're_pair_required', cause: expect.objectContaining({ message: expect.stringMatching(/re-pair required/) }) });
     const repaired = await daemon.pair('repair-code');
     expect(repaired).toEqual({ deviceId: expect.any(String) });
-    expect(await new DeviceStore(storeDir).load()).toMatchObject({
+    expect(await createTestDeviceStore(storeDir).load()).toMatchObject({
       deviceId: repaired.deviceId,
       tenantId: 'tenant-repaired',
     });
@@ -140,7 +140,7 @@ describe('authenticated enrollment tenant projection', () => {
     const productId = 'legacy-authority-refusal-test';
     const storeDir = await tmpDir('byok-enrollment-legacy-authority-');
     const workspaceRoot = await tmpDir('byok-enrollment-legacy-authority-workspace-');
-    const store = new DeviceStore(storeDir, undefined, productId);
+    const store = createTestDeviceStore(storeDir, undefined, productId);
     const initial = new AuthManager({ serverUrl: server.url, store });
     await initial.pair('legacy-with-authority-code');
     await initial.stop();
@@ -174,7 +174,7 @@ describe('authenticated enrollment tenant projection', () => {
   });
 
   it('rejects a pair response without the required authenticated tenant before writing device.json', async () => {
-    const store = new DeviceStore(await tmpDir('byok-enrollment-pair-response-'));
+    const store = createTestDeviceStore(await tmpDir('byok-enrollment-pair-response-'));
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
       deviceId: 'device-malformed',
       accessToken: 'opaque-token',
@@ -187,7 +187,7 @@ describe('authenticated enrollment tenant projection', () => {
   it('preserves the exact enrolled tenant through renewal without parsing the opaque token', async () => {
     server = await TestServer.start();
     server.setPairingTenantId('renew-code', 'tenant-renew');
-    const store = new DeviceStore(await tmpDir('byok-enrollment-renew-'));
+    const store = createTestDeviceStore(await tmpDir('byok-enrollment-renew-'));
     const auth = new AuthManager({ serverUrl: server.url, store });
     const paired = await auth.pair('renew-code');
     expect(paired.accessToken.split('.')).toHaveLength(1);
@@ -203,7 +203,7 @@ describe('authenticated enrollment tenant projection', () => {
     server = await TestServer.start();
     server.setPairingTenantId('first-code', 'tenant-first');
     server.setPairingTenantId('replacement-code', 'tenant-replacement');
-    const store = new DeviceStore(await tmpDir('byok-enrollment-repair-'));
+    const store = createTestDeviceStore(await tmpDir('byok-enrollment-repair-'));
     const auth = new AuthManager({ serverUrl: server.url, store });
     const first = await auth.pair('first-code');
     const replacement = await auth.pair('replacement-code');
@@ -223,7 +223,7 @@ describe('authenticated enrollment tenant projection', () => {
     server = await TestServer.start();
     server.setPairingTenantId('atomic-first-code', 'tenant-atomic-first');
     server.setPairingTenantId('atomic-replacement-code', 'tenant-atomic-replacement');
-    const store = new DeviceStore(await tmpDir('byok-enrollment-atomic-replace-'));
+    const store = createTestDeviceStore(await tmpDir('byok-enrollment-atomic-replace-'));
     const auth = new AuthManager({ serverUrl: server.url, store });
     const first = await auth.pair('atomic-first-code');
     vi.spyOn(store.credentials, 'replace').mockRejectedValueOnce(new Error('injected OS replace failure'));
@@ -243,7 +243,7 @@ describe('authenticated enrollment tenant projection', () => {
     server = await TestServer.start();
     server.setPairingTenantId('projection-first-code', 'tenant-projection-first');
     server.setPairingTenantId('projection-replacement-code', 'tenant-projection-replacement');
-    const store = new DeviceStore(await tmpDir('byok-enrollment-projection-failure-'));
+    const store = createTestDeviceStore(await tmpDir('byok-enrollment-projection-failure-'));
     const auth = new AuthManager({ serverUrl: server.url, store });
     const first = await auth.pair('projection-first-code');
     vi.spyOn(store, 'save').mockRejectedValueOnce(new Error('injected projection failure'));
@@ -256,7 +256,7 @@ describe('authenticated enrollment tenant projection', () => {
   it('repairs a missing non-secret projection from the complete OS authority on restart', async () => {
     server = await TestServer.start();
     server.setPairingTenantId('projection-repair-code', 'tenant-projection-repair');
-    const store = new DeviceStore(await tmpDir('byok-enrollment-projection-repair-'));
+    const store = createTestDeviceStore(await tmpDir('byok-enrollment-projection-repair-'));
     const paired = await new AuthManager({ serverUrl: server.url, store }).pair('projection-repair-code');
     await store.remove();
 
@@ -296,7 +296,7 @@ describe('authenticated enrollment tenant projection', () => {
     expect(first).toEqual({ deviceId: expect.any(String) });
     expect(replacement).toEqual({ deviceId: expect.any(String) });
     expect(daemon.status().lifecycle).toEqual({ phase: 'stopped' });
-    expect((await new DeviceStore(storeDir).load())?.tenantId).toBe('tenant-active-replacement');
+    expect((await createTestDeviceStore(storeDir).load())?.tenantId).toBe('tenant-active-replacement');
     expect(server.httpRequests.filter((request) => request.pathname === '/byok/pair')).toHaveLength(2);
     await expect(daemon.publishReliableAgentEgress?.({
       agentRef: { agentId: 'active-repair-agent', profileRevision: 'r1' },
@@ -365,7 +365,7 @@ describe('authenticated enrollment tenant projection', () => {
       deviceId: record.deviceId,
     });
     const observableEgress = JSON.stringify({ appended, journal: journal.appended, wire: server.received });
-    const credentials = await new DeviceStore(storeDir, undefined, 'enrollment-test').credentials.read();
+    const credentials = await createTestDeviceStore(storeDir, undefined, 'enrollment-test').credentials.read();
     expect(credentials).toBeDefined();
     expect(observableEgress).not.toContain(credentials!.accessToken);
     expect(observableEgress).not.toContain(credentials!.devicePrivateKeyPem);

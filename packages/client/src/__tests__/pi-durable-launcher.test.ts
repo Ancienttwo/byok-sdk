@@ -18,6 +18,7 @@ import { buildRuntimeEnv } from '../daemon/environment';
 const ownedGroups=new Set<number>();
 const roots: string[] = [], servers: Server[] = [], sessions: Session[] = [];
 afterEach(async () => {
+  vi.unstubAllEnvs();
   for (const session of sessions.splice(0)) await session.close();
   for(const group of ownedGroups){try{process.kill(-group,'SIGKILL');}catch(error){if((error as NodeJS.ErrnoException).code!=='ESRCH')throw error;}}ownedGroups.clear();
   for (const server of servers.splice(0)) { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
@@ -90,7 +91,9 @@ describe.skipIf(process.platform === 'win32')('durable ordinary worker through c
     expect(f.bodies.join('')).not.toContain('DURABLE_PROVIDER_SENTINEL'); expect(f.calls()).toBe(1);
   });
   it('real bash cannot inherit launcher credentials; durable tool ids and committed receipts agree', async () => {
-    const command = `${JSON.stringify(process.execPath)} -e 'console.log(JSON.stringify({key:process.env.PI_PROVIDER_API_KEY,control:process.env.BYOK_TEST_DEVICE_CREDENTIAL_STORE}))'`;
+    vi.stubEnv('BYOK_TEST_ENV_MARKER', '1');
+    expect(process.env.BYOK_TEST_ENV_MARKER).toBe('1');
+    const command = `${JSON.stringify(process.execPath)} -e 'console.log(JSON.stringify({key:process.env.PI_PROVIDER_API_KEY,control:process.env.BYOK_TEST_ENV_MARKER}))'`;
     const f = await fixture((res,n) => { if (n === 1) tool(res, command); else finish(res, 'isolated'); });
     const events:AgentEvent[] = []; for await (const event of f.session.events) events.push(event);
     expect(events.some(event => event.type === 'error')).toBe(false); expect(f.calls()).toBe(2);

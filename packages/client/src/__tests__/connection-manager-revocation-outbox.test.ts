@@ -1,3 +1,4 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,7 +8,6 @@ import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
 import { LongPollClient } from '../daemon/long-poll-transport';
-import { DeviceStore } from '../daemon/store';
 import { TestServer } from './fixtures/test-server';
 import { waitForOpen } from './fixtures/lifecycle-barrier';
 
@@ -46,7 +46,7 @@ describe('a revoked device stops draining its outbox instead of retrying forever
     server.setAckCapabilities(['approval_resolved', 'mailbox-read-ahead']);
 
     const storeDir = await tmpDir('byok-revoke-outbox-store-');
-    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
+    const auth = new AuthManager({ serverUrl: server.url, store: createTestDeviceStore(storeDir) });
     const record = await auth.pair('pairing-code');
     const cursorStore = new CursorStore(storeDir);
 

@@ -1,5 +1,6 @@
 import { type DaemonConfig } from '../../index';
 import { DeviceStore } from '../../daemon/store';
+import { createDeviceCredentialStore } from '../../daemon/device-credential-provider';
 import type { ControlStatusResult } from '../../daemon/control-protocol';
 import { auditLogPath, readAuditRecords, readLastEnvironmentRecord, parseEnvironmentRecord } from '../audit-log';
 import { parseRuntimeObservations } from '../../runtime-detection';
@@ -35,7 +36,7 @@ export async function runStatusCommand(config: DaemonConfig, deps: StatusDeps = 
   const connectControl = deps.connectControl ?? connectControlClient;
 
   const [record, records, environment] = await Promise.all([
-    new DeviceStore(storeDir).load(),
+    new DeviceStore(storeDir, createDeviceCredentialStore({ productId: config.productId, storeDir, deviceCredentials: config.deviceCredentials })).load(),
     readAuditRecords(storeDir),
     readLastEnvironmentRecord(storeDir),
   ]);

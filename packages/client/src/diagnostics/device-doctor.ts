@@ -2,6 +2,7 @@ import { isTenantId } from '@byok-sdk/core';
 import type { DaemonConfig } from '../daemon/create-daemon';
 import type { RuntimeAdapter } from '../types';
 import { DeviceStore } from '../daemon/store';
+import { createDeviceCredentialStore } from '../daemon/device-credential-provider';
 import { acquireDaemonOwner, DaemonOwnerActiveError } from '../daemon/daemon-owner';
 import { connectControlClient } from '../bin/control-client';
 import { collectDiagnostics } from './diagnostics';
@@ -88,7 +89,7 @@ export async function repairDeviceEnrollmentMetadata(
     // is the mutation gate, including when control is unreachable on a live daemon.
     const owner = await acquireDaemonOwner(storeDir, 'doctor');
     try {
-      const store = new DeviceStore(storeDir, undefined, productId);
+      const store = new DeviceStore(storeDir, createDeviceCredentialStore({ productId, storeDir, deviceCredentials: config.deviceCredentials }));
       failureCode = 'projection-unavailable';
       await store.load();
       failureCode = 'authority-unavailable';

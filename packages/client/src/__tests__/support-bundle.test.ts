@@ -1,3 +1,4 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { execFileSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -10,7 +11,6 @@ import { runDoctorCommand } from '../bin/commands/doctor';
 import { appendAuditRecord, auditLogPath } from '../bin/audit-log';
 import { DAEMON_RECORD_KINDS } from '../daemon/daemon-record';
 import { unmeasuredRetentionSnapshot } from '../daemon/retention/sweeper';
-import { DeviceStore } from '../daemon/store';
 import {
   createSupportBundle,
   MAX_SUPPORT_AUDIT_FACTS,
@@ -66,7 +66,7 @@ describe('support bundle privacy and bounds', () => {
       tenantId: 'SENTINEL_TENANT_ID',
       devicePublicKey: 'SENTINEL_PUBLIC_KEY',
     };
-    await new DeviceStore(dir).save(record);
+    await createTestDeviceStore(dir).save(record);
     await fs.appendFile(
       auditLogPath(dir),
       `${JSON.stringify({ kind: 'SENTINEL_AUDIT_KIND', ts: '2026-08-09T00:00:00.000Z', raw: 'SENTINEL_PROMPT_TOOL_BODY' })}\n` +

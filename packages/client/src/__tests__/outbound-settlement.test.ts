@@ -1,10 +1,10 @@
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { AuthManager } from '../daemon/auth-manager';
-import { DeviceStore } from '../daemon/store';
 import { ConnectionManager, type OutboundSettlement } from '../daemon/connection-manager';
 import { LongPollClient } from '../daemon/long-poll-transport';
 import { seedDeviceEnrollment } from './fixtures/device-enrollment';
@@ -19,7 +19,7 @@ afterEach(async () => {
 
 async function auth(): Promise<AuthManager> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-settlement-')); dirs.push(dir);
-  const store = new DeviceStore(dir);
+  const store = createTestDeviceStore(dir);
   await seedDeviceEnrollment(store, {
     deviceId: 'settlement-device', tenantId: 'settlement-tenant', accessToken: 'test-token',
     expiresAt: new Date(Date.now() + 3600000).toISOString(), devicePrivateKeyPem: 'test', devicePublicKey: 'test',

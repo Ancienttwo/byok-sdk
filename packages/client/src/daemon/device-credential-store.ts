@@ -89,6 +89,28 @@ export class DeviceCredentialStoreError extends Error {
   }
 }
 
+/** macOS refused an operation that requires unavailable user interaction. */
+export class DeviceCredentialInteractionRequiredError extends DeviceCredentialStoreError {
+  constructor() {
+    super('macOS keychain requires user interaction; configure an explicitly unlocked keychain for non-interactive credential custody');
+    this.name = 'DeviceCredentialInteractionRequiredError';
+  }
+}
+
+/** Complete enrollment custody. An injected implementation owns secret storage and its lifetime. */
+export interface DeviceCredentialBackend {
+  read(): Promise<DeviceRecord | undefined>;
+  readFirstPairingAttempt(): Promise<FirstPairingAttempt | undefined>;
+  saveFirstPairingAttempt(attempt: FirstPairingAttempt): Promise<void>;
+  replace(record: DeviceRecord): Promise<void>;
+  clear(): Promise<boolean>;
+}
+
+export interface DeviceCredentialConfig {
+  /** Explicit macOS keychain file; omitted uses the operating system's default keychain. */
+  readonly macosKeychainPath?: string;
+}
+
 function assertRecord(value: unknown): asserts value is DeviceRecord {
   if (
     typeof value !== 'object' ||
@@ -206,7 +228,7 @@ function quoteInteractive(value: string): string {
   return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
 }
 
-export interface DeviceCredentialStoreOptions {
+export interface DeviceCredentialStoreOptions extends DeviceCredentialConfig {
   readonly storeDir: string;
   readonly productId: string;
   readonly platform?: NodeJS.Platform;
@@ -215,20 +237,28 @@ export interface DeviceCredentialStoreOptions {
 
 /**
  * Internal OS-backed authority for the bearer token and device private key.
- * The constructor deliberately accepts no path or backend selector: real
- * callers get the platform provider; tests import this internal module and
- * inject a double directly.
+ * Every operation targets the selected platform provider. An explicit macOS
+ * keychain selects custody within that provider, without a file fallback.
  */
-export class DeviceCredentialStore {
+export class DeviceCredentialStore implements DeviceCredentialBackend {
   readonly #storeDir: string;
   readonly #service: string;
   readonly #platform: NodeJS.Platform;
   readonly #run: DeviceCommandRunner;
+  readonly #macosKeychainPath: string | undefined;
 
   constructor(options: DeviceCredentialStoreOptions) {
     this.#storeDir = options.storeDir;
     this.#service = serviceFor(options.productId);
     this.#platform = options.platform ?? process.platform;
+    const keychainPath = options.macosKeychainPath;
+    if (keychainPath !== undefined && (
+      this.#platform !== 'darwin' || typeof keychainPath !== 'string' ||
+      !path.posix.isAbsolute(keychainPath) || /[\u0000\r\n]/u.test(keychainPath)
+    )) {
+      throw new DeviceCredentialStoreError('macosKeychainPath must be an absolute single-line macOS keychain path on darwin');
+    }
+    this.#macosKeychainPath = keychainPath;
     this.#run = options.commandRunner ?? runDeviceCommand;
   }
 
@@ -249,6 +279,7 @@ export class DeviceCredentialStore {
 
   async #readAuthority(): Promise<DeviceCredentialAuthority | undefined> {
     const result = await this.#invoke('read');
+    this.#checkInteraction(result);
     if (
       result.exitCode === NOT_FOUND ||
       (this.#platform === 'linux' && result.exitCode === 1 && result.stderr.trim().length === 0)
@@ -273,6 +304,7 @@ export class DeviceCredentialStore {
 
   async #replaceEncoded(encoded: string): Promise<void> {
     const result = await this.#invoke('replace', encoded);
+    this.#checkInteraction(result);
     if (result.exitCode === 127) throw new DeviceCredentialStoreUnavailableError();
     if (result.exitCode !== 0) {
       throw new DeviceCredentialStoreError(
@@ -286,6 +318,7 @@ export class DeviceCredentialStore {
     const before = await this.#readAuthority();
     if (before === undefined) return false;
     const result = await this.#invoke('clear');
+    this.#checkInteraction(result);
     if (result.exitCode === 127) throw new DeviceCredentialStoreUnavailableError();
     if (result.exitCode !== 0 && result.exitCode !== NOT_FOUND) {
       throw new DeviceCredentialStoreError(
@@ -311,11 +344,19 @@ export class DeviceCredentialStore {
     }
   }
 
+  #checkInteraction(result: DeviceCommandResult): void {
+    if (this.#platform === 'darwin' && result.exitCode === 36) {
+      throw new DeviceCredentialInteractionRequiredError();
+    }
+  }
+
   #macos(operation: 'read' | 'replace' | 'clear', encoded?: string): Promise<DeviceCommandResult> {
-    if (operation === 'read') return this.#run('/usr/bin/security', ['find-generic-password', '-a', ENTRY_ACCOUNT, '-s', this.#service, '-w']);
-    if (operation === 'clear') return this.#run('/usr/bin/security', ['delete-generic-password', '-a', ENTRY_ACCOUNT, '-s', this.#service]);
+    const keychain = this.#macosKeychainPath === undefined ? [] : [this.#macosKeychainPath];
+    if (operation === 'read') return this.#run('/usr/bin/security', ['find-generic-password', '-a', ENTRY_ACCOUNT, '-s', this.#service, '-w', ...keychain]);
+    if (operation === 'clear') return this.#run('/usr/bin/security', ['delete-generic-password', '-a', ENTRY_ACCOUNT, '-s', this.#service, ...keychain]);
     const command = [
       'add-generic-password', '-U', '-a', quoteInteractive(ENTRY_ACCOUNT), '-s', quoteInteractive(this.#service), '-w', quoteInteractive(encoded!),
+      ...keychain.map(quoteInteractive),
     ].join(' ');
     return this.#run('/usr/bin/security', ['-i'], `${command}\n`);
   }
@@ -363,39 +404,6 @@ export class DeviceCredentialStore {
       throw new DeviceCredentialStoreError('Windows credential bridge did not produce a result');
     }
     return result;
-  }
-}
-
-/** Test-only double; it is intentionally internal and never selected by a production config. */
-export class InMemoryDeviceCredentialStore {
-  #authority: DeviceCredentialAuthority | undefined;
-
-  async read(): Promise<DeviceRecord | undefined> {
-    return this.#authority === undefined || isFirstPairingAttempt(this.#authority)
-      ? undefined
-      : Object.freeze({ ...this.#authority });
-  }
-
-  async readFirstPairingAttempt(): Promise<FirstPairingAttempt | undefined> {
-    return this.#authority !== undefined && isFirstPairingAttempt(this.#authority)
-      ? Object.freeze({ ...this.#authority })
-      : undefined;
-  }
-
-  async saveFirstPairingAttempt(attempt: FirstPairingAttempt): Promise<void> {
-    assertFirstPairingAttempt(attempt);
-    this.#authority = Object.freeze({ ...attempt });
-  }
-
-  async replace(record: DeviceRecord): Promise<void> {
-    assertRecord(record);
-    this.#authority = Object.freeze({ ...record });
-  }
-
-  async clear(): Promise<boolean> {
-    const had = this.#authority !== undefined;
-    this.#authority = undefined;
-    return had;
   }
 }
 
