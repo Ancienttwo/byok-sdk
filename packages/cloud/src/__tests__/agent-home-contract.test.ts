@@ -55,7 +55,7 @@ describe('hosted Agent-home contract', () => {
     const device = await harness.pairDevice(TENANT_A);
     await harness.stores.devices.recordCapabilities(TENANT_A, {
       deviceId: device.deviceId,
-      capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
+      capabilities: [AGENT_HOME_CONTRACT_CAPABILITY, 'toolset-selection'],
     });
 
     const offered = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {

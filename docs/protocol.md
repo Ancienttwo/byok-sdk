@@ -83,17 +83,25 @@ latest or second-latest release, not by author judgment.
   request/response schemas. Current and both published protocol decoders read
   them. HTTP loss requires a `kind: 'http'` strip-safe row in `WIRE_ADDITIONS`;
   envelope rows have `kind: 'envelope'`. The optional messages capability
-  advertisement is strip-safe for 0.25.0/0.26.1; acknowledgement counts are not.
-  Each messages response carries its submitted `batchLength`, and all three
-  decoders must retain counts summing to it.
+  advertisement, per-envelope `outcomes`, and the messages and events `ingress`
+  advertisements are strip-safe for 0.25.0/0.26.1; acknowledgement counts are
+  not. Each messages response carries its submitted `batchLength`, all three
+  decoders must retain counts summing to it, and decoded `outcomes` must agree
+  with those counts.
 - Every `WIRE_ADDITIONS` entry, every message type, and every top-level key a
   payload gained since the floor release appears in a corpus line.
+- Every recursive property path (array items, record values, each union
+  branch) and every enum or literal value of each current payload schema
+  appears in an envelope corpus line, and likewise for each scoped HTTP body
+  schema in the HTTP corpus. The required set is derived from the current
+  schemas' input JSON Schema. Envelopes nested in events pages and send
+  batches are exempt from the HTTP side, because the envelope corpus already
+  covers them; any further exemption must be typed and explained, and must
+  prune at least one required path.
 
 That the server and hosted cloud actually refuse an undeclared receiver is
 tested at the senders (for example
-`packages/cloud/src/__tests__/wire-additions-admission.test.ts`). Nested
-fields of a strip-safe payload are checked only as far as the corpus carries
-them; complete recursive-path and enum coverage remains a separate slice.
+`packages/cloud/src/__tests__/wire-additions-admission.test.ts`).
 
 **HTTP release evidence boundary.** The 0.25.0, 0.26.0 and 0.26.1 ledger entries
 are frozen envelope-only history. Do not backfill HTTP hashes into them. Every

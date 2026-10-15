@@ -75,8 +75,10 @@
   closed union with required `kind: 'envelope' | 'http'`; `surface`/`field`
   remain available and `requiredReceiverCapabilities` keeps its signature and
   envelope admission behaviour. The single `WIRE_ADDITIONS` table now declares
-  `MessagesSendResponse.capabilities` strip-safe against published 0.25.0/0.26.1
-  decoders. Owned HTTP corpus bodies, independent values and submitted batch
+  `MessagesSendResponse.capabilities`, `MessagesSendResponse.outcomes`,
+  `MessagesSendResponse.ingress` and `EventsPollResponse.ingress` strip-safe
+  against published 0.25.0/0.26.1 decoders; `accepted`/`rejected` counts stay
+  the acknowledgement authority. Owned HTTP corpus bodies, independent values and submitted batch
   lengths extend compatibility evidence. The first post-0.26.1 stable release
   must register both corpus prefixes; old envelope-only history stays frozen.
   No manifest bump or unpublished release registration in this feature PR.
