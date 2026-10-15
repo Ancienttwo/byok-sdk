@@ -82,60 +82,55 @@ async function codeOf(attempt: Promise<unknown>): Promise<string> {
 const INSTRUCTION_A = 'Frozen input A: 中文 🐝 café';
 const INSTRUCTION_B = 'Frozen input B: 中文 🐝 café, extended';
 
-it.each(['recurring.submit', 'dispatchFreshAgentEgress'] as const)(
-  'rejects a second %s with different instruction bytes for the same taskId and leaves the first offer untouched',
-  async (route) => {
-    await withHarness(DEFAULT_AGENT_EGRESS_POLICY, async ({ sdk, adapter, deviceId, accepted }) => {
-      const taskId = `same-id-${route === 'recurring.submit' ? 'recurring' : 'fresh'}`;
-      const submit = (instruction: string) => route === 'recurring.submit'
-        ? sdk.recurring.submit({ taskId, deviceId, payload: {
-          instruction, runtime: 'pi', agentRef: AGENT_REF, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
-          messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },
-          terminalProjection: { mode: 'none' },
-        }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'turn-0' } })
-        : sdk.dispatchFreshAgentEgress({ taskId, deviceId, agentRef: AGENT_REF, runtime: 'pi', instruction,
-          egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: { mode: 'none' } });
+// #474 unified the former recurring.submit and dispatchFreshAgentEgress routes into the
+// single executions.submit entry, so the duplicate-taskId case runs once on that entry.
+it('rejects a second executions.submit with different instruction bytes for the same taskId and leaves the first offer untouched', async () => {
+  await withHarness(DEFAULT_AGENT_EGRESS_POLICY, async ({ sdk, adapter, deviceId, accepted }) => {
+    const taskId = 'same-id-executions-submit';
+    const submit = (instruction: string) => sdk.executions.submit({ taskId, deviceId, payload: {
+      instruction, runtime: 'pi', agentRef: AGENT_REF, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },
+      terminalProjection: { mode: 'none' },
+    }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'turn-0' } });
 
-      await submit(INSTRUCTION_A);
-      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), { timeout: 10000 });
-      expect(adapter.startCalls).toHaveLength(1);
-      expect(adapter.startCalls[0]?.task.instruction).toContain(INSTRUCTION_A);
-      const offerBefore = await sdk.tasks.offer(taskId);
-      expect(Buffer.from(offeredInstruction(offerBefore) as string)).toEqual(Buffer.from(INSTRUCTION_A));
+    await submit(INSTRUCTION_A);
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), { timeout: 10000 });
+    expect(adapter.startCalls).toHaveLength(1);
+    expect(adapter.startCalls[0]?.task.instruction).toContain(INSTRUCTION_A);
+    const offerBefore = await sdk.tasks.offer(taskId);
+    expect(Buffer.from(offeredInstruction(offerBefore) as string)).toEqual(Buffer.from(INSTRUCTION_A));
 
-      // The first attempt already has a durable delivered offer, so the kernel refuses the
-      // reuse of the id (agent_task_already_exists) before it compares bodies. A different
-      // body for an undelivered id would surface coordination_input_invalid instead; that
-      // branch needs an append failure between reservation and delivery, which no public
-      // server API can inject.
-      expect(await codeOf(submit(INSTRUCTION_B))).toBe('agent_task_already_exists');
+    // The first attempt already has a durable delivered offer, so the kernel refuses the
+    // reuse of the id (agent_task_already_exists) before it compares bodies. A different
+    // body for an undelivered id would surface coordination_input_invalid instead; that
+    // branch needs an append failure between reservation and delivery, which no public
+    // server API can inject.
+    expect(await codeOf(submit(INSTRUCTION_B))).toBe('agent_task_already_exists');
 
-      const offerAfter = await sdk.tasks.offer(taskId);
-      expect(offerAfter).toEqual(offerBefore);
-      expect(Buffer.from(offeredInstruction(offerAfter) as string)).toEqual(Buffer.from(INSTRUCTION_A));
-      expect(await sdk.tasks.attempt(taskId)).toMatchObject({ taskId, deviceId });
+    const offerAfter = await sdk.tasks.offer(taskId);
+    expect(offerAfter).toEqual(offerBefore);
+    expect(Buffer.from(offeredInstruction(offerAfter) as string)).toEqual(Buffer.from(INSTRUCTION_A));
+    expect(await sdk.tasks.attempt(taskId)).toMatchObject({ taskId, deviceId });
 
-      // Let the first execution finish; a leaked second offer would have started by now.
-      adapter.sessions[0]!.emit({ type: 'progress', text: 'A reply' });
-      adapter.sessions[0]!.emit({ type: 'turn_end' });
-      await vi.waitFor(async () => expect(await sdk.tasks.deviceTerminal(taskId)).toMatchObject({
-        envelope: { type: 'task.complete' },
-      }), { timeout: 10000 });
-      expect(adapter.startCalls).toHaveLength(1);
-      expect(adapter.sessions).toHaveLength(1);
-      expect(adapter.startCalls[0]?.task.instruction).not.toContain(INSTRUCTION_B);
-      expect(accepted.length).toBe(route === 'recurring.submit' ? 1 : 0);
-    });
-  },
-  30000,
-);
+    // Let the first execution finish; a leaked second offer would have started by now.
+    adapter.sessions[0]!.emit({ type: 'progress', text: 'A reply' });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(async () => expect(await sdk.tasks.deviceTerminal(taskId)).toMatchObject({
+      envelope: { type: 'task.complete' },
+    }), { timeout: 10000 });
+    expect(adapter.startCalls).toHaveLength(1);
+    expect(adapter.sessions).toHaveLength(1);
+    expect(adapter.startCalls[0]?.task.instruction).not.toContain(INSTRUCTION_B);
+    expect(accepted.length).toBe(1);
+  });
+}, 30000);
 
 it('declines a fresh Agent egress offer whose policy is not exactly the daemon policy, non-retryably and without a runtime start', async () => {
   const daemonPolicy: AgentEgressPolicy = { ...DEFAULT_AGENT_EGRESS_POLICY, policyRevision: 'daemon-v2' };
   await withHarness(daemonPolicy, async ({ sdk, adapter, deviceId }) => {
     const taskId = 'policy-mismatch';
-    await sdk.dispatchFreshAgentEgress({ taskId, deviceId, agentRef: AGENT_REF, runtime: 'pi', instruction: INSTRUCTION_A,
-      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: { mode: 'none' } });
+    await sdk.executions.submit({ taskId, deviceId, payload: { instruction: INSTRUCTION_A, runtime: 'pi', agentRef: AGENT_REF,
+      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: { mode: 'none' } } });
     await vi.waitFor(async () => expect(await sdk.tasks.deviceTerminal(taskId)).toMatchObject({
       envelope: { type: 'task.decline', payload: {
         reason: 'Agent egress offer policy is not exactly enabled by this daemon', retryable: false,
@@ -164,7 +159,7 @@ it('fails a fresh Agent egress offer whose instruction BlobRef cannot be resolve
       contentType: 'text/plain',
       url: 'http://127.0.0.1:1/never-listening',
     };
-    await sdk.recurring.submit({ taskId, deviceId, payload: {
+    await sdk.executions.submit({ taskId, deviceId, payload: {
       instruction: { blobRef }, runtime: 'pi', agentRef: AGENT_REF, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },
       terminalProjection: { mode: 'none' },
