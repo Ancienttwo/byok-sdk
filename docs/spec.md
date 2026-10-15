@@ -1955,8 +1955,10 @@ The host APIs preserve the same distinction: hosted composition uses
 `submitAgentExecution(tenant, input)`, and the reference server uses
 `executions.submit(input)`. The Host persists its complete
 `AgentExecutionInput` first, including its own taskId, exact deviceId, explicit
-runtime and terminal projection. Existing egress resume calls continue to
-require the exact session; omitting sessionRef does not select fresh execution.
+runtime and terminal projection. Agent resume calls, with or without egress
+(`dispatch({ agentRef, sessionRef })`, `enqueueAgentOffer`), require the exact
+session; omitting sessionRef is refused and does not select fresh execution.
+The wire `task.offer_for_agent` keeps `sessionRef` optional.
 
 The fresh trace is `claim` → start the runtime without resume arguments → runtime
 issues its real session → SDK fsyncs the exact AgentRef/runtime/cwd/session

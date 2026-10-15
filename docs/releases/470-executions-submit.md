@@ -39,6 +39,27 @@ and never creates a second execution. A false delivered marker is not proof that
 happened; recovery submits exactly the same persisted input. Mismatched readback
 is a failure. Physical runtime/home disposal remains a separate observation.
 
+## Fresh `dispatch({ agentRef })` and `enqueueAgentOffer` are resume-only (#484)
+
+`ByokServer.dispatch({ agentRef, ... })` without `egressPolicy` and
+`ByokCloud.enqueueAgentOffer(tenant, deviceId, { payload })` no longer start a
+fresh Agent execution. Like the egress resume lane they require the exact
+`sessionRef` being resumed. Without it the server throws `Agent resume dispatch
+requires an exact sessionRef; use executions.submit for fresh execution` and
+cloud throws `ByokCloudError` `coordination_input_invalid`, both before any
+task, receipt or mailbox write. `task.offer_for_agent` keeps `sessionRef`
+optional on the wire; there is no protocol schema or version change. In the
+types, `DispatchInput` is now `LegacyDispatchInput | AgentResumeDispatchInput`
+(the latter requires `sessionRef`) and `AgentDispatchInput.payload` requires
+`sessionRef`.
+
+Migration: a caller that dispatched a fresh Agent execution without
+`sessionRef` moves to `executions.submit(input)` / `submitAgentExecution(tenant,
+input)` (above), which also needs `egressPolicy`, `terminalProjection` and a
+Host-owned taskId. A caller that really resumes a session keeps its call and
+passes the exact `sessionRef`. Legacy (no `agentRef`) and toolset dispatch are
+unchanged.
+
 The goal/btw and clarification examples now persist this nested input and recover
 through offer readback. Old flat example reservations are rejected; no automatic
 rewrite or dual reader is provided. Operators must finish or explicitly retire
