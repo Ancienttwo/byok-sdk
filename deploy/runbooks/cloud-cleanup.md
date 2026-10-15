@@ -161,6 +161,14 @@ Rollback means stop the host scheduler and revert application code. Do not run
 a down migration, rewrite tombstones, or delete R2 objects. The additive tables
 may remain unused.
 
+Migration 0025 is not additive: it drops `storage_usage.mailbox_bytes`, which
+applications up to and including 0.26.1 still read and write in cleanup. To
+roll back to such a release, restore the pre-upgrade database backup, or stop
+every writer and run
+`ALTER TABLE storage_usage ADD COLUMN mailbox_bytes bigint NOT NULL DEFAULT 0;`
+before starting it. The restored counter starts at zero, so that older
+cleanup reports `cleanup_accounting_drift` exactly as it did before #411.
+
 Before re-enabling writes after suspected accounting drift:
 
 1. run reconciliation and require zero `missing_objects`, `shape_drift` and
@@ -186,10 +194,10 @@ inserts the row. A refusal is `storage_quota_exceeded` (HTTP 507 on
 `storage_entitlement_missing`. Only a task's one cancellation row is exempt,
 so `cancelTask` always succeeds; it is still counted.
 
-`storage_usage.mailbox_bytes` is no longer read or written. It stays in the
-schema for one release so a rollback to the previous application still finds
-the column it reads; a later migration drops it once no supported rollback
-target reads it. Its value is meaningless from now on.
+The old `storage_usage.mailbox_bytes` counter is gone: migration
+`0025_drop_storage_usage_mailbox_bytes.sql` drops the column (#387). See
+"Rollback and usage rebuild" before rolling the application back past this
+release.
 
 Migration `0023_mailbox_usage_index.sql` builds a covering index for that sum.
 It runs inside the migration transaction (no `CONCURRENTLY`), so outbox writes
