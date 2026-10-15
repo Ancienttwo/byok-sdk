@@ -10,8 +10,9 @@
   one unknown or invalid entry stalls only its own sequence. The page `cursor`
   shape is unchanged. Token renewal decodes `/byok/challenge` and
   `/byok/token` with `ChallengeResponseSchema` / `TokenResponseSchema`; a body
-  that fails its schema throws the new `AuthResponseInvalidError` (`route`,
-  `cause`) and keeps the prior credential. Host-visible tightening: a token
+  that is not JSON or fails its schema throws the new `AuthResponseInvalidError`
+  (`route`, `cause`; exported from `@byok-sdk/client`) and keeps the prior
+  credential. Host-visible tightening: a token
   `expiresAt` that is not an ISO 8601 timestamp with `Z` or a numeric offset
   now fails renewal instead of being stored. No wire or protocol-version
   change.

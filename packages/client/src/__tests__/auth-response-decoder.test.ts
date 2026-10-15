@@ -5,13 +5,15 @@ import { createTestDeviceStore } from './fixtures/device-credentials';
  * `TokenResponseSchema`. A body that fails its schema is refused with
  * `AuthResponseInvalidError` through renewal's existing error path: no token
  * request is signed from a bad challenge, the prior credential stays intact,
- * and the device is not marked revoked.
+ * and the device is not marked revoked. A body that is not JSON at all takes
+ * the same path, and Hosts import the error from the package root.
  */
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthManager, AuthResponseInvalidError } from '../daemon/auth-manager';
+import { AuthResponseInvalidError as PublicAuthResponseInvalidError } from '../index';
 import { TestServer } from './fixtures/test-server';
 
 async function tmpDir(prefix: string): Promise<string> {
@@ -32,6 +34,11 @@ describe('AuthManager decodes renewal responses with protocol schemas (#386)', (
 
   /** Pairs for real, then answers `route` with `body` (HTTP 200) while every other request reaches the server. */
   async function pairedWithResponse(route: '/byok/challenge' | '/byok/token', body: unknown) {
+    return pairedWithRawResponse(route, JSON.stringify(body));
+  }
+
+  /** Pairs for real, then answers `route` with the exact `raw` bytes (HTTP 200, JSON content type). */
+  async function pairedWithRawResponse(route: '/byok/challenge' | '/byok/token', raw: string) {
     const store = createTestDeviceStore(await tmpDir('byok-auth-response-decoder-'));
     const auth = new AuthManager({ serverUrl: server.url, store });
     await auth.pair('pairing-code');
@@ -40,7 +47,7 @@ describe('AuthManager decodes renewal responses with protocol schemas (#386)', (
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url);
       if (url.pathname === route) {
-        return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+        return new Response(raw, { status: 200, headers: { 'content-type': 'application/json' } });
       }
       return realFetch(input, init);
     });
@@ -86,6 +93,54 @@ describe('AuthManager decodes renewal responses with protocol schemas (#386)', (
       });
       expect(auth.isRevoked()).toBe(false);
       expect(await store.credentials.read()).toEqual(before);
+    } finally {
+      await auth.stop();
+    }
+  });
+
+  it.each([
+    ['a truncated', '{"nonce":"abc'],
+    ['an empty', ''],
+    ['a non-JSON', '<html>gateway</html>'],
+  ])('refuses %s challenge body as AuthResponseInvalidError before any token request', async (_case, raw) => {
+    const { auth, store, before } = await pairedWithRawResponse('/byok/challenge', raw);
+    const tokenRequestsBefore = server.httpRequests.filter((request) => request.pathname === '/byok/token').length;
+    try {
+      const error = await auth.handleUnauthorized().catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(AuthResponseInvalidError);
+      expect(error).toMatchObject({ name: 'AuthResponseInvalidError', route: 'challenge' });
+      expect((error as AuthResponseInvalidError).cause).toBeInstanceOf(SyntaxError);
+      expect(server.httpRequests.filter((request) => request.pathname === '/byok/token')).toHaveLength(tokenRequestsBefore);
+      expect(auth.isRevoked()).toBe(false);
+      expect(await store.credentials.read()).toEqual(before);
+    } finally {
+      await auth.stop();
+    }
+  });
+
+  it.each([
+    ['a truncated', '{"accessToken":"fresh-token","expiresAt":"2030-'],
+    ['a non-JSON', 'fresh-token'],
+  ])('refuses %s token body as AuthResponseInvalidError and keeps the prior credential', async (_case, raw) => {
+    const { auth, store, before } = await pairedWithRawResponse('/byok/token', raw);
+    try {
+      const error = await auth.handleUnauthorized().catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(AuthResponseInvalidError);
+      expect(error).toMatchObject({ name: 'AuthResponseInvalidError', route: 'token' });
+      expect((error as AuthResponseInvalidError).cause).toBeInstanceOf(SyntaxError);
+      expect(auth.isRevoked()).toBe(false);
+      expect(await store.credentials.read()).toEqual(before);
+    } finally {
+      await auth.stop();
+    }
+  });
+
+  it('throws the class Hosts import from the package root', async () => {
+    const { auth } = await pairedWithRawResponse('/byok/token', '{');
+    try {
+      const error = await auth.handleUnauthorized().catch((caught: unknown) => caught);
+      expect(PublicAuthResponseInvalidError).toBe(AuthResponseInvalidError);
+      expect(error).toBeInstanceOf(PublicAuthResponseInvalidError);
     } finally {
       await auth.stop();
     }

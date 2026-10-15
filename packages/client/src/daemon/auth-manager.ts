@@ -39,11 +39,12 @@ export class AuthRequestAbortedError extends Error {
 
 /**
  * Thrown when a successful `/byok/challenge` or `/byok/token` response body
- * does not satisfy its protocol schema (`ChallengeResponseSchema` /
- * `TokenResponseSchema`, #386) — for example a missing field or a token
- * `expiresAt` that is not an ISO timestamp with an offset. The renewal fails
- * and the prior credential is kept unchanged; nothing is inferred from the
- * malformed body. The schema failure rides in `cause`. Not a revocation.
+ * is not valid JSON or does not satisfy its protocol schema
+ * (`ChallengeResponseSchema` / `TokenResponseSchema`, #386) — for example a
+ * truncated body, a missing field, or a token `expiresAt` that is not an ISO
+ * timestamp with an offset. The renewal fails and the prior credential is kept
+ * unchanged; nothing is inferred from the malformed body. The JSON
+ * `SyntaxError` or the schema failure rides in `cause`. Not a revocation.
  */
 export class AuthResponseInvalidError extends Error {
   constructor(
@@ -52,6 +53,20 @@ export class AuthResponseInvalidError extends Error {
   ) {
     super(`token renewal (${route}) failed: the server response does not match the protocol schema`, options);
     this.name = 'AuthResponseInvalidError';
+  }
+}
+
+/**
+ * Reads a successful renewal body as JSON. A body read failure (abort,
+ * network) propagates unchanged so `runRequest` still classifies it; only a
+ * body that is not JSON becomes {@link AuthResponseInvalidError}.
+ */
+async function readAuthResponseJson(response: Response, route: 'challenge' | 'token'): Promise<unknown> {
+  const text = await response.text();
+  try {
+    return JSON.parse(text) as unknown;
+  } catch (cause) {
+    throw new AuthResponseInvalidError(route, { cause });
   }
 }
 
@@ -305,7 +320,7 @@ export class AuthManager {
           `token renewal (challenge) failed: HTTP ${challengeRes.status} ${await safeErrorText(challengeRes)}`.trimEnd(),
         );
       }
-      const challenge = ChallengeResponseSchema.safeParse(await challengeRes.json());
+      const challenge = ChallengeResponseSchema.safeParse(await readAuthResponseJson(challengeRes, 'challenge'));
       if (!challenge.success) throw new AuthResponseInvalidError('challenge', { cause: challenge.error });
       return challenge.data;
     });
@@ -322,7 +337,7 @@ export class AuthManager {
       if (!tokenRes.ok) {
         throw new Error(`token renewal (token) failed: HTTP ${tokenRes.status} ${await safeErrorText(tokenRes)}`.trimEnd());
       }
-      const token = TokenResponseSchema.safeParse(await tokenRes.json());
+      const token = TokenResponseSchema.safeParse(await readAuthResponseJson(tokenRes, 'token'));
       if (!token.success) throw new AuthResponseInvalidError('token', { cause: token.error });
       return token.data;
     });
