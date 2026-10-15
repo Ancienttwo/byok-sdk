@@ -350,6 +350,39 @@ describe('hosted Agent-home contract', () => {
     ).toHaveLength(0);
   });
 
+  it('refuses a missing or empty sessionRef before capability admission (#484)', async () => {
+    const harness = createHarness();
+    // Paired but has advertised no capabilities, so admission alone would refuse it.
+    const bare = await harness.pairDevice(TENANT_A);
+    const { sessionRef: _sessionRef, ...fresh } = agentPayload();
+    const refused = {
+      name: 'ByokCloudError',
+      code: 'coordination_input_invalid',
+      message: 'Agent resume offer requires an exact sessionRef; use submitAgentExecution for fresh execution',
+    };
+
+    for (const [deviceId, taskId, payload] of [
+      ['device-not-registered', 'agent-missing-unknown-device', fresh],
+      ['device-not-registered', 'agent-empty-unknown-device', { ...fresh, sessionRef: '' }],
+      [bare.deviceId, 'agent-missing-bare-device', fresh],
+      [bare.deviceId, 'agent-empty-bare-device', { ...fresh, sessionRef: '' }],
+    ] as const) {
+      await expect(
+        // @ts-expect-error a JS caller may omit sessionRef on the resume lane (#484)
+        harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, { taskId, payload }),
+      ).rejects.toMatchObject(refused);
+      expect(await harness.cloud.readTaskAttempt(TENANT_A, taskId)).toBeUndefined();
+    }
+    expect(
+      (await harness.core.mailbox.readAfter(TENANT_A, { deviceId: bare.deviceId, afterSeq: 0, limit: 10 })).messages,
+    ).toHaveLength(0);
+
+    // The same bare device with a real sessionRef reaches capability admission.
+    await expect(
+      harness.cloud.enqueueAgentOffer(TENANT_A, bare.deviceId, { taskId: 'agent-resume-bare-device', payload: agentPayload() }),
+    ).rejects.toMatchObject({ name: 'ByokCloudError', code: 'agent_capability_missing' });
+  });
+
   it('keeps a reserved Agent attempt retryable when mailbox append fails', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);

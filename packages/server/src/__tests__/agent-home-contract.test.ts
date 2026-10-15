@@ -147,6 +147,44 @@ describe('agent-home-contract reference server', () => {
     expect(daemon.cursor()).toBe(0);
   });
 
+  it('refuses a missing or empty sessionRef before any capability read (#484)', async () => {
+    const started = await start();
+    // Advertises nothing: capability admission alone would refuse this dispatch.
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
+      productId: PRODUCT_ID,
+      capabilities: [],
+    });
+
+    for (const [taskId, deviceId, session] of [
+      ['missing-unknown-device', 'device-not-registered', {}],
+      ['empty-unknown-device', 'device-not-registered', { sessionRef: '' }],
+      ['missing-bare-device', daemon.deviceId, {}],
+      ['empty-bare-device', daemon.deviceId, { sessionRef: '' }],
+    ] as const) {
+      await expect(
+        // @ts-expect-error a JS caller may omit sessionRef on the Agent resume dispatch (#484)
+        started.byok.dispatch({ deviceId, taskId, instruction: 'fresh Agent work', agentRef, requiredToolsets: ['salesko'], ...session }),
+      ).rejects.toThrow(
+        'Agent resume dispatch requires an exact sessionRef; use executions.submit for fresh execution',
+      );
+      expect(await started.byok.tasks.attempt(taskId)).toBeUndefined();
+    }
+    expect((await started.byok.tasks.list()).tasks).toHaveLength(0);
+    expect(await daemon.next()).toEqual([]);
+    expect(daemon.cursor()).toBe(0);
+
+    // The same dispatch with a real sessionRef reaches capability admission.
+    await expect(
+      started.byok.dispatch({
+        deviceId: daemon.deviceId,
+        instruction: 'resume Agent work',
+        agentRef,
+        sessionRef: SESSION_REF,
+        requiredToolsets: ['salesko'],
+      }),
+    ).rejects.toThrow(/did not advertise toolset-selection capability/);
+  });
+
   it('sends task.offer_for_agent and persists the exact AgentRef', async () => {
     const started = await start();
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {

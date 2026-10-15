@@ -1993,21 +1993,23 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     },
 
     async enqueueAgentOffer(tenant, deviceId, input) {
-      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer_for_agent', input.payload));
-      // Parse the strict control payload before reserving a mailbox sequence.
-      // A malformed/oversized AgentRef therefore cannot leave a durable
-      // delivery row behind.
-      const payload = TaskOfferForAgentPayloadSchema.parse(input.payload);
       // Resume-only: the wire keeps `sessionRef` optional, but this lane never
       // starts a fresh Agent execution; that has exactly one authority,
-      // `submitAgentExecution`. Refused before any attempt, receipt or mailbox
-      // write, so a JS caller cannot leave a row behind.
-      if (payload.sessionRef === undefined || payload.sessionRef.length === 0) {
+      // `submitAgentExecution`. Checked first, before capability admission and
+      // any attempt, receipt or mailbox write, so a JS caller always gets the
+      // same code whatever the target device's state.
+      const sessionRef: unknown = input.payload.sessionRef;
+      if (typeof sessionRef !== 'string' || sessionRef.length === 0) {
         throw new ByokCloudError(
           'coordination_input_invalid',
           'Agent resume offer requires an exact sessionRef; use submitAgentExecution for fresh execution',
         );
       }
+      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer_for_agent', input.payload));
+      // Parse the strict control payload before reserving a mailbox sequence.
+      // A malformed/oversized AgentRef therefore cannot leave a durable
+      // delivery row behind.
+      const payload = TaskOfferForAgentPayloadSchema.parse(input.payload);
       return enqueueTaskEnvelope(tenant, deviceId, input.taskId, payload.agentRef, (taskId, seq, messageId) =>
         createEnvelope('task.offer_for_agent', payload, { id: messageId, taskId, seq }),
       );

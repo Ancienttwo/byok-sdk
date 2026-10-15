@@ -530,6 +530,19 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       throw new Error('dispatch requires an explicit deviceId (non-empty string)');
     }
 
+    // Agent resume is resume-only (#484): a fresh Agent execution has the single
+    // authority executions.submit. Refused before any capability read, so the
+    // caller gets this error whatever the target device advertises.
+    let agentResume: { agentRef: AgentRef; sessionRef: string } | undefined;
+    if (agentRef !== undefined && egressPolicy === undefined) {
+      if (sessionRef === undefined || sessionRef.length === 0) {
+        throw new Error(
+          'Agent resume dispatch requires an exact sessionRef; use executions.submit for fresh execution',
+        );
+      }
+      agentResume = { agentRef, sessionRef };
+    }
+
     // The gates the kernel does not run, in the pre-fold order. Everything
     // below the kernel DOES run (strict-agent-only, agent-home-contract, the
     // egress/message/terminal-projection capabilities) is left to it rather
@@ -599,18 +612,13 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
             ...(agentMessageContext === undefined ? {} : { agentMessageContext }),
           });
         }
-        if (agentRef !== undefined) {
-          if (sessionRef === undefined || sessionRef.length === 0) {
-            throw new Error(
-              'Agent resume dispatch requires an exact sessionRef; use executions.submit for fresh execution',
-            );
-          }
+        if (agentResume !== undefined) {
           return cloud.enqueueAgentOffer(tenant, deviceId, {
             taskId,
             payload: {
               ...common,
-              agentRef,
-              sessionRef,
+              agentRef: agentResume.agentRef,
+              sessionRef: agentResume.sessionRef,
               ...(terminalProjection === undefined ? {} : { terminalProjection }),
               ...(homeAccess === undefined ? {} : { homeAccess }),
               ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
