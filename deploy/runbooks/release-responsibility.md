@@ -49,9 +49,10 @@ published on `latest` from `v0.26.0` (`34c0e504`) and read back; see its
 [0.26.0 release notes](../../docs/releases/v0.26.0.md).
 0.26.1 / keys 0.11.1 is published on `latest` from `v0.26.1` (`e7f3edf2`); see
 its [publication record](../../docs/releases/v0.26.1-publication.md). The owner
-approved the prerelease 0.27.0-rc.1 / keys 0.12.0-rc.1 under the dist-tag `rc`,
-rc first. It is the first wire-v3 train. It is not published; npm execution
-approval remains separate. See the
+approved the prerelease 0.27.0-rc.2 / keys 0.12.0-rc.2 under the dist-tag `rc`
+on 2026-10-16, rc first. It replaces 0.27.0-rc.1, which was prepared but never
+published, and adds the fixes of #493 and #496. It is the first wire-v3 train.
+It is not published; npm execution approval remains separate. See the
 [0.27.0 release notes](../../docs/releases/v0.27.0.md).
 
 The SDK publishes npm libraries, the `byok-agent` CLI and reference packaging/service recipes. The host product owns every binary distribution decision:
@@ -69,8 +70,8 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 ## Version selection
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
-The approved source manifests name the prerelease train 0.27.0-rc.1 and
-independent keys 0.12.0-rc.1. Both are MINOR lines. The train moves the wire to
+The approved source manifests name the prerelease train 0.27.0-rc.2 and
+independent keys 0.12.0-rc.2. Both are MINOR lines. The train moves the wire to
 protocol major 3 (#468), adds `executions.submit` (#470) and typed home-busy
 decline codes (#471), and has pre-1.0 breaking cuts in protocol, client,
 server, cloud, cloud-dataplane and core. keys makes `buildPiProviderProjection`
