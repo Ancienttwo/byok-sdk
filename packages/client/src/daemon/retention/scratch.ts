@@ -1,6 +1,6 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { acquirePathMutationGate } from '../path-mutation-gate';
-import { promises as fs } from 'node:fs';
+import { promises as fs, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { RuntimeDisposalFailure } from '../../runtime-failure';
 import { atomicWriteFile } from '../../util/atomic-write';
@@ -22,19 +22,69 @@ export interface ExecutionScratch {
   release(): Promise<void>;
 }
 
-export function validateScratchRoot(root: string): string {
+/** sockaddr_un.sun_path size, including the terminating NUL. Windows has no limit. */
+const SOCKET_PATH_MAXIMUM: Partial<Record<NodeJS.Platform, number>> = { darwin: 104, linux: 108 };
+// A runtime binds under exec/<token>/runtime; reserve 16 bytes for its socket name and one NUL.
+const SOCKET_SUFFIX_BYTES = Buffer.byteLength(path.join('/', 'exec', '0'.repeat(12), 'runtime')) + 17;
+
+export function validateScratchRoot(root: string, platform: NodeJS.Platform = process.platform): string {
   if (typeof root !== 'string' || !path.isAbsolute(root) || /[\0\r\n]/u.test(root)) throw new ScratchRootPathError('must be an absolute, single-line path');
   const resolved = path.resolve(root);
-  // Reserve 16 bytes for a runtime's socket name and one terminating NUL.
-  const maximum = process.platform === 'darwin' ? 104 : process.platform === 'linux' ? 108 : undefined;
-  if (maximum !== undefined && Buffer.byteLength(path.join(resolved, 'exec', '0'.repeat(12), 'runtime')) + 17 > maximum) {
-    throw new ScratchRootPathError('is too long for runtime Unix sockets; configure a shorter private root');
+  const maximum = SOCKET_PATH_MAXIMUM[platform];
+  const bytes = Buffer.byteLength(resolved);
+  if (maximum !== undefined && bytes + SOCKET_SUFFIX_BYTES > maximum) {
+    throw new ScratchRootPathError(`is too long for runtime Unix sockets: ${bytes} bytes, ${platform} allows at most ${maximum - SOCKET_SUFFIX_BYTES}; configure a shorter private root with no symbolic-link ancestors`);
   }
   return resolved;
 }
 
-/** Reject aliases before changing permissions or deleting anything. */
-export async function privateDirectory(directory: string): Promise<void> {
+/**
+ * The root used when the Host configures none. `<storeDir>/tmp` keeps scratch
+ * beside the store it serves. An application-data storeDir is often too long
+ * for runtime sockets, so that case moves to a fixed short root keyed by a
+ * canonical storeDir hash, as `storeMutexEndpoint` does. Not `os.tmpdir()`: it varies
+ * with the environment, and on macOS it resolves through a symlink to a path
+ * past the budget. The macOS literal is `/private/tmp` because `/tmp` is a
+ * symlink there and {@link privateDirectory} rejects symbolic-link ancestors.
+ */
+export function defaultScratchRoot(storeDir: string, platform: NodeJS.Platform = process.platform): string {
+  const natural = path.join(path.resolve(storeDir), 'tmp');
+  const maximum = SOCKET_PATH_MAXIMUM[platform];
+  if (maximum === undefined) return natural;
+  const store = canonicalStore(storeDir);
+  // All aliases of a long store must select its fixed root. A long alias of a
+  // short store must fail validation instead of selecting a second root.
+  // Keep the natural path lexical so retention uses the configured namespace.
+  if (Buffer.byteLength(path.join(store, 'tmp')) + SOCKET_SUFFIX_BYTES <= maximum) return validateScratchRoot(natural, platform);
+  const identity = createHash('sha256').update(store).digest('hex').slice(0, 16);
+  return path.join(platform === 'darwin' ? '/private/tmp' : '/tmp', `byok-scratch-${identity}`);
+}
+
+/**
+ * The store identity `ScratchRoot.open()` and the owner lease use, so every
+ * alias of a long store selects one fixed root. A store that does not exist yet
+ * resolves through its deepest existing ancestor.
+ */
+function canonicalStore(storeDir: string): string {
+  const missing: string[] = [];
+  let current = path.resolve(storeDir);
+  for (;;) {
+    try { return path.join(realpathSync.native(current), ...missing); }
+    catch (error) {
+      const parent = path.dirname(current);
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || parent === current) throw error;
+      missing.unshift(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
+/**
+ * Reject aliases before changing permissions or deleting anything. With
+ * `ownedLeaf`, a leaf another user created first (a root in a shared directory
+ * such as /tmp) is refused before any permission change.
+ */
+export async function privateDirectory(directory: string, options: { ownedLeaf?: boolean } = {}): Promise<void> {
   const absolute = path.resolve(directory);
   let ancestor = path.parse(absolute).root;
   for (const component of absolute.slice(ancestor.length).split(path.sep).filter(Boolean)) {
@@ -44,6 +94,14 @@ export async function privateDirectory(directory: string): Promise<void> {
       throw error;
     });
     if (stat !== undefined && (!stat.isDirectory() || stat.isSymbolicLink())) throw new ScratchRootPathError('contains a non-directory or symbolic link');
+  }
+  const uid = process.getuid?.();
+  if (options.ownedLeaf && uid !== undefined) {
+    await fs.mkdir(path.dirname(absolute), { recursive: true, mode: 0o700 });
+    await fs.mkdir(absolute, { mode: 0o700 }).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'EEXIST') throw error; });
+    const leaf = await fs.lstat(absolute);
+    if (!leaf.isDirectory() || leaf.isSymbolicLink()) throw new ScratchRootPathError('contains a non-directory or symbolic link');
+    if (leaf.uid !== uid) throw new ScratchRootPathError('is owned by another user');
   }
   await ensureSecureDir(absolute);
 }
@@ -66,7 +124,7 @@ export class ScratchRoot {
     this.store = store;
   }
   private async claim(owner: { kind: 'store' | 'standalone'; identity: string }): Promise<void> {
-    await privateDirectory(this.root);
+    await privateDirectory(this.root, { ownedLeaf: true });
     const gate = await acquirePathMutationGate({ scope: 'store', targetPath: this.root }, { waitMs: 1_000 });
     try {
       const file = path.join(this.root, 'owner.json');

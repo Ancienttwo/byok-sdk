@@ -16,6 +16,7 @@ import type {
   RuntimeId,
   TaskApprovalResolvedPayload,
   TaskArtifactPayload,
+  TaskDeclinePayload,
   TaskState,
   ToolsetId,
   TerminalProjectionSelection,
@@ -248,6 +249,12 @@ export interface TaskResult {
   sessionRef?: string;
   artifactRefs?: BlobRef[];
   reason?: string;
+  /**
+   * Verbatim home-busy decline code (`agent_home_writer_busy` /
+   * `agent_home_reader_busy`). Classify busy by this field; `reason` is
+   * display text only. Absent on every other terminal.
+   */
+  code?: TaskDeclinePayload['code'];
   retryable?: boolean;
   /**
    * The task's structured terminal result, projected verbatim from

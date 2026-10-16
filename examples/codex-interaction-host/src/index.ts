@@ -45,7 +45,8 @@ export async function startFixtureHost(options: FixtureHostOptions): Promise<{
     const adapter = new CodexAdapter({ resolveBin: () => ({ command, source: 'path' }),
       nativeInteractions: host.nativeInteractions });
     workspace = await mkdtemp(path.join(tmpdir(), 'byok-codex-reference-'));
-    scratchRoot = await mkdtemp(path.join(await realpath(tmpdir()), 's-'));
+    // macOS tmpdir() resolves past the 61-byte scratch root limit; /tmp resolves to /private/tmp.
+    scratchRoot = await mkdtemp(path.join(await realpath(process.platform === 'win32' ? tmpdir() : '/tmp'), 's-'));
     scratch = await createExecutionScratch({ root: scratchRoot });
     const prepared = await adapter.prepare({ offer: { instruction },
       descriptor: adapter.descriptor, requiredToolsetIds: [] });

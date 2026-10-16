@@ -1,5 +1,5 @@
 import { EXPIRING_CLASS_IDS, type ExpiringClassId } from './registry';
-import { validateScratchRoot } from './scratch';
+import { defaultScratchRoot, validateScratchRoot } from './scratch';
 import path from 'node:path';
 
 export class LocalStorageConfigError extends Error {
@@ -73,7 +73,7 @@ export function resolveStorageConfig(storeDir: string, input: StorageConfig = {}
   const pressureSweepIntervalMs = integer(retention.pressureSweepIntervalMs ?? 300_000, 'retention.pressureSweepIntervalMs');
   if (sweepIntervalMs > 2_147_483_647 || pressureSweepIntervalMs > sweepIntervalMs) throw new LocalStorageConfigError('retention.intervals');
   return Object.freeze({
-    scratchRoot: validateScratchRoot(input.scratchRoot ?? path.join(storeDir, 'tmp')),
+    scratchRoot: validateScratchRoot(input.scratchRoot ?? defaultScratchRoot(storeDir)),
     budget: input.budget === undefined ? undefined : resolveStorageBudget(input.budget),
     skillPackDataDirs: Object.freeze([...roots]),
     sweepIntervalMs,

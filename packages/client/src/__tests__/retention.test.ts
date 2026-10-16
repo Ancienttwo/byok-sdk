@@ -10,7 +10,7 @@ import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store'
 import { SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
 import { journalHash, type JournalIdentity } from '../daemon/journal/journal';
 import { acquireReplicaLock } from '../adapters/pi-durable/replica';
-import { ScratchRoot, ScratchRootPathError } from '../daemon/retention/scratch';
+import { defaultScratchRoot, ScratchRoot, ScratchRootPathError, validateScratchRoot } from '../daemon/retention/scratch';
 import { createRetentionRegistry } from '../daemon/retention/producers';
 import { RetentionSweeper } from '../daemon/retention/sweeper';
 import { StoragePressure } from '../daemon/retention/pressure';
@@ -68,6 +68,30 @@ it('external-root ownership and symlink checks preserve unrelated data',async()=
  const f=await fixture(),s=await f.scratch.create();await expect(new ScratchRoot(f.scratch.root).open(testScratchRoot())).rejects.toThrow(ScratchRootPathError);
  const alias=path.join(testScratchRoot(),'alias');await fs.symlink(f.scratch.root,alias);await expect(new ScratchRoot(alias).create()).rejects.toThrow(ScratchRootPathError);
  expect(await exists(s.sdkDir)).toBe(true);await s.release();
+});
+it.skipIf(process.getuid===undefined)('refuses a different reported UID before chmod in an isolated child',async()=>{
+ const root=testScratchRoot();await fs.chmod(root,0o755);
+ // Only the child-reported UID is injected. The OS identity and filesystem
+ // metadata stay real; this proves mutation order, not OS multi-user isolation.
+ const script=`
+  import {promises as fs,readFileSync} from 'node:fs';
+  import {createRequire,registerHooks} from 'node:module';
+  // Node 26 removed native TS transforms. Use the build tool's existing
+  // compiler to load real source, including constructor parameter properties.
+  const {transformSync}=createRequire(import.meta.resolve('tsup'))('esbuild');
+  registerHooks({load(url,context,nextLoad){
+   if(!url.endsWith('.ts'))return nextLoad(url,context);
+   return {format:'module',shortCircuit:true,source:transformSync(readFileSync(new URL(url),'utf8'),{loader:'ts',format:'esm',sourcefile:url}).code};
+  }});
+  const {ScratchRoot}=await import(${JSON.stringify(new URL('../daemon/retention/scratch.ts',import.meta.url).href)});
+  const root=${JSON.stringify(root)},uid=process.getuid();process.getuid=()=>uid+1;
+  const chmod=fs.chmod;let chmodCalls=0;fs.chmod=async(...args)=>{chmodCalls++;return chmod(...args);};
+  let error;try{await new ScratchRoot(root).create();}catch(cause){error={name:cause.name,message:cause.message};}
+  console.log(JSON.stringify({error,chmodCalls,mode:(await fs.lstat(root)).mode&0o777}));
+ `;
+ const {stdout}=await promisify(execFile)(process.execPath,['--import',new URL('./fixtures/ts-source-resolve-hook.mjs',import.meta.url).href,'--input-type=module','-e',script]);
+ expect(JSON.parse(stdout)).toEqual({error:{name:'ScratchRootPathError',message:'DaemonConfig.storage.scratchRoot is owned by another user'},chmodCalls:0,mode:0o755});
+ expect((await fs.lstat(root)).mode&0o777).toBe(0o755);expect(await exists(path.join(root,'owner.json'))).toBe(false);
 });
 it('claims an existing store-owned tmp namespace using canonical filesystem ancestry',async()=>{
  const store=testScratchRoot();
@@ -149,4 +173,48 @@ it('projection and maintenance honor the same skill publication gate',async()=>{
 it('one-shot legacy migration scans exact production names without following links and needs explicit fix',async()=>{
  const root=testScratchRoot(),legacy=path.join(root,'byok-mcp-Ab12cD'),unrelated=path.join(root,'byok-mcp-Ab12cD-extra');await fs.mkdir(legacy);await fs.writeFile(path.join(legacy,'mcp-config.json'),'secret');await fs.mkdir(unrelated);await fs.symlink(unrelated,path.join(root,'byok-pi-mcp-Aa12Bb'));
  expect(await collectLegacyTemp({root})).toMatchObject({found:1,deleted:0});expect(await collectLegacyTemp({root,fix:true})).toMatchObject({found:1,deleted:1,bytesReclaimed:6});expect(await exists(unrelated)).toBe(true);
+});
+it('default scratch root leaves an application-data storeDir that is too long for runtime sockets',async()=>{
+ const short='/byok-missing-root/p',long='/byok-missing-root/Library/Application Support/Product/Local Agent/'+'a'.repeat(64)+'/device';
+ expect(defaultScratchRoot(short,'darwin')).toBe('/byok-missing-root/p/tmp');expect(defaultScratchRoot(long,'win32')).toBe(path.join(long,'tmp'));
+ const darwin=defaultScratchRoot(long,'darwin'),linux=defaultScratchRoot(long,'linux');
+ expect(darwin).toMatch(/^\/private\/tmp\/byok-scratch-[0-9a-f]{16}$/u);expect(linux).toBe(darwin.replace('/private/tmp','/tmp'));
+ expect(defaultScratchRoot(long+'/','darwin')).toBe(darwin);expect(defaultScratchRoot(long+'2','darwin')).not.toBe(darwin);
+ expect(validateScratchRoot(darwin,'darwin')).toBe(darwin);expect(validateScratchRoot(linux,'linux')).toBe(linux);
+ expect(()=>validateScratchRoot(path.join(long,'tmp'),'darwin')).toThrow(/: \d+ bytes, darwin allows at most 61;/u);
+ expect(()=>validateScratchRoot('/'+'r'.repeat(65),'linux')).toThrow(/66 bytes, linux allows at most 65;/u);
+ expect(validateScratchRoot('/'+'r'.repeat(64),'linux')).toBe('/'+'r'.repeat(64));
+});
+it.skipIf(process.platform==='win32')('every alias of a long store selects the same default scratch root',async()=>{
+ const base=testScratchRoot(),store=path.join(base,'Application Support','Product','Local Agent','a'.repeat(64),'device'),alias=path.join(base,'alias'),longAlias=path.join(base,'a'.repeat(64));
+ await fs.mkdir(store,{recursive:true});await fs.symlink(store,alias);await fs.symlink(store,longAlias);
+ const expected=defaultScratchRoot(store);expect(expected).toMatch(/byok-scratch-[0-9a-f]{16}$/u);
+ expect(defaultScratchRoot(alias)).toBe(expected);expect(defaultScratchRoot(longAlias)).toBe(expected);expect(defaultScratchRoot(await fs.realpath(store))).toBe(expected);
+ expect(defaultScratchRoot(path.join(alias,'later'))).toBe(defaultScratchRoot(path.join(store,'later')));
+});
+it.skipIf(process.platform==='win32')('a short canonical store keeps its natural root and refuses an overlong alias',async()=>{
+ const store=testScratchRoot(),alias=path.join(testScratchRoot(),'a'.repeat(64));await fs.symlink(store,alias);
+ expect(defaultScratchRoot(store)).toBe(path.join(store,'tmp'));
+ expect(()=>defaultScratchRoot(alias)).toThrow(/is too long for runtime Unix sockets/u);
+ const shortAlias=path.join(testScratchRoot(),'alias');await fs.symlink(store,shortAlias);
+ await expect(new ScratchRoot(defaultScratchRoot(shortAlias)).open(shortAlias)).rejects.toThrow(/symbolic link/u);
+});
+it.skipIf(process.platform==='win32')('restart through a long store alias reclaims the original scratch secrets and runtime residue',async()=>{
+ const store=path.join(testScratchRoot(),'s'.repeat(64)),alias=path.join(testScratchRoot(),'alias');await fs.mkdir(store);await fs.symlink(store,alias);
+ let time=Date.parse('2026-10-14T00:00:00Z');const clock=()=>new Date(time),config=resolveStorageConfig(store),scratch=new ScratchRoot(config.scratchRoot,clock);
+ cleanups.push(()=>fs.rm(config.scratchRoot,{recursive:true,force:true}));await scratch.open(store);const execution=await scratch.create();
+ await fs.writeFile(path.join(execution.sdkDir,'mcp-config.json'),'secret');await fs.writeFile(path.join(execution.runtimeDir,'output'),'residue');scratch.abandon(execution.token);
+ const restartConfig=resolveStorageConfig(alias),restart=new ScratchRoot(restartConfig.scratchRoot,clock);await restart.open(alias);
+ const registry=createRetentionRegistry({storeDir:alias,scratch:restart,config:restartConfig,clock,journal:()=>undefined,identity:()=>undefined,preparation:()=>undefined});
+ const sweeper=new RetentionSweeper({registry,config:restartConfig,clock,pressure:new StoragePressure(),freeBytes:async()=>1_000_000_000,jitter:(_s,ms)=>ms});cleanups.push(()=>sweeper.stop());
+ expect((await sweeper.runPass('startup')).failures).toBe(0);expect(await exists(execution.sdkDir)).toBe(false);expect(await exists(execution.runtimeDir)).toBe(true);
+ time+=DAY;expect((await sweeper.runPass('periodic')).failures).toBe(0);expect(await exists(execution.runtimeDir)).toBe(false);
+});
+it('a daemon store with a long path claims and uses its short default scratch root',async()=>{
+ const store=path.join(testScratchRoot(),'Application Support','Product','Local Agent','a'.repeat(64),'device');await fs.mkdir(store,{recursive:true});
+ const config=resolveStorageConfig(store);expect(config.scratchRoot).not.toBe(path.join(store,'tmp'));
+ cleanups.push(()=>fs.rm(config.scratchRoot,{recursive:true,force:true}));
+ const scratch=new ScratchRoot(config.scratchRoot);await scratch.open(store);const s=await scratch.create();
+ expect(s.runtimeDir.startsWith(config.scratchRoot+path.sep)).toBe(true);await s.release();
+ await new ScratchRoot(resolveStorageConfig(store).scratchRoot).open(store);
 });

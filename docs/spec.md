@@ -2358,12 +2358,13 @@ and the original payload. Home-busy `task.decline` carries optional `code`,
 a closed enum of `agent_home_writer_busy` and `agent_home_reader_busy` selected
 from the rejected Attempt's requested home access. Capacity rejection and
 every pre-claim `AgentHomeBusyError` decline carry it; other declines omit it.
-Cloud `readTaskResult` copies the code verbatim. Hosts classify busy through
-this code on the cloud result or the canonical `tasks.deviceTerminal` envelope,
-never by parsing `reason`. The embedded `TaskResult` is a narrower display
-projection; it is not the busy-classification API. It landed as an additive
-optional field on wire v2 and is carried unchanged on wire v3 (K7 moved
-`PROTOCOL_VERSION` to 3).
+Cloud `readTaskResult` and the embedded `TaskResult` (`tasks.get().result`,
+`handle.result()`) copy the code verbatim (#496). If the code is absent, these
+projections omit it. Hosts classify busy through this code on the cloud result,
+the embedded `TaskResult` or the canonical `tasks.deviceTerminal` envelope.
+Hosts never parse `reason` for classification. The `task.decline.code` field
+landed as an additive optional field on wire v2 and is carried unchanged on
+wire v3 (K7 moved `PROTOCOL_VERSION` to 3).
 Host cancellation alone returns no device terminal.
 A terminal stored under a different task key or with a non-terminal type is an
 error. This observation does not prove native Session.close or home release.
@@ -2680,6 +2681,10 @@ wire contracts do not change.
 
 `DaemonConfig.storage` owns optional budget, scratchRoot, skillPackDataDirs and retention cadence/limits/expiring TTLs. Defaults: 15-minute sweeps, 5-minute pressure sweeps, 256 deletions, 10-second soft pass limit, runtime/old skill revisions 24 hours, daemon/home temps one hour, reader runs seven days, confirmed journal receipts 30 days. Home temps cannot be configured below one hour; confirmed journal TTL must exceed the seven-day mailbox redelivery window. Input preparation retains its own absolute artifact/record horizons and pins; only its timer moves to the unified sweeper. Current skill revisions are resolved from installer lock.json under a shared publication gate.
 
-Standalone adapter Hosts must pass `scratch: await createExecutionScratch({ root })` to operation.start and Pi launch resolution, and await release after child disposal. Scratch roots must be short, absolute, private, canonical and exclusive. Unix socket path validation reserves 16 bytes for the runtime socket name. External roots persist their store ownership; a standalone root is exclusive to its process and must be provisioned fresh on process restart. No silent runtime or root fallback is provided.
+Standalone adapter Hosts must pass `scratch: await createExecutionScratch({ root })` to operation.start and Pi launch resolution. They must await release after child disposal. Scratch roots must be short, absolute, private, canonical and exclusive. On Unix, the root must belong to the current process user before any permission change. Unix socket validation reserves 16 bytes for the runtime socket name and one terminating NUL. The root limit is 61 UTF-8 bytes on macOS and 65 on Linux.
+
+Without `storage.scratchRoot`, derive the default from the canonical store identity (#493). Resolve the deepest existing ancestor of `storeDir` to its real path, then append any missing path components. If `<canonicalStoreDir>/tmp` exceeds the platform limit, use `/private/tmp/byok-scratch-<hash>` on macOS or `/tmp/byok-scratch-<hash>` on Linux. The hash is the first 16 lowercase hexadecimal characters of SHA-256 over the UTF-8 canonical store path. All aliases of that store select the same fixed root. Otherwise, keep the lexical `path.join(path.resolve(storeDir), 'tmp')` and validate it. If that alias exceeds the limit, construction fails. Windows keeps the lexical path without a Unix socket limit.
+
+An explicit `storage.scratchRoot` must pass validation; an excessive length fails construction. A failed root never triggers a substitute. External roots persist their store ownership. A standalone root is exclusive to its process and must be provisioned fresh on process restart. No silent runtime or root fallback is provided.
 
 Legacy shared-temp prefixes are an operator-invoked migration: doctor inventories exact production names, and only `doctor --fix --yes` with a stopped daemon deletes matching, same-uid real directories. SDK startup never scans shared OS temp. Remove this one-shot scanner in the next minor release. See `docs/migrations/client-retention-399.md` for removed APIs and Host migration.

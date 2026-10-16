@@ -1574,6 +1574,8 @@ compaction hook。本节只陈述 `codex/agent-memory-phase2` 的 source 与本�
 
 **#399 source contract**：client 的 `daemon/retention/` 统一拥有 scratch、封闭类别表、用量与 sweeper。每个 daemon 在 store owner lease 和 owned-process reconciliation 后、capability publication 前执行启动清扫；默认每 15 分钟按既有 maintenance jitter 算法运行，pressure 每 5 分钟。等待 enrollment 的服务也运行文件维护，但不提前打开 hosted journal writer。配置是 `DaemonConfig.storage`，budget 可选；无 budget 仍维护、测量并上报。
 
+**#493 默认 scratch**：先用 canonical store 路径判断 `<store>/tmp` 是否满足 Unix socket 长度限制。超限时，macOS 使用 `/private/tmp/byok-scratch-<hash>`，Linux 使用 `/tmp/byok-scratch-<hash>`。hash 是 canonical store 路径的 SHA-256 前 16 个十六进制字符。未超限时保留 lexical `<storeDir>/tmp`，并检查其长度，以保持 retention 分类。显式 root 仍须通过路径检查。root 归属检查先于 `chmod`；拒绝其他用户拥有的 root 时不改变其权限。
+
 水位按最坏优先求值：
 
 | 状态 | 条件 | 行为 |
