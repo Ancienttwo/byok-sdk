@@ -74,14 +74,22 @@ it.skipIf(process.getuid===undefined)('refuses a different reported UID before c
  // Only the child-reported UID is injected. The OS identity and filesystem
  // metadata stay real; this proves mutation order, not OS multi-user isolation.
  const script=`
-  import {promises as fs} from 'node:fs';
-  import {ScratchRoot} from ${JSON.stringify(new URL('../daemon/retention/scratch.ts',import.meta.url).href)};
+  import {promises as fs,readFileSync} from 'node:fs';
+  import {createRequire,registerHooks} from 'node:module';
+  // Node 26 removed native TS transforms. Use the build tool's existing
+  // compiler to load real source, including constructor parameter properties.
+  const {transformSync}=createRequire(import.meta.resolve('tsup'))('esbuild');
+  registerHooks({load(url,context,nextLoad){
+   if(!url.endsWith('.ts'))return nextLoad(url,context);
+   return {format:'module',shortCircuit:true,source:transformSync(readFileSync(new URL(url),'utf8'),{loader:'ts',format:'esm',sourcefile:url}).code};
+  }});
+  const {ScratchRoot}=await import(${JSON.stringify(new URL('../daemon/retention/scratch.ts',import.meta.url).href)});
   const root=${JSON.stringify(root)},uid=process.getuid();process.getuid=()=>uid+1;
   const chmod=fs.chmod;let chmodCalls=0;fs.chmod=async(...args)=>{chmodCalls++;return chmod(...args);};
   let error;try{await new ScratchRoot(root).create();}catch(cause){error={name:cause.name,message:cause.message};}
   console.log(JSON.stringify({error,chmodCalls,mode:(await fs.lstat(root)).mode&0o777}));
  `;
- const {stdout}=await promisify(execFile)(process.execPath,['--experimental-transform-types','--import',new URL('./fixtures/ts-source-resolve-hook.mjs',import.meta.url).href,'--input-type=module','-e',script]);
+ const {stdout}=await promisify(execFile)(process.execPath,['--import',new URL('./fixtures/ts-source-resolve-hook.mjs',import.meta.url).href,'--input-type=module','-e',script]);
  expect(JSON.parse(stdout)).toEqual({error:{name:'ScratchRootPathError',message:'DaemonConfig.storage.scratchRoot is owned by another user'},chmodCalls:0,mode:0o755});
  expect((await fs.lstat(root)).mode&0o777).toBe(0o755);expect(await exists(path.join(root,'owner.json'))).toBe(false);
 });
