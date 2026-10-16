@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { acquirePathMutationGate } from '../path-mutation-gate';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -22,15 +22,38 @@ export interface ExecutionScratch {
   release(): Promise<void>;
 }
 
-export function validateScratchRoot(root: string): string {
+/** sockaddr_un.sun_path size, including the terminating NUL. Windows has no limit. */
+const SOCKET_PATH_MAXIMUM: Partial<Record<NodeJS.Platform, number>> = { darwin: 104, linux: 108 };
+// A runtime binds under exec/<token>/runtime; reserve 16 bytes for its socket name and one NUL.
+const SOCKET_SUFFIX_BYTES = Buffer.byteLength(path.join('/', 'exec', '0'.repeat(12), 'runtime')) + 17;
+
+export function validateScratchRoot(root: string, platform: NodeJS.Platform = process.platform): string {
   if (typeof root !== 'string' || !path.isAbsolute(root) || /[\0\r\n]/u.test(root)) throw new ScratchRootPathError('must be an absolute, single-line path');
   const resolved = path.resolve(root);
-  // Reserve 16 bytes for a runtime's socket name and one terminating NUL.
-  const maximum = process.platform === 'darwin' ? 104 : process.platform === 'linux' ? 108 : undefined;
-  if (maximum !== undefined && Buffer.byteLength(path.join(resolved, 'exec', '0'.repeat(12), 'runtime')) + 17 > maximum) {
-    throw new ScratchRootPathError('is too long for runtime Unix sockets; configure a shorter private root');
+  const maximum = SOCKET_PATH_MAXIMUM[platform];
+  const bytes = Buffer.byteLength(resolved);
+  if (maximum !== undefined && bytes + SOCKET_SUFFIX_BYTES > maximum) {
+    throw new ScratchRootPathError(`is too long for runtime Unix sockets: ${bytes} bytes, ${platform} allows at most ${maximum - SOCKET_SUFFIX_BYTES}; configure a shorter private root with no symbolic-link ancestors`);
   }
   return resolved;
+}
+
+/**
+ * The root used when the Host configures none. `<storeDir>/tmp` keeps scratch
+ * beside the store it serves. An application-data storeDir is often too long
+ * for runtime sockets, so that case moves to a fixed short root keyed by a
+ * storeDir hash, as `storeMutexEndpoint` does. Not `os.tmpdir()`: it varies
+ * with the environment, and on macOS it resolves through a symlink to a path
+ * past the budget. The macOS literal is `/private/tmp` because `/tmp` is a
+ * symlink there and {@link privateDirectory} rejects symbolic-link ancestors.
+ */
+export function defaultScratchRoot(storeDir: string, platform: NodeJS.Platform = process.platform): string {
+  const store = path.resolve(storeDir);
+  const natural = path.join(store, 'tmp');
+  const maximum = SOCKET_PATH_MAXIMUM[platform];
+  if (maximum === undefined || Buffer.byteLength(natural) + SOCKET_SUFFIX_BYTES <= maximum) return natural;
+  const identity = createHash('sha256').update(store).digest('hex').slice(0, 16);
+  return path.join(platform === 'darwin' ? '/private/tmp' : '/tmp', `byok-scratch-${identity}`);
 }
 
 /** Reject aliases before changing permissions or deleting anything. */
@@ -67,6 +90,9 @@ export class ScratchRoot {
   }
   private async claim(owner: { kind: 'store' | 'standalone'; identity: string }): Promise<void> {
     await privateDirectory(this.root);
+    // A root in a shared directory such as /tmp may have been created by another user first.
+    const uid = process.getuid?.();
+    if (uid !== undefined && (await fs.lstat(this.root)).uid !== uid) throw new ScratchRootPathError('is owned by another user');
     const gate = await acquirePathMutationGate({ scope: 'store', targetPath: this.root }, { waitMs: 1_000 });
     try {
       const file = path.join(this.root, 'owner.json');

@@ -10,7 +10,7 @@ import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store'
 import { SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
 import { journalHash, type JournalIdentity } from '../daemon/journal/journal';
 import { acquireReplicaLock } from '../adapters/pi-durable/replica';
-import { ScratchRoot, ScratchRootPathError } from '../daemon/retention/scratch';
+import { defaultScratchRoot, ScratchRoot, ScratchRootPathError, validateScratchRoot } from '../daemon/retention/scratch';
 import { createRetentionRegistry } from '../daemon/retention/producers';
 import { RetentionSweeper } from '../daemon/retention/sweeper';
 import { StoragePressure } from '../daemon/retention/pressure';
@@ -149,4 +149,23 @@ it('projection and maintenance honor the same skill publication gate',async()=>{
 it('one-shot legacy migration scans exact production names without following links and needs explicit fix',async()=>{
  const root=testScratchRoot(),legacy=path.join(root,'byok-mcp-Ab12cD'),unrelated=path.join(root,'byok-mcp-Ab12cD-extra');await fs.mkdir(legacy);await fs.writeFile(path.join(legacy,'mcp-config.json'),'secret');await fs.mkdir(unrelated);await fs.symlink(unrelated,path.join(root,'byok-pi-mcp-Aa12Bb'));
  expect(await collectLegacyTemp({root})).toMatchObject({found:1,deleted:0});expect(await collectLegacyTemp({root,fix:true})).toMatchObject({found:1,deleted:1,bytesReclaimed:6});expect(await exists(unrelated)).toBe(true);
+});
+it('default scratch root leaves an application-data storeDir that is too long for runtime sockets',async()=>{
+ const short='/home/u/.byok/p',long='/Users/someone/Library/Application Support/Product/Local Agent/'+'a'.repeat(64)+'/device';
+ expect(defaultScratchRoot(short,'darwin')).toBe('/home/u/.byok/p/tmp');expect(defaultScratchRoot(long,'win32')).toBe(path.join(long,'tmp'));
+ const darwin=defaultScratchRoot(long,'darwin'),linux=defaultScratchRoot(long,'linux');
+ expect(darwin).toMatch(/^\/private\/tmp\/byok-scratch-[0-9a-f]{16}$/u);expect(linux).toBe(darwin.replace('/private/tmp','/tmp'));
+ expect(defaultScratchRoot(long+'/','darwin')).toBe(darwin);expect(defaultScratchRoot(long+'2','darwin')).not.toBe(darwin);
+ expect(validateScratchRoot(darwin,'darwin')).toBe(darwin);expect(validateScratchRoot(linux,'linux')).toBe(linux);
+ expect(()=>validateScratchRoot(path.join(long,'tmp'),'darwin')).toThrow(/: \d+ bytes, darwin allows at most 61;/u);
+ expect(()=>validateScratchRoot('/'+'r'.repeat(65),'linux')).toThrow(/66 bytes, linux allows at most 65;/u);
+ expect(validateScratchRoot('/'+'r'.repeat(64),'linux')).toBe('/'+'r'.repeat(64));
+});
+it('a daemon store with a long path claims and uses its short default scratch root',async()=>{
+ const store=path.join(testScratchRoot(),'Application Support','Product','Local Agent','a'.repeat(64),'device');await fs.mkdir(store,{recursive:true});
+ const config=resolveStorageConfig(store);expect(config.scratchRoot).not.toBe(path.join(store,'tmp'));
+ cleanups.push(()=>fs.rm(config.scratchRoot,{recursive:true,force:true}));
+ const scratch=new ScratchRoot(config.scratchRoot);await scratch.open(store);const s=await scratch.create();
+ expect(s.runtimeDir.startsWith(config.scratchRoot+path.sep)).toBe(true);await s.release();
+ await new ScratchRoot(resolveStorageConfig(store).scratchRoot).open(store);
 });

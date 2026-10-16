@@ -51,7 +51,7 @@ describe('agent-home-contract reference server', () => {
   }
 
   it.each(['agent_home_writer_busy', 'agent_home_reader_busy', undefined] as const)(
-    'returns decline code %s through tasks.deviceTerminal', async (code) => {
+    'returns decline code %s through tasks.deviceTerminal and tasks.get().result', async (code) => {
       const started = await start();
       const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
         productId: PRODUCT_ID, capabilities: ['agent-home-contract'],
@@ -66,6 +66,9 @@ describe('agent-home-contract reference server', () => {
       const deviceTerminal = await started.byok.tasks.deviceTerminal(handle.taskId);
       expect(deviceTerminal).toMatchObject({ envelope: terminal });
       if (code === undefined) expect(deviceTerminal?.envelope.payload).not.toHaveProperty('code');
+      const expected = { state: 'Failed', reason: 'display only', retryable: true, ...(code === undefined ? {} : { code }) };
+      expect((await started.byok.tasks.get(handle.taskId))?.result).toEqual(expected);
+      expect(await handle.result()).toEqual(expected);
     },
   );
 

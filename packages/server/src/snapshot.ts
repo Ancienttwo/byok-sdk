@@ -66,6 +66,7 @@ export function toTaskResult(terminal: TerminalResult | undefined): TaskResult |
     artifactRefs: terminal.artifactRefs === undefined ? undefined : [...terminal.artifactRefs],
     ...(terminal.document === undefined ? {} : { document: terminal.document }),
     ...(terminal.reason === undefined ? {} : { reason: terminal.reason }),
+    ...(terminal.code === undefined ? {} : { code: terminal.code }),
     ...(terminal.retryable === undefined ? {} : { retryable: terminal.retryable }),
   };
 }

@@ -7577,7 +7577,17 @@ export interface ExecutionScratch {
     }>;
     release(): Promise<void>;
 }
-export declare function validateScratchRoot(root: string): string;
+export declare function validateScratchRoot(root: string, platform?: NodeJS.Platform): string;
+/**
+ * The root used when the Host configures none. `<storeDir>/tmp` keeps scratch
+ * beside the store it serves. An application-data storeDir is often too long
+ * for runtime sockets, so that case moves to a fixed short root keyed by a
+ * storeDir hash, as `storeMutexEndpoint` does. Not `os.tmpdir()`: it varies
+ * with the environment, and on macOS it resolves through a symlink to a path
+ * past the budget. The macOS literal is `/private/tmp` because `/tmp` is a
+ * symlink there and {@link privateDirectory} rejects symbolic-link ancestors.
+ */
+export declare function defaultScratchRoot(storeDir: string, platform?: NodeJS.Platform): string;
 /** Reject aliases before changing permissions or deleting anything. */
 export declare function privateDirectory(directory: string): Promise<void>;
 export declare class ScratchRoot {

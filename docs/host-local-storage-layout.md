@@ -81,8 +81,13 @@ SDK-reserved namespace in the Agent home.
   owned-processes/                   protected process-reconciliation authority
 ```
 
-An explicit `storage.scratchRoot` moves exec scratch to one short private root;
-daemon temps remain in the store. A shared external root is refused. Each
+Runtime Unix sockets bind under `exec/<token>/runtime`, so the scratch root
+is at most 61 bytes on macOS and 65 bytes on Linux. When `<storeDir>/tmp` is
+longer, the default moves to `/private/tmp/byok-scratch-<storeDir hash>` on
+macOS and `/tmp/byok-scratch-<storeDir hash>` on Linux. An explicit
+`storage.scratchRoot` moves exec scratch to one short private root with no
+symbolic-link ancestors; daemon temps remain in the store. A shared external
+root, or one owned by another user, is refused. Each
 retention class records its root, SDK/Host owner, store/home/replica scope and
 TTL/count limit. The registry serves GC, pressure, status and support readback.
 The store lease covers scratch recovery; the shared home base lease plus the

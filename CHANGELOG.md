@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Fix (client; #493)** — a default scratch root that does not fit runtime
+  Unix sockets no longer fails daemon construction. When `<storeDir>/tmp` is
+  longer than 61 bytes on macOS or 65 bytes on Linux, the daemon uses
+  `/private/tmp/byok-scratch-<storeDir hash>` (macOS) or
+  `/tmp/byok-scratch-<storeDir hash>` (Linux). An explicit
+  `storage.scratchRoot` is unchanged. `ScratchRootPathError` now states the
+  byte count and the platform limit. A scratch root owned by another user is
+  refused.
+
+- **Fix (server; #496)** — `TaskResult` carries the K6 home-busy decline
+  `code`, so `tasks.get().result` and `handle.result()` expose it without
+  `tasks.deviceTerminal`. The rc.1 release note and the #399 migration note
+  now list the `resolveRuntimeLaunch` rename, scratch release ownership,
+  `crashed` as terminal, the removed `status().connected` / `.revoked` fields
+  and the new `byok-agent-result-mcp` bin.
+
 ## 0.27.0-rc.1 / @byok-sdk/keys 0.12.0-rc.1 — 2026-10-16 (prepared; not published)
 
 The owner approved rc.1 and the dist-tag `rc`; npm execution is a separate
