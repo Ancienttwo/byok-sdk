@@ -1,6 +1,6 @@
-# OAR bf55fd6 private runtime fork
+# OAR beea52c private runtime fork
 
-Source: https://github.com/botiverse/oar, version 0.62.1, fixed commit `bf55fd68f19749cab8ed2d5a234238af7adbd4b0`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
+Source: https://github.com/botiverse/oar, version 0.66.0, fixed commit `beea52cef61391351234edc025a481875035e68c`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
 
 `source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 55 source files plus LICENSE. Fifty source files keep upstream bytes. Five source files contain BYOK changes. The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls. No Cursor, ACP, CLI, arena, executable manager, other runtime or branded resources are included.
 
@@ -297,3 +297,22 @@ The five maintained files keep their BYOK deltas. Only their change notices name
 Upstream 0.60.0 to 0.62.1 changes the MCP tool server, Claude context usage and projection, and the Grok, Pi and Pi Durable runtimes. These modules remain outside the selected closure. No upstream npm dependency enters the SDK.
 
 Build assets copy this source's LICENSE, PROVENANCE.md and source-manifest.json to `dist/assets/provenance/oar/bf55fd6/`.
+
+### 0.62.1 → 0.66.0 re-vendor
+
+The new base is tag v0.66.0, commit `beea52cef61391351234edc025a481875035e68c`.
+Five selected paths changed upstream. None of them is a maintained file. All five keep upstream bytes. The import closure does not change: the new imports point to files that are already in the inventory.
+
+- `contracts/runtime.ts` adds the `mcpServerCredentials` refusable option and the `McpToolsListChanged` type and `Runtime.mcpToolsListChanged` member. These are type-only.
+- `contracts/session-options.ts` changes comments only.
+- `shared/mcp-servers.ts` adds `RESERVED_MCP_SERVER_NAMES`. `checkMcpServerNames` now refuses the names `__proto__`, `__defineGetter__`, `__defineSetter__`, `__lookupGetter__` and `__lookupSetter__` with an `UnsupportedOptionError` on `mcpServers`.
+- `shared/session-options.ts` takes the `mcpServerCredentials` key in `sessionOptionGiven` and `refuseSessionOptions`. It imports `hasMcpCredentials` from `shared/mcp-servers.ts`.
+- `runtimes/codex/tool-denials.ts` refuses a `disallowedTools` entry for an MCP server with a reserved name.
+
+The five maintained files keep their BYOK deltas. Only their change notices name the new base.
+
+`open.ts` calls `checkMcpServerNames`. A Codex session open with an MCP server that has a reserved name now fails with `UnsupportedOptionError` before spawn. The SDK Codex adapter builds the server list from `Object.entries` of a record, so such a name occurs only from a record with an own `__proto__` key. The SDK Codex adapter does not pass `disallowedTools`. The Codex fork does not call `refuseSessionOptions`, so the `mcpServerCredentials` change does not reach it.
+
+Upstream 0.63.0 to 0.66.0 also changes the antigravity runtime, `serveMcpTools` and its HTTP server, and adds per-runtime package entries with lazy ACP loading. These modules remain outside the selected closure. No upstream npm dependency enters the SDK.
+
+Build assets copy this source's LICENSE, PROVENANCE.md and source-manifest.json to `dist/assets/provenance/oar/beea52c/`.

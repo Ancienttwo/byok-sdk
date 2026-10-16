@@ -2,9 +2,9 @@
   "format": "byok.vendor-source",
   "version": 1,
   "package": "@botiverse/oar",
-  "packageVersion": "0.62.1",
+  "packageVersion": "0.66.0",
   "repository": "https://github.com/botiverse/oar",
-  "commit": "bf55fd68f19749cab8ed2d5a234238af7adbd4b0",
+  "commit": "beea52cef61391351234edc025a481875035e68c",
   "license": "Apache-2.0",
   "files": [
     {
@@ -106,8 +106,8 @@
     {
       "path": "contracts/runtime.ts",
       "sourcePath": "packages/oar/src/contracts/runtime.ts",
-      "upstreamSha256": "d66e6ad82cec7bba1dbe241285a987c0c561a15f9346880be6e6c754d37a7cab",
-      "vendoredSha256": "d66e6ad82cec7bba1dbe241285a987c0c561a15f9346880be6e6c754d37a7cab"
+      "upstreamSha256": "0108b05b9ed682d4bba65b05f963926b7a3bf5d712cfd7cd7fc8515732aee978",
+      "vendoredSha256": "0108b05b9ed682d4bba65b05f963926b7a3bf5d712cfd7cd7fc8515732aee978"
     },
     {
       "path": "contracts/session-not-found-error.ts",
@@ -118,8 +118,8 @@
     {
       "path": "contracts/session-options.ts",
       "sourcePath": "packages/oar/src/contracts/session-options.ts",
-      "upstreamSha256": "f02438cb529d793cbb5b75e3da5636b66d7bb4a554460cc47990038d7e86d395",
-      "vendoredSha256": "f02438cb529d793cbb5b75e3da5636b66d7bb4a554460cc47990038d7e86d395"
+      "upstreamSha256": "a0fceb7cae70fd426cfc3626fec95c0131c6657cf62f2dc51bdd1899aeba06c5",
+      "vendoredSha256": "a0fceb7cae70fd426cfc3626fec95c0131c6657cf62f2dc51bdd1899aeba06c5"
     },
     {
       "path": "contracts/session-unavailable-error.ts",
@@ -173,7 +173,7 @@
       "path": "runtimes/codex/app-server-client.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/app-server-client.ts",
       "upstreamSha256": "6cfb2582a9beb597e5621e299a0463cdb234c808fab03f6874a509852dd62956",
-      "vendoredSha256": "04bde1e1cc5d01b86dd53cbf7a43619ebaabd44c8dc3c95428d53a2f7899d2c8",
+      "vendoredSha256": "bbbcc35e5dec4e80b5506240021a1671b2ce95c5e83a6da5c04e7d322999a59e",
       "delta": "Caller-owned process: the injected LineProcess spawn receives exactly the explicit filtered env, cwd and launch arguments; no ambient env merge, home-initialization queue, executable manager, resources reader or killTree option. Bounded RPCs: 30000ms default and per-request deadlines (RpcTimeoutError), maxHeld=256 and maxPending=128 count budgets whose overflow fails and kills, timers cleared on reply, timeout, write failure, exit and kill. Server requests: numeric and string ids preserved; result and error replies go through the acknowledged stdin write. Terminal state: sticky terminal error with the bounded, redacted exitError of the BYOK transport; settlement-consumer errors reject already-dequeued waiters and never escape a timer."
     },
     {
@@ -198,7 +198,7 @@
       "path": "runtimes/codex/open.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/open.ts",
       "upstreamSha256": "353974f7722640a45a5f790b8a78cc2a630b3342e198c301a64eba5443023ac9",
-      "vendoredSha256": "4a52843dbf579d6ec69af87ae0ce723ad8da0c610d0dfc06192140b164e7a40a",
+      "vendoredSha256": "347710d381e1ec460ae4b133c5e8dc426f3b6dcfc7026b0926a029b3e496c38e",
       "delta": "Caller-owned interaction opt-in: codexThreadOpen accepts approvalPolicy \"never\" | \"on-request\" and sends it on thread/start and thread/resume; the default stays \"never\"."
     },
     {
@@ -217,14 +217,14 @@
       "path": "runtimes/codex/rpc-control.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/rpc-control.ts",
       "upstreamSha256": "89a001c616461df6b8c24c1d2201c3036b276aaf53fa8fc47fa90a18213778c1",
-      "vendoredSha256": "2ed9b1c36a2a8834de41d9da4bcb326c7dc27b08531abd99c5c411e911d450c3",
+      "vendoredSha256": "f3388431b61fb16403c5a601b2b26c2c583a33f6b79d761e5e4d5688698bc054",
       "delta": "Bounded controls: every control RPC has a deadline (timeoutMs, default 30000ms), and an RpcTimeoutError is always one rejected response with code error, independent of the plan error mapper. Synchronous response capture through the client request callback instead of a second deferred waiter, so a failed kernel append or budget overflow rejects the control and never strands a waiter; a failed fallback takeover record rejects the control and never escapes the fallback timer."
     },
     {
       "path": "runtimes/codex/session.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/session.ts",
       "upstreamSha256": "b07c31ed744abe598c6121c3ad471f830014a7a08471a14941da7c327ff875a0",
-      "vendoredSha256": "3b5bded3309a4b53109c4fe13b33b4cf82cf62e41d4b78b29a56dc03d613f3a1",
+      "vendoredSha256": "4e267c35a925afc71503c82c1ca2ab5957e9c9b8caefb8dde48cb596b14480f5",
       "delta": "Raw adapter for the SDK: injected spawn and a required explicit filtered env; caller-selected sandboxMode (danger-full-access default, inherit passes no override) instead of ambient OAR_CODEX_SANDBOX; returns AdapterSession without sealSession/withSessionCredentials/observe, building one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control. Native-first recording: each notification is retained as a body.origin=\"byok-native\" frame before the fold; a fold failure kills the process visibly. Server requests: caller-owned bounded native interaction lifecycle when configured, else synchronous decline/-32601 rejection under a 1000ms dispatch deadline; on-request approval policy is verified in the open reply. Owned process lifetime: spawn/adoption settles before the first write, failed initialization kills, the abort-fallback kill and deadline timers never throw. Codex steer is a required member."
     },
     {
@@ -242,8 +242,8 @@
     {
       "path": "runtimes/codex/tool-denials.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/tool-denials.ts",
-      "upstreamSha256": "74fb6e046c2286caebe49edaa0055642c873ea5e389afa9e56bc632441383612",
-      "vendoredSha256": "74fb6e046c2286caebe49edaa0055642c873ea5e389afa9e56bc632441383612"
+      "upstreamSha256": "cbca7b2720b16d2275c2fe547a8326e90b4178ab07792c0b17a9561edb329c95",
+      "vendoredSha256": "cbca7b2720b16d2275c2fe547a8326e90b4178ab07792c0b17a9561edb329c95"
     },
     {
       "path": "shared/abort-fallback.ts",
@@ -302,8 +302,8 @@
     {
       "path": "shared/mcp-servers.ts",
       "sourcePath": "packages/oar/src/shared/mcp-servers.ts",
-      "upstreamSha256": "001301c6218654dedde9e120baa7d2a1773e8391483f4f08fb9b6a79cad25aad",
-      "vendoredSha256": "001301c6218654dedde9e120baa7d2a1773e8391483f4f08fb9b6a79cad25aad"
+      "upstreamSha256": "8de2886a2f2a6d6e25656843d4e12f3eadb8bf3592e34a1325d0acac10d268b1",
+      "vendoredSha256": "8de2886a2f2a6d6e25656843d4e12f3eadb8bf3592e34a1325d0acac10d268b1"
     },
     {
       "path": "shared/native-error.ts",
@@ -321,7 +321,7 @@
       "path": "shared/session-kernel.ts",
       "sourcePath": "packages/oar/src/shared/session-kernel.ts",
       "upstreamSha256": "cac17f1f61fbd9adf83a5eb853ae62319ff718c82bbd60a7296b2591165708be",
-      "vendoredSha256": "b81af5fc58078b6f7f79dce0505b0254c32eccb038011142869eaffdd9b5e367",
+      "vendoredSha256": "b013a48378ac746ac5f53a88b3553d44ab1d4081f8b0847dd324aa1bbbc1fef0",
       "delta": "Fatal serialized retained-record byte budget (maxBytes, onLimit) measured after redaction; required onRecord consumer runs after append, outside best-effort observers; the redact hook is a member of the hooks object."
     },
     {
@@ -333,8 +333,8 @@
     {
       "path": "shared/session-options.ts",
       "sourcePath": "packages/oar/src/shared/session-options.ts",
-      "upstreamSha256": "b99bd6b26fffa00cae177bb042189d5630fb4735bbba560519d4724417039223",
-      "vendoredSha256": "b99bd6b26fffa00cae177bb042189d5630fb4735bbba560519d4724417039223"
+      "upstreamSha256": "e08d63d58bb00c88365a6e4295625ddd735682a15e51b3ce9067c89308d77b0c",
+      "vendoredSha256": "e08d63d58bb00c88365a6e4295625ddd735682a15e51b3ce9067c89308d77b0c"
     },
     {
       "path": "shared/token-totals.ts",

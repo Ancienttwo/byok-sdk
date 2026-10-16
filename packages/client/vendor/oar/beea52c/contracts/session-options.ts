@@ -59,7 +59,7 @@ export interface SessionOptions {
    * `effort`, and a runtime that accepts it lists the levels. A requested
    * effort is never ignored: the adapter applies it through the runtime's
    * native channel and reads the runtime's own report back. A runtime with no
-   * effort channel at all (antigravity) rejects with an
+   * effort channel for the selected model rejects with an
    * `UnsupportedOptionError` on `effort`. When the runtime refuses the level,
    * or would run another one (drop it for the model, clamp it, fall back to
    * its default), starting the session rejects with an Error naming the
@@ -130,7 +130,7 @@ export interface SessionOptions {
   readonly env?: Readonly<Record<string, string | null>>;
   /** REPLACE the runtime's built-in system prompt (claude --system-prompt, codex thread baseInstructions, pi resource-loader systemPrompt). Survives runtime compaction (pinned per vendor). Refused by cursor, kimi and antigravity: `session()` rejects with `UnsupportedOptionError` (`Runtime.refusedSessionOptions`, docs/spec/runtime-matrix.md#refused-session-options). */
   readonly systemPrompt?: string;
-  /** APPEND to the runtime's built-in system prompt, keeping its harness behavior intact (claude --append-system-prompt, codex developerInstructions, pi appendSystemPrompt). Survives runtime compaction (pinned per vendor). Refused by cursor, kimi and antigravity: `session()` rejects with `UnsupportedOptionError` (`Runtime.refusedSessionOptions`, docs/spec/runtime-matrix.md#refused-session-options). */
+  /** APPEND to the runtime's built-in system prompt, keeping its harness behavior intact (claude --append-system-prompt, codex developerInstructions, pi appendSystemPrompt). Survives runtime compaction (pinned per vendor). Refused by cursor, kimi and opencode v2: `session()` rejects with `UnsupportedOptionError` (`Runtime.refusedSessionOptions`, docs/spec/runtime-matrix.md#refused-session-options). */
   readonly appendSystemPrompt?: string;
   /**
    * MCP servers attached to THIS session, on top of the servers the runtime
@@ -148,13 +148,17 @@ export interface SessionOptions {
    * replaces it), measured on each runtime page. A stdio server
    * gets `env` on top of what the runtime passes it (claude and pi: the whole
    * environment, `SessionOptions.env` included; codex: an allowlist such as
-   * `HOME` and `PATH`). Names are unique within the list. Refused when
+   * `HOME` and `PATH`). Names are unique within the list, and none is
+   * `__proto__`, `__defineGetter__`, `__defineSetter__`, `__lookupGetter__` or
+   * `__lookupSetter__`, which some runtimes drop without a word
+   * (`UnsupportedOptionError` on every runtime, #395). Refused when
    * non-empty by cursor: `session()` rejects with `UnsupportedOptionError`
    * (`Runtime.refusedSessionOptions`,
    * docs/spec/runtime-matrix.md#refused-session-options), as it does for a
    * transport a runtime cannot attach (http on an ACP agent whose
    * `initialize` declares no `mcpCapabilities.http`) and for an entry with
-   * `env` or `headers` on antigravity, which would write them to its disk.
+   * `env` or `headers` on antigravity, which would write them to its disk
+   * (declared as `refusedSessionOptions.mcpServerCredentials`).
    */
   readonly mcpServers?: readonly McpServer[];
   /**
