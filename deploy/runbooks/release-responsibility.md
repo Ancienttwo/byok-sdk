@@ -47,6 +47,12 @@ for the dist-tag `latest`, before the end-to-end run that the rc route named.
 published on `latest` from `v0.26.0` (`34c0e504`) and read back; see its
 [publication record](../../docs/releases/v0.26.0-publication.md) and the
 [0.26.0 release notes](../../docs/releases/v0.26.0.md).
+0.26.1 / keys 0.11.1 is published on `latest` from `v0.26.1` (`e7f3edf2`); see
+its [publication record](../../docs/releases/v0.26.1-publication.md). The owner
+approved the prerelease 0.27.0-rc.1 / keys 0.12.0-rc.1 under the dist-tag `rc`,
+rc first. It is the first wire-v3 train. It is not published; npm execution
+approval remains separate. See the
+[0.27.0 release notes](../../docs/releases/v0.27.0.md).
 
 The SDK publishes npm libraries, the `byok-agent` CLI and reference packaging/service recipes. The host product owns every binary distribution decision:
 
@@ -63,30 +69,30 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 ## Version selection
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
-The published source manifests name the stable train 0.26.1 and independent
-keys 0.11.1. Both are PATCH releases. The train corrects client cleanup,
-prepared-offer races and outbound error paths. It adds no public API,
-persistence schema or security authority. keys changes only its version and
-its exact packed core edge to 0.26.1. Keep manifests, lock workspace records,
-version documents and packed internal dependencies consistent.
+The approved source manifests name the prerelease train 0.27.0-rc.1 and
+independent keys 0.12.0-rc.1. Both are MINOR lines. The train moves the wire to
+protocol major 3 (#468), adds `executions.submit` (#470) and typed home-busy
+decline codes (#471), and has pre-1.0 breaking cuts in protocol, client,
+server, cloud, cloud-dataplane and core. keys makes `buildPiProviderProjection`
+require `runtimeEntry` and moves the pi-rpc key to private IPC (#385). Keep
+manifests, lock workspace records, version documents and packed internal
+dependencies consistent.
 
-The published set contains eight aligned packages plus keys: nine packages.
-`@byok-sdk/implementation-identity` remains retired. All nine packages are on
-`latest`; complete readback passed. The [reviewed registry baseline](../../scripts/release/registry-expectations.json)
-names the published 0.26.0 train and keys 0.11.0. This train has no first
-publication. Stable publication omits `--tag` and requires its exact versions
-on `latest`.
+The candidate set contains eight aligned packages plus keys: nine packages.
+`@byok-sdk/implementation-identity` remains retired. Every public package is a
+prerelease on the one dist-tag `rc`; `latest` stays 0.26.1 / keys 0.11.1. The
+[reviewed registry baseline](../../scripts/release/registry-expectations.json)
+records that prior `latest` for all nine packages. This train has no first
+publication.
 The [implemented contract](../../scripts/release/registry-contract.mjs) verifies
 package-document absence before a declared first publication, then exact-version
 readback and the declared absent `latest` after an RC. Missing tags/versions or
 failed registry reads do not establish package absence.
 
-The owner authorized npm execution for 0.26.1 / keys 0.11.1 on 2026-10-12.
-All nine uploads succeeded. Complete readback passed against the frozen
-merge-commit CI artifacts. The annotated `v0.26.1` tag is pushed and its
-GitHub Release is Latest. See the
-[publication record](../../docs/releases/v0.26.1-publication.md).
-Live qualification and production rollout remain separate operations.
+The version/channel decision authorizes source preparation only; it does not
+authorize npm execution, tagging, live qualification or production rollout.
+The [publication plan](../../docs/releases/v0.27.0.md#publication-plan) lists
+the exact package order and remaining dry-run prerequisites.
 
 ## Pre-publication Host integration
 

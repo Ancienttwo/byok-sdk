@@ -173,11 +173,25 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.26.1`; publication requires separate release
+aligned dispatch release is `0.27.0-rc.1`; publication requires separate release
 authorization and registry readback. The current independent keys release is
-`0.11.1`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.26.1`, proven from an isolated standard npm install rather
+`0.12.0-rc.1`; its packed and published `@byok-sdk/core` edge must be the exact current
+dispatch release, `0.27.0-rc.1`, proven from an isolated standard npm install rather
 than the workspace graph.
+
+The 0.27.0-rc.1 train is a prepared prerelease, not yet published. The owner
+approved the rc route for 0.27.0-rc.1 / keys 0.12.0-rc.1 under the dist-tag
+`rc`; npm execution is a separate step. `latest` stays 0.26.1 / keys 0.11.1,
+and the reviewed registry baseline records that prior `latest` for all nine
+packages. It is the first wire-v3 train: `PROTOCOL_VERSION` is 3, a v2 daemon
+and a v3 server do not interoperate, and devices and the Host upgrade together.
+Prereleases are not registered in the v3 compatibility registry. The 0.27 line
+is a MINOR: it adds public API (`executions.submit`, typed home-busy decline
+codes, injected device credential backends) and has pre-1.0 breaking cuts in
+protocol, client, server, cloud, cloud-dataplane and core. keys 0.12.0-rc.1 is
+a MINOR: `buildPiProviderProjection` now requires `runtimeEntry`, and the
+pi-rpc lane receives its key over private IPC (#385). Notes:
+[`docs/releases/v0.27.0.md`](releases/v0.27.0.md).
 
 On 2026-10-12 the owner authorized npm publication of 0.26.1 / keys 0.11.1.
 All nine packages are published on `latest` from `v0.26.1` (`e7f3edf2`).
@@ -2347,8 +2361,9 @@ every pre-claim `AgentHomeBusyError` decline carry it; other declines omit it.
 Cloud `readTaskResult` copies the code verbatim. Hosts classify busy through
 this code on the cloud result or the canonical `tasks.deviceTerminal` envelope,
 never by parsing `reason`. The embedded `TaskResult` is a narrower display
-projection; it is not the busy-classification API. This is an additive optional
-protocol v2 field; `PROTOCOL_VERSION` stays 2.
+projection; it is not the busy-classification API. It landed as an additive
+optional field on wire v2 and is carried unchanged on wire v3 (K7 moved
+`PROTOCOL_VERSION` to 3).
 Host cancellation alone returns no device terminal.
 A terminal stored under a different task key or with a non-terminal type is an
 error. This observation does not prove native Session.close or home release.
