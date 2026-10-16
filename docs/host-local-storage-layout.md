@@ -82,12 +82,14 @@ SDK-reserved namespace in the Agent home.
 ```
 
 Runtime Unix sockets bind under `exec/<token>/runtime`, so the scratch root
-is at most 61 bytes on macOS and 65 bytes on Linux. When `<storeDir>/tmp` is
+is at most 61 bytes on macOS and 65 bytes on Linux. When canonical `<storeDir>/tmp` is
 longer, the default moves to `/private/tmp/byok-scratch-<storeDir hash>` on
-macOS and `/tmp/byok-scratch-<storeDir hash>` on Linux. An explicit
+macOS and `/tmp/byok-scratch-<storeDir hash>` on Linux. The hash is the first
+16 hexadecimal characters of SHA-256 of the canonical store path. Otherwise,
+the default keeps the lexical `<storeDir>/tmp` and checks its length. An explicit
 `storage.scratchRoot` moves exec scratch to one short private root with no
 symbolic-link ancestors; daemon temps remain in the store. A shared external
-root, or one owned by another user, is refused. Each
+root is refused. A root owned by another user is refused before permission changes. Each
 retention class records its root, SDK/Host owner, store/home/replica scope and
 TTL/count limit. The registry serves GC, pressure, status and support readback.
 The store lease covers scratch recovery; the shared home base lease plus the

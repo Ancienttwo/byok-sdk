@@ -7582,14 +7582,20 @@ export declare function validateScratchRoot(root: string, platform?: NodeJS.Plat
  * The root used when the Host configures none. `<storeDir>/tmp` keeps scratch
  * beside the store it serves. An application-data storeDir is often too long
  * for runtime sockets, so that case moves to a fixed short root keyed by a
- * storeDir hash, as `storeMutexEndpoint` does. Not `os.tmpdir()`: it varies
+ * canonical storeDir hash, as `storeMutexEndpoint` does. Not `os.tmpdir()`: it varies
  * with the environment, and on macOS it resolves through a symlink to a path
  * past the budget. The macOS literal is `/private/tmp` because `/tmp` is a
  * symlink there and {@link privateDirectory} rejects symbolic-link ancestors.
  */
 export declare function defaultScratchRoot(storeDir: string, platform?: NodeJS.Platform): string;
-/** Reject aliases before changing permissions or deleting anything. */
-export declare function privateDirectory(directory: string): Promise<void>;
+/**
+ * Reject aliases before changing permissions or deleting anything. With
+ * `ownedLeaf`, a leaf another user created first (a root in a shared directory
+ * such as /tmp) is refused before any permission change.
+ */
+export declare function privateDirectory(directory: string, options?: {
+    ownedLeaf?: boolean;
+}): Promise<void>;
 export declare class ScratchRoot {
     readonly root: string;
     private readonly live;
