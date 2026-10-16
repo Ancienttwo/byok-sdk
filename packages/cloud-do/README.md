@@ -4,9 +4,9 @@ This package hosts a pi-durable session in a Cloudflare Durable Object.
 It provides native SQLite storage, inline tools, wake and inbox processing,
 usage limits, settlement hooks, and transcript reads.
 
-The current source candidate is the prerelease 0.27.0-rc.1, in the nine-package
-release set with keys 0.12.0-rc.1, under the npm dist-tag `rc`. It is not
-published. See the [release notes](../../docs/releases/v0.27.0.md).
+The current source candidate is the prerelease 0.27.0-rc.2, in the nine-package
+release set with keys 0.12.0-rc.2, under the npm dist-tag `rc`. It is not
+published. It replaces 0.27.0-rc.1, which was never published. See the [release notes](../../docs/releases/v0.27.0.md).
 
 The current `latest` release is 0.26.1, in the nine-package release set with
 keys 0.11.1. Registry readback and isolated installation passed on 2026-10-12.
@@ -15,19 +15,19 @@ The previous stable release was 0.26.0 / keys 0.11.0; its
 [publication record](../../docs/releases/v0.26.0-publication.md) remains historical.
 The published 0.26.0-rc.4 (see the
 [rc.4 publication record](../../docs/releases/v0.26.0-rc.4-publication.md))
-is on `rc` until 0.27.0-rc.1 is published; 0.26.0-rc.1 to rc.3 are superseded. See the
+is on `rc` until 0.27.0-rc.2 is published; 0.26.0-rc.1 to rc.3 are superseded. See the
 [release notes](../../docs/releases/v0.26.1.md#version-set-and-channel).
 Live Host acceptance remains separate.
 The package needs Node 24.15.0 or later for build tooling.
 
 ## Install and subclass
 
-The following install example names the 0.27.0-rc.1 candidate. It works only
+The following install example names the 0.27.0-rc.2 candidate. It works only
 after publication and exact registry readback. Use an installed package to
 verify the consumer path.
 
 ~~~sh
-npm install @byok-sdk/cloud-do@0.27.0-rc.1
+npm install @byok-sdk/cloud-do@0.27.0-rc.2
 npm install --save-dev @cloudflare/workers-types
 ~~~
 

@@ -7,18 +7,20 @@ composition over Postgres and R2.
 
 ## Release status
 
-The current source candidate is the prerelease **0.27.0-rc.1** for the eight
-aligned packages, with independent keys **0.12.0-rc.1**. The release owner
+The current source candidate is the prerelease **0.27.0-rc.2** for the eight
+aligned packages, with independent keys **0.12.0-rc.2**. The release owner
 approved it and the npm dist-tag `rc`. It is not published; npm execution is a
-separate step. `latest` stays 0.26.1 / keys 0.11.1. rc.1 is the first wire-v3
-(protocol major 3) train: v2 daemons and v3 servers do not interoperate, so
+separate step. `latest` stays 0.26.1 / keys 0.11.1. rc.2 replaces 0.27.0-rc.1,
+which was prepared but never published: it adds the short default scratch root
+(#493) and the home-busy `code` on the server `TaskResult` (#496). It is the
+first wire-v3 (protocol major 3) train: v2 daemons and v3 servers do not interoperate, so
 devices and the Host must upgrade together. It also carries breaking server,
 cloud, client and keys API cuts.
 [Release notes](docs/releases/v0.27.0.md) describe the changes since 0.26.1 and
 the Host upgrade and migration steps.
 
-Versioned install examples below name the rc.1 candidate and work only after
-rc.1 is published and read back.
+Versioned install examples below name the rc.2 candidate and work only after
+rc.2 is published and read back.
 
 The current `latest` release is **0.26.1** for the eight aligned packages,
 with independent keys **0.11.1**, published on npm on 2026-10-12 from
@@ -41,7 +43,7 @@ and the non-retryable Codex resume of a missing thread (#349).
 the client and keys breaking cuts and the upgrade steps.
 
 The published **0.26.0-rc.4** / keys 0.11.0-rc.4 is on the `rc` channel until
-0.27.0-rc.1 is published (see its
+0.27.0-rc.2 is published (see its
 [publication record](docs/releases/v0.26.0-rc.4-publication.md)). rc.3 is
 superseded. 0.26.0-rc.1 and rc.2 were only partially published and are also superseded.
 Live Host acceptance remains separate.
@@ -117,7 +119,7 @@ Install the scoped packages your composition uses and import each one under
 its own name. For example, a self-hosted composition:
 
 ```sh
-npm install @byok-sdk/server@0.27.0-rc.1 @byok-sdk/client@0.27.0-rc.1
+npm install @byok-sdk/server@0.27.0-rc.2 @byok-sdk/client@0.27.0-rc.2
 ```
 
 ```ts
@@ -125,13 +127,13 @@ import { createByokServer } from '@byok-sdk/server';
 ```
 
 The Worker-only cloud-do package is published from 0.24.0. The example below
-names the 0.27.0-rc.1 candidate; it becomes usable only after publication and
+names the 0.27.0-rc.2 candidate; it becomes usable only after publication and
 exact registry readback.
 See [the cloud-do README](packages/cloud-do/README.md) for the subclass and binding.
 
 ~~~sh
 # Release candidate source version; publication is pending.
-npm install @byok-sdk/cloud-do@0.27.0-rc.1
+npm install @byok-sdk/cloud-do@0.27.0-rc.2
 npm install --save-dev @cloudflare/workers-types
 ~~~
 
@@ -292,7 +294,7 @@ It is intentionally outside the dispatch packages and their entire dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys@0.12.0-rc.1
+npm install @byok-sdk/keys@0.12.0-rc.2
 ```
 
 ## Host connector composition
@@ -308,7 +310,7 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK and the independently installable `@byok-sdk/keys@0.12.0-rc.1`
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.12.0-rc.2`
 require Node.js 24.15.0 or newer. MIT licensed.
 
 ## Entry dependencies

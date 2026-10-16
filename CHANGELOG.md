@@ -2,23 +2,34 @@
 
 ## Unreleased
 
+## 0.27.0-rc.2 / @byok-sdk/keys 0.12.0-rc.2 — 2026-10-16 (prepared; not published)
+
+The owner approved rc.2 and the dist-tag `rc` on 2026-10-16; npm execution is a
+separate step. rc.2 replaces rc.1, which was prepared but never published. It
+adds the fixes of PR #498. `latest` stays 0.26.1 / keys 0.11.1.
+
+- The eight aligned package manifests move to 0.27.0-rc.2.
+- keys moves to 0.12.0-rc.2. Its packed core edge is exactly 0.27.0-rc.2.
+- The lock workspace records and current version documents move together.
+- [Release notes](docs/releases/v0.27.0.md) describe the rc.2 changes.
+
 - **Fix (client; #493)** — a default scratch root that does not fit runtime
-  Unix sockets no longer fails daemon construction. When `<storeDir>/tmp` is
+  Unix sockets no longer fails daemon construction. When canonical `<storeDir>/tmp` is
   longer than 61 bytes on macOS or 65 bytes on Linux, the daemon uses
   `/private/tmp/byok-scratch-<storeDir hash>` (macOS) or
   `/tmp/byok-scratch-<storeDir hash>` (Linux). An explicit
   `storage.scratchRoot` is unchanged. `ScratchRootPathError` now states the
-  byte count and the platform limit. A scratch root owned by another user is
-  refused.
+  byte count and the platform limit. The hash uses the canonical store path.
+  A scratch root owned by another user is refused before chmod.
 
 - **Fix (server; #496)** — `TaskResult` carries the K6 home-busy decline
   `code`, so `tasks.get().result` and `handle.result()` expose it without
-  `tasks.deviceTerminal`. The rc.1 release note and the #399 migration note
-  now list the `resolveRuntimeLaunch` rename, scratch release ownership,
+  `tasks.deviceTerminal`. The 0.27.0 release note and the #399 migration
+  note now list the `resolveRuntimeLaunch` rename, scratch release ownership,
   `crashed` as terminal, the removed `status().connected` / `.revoked` fields
   and the new `byok-agent-result-mcp` bin.
 
-## 0.27.0-rc.1 / @byok-sdk/keys 0.12.0-rc.1 — 2026-10-16 (prepared; not published)
+## 0.27.0-rc.1 / @byok-sdk/keys 0.12.0-rc.1 — 2026-10-16 (prepared; never published; superseded by rc.2)
 
 The owner approved rc.1 and the dist-tag `rc`; npm execution is a separate
 step. `latest` stays 0.26.1 / keys 0.11.1. This is the first wire-v3
