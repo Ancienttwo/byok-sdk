@@ -29,12 +29,15 @@ import {
   EventsPollResponseSchema,
 } from '../index';
 
-describe('events poll capability advertisement is additive', () => {
-  it('accepts both an N-1 response without capabilities and a new response with unknown future flags', () => {
-    expect(EventsPollResponseSchema.parse({ events: [], cursor: 0 })).toEqual({ events: [], cursor: 0 });
+const INGRESS = { activityMaxEvents: 50, activityMaxBytes: 65536 } as const;
+
+describe('events poll capability advertisement (wire v3)', () => {
+  it('requires the advertisement and keeps unknown future flags', () => {
+    expect(() => EventsPollResponseSchema.parse({ events: [], cursor: 0, ingress: INGRESS }), 'a page without capabilities is not a v3 response').toThrow();
+    expect(EventsPollResponseSchema.parse({ events: [], cursor: 0, capabilities: [], ingress: INGRESS })).toEqual({ events: [], cursor: 0, capabilities: [], ingress: INGRESS });
     expect(
-      EventsPollResponseSchema.parse({ events: [], cursor: 0, capabilities: ['result-document', 'future-flag'] }),
-    ).toEqual({ events: [], cursor: 0, capabilities: ['result-document', 'future-flag'] });
+      EventsPollResponseSchema.parse({ events: [], cursor: 0, capabilities: ['result-document', 'future-flag'], ingress: INGRESS }),
+    ).toEqual({ events: [], cursor: 0, capabilities: ['result-document', 'future-flag'], ingress: INGRESS });
   });
 });
 
@@ -120,18 +123,19 @@ describe('byok route paths: client builders reproduce their prior template-strin
 });
 
 
-describe('outbound settlement v2 additions #397', () => {
-  it('preserves a counts-only response and normalizes unknown observation', async () => {
+describe('outbound settlement on wire v3 (#397)', () => {
+  it('requires correlated outcomes and normalizes an unknown refusal reason to observation', async () => {
     const { MessagesSendResponseSchema } = await import('../http-api');
-    expect(MessagesSendResponseSchema.parse({ accepted: 1 })).toEqual({ accepted: 1 });
+    expect(() => MessagesSendResponseSchema.parse({ accepted: 1 }), 'a counts-only answer is not a v3 response').toThrow();
+    expect(MessagesSendResponseSchema.parse({ accepted: 0, outcomes: [] })).toEqual({ accepted: 0, outcomes: [] });
     const id = crypto.randomUUID();
     expect(MessagesSendResponseSchema.parse({ accepted: 0, rejected: 1, outcomes: [{ id, outcome: 'rejected', reason: 'future_reason' }] }).outcomes).toEqual([{ id, outcome: 'rejected', reason: 'unknown' }]);
     expect(() => MessagesSendResponseSchema.parse({ accepted: 0, outcomes: [{ id, outcome: 'future' }] })).toThrow();
     expect(() => MessagesSendResponseSchema.parse({ accepted: 0, outcomes: [{ id, outcome: 'rejected', reason: 'x'.repeat(65) }] })).toThrow();
   });
 
-  it('accepts advertised limits without requiring them from old responders', () => {
-    expect(EventsPollResponseSchema.parse({ events: [], cursor: 0 })).toEqual({ events: [], cursor: 0 });
-    expect(EventsPollResponseSchema.parse({ events: [], cursor: 0, ingress: { activityMaxEvents: 50, activityMaxBytes: 65536 } }).ingress).toEqual({ activityMaxEvents: 50, activityMaxBytes: 65536 });
+  it('requires the activity ingress advertisement on every events page', () => {
+    expect(() => EventsPollResponseSchema.parse({ events: [], cursor: 0, capabilities: [] }), 'an events page without ingress is not a v3 response').toThrow();
+    expect(EventsPollResponseSchema.parse({ events: [], cursor: 0, capabilities: [], ingress: INGRESS }).ingress).toEqual(INGRESS);
   });
 });

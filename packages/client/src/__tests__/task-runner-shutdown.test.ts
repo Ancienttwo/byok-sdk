@@ -10,6 +10,7 @@ import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { RuntimeDisposalFailure } from '../runtime-failure';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { testIngressBudget } from './fixtures/activity-ingress';
 
 /**
  * M4 Phase 2 (daemon control socket `shutdown` RPC): `TaskRunner.
@@ -37,7 +38,7 @@ async function makeRunner(
   sent: Envelope[],
   overrides: Partial<Pick<TaskRunnerDeps, 'shutdownInterruptTimeoutMs' | 'onRuntimeDisposalFailure'>> = {},
 ): Promise<TaskRunner> {
-  const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-taskrunner-shutdown-workspace-'),
     deviceId: 'device-1',

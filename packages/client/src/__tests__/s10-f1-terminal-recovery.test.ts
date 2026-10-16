@@ -14,6 +14,7 @@ import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import * as mutationGate from '../daemon/path-mutation-gate';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { testIngressBudget } from './fixtures/activity-ingress';
 
 const roots: string[] = [];
 const heldGates = new Set<string>();
@@ -53,7 +54,7 @@ async function cancellationFixture(overrides: Partial<TaskRunnerDeps> = {}) {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
-    const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
+    const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter], workspaceRoot: await temporary('byok-publish-cancel-workspace-'),
       agentHome: new AgentHomeManager({ hostStorageRoot }), agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-cancel',

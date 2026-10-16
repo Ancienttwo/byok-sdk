@@ -56,6 +56,7 @@ import { observationOf } from './fixtures/mcp-observation';
 import { validatePreparedAgentMemoryObservation } from '../agent-memory/prepared-capability';
 import { AGENT_MEMORY_MCP_SERVER_INFO, AGENT_MEMORY_TOOLS } from '../bin/agent-memory-mcp-server';
 import { AGENT_MEMORY_MCP_SERVER_NAME } from '../sdk-reserved-mcp';
+import { testIngressBudget } from './fixtures/activity-ingress';
 
 /**
  * `task.offer_prepared` end to end through the real `TaskRunner`, the real
@@ -359,7 +360,7 @@ async function lane(options: {
 
 async function makeRunner(built: Lane, adapter: StubRuntimeAdapter, sent: Envelope[], extra: Partial<TaskRunnerDeps> = {}): Promise<TaskRunner> {
   const storeDir = await tempDir('byok-prepared-runner-store-');
-  return new TaskRunner({ scratchRoot: testScratchOwner(),
+  return new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await tempDir('byok-prepared-workspace-'),
     deviceId: DEVICE_ID,

@@ -25,6 +25,7 @@ import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { testIngressBudget } from './fixtures/activity-ingress';
 
 const roots: string[] = [];
 const sha256 = (value: string): string => `sha256:${createHash('sha256').update(value, 'utf8').digest('hex')}`;
@@ -169,7 +170,7 @@ describe('Agent memory MCP local authority', () => {
       approvalInteractive: true,
       mcpToolsets: false,
     });
-    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       workspaceRoot,
       agentHome: new AgentHomeManager({ hostStorageRoot }),
@@ -222,7 +223,7 @@ describe('Agent memory MCP local authority', () => {
       approvalInteractive: true,
       mcpToolsets: true,
     });
-    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [unsupported, supported],
       getServerCapabilities: () => ['custom-harness'],
       workspaceRoot,

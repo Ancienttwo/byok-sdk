@@ -31,6 +31,7 @@ import {
 import type { McpToolsetConfig, RuntimeCapabilities } from '../../types';
 import { StubRuntimeAdapter } from './stub-adapter';
 import { observationOf } from './mcp-observation';
+import { testIngressBudget } from './activity-ingress';
 
 /**
  * One daemon LIFETIME of the prepared-offer lane, as its own operating-system
@@ -182,7 +183,7 @@ await fs.mkdir(config.runnerStoreDir, { recursive: true });
 await fs.mkdir(config.workspaceRoot, { recursive: true });
 await fs.mkdir(config.agentHomeDir, { recursive: true });
 
-const runner = new TaskRunner({ scratchRoot: new ScratchRoot(config.scratchRoot),
+const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: new ScratchRoot(config.scratchRoot),
   adapters: [adapter],
   workspaceRoot: config.workspaceRoot,
   deviceId: DEVICE_ID,

@@ -1,4 +1,4 @@
-import { DEFAULT_ACTIVITY_INGRESS, type ActivityIngress, type AgentEvent } from '@byok-sdk/protocol';
+import type { ActivityIngress, AgentEvent } from '@byok-sdk/protocol';
 
 export type ProgressEmitter = (seq: number, events: AgentEvent[]) => void;
 
@@ -44,7 +44,8 @@ function encodedEventsBytes(events: readonly AgentEvent[]): number {
  * Coalesces a task's `AgentEvent`s into seq-ordered `task.progress` batches:
  * flush immediately at `maxBatchSize` events, otherwise at most every
  * `flushIntervalMs` while anything is buffered. One instance per task —
- * `seq` is a per-task monotonic counter starting at 1.
+ * `seq` is a per-task monotonic counter starting at 1. `ingress` reads the
+ * server-advertised activity limits at each push; there is no default.
  */
 export class ProgressBatcher {
   private buffer: AgentEvent[] = [];
@@ -56,12 +57,12 @@ export class ProgressBatcher {
 
   constructor(
     private readonly emit: ProgressEmitter,
-    options: ProgressBatcherOptions = {},
-    private readonly ingress: () => Readonly<ActivityIngress> = () => ({ activityMaxEvents: DEFAULT_ACTIVITY_INGRESS.maxEvents, activityMaxBytes: DEFAULT_ACTIVITY_INGRESS.maxBytes }),
+    options: ProgressBatcherOptions | undefined,
+    private readonly ingress: () => Readonly<ActivityIngress>,
   ) {
     validateProgressBatcherOptions(options);
-    this.maxBatchSize = options.maxBatchSize ?? 10;
-    this.flushIntervalMs = options.flushIntervalMs ?? 250;
+    this.maxBatchSize = options?.maxBatchSize ?? 10;
+    this.flushIntervalMs = options?.flushIntervalMs ?? 250;
 
   }
 

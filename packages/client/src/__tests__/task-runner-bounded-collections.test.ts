@@ -9,6 +9,7 @@ import type { BlobResolver } from '../daemon/blob-client';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { MAX_TRACKED_TASK_IDS, TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { testIngressBudget } from './fixtures/activity-ingress';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -24,7 +25,7 @@ const unusedBlobClient: BlobResolver = {
 };
 
 async function makeRunner(adapter: StubRuntimeAdapter, sent: Envelope[]): Promise<TaskRunner> {
-  const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-taskrunner-bounded-workspace-'),
     deviceId: 'device-1',

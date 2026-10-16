@@ -1,8 +1,6 @@
 import type { HarnessInfo } from '@byok-sdk/protocol';
 import {
-  DEFAULT_ACTIVITY_INGRESS,
   type OutboundRefusalReason,
-  type MessageSendOutcome,
   type ActivityIngress,
   MAX_MESSAGES_PER_BATCH,
   createEnvelope,
@@ -17,7 +15,7 @@ import { AuthManager } from './auth-manager';
 import type { CursorStore } from './cursor-store';
 import type { DaemonHaltReason } from './daemon-lifecycle';
 import { createFleetJitter, type FleetJitter } from './deterministic-jitter';
-import { LongPollClient, type MessageBatchPostResult } from './long-poll-transport';
+import { LongPollClient, type CorrelatedOutcome, type MessageBatchPostResult } from './long-poll-transport';
 
 export { ReplayCursorTooOldError } from './replay-cursor';
 
@@ -108,10 +106,15 @@ export interface ConnectionManagerOptions {
   onCrashed?: (error: unknown) => void;
 }
 
-export interface OutboundSettlement {
-  readonly envelope: Envelope;
-  readonly outcome: MessageSendOutcome['outcome'];
-  readonly reason?: OutboundRefusalReason;
+/** One outbound envelope's settlement; only a rejection has a reason, and it always has one. */
+export type OutboundSettlement =
+  | { readonly envelope: Envelope; readonly outcome: 'accepted' | 'duplicate' }
+  | { readonly envelope: Envelope; readonly outcome: 'rejected'; readonly reason: OutboundRefusalReason };
+
+function settlementFor(envelope: Envelope, outcome: CorrelatedOutcome): OutboundSettlement {
+  return outcome.outcome === 'rejected'
+    ? { envelope, outcome: 'rejected', reason: outcome.reason }
+    : { envelope, outcome: outcome.outcome };
 }
 
 /**
@@ -175,8 +178,12 @@ export class ConnectionManager {
    * application (protocol §9).
    */
   private readonly outbox: Envelope[] = [];
-  /** Terminally rejected outbound envelopes, retained as a bounded observable quarantine. */
-  private ingressBudget: ActivityIngress = { activityMaxEvents: DEFAULT_ACTIVITY_INGRESS.maxEvents, activityMaxBytes: DEFAULT_ACTIVITY_INGRESS.maxBytes };
+  /**
+   * The latest server-advertised activity ingress. Every accepted handshake
+   * answer and every events page carries one, so it is set before any session
+   * opens; there is no client-side default.
+   */
+  private ingressBudget: ActivityIngress | undefined;
   /**
    * Finding F5(b): how many envelopes `drainOutbox` has
    * currently spliced OUT of `this.outbox` for an in-flight (not yet
@@ -278,8 +285,7 @@ export class ConnectionManager {
       if (this.isEnded()) return;
       if (answer !== undefined) {
         try {
-          const outcome = answer.outcomes?.[0];
-          await this.opts.onOutboundSettled?.([{ envelope: hello, outcome: outcome?.outcome ?? ((answer.rejected ?? 0) > 0 ? 'rejected' : 'accepted'), ...((answer.rejected ?? 0) > 0 ? { reason: (outcome?.reason ?? 'unspecified') as OutboundRefusalReason } : {}) }]);
+          await this.opts.onOutboundSettled?.([settlementFor(hello, answer.outcomes[0]!)]);
         } catch {
           this.notify(() => this.opts.onOperationalOutcome?.('failure', 'reconnect'));
           await sleep(this.fleetJitter.delay('reconnect', this.reconnectAttempt++, this.opts.longPollRetryDelayMs ?? 2000), signal);
@@ -310,7 +316,8 @@ export class ConnectionManager {
     });
     this.sessionGeneration += 1;
     // Capabilities first: work an `open` observer queues sees them already.
-    if (handshake.ingress !== undefined) this.ingressBudget = handshake.ingress;
+    // `postBatch` refuses an accepted handshake answer without `ingress`.
+    this.ingressBudget = handshake.ingress;
     if (handshake.capabilities !== undefined) this.applyServerCapabilities(handshake.capabilities);
     this.setState('open');
     // An `open` observer that threw has already ended the session.
@@ -412,62 +419,31 @@ export class ConnectionManager {
   private async drainOutbox(): Promise<void> {
     if (this.state !== 'open' || this.isEnded() || this.draining) return;
     this.draining = true;
-    // Counts-only v2 responders have no rejected ids. A finite FIFO therefore replays an
-    // immutable rejected segment by halves; accepted replays are server-dedup
-    // success and a rejected singleton reaches the awaited settlement callback. A missing
-    // response returns the same current segment plus untouched siblings for
-    // the ordinary backoff path below. At most 2n - 1 POSTs occur per batch.
+    // One POST per chunk. The answer correlates every envelope (protocol v3),
+    // so each settles with its own outcome; a missing or unusable answer
+    // retains the exact chunk for the ordinary retry paths below.
     type Retained = { readonly envelopes: Envelope[]; readonly cause: 'route' | 'local' };
-    const isolateRejectedBatch = async (batch: readonly Envelope[]): Promise<Retained | undefined> => {
-      const pending: Envelope[][] = [[...batch]];
-      while (pending.length > 0) {
-        if (this.isEnded()) return { envelopes: pending.flat(), cause: 'route' };
-
-        const segment = pending.shift()!;
-        try {
-          this.opts.beforeOutboundPost?.(segment);
-          const result = await this.longPoll.postBatch(segment);
-          if (result === undefined) return { envelopes: [...segment, ...pending.flat()], cause: 'route' };
-          if (result.ingress !== undefined) this.ingressBudget = result.ingress;
-          if (result.capabilities !== undefined) this.applyServerCapabilities(result.capabilities);
-          if (result.outcomes !== undefined) {
-            const byId = new Map(result.outcomes.map((outcome) => [outcome.id, outcome]));
-            await this.opts.onOutboundSettled?.(segment.map((envelope) => {
-              const outcome = byId.get(envelope.id)!;
-              return { envelope, outcome: outcome.outcome, ...(outcome.outcome === 'rejected' ? { reason: (outcome.reason ?? 'unspecified') as OutboundRefusalReason } : {}) };
-            }));
-            if (result.outcomes.some((outcome) => outcome.outcome === 'rejected' && segment.some((envelope) => envelope.id === outcome.id && envelope.type === 'conn.hello'))) {
-              this.halt('handshake_rejected');
-              return undefined;
-            }
-            continue;
-          }
-          // v2 counts-only responders: retire only accepted segments or isolated singletons. Remove in v3.
-          if ((result.rejected ?? 0) === 0) {
-            await this.opts.onOutboundSettled?.(segment.map((envelope) => ({ envelope, outcome: 'accepted' })));
-            continue;
-          }
-          if (segment.length === 1) {
-            if (segment[0]!.type === 'conn.hello') {
-              // A refreshed snapshot is a handshake like any other.
-              await this.opts.onOutboundSettled?.([{ envelope: segment[0]!, outcome: 'rejected', reason: 'unspecified' }]);
-              this.halt('handshake_rejected');
-              return undefined;
-            }
-            await this.opts.onOutboundSettled?.([{ envelope: segment[0]!, outcome: 'rejected', reason: 'unspecified' }]);
-            continue;
-          }
-        } catch (error) {
-          // A committed cloud receipt with a lost local confirmation is still
-          // pending locally. Retry the SAME bytes; never drop them in finally.
-          console.error('[byok/client] outbound durable disposition failed; retaining exact batch', error);
-          return { envelopes: [...segment, ...pending.flat()], cause: 'local' };
+    const postAndSettle = async (batch: Envelope[]): Promise<Retained | undefined> => {
+      if (this.isEnded()) return { envelopes: batch, cause: 'route' };
+      try {
+        this.opts.beforeOutboundPost?.(batch);
+        const result = await this.longPoll.postBatch(batch);
+        if (result === undefined) return { envelopes: batch, cause: 'route' };
+        if (result.ingress !== undefined) this.ingressBudget = result.ingress;
+        if (result.capabilities !== undefined) this.applyServerCapabilities(result.capabilities);
+        const byId = new Map(result.outcomes.map((outcome) => [outcome.id, outcome]));
+        await this.opts.onOutboundSettled?.(batch.map((envelope) => settlementFor(envelope, byId.get(envelope.id)!)));
+        // A refreshed snapshot is a handshake like any other.
+        if (batch.some((envelope) => envelope.type === 'conn.hello' && byId.get(envelope.id)!.outcome === 'rejected')) {
+          this.halt('handshake_rejected');
         }
-
-        const midpoint = Math.floor(segment.length / 2);
-        pending.unshift(segment.slice(0, midpoint), segment.slice(midpoint));
+        return undefined;
+      } catch (error) {
+        // A committed cloud receipt with a lost local confirmation is still
+        // pending locally. Retry the SAME bytes; never drop them in finally.
+        console.error('[byok/client] outbound durable disposition failed; retaining exact batch', error);
+        return { envelopes: batch, cause: 'local' };
       }
-      return undefined;
     };
     try {
       while (this.outbox.length > 0) {
@@ -484,7 +460,7 @@ export class ConnectionManager {
         this.inFlightBatchSize = batch.length;
         let retained: Retained | undefined;
         try {
-          retained = await isolateRejectedBatch(batch);
+          retained = await postAndSettle(batch);
         } finally {
           this.inFlightBatchSize = 0;
         }
@@ -636,7 +612,11 @@ export class ConnectionManager {
     return this.outbox.length + this.inFlightBatchSize;
   }
 
+  /** Throws before the first advertisement: no work runs before an accepted handshake. */
   getIngressBudget(): Readonly<ActivityIngress> {
+    if (this.ingressBudget === undefined) {
+      throw new Error('no activity ingress has been advertised; the server has not accepted a handshake yet');
+    }
     return { ...this.ingressBudget };
   }
 

@@ -25,6 +25,7 @@ import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import { TestServer } from './fixtures/test-server';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { testIngressBudget } from './fixtures/activity-ingress';
 
 /**
  * #317 acceptance: one canonical Agent home runs up to N `memory-reader`
@@ -662,7 +663,7 @@ describe('durable Pi and memory-reader Attempts (#317)', () => {
     });
     const sent: Envelope[] = [];
     const agentHome = new AgentHomeManager({ hostStorageRoot });
-    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [durable],
       workspaceRoot: await temp('byok-readers-durable-workspace-'),
       agentHome,
@@ -701,7 +702,7 @@ describe('reader admission after a published reader terminal (#476)', () => {
     const pi = new StubRuntimeAdapter('pi');
     const sent: Envelope[] = [];
     const agentHome = new AgentHomeManager({ hostStorageRoot });
-    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [pi],
       workspaceRoot: await temp('byok-readers-finishing-workspace-'),
       agentHome,

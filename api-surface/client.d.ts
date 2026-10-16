@@ -2876,7 +2876,7 @@ export declare class BlobClient implements BlobResolver {
 }
 // ==== @byok-sdk/client dist/daemon/connection-manager.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
-import { type OutboundRefusalReason, type MessageSendOutcome, type ActivityIngress, type CapabilityFlag, type Envelope, type RuntimeInfo, type ToolsetId } from '@byok-sdk/protocol';
+import { type OutboundRefusalReason, type ActivityIngress, type CapabilityFlag, type Envelope, type RuntimeInfo, type ToolsetId } from '@byok-sdk/protocol';
 import { AuthManager } from './auth-manager';
 import type { CursorStore } from './cursor-store';
 import type { DaemonHaltReason } from './daemon-lifecycle';
@@ -2936,11 +2936,15 @@ export interface ConnectionManagerOptions {
      */
     onCrashed?: (error: unknown) => void;
 }
-export interface OutboundSettlement {
+/** One outbound envelope's settlement; only a rejection has a reason, and it always has one. */
+export type OutboundSettlement = {
     readonly envelope: Envelope;
-    readonly outcome: MessageSendOutcome['outcome'];
-    readonly reason?: OutboundRefusalReason;
-}
+    readonly outcome: 'accepted' | 'duplicate';
+} | {
+    readonly envelope: Envelope;
+    readonly outcome: 'rejected';
+    readonly reason: OutboundRefusalReason;
+};
 /**
  * Owns the daemon's one authenticated long-poll session with the server.
  * Every received envelope passes through the same cursor-dedupe/persistence
@@ -3003,7 +3007,11 @@ export declare class ConnectionManager {
      * application (protocol §9).
      */
     private readonly outbox;
-    /** Terminally rejected outbound envelopes, retained as a bounded observable quarantine. */
+    /**
+     * The latest server-advertised activity ingress. Every accepted handshake
+     * answer and every events page carries one, so it is set before any session
+     * opens; there is no client-side default.
+     */
     private ingressBudget;
     /**
      * Finding F5(b): how many envelopes `drainOutbox` has
@@ -3169,6 +3177,7 @@ export declare class ConnectionManager {
      * for the one case (a hung POST) this finding exists to catch honestly.
      */
     outboxLength(): number;
+    /** Throws before the first advertisement: no work runs before an accepted handshake. */
     getIngressBudget(): Readonly<ActivityIngress>;
     /**
      * Finding F5(b): polls {@link outboxLength} (not `this.outbox.length`
@@ -7282,7 +7291,7 @@ export declare function preparedMemoryProjection(mode: PreparedAgentMemoryMode, 
 };
 export declare function parsePreparedMemoryState(raw: unknown): PreparedAgentMemoryState | null;
 // ==== @byok-sdk/client dist/daemon/progress-batcher.d.ts ====
-import { type ActivityIngress, type AgentEvent } from '@byok-sdk/protocol';
+import type { ActivityIngress, AgentEvent } from '@byok-sdk/protocol';
 export type ProgressEmitter = (seq: number, events: AgentEvent[]) => void;
 export interface ProgressBatcherOptions {
     /** Flush immediately once this many events are buffered. Default 10. */
@@ -7300,7 +7309,8 @@ export declare function validateProgressBatcherOptions(options?: ProgressBatcher
  * Coalesces a task's `AgentEvent`s into seq-ordered `task.progress` batches:
  * flush immediately at `maxBatchSize` events, otherwise at most every
  * `flushIntervalMs` while anything is buffered. One instance per task —
- * `seq` is a per-task monotonic counter starting at 1.
+ * `seq` is a per-task monotonic counter starting at 1. `ingress` reads the
+ * server-advertised activity limits at each push; there is no default.
  */
 export declare class ProgressBatcher {
     private readonly emit;
@@ -7311,7 +7321,7 @@ export declare class ProgressBatcher {
     private readonly maxBatchSize;
     private readonly flushIntervalMs;
     private bufferBytes;
-    constructor(emit: ProgressEmitter, options?: ProgressBatcherOptions, ingress?: () => Readonly<ActivityIngress>);
+    constructor(emit: ProgressEmitter, options: ProgressBatcherOptions | undefined, ingress: () => Readonly<ActivityIngress>);
     push(event: AgentEvent): void;
     /** M4 Phase 4 (part B.3, observability): events buffered right now, not yet flushed as a `task.progress` batch — a cheap per-task queue-depth watermark for the daemon's control-socket `status` result (see `task-runner.ts`'s `getQueueWatermarks`). */
     get pendingCount(): number;
@@ -7988,7 +7998,7 @@ export declare function readDeviceEnrollmentStatus(options: DeviceEnrollmentStat
  */
 export declare function readDeviceEnrollmentIdentity(options: DeviceEnrollmentStatusOptions): Promise<DeviceEnrollmentIdentityStatus>;
 // ==== @byok-sdk/client dist/daemon/task-runner.d.ts ====
-import { type ActivityIngress } from '@byok-sdk/protocol';
+import type { ActivityIngress } from '@byok-sdk/protocol';
 import type { ScratchRoot } from './retention/scratch';
 import { type AgentMessageContentType, type AgentEgressPolicy, type Envelope, type RuntimeId, type TaskOfferPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferPreparedPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
 import { type McpStdioServerConfig, type McpToolsetConfig, type RuntimeAdapter } from '../types';
@@ -8371,8 +8381,14 @@ export interface TaskRunnerDeps {
      * capabilities" when absent, so a minimal test harness that doesn't care
      * about this gate isn't forced to supply one — see `sendApprovalResolved`.
      */
-    getIngressBudget?: () => Readonly<ActivityIngress>;
     getServerCapabilities?: () => readonly string[];
+    /**
+     * The server-advertised activity ingress (protocol v3), read fresh at each
+     * progress push. `create-daemon.ts` wires it to
+     * `ConnectionManager.getIngressBudget`. There is no default: a task only
+     * runs after an accepted handshake, which always carries one.
+     */
+    getIngressBudget: () => Readonly<ActivityIngress>;
     /**
      * Contract §8.1 / §8.3: is the task lane's capability gate in place right
      * now — this daemon can sign, AND it has read a deployment declaration naming

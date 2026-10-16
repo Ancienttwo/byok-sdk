@@ -17,6 +17,7 @@ import {
 } from '../daemon/task-runner';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { testIngressBudget } from './fixtures/activity-ingress';
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -51,7 +52,7 @@ async function harness(overrides: Partial<TaskRunnerDeps> = {}) {
   });
   const preflight = vi.fn<NonNullable<TaskRunnerDeps['agentResultMcpPreflight']>>(async () => {});
   const storeDir = await temporary('byok-result-control-');
-  const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await temporary('byok-result-workspace-'),
     agentHome: new AgentHomeManager({ hostStorageRoot }),

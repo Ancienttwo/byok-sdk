@@ -9,6 +9,7 @@ import { ConnectionManager, type ConnectionManagerOptions, type OutboundSettleme
 import { CursorStore } from '../daemon/cursor-store';
 import { LongPollClient } from '../daemon/long-poll-transport';
 import { seedDeviceEnrollment } from './fixtures/device-enrollment';
+import { TEST_ACTIVITY_INGRESS } from './fixtures/activity-ingress';
 
 type Scenario = 'handshake-route-failure' | 'handshake-settlement-failure' | 'poll-success' | 'poll-failure'
   | 'upload-success' | 'upload-route-failure' | 'upload-settlement-failure';
@@ -49,12 +50,17 @@ async function setup(scenario: Scenario, onOperationalOutcome: ConnectionManager
       if ((hello && scenario === 'handshake-route-failure') || (!hello && scenario === 'upload-route-failure')) {
         return new Response('', { status: 503 });
       }
-      return Response.json({ accepted: messages.length, capabilities: ['result-document'] });
+      return Response.json({
+        accepted: messages.length,
+        outcomes: messages.map((envelope) => ({ id: envelope.id, outcome: 'accepted' })),
+        capabilities: ['result-document'],
+        ...(hello ? { ingress: TEST_ACTIVITY_INGRESS } : {}),
+      });
     }
     expect(url.pathname).toBe('/byok/events');
     expect(url.searchParams.get('cursor')).toBe('7');
     if (scenario === 'poll-failure') return new Response('', { status: 503 });
-    return Response.json({ events: [], cursor: 7, capabilities: ['result-document'] });
+    return Response.json({ events: [], cursor: 7, capabilities: ['result-document'], ingress: TEST_ACTIVITY_INGRESS });
   });
   vi.stubGlobal('fetch', fetch);
   const post = vi.spyOn(LongPollClient.prototype, 'postBatch');

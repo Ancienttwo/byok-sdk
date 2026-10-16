@@ -16,6 +16,7 @@ import { RuntimeExecutionFailure, isRuntimeStartupDisposalFailure } from '../run
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { freezeRuntimeAdapterDescriptor, type Session } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { testIngressBudget } from './fixtures/activity-ingress';
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -36,7 +37,7 @@ async function cancellationFixture() {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
-    const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
+    const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter], workspaceRoot: await temporary('byok-publish-cancel-workspace-'),
       agentHome: new AgentHomeManager({ hostStorageRoot }), agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-cancel',
@@ -373,7 +374,7 @@ describe('required Agent message completion gate', () => {
     const record = await outbox.activate('pending', 'session-one');
     const payload = outbox.publishPayload(record!);
     const sent: Envelope[] = [];
-    const createRunner = () => new TaskRunner({ scratchRoot: testScratchOwner(),
+    const createRunner = () => new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [], workspaceRoot: root, storeDir: root, productId: 'recovery-test', deviceId: 'device-one', tenantId: 'tenant-one',
       send: (envelope) => sent.push(envelope),
       blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
@@ -409,7 +410,7 @@ describe('required Agent message completion gate', () => {
       const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
         steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
       });
-      const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+      const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
         adapters: [adapter], workspaceRoot: await temporary('byok-refusal-workspace-'),
         agentHome: new AgentHomeManager({ hostStorageRoot }), agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-refusal',
@@ -497,7 +498,7 @@ describe('required Agent message completion gate', () => {
     const adapter = new StubRuntimeAdapter('codex', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
-    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter], workspaceRoot: await temporary('byok-message-preflight-workspace-'),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -530,7 +531,7 @@ describe('required Agent message completion gate', () => {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
     const helperPreflight = vi.fn<NonNullable<TaskRunnerDeps['agentMessageMcpPreflight']>>(async () => {});
-    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter], workspaceRoot: await temporary('byok-message-workspace-'),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -631,7 +632,7 @@ describe('required Agent message completion gate', () => {
     expect(sent.some((envelope) => envelope.type === 'task.complete' && envelope.task_id === refusedTaskId)).toBe(false);
 
     const restartSent: Envelope[] = [];
-    const restarted = new TaskRunner({ scratchRoot: testScratchOwner(),
+    const restarted = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter], workspaceRoot: await temporary('byok-message-restart-workspace-'),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -654,7 +655,7 @@ describe('required Agent message completion gate', () => {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
-    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter], workspaceRoot: await temporary('byok-message-auto-workspace-'),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -697,7 +698,7 @@ describe('required Agent message completion gate', () => {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
-    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter], workspaceRoot: await temporary('byok-message-empty-workspace-'),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -732,7 +733,7 @@ describe('required Agent message completion gate', () => {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
-    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter], workspaceRoot: await temporary('byok-message-cap-workspace-'),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -783,7 +784,7 @@ describe('required Agent message completion gate', () => {
         value: freezeRuntimeAdapterDescriptor({ ...adapter.descriptor, progressEventsAreMessages: true }),
       });
     }
-    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter], workspaceRoot: await temporary(`byok-${prefix}-workspace-`),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,

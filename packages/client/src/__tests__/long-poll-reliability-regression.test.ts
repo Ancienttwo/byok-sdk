@@ -4,13 +4,14 @@ import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import type { CursorStore } from '../daemon/cursor-store';
-import { LongPollClient } from '../daemon/long-poll-transport';
+import { LongPollClient, type CorrelatedOutcome } from '../daemon/long-poll-transport';
 import { seedDeviceEnrollment } from './fixtures/device-enrollment';
 import { TestServer } from './fixtures/test-server';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { waitForOpen } from './fixtures/lifecycle-barrier';
+import { TEST_ACTIVITY_INGRESS } from './fixtures/activity-ingress';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -174,7 +175,7 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
     expect(cursorsBeforeSecondDurableSave).not.toContain('2');
   });
 
-  it('#136 validates frozen-v1 counts, retries unreadable bodies, and binary-isolates poison envelopes', async () => {
+  it('#136 validates counts against correlated outcomes, retries unreadable bodies, and settles poison envelopes by their own outcome', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const auth = await seededAuth();
@@ -182,15 +183,20 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
     const rejected = createEnvelope('task.started', {}, { taskId: 'rejected-task' });
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
+    const settled = {
+      accepted: 1,
+      rejected: 1,
+      outcomes: [{ id: accepted.id, outcome: 'accepted' }, { id: rejected.id, outcome: 'rejected', reason: 'state_conflict' }],
+    };
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ accepted: 1, rejected: 1 }), { status: 200, headers: { 'content-type': 'application/json' } }),
+      new Response(JSON.stringify(settled), { status: 200, headers: { 'content-type': 'application/json' } }),
     );
     const client = new LongPollClient({ serverUrl: 'http://example.invalid', auth, getCursor: () => 0, onEnvelope: () => {} });
-    await expect(client.postBatch([accepted, rejected])).resolves.toEqual({ accepted: 1, rejected: 1 });
+    await expect(client.postBatch([accepted, rejected])).resolves.toEqual(settled);
 
     fetchMock.mockResolvedValueOnce({ ok: true, status: 200, json: async () => { throw new Error('body read failed'); } } as unknown as Response);
     await expect(client.postBatch([accepted])).resolves.toBeUndefined();
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ accepted: 1 }), { status: 200 }));
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ accepted: 1, outcomes: [{ id: accepted.id, outcome: 'accepted' }] }), { status: 200 }));
     await expect(client.postBatch([accepted, rejected])).resolves.toBeUndefined();
 
     vi.unstubAllGlobals();
@@ -212,17 +218,20 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
       if (holdInitialHello) {
         holdInitialHello = false;
         await heldHello;
-        return { accepted: 1 };
+        return { accepted: 1, outcomes: [{ id: batch[0]!.id, outcome: 'accepted' as const }], ingress: TEST_ACTIVITY_INGRESS };
       }
 
       let acceptedCount = 0;
       let rejectedCount = 0;
+      const outcomes: CorrelatedOutcome[] = [];
       for (const envelope of batch) {
         if (poisonIds.has(envelope.id)) {
           rejectedCount += 1;
+          outcomes.push({ id: envelope.id, outcome: 'rejected', reason: 'not_permitted' });
           continue;
         }
         acceptedCount += 1;
+        outcomes.push({ id: envelope.id, outcome: 'accepted' });
         // The reconnect after the dropped response re-sends `conn.hello`
         // (#391); it is admission, not a business effect.
         if (envelope.type !== 'conn.hello' && !businessDedup.has(envelope.id)) {
@@ -235,7 +244,13 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
         dropFirstMixedResponse = false;
         return undefined;
       }
-      return rejectedCount > 0 ? { accepted: acceptedCount, rejected: rejectedCount } : { accepted: acceptedCount };
+      const handshake = batch.some((envelope) => envelope.type === 'conn.hello');
+      return {
+        accepted: acceptedCount,
+        outcomes,
+        ...(rejectedCount > 0 ? { rejected: rejectedCount } : {}),
+        ...(handshake ? { ingress: TEST_ACTIVITY_INGRESS } : {}),
+      };
     });
     const starting = startConnection(cursorStore);
     await vi.waitFor(() => expect(postBatch).toHaveBeenCalledTimes(1));
@@ -247,8 +262,8 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
     await starting;
 
     await vi.waitFor(() => expect(settlements.filter((item) => item.outcome === 'rejected')).toEqual([
-      { envelope: poisonFirst, outcome: 'rejected', reason: 'unspecified' },
-      { envelope: poisonSecond, outcome: 'rejected', reason: 'unspecified' },
+      { envelope: poisonFirst, outcome: 'rejected', reason: 'not_permitted' },
+      { envelope: poisonSecond, outcome: 'rejected', reason: 'not_permitted' },
     ]), { timeout: 600 });
     await vi.waitFor(() => expect(connection!.outboxLength()).toBe(0));
     expect(postBatch.mock.calls.map(([batch]) => batch.map((envelope) => envelope.id))).toEqual([
@@ -258,17 +273,14 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
       // handshake hello goes first, then the identical batch is retried.
       expect.any(Array),
       [poisonFirst.id, poisonSecond.id, acceptedBeforePoison.id, laterValid.id],
-      [poisonFirst.id, poisonSecond.id],
-      [poisonFirst.id],
-      [poisonSecond.id],
-      [acceptedBeforePoison.id, laterValid.id],
     ]);
     // Both handshakes, the start's and the reconnect's, are a lone conn.hello.
     expect(postBatch.mock.calls[0]![0].map((envelope) => envelope.type)).toEqual(['conn.hello']);
     expect(postBatch.mock.calls[2]![0].map((envelope) => envelope.type)).toEqual(['conn.hello']);
     // The first mixed response is deliberately unreadable after the server's
-    // business effects. Its identical retry and the later accepted sub-batch
-    // are deduped, so each valid business envelope executes once.
+    // business effects. Its identical retry is deduped and settles every
+    // envelope by its own outcome, so each valid business envelope executes
+    // once and nothing is re-posted to isolate the rejected ones.
     expect(businessExecutions).toEqual([acceptedBeforePoison.id, laterValid.id]);
   });
 
@@ -287,7 +299,8 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
     }],
   ])('#137 rejects an invalid trusted page: %s', async (_label, body) => {
     const auth = await seededAuth();
-    const fetchMock = vi.fn().mockImplementation(() => new Response(JSON.stringify(body), { status: 200 }));
+    // Each page carries the required advertisements, so it fails for its labelled reason.
+    const fetchMock = vi.fn().mockImplementation(() => new Response(JSON.stringify({ ...body, capabilities: [], ingress: TEST_ACTIVITY_INGRESS }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     let cursor = 0;
     const skipped = vi.fn((seq: number) => {
@@ -322,7 +335,7 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
 
   it('unknown executable work keeps the durable cursor unchanged', async () => {
     const auth = await seededAuth();
-    const body = { events: [{ type: 'task.future', seq: 1 }], cursor: 1 };
+    const body = { events: [{ type: 'task.future', seq: 1 }], cursor: 1, capabilities: [], ingress: TEST_ACTIVITY_INGRESS };
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     let cursor = 0;

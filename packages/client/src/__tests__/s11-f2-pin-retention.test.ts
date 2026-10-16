@@ -11,6 +11,7 @@ import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { recordingToolSurface } from './fixtures/prepared-tool-surface';
 import { InputPreparationCompileError, SUPPORTED_PREPARED_COMPILER_VERSION, type InputPreparationCompiler, type CompilePreparedInputRequest, type CompiledPreparedInput } from '../adapters/pi/input-preparation';
+import { testIngressBudget } from './fixtures/activity-ingress';
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => { while (cleanups.length) await cleanups.pop()?.(); vi.useRealTimers(); vi.restoreAllMocks(); });
@@ -133,7 +134,7 @@ async function harness() {
   // Exercise the actual TaskRunner terminal-release helper against its real
   // held-pin map. Admission/runtime launching is outside this retention test;
   // no launch ownership guard or provider is mocked/bypassed.
-  const runner = new TaskRunner({ scratchRoot: testScratchOwner(),  adapters: [], deviceId: 'device-1', workspaceRoot: path.join(dir, 'workspace'), storeDir: dir, productId: 'retention-test', send: () => {},
+  const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),  adapters: [], deviceId: 'device-1', workspaceRoot: path.join(dir, 'workspace'), storeDir: dir, productId: 'retention-test', send: () => {},
     blobClient: { resolveInstruction: async () => { throw new Error('unused'); }, uploadArtifact: async () => { throw new Error('unused'); } },
     sessionWorkspaces: new SessionWorkspaceStore(path.join(dir, 'sessions')), approvalRegistry: new ApprovalRegistry(),
     inputPreparationLane: { store: service.store, open: () => service.open(), authorizeAgentMemory: async () => {}, runtime: compiler.runtime, policyRevision: LIMITS.revision, toolsetDefinitionRevisions: () => new Map() },

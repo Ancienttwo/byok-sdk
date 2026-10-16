@@ -3092,18 +3092,19 @@ export declare const EventsPollQuerySchema: z.ZodObject<{
     cursor: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strip>;
 export type EventsPollQuery = z.infer<typeof EventsPollQuerySchema>;
-/** Deployment-owned activity limits; v2 responders may omit the advertisement. Remove the default in v3. */
-export declare const DEFAULT_ACTIVITY_INGRESS: {
-    readonly maxEvents: 50;
-    readonly maxBytes: 65536;
-};
+/**
+ * Deployment-owned activity limits. A v3 responder advertises them on every
+ * events page and on every answer whose `conn.hello` it accepted; there is no
+ * client-side default.
+ */
 export declare const ActivityIngressSchema: z.ZodObject<{
     activityMaxEvents: z.ZodNumber;
     activityMaxBytes: z.ZodNumber;
 }, z.core.$strip>;
 export type ActivityIngress = z.infer<typeof ActivityIngressSchema>;
 export declare const OUTBOUND_REFUSAL_REASONS: readonly ['payload_invalid', 'not_permitted', 'limit_exceeded', 'state_conflict', 'unsupported'];
-export type OutboundRefusalReason = typeof OUTBOUND_REFUSAL_REASONS[number] | 'unknown' | 'unspecified';
+/** `unknown` is an unrecognized wire reason string, kept as an observation. */
+export type OutboundRefusalReason = typeof OUTBOUND_REFUSAL_REASONS[number] | 'unknown';
 export declare const MessageSendOutcomeSchema: z.ZodObject<{
     id: z.ZodUUID;
     outcome: z.ZodEnum<{
@@ -3111,17 +3112,17 @@ export declare const MessageSendOutcomeSchema: z.ZodObject<{
         duplicate: "duplicate";
         rejected: "rejected";
     }>;
-    reason: z.ZodOptional<z.ZodString>;
+    reason: z.ZodOptional<z.ZodPipe<z.ZodString, z.ZodTransform<"limit_exceeded" | "not_permitted" | "payload_invalid" | "state_conflict" | "unknown" | "unsupported", string>>>;
 }, z.core.$strip>;
 export type MessageSendOutcome = z.infer<typeof MessageSendOutcomeSchema>;
 export declare const EventsPollResponseSchema: z.ZodObject<{
     events: z.ZodArray<z.ZodUnknown>;
     cursor: z.ZodNumber;
-    capabilities: z.ZodOptional<z.ZodArray<z.ZodString>>;
-    ingress: z.ZodOptional<z.ZodObject<{
+    capabilities: z.ZodArray<z.ZodString>;
+    ingress: z.ZodObject<{
         activityMaxEvents: z.ZodNumber;
         activityMaxBytes: z.ZodNumber;
-    }, z.core.$strip>>;
+    }, z.core.$strip>;
 }, z.core.$strip>;
 export type EventsPollResponse = z.infer<typeof EventsPollResponseSchema>;
 /**
@@ -4511,8 +4512,11 @@ export type MessagesSendRequest = z.infer<typeof MessagesSendRequestSchema>;
  * `accepted` counts every envelope `ConnectionHub.handleInbound` returned
  * `'accepted'` *or* `'duplicate'` for — a deduped replay is a wire-level
  * success even though the business mutation did not run a second time.
- * `rejected` is omitted when zero. v2 retains counts and adds optional
- * correlated outcomes and ingress; counts-only responders remain valid.
+ * `rejected` is omitted when zero. `outcomes` is required and correlates
+ * exactly one result with each posted envelope; a rejected outcome carries its
+ * reason. `ingress` is required on an answer whose `conn.hello` was accepted
+ * (or deduplicated). The client enforces the per-envelope rules against the
+ * posted batch and treats a violation as an unusable response.
  *
  * `capabilities` (additive) is the same server capability advertisement a
  * `GET /byok/events` response carries. A server includes it when the batch
@@ -4529,15 +4533,15 @@ export declare const MessagesSendResponseSchema: z.ZodObject<{
         activityMaxEvents: z.ZodNumber;
         activityMaxBytes: z.ZodNumber;
     }, z.core.$strip>>;
-    outcomes: z.ZodOptional<z.ZodArray<z.ZodObject<{
+    outcomes: z.ZodArray<z.ZodObject<{
         id: z.ZodUUID;
         outcome: z.ZodEnum<{
             accepted: "accepted";
             duplicate: "duplicate";
             rejected: "rejected";
         }>;
-        reason: z.ZodOptional<z.ZodString>;
-    }, z.core.$strip>>>;
+        reason: z.ZodOptional<z.ZodPipe<z.ZodString, z.ZodTransform<"limit_exceeded" | "not_permitted" | "payload_invalid" | "state_conflict" | "unknown" | "unsupported", string>>>;
+    }, z.core.$strip>>;
 }, z.core.$strip>;
 export type MessagesSendResponse = z.infer<typeof MessagesSendResponseSchema>;
 export declare const AgentHomeProjectionCompletionRequestSchema: z.ZodObject<{
@@ -5127,7 +5131,7 @@ export type { Envelope } from './envelope';
 export { ProtocolError, EnvelopeParseError, UnknownMessageTypeError, EnvelopeValidationError, } from './errors';
 export { encodeEnvelope, decodeEnvelope, createEnvelope, parseMessage } from './codec';
 export type { CreateEnvelopeOptions } from './codec';
-export { PairRequestSchema, PairResponseTenantIdSchema, PAIR_RESPONSE_TENANT_ID_MAX_LENGTH, PairResponseSchema, ChallengeRequestSchema, ChallengeResponseSchema, TokenRequestSchema, TokenResponseSchema, PresencePublishRequestSchema, CreateBlobRequestSchema, CreateBlobResponseSchema, BlobDownloadUrlResponseSchema, EventsPollQuerySchema, DEFAULT_ACTIVITY_INGRESS, ActivityIngressSchema, MessageSendOutcomeSchema, OUTBOUND_REFUSAL_REASONS, EventsPollResponseSchema, MessagesSendRequestSchema, MessagesSendResponseSchema, AgentHomeProjectionCompletionRequestSchema, AgentHomeProjectionStatusSchema, AgentHomeProjectionReadbackSchema, AgentMemoryProjectionCommitRequestSchema, AgentMemoryProjectionCommitResponseSchema, MAX_MESSAGES_PER_BATCH, BYOK_PAIR_PATH, BYOK_CHALLENGE_PATH, BYOK_TOKEN_PATH, BYOK_CAPABILITIES_PATH, BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, BYOK_AGENT_HOME_PROJECTIONS_PATH, BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE, byokAgentHomeProjectionCompletionPath, BYOK_AGENT_MEMORY_PROJECTIONS_PATH, BYOK_PRESENCE_PATH, BYOK_ACTIVITY_PATH, BYOK_BOARD_PATH, BYOK_BOARD_STREAM_PATH, BYOK_BOARD_CLAIM_ROUTE, BYOK_BOARD_UNCLAIM_ROUTE, BYOK_BOARD_STATUS_ROUTE, BYOK_RECORDS_PATH, BYOK_RECORD_ROUTE, byokRecordPath, BYOK_SKILL_PACKS_PATH, BYOK_SKILL_PACK_FILE_ROUTE, byokSkillPackFilePath, BYOK_BLOBS_PATH, BYOK_BLOB_FINALIZE_ROUTE, BYOK_BLOB_URL_ROUTE, BYOK_BLOB_CONTENT_ROUTE, byokBlobFinalizePath, byokBlobUrlPath, byokBlobContentPath, BYOK_INPUT_PREPARATIONS_PATH, BYOK_INPUT_PREPARATION_COMPLETION_ROUTE, BYOK_INPUT_PREPARATION_STATUS_ROUTE, byokInputPreparationCompletionPath, byokInputPreparationStatusPath, InputPreparationCompletionRequestSchema, InputPreparationStatusSchema, InputPreparationReadbackSchema, InputPreparationStatusQuerySchema, } from './http-api';
+export { PairRequestSchema, PairResponseTenantIdSchema, PAIR_RESPONSE_TENANT_ID_MAX_LENGTH, PairResponseSchema, ChallengeRequestSchema, ChallengeResponseSchema, TokenRequestSchema, TokenResponseSchema, PresencePublishRequestSchema, CreateBlobRequestSchema, CreateBlobResponseSchema, BlobDownloadUrlResponseSchema, EventsPollQuerySchema, ActivityIngressSchema, MessageSendOutcomeSchema, OUTBOUND_REFUSAL_REASONS, EventsPollResponseSchema, MessagesSendRequestSchema, MessagesSendResponseSchema, AgentHomeProjectionCompletionRequestSchema, AgentHomeProjectionStatusSchema, AgentHomeProjectionReadbackSchema, AgentMemoryProjectionCommitRequestSchema, AgentMemoryProjectionCommitResponseSchema, MAX_MESSAGES_PER_BATCH, BYOK_PAIR_PATH, BYOK_CHALLENGE_PATH, BYOK_TOKEN_PATH, BYOK_CAPABILITIES_PATH, BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, BYOK_AGENT_HOME_PROJECTIONS_PATH, BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE, byokAgentHomeProjectionCompletionPath, BYOK_AGENT_MEMORY_PROJECTIONS_PATH, BYOK_PRESENCE_PATH, BYOK_ACTIVITY_PATH, BYOK_BOARD_PATH, BYOK_BOARD_STREAM_PATH, BYOK_BOARD_CLAIM_ROUTE, BYOK_BOARD_UNCLAIM_ROUTE, BYOK_BOARD_STATUS_ROUTE, BYOK_RECORDS_PATH, BYOK_RECORD_ROUTE, byokRecordPath, BYOK_SKILL_PACKS_PATH, BYOK_SKILL_PACK_FILE_ROUTE, byokSkillPackFilePath, BYOK_BLOBS_PATH, BYOK_BLOB_FINALIZE_ROUTE, BYOK_BLOB_URL_ROUTE, BYOK_BLOB_CONTENT_ROUTE, byokBlobFinalizePath, byokBlobUrlPath, byokBlobContentPath, BYOK_INPUT_PREPARATIONS_PATH, BYOK_INPUT_PREPARATION_COMPLETION_ROUTE, BYOK_INPUT_PREPARATION_STATUS_ROUTE, byokInputPreparationCompletionPath, byokInputPreparationStatusPath, InputPreparationCompletionRequestSchema, InputPreparationStatusSchema, InputPreparationReadbackSchema, InputPreparationStatusQuerySchema, } from './http-api';
 export type { PairRequest, PairResponse, ChallengeRequest, ChallengeResponse, TokenRequest, TokenResponse, PresencePublishRequest, CreateBlobRequest, CreateBlobResponse, BlobDownloadUrlResponse, EventsPollQuery, ActivityIngress, MessageSendOutcome, OutboundRefusalReason, EventsPollResponse, MessagesSendRequest, MessagesSendResponse, AgentHomeProjectionCompletionRequest, AgentHomeProjectionStatus, AgentHomeProjectionReadback, AgentMemoryProjectionCommitRequest, AgentMemoryProjectionCommitResponse, InputPreparationCompletionRequest, InputPreparationStatus, InputPreparationReadback, InputPreparationStatusQuery, } from './http-api';
 export type { TaskOfferType } from './messages';
 export type { HarnessId, HarnessInfo } from './messages';

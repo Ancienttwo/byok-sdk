@@ -8,6 +8,7 @@ import { ApprovalRegistry } from '../daemon/approvals';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { testIngressBudget } from './fixtures/activity-ingress';
 
 const dirs: Array<{ dir: string; store: SessionWorkspaceStore }> = [];
 afterEach(async () => {
@@ -28,7 +29,7 @@ describe('TaskRunner metering at the cancellation boundary', () => {
     const sent: Envelope[] = [];
     let enteredUpload!: () => void;
     const uploading = new Promise<void>(resolve => { enteredUpload = resolve; });
-    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter], workspaceRoot: path.join(dir, 'workspace'),
       deviceId: 'cancel-usage-device', send: event => { sent.push(event); },
       blobClient: {

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthManager } from '../daemon/auth-manager';
 import { LongPollClient } from '../daemon/long-poll-transport';
 import { seedDeviceEnrollment } from './fixtures/device-enrollment';
+import { TEST_ACTIVITY_INGRESS } from './fixtures/activity-ingress';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -109,7 +110,7 @@ describe('LongPollClient: validation-failure backoff (finding R1, Codex P2)', ()
     // Every poll returns the SAME [bad, valid] batch — matches the server's
     // real retain-and-redeliver semantics (protocol §9) for as long as the
     // cursor is frozen (nothing in this test ever "corrects" seq2).
-    fetchMock.mockResolvedValue(jsonResponse({ events: [badKnownType, validEnvelope], cursor: 3 }));
+    fetchMock.mockResolvedValue(jsonResponse({ events: [badKnownType, validEnvelope], cursor: 3, capabilities: [], ingress: TEST_ACTIVITY_INGRESS }));
 
     let stalledAtSeq: number | undefined;
     const onEnvelope = vi.fn();
@@ -195,7 +196,7 @@ describe('LongPollClient: validation-failure backoff (finding R1, Codex P2)', ()
     let call = 0;
     fetchMock.mockImplementation(async () => {
       call += 1;
-      return jsonResponse(call <= 2 ? { events: [unknownType], cursor: 1 } : { events: [], cursor: 1 });
+      return jsonResponse(call <= 2 ? { events: [unknownType], cursor: 1, capabilities: [], ingress: TEST_ACTIVITY_INGRESS } : { events: [], cursor: 1, capabilities: [], ingress: TEST_ACTIVITY_INGRESS });
     });
 
     const onValidationFailedSeq = vi.fn();

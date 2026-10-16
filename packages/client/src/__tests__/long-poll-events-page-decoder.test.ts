@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthManager } from '../daemon/auth-manager';
 import { LongPollClient, LongPollRouteError } from '../daemon/long-poll-transport';
 import { seedDeviceEnrollment } from './fixtures/device-enrollment';
+import { TEST_ACTIVITY_INGRESS as ingress } from './fixtures/activity-ingress';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -99,12 +100,16 @@ describe('LongPollClient decodes the events page with EventsPollResponseSchema (
   };
 
   it.each([
-    ['events is not an array', { events: { 0: validOffer }, cursor: 1 }, ['events']],
-    ['events is missing', { cursor: 1 }, ['events']],
-    ['cursor is not an integer', { events: [validOffer], cursor: 1.5 }, ['cursor']],
-    ['cursor is a string', { events: [validOffer], cursor: '1' }, ['cursor']],
-    ['cursor is not a safe integer', { events: [], cursor: Number.MAX_SAFE_INTEGER + 1 }, ['cursor']],
-    ['capabilities is not a string array', { events: [validOffer], cursor: 1, capabilities: [7] }, ['capabilities', 0]],
+    ['events is not an array', { events: { 0: validOffer }, cursor: 1, capabilities: [], ingress }, ['events']],
+    ['events is missing', { cursor: 1, capabilities: [], ingress }, ['events']],
+    ['cursor is not an integer', { events: [validOffer], cursor: 1.5, capabilities: [], ingress }, ['cursor']],
+    ['cursor is a string', { events: [validOffer], cursor: '1', capabilities: [], ingress }, ['cursor']],
+    ['cursor is not a safe integer', { events: [], cursor: Number.MAX_SAFE_INTEGER + 1, capabilities: [], ingress }, ['cursor']],
+    ['capabilities is not a string array', { events: [validOffer], cursor: 1, capabilities: [7], ingress }, ['capabilities', 0]],
+    // Wire v3: the capability and activity ingress advertisements are required on every page.
+    ['capabilities is missing', { events: [validOffer], cursor: 1, ingress }, ['capabilities']],
+    ['ingress is missing', { events: [validOffer], cursor: 1, capabilities: [] }, ['ingress']],
+    ['ingress is malformed', { events: [validOffer], cursor: 1, capabilities: [], ingress: { activityMaxEvents: 0, activityMaxBytes: 65536 } }, ['ingress', 'activityMaxEvents']],
   ])('rejects a page whose %s through the outer schema, as a route failure on its 200', async (_case, body, issuePath) => {
     const { onEnvelope, onValidationFailedSeq, onServerCapabilities, outcomes, error } = await pollOnce(body);
     expect(error?.endpoint.path).toBe('/byok/events');
@@ -118,7 +123,7 @@ describe('LongPollClient decodes the events page with EventsPollResponseSchema (
   });
 
   it('keeps the client-local nonnegative cursor check: the schema admits a negative integer, the client refuses it', async () => {
-    const { onEnvelope, outcomes, error } = await pollOnce({ events: [], cursor: -1 });
+    const { onEnvelope, outcomes, error } = await pollOnce({ events: [], cursor: -1, capabilities: [], ingress });
     expect(error?.status).toBe(200);
     expect((error?.cause as Error).message).toBe('events poll response.cursor is not a safe nonnegative integer');
     expect(onEnvelope).not.toHaveBeenCalled();
@@ -128,8 +133,8 @@ describe('LongPollClient decodes the events page with EventsPollResponseSchema (
   it('keeps the client-local no-regression check: a page cursor below the requested cursor is refused', async () => {
     // First page advances navigation to 2 with read-ahead advertised; the next
     // page claims cursor 1, below the afterSeq=2 the client requested.
-    const first = { events: [{ ...validOffer, seq: 2 }], cursor: 2, capabilities: ['mailbox-read-ahead'] };
-    const regressed = { events: [], cursor: 1, capabilities: ['mailbox-read-ahead'] };
+    const first = { events: [{ ...validOffer, seq: 2 }], cursor: 2, capabilities: ['mailbox-read-ahead'], ingress };
+    const regressed = { events: [], cursor: 1, capabilities: ['mailbox-read-ahead'], ingress };
     let call = 0;
     fetchMock.mockImplementation(async () => {
       call += 1;
@@ -174,7 +179,7 @@ describe('LongPollClient decodes the events page with EventsPollResponseSchema (
     fetchMock.mockImplementation(async () => {
       call += 1;
       const capabilities = ['mailbox-read-ahead'];
-      return jsonResponse(call === 1 ? { events: [unknownType], cursor: 1, capabilities } : { events: [], cursor: 1, capabilities });
+      return jsonResponse(call === 1 ? { events: [unknownType], cursor: 1, capabilities, ingress } : { events: [], cursor: 1, capabilities, ingress });
     });
     const onEnvelope = vi.fn();
     const onValidationFailedSeq = vi.fn();

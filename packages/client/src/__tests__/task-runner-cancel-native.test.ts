@@ -17,6 +17,7 @@ import type { RuntimeAdapter, Session } from '../types';
 import { RuntimeDisposalFailure } from '../runtime-failure';
 import { TestServer } from './fixtures/test-server';
 import { cancellationTiming } from './fixtures/task-runner-cancel-timing';
+import { testIngressBudget } from './fixtures/activity-ingress';
 
 const fixture = fileURLToPath(new URL('./fixtures/task-runner-cancel-runtime.mjs', import.meta.url));
 const cases: Array<{ dir: string; gate: string; runner: TaskRunner; sessions: Session[];
@@ -130,7 +131,7 @@ async function setup(runtime: RuntimeId, scenario: string, {
   });
   const sent: Envelope[] = [];
   const terminalPublished = deferred();
-  const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
+  const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter], deviceId: 't1-native-device', workspaceRoot: path.join(dir, 'workspace'), storeDir: dir, productId: 't1-cancel',
     send: event => {
       timing.observeTerminal(event); sent.push(event);

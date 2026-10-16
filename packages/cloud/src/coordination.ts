@@ -5,7 +5,6 @@ import {
   type ActivityAppendInput,
   type ActivityTail,
 } from './activity';
-import { DEFAULT_ACTIVITY_INGRESS } from '@byok-sdk/protocol';
 import { ByokCloudError } from './errors';
 import type { TenantBoundActivity } from './tenant-stores';
 
@@ -26,9 +25,14 @@ export interface ActivityBounds {
   readonly ttlMs: number;
 }
 
+/**
+ * The deployment's default activity limits. The device surface advertises the
+ * effective `maxEvents`/`maxBytes` as `ingress` (events pages and accepted
+ * handshake answers); daemons have no default of their own.
+ */
 export const DEFAULT_ACTIVITY_BOUNDS: ActivityBounds = {
-  maxEvents: DEFAULT_ACTIVITY_INGRESS.maxEvents,
-  maxBytes: DEFAULT_ACTIVITY_INGRESS.maxBytes,
+  maxEvents: 50,
+  maxBytes: 65536,
   capacity: DEFAULT_ACTIVITY_CAPACITY,
   ttlMs: DEFAULT_ACTIVITY_TTL_MS,
 };
