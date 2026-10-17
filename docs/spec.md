@@ -2572,7 +2572,8 @@ undefined. A cursor with the current revision selects the suffix at its UTF-8
 byte offset. Another revision selects the full text at offset zero. A cursor
 inside a UTF-8 code point is invalid.
 
-Readback derives state from existing authority, in this order. A published
+Readback reads the terminal receipt, then the message admission, then the draft
+row, and derives state with the following priority. A published
 message whose disposition is not refused ends the lane, including a pending
 or held admission. A device terminal without a published message, or a refused
 disposition, discards the lane. An absent live row gives revision and offset

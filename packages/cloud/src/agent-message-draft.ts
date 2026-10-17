@@ -58,10 +58,11 @@ export async function readTaskAgentMessageDraft(
   const agentRef = AgentRefSchema.parse(expectedRef);
   const binding = await readTaskAgentMessageBinding(stores, deviceId, taskId, agentRef);
   if (binding === undefined) return undefined;
-  const row = await stores.agentMessageDraft.read(taskId);
   const terminal = await stores.receipts.get(terminalReceiptKey(taskId));
   if (terminal !== undefined) readDeviceTerminalReceipt(taskId, terminal);
   const message = await readTaskAgentMessage(stores, deviceId, taskId, agentRef);
+  // Read text after the state authorities so an ending state cannot use an older snapshot.
+  const row = await stores.agentMessageDraft.read(taskId);
   if (row !== undefined && (row.taskId !== taskId || row.deviceId !== deviceId
     || row.agentRef.agentId !== agentRef.agentId || row.agentRef.profileRevision !== agentRef.profileRevision)) {
     throw new Error('Invalid persisted task Agent message draft.');
