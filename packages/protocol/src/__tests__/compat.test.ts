@@ -28,8 +28,8 @@ import {
  * Executable wire-major-3 compatibility evidence (docs/protocol.md "Freeze
  * rule", docs/releases/README.md).
  *
- * v3 has no v2 reader, and no v3 decoder has been published. So this file
- * proves only what can honestly be proven today:
+ * v3 has no v2 reader. The first stable v3 decoder is published at 0.27.0.
+ * Cross-release checks live in published-compat.test.ts. This file keeps:
  *
  * 1. Retired v2 evidence. `golden/v2.envelopes.ndjson`, `golden/v2.http.ndjson`
  *    and the v2 release registry `golden/releases.json` are byte-identical to
@@ -37,9 +37,8 @@ import {
  *    every v2 envelope on its protocol version and nothing else.
  * 2. v3 self-consistency. `golden/v3.envelopes.ndjson` and
  *    `golden/v3.http.ndjson` are append-only and the current decoder reads
- *    them exactly. `golden/v3.releases.json` has no releases and no floor:
- *    cross-release gates are unproven until the first v3 release is
- *    registered and pinned as a published decoder.
+ *    them exactly. `golden/v3.releases.json` pins each stable envelope and
+ *    HTTP prefix. The published-decoder suite pins the registry floor.
  * 3. Published rejection oracle. `byok-protocol-previous` (0.26.1, the last
  *    registered v2 release) rejects every v3 corpus line and a v3
  *    `conn.hello`: a v2 peer cannot read v3 bytes. None of its bytes is v3
@@ -227,7 +226,7 @@ describe('compat: the current (v3) decoder rejects every v2 envelope on its prot
 });
 
 // ---------------------------------------------------------------------------
-// 2. v3: self-consistency only — no published v3 decoder exists yet
+// 2. v3: current-decoder consistency and frozen published prefixes
 // ---------------------------------------------------------------------------
 
 const v3Lines = ndjsonLines(readGolden('v3.envelopes.ndjson'));
@@ -235,11 +234,12 @@ const v3Corpus = corpusOf(v3Lines);
 const v3HttpText = readGolden('v3.http.ndjson');
 const v3HttpLines = ndjsonLines(v3HttpText);
 const v3HttpCorpus = httpCorpusOf(v3HttpLines);
-const v3Registry = JSON.parse(readGolden('v3.releases.json')) as { readonly releases: readonly ReleaseEntry[] };
+const v3Registry = JSON.parse(readGolden('v3.releases.json')) as { readonly floor: string; readonly releases: readonly ReleaseEntry[] };
 
-describe('compat v3 registry: no published v3 decoder exists yet, so cross-release gates are unproven', () => {
-  it('the v3 registry has releases only, and no floor until a v3 release is supported', () => {
-    expect(Object.keys(v3Registry)).toEqual(['releases']);
+describe('compat v3 registry: frozen published prefixes', () => {
+  it('the v3 registry pins the first supported stable release as its floor', () => {
+    expect(Object.keys(v3Registry)).toEqual(['floor', 'releases']);
+    expect(v3Registry.floor).toBe(v3Registry.releases[0]?.version);
     expect(Array.isArray(v3Registry.releases)).toBe(true);
     expect(v3Registry.releases.map((entry) => entry.version).filter((version) => V2_RELEASES.some((v2) => v2.version === version)),
       'a v2 release is never v3 evidence').toEqual([]);
@@ -276,7 +276,7 @@ describe('compat v3 registry: no published v3 decoder exists yet, so cross-relea
   });
 });
 
-describe('compat v3: the current decoder reads every v3 corpus line exactly (self-consistency; no published v3 decoder yet)', () => {
+describe('compat v3: the current decoder reads every v3 corpus line exactly (self-consistency; published-decoder checks are in published-compat.test.ts)', () => {
   it.each(v3Corpus.map((line) => [line.index + 1, line.type, line] as const))(
     'v3 line %i (%s) decodes, round-trips and deep-equals the committed JSON',
     (_n, _type, line) => {
@@ -394,7 +394,7 @@ function assertCurrentHttp(line: HttpCorpusLine): void {
   assertBatchCounts(line, decoded);
 }
 
-describe('compat v3: HTTP corpus (self-consistency; no published v3 decoder yet)', () => {
+describe('compat v3: HTTP corpus (self-consistency; published-decoder checks are in published-compat.test.ts)', () => {
   it('covers all eight scoped HTTP route schemas with owned bodies and independent expected values', () => {
     const surfaces: readonly HttpSurface[] = ['ChallengeRequest', 'ChallengeResponse', 'TokenRequest', 'TokenResponse',
       'EventsPollQuery', 'EventsPollResponse', 'MessagesSendRequest', 'MessagesSendResponse'];
