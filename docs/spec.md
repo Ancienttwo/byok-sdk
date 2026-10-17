@@ -173,24 +173,26 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.27.0-rc.2`; publication requires separate release
+aligned dispatch release is `0.27.0`; publication requires separate release
 authorization and registry readback. The current independent keys release is
-`0.12.0-rc.2`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.27.0-rc.2`, proven from an isolated standard npm install rather
+`0.12.0`; its packed and published `@byok-sdk/core` edge must be the exact current
+dispatch release, `0.27.0`, proven from an isolated standard npm install rather
 than the workspace graph.
 
-The 0.27.0-rc.2 train is published on `rc`. The owner approved
-0.27.0-rc.2 / keys 0.12.0-rc.2 under the dist-tag `rc` on 2026-10-16; complete
-registry readback passed on 2026-10-17. rc.2 replaces 0.27.0-rc.1, which was prepared
-but never published. rc.2 adds the short default scratch root (#493) and the
-home-busy `code` on the server `TaskResult` (#496). `latest` stays 0.26.1 / keys 0.11.1,
-and the reviewed registry baseline records that prior `latest` for all nine
-packages. It is the first wire-v3 train: `PROTOCOL_VERSION` is 3, a v2 daemon
+The owner approved stable source preparation of 0.27.0 / keys 0.12.0 on
+2026-10-17 for `latest`. Publication remains pending. The source includes the
+Agent message draft lane (#500), Claude closing-reply fixes (#501, PR #508),
+Pi dependency guidance and auth-probe tests (#507), and the cloud-dataplane
+build fix (#503). Fixed-artifact Host acceptance remains open in #195.
+0.27.0-rc.2 / keys 0.12.0-rc.2 remains published on `rc`.
+Current `latest` remains 0.26.1 / keys 0.11.1. The reviewed registry baseline
+records those prior stable versions for all nine packages.
+It is the first wire-v3 train: `PROTOCOL_VERSION` is 3, a v2 daemon
 and a v3 server do not interoperate, and devices and the Host upgrade together.
 Prereleases are not registered in the v3 compatibility registry. The 0.27 line
 is a MINOR: it adds public API (`executions.submit`, typed home-busy decline
 codes, injected device credential backends) and has pre-1.0 breaking cuts in
-protocol, client, server, cloud, cloud-dataplane and core. keys 0.12.0-rc.2 is
+protocol, client, server, cloud, cloud-dataplane and core. keys 0.12.0 is
 a MINOR: `buildPiProviderProjection` now requires `runtimeEntry`, and the
 pi-rpc lane receives its key over private IPC (#385). Notes:
 [`docs/releases/v0.27.0.md`](releases/v0.27.0.md).
