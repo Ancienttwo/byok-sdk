@@ -744,7 +744,7 @@ interface ActiveTask {
    *
    * The same slice is `task.complete.finalMessage`, so the host reads the same closing reply
    * the daemon would publish. An adapter whose descriptor sets
-   * `progressEventsAreMessages` (Codex) also resets it at each `progress`
+   * `progressEventsAreMessages` (Codex, Claude) also resets it at each `progress`
    * event, so the slice is that runtime's last whole message.
    *
    * `turn_end` deliberately does not reset (it is what reads this), and

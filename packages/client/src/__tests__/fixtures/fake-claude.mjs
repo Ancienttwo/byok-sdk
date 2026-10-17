@@ -122,6 +122,12 @@
 //   FAKE_CLAUDE_UNKNOWN_ASSISTANT_BLOCK=1 -> the assistant's final message
 //                                          includes one extra content block
 //                                          of an unrecognized `type`.
+//   FAKE_CLAUDE_REPEAT_CLOSING_TEXT=1   -> after the final message, send a
+//                                          second assistant message (new id)
+//                                          with the same text and no tool
+//                                          between, as reported downstream
+//                                          in #501. `result.result` carries
+//                                          the text once.
 //   FAKE_CLAUDE_RESULT_MALFORMED=1      -> cross-model re-review (P1
 //                                          regression): the turn's `result`
 //                                          frame is sent with `is_error`
@@ -508,6 +514,9 @@ function runProbeOrTurnFlow() {
       content.push({ type: 'totally_novel_block_type', payload: 'x' });
     }
     send({ type: 'assistant', message: { model: 'fake-model', id: `msg_${turn}b`, role: 'assistant', content }, session_id: reportedSessionId });
+    if (process.env.FAKE_CLAUDE_REPEAT_CLOSING_TEXT === '1') {
+      send({ type: 'assistant', message: { model: 'fake-model', id: `msg_${turn}c`, role: 'assistant', content: [{ type: 'text', text: finalText }] }, session_id: reportedSessionId });
+    }
 
     send({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed' }, session_id: reportedSessionId });
 

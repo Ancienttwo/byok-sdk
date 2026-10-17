@@ -2,14 +2,16 @@ import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
+import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
-import { freezeRuntimeAdapterDescriptor } from '../types';
+import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
 
@@ -35,8 +37,10 @@ function wholeMessageAdapter(): StubRuntimeAdapter {
   return adapter;
 }
 
+const CLAUDE_FIXTURE = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
+
 async function makeRunner(
-  adapter: StubRuntimeAdapter,
+  adapter: RuntimeAdapter,
   sent: Envelope[],
   extra: Partial<TaskRunnerDeps> = {},
 ): Promise<TaskRunner> {
@@ -54,7 +58,7 @@ async function makeRunner(
   });
 }
 
-async function startTask(runner: TaskRunner, taskId: string, runtime: 'pi' | 'codex'): Promise<void> {
+async function startTask(runner: TaskRunner, taskId: string, runtime: 'pi' | 'claude' | 'codex'): Promise<void> {
   await runner.handleEnvelope(
     createEnvelope('task.offer', { instruction: 'reply with exactly: CONSOLIDATED', runtime }, { taskId, seq: 1 }),
   );
@@ -70,6 +74,23 @@ async function completion(sent: Envelope[], taskId: string) {
 describe('TaskRunner task.complete.finalMessage (#322)', () => {
   it('the bundled Codex adapter declares whole-message progress events', () => {
     expect(new CodexAdapter().descriptor.progressEventsAreMessages).toBe(true);
+  });
+
+  it('publishes a Claude closing reply once when a later model call repeats it (#501)', async () => {
+    vi.stubEnv('FAKE_CLAUDE_REPEAT_CLOSING_TEXT', '1');
+    try {
+      const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: CLAUDE_FIXTURE, source: 'path' }) });
+      const sent: Envelope[] = [];
+      const runner = await makeRunner(adapter, sent);
+      await startTask(runner, 'claude-repeated-reply', 'claude');
+
+      const payload = await completion(sent, 'claude-repeated-reply');
+      expect(payload.finalMessage).toMatch(/^reply-1:/);
+      // The whole run's text still records both model calls.
+      expect(payload.summary).toBe(payload.finalMessage!.repeat(2));
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('separates the last whole message from commentary that came before it without a tool call', async () => {
