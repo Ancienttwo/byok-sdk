@@ -91,6 +91,7 @@ interface EnvelopeShapeOptions {
   'task.offer_prepared': { taskId: string; seq: number };
   'agent.egress.reliable': { taskId?: string; seq?: number };
   'agent.egress.ack': { taskId?: string; seq: number };
+  'agent.message.draft': { taskId: string; seq?: number };
   'agent.message.publish': { taskId: string; seq?: number };
   'agent.message.disposition': { taskId: string; seq: number };
   'agent.content.read': { taskId?: string; seq: number };

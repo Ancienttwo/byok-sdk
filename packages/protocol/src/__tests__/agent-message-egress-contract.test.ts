@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import {
   AGENT_MESSAGE_EGRESS_CAPABILITY,
+  AGENT_MESSAGE_DRAFT_FRAME_MAX_BYTES,
+  AgentMessageDraftPayloadSchema,
   TERMINAL_PROJECTION_SELECTION_CAPABILITY,
   AgentMessageDispositionPayloadSchema,
   AgentMessagePublishPayloadSchema,
@@ -110,5 +112,19 @@ describe('Agent-initiated message egress protocol', () => {
       outcome: 'accepted',
       receiptId: '11111111-1111-4111-8111-111111111113',
     }).success).toBe(true);
+  });
+});
+
+
+describe('Agent message draft frame', () => {
+  const frame = { agentRef, revision: 1, offset: 0, text: '' };
+  test('accepts empty frames and the UTF-8 byte limit', () => {
+    expect(AGENT_MESSAGE_DRAFT_FRAME_MAX_BYTES).toBe(16 * 1024);
+    expect(AgentMessageDraftPayloadSchema.parse(frame)).toEqual(frame);
+    expect(AgentMessageDraftPayloadSchema.safeParse({ ...frame, text: 'é'.repeat(8192), overflow: true }).success).toBe(true);
+    expect(AgentMessageDraftPayloadSchema.safeParse({ ...frame, text: 'é'.repeat(8192) + 'x' }).success).toBe(false);
+  });
+  test.each([{ revision: 0 }, { revision: 1.5 }, { offset: -1 }, { offset: 0.5 }, { overflow: false }, { extra: true }])('rejects invalid strict fields: %o', change => {
+    expect(AgentMessageDraftPayloadSchema.safeParse({ ...frame, ...change }).success).toBe(false);
   });
 });

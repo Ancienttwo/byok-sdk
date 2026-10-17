@@ -15,6 +15,7 @@ import {
   AgentMessageContentTypeSchema,
   AgentMessageEgressRequirementSchema,
   AGENT_MESSAGE_MAX_BYTES,
+  AGENT_MESSAGE_DRAFT_FRAME_MAX_BYTES,
   ContentReadPolicySchema,
 } from './agent-egress';
 import {
@@ -79,6 +80,7 @@ export const RuntimeCapabilitiesSchema = z.object({
   approvalInteractive: z.boolean().optional(),
   /** Whether this runtime can project a locally configured MCP toolset into one task. */
   mcpToolsets: z.boolean().optional(),
+  messageDraft: z.boolean().optional(),
 });
 export type RuntimeCapabilities = z.infer<typeof RuntimeCapabilitiesSchema>;
 
@@ -470,6 +472,19 @@ const AGENT_MESSAGE_BODY = z.string().min(1).refine(
 );
 
 /** Daemon -> server: one Agent-authored message, independent from task activity. */
+/** Display-only text. Offsets count UTF-8 bytes within one revision. */
+export const AgentMessageDraftPayloadSchema = z.object({
+  agentRef: AgentRefSchema,
+  revision: z.number().int().min(1),
+  offset: z.number().int().nonnegative(),
+  text: z.string().refine(
+    value => new TextEncoder().encode(value).byteLength <= AGENT_MESSAGE_DRAFT_FRAME_MAX_BYTES,
+    `Agent message draft frame exceeds ${AGENT_MESSAGE_DRAFT_FRAME_MAX_BYTES} bytes`,
+  ),
+  overflow: z.literal(true).optional(),
+}).strict();
+export type AgentMessageDraftPayload = z.infer<typeof AgentMessageDraftPayloadSchema>;
+
 export const AgentMessagePublishPayloadSchema = z
   .object({
     agentRef: AgentRefSchema,
@@ -1325,6 +1340,7 @@ export const MESSAGE_PAYLOAD_SCHEMAS = {
   ...TASK_OFFER_PAYLOAD_SCHEMAS,
   'agent.egress.reliable': AgentEgressReliablePayloadSchema,
   'agent.egress.ack': AgentEgressAckPayloadSchema,
+  'agent.message.draft': AgentMessageDraftPayloadSchema,
   'agent.message.publish': AgentMessagePublishPayloadSchema,
   'agent.message.disposition': AgentMessageDispositionPayloadSchema,
   'agent.content.read': AgentContentReadPayloadSchema,
@@ -1403,6 +1419,7 @@ export const DAEMON_TO_SERVER_TYPES = [
   'task.cancelled',
   'task.approval_resolved',
   'agent.egress.reliable',
+  'agent.message.draft',
   'agent.message.publish',
   'agent.content.receipt',
 ] as const satisfies readonly MessageType[];

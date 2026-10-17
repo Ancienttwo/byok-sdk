@@ -28,9 +28,8 @@ export async function readTaskAgentMessage(
   stores: TenantStores, deviceId: string, taskId: string, expectedRef: AgentRef,
 ): Promise<TaskAgentMessage | undefined> {
   const agentRef = AgentRefSchema.parse(expectedRef);
-  const attempt = await stores.tasks.get(taskId);
-  if (!attempt || attempt.tenantId !== stores.tenant || attempt.taskId !== taskId || attempt.deviceId !== deviceId
-    || !attempt.agentRef || !sameRef(attempt.agentRef, agentRef)) return undefined;
+  const attempt = await readMessageAttempt(stores, deviceId, taskId, agentRef);
+  if (attempt === undefined) return undefined;
   const admission = await stores.tasks.readTaskAgentMessage({ taskId, deviceId });
   if (!admission) return undefined;
   const invalid = () => new Error('Invalid persisted task Agent message.');
@@ -52,4 +51,28 @@ export async function readTaskAgentMessage(
   // it must not reinterpret a refusal as storage corruption or product acceptance.
   const disposition = admission.terminalBody === undefined ? undefined : parseAgentMessageDisposition(payload, admission.terminalBody);
   return { payload, context: frozen.data.context, ...(disposition === undefined ? {} : { disposition }) };
+}
+
+
+/** One frozen identity check shared by message and draft readers. */
+export async function readTaskAgentMessageBinding(
+  stores: TenantStores, deviceId: string, taskId: string, agentRef: AgentRef,
+) {
+  const attempt = await readMessageAttempt(stores, deviceId, taskId, agentRef);
+  if (attempt === undefined) return undefined;
+  const binding = await stores.receipts.get(`agent-message-offer:${deviceId}:${taskId}`);
+  if (!binding) return undefined;
+  let value: unknown;
+  try { value = JSON.parse(binding.body); } catch { throw new Error('Invalid persisted task Agent message.'); }
+  const frozen = FrozenMessageBinding.safeParse(value);
+  if (!frozen.success) throw new Error('Invalid persisted task Agent message.');
+  if (!sameRef(frozen.data.agentRef, agentRef)) return undefined;
+  return { attempt, frozen: frozen.data };
+}
+
+async function readMessageAttempt(stores: TenantStores, deviceId: string, taskId: string, agentRef: AgentRef) {
+  const attempt = await stores.tasks.get(taskId);
+  if (!attempt || attempt.tenantId !== stores.tenant || attempt.taskId !== taskId || attempt.deviceId !== deviceId
+    || !attempt.agentRef || !sameRef(attempt.agentRef, agentRef)) return undefined;
+  return attempt;
 }

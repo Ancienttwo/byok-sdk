@@ -29,7 +29,7 @@ import { TENANT_A, createHarness, decodeEventsPage, offerPayload } from './suppo
 const EXPECTED_CAPABILITIES = [
   'custom-harness',
   'mailbox-read-ahead',
-  'approval_resolved',
+  'approval_resolved', 'agent-message-draft',
   'agent-home-contract',
   'agent-home-projection',
   'agent-egress-policy',

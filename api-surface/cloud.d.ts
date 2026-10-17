@@ -428,6 +428,52 @@ export interface AgentMemoryProjectionStore {
         readonly agentId: string;
     }): Promise<AgentMemoryProjectionEraseResult>;
 }
+// ==== @byok-sdk/cloud dist/agent-message-draft.d.ts ====
+import type { TenantId } from '@byok-sdk/core';
+import { type AgentRef } from '@byok-sdk/protocol';
+import type { TenantStores } from './tenant-stores';
+export interface AgentMessageDraftCursor {
+    readonly revision: number;
+    readonly offset: number;
+}
+export interface AgentMessageDraftRow {
+    readonly taskId: string;
+    readonly deviceId: string;
+    readonly agentRef: AgentRef;
+    readonly revision: number;
+    readonly text: string;
+    readonly byteCount: number;
+    readonly state: 'open' | 'overflow' | 'gap';
+    readonly updatedAt: string;
+    readonly expiresAt: string;
+}
+export interface AgentMessageDraftApplyInput extends AgentMessageDraftCursor {
+    readonly taskId: string;
+    readonly deviceId: string;
+    readonly agentRef: AgentRef;
+    readonly text: string;
+    readonly overflow?: true;
+    readonly maxBytes: number;
+    readonly now: string;
+}
+export type AgentMessageDraftApplyResult = 'applied' | 'stale' | 'gap' | 'overflow';
+export interface AgentMessageDraftStore {
+    apply(tenant: TenantId, input: AgentMessageDraftApplyInput): Promise<AgentMessageDraftApplyResult>;
+    read(tenant: TenantId, taskId: string): Promise<AgentMessageDraftRow | undefined>;
+    delete(tenant: TenantId, taskId: string): Promise<void>;
+    sweepExpired(now: string): Promise<void>;
+}
+export interface AgentMessageDraftReadback extends AgentMessageDraftCursor {
+    readonly text: string;
+    readonly byteCount: number;
+    readonly state: AgentMessageDraftRow['state'] | 'ended' | 'discarded';
+}
+/** The cursor is a UTF-8 boundary. A cursor beyond retained text has no suffix. */
+export declare function agentMessageDraftSuffix(text: string, cursor: AgentMessageDraftCursor | undefined, revision: number): {
+    offset: number;
+    text: string;
+};
+export declare function readTaskAgentMessageDraft(stores: TenantStores, deviceId: string, taskId: string, expectedRef: AgentRef, cursor?: AgentMessageDraftCursor): Promise<AgentMessageDraftReadback | undefined>;
 // ==== @byok-sdk/cloud dist/approval-control.d.ts ====
 /**
  * Host-side approval resolution: the one rule that decides WHICH approval a
@@ -1021,6 +1067,7 @@ export interface FullCapabilityDeclarationOptions {
 export declare function fullCapabilityDeclaration(version?: number, options?: FullCapabilityDeclarationOptions): CapabilityDeclaration;
 export declare function declares(declaration: CapabilityDeclaration, capability: CloudCapability): boolean;
 // ==== @byok-sdk/cloud dist/cloud.d.ts ====
+import { type AgentMessageDraftCursor, type AgentMessageDraftReadback } from './agent-message-draft';
 import { type MaintenanceInput, type MaintenanceReport } from './maintenance';
 import type { DeviceAssertionReplayAuthority } from '@byok-sdk/core';
 import { type TaskAgentMessage } from './task-agent-message';
@@ -1511,6 +1558,7 @@ export interface ByokCloud {
     /** Actual device terminal only; cancellation intent never creates this observation. */
     readDeviceTerminal(tenant: TenantId, taskId: string): Promise<DeviceTerminal | undefined>;
     /** Discover first-message transmission evidence from the frozen execution binding, including pending/held without a Host body. */
+    readTaskAgentMessageDraft(tenant: TenantId, deviceId: string, taskId: string, agentRef: AgentRef, cursor?: AgentMessageDraftCursor): Promise<AgentMessageDraftReadback | undefined>;
     readTaskAgentMessage(tenant: TenantId, deviceId: string, taskId: string, agentRef: AgentRef): Promise<TaskAgentMessage | undefined>;
     /**
      * Exact durable message decision, independently of task cancellation/terminal.
@@ -2141,7 +2189,7 @@ export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected' | 'rate_limit
  * and may be refined without a protocol revision. `rate_limited` is a separate outcome,
  * not a refusal reason.
  */
-export declare const INBOUND_REFUSAL_REASONS: readonly ['protocol_version_unsupported', 'type_not_allowed', 'task_id_missing', 'device_not_eligible', 'hello_device_mismatch', 'hello_harnesses_without_capability', 'hello_protocol_version_unsupported', 'hello_product_mismatch', 'hello_capabilities_not_recorded', 'agent_message_attempt_mismatch', 'agent_message_offer_binding_missing', 'agent_message_binding_corrupt', 'agent_message_binding_mismatch', 'agent_message_too_large', 'agent_message_already_deduplicated', 'agent_message_reservation_conflict', 'agent_message_admission_unconfirmed', 'egress_conflict', 'content_receipt_event_request_mismatch', 'content_receipt_request_unknown', 'content_receipt_request_mismatch', 'content_receipt_conflict', 'task_not_found_for_device', 'task_owned_by_other_device', 'agent_identity_mismatch', 'terminal_harness_mismatch', 'claim_device_mismatch', 'claim_harness_and_runtime_conflict', 'claim_harness_mismatch', 'claim_harness_unavailable', 'claim_offer_mismatch', 'claim_not_won', 'recovery_report_invalid', 'recovery_offer_mismatch', 'activity_batch_too_large', 'activity_batch_invalid', 'approval_event_invalid'];
+export declare const INBOUND_REFUSAL_REASONS: readonly ['protocol_version_unsupported', 'type_not_allowed', 'task_id_missing', 'device_not_eligible', 'hello_device_mismatch', 'hello_harnesses_without_capability', 'hello_protocol_version_unsupported', 'hello_product_mismatch', 'hello_capabilities_not_recorded', 'agent_message_draft_invalid', 'agent_message_attempt_mismatch', 'agent_message_offer_binding_missing', 'agent_message_binding_corrupt', 'agent_message_binding_mismatch', 'agent_message_too_large', 'agent_message_already_deduplicated', 'agent_message_reservation_conflict', 'agent_message_admission_unconfirmed', 'egress_conflict', 'content_receipt_event_request_mismatch', 'content_receipt_request_unknown', 'content_receipt_request_mismatch', 'content_receipt_conflict', 'task_not_found_for_device', 'task_owned_by_other_device', 'agent_identity_mismatch', 'terminal_harness_mismatch', 'claim_device_mismatch', 'claim_harness_and_runtime_conflict', 'claim_harness_mismatch', 'claim_harness_unavailable', 'claim_offer_mismatch', 'claim_not_won', 'recovery_report_invalid', 'recovery_offer_mismatch', 'activity_batch_too_large', 'activity_batch_invalid', 'approval_event_invalid'];
 export type InboundRefusalReason = (typeof INBOUND_REFUSAL_REASONS)[number];
 /** The only way to build a rejection: the reason is required and closed. */
 interface Refused {
@@ -2219,7 +2267,7 @@ export declare function readAgentMessageDisposition(stores: TenantStores, device
 export declare function parseAgentMessageDisposition(payload: AgentMessagePublishPayload, terminalBody: string): AgentMessageDispositionPayload;
 /** Receipt key a task's terminal is recorded under — the idempotency seam S3b's journal will share. */
 export declare function terminalReceiptKey(taskId: string): string;
-export declare function handleInboundEnvelope(stores: TenantStores, deviceId: string, envelope: Envelope, activityBounds?: ActivityBounds, agentMessageConsume?: Parameters<typeof handleAgentMessagePublish>[4], observer?: ByokCloudObserver): Promise<InboundResult>;
+export declare function handleInboundEnvelope(stores: TenantStores, deviceId: string, envelope: Envelope, activityBounds?: ActivityBounds, agentMessageConsume?: Parameters<typeof handleAgentMessagePublish>[4], observer?: ByokCloudObserver, now?: string): Promise<InboundResult>;
 export {};
 // ==== @byok-sdk/cloud dist/index.d.ts ====
 /**
@@ -2297,7 +2345,7 @@ export type { TruthCommitErrorCode } from './truth/errors';
 export { BLOB_READ_ERROR_CODES, CLOUD_STORE_NAMES, TASK_ATTEMPT_STATUSES, TASK_ATTEMPT_ACTIVE_STATUSES, } from './stores/ports';
 export { CLOUD_PORT_INTERFACES, CLOUD_PORT_METHODS } from './stores/ports-contract';
 export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, BlobReadErrorCode, BlobReadResult, BlobWriteResult, CloudBlobStore, CloudStoreName, CloudStores, DeviceDirectory, DeviceRecord, DeviceRegistration, InboundDedupStore, InboundRateLimiter, NonceStore, PairingCodeClaims, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollment, PairingEnrollmentInput, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore, RequestReceipt, RequestReceiptStore, TaskAttempt, TaskAttemptListQuery, TaskAttemptCounts, TaskAttemptPage, TaskAttemptStatus, TaskAttemptStore, AgentRef, AgentEgressRecord, AgentEgressStore, AgentMessageAdmission, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore, } from './stores/ports';
-export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlobContentProxy, InMemoryCloudBlobStore, InMemoryActivityStore, InMemoryDeviceDirectory, InMemoryInboundDedupStore, InMemoryNonceStore, InMemoryPairingCodeStore, InMemoryRequestReceiptStore, InMemoryAgentEgressStore, InMemoryProofRequestReceiptStore, InMemoryTaskAttemptStore, InMemoryTaskCancellationStore, NONCE_TTL_MS, createInMemoryBlobs, createInMemoryCloudStores, createInMemoryBlobBytes, InMemoryBlobBytes, } from './stores/in-memory/index';
+export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlobContentProxy, InMemoryCloudBlobStore, InMemoryActivityStore, InMemoryAgentMessageDraftStore, InMemoryDeviceDirectory, InMemoryInboundDedupStore, InMemoryNonceStore, InMemoryPairingCodeStore, InMemoryRequestReceiptStore, InMemoryAgentEgressStore, InMemoryProofRequestReceiptStore, InMemoryTaskAttemptStore, InMemoryTaskCancellationStore, NONCE_TTL_MS, createInMemoryBlobs, createInMemoryCloudStores, createInMemoryBlobBytes, InMemoryBlobBytes, } from './stores/in-memory/index';
 export type { InMemoryBlobStoreOptions, InMemoryBlobs, InMemoryCloudComposition, } from './stores/in-memory/index';
 export type { DeviceTerminal } from './terminal-result';
 export { AgentExecutionInputSchema, type AgentExecutionInput } from './agent-execution';
@@ -2309,6 +2357,7 @@ export type { ReceiptCollectExpiredInput } from './stores/ports';
 export type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake';
 export { createInProcessMailboxWake, DEFAULT_MAILBOX_WAKE_FALLBACK_MS } from './stores/in-memory/mailbox-wake';
 export type { InProcessMailboxWakeOptions } from './stores/in-memory/mailbox-wake';
+export type { AgentMessageDraftStore, AgentMessageDraftRow, AgentMessageDraftCursor, AgentMessageDraftApplyInput, AgentMessageDraftApplyResult, AgentMessageDraftReadback } from './agent-message-draft';
 // ==== @byok-sdk/cloud dist/input-preparations.d.ts ====
 /**
  * Durable remote input-preparation facts.
@@ -2377,7 +2426,7 @@ export interface RetentionPolicy {
 }
 export declare const DEFAULT_RETENTION_POLICY: RetentionPolicy;
 export declare const DEFAULT_MAINTENANCE_LIMIT = 500;
-export declare const MAINTENANCE_STEPS: readonly ["mailbox", "receipts", "nonces", "pairingCodes", "presence", "activity", "approvals", "deviceAssertionReplay", "quota", "objects"];
+export declare const MAINTENANCE_STEPS: readonly ["mailbox", "receipts", "nonces", "pairingCodes", "presence", "activity", "approvals", "agentMessageDraft", "deviceAssertionReplay", "quota", "objects"];
 export type MaintenanceStep = typeof MAINTENANCE_STEPS[number];
 export type MaintenanceStepReport = ({
     readonly step: MaintenanceStep;
@@ -2394,6 +2443,9 @@ export type MaintenanceStepReport = ({
 } | {
     readonly step: 'deviceAssertionReplay';
     readonly status: 'not-configured';
+} | {
+    readonly step: 'agentMessageDraft';
+    readonly status: 'ok';
 };
 export interface MaintenanceReport {
     readonly tenantId: TenantId;
@@ -2619,6 +2671,18 @@ export declare class InMemoryAgentMemoryProjectionAuthorizer implements AgentMem
         readonly agentId: string;
     }): Promise<void>;
 }
+// ==== @byok-sdk/cloud dist/stores/in-memory/agent-message-draft.d.ts ====
+import { type Clock, type TenantId } from '@byok-sdk/core';
+import type { AgentMessageDraftStore, AgentMessageDraftRow, AgentMessageDraftApplyInput, AgentMessageDraftApplyResult } from '../../agent-message-draft';
+export declare class InMemoryAgentMessageDraftStore implements AgentMessageDraftStore {
+    #private;
+    private readonly clock;
+    constructor(clock: Clock);
+    apply(tenant: TenantId, input: AgentMessageDraftApplyInput): Promise<AgentMessageDraftApplyResult>;
+    read(tenant: TenantId, taskId: string): Promise<AgentMessageDraftRow | undefined>;
+    delete(tenant: TenantId, taskId: string): Promise<void>;
+    sweepExpired(now: string): Promise<void>;
+}
 // ==== @byok-sdk/cloud dist/stores/in-memory/approval-timeline.d.ts ====
 import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 import type { Clock, TenantId } from '@byok-sdk/core';
@@ -2796,6 +2860,7 @@ export declare class InMemoryDeviceDirectory implements DeviceDirectory {
     resolveByDeviceId(deviceId: string): Promise<DeviceRecord | undefined>;
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/index.d.ts ====
+export { InMemoryAgentMessageDraftStore } from './agent-message-draft';
 /**
  * The in-memory reference implementation of every cloud-local port.
  *
@@ -3068,6 +3133,7 @@ export declare const CLOUD_PORT_METHODS: Readonly<Record<CloudStoreName, readonl
 /** The interface each port name is declared as, for a source-side scan. */
 export declare const CLOUD_PORT_INTERFACES: Readonly<Record<CloudStoreName, string>>;
 // ==== @byok-sdk/cloud dist/stores/ports.d.ts ====
+import type { AgentMessageDraftStore } from '../agent-message-draft';
 import type { CollectExpiredInput, CollectExpiredResult } from '@byok-sdk/core';
 import type { HarnessInfo } from '@byok-sdk/protocol';
 /**
@@ -3678,6 +3744,7 @@ export interface InboundRateLimiter {
 export interface CloudStores {
     readonly activity: ActivityStore;
     readonly approvals: ApprovalTimelineStore;
+    readonly agentMessageDraft: AgentMessageDraftStore;
     readonly devices: DeviceDirectory;
     readonly pairingCodes: PairingCodeStore;
     readonly pairing: PairingEnrollment;
@@ -3692,7 +3759,7 @@ export interface CloudStores {
     readonly rateLimiter: InboundRateLimiter;
 }
 /** Names of every port in {@link CloudStores}, in contract order. */
-export declare const CLOUD_STORE_NAMES: readonly ['activity', 'approvals', 'devices', 'pairingCodes', 'pairing', 'nonces', 'dedup', 'tasks', 'cancellations', 'receipts', 'egress', 'proofReceipts', 'blobs', 'rateLimiter'];
+export declare const CLOUD_STORE_NAMES: readonly ['activity', 'approvals', 'agentMessageDraft', 'devices', 'pairingCodes', 'pairing', 'nonces', 'dedup', 'tasks', 'cancellations', 'receipts', 'egress', 'proofReceipts', 'blobs', 'rateLimiter'];
 export type CloudStoreName = (typeof CLOUD_STORE_NAMES)[number];
 export interface ReceiptCollectExpiredInput extends CollectExpiredInput {
     readonly requestBefore: string;
@@ -3709,7 +3776,29 @@ export interface TaskAgentMessage {
 }
 /** Discover the one durable message without requiring the Host to have received its body. */
 export declare function readTaskAgentMessage(stores: TenantStores, deviceId: string, taskId: string, expectedRef: AgentRef): Promise<TaskAgentMessage | undefined>;
+/** One frozen identity check shared by message and draft readers. */
+export declare function readTaskAgentMessageBinding(stores: TenantStores, deviceId: string, taskId: string, agentRef: AgentRef): Promise<{
+    attempt: import(".").TaskAttempt;
+    frozen: {
+        agentRef: {
+            agentId: string;
+            profileRevision: string;
+        };
+        sessionRef?: string | undefined;
+        requirement: {
+            mode: "required";
+            contract: string;
+            contentType: "text/markdown" | "text/plain";
+            maxBytes: number;
+        };
+        context: {
+            destinationBinding: string;
+            freshnessCursor?: string | undefined;
+        };
+    };
+} | undefined>;
 // ==== @byok-sdk/cloud dist/tenant-stores.d.ts ====
+import type { AgentMessageDraftStore } from './agent-message-draft';
 import type { HarnessInfo } from '@byok-sdk/protocol';
 /**
  * Layer 2 of the six-layer isolation model (§12.6.2) — the tenant-closed
@@ -3888,6 +3977,11 @@ export interface TenantStores {
     readonly presence: TenantBoundPresence;
     readonly activity: TenantBoundActivity;
     readonly approvals: TenantBoundApprovalTimeline;
+    readonly agentMessageDraft: {
+        apply(input: Parameters<AgentMessageDraftStore['apply']>[1]): ReturnType<AgentMessageDraftStore['apply']>;
+        read(taskId: string): ReturnType<AgentMessageDraftStore['read']>;
+        delete(taskId: string): Promise<void>;
+    };
     readonly devices: TenantBoundDevices;
     readonly tasks: TenantBoundTaskAttempts;
     readonly cancellations: TenantBoundTaskCancellations;

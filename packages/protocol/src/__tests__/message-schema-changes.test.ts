@@ -1,3 +1,4 @@
+import { MESSAGE_PAYLOAD_SCHEMAS } from '../messages';
 import { describe, expect, it } from 'vitest';
 import {
   ConnHelloPayloadSchema,
@@ -401,5 +402,19 @@ describe('task.approval_resolved (additive-minor message)', () => {
     const wireLine = `${JSON.stringify(envelope)}\n`;
     const decoded = decodeEnvelope(wireLine);
     expect(decoded).toEqual(envelope);
+  });
+});
+
+
+describe('runtime messageDraft capability', () => {
+  it('is optional discovery data in hello and claim', () => {
+    const capabilities = { messageDraft: true };
+    const hello = MESSAGE_PAYLOAD_SCHEMAS['conn.hello'].parse({
+      protocolVersions: [3], capabilities: [], deviceId: 'device-1', productId: 'app',
+      runtimes: [{ id: 'pi', version: '1', authPresent: true, capabilities }],
+    });
+    expect(hello.runtimes?.[0]?.capabilities).toEqual(capabilities);
+    expect(MESSAGE_PAYLOAD_SCHEMAS['task.claim'].parse({ deviceId: 'device-1', capabilities }).capabilities).toEqual(capabilities);
+    expect(MESSAGE_PAYLOAD_SCHEMAS['task.claim'].parse({ deviceId: 'device-1' }).capabilities).toBeUndefined();
   });
 });

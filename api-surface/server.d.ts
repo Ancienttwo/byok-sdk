@@ -1,4 +1,6 @@
 // ==== @byok-sdk/server dist/index.d.ts ====
+import type { AgentMessageDraftEvent } from './types';
+export type { AgentMessageDraftEvent } from './types';
 import type { WakeRecord, WakeScheduleInput, WakeScheduleResult } from './wakes/types';
 export { WakeHookMissingError, WakeConflictError, WakeInputError, WakeClosedError } from './wakes/types';
 export type { DueWake, WakeRecord, WakeScheduleInput, WakeScheduleResult, WakeConsumer, WakeInputErrorCode } from './wakes/types';
@@ -113,6 +115,11 @@ export interface ByokServer {
         deviceTerminal(taskId: string): Promise<import('@byok-sdk/cloud').DeviceTerminal | undefined>;
         /** Immutable kernel offer readback for verifying a persisted host binding. No transport seq is inferred. */
         offer(taskId: string): Promise<import('@byok-sdk/cloud').TaskOfferReadback | undefined>;
+        /** Stream display-only suffixes through the frozen Agent binding. */
+        messageDraft(taskId: string, deviceId: string, agentRef: AgentRef, options?: {
+            after?: import('@byok-sdk/cloud').AgentMessageDraftCursor;
+            signal?: AbortSignal;
+        }): AsyncIterable<AgentMessageDraftEvent>;
         /** Discover the unique message and its pending/final disposition through the frozen Agent binding. */
         agentMessage(taskId: string, deviceId: string, agentRef: AgentRef): Promise<import('@byok-sdk/cloud').TaskAgentMessage | undefined>;
         /** Exact SDK message decision; pending is undefined and corrupt persisted evidence throws. */
@@ -438,6 +445,9 @@ export declare class TaskEventRelay implements ByokCloudObserver {
      * message that a cancelled task will never send.
      */
     noteHostTransition(taskId: string, state: TaskState, at: string): void;
+    /** A wake carries no content and creates no task event queue. */
+    onAgentMessageDraft(taskId: string): void;
+    watchAgentMessageDraft(taskId: string, wake: () => void): () => void;
     onInboundCommitted(input: InboundCommitted): void;
     /** Publish an implicit resolution the composition inferred from later task traffic. */
     emitImplicitApprovalResolved(taskId: string, at: string): void;
@@ -1223,6 +1233,24 @@ export interface HubStats {
     /** Milliseconds since `createByokServer` returned this instance. */
     uptimeMs: number;
 }
+/** Display-only draft notifications. The accepted message stays authoritative. */
+export type AgentMessageDraftEvent = {
+    readonly kind: 'append';
+    readonly revision: number;
+    readonly offset: number;
+    readonly text: string;
+} | {
+    readonly kind: 'overflow';
+    readonly revision: number;
+    readonly byteCount: number;
+} | {
+    readonly kind: 'gap';
+    readonly revision: number;
+} | {
+    readonly kind: 'ended';
+} | {
+    readonly kind: 'discarded';
+};
 export {};
 // ==== @byok-sdk/server dist/wakes/types.d.ts ====
 /** One Host-owned, one-shot wall-clock wake. Periodic rules remain in the Host. */

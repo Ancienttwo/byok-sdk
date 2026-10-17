@@ -73,6 +73,7 @@ export const CLOUD_PROTOCOL_CAPABILITIES = [
   // Without this flag `TaskRunner.sendApprovalResolved` returns early and a
   // locally-resolved approval is never reported on the wire at all.
   'approval_resolved',
+  'agent-message-draft',
   'agent-home-contract',
   'agent-home-projection',
   'agent-egress-policy',

@@ -1,3 +1,5 @@
+import type { AgentMessageDraftEvent } from './types';
+export type { AgentMessageDraftEvent } from './types';
 import { WakeScheduler } from './wakes/scheduler';
 import type { WakeRecord, WakeScheduleInput, WakeScheduleResult } from './wakes/types';
 export { WakeHookMissingError, WakeConflictError, WakeInputError, WakeClosedError } from './wakes/types';
@@ -208,6 +210,8 @@ export interface ByokServer {
     deviceTerminal(taskId: string): Promise<import('@byok-sdk/cloud').DeviceTerminal | undefined>;
     /** Immutable kernel offer readback for verifying a persisted host binding. No transport seq is inferred. */
     offer(taskId: string): Promise<import('@byok-sdk/cloud').TaskOfferReadback | undefined>;
+    /** Stream display-only suffixes through the frozen Agent binding. */
+    messageDraft(taskId: string, deviceId: string, agentRef: AgentRef, options?: { after?: import('@byok-sdk/cloud').AgentMessageDraftCursor; signal?: AbortSignal }): AsyncIterable<AgentMessageDraftEvent>;
     /** Discover the unique message and its pending/final disposition through the frozen Agent binding. */
     agentMessage(taskId: string, deviceId: string, agentRef: AgentRef): Promise<import('@byok-sdk/cloud').TaskAgentMessage | undefined>;
     /** Exact SDK message decision; pending is undefined and corrupt persisted evidence throws. */
@@ -663,10 +667,17 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     relay.emitServerEvent(report.steps.some(step => step.status === 'failed') ? { kind: 'maintenance.failed', report } : { kind: 'maintenance.completed', report });
     return report;
   }, maintenanceIntervalMs, (error) => relay.emitServerEvent({ kind: 'maintenance.failed', errorCode: error instanceof ByokCloudError ? error.code : 'maintenance_step_failed' }));
+  const draftShutdown = new AbortController();
+  const draftReads = new Set<Promise<unknown>>();
   let closePromise: Promise<void> | undefined;
   function close(): Promise<void> {
+    draftShutdown.abort();
     return closePromise ??= Promise.all([scheduler.close(), wakes.close()])
-      .finally(async () => { relay.stop(); await composition.close(); })
+      .finally(async () => {
+        await Promise.allSettled(draftReads);
+        relay.stop();
+        await composition.close();
+      })
       .then(() => undefined);
   }
 
@@ -762,6 +773,43 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       attempt(taskId) { return cloud.readTaskAttempt(tenant, taskId); },
       deviceTerminal(taskId) { return cloud.readDeviceTerminal(tenant, taskId); },
       offer(taskId) { return cloud.readTaskOffer(tenant, taskId); },
+      async *messageDraft(taskId, deviceId, agentRef, options = {}) {
+        const signal = options.signal === undefined ? draftShutdown.signal : AbortSignal.any([options.signal, draftShutdown.signal]);
+        let cursor = options.after;
+        const observed: { gap?: number; overflow?: number } = {};
+        while (!signal.aborted) {
+          let wake!: () => void;
+          const changed = new Promise<void>(resolve => { wake = resolve; });
+          // Subscribe before the read to close the read-to-wait race.
+          const unsubscribe = relay.watchAgentMessageDraft(taskId, wake);
+          signal.addEventListener('abort', wake, { once: true });
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            const reading = cloud.readTaskAgentMessageDraft(tenant, deviceId, taskId, agentRef, cursor);
+            draftReads.add(reading);
+            const draft = await reading.finally(() => { draftReads.delete(reading); });
+            if (draft === undefined || signal.aborted) return;
+            if (draft.text !== '') yield { kind: 'append', revision: draft.revision, offset: draft.offset, text: draft.text };
+            if (signal.aborted) return;
+            cursor = { revision: draft.revision, offset: draft.byteCount };
+            if (draft.state === 'ended' || draft.state === 'discarded') {
+              yield { kind: draft.state };
+              return;
+            }
+            if ((draft.state === 'overflow' || draft.state === 'gap') && observed[draft.state] !== draft.revision) {
+              observed[draft.state] = draft.revision;
+              if (draft.state === 'overflow') yield { kind: 'overflow', revision: draft.revision, byteCount: draft.byteCount };
+              else yield { kind: 'gap', revision: draft.revision };
+            }
+            if (signal.aborted) return;
+            await Promise.race([changed, new Promise<void>(resolve => { timer = setTimeout(resolve, 250); })]);
+          } finally {
+            if (timer !== undefined) clearTimeout(timer);
+            signal.removeEventListener('abort', wake);
+            unsubscribe();
+          }
+        }
+      },
       agentMessage(taskId, deviceId, agentRef) { return cloud.readTaskAgentMessage(tenant, deviceId, taskId, agentRef); },
       messageDisposition(taskId, deviceId, payload) {
         return cloud.readAgentMessageDisposition(tenant, deviceId, taskId, payload);

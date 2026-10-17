@@ -99,6 +99,8 @@ function minimalPayload(type: MessageType): unknown {
         cursor: 1,
         receiptId: '00000000-0000-4000-8000-000000000022',
       };
+    case 'agent.message.draft':
+      return { agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' }, revision: 1, offset: 0, text: 'hello' };
     case 'agent.message.publish':
       return {
         agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },

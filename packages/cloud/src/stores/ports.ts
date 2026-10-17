@@ -1,3 +1,4 @@
+import type { AgentMessageDraftStore } from '../agent-message-draft';
 import type { CollectExpiredInput, CollectExpiredResult } from '@byok-sdk/core';
 import type { HarnessInfo } from '@byok-sdk/protocol';
 /**
@@ -731,6 +732,7 @@ export interface InboundRateLimiter {
 export interface CloudStores {
   readonly activity: ActivityStore;
   readonly approvals: ApprovalTimelineStore;
+  readonly agentMessageDraft: AgentMessageDraftStore;
   readonly devices: DeviceDirectory;
   readonly pairingCodes: PairingCodeStore;
   readonly pairing: PairingEnrollment;
@@ -749,6 +751,7 @@ export interface CloudStores {
 export const CLOUD_STORE_NAMES = [
   'activity',
   'approvals',
+  'agentMessageDraft',
   'devices',
   'pairingCodes',
   'pairing',

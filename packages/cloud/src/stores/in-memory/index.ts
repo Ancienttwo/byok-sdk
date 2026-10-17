@@ -1,3 +1,5 @@
+import { InMemoryAgentMessageDraftStore } from './agent-message-draft';
+export { InMemoryAgentMessageDraftStore } from './agent-message-draft';
 /**
  * The in-memory reference implementation of every cloud-local port.
  *
@@ -75,6 +77,7 @@ export function createInMemoryCloudStores(
     stores: {
       activity: new InMemoryActivityStore(clock),
       approvals: new InMemoryApprovalTimelineStore(clock),
+      agentMessageDraft: new InMemoryAgentMessageDraftStore(clock),
       devices,
       // One code/device authority, projected into issuance and consumption
       // ports so neither side exposes the other's methods.

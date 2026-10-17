@@ -225,6 +225,7 @@ describe('the public surface', () => {
     expect([...publicApi.CLOUD_STORE_NAMES]).toEqual([
       'activity',
       'approvals',
+      'agentMessageDraft',
       'devices',
       'pairingCodes',
       'pairing',

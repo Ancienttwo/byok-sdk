@@ -1,3 +1,5 @@
+import { PostgresAgentMessageDraftStore } from './agent-message-draft';
+export { PostgresAgentMessageDraftStore } from './agent-message-draft';
 /**
  * The Postgres composition of the cloud-local ports.
  *
@@ -129,6 +131,7 @@ export async function createPostgresCloudStores(
   return {
     activity: new PostgresActivityStore(pool, clock),
     approvals: new PostgresApprovalTimelineStore(pool, clock),
+    agentMessageDraft: new PostgresAgentMessageDraftStore(pool, clock),
     devices,
     // One durable code authority, projected into issuance and enrollment ports
     // so consumers cannot reopen the old redeem-then-register sequence.

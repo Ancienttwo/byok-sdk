@@ -18,6 +18,7 @@ import type { CloudStoreName } from './ports';
 
 export const CLOUD_PORT_METHODS: Readonly<Record<CloudStoreName, readonly string[]>> = {
   activity: ['append', 'read', 'collectExpired'],
+  agentMessageDraft: ['apply', 'read', 'delete', 'sweepExpired'],
   approvals: ['append', 'read', 'resolvePending', 'collectExpired'],
   devices: ['register', 'get', 'revoke', 'list', 'readiness', 'recordCapabilities', 'resolveByDeviceId'],
   pairingCodes: ['issue', 'collectExpired'],
@@ -52,6 +53,7 @@ export const CLOUD_PORT_METHODS: Readonly<Record<CloudStoreName, readonly string
 /** The interface each port name is declared as, for a source-side scan. */
 export const CLOUD_PORT_INTERFACES: Readonly<Record<CloudStoreName, string>> = {
   activity: 'ActivityStore',
+  agentMessageDraft: 'AgentMessageDraftStore',
   approvals: 'ApprovalTimelineStore',
   devices: 'DeviceDirectory',
   pairingCodes: 'PairingCodeStore',

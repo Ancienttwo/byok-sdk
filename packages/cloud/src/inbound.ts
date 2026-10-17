@@ -1,3 +1,4 @@
+import { readTaskAgentMessageBinding } from './task-agent-message';
 import { taskOfferMessageId, hashOfferBytes } from './offer-identity';
 /**
  * The single inbound choke point for every daemon -> cloud envelope.
@@ -44,6 +45,7 @@ import {
   AGENT_MESSAGE_EGRESS_CAPABILITY,
   AgentContentReadPayloadSchema,
   AgentMessagePublishPayloadSchema,
+  AgentMessageDraftPayloadSchema,
   AgentMessageDispositionPayloadSchema,
   DAEMON_TO_SERVER_TYPES,
   decodeEnvelope,
@@ -101,6 +103,8 @@ export const INBOUND_REFUSAL_REASONS = [
   'hello_protocol_version_unsupported',
   'hello_product_mismatch',
   'hello_capabilities_not_recorded',
+  // agent.message.draft
+  'agent_message_draft_invalid',
   // agent.message.publish
   'agent_message_attempt_mismatch',
   'agent_message_offer_binding_missing',
@@ -246,7 +250,10 @@ export async function handleAgentMessagePublish(
   // an already-consumed side effect remains a replay even when the task has
   // subsequently become complete or cancellation-requested.
   const priorDisposition = await readAgentMessageDisposition(stores, deviceId, taskId, payload);
-  if (priorDisposition !== undefined) return { outcome: 'duplicate', disposition: priorDisposition };
+  if (priorDisposition !== undefined) {
+    if (priorDisposition.outcome === 'refused') await stores.agentMessageDraft.delete(taskId);
+    return { outcome: 'duplicate', disposition: priorDisposition };
+  }
 
   if (alreadyDeduplicated) return refuse('agent_message_already_deduplicated');
 
@@ -288,6 +295,7 @@ export async function handleAgentMessagePublish(
   const terminal = admission?.terminalBody === undefined
     ? undefined
     : parseAgentMessageDisposition(payload, admission.terminalBody);
+  if (terminal?.outcome === 'refused') await stores.agentMessageDraft.delete(taskId);
   return terminal === undefined ? refuse('agent_message_admission_unconfirmed') : { outcome: 'accepted', disposition: terminal };
 }
 
@@ -456,10 +464,11 @@ export async function handleInboundEnvelope(
   activityBounds: ActivityBounds = DEFAULT_ACTIVITY_BOUNDS,
   agentMessageConsume?: Parameters<typeof handleAgentMessagePublish>[4],
   observer?: ByokCloudObserver,
+  now: string = new Date().toISOString(),
 ): Promise<InboundResult> {
   // Everything that decides the outcome lives in a helper typed Promise<InboundResult>,
   // so a 'rejected' cannot reach the exit below without a reason for the observer.
-  const result = await resolveInboundResult(stores, deviceId, envelope, activityBounds, agentMessageConsume);
+  const result = await resolveInboundResult(stores, deviceId, envelope, activityBounds, agentMessageConsume, now);
   const { outcome } = result;
   // One notification per envelope, at the ONE exit the gate has. Firing from
   // the gate's own return points instead would have to be repeated at each of
@@ -496,11 +505,12 @@ async function resolveInboundResult(
   envelope: Envelope,
   activityBounds: ActivityBounds,
   agentMessageConsume: Parameters<typeof handleAgentMessagePublish>[4] | undefined,
+  now: string,
 ): Promise<InboundResult> {
   // This exported entrypoint can be called without the HTTP schema boundary.
   // Refuse before reserving an envelope identity or mutating task lifecycle.
   if (envelope.v !== PROTOCOL_VERSION) return refuse('protocol_version_unsupported');
-  return applyInboundGate(stores, deviceId, envelope, activityBounds, agentMessageConsume);
+  return applyInboundGate(stores, deviceId, envelope, activityBounds, agentMessageConsume, now);
 }
 
 async function applyInboundGate(
@@ -509,6 +519,7 @@ async function applyInboundGate(
   envelope: Envelope,
   activityBounds: ActivityBounds,
   agentMessageConsume: Parameters<typeof handleAgentMessagePublish>[4] | undefined,
+  now: string,
 ): Promise<InboundResult> {
   if (!(await stores.rateLimiter.consume(deviceId))) return { outcome: 'rate_limited' };
 
@@ -532,6 +543,26 @@ async function applyInboundGate(
   }
 
   if (!(DAEMON_TO_SERVER_TYPES as readonly MessageType[]).includes(envelope.type)) return refuse('type_not_allowed');
+
+  if (envelope.type === 'agent.message.draft') {
+    const parsed = AgentMessageDraftPayloadSchema.safeParse(envelope.payload);
+    if (!parsed.success) return refuse('agent_message_draft_invalid');
+    let binding;
+    try { binding = await readTaskAgentMessageBinding(stores, deviceId, envelope.task_id, parsed.data.agentRef); }
+    catch { return refuse('agent_message_draft_invalid'); }
+    if (binding === undefined
+      || await stores.tasks.readTaskAgentMessage({ taskId: envelope.task_id, deviceId }) !== undefined
+      || await stores.receipts.get(terminalReceiptKey(envelope.task_id)) !== undefined) return refuse('agent_message_draft_invalid');
+    await stores.agentMessageDraft.apply({ ...parsed.data, taskId: envelope.task_id, deviceId,
+      maxBytes: binding.frozen.requirement.maxBytes, now });
+    // A terminal or publish may commit while this ephemeral write is in flight.
+    // Recheck after apply so that lifecycle deletion cannot leave a late row.
+    if (await stores.receipts.get(terminalReceiptKey(envelope.task_id)) !== undefined
+      || await stores.tasks.readTaskAgentMessage({ taskId: envelope.task_id, deviceId }) !== undefined) {
+      await stores.agentMessageDraft.delete(envelope.task_id);
+    }
+    return completeInboundEnvelope(stores, deviceId, envelope.id, parsed.data.agentRef);
+  }
 
   if (envelope.type === 'agent.message.publish') {
     const message = await handleAgentMessagePublish(
@@ -846,6 +877,7 @@ async function recordTerminal(
   if (winner === undefined) {
     throw new Error(`terminal receipt for ${taskId} is not a canonical terminal binding`);
   }
+  await stores.agentMessageDraft.delete(taskId);
   const attempt = await stores.tasks.get(taskId);
   if (attempt?.cancellation !== undefined) {
     // A cancellation tombstone is the effective product authority even when

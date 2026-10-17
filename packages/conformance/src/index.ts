@@ -48,3 +48,6 @@ export type {
 export { runCoreRetentionConformance } from './core/retention';
 
 export { runCloudRetentionConformance } from './cloud/retention';
+
+export { runAgentMessageDraftConformance } from './cloud/agent-message-draft';
+export type { AgentMessageDraftCompositionHandle, AgentMessageDraftCompositionFactory } from './cloud/agent-message-draft';

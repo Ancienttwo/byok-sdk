@@ -21,7 +21,7 @@ export const DEFAULT_RETENTION_POLICY: RetentionPolicy = Object.freeze({
 export const DEFAULT_MAINTENANCE_LIMIT = 500;
 export const MAINTENANCE_STEPS = Object.freeze([
   'mailbox', 'receipts', 'nonces', 'pairingCodes', 'presence',
-  'activity', 'approvals', 'deviceAssertionReplay', 'quota', 'objects',
+  'activity', 'approvals', 'agentMessageDraft', 'deviceAssertionReplay', 'quota', 'objects',
 ] as const);
 export type MaintenanceStep = typeof MAINTENANCE_STEPS[number];
 export type MaintenanceStepReport =
@@ -36,7 +36,8 @@ export type MaintenanceStepReport =
       /** Absent when a failed remainder probe left this unknown. */
       readonly more?: boolean;
     }
-  | { readonly step: 'deviceAssertionReplay'; readonly status: 'not-configured' };
+  | { readonly step: 'deviceAssertionReplay'; readonly status: 'not-configured' }
+  | { readonly step: 'agentMessageDraft'; readonly status: 'ok' };
 export interface MaintenanceReport {
   readonly tenantId: TenantId;
   /** Caller-owned cutoff clock; never replaced by the report's execution clock. */
@@ -105,7 +106,7 @@ export async function runMaintenanceSteps(
   const requestBefore = cutoff(policy.requestReceiptRetentionMs);
   const orphanBefore = cutoff(policy.objectOrphanGraceMs);
   const startedAt = ports.clock.now().toISOString();
-  const operations: Record<Exclude<MaintenanceStep, 'deviceAssertionReplay'>, () => Promise<CollectExpiredResult>> = {
+  const operations: Record<Exclude<MaintenanceStep, 'deviceAssertionReplay' | 'agentMessageDraft'>, () => Promise<CollectExpiredResult>> = {
     mailbox: () => ports.core.mailbox.collectExpired(tenant, { ...bounds, ackedBefore, expireUnackedBefore }),
     receipts: () => ports.cloud.receipts.collectExpired(tenant, { ...bounds, requestBefore }),
     nonces: () => ports.cloud.nonces.collectExpired(tenant, bounds),
@@ -123,6 +124,11 @@ export async function runMaintenanceSteps(
       continue;
     }
     try {
+      if (step === 'agentMessageDraft') {
+        await ports.cloud.agentMessageDraft.sweepExpired(now);
+        steps.push({ step, status: 'ok' });
+        continue;
+      }
       const result = step === 'deviceAssertionReplay'
         ? await ports.deviceAssertionReplay!.collectExpired(tenant, bounds)
         : await operations[step]();

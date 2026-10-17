@@ -55,6 +55,7 @@ const WIRE_REFUSAL_REASONS = {
   hello_device_mismatch: 'not_permitted',
   hello_product_mismatch: 'not_permitted',
   hello_capabilities_not_recorded: 'not_permitted',
+  agent_message_draft_invalid: 'not_permitted',
   agent_message_attempt_mismatch: 'not_permitted',
   agent_message_offer_binding_missing: 'not_permitted',
   agent_message_binding_corrupt: 'not_permitted',
@@ -86,6 +87,7 @@ const WIRE_REFUSAL_REASONS = {
 const MESSAGES_JSON_BODY_MAX_BYTES = 2 * 1024 * 1024;
 
 export interface MessagesRouteDeps extends DeviceRouteDeps {
+  readonly clock: import('@byok-sdk/core').Clock;
   readonly activityBounds: ActivityBounds;
   /**
    * The egress fact is committed by the inbound gate first. This callback then
@@ -166,6 +168,7 @@ function batchHandler(deps: MessagesRouteDeps) {
         deps.activityBounds,
         envelope.type === 'agent.message.publish' ? deps.agentMessage?.consume : undefined,
         deps.observer,
+        deps.clock.now().toISOString(),
       );
       const { outcome } = result;
       if (outcome === 'rate_limited') return c.json({ error: 'rate limit exceeded' }, 429);

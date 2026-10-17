@@ -600,6 +600,12 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     );
   });
 
+  it('agent.message.draft', () => {
+    const type = 'agent.message.draft' as const;
+    testedTypes.push(type);
+    roundTrip(type, createEnvelope(type, { agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' }, revision: 1, offset: 0, text: '草稿', overflow: true }, { taskId: 'task-1' }));
+  });
+
   it('agent.message.publish', () => {
     const type = 'agent.message.publish' as const;
     testedTypes.push(type);

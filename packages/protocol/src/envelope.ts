@@ -97,6 +97,7 @@ export const EnvelopeSchema = z.discriminatedUnion('type', [
   envelopeShape('task.cancelled', REQUIRED_TASK_ID, OPTIONAL_SEQ),
   envelopeShape('task.approval_resolved', REQUIRED_TASK_ID, OPTIONAL_SEQ),
   envelopeShape('agent.egress.reliable', OPTIONAL_TASK_ID, OPTIONAL_SEQ),
+  envelopeShape('agent.message.draft', REQUIRED_TASK_ID, OPTIONAL_SEQ),
   envelopeShape('agent.message.publish', REQUIRED_TASK_ID, OPTIONAL_SEQ),
   envelopeShape('agent.content.receipt', OPTIONAL_TASK_ID, OPTIONAL_SEQ),
 ]);

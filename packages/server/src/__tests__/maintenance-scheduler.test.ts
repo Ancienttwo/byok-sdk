@@ -131,7 +131,7 @@ describe('maintenance scheduler', () => {
     const event = events.next();
     try {
       const result = await server.maintenance.runNow();
-      expect(result.steps).toHaveLength(10);
+      expect(result.steps).toHaveLength(11);
       expect(await event).toMatchObject({ value: { kind: 'maintenance.completed', report: result } });
       expect('mailbox' in server).toBe(false);
     } finally { await events.return?.(); await server.close(); }

@@ -70,6 +70,7 @@ function codecRequirednessMatrix(): CodecRequirednessMatrix {
     'task.offer_prepared': { taskId: 'required', seq: 'required' },
     'agent.egress.reliable': { taskId: 'optional', seq: 'optional' },
     'agent.egress.ack': { taskId: 'optional', seq: 'required' },
+    'agent.message.draft': { taskId: 'required', seq: 'optional' },
     'agent.message.publish': { taskId: 'required', seq: 'optional' },
     'agent.message.disposition': { taskId: 'required', seq: 'required' },
     'agent.content.read': { taskId: 'optional', seq: 'required' },
@@ -146,6 +147,10 @@ type CodecRequirednessMatrix = {
   'agent.egress.ack': {
     taskId: FieldRequiredness<'agent.egress.ack', 'taskId'>;
     seq: FieldRequiredness<'agent.egress.ack', 'seq'>;
+  };
+  'agent.message.draft': {
+    taskId: FieldRequiredness<'agent.message.draft', 'taskId'>;
+    seq: FieldRequiredness<'agent.message.draft', 'seq'>;
   };
   'agent.message.publish': {
     taskId: FieldRequiredness<'agent.message.publish', 'taskId'>;
@@ -424,6 +429,8 @@ function minimalPayloadForProbe(type: MessageType): unknown {
         cursor: 1,
         receiptId: '00000000-0000-4000-8000-000000000022',
       };
+    case 'agent.message.draft':
+      return { agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' }, revision: 1, offset: 0, text: 'hello' };
     case 'agent.message.publish':
       return {
         agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },

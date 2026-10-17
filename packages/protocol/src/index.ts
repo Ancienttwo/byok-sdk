@@ -143,6 +143,7 @@ export {
   AgentMessageServerContextSchema,
   AgentMessageEgressRequirementSchema,
   AGENT_MESSAGE_MAX_BYTES,
+  AGENT_MESSAGE_DRAFT_FRAME_MAX_BYTES,
 } from './agent-egress';
 export type {
   AgentEgressPolicy,
@@ -318,6 +319,7 @@ export {
   AgentEgressReliablePayloadSchema,
   AgentEgressAckPayloadSchema,
   AgentMessagePublishPayloadSchema,
+  AgentMessageDraftPayloadSchema,
   AgentMessageDispositionPayloadSchema,
   AgentContentReadPayloadSchema,
   AgentContentReceiptPayloadSchema,
@@ -374,6 +376,7 @@ export type {
   AgentEgressReliablePayload,
   AgentEgressAckPayload,
   AgentMessagePublishPayload,
+  AgentMessageDraftPayload,
   AgentMessageDispositionPayload,
   AgentContentReadPayload,
   AgentContentReceiptPayload,
