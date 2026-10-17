@@ -145,6 +145,22 @@ export interface MapClaudeMessageResult {
  */
 export declare const ROUTINE_CLAUDE_SYSTEM_SUBTYPES: ReadonlySet<string>;
 /**
+ * Claude sends one `assistant` frame per content block, so one message can
+ * span several frames that share `message.id`, and each text block is its
+ * own `progress` event. This records which of those events continue a
+ * message whose non-blank text already started, for
+ * `Session.progressStartsMessage`. Text blocks in one frame always share a
+ * message. Routine `system` frames can arrive mid-message and do not end it;
+ * any other frame does. A frame with no string id never continues an
+ * earlier frame.
+ */
+export declare class AssistantMessageTracker {
+    private readonly continuations;
+    private open;
+    observe(msg: ClaudeStreamMessage, events: readonly AgentEvent[]): void;
+    startsMessage(event: AgentEvent): boolean;
+}
+/**
  * Map one raw claude stream-json line to zero or more normalized
  * `AgentEvent`s (a single `user` frame can produce two: `tool_result` plus
  * a derived `artifact`). See the per-`type` mapping functions above for the
@@ -12645,6 +12661,16 @@ export interface Session {
     sessionRef: string;
     /** Normalized events for this session; the daemon batches these into `task.progress`. */
     events: AsyncIterable<AgentEvent>;
+    /**
+     * For an adapter whose descriptor sets `progressEventsAreMessages` but
+     * emits one assistant message as several `progress` events. Return false
+     * when `event`, an object this session's `events` yielded, continues the
+     * message of an earlier event: the daemon then keeps both in the same
+     * closing reply. Absent: every non-blank `progress` event starts a message.
+     */
+    progressStartsMessage?(event: Extract<AgentEvent, {
+        type: 'progress';
+    }>): boolean;
     /** Inject steering text into a running turn (mid-stream). */
     steer(text: string): Promise<void>;
     /** Send a new instruction on the same session after it has gone idle. */
