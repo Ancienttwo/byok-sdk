@@ -93,6 +93,22 @@ describe('TaskRunner task.complete.finalMessage (#322)', () => {
     }
   });
 
+  it('keeps every text block of one Claude message in the closing reply', async () => {
+    vi.stubEnv('FAKE_CLAUDE_SPLIT_CLOSING_TEXT', '1');
+    try {
+      const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: CLAUDE_FIXTURE, source: 'path' }) });
+      const sent: Envelope[] = [];
+      const runner = await makeRunner(adapter, sent);
+      await startTask(runner, 'claude-split-reply', 'claude');
+
+      const payload = await completion(sent, 'claude-split-reply');
+      expect(payload.finalMessage).toMatch(/^reply-1:.*CONSOLIDATED$/);
+      expect(payload.summary).toBe(payload.finalMessage);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('separates the last whole message from commentary that came before it without a tool call', async () => {
     const adapter = wholeMessageAdapter();
     const sent: Envelope[] = [];

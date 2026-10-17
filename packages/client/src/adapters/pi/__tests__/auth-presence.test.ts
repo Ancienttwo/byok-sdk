@@ -1,5 +1,7 @@
 /** Pi's non-secret login-state observation (`authPresent`), on both detect paths. */
 import { promises as fs } from 'node:fs';
+import childProcess from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -128,6 +130,31 @@ describe('probePiAuthPresent: models.json provider apiKey', () => {
       await expect(probe(), apiKey).resolves.toBe(true);
     }
     await expect(fs.access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  test.each(['auth.json', 'models.json'] as const)('%s command key does not spawn a child process', async (file) => {
+    await write('settings.json', { defaultProvider: 'openai' });
+    const apiKey = '!echo byok-auth-presence-fixture';
+    await write(file, file === 'auth.json'
+      ? { openai: { type: 'api_key', key: apiKey } }
+      : { providers: { openai: { apiKey } } });
+    const spies = [
+      vi.spyOn(childProcess, 'spawn'),
+      vi.spyOn(childProcess, 'spawnSync'),
+      vi.spyOn(childProcess, 'exec'),
+      vi.spyOn(childProcess, 'execSync'),
+      vi.spyOn(childProcess, 'execFile'),
+      vi.spyOn(childProcess, 'execFileSync'),
+      vi.spyOn(childProcess, 'fork'),
+    ];
+    syncBuiltinESMExports();
+    try {
+      await expect(probe()).resolves.toBe(true);
+      for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+      syncBuiltinESMExports();
+    }
   });
 
   test('a configured defaultProvider must itself carry the apiKey; with no default any provider does', async () => {

@@ -745,7 +745,8 @@ interface ActiveTask {
    * The same slice is `task.complete.finalMessage`, so the host reads the same closing reply
    * the daemon would publish. An adapter whose descriptor sets
    * `progressEventsAreMessages` (Codex, Claude) also resets it at each `progress`
-   * event, so the slice is that runtime's last whole message.
+   * event that `Session.progressStartsMessage` does not mark as a
+   * continuation, so the slice is that runtime's last whole message.
    *
    * `turn_end` deliberately does not reset (it is what reads this), and
    * neither does `usage`: bundled adapters emit terminal usage IMMEDIATELY
@@ -4257,7 +4258,10 @@ export class TaskRunner {
         if (event.type === 'progress') {
           active.summaryParts.push(event.text);
           // A blank whole message must not erase the reply that came before it.
-          if (active.adapter.descriptor.progressEventsAreMessages === true && event.text.trim() !== '') {
+          if (
+            active.adapter.descriptor.progressEventsAreMessages === true && event.text.trim() !== ''
+            && active.session.progressStartsMessage?.(event) !== false
+          ) {
             active.finalTextParts.length = 0;
           }
           active.finalTextParts.push(event.text);

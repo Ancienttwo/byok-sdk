@@ -122,6 +122,11 @@
 //   FAKE_CLAUDE_UNKNOWN_ASSISTANT_BLOCK=1 -> the assistant's final message
 //                                          includes one extra content block
 //                                          of an unrecognized `type`.
+//   FAKE_CLAUDE_SPLIT_CLOSING_TEXT=1    -> send the final message as one
+//                                          frame per content block, as real
+//                                          claude does, with its text split
+//                                          across two text blocks of the
+//                                          same message id.
 //   FAKE_CLAUDE_REPEAT_CLOSING_TEXT=1   -> after the final message, send a
 //                                          second assistant message (new id)
 //                                          with the same text and no tool
@@ -513,7 +518,16 @@ function runProbeOrTurnFlow() {
     if (process.env.FAKE_CLAUDE_UNKNOWN_ASSISTANT_BLOCK === '1' && turn === 1) {
       content.push({ type: 'totally_novel_block_type', payload: 'x' });
     }
-    send({ type: 'assistant', message: { model: 'fake-model', id: `msg_${turn}b`, role: 'assistant', content }, session_id: reportedSessionId });
+    if (process.env.FAKE_CLAUDE_SPLIT_CLOSING_TEXT === '1') {
+      const half = Math.ceil(finalText.length / 2);
+      const blocks = [content[0], { type: 'text', text: finalText.slice(0, half) }, { type: 'text', text: finalText.slice(half) }];
+      for (const block of blocks) {
+        send({ type: 'system', subtype: 'thinking_tokens', session_id: reportedSessionId });
+        send({ type: 'assistant', message: { model: 'fake-model', id: `msg_${turn}b`, role: 'assistant', content: [block] }, session_id: reportedSessionId });
+      }
+    } else {
+      send({ type: 'assistant', message: { model: 'fake-model', id: `msg_${turn}b`, role: 'assistant', content }, session_id: reportedSessionId });
+    }
     if (process.env.FAKE_CLAUDE_REPEAT_CLOSING_TEXT === '1') {
       send({ type: 'assistant', message: { model: 'fake-model', id: `msg_${turn}c`, role: 'assistant', content: [{ type: 'text', text: finalText }] }, session_id: reportedSessionId });
     }

@@ -1195,6 +1195,11 @@ resolved name/version mismatch fails closed. There is no implicit global Pi fall
 Only public Pi APIs are used; private imports, patches, copied provider serializers
 or Session core, and global monkey-patches are forbidden.
 
+Upstream RAFT also embeds the Pi SDK and inherits the user's agent directory.
+It does not run the user's installed pi CLI (RAFT mirror commit
+`26f77ef97c40d3d91aa2c5e42b0fd66b8bf39fe6`). byok keeps the same split and
+runs Pi in a child-process host.
+
 The checked official provenance record (`official-pi-closure.json`) binds the
 name, version, tarball SHA-512 integrity, signed provenance and upstream commit of
 each of the nine official packages at the pinned release. It holds no file

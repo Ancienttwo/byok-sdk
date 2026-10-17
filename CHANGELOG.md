@@ -3,13 +3,31 @@
 ## Unreleased
 
 - **Fix (client; #501)** — the Claude adapter declares
-  `progressEventsAreMessages`. Each Claude `progress` event is one complete
-  text block, so the closing reply is now the last non-blank text block.
-  Before, a run that repeated its answer in a later model call with no tool
-  between published the answer twice in the daemon-authored Agent message
-  and in `task.complete.finalMessage`. Earlier text blocks with no tool
-  between them are now commentary, as for Codex. `summary` still carries the
-  whole run's text.
+  `progressEventsAreMessages`, so the closing reply is now the last non-blank
+  assistant message. Before, a run that repeated its answer in a later model
+  call with no tool between published the answer twice in the
+  daemon-authored Agent message and in `task.complete.finalMessage`. Earlier
+  messages with no tool between them are now commentary, as for Codex.
+  `summary` still carries the whole run's text.
+
+- **Feature (client)** — `Session` gains optional
+  `progressStartsMessage(event)`. An adapter that sets
+  `progressEventsAreMessages` but emits one message as several `progress`
+  events returns false for a continuation. The daemon then keeps every part
+  in the same closing reply. Claude sends one stream-json frame per content
+  block, so the Claude session uses `message.id` to join the text blocks of
+  one message. `progress` events still reach the wire as each block
+  arrives. Without the method, every non-blank `progress` event starts a
+  message, as before.
+
+- **Fixed (client)** — Pi dependency errors now direct hosts to reinstall
+  dependencies or use `sdkHelperHost` with `copyPiRuntimeAssets`.
+  `BYOK_PI_BIN` remains a test and e2e seam. The spec records the RAFT SDK
+  comparison. The security guide now lists all three files read by the auth
+  probe. The probe keeps its current implementation because the pinned Pi
+  1.2.0 `ModelRuntime.create` can execute stored `!command` keys even with
+  `allowModelNetwork: false`. New tests assert that the probe spawns no child
+  process for command keys in `auth.json` or `models.json`.
 
 ## 0.27.0-rc.2 / @byok-sdk/keys 0.12.0-rc.2 — 2026-10-16 (published)
 
