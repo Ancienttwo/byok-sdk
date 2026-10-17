@@ -27,6 +27,7 @@
 --   deploy/sql/0023_mailbox_usage_index.sql (tenant-leading covering index for derived mailbox usage; no new table)
 --   deploy/sql/0024_mailbox_wake.sql (post-commit outbox wake trigger; no new table)
 --   deploy/sql/0025_drop_storage_usage_mailbox_bytes.sql (drops the retired storage_usage counter column; no new table or key)
+--   deploy/sql/0026_agent_message_draft.sql (ephemeral tenant-first Agent message draft snapshot; one row per task)
 --
 -- Every migration must be claimed here. `check-deploy-sql-order` enforces that
 -- the moment this file exists, and the friction is the point: a new table has
@@ -193,6 +194,111 @@ BEGIN
     RAISE EXCEPTION
       'agent_message_admission must not impose device-wide message uniqueness, found %',
       message_unique_columns;
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 0.10 Agent message draft snapshot is tenant-first, ephemeral and keyless
+-- ---------------------------------------------------------------------------
+--
+-- 0026 adds one display-only snapshot row per task. The accepted Agent message
+-- stays the only product truth, so this table may carry no second message key:
+-- its primary key is the task under its tenant, and the only other index is
+-- the non-unique expiry sweep that keeps the row ephemeral.
+DO $$
+DECLARE
+  missing_columns text;
+  primary_key_columns text[];
+  unique_columns text[];
+  expiry_index_unique boolean;
+BEGIN
+  SELECT string_agg(required.column_name, ', ' ORDER BY required.column_name)
+    INTO missing_columns
+    FROM (
+      VALUES
+        ('tenant_id'::text, 'text'::regtype),
+        ('task_id'::text, 'text'::regtype),
+        ('device_id'::text, 'text'::regtype),
+        ('agent_ref'::text, 'jsonb'::regtype),
+        ('revision'::text, 'bigint'::regtype),
+        ('text'::text, 'text'::regtype),
+        ('byte_count'::text, 'integer'::regtype),
+        ('state'::text, 'text'::regtype),
+        ('updated_at'::text, 'timestamptz'::regtype),
+        ('expires_at'::text, 'timestamptz'::regtype)
+    ) AS required(column_name, type_oid)
+   WHERE NOT EXISTS (
+      SELECT 1
+        FROM pg_class t
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        JOIN pg_attribute a ON a.attrelid = t.oid
+       WHERE n.nspname = current_schema()
+         AND t.relname = 'agent_message_draft'
+         AND a.attname = required.column_name
+         AND a.atttypid = required.type_oid
+         AND a.attnotnull
+         AND a.attnum > 0
+         AND NOT a.attisdropped
+    );
+
+  IF missing_columns IS NOT NULL THEN
+    RAISE EXCEPTION
+      'control-plane invariants ran without complete 0026_agent_message_draft.sql: missing/non-required column(s): %',
+      missing_columns;
+  END IF;
+
+  SELECT array_agg(a.attname ORDER BY key_columns.ordinality)
+    INTO primary_key_columns
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS key_columns(attnum, ordinality)
+    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = key_columns.attnum
+   WHERE n.nspname = current_schema()
+     AND t.relname = 'agent_message_draft'
+     AND c.contype = 'p';
+
+  IF primary_key_columns IS DISTINCT FROM ARRAY['tenant_id', 'task_id']::text[] THEN
+    RAISE EXCEPTION
+      'agent_message_draft primary key must be (tenant_id, task_id), found %',
+      primary_key_columns;
+  END IF;
+
+  SELECT array_agg(a.attname ORDER BY key_columns.ordinality)
+    INTO unique_columns
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS key_columns(attnum, ordinality)
+    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = key_columns.attnum
+   WHERE n.nspname = current_schema()
+     AND t.relname = 'agent_message_draft'
+     AND c.contype = 'u';
+
+  IF unique_columns IS NOT NULL THEN
+    RAISE EXCEPTION
+      'agent_message_draft must not carry a second message key, found unique constraint on %',
+      unique_columns;
+  END IF;
+
+  SELECT x.indisunique
+    INTO expiry_index_unique
+    FROM pg_index x
+    JOIN pg_class i ON i.oid = x.indexrelid
+    JOIN pg_class t ON t.oid = x.indrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+   WHERE n.nspname = current_schema()
+     AND t.relname = 'agent_message_draft'
+     AND i.relname = 'agent_message_draft_expiry';
+
+  IF expiry_index_unique IS NULL THEN
+    RAISE EXCEPTION
+      'agent_message_draft needs its non-unique expiry sweep index agent_message_draft_expiry (expires_at)';
+  END IF;
+
+  IF expiry_index_unique THEN
+    RAISE EXCEPTION
+      'agent_message_draft_expiry must stay non-unique: expiry is a sweep order, not an identity';
   END IF;
 END $$;
 
