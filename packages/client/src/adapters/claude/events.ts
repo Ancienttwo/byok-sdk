@@ -474,6 +474,38 @@ function toNonNegativeInt(value: unknown): number | undefined {
 }
 
 /**
+ * Claude sends one `assistant` frame per content block, so one message can
+ * span several frames that share `message.id`, and each text block is its
+ * own `progress` event. This records which of those events continue a
+ * message whose non-blank text already started, for
+ * `Session.progressStartsMessage`. Text blocks in one frame always share a
+ * message. Routine `system` frames can arrive mid-message and do not end it;
+ * any other frame does. A frame with no string id never continues an
+ * earlier frame.
+ */
+export class AssistantMessageTracker {
+  private readonly continuations = new WeakSet<AgentEvent>();
+  private open: { messageId: string | undefined } | undefined;
+
+  observe(msg: ClaudeStreamMessage, events: readonly AgentEvent[]): void {
+    const id = msg.type === 'assistant' ? (msg.message as { id?: unknown } | undefined)?.id : undefined;
+    const messageId = typeof id === 'string' ? id : undefined;
+    const continues = msg.type === 'assistant' && messageId !== undefined && this.open?.messageId === messageId;
+    if (!continues && msg.type !== 'system') this.open = undefined;
+    if (msg.type !== 'assistant') return;
+    for (const event of events) {
+      if (event.type !== 'progress') continue;
+      if (this.open !== undefined) this.continuations.add(event);
+      else if (event.text.trim() !== '') this.open = { messageId };
+    }
+  }
+
+  startsMessage(event: AgentEvent): boolean {
+    return !this.continuations.has(event);
+  }
+}
+
+/**
  * Map one raw claude stream-json line to zero or more normalized
  * `AgentEvent`s (a single `user` frame can produce two: `tool_result` plus
  * a derived `artifact`). See the per-`type` mapping functions above for the
