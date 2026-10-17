@@ -52,8 +52,10 @@ its [publication record](../../docs/releases/v0.26.1-publication.md). The owner
 approved the prerelease 0.27.0-rc.2 / keys 0.12.0-rc.2 under the dist-tag `rc`
 on 2026-10-16, rc first. It replaces 0.27.0-rc.1, which was prepared but never
 published, and adds the fixes of #493 and #496. It is the first wire-v3 train.
-It is not published; npm execution approval remains separate. See the
-[0.27.0 release notes](../../docs/releases/v0.27.0.md).
+All nine rc.2 packages are published and read back on `rc`, from `v0.27.0-rc.2`
+(`b8f47f02`). See its
+[rc.2 publication record](../../docs/releases/v0.27.0-rc.2-publication.md) and
+the [0.27.0 release notes](../../docs/releases/v0.27.0.md).
 
 The SDK publishes npm libraries, the `byok-agent` CLI and reference packaging/service recipes. The host product owns every binary distribution decision:
 

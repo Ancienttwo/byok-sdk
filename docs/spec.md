@@ -179,9 +179,9 @@ authorization and registry readback. The current independent keys release is
 dispatch release, `0.27.0-rc.2`, proven from an isolated standard npm install rather
 than the workspace graph.
 
-The 0.27.0-rc.2 train is a prepared prerelease, not yet published. The owner
-approved 0.27.0-rc.2 / keys 0.12.0-rc.2 under the dist-tag `rc` on 2026-10-16;
-npm execution is a separate step. rc.2 replaces 0.27.0-rc.1, which was prepared
+The 0.27.0-rc.2 train is published on `rc`. The owner approved
+0.27.0-rc.2 / keys 0.12.0-rc.2 under the dist-tag `rc` on 2026-10-16; complete
+registry readback passed on 2026-10-17. rc.2 replaces 0.27.0-rc.1, which was prepared
 but never published. rc.2 adds the short default scratch root (#493) and the
 home-busy `code` on the server `TaskResult` (#496). `latest` stays 0.26.1 / keys 0.11.1,
 and the reviewed registry baseline records that prior `latest` for all nine
