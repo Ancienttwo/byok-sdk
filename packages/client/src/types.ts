@@ -55,6 +55,8 @@ export type RuntimeDetectionRefusalReason = 'app_server_unavailable';
 
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
+  /** Supports display-only Agent message drafts. Omission means unsupported. */
+  readonly messageDraft?: boolean;
   /** Local native interaction support only; omission is unsupported. Not the remote boolean approval lane. */
   readonly nativeInteractions?: NativeInteractionCapabilities;
   /** Local adapter advertisement; no new protocol field or capability vocabulary. */
@@ -505,6 +507,7 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
       resume: descriptor.capabilities.resume === true,
       approvalInteractive: descriptor.capabilities.approvalInteractive === true,
       ...(descriptor.capabilities.mcpToolsets === undefined ? {} : { mcpToolsets: descriptor.capabilities.mcpToolsets === true }),
+      ...(descriptor.capabilities.messageDraft === undefined ? {} : { messageDraft: descriptor.capabilities.messageDraft === true }),
     }),
   });
 }

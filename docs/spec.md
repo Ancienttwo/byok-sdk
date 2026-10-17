@@ -2550,6 +2550,13 @@ server advertises `agent-message-draft`. `RuntimeCapabilities.messageDraft` is
 optional discovery and claim data. A runtime without this capability sends no
 draft frames.
 
+The daemon reconciles the draft to the published body with a final revision
+before `agent.message.publish` when the text differs.
+The draft and the closing reply share one message-boundary decision for each
+progress event.
+An unpaired surrogate in runtime text is projected to U+FFFD in the draft;
+the accepted body is unchanged.
+
 Each strict frame carries `agentRef`, a positive integer `revision`, a UTF-8
 byte `offset`, and `text` of at most 16 KiB. `overflow?: true` marks the last
 frame at the frozen offer's `messageEgress.maxBytes` limit. Cloud checks the

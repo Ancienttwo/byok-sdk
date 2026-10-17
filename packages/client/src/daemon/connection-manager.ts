@@ -450,7 +450,13 @@ export class ConnectionManager {
         if (this.state !== 'open' || this.isEnded()) return;
 
         const generation = this.sessionGeneration;
-        const batch = this.outbox.splice(0, MAX_MESSAGES_PER_BATCH);
+        let batch = this.outbox.splice(0, MAX_MESSAGES_PER_BATCH);
+        // serveSession applies handshake capabilities before opening this drain.
+        // Re-gate queued drafts after reconnect; dropped drafts have no receipt.
+        if (!this.serverCapabilities.includes('agent-message-draft')) {
+          batch = batch.filter(envelope => envelope.type !== 'agent.message.draft');
+        }
+        if (batch.length === 0) continue;
         // Finding F5(b): tracked for the DURATION of the `postBatch` await —
         // `batch` has already left `this.outbox` (spliced out above) but
         // isn't confirmed delivered yet, so a plain `this.outbox.length`

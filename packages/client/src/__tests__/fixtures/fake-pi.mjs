@@ -14,6 +14,10 @@
 // silently passing.
 //
 // Env toggles:
+//   FAKE_PI_REPLY_GATE=<dir>     -> after each reply delta, wait for the Host
+//                                    to create `next` or `finish` in this dir.
+//                                    Tests can read each real draft before
+//                                    the next delta or terminal is emitted.
 //   FAKE_PI_NO_KEY=1              -> `prompt` responds success:false, mirroring
 //                                    pi's real "No API key found..." rejection.
 //   FAKE_PI_VERSION=<text>        -> overrides the `--version` output.
@@ -91,7 +95,7 @@
 //                                    is still alive. See
 //                                    ./process-tree-descendant.mjs.
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { spawnProcessTreeDescendant } from './process-tree-receipt.mjs';
@@ -178,6 +182,12 @@ const rl = createInterface({ input: process.stdin, terminal: false });
 
 function send(obj) {
   process.stdout.write(`${JSON.stringify(obj)}\n`);
+}
+
+async function waitForReplyGate(name) {
+  const gate = process.env.FAKE_PI_REPLY_GATE;
+  if (!gate) return;
+  while (!existsSync(path.join(gate, name))) await new Promise(resolve => setTimeout(resolve, 10));
 }
 
 /** id -> resolve function, for extension_ui_request/response correlation (see FAKE_PI_EXTENSION_UI_REQUEST above). */
@@ -321,6 +331,7 @@ async function handleCommand(msg) {
         message: {},
         assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: finalTextPart1 },
       });
+      await waitForReplyGate('next');
       if (finalTextPart2) {
         send({
           type: 'message_update',
@@ -328,6 +339,7 @@ async function handleCommand(msg) {
           assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: finalTextPart2 },
         });
       }
+      await waitForReplyGate('finish');
       send({
         type: 'message_update',
         message: {},
