@@ -296,6 +296,13 @@ gain the OPTIONAL `agentHomeMemoryChange` evidence of a reader Attempt. No flag
 gates the terminal field: it is observability only, and an older server strips
 it. The frozen fingerprint golden was regenerated for these additive changes.
 
+**Agent message drafts (additive v3).** `agent.message.draft` is gated on the
+server's `agent-message-draft` flag. Its payload is strict. It has no reliable
+ack or spool entry. `RuntimeCapabilities.messageDraft` is optional strip-safe
+information in runtime/harness discovery and the claim snapshot. The three
+paths name one shared field in `WIRE_ADDITIONS`. See the
+[Agent message draft lane](spec.md#agent-message-draft-lane).
+
 ## 1. Envelope
 
 Every wire message is a single-line NDJSON envelope:
@@ -435,6 +442,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `task.fail` | D→S | **required** | optional | `reason`, `retryable?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` | Task ends in error |
 | `task.cancelled` | D→S | **required** | optional | `reason?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` | Task ends `Cancelled` (server- or daemon-initiated) |
 | `task.approval_resolved` | D→S | **required** | optional | `approvalId`, `decision` (`'approve'\|'reject'`), `resolvedBy` (`'local'`), `at` | A pending approval was resolved entirely on the device (§5.2) — gated on the `approval_resolved` capability flag |
+| `agent.message.draft` | D→S | **required** | optional | `agentRef`, `revision`, UTF-8 `offset`, `text` (≤ 16 KiB), `overflow?: true` | Display-only snapshot frames; server-advertised `agent-message-draft` gate |
 | `agent.egress.reliable` | D→S | optional | optional | exact Agent/session/policy identity, stable `eventId`/`cursor`, payload hash and byte count | A locally fsynced reliable event is sent or retried |
 | `agent.content.receipt` | D→S | optional | optional | exact request/actor/Agent/session/runtime/cwd/policy/target/MIME/decode identity; allowed includes hash/size/BlobRef, denied includes zero bytes and typed reason | Local content policy and audit completed |
 

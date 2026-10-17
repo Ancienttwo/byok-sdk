@@ -132,6 +132,7 @@ export const CAPABILITY_FLAGS = [
   MAILBOX_READ_AHEAD_CAPABILITY,
   PROVIDER_PROVISIONING_CAPABILITY,
   AGENT_MEMORY_INTENT_CAPABILITY,
+  'agent-message-draft',
 ] as const;
 
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];

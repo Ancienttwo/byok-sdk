@@ -291,12 +291,29 @@ describe('compat v3: the current decoder reads every v3 corpus line exactly (sel
 function carries(line: CorpusLine, entry: WireAddition): boolean {
   if (entry.kind !== 'envelope' || line.type !== entry.surface) return false;
   if (entry.field === undefined) return true;
-  const value = line.payload[entry.field];
+  const values = entry.field.split('.').reduce<unknown[]>((parents, segment) => parents.flatMap(parent => {
+    if (parent === null || typeof parent !== 'object') return [];
+    const array = segment.endsWith('[]');
+    const value = (parent as Record<string, unknown>)[array ? segment.slice(0, -2) : segment];
+    return array ? (Array.isArray(value) ? value : []) : [value];
+  }), [line.payload]);
+  const value = values.find(value => value !== undefined);
   if (value === undefined) return false;
   return entry.rule !== 'gated' || entry.value === undefined || value === entry.value;
 }
 
 describe('compat v3: corpus coverage and WIRE_ADDITIONS', () => {
+  it('strips the optional messageDraft runtime field in the previous capability reader', () => {
+    expect(previousRelease.RuntimeCapabilitiesSchema.parse({ steer: true, messageDraft: true })).toEqual({ steer: true });
+  });
+
+  it('declares exactly one server gate for draft frames', () => {
+    expect(WIRE_ADDITIONS.filter(entry => entry.surface === 'agent.message.draft')).toEqual([
+      { kind: 'envelope', rule: 'gated', surface: 'agent.message.draft', capability: 'agent-message-draft', advertisedBy: 'server' },
+    ]);
+    expect(requiredReceiverCapabilities('agent.message.draft', {})).toEqual(['agent-message-draft']);
+  });
+
   it('every message type appears in the v3 corpus', () => {
     const seen = new Set(v3Corpus.map((line) => line.type));
     expect(MESSAGE_TYPES.filter((type) => !seen.has(type))).toEqual([]);
@@ -347,7 +364,11 @@ describe('compat v3: corpus coverage and WIRE_ADDITIONS', () => {
     expect(requiredReceiverCapabilities('task.progress', {})).toEqual([]);
     expect(requiredReceiverCapabilities('task.complete', { document: {}, finalMessage: 'x' })).toEqual([]);
     expect(requiredReceiverCapabilities('task.decline', { code: 'agent_home_writer_busy' })).toEqual([]);
-    expect(WIRE_ADDITIONS.filter((entry) => entry.rule === 'strip-safe'), 'v2 strip-safe additions are v3 baseline').toEqual([]);
+    expect(WIRE_ADDITIONS.filter((entry) => entry.rule === 'strip-safe'), 'only the new runtime field is registered; v2 rows remain baseline').toEqual([
+      { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'runtimes[].capabilities.messageDraft' },
+      { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'harnesses[].capabilities.messageDraft' },
+      { kind: 'envelope', rule: 'strip-safe', surface: 'task.claim', field: 'capabilities.messageDraft' },
+    ]);
   });
 });
 
@@ -421,7 +442,12 @@ describe('compat: published 0.26.1 (byok-protocol-previous) is a rejection oracl
   it.each(v3Corpus.map((line) => [line.index + 1, line.type, line] as const))(
     'rejects v3 line %i (%s)',
     (_n, _type, line) => {
-      expect(() => previousRelease.decodeEnvelope(line.raw)).toThrow(previousRelease.EnvelopeValidationError);
+      if (line.type === 'agent.message.draft') {
+        expect(requiredReceiverCapabilities(line.type, line.payload)).toEqual(['agent-message-draft']);
+        expect(() => previousRelease.decodeEnvelope(line.raw)).toThrow(previousRelease.UnknownMessageTypeError);
+      } else {
+        expect(() => previousRelease.decodeEnvelope(line.raw)).toThrow(previousRelease.EnvelopeValidationError);
+      }
     },
   );
 

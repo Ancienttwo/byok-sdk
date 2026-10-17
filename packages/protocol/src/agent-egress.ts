@@ -14,6 +14,7 @@ const POLICY_REVISION = z
   .regex(/^[^\u0000-\u001f\u007f\r\n]+$/u, 'policyRevision must not contain control characters');
 
 const POSITIVE_LIMIT = z.number().int().positive().max(2_147_483_647);
+export const AGENT_MESSAGE_DRAFT_FRAME_MAX_BYTES = 16 * 1024;
 export const AGENT_MESSAGE_MAX_BYTES = 256 * 1024;
 export const AgentMessageContractSchema = z
   .string()
