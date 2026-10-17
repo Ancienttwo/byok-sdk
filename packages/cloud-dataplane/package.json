@@ -41,7 +41,7 @@
   },
   "scripts": {
     "build": "rm -rf dist && tsup && tsc -p tsconfig.build.json && node scripts/copy-migrations.mjs",
-    "dev": "tsup --watch",
+    "dev": "rm -rf dist && tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:worker": "vitest run src/__tests__/runtime-entry.test.ts src/__tests__/worker-packaging.test.ts",

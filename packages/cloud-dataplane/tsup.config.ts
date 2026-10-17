@@ -15,7 +15,7 @@ import { defineConfig } from 'tsup';
 // Neither config cleans. tsup runs array configs concurrently, and a config's
 // clean globs and deletes everything under `dist/` whenever that config gets
 // there — after the other config may already have written its output. The
-// `build` script removes `dist/` once, before tsup starts.
+// `build` and `dev` scripts remove `dist/` once, before tsup starts.
 export default defineConfig([
   {
     entry: ['src/index.ts'],
