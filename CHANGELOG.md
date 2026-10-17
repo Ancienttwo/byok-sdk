@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Fix (client; #501)** — the Claude adapter declares
+  `progressEventsAreMessages`. Each Claude `progress` event is one complete
+  text block, so the closing reply is now the last non-blank text block.
+  Before, a run that repeated its answer in a later model call with no tool
+  between published the answer twice in the daemon-authored Agent message
+  and in `task.complete.finalMessage`. Earlier text blocks with no tool
+  between them are now commentary, as for Codex. `summary` still carries the
+  whole run's text.
+
 ## 0.27.0-rc.2 / @byok-sdk/keys 0.12.0-rc.2 — 2026-10-16 (published)
 
 The owner approved rc.2 and the dist-tag `rc` on 2026-10-16, then npm execution.

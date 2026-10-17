@@ -109,6 +109,11 @@ export class ClaudeAdapter implements RuntimeAdapter {
     this.descriptor = freezeRuntimeAdapterDescriptor({
       id: 'claude',
       supportsDispatchSelection: true,
+      // Each `assistant` frame carries complete content blocks, never deltas
+      // (`events.ts` `mapAssistant`), so the closing reply is the last text
+      // block. A run that repeats its answer in a later model call with no
+      // tool between (#501) then publishes it once.
+      progressEventsAreMessages: true,
       capabilities: {
         steer: false,
         resume: true,
