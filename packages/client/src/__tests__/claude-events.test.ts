@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  AssistantMessageTracker,
   createToolUseCorrelation,
   mapClaudeMessageToAgentEvents,
   ROUTINE_CLAUDE_SYSTEM_SUBTYPES,
@@ -435,5 +436,51 @@ describe('fixture path', () => {
   it('fake-claude.mjs exists', async () => {
     const fixturePath = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
     await fs.access(fixturePath);
+  });
+});
+
+describe('AssistantMessageTracker', () => {
+  /** Maps each frame and returns, per frame, whether each of its `progress` events starts a message. */
+  function starts(frames: ClaudeStreamMessage[]): boolean[][] {
+    const correlation = createToolUseCorrelation();
+    const tracker = new AssistantMessageTracker();
+    return frames.map((frame) => {
+      const { events } = mapClaudeMessageToAgentEvents(frame, correlation, { workspaceDir: '/tmp/ws' });
+      tracker.observe(frame, events);
+      return events.filter((event) => event.type === 'progress').map((event) => tracker.startsMessage(event));
+    });
+  }
+  const assistant = (id: string | undefined, content: unknown[]): ClaudeStreamMessage => ({
+    type: 'assistant', message: { ...(id === undefined ? {} : { id }), content },
+  });
+  const text = (value: string) => ({ type: 'text', text: value });
+
+  it('continues a message across frames that share its id, through thinking and routine system frames', () => {
+    expect(starts([
+      assistant('msg_1', [text('Part one. ')]),
+      { type: 'system', subtype: 'thinking_tokens' },
+      assistant('msg_1', [{ type: 'thinking', thinking: '' }]),
+      assistant('msg_1', [text('Part two.')]),
+    ])).toEqual([[true], [], [], [false]]);
+  });
+
+  it('starts a message at each new id, so a repeated answer in a later model call starts again', () => {
+    expect(starts([assistant('msg_1', [text('Answer.')]), assistant('msg_2', [text('Answer.')])])).toEqual([[true], [true]]);
+  });
+
+  it('starts a message after any non-system frame between frames of the same id', () => {
+    expect(starts([assistant('msg_1', [text('A')]), { type: 'rate_limit_event' }, assistant('msg_1', [text('B')])])).toEqual([[true], [], [true]]);
+  });
+
+  it('continues within one frame but never across frames that carry no id', () => {
+    expect(starts([assistant(undefined, [text('A'), text('B')]), assistant(undefined, [text('C')])])).toEqual([[true, false], [true]]);
+  });
+
+  it('lets a message start at its first non-blank text block', () => {
+    expect(starts([assistant('msg_1', [text('\n')]), assistant('msg_1', [text('Answer.')])])).toEqual([[true], [true]]);
+  });
+
+  it('treats an event it never observed as a message start', () => {
+    expect(new AssistantMessageTracker().startsMessage({ type: 'progress', text: 'x' })).toBe(true);
   });
 });

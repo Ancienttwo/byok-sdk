@@ -22,7 +22,7 @@ import { resolveClaudeBin, type ResolvedBin } from './resolve-bin';
 import { createClaudeControlChannel } from './control-channel';
 import { ClaudeNativeInteractionBridge, CLAUDE_NATIVE_INTERACTION_CAPABILITIES } from './native-interactions';
 import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions';
-import { createToolUseCorrelation, mapClaudeMessageToAgentEvents, type ToolUseCorrelation } from './events';
+import { AssistantMessageTracker, createToolUseCorrelation, mapClaudeMessageToAgentEvents, type ToolUseCorrelation } from './events';
 import { ClaudeProcessClient, type SpawnFn } from './process-client';
 
 
@@ -109,10 +109,11 @@ export class ClaudeAdapter implements RuntimeAdapter {
     this.descriptor = freezeRuntimeAdapterDescriptor({
       id: 'claude',
       supportsDispatchSelection: true,
-      // Each `assistant` frame carries complete content blocks, never deltas
-      // (`events.ts` `mapAssistant`), so the closing reply is the last text
-      // block. A run that repeats its answer in a later model call with no
-      // tool between (#501) then publishes it once.
+      // `progress` events are complete text blocks, never deltas, and
+      // `progressStartsMessage` joins the blocks of one message, so the
+      // closing reply is the last assistant message. A run that repeats its
+      // answer in a later model call with no tool between (#501) then
+      // publishes it once.
       progressEventsAreMessages: true,
       capabilities: {
         steer: false,
@@ -454,6 +455,7 @@ function subscriptionModel(
 class ClaudeSession implements Session {
   declare readonly interactions?: NativeInteractionChannel;
   private readonly correlation: ToolUseCorrelation = createToolUseCorrelation();
+  private readonly assistantMessages = new AssistantMessageTracker();
   private closeAttempt: Promise<void> | undefined;
 
   constructor(
@@ -470,6 +472,7 @@ class ClaudeSession implements Session {
   get events(): AsyncIterable<AgentEvent> {
     const client = this.client;
     const correlation = this.correlation;
+    const assistantMessages = this.assistantMessages;
     const workspaceDir = this.workspaceDir;
     const control = this.control;
     return {
@@ -554,6 +557,7 @@ class ClaudeSession implements Session {
                   mapped.events.unshift({ type: 'usage', contextWindow: control.contextWindow, contextSource: 'provider' });
                 }
               }
+              assistantMessages.observe(value, mapped.events);
               terminalFailure = mapped.terminalFailure ?? terminalFailure;
               if (mapped.unmappedLabel) {
                 client.recordUnmappedFrame(mapped.unmappedLabel);
@@ -578,6 +582,10 @@ class ClaudeSession implements Session {
    * throws rather than silently behaving like `followUp()` under the
    * `steer()` name, which would promise live redirection it cannot deliver.
    */
+  progressStartsMessage(event: Extract<AgentEvent, { type: 'progress' }>): boolean {
+    return this.assistantMessages.startsMessage(event);
+  }
+
   async steer(): Promise<void> {
     throw new SteerUnsupportedError(
       'claude',
