@@ -578,3 +578,12 @@ export interface HubStats {
   /** Milliseconds since `createByokServer` returned this instance. */
   uptimeMs: number;
 }
+
+
+/** Display-only draft notifications. The accepted message stays authoritative. */
+export type AgentMessageDraftEvent =
+  | { readonly kind: 'append'; readonly revision: number; readonly offset: number; readonly text: string }
+  | { readonly kind: 'overflow'; readonly revision: number; readonly byteCount: number }
+  | { readonly kind: 'gap'; readonly revision: number }
+  | { readonly kind: 'ended' }
+  | { readonly kind: 'discarded' };

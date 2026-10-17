@@ -69,6 +69,7 @@ export interface TaskEventRelayOptions {
  * failure handling.
  */
 export class TaskEventRelay implements ByokCloudObserver {
+  readonly #draftWakes = new Map<string, Set<() => void>>();
   readonly #tasks = new Map<string, TaskRelayState>();
   readonly #serverEvents: AsyncEventQueue<ByokServerEvent>;
   readonly #bufferLimit: number;
@@ -169,6 +170,21 @@ export class TaskEventRelay implements ByokCloudObserver {
     this.#transition(existing, taskId, state, at);
   }
 
+  /** A wake carries no content and creates no task event queue. */
+  onAgentMessageDraft(taskId: string): void {
+    for (const wake of this.#draftWakes.get(taskId) ?? []) wake();
+  }
+
+  watchAgentMessageDraft(taskId: string, wake: () => void): () => void {
+    const listeners = this.#draftWakes.get(taskId) ?? new Set<() => void>();
+    listeners.add(wake);
+    this.#draftWakes.set(taskId, listeners);
+    return () => {
+      listeners.delete(wake);
+      if (listeners.size === 0) this.#draftWakes.delete(taskId);
+    };
+  }
+
   onInboundCommitted(input: InboundCommitted): void {
     if (this.#stopped) return;
     const { envelope } = input;
@@ -176,6 +192,9 @@ export class TaskEventRelay implements ByokCloudObserver {
 
     const taskId = envelope.task_id;
     if (taskId === undefined) return;
+    if (envelope.type === 'agent.message.draft' || envelope.type === 'agent.message.publish'
+      || envelope.type === 'task.complete' || envelope.type === 'task.fail'
+      || envelope.type === 'task.cancelled' || envelope.type === 'task.decline') this.onAgentMessageDraft(taskId);
     const state = this.#tasks.get(taskId);
     if (state === undefined) return;
 
@@ -274,6 +293,8 @@ export class TaskEventRelay implements ByokCloudObserver {
       state.queue.close();
     }
     this.#tasks.clear();
+    for (const listeners of this.#draftWakes.values()) for (const wake of listeners) wake();
+    this.#draftWakes.clear();
     this.#serverEvents.close();
   }
 
@@ -294,6 +315,7 @@ export class TaskEventRelay implements ByokCloudObserver {
     if (next !== 'Complete' && next !== 'Failed' && next !== 'Cancelled') return;
     state.terminalSettled = true;
     state.settleTerminal();
+    this.onAgentMessageDraft(taskId);
     // The feed ENDS at the terminal, right after the terminal event is pushed —
     // that transition is the last thing that will ever happen to this task, so
     // a `for await` over `events()` completes there instead of hanging. Closing

@@ -1390,6 +1390,7 @@ export function createSqliteEmbeddedStores(
     objects,
     quota,
   };
+  // Activity and Agent message drafts remain ephemeral in this composition.
   const inMemoryCloud = createInMemoryCloudStores(
     dependencies.clock,
     dependencies.crypto,

@@ -2158,6 +2158,9 @@ released bigint bytes and an eligible-remainder flag, and commits independently.
 Failures retain confirmed `committed` counts and `failedRows`; step faults use
 `failedRows: 0`. Unknown counts and `more` are omitted. A remainder-probe fault
 cannot erase prior committed counts. Observers receive the same report.
+An eleventh step sweeps the ephemeral Agent message draft snapshots with
+`sweepExpired(now)`. This sweep is global. Its success report has no row or
+byte counts because that port returns no counts.
 
 The reference server always schedules one non-overlapping pass every five
 minutes with ±20% jitter, defaults to 500 rows/objects per step, and exposes
@@ -2531,6 +2534,57 @@ null occupancy stays unknown. On the prepared Pi lane, Host `pi_model`
 configuration is the context window authority even if runtime stats differ.
 Historical v1 envelopes remain readable and unchanged; older consumers ignore
 these optional fields.
+
+
+## Agent message draft lane
+
+The draft lane is display-only. The accepted Agent message is the only product
+truth. Draft frames do not enter the reliable spool, mailbox or activity tail.
+The wire major remains 3. A daemon sends `agent.message.draft` only when the
+server advertises `agent-message-draft`. `RuntimeCapabilities.messageDraft` is
+optional discovery and claim data. A runtime without this capability sends no
+draft frames.
+
+Each strict frame carries `agentRef`, a positive integer `revision`, a UTF-8
+byte `offset`, and `text` of at most 16 KiB. `overflow?: true` marks the last
+frame at the frozen offer's `messageEgress.maxBytes` limit. Cloud checks the
+exact tenant, task, device and Agent binding. It refuses a frame if the frozen
+offer has no message requirement, the frame is invalid, or a message or device
+terminal already exists.
+
+Cloud retains one snapshot per task. A higher revision replaces the snapshot
+only at offset zero. A lower revision or an offset below the stored byte count
+is stale. An offset above that count marks a gap. An append above the frozen
+limit marks overflow and retains the existing text. A valid append adds the
+text and applies the optional overflow marker. Gap and overflow stop appends
+for that revision. A higher revision starts again. Gap, stale and overflow are
+accepted observations. They do not produce a reliable acknowledgement.
+
+Every applied frame refreshes the 10 minute activity TTL. Memory and Postgres
+stores share this contract. SQLite uses the memory draft store. Maintenance
+sweeps expired drafts on the activity cadence. A device complete, fail, cancel
+or decline deletes the row. A refused message disposition also deletes it.
+Host cancellation alone is not a device terminal.
+
+`cloud.readTaskAgentMessageDraft(tenant, deviceId, taskId, agentRef, cursor?)`
+returns `{ revision, offset, text, byteCount, state }`. Wrong identity returns
+undefined. A cursor with the current revision selects the suffix at its UTF-8
+byte offset. Another revision selects the full text at offset zero. A cursor
+inside a UTF-8 code point is invalid.
+
+Readback derives state from existing authority, in this order. A published
+message whose disposition is not refused ends the lane, including a pending
+or held admission. A device terminal without a published message, or a refused
+disposition, discards the lane. An absent live row gives revision and offset
+zero, empty text, zero bytes and open state. Otherwise the row supplies state.
+
+`server.tasks.messageDraft(taskId, deviceId, agentRef, { after?, signal? })`
+reads that snapshot. It emits non-empty `append` events with revision and byte
+offset. It emits `overflow` with revision and byte count, or `gap` with revision,
+once per revision. It emits `ended` or `discarded` and then completes. Wrong
+identity gives an empty iterable. Each read waits for a relay wake or 250 ms.
+The relay retains no draft content or subscriber event queue. A Host BFF can
+poll the cloud read API. With no draft producer, only a terminal marker appears.
 
 ## Pi subagents
 
