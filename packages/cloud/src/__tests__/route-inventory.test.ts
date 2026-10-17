@@ -159,7 +159,7 @@ describe('tenant isolation across every device-class resource', () => {
       capabilities: [
         'custom-harness',
         'mailbox-read-ahead',
-        'approval_resolved',
+        'approval_resolved', 'agent-message-draft',
         'agent-home-contract',
         'agent-home-projection',
         'agent-egress-policy',

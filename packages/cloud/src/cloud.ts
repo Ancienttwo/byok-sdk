@@ -1,3 +1,4 @@
+import { readTaskAgentMessageDraft, type AgentMessageDraftCursor, type AgentMessageDraftReadback } from './agent-message-draft';
 import { runMaintenanceSteps, type MaintenanceInput, type MaintenanceReport } from './maintenance';
 import type { DeviceAssertionReplayAuthority } from '@byok-sdk/core';
 import { readTaskAgentMessage, type TaskAgentMessage } from './task-agent-message';
@@ -757,6 +758,7 @@ export interface ByokCloud {
   /** Actual device terminal only; cancellation intent never creates this observation. */
   readDeviceTerminal(tenant: TenantId, taskId: string): Promise<DeviceTerminal | undefined>;
   /** Discover first-message transmission evidence from the frozen execution binding, including pending/held without a Host body. */
+  readTaskAgentMessageDraft(tenant: TenantId, deviceId: string, taskId: string, agentRef: AgentRef, cursor?: AgentMessageDraftCursor): Promise<AgentMessageDraftReadback | undefined>;
   readTaskAgentMessage(tenant: TenantId, deviceId: string, taskId: string, agentRef: AgentRef): Promise<TaskAgentMessage | undefined>;
   /**
    * Exact durable message decision, independently of task cancellation/terminal.
@@ -906,6 +908,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       { method: 'POST', path: BYOK_MESSAGES_PATH, class: 'device' },
       messagesHandler({
         ...deviceRouteDeps,
+        clock: options.clock,
         activityBounds,
         appendReliableEgressAck: enqueueReliableEgressAck,
         appendContentReceiptAck: enqueueContentReceiptAck,
@@ -2353,6 +2356,9 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       return receipt === undefined ? undefined : readDeviceTerminalReceipt(taskId, receipt);
     },
 
+    readTaskAgentMessageDraft(tenant, deviceId, taskId, agentRef, cursor) {
+      return readTaskAgentMessageDraft(tenantStoresFor(controlPlane(tenant), root), deviceId, taskId, agentRef, cursor);
+    },
     readTaskAgentMessage(tenant, deviceId, taskId, agentRef) {
       return readTaskAgentMessage(tenantStoresFor(controlPlane(tenant), root), deviceId, taskId, agentRef);
     },

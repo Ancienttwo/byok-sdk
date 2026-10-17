@@ -21,7 +21,8 @@
   },
   "dependencies": {
     "@byok-sdk/cloud": "workspace:*",
-    "@byok-sdk/core": "workspace:*"
+    "@byok-sdk/core": "workspace:*",
+    "@byok-sdk/protocol": "workspace:*"
   },
   "devDependencies": {
     "@byok-sdk/testkit": "workspace:*"

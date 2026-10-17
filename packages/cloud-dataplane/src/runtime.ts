@@ -40,6 +40,7 @@ export {
   PostgresTaskAttemptStore,
   PostgresTaskCancellationStore,
   PostgresActivityStore,
+  PostgresAgentMessageDraftStore,
   PostgresApprovalTimelineStore,
   PostgresDeviceAssertionReplayAuthority,
   PostgresAgentMemoryProjectionStore,

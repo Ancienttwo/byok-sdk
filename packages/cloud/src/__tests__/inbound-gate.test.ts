@@ -115,12 +115,13 @@ describe('the inbound gate', () => {
         });
       }
       const outcome = await handleInboundEnvelope(stores, deviceId, envelope).then((result) => result.outcome);
+      if (type === 'agent.message.draft') expect(outcome).toBe('rejected'); // No frozen message requirement in this generic fixture.
       if (outcome === 'accepted') accepted.push(type);
     }
     // `agent.message.publish` has its own exact task/Agent binding and product
     // consumer contract; its common rate/dedup admission is covered by the
     // issue regression rather than this generic lifecycle fixture.
-    expect(accepted).toEqual([...DAEMON_TO_SERVER_TYPES].filter((type) => type !== 'agent.message.publish'));
+    expect(accepted).toEqual([...DAEMON_TO_SERVER_TYPES].filter((type) => type !== 'agent.message.publish' && type !== 'agent.message.draft'));
   });
 
   it('step 2: rejects an envelope from a device other than the immutable offer target before claim', async () => {
@@ -385,6 +386,8 @@ function envelopeOfType(type: (typeof DAEMON_TO_SERVER_TYPES)[number], taskId: s
         { approvalId: 'ap-1', decision: 'approve', resolvedBy: 'local', at: new Date().toISOString() },
         { taskId },
       );
+    case 'agent.message.draft':
+      return createEnvelope(type, { agentRef: { agentId: 'agent-inbound', profileRevision: 'profile-inbound' }, revision: 1, offset: 0, text: 'draft' }, { taskId });
     case 'agent.egress.reliable':
       return createEnvelope('agent.egress.reliable', {
         agentRef: { agentId: 'agent-inbound', profileRevision: 'profile-inbound' },

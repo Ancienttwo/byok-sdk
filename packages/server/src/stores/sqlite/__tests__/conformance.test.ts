@@ -53,6 +53,7 @@ const cloudFactory: CloudCompositionFactory = {
       stores: {
         activity: stores.activity,
         approvals: stores.approvals,
+        agentMessageDraft: stores.agentMessageDraft,
         devices: stores.devices,
         pairingCodes: stores.pairingCodes,
         pairing: stores.pairing,

@@ -1,3 +1,4 @@
+import type { AgentMessageDraftStore } from './agent-message-draft';
 import type { HarnessInfo } from '@byok-sdk/protocol';
 /**
  * Layer 2 of the six-layer isolation model (§12.6.2) — the tenant-closed
@@ -217,6 +218,11 @@ export interface TenantStores {
   readonly presence: TenantBoundPresence;
   readonly activity: TenantBoundActivity;
   readonly approvals: TenantBoundApprovalTimeline;
+  readonly agentMessageDraft: {
+    apply(input: Parameters<AgentMessageDraftStore['apply']>[1]): ReturnType<AgentMessageDraftStore['apply']>;
+    read(taskId: string): ReturnType<AgentMessageDraftStore['read']>;
+    delete(taskId: string): Promise<void>;
+  };
   readonly devices: TenantBoundDevices;
   readonly tasks: TenantBoundTaskAttempts;
   readonly cancellations: TenantBoundTaskCancellations;
@@ -274,6 +280,11 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
     approvals: {
       append: (input) => cloud.approvals.append(tenant, input),
       read: (taskId) => cloud.approvals.read(tenant, taskId),
+    },
+    agentMessageDraft: {
+      apply: input => cloud.agentMessageDraft.apply(tenant, input),
+      read: taskId => cloud.agentMessageDraft.read(tenant, taskId),
+      delete: taskId => cloud.agentMessageDraft.delete(tenant, taskId),
     },
     devices: {
       get: (deviceId) => cloud.devices.get(tenant, deviceId),

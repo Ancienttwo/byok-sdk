@@ -170,6 +170,12 @@ async function seedEveryTenantTable(pool: Pool, tenant: TenantId, suffix: string
      VALUES ($1, $2, 'task', 'message-admission', '{}')`,
     [tenant, device],
   );
+  await pool.query(
+    `INSERT INTO agent_message_draft
+       (tenant_id, task_id, device_id, agent_ref, revision, text, byte_count, state, updated_at, expires_at)
+     VALUES ($1, 'task', $2, '{"agentId":"draft-agent","profileRevision":"1"}'::jsonb, 1, 'draft', 5, 'open', $3, $3)`,
+    [tenant, device, now],
+  );
   await pool.query(`INSERT INTO device_request_receipts (tenant_id, key, body, recorded_at) VALUES ($1, 'receipt', '{}', $2)`, [tenant, now]);
   await pool.query(`INSERT INTO device_stream (tenant_id, device_id) VALUES ($1, $2)`, [tenant, device]);
   await pool.query(

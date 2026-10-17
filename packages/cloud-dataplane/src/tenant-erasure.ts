@@ -46,6 +46,7 @@ export const TENANT_ERASURE_TABLES = [
   'agent_egress_event',
   'device_request_receipts',
   'proof_request_receipt',
+  'agent_message_draft',
   'agent_message_admission',
   'task',
   'device_presence',

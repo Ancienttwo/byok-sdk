@@ -348,6 +348,7 @@ export {
   InMemoryBlobContentProxy,
   InMemoryCloudBlobStore,
   InMemoryActivityStore,
+  InMemoryAgentMessageDraftStore,
   InMemoryDeviceDirectory,
   InMemoryInboundDedupStore,
   InMemoryNonceStore,
@@ -381,3 +382,5 @@ export type { ReceiptCollectExpiredInput } from './stores/ports';
 export type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake';
 export { createInProcessMailboxWake, DEFAULT_MAILBOX_WAKE_FALLBACK_MS } from './stores/in-memory/mailbox-wake';
 export type { InProcessMailboxWakeOptions } from './stores/in-memory/mailbox-wake';
+
+export type { AgentMessageDraftStore, AgentMessageDraftRow, AgentMessageDraftCursor, AgentMessageDraftApplyInput, AgentMessageDraftApplyResult, AgentMessageDraftReadback } from './agent-message-draft';
