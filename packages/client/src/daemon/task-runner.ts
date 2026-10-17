@@ -3039,7 +3039,6 @@ export class TaskRunner {
           agentRef: active.agentRef,
           maxBytes: active.messageRequirement.maxBytes,
           maxCoalesceMs: this.deps.agentEgressPolicy!.activity.maxCoalesceMs,
-          progressEventsAreMessages: pick.descriptor.progressEventsAreMessages === true,
           getServerCapabilities: () => this.deps.getServerCapabilities?.() ?? [],
           send: envelope => this.deps.send(envelope),
         });
@@ -4072,7 +4071,11 @@ export class TaskRunner {
           }
         }
 
-        active.messageDraft?.push(event);
+        // The session hook can be stateful. Share one decision with both text lanes.
+        const startsMessage = event.type === 'progress'
+          && active.adapter.descriptor.progressEventsAreMessages === true && event.text.trim() !== ''
+          && active.session.progressStartsMessage?.(event) !== false;
+        active.messageDraft?.push(event, startsMessage);
         if (event.type === 'tool_use' || event.type === 'tool_result' || event.type === 'needs_approval') {
           // A tool interaction ends the current text run: whatever the model
           // said before it was narration about what it was ABOUT to do, not
@@ -4278,10 +4281,7 @@ export class TaskRunner {
         if (event.type === 'progress') {
           active.summaryParts.push(event.text);
           // A blank whole message must not erase the reply that came before it.
-          if (
-            active.adapter.descriptor.progressEventsAreMessages === true && event.text.trim() !== ''
-            && active.session.progressStartsMessage?.(event) !== false
-          ) {
+          if (startsMessage) {
             active.finalTextParts.length = 0;
           }
           active.finalTextParts.push(event.text);

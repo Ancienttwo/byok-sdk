@@ -11,7 +11,6 @@ interface AgentMessageDraftPublisherOptions {
   agentRef: AgentRef;
   maxBytes: number;
   maxCoalesceMs: number;
-  progressEventsAreMessages: boolean;
   getServerCapabilities: () => readonly string[];
   send: (envelope: Envelope) => void;
 }
@@ -29,13 +28,13 @@ export class AgentMessageDraftPublisher {
 
   constructor(private readonly options: AgentMessageDraftPublisherOptions) {}
 
-  /** Keep the same text run as TaskRunner.finalTextParts. */
-  push(event: AgentEvent): void {
+  /** Use TaskRunner's single boundary decision for the same text run as finalTextParts. */
+  push(event: AgentEvent, startsMessage = false): void {
     if (!this.canSend()) return;
     if (event.type === 'tool_use' || event.type === 'tool_result' || event.type === 'needs_approval') {
       this.reset();
     } else if (event.type === 'progress') {
-      if (this.options.progressEventsAreMessages && event.text.trim() !== '') this.reset();
+      if (startsMessage) this.reset();
       if (this.overflow) return;
       this.pending += event.text;
       this.drain(false, false);

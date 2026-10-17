@@ -14,6 +14,7 @@ import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store'
 import { ApprovalRegistry } from '../daemon/approvals';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
+import { freezeRuntimeAdapterDescriptor } from '../types';
 import { testIngressBudget } from './fixtures/activity-ingress';
 import { testScratchOwner } from './fixtures/execution-scratch';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -22,19 +23,19 @@ const agentRef = { agentId: 'draft-agent', profileRevision: '1' };
 const frameMax = AGENT_MESSAGE_DRAFT_FRAME_MAX_BYTES;
 type Draft = Extract<Envelope, { type: 'agent.message.draft' }>;
 
-function fixture(options: { maxBytes?: number; wholeMessages?: boolean; capabilities?: string[] } = {}) {
+function fixture(options: { maxBytes?: number; capabilities?: string[] } = {}) {
   const sent: Draft[] = [];
   let capabilities = options.capabilities ?? ['agent-message-draft'];
   const publisher = new AgentMessageDraftPublisher({
     taskId: 'draft-task', agentRef, maxBytes: options.maxBytes ?? 256 * 1024,
-    maxCoalesceMs: 250, progressEventsAreMessages: options.wholeMessages ?? false,
+    maxCoalesceMs: 250,
     getServerCapabilities: () => capabilities,
     send: envelope => {
       expect(envelope.type).toBe('agent.message.draft');
       if (envelope.type === 'agent.message.draft') sent.push(envelope);
     },
   });
-  return { publisher, sent, push: (text: string) => publisher.push({ type: 'progress', text }),
+  return { publisher, sent, push: (text: string, startsMessage = false) => publisher.push({ type: 'progress', text }, startsMessage),
     withdraw: () => { capabilities = []; } };
 }
 
@@ -121,14 +122,14 @@ describe('AgentMessageDraftPublisher', () => {
   });
 
   it('replaces non-blank whole messages, preserves blank suffixes, and resumes after overflow', () => {
-    const { push, sent, publisher } = fixture({ maxBytes: 6, wholeMessages: true });
-    push('first-too-long');
+    const { push, sent, publisher } = fixture({ maxBytes: 6 });
+    push('first-too-long', true);
     expect(sent[0]?.payload).toEqual({ agentRef, revision: 2, offset: 0, text: 'first-', overflow: true });
-    push('next');
+    push('next', true);
     push(' \n');
     publisher.flush();
     expect(sent[1]?.payload).toEqual({ agentRef, revision: 3, offset: 0, text: 'next \n' });
-    push('last');
+    push('last', true);
     publisher.flush();
     expect(sent[2]?.payload).toEqual({ agentRef, revision: 4, offset: 0, text: 'last' });
   });
@@ -155,10 +156,10 @@ describe('AgentMessageDraftPublisher', () => {
 
   it('drops an unsent revision and clears its timer', () => {
     vi.useFakeTimers();
-    const { push, sent, publisher } = fixture({ wholeMessages: true });
-    push('old');
+    const { push, sent, publisher } = fixture();
+    push('old', true);
     vi.advanceTimersByTime(200);
-    push('new');
+    push('new', true);
     vi.advanceTimersByTime(50);
     expect(sent).toEqual([]);
     publisher.flush();
@@ -218,7 +219,7 @@ describe('TaskRunner draft reconciliation before publish', () => {
     await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
   });
 
-  async function start() {
+  async function start(wholeMessages = false) {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-draft-finalize-'));
     roots.push(root);
     const storeDir = path.join(root, 'store');
@@ -226,6 +227,11 @@ describe('TaskRunner draft reconciliation before publish', () => {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: true, resume: true, approvalInteractive: false, mcpToolsets: true, messageDraft: true,
     });
+    if (wholeMessages) {
+      Object.defineProperty(adapter, 'descriptor', {
+        value: freezeRuntimeAdapterDescriptor({ ...adapter.descriptor, progressEventsAreMessages: true }),
+      });
+    }
     const policy = { ...DEFAULT_AGENT_EGRESS_POLICY,
       activity: { ...DEFAULT_AGENT_EGRESS_POLICY.activity, maxCoalesceMs: 10 } };
     const runner = new TaskRunner({
@@ -245,7 +251,8 @@ describe('TaskRunner draft reconciliation before publish', () => {
       instruction: 'reply', runtime: 'pi', agentRef, egressPolicy: policy,
       messageEgress: { mode: 'required', contract: 'draft.v1', contentType: 'text/plain', maxBytes: frameMax * 3 },
     }, { taskId: 'finalize-task', seq: 1 }));
-    expect(adapter.descriptor.progressEventsAreMessages).toBeUndefined();
+    if (wholeMessages) expect(adapter.descriptor.progressEventsAreMessages).toBe(true);
+    else expect(adapter.descriptor.progressEventsAreMessages).toBeUndefined();
     expect(adapter.sessions).toHaveLength(1);
     const frames = () => sent.filter((e): e is Draft => e.type === 'agent.message.draft');
     const published = async () => {
@@ -317,5 +324,65 @@ describe('TaskRunner draft reconciliation before publish', () => {
     expect(publish.payload.body.charCodeAt(1)).toBe(0xd800);
     expect(lastFrames.map(e => e.payload.text).join('')).toBe('x\ufffd');
     expect(new Set(f.frames().map(e => e.payload.revision))).toEqual(new Set([1]));
+  });
+
+  it('keeps three blocks of one message in one revision and calls the boundary hook once per block', async () => {
+    const f = await start(true);
+    const progressStartsMessage = vi.fn().mockReturnValueOnce(true).mockReturnValue(false);
+    Object.assign(f.session, { progressStartsMessage });
+    const blocks = ['first ', 'second ', 'third'];
+    for (const [index, text] of blocks.entries()) {
+      const event = { type: 'progress' as const, text };
+      f.session.emit(event);
+      await vi.waitFor(() => expect(f.frames()).toHaveLength(index + 1));
+      expect(progressStartsMessage).toHaveBeenCalledTimes(index + 1);
+      expect(progressStartsMessage).toHaveBeenNthCalledWith(index + 1, event);
+    }
+    expect(f.frames().map(frame => frame.payload.revision)).toEqual([2, 2, 2]);
+    const before = f.frames();
+    f.session.emit({ type: 'turn_end' });
+    const { publish } = await f.published();
+    expect(publish.payload.body).toBe(blocks.join(''));
+    expect(f.frames().map(frame => frame.payload.text).join('')).toBe(publish.payload.body);
+    expect(f.frames()).toEqual(before);
+    expect(f.frames()).toHaveLength(blocks.length);
+    expect(progressStartsMessage).toHaveBeenCalledTimes(blocks.length);
+  });
+
+  it('starts a new revision only at the next message boundary', async () => {
+    const f = await start(true);
+    const progressStartsMessage = vi.fn()
+      .mockReturnValueOnce(true).mockReturnValueOnce(false).mockReturnValueOnce(false).mockReturnValueOnce(true);
+    Object.assign(f.session, { progressStartsMessage });
+    const blocks = ['first ', 'second ', 'third', 'next message'];
+    for (const [index, text] of blocks.entries()) {
+      f.session.emit({ type: 'progress', text });
+      await vi.waitFor(() => expect(f.frames()).toHaveLength(index + 1));
+    }
+    expect(f.frames().map(frame => frame.payload.revision)).toEqual([2, 2, 2, 3]);
+    expect(f.frames().at(-1)?.payload.offset).toBe(0);
+    const before = f.frames();
+    f.session.emit({ type: 'turn_end' });
+    const { publish } = await f.published();
+    expect(publish.payload.body).toBe('next message');
+    expect(f.frames()).toEqual(before);
+    expect(progressStartsMessage).toHaveBeenCalledTimes(blocks.length);
+  });
+
+  it('keeps per-event message boundaries without a session hook and preserves blank suffixes', async () => {
+    const f = await start(true);
+    expect(f.session).not.toHaveProperty('progressStartsMessage');
+    const blocks = ['first', ' \n', 'second'];
+    for (const [index, text] of blocks.entries()) {
+      f.session.emit({ type: 'progress', text });
+      await vi.waitFor(() => expect(f.frames()).toHaveLength(index + 1));
+    }
+    expect(f.frames().map(frame => frame.payload.revision)).toEqual([2, 2, 3]);
+    expect(f.frames().map(frame => frame.payload.offset)).toEqual([0, 5, 0]);
+    const before = f.frames();
+    f.session.emit({ type: 'turn_end' });
+    const { publish } = await f.published();
+    expect(publish.payload.body).toBe('second');
+    expect(f.frames()).toEqual(before);
   });
 });

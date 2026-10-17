@@ -2552,6 +2552,8 @@ draft frames.
 
 The daemon reconciles the draft to the published body with a final revision
 before `agent.message.publish` when the text differs.
+The draft and the closing reply share one message-boundary decision for each
+progress event.
 An unpaired surrogate in runtime text is projected to U+FFFD in the draft;
 the accepted body is unchanged.
 
