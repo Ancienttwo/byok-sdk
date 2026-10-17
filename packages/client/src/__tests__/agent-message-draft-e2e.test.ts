@@ -219,7 +219,11 @@ describe('Agent message drafts through the real server and daemon', () => {
     adapter.sessions[0]!.emit({ type: 'progress', text: '  closing reply \n' });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await f.terminal();
-    expect(drafts(f.sent).map(e => e.payload.text).join('')).toBe('  closing reply \n');
+    const frames = drafts(f.sent);
+    const revisions = [...new Set(frames.map(e => e.payload.revision))];
+    expect(revisions).toEqual([1, 2]);
+    expect(frames.filter(e => e.payload.revision === revisions[0]).map(e => e.payload.text).join('')).toBe('  closing reply \n');
+    expect(frames.filter(e => e.payload.revision === revisions[1]).map(e => e.payload.text).join('')).toBe('closing reply');
     expect(f.accepted[0]?.body).toBe('closing reply');
     expect(f.sent.findIndex(e => e.type === 'agent.message.publish')).toBeGreaterThan(f.sent.findLastIndex(e => e.type === 'agent.message.draft'));
     assertWireCapability(f.sent, id, true);

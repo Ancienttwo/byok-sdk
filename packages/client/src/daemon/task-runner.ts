@@ -1779,7 +1779,7 @@ export class TaskRunner {
     if (!authorized || record.sessionRef === undefined
       || !outbox.retryableRecords().some(pending => pending.messageId === record.messageId)) return;
     if (active !== undefined) {
-      active.messageDraft?.flush();
+      active.messageDraft?.finalize(record.body);
       active.messageDraft?.stop();
       active.messageSendAttempted = true;
     }

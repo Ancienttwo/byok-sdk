@@ -20,6 +20,7 @@ interface AgentMessageDraftPublisherOptions {
 export class AgentMessageDraftPublisher {
   private revision = 1;
   private offset = 0;
+  private emittedText = '';
   private pending = '';
   private resetPending = false;
   private overflow = false;
@@ -56,11 +57,23 @@ export class AgentMessageDraftPublisher {
     this.drain(true, true);
   }
 
+  /** Reconcile the display text with the bounded body selected for publication. */
+  finalize(body: string): void {
+    this.flush();
+    if (!this.canSend()) return;
+    const text = body.toWellFormed();
+    if (this.emittedText === text) return;
+    this.reset();
+    this.pending = text;
+    this.flush();
+  }
+
   /** Publish and terminal paths both retire this task's display lane. */
   stop(): void {
     this.clearTimer();
     this.stopped = true;
     this.pending = '';
+    this.emittedText = '';
     this.resetPending = false;
   }
 
@@ -68,6 +81,7 @@ export class AgentMessageDraftPublisher {
     this.clearTimer();
     this.revision += 1;
     this.offset = 0;
+    this.emittedText = '';
     this.pending = '';
     this.resetPending = true;
     this.overflow = false;
@@ -87,7 +101,8 @@ export class AgentMessageDraftPublisher {
     // Hold its first half until the next event or the final publish flush.
     const last = this.pending.charCodeAt(this.pending.length - 1);
     const held = !final && last >= 0xd800 && last <= 0xdbff ? this.pending.slice(-1) : '';
-    const bytes = Buffer.from(held === '' ? this.pending : this.pending.slice(0, -1), 'utf8');
+    const text = (held === '' ? this.pending : this.pending.slice(0, -1)).toWellFormed();
+    const bytes = Buffer.from(text, 'utf8');
     const remaining = this.options.maxBytes - this.offset;
     const overflow = bytes.length > remaining;
     const accepted = utf8PrefixLength(bytes, Math.min(bytes.length, remaining));
@@ -115,6 +130,7 @@ export class AgentMessageDraftPublisher {
       ...(overflow ? { overflow: true as const } : {}),
     }, { taskId: this.options.taskId }));
     this.offset += Buffer.byteLength(text, 'utf8');
+    this.emittedText += text;
     this.resetPending = false;
   }
 
