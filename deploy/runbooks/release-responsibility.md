@@ -53,9 +53,13 @@ approved the prerelease 0.27.0-rc.2 / keys 0.12.0-rc.2 under the dist-tag `rc`
 on 2026-10-16, rc first. It replaces 0.27.0-rc.1, which was prepared but never
 published, and adds the fixes of #493 and #496. It is the first wire-v3 train.
 All nine rc.2 packages are published and read back on `rc`, from `v0.27.0-rc.2`
-(`b8f47f02`). See its
-[rc.2 publication record](../../docs/releases/v0.27.0-rc.2-publication.md) and
-the [0.27.0 release notes](../../docs/releases/v0.27.0.md).
+(`b8f47f02`); see its
+[rc.2 publication record](../../docs/releases/v0.27.0-rc.2-publication.md).
+On 2026-10-17 the owner chose a third candidate, 0.27.0-rc.3 / keys
+0.12.0-rc.3, which adds the Agent message draft lane (#500) and the fixes
+#501, #503, #507 and PR #508. It is not published; npm execution approval
+remains separate. See the
+[0.27.0 release notes](../../docs/releases/v0.27.0.md).
 
 The SDK publishes npm libraries, the `byok-agent` CLI and reference packaging/service recipes. The host product owns every binary distribution decision:
 
@@ -72,10 +76,10 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 ## Version selection
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
-The approved source manifests name the prerelease train 0.27.0-rc.2 and
-independent keys 0.12.0-rc.2. Both are MINOR lines. The train moves the wire to
-protocol major 3 (#468), adds `executions.submit` (#470) and typed home-busy
-decline codes (#471), and has pre-1.0 breaking cuts in protocol, client,
+The approved source manifests name the prerelease train 0.27.0-rc.3 and
+independent keys 0.12.0-rc.3. Both are MINOR lines. The train moves the wire to
+protocol major 3 (#468), adds `executions.submit` (#470), typed home-busy
+decline codes (#471) and the Agent message draft lane (#500), and has pre-1.0 breaking cuts in protocol, client,
 server, cloud, cloud-dataplane and core. keys makes `buildPiProviderProjection`
 require `runtimeEntry` and moves the pi-rpc key to private IPC (#385). Keep
 manifests, lock workspace records, version documents and packed internal
