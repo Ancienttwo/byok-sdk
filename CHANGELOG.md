@@ -2,6 +2,51 @@
 
 ## Unreleased
 
+## 0.27.0 / @byok-sdk/keys 0.12.0 — 2026-10-17 (prepared; not published)
+
+The owner approved stable source preparation on 2026-10-17. The target npm
+dist-tag is `latest`. Publication is pending. This train includes all changes
+since 0.26.1, including the Agent message draft lane (#500) and the fixes
+merged after rc.2. Current `latest` remains 0.26.1 / keys 0.11.1.
+
+- The eight aligned package manifests move to 0.27.0.
+- keys moves to 0.12.0. Its packed core edge is exactly 0.27.0.
+- The lock workspace records and current version documents move together.
+- [Release notes](docs/releases/v0.27.0.md) describe the stable changes.
+
+- **Feature (protocol, cloud, cloud-dataplane, server; #500, PR #505)** — a
+  display-only Agent message draft lane. New daemon-to-server message
+  `agent.message.draft` (strict payload: `agentRef`, `revision`, UTF-8
+  `offset`, `text` of at most `AGENT_MESSAGE_DRAFT_FRAME_MAX_BYTES` = 16 KiB,
+  `overflow?: true`), gated by the new server-advertised capability flag
+  `agent-message-draft`; `RuntimeCapabilities.messageDraft` is a strip-safe
+  optional field. Cloud adds the required `agentMessageDraft` store
+  (`AgentMessageDraftStore`, one snapshot row per task, 10 minute activity
+  TTL, swept by the new `agentMessageDraft` maintenance step),
+  `readTaskAgentMessageDraft` and the inbound refusal reason
+  `agent_message_draft_invalid`. cloud-dataplane adds
+  `PostgresAgentMessageDraftStore` and the forward-only migration
+  `0026_agent_message_draft.sql`; the table joins `TENANT_ERASURE_TABLES`.
+  The server adds `tasks.messageDraft(taskId, deviceId, agentRef, { after,
+  signal })`, an async iterable of `AgentMessageDraftEvent` (`append`,
+  `overflow`, `gap`, `ended`, `discarded`) driven by relay wakes. Nothing
+  enters the reliable spool, the mailbox or the activity tail; the accepted
+  Agent message stays the only product truth. Wire major stays 3.
+
+- **Feature (client; #500, PR #506)** — `AgentMessageDraftPublisher` mirrors
+  the closing-reply text run into `agent.message.draft` frames: it coalesces
+  for `egressPolicy.activity.maxCoalesceMs`, splits at 16 KiB on UTF-8
+  boundaries, sends one `overflow` frame at the offer's
+  `messageEgress.maxBytes` and holds a trailing high surrogate until the next
+  delta. It runs only when the task has `messageEgress`, the server advertised
+  `agent-message-draft` and the adapter declares `capabilities.messageDraft`.
+  The Pi adapter declares `messageDraft: true`; Claude Code and Codex send no
+  frames. `messageDraft` reaches `conn.hello` and `task.claim`.
+
+- **Fix (cloud-dataplane; #503)** — the two tsup configs no longer race on
+  `clean`, which could delete `dist/runtime.js` after it was written. The
+  package `build` script removes `dist` once before `tsup`.
+
 - **Fix (client; #501)** — the Claude adapter declares
   `progressEventsAreMessages`, so the closing reply is now the last non-blank
   assistant message. Before, a run that repeated its answer in a later model
@@ -10,7 +55,7 @@
   messages with no tool between them are now commentary, as for Codex.
   `summary` still carries the whole run's text.
 
-- **Feature (client)** — `Session` gains optional
+- **Feature (client; PR #508)** — `Session` gains optional
   `progressStartsMessage(event)`. An adapter that sets
   `progressEventsAreMessages` but emits one message as several `progress`
   events returns false for a continuation. The daemon then keeps every part

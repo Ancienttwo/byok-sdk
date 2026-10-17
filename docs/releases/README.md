@@ -7,8 +7,10 @@ This page holds the standing steps that every release repeats.
 
 `packages/protocol/src/__tests__/compat.test.ts` decides wire compatibility
 from evidence, not the author's judgment (see "Freeze rule" in
-`docs/protocol.md`). The wire is at major 3, and no v3 release has been
-published yet.
+`docs/protocol.md`). The wire is at major 3. The v3 rc.2 train is published
+on `rc`. No stable
+v3 decoder is published yet. The 0.27.0 stable preparation registers its
+first envelope and HTTP corpus prefixes.
 
 Retired v2 evidence. `golden/v2.envelopes.ndjson`, `golden/v2.http.ndjson`
 and the v2 registry `golden/releases.json` (floor 0.25.0; 0.25.0, 0.26.0 and
@@ -22,8 +24,10 @@ registered in `golden/v3.releases.json`, a v3 corpus line that no registered
 entry covers may be corrected in place when a pre-release v3 tightening makes
 it undecodable. Once any v3 release is registered, the lines it covers are
 immutable and the rest stays append-only. `golden/v3.releases.json` records each stable v3 release's
-corpus line counts and SHA-256 prefixes; it has no releases and no `floor`
-yet. Every v3 entry, from the first, pins both `envelopes` and `http`.
+corpus line counts and SHA-256 prefixes. The 0.27.0 preparation registers
+the first stable entry. It has no `floor` until the published-decoder
+checks are restored after publication. Each v3 entry pins both `envelopes`
+and `http`.
 Prereleases are not registered and are outside the guarantee. Until a v3
 release is registered and pinned as a published decoder, the suite proves v3
 self-consistency only and cross-release gates are unproven.

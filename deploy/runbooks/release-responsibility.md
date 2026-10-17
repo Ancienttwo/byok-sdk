@@ -53,9 +53,13 @@ approved the prerelease 0.27.0-rc.2 / keys 0.12.0-rc.2 under the dist-tag `rc`
 on 2026-10-16, rc first. It replaces 0.27.0-rc.1, which was prepared but never
 published, and adds the fixes of #493 and #496. It is the first wire-v3 train.
 All nine rc.2 packages are published and read back on `rc`, from `v0.27.0-rc.2`
-(`b8f47f02`). See its
-[rc.2 publication record](../../docs/releases/v0.27.0-rc.2-publication.md) and
-the [0.27.0 release notes](../../docs/releases/v0.27.0.md).
+(`b8f47f02`); see its
+[rc.2 publication record](../../docs/releases/v0.27.0-rc.2-publication.md).
+On 2026-10-17 the owner approved stable source preparation of 0.27.0 / keys
+0.12.0 for `latest`. It includes the Agent message draft lane (#500) and the
+fixes #501, #503, #507 and PR #508. Publication remains pending. Fixed-artifact
+Host acceptance (#195) remains a pre-publication gap. See the
+[0.27.0 release notes](../../docs/releases/v0.27.0.md).
 
 The SDK publishes npm libraries, the `byok-agent` CLI and reference packaging/service recipes. The host product owns every binary distribution decision:
 
@@ -72,18 +76,19 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 ## Version selection
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
-The approved source manifests name the prerelease train 0.27.0-rc.2 and
-independent keys 0.12.0-rc.2. Both are MINOR lines. The train moves the wire to
-protocol major 3 (#468), adds `executions.submit` (#470) and typed home-busy
-decline codes (#471), and has pre-1.0 breaking cuts in protocol, client,
+The approved source manifests name the stable train 0.27.0 and
+independent keys 0.12.0. Both are MINOR lines. The train moves the wire to
+protocol major 3 (#468), adds `executions.submit` (#470), typed home-busy
+decline codes (#471) and the Agent message draft lane (#500), and has pre-1.0 breaking cuts in protocol, client,
 server, cloud, cloud-dataplane and core. keys makes `buildPiProviderProjection`
 require `runtimeEntry` and moves the pi-rpc key to private IPC (#385). Keep
 manifests, lock workspace records, version documents and packed internal
 dependencies consistent.
 
 The candidate set contains eight aligned packages plus keys: nine packages.
-`@byok-sdk/implementation-identity` remains retired. Every public package is a
-prerelease on the one dist-tag `rc`; `latest` stays 0.26.1 / keys 0.11.1. The
+`@byok-sdk/implementation-identity` remains retired. Every public package targets
+the dist-tag `latest`; current `latest` remains 0.26.1 / keys 0.11.1 until
+publication and complete registry readback. The
 [reviewed registry baseline](../../scripts/release/registry-expectations.json)
 records that prior `latest` for all nine packages. This train has no first
 publication.

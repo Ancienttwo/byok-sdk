@@ -92,7 +92,7 @@
     },
     "packages/client": {
       "name": "@byok-sdk/client",
-      "version": "0.27.0-rc.2",
+      "version": "0.27.0",
       "bin": {
         "byok-agent": "./dist/bin/byok-agent.js",
         "byok-agent-message-mcp": "./dist/bin/byok-agent-message-mcp.js",
@@ -137,7 +137,7 @@
     },
     "packages/cloud": {
       "name": "@byok-sdk/cloud",
-      "version": "0.27.0-rc.2",
+      "version": "0.27.0",
       "dependencies": {
         "@byok-sdk/core": "workspace:*",
         "@byok-sdk/protocol": "workspace:*",
@@ -147,7 +147,7 @@
     },
     "packages/cloud-dataplane": {
       "name": "@byok-sdk/cloud-dataplane",
-      "version": "0.27.0-rc.2",
+      "version": "0.27.0",
       "dependencies": {
         "@byok-sdk/cloud": "workspace:*",
         "@byok-sdk/core": "workspace:*",
@@ -165,7 +165,7 @@
     },
     "packages/cloud-do": {
       "name": "@byok-sdk/cloud-do",
-      "version": "0.27.0-rc.2",
+      "version": "0.27.0",
       "dependencies": {
         "@earendil-works/chord": "1.2.0",
         "@earendil-works/pi-ai": "1.2.0",
@@ -193,7 +193,7 @@
     },
     "packages/core": {
       "name": "@byok-sdk/core",
-      "version": "0.27.0-rc.2",
+      "version": "0.27.0",
       "dependencies": {
         "zod": "^4.4.3",
       },
@@ -203,7 +203,7 @@
     },
     "packages/keys": {
       "name": "@byok-sdk/keys",
-      "version": "0.12.0-rc.2",
+      "version": "0.12.0",
       "bin": {
         "byok-pi-provider-launcher": "./dist/bin/pi-provider-launcher.js",
       },
@@ -214,7 +214,7 @@
     },
     "packages/protocol": {
       "name": "@byok-sdk/protocol",
-      "version": "0.27.0-rc.2",
+      "version": "0.27.0",
       "dependencies": {
         "@cfworker/json-schema": "4.1.1",
         "zod": "^4.4.3",
@@ -225,7 +225,7 @@
     },
     "packages/server": {
       "name": "@byok-sdk/server",
-      "version": "0.27.0-rc.2",
+      "version": "0.27.0",
       "dependencies": {
         "@byok-sdk/cloud": "workspace:*",
         "@byok-sdk/core": "workspace:*",
@@ -247,7 +247,7 @@
     },
     "packages/ui-runtime": {
       "name": "@byok-sdk/ui-runtime",
-      "version": "0.27.0-rc.2",
+      "version": "0.27.0",
       "dependencies": {
         "@byok-sdk/cloud": "workspace:*",
         "@byok-sdk/protocol": "workspace:*",
