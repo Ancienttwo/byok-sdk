@@ -66,7 +66,7 @@ export function resolvePiRuntimeIdentity(): PiRuntimeIdentity {
   const spec = readClientPiRuntimePin();
   if (spec === undefined) {
     throw new Error(
-      `@byok-sdk/client does not declare a ${PI_PACKAGE_NAME} dependency; reinstall @byok-sdk/client or set BYOK_PI_BIN to a Node 24.15+ pi sidecar`,
+      `@byok-sdk/client does not declare a ${PI_PACKAGE_NAME} dependency; ${PI_BIN_REMEDY}`,
     );
   }
   if (!PI_EXACT_VERSION.test(spec)) {
@@ -128,19 +128,17 @@ export function resolvePinnedPiPackage(remedy: string): {
   return { dir: root.dir, identity: expected, bin: root.manifest.bin };
 }
 
-const PI_BIN_REMEDY = 'reinstall @byok-sdk/client dependencies or set BYOK_PI_BIN to a Node 24.15+ pi sidecar';
+const PI_BIN_REMEDY = 'reinstall @byok-sdk/client dependencies, or ship pi through sdkHelperHost and copyPiRuntimeAssets';
 
 /**
  * Resolve the pi CLI executable from the required package installed alongside
  * `@byok-sdk/client`. There is intentionally no automatic PATH fallback: a
  * global `pi` would create a second, unversioned authority for this contract.
  *
- * `BYOK_PI_BIN` explicitly overrides the package when set: `PiAdapterOptions.resolveBin`
- * is the injectable seam for in-process tests, but the `byok-agent` CLI bin
- * only ever constructs `new PiAdapter()` with no options (see `createDaemon`),
- * so an out-of-process substitution (e.g. examples/basic's e2e run swapping
- * in the fake-pi fixture, or a single-file product injecting its required
- * Node 24.15+ pi sidecar) has no other seam to use.
+ * `BYOK_PI_BIN` overrides the package for tests and e2e runs only.
+ * `PiAdapterOptions.resolveBin` is the seam for in-process tests.
+ * The `byok-agent` CLI constructs `new PiAdapter()` with no options, so e2e
+ * runs use the env override to select a fake-pi fixture.
  */
 export function resolvePiBin(): ResolvedBin {
   const override = process.env.BYOK_PI_BIN;

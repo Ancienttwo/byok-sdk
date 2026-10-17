@@ -11,6 +11,15 @@
   between them are now commentary, as for Codex. `summary` still carries the
   whole run's text.
 
+- **Fixed (client)** — Pi dependency errors now direct hosts to reinstall
+  dependencies or use `sdkHelperHost` with `copyPiRuntimeAssets`.
+  `BYOK_PI_BIN` remains a test and e2e seam. The spec records the RAFT SDK
+  comparison. The security guide now lists all three files read by the auth
+  probe. The probe keeps its current implementation because the pinned Pi
+  1.2.0 `ModelRuntime.create` can execute stored `!command` keys even with
+  `allowModelNetwork: false`. New tests assert that the probe spawns no child
+  process for command keys in `auth.json` or `models.json`.
+
 ## 0.27.0-rc.2 / @byok-sdk/keys 0.12.0-rc.2 — 2026-10-16 (published)
 
 The owner approved rc.2 and the dist-tag `rc` on 2026-10-16, then npm execution.
