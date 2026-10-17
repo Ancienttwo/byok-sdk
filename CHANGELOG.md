@@ -2,16 +2,18 @@
 
 ## Unreleased
 
-## 0.27.0-rc.2 / @byok-sdk/keys 0.12.0-rc.2 — 2026-10-16 (prepared; not published)
+## 0.27.0-rc.2 / @byok-sdk/keys 0.12.0-rc.2 — 2026-10-16 (published)
 
-The owner approved rc.2 and the dist-tag `rc` on 2026-10-16; npm execution is a
-separate step. rc.2 replaces rc.1, which was prepared but never published. It
+The owner approved rc.2 and the dist-tag `rc` on 2026-10-16, then npm execution.
+rc.2 replaces rc.1, which was prepared but never published. It
 adds the fixes of PR #498. `latest` stays 0.26.1 / keys 0.11.1.
 
 - The eight aligned package manifests move to 0.27.0-rc.2.
 - keys moves to 0.12.0-rc.2. Its packed core edge is exactly 0.27.0-rc.2.
 - The lock workspace records and current version documents move together.
 - [Release notes](docs/releases/v0.27.0.md) describe the rc.2 changes.
+- [Publication record](docs/releases/v0.27.0-rc.2-publication.md) confirms all
+  nine rc.2 packages, frozen artifact identity and registry readback.
 
 - **Fix (client; #493)** — a default scratch root that does not fit runtime
   Unix sockets no longer fails daemon construction. When canonical `<storeDir>/tmp` is
