@@ -32,5 +32,6 @@ export function toRuntimeInfoCapabilities(caps: RuntimeCapabilities): ProtocolRu
     resume: caps.resume,
     approvalInteractive: caps.approvalInteractive,
     ...(caps.mcpToolsets === undefined ? {} : { mcpToolsets: caps.mcpToolsets }),
+    ...(caps.messageDraft === undefined ? {} : { messageDraft: caps.messageDraft }),
   };
 }

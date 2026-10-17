@@ -765,6 +765,7 @@ const __executionScratch = await testExecutionScratch();
       steer: true,
       resume: true,
       mcpToolsets: true,
+      messageDraft: true,
       // S0/H-002: pi has no needs_approval notion at all
       // (`PiSession.resolveApproval` throws unconditionally).
       approvalInteractive: false,

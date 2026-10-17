@@ -101,6 +101,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       steer: true,
       resume: true,
       mcpToolsets: true,
+      messageDraft: true,
       approvalInteractive: false,
     });
 

@@ -1,4 +1,5 @@
 import type { ActivityIngress } from '@byok-sdk/protocol';
+import { AgentMessageDraftPublisher } from './agent-message-draft';
 import type { ScratchRoot, ExecutionScratch } from './retention/scratch';
 import { observePreparedMemory, type PreparedAgentMemoryState } from './prepared-agent-memory';
 import { InputPreparationRequestError } from './input-preparation-service';
@@ -821,6 +822,7 @@ interface ActiveTask {
   /** Shared receipt for concurrent finish/shutdown callers; cleared after a failed attempt so shutdown can retry. */
   disposalAttempt?: Promise<void>;
   messageRequirement?: Readonly<AgentMessageEgressRequirement>;
+  messageDraft?: AgentMessageDraftPublisher;
   terminalProjection?: Readonly<TerminalProjectionSelection>;
   /** Present exactly for a result-document task: where its `submit_result` outcome is staged. */
   resultStore?: AgentResultStore;
@@ -1776,7 +1778,11 @@ export class TaskRunner {
       : active.messageOutbox === outbox && this.canPublishAgentMessage(active);
     if (!authorized || record.sessionRef === undefined
       || !outbox.retryableRecords().some(pending => pending.messageId === record.messageId)) return;
-    if (active !== undefined) active.messageSendAttempted = true;
+    if (active !== undefined) {
+      active.messageDraft?.flush();
+      active.messageDraft?.stop();
+      active.messageSendAttempted = true;
+    }
     this.deps.send(createEnvelope('agent.message.publish', outbox.publishPayload(record), {
       taskId: record.taskId,
       sessionRef: record.sessionRef,
@@ -3024,6 +3030,19 @@ export class TaskRunner {
         ...(terminalProjection === undefined ? {} : { terminalProjection }),
         ...(terminalProjection?.mode !== 'result-document' ? {} : { resultStore: this.resultContextByTask.get(taskId)?.store }),
       };
+      if (active.messageRequirement !== undefined && active.agentRef !== undefined
+        && pick.descriptor.capabilities.messageDraft === true
+        && this.deps.getServerCapabilities?.().includes('agent-message-draft')) {
+        active.messageDraft = new AgentMessageDraftPublisher({
+          taskId,
+          agentRef: active.agentRef,
+          maxBytes: active.messageRequirement.maxBytes,
+          maxCoalesceMs: this.deps.agentEgressPolicy!.activity.maxCoalesceMs,
+          progressEventsAreMessages: pick.descriptor.progressEventsAreMessages === true,
+          getServerCapabilities: () => this.deps.getServerCapabilities?.() ?? [],
+          send: envelope => this.deps.send(envelope),
+        });
+      }
 
       // A strict Agent handoff is the local restart authority. It is
       // intentionally awaited and fsynced before task.started; an Agent
@@ -4052,6 +4071,7 @@ export class TaskRunner {
           }
         }
 
+        active.messageDraft?.push(event);
         if (event.type === 'tool_use' || event.type === 'tool_result' || event.type === 'needs_approval') {
           // A tool interaction ends the current text run: whatever the model
           // said before it was narration about what it was ABOUT to do, not
@@ -5367,6 +5387,7 @@ export class TaskRunner {
         active.messageRetryTimer = undefined;
       }
       active.batcher.stop();
+      active.messageDraft?.stop();
       this.addFinishedTaskId(taskId); // semantic terminal is authoritative even while disposal ownership is retained
 
     // M4 Phase 4 (gatekeeper LOW advisory): a task can finish (complete,
@@ -5485,6 +5506,7 @@ export class TaskRunner {
       this.revokeHostToolsetContexts(active.taskId);
       active.beingTornDown = true;
       active.semanticTerminal = { prepare };
+      active.messageDraft?.stop();
     }
     const terminal = active.semanticTerminal;
     const attempt = Promise.resolve().then(async () => {

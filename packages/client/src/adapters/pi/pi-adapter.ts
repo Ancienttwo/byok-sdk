@@ -198,6 +198,7 @@ export class PiAdapter implements RuntimeAdapter {
       steer: true,
       resume: true,
       mcpToolsets: true,
+      messageDraft: true,
       approvalInteractive: false,
     },
   });
