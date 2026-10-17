@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Fix (client; #501)** — the Claude adapter declares
+  `progressEventsAreMessages`. Each Claude `progress` event is one complete
+  text block, so the closing reply is now the last non-blank text block.
+  Before, a run that repeated its answer in a later model call with no tool
+  between published the answer twice in the daemon-authored Agent message
+  and in `task.complete.finalMessage`. Earlier text blocks with no tool
+  between them are now commentary, as for Codex. `summary` still carries the
+  whole run's text.
+
 - **Fixed (client)** — Pi dependency errors now direct hosts to reinstall
   dependencies or use `sdkHelperHost` with `copyPiRuntimeAssets`.
   `BYOK_PI_BIN` remains a test and e2e seam. The spec records the RAFT SDK

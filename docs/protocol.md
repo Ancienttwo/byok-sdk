@@ -270,7 +270,8 @@ corpus remains a pre-usage compatibility witness.
 **Landed additive minor: `task.complete.finalMessage`.** `task.complete`
 gains an OPTIONAL string with the runtime's closing reply. It is the assistant
 text after the last tool interaction. For a runtime whose `progress` events are
-whole messages (Codex), it is the last message only. `summary` does not change:
+whole messages (Codex, and Claude with one event per text block), it is the
+last message only. `summary` does not change:
 it still joins every `progress` text with no separator. The daemon omits the
 field when the run ended with no closing text. No capability flag gates it. An
 older server strips it, and the host then reads `summary` as before. The frozen
