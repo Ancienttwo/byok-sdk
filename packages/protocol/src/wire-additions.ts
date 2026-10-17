@@ -20,9 +20,9 @@
  * configured for them (Agent home, egress, input preparation, provisioning,
  * memory intents and so on): they gate on the receiver's configuration. The
  * server-advertised `approval_resolved` gate is kept as the daemon's sending
- * condition for `task.approval_resolved`. No v3 release has been
- * published, so no row is proven against a published v3 decoder yet
- * (`src/__tests__/compat.test.ts`).
+ * condition for `task.approval_resolved`. The first stable v3 decoder is
+ * 0.27.0. Cross-release checks use its actual registry tarball
+ * (`src/__tests__/published-compat.test.ts`).
  *
  * Senders derive their admission flags from {@link requiredReceiverCapabilities}
  * and nowhere else, so a gate cannot exist in one place and be missing in

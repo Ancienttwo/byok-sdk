@@ -88,7 +88,7 @@ unproven (see the evidence list below).
    declaration says dropping it does not change what the receiver executes or
    acknowledges.
 
-`compat.test.ts` holds three kinds of evidence:
+`compat.test.ts` and `published-compat.test.ts` hold the wire evidence:
 
 - **Retired v2 evidence (negative oracle).** `golden/v2.envelopes.ndjson`,
   `golden/v2.http.ndjson` and the v2 registry `golden/releases.json` are
@@ -107,15 +107,17 @@ unproven (see the evidence list below).
   literal body to its independently authored value (messages responses must
   account for their `batchLength`). The v3 corpus carries every message type,
   every `WIRE_ADDITIONS` entry and a result-document offer with `schema` on
-  each Agent offer type. `golden/v3.releases.json` has `releases: []` and no
-  `floor`. Every v3 entry, from the first, pins both corpus prefixes.
+  each Agent offer type. `golden/v3.releases.json` registers 0.27.0 and sets
+  `floor` to 0.27.0. Each v3 entry pins both corpus prefixes.
 - **Published rejection oracle.** `byok-protocol-previous` (0.26.1, the last
   registered v2 release) rejects every v3 corpus line, a v3 `conn.hello` and
   the v3 HTTP lines that carry envelopes. Nothing it produces is v3 evidence.
 
-When the first v3 release is registered, pin it as a published decoder and
-restore the cross-release checks (never-narrowed surface, released decoders
-read current bytes, strip-safe and gated declarations) against it.
+`byok-protocol-floor` pins the real published 0.27.0 registry tarball.
+`published-compat.test.ts` checks released JSON Schema constraints, constants
+and state transitions, current envelope and HTTP bytes, and declared gated
+or strip-safe losses. It also proves the alias is independent of the
+workspace. JSON Schema does not express arbitrary runtime refinements.
 
 v3 starts from a reset table: the v2 strip-safe rows and the v2
 `result-document` gate are baseline and gone. `WIRE_ADDITIONS` keeps the
