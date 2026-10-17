@@ -260,11 +260,15 @@ report (`adapters/codex/codex-adapter.ts`), and pi's login-state probe
 (`adapters/pi/auth-presence.ts`) — never a file read of `~/.claude` or
 `~/.codex`. Pi's own `auth check` needs an explicit provider and a single-file
 product exposes no pi CLI, so the pi probe checks provider credential env-var
-*names* and then reads pi's agent-dir `auth.json` (and `settings.json`
-`defaultProvider`) in-process, inspecting only whether a login record of pi's
-own `api_key`/`oauth` shape exists. It never compares, returns, logs, or keeps
-a value; a missing `auth.json`, or an unreadable or malformed `auth.json` or
-`settings.json`, observes `authPresent: false`.
+*names* and then reads `auth.json`, `settings.json`, and `models.json` in pi's
+agent directory. It checks the `settings.json` `defaultProvider`, or any
+provider if no default is set. A login is an `auth.json` record with pi's
+`api_key`/`oauth` shape, or a `models.json` provider with a non-empty `apiKey`.
+The probe does not resolve env references or execute `!command` keys.
+It never compares, returns, logs, or keeps a credential value. An unreadable
+or malformed `auth.json` or `settings.json` observes `authPresent: false`.
+A missing `auth.json`, or a missing, unreadable, or malformed `models.json`,
+contributes no credential. The probe does not read `models-store.json`.
 
 **Environment inheritance (ADR-037 D2/D3)**: every task child — the runtime
 CLI and the MCP servers the daemon probes for it — gets the daemon's full

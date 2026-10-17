@@ -47,7 +47,7 @@ describe('resolvePiBin', () => {
     expect(result.command.endsWith('cli.js')).toBe(true);
   });
 
-  it('BYOK_PI_BIN explicitly overrides package resolution for tests and packaged sidecars', () => {
+  it('BYOK_PI_BIN explicitly overrides package resolution for tests and e2e runs', () => {
     process.env.BYOK_PI_BIN = '/tmp/some-fake-pi.mjs';
     expect(resolvePiBin()).toEqual({ command: '/tmp/some-fake-pi.mjs', source: 'env' });
   });

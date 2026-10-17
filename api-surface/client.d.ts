@@ -517,12 +517,10 @@ export declare function resolvePinnedPiPackage(remedy: string): {
  * `@byok-sdk/client`. There is intentionally no automatic PATH fallback: a
  * global `pi` would create a second, unversioned authority for this contract.
  *
- * `BYOK_PI_BIN` explicitly overrides the package when set: `PiAdapterOptions.resolveBin`
- * is the injectable seam for in-process tests, but the `byok-agent` CLI bin
- * only ever constructs `new PiAdapter()` with no options (see `createDaemon`),
- * so an out-of-process substitution (e.g. examples/basic's e2e run swapping
- * in the fake-pi fixture, or a single-file product injecting its required
- * Node 24.15+ pi sidecar) has no other seam to use.
+ * `BYOK_PI_BIN` overrides the package for tests and e2e runs only.
+ * `PiAdapterOptions.resolveBin` is the seam for in-process tests.
+ * The `byok-agent` CLI constructs `new PiAdapter()` with no options, so e2e
+ * runs use the env override to select a fake-pi fixture.
  */
 export declare function resolvePiBin(): ResolvedBin;
 // ==== @byok-sdk/client dist/adapters/pi/rpc-client.d.ts ====
