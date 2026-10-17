@@ -1,4 +1,5 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
+import { InMemoryAgentMessageDraftStore } from '@byok-sdk/cloud';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { createByokServer, createHmacTokenSigner, type ByokServer } from '../index';
@@ -68,6 +69,40 @@ describe('tasks.messageDraft through real HTTP inbound', () => {
     expect(await end).toEqual({ done: false, value: { kind: 'ended' } });
     expect(await iterator.next()).toEqual({ done: true, value: undefined });
     expect(wake).toHaveBeenCalledWith(taskId);
+  });
+  it('keeps the final suffix when publication races the first snapshot read', async () => {
+    const body = 'hello world';
+    const message = createEnvelope('agent.message.publish', {
+      ...publish().payload, body, byteCount: Buffer.byteLength(body),
+      contentHash: `sha256:${createHash('sha256').update(body).digest('hex')}`,
+    }, { taskId });
+    await send(frame('hello'));
+    const originalRead = InMemoryAgentMessageDraftStore.prototype.read;
+    // This fails with the old row-first order: it pairs "hello" with ended
+    // and exits before it can emit " world". The wrapper returns the real row.
+    const read = vi.spyOn(InMemoryAgentMessageDraftStore.prototype, 'read').mockImplementationOnce(
+      async function (this: InMemoryAgentMessageDraftStore, tenant, id) {
+        const row = await originalRead.call(this, tenant, id);
+        expect(row).toMatchObject({ taskId, text: 'hello', byteCount: 5 });
+        await send(frame(' world', 5));
+        await send(message);
+        return row;
+      },
+    );
+    const events = [];
+    for await (const event of instance.tasks.messageDraft(taskId, daemon.deviceId, agentRef, { signal: abort.signal })) {
+      events.push(event);
+    }
+    expect(events.filter(event => event.kind === 'append').map(event => event.text).join('')).toBe(body);
+    expect(events).toEqual([
+      { kind: 'append', revision: 1, offset: 0, text: 'hello' },
+      { kind: 'append', revision: 1, offset: 5, text: ' world' },
+      { kind: 'ended' },
+    ]);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(await instance.tasks.agentMessage(taskId, daemon.deviceId, agentRef)).toMatchObject({
+      payload: { body }, disposition: { outcome: 'accepted' },
+    });
   });
   it('resumes a UTF-8 suffix and sends a full replacement for a new revision', async () => {
     await send(frame('你好!'));
