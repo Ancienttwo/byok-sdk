@@ -6,13 +6,16 @@ import { defineConfig } from 'tsup';
 //   reads migration files off disk. That is exactly why it is a separate
 //   package (design §4) — the two platform-neutral packages stay loadable on
 //   Workers because the database driver never enters their dependency graph.
-//   This config is unchanged from the single-config era, `clean` included.
 // - The runtime entry is the Worker-loadable online surface, so it builds for
 //   the neutral platform: no node builtin is external there, which makes the
 //   esbuild pass fail the build the moment the runtime subgraph reaches one.
 //   That failure is the point — the alternative is a Worker that breaks at
-//   deploy time. `clean: false` because the root config above already cleaned
-//   the output directory for this run; only one config may own the clean.
+//   deploy time.
+//
+// Neither config cleans. tsup runs array configs concurrently, and a config's
+// clean globs and deletes everything under `dist/` whenever that config gets
+// there — after the other config may already have written its output. The
+// `build` script removes `dist/` once, before tsup starts.
 export default defineConfig([
   {
     entry: ['src/index.ts'],
@@ -21,7 +24,7 @@ export default defineConfig([
     platform: 'node',
     dts: false,
     sourcemap: true,
-    clean: true,
+    clean: false,
     splitting: false,
     treeshake: true,
   },
