@@ -109,11 +109,15 @@ export class HostMemoryPage {
     });
   }
   async flushNotices(): Promise<void> {
+    const failures: unknown[] = [];
     for (const row of Object.values(this.ledger.snapshot().memory?.intents ?? {})) {
       if (!row.noticePending || row.readback) continue;
-      await this.options.notify(row.deviceId, { intentId: row.intent.intentId, agentRef: row.intent.agentRef });
-      this.ledger.transaction(state => { memory(state).intents[row.intent.intentId]!.noticePending = false; });
+      try {
+        await this.options.notify(row.deviceId, { intentId: row.intent.intentId, agentRef: row.intent.agentRef });
+        this.ledger.transaction(state => { memory(state).intents[row.intent.intentId]!.noticePending = false; });
+      } catch (error) { failures.push(error); }
     }
+    if (failures.length) throw new AggregateError(failures, 'Memory notice delivery failed; pending intents retained');
   }
   /** Bind this adapter to the authenticated device. Do not take identity from a request body. */
   transport(deviceId: string): AgentMemoryIntentTransport {

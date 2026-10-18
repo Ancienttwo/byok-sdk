@@ -109,10 +109,22 @@ it.each(['revoke', 'expire', 'move'] as const)('withholds %s before release and 
 it('retries an unconfirmed notice after restart with the exact same intent and no mailbox body', async () => {
   const { intent } = await page.approve(approval());
   notify.mockRejectedValueOnce(new Error('lost response'));
-  await expect(page.flushNotices()).rejects.toThrow('lost response');
+  await expect(page.flushNotices()).rejects.toMatchObject({ errors: [new Error('lost response')] });
   ledger.close(); ledger = new HostLedger(path.join(root, 'ledger.sqlite'), 'product:host-core-test'); page = new HostMemoryPage(ledger, options());
   await page.flushNotices(); await page.flushNotices();
   expect(notify.mock.calls).toEqual([[binding.deviceId, { intentId: intent.intentId, agentRef }], [binding.deviceId, { intentId: intent.intentId, agentRef }]]);
+});
+
+it('delivers later notices when an earlier transport fails and retains only the failed retry', async () => {
+  const first = await page.approve(approval());
+  const second = await page.approve(approval());
+  notify.mockRejectedValueOnce(new Error('first delivery failed'));
+  await expect(page.flushNotices()).rejects.toThrow();
+  expect(notify.mock.calls).toHaveLength(2);
+  expect(page.intent(first.intent.intentId)!.noticePending).toBe(true);
+  expect(page.intent(second.intent.intentId)!.noticePending).toBe(false);
+  await page.flushNotices();
+  expect(notify.mock.calls).toHaveLength(3);
 });
 
 it('checks projection hash, grant, exact profile, ordering and immutable mutation identity', async () => {
