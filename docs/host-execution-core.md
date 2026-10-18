@@ -234,6 +234,10 @@ Reject stale versions as `version_conflict`; do not merge on the device.
 Finish the current occurrence before switching definitions.
 The example accepts an immutable mirror. It does not implement command transport or the version-change workflow.
 
+The Aimpact scope ruling of 2026-10-18 assigns same-routine-ID version changes to K8a with `update_routine`.
+This includes current/pending versions, scheduling generation and the in-flight limit.
+This reference keeps each routine ID's definition immutable. Use a new ID to change a definition.
+
 Store only `active`, `paused` and `completed` lifecycle values.
 Pause prevents new occurrences and cancels the planned wake.
 Existing admitted work can finish. The reference also permits an already queued occurrence to finish.
@@ -291,10 +295,16 @@ Keep user model keys out of Host logs and result storage.
 
 Tests cover the K4 routine smoke path, sleep catch-up, SIGKILL recovery, shared FIFO,
 busy terminal gating, retry limits, quiet hours, lifecycle, cancellation, outcome rollback and upload IDs.
+The Bot chat test covers PRD section 5.8's first item: `executions.submit`, `messageEgress`,
+an exact `accepted` disposition readback, and successful terminal settlement.
+It uses the same FIFO and outcome transaction as a routine.
 They use a fake runtime and real SDK transport and storage.
 They do not prove native model behavior or a downstream deployment.
-The service-owned command, visibility, credential-log audit and idle network budget rows
-in platform PRD section 14.1 remain downstream integration checks.
+
+The Aimpact scope ruling of 2026-10-18 assigns the service rows in platform PRD section 14.1
+to the downstream Host service after K2 and A2, as specified in that PRD.
+These rows cover routine sync with the browser closed, `sync_failed`, 409, `device_offline`,
+`missed`, security and cost. This reference covers the device-local Topology L execution rows.
 See the [recorded validation](../examples/host-execution-core/VALIDATION.md).
 
 The RAFT comparison in platform PRD section 12.11 is a design reference.

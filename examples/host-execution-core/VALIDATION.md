@@ -4,6 +4,34 @@ Date: 2026-10-18. Baseline: `8e8839a3`.
 Branch: `codex/bot-k4-host-execution-core`.
 Environment: macOS, Node `v24.21.0`, Bun `1.4.3`.
 
+## V3 scope ruling and chat acceptance
+
+V3 starts at `ae7acb2c`. Aimpact made these scope decisions on 2026-10-18:
+
+- Platform PRD section 14.1's service rows belong to the downstream Host service after K2 and A2.
+  They cover routine sync with the browser closed, `sync_failed`, 409, `device_offline`, `missed`, security and cost.
+  This reference covers the device-local Topology L execution rows.
+- Same-routine-ID version changes belong to K8a with `update_routine`.
+  This includes current/pending versions, scheduling generation and the in-flight limit.
+  K4 keeps definitions immutable. A changed definition needs a new ID.
+
+Both decisions are recorded in the Host guide and example README.
+
+P1: The test boundary is the existing embedded server, daemon and fake runtime.
+P2: A routine and a Bot chat pass through the same core `executions.submit` path.
+The runtime publishes a message and submits a result. The SDK stores the exact message decision and device terminal.
+The Host reads that terminal and commits the opaque outcome, applied marker and result projections.
+P3: Add one acceptance test and an optional message consumer in test support. Keep production code unchanged.
+
+The new `src/core.test.ts` chat test covers Bot PRD section 5.8's first item.
+It holds the consumer decision to observe a pending disposition, no terminal and no applied marker.
+It checks the exact task/device identity, frozen context, message body, byte count and SHA-256 hash.
+After acceptance it reads `tasks.messageDisposition(taskId, deviceId, payload).outcome === 'accepted'`.
+It reads `task.complete` with the expected result document and compares it with the Host's stored terminal.
+It proves FIFO order behind a routine and uses one injected outcome handler for both sources.
+After ledger reopen, both conclusions, outcome markers and projections remain, with exactly two applications.
+The same immutable accepted disposition remains readable after terminal settlement.
+
 ## V2 review response
 
 V2 starts at `49512593`. The read-only source review is
@@ -108,6 +136,16 @@ The test observes one occurrence, one execution, identical input and one committ
 
 ## Test changes and reasons
 
+V3 changes:
+
+- `test-support.ts` accepts an optional public `agentMessage` consumer and passes it to the embedded server.
+  Existing callers keep their existing configuration. This lets the chat test use the real SDK message path.
+- `core.test.ts` adds one Bot chat acceptance test. Existing assertions are unchanged.
+  A gated consumer separates pending from accepted evidence. SDK reads establish acceptance and success.
+  The new projection assertion checks the stored row's public ID and value.
+  The first focused run exited 1 because the test looked up that ID as an internal outbox key.
+  The correction preserves the assertion and uses the row value, since the ledger hashes outbox keys.
+
 V2 changes:
 
 - P2-3 fixture correction: a final v2 run observed an unclaimed cancellation in the
@@ -198,7 +236,7 @@ The root test exited 0. This closes the review's remaining test condition withou
 
 ## Acceptance limits
 
-K4 does not implement K8 actions, memory pages, group chat or the other synthetic end-to-end slices.
+K4 does not implement K8 actions, memory pages, group chat or synthetic end-to-end slices beyond chat, routines and crash recovery.
 The default calendar is a UTC interval reference. Other calendars use the injected shared pure function.
 This small ledger uses one JSON snapshot and one live Host owner.
 The Host service owns definition commands, version changes, CAS, sync and read-time visibility.

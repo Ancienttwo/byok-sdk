@@ -17,6 +17,8 @@ bun run --cwd examples/host-execution-core test
 
 Tests start an embedded SQLite server and a daemon with a fake Pi runtime.
 The runtime calls the real reserved `submit_result` helper.
+The Bot chat test also reads the exact `accepted` message disposition from the SDK after `messageEgress`.
+It shares a FIFO and the outcome transaction with a routine.
 They do not call a model provider or require a browser.
 The crash test sends SIGKILL to a child Host during wake delivery.
 
@@ -111,7 +113,17 @@ The Host service owns definition versions, CAS commands, sync, authentication,
 result upload policy, visibility, retention and deletion. This example mirrors an
 immutable definition. The Host service must retain its version history and command receipts.
 The example does not implement the service's version-change workflow, command API or UI.
+
+The Aimpact scope ruling of 2026-10-18 assigns the service rows in platform PRD section 14.1
+to the downstream Host service after K2 and A2, as specified in that PRD.
+These rows cover routine sync with the browser closed, `sync_failed`, 409, `device_offline`,
+`missed`, security and cost. This reference covers the device-local Topology L execution rows.
+
+The same ruling assigns same-routine-ID version changes to K8a with `update_routine`.
+This includes current/pending versions, scheduling generation and the in-flight limit.
+This reference keeps each routine ID's definition immutable. Use a new ID to change a definition.
+
 It does not implement Bot delegation, group chat, confirmable actions, routine outcome
-actions, memory pages or the other synthetic end-to-end slices.
+actions, memory pages or synthetic end-to-end slices beyond chat, routines and crash recovery.
 
 See [VALIDATION.md](VALIDATION.md) for commands, results and acceptance limits.
