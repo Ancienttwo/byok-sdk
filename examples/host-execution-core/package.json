@@ -1,0 +1,20 @@
+{
+  "name": "@byok-sdk/example-host-execution-core",
+  "version": "0.0.1",
+  "private": true,
+  "description": "K4 Host execution core contract probes; implementation is blocked",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=24.15.0" },
+  "scripts": { "typecheck": "tsc --noEmit", "test": "vitest run" },
+  "dependencies": {
+    "@byok-sdk/client": "workspace:*",
+    "@byok-sdk/server": "workspace:*",
+    "@hono/node-server": "^2.0.10"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}
