@@ -44,6 +44,21 @@
         "vitest": "^4.1.10",
       },
     },
+    "examples/host-execution-core": {
+      "name": "@byok-sdk/example-host-execution-core",
+      "version": "0.0.1",
+      "dependencies": {
+        "@byok-sdk/server": "workspace:*",
+        "@hono/node-server": "^2.0.10",
+      },
+      "devDependencies": {
+        "@byok-sdk/client": "workspace:*",
+        "@types/node": "^24",
+        "tsx": "^4.19.2",
+        "typescript": "^7.0.2",
+        "vitest": "^4.1.10",
+      },
+    },
     "examples/live-activity-host": {
       "name": "@byok-sdk/example-live-activity-host",
       "version": "0.0.1",
@@ -324,6 +339,8 @@
     "@byok-sdk/example-basic": ["@byok-sdk/example-basic@workspace:examples/basic"],
 
     "@byok-sdk/example-codex-interaction-host": ["@byok-sdk/example-codex-interaction-host@workspace:examples/codex-interaction-host"],
+
+    "@byok-sdk/example-host-execution-core": ["@byok-sdk/example-host-execution-core@workspace:examples/host-execution-core"],
 
     "@byok-sdk/example-live-activity-host": ["@byok-sdk/example-live-activity-host@workspace:examples/live-activity-host"],
 
