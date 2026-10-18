@@ -4,6 +4,20 @@ Date: 2026-10-18. Baseline: `8e8839a3`.
 Branch: `codex/bot-k4-host-execution-core`.
 Environment: macOS, Node `v24.21.0`, Bun `1.4.3`.
 
+## V4 patch: preserve SDK schedule errors
+
+This patch starts at `5c86a4b8` and implements the owner's follow-up request.
+The pause observation fix (`135580c8`) and calendar recovery documentation (`35dcd82a`) already exist.
+They remain unchanged. The pause test polls the public SDK pending state with its original empty-set assertion.
+It does not retry the test or insert a fixed sleep. The original occurrence count and lifecycle assertions remain.
+
+P1: `flushWakes` catches a real SDK `WAKE_AVAILABLE_AT_INVALID` rejection and defers the routine.
+P2: That transaction removes the schedule outbox row. Previously, it did not copy the SDK error into the routine ledger.
+The added assertion fails on the old implementation after a real wall-clock rollback and ledger reopen.
+P3: Add optional `routine.lastError = { code, message }` in the same transaction as `schedule_retrying`.
+Keep the original SDK values. Retain the last rejection after recovery for inspection.
+A Host-only horizon precheck does not invent an SDK error. No scheduler or retry policy changes.
+
 ## V4 review closure
 
 V4 starts at `ed992795`. The final external review returned PASS_WITH_NITS.
@@ -48,7 +62,7 @@ No push or PR was made. The main checkout was not changed.
 
 ### V4 residual items
 
-- `schedule_retrying` does not retain the SDK's original error code or message. Address this P3 during K8a alignment.
+- The initial v4 left SDK error retention for K8a. The owner's v4 patch request above closes that P3 here.
 - The occurrence hash includes the trigger, and the outbox has no persistent operation sequence number.
   These remain WO-03 alignment records. This revision does not change either storage contract.
 - SDK nit: export the wake horizon constant from `@byok-sdk/server` for Host prechecks.
@@ -236,6 +250,14 @@ The test observes one occurrence, one execution, identical input and one committ
 | Cancel classification | `unclaimed-expiry.test.ts`: real cancelled/unclaimed attempt, claimed cancel_requested state, then task.cancelled terminal. |
 
 ## Test changes and reasons
+
+V4 patch changes:
+
+- `scheduling-recovery.test.ts` adds a ledger reopen and one exact `lastError` assertion to the existing real-SDK rollback test.
+  This proves that both SDK error fields persist after the schedule outbox row is removed and the Host restarts.
+  The original status, empty pending set, absent outbox row and successful reschedule assertions remain.
+  The new assertion failed with `undefined` before the implementation change. No error or receipt is mocked.
+- `routines.test.ts` remains unchanged from `135580c8`. Five complete sequential suite runs verify the existing public completion observation.
 
 V4 changes:
 

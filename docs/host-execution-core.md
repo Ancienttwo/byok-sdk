@@ -70,6 +70,8 @@ Until then, annual routine candidates more than 366 and up to 368 days ahead use
 It retains a later candidate on the routine with status `schedule_retrying`, without a schedule row.
 Process-local backoff starts at 60 seconds, doubles to one hour, and retries the same candidate.
 Startup also retries it. A wall-clock rollback rejection from the SDK enters the same state.
+An SDK horizon rejection stores its original code and message in `routine.lastError`, in the same transaction.
+This evidence remains after recovery. A Host horizon precheck creates no SDK error.
 A wake dispatch failure cannot skip the other Agent queues. The scan reports failures after those queues run.
 Periodic rules remain Host-owned.
 

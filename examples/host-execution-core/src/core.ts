@@ -199,9 +199,11 @@ export class HostExecutionCore {
         this.ledger.transaction(state => { if (canonical(state.outbox[key]) === canonical(row)) delete state.outbox[key]; });
       } catch (error) {
         if (row.kind === 'schedule' && error && typeof error === 'object' && 'code' in error && error.code === 'WAKE_AVAILABLE_AT_INVALID') {
+          const lastError = { code: error.code, message: error instanceof Error ? error.message : String(error) };
           const deferred = this.ledger.transaction(state => {
             const routine = Object.values(state.routines).find(routine => routine.lifecycle === 'active' && routine.next?.dedupKey === row.input.dedupKey);
             if (!routine) return false;
+            routine.lastError = lastError;
             deferSchedule(state, routine, this.now()); return true;
           });
           if (deferred) continue;

@@ -70,6 +70,8 @@ it('backs off after a wall-clock rollback makes the real SDK reject a previously
   expect(routine('rollback')).toMatchObject({ lifecycle: 'active', status: 'schedule_retrying' });
   expect(await host.server.wakes.pending()).toEqual([]);
   expect(host.ledger.snapshot().outbox[`schedule:rollback:1:${at}`]).toBeUndefined();
+  await host.restartCore();
+  expect(routine('rollback').lastError).toEqual({ code: 'WAKE_AVAILABLE_AT_INVALID', message: 'WAKE_AVAILABLE_AT_INVALID' });
   vi.setSystemTime(now); await vi.advanceTimersByTimeAsync(60_000);
   await vi.waitFor(() => expect(routine('rollback').status).toBe('ok'));
   expect((await host.server.wakes.pending())[0]).toMatchObject({ dedupKey: `rollback:1:${at}`, availableAt: at });

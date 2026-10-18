@@ -41,6 +41,8 @@ export interface Routine {
   next: WakeScheduleInput | null;
   scheduleRetryAt?: number;
   scheduleRetryCount?: number;
+  /** Last SDK schedule rejection. Retained after recovery. */
+  lastError?: { code: string; message: string };
   calendarErrors?: Array<{ at: number; wakeKey?: string; message: string }>;
 }
 export interface Occurrence {
