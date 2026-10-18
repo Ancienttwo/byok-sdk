@@ -219,6 +219,9 @@ transcript as shared history.
 
 ## Agent diagnostics and recovery integration
 
+For fresh user, routine and Bot work, see the [Host execution core guide](docs/host-execution-core.md)
+and its [copy-and-own reference](examples/host-execution-core/README.md).
+
 The SDK maintains the [downstream integration guide](docs/agent-diagnostics-integration.md)
 for diagnostic UI, local CLI wiring, bounded health repair, support bundles,
 and acceptance scenarios. It distinguishes device diagnostics from Agent

@@ -1,87 +1,94 @@
-# K4 Host execution core: blocked
+# Host execution core
 
-WO-05 is blocked on safe expiration of unclaimed offers.
-This directory contains a contract probe. It is not the K4 reference implementation.
-The probe uses the built public SDK, SQLite, real HTTP, and a fake runtime.
-It does not call a model provider.
+This is the K4 copy-and-own TypeScript reference for a device-local Host.
+It uses the public embedded server API. It does not change the SDK.
+Read the [Host guide](../../docs/host-execution-core.md) before integration.
 
-## P1: Boundary
-
-The baseline is `docs/bot-mode-prd@8e8839a3`.
-[Bot PRD §5.1](../../docs/plans/2026-10-18-bot-mode-product-prd.md#51-k4host-执行核心参考实现)
-requires a bounded wait. The Host must cancel an unclaimed offer when the wait expires.
-It must not treat a running execution as an expired queue entry.
-
-WO-05 permits `executions.submit`, `tasks.offer`, `tasks.deviceTerminal`,
-`tasks.cancel`, and the wake API. These calls cannot distinguish an unclaimed
-offer from a running execution before a device terminal arrives.
-
-| Evidence at the baseline | Meaning |
-| --- | --- |
-| `packages/cloud/src/cloud.ts:490` | `TaskOfferReadback` contains the immutable input and a delivery marker. It has no claim or lease state. |
-| `packages/cloud/src/cloud.ts:504` | `EnqueuedOffer.attempt` is the submission snapshot. It is not a current observation. |
-| `packages/cloud/src/cloud.ts:2332` | `delivered` comes from the durable enqueue receipt. It does not mean that the daemon claimed the offer. |
-| `packages/server/src/index.ts:220` | Embedded `tasks.cancel` returns `Promise<void>`. It has no unclaimed-only condition. |
-| `packages/server/src/index.ts:817` | The facade discards the attempt returned by the cancellation transaction. |
-| `packages/server/src/stores/sqlite/index.ts:974` | The transaction writes `cancelled` for unclaimed work, or `cancel_requested` for claimed work. Both branches send cancellation. |
-
-## P2: Real path and counterexample
-
-[The probe](src/unclaimed-expiry.test.ts) follows this path:
-
-1. Pair a daemon and let it advertise its fake Pi runtime. Stop it.
-2. Submit an offer while the device is offline. The offer has `delivered: true`.
-3. Cancel that offer. The call returns `undefined`. No device terminal exists.
-4. Submit a second offer while offline. Save the submission and offer readback.
-5. Start the daemon. Wait until the runtime session exists.
-6. Read the same offer again. It equals the offline readback. The device terminal is still absent.
-7. Cancel this running task. The call again returns `undefined`. The runtime receives an interrupt.
-8. Read its `task.cancelled` device terminal. The first task still has no device terminal and never starts.
-
-This reproduces the ambiguity without a mocked SDK response.
-The submission snapshot also remains unclaimed after the runtime starts.
-
-At a waiting deadline, the allowed readbacks have the same values in two states
-that require different actions. A Host cannot select the correct action from them.
-If it always cancels, it cancels running work. If it never cancels, an offline
-unclaimed offer can run after the deadline. If it waits for a device terminal
-after pre-claim cancellation, it can leave the FIFO blocked indefinitely.
-
-## P3: Decision
-
-Stop K4 implementation. Do not change `packages/` in this work order.
-An independent read-only gatekeeper review confirmed this boundary.
-
-Adding `tasks.attempt` to the allowed calls would not fully solve it.
-A daemon can claim after a Host read and before cancellation.
-A read after cancellation can explain what happened, but cannot undo a request
-that already cancelled running work.
-
-The SDK owner must provide an atomic unclaimed-only cancellation contract.
-It must arbitrate against claim and expose a durable result for lost-response recovery.
-The entrypoints are the embedded task facade and the cancellation transaction
-listed above. WO-05 must then be allowed to call that contract.
-This is a required prerequisite, not an SDK change made by this example.
-
-## Run the probe
+## Run
 
 From the repository root:
 
 ```sh
 bun ci
 bun run build
+bun run --cwd examples/host-execution-core typecheck
 bun run --cwd examples/host-execution-core test
 ```
 
-The probe passes when it observes the current API limitation.
-A passing probe is not evidence that K4 acceptance passed.
-See [VALIDATION.md](VALIDATION.md) for the recorded checks.
+Tests start an embedded SQLite server and a daemon with a fake Pi runtime.
+The runtime calls the real reserved `submit_result` helper.
+They do not call a model provider or require a browser.
+The crash test sends SIGKILL to a child Host during wake delivery.
 
-## Deferred delivery
+## Files
 
-The persistent intent, occurrence, and outbox modules remain unimplemented.
-The FIFO, task generations, outcome transaction, wake recovery, routine schedule,
-catch-up policy, attempt limit, and lifecycle remain unimplemented.
-The requested routine smoke matrix has not run.
-The English Host guide and its root README link remain unwritten.
-Work stopped at the SDK gap, as required by WO-05.
+| File | Responsibility |
+| --- | --- |
+| `src/core.ts` | FIFO dispatch, exact recovery, cancellation, retry, outcome application and outbox scans. |
+| `src/ledger.ts` | A separate Host SQLite ledger with synchronous transactions. |
+| `src/model.ts`, `src/transitions.ts` | Durable records, stable identities and atomic state changes. |
+| `src/routines.ts` | Occurrence deduplication, next-slot commit, coalescing and lifecycle. |
+| `src/schedule.ts` | The default UTC interval calendar and the shared calendar callback type. |
+| `src/index.ts` | The example's copy-and-own entrypoint. This is not a published SDK package. |
+| `src/*.test.ts` | Contract probes and real server/daemon smoke tests. |
+
+## P1: Boundary
+
+The Host owns intent, occurrence, FIFO, generation and semantic outcome state.
+The SDK owns offer admission, claim, cancellation and device terminal evidence.
+The example calls `executions.submit`, `tasks.offer`, `tasks.attempt`,
+`tasks.deviceTerminal`, `tasks.cancel`, and `wakes.schedule/cancel/pending`.
+It consumes wakes through the public `wake.consume` hook.
+
+Each Host instance has one tenant and one ledger owner.
+SQLite stores a small JSON ledger in one row. This keeps application state,
+outcome markers and outbox records in the same transaction.
+Use a separate Host database. Never open the SDK database or an Agent home as this ledger.
+
+## P2: Real path
+
+`addRoutine` commits a definition and a schedule outbox record.
+The wake hook commits one occurrence, its intent, and the next planned time together.
+The scanner reserves the complete execution input before it calls `executions.submit`.
+The daemon executes that input. The fake runtime submits a real result document.
+The scanner reads the canonical device terminal and applies the opaque outcome once.
+The same transaction writes the intent conclusion and its result projection.
+An uploader retries projections with stable IDs.
+Wake dispatch failure rejects the hook so the SDK retains a retry trigger.
+A failed direct call can already have committed its ledger entry. Retry the same input or call `recover`.
+
+SIGKILL recovery opens the same Host and SDK databases.
+The scanner reads the existing offer and retains the original input and taskId.
+It does not create a new generation to recover an uncertain submission.
+
+## P3: Decision and accepted boundary
+
+Use the existing SQLite and public API conventions from `examples/basic`.
+Keep one FIFO per `(tenant, deviceId, agentId)`. Profile changes do not create another FIFO.
+Use the embedded wake queue for local deadlines and backoff.
+Keep outcome semantics in a synchronous injected callback. K8 actions are outside K4.
+
+The owner resolved the initial expiry blocker on 2026-10-18.
+The allowed readbacks now include `tasks.attempt` and `tasks.get`.
+At a waiting deadline, cancel first and then read the canonical attempt.
+An unclaimed cancelled attempt concludes `expired` without a device terminal.
+A claimed cancellation holds the FIFO until a device terminal, then concludes `cancelled`.
+A claim that wins at the deadline can be interrupted. This boundary is accepted.
+See `unclaimed-expiry.test.ts` and the guide for the exact distinction.
+
+## Integration limits
+
+This example is a single-owner reference for a small ledger.
+Its scans and transactions read the JSON ledger. They are not a large-dataset storage design.
+The default calendar supports fixed UTC intervals and UTC quiet hours.
+Inject a shared pure calendar for cron, other time zones, DST or business calendars.
+The SDK still receives only one-shot times.
+
+The Host service owns definition versions, CAS commands, sync, authentication,
+result upload policy, visibility, retention and deletion. This example mirrors an
+immutable definition. The Host service must retain its version history and command receipts.
+The example does not implement the service's version-change workflow, command API or UI.
+It does not implement Bot delegation, group chat, confirmable actions, routine outcome
+actions, memory pages or the other synthetic end-to-end slices.
+
+See [VALIDATION.md](VALIDATION.md) for commands, results and acceptance limits.
