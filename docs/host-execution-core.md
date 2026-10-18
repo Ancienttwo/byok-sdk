@@ -315,3 +315,32 @@ See the [recorded validation](../examples/host-execution-core/VALIDATION.md).
 
 The RAFT comparison in platform PRD section 12.11 is a design reference.
 It does not add consensus, a new queue authority or a recovery protocol to this example.
+
+## P5a: Host memory commands and ContextPack
+
+The [memory example](../examples/host-execution-core/README.md#p5a-memory-page) adds
+`HostMemoryPage`. It keeps memory intent state in the Host ledger. The SDK keeps the
+at-most-once CAS ledger in the Agent home. These are separate authorities.
+
+The path is approval, durable intent, capability-gated notice, device fetch, leased CAS,
+Host terminal commit, readback and device ACK. `fetch` with no reservation releases no
+content and changes no intent state. Terminal readback binds the tenant, device, Agent,
+path, operation and digest. The first terminal fact wins. Conflicting later completions
+return that stored fact. `uncertain` stays a terminal non-success.
+
+The user can replace a whole file or delete a note. `MEMORY.md` deletion remains a device
+rejection. EMPTY-base attempts are authorized writes. They cannot safely query a revision.
+A conflict requires a new user decision. No automatic rebase runs. Redacted projections
+cannot supply an ordinary edit baseline. This follows WO-01 v2 and leaves P5b unchanged.
+
+A Host-owned redactor emits only policy-approved resident text in the existing opaque
+projection bytes. The receiver checks the outer schema, hash, grant and monotone ordering.
+It stores Host receipt time with the text. ContextPack checks authorization again and reads
+only the exact device and Agent profile. Missing text or text over 8 KiB blocks execution
+before submit. A valid pack is frozen with the execution input. An intent receipt cannot
+refresh this projection. A task-close projection must pass the policy path first.
+
+The example supplies copy-and-own Host functions. A downstream Host owns authenticated
+user and device routes, grant records, current placement, notice retry scheduling and UI.
+P5a does not add SDK wire fields or an edit-view profile. Synthetic Linux tests cover the
+real mailbox and filesystem path. They do not establish macOS or Windows platform proof.

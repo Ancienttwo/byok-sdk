@@ -130,3 +130,52 @@ It does not implement Bot delegation, group chat, confirmable actions, routine o
 actions, memory pages or synthetic end-to-end slices beyond chat, routines and crash recovery.
 
 See [VALIDATION.md](VALIDATION.md) for commands, results and acceptance limits.
+
+## P5a memory page
+
+`src/memory.ts` adds the Host half of memory intents. It uses the existing SDK wire.
+The Host stores pending bodies in its separate SQLite ledger.
+It removes the body in the same transaction that stores a terminal readback.
+This is logical removal. It does not erase database backups or old WAL pages.
+
+Use `HostMemoryPage.approve` only after the Host authenticates the user and authorizes
+one exact operation. Supply the current device and Agent profile from Host state.
+Bind `transport(deviceId)` to the authenticated device, then inject it as
+`DaemonConfig.agentMemoryIntents`. Do not take the device ID from a request body.
+Call `flushNotices` after approval and at Host startup. Retry it after a transport error.
+Its callback calls the public cloud `enqueueAgentMemoryIntentNotice` API.
+The embedded server facade has no memory-notice method. The callback must use the
+owning cloud composition. Never insert a mailbox row by hand.
+
+P5a supports explicit whole-file replacement and note deletion. It has no normal editor.
+A user can authorize an initial write with `baseRevision` omitted. This uses sha256 of
+empty bytes. It can create or replace an empty file, or delete an empty note.
+It is not a read-only revision probe. A conflict ends the intent and returns `observed`.
+A second write needs a new user decision and a new `approvalRef`.
+The Host never puts the observed revision on an old draft by itself.
+Redacted text is read-only. P5b owns edit-view and `contentComplete`.
+
+The embedder redactor can emit the Host-owned opaque JSON profile
+`{"residentMemory":"policy-approved resident text"}` through the existing projection port.
+Use `null` when the snapshot has no `MEMORY.md`. Send no paths or raw source revisions.
+This profile is not an SDK edit-view format and conveys no completeness proof.
+Set `authorizeProjection` to check the exact task, device, session, runtime, grant,
+policy revision and writer epoch from trusted Host records. The model destination
+must also be allowed by that policy. The example calls this check again at ContextPack read.
+
+Pass the memory page to `HostExecutionCore` as `options.memory`.
+The scanner adds only the resident text and projection metadata to the inline instruction.
+It freezes this input before submit. Blob instructions need an embedder-owned composition step.
+Notes do not enter this ContextPack. The model can recall them through the SDK tools.
+Missing resident text and text above 8192 UTF-8 bytes block dispatch. No text is truncated.
+The queued intent keeps an explicit error in the Host outbox.
+A later valid projection lets the same queued intent proceed.
+
+Projection receipt time is `projectedAt`. It is not the device's file modification time.
+An applied intent does not create a projection. Task-close projection may still be old.
+The original timestamp stays visible until a later accepted projection replaces it.
+
+Linux tests use a real cloud mailbox, daemon, home lease, native CAS and device ACK.
+The runtime is synthetic. No model provider is called.
+Run `bun run --cwd examples/host-execution-core test src/memory-linux.test.ts` on Linux.
+Those three tests skip on other platforms. macOS and Windows proof stay in P2.
