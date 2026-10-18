@@ -22,6 +22,30 @@ After the calendar is fixed, pause and then activate the routine to recalculate 
 `recover()` and same-definition `addRoutine()` do not recover that stored state.
 This follows `setLifecycle` in `src/routines.ts:128`; it adds no recovery behavior.
 
+### V4 checks
+
+All three complete example runs used the same test source at `135580c8`.
+They ran in sequence. No edit or filtered test run occurred between them.
+
+| Command | Exit | Evidence |
+| --- | --- | --- |
+| `bun run --cwd examples/host-execution-core test`, run 1 | 0 | 5 files, 38 tests passed in 38.83 seconds; `v4-example-1.log`. |
+| `bun run --cwd examples/host-execution-core test`, run 2 | 0 | 5 files, 38 tests passed in 43.84 seconds; `v4-example-2.log`. |
+| `bun run --cwd examples/host-execution-core test`, run 3 | 0 | 5 files, 38 tests passed in 52.57 seconds; `v4-example-3.log`. |
+| `bun run build` | 0 | All workspace builds completed; `v4-build.log`. |
+| `bun run typecheck` | 0 | All workspace typechecks completed; `v4-typecheck.log`. |
+| `bun run test` | 0 | Vitest: 9,326 passed, 200 skipped. Node tests: 10 passed, 0 failed; `v4-full-test.log`. |
+| `bun run check:api-surface` | 0 | 9 package goldens match; `v4-api-surface.log`. |
+| `bun run check:version-authority` | 0 | Dispatch 0.27.0 and keys 0.12.0 agree; `v4-version-authority.log`. |
+| `git diff --check` and `git diff ed992795..HEAD --check` | 0 | No whitespace errors. |
+
+Logs and the three sequential exit receipts are in this worktree's ignored `_ops/wo-05/` directory.
+The root run also passed all 38 example tests in 34.07 seconds.
+Skipped tests were in client (30), cloud-dataplane (139), keys (12), and server (19).
+The optional Docker dataplane substrate was not started.
+Test code did not change after `135580c8`. This revision changes no production code or `packages/` file.
+No push or PR was made. The main checkout was not changed.
+
 ### V4 residual items
 
 - `schedule_retrying` does not retain the SDK's original error code or message. Address this P3 during K8a alignment.
