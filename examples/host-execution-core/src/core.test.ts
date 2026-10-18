@@ -179,6 +179,10 @@ it('keeps cancellation unsettled and never changes generation until device termi
   } }) });
   const intent = await host.core.enqueue(host.intent('cancel'));
   await running('cancel');
+  // This case requires a durable claim before cancellation can wait for terminal.
+  await vi.waitFor(async () => expect(await host.server.tasks.attempt(intent.taskId)).toMatchObject({
+    ownerDeviceId: host.deviceId, claimedRuntime: 'pi',
+  }), { timeout: 5000 });
   await host.core.cancel('cancel');
   await vi.waitFor(async () => expect(await host.server.tasks.deviceTerminal(intent.taskId)).toBeDefined());
   await host.core.drain();

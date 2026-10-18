@@ -27,6 +27,12 @@ The probe now observes `tasks.attempt` owner and claimed runtime before its one 
 Its original immediate cancellation assertions remain. This is a precondition barrier, not a test retry or fixed sleep.
 The five-run sequence starts again on that fixed artifact. The failed sequence remains in the logs.
 
+The next sequence also passed once, then exposed the same missing claim precondition in `core.test.ts`.
+Its claimed-cancellation case had settled through the valid unclaimed-cancel path while the test expected `inflight`.
+That test now observes the same public owner/runtime receipt before its single Host cancel call.
+The hidden-terminal barrier, unsettled conclusion, generation and final cancellation assertions remain unchanged.
+Both failed sequences remain recorded. The final five-run sequence uses both claim barriers.
+
 ## V4 review closure
 
 V4 starts at `ed992795`. The final external review returned PASS_WITH_NITS.
@@ -271,6 +277,9 @@ V4 patch changes:
   It requires both the paired device owner and `claimedRuntime: 'pi'`. Session creation alone does not prove either value.
   Every original offer, stale submit snapshot, interruption, cancellation status and device terminal assertion remains.
   The cancel action still runs once, and its intermediate `cancel_requested` assertion is immediate.
+- `core.test.ts` adds the same owner/runtime precondition to its claimed-cancellation case after the second observed failure.
+  The Host must still hold the FIFO with no conclusion while terminal readback is hidden, then settle without a generation change.
+  All original assertions remain. The change waits for the required input state, not for a failed result to turn green.
 
 V4 changes:
 
