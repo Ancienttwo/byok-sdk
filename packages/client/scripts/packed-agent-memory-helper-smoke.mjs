@@ -21,8 +21,9 @@ for (const arch of ['arm64', 'x64']) {
   assert.equal(agentMemoryHelperDigest(readFileSync(bin), arch), manifest.entries[`darwin-${arch}`].digest);
 }
 if (process.platform === 'darwin') {
-  const sdk = await import(pathToFileURL(require.resolve('@byok-sdk/client')));
-  const memory = await import(pathToFileURL(require.resolve('@byok-sdk/client/agent-memory')));
+  const clientManifest = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
+  const sdk = await import(pathToFileURL(path.resolve(root, clientManifest.exports['.'].import)));
+  const memory = await import(pathToFileURL(path.resolve(root, clientManifest.exports['./agent-memory'].import)));
   const bin = path.join(directory, `darwin-${process.arch}`);
   const original = readFileSync(bin);
   const manifestFile = path.join(directory, 'manifest.json');
