@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { hash } from './model';
 import { nextIntervalOccurrence } from './schedule';
+import { parseRoutineWakeKey } from './routines';
 import { openHost, template, type TestHost } from './test-support';
 
 let host: TestHost;
@@ -44,7 +45,7 @@ it('keeps one running occurrence and only the latest queued slot, then pause sto
   expect(occurrences().some(row => row.conclusion === 'superseded')).toBe(true);
   await host.core.lifecycle('coalesce', 'paused');
   const count = occurrences().length;
-  expect((await host.server.wakes.pending()).filter(wake => wake.dedupKey.startsWith('routine:'))).toEqual([]);
+  expect((await host.server.wakes.pending()).filter(wake => wake.dedupKey.startsWith('coalesce:'))).toEqual([]);
   const running = intents().find(row => row.phase === 'inflight')!;
   host.adapter.sessions.get(running.taskId)!.finish({ text: 'current completes' });
   await vi.waitFor(async () => { await host.core.drain(); expect(host.core.intent(running.key)?.conclusion).toBe('succeeded'); });
@@ -91,7 +92,7 @@ it('redelivers a rejected wake after 60 seconds without another occurrence or ex
   let rejected = false;
   host = await openHost({ consume: async (wake, _signal, next) => {
     await next();
-    if (wake.dedupKey.startsWith('routine:') && !rejected) { rejected = true; throw new Error('response lost after commit'); }
+    if (wake.dedupKey.startsWith('retry-wake:') && !rejected) { rejected = true; throw new Error('response lost after commit'); }
   } });
   const now = Date.now(); vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(now);
   await host.core.addRoutine(host.routine('retry-wake'));
@@ -144,12 +145,12 @@ it('reports an initial schedule failure and recovers its durable outbox on start
   await vi.waitFor(() => expect(host.adapter.starts).toHaveLength(1));
 });
 
-it.each(['routine:', 'host-scan:'])('rejects the current hook if successor %s scheduling fails, then SDK retry recovers', async prefix => {
+it.each(['successor-failure:', 'host-scan:'])('rejects the current hook if successor %s scheduling fails, then SDK retry recovers', async prefix => {
   let armed = false;
   let failed = false;
   const deliveries: number[] = [];
   host = await openHost({
-    consume: async (wake, _signal, next) => { if (wake.dedupKey.startsWith('routine:')) deliveries.push(wake.delivery); await next(); },
+    consume: async (wake, _signal, next) => { if (wake.dedupKey.startsWith('successor-failure:')) deliveries.push(wake.delivery); await next(); },
     wrapServer: server => ({ ...server, wakes: { ...server.wakes, schedule: async input => {
       if (armed && !failed && input.dedupKey.startsWith(prefix)) { failed = true; throw new Error('successor schedule unavailable'); }
       return server.wakes.schedule(input);
@@ -166,4 +167,19 @@ it.each(['routine:', 'host-scan:'])('rejects the current hook if successor %s sc
   await vi.waitFor(() => expect(host.adapter.starts).toHaveLength(1));
   expect(occurrences()).toHaveLength(1);
   expect(Object.keys(host.ledger.snapshot().executions)).toHaveLength(1);
+});
+
+it('uses the PRD routine key without payload and parses colon-containing ids from the right', async () => {
+  host = await openHost();
+  const at = Date.now() + 60_000;
+  await host.core.addRoutine(host.routine('team:bot:routine', { version: 12, rule: { anchorMs: at, everyMs: 86_400_000 } }));
+  const [wake] = await host.server.wakes.pending();
+  expect(wake?.dedupKey).toBe(`team:bot:routine:12:${at}`);
+  expect(wake?.payload).toBeUndefined();
+  expect(parseRoutineWakeKey(wake!.dedupKey)).toEqual({ id: 'team:bot:routine', version: 12, at });
+  for (const key of ['r:01:5', 'r:1:-5', 'r:1:1e3', 'r:0:5', 'r:1:9007199254740993', ':1:5', 'r:1', 'r:1:5 ']) {
+    expect(parseRoutineWakeKey(key)).toBeUndefined();
+  }
+  await host.core.consume({ wakeId: 'unarmed', dedupKey: `team:bot:routine:13:${at}`, availableAt: at, deliveredAt: at, delivery: 1 }, new AbortController().signal);
+  expect(occurrences()).toEqual([]);
 });

@@ -3,14 +3,25 @@ import { hash, time, type LedgerState, type Routine, type RoutineDefinition } fr
 import { cancelWake, enqueue, settle } from './transitions';
 import type { NextOccurrence } from './schedule';
 
+export function parseRoutineWakeKey(key: string): { id: string; version: number; at: number } | undefined {
+  const last = key.lastIndexOf(':'), previous = key.lastIndexOf(':', last - 1);
+  if (previous < 1 || [...key].length > 256) return undefined;
+  const versionText = key.slice(previous + 1, last), timeText = key.slice(last + 1);
+  if (!/^[1-9][0-9]*$/.test(versionText) || !/^(0|[1-9][0-9]*)$/.test(timeText)) return undefined;
+  const version = Number(versionText), at = Number(timeText);
+  if (!Number.isSafeInteger(version) || !Number.isSafeInteger(at)) return undefined;
+  return { id: key.slice(0, previous), version, at };
+}
+
 export function nextWake(definition: RoutineDefinition, after: number, nextTime: NextOccurrence): WakeScheduleInput | null {
   const slot = nextTime(structuredClone(definition), after);
   if (slot === null) return null;
   time(slot);
   if (slot <= after) throw new Error('Calendar must advance beyond its input time');
   if (definition.endAt !== undefined && slot > definition.endAt) return null;
-  return { dedupKey: `routine:${hash([definition.id, definition.version, slot])}`, availableAt: slot,
-    payload: JSON.stringify({ hostExecutionCore: 1, kind: 'routine', routine: hash(definition.id), version: definition.version }) };
+  const dedupKey = `${definition.id}:${definition.version}:${slot}`;
+  if (!parseRoutineWakeKey(dedupKey)) throw new Error('Invalid routine wake key');
+  return { dedupKey, availableAt: slot };
 }
 export function scheduleNext(state: LedgerState, routine: Routine): void {
   if (routine.lifecycle === 'active' && routine.next) {
@@ -22,8 +33,10 @@ export function scheduleNext(state: LedgerState, routine: Routine): void {
 /** Called inside the same transaction that creates the occurrence and its intent. */
 export function recordOccurrence(state: LedgerState, tenant: string, wake: DueWake, now: number, nextTime: NextOccurrence): void {
   if (state.slots[hash(wake.dedupKey)]) return; // Persisted trigger wins even after a later redelivery.
-  const routine = Object.values(state.routines).find(row => row.next?.dedupKey === wake.dedupKey);
+  const parsed = parseRoutineWakeKey(wake.dedupKey);
+  const routine = parsed ? state.routines[hash(parsed.id)] : undefined;
   if (!routine || routine.lifecycle !== 'active' || !routine.next) return;
+  if (routine.next.dedupKey !== wake.dedupKey) return;
   if (routine.next.availableAt !== wake.availableAt || routine.next.payload !== wake.payload) throw new Error('Wake differs from the routine reservation');
   const definition = routine.definition;
   const trigger = { kind: now - wake.availableAt > definition.lateAfterMs ? 'catch_up' as const : 'scheduled' as const, plannedAt: wake.availableAt };

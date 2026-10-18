@@ -4,6 +4,20 @@ Date: 2026-10-18. Baseline: `8e8839a3`.
 Branch: `codex/bot-k4-host-execution-core`.
 Environment: macOS, Node `v24.21.0`, Bun `1.4.3`.
 
+## V2 review response (in progress)
+
+V2 starts at `49512593`. The read-only source review is
+`/Users/chris/Projects/byok-sdk/_ops/bot-wo/REV-05-round1.md`.
+The prior checks below describe v1 until the v2 result table is recorded.
+
+P1: The affected boundary is Host wake planning, outbox dispatch and occurrence policy.
+P2: A failed wake dispatch currently exits scan before any Agent queue runs.
+The same routine path treats a calendar null as completion and keeps stale retry cutoffs after pause.
+P3: Keep the ledger and FIFO design. Isolate dispatch errors, add explicit scheduling status,
+and use one process-local backoff timer only for out-of-horizon routine candidates.
+Keep same-id definitions immutable. Do not add K8 version switching or SDK code.
+Commit key alignment, scheduling fixes, pause policy, stronger evidence, and documentation separately.
+
 ## Owner ruling
 
 The initial blocker report at `36ed2137` is superseded.
@@ -41,6 +55,13 @@ The test observes one occurrence, one execution, identical input and one committ
 | Cancel classification | `unclaimed-expiry.test.ts`: real cancelled/unclaimed attempt, claimed cancel_requested state, then task.cancelled terminal. |
 
 ## Test changes and reasons
+
+V2 changes:
+
+- Key alignment: routine wake filters now identify the same named routine through
+  `<routineId>:<version>:<t>`. The rejection, retry count and execution assertions remain.
+  A new test checks right-to-left parsing, colon-containing IDs, canonical numbers,
+  absent payload and exact rejection of an unarmed version.
 
 - The existing expiry probe retains its original offer, terminal and interruption assertions.
   Its name and comment now describe the accepted cancel-then-attempt composition.
