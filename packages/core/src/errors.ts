@@ -30,6 +30,7 @@
  * - the five `storage_*` codes (§12.7.7, see `quota.ts`)
  */
 export const CORE_ERROR_CODES = {
+  routine_schedule_invalid: 'routine_schedule_invalid',
   retention_input_invalid: 'retention_input_invalid',
   retention_collect_failed: 'retention_collect_failed',
   // identity + content addressing
