@@ -433,3 +433,139 @@ The Host service owns definition commands, version changes, CAS, sync and read-t
 The service-owned command, visibility, credential-log audit and one-hour idle traffic rows from platform PRD section 14.1 are downstream checks.
 They are documented in the Host guide, not claimed as tested here.
 No packages/ source is changed. No push or PR was made. The main checkout was not changed.
+
+## WO-11 P5a: scope and design
+
+Date: 2026-10-19. Branch: `codex/p5a-memory-page`.
+The initial branch has no K4 example. Commit `31ef0823` copies the example and guide
+from the read-only K4 worktree at `e5afad26b42108cb4aa5b14f9f674291bc168b81`.
+The earlier sections of this file are copied K4 evidence. They are not WO-11 checks.
+No file in the reference worktree was changed.
+
+### P1: Boundary
+
+The Host owns the approval, pending body, notice retry, placement check, terminal
+readback and policy-approved resident projection. The SDK owns the home lease,
+filesystem CAS, device intent ledger and ACK. `memory.ts` adds the Host half.
+No SDK package source or wire field changes.
+
+### P2: Real path
+
+The synthetic Linux test uses a real cloud mailbox and daemon. The Host approves an
+intent and commits it before notice delivery. The daemon calls the Host transport.
+The native backend applies one CAS under the real home lease. The Host commits the
+content-free completion and removes the pending body. The test checks file content,
+note removal, device ACK and persisted readback after the Host ledger reopens.
+
+A real task closes through the reserved result helper. Its redactor emits the resident
+profile through the projection port. The Host uses only that policy-approved text.
+The test then replaces memory with 8193 UTF-8 bytes. A later real task-close projection
+makes ContextPack construction fail. The old projection remains unchanged until that
+new projection arrives. A separate real embedded-server test checks that a missing
+projection blocks submit and that an accepted pack stays frozen in the offered input.
+
+### P3: Decision
+
+WO-01 v2 forbids a read-only interpretation of the EMPTY revision. P5a uses it only
+for an authorized whole-file write. A conflict ends one intent. A new user approval
+must select the next base and body. No automatic rebase runs. Redacted text remains
+read-only. P5b edit-view and `contentComplete` are not implemented.
+
+The Host profile is opaque JSON with one `residentMemory` member. It is not an SDK
+edit-view format. It contains no file paths or source revisions. The outer mutation
+hash and byte count still bind the profile. Authorization is checked on publish and
+ContextPack read. The stored Host receipt time is retained on an idempotent publish.
+The 8 KiB limit counts UTF-8 bytes. The receiver never truncates text.
+
+### Test change audit
+
+No existing K4 assertion was modified or removed.
+The two added files contain 15 Host tests and 3 Linux synthetic tests.
+The first draft incorrectly matched an absent `content` member against an explicit
+undefined member. The correction uses `not.toHaveProperty`, which checks actual
+absence. The Linux fixture now supplies the real egress policy before it submits a
+task. This satisfies SDK capability admission. It does not bypass the gate.
+A temporary failure diagnostic was removed before commit.
+
+Herdr reported `pane_not_found` for this process's inherited pane. No other existing
+pane was controlled. The read-only gatekeeper route is allowed by AGENTS.md.
+Round 1 found no confirmed P1/P2 implementation issue and no weakened assertions.
+It held acceptance for the unresolved test results. Round 2 reviewed the final evidence.
+
+### WO-11 observed checks
+
+Local runtime: Node 24.21.0 and Bun 1.4.3. Linux uses Node 24.21.0 and Bun 1.4.2
+from the WO-01 probe image `byok-bot-m0-memory-intent:r2-base`.
+The image has the same package and script baseline as this branch: the source diff
+against `becc9f57` is empty for `packages/` and `scripts/`.
+Each Linux run installs the current lockfile with `--frozen-lockfile`.
+The source archive excludes node_modules and macOS metadata sidecar files.
+
+| Command | Exit | Evidence |
+| --- | --- | --- |
+| `bun run build` | 0 | All workspace builds completed. |
+| `bun run typecheck` | 0 | All workspace typechecks completed. |
+| `bun run check:api-surface` | 0 | All 9 package goldens match. |
+| `bun run check:version-authority` | 0 | Dispatch 0.27.0 and keys 0.12.0 match README and spec. |
+| `bun run --cwd examples/host-execution-core typecheck` | 0 | Final example and Linux fixture compile. |
+| `bun run --cwd examples/host-execution-core test` on macOS | 0 | 52 passed, 3 Linux tests skipped. |
+| `bun run test src/memory-linux.test.ts` in the example on Linux | 0 | 3 passed. Real replace, delete, conflict, ACK, task-close projection and limit block. |
+| Earlier `bun run test` in the example on Linux | 1 | 54 passed, 1 K4 retry-generation timeout. All 3 new Linux tests passed. |
+| `bun run test src/core.test.ts -t "retries a retryable device failure"` on Linux | 0 | Final core: 1 passed. K4 baseline core: 1 passed. |
+| `bun run --cwd packages/client test src/__tests__/daemon-control-socket.test.ts` | 0 | 15 passed in a focused rerun. |
+
+The initial Linux run also included macOS AppleDouble files as test inputs. The archive
+step was corrected. Those binary sidecars are absent from the source tree and later runs.
+A first fixture run omitted `agentEgress.policy`. The SDK correctly refused capability
+admission. The final fixture configures the policy and uses the same admission path.
+A later full Linux run timed out before runtime start in the projection test. An isolated
+run passed. That full Linux run and the focused file both pass all new tests. The final complete result follows below.
+The K4 retry timeout also passes in isolation with both final and baseline core source.
+These focused results do not turn the failed full Linux command into a pass.
+
+The exact cause of the earlier full-run timing failures is unconfirmed. The final Linux full run passes without K4 changes.
+No test deadline, assertion or SDK implementation was changed to hide them.
+Raw logs, archives and the diagnostic record are in the ignored `_ops/wo-11/` directory.
+
+The first exact root `bun run test` exited 1 after client: 3991 passed, 30 skipped,
+1 shutdown test timeout. The sequential root command stopped before later workspaces.
+The same unchanged client file passed 15/15 in its focused rerun. The exact full root
+rerun then passed. The final evidence below records its result separately.
+
+A later self-review reproduced one notice error blocking the rest of the scan.
+The added test first failed with one delivery call instead of two. Commit `0732d0ec`
+continues the scan, retains each failed pending row and reports an AggregateError.
+The prior lost-response test now checks the exact original error inside `errors`.
+It keeps all existing retry and persistence assertions. Final Host tests pass 15/15.
+The root rerun had not reached the example when this fix was committed. All earlier
+workspace source was unchanged. The example therefore runs the final notice code.
+
+### Final WO-11 evidence
+
+| Command | Exit | Evidence |
+| --- | --- | --- |
+| `bun run typecheck` after `0732d0ec` | 0 | All workspace typechecks completed. |
+| `bun run --cwd examples/host-execution-core test src/memory.test.ts` | 0 | 15 passed, including notice delivery after one failure. |
+| `bun run test` in the Linux example after `0732d0ec` | 0 | 56 passed in 7 files. No Linux test skipped. |
+| Exact root `bun run test` rerun | 0 | Vitest: 9341 passed, 203 skipped. Cloud-do Node tests: 10 passed. |
+| Final example in the root rerun on macOS | 0 | 53 passed, 3 Linux tests skipped. |
+
+Final Linux log: `_ops/wo-11/linux-example-verified.log`.
+Exit readback: `_ops/wo-11/linux-verified-exit.txt` contains `linux-example-verified=0`.
+The full command includes all 3 real Linux memory tests and the unchanged K4 tests.
+
+Root exit readback: `_ops/wo-11/test-final-exit.txt` contains `test-final=0`.
+Root log: `_ops/wo-11/test-final.log`.
+The 203 skips include the 3 Linux memory tests. All 3 pass in the separate Linux full run.
+The optional Docker dataplane substrate was not started. Its 139 tests remain skipped.
+
+Round 2 found no P1/P2 code or test issue. It verified Linux 56/56 and the notice fix.
+It requested accurate historical labels and a README scope correction. Both were made.
+The root exit 0 resolves its last verification condition. No implementation changed
+since `0732d0ec`. Later changes only record evidence and correct scope text.
+
+P5a is complete for this slice. P5b edit-view and macOS/Windows proof remain outside it.
+No push, PR, merge or package publication was performed.
+
+The read-only reviewer returned `VERDICT: PASS` after it read the final root exit.
+It found no P1/P2 issue and recommended a local documentation commit with no push.

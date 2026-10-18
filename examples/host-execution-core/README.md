@@ -126,8 +126,8 @@ The same ruling assigns same-routine-ID version changes to K8a with `update_rout
 This includes current/pending versions, scheduling generation and the in-flight limit.
 This reference keeps each routine ID's definition immutable. Use a new ID to change a definition.
 
-It does not implement Bot delegation, group chat, confirmable actions, routine outcome
-actions, memory pages or synthetic end-to-end slices beyond chat, routines and crash recovery.
+K8 actions and group chat remain in their own work orders.
+P5a adds Host memory commands and Linux synthetic memory tests below.
 
 See [VALIDATION.md](VALIDATION.md) for commands, results and acceptance limits.
 
