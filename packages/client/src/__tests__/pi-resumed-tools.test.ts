@@ -130,7 +130,17 @@ describe('resumed Pi session tools (Pi 1.3)', () => {
     expect(resumed).toEqual(fresh);
   });
 
-  it('refuses a resume with no declarable tool instead of keeping pending transcript tools', async () => {
+  it('drops pending transcript tools when only deferred or codemode tools are registered', async () => {
+    const excludeTools = ['read', 'bash', 'powershell', 'edit', 'write', 'grep', 'find', 'ls'];
+    const { resumed, fresh } = await resumedAndFresh(dirs([]), ['late_off'], {
+      atLoad: [{ name: 'deferred_load', exposure: 'deferred' }, { name: 'codemode_load', exposure: 'codemode' }],
+      atStart: [{ name: 'late_off', defaultActive: false }],
+    }, { excludeTools });
+    expect(resumed).toEqual([]);
+    expect(resumed).toEqual(fresh);
+  });
+
+  it('refuses a resume with no activatable tool instead of keeping pending transcript tools', async () => {
     const paths = dirs();
     const file = previousTranscript(paths, ['late_off']);
     const registrations = { atLoad: [], atStart: [{ name: 'late_off', defaultActive: false }] };

@@ -18,20 +18,22 @@ function fail(message: string): never { throw new Error(`byok-pi-rpc: ${message}
  * The restore also keeps the transcript's not-yet-registered tools pending,
  * and a registration during `session_start` would activate them. Pi drops
  * pending tools only when a call deactivates an active tool, so the reset
- * activates every declarable tool, empties the set, then sets the loadout.
- * With no declarable tool, Pi offers no way to drop them, so the open fails.
- * The SDK hosts always register their own tools at load.
+ * activates every registered tool, empties the set, then sets the loadout.
+ * When Pi activates none of them, it offers no way to drop the pending tools,
+ * so the open fails.
  */
 export function resetResumedPiTools(
   session: CreateAgentSessionResult['session'], settingsManager: SettingsManager, cwd: string,
 ): void {
   if (session.sessionManager.buildSessionContext().messages.length === 0) return;
-  const declarable = session.getAllTools().filter((tool) => tool.exposure === 'direct' || tool.exposure === 'model-only');
-  if (declarable.length === 0) throw new Error('a resumed Pi session with no declarable tool cannot drop its restored pending tools');
+  const registered = session.getAllTools();
   const defaults = settingsManager.getDefaultTools() ?? createCodingTools(cwd).map((tool) => tool.name);
-  const extensions = declarable.filter((tool) =>
-    tool.sourceInfo.path !== `builtin:${tool.name}` && session.getToolDefinition(tool.name)?.defaultActive !== false);
-  session.setActiveToolsByName(declarable.map((tool) => tool.name));
+  const extensions = registered.filter((tool) =>
+    tool.sourceInfo.path !== `builtin:${tool.name}`
+    && session.getToolDefinition(tool.name)?.defaultActive !== false
+    && (tool.exposure === 'direct' || tool.exposure === 'model-only'));
+  session.setActiveToolsByName(registered.map((tool) => tool.name));
+  if (session.getActiveToolNames().length === 0) throw new Error('a resumed Pi session with no activatable tool cannot drop its restored pending tools');
   session.setActiveToolsByName([]);
   session.setActiveToolsByName([...defaults, ...extensions.map((tool) => tool.name)]);
 }
