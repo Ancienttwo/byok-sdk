@@ -17,20 +17,40 @@ V3 starts at `ae7acb2c`. Aimpact made these scope decisions on 2026-10-18:
 
 Both decisions are recorded in the Host guide and example README.
 
+The WO-03 follow-up keeps `WAKE_HORIZON_MS` at 366 days for the current SDK.
+`src/routines.ts:6` now states the synchronization rule. The guide and README state the same rule.
+After K8-S raises the running SDK limit to 368 days, the Host constant must change with it.
+Until then, candidates more than 366 and up to 368 days ahead use `schedule_retrying` backoff.
+They do not add a schedule outbox row or block other work. Existing horizon tests retain all assertions.
+
+SDK nit: export the wake horizon constant from `@byok-sdk/server` for Host prechecks.
+The current `MAX_FUTURE_MS` is private at `packages/server/src/wakes/types.ts:42`.
+Validation uses it at `:48`. The public server entrypoint and built declarations expose no horizon constant.
+No private SDK import or `packages/` change is made. This nit does not block K4.
+
 P1: The test boundary is the existing embedded server, daemon and fake runtime.
 P2: A routine and a Bot chat pass through the same core `executions.submit` path.
 The runtime publishes a message and submits a result. The SDK stores the exact message decision and device terminal.
 The Host reads that terminal and commits the opaque outcome, applied marker and result projections.
 P3: Add one acceptance test and an optional message consumer in test support. Keep production code unchanged.
 
-The new `src/core.test.ts` chat test covers Bot PRD section 5.8's first item.
+The new `src/core.test.ts:56` chat test covers Bot PRD section 5.8's first item.
 It holds the consumer decision to observe a pending disposition, no terminal and no applied marker.
 It checks the exact task/device identity, frozen context, message body, byte count and SHA-256 hash.
 After acceptance it reads `tasks.messageDisposition(taskId, deviceId, payload).outcome === 'accepted'`.
+The exact readback assertion is at `src/core.test.ts:100`, with a second read at `:120` after settlement and reopen.
 It reads `task.complete` with the expected result document and compares it with the Host's stored terminal.
 It proves FIFO order behind a routine and uses one injected outcome handler for both sources.
 After ledger reopen, both conclusions, outcome markers and projections remain, with exactly two applications.
 The same immutable accepted disposition remains readable after terminal settlement.
+
+### V3 independent test review
+
+The read-only gatekeeper reviewed only `ae7acb2c..30979bb7` for v3 test integrity and scope.
+It returned PASS with no new defect or weakened assertion.
+It confirmed real SDK submit and message readback, the pending decision barrier, shared FIFO,
+and one outcome transaction path for both sources. It did not run tests or edit files.
+The execution owner records the full checks separately below.
 
 ## V2 review response
 
