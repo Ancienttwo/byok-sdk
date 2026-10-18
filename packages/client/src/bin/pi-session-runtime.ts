@@ -24,7 +24,13 @@ export function resetResumedPiTools(
     tool.sourceInfo.path !== `builtin:${tool.name}`
     && session.getToolDefinition(tool.name)?.defaultActive !== false
     && (tool.exposure === 'direct' || tool.exposure === 'model-only'));
-  session.setActiveToolsByName([...defaults, ...extensions.map((tool) => tool.name)]);
+  const loadout = [...defaults, ...extensions.map((tool) => tool.name)];
+  // The restore also keeps the transcript's not-yet-registered tools pending,
+  // and a later registration would activate them. Pi drops pending tools only
+  // when a call deactivates an active tool, so empty the loadout between.
+  session.setActiveToolsByName(loadout);
+  session.setActiveToolsByName([]);
+  session.setActiveToolsByName(loadout);
 }
 
 /** Session ids are native minted references, never fuzzy search terms. */
