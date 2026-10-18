@@ -179,14 +179,15 @@ authorization and registry readback. The current independent keys release is
 dispatch release, `0.27.0`, proven from an isolated standard npm install rather
 than the workspace graph.
 
-The owner approved stable source preparation of 0.27.0 / keys 0.12.0 on
-2026-10-17 for `latest`. Publication remains pending. The source includes the
-Agent message draft lane (#500), Claude closing-reply fixes (#501, PR #508),
-Pi dependency guidance and auth-probe tests (#507), and the cloud-dataplane
-build fix (#503). Fixed-artifact Host acceptance remains open in #195.
-0.27.0-rc.2 / keys 0.12.0-rc.2 remains published on `rc`.
-Current `latest` remains 0.26.1 / keys 0.11.1. The reviewed registry baseline
-records those prior stable versions for all nine packages.
+0.27.0 / keys 0.12.0 is published on `latest` from `v0.27.0` (`cd977261`).
+Complete registry readback and isolated installation passed on 2026-10-17.
+The owner directed publication while fixed-artifact Host acceptance (#195)
+remained open. Publication does not establish that acceptance.
+The train includes the Agent message draft lane (#500), Claude closing-reply
+fixes (#501, PR #508), Pi dependency guidance and auth-probe tests (#507),
+and the cloud-dataplane build fix (#503). The `rc` channel remains
+0.27.0-rc.2 / keys 0.12.0-rc.2. See the
+[publication record](releases/v0.27.0-publication.md).
 It is the first wire-v3 train: `PROTOCOL_VERSION` is 3, a v2 daemon
 and a v3 server do not interoperate, and devices and the Host upgrade together.
 Prereleases are not registered in the v3 compatibility registry. The 0.27 line
@@ -198,7 +199,7 @@ pi-rpc lane receives its key over private IPC (#385). Notes:
 [`docs/releases/v0.27.0.md`](releases/v0.27.0.md).
 
 On 2026-10-12 the owner authorized npm publication of 0.26.1 / keys 0.11.1.
-All nine packages are published on `latest` from `v0.26.1` (`e7f3edf2`).
+All nine packages were published on `latest` from `v0.26.1` (`e7f3edf2`).
 The exact merge-commit push CI passed all 24 jobs. Registry readback verifies
 all frozen integrities and dependency maps, and the isolated install resolves
 only core 0.26.1. The train corrects client cleanup, prepared-offer races and

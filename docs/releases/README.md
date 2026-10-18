@@ -7,10 +7,10 @@ This page holds the standing steps that every release repeats.
 
 `packages/protocol/src/__tests__/compat.test.ts` decides wire compatibility
 from evidence, not the author's judgment (see "Freeze rule" in
-`docs/protocol.md`). The wire is at major 3. The v3 rc.2 train is published
-on `rc`. No stable
-v3 decoder is published yet. The 0.27.0 stable preparation registers its
-first envelope and HTTP corpus prefixes.
+`docs/protocol.md`). The wire is at major 3. The first stable v3 train is
+0.27.0. The v3 registry pins its envelope and HTTP prefixes, and
+`published-compat.test.ts` uses the actual published 0.27.0 registry tarball
+as the compatibility floor.
 
 Retired v2 evidence. `golden/v2.envelopes.ndjson`, `golden/v2.http.ndjson`
 and the v2 registry `golden/releases.json` (floor 0.25.0; 0.25.0, 0.26.0 and
@@ -25,12 +25,11 @@ entry covers may be corrected in place when a pre-release v3 tightening makes
 it undecodable. Once any v3 release is registered, the lines it covers are
 immutable and the rest stays append-only. `golden/v3.releases.json` records each stable v3 release's
 corpus line counts and SHA-256 prefixes. The 0.27.0 preparation registers
-the first stable entry. It has no `floor` until the published-decoder
-checks are restored after publication. Each v3 entry pins both `envelopes`
+the first stable entry. Its `floor` is 0.27.0. Each v3 entry pins both `envelopes`
 and `http`.
-Prereleases are not registered and are outside the guarantee. Until a v3
-release is registered and pinned as a published decoder, the suite proves v3
-self-consistency only and cross-release gates are unproven.
+Prereleases are not registered and are outside the guarantee. The suite
+checks current source against the independently installed published v3 floor
+as well as its own corpus.
 
 Rejection oracle. The `devDependencies` alias `byok-protocol-previous` in
 `packages/protocol/package.json` pins 0.26.1, the last v2 release. The suite
@@ -57,11 +56,12 @@ public API change is recorded under CHANGELOG `Unreleased`, with its required
 next MINOR release; do not bump/register that future version just to add corpus
 coverage. Release preparation owns the manifest bump and corpus registration.
 
-### After the first v3 release is published
+### Published v3 decoder baseline
 
-Add a published-decoder alias for it (tarball URL), regenerate `bun.lock`, and
-restore the cross-release checks against it in `compat.test.ts`: the released
-surface is never narrowed, the released decoder reads current bytes, and
-gated and strip-safe `WIRE_ADDITIONS` rows are proven against it. Set the v3
-`floor` to that release in the same change. The 0.26.1 alias then remains a
+`byok-protocol-floor` pins the first stable v3 release by its registry tarball
+URL. Keep the lock integrity and the registry floor aligned.
+`published-compat.test.ts` checks that the released JSON Schema shape is not
+narrowed, the released decoder reads current bytes, and
+gated and strip-safe `WIRE_ADDITIONS` rows are proven against it. The v3
+`floor` is 0.27.0. The 0.26.1 alias then remains a
 rejection oracle only, until the owner retires it.

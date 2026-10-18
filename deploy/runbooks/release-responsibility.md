@@ -55,11 +55,13 @@ published, and adds the fixes of #493 and #496. It is the first wire-v3 train.
 All nine rc.2 packages are published and read back on `rc`, from `v0.27.0-rc.2`
 (`b8f47f02`); see its
 [rc.2 publication record](../../docs/releases/v0.27.0-rc.2-publication.md).
-On 2026-10-17 the owner approved stable source preparation of 0.27.0 / keys
-0.12.0 for `latest`. It includes the Agent message draft lane (#500) and the
-fixes #501, #503, #507 and PR #508. Publication remains pending. Fixed-artifact
-Host acceptance (#195) remains a pre-publication gap. See the
-[0.27.0 release notes](../../docs/releases/v0.27.0.md).
+On 2026-10-17 the owner directed stable publication of 0.27.0 / keys 0.12.0
+on `latest` while fixed-artifact Host acceptance (#195) remained open.
+All nine packages are published from `v0.27.0` (`cd977261`). Complete registry
+readback and isolated installation passed. The `rc` channel remains rc.2.
+See the [publication record](../../docs/releases/v0.27.0-publication.md) and
+[release notes](../../docs/releases/v0.27.0.md). This publication does not
+establish Host acceptance, migrate a Host or deploy a product.
 
 The SDK publishes npm libraries, the `byok-agent` CLI and reference packaging/service recipes. The host product owns every binary distribution decision:
 
@@ -87,8 +89,7 @@ dependencies consistent.
 
 The candidate set contains eight aligned packages plus keys: nine packages.
 `@byok-sdk/implementation-identity` remains retired. Every public package targets
-the dist-tag `latest`; current `latest` remains 0.26.1 / keys 0.11.1 until
-publication and complete registry readback. The
+the dist-tag `latest`, now 0.27.0 / keys 0.12.0. The pre-publication
 [reviewed registry baseline](../../scripts/release/registry-expectations.json)
 records that prior `latest` for all nine packages. This train has no first
 publication.
@@ -97,10 +98,11 @@ package-document absence before a declared first publication, then exact-version
 readback and the declared absent `latest` after an RC. Missing tags/versions or
 failed registry reads do not establish package absence.
 
-The version/channel decision authorizes source preparation only; it does not
-authorize npm execution, tagging, live qualification or production rollout.
-The [publication plan](../../docs/releases/v0.27.0.md#publication-plan) lists
-the exact package order and remaining dry-run prerequisites.
+Source preparation and npm execution need separate authorization. The owner
+provided both for this release. Live qualification and production rollout
+remain separate operations.
+The [publication record](../../docs/releases/v0.27.0-publication.md) confirms
+the exact source, package order and completed registry readback.
 
 ## Pre-publication Host integration
 

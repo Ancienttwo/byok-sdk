@@ -7,23 +7,24 @@ composition over Postgres and R2.
 
 ## Release status
 
-The current source prepares **0.27.0** for the eight aligned packages, with
-independent keys **0.12.0**, for the npm dist-tag `latest`. The owner approved
-stable source preparation on 2026-10-17. Publication remains pending.
-The train uses wire v3. A v2 daemon and a v3 server do not interoperate, so
-devices and the Host must upgrade together. The train also changes server,
-cloud, client and keys APIs.
+The current `latest` release is **0.27.0** for the eight aligned packages,
+with independent keys **0.12.0**. All nine packages are published on npm from
+`v0.27.0` (`cd977261`), and complete registry readback and isolated installation
+passed. See the [publication record](docs/releases/v0.27.0-publication.md).
+The owner directed publication while #195 remained open. This does not
+establish Host acceptance or production rollout.
+
+This is the first stable wire-v3 train. A v2 daemon and a v3 server do not
+interoperate. Devices and the Host must upgrade together. The train also
+changes server, cloud, client and keys APIs.
 [Release notes](docs/releases/v0.27.0.md) describe the changes since 0.26.1
 and the Host upgrade and migration steps.
 
-Versioned install examples below name the prepared stable versions. They work
-only after publication and registry readback. The published `rc` train remains
-**0.27.0-rc.2** / keys **0.12.0-rc.2**; see its
+Versioned install examples below use the published stable packages. The `rc`
+channel remains **0.27.0-rc.2** / keys **0.12.0-rc.2**; see its
 [publication record](docs/releases/v0.27.0-rc.2-publication.md).
-Fixed-artifact Host acceptance is still open in #195. Stable source preparation
-does not establish that acceptance.
 
-The current `latest` release is **0.26.1** for the eight aligned packages,
+The previous `latest` release was **0.26.1** for the eight aligned packages,
 with independent keys **0.11.1**, published on npm on 2026-10-12 from
 `v0.26.1` (`e7f3edf2`, PR #381). The
 [publication record](docs/releases/v0.26.1-publication.md) confirms all nine
@@ -31,7 +32,7 @@ packages, exact CI artifact hashes, registry readback and an isolated install.
 [Release notes](docs/releases/v0.26.1.md) cover the client corrections since
 0.26.0. This PATCH release adds no public API or schema migration.
 
-The previous `latest` release was **0.26.0** for the eight aligned packages,
+The earlier `latest` release was **0.26.0** for the eight aligned packages,
 with independent keys **0.11.0**, published on npm `latest` on 2026-10-11 from
 `v0.26.0` (`34c0e504`, PR #350). The
 [publication record](docs/releases/v0.26.0-publication.md) verifies the frozen
@@ -96,7 +97,7 @@ and the keys SQLite profile schema; then **0.17.0** with keys **0.4.3**
 
 The published 0.23.0 train, like 0.22.0, uses unmodified official
 `@earendil-works/pi-coding-agent@0.87.1` and its attested sibling closure;
-the current source pins 1.3.0; the 0.27.0 train (its RCs and the prepared stable) uses 1.2.0; 1.1.0 ships in stable 0.25.0, 0.26.x and their published RCs.
+the current source pins 1.3.0; 1.2.0 ships in stable 0.27.0 and its published RCs; 1.1.0 ships in stable 0.25.0, 0.26.x and their published RCs.
 The maintained fork is retired from this train; 0.21.0 remains the historical
 fork-based release. Release SemVer is observability only;
 protocol intersection and advertised capabilities remain the execution gates.
@@ -127,12 +128,11 @@ import { createByokServer } from '@byok-sdk/server';
 ```
 
 The Worker-only cloud-do package is published from 0.24.0. The example below
-names the 0.27.0 candidate; it becomes usable only after publication and
-exact registry readback.
+names the published 0.27.0 stable release.
 See [the cloud-do README](packages/cloud-do/README.md) for the subclass and binding.
 
 ~~~sh
-# Prepared stable version; publication is pending.
+# Published stable version.
 npm install @byok-sdk/cloud-do@0.27.0
 npm install --save-dev @cloudflare/workers-types
 ~~~
@@ -360,7 +360,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/keys/package.json` | Package metadata | — | forbidden | 1466 B |
 | `@byok-sdk/protocol` | Wire schemas and codecs; codegen negative control | `@cfworker/json-schema`, `zod` | allowed | 125395 B |
 | `@byok-sdk/protocol/constants` | Schema-free protocol values | — | forbidden | 4429 B |
-| `@byok-sdk/protocol/package.json` | Package metadata | — | forbidden | 1481 B |
+| `@byok-sdk/protocol/package.json` | Package metadata | — | forbidden | 1667 B |
 | `@byok-sdk/server` | Resident Node server | `@cfworker/json-schema`, `hono`, `zod` | allowed | 700489 B |
 | `@byok-sdk/server/package.json` | Package metadata | — | forbidden | 1609 B |
 | `@byok-sdk/ui-runtime` | UI folds; current cloud/Hono/Zod closure | `@cfworker/json-schema`, `hono`, `zod` | allowed | 550505 B |
