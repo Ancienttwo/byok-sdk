@@ -1,10 +1,11 @@
 import type { AskUserAction, ConfirmableAction, ResultSchema, RoutineScheduleFields } from '@byok-sdk/protocol';
+import { emptyTeam, type TeamState } from './team-model';
 import type { Json } from '../../host-execution-core/src/model';
 
 export interface Turn {
-  id: string; root: string; source: 'user' | 'continuation' | 'answer' | 'action_result' | 'routine';
+  id: string; root: string; botId: string; source: 'user' | 'continuation' | 'answer' | 'action_result' | 'routine' | 'room_slot';
   request: string; hop: number; status: 'queued' | 'processing' | 'succeeded' | 'failed';
-  outcome?: Json; conclusion?: string; reported?: boolean;
+  blocked?: string; outcome?: Json; conclusion?: string; reported?: boolean;
 }
 export interface Card {
   id: string; turnId: string; action: ConfirmableAction<Json>;
@@ -32,16 +33,16 @@ export interface WakeOp {
 }
 export interface Rejection { taskId: string; action: string; reason: string }
 export interface CollaborationState {
-  turns: Record<string, Turn>; budgets: Record<string, { continuation: number; delegation: number }>;
+  team: TeamState; turns: Record<string, Turn>; budgets: Record<string, { continuation: number; delegation: number }>;
   schemas: Record<string, ResultSchema>; questions: Record<string, Question>; cards: Record<string, Card>;
   routines: Record<string, Routine>; occurrences: Record<string, Occurrence>; operations: WakeOp[];
   rejected: Rejection[]; audit: string[]; sequence: number;
 }
 export function stateOf(application: Record<string, Json>): CollaborationState {
-  if (!application.collaboration) application.collaboration = {
-    turns: {}, budgets: {}, schemas: {}, questions: {}, cards: {}, routines: {}, occurrences: {},
+  if (!application.collaboration) application.collaboration = json({
+    team: emptyTeam(), turns: {}, budgets: {}, schemas: {}, questions: {}, cards: {}, routines: {}, occurrences: {},
     operations: [], rejected: [], audit: [], sequence: 0,
-  };
+  });
   return application.collaboration as unknown as CollaborationState;
 }
 export function json(value: unknown): Json { return JSON.parse(JSON.stringify(value)) as Json; }

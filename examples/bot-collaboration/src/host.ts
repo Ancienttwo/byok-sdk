@@ -7,11 +7,18 @@ import { hash, project, time, type ExecutionTemplate, type Json, type LedgerStat
 import { enqueue } from '../../host-execution-core/src/transitions';
 import { WAKE_HORIZON_MS } from '../../host-execution-core/src/routines';
 import { json, stateOf, type CollaborationState, type Routine, type Turn } from './model';
-import { contextPack, outcomeSchema, SYSTEM_PROMPT } from './schema';
+import { turnContext, outcomeSchema, SYSTEM_PROMPT } from './schema';
 import { arm, consumeRoutine, createRoutine, lifecycle, operation, owned, switchVersion, updateRoutine } from './routines';
 
+import { activeBot, applyManagement, roomFields } from './team';
+import { advanceRooms, applySpeech, memberPresent, roomInput, type Mentions } from './rooms';
+import type { RoomFields } from '@byok-sdk/protocol';
+
+import { flushHomes, type HomeServer } from './home-projections';
 export interface BotOptions {
   botId: string; execution: ExecutionTemplate; now?: () => number;
+  /** Host-owned model templates. New Bots stay on the selected template's device. */
+  models?: Record<string, ExecutionTemplate>;
   /** Must deduplicate by id. A committed confirmation can be replayed after a crash. */
   connector: (id: string, action: string, draft: Json) => Promise<Json>;
 }
@@ -23,14 +30,21 @@ export class BotCollaboration {
   private timer?: ReturnType<typeof setTimeout>;
   private closed = false;
   private readonly now: () => number;
-  constructor(readonly server: ExecutionServer, readonly ledger: HostLedger, private readonly options: BotOptions) {
+  constructor(readonly server: ExecutionServer & HomeServer, readonly ledger: HostLedger, private readonly options: BotOptions) {
     if (!options.botId || options.execution.payload.agentRef.agentId !== options.botId) throw new Error('Select this Bot Agent');
     if (options.execution.payload.requiredToolsets?.length) throw new Error('Bot executions cannot have connector toolsets');
     this.now = () => time((options.now ?? Date.now)());
     this.core = new HostExecutionCore(server, ledger, { now: this.now, reconcileMs: 100,
       applyOutcome: (document, tx) => this.applyOutcome(document, tx) });
-    ledger.transaction(s => { stateOf(s.application); });
+    ledger.transaction(s => {
+      const state = stateOf(s.application);
+      state.team.bots[options.botId] ??= { id: options.botId, name: 'Main Bot', role: 'Team owner', persona: '',
+        model: Object.keys(this.models())[0]!, mainBot: true, archived: false,
+        revision: options.execution.payload.agentRef.profileRevision, readyRevision: options.execution.payload.agentRef.profileRevision,
+        execution: structuredClone(options.execution) };
+    });
   }
+  private models(): Record<string, ExecutionTemplate> { return this.options.models ?? { default: this.options.execution }; }
   snapshot(): CollaborationState { return stateOf(this.ledger.snapshot().application); }
   private exclusive<T>(work: () => Promise<T>): Promise<T> {
     if (this.closed) return Promise.reject(new Error('Bot Host is closed'));
@@ -38,22 +52,23 @@ export class BotCollaboration {
     this.chain = next.catch(() => {});
     return next;
   }
-  async input(key: string, request: string): Promise<string> {
-    const id = hash(['user', key]);
+  async input(key: string, request: string, botId = this.options.botId): Promise<string> {
+    const id = hash(['user', botId, key]);
     await this.exclusive(async () => {
       this.ledger.transaction(s => {
         const state = stateOf(s.application);
+        activeBot(state.team, botId);
         const old = state.turns[id];
         if (old && old.request !== request) throw new Error('Input identity conflict');
         state.budgets[id] ??= { continuation: 0, delegation: 0 };
-        this.addTurn(state, id, id, 'user', request);
+        this.addTurn(state, id, id, 'user', request, botId);
       });
       await this.process();
     });
     return id;
   }
-  private addTurn(state: CollaborationState, id: string, root: string, source: Turn['source'], request: string): void {
-    state.turns[id] ??= { id, root, source, request, hop: 0, status: 'queued' };
+  private addTurn(state: CollaborationState, id: string, root: string, source: Turn['source'], request: string, botId = this.options.botId): void {
+    state.turns[id] ??= { id, root, botId, source, request, hop: 0, status: 'queued' };
     state.budgets[root] ??= { continuation: 0, delegation: 0 };
   }
   private applyOutcome(document: unknown, tx: OutcomeTransaction): void {
@@ -69,16 +84,23 @@ export class BotCollaboration {
         state.rejected.push({ taskId: tx.intent.taskId, action, reason: String(error instanceof Error ? error.message : error) });
       }
     };
+    const bot = state.team.bots[turn.botId];
+    const seat = state.team.seats[turn.id];
+    if (!bot || bot.archived || seat && (!memberPresent(state.team, seat) || ['removed', 'busy', 'blocked'].includes(seat.status))) {
+      state.audit.push(`Outcome audit only: ${tx.intent.taskId}`); return;
+    }
+    if (seat) applySpeech(state, turn, outcome, tx.intent.taskId, this.now(), accept);
+    applyManagement(state, turn.botId, tx.intent.taskId, outcome, this.models(), accept);
     const delegated = new Set<string>();
     outcome.delegate?.forEach((action, index) => accept('delegate', () => {
-      if (action.to !== this.options.botId) throw new Error('Target is not this Bot');
+      if (action.to !== turn.botId) throw new Error('Target is not this Bot');
       if (delegated.has(action.to)) throw new Error('Duplicate delegation target');
       delegated.add(action.to);
       const budget = state.budgets[turn.root]!;
       if (budget.continuation >= 4) throw new Error('Continuation budget is 4');
       budget.continuation++;
       // This single Bot schema only offers self. Hop and delegation stay unchanged.
-      this.addTurn(state, hash([tx.intent.taskId, 'delegate', index]), turn.root, 'continuation', action.request);
+      this.addTurn(state, hash([tx.intent.taskId, 'delegate', index]), turn.root, 'continuation', action.request, turn.botId);
     }));
     if (outcome.ask_user) accept('ask_user', () => {
       const question = outcome.ask_user!;
@@ -94,12 +116,39 @@ export class BotCollaboration {
       tx.publish(`card:${id}`, json(state.cards[id]));
     });
     outcome.create_routine?.forEach((action, index) => accept('create_routine', () => {
-      createRoutine(state, this.options.botId, tx.intent.taskId, index, action, this.now());
+      createRoutine(state, turn.botId, tx.intent.taskId, index, action, this.now());
     }));
-    outcome.update_routine?.forEach(action => accept('update_routine', () => updateRoutine(state, this.options.botId, action, this.now())));
+    outcome.update_routine?.forEach(action => accept('update_routine', () => updateRoutine(state, turn.botId, action, this.now())));
     outcome.cancel_routine?.forEach(action => accept('cancel_routine', () => {
-      lifecycle(state, owned(state, this.options.botId, action.routineId), 'completed', this.now());
+      lifecycle(state, owned(state, turn.botId, action.routineId), 'completed', this.now());
     }));
+  }
+  async setMainBot(botId: string, mainBot: boolean): Promise<void> {
+    await this.exclusive(async () => {
+      this.ledger.transaction(s => { activeBot(stateOf(s.application).team, botId).mainBot = mainBot; });
+      await this.process();
+    });
+  }
+  async roomInput(key: string, roomId: string, text: string, mentions: Mentions = []): Promise<string> {
+    let id!: string;
+    await this.exclusive(async () => {
+      this.ledger.transaction(s => { id = roomInput(stateOf(s.application), key, roomId, text, mentions); });
+      await this.process();
+    });
+    return id;
+  }
+  async updateRoom(roomId: string, update: Partial<RoomFields>): Promise<void> {
+    await this.exclusive(async () => {
+      this.ledger.transaction(s => {
+        const team = stateOf(s.application).team, room = team.rooms[roomId];
+        if (!room) throw new Error('Room not found');
+        const fields = { ...room, ...update };
+        if (!update.admin && !fields.members.includes(fields.admin ?? '')) delete fields.admin;
+        const next = roomFields(team, fields);
+        Object.assign(room, next); if (!next.admin) delete room.admin;
+      });
+      await this.process();
+    });
   }
   async answer(id: string, answer: string): Promise<void> {
     await this.exclusive(async () => {
@@ -113,7 +162,7 @@ export class BotCollaboration {
         if (!answer.trim() || question.value.answerKind === 'single_choice' && !question.value.options.some(o => o.id === answer)) throw new Error('Invalid answer');
         question.answer = answer;
         const turnId = hash(['answer', id]);
-        this.addTurn(state, turnId, turnId, 'answer', JSON.stringify({ question: question.value, answer }));
+        this.addTurn(state, turnId, turnId, 'answer', JSON.stringify({ question: question.value, answer }), state.turns[question.turnId]!.botId);
       });
       await this.process();
     });
@@ -143,10 +192,16 @@ export class BotCollaboration {
   }
   readonly consume = (wake: DueWake, signal: AbortSignal): Promise<void> => this.exclusive(async () => {
     signal.throwIfAborted();
-    if (wake.dedupKey.startsWith('host-scan:')) await this.core.consume(wake, signal);
+    if (wake.dedupKey.startsWith('host-scan:')) {
+      this.ledger.transaction(s => { this.sync(s); });
+      await this.core.consume(wake, signal);
+    }
     else this.ledger.transaction(s => {
       const state = stateOf(s.application);
-      consumeRoutine(state, wake, this.now(), (id, request) => this.addTurn(state, id, id, 'routine', request));
+      consumeRoutine(state, wake, this.now(), (id, request) => {
+        const occurrence = state.occurrences[wake.dedupKey]!;
+        this.addTurn(state, id, id, 'routine', request, occurrence.definition!.target);
+      });
     });
     await this.process();
   });
@@ -160,6 +215,7 @@ export class BotCollaboration {
   }
   recover(): Promise<void> {
     return this.exclusive(async () => {
+      this.ledger.transaction(s => { this.sync(s); });
       await this.core.recover();
       const pending = new Set((await this.server.wakes.pending()).map(w => w.dedupKey));
       this.ledger.transaction(s => {
@@ -176,15 +232,32 @@ export class BotCollaboration {
   private sync(s: LedgerState): boolean {
     const state = stateOf(s.application);
     let materialized = false;
+    advanceRooms(s, state, this.now(), (id, botId, request) => this.addTurn(state, id, id, 'room_slot', request, botId));
     for (const turn of Object.values(state.turns)) {
       const intent = s.intents[hash(turn.id)];
+      const bot = state.team.bots[turn.botId];
+      if (!intent && bot?.archived) { turn.status = 'failed'; turn.conclusion = 'cancelled'; }
+      if (!intent && (turn.status === 'failed' || turn.blocked)) continue;
+      if (intent && bot?.archived && !s.executions[intent.taskId]?.started && !intent.conclusion) intent.cancelReason = 'cancelled';
       if (!intent) {
-        const schema: ResultSchema = outcomeSchema(this.options.botId, state);
+        if (!bot || bot.readyRevision !== bot.revision) continue;
+        let schema: ResultSchema, context: unknown;
+        try {
+          schema = outcomeSchema(turn.botId, state, turn, Object.keys(this.models()));
+          context = turnContext(state, turn);
+        } catch (error) {
+          turn.blocked = String(error instanceof Error ? error.message : error);
+          const seat = state.team.seats[turn.id];
+          if (seat) { seat.status = 'blocked'; seat.released = true; seat.reason = turn.blocked; }
+          project(s, `blocked:${turn.id}`, json({ turnId: turn.id, reason: turn.blocked }));
+          continue;
+        }
         state.schemas[turn.id] = schema;
-        const base = this.options.execution;
+        const base = bot.execution;
+        const { messageEgress: _egress, ...roomPayload } = base.payload;
         enqueue(s, this.ledger.tenant, { key: turn.id, source: turn.source === 'routine' ? 'routine' : turn.source === 'user' || turn.source === 'answer' ? 'user' : 'bot',
-          waitUntil: this.now() + 300_000, execution: { ...base, payload: { ...base.payload,
-            instruction: `${SYSTEM_PROMPT}\n\nRequest:\n${turn.request}\n\nContextPack:\n${JSON.stringify(contextPack(state))}`,
+          waitUntil: this.now() + 300_000, execution: { ...base, ...(turn.source === 'room_slot' ? { agentMessageContext: undefined } : {}), payload: { ...(turn.source === 'room_slot' ? roomPayload : base.payload),
+            instruction: `${SYSTEM_PROMPT}\n\nRequest:\n${turn.request}\n\nContextPack:\n${JSON.stringify(context)}`,
             terminalProjection: { mode: 'result-document', contract: BOT_TURN_OUTCOME_CONTRACT, schema },
           } } });
         turn.status = 'processing';
@@ -193,7 +266,7 @@ export class BotCollaboration {
         turn.status = intent.conclusion === 'succeeded' ? 'succeeded' : 'failed';
         turn.conclusion = intent.conclusion;
         if (!turn.reported) {
-          project(s, `bot-turn:${turn.id}`, json({ owner: this.options.botId, ...turn }));
+          project(s, `bot-turn:${turn.id}`, json({ owner: turn.botId, ...turn }));
           turn.reported = true;
         }
       }
@@ -214,7 +287,7 @@ export class BotCollaboration {
       if (card.state !== 'pending' && (card.state !== 'confirmed' || card.result !== undefined || card.error !== undefined)) {
         project(s, `card:${card.id}:${card.state}`, json(card));
         const root = state.turns[card.turnId]!.root;
-        this.addTurn(state, hash(['action_result', card.id]), root, 'action_result', JSON.stringify({ cardId: card.id, state: card.state, result: card.result, error: card.error }));
+        this.addTurn(state, hash(['action_result', card.id]), root, 'action_result', JSON.stringify({ cardId: card.id, state: card.state, result: card.result, error: card.error }), state.turns[card.turnId]!.botId);
       }
     }
     return materialized;
@@ -264,6 +337,8 @@ export class BotCollaboration {
   private async process(): Promise<void> {
     let more: boolean;
     do {
+      const admitted = this.ledger.transaction(s => this.sync(s));
+      await flushHomes(this.server, this.ledger, this.now);
       await this.core.drain();
       let materialized = this.ledger.transaction(s => this.sync(s));
       await this.flushCards();
@@ -272,14 +347,20 @@ export class BotCollaboration {
       const ledger = this.ledger.snapshot();
       // An immediate runtime terminal can create another turn on any pass.
       // Drain to a fixed point, so no application-only turn can lose its wake.
-      more = materialized || Object.values(stateOf(ledger.application).turns).some(turn => !ledger.intents[hash(turn.id)]);
+      const state = stateOf(ledger.application);
+      more = admitted || materialized || Object.values(ledger.intents).some(intent => intent.phase === 'queued' && intent.cancelReason && !intent.conclusion)
+        || Object.values(state.turns).some(turn => !ledger.intents[hash(turn.id)] && !turn.blocked
+        && turn.status !== 'failed' && !state.team.bots[turn.botId]?.archived
+        && state.team.bots[turn.botId]?.readyRevision === state.team.bots[turn.botId]?.revision);
     } while (more);
     clearTimeout(this.timer);
     if (!this.closed) {
       // Durable state is authority. The timer only retries outbox work and expires cards.
       const state = this.snapshot();
       const due = [...state.operations.filter(o => o.state === 'pending').map(o => o.retryAt ?? this.now() + 1),
-        ...Object.values(state.cards).filter(c => c.state === 'pending').map(c => c.expiresAt)];
+        ...Object.values(state.cards).filter(c => c.state === 'pending').map(c => c.expiresAt),
+        ...Object.values(state.team.seats).filter(seat => !seat.released && seat.deadline !== undefined).map(seat => seat.deadline!),
+        ...state.team.homeOperations.filter(op => op.status === 'pending').map(op => Math.max(this.now() + 1000, op.retryAt ?? 0))];
       if (due.length) {
         this.timer = setTimeout(() => { void this.drain().catch(() => {}); }, Math.max(1, Math.min(60_000, Math.min(...due) - this.now())));
         this.timer.unref?.();
