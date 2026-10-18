@@ -184,7 +184,7 @@ jobs:
         run: |
           test "$(go env GOARCH)" = "$BYOK_EXPECT_GOARCH"
           cmp "$RUNNER_TEMP/byok-agent-memory-fs" "packages/client/dist/native/agent-memory-fs/darwin-$(node -p 'process.arch')"
-          diskutil info "$RUNNER_TEMP" | grep 'File System Personality'
+          diskutil info "$(df -P "$RUNNER_TEMP" | awk 'NR==2 {print $1}')" | grep 'File System Personality'
 
       - name: Run SDK helper, intent and capability contracts
         run: |
