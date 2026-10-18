@@ -2,12 +2,14 @@
 
 ## Unreleased
 
-## 0.27.0 / @byok-sdk/keys 0.12.0 — 2026-10-17 (prepared; not published)
+## 0.27.0 / @byok-sdk/keys 0.12.0 — 2026-10-17 (published)
 
-The owner approved stable source preparation on 2026-10-17. The target npm
-dist-tag is `latest`. Publication is pending. This train includes all changes
-since 0.26.1, including the Agent message draft lane (#500) and the fixes
-merged after rc.2. Current `latest` remains 0.26.1 / keys 0.11.1.
+All nine packages are published on `latest` from `v0.27.0` (`cd977261`).
+Complete registry readback and isolated installation passed. The owner
+directed publication while #195 remained open. This train includes all
+changes since 0.26.1, including the Agent message draft lane (#500) and the
+fixes merged after rc.2. See the
+[publication record](docs/releases/v0.27.0-publication.md).
 
 - The eight aligned package manifests move to 0.27.0.
 - keys moves to 0.12.0. Its packed core edge is exactly 0.27.0.
