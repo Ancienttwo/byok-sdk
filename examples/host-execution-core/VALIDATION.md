@@ -58,6 +58,16 @@ The test observes one occurrence, one execution, identical input and one committ
 
 V2 changes:
 
+- P2-3 fixture correction: a final v2 run observed an unclaimed cancellation in the
+  existing claimed-race test. Session creation is not a durable SDK claim receipt
+  (`packages/client/src/daemon/task-runner.ts:2675` sends claim before starting the runtime, without waiting for its receipt).
+  The test now waits for `tasks.attempt().claimedRuntime`, uses one fake Date clock
+  for Host and SDK, and sets a test-only reconciliation interval after its waiting deadline.
+  This makes the intended precondition deterministic. All original cancellation,
+  generation and FIFO assertions remain. Production `reconcileMs` stays 1,000 ms.
+  The crash fixture uses the same durable-receipt barrier before exposing its kill
+  checkpoint. That checkpoint still lies after SDK admission and before Host
+  delivered persistence, with the exact routine wake in delivering state.
 - P2-4: the crash fixture now binds `delivering` to the current occurrence's exact
   dedupKey. It reports SDK delivery 2 on restart, the committed slots replay counter
   transition from 0 to 1, the SDK pending wake with deliveries 2, and the canonical

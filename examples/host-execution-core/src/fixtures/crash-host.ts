@@ -1,5 +1,6 @@
 // Test process only. The parent kills this process while a real wake is delivering.
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { serve } from '@hono/node-server';
 import { createByokServer } from '@byok-sdk/server';
 import { HostExecutionCore } from '../core';
@@ -33,6 +34,16 @@ const server = createByokServer({ productId, storage: { kind: 'sqlite', path: pa
 core = new HostExecutionCore({ ...server, executions: { submit: async input => {
   const result = await server.executions.submit(input);
   if (holdSubmit) {
+    // A started fake session does not prove that its asynchronous claim reached
+    // SQLite. Freeze the crash checkpoint only after the SDK receipt is durable.
+    const deadline = Date.now() + 5000;
+    while ((await server.tasks.attempt(input.taskId))?.status !== 'running') {
+      if (Date.now() >= deadline) {
+        process.send?.({ kind: 'error', message: 'SDK running receipt did not reach the crash checkpoint' });
+        throw new Error('SDK running receipt missing');
+      }
+      await delay(10);
+    }
     const state = ledger.snapshot();
     const intent = Object.values(state.intents).find(row => row.taskId === input.taskId)!;
     const dedupKey = state.occurrences[intent.occurrence!]!.wakeKey;

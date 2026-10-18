@@ -166,16 +166,21 @@ it('does not retry an untyped decline and never parses its reason', async () => 
 });
 
 it('accepts the deadline/claim race but holds the FIFO until the cancelled terminal', async () => {
+  host = await openHost({ reconcileMs: 120_000 }); await host.offline();
   let now = Date.now();
-  host = await openHost({ now: () => now }); await host.offline();
+  vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(now);
   const first = await host.core.enqueue(host.intent('race', { waitUntil: now + 60_000 }));
   await host.online();
   const session = await running('race');
+  // Session creation is not a durable claim receipt. Keep the Host's scan after
+  // this test's explicit deadline step, but observe the real SDK claim first.
+  await vi.waitFor(async () => expect(await host.server.tasks.attempt(first.taskId)).toMatchObject({ claimedRuntime: 'pi' }));
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   vi.spyOn(session, 'interrupt').mockImplementation(async () => { session.interrupted = true; await gate; });
   try {
     now += 60_001;
+    vi.setSystemTime(now);
     await host.core.drain();
     expect(await host.server.tasks.attempt(first.taskId)).toMatchObject({ status: 'cancel_requested', claimedRuntime: 'pi' });
     const second = await host.core.enqueue(host.intent('behind', { waitUntil: now + 60_000 }));
