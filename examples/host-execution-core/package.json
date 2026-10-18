@@ -2,7 +2,7 @@
   "name": "@byok-sdk/example-host-execution-core",
   "version": "0.0.1",
   "private": true,
-  "description": "K4 Host execution core contract probes; implementation is blocked",
+  "description": "Copy-and-own Host execution core with a durable FIFO, routine ledger and outbox",
   "type": "module",
   "license": "MIT",
   "engines": { "node": ">=24.15.0" },
@@ -14,6 +14,7 @@
   },
   "devDependencies": {
     "@types/node": "^24",
+    "tsx": "^4.19.2",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   }

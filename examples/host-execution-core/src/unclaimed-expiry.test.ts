@@ -1,4 +1,5 @@
-// Contract probe, not a Host implementation or K4 acceptance test.
+// Contract probe: cancel first, then read attempt to distinguish the two states.
+// The owner accepts interruption of an execution that wins a racing claim.
 // The fake runtime holds an execution open. SQLite, HTTP, claim and cancel are real.
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -10,7 +11,7 @@ import { expect, it, vi } from 'vitest';
 import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
 import { BotStubAdapter, waitForReady } from '../../basic/goal-btw.test-support';
 
-it('cannot distinguish an unclaimed offer from running work through the permitted readbacks', async () => {
+it('distinguishes pre-claim cancellation from claimed cancellation through attempt readback', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'k4-'));
   const productId = 'k4-expiry-probe';
   const policy: AgentEgressPolicy = {
@@ -33,6 +34,7 @@ it('cannot distinguish an unclaimed offer from running work through the permitte
     agentEgress: { policy }, hostedJournal: { mode: 'sqlite' as const },
   };
   let daemon = createDaemonWithAdapters(config, [adapter], { deviceCredentials });
+  let releaseInterrupt: (() => void) | undefined;
   try {
     const pairing = await server.pairing.createPairingCode({ productId });
     const { deviceId } = await daemon.pair(pairing.code);
@@ -49,6 +51,8 @@ it('cannot distinguish an unclaimed offer from running work through the permitte
     expect((await server.tasks.offer('cancel-before-claim'))?.delivered).toBe(true);
     expect(await server.tasks.deviceTerminal('cancel-before-claim')).toBeUndefined();
     expect(await server.tasks.cancel('cancel-before-claim', 'waiting limit')).toBeUndefined();
+    expect(await server.tasks.attempt('cancel-before-claim')).toMatchObject({ status: 'cancelled' });
+    expect((await server.tasks.attempt('cancel-before-claim'))?.claimedRuntime).toBeUndefined();
     // Successful pre-claim cancellation has no device terminal to settle from.
     expect(await server.tasks.deviceTerminal('cancel-before-claim')).toBeUndefined();
 
@@ -70,13 +74,21 @@ it('cannot distinguish an unclaimed offer from running work through the permitte
     expect(submitted.attempt.ownerDeviceId).toBeUndefined(); // The submit snapshot stays stale.
     expect(session.interrupted).toBe(false);
 
+    // Hold device completion so the intermediate cancel_requested state is observable.
+    const interruptGate = new Promise<void>(resolve => { releaseInterrupt = resolve; });
+    vi.spyOn(session, 'interrupt').mockImplementation(async () => { session.interrupted = true; await interruptGate; });
     expect(await server.tasks.cancel('claim-before-cancel', 'waiting limit')).toBeUndefined();
+    expect(await server.tasks.attempt('claim-before-cancel')).toMatchObject({ status: 'cancel_requested', claimedRuntime: 'pi' });
     await vi.waitFor(() => expect(session.interrupted).toBe(true), { timeout: 5000 });
+    releaseInterrupt!();
     await vi.waitFor(async () => expect(await server.tasks.deviceTerminal('claim-before-cancel')).toMatchObject({
       envelope: { type: 'task.cancelled' },
     }), { timeout: 5000 });
     expect(await server.tasks.deviceTerminal('cancel-before-claim')).toBeUndefined();
+    expect(await server.tasks.attempt('cancel-before-claim')).toMatchObject({ status: 'cancelled' });
+    expect((await server.tasks.attempt('cancel-before-claim'))?.claimedRuntime).toBeUndefined();
   } finally {
+    releaseInterrupt?.();
     await daemon.stop();
     await server.close();
     await new Promise<void>((resolve, reject) => {
