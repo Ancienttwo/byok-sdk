@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Feature (keys, client; #512, #513)** — `PiModelConfig` can declare the
+  Pi wire API and more pi-ai catalog fields. The new optional `api` is
+  `'openai-completions'` or `'openai-responses'`. When it is absent, the
+  projection keeps `'openai-completions'`. An `anthropic` profile must not
+  declare `api`. `compat` stays strict, and each API admits only its own keys
+  (`PI_COMPAT_KEYS_BY_API`). Both APIs now admit
+  `supportsLongCacheRetention`. The new optional strict `inputLimits` follows
+  pi-ai's `ModelInputLimitsSchema`. The durable host loads the
+  `openai-responses` stream. The prepared runtime entry refuses
+  `'openai-responses'`, `inputLimits` and `supportsLongCacheRetention` at
+  admission, because the frozen prepared wire carries none of them. The keys
+  README describes how to map a pi-ai catalog entry to `pi_model`.
+
 ## 0.27.0 / @byok-sdk/keys 0.12.0 — 2026-10-17 (published)
 
 All nine packages are published on `latest` from `v0.27.0` (`cd977261`).

@@ -4,6 +4,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { runCommand, type CommandRunner } from './command-runner';
 import { configurationPendingError, withConfigurationLock } from './custody';
 import { ByokKeysError } from './errors';
+import { PI_PREPARED_COMPAT_KEYS } from './pi-model-config';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
 import {
   PI_LAUNCHER_RUNTIME_ENTRIES, PI_PROJECTED_KEY_ENV, buildPiPreparedArgs, buildPiProviderArgs,
@@ -233,6 +234,11 @@ export function parsePiProviderLauncherOptions(
  * the same question the launch would, before any process exists. The
  * projection refuses a keyless profile for this entry too.
  *
+ * A declared `pi_model.api: 'openai-responses'` is refused for the same
+ * reason. So are `pi_model.inputLimits` and any compat key outside
+ * {@link PI_PREPARED_COMPAT_KEYS}: the frozen prepared model wire does not
+ * carry them, and the prepared host refuses a projected entry that declares one.
+ *
  * Deliberately NOT a silent narrowing of the profile: nothing here rewrites the
  * adapter or invents a credential.
  */
@@ -241,6 +247,22 @@ export function assertPiPreparedProviderProfile(profile: ModelProviderProfile): 
     throw new ByokKeysError(
       'PROVIDER_PROFILE_INVALID',
       `${profile.profile_ref} speaks the anthropic adapter; the prepared runtime entry compiles openai-completions only`,
+    );
+  }
+  if (profile.pi_model?.api === 'openai-responses') {
+    throw new ByokKeysError(
+      'PROVIDER_PROFILE_INVALID',
+      `${profile.profile_ref} declares Pi api openai-responses; the prepared runtime entry compiles openai-completions only`,
+    );
+  }
+  const uncarried = profile.pi_model === undefined ? [] : [
+    ...(profile.pi_model.inputLimits === undefined ? [] : ['inputLimits']),
+    ...Object.keys(profile.pi_model.compat).filter(key => !PI_PREPARED_COMPAT_KEYS.includes(key)).map(key => `compat.${key}`),
+  ];
+  if (uncarried.length > 0) {
+    throw new ByokKeysError(
+      'PROVIDER_PROFILE_INVALID',
+      `${profile.profile_ref} declares Pi ${uncarried.join(', ')}; the prepared model wire does not carry these fields`,
     );
   }
   if (profile.auth_mode === 'none') {
