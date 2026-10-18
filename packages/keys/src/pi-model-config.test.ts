@@ -46,10 +46,10 @@ describe('explicit Pi model authority', () => {
     expect(() => parseModelProviderProfile({ ...profileInput, pi_model })).toThrow();
   });
 
-  // pi-ai 1.2.0 `providers/data/xai.json` grok-4.3, minus the catalog-only identity, endpoint and cost fields.
+  // pi-ai 1.2.0 `providers/data/xai.json` grok-4.7, minus the catalog-only identity, endpoint and cost fields.
   const XAI_RESPONSES_MODEL = {
-    api: 'openai-responses', contextWindow: 1_000_000, maxTokens: 30_000, reasoning: true, thinkingLevel: 'low',
-    thinkingLevelMap: { off: 'none', minimal: null, low: 'low', medium: 'medium', high: 'high', xhigh: null, max: null },
+    api: 'openai-responses', contextWindow: 500_000, maxTokens: 500_000, reasoning: true, thinkingLevel: 'low',
+    thinkingLevelMap: { off: null, minimal: null, low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: null },
     compat: { supportsLongCacheRetention: false },
     inputLimits: { images: { resize: { maxWidth: 2000, maxHeight: 2000, maxBytes: 4_718_592, jpegQuality: 80 } } },
   } as const;
