@@ -222,3 +222,20 @@ it('allows separate Agent queues to execute at the same time', async () => {
   expect(host.core.intent('agent-a')?.conclusion).toBeUndefined();
   expect(host.core.intent('agent-b')?.conclusion).toBeUndefined();
 });
+
+it('resubmits the same frozen input after a failure before SDK admission', async () => {
+  const inputs: unknown[] = [];
+  host = await openHost({ wrapServer: server => ({ ...server, executions: { submit: async input => {
+    inputs.push(structuredClone(input));
+    if (inputs.length === 1) throw new Error('dispatch failed before admission');
+    return server.executions.submit(input);
+  } } }) });
+  const intent = await host.core.enqueue(host.intent('before-admission'));
+  expect(await host.server.tasks.offer(intent.taskId)).toBeUndefined();
+  expect(host.ledger.snapshot().executions[intent.taskId]?.submission).toBe('uncertain');
+  await host.restartCore(); await running(intent.key);
+  expect(inputs).toHaveLength(2);
+  expect(inputs[1]).toEqual(inputs[0]);
+  expect(host.core.intent(intent.key)).toMatchObject({ generation: 0, attempts: 1, taskId: intent.taskId });
+  expect(host.adapter.starts).toHaveLength(1);
+});

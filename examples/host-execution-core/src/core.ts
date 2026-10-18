@@ -152,14 +152,18 @@ export class HostExecutionCore {
     });
   }
   private async flushWakes(): Promise<void> {
+    const failures: unknown[] = [];
     for (const [key, row] of Object.entries(this.ledger.snapshot().outbox)) {
       if (row.kind !== 'schedule' && row.kind !== 'cancel-wake') continue;
       try {
         if (row.kind === 'schedule') await this.server.wakes.schedule(row.input);
         else await this.server.wakes.cancel(row.key);
         this.ledger.transaction(state => { if (canonical(state.outbox[key]) === canonical(row)) delete state.outbox[key]; });
-      } catch (error) { this.error(key, error); }
+      } catch (error) { this.error(key, error); failures.push(error); }
     }
+    // A consume hook must reject if it cannot persist its successor wake. The SDK
+    // then retains this delivery for retry. Direct callers must retry or recover.
+    if (failures.length) throw new AggregateError(failures, 'Wake dispatch failed; durable outbox retained');
   }
   private armScan(): void {
     this.ledger.transaction(state => {

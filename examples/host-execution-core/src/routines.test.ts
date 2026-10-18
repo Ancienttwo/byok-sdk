@@ -59,7 +59,13 @@ it('defers a quiet-hour slot and uses the same pure calendar on both sides', () 
     anchorMs: Date.UTC(2026, 9, 18, 23), everyMs: 86_400_000, quietHours: { startMinute: 22 * 60, endMinute: 7 * 60 },
   }, execution: template('calendar-only'), waitMs: 60000, lateAfterMs: 1000 };
   expect(nextIntervalOccurrence(definition, Date.UTC(2026, 9, 18, 22))).toBe(Date.UTC(2026, 9, 19, 7));
+  expect(nextIntervalOccurrence(definition, Date.UTC(2026, 9, 18, 23, 30))).toBe(Date.UTC(2026, 9, 19, 7));
+  expect(nextIntervalOccurrence(definition, Date.UTC(2026, 9, 19, 3))).toBe(Date.UTC(2026, 9, 19, 7));
   expect(nextIntervalOccurrence(definition, Date.UTC(2026, 9, 19, 7))).toBe(Date.UTC(2026, 9, 20, 7));
+  const sameDay = { ...definition, rule: { anchorMs: Date.UTC(2026, 9, 18, 10), everyMs: 86_400_000,
+    quietHours: { startMinute: 9 * 60, endMinute: 11 * 60 } } };
+  expect(nextIntervalOccurrence(sameDay, Date.UTC(2026, 9, 18, 10, 30))).toBe(Date.UTC(2026, 9, 18, 11));
+  expect(nextIntervalOccurrence({ ...sameDay, rule: { ...sameDay.rule, everyMs: 1 } }, Date.UTC(2026, 9, 18, 10, 30))).toBe(Date.UTC(2026, 9, 18, 11));
 });
 
 it('does not retry an old occurrence beyond the next routine slot', async () => {
@@ -122,4 +128,42 @@ it('a timed-out hook cannot create a late occurrence and does not block another 
   expect(occurrences().map(row => row.routineId)).toEqual(['other']);
   await vi.advanceTimersByTimeAsync(Math.max(0, retryAt - Date.now()));
   await vi.waitFor(() => expect(occurrences().map(row => row.routineId).sort()).toEqual(['held', 'other']));
+});
+
+it('reports an initial schedule failure and recovers its durable outbox on startup', async () => {
+  let fail = true;
+  host = await openHost({ wrapServer: server => ({ ...server, wakes: { ...server.wakes, schedule: async input => {
+    if (fail) { fail = false; throw new Error('temporary schedule failure'); }
+    return server.wakes.schedule(input);
+  } } }) });
+  await expect(host.core.addRoutine(host.routine('initial-failure'))).rejects.toThrow('Wake dispatch failed');
+  expect(await host.server.wakes.pending()).toEqual([]);
+  expect(Object.values(host.ledger.snapshot().outbox)).toContainEqual(expect.objectContaining({ kind: 'schedule', lastError: 'temporary schedule failure' }));
+  await host.restartCore();
+  await vi.waitFor(() => expect(occurrences()).toHaveLength(1));
+  await vi.waitFor(() => expect(host.adapter.starts).toHaveLength(1));
+});
+
+it.each(['routine:', 'host-scan:'])('rejects the current hook if successor %s scheduling fails, then SDK retry recovers', async prefix => {
+  let armed = false;
+  let failed = false;
+  const deliveries: number[] = [];
+  host = await openHost({
+    consume: async (wake, _signal, next) => { if (wake.dedupKey.startsWith('routine:')) deliveries.push(wake.delivery); await next(); },
+    wrapServer: server => ({ ...server, wakes: { ...server.wakes, schedule: async input => {
+      if (armed && !failed && input.dedupKey.startsWith(prefix)) { failed = true; throw new Error('successor schedule unavailable'); }
+      return server.wakes.schedule(input);
+    } } }),
+  });
+  await host.core.addRoutine(host.routine('successor-failure', { waitMs: 300_000 }));
+  armed = true;
+  await vi.waitFor(async () => expect((await host.server.wakes.pending()).some(wake => wake.lastError?.includes('Wake dispatch failed'))).toBe(true));
+  const retry = (await host.server.wakes.pending()).find(wake => wake.lastError?.includes('Wake dispatch failed'))!;
+  expect(occurrences()).toHaveLength(1);
+  vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(retry.retryAt! + 1);
+  await host.server.wakes.schedule({ dedupKey: 'retry-clock-check', availableAt: Date.now() });
+  await vi.waitFor(() => expect(deliveries).toEqual([1, 2]));
+  await vi.waitFor(() => expect(host.adapter.starts).toHaveLength(1));
+  expect(occurrences()).toHaveLength(1);
+  expect(Object.keys(host.ledger.snapshot().executions)).toHaveLength(1);
 });
