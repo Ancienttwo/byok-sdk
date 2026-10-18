@@ -1,10 +1,14 @@
 # WO-09a：Windows / NTFS strict ledger barrier 决策稿
 
-状态：待 Aimpact 选择故障模型。日期：2026-10-19。
+状态：Aimpact 已选 S；Windows 证明仍 BLOCKED。日期：2026-10-19。
 
 本稿只提出 spec 决策。它不批准 Windows admission，也不修改现行契约。
 当前结论：Windows 的 `B` 保持 `false`。`agent-memory-intent.v1` 不开放。
-建议选择 S，保留强故障模型。若选择 P/F，须接受系统故障后的永久分裂风险，并修改 Host admission。选项和依据见 §6。
+Aimpact 于 2026-10-19 选择 S。故障集合包括 process crash、OS crash 和断电。
+支持域限本地 NTFS、明确 OS build、普通用户 token。排除 SMB、同步目录和其他 FS。
+storage 必须兑现完整 flush。磁盘毁坏、谎报 flush 和备份回滚仍不在条件承诺内。
+这项裁定不授予 B，也不完成 Q14。WO-09 必须按 §7 证明 §3。
+P/F/R 只作为未采用方案保留。选项和依据见 §6。
 Microsoft 已说明文件数据和 metadata 的 flush 语义。缺口是把这些语义绑定到本后端的完整操作和恢复结果。
 不能把“本单未证明 namespace barrier”写成“NTFS 无法提供 durability”。依据：[M1]、[M2]、[M4]；调用证据见 §2。
 
@@ -181,7 +185,9 @@ OS-crash 与断电可使用同一条件契约，但两者的实验覆盖不能�
 
 ## 6. owner 可选择的故障模型
 
-以下都是待选项。当前没有一项获批，也没有因本稿而令 B=true。
+以下保留裁定时的选项。Aimpact 已选 S；P/F/R 未获批。
+裁定没有令 B=true。实现和验收记录见
+`docs/plans/2026-10-19-wo09-windows-ledger-validation.md`。
 
 | 选项 | owner 接受的准确含义 | v1 与 B 的后果 |
 |---|---|---|
@@ -219,13 +225,13 @@ WO-09 开始前须确定 Host 的明确 opt-in 和兼容边界；仅本地布尔
 依据：`docs/plans/2026-10-18-bot-mode-product-prd.md:443`、`docs/protocol.md:978`。
 
 owner 的决定须填写：`选项 S/P/F/R`、`允许的故障集合`、`OS/FS/storage 假设`、`接受的残留风险`、`Host admission 规则`、`签名与日期`。
-没有决定前，WO-09 可做矩阵和原语实验，但不能开放 Windows intent。
+决定已给出。WO-09 可做矩阵和原语实验；§3/§7 的证据齐全前不能开放 Windows intent。
 
 ### 可并入 spec 的拟议文字
 
 若选 S，并完成证明，在 Durable Agent homes 的 intent 段采用以下文字。
 同步替换 `docs/protocol.md` 的 advertisement 限制和 B 的注释。
-本稿保留现行 spec 文件，等待裁定。
+WO-09 已把 S 的要求写入 spec/protocol。Windows 仍关闭；下文不代表证明已通过。
 
 > A backend may advertise Agent memory intents only after it proves a durable barrier for its stated OS, file system and storage profile. On Windows, the profile is local NTFS with storage that honors flush requests. The barrier covers process failure, OS failure and power loss. It covers the ledger bytes, memory result, required metadata and name changes, and new parent directories. The device commits applying before CAS. It commits the memory result and terminal before Host completion. It commits ackedAt after matching Host readback and before cursor advance. An error blocks the next step. File flush alone is not proof of the full sequence. Windows remains disabled until this proof is complete.
 
@@ -261,7 +267,7 @@ owner 的决定须填写：`选项 S/P/F/R`、`允许的故障集合`、`OS/FS/s
 - [M7] [ZwFlushBuffersFileEx](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-zwflushbuffersfileex)：Remarks 明确 user-mode 应使用 Nt 名称。Flags 细节采用较完整的 [M2]，不混用两页的表。
 - [M8] [ReplaceFileW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-replacefilew)：REPLACEFILE_WRITE_THROUGH 不支持；Return value 列出部分失败状态。
 
-## 9. 本单验证记录
+## 9. WO-09a 历史验证记录（裁定前）
 
 本机：macOS arm64，Node `v24.21.0`，Bun `1.4.3`。
 仓库 packageManager 固定 `bun@1.4.2`；本次记录是本机 Bun 1.4.3 的结果，不是该版本 CI 的复验。
@@ -286,5 +292,6 @@ M1—M8 的 8 个 Microsoft URL 均返回 HTTP 200。程序逐项检查了所引
 本机完整日志位于 `/var/folders/nz/1kt960ns5kq331c5qw2sh6sc0000gn/T/wo09a-checks-j57ctt24/`。
 该临时目录不属于 Git 交付物。
 
-残留边界：owner 尚未裁定；Windows API/普通用户矩阵、OS crash 和物理断电尚无本单实测。
+该次验证时 owner 尚未裁定。当前裁定见文首。
+Windows API/普通用户矩阵、OS crash 和物理断电尚无本单实测。
 WO-09 的 Windows intent 开放仍受 §5—§7 约束。

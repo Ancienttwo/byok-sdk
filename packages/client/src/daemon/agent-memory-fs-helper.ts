@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { AgentHomeLease } from '../agent-home';
 import { AgentMemoryError, AgentMemoryRevisionConflictError } from './agent-memory';
 import type { AgentMemoryFilesystem, AgentMemoryFilesystemFileState } from './agent-memory-filesystem';
+import { agentMemoryHelperIdentity, agentMemoryHelperIdentityMatches } from './agent-memory-helper-identity';
 
 export const AGENT_MEMORY_FILESYSTEM_HELPER_PROTOCOL = 2;
 export const AGENT_MEMORY_FILESYSTEM_HELPER_VERSION = '2';
@@ -38,18 +39,15 @@ function safeHelperPath(value: unknown): string {
 }
 
 function helperPlatformSupported(): boolean {
-  // Windows remains closed until the native reparse/junction matrix is run on
-  // a real Windows host. Linux retains its existing native descriptor backend;
+  // Windows requires containment and model S recovery proof (process/OS crash
+  // and power loss). A green denial matrix does not grant admission.
+  // Linux retains its existing native descriptor backend;
   // the external process authority is admitted only for the proven macOS gap.
   return process.platform === 'darwin';
 }
 
 export function isAgentMemoryFilesystemHelperSupported(): boolean {
   return helperPlatformSupported();
-}
-
-function unixIdentity(homeIdentity: AgentHomeLease['homeIdentity']): Readonly<Record<string, string>> {
-  return Object.freeze({ kind: 'unix', dev: homeIdentity.dev.toString(10), ino: homeIdentity.ino.toString(10) });
 }
 
 function responseRecord(value: unknown): HelperResponse | undefined {
@@ -128,6 +126,7 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
   static async open(input: Readonly<{ helperBin: string; canonicalHome: string; homeIdentity: AgentHomeLease['homeIdentity'] }>): Promise<AgentMemoryFilesystemHelperClient> {
     if (!helperPlatformSupported()) throw new AgentMemoryError('Agent memory filesystem helper is not admitted on this platform');
     const helperBin = safeHelperPath(input.helperBin);
+    const expected = agentMemoryHelperIdentity(input.homeIdentity, process.platform);
     const child = spawn(helperBin, ['serve'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: false,
@@ -138,14 +137,10 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
     try {
       const result = await client.request('open', {
         root: path.resolve(input.canonicalHome),
-        expectedIdentity: unixIdentity(input.homeIdentity),
+        expectedIdentity: expected,
       });
       if (result.helperVersion !== AGENT_MEMORY_FILESYSTEM_HELPER_VERSION) throw new AgentMemoryError('Agent memory filesystem helper version mismatch');
-      const identity = result.identity;
-      if (identity === null || typeof identity !== 'object' || Array.isArray(identity)) throw new AgentMemoryError('Agent memory filesystem helper omitted root identity');
-      const actual = identity as Record<string, unknown>;
-      const expected = unixIdentity(input.homeIdentity);
-      if (actual.kind !== expected.kind || actual.dev !== expected.dev || actual.ino !== expected.ino) throw new AgentMemoryError('Agent memory filesystem helper root identity mismatch');
+      if (!agentMemoryHelperIdentityMatches(result.identity, expected)) throw new AgentMemoryError('Agent memory filesystem helper root identity mismatch');
       return client;
     } catch (error) {
       await client.close().catch(() => {});

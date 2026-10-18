@@ -983,7 +983,16 @@ directory fsync). For the native Linux descriptor backend, the last condition
 also needs a startup probe showing that the Agent-home storage root honors a
 directory fsync. The external macOS filesystem helper cannot prove either the
 barrier or conflict-before-rename ordering, so a helper-backed daemon does not
-advertise. Windows does not advertise. A notice that reaches a daemon without
+advertise. Windows does not advertise. Its accepted model S covers process
+crash, OS crash and power loss. The proposed domain is local NTFS on an
+explicit OS build with a normal user token and storage that honors flush.
+It excludes SMB, synced directories and other file systems. Windows B stays
+false until the ledger, memory replace/delete, metadata, name changes and new
+parent directories meet the full recovery contract. A successful file flush,
+process kill test or readback does not grant B. Sections 3 and 7 of
+`docs/plans/2026-10-19-windows-ntfs-ledger-barrier-decision.md` define that
+contract and its fallible acceptance. The Windows requirement of Q14 stays
+open. A notice that reaches a daemon without
 the capability fails `transport_unconfigured` or `filesystem_unavailable`
 before any fetch. There is no control-socket method for intents.
 

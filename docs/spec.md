@@ -1877,7 +1877,22 @@ advance. A leftover `applying` record is reported `uncertain` and never
 re-executed. Busy, fetch, readback, identity or I/O failures leave the cursor
 in place. The capability is advertised only on a backend whose ledger write
 provably includes a directory fsync; today that means native Linux and excludes
-the macOS helper and Windows. Wire and failure detail: `docs/protocol.md` §2.4.
+the macOS helper and Windows.
+
+For Windows, the accepted fault model S covers process crash, OS crash and
+power loss. Its proposed support domain is local NTFS on an explicit OS
+build with a normal user token and storage that honors full flush requests.
+SMB, synced directories and other file systems are excluded. Admission needs
+proof that ledger bytes, memory replace/delete results, required metadata,
+name changes and new parent directories survive that fault set. The order is
+durable applying, CAS, durable memory result, durable terminal, matching Host
+complete/readback, durable ackedAt, then cursor advance. A barrier error blocks
+the next step. Corrupt ledger recovery must fail closed. A file flush or
+visible readback alone does not prove that order. Windows remains BLOCKED
+and B remains false until the proof and recovery experiments pass. Linux
+checks do not complete Q14's Windows requirement. The acceptance contract is
+`docs/plans/2026-10-19-windows-ntfs-ledger-barrier-decision.md` sections 3 and 7.
+Wire and failure detail: `docs/protocol.md` §2.4.
 
 The daemon publishes the authenticated `conn.hello` capability snapshot as the
 first long-poll message; the hosted composition persists that snapshot before

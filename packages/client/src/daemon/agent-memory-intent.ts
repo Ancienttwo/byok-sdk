@@ -161,7 +161,12 @@ export interface AgentMemoryIntentBackend {
   readonly openFilesystem?: (lease: AgentHomeLease) => Promise<AgentMemoryFilesystem>;
   /** A thrown `AgentMemoryRevisionConflictError` proves this attempt renamed nothing. */
   readonly conflictProvesNoRename: boolean;
-  /** A successful internal-state write proves temp fsync, rename and directory fsync. */
+  /**
+   * A successful write proves durable bytes, metadata and name changes.
+   * Linux requires temp fsync, rename and directory fsync. Windows requires
+   * model S proof for ledger, memory replace/delete and new parent directories
+   * under process crash, OS crash and power loss. File flush alone is not B.
+   */
   readonly strictLedgerBarrier: boolean;
 }
 
