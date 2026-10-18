@@ -1,5 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 import { RuntimeExecutionFailure } from '@byok-sdk/client';
+import type { CreateByokServerOptions } from '@byok-sdk/server';
 import { hash, taskId } from './model';
 import { openHost, template, type TestHost } from './test-support';
 
@@ -49,6 +51,74 @@ it('uses one FIFO for routine, Bot and user triggers, independent of profile rev
   (await running('bot')).finish({ text: 'second' }); await settled('bot');
   (await running('user')).finish({ text: 'third' }); await settled('user');
   expect(host.adapter.starts.map(start => start.manifest.taskId)).toEqual([first.taskId, bot.taskId, user.taskId]);
+});
+
+it('accepts one Bot chat turn through messageEgress and settles it through the routine FIFO and outcome transaction', async () => {
+  const received: Array<Parameters<NonNullable<CreateByokServerOptions['agentMessage']>['consume']>[0]> = [];
+  let accept!: () => void;
+  const decision = new Promise<void>(resolve => { accept = resolve; });
+  host = await openHost({
+    agentMessage: { consume: async input => { received.push(input); await decision; return { outcome: 'accepted' }; } },
+    applyOutcome: (document, tx) => {
+      tx.application[tx.intent.taskId] = { source: tx.intent.source, document: document as { text: string },
+        terminal: tx.terminal.envelope.type };
+      tx.application.count = Number(tx.application.count ?? 0) + 1;
+      tx.publish(`outcome:${tx.intent.taskId}`, { source: tx.intent.source });
+    },
+  });
+  try {
+    const submit = vi.spyOn(host.server.executions, 'submit'); // Call through to the real embedded server.
+    await host.core.addRoutine(host.routine('before-chat'));
+    await vi.waitFor(() => expect(Object.keys(host.ledger.snapshot().occurrences)).toHaveLength(1));
+    const routine = Object.values(host.ledger.snapshot().intents)[0]!;
+    const routineSession = await running(routine.key);
+    const execution = template(host.deviceId);
+    const chat = await host.core.enqueue(host.intent('chat-turn', { source: 'bot', execution: {
+      ...execution, payload: { ...execution.payload, instruction: 'Reply to this chat turn and submit its result.',
+        messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },
+      }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'turn-1' },
+    } }));
+    expect(chat.source).toBe('bot');
+    expect(await host.server.tasks.offer(chat.taskId)).toBeUndefined();
+    expect(host.adapter.starts.map(start => start.manifest.taskId)).toEqual([routine.taskId]);
+    routineSession.finish({ text: 'routine result' }); await settled(routine.key);
+
+    const reply = { text: 'Hello from the Bot.' };
+    (await running(chat.key)).finish(reply);
+    await vi.waitFor(() => expect(received).toHaveLength(1));
+    const message = received[0]!;
+    const body = JSON.stringify(reply);
+    expect(message).toMatchObject({ tenant: 'product:host-core-test', taskId: chat.taskId, deviceId: host.deviceId,
+      context: { destinationBinding: 'conversation', freshnessCursor: 'turn-1' },
+      payload: { agentRef: execution.payload.agentRef, contentType: 'text/markdown', body,
+        byteCount: Buffer.byteLength(body), contentHash: `sha256:${createHash('sha256').update(body).digest('hex')}` },
+    });
+    expect(await host.server.tasks.messageDisposition(chat.taskId, host.deviceId, message.payload)).toBeUndefined();
+    expect(await host.server.tasks.deviceTerminal(chat.taskId)).toBeUndefined();
+    expect(host.ledger.snapshot().applied[chat.taskId]).toBeUndefined();
+    accept();
+    await vi.waitFor(async () => expect(await host.server.tasks.messageDisposition(chat.taskId, host.deviceId, message.payload))
+      .toMatchObject({ outcome: 'accepted' }));
+    await vi.waitFor(async () => expect(await host.server.tasks.deviceTerminal(chat.taskId))
+      .toMatchObject({ envelope: { type: 'task.complete', payload: { document: reply } } }));
+    await settled(chat.key);
+    expect(host.ledger.snapshot().executions[chat.taskId]!.terminal).toEqual(await host.server.tasks.deviceTerminal(chat.taskId));
+    expect(submit.mock.calls.map(([input]) => input.taskId)).toEqual([routine.taskId, chat.taskId]);
+    expect(host.adapter.starts.map(start => start.manifest.taskId)).toEqual([routine.taskId, chat.taskId]);
+
+    await host.restartCore(); await host.core.drain();
+    const state = host.ledger.snapshot();
+    expect(state.application).toEqual({ count: 2,
+      [routine.taskId]: { source: 'routine', document: { text: 'routine result' }, terminal: 'task.complete' },
+      [chat.taskId]: { source: 'bot', document: reply, terminal: 'task.complete' },
+    });
+    expect(state.applied).toEqual({ [routine.taskId]: true, [chat.taskId]: true });
+    for (const intent of [routine, chat]) {
+      expect(host.core.intent(intent.key)?.conclusion).toBe('succeeded');
+      expect(Object.values(state.outbox)).toContainEqual({ kind: 'projection', id: `outcome:${intent.taskId}`, value: { source: intent.source } });
+    }
+    expect(await host.server.tasks.messageDisposition(chat.taskId, host.deviceId, message.payload)).toMatchObject({ outcome: 'accepted' });
+  } finally { accept(); }
 });
 
 it('recovers a lost submit response with the same frozen task and no second execution', async () => {

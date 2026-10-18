@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { serve } from '@hono/node-server';
-import { createByokServer, type DueWake } from '@byok-sdk/server';
+import { createByokServer, type CreateByokServerOptions, type DueWake } from '@byok-sdk/server';
 import { createDaemonWithAdapters, type AgentEgressPolicy } from '@byok-sdk/client';
 import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
 import { BotStubAdapter, waitForReady } from '../../basic/goal-btw.test-support';
@@ -24,6 +24,7 @@ export function template(deviceId: string, agentId = 'main'): ExecutionTemplate 
   } };
 }
 export async function openHost(options: HostOptions & {
+  agentMessage?: CreateByokServerOptions['agentMessage'];
   consume?: (wake: DueWake, signal: AbortSignal, next: () => Promise<void>) => Promise<void>;
   wrapServer?: (server: ExecutionServer) => ExecutionServer;
 } = {}) {
@@ -33,6 +34,7 @@ export async function openHost(options: HostOptions & {
   let ledger = new HostLedger(ledgerPath, `product:${productId}`);
   let core!: HostExecutionCore;
   const server = createByokServer({ productId, storage: { kind: 'sqlite', path: path.join(root, 'server.sqlite') },
+    agentMessage: options.agentMessage,
     wake: { consume: (wake, signal) => options.consume ? options.consume(wake, signal, () => core.consume(wake, signal)) : core.consume(wake, signal) },
   });
   core = new HostExecutionCore(options.wrapServer?.(server) ?? server, ledger, options);
