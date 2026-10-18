@@ -5,3 +5,6 @@ export { nextIntervalOccurrence } from './schedule';
 export type { NextOccurrence } from './schedule';
 export { DEFAULT_RETRY, taskId } from './model';
 export type { IntentInput, Intent, ExecutionTemplate, RetryPolicy, RoutineDefinition, Routine, Occurrence, Conclusion, Json } from './model';
+
+export { HostMemoryPage, memoryRevision, EMPTY_MEMORY_REVISION, RESIDENT_MEMORY_MAX_BYTES } from './memory';
+export type { MemoryApproval, MemoryBinding, MemoryOptions, MemoryContextPack } from './memory';

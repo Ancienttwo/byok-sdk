@@ -1,3 +1,4 @@
+import type { MemoryState } from './memory';
 import { createHash } from 'node:crypto';
 import type { AgentExecutionInput, ByokServer, WakeScheduleInput } from '@byok-sdk/server';
 
@@ -59,6 +60,7 @@ export type Outbox =
   | { kind: 'projection'; id: string; value: Json; lastError?: string };
 export interface LedgerState {
   version: 1; sequence: number; scanSequence: number;
+  memory?: MemoryState;
   intents: Record<string, Intent>; executions: Record<string, Execution>;
   routines: Record<string, Routine>; occurrences: Record<string, Occurrence>;
   slots: Record<string, string>; outbox: Record<string, Outbox>;

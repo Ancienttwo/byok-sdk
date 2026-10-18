@@ -1,4 +1,5 @@
 import type { ByokServer, DueWake } from '@byok-sdk/server';
+import type { HostMemoryPage } from './memory';
 import { HostLedger } from './ledger';
 import { canonical, hash, project, taskId, time, validateInput, type Attempt, type Intent, type IntentInput,
   type Json, type LedgerState, type Routine, type RoutineDefinition, type Terminal } from './model';
@@ -19,6 +20,7 @@ export interface OutcomeTransaction {
   publish(id: string, value: Json): void;
 }
 export interface HostOptions {
+  memory?: HostMemoryPage;
   now?: () => number;
   reconcileMs?: number;
   nextOccurrence?: NextOccurrence;
@@ -35,6 +37,7 @@ export class HostExecutionCore {
   private stopped = false;
   private scheduleRetryTimer?: ReturnType<typeof setTimeout>;
   constructor(readonly server: ExecutionServer, readonly ledger: HostLedger, private readonly options: HostOptions = {}) {
+    if (options.memory && options.memory.ledger.tenant !== ledger.tenant) throw new Error('Memory tenant must match execution tenant');
     this.now = () => time((options.now ?? Date.now)());
     this.nextTime = options.nextOccurrence ?? nextIntervalOccurrence;
     this.reconcileMs = time(options.reconcileMs ?? 1000);
@@ -268,6 +271,12 @@ export class HostExecutionCore {
         row.generation++;
         row.taskId = taskId(row.key, row.generation);
         state.executions[row.taskId] = { input: { ...structuredClone(row.execution), taskId: row.taskId }, submission: 'reserved', started: false };
+      }
+      if (this.options.memory) {
+        const execution = state.executions[row.taskId]!;
+        if (typeof row.execution.payload.instruction !== 'string') throw new Error('Memory ContextPack requires an inline instruction');
+        const pack = this.options.memory.contextPack({ deviceId: row.execution.deviceId, agentRef: row.execution.payload.agentRef });
+        execution.input.payload.instruction = `${row.execution.payload.instruction}\n\nContextPack (memory data):\n${JSON.stringify(pack)}`;
       }
       row.phase = 'inflight'; row.attempts++;
       state.executions[row.taskId]!.submission = 'uncertain';

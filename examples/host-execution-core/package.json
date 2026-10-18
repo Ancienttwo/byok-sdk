@@ -5,17 +5,25 @@
   "description": "Copy-and-own Host execution core with a durable FIFO, routine ledger and outbox",
   "type": "module",
   "license": "MIT",
-  "engines": { "node": ">=24.15.0" },
-  "scripts": { "typecheck": "tsc --noEmit", "test": "vitest run" },
+  "engines": {
+    "node": ">=24.15.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
   "dependencies": {
     "@byok-sdk/server": "workspace:*",
-    "@hono/node-server": "^2.0.10"
+    "@hono/node-server": "^2.0.10",
+    "@byok-sdk/core": "workspace:*",
+    "@byok-sdk/protocol": "workspace:*",
+    "@byok-sdk/client": "workspace:*"
   },
   "devDependencies": {
-    "@byok-sdk/client": "workspace:*",
     "@types/node": "^24",
     "tsx": "^4.19.2",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "@byok-sdk/cloud": "workspace:*"
   }
 }
