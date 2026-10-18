@@ -48,11 +48,11 @@
       "name": "@byok-sdk/example-host-execution-core",
       "version": "0.0.1",
       "dependencies": {
-        "@byok-sdk/client": "workspace:*",
         "@byok-sdk/server": "workspace:*",
         "@hono/node-server": "^2.0.10",
       },
       "devDependencies": {
+        "@byok-sdk/client": "workspace:*",
         "@types/node": "^24",
         "tsx": "^4.19.2",
         "typescript": "^7.0.2",

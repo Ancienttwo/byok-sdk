@@ -47,7 +47,8 @@ Use a separate Host database. Never open the SDK database or an Agent home as th
 
 ## P2: Real path
 
-`addRoutine` commits a definition and a schedule outbox record.
+`addRoutine` commits a definition and its scheduling state.
+An in-horizon candidate also adds a schedule outbox record.
 The wake hook commits one occurrence, its intent, and the next planned time together.
 The scanner reserves the complete execution input before it calls `executions.submit`.
 The daemon executes that input. The fake runtime submits a real result document.
@@ -65,7 +66,8 @@ It does not create a new generation to recover an uncertain submission.
 
 Use the existing SQLite and public API conventions from `examples/basic`.
 Keep one FIFO per `(tenant, deviceId, agentId)`. Profile changes do not create another FIFO.
-Use the embedded wake queue for local deadlines and backoff.
+Use the embedded wake queue for execution deadlines and backoff.
+An out-of-horizon routine candidate uses process-local backoff until K2 can accept it.
 Keep outcome semantics in a synchronous injected callback. K8 actions are outside K4.
 
 The owner resolved the initial expiry blocker on 2026-10-18.
@@ -79,7 +81,28 @@ See `unclaimed-expiry.test.ts` and the guide for the exact distinction.
 ## Integration limits
 
 This example is a single-owner reference for a small ledger.
-Its scans and transactions read the JSON ledger. They are not a large-dataset storage design.
+Every transaction reads and rewrites the whole JSON ledger. The example does not clean up history rows.
+That includes settled intents, executions with terminal documents, occurrences, slot dedup keys,
+outcome markers and calendar audits. They are not a large-dataset storage design.
+
+While work is in flight, the core normally creates a new `host-scan` wake every `reconcileMs`
+(default 1,000 ms). Earlier deadlines can cause earlier scans. The SDK retains done wake rows for seven days.
+One scan per second is about 86,400 completed rows per day, or 604,800 over seven days, before bounded cleanup.
+This is a planning estimate, not a measured capacity limit. Other wakes add rows.
+Let the SDK manage its wake retention. Do not delete SDK rows directly.
+
+When adopting this code, define a retention policy for the Host ledger:
+
+- Keep unsettled intents, their execution evidence, and every unacknowledged outbox row.
+- Archive settled records and large outcome documents after result acknowledgement and the product's retention period.
+- Keep task application and slot dedup tombstones through the maximum replay, upload retry and backup-restore window.
+  Include at least the SDK's seven-day completed-wake replay window. Do not reuse retired identities.
+- Apply archive and tombstone changes atomically. Measure JSON rewrite cost before selecting a storage budget.
+
+Set `HostOptions.reconcileMs`, for example `{ reconcileMs: 10_000 }`, to reduce normal scan frequency.
+The default is unchanged. A larger interval increases terminal observation and FIFO release latency.
+Choose the interval from the product's latency budget and measured write load.
+
 The default calendar supports fixed UTC intervals and UTC quiet hours.
 Inject a shared pure calendar for cron, other time zones, DST or business calendars.
 The SDK still receives only one-shot times.

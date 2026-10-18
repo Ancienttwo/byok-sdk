@@ -56,14 +56,25 @@ An execution has an explicit runtime, AgentRef, egress policy and terminal proje
 Freeze all input context, including any selected server-held message context.
 The core assigns taskId. It never adds SessionRef or changes execution mode.
 
-All local scheduling, waiting deadlines and backoff use the one-shot SDK wake queue.
-The reference has no separate interval timer. Topology H uses service-owned timers.
+Execution waiting deadlines and backoff use the one-shot SDK wake queue.
+Out-of-horizon routine candidates use one process-local retry timer. Topology H uses service-owned timers.
+`HostOptions.now` is for tests only. It must use the same wall clock as the SDK wake scheduler.
 The default calendar is `{ anchorMs, everyMs }` with `timeZone: 'UTC'`.
 Optional `quietHours: { startMinute, endMinute }` uses UTC minutes since midnight.
 Quiet hours can cross midnight. Defer the slot to their end; do not drop it.
 Inject a shared pure `nextOccurrence` function for cron, other zones, DST or business calendars.
 Use that same function in the Host service. Return a time strictly after the input time, or null.
-Keep each SDK wake within its 366-day horizon. Periodic rules remain Host-owned.
+The core checks the current 366-day K2 horizon before writing a schedule outbox row.
+It retains a later candidate on the routine with status `schedule_retrying`, without a schedule row.
+Process-local backoff starts at 60 seconds, doubles to one hour, and retries the same candidate.
+Startup also retries it. A wall-clock rollback rejection from the SDK enters the same state.
+A wake dispatch failure cannot skip the other Agent queues. The scan reports failures after those queues run.
+Periodic rules remain Host-owned.
+
+A calendar `null` keeps lifecycle `active` with status `no_occurrence_within_horizon`.
+Startup and an explicit refresh through `addRoutine` recompute it. The definition must remain identical.
+New definitions are evaluated when added; changing the same ID is still outside K4.
+The default calendar can complete a routine when its explicit `endAt` excludes all later slots.
 
 Stop the core before stopping the server. Close the ledger after scans finish.
 The reference has one owner and stores a small JSON ledger in one SQLite row.
@@ -146,8 +157,11 @@ Compute the next time from the current wall clock. Skip intervening missed slots
 One overdue wake creates at most one catch-up after sleep.
 A repeated wake uses the committed trigger and next time. It cannot reclassify the same slot later.
 
-The transaction also writes a schedule outbox record. Dispatch it after commit.
+For an in-horizon successor, the transaction also writes a schedule outbox record. Dispatch it after commit.
 Exact wake key, time and payload make replay idempotent.
+Routine keys are `<routineId>:<version>:<t>`, with `t` in canonical decimal epoch milliseconds and no payload.
+Parse the last two colon-separated fields from the right, so routine IDs can contain colons.
+The hook still compares the complete key with `routine.next.dedupKey` before admitting a slot.
 After restart, scan the persistent outbox and reconcile pending wakes.
 Recovery must not depend on browser polling.
 
@@ -158,7 +172,7 @@ Bound attempts and store their count with the occurrence.
 
 ## 7. Wake behavior
 
-The SDK rechecks wall clock at most every 60 seconds. It delivers late wakes.
+The SDK rechecks the wall clock at least once every 60 seconds. It delivers late wakes.
 The Host owns the catch-up decision. The SDK retries a rejected hook after 60 seconds.
 It aborts a hook at its 60-second delivery deadline. An old hook can overlap a later delivery.
 Durable deduplication must cover both concurrent and restarted delivery.
@@ -167,11 +181,14 @@ The hook commits intent and scheduling state, dispatches work and returns.
 It must not wait for execution completion.
 The reference scans unsettled outbox rows through another one-shot local wake.
 Dispatch errors remain on their outbox rows for retry and restart recovery.
-If a successor wake cannot be persisted, the consume hook rejects.
+One failed row does not stop intent reconciliation. The scan throws after all Agent queues run.
+If an in-horizon successor wake cannot be persisted by the SDK, the consume hook rejects.
 The SDK keeps the current wake and retries it after 60 seconds.
 A direct entrypoint also rejects after a wake dispatch failure, even if its ledger transaction committed.
 Retry the same input or call `recover`; do not create another intent or routine identity.
 The error contains the retained outbox failure. An initial dispatch failure is not reported as successful scheduling.
+Calendar exceptions are separate. The hook records an audit entry and status `calendar_error`, clears the successor, and resolves.
+The current occurrence can still finish. The SDK does not redeliver the wake for that calendar error.
 `wakes.cancel` removes queued wakes only. A delivering wake can still run or retry.
 The hook must check current lifecycle and the reserved wake identity.
 Do not depend on cancel returning true to pause a routine.
@@ -220,6 +237,7 @@ The example accepts an immutable mirror. It does not implement command transport
 Store only `active`, `paused` and `completed` lifecycle values.
 Pause prevents new occurrences and cancels the planned wake.
 Existing admitted work can finish. The reference also permits an already queued occurrence to finish.
+Pause removes the retry cutoff for the cancelled successor slot. The intent's original waiting deadline still applies.
 To stop admitted work, explicitly cancel its intent.
 Complete stops future scheduling and preserves history.
 Deletion belongs to a separate privacy process.
