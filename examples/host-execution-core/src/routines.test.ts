@@ -45,7 +45,11 @@ it('keeps one running occurrence and only the latest queued slot, then pause sto
   expect(occurrences().some(row => row.conclusion === 'superseded')).toBe(true);
   await host.core.lifecycle('coalesce', 'paused');
   const count = occurrences().length;
-  expect((await host.server.wakes.pending()).filter(wake => wake.dedupKey.startsWith('coalesce:'))).toEqual([]);
+  // The SDK invalidates delivery before its complete write commits.
+  // Wait for that write before checking that the paused routine has no wakes.
+  await vi.waitFor(async () => {
+    expect((await host.server.wakes.pending()).filter(wake => wake.dedupKey.startsWith('coalesce:'))).toEqual([]);
+  }, { timeout: 5000 });
   const running = intents().find(row => row.phase === 'inflight')!;
   host.adapter.sessions.get(running.taskId)!.finish({ text: 'current completes' });
   await vi.waitFor(async () => { await host.core.drain(); expect(host.core.intent(running.key)?.conclusion).toBe('succeeded'); });
