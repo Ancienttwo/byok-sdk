@@ -1,6 +1,6 @@
 # WO-09: Windows ledger implementation and VALIDATION
 
-Status: BLOCKED for Windows admission. B remains false. Local checks are in progress.
+Status: BLOCKED for Windows admission. B remains false. Local checks are complete.
 Branch: `codex/p2-win-ledger`. Base: `e829f553` (WO-09a).
 
 ## Owner decision
@@ -136,7 +136,59 @@ acceptance. Go checks use GOTOOLCHAIN=go1.26.5 from go.mod.
   Reviewer `wo09-review` found no actionable findings. It accepted the bounded
   code change subject to pending checks. It kept release acceptance BLOCKED.
   It found no weakened test or false S/Q14 claim. It changed no file.
-- Five required checks: pending final results.
+- First required run: build 0, typecheck 0, test 1, API surface 1,
+  version authority 0. The test found that a separate identity file expanded
+  the fixed embedded-memory module graph. Identity functions now remain in
+  the existing helper file. The original graph assertion is unchanged.
+  API surface reported only the deliberate B contract comment change. The
+  golden comment now carries that same contract. The first run did not add
+  an exported declaration to a reachable module.
+- Second independent read-only Codex review: same pane and reviewer, round 2.
+  No actionable findings. The reviewer verified that the moved functions are
+  unchanged, the 15-module graph matches baseline, external imports are
+  unchanged and no pre-existing test assertion changed. It also compared
+  the then-current golden with comments removed and found no signature drift.
+  That comparison did not replace the final built-declaration scan.
+  It accepted the bounded code change, subject to final required checks.
+  Model S release acceptance remains BLOCKED. No third round was requested.
+- Final affected checks: 5 files, 21 tests passed; exit 0. This includes the
+  original embedded-entry constraints. Real macOS helper integration also
+  passed again after relocation: 2 tests, exit 0.
+- The complete rerun passed tests but found one more API-surface difference:
+  moving exported identity helpers into the existing reachable module added
+  their internal declarations to the declaration closure. The final generated
+  client golden adds `AgentMemoryHelperIdentity`, `agentMemoryHelperIdentity`
+  and `agentMemoryHelperIdentityMatches`, plus the B contract comment. The
+  public entrypoint export lists are unchanged. This is deliberate declaration
+  tracking, not a weaker assertion. No source code changed after the complete
+  test rerun. The full API-surface check then passed.
+
+### Final required checks
+
+| Command | Exit | Seconds |
+|---|---|---|
+| `bun run build` | 0 | 20.50 |
+| `bun run typecheck` | 0 | 10.09 |
+| `bun run test` | 0 | 643.40 |
+| `bun run check:api-surface` | 0 | 7.03 |
+| `bun run check:version-authority` | 0 | 0.07 |
+
+Vitest totals: 9,296 passed and 200 skipped. Client: 4,000 passed and 30
+skipped. Cloud-dataplane: 94 passed and 139 skipped. Cloud-do Node tests add
+10 passed and 0 failed. No optional Docker substrate was started. Skipped
+tests are not accepted evidence.
+
+Logs and exit records are in `_ops/wo09-validation/`. Initial failures remain
+in `results.json` and numbered logs. The complete corrected run is in
+`final/results.json`. Its API-surface failure and the final passing retry are
+both retained; the passing retry is `final/api-surface-fixed.json` and
+`final/api-surface-fixed.log`. The independent review transcript is
+`review.txt`. These are ignored local operation records.
+
+Local implementation commit: `c65240b6`. The follow-up commit contains the
+module-graph correction, declaration golden and this final validation report.
+No push, PR, merge or Windows deployment occurred.
+
 
 No Windows S proof has passed. Windows intents stay BLOCKED. B stays false.
 Q14 is not complete. No flag or weaker durability path has been added.

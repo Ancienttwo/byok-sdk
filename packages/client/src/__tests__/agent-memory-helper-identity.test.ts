@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { agentMemoryHelperIdentity, agentMemoryHelperIdentityMatches } from '../daemon/agent-memory-helper-identity';
+import { agentMemoryHelperIdentity, agentMemoryHelperIdentityMatches } from '../daemon/agent-memory-fs-helper';
 
 describe('private helper tagged identity', () => {
   it('keeps unsigned 64-bit Unix device and inode values exact', () => {

@@ -1942,6 +1942,19 @@ import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
 export declare const AGENT_MEMORY_FILESYSTEM_HELPER_PROTOCOL = 2;
 export declare const AGENT_MEMORY_FILESYSTEM_HELPER_VERSION = "2";
 export declare function isAgentMemoryFilesystemHelperSupported(): boolean;
+/** Private protocol 2 identity. Decimal strings keep all 64 bits. */
+export type AgentMemoryHelperIdentity = Readonly<{
+    kind: 'unix';
+    dev: string;
+    ino: string;
+}> | Readonly<{
+    kind: 'windows';
+    volumeSerial: string;
+    fileIndex: string;
+}>;
+/** Serialization is not platform admission or a durability proof. */
+export declare function agentMemoryHelperIdentity(home: AgentHomeLease['homeIdentity'], platform: NodeJS.Platform): AgentMemoryHelperIdentity;
+export declare function agentMemoryHelperIdentityMatches(value: unknown, expected: AgentMemoryHelperIdentity): boolean;
 export declare function openAgentMemoryFilesystemHelper(input: Readonly<{
     helperBin: string;
     canonicalHome: string;
@@ -2032,7 +2045,12 @@ export interface AgentMemoryIntentBackend {
     readonly openFilesystem?: (lease: AgentHomeLease) => Promise<AgentMemoryFilesystem>;
     /** A thrown `AgentMemoryRevisionConflictError` proves this attempt renamed nothing. */
     readonly conflictProvesNoRename: boolean;
-    /** A successful internal-state write proves temp fsync, rename and directory fsync. */
+    /**
+     * A successful write proves durable bytes, metadata and name changes.
+     * Linux requires temp fsync, rename and directory fsync. Windows requires
+     * model S proof for ledger, memory replace/delete and new parent directories
+     * under process crash, OS crash and power loss. File flush alone is not B.
+     */
     readonly strictLedgerBarrier: boolean;
 }
 /**
