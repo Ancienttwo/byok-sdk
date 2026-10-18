@@ -37,7 +37,11 @@ export interface RoutineDefinition {
 export interface Routine {
   definition: RoutineDefinition;
   lifecycle: 'active' | 'paused' | 'completed';
+  status: 'ok' | 'schedule_retrying' | 'no_occurrence_within_horizon' | 'calendar_error';
   next: WakeScheduleInput | null;
+  scheduleRetryAt?: number;
+  scheduleRetryCount?: number;
+  calendarErrors?: Array<{ at: number; wakeKey?: string; message: string }>;
 }
 export interface Occurrence {
   key: string; routineId: string; definitionVersion: number;

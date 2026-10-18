@@ -58,6 +58,17 @@ The test observes one occurrence, one execution, identical input and one committ
 
 V2 changes:
 
+- P1-1: new real-SDK regressions verify that a 400-day routine adds no schedule row
+  and that Bot and other-Agent intents still submit. Another test keeps a wake row
+  permanently failing and checks that both intents also settle before scan reports its error.
+  Boundary/backoff tests check 366 days, 366 days plus 1 ms, and an actual SDK rejection
+  after a wall-clock rollback. Existing schedule-failure assertions are retained.
+- P2-6: new tests distinguish initial and successor calendar null from completion.
+  Startup and same-definition refresh recover an available slot. Same-ID changes still fail.
+  A separate assertion keeps the default `endAt` completion behavior.
+- P2-7: new tests observe a real hook resolving after a calendar exception, one durable
+  audit, one delivery, and no redelivery after the SDK retry interval. A startup error
+  also leaves Bot dispatch usable. The current occurrence can finish.
 - Key alignment: routine wake filters now identify the same named routine through
   `<routineId>:<version>:<t>`. The rejection, retry count and execution assertions remain.
   A new test checks right-to-left parsing, colon-containing IDs, canonical numbers,

@@ -3,7 +3,7 @@ import { HostLedger } from './ledger';
 import { canonical, hash, project, taskId, time, validateInput, type Attempt, type Intent, type IntentInput,
   type Json, type LedgerState, type Routine, type RoutineDefinition, type Terminal } from './model';
 import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
-import { nextWake, recordOccurrence, scheduleNext, setLifecycle } from './routines';
+import { applyPlan, auditCalendarError, deferSchedule, nextWake, recordOccurrence, scheduleNext, setLifecycle, WAKE_HORIZON_MS } from './routines';
 import { cancelWake, enqueue, settle } from './transitions';
 
 export type ExecutionServer = {
@@ -25,7 +25,7 @@ export interface HostOptions {
   applyOutcome?: (document: unknown, transaction: OutcomeTransaction) => void;
 }
 
-/** One instance per embedded tenant. All runtime timers use the embedded wake queue. */
+/** One instance per embedded tenant. Only horizon retries use a process-local timer. */
 export class HostExecutionCore {
   private readonly now: () => number;
   private readonly nextTime: NextOccurrence;
@@ -33,6 +33,7 @@ export class HostExecutionCore {
   private draining?: Promise<void>;
   private again = false;
   private stopped = false;
+  private scheduleRetryTimer?: ReturnType<typeof setTimeout>;
   constructor(readonly server: ExecutionServer, readonly ledger: HostLedger, private readonly options: HostOptions = {}) {
     this.now = () => time((options.now ?? Date.now)());
     this.nextTime = options.nextOccurrence ?? nextIntervalOccurrence;
@@ -53,15 +54,19 @@ export class HostExecutionCore {
     time(definition.waitMs); time(definition.lateAfterMs);
     if (definition.endAt !== undefined) time(definition.endAt);
     validateInput({ key: definition.id, source: 'routine', execution: definition.execution, waitUntil: this.now() + definition.waitMs, retry: definition.retry });
-    const next = nextWake(definition, this.now() - 1, this.nextTime);
+    const now = this.now();
+    const plan = nextWake(definition, now - 1, this.nextTime, now);
     this.ledger.transaction(state => {
       const id = hash(definition.id);
       if (state.routines[id]) {
         if (canonical(state.routines[id]!.definition) !== canonical(definition)) throw new Error('Routine definition is immutable; use a new routine id after current work settles');
+        if (state.routines[id]!.lifecycle === 'active' && state.routines[id]!.status === 'no_occurrence_within_horizon') {
+          applyPlan(state, state.routines[id]!, plan, now);
+        }
         return;
       }
-      state.routines[id] = { definition: structuredClone(definition), lifecycle: next ? 'active' : 'completed', next };
-      scheduleNext(state, state.routines[id]!);
+      state.routines[id] = { definition: structuredClone(definition), lifecycle: 'active', status: 'ok', next: null };
+      applyPlan(state, state.routines[id]!, plan, now);
     });
     await this.drain();
   }
@@ -96,7 +101,10 @@ export class HostExecutionCore {
       if (state.scanWake) cancelWake(state, state.scanWake.dedupKey);
       state.scanWake = null;
       for (const routine of Object.values(state.routines)) {
-        if (routine.next && !pending.has(routine.next.dedupKey)) scheduleNext(state, routine);
+        if (routine.lifecycle === 'active' && routine.status === 'no_occurrence_within_horizon') {
+          try { applyPlan(state, routine, nextWake(routine.definition, this.now(), this.nextTime, this.now()), this.now()); }
+          catch (error) { auditCalendarError(routine, this.now(), error); }
+        } else if (routine.next && !pending.has(routine.next.dedupKey)) scheduleNext(state, routine, this.now());
       }
     });
     await this.drain();
@@ -109,15 +117,21 @@ export class HostExecutionCore {
       do { this.again = false; await this.scan(); } while (this.again && !this.stopped);
     })().finally(() => {
       this.draining = undefined;
+      this.armScheduleRetry();
       if (this.again && !this.stopped) return this.drain();
     });
     return this.draining;
   }
-  async close(): Promise<void> { this.stopped = true; await this.draining; }
+  async close(): Promise<void> { this.stopped = true; clearTimeout(this.scheduleRetryTimer); await this.draining; }
   private assertOpen(): void { if (this.stopped) throw new Error('Host core is closed'); }
 
   private async scan(): Promise<void> {
-    await this.flushWakes();
+    this.ledger.transaction(state => {
+      for (const routine of Object.values(state.routines)) {
+        if (routine.status === 'schedule_retrying' && (routine.scheduleRetryAt ?? 0) <= this.now()) scheduleNext(state, routine, this.now());
+      }
+    });
+    const first = await this.flushWakes();
     for (let pass = 0; pass < 100 && !this.stopped; pass++) {
       this.ledger.transaction(state => {
         for (const intent of Object.values(state.intents)) {
@@ -143,7 +157,21 @@ export class HostExecutionCore {
       if (!changed) break;
     }
     this.armScan();
-    await this.flushWakes();
+    const last = await this.flushWakes(first.failedKeys);
+    const failures = [...first.failures, ...last.failures];
+    // All Agent queues were scanned. Reject only now, so the SDK retains the hook retry.
+    if (failures.length) throw new AggregateError(failures, 'Wake dispatch failed; durable outbox retained');
+  }
+  private armScheduleRetry(): void {
+    clearTimeout(this.scheduleRetryTimer);
+    if (this.stopped) return;
+    const retries = Object.values(this.ledger.snapshot().routines)
+      .filter(routine => routine.lifecycle === 'active' && routine.status === 'schedule_retrying' && routine.scheduleRetryAt !== undefined);
+    if (!retries.length) return;
+    const at = Math.min(...retries.map(routine => routine.scheduleRetryAt!));
+    // Cap each wait to recheck wall clock after sleep. Attempts use the persisted backoff.
+    this.scheduleRetryTimer = setTimeout(() => { if (!this.stopped) void this.drain().catch(() => {}); }, Math.max(1, Math.min(60_000, at - this.now())));
+    this.scheduleRetryTimer.unref?.();
   }
   private error(key: string, error: unknown): void {
     this.ledger.transaction(state => {
@@ -151,19 +179,37 @@ export class HostExecutionCore {
       if (row) row.lastError = String(error instanceof Error ? error.message : error).slice(0, 1024);
     });
   }
-  private async flushWakes(): Promise<void> {
+  private async flushWakes(skip = new Set<string>()): Promise<{ failures: unknown[]; failedKeys: Set<string> }> {
     const failures: unknown[] = [];
+    const failedKeys = new Set<string>();
     for (const [key, row] of Object.entries(this.ledger.snapshot().outbox)) {
-      if (row.kind !== 'schedule' && row.kind !== 'cancel-wake') continue;
+      if (skip.has(key) || row.kind !== 'schedule' && row.kind !== 'cancel-wake') continue;
       try {
+        if (row.kind === 'schedule' && row.input.availableAt - this.now() > WAKE_HORIZON_MS) {
+          const deferred = this.ledger.transaction(state => {
+            const routine = Object.values(state.routines).find(routine => routine.next?.dedupKey === row.input.dedupKey);
+            if (!routine) return false;
+            scheduleNext(state, routine, this.now());
+            return true;
+          });
+          if (deferred) continue;
+        }
         if (row.kind === 'schedule') await this.server.wakes.schedule(row.input);
         else await this.server.wakes.cancel(row.key);
         this.ledger.transaction(state => { if (canonical(state.outbox[key]) === canonical(row)) delete state.outbox[key]; });
-      } catch (error) { this.error(key, error); failures.push(error); }
+      } catch (error) {
+        if (row.kind === 'schedule' && error && typeof error === 'object' && 'code' in error && error.code === 'WAKE_AVAILABLE_AT_INVALID') {
+          const deferred = this.ledger.transaction(state => {
+            const routine = Object.values(state.routines).find(routine => routine.lifecycle === 'active' && routine.next?.dedupKey === row.input.dedupKey);
+            if (!routine) return false;
+            deferSchedule(state, routine, this.now()); return true;
+          });
+          if (deferred) continue;
+        }
+        this.error(key, error); failures.push(error); failedKeys.add(key);
+      }
     }
-    // A consume hook must reject if it cannot persist its successor wake. The SDK
-    // then retains this delivery for retry. Direct callers must retry or recover.
-    if (failures.length) throw new AggregateError(failures, 'Wake dispatch failed; durable outbox retained');
+    return { failures, failedKeys };
   }
   private armScan(): void {
     this.ledger.transaction(state => {
