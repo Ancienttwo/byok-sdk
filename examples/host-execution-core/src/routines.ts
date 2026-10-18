@@ -104,6 +104,16 @@ export function setLifecycle(state: LedgerState, id: string, lifecycle: Routine[
   if (!['active', 'paused', 'completed'].includes(lifecycle)) throw new Error('Invalid routine lifecycle');
   if (routine.lifecycle === 'completed' && lifecycle !== 'completed') throw new Error('A completed routine cannot resume');
   if (routine.lifecycle === lifecycle) return;
+  if (lifecycle === 'paused' && routine.next) {
+    const cancelledSlot = routine.next.availableAt;
+    for (const occurrence of Object.values(state.occurrences)) {
+      if (occurrence.routineId !== id || occurrence.conclusion) continue;
+      const intent = state.intents[occurrence.intentId]!;
+      // This cutoff belonged to the successor we are cancelling, not to a
+      // committed superseding occurrence. Keep the independent waiting bound.
+      if (intent.retryUntil === cancelledSlot) delete intent.retryUntil;
+    }
+  }
   if (routine.next) cancelWake(state, routine.next.dedupKey);
   routine.lifecycle = lifecycle;
   routine.next = null; routine.status = 'ok';

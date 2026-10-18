@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { hash } from './model';
+import { hash, taskId } from './model';
 import { nextIntervalOccurrence } from './schedule';
 import { parseRoutineWakeKey } from './routines';
 import { openHost, template, type TestHost } from './test-support';
@@ -70,22 +70,54 @@ it('defers a quiet-hour slot and uses the same pure calendar on both sides', () 
 });
 
 it('does not retry an old occurrence beyond the next routine slot', async () => {
-  host = await openHost();
+  host = await openHost({ reconcileMs: 20 });
   // External writer makes each real routine offer decline with a typed busy code.
-  const definition = host.routine('retry', { rule: { anchorMs: Date.now() + 30, everyMs: 500 },
-    retry: { maxAttempts: 3, delaysMs: [200, 1000], retryFailures: false } });
+  const definition = host.routine('retry', { waitMs: 600_000,
+    retry: { maxAttempts: 3, delaysMs: [20, 120_000], retryFailures: false } });
   await host.server.executions.submit({ ...definition.execution, taskId: 'other-writer' });
   await vi.waitFor(() => expect(host.adapter.sessions.has('other-writer')).toBe(true));
+  definition.rule = { anchorMs: Date.now() + 30, everyMs: 60_000 };
   await host.core.addRoutine(definition);
-  await vi.waitFor(() => expect(occurrences().length).toBeGreaterThanOrEqual(2), { timeout: 5000 });
+  await vi.waitFor(() => expect(occurrences()).toHaveLength(1));
   const first = occurrences()[0]!;
-  const old = host.ledger.snapshot().intents[first.intentId]!;
+  await vi.waitFor(async () => {
+    await host.core.drain();
+    expect(host.ledger.snapshot().intents[first.intentId]).toMatchObject({ attempts: 2, conclusion: 'declined' });
+  }, { timeout: 5000 });
+  vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(first.nextAt! + 1);
+  await host.server.wakes.schedule({ dedupKey: 'retry-slot-clock-check', availableAt: Date.now() });
+  await vi.waitFor(() => expect(occurrences().length).toBeGreaterThanOrEqual(2), { timeout: 5000 });
   await host.core.drain();
-  // A retry cannot cross the next slot. It either settles at the retry decision
-  // or the new occurrence supersedes a queued/backoff intent.
-  expect(old.attempts).toBeLessThanOrEqual(2);
-  expect(old.conclusion).toBeDefined();
-  expect(old.retryUntil).toBeLessThanOrEqual(first.nextAt!);
+  const old = host.ledger.snapshot().intents[first.intentId]!;
+  expect(old.attempts).toBe(2);
+  expect(old.conclusion).toBe('declined');
+  expect(old.generation).toBe(1);
+  expect(await host.server.tasks.offer(taskId(old.key, 2))).toBeUndefined();
+});
+
+it('lets an admitted queued occurrence finish after pause cancels its successor cutoff', async () => {
+  host = await openHost();
+  const bot = await host.core.enqueue(host.intent('blocking-bot'));
+  await vi.waitFor(() => expect(host.adapter.sessions.has(bot.taskId)).toBe(true));
+  await host.core.addRoutine(host.routine('paused-queue', { rule: { anchorMs: Date.now() + 30, everyMs: 1000 }, waitMs: 60_000 }));
+  await vi.waitFor(() => expect(occurrences()).toHaveLength(1));
+  const occurrence = occurrences()[0]!;
+  const before = host.ledger.snapshot().intents[occurrence.intentId]!;
+  expect(before).toMatchObject({ phase: 'queued', retryUntil: occurrence.nextAt });
+  await host.core.lifecycle('paused-queue', 'paused');
+  vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(occurrence.nextAt! + 1);
+  await host.core.drain();
+  const queued = host.ledger.snapshot().intents[occurrence.intentId]!;
+  expect(queued.phase).toBe('queued');
+  expect(queued.conclusion).toBeUndefined();
+  expect(queued.retryUntil).toBeUndefined();
+  expect(queued.waitUntil).toBe(before.waitUntil);
+  host.adapter.sessions.get(bot.taskId)!.finish({ text: 'release the FIFO' });
+  await vi.waitFor(async () => { await host.core.drain(); expect(host.adapter.sessions.has(queued.taskId)).toBe(true); });
+  host.adapter.sessions.get(queued.taskId)!.finish({ text: 'admitted before pause' });
+  await vi.waitFor(async () => { await host.core.drain(); expect(host.core.intent(queued.key)?.conclusion).toBe('succeeded'); });
+  expect(occurrences()).toHaveLength(1);
+  expect(host.ledger.snapshot().routines[hash('paused-queue')]?.lifecycle).toBe('paused');
 });
 
 it('redelivers a rejected wake after 60 seconds without another occurrence or execution', async () => {

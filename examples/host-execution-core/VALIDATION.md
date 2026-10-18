@@ -58,6 +58,13 @@ The test observes one occurrence, one execution, identical input and one committ
 
 V2 changes:
 
+- P2-1: a new pause test leaves an occurrence behind a real running Bot, crosses
+  the cancelled successor time, then proves that the queued occurrence executes.
+  It also proves that pause does not extend the independent `waitUntil` budget.
+- P2-5: the old occurrence is now read after `drain`. The weak `attempts <= 2`
+  assertion is replaced with exactly two attempts, one generation advance, and no third SDK offer.
+  The tautological retry cutoff comparison is removed as requested. A longer wait budget
+  and an injected next-slot clock isolate the next-slot policy from waiting expiry and wall-time races.
 - P1-1: new real-SDK regressions verify that a 400-day routine adds no schedule row
   and that Bot and other-Agent intents still submit. Another test keeps a wake row
   permanently failing and checks that both intents also settle before scan reports its error.
