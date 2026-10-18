@@ -4,11 +4,11 @@ Date: 2026-10-18. Baseline: `8e8839a3`.
 Branch: `codex/bot-k4-host-execution-core`.
 Environment: macOS, Node `v24.21.0`, Bun `1.4.3`.
 
-## V2 review response (in progress)
+## V2 review response
 
 V2 starts at `49512593`. The read-only source review is
 `/Users/chris/Projects/byok-sdk/_ops/bot-wo/REV-05-round1.md`.
-The prior checks below describe v1 until the v2 result table is recorded.
+All listed v2 items are implemented. Historical v1 checks are labelled separately below.
 
 P1: The affected boundary is Host wake planning, outbox dispatch and occurrence policy.
 P2: A failed wake dispatch currently exits scan before any Agent queue runs.
@@ -17,6 +17,58 @@ P3: Keep the ledger and FIFO design. Isolate dispatch errors, add explicit sched
 and use one process-local backoff timer only for out-of-horizon routine candidates.
 Keep same-id definitions immutable. Do not add K8 version switching or SDK code.
 Commit key alignment, scheduling fixes, pause policy, stronger evidence, and documentation separately.
+
+### V2 item map
+
+Locations are relative to this example unless prefixed with `docs/`.
+
+| Review item | Commit | Location | Test or verification |
+| --- | --- | --- | --- |
+| P1-1: isolate wake failures and enforce horizon | `e6c275a4` | `src/core.ts:128`, `src/routines.ts:20` | `src/scheduling-recovery.test.ts:11`, `:25`, `:44`, `:60`; two Agents submit and settle, boundary and process retry verified. |
+| P2-1: paused queued occurrence | `08fbdb97` | `src/routines.ts:113` | `src/routines.test.ts:98`; queued occurrence crosses the cancelled successor time and finishes. |
+| P2-2: storage growth and tuning | `c5d85e5f` | `README.md:84`, `:88`, `:102` | Read-only source/document check. No retention code or default interval change. |
+| P2-3: shared test clock | `c5d85e5f`, `fd032563` | `docs/host-execution-core.md:61`, `src/core.test.ts:168` | Claimed-race test uses one fake Date clock and a durable SDK claim receipt. |
+| P2-4: crash evidence | `c1b59e52`, `fd032563` | `src/fixtures/crash-host.ts:39`, `:51`, `src/crash-recovery.test.ts:75` | Exact wake, SDK delivery 2, slots replay 0 to 1, same SDK task/device and original execution assertions. |
+| P2-5: retry assertions | `08fbdb97` | `src/routines.test.ts:72` | Read after drain; exactly two attempts, generation 1, no third SDK offer. |
+| P2-6: null calendar | `e6c275a4` | `src/routines.ts:22`, `src/core.ts:104` | `src/scheduling-recovery.test.ts:78`, `:92`, `:105`; startup, refresh, immutable definition and default endAt. |
+| P2-7: calendar error audit | `e6c275a4` | `src/routines.ts:52`, `:83` | `src/scheduling-recovery.test.ts:112`, `:137`; real hook resolves once and Bot work remains usable. |
+| Document 1: wall-clock wording | `c5d85e5f` | `docs/host-execution-core.md:175` | Matches the SDK's maximum 60-second timer wait. |
+| Document 2: horizon behavior | `c5d85e5f` | `docs/host-execution-core.md:67` | Matches the horizon and rollback regressions above. |
+| Document 3: paused work | `c5d85e5f` | `docs/host-execution-core.md:240` | Matches the pause regression and preserves the waiting bound. |
+| Document 4: HostOptions.now | `c5d85e5f` | `docs/host-execution-core.md:61` | Test-only shared wall clock is explicit. |
+| PRD 5.5 key alignment | `080dbf15`, `c5d85e5f` | `src/routines.ts:10`, `:27`, `docs/host-execution-core.md:162` | `src/routines.test.ts:204`; colon IDs, canonical numbers, no payload and exact armed key. |
+| Nit: client test dependency | `c5d85e5f` | `package.json:15`, root `bun.lock` | Manifest and lockfile agree; root typecheck and example tests pass. |
+
+### V2 checks
+
+| Command | Exit | Evidence |
+| --- | --- | --- |
+| `bun run build` | 0 | All workspace builds completed; `v2-build.log`. |
+| `bun run typecheck` | 0 | Final test fixtures compile; `v2-final-typecheck.log`. |
+| `bun run test` | 0 | Vitest: 9,325 passed, 200 skipped. Node tests: 10 passed, 0 failed; `v2-full-test.log`. |
+| `bun run check:api-surface` | 0 | 9 package goldens match; `v2-final-api-surface.log`. |
+| `bun run check:version-authority` | 0 | Dispatch 0.27.0 and keys 0.12.0 agree; `v2-final-version-authority.log`. |
+| `bun run --cwd examples/host-execution-core typecheck` | 0 | Final example source and fixtures compile. |
+| `bun run --cwd examples/host-execution-core test` | 0 | 5 files, 37 tests passed in 29.39 seconds; `v2-final-example-tests.log`. |
+| `git diff --check` | 0 | No whitespace errors. |
+
+The final root test completed all workspace scripts. The example again passed all 37 tests in 29.20 seconds.
+Skipped tests were in client (30), cloud-dataplane (139), keys (12), and server (19).
+The optional Docker dataplane substrate was not started.
+Logs are under this worktree's ignored `_ops/wo-05/` directory.
+An earlier example rerun exited 1 at the old claimed-race precondition.
+The durable-receipt and shared-clock correction is described under Test changes and reasons.
+
+### V2 independent review
+
+The read-only gatekeeper reviewed `49512593..c5d85e5f` against the supplied external review and v2 work order.
+It found the listed fixes implemented and no P1/P2, with final checks still pending.
+The second round reviewed only `c5d85e5f..fd032563` test and validation hunks.
+It returned PASS for test integrity and checkpoint fidelity, with no weakened assertions.
+It did not run tests. The execution owner closed the final root-check condition with exit 0.
+No further code or test changes followed `fd032563`.
+The source, manifest and lockfile diff from that reviewed commit was empty after the full run.
+No listed v2 item remains open. Routine current/pending version switching and scheduling generations remain K8a work, as instructed.
 
 ## Owner ruling
 
@@ -111,7 +163,7 @@ V2 changes:
   Both are fixed in implementation. New regression assertions cover each counterexample.
   Calendar selection uses monotone deferral and checks at most two raw slots, even for a 1 ms interval.
 
-## Checks
+## V1 checks (historical)
 
 | Command | Exit | Evidence |
 | --- | --- | --- |
@@ -128,7 +180,7 @@ Skipped tests were in client (30), cloud-dataplane (139), keys (12), and server 
 The optional Docker dataplane substrate was not started.
 Raw output is in the ignored `_ops/wo-05/` directory of this worktree.
 
-## Independent review
+## V1 independent review (historical)
 
 Herdr returned `pane_not_found` for the inherited calling pane. No other pane was controlled.
 The review used the gatekeeper route permitted by the work order's AGENTS instructions.
