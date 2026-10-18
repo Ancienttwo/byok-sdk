@@ -151,12 +151,15 @@ mention in a post cannot create a seat. A Main Bot room turn also has management
 actions. Only structured `room_call.members` can add seats after a Bot speaks.
 
 Seats run in reservation order within a round. Each seat enters the same K4
-FIFO as that Bot's own turns. The room grace is 240 seconds. The K4 fallback
+FIFO as that Bot's own turns. The waiting grace is 240 seconds. First observed claim starts a separate
+240-second running grace. This persisted deadline does not reset on later
+scans or recovery. The K4 fallback
 waiting bound stays at 300 seconds. Room admission cancels waiting work first.
 If the member is still waiting at grace, the seat becomes `busy`. If it has
 started, the round can proceed while its writer stays held in K4. A later post
 uses its seat id and enters history once. Removed waiting seats are invalid.
 Removed running members can produce audit evidence, but cannot post or call.
+Already completed post, pass, and failure states remain unchanged.
 
 A round permits initial seats + 4, plus 4 when it has an admin. Each member
 gets at most two seats; the round admin gets at most four. A reservation spends

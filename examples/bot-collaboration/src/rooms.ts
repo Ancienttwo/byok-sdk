@@ -47,6 +47,11 @@ export function memberPresent(team: TeamState, seat: Seat): boolean {
   const room = team.rooms[team.rounds[seat.roundId]!.roomId];
   return !!room?.members.includes(seat.botId) && !team.bots[seat.botId]?.archived;
 }
+function observeStart(seat: Seat, now: number): void {
+  if (seat.startedAt !== undefined) return;
+  seat.startedAt = now;
+  seat.deadline = now + ROOM_GRACE_MS;
+}
 export function applySpeech(state: CollaborationState, turn: Turn, document: BotTurnOutcome, taskId: string, now: number,
   accept: (action: string, work: () => void) => void): void {
   const team = state.team, seat = team.seats[turn.id]!;
@@ -58,6 +63,7 @@ export function applySpeech(state: CollaborationState, turn: Turn, document: Bot
     if (!speech || speech.kind === 'post' && !speech.text.trim()) {
       seat.status = 'failed'; seat.released = true; throw new Error('A seat needs a post or explicit pass');
     }
+    observeStart(seat, now);
     seat.late ||= now >= seat.deadline!;
     if (speech.kind === 'post') {
       if (seat.late && team.roots[round.root]!.late >= 10) {
@@ -90,6 +96,9 @@ export function advanceRooms(s: LedgerState, state: CollaborationState, now: num
   const team = state.team;
   for (const seat of Object.values(team.seats)) {
     const intent = s.intents[hash(seat.id)], execution = intent && s.executions[intent.taskId];
+    // Keep completed speech and failures immutable. A released late seat is
+    // still waiting for terminal, so membership changes must still revoke it.
+    if (seat.released && ['post', 'pass', 'failed', 'busy', 'blocked'].includes(seat.status)) continue;
     if (!memberPresent(team, seat)) {
       seat.status = 'removed'; seat.released = true;
       if (intent && !execution?.started && !intent.conclusion) intent.cancelReason = 'cancelled';
@@ -102,7 +111,7 @@ export function advanceRooms(s: LedgerState, state: CollaborationState, now: num
       seat.status = intent.conclusion === 'expired' ? 'busy' : 'failed'; seat.released = true;
       seat.reason = intent.conclusion; continue;
     }
-    if (execution?.started) seat.status = 'running';
+    if (execution?.started) { observeStart(seat, now); seat.status = 'running'; }
     if (seat.deadline !== undefined && now >= seat.deadline) {
       if (execution?.started) { seat.status = 'late'; seat.late = true; }
       else {

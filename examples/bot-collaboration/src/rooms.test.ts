@@ -103,6 +103,7 @@ it('limits late posts to ten per user root and autonomous rounds to three', () =
     const seat = state.team.seats[state.team.rounds[roundId]!.seats[i]!]!;
     ledger.intents[hash(seat.id)] = { taskId: seat.id } as LedgerState['intents'][string];
     ledger.executions[seat.id] = { started: true } as LedgerState['executions'][string];
+    advance(now); // Observe the emitted claim before advancing the running clock.
     now += ROOM_GRACE_MS; advance(now);
     speech(seat.id, undefined, now, 'Late post');
   }
@@ -117,6 +118,7 @@ it('limits late posts to ten per user root and autonomous rounds to three', () =
     const seat = Object.values(fresh.state.team.seats).find(s => !s.released)!;
     fresh.ledger.intents[hash(seat.id)] = { taskId: seat.id } as LedgerState['intents'][string];
     fresh.ledger.executions[seat.id] = { started: true } as LedgerState['executions'][string];
+    fresh.advance(i * ROOM_GRACE_MS); // First claim observation.
     fresh.advance((i + 1) * ROOM_GRACE_MS);
     fresh.speech(seat.id, ['b0'], (i + 1) * ROOM_GRACE_MS, 'Next round');
   }
@@ -166,4 +168,40 @@ it('bounds shared notes at twenty and preserves other valid actions after a refu
   expect(state.team.bots.b1!.revision).toBe('1');
   expect(state.team.rooms.r!.announcement).toBe('Valid');
   expect(rejected).toContain('update_bot: An update must change a Bot field');
+});
+
+it('gives a member a full running grace after waiting 239 seconds and keeps that deadline across scans', () => {
+  const { state, ledger, advance } = setup();
+  const round = roomInput(state, 'two-graces', 'r', 'Discuss', ['b1', 'b2']);
+  advance(0);
+  const [first, second] = state.team.rounds[round]!.seats;
+  ledger.intents[hash(first!)] = { taskId: first } as LedgerState['intents'][string];
+  ledger.executions[first!] = { started: true } as LedgerState['executions'][string];
+  advance(239_000);
+  expect(state.team.seats[first!]!).toMatchObject({ status: 'running', startedAt: 239_000, deadline: 479_000, released: false });
+  advance(240_000);
+  expect(state.team.seats[first!]!.status).toBe('running');
+  expect(state.team.seats[second!]!.status).toBe('waiting');
+  advance(478_999);
+  expect(state.team.seats[first!]!.released).toBe(false);
+  advance(479_000);
+  expect(state.team.seats[first!]!).toMatchObject({ status: 'late', released: true, startedAt: 239_000, deadline: 479_000 });
+  expect(state.team.seats[second!]!.status).toBe('queued');
+});
+
+it('preserves completed post and pass when members are removed, but revokes a pending late seat', () => {
+  const { state, ledger, advance, speech } = setup();
+  const round = roomInput(state, 'stable-completed', 'r', 'Discuss', ['b0', 'b1', 'b2']); advance();
+  const ids = state.team.rounds[round]!.seats;
+  speech(ids[0]!, undefined, 0, 'Already published'); advance();
+  speech(ids[1]!); advance();
+  const completed = ids.slice(0, 2).map(id => structuredClone(state.team.seats[id]));
+  ledger.intents[hash(ids[2]!)] = { taskId: ids[2] } as LedgerState['intents'][string];
+  ledger.executions[ids[2]!] = { started: true } as LedgerState['executions'][string];
+  advance(0); advance(ROOM_GRACE_MS);
+  expect(state.team.seats[ids[2]!]!.status).toBe('late');
+  state.team.rooms.r!.members = []; advance(ROOM_GRACE_MS);
+  expect(ids.slice(0, 2).map(id => state.team.seats[id])).toEqual(completed);
+  expect(state.team.seats[ids[2]!]!.status).toBe('removed');
+  expect(state.team.rooms.r!.messages.filter(m => m.text === 'Already published')).toHaveLength(1);
 });
