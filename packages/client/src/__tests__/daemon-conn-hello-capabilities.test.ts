@@ -10,8 +10,11 @@ import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter } from '../types';
 import { TestServer } from './fixtures/test-server';
-import { AGENT_MEMORY_INTENT_CAPABILITY } from '@byok-sdk/protocol';
+import { AGENT_MEMORY_INTENT_CAPABILITY, createEnvelope } from '@byok-sdk/protocol';
 import { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
+import * as memoryRuntime from '../daemon/agent-memory';
+import { CursorStore } from '../daemon/cursor-store';
+import * as helperClient from '../daemon/agent-memory-fs-helper';
 import type { AgentMemoryIntentTransport } from '../daemon/agent-memory-intent';
 
 const PI_FIXTURE = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
@@ -308,13 +311,13 @@ describe('conn.hello.capabilities (C2: approval-targeting)', () => {
  * WP2I-S2: `agent-memory-intent.v1` is advertised only when a Host transport,
  * an Agent home, the secure memory filesystem and a backend whose ledger write
  * is a proven durable barrier are ALL present. Today that is the native Linux
- * descriptor backend on a filesystem that honors directory fsync. Windows,
- * macOS without a helper, and the (unproven) macOS helper backend never
- * advertise.
+ * descriptor backend or the SDK macOS helper after a real volume probe.
+ * Windows never advertises.
  */
 describe('conn.hello.capabilities (WP2I-S2: agent-memory-intent.v1)', () => {
   let server: TestServer;
   let daemon: Daemon | undefined;
+  let lastStoreDir: string;
   const transport: AgentMemoryIntentTransport = {
     fetch: async () => { throw new Error('not reached by a capability test'); },
     complete: async () => { throw new Error('not reached by a capability test'); },
@@ -333,6 +336,7 @@ describe('conn.hello.capabilities (WP2I-S2: agent-memory-intent.v1)', () => {
   async function helloCapabilities(overrides: { transport?: AgentMemoryIntentTransport; agentHome?: boolean; helperBin?: string }): Promise<readonly string[]> {
     const workspaceRoot = await tmpDir('byok-conn-hello-intent-workspace-');
     const storeDir = await tmpDir('byok-conn-hello-intent-store-');
+    lastStoreDir = storeDir;
     const hostStorageRoot = await tmpDir('byok-conn-hello-intent-root-');
     daemon = createDaemonWithAdapters(
       { storage: { scratchRoot: testScratchRoot() },
@@ -355,12 +359,12 @@ describe('conn.hello.capabilities (WP2I-S2: agent-memory-intent.v1)', () => {
     return hello.payload.capabilities ?? [];
   }
 
-  it('advertises with a transport and an Agent home only where the native backend is proven (Linux)', async () => {
+  it('advertises with a transport and an Agent home with a proven Linux or SDK macOS backend', async () => {
     const capabilities = await helloCapabilities({ transport });
-    if (isAgentMemorySecureFilesystemAvailable(false)) {
+    if (isAgentMemorySecureFilesystemAvailable(process.platform === 'darwin')) {
       expect(capabilities).toContain(AGENT_MEMORY_INTENT_CAPABILITY);
     } else {
-      // Windows, and macOS without a helper: no secure backend, no capability.
+      // Windows has no proven secure backend.
       expect(capabilities).not.toContain(AGENT_MEMORY_INTENT_CAPABILITY);
     }
   });
@@ -373,9 +377,50 @@ describe('conn.hello.capabilities (WP2I-S2: agent-memory-intent.v1)', () => {
     expect(await helloCapabilities({ transport, agentHome: false })).not.toContain(AGENT_MEMORY_INTENT_CAPABILITY);
   });
 
-  (process.platform === 'darwin' ? it : it.skip)('does not advertise on macOS even with the external helper configured (its barrier is unproven)', async () => {
-    const capabilities = await helloCapabilities({ transport, helperBin: '/opt/byok-agent-memory-fs' });
-    expect(capabilities).not.toContain(AGENT_MEMORY_INTENT_CAPABILITY);
+  (process.platform === 'darwin' ? it : it.skip)('advertises on macOS only after the SDK helper passes the real volume probe', async () => {
+    const capabilities = await helloCapabilities({ transport });
+    expect(capabilities).toContain(AGENT_MEMORY_INTENT_CAPABILITY);
+  });
+
+  (process.platform === 'darwin' ? it : it.skip).each(['ENOTSUP', 'EINVAL', 'EPERM', 'EIO'])('withholds macOS intents when the real-volume helper probe refuses %s', async code => {
+    const probe = vi.spyOn(helperClient, 'openAgentMemoryFilesystemHelper').mockRejectedValue(Object.assign(new Error('strict volume barrier failed'), { code }));
+    try {
+      const capabilities = await helloCapabilities({ transport });
+      expect(probe).toHaveBeenCalledTimes(1);
+      expect(capabilities).not.toContain(AGENT_MEMORY_INTENT_CAPABILITY);
+    } finally { probe.mockRestore(); }
+  });
+
+  (process.platform === 'linux' ? it : it.skip).each(['EINVAL', 'EPERM', 'EIO'])('withholds Linux intents after a real directory-probe %s and refuses a stale notice before fetch', async code => {
+    const originalProbe = memoryRuntime.probeAgentMemoryStrictDirectorySync;
+    const originalOpen = fs.open.bind(fs);
+    let probing = false;
+    let refusals = 0;
+    const probe = vi.spyOn(memoryRuntime, 'probeAgentMemoryStrictDirectorySync').mockImplementation(async directory => {
+      probing = true;
+      try { return await originalProbe(directory); } finally { probing = false; }
+    });
+    const open = vi.spyOn(fs, 'open').mockImplementation(async (...args: Parameters<typeof fs.open>) => {
+      const handle = await originalOpen(...args);
+      if (probing) vi.spyOn(handle, 'sync').mockImplementation(async () => {
+        refusals++;
+        throw Object.assign(new Error('directory probe refused'), { code });
+      });
+      return handle;
+    });
+    const fetch = vi.fn(async () => { throw new Error('must fail before fetch'); });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(await helloCapabilities({ transport: { fetch, complete: async () => { throw new Error('not reached'); } } })).not.toContain(AGENT_MEMORY_INTENT_CAPABILITY);
+      expect(refusals).toBeGreaterThan(0);
+      const notice = createEnvelope('agent.memory.intent.available', { intentId: '00000000-0000-4000-8000-000000000001', agentRef: { agentId: 'one', profileRevision: '1' } }, { seq: server.nextSeq() });
+      server.pushLongPollEvent(notice);
+      await vi.waitFor(() => expect(errors.mock.calls.some(args => String(args[0]).includes('agent.memory.intent.available') && (args[1] as { reason?: string })?.reason === 'filesystem_unavailable')).toBe(true));
+      expect(fetch).not.toHaveBeenCalled();
+      const deviceId = daemon?.status().deviceId;
+      if (deviceId === undefined) throw new Error('paired device id missing');
+      expect(await new CursorStore(lastStoreDir).load(server.url, deviceId)).toBe(0);
+    } finally { probe.mockRestore(); open.mockRestore(); errors.mockRestore(); }
   });
 
   it('Windows has no secure memory backend, with or without a helper', () => {

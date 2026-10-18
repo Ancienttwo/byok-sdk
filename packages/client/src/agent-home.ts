@@ -254,8 +254,23 @@ async function syncDirectoryParent(directory: string): Promise<void> {
   }
 }
 
+/** Retry barriers for ancestors that may be visible after a failed creation. */
+async function syncExistingDirectoryChain(directory: string): Promise<void> {
+  if (process.platform === 'win32') return;
+  const device = (await fs.stat(directory, { bigint: true })).dev;
+  const chain: string[] = [];
+  for (let cursor = directory; ; cursor = path.dirname(cursor)) {
+    const parent = path.dirname(cursor);
+    if ((await fs.stat(parent, { bigint: true })).dev !== device) break;
+    chain.unshift(cursor);
+    if (parent === cursor) break;
+  }
+  for (const entry of chain) await syncDirectoryParent(entry);
+}
+
 async function materializeDirectory(inputPath: string): Promise<string> {
   const { canonical, tail } = await resolveExistingAncestor(inputPath);
+  await syncExistingDirectoryChain(canonical);
   let cursor = canonical;
   for (const component of tail) {
     cursor = path.join(cursor, component);
@@ -272,7 +287,6 @@ async function materializeDirectory(inputPath: string): Promise<string> {
     // created it and then failed to sync its parent.
     await syncDirectoryParent(cursor);
   }
-  await syncDirectoryParent(cursor);
   const realized = await fs.realpath(inputPath);
   if (realized !== cursor) {
     throw new AgentHomeResolutionError(`Agent home path changed through a symlink while being created: ${inputPath}`);

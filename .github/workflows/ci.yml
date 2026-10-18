@@ -134,8 +134,18 @@ jobs:
   # TypeScript-to-Go integration test in one independent job so the admission
   # path cannot be hidden behind the Linux full-suite skips.
   agent-memory-helper:
-    name: agent memory filesystem helper (macOS, fixed Node/Bun/Go)
-    runs-on: macos-latest
+    name: agent memory filesystem helper (${{ matrix.os }}, fixed Node/Bun/Go)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            goarch: arm64
+          - os: macos-15-intel
+            goarch: amd64
+    env:
+      BYOK_EXPECT_GOARCH: ${{ matrix.goarch }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -161,16 +171,32 @@ jobs:
 
       - name: Test Go helper
         working-directory: packages/client/native/agent-memory-fs
-        run: GOTOOLCHAIN=go1.26.5 go test ./...
+        run: GOTOOLCHAIN=go1.26.5 go test -race ./...
 
       - name: Build Go helper
         working-directory: packages/client/native/agent-memory-fs
-        run: GOTOOLCHAIN=go1.26.5 go build -o "$RUNNER_TEMP/byok-agent-memory-fs" .
+        run: CGO_ENABLED=0 GOTOOLCHAIN=go1.26.5 go build -buildvcs=false -trimpath -o "$RUNNER_TEMP/byok-agent-memory-fs" .
 
-      - name: Run TypeScript-to-Go helper integration
+      - name: Check reproducible release bytes
+        run: node packages/client/scripts/check-agent-memory-helper-build.mjs
+
+      - name: Check native architecture and filesystem
         run: |
-          BYOK_TEST_AGENT_MEMORY_FS_BIN="$RUNNER_TEMP/byok-agent-memory-fs" \
-            bun run --filter @byok-sdk/client test -- src/__tests__/agent-memory-fs-helper.test.ts
+          test "$(go env GOARCH)" = "$BYOK_EXPECT_GOARCH"
+          cmp "$RUNNER_TEMP/byok-agent-memory-fs" "packages/client/dist/native/agent-memory-fs/darwin-$(node -p 'process.arch')"
+          diskutil info "$RUNNER_TEMP" | grep 'File System Personality'
+
+      - name: Run SDK helper, intent and capability contracts
+        run: |
+          bun run --filter @byok-sdk/client test -- src/__tests__/agent-memory-fs-helper.test.ts src/__tests__/agent-memory-helper-release.test.ts src/__tests__/agent-memory-helper-crash.test.ts src/__tests__/agent-memory-intent.test.ts src/__tests__/daemon-conn-hello-capabilities.test.ts src/__tests__/agent-home-directory-barrier.test.ts
+
+      - name: Prove real Node and Bun helper identity
+        run: |
+          node packages/client/scripts/agent-memory-runtime-smoke.mjs
+          bun packages/client/scripts/agent-memory-runtime-smoke.mjs
+
+      - name: Verify the installed release artifacts and re-signing policy
+        run: bun run check:release-pack -- --out-dir .ci-artifacts/mac-helper-pack
 
   execution-recovery-native:
     name: compiled execution recovery (macOS, Node 24, Bun 1.4.2)

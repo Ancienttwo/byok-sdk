@@ -34,6 +34,7 @@ import {
   validateAgentMemoryPath,
 } from '../daemon/agent-memory';
 import type { AgentMemoryFilesystem, AgentMemoryFilesystemFileState } from '../daemon/agent-memory-filesystem';
+import { resolveAgentMemoryFilesystemHelper } from '../daemon/agent-memory-helper-release';
 import { isAgentMemoryFilesystemHelperSupported, openAgentMemoryFilesystemHelper } from '../daemon/agent-memory-fs-helper';
 import {
   AGENT_MEMORY_INTENT_LEDGER_CAPACITY,
@@ -1662,10 +1663,8 @@ describe('WP2I-S2 backend proof and fail-closed entry', () => {
     expect(w.host.fetches).toHaveLength(0);
   });
 
-  it('declares the helper backend unproven on both counts and the native backend proven', () => {
-    const helper = helperAgentMemoryIntentBackend('/opt/byok-agent-memory-fs');
-    expect(helper.strictLedgerBarrier).toBe(false);
-    expect(helper.conflictProvesNoRename).toBe(false);
+  it('refuses a foreign helper rather than granting it either proof', () => {
+    expect(() => helperAgentMemoryIntentBackend('/opt/byok-agent-memory-fs')).toThrow();
     expect(NATIVE_AGENT_MEMORY_INTENT_BACKEND).toEqual({ conflictProvesNoRename: true, strictLedgerBarrier: true });
   });
 
@@ -1888,11 +1887,34 @@ describe('WP2I-S2 native descriptor backend (Linux)', () => {
 // macOS helper backend (only with a built helper binary)
 // ===========================================================================
 
-const helperBin = process.env.BYOK_TEST_AGENT_MEMORY_FS_BIN;
+const helperBin = process.platform === 'darwin' ? resolveAgentMemoryFilesystemHelper() : undefined;
 const itHelper = helperBin !== undefined && isAgentMemoryFilesystemHelperSupported() ? it : it.skip;
 
-describe('WP2I-S2 macOS helper backend (evidence only; not advertised)', () => {
-  itHelper('a helper revision conflict leaves the target untouched, yet the processor still maps it to uncertain', async () => {
+describe('WP2I-S2 macOS SDK helper backend', () => {
+  itHelper('applies replace and delete through the real SDK ledger and does not repeat an acknowledged CAS', async () => {
+    const w = await world();
+    const backend = helperAgentMemoryIntentBackend(helperBin!);
+    const replace = await makeIntent({ path: 'notes/host-a.md', operation: 'replace', base: EMPTY, content: 'durable helper value' });
+    w.host.add(replace);
+    const result = await w.processor({ backend })(notice(replace));
+    expect(result.kind === 'acknowledged' && result.completion.outcome).toBe('applied');
+    expect(await w.readMemory('notes/host-a.md')).toBe('durable helper value');
+    expect(await w.record(replace.intentId)).toMatchObject({ state: 'applied', ackedAt: expect.any(String) });
+    const before = await fs.stat(w.memoryFile('notes/host-a.md'), { bigint: true });
+    await w.processor({ backend })(notice(replace));
+    expect((await fs.stat(w.memoryFile('notes/host-a.md'), { bigint: true })).ino).toBe(before.ino);
+    if (replace.targetRevision === null) throw new Error('replace requires a target revision');
+    const remove = await makeIntent({ path: 'notes/host-a.md', operation: 'delete', base: replace.targetRevision });
+    w.host.add(remove);
+    const removed = await w.processor({ backend })(notice(remove));
+    expect(removed.kind === 'acknowledged' && removed.completion.outcome).toBe('applied');
+    expect(await w.readMemory('notes/host-a.md')).toBeUndefined();
+    expect(await w.record(remove.intentId)).toMatchObject({ state: 'applied', ackedAt: expect.any(String) });
+    expect(w.host.completes.map(value => value.outcome)).toEqual(['applied', 'applied', 'applied']);
+    expect(w.host.completes[1]).toEqual(w.host.completes[0]);
+  });
+
+  itHelper('a verified helper conflict leaves the target untouched and is reported as conflict', async () => {
     const w = await world();
     await w.homes.prepare(AGENT).then((binding) => binding.lease.release());
     await w.writeMemory('notes/host-a.md', 'current');
@@ -1911,13 +1933,13 @@ describe('WP2I-S2 macOS helper backend (evidence only; not advertised)', () => {
     expect(await w.readMemory('notes/host-a.md')).toBe('current');
     expect((await fs.readdir(path.join(w.canonicalHome, 'notes'))).filter((name) => name.startsWith('.byok-'))).toEqual([]);
 
-    // Only for this evidence run: grant the helper the ledger-barrier proof it
-    // lacks in production, to show its conflict still maps to `uncertain`.
-    const helper = { ...helperAgentMemoryIntentBackend(helperBin!), strictLedgerBarrier: true };
+    const helper = helperAgentMemoryIntentBackend(helperBin!);
+    expect(helper.strictLedgerBarrier).toBe(true);
+    expect(helper.conflictProvesNoRename).toBe(true);
     const intent = await makeIntent({ path: 'notes/host-a.md', operation: 'replace', base: sha('stale'), content: 'x' });
     w.host.add(intent);
     const result = await w.processor({ backend: helper })(notice(intent));
-    expect(result.kind === 'acknowledged' && result.completion.outcome).toBe('uncertain');
+    expect(result.kind === 'acknowledged' && result.completion.outcome).toBe('conflict');
   });
 });
 
@@ -1982,7 +2004,7 @@ describe('WP2I-S2 daemon routing', () => {
     await staleNotice(undefined, 'transport_unconfigured');
   });
 
-  const itUnproven = isAgentMemorySecureFilesystemAvailable(false) ? it.skip : it;
+  const itUnproven = isAgentMemorySecureFilesystemAvailable(process.platform === 'darwin') ? it.skip : it;
   itUnproven('with a transport on a platform with no proven backend (Windows, macOS): filesystem_unavailable before any fetch', async () => {
     const events: string[] = [];
     const hostStorageRoot = await tempRoot('bk-s2-unused-');

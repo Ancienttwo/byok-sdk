@@ -1876,8 +1876,26 @@ It makes the terminal durable before the content-free completion, and makes
 advance. A leftover `applying` record is reported `uncertain` and never
 re-executed. Busy, fetch, readback, identity or I/O failures leave the cursor
 in place. The capability is advertised only on a backend whose ledger write
-provably includes a directory fsync; today that means native Linux and excludes
-the macOS helper and Windows. Wire and failure detail: `docs/protocol.md` §2.4.
+provably includes a directory barrier. Linux uses its native descriptor backend.
+macOS uses the SDK release helper on a volume that accepts strict `F_FULLFSYNC`.
+Windows remains unavailable. The macOS helper uses `F_FULLFSYNC` for temporary
+files and pinned parent directories. It never falls back to ordinary `fsync`.
+Before advertising, the daemon opens the helper on the actual home volume.
+Each helper open syncs the home directory chain on that volume before a CAS.
+Shared home initialization syncs each new directory's parent on POSIX. A retry
+repeats the parent barrier for existing entries.
+
+The client release carries Darwin arm64 and x64 helpers. The SDK resolves its
+own path and checks the build manifest before each helper open. Arbitrary
+`agentMemoryFilesystem.helperBin` configuration is removed. Builds use Go
+1.26.5, `CGO_ENABLED=0`, `-buildvcs=false` and `-trimpath`. Product re-signing is
+allowed. The `mach-o-content-v1` digest covers the Mach-O header, load commands
+and file content. It excludes the `LC_CODE_SIGNATURE` blob and command. It
+normalizes the header command counts and `__LINKEDIT` file and VM sizes. It
+accounts for the zero-filled command slot in unsigned Go x64 output. The
+signature must end at EOF. Wrong architecture, format, code or manifest fails
+closed. This check detects deployment errors. It does not verify signer trust.
+Windows PE digest support belongs to its separate platform slice. Wire and failure detail: `docs/protocol.md` §2.4.
 
 The daemon publishes the authenticated `conn.hello` capability snapshot as the
 first long-poll message; the hosted composition persists that snapshot before
