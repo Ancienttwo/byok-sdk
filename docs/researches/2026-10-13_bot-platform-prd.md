@@ -1,6 +1,7 @@
 # PRD：BYOK Bot 平台——routine、Bot 协作、成本与部署
 
 > 初版：2026-10-13。同日并入 Bot 协作层和 SDK 重构 K5–K8。
+> 修订：2026-10-19，随产品 PRD v3 写入第一批裁定和事实修正。本文其余历史基线不变。修订依据 R3/R5/R6 见[产品 PRD §13](../plans/2026-10-18-bot-mode-product-prd.md#13-v3-修订依据)。新增上限仍是 v1 提议值，不代表实现或发布。
 > 状态：待 owner 批准。PR 合并即批准本文的需求、K2 契约草案、K5–K7 重构契约、Bot 协作契约和路线图。合并不授权实现、发布、issue 修改或下游迁移。每个切片单独开 issue 和 PR。
 > 权威关系：[docs/spec.md](../spec.md) 是产品权威。本文只定义计划中的变化。每个切片落地时，在同一个 PR 中修改 spec。决策另记在 [ADR-038](../architecture/adr-2026-10-13-bot-platform.md)。
 > 依据：byok-sdk `main@c3ca6a84`；首个下游 Aiphabee `main@31b7280e`；RAFT Computer 的 reminder 实现（`botiverse/raft-source`）。Bot 协作和 K5–K7 依据 byok-sdk `main@b597b93e`，以及 DeepSeek Bot `c57d25b4`、DS Bot App `aea9380c`（Apache-2.0，只借鉴设计，不复制代码）。
@@ -138,7 +139,7 @@ owner 已定（2026-10-13）：
 不变量：
 
 - I1：用户 key 只在设备上（ADR-036 D3）。
-- I2：周期规则只在 Host。SDK 只接收时间点。spec 已经写明 "Recurring schedules remain Host-driven; the device does not interpret cron"（[Durable Pi lane](../spec.md#durable-pi-lane-experimental-flag-gated)）。
+- I2：周期规则只在 Host。SDK 运行时组件只接收时间点，不解释周期规则；core 的纯函数是 Host 调用的库。K8-S 将 spec 的对应句改为 "Recurring schedules remain Host-driven; no SDK runtime component interprets them"（[Durable Pi lane](../spec.md#durable-pi-lane-experimental-flag-gated)）。这是配套修订要求，不声称 spec 已改。（依据 R3）
 - I3：每个 occurrence 只有一个 execution identity。只有原 task 已经有设备 terminal，并且符合 §12.4 第 9 条时，才换新一代 `taskId`。
 - I4：唤醒只是提示，持久化的行才是事实。唤醒丢失只会推迟工作，不会丢失或重复工作。#410 用同一条规则。
 - I5：mailbox 字节只有一个权威：保留的行（#411）。
@@ -201,11 +202,11 @@ Host 服务端（定义真相）             设备上的 Host 进程（embedded
 ```text
 Bot A 的执行（由用户输入、routine 或另一个 Bot 触发）
   ├─ messageEgress：A 的回复
-  └─ submit_result：{ actions: [{ kind: "delegate", to: "B", request: "…" }] }
+  └─ submit_result：{ delegate: [{ to: "B", request: "…" }] }
         │  A 的设备 terminal（带 outcome）
         ▼
 Host 事务：
-  1. 插入委派（key = H(A.taskId, 动作序号)），检查 hop 和预算
+  1. 插入委派（key = H(A.taskId, 'delegate', 下标)），检查 hop 和预算
   2. 在 B 的 canonical 对话里插入 Turn（来源 bot_request）
   3. 在 B 的 Agent 队列里排 intent
         │  轮到 B
@@ -274,7 +275,7 @@ interface ByokServer {
 interface WakeScheduleInput {
   /** 1–256 个字符，由 Host 定义，例如 `routine:<id>:<version>:<slotMs>`。 */
   dedupKey: string;
-  /** epoch 毫秒。最多比当前时间晚 366 天。 */
+  /** epoch 毫秒。最多比当前时间晚 368 天（K8-S 修订目标）。 */
   availableAt: number;
   /** 不透明的 Host 关联数据，最多 4 KiB。 */
   payload?: string;
@@ -337,14 +338,14 @@ interface WakeRecord {
 | 来源 | message、schedule、callback | message、schedule、invocation | 只有时间点 |
 | 周期规则 | `bot_schedule` 表，cron 或单次 | 无，单次 | 无，单次；规则在 Host |
 | 过期 | 未定义 | `expiresAt`，默认 `availableAt` 加 1 天 | 无；过期的 wake 也投递 |
-| 最远时间 | 未定义 | 30 天 | 366 天 |
+| 最远时间 | 未定义 | 30 天 | 368 天（K8-S 修订目标） |
 | 合批 | 无 | 一次唤醒最多 16 项 | 无，逐个投递 |
 | 执行 | daemon 直接启动 execution | DO 内执行，平台 key | 回调 Host，Host 用 `executions.submit` 提交 |
 
 两处差异的理由：
 
 - 去掉 `expiresAt`：Host 只在 hook 里调度下一次 wake。如果 wake 在设备休眠时过期并被丢弃，下一次 wake 就不会产生，routine 会停止。
-- 最远时间 366 天：每月和每年的 routine 超过 30 天。上限只用来发现时间单位错误。
+- 最远时间 368 天：年度 routine 跨闰日和 DST 时，两次时点的间隔可超过 366 天。tzdata 2026a 实测最大为 366 天加 3 小时。368 天是有证据支持的产品视界，不是所有时区的上界。超出时 Host 持久重试或显示失败。上限只用来发现时间单位错误。K8-S 修改 `MAX_FUTURE_MS` 和 `wakes.test.ts:48/:58` 两处断言，实现 PR 逐条说明。发布前按所用 SDK 的现行上限处理。（依据 R3）
 
 ### 7.5 K2 验收
 
@@ -471,7 +472,7 @@ K5 和 K6 可以并行，也可以和 K1–K3 并行。K7 在两者之后：它�
 
 ## 9. Bot 协作契约
 
-本节定义 Host 侧的协作模型。实现是 K8 的 copy-and-own 参考实现，放在 `examples/`，不是 SDK API。表里的数值是参考实现的默认值，Host 可以调整，但必须有上限。
+本节定义 Host 侧的协作模型。实现是 K8 的 copy-and-own 参考实现，放在 `examples/`。K8-S 的 outcome 片段、组合函数和 routine 纯函数属于 SDK 切片。§9.3 新增的码点和个数上限是 v1 提议值，尚未标已定；其余表中的预算沿用原默认值。Host 可以调整，但必须有上限。（依据 R3）
 
 ### 9.1 模型
 
@@ -497,47 +498,63 @@ K5 和 K6 可以并行，也可以和 K1–K3 并行。K7 在两者之后：它�
 3. `taskId = H(intentKey, generation)`。提交前持久化完整输入，然后调用 `executions.submit`。不确定提交是否成功时，用 `tasks.offer(taskId)` 读回，用同样的输入恢复。
 4. 只有读到设备 terminal 后才换代。允许换代的只有两种：decline 的 `code` 是 `agent_home_writer_busy` 或 `agent_home_reader_busy`（K6）；或者执行失败，并且触发来源的重试策略允许。只取消、读不到 terminal 时不换代。
 5. 执行结算和 intent 结论分开记录。执行结算来自 SDK 证据：消息处置、设备 terminal、outcome 文档。intent 结论由 Host 给出，回报给触发来源的账本，每个 intent 只有一个结论。
-6. 每个 intent 的等待时间有上限。超过上限还没开始执行时，Host 取消还没被认领的 offer（还没被 lease 的 offer 取消后立即生效，不会再运行），结论为 `expired`。
+6. 每个 intent 的等待时间有上限。到期后 Host 取消 offer，再读回 canonical attempt。确认取消成功且没有 claim 时，结论才为 `expired`；有 claim 则等设备 terminal。具体规则见下方 WO-05 裁定。（依据 R5）
 7. Host 读到成功的 terminal 后，在一个事务里按 `taskId` 应用 outcome，只应用一次。应用时按当前状态重新校验。某个动作已经不合法时（例如目标 Bot 已删除），只拒绝这个动作，并写进发起方下一次的 ContextPack。
 8. 恢复靠服务端的持久 outbox 扫描（对话 PRD 的规则），不靠浏览器轮询。
 9. Topology L 的定时（等待上限、退避）用 K2 的 wake 队列；Topology H 用 Host 服务端的定时器。消息和回调不进 wake 队列。
+
+第 6 条按 WO-05 裁定细化：到期先 `tasks.cancel`，再读 `tasks.attempt`。状态为 `cancelled` 且无 claimed runtime 或 owner 时，结论为 `expired`。已有 claim 或状态是 `cancel_requested` 时，保持 FIFO 占用，等设备 terminal 后结为 `cancelled`。接受到期与 claim 的竞态。K4 允许 `tasks.attempt`、`tasks.get`；产品快照不能代替 attempt。`tasks.cancel` 不改为返回 attempt。（依据 R5）
+
+K4 的 routine 定义按 id 不可变，改定义换新 id。同 id 的 current/pending、调度 generation 和在途上限归 K8a 的 `update_routine`。K4 合成端到端覆盖聊天、routine 和崩溃恢复；委派与确认归 K8a，记忆页及三端证明归产品 PRD P5/P2。服务端各行见 §14.1。（依据 R6）
 
 ### 9.3 Bot 执行的 outcome 契约
 
 每个 Bot 执行使用两条通道：
 
 - `messageEgress`：Bot 说的话。自己对话里的执行和被委派的执行用它；群发言不用（§9.5）。
-- result-document（K7）：Bot 要 Host 做的事。contract 是 `bot-turn-outcome.v1`，schema 由 Host 在提交时生成，冻结在 offer 里。
+- result-document（K7）：Bot 要 Host 做的事。contract 是 `bot-turn-outcome.v1`。动作片段和组合函数由 `@byok-sdk/protocol` 发布。Host 在提交时按角色和执行类型选片段，填 enum，调用 `composeBotTurnOutcomeSchema`，把结果冻结在 offer 里。K8-S 配套新增 spec「Bot turn outcome fragments and routine time points」。（依据 R3）
 
 Host 按这次执行的情况生成 schema：
 
 - 花名册里的 Bot id、群 id 和可用模型写成 `enum`，模型交不出不存在的对象。
 - 只有 Main Bot 的 schema 包含管理类动作。普通 Bot 的 schema 里没有这些动作，交不出来；Host 应用时再按角色校验一次。
-- 只有群发言执行的 schema 包含 `post`、`pass` 和 `room_call`。
+- 只有群发言执行的 schema 包含必填的 `speech`（`post` 或 `pass`）和可选的 `room_call`。
+- 新建对象用 Host 预发的 localId 槽位（例如 `new_bot_1`），槽位写成 `enum`。同一份 outcome 里引用新对象也用槽位。
+- 时区写成 `enum`，只放设备和服务端引擎都认识的规范名。
+- routine schedule 为结构化字段：`minute`（整数 0–59）、`hour`（整数 0–23）、`tz`（Host enum）。无日字段为每日；每周用 `daysOfWeek`（1–7 个 `mon`…`sun`）；每月用 `dayOfMonth`（1–31），可加 `month`（1–12）表示每年。星期和日期互斥；`month` 必须带 `dayOfMonth`。重复星期按集合处理。不存在的月日期跳过；每天最多一个时点。字段类型、范围和 enum 放在外层 `properties`，三种封闭形状用只列属性名的 `oneOf` 区分。`checkRoutineSchedule` 在 Host 应用时处理日期组合；4 月 31 日报 `schedule_unreachable`，2 月 29 日报 `schedule_beyond_horizon`。
+
+K7 子集没有 `pattern`、`format`、`uniqueItems`、`$ref`。`maxLength` 数码点，canonical JSON 每码点按最多 6 字节计；无可收紧范围时，`number`/`integer` 的保守上界为 25/24 字节。组合函数保证 outcome 最坏不超过 65 536 字节。只有 schema 超过 16 KiB（`schema-over-budget`）才可把两个 routine 片段改为 `flat` 后重新组合；`not-subset`、`over-budget` 不触发该路径。冻结前完成，冻结后不改 schema。仍超限时显式阻塞或走 Host 已定义的分批选择流程，不静默截断 enum。`flat` 的字段组合由 Host 应用时再校验。（依据 R3，WO-03 v4 §2.6）
+
+outcome 的根是封闭对象，每种动作一个可选字段，各有个数上限提议值：`delegate` 2、`ask_user` 1、`confirmable_action` 1、`create_routine` 1、`update_routine` 1、`cancel_routine` 2、`create_bot` 3、`update_bot` 1、`delete_bot` 1、`create_room` 1、`update_room` 1、`team_note` 1。群发言执行用必填 `speech` 和可选 `room_call`，members 最多 4 项。下表码点上限同样是 WO-03 v4 §2.5 的 v1 提议值。
 
 动作（参考实现 v1）：
 
-| `kind` | 字段 | 谁能用 | Host 的处理 |
+| 动作字段 | 字段 | 谁能用 | Host 的处理 |
 |---|---|---|---|
-| `delegate` | `to`、`request`（≤ 8 KiB） | 所有 Bot | 新建委派（§9.4） |
-| `ask_user` | `question`、`answerKind`（`text` 或 `single_choice`）、`options` | 所有 Bot | 建问题卡片。回答作为新一轮 `user` 输入，同 `examples/basic/clarification.ts` 的做法 |
-| `post` | `text`（≤ 16 KiB） | 群发言执行 | 写入群对话 |
-| `pass` | 无 | 群发言执行 | 本席位不发言 |
+| `delegate` | `to`（含自己）、`request`（≤ 1 000 码点） | 所有 Bot | 新建委派（§9.4）；给自己时走产品 PRD §5.6 的续作预算 |
+| `ask_user` | `question` ≤ 400 码点、`answerKind`（`text` 或 `single_choice`）；单选 options 2–6 项，id ≤ 24、label ≤ 80 码点 | 所有 Bot | 建问题卡片。回答作为新一轮 `user` 输入，同 `examples/basic/clarification.ts` 的做法 |
+| `confirmable_action` | `action`（Host 动作名）、`summary`（≤ 300 码点）、`draft`（该动作的 Host 草稿 schema，有有限上界，最坏 ≤ 16 KiB） | 所有 Bot | 建确认卡。用户确认后，Host 用自己的凭据执行；Bot 不直接执行有后果的动作。结果作为 `action_result` Turn 回到对话（产品 PRD §5.4） |
+| `create_routine` | `localId`（Host 槽位）、`schedule`（本节结构化字段）、`prompt`（≤ 500 码点）、`target`（仅 Main Bot schema 可带；默认自己） | 所有 Bot；`target` 指向别人只有 Main Bot | 用 `checkRoutineSchedule` 校验，失败则拒绝动作并写进下一次 ContextPack；落 routine 账本，算下一个时点，调 `wakes.schedule`（§12） |
+| `update_routine` | `routineId`（Host enum）、可选 `schedule`、可选 `prompt`（≤ 500 码点） | routine 的 owner 或 Main Bot | 没有改动时拒绝。校验 schedule，写新的定义版本，当前 occurrence 完成后切换（§12.3 第 6 条）。同 id 版本切换归 K8a |
+| `cancel_routine` | `routineId`（Host enum） | 同 `update_routine` | lifecycle 改 `completed`，取消已调度 wake。运行中的执行不自动停止；要停时 Host 显式调 `tasks.cancel`（§12.7） |
+| `speech` | `{ kind: 'post', text ≤ 2 730 码点 }` 或 `{ kind: 'pass' }` | 群发言执行 | 写入群对话 / 本席位不发言 |
 | `room_call` | `members` | 群发言执行 | 在本轮预算内追加席位 |
 | `create_bot` | `localId`、`name`、`role`、`persona`、`model` | Main Bot | 见 §9.6 |
 | `update_bot` | `botId`、要改的字段 | Main Bot | 推进 `profileRevision` |
 | `delete_bot` | `botId` | Main Bot | 见 §9.6 |
 | `create_room`、`update_room` | 名称、成员、admin、模式、公告 | Main Bot | 写群账本 |
-| `team_note` | `text`（≤ 300 字） | Main Bot | 追加团队笔记 |
+| `team_note` | `text`（≤ 300 码点） | Main Bot | 追加团队笔记 |
 
-- `actions` 可以为空，表示只有回复。
+- 对话变体的 `{}` 表示没有动作，只有回复。群发言变体必须交 `speech`。
 - 执行没交 outcome 就结束是 `task.fail`（K7）：回复照常显示，动作一个都不应用。执行失败、被取消或中断时，即使暂存过 outcome，terminal 也不带它，动作同样一个都不应用。
-- 同一份 outcome 里引用新建的 Bot，用 `localId`。
+- 同一份 outcome 里引用新建的 Bot 或群，用 Host 预发的 localId 槽位。
+
+Bot 的 name/role/persona 上限提议值为 40/80/300 码点；群的 name/announcement 为 40/300 码点。动作 key 是 `H(taskId, kind, 数组下标)`。Host 在一个事务里按固定顺序应用：`create_bot` → `update_bot` → `delete_bot` → `create_room` → `update_room` → `team_note` → routine 三动作 → `confirmable_action` → `ask_user` → `delegate`。（依据 R3）
 
 ### 9.4 委派
 
 1. A 的 outcome 里有 `delegate`。Host 在应用 A 的 outcome 的事务里：
-   - 插入委派，key 是 `H(A.taskId, 动作序号)`。同一个 terminal 应用两次也不会产生第二个委派。
+   - 插入委派，key 是 `H(A.taskId, 'delegate', 下标)`。同一个 terminal 应用两次也不会产生第二个委派。（依据 R3）
    - 计算 `hop`：A 这一轮的 hop 加 1，用户输入的 hop 是 0。默认上限 4，超过时结论为 `refused`。
    - 检查这条用户输入派生的 Bot 自发执行预算，默认 12 次。超过时结论为 `refused`。
    - 在 B 的 canonical 对话里插入 Turn，来源 `bot_request`，用结构化元数据记录发起方和委派 id；在 B 的队列里排 intent。
@@ -652,7 +669,7 @@ D7 写在 cloud generic agent 的 ADR 里，原文是"Cloudflare 优先（DO / D
 
 | 对象 | 内容 | 权威 |
 |---|---|---|
-| Routine | 做什么、什么时候（规则和时区）、目标 Agent、结果去向、lifecycle、定义版本 | Host 服务端；设备保存镜像 |
+| Routine | 做什么、什么时候（结构化 schedule 和时区，见 §9.3）、目标 Agent、结果去向、lifecycle、定义版本 | Host 服务端；设备保存镜像 |
 | Occurrence | 一个计划时点：trigger、尝试次数、结算 | 设备上的 Host 账本 |
 | Execution | 一个 SDK task：offer、attempt、terminal | SDK |
 
@@ -671,23 +688,27 @@ D7 写在 cloud generic agent 的 ADR 里，原文是"Cloudflare 优先（DO / D
 3. 设备用设备凭据拉取命令。拉取并入已有的同步调用，并按版本做条件响应（R3）。
 4. 设备先持久化回执，再应用命令，最后确认。同一个命令 id 返回同一个确认。过期的版本返回 `version_conflict`，设备不做合并。
 5. 命令不经过浏览器。没有打开浏览器时，routine 也要能同步。
-6. 定义版本变化后，先完成当前 occurrence，再切换到新版本。
+6. 定义版本变化后，先完成当前 occurrence，再切换到新版本。定义版本区分 current 和 pending。有在途 occurrence 时，新版本先记为 pending，在途的那次按旧版本快照结算后再切换；无在途时立刻切换。暂停后恢复也服从这个条件。调度操作经 outbox 执行，带调度 generation，过期操作不执行。同 id 的版本管理和在途上限归 K8a 的 `update_routine`；K4 定义不可变，改定义换新 id。（依据 R3、R6）
 
 ### 12.4 Occurrence 与 execution
 
-1. `occurrence_key = SHA-256(routine_id, definition_version, trigger)`。trigger 包含类型（`scheduled` 或 `catch_up`）和计划时间。这个 key 在账本中唯一。
+1. `occurrence_key = SHA-256(routine_id, definition_version, 计划时间 t)`。身份是 `(routineId, version, t)`，在账本中唯一。trigger 类型（`scheduled` 或 `catch_up`）在第一次提交时判定并持久化，重投读回，不按这次投递时间重算。wake 的 `dedupKey = "<routineId>:<version>:<t>"`，version/t 为规范十进制安全整数，从右往左解析。（依据 R3）
 2. 写 occurrence 和推进下一个时点在同一个事务中完成。下一个时点从当前时间算起。错过的时点跳过。休眠后只补跑一次。
 3. quiet hours 内的时点推迟到 quiet hours 结束，不丢弃。
 4. 尝试次数有上限，例如 3 次，间隔至少 5 分钟和 15 分钟。下一个时点到期时，旧的重试作废。
 5. 每个 routine 最多一个执行中的 occurrence 和一个待执行的 occurrence。
-6. 时区存在定义里。用一个纯函数计算时点，设备和服务端共用。这样两边算出同样的期望时间。
+6. 时区存在定义里。设备和服务端共用 `@byok-sdk/core` 的 `nextRoutineOccurrence(schedule, now)`。设备上的 Host 算出的时点是调度唯一权威；服务端只算可见性的期望时间。tz 只用两端都认识的规范名。（依据 R3）
 7. `taskId` 由 occurrence 和 pass 派生，不含尝试次数。提交前持久化完整输入。
 8. 不确定提交是否成功时，用 `server.tasks.offer(taskId)` 读回，和持久化的输入比较，然后用同样的输入恢复。不生成新的 `taskId`。
 9. 只有原 task 已经有设备 terminal 时，才换新一代 `taskId`。用 `server.tasks.deviceTerminal(taskId)` 读取。允许换代的 terminal 只有两种：
    - decline，`code` 为 `agent_home_writer_busy` 或 `agent_home_reader_busy`（K6）；
    - 失败，并且尝试策略允许再试一次。
 
-   只取消、读不到 terminal 时，不换新一代。只取消不会产生设备 terminal，原 task 仍可能在设备恢复连接后运行（[Host exact Agent message disposition readback](../spec.md#host-exact-agent-message-disposition-readback)）。这时 occurrence 保持未结算，Host 继续读回，直到读到 terminal。
+   只取消、读不到 terminal 时，不换新一代。已认领 task 的取消请求不等于设备 terminal，原 task 仍可能在设备恢复连接后运行（[Host exact Agent message disposition readback](../spec.md#host-exact-agent-message-disposition-readback)）。这时 occurrence 保持未结算，Host 继续读回，直到读到 terminal。（依据 R5）
+
+   未认领到期的例外按 §9.2：取消后读回 canonical attempt，确认 `cancelled` 且无 claim 才结为 `expired`。已有 claim 则等设备 terminal，不换代。无需让 `tasks.cancel` 返回 attempt。（依据 R5）
+
+10. K4、K8a 共同恢复规则：稳定 slot 身份、armed 检查和持久调度恢复。outbox 只有一个消费者，按持久序号执行同一 routine 的操作，迟到取消不得删除后来重用同 key 的 wake。日历抛错时，同一事务记审计、停止后继，状态为 `calendar_error`；hook 正常返回，不触发重投。UI 显示原因；恢复入口为进程启动、用户重试和新的定义版本。同 id 版本切换仍只由 K8a 实现。（依据 R3）
 
 ### 12.5 并发
 
@@ -773,7 +794,7 @@ RAFT 也把时钟放在执行端：服务端管理 reminder 的生命周期和�
 
 ### 13.1 SDK（先做）
 
-K1、K2、K3、K5、K6 互不依赖，可以并行。K7 在 K5、K6 之后；K4 在 K2、K5、K6、K7 之后；K8 在 K4 之后。每个阶段单独合并后，系统都处于可用状态。
+K1、K2、K3、K5、K6 互不依赖，可以并行。K7 在 K5、K6 之后；K4 在 K2、K5、K6、K7 之后；K8a 参考实现在 K4 和 K8-S 之后。K8-S 不依赖 K4，可独立先做。每个阶段单独合并后，系统都处于可用状态。（依据 R3、R6）
 
 | 阶段 | 范围 | 依赖 | 验收 |
 |---|---|---|---|
@@ -783,8 +804,8 @@ K1、K2、K3、K5、K6 互不依赖，可以并行。K7 在 K5、K6 之后；K4 
 | K5 统一提交 | 新 issue，正文取 §8.1 | 无 | §8.1 |
 | K6 busy typed code | 新 issue，正文取 §8.2 | 无 | §8.2 |
 | K7 结构化 outcome 通道 | 新 issue，正文取 §8.3 | K5、K6 | §8.3 |
-| K4 收尾 | Host 执行核心参考实现（§9.2，routine 和 Bot 触发共用）、routine 冒烟测试（扩展 [#418]）、Host 指南独立成文、[#399] | K2、K5、K6、K7 | 用默认配置跑通一个 routine 的调度、补跑和崩溃恢复；一个 routine 和一个 Bot 触发共用同一个 per-Agent FIFO；busy 拒绝只在读到设备 terminal 后换代；README 链接 Host 指南 |
-| K8 Bot 协作参考实现 | 新 issue，正文取 §9；放在 `examples/` | K4 | §14.2 |
+| K4 收尾 | Host 执行核心参考实现（§9.2）、聊天/routine/崩溃合成端到端（扩展 [#418]）、Host 指南独立成文、[#399]；routine 定义按 id 不可变 | K2、K5、K6、K7 | 调度、补跑和崩溃恢复；聊天消息 disposition 接受并读回成功 terminal；routine 与 Bot 共用 FIFO/outcome 事务；busy 只在 terminal 后换代；README 链接 Host 指南；共同恢复规则有场景测试；§14.1 Topology L 执行各行在 SDK 合成 Host 跑通，服务端各行归下游 |
+| K8 Bot 协作参考实现 | K8-S：protocol outcome 片段/组合函数、core routine 纯函数、server wake 368 天。K8a：`examples/` 中同 id current/pending、调度 generation、在途上限和测试；不属于 K8-S。其余动作见 §9 和产品 PRD P3/P4 | K4；K8-S 不依赖 K4 | §14.2；K8-S 结构化字段/组合校验、三个变体 ≤ 65 536、368 天边界和 DST/月末/闰年定向测试；K8a 版本管理场景 |
 | K9 运行中动作通道（推迟） | 有证据时才开 issue | 见下 | — |
 
 K9 的触发条件：下面任一项有测量数据，并且超过 owner 定的阈值。
@@ -804,7 +825,7 @@ bun run check:api-surface
 bun run check:version-authority
 ```
 
-K1 和 K3 的 dataplane 测试还需要 `docker compose -f docker-compose.test.yml up -d --wait`。K7 还要运行 `bun run check:release-pack`。
+K1 和 K3 的 dataplane 测试还需要 `docker compose -f docker-compose.test.yml up -d --wait`。K7 和 K8-S 还要运行 `bun run check:release-pack`。（依据 R3）
 
 每个阶段在同一个 PR 中修改 spec：
 
@@ -815,13 +836,14 @@ K1 和 K3 的 dataplane 测试还需要 `docker compose -f docker-compose.test.y
 - K5：把 [Recurring Host composition requirements](../spec.md#recurring-host-composition-requirements) 改为统一提交，并修改 [Host exact Agent message disposition readback](../spec.md#host-exact-agent-message-disposition-readback) 里关于 recurring 提交的段落。
 - K6：`task.decline` 的 `code` 及其投影。
 - K7：result projection 和 prepared lane 的段落；新增保留名 `byokagentresult`；`docs/protocol.md` 的 wire major 和升级排空步骤。
-- K8：只改 `examples/` 和文档。参考实现暴露出 SDK 缺口时另开 issue，不在 K8 里改 SDK。
+- K8：K8-S 新增 spec「Bot turn outcome fragments and routine time points」，修改「Embedded wake queue」的 366 天和「Durable Pi lane」的周期规则句子。其余部分只改 `examples/` 和文档。参考实现暴露的其他 SDK 缺口另开 issue。（依据 R3）
 
 回滚：
 
 - K1、K3：按各自 issue 的迁移说明回滚。#410 写明部署顺序不影响正确性：没有 trigger 时，新代码退化为兜底间隔读取。
 - K2：恢复 adoption 前的备份。旧版本拒绝 schema 5。
-- K4、K8：只有参考实现、文档和测试，直接回退。
+- K4、K8 参考实现：只有参考实现、文档和测试，直接回退。
+- K8-S：发布前 revert。发布后按 release notes 处理，不留兼容层（O10）。已冻结 offer 的 schema 不受影响。（依据 R3）
 - K5、K6、K7：发布前直接 revert。发布后不提供兼容层（O10），按 release notes 的升级步骤处理。K7 发布后回退也是一次 wire major 切换，同样先排空。
 
 ### 13.2 下游接入：Aiphabee（不在本仓库）
@@ -842,6 +864,8 @@ A1 和 A4 不依赖 SDK，可以提前。
 ### 14.1 Routine
 
 Topology L，在 K2 和 A2 之后执行：
+
+服务端各行由下游 Host 服务实现：浏览器关闭时的 routine 同步、`sync_failed`、409、`device_offline`、`missed`、安全和成本。K4 在 SDK 仓库的合成 Host 覆盖 Topology L 执行各行，不据此声称完成下游服务验收。聊天/routine/崩溃归 K4；委派与确认归 K8a；记忆页及三端证明归产品 PRD P5/P2。（依据 R6）
 
 | 类型 | 场景 | 期望 |
 |---|---|---|
