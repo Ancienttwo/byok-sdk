@@ -484,7 +484,7 @@ recovery must use SQLite. Wake rows share its EXCLUSIVE owner and coordinator.
 
 `schedule({ dedupKey, availableAt, payload? })` returns `{ wakeId, accepted }`.
 The key contains 1–256 Unicode characters, `availableAt` is a nonnegative safe
-integer no more than 366 days in the future, and payload is an opaque string of
+integer no more than 368 days in the future, and payload is an opaque string of
 at most 4 KiB UTF-8. Past times are immediately due. Invalid input throws
 `WakeInputError` with a closed code. An exact key/time/payload replay returns the
 original ID and `accepted: false`, including completed keys retained for seven
