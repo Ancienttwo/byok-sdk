@@ -261,8 +261,9 @@ await server.close();
 
 schedule deduplicates exact key/time/payload, returning the original wakeId with
 accepted:false. Changed content throws `WakeConflictError`. Keys are 1–256
-Unicode characters; availableAt is a nonnegative safe integer at most 366 days
+Unicode characters; availableAt is a nonnegative safe integer at most 368 days
 in the future; payload is at most 4 KiB UTF-8. Bad input throws `WakeInputError`.
+Use `MAX_FUTURE_MS` from `@byok-sdk/server` to check this time limit in the Host.
 A missing hook throws `WakeHookMissingError` without writing; opening a queued
 SQLite wake database without that hook is also refused and releases ownership.
 

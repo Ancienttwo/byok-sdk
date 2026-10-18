@@ -39,7 +39,8 @@ export class WakeClosedError extends Error {
 }
 export const WAKE_WAIT_MS = 60_000;
 export const WAKE_RETENTION_MS = 7 * 24 * 60 * 60_000;
-const MAX_FUTURE_MS = 366 * 24 * 60 * 60_000;
+/** Maximum allowed delay from the current time for a scheduled wake. */
+export const MAX_FUTURE_MS = 368 * 24 * 60 * 60_000;
 export function validateWakeKey(key: unknown): asserts key is string {
   if (typeof key !== 'string' || key.length < 1 || [...key].length > 256) throw new WakeInputError('WAKE_DEDUP_KEY_INVALID');
 }
