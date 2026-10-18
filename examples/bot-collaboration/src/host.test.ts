@@ -120,11 +120,12 @@ it('reports a failed continuation and a failed confirmed connector result', asyn
 });
 
 it('runs a real scheduled wake and returns the routine result to its owner', async () => {
-  await setup();
-  // Freeze Date only. Real timers, sockets, and the result helper stay live.
+  // Set Date before startup so presence and deadlines never see a rollback.
+  // Real timers, sockets, and the result helper stay live.
   vi.useFakeTimers({ toFake: ['Date'] });
   const minute = Math.ceil(Date.now() / 60_000) * 60_000;
   vi.setSystemTime(minute - 30_000);
+  await setup();
   const root = await bot.input('routine', 'Create my daily routine');
   const date = new Date(minute);
   await finish(root, { create_routine: [{ localId: 'new_routine_1', schedule: { hour: date.getUTCHours(), minute: date.getUTCMinutes(), tz: 'UTC' }, prompt: 'Daily report' }] });
