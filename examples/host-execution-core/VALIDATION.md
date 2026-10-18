@@ -33,6 +33,43 @@ That test now observes the same public owner/runtime receipt before its single H
 The hidden-terminal barrier, unsettled conclusion, generation and final cancellation assertions remain unchanged.
 Both failed sequences remain recorded. The final five-run sequence uses both claim barriers.
 
+### V4 patch checks
+
+Verification date: 2026-10-19. The final five-run sequence used `472964dd` without edits between runs.
+Each run executed the complete example suite. No test retry setting, filtered run or fixed sleep was added.
+
+| Command | Exit | Evidence |
+| --- | --- | --- |
+| `bun run --cwd examples/host-execution-core test`, final run 1 | 0 | 38/38 in 45.29 seconds; `v4-patch-final-example-1.log`. |
+| `bun run --cwd examples/host-execution-core test`, final run 2 | 0 | 38/38 in 39.18 seconds; `v4-patch-final-example-2.log`. |
+| `bun run --cwd examples/host-execution-core test`, final run 3 | 0 | 38/38 in 34.67 seconds; `v4-patch-final-example-3.log`. |
+| `bun run --cwd examples/host-execution-core test`, final run 4 | 0 | 38/38 in 35.86 seconds; `v4-patch-final-example-4.log`. |
+| `bun run --cwd examples/host-execution-core test`, final run 5 | 0 | 38/38 in 32.56 seconds; `v4-patch-final-example-5.log`. |
+| `bun run typecheck` | 0 | Final source and tests compile; `v4-patch-final-typecheck.log`. |
+| `bun run build` | 0 | All workspace builds completed; `v4-patch-build.log`. |
+| `bun run test` | 0 | Vitest: 9,326 passed, 200 skipped. Node tests: 10 passed, 0 failed; `v4-patch-full-test.log`. |
+| `bun run check:api-surface` | 0 | 9 package goldens match; `v4-patch-api-surface.log`. |
+| `bun run check:version-authority` | 0 | Dispatch 0.27.0 and keys 0.12.0 agree; `v4-patch-version-authority.log`. |
+| `git diff --check` and `git diff 5c86a4b8..HEAD --check` | 0 | No whitespace errors. |
+
+All logs are in this worktree's ignored `_ops/wo-05/` directory.
+The root run also passed all 38 example tests on the final source in 32.24 seconds.
+Skipped tests were in client (30), cloud-dataplane (139), keys (12), and server (19).
+The optional Docker dataplane substrate was not started.
+Source and tests did not change after `472964dd`. No `packages/` file changed.
+No push or PR was made. The main checkout was not changed.
+The final sequence receipts are in `v4-patch-final-example-exits.log`.
+The first sequence exited 0, then 1 (`v4-patch-example-1.log`, `-2.log`).
+The second sequence also exited 0, then 1 (`v4-patch-stable-example-1.log`, `-2.log`).
+Each sequence stopped at its failure. The corresponding claim precondition was then fixed before a new sequence began.
+The new error assertion first failed on the old implementation, then passed after the fix (`v4-patch-red.log`, `v4-patch-green.log`).
+One example typecheck ran while build was replacing the SDK dist declarations and exited 1 with missing client imports.
+After build finished, the same command exited 0 (`v4-patch-example-typecheck-during-build.log`, `v4-patch-example-typecheck.log`).
+
+The read-only gatekeeper reviewed `5c86a4b8..6851d161` and `6851d161..1e2a2ddb`.
+Both reviews returned PASS for test integrity and the scoped implementation. They ran no tests and made no edits.
+The final `core.test.ts` claim barrier received a self-review. It uses the same public receipt and preserves every original assertion.
+
 ## V4 review closure
 
 V4 starts at `ed992795`. The final external review returned PASS_WITH_NITS.
