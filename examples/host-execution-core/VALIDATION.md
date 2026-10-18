@@ -4,6 +4,32 @@ Date: 2026-10-18. Baseline: `8e8839a3`.
 Branch: `codex/bot-k4-host-execution-core`.
 Environment: macOS, Node `v24.21.0`, Bun `1.4.3`.
 
+## V4 review closure
+
+V4 starts at `ed992795`. The final external review returned PASS_WITH_NITS.
+The read-only report is `/Users/chris/Projects/byok-sdk/_ops/bot-wo/REV-05-round2-result.md`.
+This revision changes only the pause test's observation point and calendar recovery documentation.
+
+P1: The test reads SDK `wakes.pending()` after the Host commits a routine pause.
+P2: The SDK invalidates the active delivery before its queued complete write commits
+(`packages/server/src/wakes/scheduler.ts:90`, `:101`). During that window, pending can report the row as queued (`:130`).
+The external review observed this failure once. Its unmodified full rerun passed.
+P3: Keep the exact empty-set assertion, routine filter and occurrence count checks.
+Wait for the real SDK row to leave pending. Do not change cancellation or production code.
+
+The guide and README now describe the existing `calendar_error` recovery entrypoint.
+After the calendar is fixed, pause and then activate the routine to recalculate its next time.
+`recover()` and same-definition `addRoutine()` do not recover that stored state.
+This follows `setLifecycle` in `src/routines.ts:128`; it adds no recovery behavior.
+
+### V4 residual items
+
+- `schedule_retrying` does not retain the SDK's original error code or message. Address this P3 during K8a alignment.
+- The occurrence hash includes the trigger, and the outbox has no persistent operation sequence number.
+  These remain WO-03 alignment records. This revision does not change either storage contract.
+- SDK nit: export the wake horizon constant from `@byok-sdk/server` for Host prechecks.
+  The current private constant and 366/368-day synchronization rule remain as recorded below.
+
 ## V3 scope ruling and chat acceptance
 
 V3 starts at `ae7acb2c`. Aimpact made these scope decisions on 2026-10-18:
@@ -186,6 +212,14 @@ The test observes one occurrence, one execution, identical input and one committ
 | Cancel classification | `unclaimed-expiry.test.ts`: real cancelled/unclaimed attempt, claimed cancel_requested state, then task.cancelled terminal. |
 
 ## Test changes and reasons
+
+V4 changes:
+
+- `routines.test.ts` wraps the existing empty pending-set assertion in `vi.waitFor` with a five-second bound.
+  This waits for SDK completion instead of assuming the pause call includes that asynchronous write.
+  The routine filter and empty-set assertion are unchanged. The occurrence count is still captured immediately after pause.
+  The current execution must still succeed, the count must remain unchanged, and the lifecycle must remain paused.
+  No assertion is removed or relaxed. No production code changes.
 
 V3 changes:
 

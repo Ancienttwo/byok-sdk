@@ -191,6 +191,8 @@ Retry the same input or call `recover`; do not create another intent or routine 
 The error contains the retained outbox failure. An initial dispatch failure is not reported as successful scheduling.
 Calendar exceptions are separate. The hook records an audit entry and status `calendar_error`, clears the successor, and resolves.
 The current occurrence can still finish. The SDK does not redeliver the wake for that calendar error.
+After you fix the calendar, await `lifecycle(id, 'paused')`, then await `lifecycle(id, 'active')` to recalculate the next time.
+`recover()` and `addRoutine()` with the same definition do not recover the stored `calendar_error` state.
 `wakes.cancel` removes queued wakes only. A delivering wake can still run or retry.
 The hook must check current lifecycle and the reserved wake identity.
 Do not depend on cancel returning true to pause a routine.

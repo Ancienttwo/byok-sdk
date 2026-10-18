@@ -107,6 +107,7 @@ Choose the interval from the product's latency budget and measured write load.
 
 The default calendar supports fixed UTC intervals and UTC quiet hours.
 Inject a shared pure calendar for cron, other time zones, DST or business calendars.
+After you fix a `calendar_error`, await `lifecycle(id, 'paused')`, then await `lifecycle(id, 'active')`; `recover()` and same-definition `addRoutine()` do not recover that state.
 The SDK still receives only one-shot times.
 After K8-S raises the running SDK's wake limit to 368 days, update the Host's `WAKE_HORIZON_MS` to match.
 Until then, annual routine candidates more than 366 and up to 368 days ahead use `schedule_retrying` backoff without blocking other work.
