@@ -241,6 +241,19 @@ async function assertRealDirectoryIfPresent(target: string): Promise<void> {
   }
 }
 
+/** Establish each directory entry before a child or ledger can depend on it. */
+async function syncDirectoryParent(directory: string): Promise<void> {
+  // Node has no Windows directory flush. Windows intents remain unavailable.
+  // Darwin also runs the helper's strict full-sync chain before each open.
+  if (process.platform === 'win32') return;
+  const parent = await fs.open(path.dirname(directory), 'r');
+  try {
+    await parent.sync();
+  } finally {
+    await parent.close();
+  }
+}
+
 async function materializeDirectory(inputPath: string): Promise<string> {
   const { canonical, tail } = await resolveExistingAncestor(inputPath);
   let cursor = canonical;
@@ -255,7 +268,11 @@ async function materializeDirectory(inputPath: string): Promise<string> {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       await fs.mkdir(cursor, { mode: 0o700 });
     }
+    // Repeat the barrier for an existing entry. A prior attempt may have
+    // created it and then failed to sync its parent.
+    await syncDirectoryParent(cursor);
   }
+  await syncDirectoryParent(cursor);
   const realized = await fs.realpath(inputPath);
   if (realized !== cursor) {
     throw new AgentHomeResolutionError(`Agent home path changed through a symlink while being created: ${inputPath}`);
@@ -279,6 +296,9 @@ async function ensureDirectoryNoSymlink(root: string, target: string): Promise<s
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       await fs.mkdir(cursor, { mode: 0o700 });
     }
+    // Repeat the barrier for an existing entry. A prior attempt may have
+    // created it and then failed to sync its parent.
+    await syncDirectoryParent(cursor);
   }
   const realized = await fs.realpath(target);
   if (!isWithin(root, realized) || realized !== target) {
