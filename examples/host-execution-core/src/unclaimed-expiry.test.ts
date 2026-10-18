@@ -66,6 +66,10 @@ it('distinguishes pre-claim cancellation from claimed cancellation through attem
     await daemon.start();
     await waitForReady(daemon);
     await vi.waitFor(() => expect(adapter.sessions.has('claim-before-cancel')).toBe(true), { timeout: 5000 });
+    // Runtime creation does not wait for the SDK's durable claim receipt.
+    await vi.waitFor(async () => expect(await server.tasks.attempt('claim-before-cancel')).toMatchObject({
+      ownerDeviceId: deviceId, claimedRuntime: 'pi',
+    }), { timeout: 5000 });
     const session = adapter.sessions.get('claim-before-cancel')!;
     expect(adapter.sessions.has('cancel-before-claim')).toBe(false);
     // Same task and identical allowed observations, although a runtime now runs.

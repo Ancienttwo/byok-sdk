@@ -18,6 +18,15 @@ P3: Add optional `routine.lastError = { code, message }` in the same transaction
 Keep the original SDK values. Retain the last rejection after recovery for inspection.
 A Host-only horizon precheck does not invent an SDK error. No scheduler or retry policy changes.
 
+The first complete run passed. The second failed in the existing `unclaimed-expiry.test.ts` claim-before-cancel case.
+The SDK returned `cancelled` with no `claimedRuntime`, instead of the expected `cancel_requested` with `pi`.
+The test had observed runtime creation, not the SDK's durable claim.
+`packages/client/src/daemon/task-runner.ts:2675` sends claim without awaiting its receipt, then starts the runtime at `:2879`.
+SQLite cancellation selects its status from the persisted owner at `packages/server/src/stores/sqlite/index.ts:975`.
+The probe now observes `tasks.attempt` owner and claimed runtime before its one cancel call.
+Its original immediate cancellation assertions remain. This is a precondition barrier, not a test retry or fixed sleep.
+The five-run sequence starts again on that fixed artifact. The failed sequence remains in the logs.
+
 ## V4 review closure
 
 V4 starts at `ed992795`. The final external review returned PASS_WITH_NITS.
@@ -258,6 +267,10 @@ V4 patch changes:
   The original status, empty pending set, absent outbox row and successful reschedule assertions remain.
   The new assertion failed with `undefined` before the implementation change. No error or receipt is mocked.
 - `routines.test.ts` remains unchanged from `135580c8`. Five complete sequential suite runs verify the existing public completion observation.
+- `unclaimed-expiry.test.ts` adds a public SDK claim receipt barrier before cancellation after the observed full-suite failure.
+  It requires both the paired device owner and `claimedRuntime: 'pi'`. Session creation alone does not prove either value.
+  Every original offer, stale submit snapshot, interruption, cancellation status and device terminal assertion remains.
+  The cancel action still runs once, and its intermediate `cancel_requested` assertion is immediate.
 
 V4 changes:
 
