@@ -52,6 +52,37 @@ It confirmed real SDK submit and message readback, the pending decision barrier,
 and one outcome transaction path for both sources. It did not run tests or edit files.
 The execution owner records the full checks separately below.
 
+### V3 item map
+
+| Item | Commit | Evidence |
+| --- | --- | --- |
+| One Bot chat turn | `384ee416` | `src/core.test.ts:56`; exact accepted disposition at `:100`, successful terminal at `:102`, durable outcomes at `:109`. |
+| Downstream service rows after K2 and A2 | `30979bb7` | `docs/host-execution-core.md:306`, example `README.md:119`. |
+| Same-ID version changes belong to K8a | `30979bb7` | `docs/host-execution-core.md:239`, example `README.md:124`. |
+| Keep 366 days until the running SDK changes | `16286bd3` | `src/routines.ts:6`, `docs/host-execution-core.md:68`, example `README.md:111`; SDK export nit above. |
+
+### V3 checks
+
+| Command | Exit | Evidence |
+| --- | --- | --- |
+| `bun run build` | 0 | All workspace builds completed; `v3-build.log`. |
+| `bun run typecheck` | 0 | All workspace typechecks completed; `v3-typecheck.log`. |
+| `bun run test` | 0 | Vitest: 9,326 passed, 200 skipped. Node tests: 10 passed, 0 failed; `v3-full-test.log`. |
+| `bun run check:api-surface` | 0 | 9 package goldens match; `v3-api-surface.log`. |
+| `bun run check:version-authority` | 0 | Dispatch 0.27.0 and keys 0.12.0 agree; `v3-version-authority.log`. |
+| `bun run --cwd examples/host-execution-core typecheck` | 0 | Includes the final horizon comment; `v3-example-typecheck.log`. |
+| `bun run --cwd examples/host-execution-core test` | 0 | 5 files, 38 tests passed in 38.13 seconds; `v3-example-tests.log`. |
+| `bun run --cwd examples/host-execution-core test src/core.test.ts -t 'accepts one Bot chat turn'` | 1, then 0 | Initial new-test row lookup corrected as described below; final focused pass in `v3-chat-test.log`. |
+| `bun run --cwd examples/host-execution-core test src/scheduling-recovery.test.ts` | 0 | After the WO-03 comment and documentation addition: 9 tests passed; `v3-horizon-followup.log`. |
+| `git diff --check` and `git diff ae7acb2c..HEAD --check` | 0 | No whitespace errors. |
+
+The full root run also passed all 38 example tests in 36.74 seconds.
+Skipped tests were in client (30), cloud-dataplane (139), keys (12), and server (19).
+The optional Docker dataplane substrate was not started. Logs are in this worktree's ignored `_ops/wo-05/` directory.
+Executable code and test assertions did not change after `384ee416`.
+The later WO-03 addition changes one source comment and documentation only; the constant remains 366 days.
+No `packages/` file changed. No push or PR was made. The main checkout was not changed.
+
 ## V2 review response
 
 V2 starts at `49512593`. The read-only source review is
