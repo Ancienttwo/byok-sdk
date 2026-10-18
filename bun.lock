@@ -31,6 +31,23 @@
         "vitest": "^4.1.10",
       },
     },
+    "examples/bot-collaboration": {
+      "name": "@byok-sdk/example-bot-collaboration",
+      "version": "0.0.1",
+      "dependencies": {
+        "@byok-sdk/core": "workspace:*",
+        "@byok-sdk/example-host-execution-core": "workspace:*",
+        "@byok-sdk/protocol": "workspace:*",
+        "@byok-sdk/server": "workspace:*",
+      },
+      "devDependencies": {
+        "@byok-sdk/client": "workspace:*",
+        "@hono/node-server": "^2.0.10",
+        "@types/node": "^24",
+        "typescript": "^7.0.2",
+        "vitest": "^4.1.10",
+      },
+    },
     "examples/codex-interaction-host": {
       "name": "@byok-sdk/example-codex-interaction-host",
       "version": "0.0.1",
@@ -337,6 +354,8 @@
     "@byok-sdk/core": ["@byok-sdk/core@workspace:packages/core"],
 
     "@byok-sdk/example-basic": ["@byok-sdk/example-basic@workspace:examples/basic"],
+
+    "@byok-sdk/example-bot-collaboration": ["@byok-sdk/example-bot-collaboration@workspace:examples/bot-collaboration"],
 
     "@byok-sdk/example-codex-interaction-host": ["@byok-sdk/example-codex-interaction-host@workspace:examples/codex-interaction-host"],
 

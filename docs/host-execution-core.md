@@ -64,9 +64,8 @@ Optional `quietHours: { startMinute, endMinute }` uses UTC minutes since midnigh
 Quiet hours can cross midnight. Defer the slot to their end; do not drop it.
 Inject a shared pure `nextOccurrence` function for cron, other zones, DST or business calendars.
 Use that same function in the Host service. Return a time strictly after the input time, or null.
-The core checks the current 366-day K2 horizon before writing a schedule outbox row.
-After K8-S raises the running SDK's limit to 368 days, update the Host's `WAKE_HORIZON_MS` to match.
-Until then, annual routine candidates more than 366 and up to 368 days ahead use `schedule_retrying` backoff without blocking other work.
+The core checks the 368-day K2 horizon before it writes a schedule outbox row.
+The Host's `WAKE_HORIZON_MS` matches the SDK's `MAX_FUTURE_MS`.
 It retains a later candidate on the routine with status `schedule_retrying`, without a schedule row.
 Process-local backoff starts at 60 seconds, doubles to one hour, and retries the same candidate.
 Startup also retries it. A wall-clock rollback rejection from the SDK enters the same state.

@@ -1,0 +1,15 @@
+{
+  "name": "@byok-sdk/example-bot-collaboration",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Single Bot actions on the K4 Host execution core",
+  "scripts": { "typecheck": "tsc --noEmit", "test": "vitest run" },
+  "dependencies": {
+    "@byok-sdk/core": "workspace:*",
+    "@byok-sdk/protocol": "workspace:*",
+    "@byok-sdk/server": "workspace:*",
+    "@byok-sdk/example-host-execution-core": "workspace:*"
+  },
+  "devDependencies": { "@byok-sdk/client": "workspace:*", "@hono/node-server": "^2.0.10", "@types/node": "^24", "typescript": "^7.0.2", "vitest": "^4.1.10" }
+}

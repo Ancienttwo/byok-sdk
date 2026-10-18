@@ -4,9 +4,7 @@ import { cancelWake, enqueue, settle } from './transitions';
 import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
 
 // Must equal the running SDK's wake limit. Do not import SDK internals.
-// After K8-S raises that SDK limit to 368 days, update this value to match.
-// Keep 366 days until then, so the outbox excludes wakes the current SDK rejects.
-export const WAKE_HORIZON_MS = 366 * 86_400_000;
+export const WAKE_HORIZON_MS = 368 * 86_400_000;
 interface WakePlan { next: WakeScheduleInput | null; status: Routine['status']; completed: boolean }
 
 export function parseRoutineWakeKey(key: string): { id: string; version: number; at: number } | undefined {
