@@ -179,3 +179,23 @@ it('rechecks Main Bot role at terminal apply and blocks over-budget context with
   expect(host().core.intent(seats(blocked)[0]!.id)).toBeUndefined();
   expect(host().snapshot().team.rooms[room.id]!.messages).toHaveLength(101);
 });
+
+it.each(['failure', 'missing outcome', 'cancellation'] as const)('settles a running late seat after real SDK %s without writing a post', async cause => {
+  let now = Date.now(); fixture = await openTeam({ now: () => now });
+  const { profiles, room } = await createTeam(); await ready(profiles);
+  const round = await host().roomInput('late-terminal', room.id, 'Review', [profiles[0]!.id, profiles[1]!.id]);
+  const first = seats(round)[0]!, second = seats(round)[1]!;
+  const session = await running(first.id);
+  await vi.waitFor(async () => { await host().drain(); expect(seats(round)[0]!.startedAt).toBe(now); }, { timeout: 5000 });
+  now += ROOM_GRACE_MS; await host().drain();
+  expect(seats(round)[0]!.status).toBe('late'); await running(second.id);
+  if (cause === 'failure') session.fail();
+  else if (cause === 'missing outcome') session.finish({}, false);
+  else await host().cancelTurn(first.id);
+  await vi.waitFor(async () => { await host().drain(); expect(seats(round)[0]!.status).toBe('failed'); }, { timeout: 5000 });
+  expect(seats(round)[0]!.reason).toBe(cause === 'cancellation' ? 'cancelled' : 'failed');
+  await finish(second.id, { speech: { kind: 'pass' } });
+  await fixture.reopen();
+  expect(seats(round)[0]!.status).toBe('failed');
+  expect(host().snapshot().team.rooms[room.id]!.messages.some(m => m.id === first.id)).toBe(false);
+});

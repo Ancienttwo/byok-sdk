@@ -205,3 +205,18 @@ it('preserves completed post and pass when members are removed, but revokes a pe
   expect(state.team.seats[ids[2]!]!.status).toBe('removed');
   expect(state.team.rooms.r!.messages.filter(m => m.text === 'Already published')).toHaveLength(1);
 });
+
+it.each(['failed', 'cancelled', 'declined'] as const)('settles a late seat after a %s terminal and keeps the failure stable', conclusion => {
+  const { state, ledger, advance } = setup();
+  const round = roomInput(state, 'late-failure', 'r', 'Discuss', ['b1']); advance(0);
+  const id = state.team.rounds[round]!.seats[0]!;
+  ledger.intents[hash(id)] = { taskId: id } as LedgerState['intents'][string];
+  ledger.executions[id] = { started: true } as LedgerState['executions'][string];
+  advance(0); advance(ROOM_GRACE_MS);
+  expect(state.team.seats[id]!.status).toBe('late');
+  ledger.intents[hash(id)]!.conclusion = conclusion;
+  advance(ROOM_GRACE_MS + 1);
+  expect(state.team.seats[id]).toMatchObject({ status: 'failed', reason: conclusion, released: true });
+  state.team.rooms.r!.members = []; advance(ROOM_GRACE_MS + 2);
+  expect(state.team.seats[id]).toMatchObject({ status: 'failed', reason: conclusion });
+});

@@ -98,7 +98,7 @@ export function advanceRooms(s: LedgerState, state: CollaborationState, now: num
     const intent = s.intents[hash(seat.id)], execution = intent && s.executions[intent.taskId];
     // Keep completed speech and failures immutable. A released late seat is
     // still waiting for terminal, so membership changes must still revoke it.
-    if (seat.released && ['post', 'pass', 'failed', 'busy', 'blocked'].includes(seat.status)) continue;
+    if (seat.released && ['post', 'pass', 'failed', 'busy', 'blocked', 'removed'].includes(seat.status)) continue;
     if (!memberPresent(team, seat)) {
       seat.status = 'removed'; seat.released = true;
       if (intent && !execution?.started && !intent.conclusion) intent.cancelReason = 'cancelled';
@@ -106,11 +106,11 @@ export function advanceRooms(s: LedgerState, state: CollaborationState, now: num
       if (turn && !intent) { turn.status = 'failed'; turn.conclusion = 'cancelled'; }
       continue;
     }
-    if (seat.released) continue;
     if (intent?.conclusion) {
       seat.status = intent.conclusion === 'expired' ? 'busy' : 'failed'; seat.released = true;
       seat.reason = intent.conclusion; continue;
     }
+    if (seat.released) continue;
     if (execution?.started) { observeStart(seat, now); seat.status = 'running'; }
     if (seat.deadline !== undefined && now >= seat.deadline) {
       if (execution?.started) { seat.status = 'late'; seat.late = true; }
