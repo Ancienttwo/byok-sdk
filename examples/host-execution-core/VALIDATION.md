@@ -58,6 +58,11 @@ The test observes one occurrence, one execution, identical input and one committ
 
 V2 changes:
 
+- P2-4: the crash fixture now binds `delivering` to the current occurrence's exact
+  dedupKey. It reports SDK delivery 2 on restart, the committed slots replay counter
+  transition from 0 to 1, the SDK pending wake with deliveries 2, and the canonical
+  TaskAttempt for the same task and device. All original ledger, input, outcome and
+  adapter-start assertions remain. The replay counter records the actual dedup branch.
 - P2-1: a new pause test leaves an occurrence behind a real running Bot, crosses
   the cancelled successor time, then proves that the queued occurrence executes.
   It also proves that pause does not extend the independent `waitUntil` budget.

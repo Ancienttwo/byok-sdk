@@ -48,6 +48,7 @@ export interface Occurrence {
   trigger: { kind: 'scheduled' | 'catch_up'; plannedAt: number };
   wakeKey: string; recordedAt: number; nextAt: number | null; intentId: string;
   attempts: number; conclusion?: Conclusion;
+  slotReplayCount?: number;
 }
 export type Outbox =
   | { kind: 'intent'; intentId: string; lastError?: string }

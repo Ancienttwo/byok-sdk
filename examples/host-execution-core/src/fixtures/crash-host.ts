@@ -4,7 +4,7 @@ import { serve } from '@hono/node-server';
 import { createByokServer } from '@byok-sdk/server';
 import { HostExecutionCore } from '../core';
 import { HostLedger } from '../ledger';
-import type { ExecutionTemplate } from '../model';
+import { hash, type ExecutionTemplate } from '../model';
 
 const root = process.argv[2]!;
 const port = Number(process.argv[3] ?? 0);
@@ -13,13 +13,33 @@ const productId = 'k4-crash-test';
 const ledger = new HostLedger(path.join(root, 'host.sqlite'), `product:${productId}`);
 let core!: HostExecutionCore;
 const server = createByokServer({ productId, storage: { kind: 'sqlite', path: path.join(root, 'server.sqlite') },
-  wake: { consume: (wake, signal) => core.consume(wake, signal) },
+  wake: { consume: async (wake, signal) => {
+    const before = ledger.snapshot();
+    const occurrenceKey = before.slots[hash(wake.dedupKey)];
+    await core.consume(wake, signal);
+    if (occurrenceKey) {
+      const after = ledger.snapshot();
+      const occurrence = after.occurrences[occurrenceKey]!;
+      const taskId = after.intents[occurrence.intentId]!.taskId;
+      process.send?.({ kind: 'replayed', taskId, dedupKey: wake.dedupKey, delivery: wake.delivery,
+        beforeReplayCount: before.occurrences[occurrenceKey]!.slotReplayCount ?? 0,
+        slotReplayCount: occurrence.slotReplayCount,
+        sdkWake: (await server.wakes.pending()).find(row => row.dedupKey === wake.dedupKey),
+        attempt: await server.tasks.attempt(taskId),
+      });
+    }
+  } },
 });
 core = new HostExecutionCore({ ...server, executions: { submit: async input => {
   const result = await server.executions.submit(input);
   if (holdSubmit) {
+    const state = ledger.snapshot();
+    const intent = Object.values(state.intents).find(row => row.taskId === input.taskId)!;
+    const dedupKey = state.occurrences[intent.occurrence!]!.wakeKey;
     const pending = await server.wakes.pending();
-    process.send?.({ kind: 'submitted', taskId: input.taskId, delivering: pending.some(wake => wake.state === 'delivering') });
+    const current = pending.find(wake => wake.dedupKey === dedupKey);
+    process.send?.({ kind: 'submitted', taskId: input.taskId, dedupKey,
+      delivering: current?.state === 'delivering', delivery: current?.deliveries });
     await new Promise<void>(() => {});
   }
   return result;

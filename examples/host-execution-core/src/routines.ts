@@ -65,7 +65,12 @@ export function applyPlan(state: LedgerState, routine: Routine, plan: WakePlan, 
 
 /** Called inside the same transaction that creates the occurrence and its intent. */
 export function recordOccurrence(state: LedgerState, tenant: string, wake: DueWake, now: number, nextTime: NextOccurrence): void {
-  if (state.slots[hash(wake.dedupKey)]) return; // Persisted trigger wins even after a later redelivery.
+  const existing = state.slots[hash(wake.dedupKey)];
+  if (existing) {
+    const occurrence = state.occurrences[existing]!;
+    occurrence.slotReplayCount = (occurrence.slotReplayCount ?? 0) + 1;
+    return; // Persisted trigger wins even after a later redelivery.
+  }
   const parsed = parseRoutineWakeKey(wake.dedupKey);
   const routine = parsed ? state.routines[hash(parsed.id)] : undefined;
   if (!routine || routine.lifecycle !== 'active' || !routine.next) return;
