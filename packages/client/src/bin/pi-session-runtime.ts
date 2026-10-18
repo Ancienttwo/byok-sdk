@@ -1,11 +1,31 @@
 import { isAbsolute } from 'node:path';
 import {
-  createAgentSession, createAgentSessionRuntime, createAgentSessionServices,
+  createAgentSession, createAgentSessionRuntime, createAgentSessionServices, createCodingTools,
   getAgentDir, resolveCliModel, runRpcMode, SessionManager, SettingsManager,
-  type CreateAgentSessionOptions, type CreateAgentSessionRuntimeFactory,
+  type CreateAgentSessionOptions, type CreateAgentSessionResult, type CreateAgentSessionRuntimeFactory,
 } from '@earendil-works/pi-coding-agent';
 
 function fail(message: string): never { throw new Error(`byok-pi-rpc: ${message}`); }
+
+/**
+ * Pi 1.3 restores a resumed transcript's active tools, so a tool this open's
+ * extensions register (such as a new MCP toolset tool) stays inactive. As OAR
+ * 0.67 does (#416), reset a resumed default-tools session to the current
+ * native defaults and default-active extension tools before `session_start`,
+ * so it offers the same tools as a new session with the same options. Pi
+ * still applies `excludeTools` and exposure rules.
+ */
+export function resetResumedPiTools(
+  session: CreateAgentSessionResult['session'], settingsManager: SettingsManager, cwd: string,
+): void {
+  if (session.sessionManager.buildSessionContext().messages.length === 0) return;
+  const defaults = settingsManager.getDefaultTools() ?? createCodingTools(cwd).map((tool) => tool.name);
+  const extensions = session.getAllTools().filter((tool) =>
+    tool.sourceInfo.path !== `builtin:${tool.name}`
+    && session.getToolDefinition(tool.name)?.defaultActive !== false
+    && (tool.exposure === 'direct' || tool.exposure === 'model-only'));
+  session.setActiveToolsByName([...defaults, ...extensions.map((tool) => tool.name)]);
+}
 
 /** Session ids are native minted references, never fuzzy search terms. */
 export async function openPiRpcSession(cwd: string, session: string | undefined, sessionDir?: string, reject: (message: string) => never = fail): Promise<SessionManager> {
@@ -77,6 +97,7 @@ export async function runPiSessionRuntime(options: {
       model: resolved?.model, thinkingLevel: options.thinking ?? resolved?.thinkingLevel,
       tools: options.tools, excludeTools: options.excludeTools, noTools: options.noTools,
     });
+    if (options.tools === undefined && options.noTools === undefined) resetResumedPiTools(created.session, services.settingsManager, options.cwd);
     if (created.modelFallbackMessage && options.initialModel === 'required') {
       await created.session.dispose();
       options.reject(created.modelFallbackMessage);

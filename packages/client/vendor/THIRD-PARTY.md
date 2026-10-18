@@ -39,7 +39,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 
-## @earendil-works/pi-ai@1.2.0
+## @earendil-works/pi-ai@1.3.0
 
 MIT License
 
@@ -169,9 +169,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 
-## OAR 0.66.0 beea52c (Apache-2.0)
+## OAR 0.67.0 c264f17 (Apache-2.0)
 
-Fixed upstream commit beea52cef61391351234edc025a481875035e68c from https://github.com/botiverse/oar. SDK-owned private runtime fork; selected source inventory and original/maintained SHA256 are recorded in oar/beea52c/source-manifest.json. BYOK changes are documented in oar/beea52c/PROVENANCE.md and marked in modified files.
+Fixed upstream commit c264f17040dd9513b43300886a80f3f6eddde7b1 from https://github.com/botiverse/oar. SDK-owned private runtime fork; selected source inventory and original/maintained SHA256 are recorded in oar/c264f17/source-manifest.json. BYOK changes are documented in oar/c264f17/PROVENANCE.md and marked in modified files.
 
 
                                  Apache License
