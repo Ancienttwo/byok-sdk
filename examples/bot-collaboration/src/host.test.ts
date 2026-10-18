@@ -124,17 +124,26 @@ it('runs a real scheduled wake and returns the routine result to its owner', asy
   // Freeze Date only. Real timers, sockets, and the result helper stay live.
   vi.useFakeTimers({ toFake: ['Date'] });
   const minute = Math.ceil(Date.now() / 60_000) * 60_000;
-  vi.setSystemTime(minute - 100);
+  vi.setSystemTime(minute - 30_000);
   const root = await bot.input('routine', 'Create my daily routine');
   const date = new Date(minute);
   await finish(root, { create_routine: [{ localId: 'new_routine_1', schedule: { hour: date.getUTCHours(), minute: date.getUTCMinutes(), tz: 'UTC' }, prompt: 'Daily report' }] });
   vi.setSystemTime(minute + 1);
+  // Re-arm the real timer after the synthetic Date jump. No wake row is removed.
+  await fixture.server.wakes.cancel('clock-rearm-no-row');
   await vi.waitFor(async () => { await bot.drain(); expect(Object.values(bot.snapshot().turns).some(t => t.source === 'routine')).toBe(true); }, { timeout: 5000 });
   const routineTurn = Object.values(bot.snapshot().turns).find(t => t.source === 'routine')!;
   await finish(routineTurn.id);
   expect(Object.values(bot.snapshot().occurrences)[0]).toMatchObject({ decision: 'run', settled: true, definition: { prompt: 'Daily report', target: 'main' } });
   expect(Object.values(fixture.ledger.snapshot().outbox)).toContainEqual(expect.objectContaining({ kind: 'projection', id: `bot-turn:${routineTurn.id}`, value: expect.objectContaining({ owner: 'main', source: 'routine', status: 'succeeded' }) }));
   const routine = Object.values(bot.snapshot().routines)[0]!;
+  const emptyUpdate = await bot.input('empty-update', 'No changes');
+  await finish(emptyUpdate, { update_routine: [{ routineId: routine.id }] });
+  expect(bot.snapshot().routines[routine.id]!.current).toBe(1);
+  expect(bot.snapshot().rejected).toContainEqual(expect.objectContaining({ action: 'update_routine', reason: 'An update must change schedule or prompt' }));
+  const update = await bot.input('update-routine', 'Change the report');
+  await finish(update, { update_routine: [{ routineId: routine.id, prompt: 'New daily report' }] });
+  expect(bot.snapshot().routines[routine.id]).toMatchObject({ current: 2, pending: null, armed: { version: 2 } });
   const cancelTurn = await bot.input('cancel-routine', 'Stop the daily routine');
   await finish(cancelTurn, { cancel_routine: [{ routineId: routine.id }] });
   expect(bot.snapshot().routines[routine.id]).toMatchObject({ lifecycle: 'completed', armed: null });
@@ -227,4 +236,100 @@ it('serializes a blocked cancel before resume schedules the same future key', as
   expect(calls).toEqual(['schedule', 'cancel', 'schedule']);
   expect(bot.snapshot().routines[id]!.armed!.key).toBe(original.key);
   expect((await fixture.server.wakes.pending()).map(w => w.dedupKey)).toContain(original.key);
+});
+
+it('reports a missing outcome as failure and exposes cancellation through the serial Host entrypoint', async () => {
+  await setup();
+  const missing = await bot.input('missing-outcome', 'Return a result');
+  (await running(missing)).finish({}, false);
+  await vi.waitFor(async () => { await bot.drain(); expect(bot.snapshot().turns[missing]?.status).toBe('failed'); }, { timeout: 5000 });
+  const cancelled = await bot.input('cancel-turn', 'Stop this work');
+  await running(cancelled);
+  await vi.waitFor(async () => expect(await fixture.server.tasks.attempt(bot.core.intent(cancelled)!.taskId))
+    .toMatchObject({ claimedRuntime: 'pi', ownerDeviceId: fixture.deviceId }), { timeout: 5000 });
+  await bot.cancelTurn(cancelled);
+  await vi.waitFor(async () => { await bot.drain(); expect(bot.snapshot().turns[cancelled]).toMatchObject({ status: 'failed', conclusion: 'cancelled' }); }, { timeout: 5000 });
+});
+
+it('drains immediate real SDK terminals to a fixed point without stranding a continuation', async () => {
+  await setup({}, server => ({ ...server, executions: { submit: async input => {
+    const result = await server.executions.submit(input);
+    await vi.waitFor(() => expect(fixture.adapter.sessions.has(input.taskId)).toBe(true), { timeout: 5000 });
+    fixture.adapter.sessions.get(input.taskId)!.finish({ delegate: [{ to: 'main', request: 'Continue this bounded chain' }] });
+    await vi.waitFor(async () => expect(await server.tasks.deviceTerminal(input.taskId)).toBeDefined(), { timeout: 5000 });
+    return result;
+  } } }));
+  const root = await bot.input('immediate-chain', 'Work through this chain');
+  expect(Object.values(bot.snapshot().turns)).toHaveLength(5);
+  expect(Object.values(bot.snapshot().turns).every(turn => turn.status === 'succeeded')).toBe(true);
+  expect(bot.snapshot().budgets[root]).toEqual({ continuation: 4, delegation: 0 });
+  expect(fixture.adapter.starts).toHaveLength(5);
+  expect(bot.snapshot().rejected).toContainEqual(expect.objectContaining({ action: 'delegate', reason: 'Continuation budget is 4' }));
+});
+
+it('rejects duplicate targets and option ids without consuming a second continuation', async () => {
+  await setup();
+  const root = await bot.input('duplicate-actions', 'Choose');
+  await finish(root, { delegate: [{ to: 'main', request: 'one' }, { to: 'main', request: 'two' }],
+    ask_user: { question: 'Choose', answerKind: 'single_choice', options: [{ id: 'same', label: 'A' }, { id: 'same', label: 'B' }] } });
+  expect(bot.snapshot().budgets[root]).toEqual({ continuation: 1, delegation: 0 });
+  expect(Object.values(bot.snapshot().questions)).toEqual([]);
+  expect(bot.snapshot().rejected).toEqual(expect.arrayContaining([
+    expect.objectContaining({ action: 'delegate', reason: 'Duplicate delegation target' }),
+    expect.objectContaining({ action: 'ask_user', reason: 'Duplicate option id' }),
+  ]));
+  const child = Object.values(bot.snapshot().turns).find(t => t.source === 'continuation')!;
+  await finish(child.id);
+});
+
+it('gives a user answer a new stable continuation budget', async () => {
+  await setup();
+  const root = await bot.input('answer-budget', 'Ask a question');
+  await finish(root, { ask_user: { question: 'Continue?', answerKind: 'text' } });
+  fixture.ledger.transaction(s => { stateOf(s.application).budgets[root]!.continuation = 4; });
+  const question = Object.values(bot.snapshot().questions)[0]!;
+  await bot.answer(question.id, 'Yes');
+  await bot.answer(question.id, 'Yes');
+  const answer = Object.values(bot.snapshot().turns).find(t => t.source === 'answer')!;
+  expect(answer.root).toBe(answer.id);
+  expect(bot.core.intent(answer.id)?.source).toBe('user');
+  await finish(answer.id, { delegate: [{ to: 'main', request: 'Continue after the answer' }] });
+  expect(bot.snapshot().budgets[root]!.continuation).toBe(4);
+  expect(bot.snapshot().budgets[answer.id]!.continuation).toBe(1);
+  expect(Object.values(bot.snapshot().turns).filter(t => t.source === 'answer')).toHaveLength(1);
+  const child = Object.values(bot.snapshot().turns).find(t => t.source === 'continuation')!;
+  await finish(child.id);
+});
+
+it('replays the same connector key after an external effect and a failed SQLite result commit', async () => {
+  const effects = new Map<string, string>();
+  const calls: string[] = [];
+  const options = await setup({ connector: async id => {
+    calls.push(id);
+    if (!effects.has(id)) effects.set(id, `external-${effects.size + 1}`);
+    return { externalId: effects.get(id)! };
+  } });
+  const root = await bot.input('effect-before-crash', 'Send');
+  await finish(root, { confirmable_action: [{ action: 'send_message', summary: 'Send', draft: { text: 'hello' } }] });
+  const card = Object.values(bot.snapshot().cards)[0]!;
+  const transaction = fixture.ledger.transaction.bind(fixture.ledger);
+  const fault = vi.spyOn(fixture.ledger, 'transaction').mockImplementation(apply => transaction(state => {
+    const value = apply(state);
+    if (stateOf(state.application).cards[card.id]?.result !== undefined) throw new Error('result commit lost');
+    return value;
+  }));
+  await expect(bot.decide(card.id, 'confirmed')).rejects.toThrow('result commit lost');
+  fault.mockRestore();
+  expect(effects.size).toBe(1);
+  expect(bot.snapshot().cards[card.id]).toMatchObject({ state: 'confirmed' });
+  expect(bot.snapshot().cards[card.id]!.result).toBeUndefined();
+  await bot.close();
+  extra = new HostLedger(`${fixture.root}/host.sqlite`, fixture.ledger.tenant);
+  bot = new BotCollaboration(fixture.server, extra, options);
+  await bot.recover();
+  expect(calls).toEqual([card.id, card.id]);
+  expect(effects.size).toBe(1);
+  const result = Object.values(bot.snapshot().turns).find(t => t.source === 'action_result')!;
+  expect(result.request).toContain('external-1');
+  await finish(result.id);
 });

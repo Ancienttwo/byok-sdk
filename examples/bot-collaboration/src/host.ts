@@ -3,7 +3,7 @@ import { BOT_TURN_OUTCOME_CONTRACT, validateResultOutcome } from '@byok-sdk/prot
 import type { DueWake } from '@byok-sdk/server';
 import { HostExecutionCore, type ExecutionServer, type OutcomeTransaction } from '../../host-execution-core/src/core';
 import { HostLedger } from '../../host-execution-core/src/ledger';
-import { hash, project, type ExecutionTemplate, type Json, type LedgerState } from '../../host-execution-core/src/model';
+import { hash, project, time, type ExecutionTemplate, type Json, type LedgerState } from '../../host-execution-core/src/model';
 import { enqueue } from '../../host-execution-core/src/transitions';
 import { WAKE_HORIZON_MS } from '../../host-execution-core/src/routines';
 import { json, stateOf, type CollaborationState, type Routine, type Turn } from './model';
@@ -26,7 +26,7 @@ export class BotCollaboration {
   constructor(readonly server: ExecutionServer, readonly ledger: HostLedger, private readonly options: BotOptions) {
     if (!options.botId || options.execution.payload.agentRef.agentId !== options.botId) throw new Error('Select this Bot Agent');
     if (options.execution.payload.requiredToolsets?.length) throw new Error('Bot executions cannot have connector toolsets');
-    this.now = options.now ?? Date.now;
+    this.now = () => time((options.now ?? Date.now)());
     this.core = new HostExecutionCore(server, ledger, { now: this.now, reconcileMs: 100,
       applyOutcome: (document, tx) => this.applyOutcome(document, tx) });
     ledger.transaction(s => { stateOf(s.application); });
@@ -69,22 +69,27 @@ export class BotCollaboration {
         state.rejected.push({ taskId: tx.intent.taskId, action, reason: String(error instanceof Error ? error.message : error) });
       }
     };
+    const delegated = new Set<string>();
     outcome.delegate?.forEach((action, index) => accept('delegate', () => {
       if (action.to !== this.options.botId) throw new Error('Target is not this Bot');
+      if (delegated.has(action.to)) throw new Error('Duplicate delegation target');
+      delegated.add(action.to);
       const budget = state.budgets[turn.root]!;
       if (budget.continuation >= 4) throw new Error('Continuation budget is 4');
       budget.continuation++;
       // This single Bot schema only offers self. Hop and delegation stay unchanged.
       this.addTurn(state, hash([tx.intent.taskId, 'delegate', index]), turn.root, 'continuation', action.request);
     }));
-    if (outcome.ask_user) {
+    if (outcome.ask_user) accept('ask_user', () => {
+      const question = outcome.ask_user!;
+      if (question.answerKind === 'single_choice' && new Set(question.options.map(o => o.id)).size !== question.options.length) throw new Error('Duplicate option id');
       const id = hash([tx.intent.taskId, 'ask_user']);
-      state.questions[id] = { id, turnId: turn.id, value: outcome.ask_user };
+      state.questions[id] = { id, turnId: turn.id, value: question };
       tx.publish(`question:${id}`, json(state.questions[id]));
-    }
+    });
     outcome.confirmable_action?.forEach((action, index) => {
       const id = hash([tx.intent.taskId, 'confirmable_action', index]);
-      state.cards[id] = { id, turnId: turn.id, action: json(action) as unknown as typeof state.cards[string]['action'],
+      state.cards[id] = { id, turnId: turn.id, action: { action: action.action, summary: action.summary, draft: json(action.draft) },
         state: 'pending', expiresAt: this.now() + 86_400_000 };
       tx.publish(`card:${id}`, json(state.cards[id]));
     });
@@ -107,7 +112,8 @@ export class BotCollaboration {
         }
         if (!answer.trim() || question.value.answerKind === 'single_choice' && !question.value.options.some(o => o.id === answer)) throw new Error('Invalid answer');
         question.answer = answer;
-        this.addTurn(state, hash(['answer', id]), state.turns[question.turnId]!.root, 'answer', JSON.stringify({ question: question.value, answer }));
+        const turnId = hash(['answer', id]);
+        this.addTurn(state, turnId, turnId, 'answer', JSON.stringify({ question: question.value, answer }));
       });
       await this.process();
     });
@@ -145,6 +151,13 @@ export class BotCollaboration {
     await this.process();
   });
   drain(): Promise<void> { return this.exclusive(() => this.process()); }
+  cancelTurn(id: string): Promise<void> {
+    return this.exclusive(async () => {
+      if (!this.snapshot().turns[id]) throw new Error('Turn not found');
+      await this.core.cancel(id);
+      await this.process();
+    });
+  }
   recover(): Promise<void> {
     return this.exclusive(async () => {
       await this.core.recover();
@@ -160,20 +173,22 @@ export class BotCollaboration {
       await this.process();
     });
   }
-  private sync(s: LedgerState): void {
+  private sync(s: LedgerState): boolean {
     const state = stateOf(s.application);
+    let materialized = false;
     for (const turn of Object.values(state.turns)) {
       const intent = s.intents[hash(turn.id)];
       if (!intent) {
         const schema: ResultSchema = outcomeSchema(this.options.botId, state);
         state.schemas[turn.id] = schema;
         const base = this.options.execution;
-        enqueue(s, this.ledger.tenant, { key: turn.id, source: turn.source === 'routine' ? 'routine' : turn.source === 'user' ? 'user' : 'bot',
+        enqueue(s, this.ledger.tenant, { key: turn.id, source: turn.source === 'routine' ? 'routine' : turn.source === 'user' || turn.source === 'answer' ? 'user' : 'bot',
           waitUntil: this.now() + 300_000, execution: { ...base, payload: { ...base.payload,
             instruction: `${SYSTEM_PROMPT}\n\nRequest:\n${turn.request}\n\nContextPack:\n${JSON.stringify(contextPack(state))}`,
             terminalProjection: { mode: 'result-document', contract: BOT_TURN_OUTCOME_CONTRACT, schema },
           } } });
         turn.status = 'processing';
+        materialized = true;
       } else if (intent.conclusion) {
         turn.status = intent.conclusion === 'succeeded' ? 'succeeded' : 'failed';
         turn.conclusion = intent.conclusion;
@@ -202,6 +217,7 @@ export class BotCollaboration {
         this.addTurn(state, hash(['action_result', card.id]), root, 'action_result', JSON.stringify({ cardId: card.id, state: card.state, result: card.result, error: card.error }));
       }
     }
+    return materialized;
   }
   private async flushWakes(): Promise<void> {
     // All mutations and store calls run on this instance's single serial chain.
@@ -246,15 +262,18 @@ export class BotCollaboration {
     }
   }
   private async process(): Promise<void> {
-    await this.core.drain();
-    this.ledger.transaction(s => this.sync(s));
-    await this.flushWakes();
-    await this.flushCards();
-    this.ledger.transaction(s => this.sync(s));
-    await this.core.drain();
-    this.ledger.transaction(s => this.sync(s));
-    await this.flushWakes();
-    await this.core.drain();
+    let more: boolean;
+    do {
+      await this.core.drain();
+      let materialized = this.ledger.transaction(s => this.sync(s));
+      await this.flushCards();
+      materialized = this.ledger.transaction(s => this.sync(s)) || materialized;
+      await this.flushWakes();
+      const ledger = this.ledger.snapshot();
+      // An immediate runtime terminal can create another turn on any pass.
+      // Drain to a fixed point, so no application-only turn can lose its wake.
+      more = materialized || Object.values(stateOf(ledger.application).turns).some(turn => !ledger.intents[hash(turn.id)]);
+    } while (more);
     clearTimeout(this.timer);
     if (!this.closed) {
       // Durable state is authority. The timer only retries outbox work and expires cards.

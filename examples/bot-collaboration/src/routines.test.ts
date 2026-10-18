@@ -106,3 +106,11 @@ it('does not commit an invalid update and audits calendar errors', () => {
   arm(state, routine, now, now);
   expect(routine.status).toBe('ok');
 });
+
+it('rejects empty updates and stores duplicate weekdays as a set', () => {
+  const { state, routine } = setup();
+  expect(() => updateRoutine(state, 'main', { routineId: routine.id }, now)).toThrow('An update must change schedule or prompt');
+  expect(routine).toMatchObject({ current: 1, pending: null, generation: 1 });
+  updateRoutine(state, 'main', { routineId: routine.id, schedule: { ...schedule, daysOfWeek: ['mon', 'mon'] } }, now);
+  expect(routine.versions[2]?.schedule).toEqual({ ...schedule, daysOfWeek: ['mon'] });
+});

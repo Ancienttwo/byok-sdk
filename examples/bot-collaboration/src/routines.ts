@@ -22,6 +22,7 @@ export function arm(state: CollaborationState, routine: Routine, after: number, 
 function check(definition: Definition): void {
   const check = checkRoutineSchedule(definition.schedule);
   if (!check.ok) throw new Error(`${check.code}: ${check.message}`);
+  if ('daysOfWeek' in definition.schedule) definition.schedule = { ...definition.schedule, daysOfWeek: [...new Set(definition.schedule.daysOfWeek)] };
 }
 export function createRoutine(state: CollaborationState, owner: string, taskId: string, index: number, action: CreateRoutineAction, now: number): Routine {
   if (action.target !== undefined) throw new Error('An ordinary Bot cannot supply target');
@@ -48,6 +49,7 @@ export function switchVersion(state: CollaborationState, routine: Routine, now: 
 }
 export function updateRoutine(state: CollaborationState, owner: string, action: UpdateRoutineAction, now: number): void {
   const routine = owned(state, owner, action.routineId);
+  if (action.schedule === undefined && action.prompt === undefined) throw new Error('An update must change schedule or prompt');
   const version = Math.max(...Object.keys(routine.versions).map(Number)) + 1;
   const prior = routine.versions[routine.pending ?? routine.current]!;
   const definition: Definition = { ...prior, version, schedule: action.schedule ?? prior.schedule, prompt: action.prompt ?? prior.prompt };

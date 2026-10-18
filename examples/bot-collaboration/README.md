@@ -21,7 +21,7 @@ per tenant and ledger. Give it a complete Agent execution template and a Host
 connector. Route the embedded server's `wake.consume` to `bot.consume`.
 Call `bot.recover()` after startup. Call `bot.close()` before closing the SDK
 server or the ledger. Do not call the K4 core's mutation methods directly.
-Use `input`, `answer`, `decide`, `updateRoutine`, and `setRoutineLifecycle`.
+Use `input`, `answer`, `decide`, `cancelTurn`, `updateRoutine`, and `setRoutineLifecycle`.
 Read `snapshot` or upload K4 projections with `core.flushProjections`.
 
 The execution template selects this Bot's Agent. It must use a runtime profile
@@ -40,6 +40,9 @@ keeps hop at zero and does not consume the delegation budget. A refused action
 enters `ContextPack.rejectedActions`. Other accepted actions still apply.
 
 Questions support text and single choice. An answer creates an `answer` turn.
+It is a new user input with its own stable budget root. Replaying the same
+answer does not reset that budget. Empty updates and duplicate targets or
+option ids are refused. Duplicate weekdays are stored as a set.
 A confirmation card starts as `pending`. The owner can choose `confirmed` or
 `rejected`. A card becomes `expired` after 24 hours. Only a committed
 `confirmed` card calls the Host connector. All three decisions return as an
@@ -81,6 +84,8 @@ finishes with its old snapshot. To stop an execution too, use K4 cancellation
 explicitly. Routine results are owner turns with source `routine`.
 
 The wake outbox has persistent sequence numbers and one serial consumer.
+The Host drains application commands until all new turns have a K4 intent.
+An immediate terminal cannot leave a continuation without a wake.
 A schedule must match the active generation and armed slot. A cancel cannot
 be overtaken by a later schedule for the same key. Failed operations retain
 a retry time. A process timer retries them. Startup repairs a missing armed
