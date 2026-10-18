@@ -123,6 +123,25 @@ describe('resumed Pi session tools (Pi 1.3)', () => {
     expect(resumed).toEqual(fresh);
   });
 
+  it('drops pending transcript tools when the loadout is empty', async () => {
+    const { resumed, fresh } = await resumedAndFresh(dirs([]), ['late_off', 'late_deferred', 'late_codemode'],
+      { atLoad: [], atStart: [{ name: 'late_off', defaultActive: false }, { name: 'late_deferred', exposure: 'deferred' }, { name: 'late_codemode', exposure: 'codemode' }] });
+    expect(resumed).toEqual([]);
+    expect(resumed).toEqual(fresh);
+  });
+
+  it('refuses a resume with no declarable tool instead of keeping pending transcript tools', async () => {
+    const paths = dirs();
+    const file = previousTranscript(paths, ['late_off']);
+    const registrations = { atLoad: [], atStart: [{ name: 'late_off', defaultActive: false }] };
+    const excludeTools = ['read', 'bash', 'powershell', 'edit', 'write', 'grep', 'find', 'ls'];
+    await expect(open(paths, SessionManager.open(file, paths.sessionDir), registrations, { excludeTools, reset: true }))
+      .rejects.toThrow('cannot drop its restored pending tools');
+    // Native Pi 1.3 would otherwise offer the inactive tool; a new open does not.
+    expect(await open(paths, SessionManager.open(file, paths.sessionDir), registrations, { excludeTools, reset: false })).toEqual(['late_off']);
+    expect(await open(paths, SessionManager.create(paths.cwd, paths.sessionDir), registrations, { excludeTools, reset: true })).toEqual([]);
+  });
+
   it('leaves a new session unchanged', async () => {
     const paths = dirs();
     const registrations = { atLoad: [{ name: 'mcp_A' }], atStart: [{ name: 'late_on' }] };

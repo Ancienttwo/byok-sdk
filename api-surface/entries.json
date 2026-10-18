@@ -603,12 +603,12 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 88112,
+          "line": 88113,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 96291,
+          "line": 96292,
           "rule": "opaque import()"
         },
         {
@@ -928,12 +928,12 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host-sealed.js",
-          "line": 88037,
+          "line": 88038,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host-sealed.js",
-          "line": 95562,
+          "line": 95563,
           "rule": "opaque import()"
         },
         {

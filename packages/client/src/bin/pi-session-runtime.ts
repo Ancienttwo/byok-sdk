@@ -14,23 +14,26 @@ function fail(message: string): never { throw new Error(`byok-pi-rpc: ${message}
  * native defaults and default-active extension tools before `session_start`,
  * so it offers the same tools as a new session with the same options. Pi
  * still applies `excludeTools` and exposure rules.
+ *
+ * The restore also keeps the transcript's not-yet-registered tools pending,
+ * and a registration during `session_start` would activate them. Pi drops
+ * pending tools only when a call deactivates an active tool, so the reset
+ * activates every declarable tool, empties the set, then sets the loadout.
+ * With no declarable tool, Pi offers no way to drop them, so the open fails.
+ * The SDK hosts always register their own tools at load.
  */
 export function resetResumedPiTools(
   session: CreateAgentSessionResult['session'], settingsManager: SettingsManager, cwd: string,
 ): void {
   if (session.sessionManager.buildSessionContext().messages.length === 0) return;
+  const declarable = session.getAllTools().filter((tool) => tool.exposure === 'direct' || tool.exposure === 'model-only');
+  if (declarable.length === 0) throw new Error('a resumed Pi session with no declarable tool cannot drop its restored pending tools');
   const defaults = settingsManager.getDefaultTools() ?? createCodingTools(cwd).map((tool) => tool.name);
-  const extensions = session.getAllTools().filter((tool) =>
-    tool.sourceInfo.path !== `builtin:${tool.name}`
-    && session.getToolDefinition(tool.name)?.defaultActive !== false
-    && (tool.exposure === 'direct' || tool.exposure === 'model-only'));
-  const loadout = [...defaults, ...extensions.map((tool) => tool.name)];
-  // The restore also keeps the transcript's not-yet-registered tools pending,
-  // and a later registration would activate them. Pi drops pending tools only
-  // when a call deactivates an active tool, so empty the loadout between.
-  session.setActiveToolsByName(loadout);
+  const extensions = declarable.filter((tool) =>
+    tool.sourceInfo.path !== `builtin:${tool.name}` && session.getToolDefinition(tool.name)?.defaultActive !== false);
+  session.setActiveToolsByName(declarable.map((tool) => tool.name));
   session.setActiveToolsByName([]);
-  session.setActiveToolsByName(loadout);
+  session.setActiveToolsByName([...defaults, ...extensions.map((tool) => tool.name)]);
 }
 
 /** Session ids are native minted references, never fuzzy search terms. */
