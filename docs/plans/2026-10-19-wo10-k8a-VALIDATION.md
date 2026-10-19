@@ -279,3 +279,72 @@ after 13 short inputs. `/tmp/wo10-local-admission-red.log` exited 1.
 
 A second read-only review will check these corrections. Cross-Bot delegation
 stays withdrawn and deferred to K8b. No packages/ source is changed.
+
+## Local review result and item map
+
+The second independent read-only Codex review passed at `194fa0bc`.
+All three admission findings are closed. The reviewer also ran 36 in-memory
+counterexamples across candidate positions, turn counts, byte budgets, and
+UTF-8/escaped data. No weakened assertion was found. Final root checks are
+recorded separately below. No extra cross-Bot work is included.
+
+Paths in this table are relative to `examples/bot-collaboration/src` unless
+prefixed with `K4/` or `README`. Baseline commits are named explicitly.
+
+| Review item | Commit | Source | Test |
+| --- | --- | --- | --- |
+| Cross-Bot delegation 已撤除; deferred to K8b | `010ac94c` | `schema.ts:18`; `README.md:4` | `schema-budget.test.ts:28` |
+| P1-2 retry timer ignores blocked followers | baseline `fae8f2d6` | `host.ts:365` | `wake-retry.test.ts:35`, `:60` |
+| P2-1 failed routine does not block another | baseline `fae8f2d6` | `host.ts:282` | `wake-retry.test.ts:35` |
+| P2-2 recent window and byte admission | `4a892e1c`, `194fa0bc` | `schema.ts:36`; `host.ts:202` | `context-budget.test.ts:31`, `:49`, `:95`, `:105` |
+| P2-2 feedback consumption and frozen input | `4a892e1c` | `host.ts:239` | `context-budget.test.ts:78`; `host.test.ts:338` |
+| P2-2 blocked cancellation and routine settlement | `194fa0bc` | `host.ts:169` | `context-budget.test.ts:114`, `:129` |
+| P2-3 bounded connector and failed timeout | baseline `79aad194`, `bfea8795` | `host.ts:318`, `:344` | `acceptance.test.ts:51` |
+| P2-4 self-continuation pre-submit crash | `bfea8795` | `host.ts:235`; K4 frozen execution core | `host.test.ts:360` |
+| P3-1 durable card projection marker | baseline `79aad194` | `host.ts:268` | `acceptance.test.ts:80` |
+| P3-2 successful cancel clears stale retry status | baseline `79aad194` | `host.ts:292` | `wake-retry.test.ts:96` |
+| P3-3 composer checked/flat policy and bounds | `b7c36029`, `4a892e1c` | `schema.ts:15`; `host.ts:222` | `schema-budget.test.ts:9`, `:21`, `:28`; `context-budget.test.ts:63` |
+| P3-4 public K4 package imports | `b7c36029` | `K4/src/index.ts:9`; `host.ts:3` | `host.test.ts:35`; both example suites |
+| P3-5 malformed wake audit and resolve | baseline `79aad194` | `routines.ts:75` | `routines.test.ts:118` |
+| P3-6 documented five-minute wait | `010ac94c` | `README.md:40`; `host.ts:235` | `K4/src/unclaimed-expiry.test.ts:14` |
+| P3-7 context frozen on K4 enqueue | `4a892e1c`, `bfea8795`, `010ac94c` | `host.ts:235`; `README.md:39` | `host.test.ts:338`, `:360` |
+| P3-8 368-day boundary title | baseline `79aad194` | `K4/src/scheduling-recovery.test.ts:44` | Same test; all assertions retained |
+| P3-9 state version guard | baseline `79aad194` | `model.ts:35` | `acceptance.test.ts:128` |
+| Retained action order and decision errors | baseline `79aad194` | `host.ts:80`, `:135` | `acceptance.test.ts:101`, `:112`, `:138` |
+
+Cross-Bot withdrawal is a scope correction, not a pretend implementation or
+an empty revert. It was never written in this local round. packages/ and the
+accepted WO-07/WO-368 source are unchanged from `04d18bdc`.
+
+## Final local verification
+
+Source commit: `194fa0bc489b70c222b6003427cdd77dccb85f10`.
+The following checks all passed on this source. Later edits are documentation
+only. Raw logs and exit records are in `/tmp/wo10-local-final-checks/`.
+
+| Command | Exit | Seconds |
+| --- | --- | --- |
+| `bun run build` | 0 | 11.65 |
+| `bun run typecheck` | 0 | 6.82 |
+| `bun run --cwd examples/bot-collaboration test` | 0 | 24.22 |
+| `bun run --cwd examples/host-execution-core test` | 0 | 30.81 |
+| `bun run test` | 0 | 662.24 |
+| `bun run check:api-surface` | 0 | 7.45 |
+| `bun run check:version-authority` | 0 | 0.09 |
+| `git diff --check` | 0 | Passed |
+
+The explicit Bot suite passed 48/48; K4 passed 38/38. The root test command also
+passed. Nine API goldens match. Version authority passed. Docker-dependent
+dataplane and platform cases retain their original skip conditions. No test
+was disabled to obtain these results.
+
+Local commit sequence: `04d18bdc`, `b7c36029`, `4a892e1c`, `bfea8795`,
+`010ac94c`, `194fa0bc`, plus the final documentation commit.
+The normal main merge is retained. #531 was not merged in reverse.
+
+RESULT: DONE for this authorized local single Bot repair scope.
+Cross-Bot delegation is 已撤除 from #530 and deferred to K8b.
+No paid Pi measurement, push, gh pr edit, rebase, force-push, branch deletion,
+or deployment was performed. The only main-checkout output is the explicitly
+requested ignored `_ops/bot-wo/PR-530-body.md` text file. No tracked main file
+or packages/ source was edited.

@@ -32,3 +32,15 @@ ledger. A new HostLedger connection and recover reuse the task id and payload.
 
 K4 already has Draft #532. No restack, new PR, push, gh edit, deployment, or
 packages/ source change is part of this local-only work.
+
+## Observed verification
+
+All five required root commands passed at source `194fa0bc`. The explicit
+Bot suite passed 48 tests. The K4 suite passed 38 tests. Diff check passed.
+The second independent read-only review passed and closed its three admission
+findings. Test changes, reasons, commit mapping, and raw log locations are in
+`2026-10-19-wo10-k8a-VALIDATION.md`.
+
+The requested PR body is a local file at
+`/Users/chris/Projects/byok-sdk/_ops/bot-wo/PR-530-body.md`.
+No push or gh pr edit is performed.
