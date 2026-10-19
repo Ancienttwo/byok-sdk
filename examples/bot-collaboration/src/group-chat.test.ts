@@ -129,6 +129,7 @@ it('invalidates waiting seats and audits running results after member removal', 
   const { profiles, room } = await createTeam(); await ready(profiles);
   const round = await host().roomInput('remove', room.id, 'Discuss', profiles.map(b => b.id));
   const first = seats(round)[0]!; await running(first.id);
+  await vi.waitFor(async () => { await host().drain(); expect(fixture.ledger.snapshot().executions[host().core.intent(first.id)!.taskId]?.started).toBe(true); }, { timeout: 5000 });
   await host().updateRoom(room.id, { members: [profiles[2]!.id] });
   expect(seats(round).slice(0, 2).every(s => s.status === 'removed')).toBe(true);
   expect(host().core.intent(seats(round)[1]!.id)).toBeUndefined();

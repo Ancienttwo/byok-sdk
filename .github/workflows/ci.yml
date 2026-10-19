@@ -130,6 +130,22 @@ jobs:
         if: ${{ always() && steps.tmpdir-snapshot.outcome == 'success' }}
         run: node scripts/ci/check-tmpdir-leaks.mjs verify "$RUNNER_TEMP/tmpdir-before.txt"
 
+  agent-memory-helper-linux:
+    name: agent memory helper non-Darwin volume checks (Linux, fixed Go)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: packages/client/native/agent-memory-fs/go.mod
+
+      - name: Test Go helper and non-Darwin volume identity
+        working-directory: packages/client/native/agent-memory-fs
+        run: GOTOOLCHAIN=go1.26.5 go test ./...
+
   # The Go helper is admitted only on macOS. Keep its toolchain and the
   # TypeScript-to-Go integration test in one independent job so the admission
   # path cannot be hidden behind the Linux full-suite skips.
@@ -191,7 +207,7 @@ jobs:
 
       - name: Run SDK helper, intent and capability contracts
         run: |
-          bun run --filter @byok-sdk/client test -- src/__tests__/agent-memory-fs-helper.test.ts src/__tests__/agent-memory-helper-release.test.ts src/__tests__/agent-memory-helper-crash.test.ts src/__tests__/agent-memory-intent.test.ts src/__tests__/daemon-conn-hello-capabilities.test.ts src/__tests__/agent-home-directory-barrier.test.ts
+          bun run --filter @byok-sdk/client test -- src/__tests__/agent-memory-fs-helper.test.ts src/__tests__/agent-memory-helper-release.test.ts src/__tests__/agent-memory-helper-release-errors.test.ts src/__tests__/agent-memory-helper-admission.test.ts src/__tests__/agent-memory-helper-crash.test.ts src/__tests__/agent-memory-intent.test.ts src/__tests__/daemon-conn-hello-capabilities.test.ts src/__tests__/agent-home-directory-barrier.test.ts
 
       - name: Prove real Node and Bun helper identity
         run: |
