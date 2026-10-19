@@ -30,10 +30,25 @@ export function outcomeSchema(botId: string, state: CollaborationState) {
     return compose('flat');
   }
 }
-export function contextPack(state: CollaborationState) {
+export const DEFAULT_CONTEXT_MAX_BYTES = 32 * 1024;
+export const DEFAULT_CONTEXT_TURN_LIMIT = 12;
+
+export function contextPack(state: CollaborationState, turnLimit = DEFAULT_CONTEXT_TURN_LIMIT) {
+  if (!Number.isSafeInteger(turnLimit) || turnLimit < 1) throw new Error('Invalid ContextPack turn limit');
+  const turns = Object.values(state.turns);
   return {
-    rejectedActions: state.rejected,
+    historyWindow: { turnLimit, omittedTurns: Math.max(0, turns.length - turnLimit) },
+    rejectedActions: state.rejected.filter(row => !row.consumedBy),
     questions: Object.values(state.questions), cards: Object.values(state.cards),
-    routines: Object.values(state.routines), turns: Object.values(state.turns),
+    routines: Object.values(state.routines).map(routine => ({
+      id: routine.id, owner: routine.owner, current: routine.current, pending: routine.pending,
+      lifecycle: routine.lifecycle, status: routine.status,
+      definition: routine.versions[routine.current], lastError: routine.errors.at(-1),
+    })),
+    turns: turns.slice(-turnLimit).map(turn => ({
+      id: turn.id, root: turn.root, source: turn.source, request: turn.request,
+      hop: turn.hop, status: turn.status, conclusion: turn.conclusion,
+      outcomeSummary: turn.outcome && typeof turn.outcome === 'object' && !Array.isArray(turn.outcome) ? Object.keys(turn.outcome) : [],
+    })),
   };
 }

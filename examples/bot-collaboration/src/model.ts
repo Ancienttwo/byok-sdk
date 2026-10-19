@@ -3,8 +3,8 @@ import type { Json } from '@byok-sdk/example-host-execution-core';
 
 export interface Turn {
   id: string; root: string; source: 'user' | 'continuation' | 'answer' | 'action_result' | 'routine';
-  request: string; hop: number; status: 'queued' | 'processing' | 'succeeded' | 'failed';
-  outcome?: Json; conclusion?: string; reported?: boolean;
+  request: string; hop: number; status: 'queued' | 'processing' | 'succeeded' | 'failed' | 'blocked';
+  outcome?: Json; conclusion?: string; reported?: boolean; blockedReason?: string;
 }
 export interface Card {
   id: string; turnId: string; action: ConfirmableAction<Json>;
@@ -30,7 +30,7 @@ export interface WakeOp {
   sequence: number; routineId: string; generation: number; kind: 'schedule' | 'cancel'; slot: Slot;
   state: 'pending' | 'done' | 'obsolete'; error?: string; retryAt?: number;
 }
-export interface Rejection { taskId: string; action: string; reason: string }
+export interface Rejection { taskId: string; action: string; reason: string; consumedBy?: string }
 export interface CollaborationState {
   version: 1;
   turns: Record<string, Turn>; budgets: Record<string, { continuation: number; delegation: number }>;

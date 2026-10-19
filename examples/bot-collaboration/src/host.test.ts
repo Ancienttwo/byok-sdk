@@ -334,3 +334,25 @@ it('replays the same connector key after an external effect and a failed SQLite 
   expect(result.request).toContain('external-1');
   await finish(result.id);
 });
+
+it('delivers rejected feedback to the Bot once while preserving the first frozen ContextPack', async () => {
+  await setup();
+  const root = await bot.input('feedback-root', 'Create a report');
+  await finish(root, { create_routine: [{ localId: 'new_routine_1', schedule: { hour: 9, minute: 0, dayOfMonth: 31, month: 4, tz: 'UTC' }, prompt: 'invalid' }],
+    delegate: [{ to: 'main', request: 'Explain the refusal' }] });
+  const child = Object.values(bot.snapshot().turns).find(t => t.source === 'continuation')!;
+  const task = bot.core.intent(child.id)!.taskId;
+  const frozen = structuredClone(fixture.ledger.snapshot().executions[task]!.input);
+  const firstContext = JSON.parse(String(frozen.payload.instruction).split('\n\nContextPack:\n')[1]!);
+  expect(firstContext.rejectedActions[0].reason).toContain('schedule_unreachable');
+  expect(bot.snapshot().rejected[0]!.consumedBy).toBe(child.id);
+  await finish(child.id);
+  await vi.waitFor(() => expect(fixture.daemon.status().activeTaskCount).toBe(0), { timeout: 5000 });
+  fixture.ledger.transaction(s => { stateOf(s.application).rejected.push({ taskId: 'new-policy', action: 'delegate', reason: 'new-feedback' }); });
+  const next = await bot.input('feedback-next', 'What changed?');
+  const input = fixture.ledger.snapshot().executions[bot.core.intent(next)!.taskId]!.input;
+  const nextContext = JSON.parse(String(input.payload.instruction).split('\n\nContextPack:\n')[1]!);
+  expect(nextContext.rejectedActions.map((r: { reason: string }) => r.reason)).toEqual(['new-feedback']);
+  expect(fixture.ledger.snapshot().executions[task]!.input).toEqual(frozen);
+  await finish(next);
+});

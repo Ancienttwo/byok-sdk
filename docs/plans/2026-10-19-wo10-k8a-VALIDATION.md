@@ -206,3 +206,26 @@ round, so no revert is needed. Ordinary merge `04d18bdc` syncs origin/main at
 The new scope permits ContextPack budgets and K4 package exports in this branch.
 The previous PENDING-AIMPACT notes below the historical checks are superseded
 for these two implementation items. No PRD text is changed.
+
+### P2-2 ContextPack tests and policy
+
+- New `context-budget.test.ts` checks the declared recent window, omitted-turn
+  count, outcome summaries, current routine definitions, unseen rejections,
+  UTF-8 overflow blocking, no execution or timer spin while blocked, flat
+  schema overflow blocking, and rejection release after unstarted cancellation.
+- The schema-block integration case asserts block/no intent and retention of
+  authorized ids. Its first draft incorrectly required two composer calls per
+  Host drain. One drain has two sync passes. That incidental call-count check
+  was replaced with semantic assertions. `schema-budget.test.ts` still proves
+  exactly one checked attempt and one flat fallback per schema composition.
+- New `host.test.ts` case uses the real SDK and daemon to check one-time Bot
+  feedback and frozen ContextPack identity. Existing assertions stay unchanged.
+- `routines.test.ts` binds the same horizon equality assertion to the public
+  `WAKE_MAX_FUTURE_MS` name adopted from #523. No numeric expectation changes.
+
+Defaults: 12 recent turns and 32 KiB canonical UTF-8 ContextPack JSON. Selected
+turns carry action-name summaries, not full outcome documents. The window
+reports its omitted count. Only current routine definitions travel. Rejected
+actions are reserved by a frozen input; unstarted terminal failure releases
+that reservation. A pack above its byte cap blocks with a persisted reason.
+Blocked turns do not schedule a retry loop. These limits do not trim strings.

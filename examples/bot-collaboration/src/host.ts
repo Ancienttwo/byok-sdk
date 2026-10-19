@@ -1,5 +1,5 @@
 import type { BotTurnOutcome, ResultSchema, UpdateRoutineAction } from '@byok-sdk/protocol';
-import { BOT_TURN_OUTCOME_CONTRACT, validateResultOutcome } from '@byok-sdk/protocol';
+import { BOT_TURN_OUTCOME_CONTRACT, BotTurnOutcomeSchemaError, validateResultOutcome } from '@byok-sdk/protocol';
 import type { DueWake } from '@byok-sdk/server';
 import { HostExecutionCore, type ExecutionServer, type OutcomeTransaction } from '@byok-sdk/example-host-execution-core';
 import { HostLedger } from '@byok-sdk/example-host-execution-core';
@@ -7,7 +7,7 @@ import { hash, project, time, type ExecutionTemplate, type Json, type LedgerStat
 import { enqueue } from '@byok-sdk/example-host-execution-core';
 import { WAKE_HORIZON_MS } from '@byok-sdk/example-host-execution-core';
 import { json, stateOf, type CollaborationState, type Routine, type Turn } from './model';
-import { contextPack, outcomeSchema, SYSTEM_PROMPT } from './schema';
+import { contextPack, outcomeSchema, SYSTEM_PROMPT, DEFAULT_CONTEXT_MAX_BYTES, DEFAULT_CONTEXT_TURN_LIMIT } from './schema';
 import { arm, consumeRoutine, createRoutine, lifecycle, operation, owned, switchVersion, updateRoutine } from './routines';
 
 export interface BotOptions {
@@ -16,6 +16,8 @@ export interface BotOptions {
   connector: (id: string, action: string, draft: Json, signal: AbortSignal) => Promise<Json>;
   /** The Host also enforces this limit when a connector ignores cancellation. */
   connectorTimeoutMs?: number;
+  contextMaxBytes?: number;
+  contextTurnLimit?: number;
 }
 
 /** Copy-and-own Host example. Use one instance per ledger tenant. */
@@ -26,12 +28,17 @@ export class BotCollaboration {
   private closed = false;
   private readonly now: () => number;
   private readonly connectorTimeoutMs: number;
+  private readonly contextMaxBytes: number;
+  private readonly contextTurnLimit: number;
   constructor(readonly server: ExecutionServer, readonly ledger: HostLedger, private readonly options: BotOptions) {
     if (!options.botId || options.execution.payload.agentRef.agentId !== options.botId) throw new Error('Select this Bot Agent');
     if (options.execution.payload.requiredToolsets?.length) throw new Error('Bot executions cannot have connector toolsets');
     this.now = () => time((options.now ?? Date.now)());
     this.connectorTimeoutMs = time(options.connectorTimeoutMs ?? 30_000);
     if (this.connectorTimeoutMs < 1 || this.connectorTimeoutMs > 2_147_483_647) throw new Error('Invalid connector timeout');
+    this.contextMaxBytes = time(options.contextMaxBytes ?? DEFAULT_CONTEXT_MAX_BYTES);
+    this.contextTurnLimit = time(options.contextTurnLimit ?? DEFAULT_CONTEXT_TURN_LIMIT);
+    if (this.contextMaxBytes < 1 || this.contextTurnLimit < 1) throw new Error('Invalid ContextPack limits');
     this.core = new HostExecutionCore(server, ledger, { now: this.now, reconcileMs: 100,
       applyOutcome: (document, tx) => this.applyOutcome(document, tx) });
     ledger.transaction(s => { stateOf(s.application); });
@@ -181,6 +188,12 @@ export class BotCollaboration {
       await this.process();
     });
   }
+  private blockTurn(state: LedgerState, turn: Turn, reason: string): void {
+    if (turn.blockedReason !== reason) project(state, `blocked:${turn.id}:${hash(reason)}`, {
+      owner: this.options.botId, turnId: turn.id, reason,
+    });
+    turn.status = 'blocked'; turn.blockedReason = reason;
+  }
   private sync(s: LedgerState): boolean {
     const state = stateOf(s.application);
     // Refresh passive state before any new offer freezes its ContextPack.
@@ -191,17 +204,34 @@ export class BotCollaboration {
     for (const turn of Object.values(state.turns)) {
       const intent = s.intents[hash(turn.id)];
       if (!intent) {
-        const schema: ResultSchema = outcomeSchema(this.options.botId, state);
+        turn.status = 'queued';
+        let schema: ResultSchema;
+        try { schema = outcomeSchema(this.options.botId, state); } catch (error) {
+          if (!(error instanceof BotTurnOutcomeSchemaError) || error.code !== 'schema-over-budget') throw error;
+          this.blockTurn(s, turn, `Outcome schema over budget after flat fallback: ${error.message}`);
+          continue;
+        }
+        const context = JSON.stringify(contextPack(state, this.contextTurnLimit));
+        const bytes = Buffer.byteLength(context, 'utf8');
+        if (bytes > this.contextMaxBytes) {
+          this.blockTurn(s, turn, `ContextPack is ${bytes} bytes; budget is ${this.contextMaxBytes} bytes`);
+          continue;
+        }
         state.schemas[turn.id] = schema;
         const base = this.options.execution;
         enqueue(s, this.ledger.tenant, { key: turn.id, source: turn.source === 'routine' ? 'routine' : turn.source === 'user' || turn.source === 'answer' ? 'user' : 'bot',
           waitUntil: this.now() + 300_000, execution: { ...base, payload: { ...base.payload,
-            instruction: `${SYSTEM_PROMPT}\n\nRequest:\n${turn.request}\n\nContextPack:\n${JSON.stringify(contextPack(state))}`,
+            instruction: `${SYSTEM_PROMPT}\n\nRequest:\n${turn.request}\n\nContextPack:\n${context}`,
             terminalProjection: { mode: 'result-document', contract: BOT_TURN_OUTCOME_CONTRACT, schema },
           } } });
+        for (const rejection of state.rejected) if (!rejection.consumedBy) rejection.consumedBy = turn.id;
+        delete turn.blockedReason;
         turn.status = 'processing';
         materialized = true;
       } else if (intent.conclusion) {
+        if (intent.conclusion !== 'succeeded' && !s.executions[intent.taskId]!.started) {
+          for (const rejection of state.rejected) if (rejection.consumedBy === turn.id) delete rejection.consumedBy;
+        }
         turn.status = intent.conclusion === 'succeeded' ? 'succeeded' : 'failed';
         turn.conclusion = intent.conclusion;
         if (!turn.reported) {
@@ -313,7 +343,7 @@ export class BotCollaboration {
       const ledger = this.ledger.snapshot();
       // An immediate runtime terminal can create another turn on any pass.
       // Drain to a fixed point, so no application-only turn can lose its wake.
-      more = materialized || Object.values(stateOf(ledger.application).turns).some(turn => !ledger.intents[hash(turn.id)]);
+      more = materialized || Object.values(stateOf(ledger.application).turns).some(turn => turn.status !== 'blocked' && !ledger.intents[hash(turn.id)]);
     } while (more);
     clearTimeout(this.timer);
     if (!this.closed) {
