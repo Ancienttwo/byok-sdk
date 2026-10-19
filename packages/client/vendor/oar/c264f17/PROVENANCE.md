@@ -1,6 +1,6 @@
-# OAR beea52c private runtime fork
+# OAR c264f17 private runtime fork
 
-Source: https://github.com/botiverse/oar, version 0.66.0, fixed commit `beea52cef61391351234edc025a481875035e68c`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
+Source: https://github.com/botiverse/oar, version 0.67.0, fixed commit `c264f17040dd9513b43300886a80f3f6eddde7b1`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
 
 `source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 55 source files plus LICENSE. Fifty source files keep upstream bytes. Five source files contain BYOK changes. The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls. No Cursor, ACP, CLI, arena, executable manager, other runtime or branded resources are included.
 
@@ -316,3 +316,14 @@ The five maintained files keep their BYOK deltas. Only their change notices name
 Upstream 0.63.0 to 0.66.0 also changes the antigravity runtime, `serveMcpTools` and its HTTP server, and adds per-runtime package entries with lazy ACP loading. These modules remain outside the selected closure. No upstream npm dependency enters the SDK.
 
 Build assets copy this source's LICENSE, PROVENANCE.md and source-manifest.json to `dist/assets/provenance/oar/beea52c/`.
+
+### 0.66.0 → 0.67.0 re-vendor
+
+The new base is tag v0.67.0, commit `c264f17040dd9513b43300886a80f3f6eddde7b1`.
+One selected path changed upstream: `contracts/records.ts`. It is not a maintained file and keeps the upstream bytes. The change is one JSDoc comment on `tool_call_ended.exitCode`; no type changes. The import closure does not change.
+
+The five maintained files keep their BYOK deltas. Only their change notices name the new base.
+
+Upstream 0.66.1 to 0.67.0 also changes the executable manager (Windows npm and pnpm shim launch), the pi and pi-durable runtimes (Pi 1.3.0, resumed tool reset, command exit codes) and adds the `forms` entry. These modules remain outside the selected closure. No upstream npm dependency enters the SDK.
+
+Build assets copy this source's LICENSE, PROVENANCE.md and source-manifest.json to `dist/assets/provenance/oar/c264f17/`.

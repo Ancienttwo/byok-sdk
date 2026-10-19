@@ -2,7 +2,7 @@ import type { AgentMessageDraftEvent } from './types';
 export type { AgentMessageDraftEvent } from './types';
 import { WakeScheduler } from './wakes/scheduler';
 import type { WakeRecord, WakeScheduleInput, WakeScheduleResult } from './wakes/types';
-export { WakeHookMissingError, WakeConflictError, WakeInputError, WakeClosedError, MAX_FUTURE_MS } from './wakes/types';
+export { WakeHookMissingError, WakeConflictError, WakeInputError, WakeClosedError, WAKE_MAX_FUTURE_MS } from './wakes/types';
 export type { DueWake, WakeRecord, WakeScheduleInput, WakeScheduleResult, WakeConsumer, WakeInputErrorCode } from './wakes/types';
 import { MaintenanceScheduler, assertMaintenanceInterval, DEFAULT_MAINTENANCE_INTERVAL_MS } from './maintenance-scheduler';
 import { resolveRetentionPolicy, DEFAULT_MAINTENANCE_LIMIT, ByokCloudError, type MaintenanceReport } from '@byok-sdk/cloud';
