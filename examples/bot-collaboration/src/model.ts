@@ -60,8 +60,11 @@ export interface Delegation {
   /** A chain Turn still open at the verdict. Its later terminal goes to audit only. */
   lateTurnId?: string;
 }
-/** One A outcome. `slots` are the prepaid A reply units of this batch. */
-export interface Batch { id: string; delegationIds: string[]; slots: string[] }
+/**
+ * One A outcome. `slots` are the prepaid A reply units of this batch.
+ * `released` is set at the first report, or when every accepted delegation is uncertain (§3.5).
+ */
+export interface Batch { id: string; delegationIds: string[]; slots: string[]; released?: true }
 /** `turnId` is the Turn that holds the unit. A free A slot has none. */
 export interface Unit { id: string; root: string; state: 'reserved' | 'spent' | 'released'; turnId?: string }
 export interface AcceptedReply {

@@ -269,14 +269,15 @@ also stays outside this history-window change.
 
 ## Cross-Bot delegation
 
-This section covers slices X1 and X2 of `docs/plans/2026-10-19-k8b-cross-bot.md`.
-A Bot can delegate one request to another Bot of the same team. The `to` enum
+This section covers slices X1, X2, X2M and X3 of
+`docs/plans/2026-10-19-k8b-cross-bot.md`.
+A Bot can delegate requests to other Bots of the same team. The `to` enum
 lists this Bot first, then each active team Bot after its first persona
 readback. It lists Bot ids only. A room seat has no `delegate` fragment.
 
-The Host applies one cross-Bot item for each outcome. It refuses an item with
+One outcome can hold two cross-Bot items. The Host refuses an item with
 a delegation verdict and a reason: `room_seat`, `duplicate_target`,
-`target_archived`, `hop_limit`, `fan_out_not_enabled`, or `budget_exhausted`.
+`target_archived`, `hop_limit`, or `budget_exhausted`.
 A refusal also enters the initiator's `rejectedActions`.
 An accepted item creates a `bot_request` Turn for the target. Its id is
 `H(taskId, 'delegate', index)`. Its hop is the initiator's hop plus one, at
@@ -339,14 +340,25 @@ verdict. The Main Bot sees it in its next ContextPack.
 `abandoned`. When the attempt can still run, it also writes a K4 cancel. A
 terminal after the verdict goes to `audit` only.
 
-Every verdict reaches the initiator once, in a `bot_reply` Turn. Its id is
-`H('bot_reply', delegationId)`. When an outcome has no accepted item, one
-refusal report Turn `H('bot_reply', taskId)` holds all its refusals. That
+Every verdict reaches the initiator once, in a `bot_reply` Turn. The accepted
+items of one outcome form a batch. The first report waits until each accepted
+item has a verdict or is `uncertain`. It holds every verdict of the batch so
+far, refusals included. Its id is `H('bot_reply', taskId)` for two accepted
+items and `H('bot_reply', delegationId)` for one. When every accepted item is
+`uncertain`, there is no batch Turn. A verdict after the first report, or
+after that state, reports in its own Turn `H('bot_reply', delegationId)`.
+When an outcome has no accepted item, one refusal report Turn
+`H('bot_reply', taskId)` holds all its refusals. That
 report has no `delegate` fragment. Status changes publish
 `delegation:<id>:<revision>` projections.
 
-The root Bot budget is 12 units. An accepted item reserves one B unit and one
-A reply slot. A refusal report reserves one slot when one is free. Otherwise
+The root Bot budget is 12 units. An outcome with `n` accepted items reserves
+`n + max(n, 1)` units: one B unit and one A reply slot for each item.
+Admission counts every open reservation on the root. When the units are not
+free, the Host refuses accepted items from the last index
+(`budget_exhausted`) and checks again. After each report, the batch releases
+its free slots above the number of unreported items. A refusal report
+reserves one slot when one is free. Otherwise
 it is delivery only: it does not start a model, and it enters the next
 ContextPack. A unit is spent at the first observed claim and released when it
 can no longer be needed. `spent + reserved <= 12` holds after each transaction.

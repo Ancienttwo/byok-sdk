@@ -58,10 +58,10 @@ it('backs off reply checks from 1 s to 60 s and shows uncertain after 30 minutes
   apply();
   const d = state.delegations[hash(['task', 'delegate', 0])]!;
   Object.assign(d, { status: 'reply_pending', pendingSince: 0, nextCheckAt: 0, checks: 0 });
-  const delays = Array.from({ length: 8 }, () => { const at = REPLY_UNCERTAIN_AFTER_MS - 1; retryReply(d, at, emit); return d.nextCheckAt! - at; });
+  const delays = Array.from({ length: 8 }, () => { const at = REPLY_UNCERTAIN_AFTER_MS - 1; retryReply(state, d, at, emit); return d.nextCheckAt! - at; });
   expect(delays).toEqual([1000, 2000, 4000, 8000, 16_000, 32_000, 60_000, 60_000]);
   expect(d.status).toBe('reply_pending');
-  retryReply(d, REPLY_UNCERTAIN_AFTER_MS, emit);
+  retryReply(state, d, REPLY_UNCERTAIN_AFTER_MS, emit);
   expect(d).toMatchObject({ status: 'uncertain', uncertainSince: REPLY_UNCERTAIN_AFTER_MS });
   expect(d.verdict).toBeUndefined();
   expect(events.at(-1)).toBe(`delegation:${d.id}:${d.revision}`);

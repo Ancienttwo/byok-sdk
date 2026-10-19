@@ -106,24 +106,51 @@ function report(state: CollaborationState, batch: Batch, rows: Delegation[], id:
   if (slot) state.units[slot]!.turnId = id;
   else { turn.status = 'delivered'; turn.conclusion = 'delivered'; }
   for (const row of rows) row.replyTurnId = id;
+  // The batch keeps one free slot for each accepted delegation that is not reported yet (§6.2).
+  const open = batch.delegationIds.filter(key => state.delegations[key]!.requestTurnId && !state.delegations[key]!.replyTurnId).length;
+  batch.slots.filter(unit => state.units[unit]!.state === 'reserved' && !state.units[unit]!.turnId).slice(open)
+    .forEach(unit => releaseUnit(state, unit));
 }
-/** Set the verdict once, then deliver every resolved, unreported row of its batch. */
+/**
+ * Fan-in join (§3.5). The first report waits until every accepted delegation of
+ * the batch has a verdict or is uncertain. It carries every verdict so far,
+ * apply-time refusals included. With every accepted delegation uncertain there
+ * is no batch Turn. After the release, each verdict reports in its own Turn.
+ * `d` is the delegation that just got its verdict. Returns the reported rows.
+ */
+function deliver(state: CollaborationState, batch: Batch, d?: Delegation): Delegation[] {
+  const rows = batch.delegationIds.map(id => state.delegations[id]!);
+  const accepted = rows.filter(row => row.requestTurnId);
+  const unreported = rows.filter(row => row.verdict && !row.replyTurnId);
+  if (!batch.released) {
+    if (accepted.some(row => !row.verdict && row.status !== 'uncertain')) return [];
+    batch.released = true;
+    if (accepted.length && !accepted.some(row => row.verdict)) return [];
+    // A batch of one keeps the single key `H('bot_reply', delegationId)`.
+    report(state, batch, unreported, hash(['bot_reply', accepted.length === 1 ? accepted[0]!.id : batch.id]), !accepted.length);
+    return unreported;
+  }
+  if (!d || d.replyTurnId) return [];
+  const late = [d, ...unreported.filter(row => row !== d && !row.requestTurnId)];
+  report(state, batch, late, hash(['bot_reply', d.id]), false);
+  return late;
+}
+/** Set the verdict once, then deliver it through the batch join. */
 export function resolveDelegation(state: CollaborationState, d: Delegation, verdict: Verdict, now: number, emit: Publish,
   reason?: string, reply?: string): boolean {
   if (d.verdict) return false;
   close(d, verdict, now, reason, reply);
   // A B unit whose Turn never started is no longer needed.
   releaseUnit(state, hash([d.id, 'B']));
-  const batch = state.batches[d.batch]!;
-  const rows = batch.delegationIds.map(id => state.delegations[id]!).filter(row => row.verdict && !row.replyTurnId);
-  if (rows.length) report(state, batch, rows, hash(['bot_reply', d.id]), false);
-  for (const row of rows) publish(row, emit);
+  for (const row of new Set([d, ...deliver(state, state.batches[d.batch]!, d)])) publish(row, emit);
   return true;
 }
 
+/** Units that a batch with `n` accepted cross-Bot items prepays: n B units and max(n, 1) A reply slots (Q10). */
+export function reserveUnits(n: number): number { return n + Math.max(n, 1); }
 /**
  * Apply every delegate item of one outcome (§3.1). Self items keep the K8a
- * continuation path. X1 accepts one cross-Bot item per outcome.
+ * continuation path. The accepted cross-Bot items form one batch (§3.5).
  */
 export function applyDelegate(state: CollaborationState, turn: Turn, taskId: string, outcome: BotTurnOutcome, seat: boolean,
   now: number, emit: Publish, accept: (action: string, work: () => void) => void): { successor: boolean } {
@@ -131,7 +158,7 @@ export function applyDelegate(state: CollaborationState, turn: Turn, taskId: str
   let self = false;
   const targets = new Set<string>();
   const rows: Delegation[] = [];
-  let accepted: Delegation | undefined;
+  const accepted: Delegation[] = [];
   outcome.delegate?.forEach((action, index) => {
     const id = hash([taskId, 'delegate', index]);
     if (action.to === turn.botId) {
@@ -155,33 +182,36 @@ export function applyDelegate(state: CollaborationState, turn: Turn, taskId: str
     const row: Delegation = { id, root: turn.root, fromBotId: turn.botId, fromTurnId: turn.id, fromTaskId: taskId, index,
       toBotId: action.to, request: action.request, hop: turn.hop + 1, chainTurnIds: [], batch: taskId, status: 'queued', revision: 0 };
     const reason = seat ? 'room_seat' : targets.has(action.to) ? 'duplicate_target' : !target || target.archived ? 'target_archived'
-      : row.hop > HOP_LIMIT ? 'hop_limit' : accepted ? 'fan_out_not_enabled' : undefined;
+      : row.hop > HOP_LIMIT ? 'hop_limit' : undefined;
     targets.add(action.to);
     state.delegations[id] = row;
     rows.push(row);
     if (reason) close(row, 'refused', now, reason);
-    else accepted = row;
+    else accepted.push(row);
   });
   if (!rows.length) return { successor };
-  // Root admission: spent + reserved + reserve(n) <= 12, with reserve(1) = 2 and reserve(0) = 1.
+  // Root admission over every open reservation: spent + reserved + reserve(n) <= 12. Refuse from the last index.
   budget(state, turn.root).reserved ??= 0;
-  if (accepted && freeUnits(state, turn.root) < 2) { close(accepted, 'refused', now, 'budget_exhausted'); accepted = undefined; }
+  while (accepted.length && freeUnits(state, turn.root) < reserveUnits(accepted.length)) close(accepted.pop()!, 'refused', now, 'budget_exhausted');
   const batch: Batch = state.batches[taskId] = { id: taskId, delegationIds: rows.map(row => row.id), slots: [] };
-  if (accepted || freeUnits(state, turn.root) >= 1) {
-    const slot = hash([taskId, 'A', 0]);
+  // With no accepted item, the refusal report takes a slot only when one is free (§8.2).
+  const slots = accepted.length || Math.min(1, freeUnits(state, turn.root));
+  for (let k = 0; k < slots; k++) {
+    const slot = hash([taskId, 'A', k]);
     reserve(state, turn.root, slot);
     batch.slots.push(slot);
   }
   for (const row of rows) if (row.verdict) state.rejected.push({ botId: turn.botId, taskId, action: 'delegate', reason: row.reason! });
-  if (accepted) {
-    const target = state.team.bots[accepted.toBotId]!, unit = hash([accepted.id, 'B']);
+  for (const row of accepted) {
+    const target = state.team.bots[row.toBotId]!, unit = hash([row.id, 'B']);
     reserve(state, turn.root, unit);
-    Object.assign(accepted, { toAgentRef: { ...target.execution.payload.agentRef },
-      toDeviceId: target.execution.deviceId, requestTurnId: accepted.id, chainTurnIds: [accepted.id] });
-    addTurn(state, { id: accepted.id, root: turn.root, source: 'bot_request', request: accepted.request, botId: target.id,
-      hop: accepted.hop, authority: 'bot', delegationId: accepted.id, unit });
-    state.units[unit]!.turnId = accepted.id;
-  } else report(state, batch, rows, hash(['bot_reply', taskId]), true);
+    Object.assign(row, { toAgentRef: { ...target.execution.payload.agentRef },
+      toDeviceId: target.execution.deviceId, requestTurnId: row.id, chainTurnIds: [row.id] });
+    addTurn(state, { id: row.id, root: turn.root, source: 'bot_request', request: row.request, botId: target.id,
+      hop: row.hop, authority: 'bot', delegationId: row.id, unit });
+    state.units[unit]!.turnId = row.id;
+  }
+  deliver(state, batch);
   for (const row of rows) publish(row, emit);
   return { successor };
 }
@@ -196,8 +226,10 @@ export function observeStart(state: CollaborationState, turn: Turn, now: number,
   // A successor that starts after an uncertain claim runs again (§8.3: a later terminal gives the normal verdict).
   if (d.status === 'queued' || fresh && d.status === 'uncertain' && !d.cancel) { d.status = 'running'; publish(d, emit); }
 }
-function uncertain(d: Delegation, now: number, emit: Publish): void {
+/** Display only (§8.3). An uncertain delegation no longer holds back its batch. */
+function uncertain(state: CollaborationState, d: Delegation, now: number, emit: Publish): void {
   d.status = 'uncertain'; d.uncertainSince = now; publish(d, emit);
+  for (const row of deliver(state, state.batches[d.batch]!)) publish(row, emit);
 }
 /** Cancel verdict. A reply accepted before the cancel rides along as partial (§8.8). */
 function resolveCancel(state: CollaborationState, d: Delegation, taskId: string | undefined, now: number, emit: Publish): void {
@@ -294,7 +326,7 @@ export function settleDelegations(s: LedgerState, state: CollaborationState, now
     if (d.cancel) {
       const target = state.turns[d.cancel.targetTurnId]!, cancelled = s.intents[hash(target.id)];
       if (cancelled?.conclusion || !cancelled && target.conclusion) resolveCancel(state, d, cancelled?.taskId, now, emit);
-      else if (d.status !== 'uncertain' && now - d.cancel.requestedAt >= timers.cancelGraceMs) uncertain(d, now, emit);
+      else if (d.status !== 'uncertain' && now - d.cancel.requestedAt >= timers.cancelGraceMs) uncertain(state, d, now, emit);
       continue;
     }
     if (d.nextCheckAt !== undefined) {
@@ -304,7 +336,7 @@ export function settleDelegations(s: LedgerState, state: CollaborationState, now
     const conclusion = intent?.conclusion ?? (last.conclusion as Conclusion | undefined);
     if (!conclusion) {
       // Display only: no resubmit and no new generation (§8.3).
-      if (d.status !== 'uncertain' && d.claimed?.turnId === last.id && now - d.claimed.at >= timers.uncertainAfterMs) uncertain(d, now, emit);
+      if (d.status !== 'uncertain' && d.claimed?.turnId === last.id && now - d.claimed.at >= timers.uncertainAfterMs) uncertain(state, d, now, emit);
       continue;
     }
     // An archived target's outcome is audit only (§8.4), so its chain closes as refused.
@@ -343,12 +375,12 @@ export function reconcileReply(state: CollaborationState, d: Delegation, readbac
     d.status = 'reply_held'; delete d.nextCheckAt; publish(d, emit); return;
   }
   // Pending, or accepted without a Host record: the Host alone authors the reply body.
-  retryReply(d, now, emit, uncertainAfterMs);
+  retryReply(state, d, now, emit, uncertainAfterMs);
 }
-export function retryReply(d: Delegation, now: number, emit: Publish, uncertainAfterMs = REPLY_UNCERTAIN_AFTER_MS): void {
+export function retryReply(state: CollaborationState, d: Delegation, now: number, emit: Publish, uncertainAfterMs = REPLY_UNCERTAIN_AFTER_MS): void {
   d.checks = (d.checks ?? 0) + 1;
   d.nextCheckAt = now + Math.min(REPLY_RETRY_MAX_MS, 1000 * 2 ** (d.checks - 1));
-  if (d.status !== 'uncertain' && now - (d.pendingSince ?? now) >= uncertainAfterMs) uncertain(d, now, emit);
+  if (d.status !== 'uncertain' && now - (d.pendingSince ?? now) >= uncertainAfterMs) uncertain(state, d, now, emit);
 }
 
 export function frame(label: string, meta: Record<string, unknown>, body: string): string {
