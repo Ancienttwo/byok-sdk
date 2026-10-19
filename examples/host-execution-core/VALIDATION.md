@@ -21,6 +21,29 @@ All error-state, pending-wake, outbox, persisted-error and successful-recovery a
 The exact-boundary test still requires acceptance at the limit and deferral at limit plus one millisecond.
 The guide and README now describe the current public constant. The prior SDK export nit is closed by main's PR 523.
 
+### Merge-train checks
+
+| Command | Exit | Evidence |
+| --- | --- | --- |
+| `bun ci` | 0 | Frozen dependencies match the merged lockfile; `merge-train-install.log`. |
+| `bun run build` | 0 | All workspace builds completed; `merge-train-build.log`. |
+| `bun run typecheck` | 0 | All workspace typechecks completed; `merge-train-typecheck.log`. |
+| `bun run --cwd examples/host-execution-core test src/scheduling-recovery.test.ts` | 0 | 9/9 passed; `merge-train-focused.log`. |
+| `bun run --cwd examples/host-execution-core test` | 0 | 5 files, 38/38 passed in 44.30 seconds; `merge-train-k4.log`. |
+| `bun run test` | 130 | Interrupted after multiple client-suite failures; no complete root-suite pass is claimed. See `merge-train-full-test.log`. |
+| `bun run check:api-surface` | 0 | Built declarations match all 9 package goldens; `merge-train-api-surface.log`. |
+| `bun run check:version-authority` | 0 | Dispatch 0.27.0 and keys 0.12.0 agree; `merge-train-version-authority.log`. |
+| `git diff --check` | 0 | No whitespace errors. |
+
+Logs are in this worktree's ignored `_ops/wo-05/` directory.
+The old-source rollback probe exited 1 after merge and build (`merge-train-red.log`).
+CI logs for baseline and Node 26 show the same failure (`merge-train-ci-baseline.log`, `merge-train-ci-node26.log`).
+The read-only gatekeeper reviewed only `f85a80f5..a6adaad2` and returned PASS with no weakened assertion.
+It did not review main's changes, run tests or modify files.
+The additional root run reported failures in client admission, journal, daemon, approval and other SDK tests before interruption.
+Their causes are not diagnosed by this K4 repair. The SDK package diff against `origin/main@5b988a6e` is empty.
+The requested K4 suite and typecheck completed successfully. No source or test changes followed `a6adaad2`.
+
 ## V4 patch: preserve SDK schedule errors
 
 This patch starts at `5c86a4b8` and implements the owner's follow-up request.
