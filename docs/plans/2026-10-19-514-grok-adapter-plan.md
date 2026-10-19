@@ -348,7 +348,7 @@ This PR changes two documents. Later slices are additive. The adapter does nothi
 - Child spend can be missing from `usage` (OAR documented gap).
 - A new runtime npm dependency enters `@byok-sdk/client`.
 - `PROVENANCE.md` states "No … ACP … included". S1 must rewrite that sentence and the history.
-- PRD text outside §7, §8 and Q4 still describes the old decision: §1 line 25, §10 M0.7, §11 (#512/#513 as the only Grok path) and the Q8 row. They need a follow-up edit after review.
+- The PRD records the ruling in §1, §7, §8, §10 M0.7, §11 and the Q4 row. The Q8 row still says "Pi only". It waits for Aimpact (§12 Q2).
 
 ## Verification of this plan
 

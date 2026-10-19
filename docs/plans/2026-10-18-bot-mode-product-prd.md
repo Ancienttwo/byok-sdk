@@ -22,7 +22,7 @@ SDK 侧的执行原语和记忆原语都已落地。K2 wake 队列、K5 `executi
 
 Aimpact 问：SDK 除了接 agent 模式的 harness，是否支持 Bot 模式接入，例如 Grok Bot、Muse 和 Hermes。这个问题有两种读法：
 
-1. 把 Grok、Hermes 当 runtime，由 SDK 驱动它们。SDK 不支持。adapter 只有 `PiAdapter`、`ClaudeAdapter`、`CodexAdapter`（`packages/client/src/adapters/index.ts`）。上游 OAR 有 `grok` runtime，SDK 没有带进来，也决定不带（§7）。
+1. 把 Grok、Hermes 当 runtime，由 SDK 驱动它们。SDK 不支持。adapter 只有 `PiAdapter`、`ClaudeAdapter`、`CodexAdapter`（`packages/client/src/adapters/index.ts`）。上游 OAR 有 `grok` runtime，SDK 还没有带进来。Aimpact 2026-10-19 改判为做 `GrokAdapter`，Grok Bot 优先，CLI 只作底层 runtime（§7）。Hermes 没有批准（#519）。
 2. 在 SDK 上做 Grok Bot、Hermes 那种 Bot 产品。SDK 支持大部分。这是本文的范围。
 
 仓库里这三个名字的含义：
@@ -345,7 +345,7 @@ Aimpact 于 2026-10-19 约 13:45 HKT 改判（§12 Q4）：「可以顺手接入
   - M0.4 outcome 表达能力：K7 受限 JSON Schema 子集能否表达 `confirmable_action`、routine 三动作和 `to` 含自己；每个动作的上限之和 ≤ 65 536。
   - M0.5 routine 片段对齐：cron/tz 词汇、`nextRoutineOccurrence` 签名、`dedupKey` 派生、和 `wakes.schedule` 的字段对应；确认 I2 不破。
   - M0.6 Aiphabee 前置清点：bot 聊天用的 Pi lane（ordinary 还是 prepared）及其记忆工具和 `submit_result` 的接法；A1–A4 进度；credits 执行计费（和 ADR-038 决策 1 冲突）；#512、#513；用户设备的 OS 分布；刷新基线。
-  - M0.7（可选）Grok CLI 是否读指令文件。
+  - M0.7 Grok：Grok Bot 不依赖 Grok CLI 读指令文件，persona 和常驻记忆走 ContextPack（§7）。Grok Bot 的隔离证明（A1、M1、用户配置和原生记忆）在 #514 plan 的切片 S0 里做，不在 M0 里做。M0 只记录 S0 的结论。
 - 依赖：无。
 - 验收：一份核验记录（`docs/researches/`），每项有命令输出或 `file:line`；falsifier 成立的项有修订稿草案。
 - 风险：M0.2 可能需要新字段，会拖 P5；M0.3 可能发现 Windows 需要的不只是 helper 开放，而是新的后端设计。
@@ -425,7 +425,8 @@ spec 修改：P1 加 README 链接；P2 改平台句子；P3 加 `bot-turn-outco
 - outcome 总上限 64 KiB。`confirmable_action.draft`、routine `prompt` 和 `post` 加起来要留在里面；M0.4 定每项上限。
 - Aiphabee 的 bot 聊天如果在 ordinary lane，记忆工具是 live reserved helper，没有 prepared 的显式模式；M0.6 查清后再定接法。
 - Aiphabee 对设备端执行收 credits，和 ADR-038 决策 1 冲突（平台 PRD §10.3）。
-- #512、#513 挡着 `xai` profile。Grok 回复要等它们。
+- #512、#513 挡着 `xai` profile，只影响「Grok 只当模型」的 Pi 路径。Grok Bot 走 `GrokAdapter`（§7），不等它们。
+- Grok Bot 要能按 session 关掉 Grok 自带的 shell、改文件和联网工具，还要隔开用户的规则、MCP 配置和原生记忆（A1、M1）。#514 S0 证明不了，Grok Bot 不上线。Grok 安装器只支持 macOS 和 Linux，Windows 上没有 Grok Bot（Q14）。
 - 群聊不做 Summary，长群会撞 ContextPack 预算。v1 显式阻塞，不静默截断。
 - 热门 Bot 反复被 busy 拒绝，每次消耗一个 `taskId` 代际和一行 mailbox。Host 保持每个 Agent 只有一个 writer 在途。
 - 两个 Bot 写同一个共享仓库没有保护（ADR-031 的 WorkspaceRef 未实现）。
