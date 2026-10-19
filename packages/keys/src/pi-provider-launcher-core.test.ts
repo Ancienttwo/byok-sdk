@@ -630,6 +630,16 @@ describe('the required runtime entry', () => {
     expect(() => assertPiPreparedProviderProfile(anthropic)).toThrow(/anthropic adapter/);
     expect(assertPiPreparedProviderProfile(profile('bearer'))).toBeUndefined();
   });
+
+  it.each([
+    ['openai-responses', { api: 'openai-responses', compat: {} }, /api openai-responses/],
+    ['inputLimits', { inputLimits: { maxRequestBytes: 1_048_576 } }, /declares Pi inputLimits; the prepared model wire/],
+    ['supportsLongCacheRetention', { compat: { ...PI_MODEL_FIXTURE.compat, supportsLongCacheRetention: false } }, /declares Pi compat\.supportsLongCacheRetention; the prepared model wire/],
+  ])('refuses a prepared entry for a pi_model that declares %s', (_, declared, message) => {
+    const prepared = parseModelProviderProfile({ ...profile('bearer'), pi_model: { ...PI_MODEL_FIXTURE, ...declared } });
+    expect(() => assertPiPreparedProviderProfile(prepared)).toThrow(message);
+    expect(assertPiPreparedProviderProfile({ ...prepared, pi_model: PI_MODEL_FIXTURE })).toBeUndefined();
+  });
 });
 
 describe('the prepared runtime entry spawn', () => {

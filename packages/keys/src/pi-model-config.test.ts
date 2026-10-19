@@ -46,10 +46,53 @@ describe('explicit Pi model authority', () => {
     expect(() => parseModelProviderProfile({ ...profileInput, pi_model })).toThrow();
   });
 
-  it.each(['contextWindow', 'maxTokens', 'thinkingLevel', 'compat'] as const)('fences changed %s before launch', (field) => {
+  // pi-ai 1.2.0 `providers/data/xai.json` grok-4.7, minus the catalog-only identity, endpoint and cost fields.
+  const XAI_RESPONSES_MODEL = {
+    api: 'openai-responses', contextWindow: 500_000, maxTokens: 500_000, reasoning: true, thinkingLevel: 'low',
+    thinkingLevelMap: { off: null, minimal: null, low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: null },
+    compat: { supportsLongCacheRetention: false },
+    inputLimits: { images: { resize: { maxWidth: 2000, maxHeight: 2000, maxBytes: 4_718_592, jpegQuality: 80 } } },
+  } as const;
+
+  it('projects a declared openai-responses api on the provider and the catalog settings on the model', () => {
+    const profile = parseModelProviderProfile({ ...profileInput, auth_mode: 'bearer', pi_model: XAI_RESPONSES_MODEL });
+    const provider = (buildPiProviderProjection(profile, 'pi-rpc') as any).providers['byok-sdk-test-zai'];
+    const { api, thinkingLevel: _, ...settings } = XAI_RESPONSES_MODEL;
+    expect(provider.api).toBe(api);
+    expect(provider.models).toEqual([{ id: profile.model, name: profile.display_name, input: ['text'], ...settings }]);
+  });
+
+  it('keeps openai-completions when no api is declared', () => {
+    const provider = (buildPiProviderProjection(parseModelProviderProfile(profileInput), 'pi-rpc') as any).providers['byok-sdk-test-zai'];
+    expect(provider.api).toBe('openai-completions');
+    expect(provider.models[0]).not.toHaveProperty('api');
+  });
+
+  it('admits supportsLongCacheRetention for openai-completions', () => {
+    const pi_model = { ...PI_MODEL_FIXTURE, compat: { ...PI_MODEL_FIXTURE.compat, supportsLongCacheRetention: false } };
+    expect(parseModelProviderProfile({ ...profileInput, pi_model }).pi_model).toEqual(pi_model);
+  });
+
+  it.each([
+    ['a Completions-only compat key under openai-responses', { ...XAI_RESPONSES_MODEL, compat: { thinkingFormat: 'openai' } }, /thinkingFormat does not apply to openai-responses/],
+    ['an api Pi does not serve for this adapter', { ...XAI_RESPONSES_MODEL, api: 'anthropic-messages' }, /expected one of "openai-completions"\|"openai-responses"/],
+    ['an inputLimits key outside Pi\'s schema', { ...XAI_RESPONSES_MODEL, inputLimits: { images: { maxPixels: 1 } } }, /maxPixels/],
+    ['a JPEG quality outside 1..100', { ...XAI_RESPONSES_MODEL, inputLimits: { images: { resize: { jpegQuality: 101 } } } }, /expected number to be <=100/],
+  ])('rejects %s', (_, pi_model, message) => {
+    expect(() => parseModelProviderProfile({ ...profileInput, pi_model })).toThrow(message);
+  });
+
+  it('rejects a Pi api on an anthropic profile, whose adapter decides it', () => {
+    expect(() => parseModelProviderProfile({
+      ...profileInput, adapter: 'anthropic', auth_mode: 'x_api_key', base_url: 'https://api.anthropic.com/v1',
+      pi_model: { ...PI_MODEL_FIXTURE, api: 'openai-completions' },
+    })).toThrow(/declare no Pi api/);
+  });
+
+  it.each(['api', 'contextWindow', 'maxTokens', 'thinkingLevel', 'compat', 'inputLimits'] as const)('fences changed %s before launch', (field) => {
     const original = parseModelProviderProfile(profileInput);
-    const changedValues = { contextWindow: 900_000, maxTokens: 16_384, thinkingLevel: 'high',
-      compat: { ...PI_MODEL_FIXTURE.compat, zaiToolStream: false } };
+    const changedValues = { api: 'openai-completions', contextWindow: 900_000, maxTokens: 16_384, thinkingLevel: 'high',
+      compat: { ...PI_MODEL_FIXTURE.compat, zaiToolStream: false }, inputLimits: { maxRequestBytes: 1_048_576 } };
     const changed = parseModelProviderProfile({ ...profileInput, pi_model: { ...PI_MODEL_FIXTURE, [field]: changedValues[field] } });
     const binding = exactProviderProfileBinding(original);
     expect(exactProviderProfileBinding(changed).profileHash).not.toBe(binding.profileHash);
