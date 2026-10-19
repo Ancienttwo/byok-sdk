@@ -274,7 +274,7 @@ interface ByokServer {
 interface WakeScheduleInput {
   /** 1–256 个字符，由 Host 定义，例如 `routine:<id>:<version>:<slotMs>`。 */
   dedupKey: string;
-  /** epoch 毫秒。最多比当前时间晚 366 天。 */
+  /** epoch 毫秒。最多比当前时间晚 368 天。 */
   availableAt: number;
   /** 不透明的 Host 关联数据，最多 4 KiB。 */
   payload?: string;
@@ -337,14 +337,14 @@ interface WakeRecord {
 | 来源 | message、schedule、callback | message、schedule、invocation | 只有时间点 |
 | 周期规则 | `bot_schedule` 表，cron 或单次 | 无，单次 | 无，单次；规则在 Host |
 | 过期 | 未定义 | `expiresAt`，默认 `availableAt` 加 1 天 | 无；过期的 wake 也投递 |
-| 最远时间 | 未定义 | 30 天 | 366 天 |
+| 最远时间 | 未定义 | 30 天 | 368 天 |
 | 合批 | 无 | 一次唤醒最多 16 项 | 无，逐个投递 |
 | 执行 | daemon 直接启动 execution | DO 内执行，平台 key | 回调 Host，Host 用 `executions.submit` 提交 |
 
 两处差异的理由：
 
 - 去掉 `expiresAt`：Host 只在 hook 里调度下一次 wake。如果 wake 在设备休眠时过期并被丢弃，下一次 wake 就不会产生，routine 会停止。
-- 最远时间 366 天：每月和每年的 routine 超过 30 天。上限只用来发现时间单位错误。
+- 最远时间 368 天：每月和每年的 routine 超过 30 天。上限只用来发现时间单位错误。
 
 ### 7.5 K2 验收
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createByokServer, WakeClosedError, WakeConflictError, WakeHookMissingError, type ByokServer, type DueWake } from '../index';
+import { createByokServer, WakeClosedError, WakeConflictError, WakeHookMissingError, WAKE_MAX_FUTURE_MS, type ByokServer, type DueWake } from '../index';
 import { MemoryWakeStore, type WakeStore } from '../wakes/store';
 import { createSqliteEmbeddedStores } from '../stores/sqlite';
 import { createWebCrypto } from '@byok-sdk/cloud';
@@ -45,7 +45,7 @@ describe.each(['memory', 'sqlite'] as const)('embedded wakes (%s)', kind => {
     [{ dedupKey: '', availableAt: NOW }, 'WAKE_DEDUP_KEY_INVALID'],
     [{ dedupKey: 'x'.repeat(257), availableAt: NOW }, 'WAKE_DEDUP_KEY_INVALID'],
     [{ dedupKey: 'x', availableAt: -1 }, 'WAKE_AVAILABLE_AT_INVALID'],
-    [{ dedupKey: 'x', availableAt: NOW + 366 * 86400000 + 1 }, 'WAKE_AVAILABLE_AT_INVALID'],
+    [{ dedupKey: 'x', availableAt: NOW + 368 * 86400000 + 1 }, 'WAKE_AVAILABLE_AT_INVALID'],
     [{ dedupKey: 'x', availableAt: NOW + 0.5 }, 'WAKE_AVAILABLE_AT_INVALID'],
     [{ dedupKey: 'x', availableAt: NOW, payload: '界'.repeat(1366) }, 'WAKE_PAYLOAD_TOO_LARGE'],
   ] as const)('rejects invalid input %# without writing', async (input, code) => {
@@ -55,8 +55,13 @@ describe.each(['memory', 'sqlite'] as const)('embedded wakes (%s)', kind => {
   });
   it('allows exact input boundaries, including Unicode character and UTF-8 byte bounds', async () => {
     const server = open(async () => {});
-    expect((await server.wakes.schedule({ dedupKey: '😀'.repeat(256), availableAt: NOW + 366 * 86400000, payload: 'x'.repeat(4096) })).accepted).toBe(true);
+    expect(WAKE_MAX_FUTURE_MS).toBe(368 * 86400000);
+    expect((await server.wakes.schedule({ dedupKey: '😀'.repeat(256), availableAt: NOW + 368 * 86400000, payload: 'x'.repeat(4096) })).accepted).toBe(true);
     expect((await server.wakes.pending())[0]?.deliveries).toBe(0);
+  });
+  it.each([366, 367])('allows scheduling %i days in the future', async days => {
+    const server = open(async () => {});
+    expect((await server.wakes.schedule({ dedupKey: 'future', availableAt: NOW + days * 86400000 })).accepted).toBe(true);
   });
   it('delivers serially by due time then wakeId, while pending uses availableAt order', async () => {
     const seen: DueWake[] = []; const gates = [deferred(), deferred(), deferred()];
