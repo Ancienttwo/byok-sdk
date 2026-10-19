@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Feature (client; Octop T1, #553)** — the daemon makes one local execution
+  record for each started execution. The record tells whether the SDK saw the
+  whole event trajectory: `complete`, `partial` with counted gaps, or
+  `unknown`. It holds counts and closed codes only. It never changes the
+  terminal, `retryable`, outcome application or a retry decision. A Host reads
+  it as the new `execution-record` `DaemonEvent` (`Daemon.subscribe`,
+  control-socket `tasks.subscribe`) and in `audit.jsonl`. The event follows
+  the task's terminal event, so a started task's events no longer end at its
+  terminal event. An adapter opts in with
+  `RuntimeAdapterDescriptor.trajectoryEvidence: 'event-stream'` and can report
+  counts through the new optional `Session.evidence()`. The Pi RPC lanes opt
+  in; the durable Pi worker does not. `PiRpcClient` now counts stdout lines
+  that are not a JSON object and an unterminated last line. Pi 1.3.0
+  `message_update`, `entry_appended` and successful `auto_retry_end` frames no
+  longer log a false "no AgentEvent mapping" warning.
 - **Feature (keys, client; #512, #513)** — `PiModelConfig` can declare the
   Pi wire API and more pi-ai catalog fields. The new optional `api` is
   `'openai-completions'` or `'openai-responses'`. When it is absent, the

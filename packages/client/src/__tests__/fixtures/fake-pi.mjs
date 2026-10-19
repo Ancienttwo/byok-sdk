@@ -86,6 +86,16 @@
 //                                    path to complete correctly.
 //   FAKE_PI_AUTO_RETRY_FAIL=1    -> emit an exhausted native retry terminal
 //                                    instead of agent_settled.
+//   FAKE_PI_TRAJECTORY=<gap>     -> one trajectory gap for the execution
+//                                    record (Octop T1); the rest of the
+//                                    sequence is unchanged:
+//                                    `missing-tool-end` never ends call_1;
+//                                    `stdout-noise` writes one non-JSON stdout
+//                                    line; `killed` answers get_state, writes
+//                                    half of call_1's end frame, then
+//                                    SIGKILLs itself;
+//                                    `open-calls` first starts 4097 calls
+//                                    that never end.
 //   FAKE_PI_IGNORE_TERM=1        -> root and lifecycle descendant ignore
 //                                    SIGTERM, proving close escalates to SIGKILL.
 //   FAKE_PI_ESCAPE_LOG=<path>    -> escape-race fixture: the descendant spawns
@@ -192,6 +202,8 @@ async function waitForReplyGate(name) {
 
 /** id -> resolve function, for extension_ui_request/response correlation (see FAKE_PI_EXTENSION_UI_REQUEST above). */
 const pendingExtensionUiResolvers = new Map();
+/** FAKE_PI_TRAJECTORY=killed: die mid-frame once start() has its session id. */
+let killAfterState = false;
 
 rl.on('line', (line) => {
   let msg;
@@ -239,6 +251,7 @@ async function handleCommand(msg) {
         id: msg.id,
         data: { model: { id: 'fake-model' }, thinkingLevel: 'off', isStreaming: false, sessionId },
       });
+      if (killAfterState) process.stdout.write('{"type":"tool_execution_end"', () => process.kill(process.pid, 'SIGKILL'));
       break;
 
     case 'prompt': {
@@ -258,19 +271,33 @@ async function handleCommand(msg) {
       // assistant text reply, then the real settle event.
       send({ type: 'agent_start' });
       send({ type: 'turn_start' });
+      const trajectory = process.env.FAKE_PI_TRAJECTORY;
+      if (trajectory === 'open-calls') {
+        for (let index = 0; index < 4097; index++) {
+          send({ type: 'tool_execution_start', toolCallId: `open_${index}`, toolName: 'bash', args: {} });
+        }
+      }
       send({
         type: 'tool_execution_start',
         toolCallId: 'call_1',
         toolName: 'bash',
         args: { command: 'echo hi' },
       });
-      send({
-        type: 'tool_execution_end',
-        toolCallId: 'call_1',
-        toolName: 'bash',
-        result: { content: [{ type: 'text', text: 'hi\n' }] },
-        isError: false,
-      });
+      if (trajectory === 'killed') {
+        // get_state still has to answer, or start() fails before a session exists.
+        killAfterState = true;
+        break;
+      }
+      if (trajectory !== 'missing-tool-end') {
+        send({
+          type: 'tool_execution_end',
+          toolCallId: 'call_1',
+          toolName: 'bash',
+          result: { content: [{ type: 'text', text: 'hi\n' }] },
+          isError: false,
+        });
+      }
+      if (trajectory === 'stdout-noise') process.stdout.write('fake-pi diagnostic that is not a frame\n');
       const artifactName = process.env.FAKE_PI_ARTIFACT_NAME;
       if (artifactName) {
         const size = Number(process.env.FAKE_PI_ARTIFACT_SIZE ?? 70000);
