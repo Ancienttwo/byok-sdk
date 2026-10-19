@@ -148,7 +148,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Embedded Agent memory service",
-      "budgetBytes": 60360,
+      "budgetBytes": 67063,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -168,6 +168,7 @@
         "child_process",
         "crypto",
         "fs",
+        "module",
         "path"
       ],
       "lazyImports": [],
@@ -179,6 +180,7 @@
           "child_process",
           "crypto",
           "fs",
+          "module",
           "path"
         ],
         "thirdParty": []
@@ -380,6 +382,7 @@
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/anthropic-messages",
         "@earendil-works/pi-ai/api/openai-completions",
+        "@earendil-works/pi-ai/api/openai-responses",
         "@earendil-works/pi-coding-agent",
         "@earendil-works/pi-durable/storage/sqlite/node",
         "promise.try",
@@ -603,12 +606,12 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 88102,
+          "line": 88113,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 96287,
+          "line": 96292,
           "rule": "opaque import()"
         },
         {
@@ -711,6 +714,7 @@
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/anthropic-messages",
         "@earendil-works/pi-ai/api/openai-completions",
+        "@earendil-works/pi-ai/api/openai-responses",
         "@earendil-works/pi-coding-agent",
         "@earendil-works/pi-durable/storage/sqlite/node",
         "promise.try",
@@ -928,12 +932,12 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host-sealed.js",
-          "line": 88027,
+          "line": 88038,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host-sealed.js",
-          "line": 95558,
+          "line": 95563,
           "rule": "opaque import()"
         },
         {
@@ -1010,7 +1014,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Cloud coordination and HTTP handlers",
-      "budgetBytes": 519419,
+      "budgetBytes": 533443,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1063,7 +1067,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 767924,
+      "budgetBytes": 783315,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1395,7 +1399,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Shared contracts and validation",
-      "budgetBytes": 123007,
+      "budgetBytes": 126269,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1557,7 +1561,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Wire schemas and codecs; codegen negative control",
-      "budgetBytes": 125395,
+      "budgetBytes": 127135,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1757,7 +1761,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 550505,
+      "budgetBytes": 561703,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

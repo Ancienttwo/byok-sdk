@@ -15,7 +15,8 @@ This decision does not grant Windows admission or complete Q14.
 
 - `agent-home.ts` captures the leased home identity as bigint dev/ino.
 - `agent-memory.ts` selects native Linux or the macOS helper.
-- `agent-memory-fs-helper.ts` starts an explicit helper with an empty env.
+- `agent-memory-fs-helper.ts` verifies the SDK release helper and starts it
+  with an empty env.
   It exchanges tagged identity over protocol 2.
 - Go `openSession` rejects Windows before it grants a session.
 - Go `identity_windows.go` reads the volume serial and file index by handle.
@@ -54,7 +55,8 @@ flush operations nor model S recovery.
 
 Do not add a callable NTFS ledger backend until section 3 of WO-09a is
 proved under section 7. Do not add flags, weaker flush paths or error
-suppression. Keep TS admission closed, Go open closed and helper B=false.
+suppression. Keep Windows TS admission closed, Go open closed and B=false.
+The verified macOS release helper retains B=true after its volume probe.
 The local machine is macOS. No Windows or destructive recovery environment
 has been supplied. These missing observations block the full proof.
 
@@ -232,3 +234,82 @@ Follow-up checks before push:
 No exports changed. API-surface rerun is not required for this follow-up.
 No assertion condition or expected result changed. No manual Windows run is
 claimed. The PR must stay draft and BLOCKED.
+
+## Main integration: PR #526, #527, #524 and #532
+
+### P1 map
+
+Main at `2fdab7d0` includes the macOS helper release and barrier support.
+The helper client must keep both release verification and tagged identity
+validation. The Windows workflow remains `workflow_dispatch` only.
+Its labels remain platform-refusal checks.
+
+### P2 trace
+
+On win32, `helperAgentMemoryIntentBackend` calls release verification.
+The resolver throws `SDK Agent memory helper is not admitted on this platform`
+before it returns a backend. The old test tried to read `strictLedgerBarrier`
+from that result. The focused test failed at that call after the merge.
+No Windows backend exists, so it cannot grant B.
+
+### P3 decision
+
+Keep the main PRD v3 and the final #527 decision document without changes.
+Keep the main macOS barrier and release rules in spec and protocol.
+Keep the Windows model S requirements after those rules.
+Change the Windows test to require the platform-refusal throw.
+The remaining filesystem-admission and helper-open checks stay intact.
+Keep release verification before spawn and tagged identity validation on open.
+S is chosen but unproven. Windows B=false. WO-09 stays BLOCKED.
+
+### Assertion change
+
+`agent-memory-windows-gate.test.ts`: replace the returned-backend B=false
+assertion with an exact platform-refusal message check. #526 rejects win32
+before backend construction. This check follows that stronger boundary.
+It does not admit a backend or weaken a production gate.
+
+### Entry budget
+
+The combined helper graph measures 60,966 workspace bytes.
+The prior entry budget was 60,360 bytes. Tagged identity validation and
+release verification are both required. Keep both checks.
+Set the entry budget to 67,063 bytes, with 10 percent headroom rounded up.
+The generated README table uses the same value. The entry still has no
+third-party dependencies, Zod or code generation. Declaration goldens match.
+
+### Local checks for the main integration
+
+Host: macOS arm64. Node v24.21.0. Bun 1.4.3. Go tests use Go 1.26.5.
+
+- `bun install`: exit 0. It replaced stale Pi 1.2.0 build inputs after the
+  main merge. The first build failed on that old input. No lockfile changed.
+- `bun run build`: exit 0 after the install.
+- `bun run typecheck`: exit 0.
+- `bun run check:api-surface`: exit 0 after the reviewed entry budget update.
+  All nine declaration goldens match. No new public entrypoint was added.
+- `bun run check:version-authority`: exit 0.
+- `bun run --filter @byok-sdk/client build:agent-memory-helper`: exit 0.
+  Darwin arm64 and x64 release assets match two independent source builds.
+- `bun run --filter @byok-sdk/client test -- agent-memory agent-home-directory-barrier daemon-conn-hello-capabilities`:
+  exit 0. 22 files passed and one skipped. 212 tests passed and 33 skipped.
+  This includes the Windows gate and tagged identity tests.
+- `GOTOOLCHAIN=go1.26.5 go test ./...`: exit 0 on macOS.
+- `GOOS=windows GOARCH=amd64 GOTOOLCHAIN=go1.26.5 go test -c`:
+  exit 0. This is a cross-compile, not a Windows execution result.
+- Node and Bun `agent-memory-runtime-smoke.mjs`: both exit 0.
+  Both report identity accepted and strictBarrier passed on macOS arm64.
+- `bun run test:scripts`: exit 0. 108 tests passed.
+
+The manual Windows workflow was not dispatched. Windows S recovery proof
+is still absent. These checks do not complete Q14 or grant Windows B.
+
+### Read-only review
+
+The independent review found no blocking issue or test change that hides a
+production bug. It confirmed that win32 refusal precedes path reads, that
+release verification and identity validation both remain, and that the
+budget follows the entry contract's measured bytes plus 10 percent rule.
+The review noted unstaged files. All four noted files were staged before
+commit. The main PRD and decision document are byte-identical to main.
+The three platform-refusal files are byte-identical to `f11fe428`.

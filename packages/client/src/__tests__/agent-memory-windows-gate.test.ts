@@ -16,7 +16,8 @@ describe('Windows model S admission', () => {
       expect(isAgentMemorySecureFilesystemAvailable(false)).toBe(false);
       expect(isAgentMemorySecureFilesystemAvailable(true)).toBe(false);
       const helperBin = path.resolve('unproved-agent-memory-fs.exe');
-      expect(helperAgentMemoryIntentBackend(helperBin).strictLedgerBarrier).toBe(false);
+      // No backend is returned on Windows, so it cannot grant B.
+      expect(() => helperAgentMemoryIntentBackend(helperBin)).toThrow('SDK Agent memory helper is not admitted on this platform');
       await expect(openAgentMemoryFilesystemHelper({
         helperBin, canonicalHome: path.resolve('unproved-home'), homeIdentity: { dev: 1n, ino: 2n },
       })).rejects.toThrow('not admitted on this platform');

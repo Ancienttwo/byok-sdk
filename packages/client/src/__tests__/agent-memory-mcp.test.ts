@@ -187,7 +187,7 @@ describe('Agent memory MCP local authority', () => {
       productId: 'memory-mcp-toolsets',
       tenantId: 'tenant-memory-mcp-toolsets',
       agentMemoryMcpBin: { command: 'node', args: ['memory-mcp.js'] },
-      ...(process.platform === 'darwin' ? { agentMemoryFilesystemHelperBin: '/opt/byok-agent-memory-fs' } : {}),
+      ...(process.platform === 'darwin' ? { resolveAgentMemoryFilesystemHelperBin: () => '/opt/byok-agent-memory-fs' } : {}),
     });
 
     await runner.handleEnvelope(createEnvelope(
@@ -241,7 +241,7 @@ describe('Agent memory MCP local authority', () => {
       productId: 'memory-mcp-selection',
       tenantId: 'tenant-memory-mcp-selection',
       agentMemoryMcpBin: { command: 'node', args: ['memory-mcp.js'] },
-      ...(process.platform === 'darwin' ? { agentMemoryFilesystemHelperBin: '/opt/byok-agent-memory-fs' } : {}),
+      ...(process.platform === 'darwin' ? { resolveAgentMemoryFilesystemHelperBin: () => '/opt/byok-agent-memory-fs' } : {}),
     });
 
     await runner.handleEnvelope(createEnvelope(

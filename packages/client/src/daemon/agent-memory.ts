@@ -169,8 +169,8 @@ const SECURE_DIRECTORY_DESCRIPTOR_ROOT = '/proc/self/fd';
 
 /**
  * The sole platform gate for the Agent-memory write authority. Linux retains
- * the native procfs descriptor backend. macOS requires the explicit external
- * helper that passed its local race proof. Windows remains unavailable rather
+ * the native procfs descriptor backend. macOS requires the SDK release
+ * helper that passed its native proof and deployment digest check. Windows remains unavailable rather
  * than selecting an unproved fallback.
  */
 export function isAgentMemorySecureFilesystemAvailable(externalHelperConfigured = false): boolean {

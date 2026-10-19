@@ -1338,6 +1338,250 @@ export declare const BlobRefSchema: z.ZodObject<{
     url: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
 export type BlobRef = z.infer<typeof BlobRefSchema>;
+// ==== @byok-sdk/protocol dist/bot-turn-outcome.d.ts ====
+import { type ResultSchema } from './result-schema';
+export declare const BOT_TURN_OUTCOME_CONTRACT = "bot-turn-outcome.v1";
+/** Proposed code-point and item caps. Product confirmation is pending. */
+export declare const BOT_TURN_OUTCOME_LIMITS: Readonly<{
+    delegateMaxItems: 2;
+    delegateRequestMaxLength: 1000;
+    askUserQuestionMaxLength: 400;
+    askUserOptionsMaxItems: 6;
+    askUserOptionIdMaxLength: 24;
+    askUserOptionLabelMaxLength: 80;
+    confirmableActionMaxItems: 1;
+    confirmableSummaryMaxLength: 300;
+    confirmableDraftMaxBytes: 16384;
+    createRoutineMaxItems: 1;
+    updateRoutineMaxItems: 1;
+    cancelRoutineMaxItems: 2;
+    routinePromptMaxLength: 500;
+    postTextMaxLength: 2730;
+    roomCallMembersMaxItems: 4;
+    createBotMaxItems: 3;
+    updateBotMaxItems: 1;
+    deleteBotMaxItems: 1;
+    botNameMaxLength: 40;
+    botRoleMaxLength: 80;
+    botPersonaMaxLength: 300;
+    createRoomMaxItems: 1;
+    updateRoomMaxItems: 1;
+    roomNameMaxLength: 40;
+    roomMembersMaxItems: 12;
+    roomAnnouncementMaxLength: 300;
+    teamNoteMaxLength: 300;
+}>;
+export type NonEmptyIds = readonly [string, ...string[]];
+/** ISO 8601 order, Monday first. Equal to core's list. A server test checks parity. */
+export declare const ROUTINE_DAYS_OF_WEEK: readonly ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+export type RoutineDayOfWeek = (typeof ROUTINE_DAYS_OF_WEEK)[number];
+export type BotTurnOutcomeSchemaErrorCode = 'not-subset' | 'schema-over-budget' | 'over-budget' | 'draft-over-budget';
+export declare class BotTurnOutcomeSchemaError extends Error {
+    readonly code: BotTurnOutcomeSchemaErrorCode;
+    constructor(code: BotTurnOutcomeSchemaErrorCode, message: string);
+}
+/**
+ * `checked` (default): field types, ranges and enums sit once in the outer
+ * properties; each oneOf branch lists only its allowed names and required
+ * fields, with additionalProperties false. An instance matches exactly one
+ * branch: daysOfWeek and dayOfMonth never appear together; month needs
+ * dayOfMonth. `flat`: the same outer object without the oneOf; the Host then
+ * refuses those two combinations at apply time. Use `flat` only under the
+ * schema budget rule of composeBotTurnOutcomeSchema. Neither form sees
+ * duplicate days, a day the month never has (Apr 31), or Feb 29.
+ */
+export type RoutineScheduleShape = 'checked' | 'flat';
+/**
+ * Every id is a Host-filled enum. New objects use Host-offered localId slots
+ * (e.g. "new_bot_1"), so a same-outcome reference is also an enum member.
+ */
+export declare const botTurnOutcomeFragments: {
+    /** `to` lists this Bot first: delegating to yourself is a continuation. */
+    delegate(o: {
+        to: NonEmptyIds;
+    }): ResultSchema;
+    askUser(): ResultSchema;
+    /** One branch per Host action; each draft needs a finite bound of at most confirmableDraftMaxBytes. */
+    confirmableAction(o: {
+        actions: readonly [{
+            action: string;
+            draft: ResultSchema;
+        }, ...{
+            action: string;
+            draft: ResultSchema;
+        }[]];
+    }): ResultSchema;
+    /** `targets` only for a Main Bot: the Bot itself first, then team Bots. Omitted means the Bot itself. */
+    createRoutine(o: {
+        localIds: NonEmptyIds;
+        timeZones: NonEmptyIds;
+        targets?: NonEmptyIds;
+        scheduleShape?: RoutineScheduleShape;
+    }): ResultSchema;
+    updateRoutine(o: {
+        routineIds: NonEmptyIds;
+        timeZones: NonEmptyIds;
+        scheduleShape?: RoutineScheduleShape;
+    }): ResultSchema;
+    cancelRoutine(o: {
+        routineIds: NonEmptyIds;
+    }): ResultSchema;
+    /** Room turns only. Exactly one of post or pass. */
+    speech(): ResultSchema;
+    roomCall(o: {
+        members: NonEmptyIds;
+    }): ResultSchema;
+    createBot(o: {
+        localIds: NonEmptyIds;
+        models: NonEmptyIds;
+    }): ResultSchema;
+    updateBot(o: {
+        botIds: NonEmptyIds;
+        models: NonEmptyIds;
+    }): ResultSchema;
+    deleteBot(o: {
+        botIds: NonEmptyIds;
+    }): ResultSchema;
+    /** `members`: team Bot ids plus the create_bot localId slots of this outcome. */
+    createRoom(o: {
+        localIds: NonEmptyIds;
+        members: NonEmptyIds;
+    }): ResultSchema;
+    updateRoom(o: {
+        roomIds: NonEmptyIds;
+        members: NonEmptyIds;
+    }): ResultSchema;
+    teamNote(): ResultSchema;
+};
+export type BotTurnOutcomeKind = 'delegate' | 'ask_user' | 'confirmable_action' | 'create_routine' | 'update_routine' | 'cancel_routine' | 'speech' | 'room_call' | 'create_bot' | 'update_bot' | 'delete_bot' | 'create_room' | 'update_room' | 'team_note';
+/**
+ * Host composition: pick fragments, freeze the result in the offer. Refuses a
+ * schema outside the K7 subset ('not-subset'), a schema above
+ * RESULT_SCHEMA_MAX_BYTES ('schema-over-budget'), or one whose largest
+ * instance could exceed RESULT_OUTCOME_MAX_BYTES ('over-budget').
+ *
+ * Schema budget rule, before the offer is frozen: only 'schema-over-budget'
+ * allows the Host to rebuild the routine fragments with scheduleShape 'flat'.
+ * If the schema is still over, the Host blocks the turn with a visible reason
+ * or runs its defined batch selection. It never drops authorized ids from an
+ * enum silently.
+ */
+export declare function composeBotTurnOutcomeSchema(fragments: BotTurnOutcomeFragments, required?: readonly BotTurnOutcomeKind[]): ResultSchema;
+export type BotTurnOutcomeFragments = Partial<Readonly<Record<BotTurnOutcomeKind, ResultSchema>>>;
+export interface DelegateAction {
+    readonly to: string;
+    readonly request: string;
+}
+export type AskUserAction = {
+    readonly question: string;
+    readonly answerKind: 'text';
+} | {
+    readonly question: string;
+    readonly answerKind: 'single_choice';
+    readonly options: readonly {
+        readonly id: string;
+        readonly label: string;
+    }[];
+};
+export interface ConfirmableAction<Draft = unknown> {
+    readonly action: string;
+    readonly summary: string;
+    readonly draft: Draft;
+}
+/**
+ * No day field: every day. daysOfWeek and dayOfMonth never appear together;
+ * month needs dayOfMonth. Under the 'flat' shape the schema does not enforce
+ * this; the Host narrows to this type only after checkRoutineSchedule passes.
+ */
+export type RoutineScheduleFields = {
+    readonly minute: number;
+    readonly hour: number;
+    readonly tz: string;
+} | {
+    readonly minute: number;
+    readonly hour: number;
+    readonly daysOfWeek: readonly RoutineDayOfWeek[];
+    readonly tz: string;
+} | {
+    readonly minute: number;
+    readonly hour: number;
+    readonly dayOfMonth: number;
+    readonly month?: number;
+    readonly tz: string;
+};
+export interface CreateRoutineAction {
+    readonly localId: string;
+    readonly schedule: RoutineScheduleFields;
+    readonly prompt: string;
+    readonly target?: string;
+}
+export interface UpdateRoutineAction {
+    readonly routineId: string;
+    readonly schedule?: RoutineScheduleFields;
+    readonly prompt?: string;
+}
+export interface CancelRoutineAction {
+    readonly routineId: string;
+}
+export type RoomSpeech = {
+    readonly kind: 'post';
+    readonly text: string;
+} | {
+    readonly kind: 'pass';
+};
+export interface RoomCallAction {
+    readonly members: readonly string[];
+}
+export interface CreateBotAction {
+    readonly localId: string;
+    readonly name: string;
+    readonly role: string;
+    readonly persona: string;
+    readonly model: string;
+}
+export interface UpdateBotAction {
+    readonly botId: string;
+    readonly name?: string;
+    readonly role?: string;
+    readonly persona?: string;
+    readonly model?: string;
+}
+export interface DeleteBotAction {
+    readonly botId: string;
+}
+export interface RoomFields {
+    readonly name: string;
+    readonly members: readonly string[];
+    readonly admin?: string;
+    readonly mode?: 'mention' | 'admin';
+    readonly announcement?: string;
+}
+export interface CreateRoomAction extends RoomFields {
+    readonly localId: string;
+}
+export interface UpdateRoomAction extends Partial<RoomFields> {
+    readonly roomId: string;
+}
+export interface TeamNoteAction {
+    readonly text: string;
+}
+/** Shape of a document that passed a schema composed from these fragments. */
+export interface BotTurnOutcome {
+    readonly delegate?: readonly DelegateAction[];
+    readonly ask_user?: AskUserAction;
+    readonly confirmable_action?: readonly ConfirmableAction[];
+    readonly create_routine?: readonly CreateRoutineAction[];
+    readonly update_routine?: readonly UpdateRoutineAction[];
+    readonly cancel_routine?: readonly CancelRoutineAction[];
+    readonly speech?: RoomSpeech;
+    readonly room_call?: RoomCallAction;
+    readonly create_bot?: readonly CreateBotAction[];
+    readonly update_bot?: readonly UpdateBotAction[];
+    readonly delete_bot?: readonly DeleteBotAction[];
+    readonly create_room?: readonly CreateRoomAction[];
+    readonly update_room?: readonly UpdateRoomAction[];
+    readonly team_note?: TeamNoteAction;
+}
 // ==== @byok-sdk/protocol dist/capability-constants.d.ts ====
 /**
  * The ONE version of the input-preparation contract, shared by this relay wire
@@ -5184,6 +5428,8 @@ export type { TaskOfferType } from './messages';
 export type { HarnessId, HarnessInfo } from './messages';
 export { CUSTOM_HARNESS_CAPABILITY } from './version';
 export { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from './input-preparation';
+export * from './bot-turn-outcome';
+export { resultOutcomeMaxBytes } from './result-schema';
 // ==== @byok-sdk/protocol dist/input-preparation.d.ts ====
 import { z } from 'zod';
 /** The preparation surface uses the package-wide lowercase `sha256:<hex>` transport form. */
@@ -9965,6 +10211,13 @@ export declare function checkResultSchema(schema: unknown): ResultSchemaCheck;
  * a sender stages and puts on the wire.
  */
 export declare function validateResultOutcome(schema: unknown, outcome: unknown): ResultOutcomeCheck;
+/**
+ * Conservative canonical UTF-8 bound, or null for an invalid or unbounded schema.
+ * Strings cost at most 6 bytes per code point. Number costs 25; integer costs
+ * 24, tightened only when both ends have magnitude below 1e21. A bound need
+ * not be attainable when constraints intersect or oneOf branches overlap.
+ */
+export declare function resultOutcomeMaxBytes(schema: ResultSchema): number | null;
 export {};
 // ==== @byok-sdk/protocol dist/task-state.d.ts ====
 export declare const TASK_STATES: readonly ['Offered', 'Claimed', 'Running', 'AwaitApproval', 'Complete', 'Failed', 'Cancelled'];

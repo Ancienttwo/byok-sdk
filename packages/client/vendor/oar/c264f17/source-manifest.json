@@ -2,9 +2,9 @@
   "format": "byok.vendor-source",
   "version": 1,
   "package": "@botiverse/oar",
-  "packageVersion": "0.66.0",
+  "packageVersion": "0.67.0",
   "repository": "https://github.com/botiverse/oar",
-  "commit": "beea52cef61391351234edc025a481875035e68c",
+  "commit": "c264f17040dd9513b43300886a80f3f6eddde7b1",
   "license": "Apache-2.0",
   "files": [
     {
@@ -100,8 +100,8 @@
     {
       "path": "contracts/records.ts",
       "sourcePath": "packages/oar/src/contracts/records.ts",
-      "upstreamSha256": "8902f47ad98aefd5c5b48b5975c032f6c4aa6340b519cfc46f39ed7d97367018",
-      "vendoredSha256": "8902f47ad98aefd5c5b48b5975c032f6c4aa6340b519cfc46f39ed7d97367018"
+      "upstreamSha256": "3ad3527215355ce516e4d1f4b59578094a7741037ea550e093b04091664d6108",
+      "vendoredSha256": "3ad3527215355ce516e4d1f4b59578094a7741037ea550e093b04091664d6108"
     },
     {
       "path": "contracts/runtime.ts",
@@ -173,7 +173,7 @@
       "path": "runtimes/codex/app-server-client.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/app-server-client.ts",
       "upstreamSha256": "6cfb2582a9beb597e5621e299a0463cdb234c808fab03f6874a509852dd62956",
-      "vendoredSha256": "bbbcc35e5dec4e80b5506240021a1671b2ce95c5e83a6da5c04e7d322999a59e",
+      "vendoredSha256": "70cafa1600b2ed3f84bf0532bc88c119456db2d6d7b73f6c2deb430c097b7136",
       "delta": "Caller-owned process: the injected LineProcess spawn receives exactly the explicit filtered env, cwd and launch arguments; no ambient env merge, home-initialization queue, executable manager, resources reader or killTree option. Bounded RPCs: 30000ms default and per-request deadlines (RpcTimeoutError), maxHeld=256 and maxPending=128 count budgets whose overflow fails and kills, timers cleared on reply, timeout, write failure, exit and kill. Server requests: numeric and string ids preserved; result and error replies go through the acknowledged stdin write. Terminal state: sticky terminal error with the bounded, redacted exitError of the BYOK transport; settlement-consumer errors reject already-dequeued waiters and never escape a timer."
     },
     {
@@ -198,7 +198,7 @@
       "path": "runtimes/codex/open.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/open.ts",
       "upstreamSha256": "353974f7722640a45a5f790b8a78cc2a630b3342e198c301a64eba5443023ac9",
-      "vendoredSha256": "347710d381e1ec460ae4b133c5e8dc426f3b6dcfc7026b0926a029b3e496c38e",
+      "vendoredSha256": "fe676b63944d423af2b2e374c8efafbbf2e59a41422be5094eecb9d089ba304e",
       "delta": "Caller-owned interaction opt-in: codexThreadOpen accepts approvalPolicy \"never\" | \"on-request\" and sends it on thread/start and thread/resume; the default stays \"never\"."
     },
     {
@@ -217,14 +217,14 @@
       "path": "runtimes/codex/rpc-control.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/rpc-control.ts",
       "upstreamSha256": "89a001c616461df6b8c24c1d2201c3036b276aaf53fa8fc47fa90a18213778c1",
-      "vendoredSha256": "f3388431b61fb16403c5a601b2b26c2c583a33f6b79d761e5e4d5688698bc054",
+      "vendoredSha256": "e46f5ad0866aa7bb0e3c5198f2e632e7f871253cb784eedf94b2b6bec0d93c18",
       "delta": "Bounded controls: every control RPC has a deadline (timeoutMs, default 30000ms), and an RpcTimeoutError is always one rejected response with code error, independent of the plan error mapper. Synchronous response capture through the client request callback instead of a second deferred waiter, so a failed kernel append or budget overflow rejects the control and never strands a waiter; a failed fallback takeover record rejects the control and never escapes the fallback timer."
     },
     {
       "path": "runtimes/codex/session.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/session.ts",
       "upstreamSha256": "b07c31ed744abe598c6121c3ad471f830014a7a08471a14941da7c327ff875a0",
-      "vendoredSha256": "4e267c35a925afc71503c82c1ca2ab5957e9c9b8caefb8dde48cb596b14480f5",
+      "vendoredSha256": "673b0eb39856c9d077ffcf432fdc19deb664c0f765dbf160a4dfb2295ee3979f",
       "delta": "Raw adapter for the SDK: injected spawn and a required explicit filtered env; caller-selected sandboxMode (danger-full-access default, inherit passes no override) instead of ambient OAR_CODEX_SANDBOX; returns AdapterSession without sealSession/withSessionCredentials/observe, building one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control. Native-first recording: each notification is retained as a body.origin=\"byok-native\" frame before the fold; a fold failure kills the process visibly. Server requests: caller-owned bounded native interaction lifecycle when configured, else synchronous decline/-32601 rejection under a 1000ms dispatch deadline; on-request approval policy is verified in the open reply. Owned process lifetime: spawn/adoption settles before the first write, failed initialization kills, the abort-fallback kill and deadline timers never throw. Codex steer is a required member."
     },
     {
@@ -321,7 +321,7 @@
       "path": "shared/session-kernel.ts",
       "sourcePath": "packages/oar/src/shared/session-kernel.ts",
       "upstreamSha256": "cac17f1f61fbd9adf83a5eb853ae62319ff718c82bbd60a7296b2591165708be",
-      "vendoredSha256": "b013a48378ac746ac5f53a88b3553d44ab1d4081f8b0847dd324aa1bbbc1fef0",
+      "vendoredSha256": "3b58a60569c23f30354b5d540d0cad06ab8e7389baa018305781a34f0724feb6",
       "delta": "Fatal serialized retained-record byte budget (maxBytes, onLimit) measured after redaction; required onRecord consumer runs after append, outside best-effort observers; the redact hook is a member of the hooks object."
     },
     {

@@ -391,3 +391,5 @@ export type { ObjectCollectExpiredInput } from './blob';
 
 export { InMemoryStorageLedger } from './in-memory/storage-ledger';
 export type { InMemoryObjectBytes } from './in-memory/blob';
+
+export * from './routine-schedule';

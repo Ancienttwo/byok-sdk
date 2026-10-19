@@ -1279,8 +1279,6 @@ export { openAgentMemoryFilesystemHelper } from '../daemon/agent-memory-fs-helpe
 export type { AgentMemoryFilesystem } from '../daemon/agent-memory-filesystem';
 /** One file's state as reported by that filesystem authority. */
 export type { AgentMemoryFilesystemFileState } from '../daemon/agent-memory-filesystem';
-/** Product-owned deployment pointer to the helper binary; the SDK never searches PATH. */
-export type { AgentMemoryFilesystemHelperConfig } from '../daemon/agent-memory-filesystem';
 /** Serves `memory_recall`/`memory_save` as a stdio MCP server over host-provided streams. */
 export { serveAgentMemoryMcpOverStdio } from '../bin/agent-memory-mcp-server';
 /** MCP tool name a host must allowlist for reads. */
@@ -1932,10 +1930,6 @@ export interface AgentMemoryFilesystemFileState {
     readonly revision: string;
     readonly byteCount: number;
 }
-/** Product-owned deployment pointer. The SDK never searches PATH. */
-export interface AgentMemoryFilesystemHelperConfig {
-    readonly helperBin: string;
-}
 // ==== @byok-sdk/client dist/daemon/agent-memory-fs-helper.d.ts ====
 import type { AgentHomeLease } from '../agent-home';
 import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
@@ -2059,14 +2053,7 @@ export interface AgentMemoryIntentBackend {
  * directory-fsync variant.
  */
 export declare const NATIVE_AGENT_MEMORY_INTENT_BACKEND: AgentMemoryIntentBackend;
-/**
- * External macOS helper backend. The helper binary is product-deployed and the
- * SDK cannot prove, in this repository and at runtime, that the configured
- * binary orders its revision conflict before the rename or that its successful
- * `replace` includes a strict directory fsync. Both proofs are therefore
- * absent: this backend never advertises intents, and a conflict on it would be
- * reported as `uncertain`.
- */
+/** SDK release helper: verified Mach-O code, strict barriers, pre-rename CAS. */
 export declare function helperAgentMemoryIntentBackend(helperBin: string): AgentMemoryIntentBackend;
 export interface AgentMemoryIntentProcessorOptions {
     readonly tenantId: string;
@@ -2272,8 +2259,8 @@ export interface AgentMemoryHostedProjection {
 export declare function validateAgentMemoryPath(value: unknown): string;
 /**
  * The sole platform gate for the Agent-memory write authority. Linux retains
- * the native procfs descriptor backend. macOS requires the explicit external
- * helper that passed its local race proof. Windows remains unavailable rather
+ * the native procfs descriptor backend. macOS requires the SDK release
+ * helper that passed its native proof and deployment digest check. Windows remains unavailable rather
  * than selecting an unproved fallback.
  */
 export declare function isAgentMemorySecureFilesystemAvailable(externalHelperConfigured?: boolean): boolean;
@@ -3930,7 +3917,6 @@ import { type ProviderProvisioningHandler } from './provider-provisioning';
 import { type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
 import { type AgentMemoryHostedProjection } from './agent-memory';
 import { type AgentMemoryIntentTransport } from './agent-memory-intent';
-import type { AgentMemoryFilesystemHelperConfig } from './agent-memory-filesystem';
 import { type AgentContentReadRoot } from './agent-content-read';
 /**
  * Optional white-label product display info — purely opaque passthrough
@@ -4019,12 +4005,6 @@ export interface DaemonConfig {
     };
     /** Optional, one-way hosted projection. Without all guards it has zero network activity. */
     agentMemory?: AgentMemoryHostedProjection;
-    /**
-     * Product-owned external secure-filesystem helper. The path must be absolute;
-     * the SDK never searches PATH or bundles a native addon. Required for Phase
-     * 2 on macOS. Windows remains fail-closed pending its native race proof.
-     */
-    agentMemoryFilesystem?: AgentMemoryFilesystemHelperConfig;
     /**
      * Explicit composition for SDK-reserved MCP helpers when this daemon is
      * embedded in a single-file/SEA product executable. The product entrypoint
@@ -4308,10 +4288,9 @@ export interface DaemonConfig {
      * OFF by default. The `agent-memory-intent.v1` capability is advertised only
      * while this transport is present AND `agentHome` is configured AND the
      * secure memory filesystem is available AND that backend's ledger write is
-     * a proven durable barrier (temp fsync, rename, directory fsync). Today that
-     * is the native Linux backend on a filesystem that honors directory fsync;
-     * Windows, macOS without a helper, and the external macOS helper backend do
-     * not advertise. A notice that arrives without the capability is NOT
+     * a proven durable barrier (temp sync, rename, directory sync). Linux uses
+     * native descriptors. macOS uses the verified SDK helper after a strict
+     * full-sync volume probe. Windows does not advertise. A notice that arrives without the capability is NOT
      * acknowledged: it fails `transport_unconfigured` or
      * `filesystem_unavailable` before any fetch. There is no control-socket
      * method for intents; the only entry is the mailbox notice.
@@ -8515,8 +8494,8 @@ export interface TaskRunnerDeps {
     agentMemoryMcpBin?: Readonly<ResolvedAgentMemoryMcpBin>;
     /** SDK-owned task-free Agent-memory descriptor helper a preparation observes. */
     agentMemoryDescribeBin?: Readonly<ResolvedAgentMemoryMcpBin>;
-    /** Explicit external secure-fs helper. No PATH discovery or bundled native addon exists. */
-    agentMemoryFilesystemHelperBin?: string;
+    /** Resolve the verified SDK helper only when memory needs filesystem authority. */
+    resolveAgentMemoryFilesystemHelperBin?: () => string;
     /** Optional local-to-hosted redacted projection port. Omission is zero-network. */
     agentMemoryHostedProjection?: AgentMemoryHostedProjection;
 }
@@ -10008,7 +9987,6 @@ export type { ProviderProvisioningHandler, ProviderProvisioningNotice, ProviderP
 export { AgentMemoryIntentNoticeError, AGENT_MEMORY_INTENT_NOTICE_FAILURE_REASONS, } from './daemon/agent-memory-intent';
 export type { AgentMemoryIntentTransport, AgentMemoryIntentFetchInput, AgentMemoryIntentNoticeFailureReason, } from './daemon/agent-memory-intent';
 export { AgentMemoryError, AgentMemoryRevisionConflictError, isAgentMemorySecureFilesystemAvailable, AGENT_MEMORY_AUDIT_FILENAME, AGENT_MEMORY_OUTBOX_FILENAME, } from './daemon/agent-memory';
-export type { AgentMemoryFilesystemHelperConfig } from './daemon/agent-memory-filesystem';
 export type { AgentMemoryFile, AgentMemorySnapshot, AgentMemoryRedactor, AgentMemoryProjectionGrant, AgentMemoryProjectionPort, AgentMemoryHostedProjection, } from './daemon/agent-memory';
 export type { AgentEgressDropReceipt, AgentEgressLaneStatus, AgentEgressStatus, } from './daemon/agent-egress-policy';
 export { AGENT_CONTENT_READ_CAPABILITIES, AGENT_CONTENT_READ_CAPABILITY_WORKSPACE, AGENT_CONTENT_READ_CAPABILITY_TRANSCRIPT, AGENT_CONTENT_READ_CAPABILITY_ARTIFACT, } from './daemon/agent-content-read';

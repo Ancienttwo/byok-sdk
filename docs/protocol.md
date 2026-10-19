@@ -981,9 +981,12 @@ configured, the platform's secure memory filesystem is available, and the
 backend's ledger write is a proven durable barrier (temp-file fsync, rename,
 directory fsync). For the native Linux descriptor backend, the last condition
 also needs a startup probe showing that the Agent-home storage root honors a
-directory fsync. The external macOS filesystem helper cannot prove either the
-barrier or conflict-before-rename ordering, so a helper-backed daemon does not
-advertise. Windows does not advertise. Its accepted model S covers process
+directory fsync. On macOS, the SDK verifies its release helper and probes the
+actual Agent-home volume with strict `F_FULLFSYNC`. The verified helper provides
+the ledger barrier and conflict-before-rename ordering, so that daemon can
+advertise. Missing or invalid helper assets cannot admit memory tools. An
+explicit intent configuration with invalid assets fails before startup.
+Windows does not advertise. Its accepted model S covers process
 crash, OS crash and power loss. The proposed domain is local NTFS on an
 explicit OS build with a normal user token and storage that honors flush.
 It excludes SMB, synced directories and other file systems. Windows B stays
