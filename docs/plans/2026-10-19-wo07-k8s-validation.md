@@ -147,4 +147,74 @@ and at most one offset change in the resolution window. The measured zone and
 year samples do not prove future time-zone laws. The device Host remains the
 schedule authority. Host code must handle a null successor visibly.
 
-This work does not publish, push, open a PR, or merge another worktree.
+The initial implementation used local commits only. The acceptance follow-up
+uses normal commits and a normal push to PR #525. It does not change Draft
+status, merge history, another WO branch, or deployment.
+
+
+## Acceptance follow-up (2026-10-19)
+
+Scope: the four items from the Claude read-only acceptance review of PR #525.
+
+P1: The three consumer builds keep core and protocol imports external.
+The API closure walker adds the complete size of each reachable workspace
+module once. It does not measure a final application bundle after tree shaking.
+The new protocol root export makes the Bot fragments available to Host code.
+The new core root export makes the routine helpers available to Host code.
+
+P2: Rebuild the core and protocol sources at `8e8839a3` with the current tsup
+config and installed toolchain. Compare those root modules with this branch.
+Run the same closure walker with the two baseline modules substituted in that
+process. No installed or tracked dist file changes during that comparison.
+The three consumer sources did not change in WO-07.
+
+| Root module | Baseline bytes | WO-07 bytes | Increase |
+| --- | ---: | ---: | ---: |
+| core | 120,544 | 126,269 | 5,725 |
+| protocol | 115,614 | 127,135 | 11,521 |
+
+| Entry | Baseline closure | WO-07 closure | Old budget | Budget increase |
+| --- | ---: | ---: | ---: | ---: |
+| cloud | 516,197 | 533,443 | 519,419 | 14,024 |
+| cloud-dataplane | 766,069 | 783,315 | 767,924 | 15,391 |
+| ui-runtime | 544,457 | 561,703 | 550,505 | 11,198 |
+
+Each static closure increases by 17,246 bytes. Each consumer reaches the two
+larger root modules. The budget increases differ because the old budgets had
+different remaining margins. There is no new third-party dependency.
+
+P3: Keep the required public root exports and the measured closure budgets.
+Removing the Bot export would remove the requested Host API. A consumer bundle
+size claim would require a separate application build. The PR body records the
+static closure cost instead of claiming such a measurement.
+
+Merge order: PR #523 first, then PR #525, then the WO-10 consumer PR #530.
+PR #523 was still OPEN when checked in this follow-up. Do not merge main into
+this branch. The horizon parity test remains conditional on #523 reaching main.
+No server horizon constant or wake assertion changes in this follow-up.
+
+A real-path probe uses yearly March 10 at 12:00 in `America/New_York`.
+From `2031-03-10T16:00:00Z`, core returns `2032-03-10T17:00:00Z`.
+The gap is 31,626,000,000 ms: 366 days plus one hour.
+The current server's 366-day bound rejects that instant with
+`WAKE_AVAILABLE_AT_INVALID`. PR #523 must land before this Host integration.
+
+PENDING-AIMPACT: confirm `BOT_TURN_OUTCOME_LIMITS` before merge.
+Those proposed limits are frozen public API values and are enforced by the
+fragments. No limit value changes in this follow-up. No product decision is
+inferred from the acceptance review.
+
+The routine test moves the minute-scan oracle comment to `dstOracle`, fixes
+callback indentation, and reports the current core horizon in its diagnostic.
+The assertion conditions, expected instants, sample counts, and timeouts do not
+change. The PR body records this test change explicitly.
+
+Follow-up checks passed with exit 0: `bun run typecheck`; core
+`bunx vitest run src/__tests__/routine-schedule.test.ts src/__tests__/constraints.test.ts`
+(149 tests in two files); and `bun run check:api-surface` (all nine goldens).
+`git diff --check` also passed. The earlier full-suite failure above stays
+recorded. This follow-up does not claim a new full-suite pass.
+
+Local evidence is under `_ops/wo07-review/` in this worktree:
+`closure-measurements.json`, `horizon-probe.json`, `typecheck.log`,
+`core-focused.log`, and `api-surface.log`.
