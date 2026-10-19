@@ -1341,10 +1341,11 @@ export type BlobRef = z.infer<typeof BlobRefSchema>;
 // ==== @byok-sdk/protocol dist/bot-turn-outcome.d.ts ====
 import { type ResultSchema } from './result-schema';
 export declare const BOT_TURN_OUTCOME_CONTRACT = "bot-turn-outcome.v1";
-/** Proposed code-point and item caps. Product confirmation is pending. */
+/** Code-point and item caps for Bot turn outcomes. */
 export declare const BOT_TURN_OUTCOME_LIMITS: Readonly<{
     delegateMaxItems: 2;
     delegateRequestMaxLength: 1000;
+    cancelDelegationMaxItems: 2;
     askUserQuestionMaxLength: 400;
     askUserOptionsMaxItems: 6;
     askUserOptionIdMaxLength: 24;
@@ -1400,6 +1401,10 @@ export declare const botTurnOutcomeFragments: {
     delegate(o: {
         to: NonEmptyIds;
     }): ResultSchema;
+    /** Owner-authorized Main Bot turns only. The Host lists open delegations. */
+    cancelDelegation(o: {
+        delegationIds: NonEmptyIds;
+    }): ResultSchema;
     askUser(): ResultSchema;
     /** One branch per Host action; each draft needs a finite bound of at most confirmableDraftMaxBytes. */
     confirmableAction(o: {
@@ -1453,7 +1458,7 @@ export declare const botTurnOutcomeFragments: {
     }): ResultSchema;
     teamNote(): ResultSchema;
 };
-export type BotTurnOutcomeKind = 'delegate' | 'ask_user' | 'confirmable_action' | 'create_routine' | 'update_routine' | 'cancel_routine' | 'speech' | 'room_call' | 'create_bot' | 'update_bot' | 'delete_bot' | 'create_room' | 'update_room' | 'team_note';
+export type BotTurnOutcomeKind = 'delegate' | 'cancel_delegation' | 'ask_user' | 'confirmable_action' | 'create_routine' | 'update_routine' | 'cancel_routine' | 'speech' | 'room_call' | 'create_bot' | 'update_bot' | 'delete_bot' | 'create_room' | 'update_room' | 'team_note';
 /**
  * Host composition: pick fragments, freeze the result in the offer. Refuses a
  * schema outside the K7 subset ('not-subset'), a schema above
@@ -1471,6 +1476,9 @@ export type BotTurnOutcomeFragments = Partial<Readonly<Record<BotTurnOutcomeKind
 export interface DelegateAction {
     readonly to: string;
     readonly request: string;
+}
+export interface CancelDelegationAction {
+    readonly delegationId: string;
 }
 export type AskUserAction = {
     readonly question: string;
@@ -1568,6 +1576,7 @@ export interface TeamNoteAction {
 /** Shape of a document that passed a schema composed from these fragments. */
 export interface BotTurnOutcome {
     readonly delegate?: readonly DelegateAction[];
+    readonly cancel_delegation?: readonly CancelDelegationAction[];
     readonly ask_user?: AskUserAction;
     readonly confirmable_action?: readonly ConfirmableAction[];
     readonly create_routine?: readonly CreateRoutineAction[];
