@@ -34,6 +34,9 @@ export interface ResidentProjection {
   mutation: AgentMemoryProjectionMutation;
   projectedAt: string;
   text: string | null;
+  /** An applied small replacement invalidates this old display, not its ordering metadata. */
+  invalidatedByIntent?: string;
+  refreshTaskIds?: string[];
 }
 export interface MemoryState {
   intents: Record<string, MemoryIntentRow>;
@@ -41,7 +44,7 @@ export interface MemoryState {
   projections: Record<string, ResidentProjection>;
 }
 export interface MemoryContextPack {
-  residentMemory: { text: string; projectedAt: string; mutationId: string; policyRevision: string };
+  residentMemory?: { text: string; projectedAt: string; mutationId: string; policyRevision: string };
 }
 export interface MemoryOptions {
   now?: () => number;
@@ -67,6 +70,14 @@ function sameIdentity(intent: AgentMemoryIntentV1, completion: AgentMemoryIntent
 
 /** Copy-and-own Host logic. Public commands require authenticated Host approval. */
 export class HostMemoryPage {
+  private readonly listeners = new Set<(binding: MemoryBinding) => Promise<void>>();
+  onChange(listener: (binding: MemoryBinding) => Promise<void>): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  }
+  private async changed(binding: MemoryBinding): Promise<void> {
+    for (const listener of this.listeners) await listener(binding);
+  }
   constructor(readonly ledger: HostLedger, private readonly options: MemoryOptions) {}
   private now(): number { return (this.options.now ?? Date.now)(); }
   intent(intentId: string): MemoryIntentRow | undefined { return this.ledger.snapshot().memory?.intents[intentId]; }
@@ -119,6 +130,15 @@ export class HostMemoryPage {
     }
     if (failures.length) throw new AggregateError(failures, 'Memory notice delivery failed; pending intents retained');
   }
+  /** Bind a new core submission to the pending refresh before the SDK can execute it. */
+  refreshExecution(binding: MemoryBinding, taskId: string): void {
+    this.ledger.transaction(state => {
+      const projection = memory(state).projections[bindingKey(binding)];
+      if (!projection?.invalidatedByIntent) return;
+      const tasks = projection.refreshTaskIds ??= [];
+      if (!tasks.includes(taskId)) tasks.push(taskId);
+    });
+  }
   /** Bind this adapter to the authenticated device. Do not take identity from a request body. */
   transport(deviceId: string): AgentMemoryIntentTransport {
     return {
@@ -131,7 +151,7 @@ export class HostMemoryPage {
         const code = row.revoked ? 'intent_revoked' : this.now() >= row.expiresAt ? 'intent_expired'
           : !this.options.isCurrent({ deviceId, agentRef: row.intent.agentRef }) ? 'placement_changed' : undefined;
         if (code) {
-          this.record(row, { ...this.identity(row.intent), outcome: 'rejected', code }, 'host_terminal');
+          this.record(state, row, { ...this.identity(row.intent), outcome: 'rejected', code }, 'host_terminal');
           return { disposition: 'terminal', intent: metadata(row.intent), readback: row.readback };
         }
         row.releasedAt ??= new Date(this.now()).toISOString();
@@ -139,7 +159,7 @@ export class HostMemoryPage {
       }),
       complete: async value => {
         const completion = AgentMemoryIntentCompletionSchema.parse(value);
-        return this.ledger.transaction(state => {
+        const readback = this.ledger.transaction(state => {
           const row = memory(state).intents[completion.intentId];
           if (!row || row.deviceId !== deviceId || !sameIdentity(row.intent, completion)) throw new Error('Memory completion identity mismatch');
           if (row.readback) return { ...row.readback, disposition: row.readback.disposition === 'host_terminal' ? 'host_terminal'
@@ -148,9 +168,13 @@ export class HostMemoryPage {
           if (completion.outcome === 'applied' && (row.intent.operation === 'replace'
             ? !completion.result.exists || completion.result.revision !== row.intent.targetRevision
             : completion.result.exists || completion.result.revision !== EMPTY_MEMORY_REVISION)) throw new Error('Memory applied result mismatch');
-          this.record(row, completion, 'recorded');
+          this.record(state, row, completion, 'recorded');
           return row.readback!;
         });
+        if (readback.completion.outcome === 'applied' && readback.completion.path === 'MEMORY.md') {
+          await this.changed({ deviceId, agentRef: readback.completion.agentRef });
+        }
+        return readback;
       },
     };
   }
@@ -158,9 +182,14 @@ export class HostMemoryPage {
     const { intentId, agentRef, path, operation, operationDigest } = intent;
     return { intentId, agentRef, path, operation, operationDigest };
   }
-  private record(row: MemoryIntentRow, completion: AgentMemoryIntentCompletion, disposition: 'recorded' | 'host_terminal'): void {
+  private record(state: LedgerState, row: MemoryIntentRow, completion: AgentMemoryIntentCompletion, disposition: 'recorded' | 'host_terminal'): void {
     row.readback = AgentMemoryIntentReadbackSchema.parse({ tenantId: this.ledger.tenant, deviceId: row.deviceId,
       intentId: row.intent.intentId, disposition, completion, recordedAt: new Date(this.now()).toISOString() });
+    if (completion.outcome === 'applied' && row.intent.path === 'MEMORY.md' && row.intent.operation === 'replace'
+      && row.intent.content !== undefined && Buffer.byteLength(row.intent.content, 'utf8') <= RESIDENT_MEMORY_MAX_BYTES) {
+      const prior = memory(state).projections[bindingKey({ deviceId: row.deviceId, agentRef: row.intent.agentRef })];
+      if (prior) { prior.invalidatedByIntent = row.intent.intentId; delete prior.refreshTaskIds; }
+    }
     row.intent = metadata(row.intent); // Purge pending content in the terminal commit.
     row.noticePending = false;
   }
@@ -178,7 +207,7 @@ export class HostMemoryPage {
         || !('residentMemory' in body) || body.residentMemory !== null && typeof body.residentMemory !== 'string'
         || typeof body.residentMemory === 'string' && /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(body.residentMemory)) throw new Error('Invalid resident memory profile');
       const resident = body.residentMemory as string | null;
-      return this.ledger.transaction(state => {
+      const result = this.ledger.transaction(state => {
         const projections = memory(state).projections;
         const key = bindingKey({ deviceId, agentRef: mutation.agentRef });
         const prior = projections[key];
@@ -190,16 +219,20 @@ export class HostMemoryPage {
           }
           if (mutation.writerEpoch < previous.writerEpoch || mutation.writerEpoch === previous.writerEpoch && mutation.sourceSeq <= previous.sourceSeq) throw new Error('Stale memory projection');
         }
-        projections[key] = { mutation, text: resident, projectedAt: new Date(this.now()).toISOString() };
+        const pending = prior?.invalidatedByIntent && !prior.refreshTaskIds?.includes(mutation.taskId)
+          ? { invalidatedByIntent: prior.invalidatedByIntent, refreshTaskIds: prior.refreshTaskIds } : {};
+        projections[key] = { mutation, text: resident, projectedAt: new Date(this.now()).toISOString(), ...pending };
         return { accepted: true };
       });
+      await this.changed({ deviceId, agentRef: mutation.agentRef });
+      return result;
     } };
   }
   contextPack(binding: MemoryBinding): MemoryContextPack {
     if (!this.options.isCurrent(binding)) throw new Error('Memory placement or profile changed');
     const projection = this.ledger.snapshot().memory?.projections[bindingKey(binding)];
-    if (projection && !this.options.authorizeProjection(binding.deviceId, projection.mutation)) throw new Error('Memory projection no longer authorized');
-    if (!projection || projection.text === null) throw new Error('Memory blocked: no resident projection. Refresh MEMORY.md.');
+    if (!projection || projection.text === null || projection.invalidatedByIntent) return {};
+    if (!this.options.authorizeProjection(binding.deviceId, projection.mutation)) throw new Error('Memory projection no longer authorized');
     if (Buffer.byteLength(projection.text, 'utf8') > RESIDENT_MEMORY_MAX_BYTES) throw new Error('Memory blocked: MEMORY.md exceeds 8 KiB. Reduce its size.');
     return { residentMemory: { text: projection.text, projectedAt: projection.projectedAt,
       mutationId: projection.mutation.mutationId, policyRevision: projection.mutation.policyRevision } };

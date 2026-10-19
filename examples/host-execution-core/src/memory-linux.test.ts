@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, writeFile, stat, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, stat, rm, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -9,6 +9,8 @@ import { createDaemonWithAdapters, AgentHomeManager } from '@byok-sdk/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
 import { BotStubAdapter, waitForReady, waitForTaskCleanup } from '../../basic/goal-btw.test-support';
+import { createByokServer } from '@byok-sdk/server';
+import { HostExecutionCore, type ExecutionServer } from './core';
 import { HostLedger } from './ledger';
 import { HostMemoryPage, memoryRevision, type MemoryApproval } from './memory';
 import { policy, template } from './test-support';
@@ -16,7 +18,7 @@ import { policy, template } from './test-support';
 async function openMemoryHost() {
   const root = await mkdtemp(path.join(tmpdir(), 'memory-e2e-'));
   const tenant = tenantId('product:memory-page');
-  const agentRef = { agentId: 'main', profileRevision: '1' };
+  let agentRef = { agentId: 'main', profileRevision: '1' };
   const productId = 'memory-page';
   const composition = createInMemoryByokCloud({ instanceProductId: productId, longPollHoldMs: 30 });
   const cloud = composition.cloud;
@@ -34,6 +36,15 @@ async function openMemoryHost() {
     authorizeProjection: (_device: string, mutation: { grantRef: string; policyRevision: string; writerEpoch: number }) => mutation.grantRef === 'memory-test-grant' && mutation.policyRevision === 'memory-test-policy' && mutation.writerEpoch === 1,
   };
   let page = new HostMemoryPage(ledger, options);
+  let core: HostExecutionCore;
+  const wakeServer = createByokServer({ productId, wake: { consume: (wake, signal) => core.consume(wake, signal) } });
+  const executionServer: ExecutionServer = {
+    executions: { submit: input => cloud.submitAgentExecution(tenant, input) },
+    tasks: { offer: id => cloud.readTaskOffer(tenant, id), attempt: id => cloud.readTaskAttempt(tenant, id),
+      deviceTerminal: id => cloud.readDeviceTerminal(tenant, id), cancel: async (id, reason) => { await cloud.cancelTask(tenant, id, reason); } },
+    wakes: wakeServer.wakes,
+  };
+  core = new HostExecutionCore(executionServer, ledger, { memory: page, reconcileMs: 100 });
   const adapter = new BotStubAdapter();
   const agentRoot = path.join(root, 'homes');
   const home = (await new AgentHomeManager({ hostStorageRoot: agentRoot }).layout.resolve(agentRef)).canonicalHome;
@@ -56,25 +67,37 @@ async function openMemoryHost() {
   deviceId = (await daemon.pair(pairing.code)).deviceId;
   await daemon.start(); await waitForReady(daemon);
   return {
-    root, home, cloud, composition, adapter, deviceId, agentRef, daemon, get page() { return page; }, get ledger() { return ledger; },
+    root, home, cloud, composition, adapter, deviceId, get agentRef() { return agentRef; }, daemon, get core() { return core; },
+    setProfileRevision(revision: string) { agentRef = { ...agentRef, profileRevision: revision }; }, get page() { return page; }, get ledger() { return ledger; },
     async command(rest: Partial<MemoryApproval> = {}) {
       const row = await page.approve({ deviceId, agentRef, approvalRef: randomUUID(), path: 'MEMORY.md', operation: 'replace', content: 'replacement private-value\n', expiresAt: Date.now() + 60_000, ...rest });
       await page.flushNotices();
       await vi.waitFor(() => expect(page.intent(row.intent.intentId)?.readback).toBeDefined(), { timeout: 10_000 });
       return page.intent(row.intent.intentId)!;
     },
-    restartLedger() { ledger.close(); ledger = new HostLedger(path.join(root, 'host.sqlite'), tenant); page = new HostMemoryPage(ledger, options); },
+    async restartLedger() {
+      await core.close(); ledger.close(); ledger = new HostLedger(path.join(root, 'host.sqlite'), tenant);
+      page = new HostMemoryPage(ledger, options); core = new HostExecutionCore(executionServer, ledger, { memory: page, reconcileMs: 100 });
+      await core.recover();
+    },
+    input(key: string = randomUUID()) {
+      const execution = template(deviceId);
+      execution.payload.agentRef = { ...agentRef };
+      return { key, source: 'user' as const, execution, waitUntil: Date.now() + 60_000 };
+    },
     async project() {
-      const taskId = randomUUID();
-      await cloud.submitAgentExecution(tenant, { taskId, ...template(deviceId) });
+      const input = this.input();
+      const { taskId } = await core.enqueue(input);
       await vi.waitFor(() => expect(adapter.sessions.has(taskId)).toBe(true), { timeout: 10_000 });
       const session = adapter.sessions.get(taskId)!;
       session.finish({ text: 'done' });
       await vi.waitFor(async () => expect(await cloud.readDeviceTerminal(tenant, taskId)).toMatchObject({ envelope: { type: 'task.complete' } }), { timeout: 10_000 });
       await waitForTaskCleanup(daemon, session);
+      await core.drain();
+      return core.intent(input.key)!;
     },
     async close() {
-      await daemon.stop(); ledger.close();
+      await core.close(); await daemon.stop(); await wakeServer.close(); ledger.close();
       await new Promise<void>((resolve, reject) => { http.close(error => error ? reject(error) : resolve()); if ('closeAllConnections' in http) http.closeAllConnections(); });
       await rm(root, { recursive: true, force: true });
     },
@@ -95,7 +118,7 @@ describe.skipIf(process.platform !== 'linux')('memory page with real Linux mailb
     const deleted = await host.command({ path: 'notes/x.md', operation: 'delete', content: undefined, baseRevision: memoryRevision('note to remove\n') });
     expect(deleted.readback!.completion.outcome).toBe('applied');
     await expect(stat(path.join(host.home, 'notes', 'x.md'))).rejects.toMatchObject({ code: 'ENOENT' });
-    host.restartLedger();
+    await host.restartLedger();
     expect(host.page.intent(replaced.intent.intentId)!.readback).toEqual(replaced.readback);
     expect(host.page.intent(deleted.intent.intentId)!.readback).toEqual(deleted.readback);
     await host.cloud.enqueueAgentMemoryIntentNotice(tenantId('product:memory-page'), host.deviceId, { intentId: replaced.intent.intentId, agentRef: host.agentRef });
@@ -123,7 +146,7 @@ describe.skipIf(process.platform !== 'linux')('memory page with real Linux mailb
     await host.project();
     const binding = { deviceId: host.deviceId, agentRef: host.agentRef };
     const first = host.page.contextPack(binding);
-    expect(first.residentMemory.text).toBe('original [redacted]\n');
+    expect(first.residentMemory!.text).toBe('original [redacted]\n');
     expect(JSON.stringify(first)).not.toContain('private-value');
     const replacement = 'é'.repeat(4096) + 'x';
     const row = await host.command({ baseRevision: memoryRevision('original private-value\n'), content: replacement });
@@ -131,5 +154,55 @@ describe.skipIf(process.platform !== 'linux')('memory page with real Linux mailb
     expect(host.page.contextPack(binding)).toEqual(first); // Intent results do not forge a fresh projection.
     await host.project();
     expect(() => host.page.contextPack(binding)).toThrow('exceeds 8 KiB');
+  });
+});
+
+
+describe.skipIf(process.platform !== 'linux')('memory bootstrap and refresh through the core', () => {
+  let host: Awaited<ReturnType<typeof openMemoryHost>>;
+  beforeEach(async () => { host = await openMemoryHost(); });
+  afterEach(async () => { await host?.close(); });
+
+  it('starts a new Agent through the core and receives its first task-close projection', async () => {
+    expect(host.ledger.snapshot().memory?.projections ?? {}).toEqual({});
+    const intent = await host.project();
+    expect(intent).toMatchObject({ conclusion: 'succeeded', attempts: 1 });
+    const offer = await host.cloud.readTaskOffer(tenantId('product:memory-page'), intent.taskId);
+    expect(offer?.payload).toHaveProperty('instruction', template(host.deviceId).payload.instruction);
+    expect(host.page.contextPack({ deviceId: host.deviceId, agentRef: host.agentRef }).residentMemory?.text).toBe('original [redacted]\n');
+  });
+
+  it('runs with no MEMORY.md and after a profile revision bump', async () => {
+    await unlink(path.join(host.home, 'MEMORY.md'));
+    expect(host.page.contextPack({ deviceId: host.deviceId, agentRef: host.agentRef })).toEqual({});
+    expect((await host.project()).conclusion).toBe('succeeded');
+    expect(await readFile(path.join(host.home, 'MEMORY.md'), 'utf8')).toBe(''); // The SDK initializes the missing file.
+    host.setProfileRevision('2');
+    expect(host.page.contextPack({ deviceId: host.deviceId, agentRef: host.agentRef })).toEqual({});
+    expect((await host.project()).conclusion).toBe('succeeded');
+    expect(host.page.contextPack({ deviceId: host.deviceId, agentRef: host.agentRef }).residentMemory?.text).toBe('');
+  });
+
+  it('refreshes an oversized projection after a verified small replace, including Host restart', async () => {
+    const oversized = 'x'.repeat(8193);
+    await writeFile(path.join(host.home, 'MEMORY.md'), oversized);
+    await host.project(); // Bootstrap is allowed; its real task-close projection discovers the size.
+    const input = host.input('blocked-until-user-fix');
+    const blocked = await host.core.enqueue(input);
+    expect(blocked).toMatchObject({ phase: 'memory_blocked', attempts: 0 });
+    await host.restartLedger();
+    expect(host.core.intent(input.key)).toMatchObject({ phase: 'memory_blocked', attempts: 0 });
+    const result = await host.command({ baseRevision: memoryRevision(oversized), content: 'small private-value\n' });
+    expect(result.readback?.completion.outcome).toBe('applied');
+    expect(host.page.contextPack({ deviceId: host.deviceId, agentRef: host.agentRef })).toEqual({});
+    await vi.waitFor(() => expect(host.adapter.sessions.has(blocked.taskId)).toBe(true), { timeout: 10_000 });
+    const offer = await host.cloud.readTaskOffer(tenantId('product:memory-page'), blocked.taskId);
+    expect(offer?.payload).toHaveProperty('instruction', input.execution.payload.instruction);
+    const session = host.adapter.sessions.get(blocked.taskId)!;
+    session.finish({ text: 'refreshed' });
+    await waitForTaskCleanup(host.daemon, session);
+    await host.core.drain();
+    await vi.waitFor(() => expect(host.page.contextPack({ deviceId: host.deviceId, agentRef: host.agentRef }).residentMemory?.text).toBe('small [redacted]\n'));
+    expect(host.core.intent(input.key)).toMatchObject({ conclusion: 'succeeded', attempts: 1 });
   });
 });

@@ -93,7 +93,7 @@ export function recordOccurrence(state: LedgerState, tenant: string, wake: DueWa
     const intent = state.intents[prior.intentId]!;
     // A new slot ends old retries. Keep a running occurrence and only the latest queued occurrence.
     intent.retryUntil = Math.min(intent.retryUntil ?? now, now);
-    if (intent.phase === 'queued' || intent.phase === 'backoff') settle(state, intent, 'superseded');
+    if (intent.phase === 'queued' || intent.phase === 'backoff' || intent.phase === 'memory_blocked') settle(state, intent, 'superseded');
   }
   const intent = enqueue(state, tenant, { key: `occurrence:${key}`, source: 'routine', execution: definition.execution,
     waitUntil: time(now + definition.waitMs), retry: definition.retry });

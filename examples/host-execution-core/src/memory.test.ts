@@ -139,42 +139,137 @@ it('checks projection hash, grant, exact profile, ordering and immutable mutatio
   await expect(port.publish({ mutation: projection('stale') })).rejects.toThrow('Stale');
   await expect(port.publish({ mutation: projection('denied', { grantRef: 'other', sourceSeq: 2 }) })).rejects.toThrow('authorized');
   await expect(port.publish({ mutation: { ...first, snapshot: { ...first.snapshot, redactedHash: memoryRevision('bad') } } })).rejects.toThrow('hash mismatch');
-  expect(() => page.contextPack({ ...binding, agentRef: { ...agentRef, profileRevision: '2' } })).toThrow('no resident projection');
+  expect(page.contextPack({ ...binding, agentRef: { ...agentRef, profileRevision: '2' } })).toEqual({});
   await port.publish({ mutation: projection('next', { sourceSeq: 2 }) });
-  expect(page.contextPack(binding).residentMemory.text).toBe('next');
+  expect(page.contextPack(binding).residentMemory!.text).toBe('next');
   await expect(port.publish({ mutation: projection('old epoch', { writerEpoch: 1, sourceSeq: 3, grantRef: 'other' }) })).rejects.toThrow();
 });
 
-it('blocks missing and oversized resident text without truncation and counts UTF-8 bytes', async () => {
-  expect(() => page.contextPack(binding)).toThrow('blocked');
+it('allows absent memory, blocks oversized text and counts UTF-8 bytes', async () => {
+  expect(page.contextPack(binding)).toEqual({});
   const port = page.projectionPort('device');
   await port.publish({ mutation: projection('é'.repeat(4096)) });
-  expect(Buffer.byteLength(page.contextPack(binding).residentMemory.text)).toBe(8192);
+  expect(Buffer.byteLength(page.contextPack(binding).residentMemory!.text)).toBe(8192);
   await port.publish({ mutation: projection('é'.repeat(4096) + 'x', { sourceSeq: 2 }) });
   expect(() => page.contextPack(binding)).toThrow('exceeds 8 KiB');
   await port.publish({ mutation: projection(null, { sourceSeq: 3 }) });
-  expect(() => page.contextPack(binding)).toThrow('no resident projection');
+  expect(page.contextPack(binding)).toEqual({});
   await port.publish({ mutation: projection('', { sourceSeq: 4 }) });
-  expect(page.contextPack(binding).residentMemory.text).toBe('');
+  expect(page.contextPack(binding).residentMemory!.text).toBe('');
 });
 
 it('blocks execution before submit, then freezes a resident ContextPack in the real offered instruction', async () => {
   let host: TestHost | undefined;
   try {
     host = await openHost({ memory: page });
+    await page.projectionPort(host.deviceId).publish({ mutation: projection('x'.repeat(8193)) });
     const offer = await host.core.enqueue(host.intent('memory-turn'));
     expect(await host.server.tasks.offer(offer.taskId)).toBeUndefined();
     expect(host.core.intent('memory-turn')!.attempts).toBe(0);
     expect(Object.values(host.ledger.snapshot().outbox).some(row => row.lastError?.includes('Memory blocked'))).toBe(true);
-    await page.projectionPort(host.deviceId).publish({ mutation: projection('resident [redacted]') });
+    await page.projectionPort(host.deviceId).publish({ mutation: projection('resident [redacted]', { sourceSeq: 2 }) });
     await host.core.drain();
     const payload = (await host.server.tasks.offer(offer.taskId))!.payload;
     if (!('instruction' in payload)) throw new Error('Expected an inline instruction');
     const frozen = payload.instruction;
     expect(frozen).toContain('resident [redacted]');
     expect(frozen).toContain('ContextPack');
-    await page.projectionPort(host.deviceId).publish({ mutation: projection('new projection', { sourceSeq: 2 }) });
+    await page.projectionPort(host.deviceId).publish({ mutation: projection('new projection', { sourceSeq: 3 }) });
     await host.core.drain();
     expect((await host.server.tasks.offer(offer.taskId))!.payload).toEqual(payload);
   } finally { await host?.close(); }
+});
+
+
+it('bootstraps without a resident projection', () => {
+  expect(page.contextPack(binding)).toEqual({});
+});
+
+it('parks an oversized queue head without hot wake polling', async () => {
+  const host = await openHost({ memory: page });
+  try {
+    await page.projectionPort(host.deviceId).publish({ mutation: projection('x'.repeat(8193)) });
+    const wakes = vi.spyOn(host.server.wakes, 'schedule');
+    await host.core.enqueue(host.intent('parked'));
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    expect(host.core.intent('parked')).toMatchObject({ phase: 'memory_blocked', attempts: 0 });
+    expect(wakes.mock.calls.length).toBeLessThanOrEqual(1);
+  } finally { await host.close(); }
+});
+
+
+it('keeps a blob instruction parked after restart and supports cancellation without attempts', async () => {
+  const host = await openHost({ memory: page });
+  try {
+    const input = host.intent('blob-parked');
+    input.execution.payload.instruction = { blobRef: { blobId: 'blob', contentHash: memoryRevision('blob'), size: 4, contentType: 'text/plain' } };
+    const wakes = vi.spyOn(host.server.wakes, 'schedule');
+    await host.core.enqueue(input);
+    await host.restartCore();
+    const afterRestart = wakes.mock.calls.length;
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    expect(host.core.intent(input.key)).toMatchObject({ phase: 'memory_blocked', attempts: 0, generation: 0,
+      memoryBlocked: { resume: 'queued', reason: 'Memory ContextPack requires an inline instruction' } });
+    expect(wakes.mock.calls.length).toBe(afterRestart);
+    expect(await host.server.tasks.offer(host.core.intent(input.key)!.taskId)).toBeUndefined();
+    await host.core.cancel(input.key);
+    expect(host.core.intent(input.key)).toMatchObject({ conclusion: 'cancelled', attempts: 0 });
+  } finally { await host.close(); }
+});
+
+it('retries the durable projection wake on duplicate publish without a manual drain', async () => {
+  const host = await openHost({ memory: page, reconcileMs: 100 });
+  try {
+    const port = page.projectionPort(host.deviceId);
+    await port.publish({ mutation: projection('x'.repeat(8193)) });
+    const intent = await host.core.enqueue(host.intent('wake-after-refresh'));
+    const wakes = vi.spyOn(host.server.wakes, 'schedule').mockRejectedValueOnce(new Error('wake response lost'));
+    const refreshed = projection('new resident', { sourceSeq: 2 });
+    await expect(port.publish({ mutation: refreshed })).rejects.toThrow('Memory reconciliation wake failed');
+    expect(host.core.intent(intent.key)).toMatchObject({ phase: 'queued', attempts: 0 });
+    await port.publish({ mutation: refreshed });
+    await vi.waitFor(() => expect(host.adapter.sessions.has(intent.taskId)).toBe(true), { timeout: 5000 });
+    expect(host.core.intent(intent.key)).toMatchObject({ phase: 'inflight', attempts: 1 });
+    expect(wakes.mock.calls[1]![0].dedupKey).toBe(wakes.mock.calls[0]![0].dedupKey);
+  } finally { await host.close(); }
+});
+
+
+it('clears only an applied small replacement and waits for its refresh task projection', async () => {
+  const port = page.projectionPort(binding.deviceId);
+  const old = projection('x'.repeat(8193));
+  await port.publish({ mutation: old });
+  const conflict = await page.approve(approval());
+  await page.transport(binding.deviceId).fetch({ intentId: conflict.intent.intentId, agentRef, reservation: 'held' });
+  await page.transport(binding.deviceId).complete(completion(conflict.intent.intentId, 'conflict'));
+  expect(() => page.contextPack(binding)).toThrow('exceeds 8 KiB');
+  const applied = await page.approve(approval());
+  await page.transport(binding.deviceId).fetch({ intentId: applied.intent.intentId, agentRef, reservation: 'held' });
+  const result = completion(applied.intent.intentId);
+  await page.transport(binding.deviceId).complete(result);
+  expect(page.contextPack(binding)).toEqual({});
+  await port.publish({ mutation: old });
+  await port.publish({ mutation: projection('late old snapshot', { sourceSeq: 2 }) });
+  expect(page.contextPack(binding)).toEqual({});
+  page.refreshExecution(binding, 'refresh-task');
+  await port.publish({ mutation: projection('fresh [redacted]', { taskId: 'refresh-task', sourceSeq: 3 }) });
+  const fresh = page.contextPack(binding);
+  expect(fresh.residentMemory?.text).toBe('fresh [redacted]');
+  await page.transport(binding.deviceId).complete(result);
+  expect(page.contextPack(binding)).toEqual(fresh);
+});
+
+it('recovers an accepted projection after the core was offline during its notification', async () => {
+  const host = await openHost({ memory: page });
+  try {
+    const port = page.projectionPort(host.deviceId);
+    await port.publish({ mutation: projection('x'.repeat(8193)) });
+    const intent = await host.core.enqueue(host.intent('offline-refresh'));
+    await host.core.close();
+    await port.publish({ mutation: projection('fresh after restart', { sourceSeq: 2 }) });
+    expect(host.core.intent(intent.key)).toMatchObject({ phase: 'memory_blocked', attempts: 0 });
+    await host.restartCore();
+    await vi.waitFor(() => expect(host.adapter.sessions.has(intent.taskId)).toBe(true), { timeout: 5000 });
+    expect(host.core.intent(intent.key)).toMatchObject({ phase: 'inflight', attempts: 1 });
+  } finally { await host.close(); }
 });

@@ -1,5 +1,5 @@
 import type { ByokServer, DueWake } from '@byok-sdk/server';
-import type { HostMemoryPage } from './memory';
+import type { HostMemoryPage, MemoryBinding } from './memory';
 import { HostLedger } from './ledger';
 import { canonical, hash, project, taskId, time, validateInput, type Attempt, type Intent, type IntentInput,
   type Json, type LedgerState, type Routine, type RoutineDefinition, type Terminal } from './model';
@@ -35,6 +35,8 @@ export class HostExecutionCore {
   private draining?: Promise<void>;
   private again = false;
   private stopped = false;
+  private stopMemoryUpdates?: () => void;
+  private memoryWaking: Promise<void> = Promise.resolve();
   private scheduleRetryTimer?: ReturnType<typeof setTimeout>;
   constructor(readonly server: ExecutionServer, readonly ledger: HostLedger, private readonly options: HostOptions = {}) {
     if (options.memory && options.memory.ledger.tenant !== ledger.tenant) throw new Error('Memory tenant must match execution tenant');
@@ -42,6 +44,16 @@ export class HostExecutionCore {
     this.nextTime = options.nextOccurrence ?? nextIntervalOccurrence;
     this.reconcileMs = time(options.reconcileMs ?? 1000);
     if (this.reconcileMs < 1) throw new Error('Reconciliation interval must be positive');
+    this.stopMemoryUpdates = options.memory?.onChange(binding => {
+      const wake = this.memoryWaking.then(async () => {
+        if (this.stopped) return;
+        if (this.resumeMemory(binding)) this.armScan(this.now() + this.reconcileMs);
+        const result = await this.flushWakes();
+        if (result.failures.length) throw new AggregateError(result.failures, 'Memory reconciliation wake failed');
+      });
+      this.memoryWaking = wake.catch(() => {});
+      return wake;
+    });
   }
   intent(key: string): Intent | undefined { return this.ledger.snapshot().intents[hash(key)]; }
   async enqueue(input: IntentInput): Promise<Intent> {
@@ -110,6 +122,7 @@ export class HostExecutionCore {
         } else if (routine.next && !pending.has(routine.next.dedupKey)) scheduleNext(state, routine, this.now());
       }
     });
+    this.resumeMemory();
     await this.drain();
   }
   drain(): Promise<void> {
@@ -125,7 +138,10 @@ export class HostExecutionCore {
     });
     return this.draining;
   }
-  async close(): Promise<void> { this.stopped = true; clearTimeout(this.scheduleRetryTimer); await this.draining; }
+  async close(): Promise<void> {
+    this.stopped = true; this.stopMemoryUpdates?.(); clearTimeout(this.scheduleRetryTimer);
+    await Promise.all([this.draining, this.memoryWaking]);
+  }
   private assertOpen(): void { if (this.stopped) throw new Error('Host core is closed'); }
 
   private async scan(): Promise<void> {
@@ -138,7 +154,7 @@ export class HostExecutionCore {
     for (let pass = 0; pass < 100 && !this.stopped; pass++) {
       this.ledger.transaction(state => {
         for (const intent of Object.values(state.intents)) {
-          if (intent.phase === 'queued' && (intent.cancelReason || this.now() >= intent.waitUntil || this.now() >= (intent.retryUntil ?? Infinity))) {
+          if ((intent.phase === 'queued' || intent.phase === 'memory_blocked') && (intent.cancelReason || this.now() >= intent.waitUntil || this.now() >= (intent.retryUntil ?? Infinity))) {
             settle(state, intent, intent.cancelReason === 'cancelled' ? 'cancelled' : this.now() >= intent.waitUntil ? 'expired' : 'superseded');
           } else if (intent.phase === 'backoff' && (intent.cancelReason || this.now() >= Math.min(intent.waitUntil, intent.retryUntil ?? Infinity))) {
             settle(state, intent, intent.cancelReason === 'cancelled' ? 'cancelled' : this.now() >= intent.waitUntil ? 'expired' : 'superseded');
@@ -216,7 +232,7 @@ export class HostExecutionCore {
     }
     return { failures, failedKeys };
   }
-  private armScan(): void {
+  private armScan(readyAt = this.now() + 1): void {
     this.ledger.transaction(state => {
       const open = Object.values(state.intents).filter(intent => !intent.conclusion);
       if (!open.length) {
@@ -225,8 +241,9 @@ export class HostExecutionCore {
       }
       const now = this.now();
       const due = Math.max(now + 1, Math.min(...open.map(intent => {
+        if (intent.phase === 'memory_blocked') return Math.min(intent.waitUntil, intent.retryUntil ?? Infinity);
         if (intent.phase === 'backoff') return Math.min(intent.notBefore, intent.waitUntil, intent.retryUntil ?? Infinity);
-        if (intent.phase === 'queued') return open.some(other => other.agent === intent.agent && other.sequence < intent.sequence) ? intent.waitUntil : now + 1;
+        if (intent.phase === 'queued') return open.some(other => other.agent === intent.agent && other.sequence < intent.sequence) ? intent.waitUntil : readyAt;
         return Math.min(now + this.reconcileMs, state.executions[intent.taskId]!.started ? Infinity : intent.waitUntil);
       })));
       if (state.scanWake && state.scanWake.availableAt > now && state.scanWake.availableAt <= due) return;
@@ -257,27 +274,56 @@ export class HostExecutionCore {
         return;
       }
       const input = this.ledger.snapshot().executions[intent.taskId]!.input;
+      this.options.memory?.refreshExecution({ deviceId: input.deviceId, agentRef: input.payload.agentRef }, input.taskId);
       try { await this.server.executions.submit(input); }
       catch (error) { if (!await this.delivered(intent)) throw error; }
     }
     this.ledger.transaction(state => { state.executions[intent.taskId]!.submission = 'delivered'; });
   }
+  private memoryInstruction(intent: Intent): string | undefined {
+    if (!this.options.memory) return undefined;
+    const instruction = intent.execution.payload.instruction;
+    if (typeof instruction !== 'string') throw new Error('Memory ContextPack requires an inline instruction');
+    const pack = this.options.memory.contextPack({ deviceId: intent.execution.deviceId, agentRef: intent.execution.payload.agentRef });
+    return pack.residentMemory ? `${instruction}\n\nContextPack (memory data):\n${JSON.stringify(pack)}` : instruction;
+  }
+  private resumeMemory(binding?: MemoryBinding): boolean {
+    return this.ledger.transaction(state => {
+      let changed = false;
+      for (const intent of Object.values(state.intents)) {
+        if (intent.phase !== 'memory_blocked' || binding && (intent.execution.deviceId !== binding.deviceId
+          || canonical(intent.execution.payload.agentRef) !== canonical(binding.agentRef))) continue;
+        try { this.memoryInstruction(intent); } catch { continue; }
+        intent.phase = intent.memoryBlocked!.resume;
+        delete intent.memoryBlocked;
+        const outbox = state.outbox[`intent:${intent.id}`];
+        if (outbox) delete outbox.lastError;
+        changed = true;
+      }
+      return changed;
+    });
+  }
   private begin(intent: Intent): Intent | undefined {
     return this.ledger.transaction(state => {
       const row = state.intents[intent.id]!;
       if (row.conclusion || row.cancelReason || this.now() >= row.waitUntil
-        || this.now() >= (row.retryUntil ?? Infinity) || row.phase === 'inflight') return undefined;
+        || this.now() >= (row.retryUntil ?? Infinity) || row.phase === 'inflight' || row.phase === 'memory_blocked') return undefined;
+      let instruction: string | undefined;
+      try { instruction = this.memoryInstruction(row); }
+      catch (error) {
+        const reason = String(error instanceof Error ? error.message : error).slice(0, 1024);
+        row.memoryBlocked = { resume: row.phase === 'backoff' ? 'backoff' : 'queued', reason };
+        row.phase = 'memory_blocked';
+        const outbox = state.outbox[`intent:${row.id}`];
+        if (outbox) outbox.lastError = reason;
+        return undefined;
+      }
       if (row.phase === 'backoff') {
         row.generation++;
         row.taskId = taskId(row.key, row.generation);
         state.executions[row.taskId] = { input: { ...structuredClone(row.execution), taskId: row.taskId }, submission: 'reserved', started: false };
       }
-      if (this.options.memory) {
-        const execution = state.executions[row.taskId]!;
-        if (typeof row.execution.payload.instruction !== 'string') throw new Error('Memory ContextPack requires an inline instruction');
-        const pack = this.options.memory.contextPack({ deviceId: row.execution.deviceId, agentRef: row.execution.payload.agentRef });
-        execution.input.payload.instruction = `${row.execution.payload.instruction}\n\nContextPack (memory data):\n${JSON.stringify(pack)}`;
-      }
+      if (instruction !== undefined) state.executions[row.taskId]!.input.payload.instruction = instruction;
       row.phase = 'inflight'; row.attempts++;
       state.executions[row.taskId]!.submission = 'uncertain';
       if (row.occurrence) state.occurrences[row.occurrence]!.attempts = row.attempts;
@@ -285,6 +331,7 @@ export class HostExecutionCore {
     });
   }
   private async reconcile(intent: Intent): Promise<boolean> {
+    if (intent.phase === 'memory_blocked') return false;
     if (intent.phase === 'backoff' && this.now() < intent.notBefore) return false;
     if (intent.phase === 'queued' || intent.phase === 'backoff') {
       const begun = this.begin(intent);

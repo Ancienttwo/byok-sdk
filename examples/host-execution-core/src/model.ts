@@ -18,7 +18,8 @@ export interface IntentInput {
 }
 export interface Intent extends IntentInput {
   id: string; agent: string; sequence: number; retry: RetryPolicy;
-  phase: 'queued' | 'inflight' | 'backoff' | 'settled';
+  phase: 'queued' | 'inflight' | 'backoff' | 'memory_blocked' | 'settled';
+  memoryBlocked?: { resume: 'queued' | 'backoff'; reason: string };
   generation: number; taskId: string; notBefore: number; attempts: number;
   occurrence?: string; retryUntil?: number;
   cancelReason?: 'expired' | 'cancelled'; conclusion?: Conclusion;
