@@ -85,7 +85,7 @@ it('requires explicit speech, offers management only to Main Bots, and checks cu
   expect(validateResultOutcome(group, { speech: { kind: 'pass' } }).ok).toBe(true);
   expect(validateResultOutcome(group, { room_call: { members: ['b0'] }, speech: { kind: 'pass' } }).ok).toBe(true);
   expect(group.properties).not.toHaveProperty('create_bot');
-  const ordinary = { ...turn, source: 'user' } as Turn;
+  const ordinary = { ...turn, source: 'user', authority: 'owner' } as Turn;
   expect(outcomeSchema('b1', state, ordinary).properties).not.toHaveProperty('speech');
   const main = outcomeSchema('b0', state, ordinary);
   expect(Object.keys(main.properties!)).toEqual(expect.arrayContaining(['create_bot', 'update_bot', 'delete_bot', 'create_room', 'team_note']));

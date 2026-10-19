@@ -2,23 +2,32 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { serve } from '@hono/node-server';
-import { createByokServer } from '@byok-sdk/server';
+import { createByokServer, type ByokServer } from '@byok-sdk/server';
 import { createDaemonWithAdapters } from '@byok-sdk/client';
 import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
 import { BotStubAdapter, waitForReady } from '../../basic/goal-btw.test-support';
 import { HostLedger } from '@byok-sdk/example-host-execution-core';
 import { policy, template } from '@byok-sdk/example-host-execution-core/test-support';
-import { BotCollaboration, type BotOptions } from './host';
+import { BotCollaboration, type AgentMessageInput, type BotOptions } from './host';
 import { createBotPersonaProjection } from './persona';
 
-/** Real embedded server, HTTP, daemon, persona writes, and submit_result helper. */
-export async function openTeam(options: { now?: () => number; holdProjection?: () => Promise<void> } = {}) {
+/**
+ * Real embedded server, HTTP, daemon, persona writes, and submit_result helper.
+ * `routeMessages` installs `host.consumeMessage` as the server consumer.
+ * Otherwise the consumer accepts every message without a Host record.
+ */
+export async function openTeam(options: { now?: () => number; holdProjection?: () => Promise<void>; routeMessages?: boolean;
+  wrapServer?: (server: ByokServer) => ConstructorParameters<typeof BotCollaboration>[0]; instructionMaxBytes?: number } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'k8b-'));
   const productId = 'k8b-test';
   let ledger = new HostLedger(join(root, 'host.sqlite'), `product:${productId}`);
   let host!: BotCollaboration;
+  const received: AgentMessageInput[] = [];
   const server = createByokServer({ productId, storage: { kind: 'sqlite', path: join(root, 'server.sqlite') },
-    agentMessage: { consume: async () => ({ outcome: 'accepted' }) },
+    agentMessage: { consume: async input => {
+      received.push(input);
+      return options.routeMessages ? host.consumeMessage(input) : { outcome: 'accepted' };
+    } },
     wake: { consume: (wake, signal) => host.consume(wake, signal) },
   });
   const http = serve({ fetch: server.hono.fetch, port: 0, hostname: '127.0.0.1' });
@@ -39,15 +48,16 @@ export async function openTeam(options: { now?: () => number; holdProjection?: (
   const botOptions: BotOptions = { botId: 'main', execution: { ...base,
     agentMessageContext: { destinationBinding: 'owner', freshnessCursor: 'k8b' }, payload: { ...base.payload,
       messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 65536 },
-    } }, connector: async id => ({ id }), now: options.now };
-  host = new BotCollaboration(server, ledger, botOptions);
+    } }, connector: async id => ({ id }), now: options.now, instructionMaxBytes: options.instructionMaxBytes };
+  const port = options.wrapServer?.(server) ?? server;
+  host = new BotCollaboration(port, ledger, botOptions);
   await daemon.start(); await waitForReady(daemon);
-  return { root, server, get ledger() { return ledger; }, daemon, adapter, deviceId, botOptions,
+  return { root, server, received, get ledger() { return ledger; }, daemon, adapter, deviceId, botOptions,
     get host() { return host; },
     async reopen() {
       await host.close(); ledger.close();
       ledger = new HostLedger(join(root, 'host.sqlite'), `product:${productId}`);
-      host = new BotCollaboration(server, ledger, botOptions); await host.recover();
+      host = new BotCollaboration(port, ledger, botOptions); await host.recover();
     },
     async close() {
       await host.close(); await daemon.stop(); await server.close(); ledger.close();

@@ -1,0 +1,275 @@
+import type { BotTurnOutcome } from '@byok-sdk/protocol';
+import { canonical, hash, taskId as taskIdOf, type Conclusion, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import { addTurn, json, type Batch, type CollaborationState, type Delegation, type ReplyEntry, type Turn, type Verdict } from './model';
+
+/** Host cap on a delegated Bot's accepted reply (Q8). consumeMessage checks it too. */
+export const BOT_REPLY_MAX_BYTES = 8192;
+/** Bound of one canonical metadata line in the Request section, asserted when the line is built. */
+export const REPLY_META_MAX_BYTES = 2048;
+/** Header, end line and line breaks of one framed block. */
+export const FRAME_MAX_BYTES = 96;
+export const ROOT_BOT_BUDGET = 12;
+export const HOP_LIMIT = 4;
+export const DEFAULT_INSTRUCTION_MAX_BYTES = 65_536;
+/** Roster entry: 64-byte id, name <= 40 and role <= 80 code points at 6 bytes each, keys. */
+export const ROSTER_ENTRY_MAX_BYTES = 848;
+/** historyWindow with its notice, and the keys of truncated arrays. */
+export const CONTEXT_FIXED_MAX_BYTES = 1024;
+export const REPLY_REQUEST_MAX_BYTES = 2 * (BOT_REPLY_MAX_BYTES + REPLY_META_MAX_BYTES + FRAME_MAX_BYTES);
+export const BOT_REQUEST_MAX_BYTES = 4000 + REPLY_META_MAX_BYTES + FRAME_MAX_BYTES;
+export const REPLY_RETRY_MAX_MS = 60_000;
+export const REPLY_UNCERTAIN_AFTER_MS = 30 * 60_000;
+const TEAM_BOT_LIMIT = 24;
+
+export function isCrossBot(turn: Turn): boolean { return turn.source === 'bot_request' || turn.source === 'bot_reply'; }
+/** UTF-8 bytes of the instruction parts around the Request and ContextPack sections. */
+export function instructionOverhead(prompt: string): number {
+  return Buffer.byteLength(`${prompt}\n\nRequest:\n\n\nContextPack:\n`, 'utf8');
+}
+/** Construction check (§3.7): P + max(R_reply, R_req) + F_max. */
+export function minimumInstructionBytes(prompt: string): number {
+  return instructionOverhead(prompt) + Math.max(REPLY_REQUEST_MAX_BYTES, BOT_REQUEST_MAX_BYTES)
+    + TEAM_BOT_LIMIT * ROSTER_ENTRY_MAX_BYTES + CONTEXT_FIXED_MAX_BYTES;
+}
+
+type Publish = (id: string, value: Json) => void;
+const bytes = (text: string) => Buffer.byteLength(text, 'utf8');
+const cut = (text: string, codePoints: number) => [...text].slice(0, codePoints).join('');
+
+// Unit ledger (§6.2). Each unit moves once: reserved -> spent, or reserved -> released.
+function budget(state: CollaborationState, root: string) {
+  return state.budgets[root] ??= { continuation: 0, delegation: 0 };
+}
+function freeUnits(state: CollaborationState, root: string): number {
+  const row = budget(state, root);
+  return ROOT_BOT_BUDGET - row.delegation - (row.reserved ?? 0);
+}
+function reserve(state: CollaborationState, root: string, id: string): void {
+  if (state.units[id]) return;
+  const row = budget(state, root);
+  if (freeUnits(state, root) < 1) throw new Error('Root Bot budget invariant: spent + reserved <= 12');
+  row.reserved = (row.reserved ?? 0) + 1;
+  state.units[id] = { id, root, state: 'reserved' };
+}
+export function claimUnit(state: CollaborationState, id: string | undefined): void {
+  const unit = id === undefined ? undefined : state.units[id];
+  if (unit?.state !== 'reserved') return;
+  const row = budget(state, unit.root);
+  unit.state = 'spent'; row.reserved! -= 1; row.delegation += 1;
+}
+export function releaseUnit(state: CollaborationState, id: string | undefined): void {
+  const unit = id === undefined ? undefined : state.units[id];
+  if (unit?.state !== 'reserved') return;
+  unit.state = 'released'; budget(state, unit.root).reserved! -= 1;
+}
+
+function publish(d: Delegation, emit: Publish): void {
+  d.revision++;
+  emit(`delegation:${d.id}:${d.revision}`, json({ id: d.id, revision: d.revision, fromBotId: d.fromBotId, toBotId: d.toBotId,
+    request: d.request, status: d.status, verdict: d.verdict, reason: d.reason, replyTurnId: d.replyTurnId }));
+}
+function close(d: Delegation, verdict: Verdict, now: number, reason?: string, reply?: string): void {
+  d.verdict = verdict; d.status = 'resolved'; d.resolvedAt = now;
+  if (reason) d.reason = reason;
+  if (reply) d.reply = reply;
+  delete d.nextCheckAt;
+}
+function entry(d: Delegation): ReplyEntry {
+  return { delegationId: d.id, from: d.toBotId, request: d.request, verdict: d.verdict!,
+    ...(d.reason ? { reason: d.reason } : {}), ...(d.reply ? { reply: d.reply } : {}),
+    ...(d.continuationRefused ? { continuationRefused: true as const } : {}) };
+}
+/** Delivery (§8.2): one reply Turn per report. It runs only when a prepaid A slot is free. */
+function report(state: CollaborationState, batch: Batch, rows: Delegation[], id: string, refusalReport: boolean): void {
+  const origin = state.turns[rows[0]!.fromTurnId]!;
+  const initiator = state.team.bots[origin.botId];
+  if (!initiator || initiator.archived) {
+    for (const slot of batch.slots) if (!state.units[slot]!.turnId) releaseUnit(state, slot);
+    return;
+  }
+  const slot = batch.slots.find(unit => state.units[unit]!.state === 'reserved' && !state.units[unit]!.turnId);
+  const replies = rows.map(entry);
+  const turn = addTurn(state, { id, root: origin.root, source: 'bot_reply', botId: origin.botId, hop: origin.hop,
+    authority: origin.authority ?? 'bot', replies, ...(refusalReport ? { refusalReport } : {}), ...(slot ? { unit: slot } : {}),
+    request: `Delegation replies: ${replies.map(r => `${r.from} ${r.verdict}${r.reason ? ` (${r.reason})` : ''}`).join('; ')}` });
+  if (slot) state.units[slot]!.turnId = id;
+  else { turn.status = 'delivered'; turn.conclusion = 'delivered'; }
+  for (const row of rows) row.replyTurnId = id;
+}
+/** Set the verdict once, then deliver every resolved, unreported row of its batch. */
+export function resolveDelegation(state: CollaborationState, d: Delegation, verdict: Verdict, now: number, emit: Publish,
+  reason?: string, reply?: string): boolean {
+  if (d.verdict) return false;
+  close(d, verdict, now, reason, reply);
+  // A B unit whose Turn never started is no longer needed.
+  releaseUnit(state, hash([d.id, 'B']));
+  const batch = state.batches[d.batch]!;
+  const rows = batch.delegationIds.map(id => state.delegations[id]!).filter(row => row.verdict && !row.replyTurnId);
+  if (rows.length) report(state, batch, rows, hash(['bot_reply', d.id]), false);
+  for (const row of rows) publish(row, emit);
+  return true;
+}
+
+/**
+ * Apply every delegate item of one outcome (§3.1). Self items keep the K8a
+ * continuation path. X1 accepts one cross-Bot item per outcome.
+ */
+export function applyDelegate(state: CollaborationState, turn: Turn, taskId: string, outcome: BotTurnOutcome, seat: boolean,
+  now: number, emit: Publish, accept: (action: string, work: () => void) => void): { successor: boolean } {
+  let successor = false;
+  let self = false;
+  const targets = new Set<string>();
+  const rows: Delegation[] = [];
+  let accepted: Delegation | undefined;
+  outcome.delegate?.forEach((action, index) => {
+    const id = hash([taskId, 'delegate', index]);
+    if (action.to === turn.botId) {
+      accept('delegate', () => {
+        if (self) throw new Error('Duplicate delegation target');
+        self = true;
+        if (state.turns[id]) { successor = true; return; }
+        const limits = budget(state, turn.root);
+        if (limits.continuation >= 4) throw new Error('Continuation budget is 4');
+        limits.continuation++;
+        // A continuation keeps hop, authority and the open delegation of its parent.
+        addTurn(state, { id, root: turn.root, source: 'continuation', request: action.request, botId: turn.botId, hop: turn.hop,
+          authority: turn.authority ?? 'bot', ...(turn.delegationId ? { delegationId: turn.delegationId } : {}) });
+        if (turn.delegationId) state.delegations[turn.delegationId]!.chainTurnIds.push(id);
+        successor = true;
+      });
+      return;
+    }
+    if (state.delegations[id]) return;
+    const target = state.team.bots[action.to];
+    const row: Delegation = { id, root: turn.root, fromBotId: turn.botId, fromTurnId: turn.id, fromTaskId: taskId, index,
+      toBotId: action.to, request: action.request, hop: turn.hop + 1, chainTurnIds: [], batch: taskId, status: 'queued', revision: 0 };
+    const reason = seat ? 'room_seat' : targets.has(action.to) ? 'duplicate_target' : !target || target.archived ? 'target_archived'
+      : row.hop > HOP_LIMIT ? 'hop_limit' : accepted ? 'fan_out_not_enabled' : undefined;
+    targets.add(action.to);
+    state.delegations[id] = row;
+    rows.push(row);
+    if (reason) close(row, 'refused', now, reason);
+    else accepted = row;
+  });
+  if (!rows.length) return { successor };
+  // Root admission: spent + reserved + reserve(n) <= 12, with reserve(1) = 2 and reserve(0) = 1.
+  budget(state, turn.root).reserved ??= 0;
+  if (accepted && freeUnits(state, turn.root) < 2) { close(accepted, 'refused', now, 'budget_exhausted'); accepted = undefined; }
+  const batch: Batch = state.batches[taskId] = { id: taskId, delegationIds: rows.map(row => row.id), slots: [] };
+  if (accepted || freeUnits(state, turn.root) >= 1) {
+    const slot = hash([taskId, 'A', 0]);
+    reserve(state, turn.root, slot);
+    batch.slots.push(slot);
+  }
+  for (const row of rows) if (row.verdict) state.rejected.push({ botId: turn.botId, taskId, action: 'delegate', reason: row.reason! });
+  if (accepted) {
+    const target = state.team.bots[accepted.toBotId]!, unit = hash([accepted.id, 'B']);
+    reserve(state, turn.root, unit);
+    Object.assign(accepted, { toAgentRef: { ...target.execution.payload.agentRef },
+      toDeviceId: target.execution.deviceId, requestTurnId: accepted.id, chainTurnIds: [accepted.id] });
+    addTurn(state, { id: accepted.id, root: turn.root, source: 'bot_request', request: accepted.request, botId: target.id,
+      hop: accepted.hop, authority: 'bot', delegationId: accepted.id, unit });
+    state.units[unit]!.turnId = accepted.id;
+  } else report(state, batch, rows, hash(['bot_reply', taskId]), true);
+  for (const row of rows) publish(row, emit);
+  return { successor };
+}
+
+/** Claim (first observed start spends the unit) and the queued -> running status. */
+export function observeStart(state: CollaborationState, turn: Turn, emit: Publish): void {
+  claimUnit(state, turn.unit);
+  const d = turn.delegationId ? state.delegations[turn.delegationId] : undefined;
+  if (d && d.status === 'queued') { d.status = 'running'; publish(d, emit); }
+}
+
+/** B chain end after a success terminal: the Host acceptance record is the body authority (§3.3). */
+export function endChain(state: CollaborationState, turn: Turn, taskId: string, proposedSelf: boolean, now: number, emit: Publish): void {
+  const d = state.delegations[turn.delegationId!]!;
+  if (d.verdict) { state.audit.push(`Delegation result after verdict: ${d.id} ${taskId}`); return; }
+  if (proposedSelf) d.continuationRefused = true;
+  if (state.replies[taskId]?.body !== undefined) { resolveDelegation(state, d, 'answered', now, emit, undefined, taskId); return; }
+  Object.assign(d, { status: 'reply_pending', pendingSince: now, nextCheckAt: now, checks: 0 });
+  publish(d, emit);
+}
+
+/**
+ * K4 started flag, or a run terminal, of any generation. A later generation
+ * reuses the spent unit. A decline terminal is not a run.
+ */
+function started(s: LedgerState, key: string): boolean {
+  const intent = s.intents[hash(key)];
+  return !!intent && Array.from({ length: intent.generation + 1 }, (_, g) => s.executions[taskIdOf(key, g)]).some(execution =>
+    execution?.started || execution?.terminal !== undefined && execution.terminal.envelope.type !== 'task.decline');
+}
+const FAILURE: Partial<Record<Conclusion, { verdict: Verdict; reason?: string }>> = {
+  cancelled: { verdict: 'cancelled', reason: 'user_cancelled' }, expired: { verdict: 'expired' },
+  declined: { verdict: 'failed', reason: 'busy' }, failed: { verdict: 'failed' }, superseded: { verdict: 'failed' },
+};
+/** Units, running status, and verdicts of chain ends that did not succeed. Runs inside sync. */
+export function settleDelegations(s: LedgerState, state: CollaborationState, now: number, emit: Publish): void {
+  for (const turn of Object.values(state.turns)) {
+    if (!turn.unit || state.units[turn.unit]?.state !== 'reserved') continue;
+    if (started(s, turn.id)) observeStart(state, turn, emit);
+    else if (s.intents[hash(turn.id)]?.conclusion || turn.conclusion && !s.intents[hash(turn.id)]) releaseUnit(state, turn.unit);
+  }
+  for (const d of Object.values(state.delegations)) {
+    if (d.verdict || !d.chainTurnIds.length) continue;
+    const last = state.turns[d.chainTurnIds.at(-1)!]!, intent = s.intents[hash(last.id)];
+    if (started(s, last.id)) observeStart(state, last, emit);
+    if (d.status === 'reply_pending' || d.status === 'uncertain') {
+      if (intent && state.replies[intent.taskId]?.body !== undefined) resolveDelegation(state, d, 'answered', now, emit, undefined, intent.taskId);
+      continue;
+    }
+    const conclusion = intent?.conclusion ?? (last.conclusion as Conclusion | undefined);
+    if (!conclusion) continue;
+    // An archived target's outcome is audit only (§8.4), so its chain closes as refused.
+    if (state.team.bots[last.botId]?.archived) { resolveDelegation(state, d, 'refused', now, emit, 'target_archived'); continue; }
+    if (conclusion === 'succeeded') continue;
+    const mapped = FAILURE[conclusion] ?? { verdict: 'failed' as const };
+    resolveDelegation(state, d, mapped.verdict, now, emit, mapped.reason);
+  }
+}
+
+/** SDK readback for a reply_pending delegation without a Host record (§3.3). */
+export function reconcileReply(state: CollaborationState, d: Delegation, readback: { disposition?: { outcome: string } } | undefined,
+  now: number, emit: Publish): void {
+  if (d.verdict || d.nextCheckAt === undefined) return;
+  if (!readback || readback.disposition?.outcome === 'refused') { resolveDelegation(state, d, 'failed', now, emit, 'no_reply'); return; }
+  if (readback.disposition?.outcome === 'held') {
+    d.status = 'reply_held'; delete d.nextCheckAt; publish(d, emit); return;
+  }
+  // Pending, or accepted without a Host record: the Host alone authors the reply body.
+  retryReply(d, now, emit);
+}
+export function retryReply(d: Delegation, now: number, emit: Publish): void {
+  d.checks = (d.checks ?? 0) + 1;
+  d.nextCheckAt = now + Math.min(REPLY_RETRY_MAX_MS, 1000 * 2 ** (d.checks - 1));
+  if (d.status !== 'uncertain' && now - (d.pendingSince ?? now) >= REPLY_UNCERTAIN_AFTER_MS) {
+    d.status = 'uncertain'; d.uncertainSince = now; publish(d, emit);
+  }
+}
+
+function frame(label: string, meta: Record<string, unknown>, body: string): string {
+  const line = canonical(meta);
+  if (bytes(line) > REPLY_META_MAX_BYTES) throw new Error(`Delegation metadata exceeds ${REPLY_META_MAX_BYTES} bytes`);
+  return `--- ${label} (${bytes(body)} bytes) ---\n${line}\n${body}\n--- end ${label} ---`;
+}
+function sender(state: CollaborationState, botId: string) {
+  return { botId, name: cut(state.team.bots[botId]?.name ?? '', 40) };
+}
+/** B's delegation block. It is metadata only: the request text stays in the Request section. */
+export function delegationBlock(state: CollaborationState, turn: Turn) {
+  const d = state.delegations[turn.delegationId!]!;
+  return { delegationId: d.id, from: sender(state, d.fromBotId), hop: d.hop };
+}
+/**
+ * Request section of a Cross-Bot Turn (§3.7). Request text and reply bodies
+ * appear once as raw UTF-8 in length-framed blocks, with no second JSON encoding.
+ */
+export function crossBotRequest(state: CollaborationState, turn: Turn): string {
+  if (turn.source === 'bot_request') return frame('request', delegationBlock(state, turn), turn.request);
+  return (turn.replies ?? []).map((reply, index) => frame(`reply ${index + 1}`, {
+    delegationId: reply.delegationId, from: sender(state, reply.from), request: cut(reply.request, 200), verdict: reply.verdict,
+    ...(reply.reason ? { reason: reply.reason } : {}), ...(reply.continuationRefused ? { continuationRefused: true } : {}),
+  }, reply.reply ? state.replies[reply.reply]?.body ?? '' : '')).join('\n');
+}
