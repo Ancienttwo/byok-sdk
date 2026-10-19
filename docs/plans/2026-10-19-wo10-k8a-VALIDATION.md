@@ -172,3 +172,16 @@ The final validation commit contains documentation only.
 
 PENDING-AIMPACT: ContextPack size/window/history policy, K4 stacking, and
 relative imports into K4 internals. This follow-up does not decide these items.
+
+---
+
+## PRODUCT RULINGS 2026-10-19 (doc honesty)
+
+Aimpact approved product rulings that affect K8a collaboration scope. This note is documentation honesty only; no behavior change in this commit.
+
+- History: recent-N truncate by token budget + explicit truncation notice; do not block-when-full.
+- Non-@ messages: background context only; must not trigger a reply.
+- Late-joining Bots: messages after join only.
+- K4: separate Draft PR #532 first; restack this branch onto it afterward; remove squashed K4 copy from #529.
+- Cross-Bot delegation: deferred until after #530+#531 land (first WO of K8b).
+- #525 `BOT_TURN_OUTCOME_LIMITS` remains HOLD pending Aimpact confirm.
