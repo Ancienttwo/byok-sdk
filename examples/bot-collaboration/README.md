@@ -1,0 +1,154 @@
+# Single Bot collaboration
+
+This copy-and-own example implements the single Bot part of K8a.
+It supports self continuations. 跨 Bot 委派推迟到 K8b，作为 #530 和 #531
+合入后的第一张 K8b 工单。本轮已撤除该范围，未写入跨 Bot 代码或测试。
+Platform PRD sections 9.4 and 14.2 are not fully implemented here.
+It uses the K4 Host execution core and K8-S public schema and calendar APIs.
+It has no paid runtime call. Tests use a synthetic adapter with the real SDK,
+daemon, HTTP transport, SQLite stores, and `submit_result` helper.
+
+## Run
+
+Use Node 24.15 or later and Bun. From the repository root:
+
+```sh
+bun install --frozen-lockfile
+bun run build
+bun run --cwd examples/bot-collaboration typecheck
+bun run --cwd examples/bot-collaboration test
+```
+
+`src/host.test.ts` shows the embedded setup. Create one `BotCollaboration`
+per tenant and ledger. Give it a valid Agent execution template and a Host
+connector. Route the embedded server's `wake.consume` to `bot.consume`.
+Call `bot.recover()` after startup. Call `bot.close()` before closing the SDK
+server or the ledger. Do not call the K4 core's mutation methods directly.
+Use `input`, `answer`, `decide`, `cancelTurn`, `updateRoutine`, and `setRoutineLifecycle`.
+Read `snapshot` or upload K4 projections with `core.flushProjections`.
+
+The execution template selects this Bot's Agent. It must use a runtime profile
+without external connector tools or credentials. The example refuses required
+MCP toolsets. The Host connector stays outside the Agent. This example does not
+provide a runtime sandbox. The deployment owns that boundary.
+
+## Actions and context
+
+The Host applies routine actions, confirmation cards, questions, then self
+continuations. Each turn freezes the ordinary Bot schema and its ContextPack
+when its K4 intent is enqueued. Waiting turns and retries reuse that frozen
+input. The wait limit is five minutes before execution starts. A started
+execution waits for canonical device terminal evidence.
+The schema offers self delegation, `ask_user`, `confirmable_action`, and the
+three routine actions. It offers all current routine ids, up to eight.
+It never offers a `target` field or another Bot id. A user input starts one
+root budget. Self delegation permits four continuations for that root. It
+keeps hop at zero and does not consume the delegation budget. A refused action
+enters `ContextPack.rejectedActions`. Other accepted actions still apply.
+A rejected action is reserved by the next frozen input. It is not copied into
+later inputs. An unstarted terminal failure releases that reservation.
+
+ContextPack defaults are at most 12 recent turns (`contextTurnLimit`) and 32 KiB of
+serialized UTF-8 JSON (`contextMaxBytes`). The byte cap is a conservative token
+guard for byte-level tokenizers. It does not measure a model's exact token count.
+Cards and questions each use the same recent-N limit. Pending cards and unanswered
+questions take priority over settled items. Within each group, newer items stay.
+The `historyWindow` notice reports `omittedTurns`, `omittedCards`, and
+`omittedQuestions`. It also reports `omittedPendingCards` and
+`omittedPendingQuestions` if pending work cannot fit. These counts include zero.
+The Host removes settled cards and questions, then older turns, then pending
+items until the pack fits. It retains the full records in the application ledger.
+The current request always remains in the measured pack, even when it was
+blocked before newer inputs arrived. Turns carry action-name summaries, not full
+outcome documents. Routine context contains only its current definition.
+Card and question history cannot block a new request. If the required pack
+still exceeds the byte budget after all optional history is removed,
+the turn becomes `blocked` with a readable reason and an owner
+projection. It creates no execution or retry spin. No strings are silently
+cut to fit. Raising the budget or repairing the selected data and calling
+`drain()` retries admission. `cancelTurn()` can settle a blocked turn before
+K4 admission. It creates no execution and lets pending routine versions settle.
+
+Schema composition first uses checked schedules. Only `schema-over-budget`
+permits a retry with flat schedules. If flat is still above the schema cap,
+the turn is explicitly blocked. `not-subset` and `over-budget` are Host defects
+and propagate as errors. No authorized routine id is dropped.
+
+Questions support text and single choice. An answer creates an `answer` turn.
+It is a new user input with its own stable budget root. Replaying the same
+answer does not reset that budget. Empty updates and duplicate targets or
+option ids are refused. Duplicate weekdays are stored as a set.
+An expired card can appear in the recent ContextPack window. It creates no model turn.
+A confirmation card starts as `pending`. The owner can choose `confirmed` or
+`rejected`. A card becomes `expired` after 24 hours. Only a committed
+`confirmed` card calls the Host connector. Confirmation results and explicit
+rejection return as an `action_result` turn. Passive expiry creates no turn.
+Connector success, error, and external id enter that turn.
+Late and conflicting decisions return an error. Replaying the same completed
+decision is idempotent. Decision projections are committed once, so uploading
+them does not cause later syncs to publish them again.
+
+The connector receives an AbortSignal and must deduplicate by the card id.
+The Host enforces `connectorTimeoutMs` (default 30 seconds), even if the
+connector ignores cancellation. A timeout releases the serial chain and
+commits a failed action_result with an unknown external outcome. A late connector
+result cannot overwrite that committed result. A crash after the
+external effect but before result commit can call it again with that id.
+No exactly-once external effect is claimed.
+
+The system rules are in `src/schema.ts`. K4 carries them in the instruction.
+They require an acknowledgement and self delegation for long work. Final text
+uses messageEgress. Progress uses messageDraft or typed activity. A failed,
+cancelled, or missing-outcome continuation has a failed owner projection.
+The Host publishes final turns with `owner`, source, status, and conclusion.
+It does not turn an outcome document into a second chat message.
+
+## Routine invariants
+
+K4's routine definitions stay immutable. K8a stores its versioned routine state
+in the K4 application ledger. This state participates in the outcome commit.
+The SDK stores one-shot times only. The Host uses `nextRoutineOccurrence`.
+K4, K8-S and the SDK all use the 368-day wake horizon.
+
+Each routine has immutable versions, `current`, `pending`, and a scheduling
+`generation`. Its unique slot is `(routineId, version, t)`. A delivery freezes
+its decision, trigger, and definition snapshot. Redelivery reads that row.
+Late or cancelled hooks cannot recreate a discarded chain.
+
+At most two occurrences remain unsettled for one routine. A third due slot
+gets a `capacity` audit decision and no execution. The active version arms
+its next time. On update, accepted work and a due undelivered slot stay on
+the old version. The Host stops replenishing that chain. It switches only when
+accepted work settles and no due old slot remains. It cancels the old future
+slot, advances generation, and arms the new version. Further updates replace
+`pending` with a new immutable version.
+
+Pause cancels the armed slot. Resume keeps `current` while work is unsettled.
+Cancel marks the routine completed and stops new occurrences. Accepted work
+finishes with its old snapshot. To stop an execution too, use K4 cancellation
+explicitly. Routine results are owner turns with source `routine`.
+
+The wake outbox has persistent sequence numbers and one serial consumer.
+The Host drains application commands until all new turns have a K4 intent.
+An immediate terminal cannot leave a continuation without a wake.
+A schedule must match the active generation and armed slot. A cancel cannot
+be overtaken by a later schedule for the same key. Failed operations retain
+a retry time. A process timer retries them. Startup repairs a missing armed
+wake. A mismatched wake time records an audit and resolves without a retry
+loop. A successful cancel retry clears its stale failure status.
+Calendar errors stop the chain, record an audit, and let the accepted
+occurrence finish. Startup or explicit pause/resume retries the calendar.
+
+## Boundaries
+
+The collaboration application state has version 1. Unsupported and unversioned
+stored state is rejected without a reset or automatic migration.
+
+This example has one Bot and one owner. 跨 Bot 委派推迟到 K8b。
+This report covers the single Bot slice only.
+Group chat and Main Bot actions belong to K8b. Paid Pi success-rate measurement belongs to WO-10b. Application history,
+versions and audit rows have no retention policy in this small example.
+
+K4 is tracked in Draft #532. This branch uses its package exports. No restack,
+PR status change, push, or deployment is performed in this local follow-up.
+The PRD remains Aimpact's authority.

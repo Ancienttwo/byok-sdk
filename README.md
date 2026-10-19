@@ -221,6 +221,8 @@ transcript as shared history.
 
 For fresh user, routine and Bot work, see the [Host execution core guide](docs/host-execution-core.md)
 and its [copy-and-own reference](examples/host-execution-core/README.md).
+For single Bot actions, see the [Bot collaboration reference](examples/bot-collaboration/README.md).
+It supports self continuations. 跨 Bot 委派推迟到 K8b（#530 和 #531 合入后的第一张 K8b 工单）。
 
 The SDK maintains the [downstream integration guide](docs/agent-diagnostics-integration.md)
 for diagnostic UI, local CLI wiring, bounded health repair, support bundles,
