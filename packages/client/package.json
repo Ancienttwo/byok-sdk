@@ -74,7 +74,8 @@
     "smoke:codex-app-server": "node scripts/codex-app-server-real.mjs",
     "audit:adapter-task-smoke": "node scripts/adapter-task-smoke.mjs",
     "audit:credentials": "node scripts/linux-credential-audit.mjs",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "build:agent-memory-helper": "node scripts/build-agent-memory-helper.mjs && node scripts/check-agent-memory-helper-build.mjs"
   },
   "optionalDependencies": {
     "koffi": "3.2.0"
