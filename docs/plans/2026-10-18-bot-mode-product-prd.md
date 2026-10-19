@@ -15,7 +15,7 @@ SDK 侧的执行原语和记忆原语都已落地。K2 wake 队列、K5 `executi
 | 判断 | 状态 |
 |---|---|
 | 方向成立 | 是。符合 ADR-036 D1、D3 和 ADR-038 决策 7–13。 |
-| 可以开始实现 | M0 之后 K4 可以。它依赖的 K2、K5、K6、K7 都已合并。平台证明切片可以和 K4 并行。K8 在 K4 之后。 |
+| 可以开始实现 | M0 之后 K4 可以。它依赖的 K2、K5、K6、K7 都已合并。平台证明切片和 K8-S 可以与 K4 并行。K8 的 Host 协作参考实现依赖 K4 和 K8-S（§5.2）。 |
 | 可以上线 | 否。平台证明没做，Bot 协作没有参考实现，`submit_result` 的成功率没按 runtime 测量，Aiphabee 的 A1–A4 没有接入。 |
 
 ## 1. 背景与问题
@@ -194,7 +194,7 @@ K7 子集没有 `pattern`、`format`、`uniqueItems`、`$ref`。schedule 用结�
 
 交付物：`examples/bot-collaboration`（§12 Q5），建在 K4 之上。按 §12 Q6 拆两步：K8a 是委派、`ask_user`、`confirmable_action`、routine 三动作和长任务规则；`update_routine` 含同 id 的版本管理。K4 保持定义不可变。K8b 是群聊和 Main Bot。K8-S 可先于 K8a 独立交付，不依赖 K4。参考实现暴露的其他 SDK 缺口另开 issue。（依据 R3、R6）
 
-验收：平台 PRD §14.2 全表（群聊行按 mention-only 默认改写），加 §9 的新行。
+验收：平台 PRD §14.2 已定行，加 §9 的新行。群聊行已按 mention-only 默认写明。标为「待 Aimpact 裁定」的行不能记为已通过。
 
 ### 5.3 记忆
 
@@ -333,7 +333,7 @@ Aimpact 已定（§12 Q4）：不做 grok ACP adapter。Grok 走 Pi + xAI profil
 | K8-S | api-surface 新增片段、组合函数和纯函数；片段通过 K7 子集校验；字段范围与 `oneOf` 组合有测试；core 覆盖 `schedule_invalid`、`schedule_unreachable`、`schedule_beyond_horizon`、`tz_invalid`，以及 DST gap/overlap、Lord Howe、Samoa、月末、闰年；server 368 天边界测试；workerd 定向样例 | SDK 单测 |
 | K8a | 平台 PRD §14.2 委派行；`to` = 自己走续作预算；`confirmable_action` 四态；`create_routine` → wake → 执行 → 结果回 owner；取消后无新 occurrence；普通 Bot 不可用 `target` 指向别人；同 id 的结算后切换、pending 时暂停/恢复、update 与旧 hook 交错；定义并验证在途上限 | SDK 仓库合成 Host |
 | K8a | `submit_result` 成功率在 Pi 上测量并记录 | 真实 runtime，付费调用另行授权 |
-| K8b | 平台 PRD §14.2 群聊行，按 mention-only 默认改写；未被点名的成员没有执行 | SDK 仓库合成 Host |
+| K8b | 平台 PRD §14.2 已定的 mention-only 群聊行；未被点名的成员没有执行；待裁定行保持开放 | SDK 仓库合成 Host |
 | 平台证明 macOS | 配置 helper 后 `agent-memory-intent.v1` 广播；两项证明的定向测试在 `macos-latest` 通过；spec 的平台句子更新 | SDK 单测 + CI |
 | 平台证明 Windows | reparse/junction 矩阵在 `windows-latest` 通过；`memory_recall`/`memory_save` 在 Windows 可用；intent 两项证明通过并广播；NTFS 屏障语义写进 spec | SDK 单测 + CI |
 | 记忆页 | 改 → `applied` → 下一次执行 recall 到新内容；`conflict` 不合并；forget 不删对话和 Summary；`MEMORY.md` 删除被拒；8 KiB 上限阻塞 | SDK 集成测试，三端各跑 |
@@ -477,17 +477,18 @@ spec 修改：P1 加 README 链接；P2 改平台句子；K8-S 加 outcome 片�
 
 ## 13. v3 修订依据
 
-本次只修订两份 PRD。下表固定第一批证据和裁定。报告位于各 WO 的本地分支，未复制到本分支。`file:line` 指对应 commit 内的文件。`PRD-revisions.md` 和 WO 工单位于主 checkout 的 `_ops/bot-wo/`，是本地裁定输入，不是发布物。
+下表固定第一批证据和裁定。未推送的 WO 原报告和本地 `_ops/bot-wo/` 输入已摘录到[来源摘录](2026-10-19-bot-mode-prd-v3-source-excerpts.md)。读者无需访问实现 pane。WO-05 使用已推送的固定 commit 链接。原 commit 和行号保留在摘录中，供核对来源。
 
-| 标记 | 修订位置 | 来源 |
+| 标记 | 修订位置 | 可读来源 |
 |---|---|---|
-| R1 | §5.3.2、§10 M0.2/P5a/P5b 与依赖、§11、§12 Q3/Q15 | WO-01 `fae93b80`，`docs/researches/2026-10-18-bot-mode-m0-memory-intent.md:250`（P3）、`:272`（v2 修订稿）、`:313`（不变量）、`:380`（PRD 修订点）；拆期和已定项：`_ops/bot-wo/PRD-revisions.md:6`、`:7`；交付与依赖：`_ops/bot-wo/batch-2.md:45`–`:49`。仅把裁定列明的项目标为已定，其余修订稿细节仍为建议 |
-| R2 | §5.3.3、§10 P2、§11 三端风险 | WO-02 `c7407c74`，`docs/researches/2026-10-18-bot-mode-m0-platform-gap.md:45`（共享缺口）、`:120`（SDK 产物/digest/重签）、`:237`（NTFS 故障模型）、`:243`（#522）、`:324`（#521）、`:448`（PRD 修订稿）；`_ops/bot-wo/PRD-revisions.md:18`–`:20` |
-| R3 | §5.2/§5.4/§5.5、§8、§9 K4/K8、§10 M0.5/P3、§11、§12 Q16/Q17/Q21/Q22；平台 §5 I2、§6、§7、§9.3/§9.4、§12.1/§12.3/§12.4、§13.1 | WO-03 v4 `e5dcdd0d`，`docs/researches/2026-10-18-bot-mode-m0-outcome-routine.md:12`（四项裁定）、`:49`（数值/码点上界）、`:298`（K7 子集）、`:333`（v1 提议上限）、`:389`（预算政策）、`:404`（schedule）、`:869`（动作 key/顺序）、`:926`（368 天）、`:981`（平台修订文字）、`:1070`（产品修订点） |
-| R4 | 依据快照、§2.1、§5.3.1、§7、§11、§12 Q1 的事实描述 | WO-04 `0d9955e1`，`docs/researches/2026-10-18-bot-mode-m0-aiphabee-inventory.md:5`（基线）、`:30`（ordinary/runtime 选择）、`:38`（记忆工具）、`:157`（第 6 项与 #512/#513）；`_ops/bot-wo/PRD-revisions.md:21`。不改变 Q1/Q8 |
-| R5 | §5.1 公开 API、到期取消、§12 Q18；平台 §9.2 第 6 条和 §12.4 第 9 条 | WO-05 `e5afad26`，`examples/host-execution-core/VALIDATION.md:270`（owner 裁定）、`examples/host-execution-core/README.md:76`（cancel → attempt）；`_ops/bot-wo/PRD-revisions.md:11`、`:12`（cancel 返回值不改） |
-| R6 | §5.1/§5.8、§9 K4/合成端到端、§10 P1/P3、§12 Q19–Q21；平台 §9.2、§12.3、§13.1 K4、§14.1 边界 | WO-05 v3 `e5afad26`，`examples/host-execution-core/README.md:120`（下游服务）、`:125`（K8a 版本管理）、`:129`（合成范围）；`_ops/bot-wo/WO-05-v3.md:3`–`:10`；`_ops/bot-wo/PRD-revisions.md:13`–`:15` |
+| R1 | §5.3.2、§10 M0.2/P5a/P5b 与依赖、§11、§12 Q3/Q15 | [WO-01 摘录](2026-10-19-bot-mode-prd-v3-source-excerpts.md#r1)；[拆期和已定项原文](2026-10-19-bot-mode-prd-v3-source-excerpts.md#r0)。只把裁定列明的项目标为已定，其余修订稿细节仍为建议 |
+| R2 | §5.3.3、§10 P2、§11 三端风险 | [WO-02 摘录](2026-10-19-bot-mode-prd-v3-source-excerpts.md#r2)；[事实修正清单原文](2026-10-19-bot-mode-prd-v3-source-excerpts.md#r0) |
+| R3 | §0 的 K8-S 依赖、§5.2/§5.4/§5.5、§8、§9 K4/K8、§10 M0.5/P3、§11、§12 Q16/Q17/Q21/Q22；平台 §5 I2、§6、§7、§9.3/§9.4、§12.1/§12.3/§12.4、§13.1 | [WO-03 v4 摘录](2026-10-19-bot-mode-prd-v3-source-excerpts.md#r3)；[交付与依赖原文](2026-10-19-bot-mode-prd-v3-source-excerpts.md#r0) |
+| R4 | 依据快照、§2.1、§5.3.1、§7、§11、§12 Q1 的事实描述 | [WO-04 摘录](2026-10-19-bot-mode-prd-v3-source-excerpts.md#r4)；[事实修正原文](2026-10-19-bot-mode-prd-v3-source-excerpts.md#r0)。不改变 Q1/Q8 |
+| R5 | §5.1 公开 API、到期取消、§12 Q18；平台 §9.2 第 6 条和 §12.4 第 9 条 | WO-05 已推送的 [owner 裁定](https://github.com/Ancienttwo/byok-sdk/blob/e5afad26b42108cb4aa5b14f9f674291bc168b81/examples/host-execution-core/VALIDATION.md#L268-L273)、[cancel → attempt](https://github.com/Ancienttwo/byok-sdk/blob/e5afad26b42108cb4aa5b14f9f674291bc168b81/examples/host-execution-core/README.md#L76-L79)；[返回值不改的裁定原文](2026-10-19-bot-mode-prd-v3-source-excerpts.md#r0) |
+| R6 | §5.1/§5.8、§9 K4/合成端到端、§10 P1/P3、§12 Q19–Q21；平台 §9.2、§12.3、§13.1 K4、§14.1 边界 | WO-05 已推送的 [下游服务、版本管理和合成边界](https://github.com/Ancienttwo/byok-sdk/blob/e5afad26b42108cb4aa5b14f9f674291bc168b81/examples/host-execution-core/README.md#L120-L130)；[WO-05 v3 裁定原文](2026-10-19-bot-mode-prd-v3-source-excerpts.md#r0) |
+| R7 | §5.2/§9 的群聊验收引用；平台 §9.1/§9.5/§14.2 的默认 mention-only 和预算矩阵 | [已定默认行为和原预算摘录](2026-10-19-bot-mode-prd-v3-source-excerpts.md#r7)。按 2026-10-19 只读验收意见写成可测试行；待裁定项不补决定 |
 
-表中只列本次修订的来源。未裁定的产品重签策略、NTFS 故障模型和上限数值仍保持原状态。
+未裁定的产品重签策略、NTFS 故障模型和上限数值仍保持原状态。此次验收列出的长记录策略（§6 与 §11）、未点名消息隐私、后来加入成员的可见范围，以及 Q5/Q6 也保持待 Aimpact 裁定。
 
 [#195]: https://github.com/Ancienttwo/byok-sdk/issues/195

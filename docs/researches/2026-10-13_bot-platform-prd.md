@@ -481,7 +481,7 @@ K5 和 K6 可以并行，也可以和 K1–K3 并行。K7 在两者之后：它�
 | Bot | 名字、角色、persona、模型、toolsets、是否 Main Bot、所在设备；对应一个 AgentRef | Host 服务端 |
 | Conversation | 每个 Bot 一条 canonical 对话；每个群一条共享对话 | Host |
 | Turn | 一次输入、它的执行和结算。输入来源：`user`、`routine`、`bot_request`、`bot_reply`、`room_slot` | Host |
-| 群（Room） | 成员（最多 12 个）、admin、模式（`everyone` 或 `admin`）、公告、轮次预算 | Host |
+| 群（Room） | 成员（最多 12 个）、admin、模式（默认 `mention`，可选 `admin`）、公告、轮次预算 | Host |
 | 委派（Delegation） | 发起方 Turn、目标 Turn、回传 Turn、hop、结论 | Host |
 | Execution | 一个 SDK task：offer、attempt、message、outcome、terminal | SDK |
 
@@ -578,16 +578,15 @@ Bot 的 name/role/persona 上限提议值为 40/80/300 码点；群的 name/anno
 ### 9.5 群聊
 
 1. 群是一条共享对话。成员每次发言是该成员 AgentRef 的一次 fresh 执行：ContextPack 是群记录、群公告和成员列表，persona 来自成员自己的 home。不为每个成员维护隐藏会话。
-2. 群发言执行只选 result-document，不选 `messageEgress`。发言内容是 outcome 里的 `post`。
-3. 一轮由用户发言触发，也可以由群内 outcome 的 `room_call` 在预算内追加席位。Host 计算席位：
-   - `admin` 模式下，普通消息只给 admin，被点名的成员排在 admin 后面。
-   - 点名来自 UI 传来的 botId 列表，或 outcome 里的 `room_call`。Host 不扫描正文里的 `@名字`。
-   - 只有用户或 admin 可以点全体。
+2. 群发言执行只选 result-document，不选 `messageEgress`。发言内容是 outcome 的 `speech { kind: 'post', text }`；不发言用 `speech { kind: 'pass' }`。
+3. 默认 `mention` 模式下，未被点名的成员不执行。用户消息没有结构化 mention 时，不产生席位，也不提交执行。点名来自 UI 的结构化 Bot id 或 `all`，或 outcome 的 `room_call.members` Bot id。Host 不扫描正文里的 `@名字` 或 `@all`。只有用户或 admin 可以点全体。群内 `room_call` 只在预算内追加席位。可选 `admin` 模式仍保留原规则：普通消息只给 admin，被点名成员排在 admin 后面。它不适用于默认模式。（依据产品 PRD §5.2 的已定群聊修订；产品 PRD §13 R7）
 4. 默认预算取自 DeepSeek Bot 的实际值：一轮的发言上限是初始席位数加 4，有 admin 时再加 4；每个成员一轮最多 2 次，admin 最多 4 次；用户不说话时，Bot 最多自己开 3 轮；晚到发言最多 10 条。
 5. 每个席位都是成员 Agent 队列里的一个 intent，和成员自己对话里的执行排同一个队。成员忙时席位等待；超过群的宽限（默认 240 秒）还没开始，记为 `busy` 并跳过。
 6. 成员开始执行后超过宽限还没结束，本轮继续往下走。它之后到达的 `post` 作为晚到发言写入一次，计入晚到预算。
 7. 成员的执行失败或没交 outcome，席位记为失败并显示，不算 PASS。
 8. 只有用户或 Main Bot 可以加人、移除成员或换 admin。被移除的成员还没开始的席位作废；已经在执行的，结果只进审计。
+
+本节的无 mention 规则只规定不产生执行。未点名消息的隐私、后来加入的 Bot 可见范围、长记录截断或阻塞仍待 Aimpact 裁定。§14.2 单列待裁定行；本次不改变这些策略。
 
 ### 9.6 Main Bot 与团队管理
 
@@ -890,7 +889,7 @@ Topology L，在 K2 和 A2 之后执行：
 
 ### 14.2 Bot 协作
 
-K8 参考实现，Topology L 和 H 各跑一遍：
+K8 参考实现，Topology L 和 H 各跑一遍。群聊按 §9.5 的默认 `mention` 模式验收；标为「待 Aimpact 裁定」的行保持开放，不能记为已通过：
 
 | 类型 | 场景 | 期望 |
 |---|---|---|
@@ -907,11 +906,22 @@ K8 参考实现，Topology L 和 H 各跑一遍：
 | 边界 | 一条用户输入派生的 Bot 执行超过预算 | 后续委派 `refused`，并显示原因 |
 | 边界 | B 正在自己的对话里执行 | 委派在 B 的队列里等待；busy 拒绝只在 terminal 后换代 |
 | 边界 | 委派进行中，Main Bot 改了 B 的资料 | 进行中的执行用旧 `profileRevision`，下一次用新的 |
-| 群聊 | `admin` 模式下用户发普通消息 | 只有 admin 发言 |
-| 群聊 | 成员交 `pass` | 不发言 |
+| 群聊 | 用户消息无结构化 mention；群有 admin 或没有 admin 各测一次 | 两种情况下初始席位均为 0，SDK execution 均为 0；不自动执行 admin |
+| 群聊 | 用户正文含 `@Bot` 或 `@all`，但结构化 mention 为空 | 初始席位为 0，SDK execution 为 0；不解析正文来点名 |
+| 群聊 | 用户结构化 mention 只含成员 A、B 的 Bot id | 初始席位只含 A、B；未点名成员无执行。后续席位只能来自预算内的结构化 `room_call` |
+| 群聊 | 用户的结构化 mention 为 `all` | 当前群成员都有初始席位；不靠正文中的 `@all` 触发 |
+| 群聊 | 已执行成员的 outcome 含 `room_call.members`，列出 C 的 Bot id | 预算允许时，为 C 追加席位；正文中的 C 名字不追加席位 |
+| 群聊 | 成员互相 `room_call`，尝试超过一轮的总预算 | 初始席位数为 n 时，无 admin 最多 n + 4 次发言，有 admin 最多 n + 8 次；超出部分不产生执行 |
+| 群聊 | 同一轮反复点名同一成员 | 普通成员最多 2 次，admin 最多 4 次；超过其上限不再执行该成员 |
+| 群聊 | 用户不再输入，Bot 持续请求后续轮次 | 最多自开 3 轮；第 4 轮不产生执行 |
+| 群聊 | 本轮已有 10 条晚到发言，再到达第 11 条 | 晚到发言最多写入 10 条；第 11 条不追加到群对话 |
+| 群聊 | 成员交 `speech { kind: 'pass' }` | 不发言 |
 | 群聊 | 成员输出空文本或执行失败 | 席位显示失败，不算 PASS |
 | 群聊 | 成员超过宽限仍在执行 | 本轮继续；完成后作为晚到发言写入一次 |
 | 群聊 | 成员正在自己的对话里执行 | 席位等待；超过宽限记为 `busy` 并跳过 |
+| 待裁定 | 未点名消息之后，某 Bot 被点名；检查它能看到哪些先前消息 | 待 Aimpact 裁定：未点名消息的隐私与可见范围；本次只验收无 mention 时不执行 |
+| 待裁定 | 新 Bot 在群内已有历史之后加入；检查其 ContextPack | 待 Aimpact 裁定：后来加入的 Bot 可见哪些历史 |
+| 待裁定 | 群记录超过 ContextPack 预算 | 待 Aimpact 裁定：产品 PRD §6 的截断与 §11 的显式阻塞冲突；本次不选策略 |
 | 安全 | 普通 Bot 的 outcome schema | 不含管理类动作；Host 应用时再校验角色 |
 
 ### 14.3 SDK 重构
