@@ -50,6 +50,7 @@ test('--artifacts and --out-dir are mutually exclusive and the existing flags ke
     outDir: undefined,
     artifacts: 'ci-pack',
     tag: undefined,
+    trustedPublishing: false,
   });
   assert.deepEqual(parseArguments(['--execute', '--otp', '123456', '--artifacts', 'ci-pack']), {
     execute: true,
@@ -57,6 +58,7 @@ test('--artifacts and --out-dir are mutually exclusive and the existing flags ke
     outDir: undefined,
     artifacts: 'ci-pack',
     tag: undefined,
+    trustedPublishing: false,
   });
   assert.throws(
     () => parseArguments(['--artifacts', 'ci-pack', '--out-dir', 'fresh']),
