@@ -29,7 +29,8 @@
     "check:task-sync": "repo-harness run check-task-sync",
     "check:task-workflow": "repo-harness run check-task-workflow --strict",
     "sync:brain-docs": "repo-harness run sync-brain-docs --all",
-    "test:scripts": "node --test --test-concurrency=1 scripts/api-surface/check-api-surface.test.mjs scripts/api-surface/entry-closure.test.mjs scripts/api-surface/check-version-authority.test.mjs scripts/release/publish.test.mjs scripts/release/beta-release.test.mjs scripts/release/registry-contract.test.mjs scripts/release/registry-npm.test.mjs scripts/release/pack-and-smoke.test.mjs scripts/api-surface/check-provisioning-code-alignment.test.mjs scripts/api-surface/check-oar-bridge.test.mjs scripts/ci/check-tmpdir-leaks.test.mjs scripts/vitest/tmp-root.test.mjs"
+    "test:scripts": "node --test --test-concurrency=1 scripts/api-surface/check-api-surface.test.mjs scripts/api-surface/entry-closure.test.mjs scripts/api-surface/check-version-authority.test.mjs scripts/release/publish.test.mjs scripts/release/beta-release.test.mjs scripts/release/registry-contract.test.mjs scripts/release/registry-npm.test.mjs scripts/release/pack-and-smoke.test.mjs scripts/api-surface/check-provisioning-code-alignment.test.mjs scripts/api-surface/check-oar-bridge.test.mjs scripts/ci/check-tmpdir-leaks.test.mjs scripts/vitest/tmp-root.test.mjs scripts/release/agent-memory-helper-source.test.mjs",
+    "build:release": "bun run build && bun run --filter @byok-sdk/client build:agent-memory-helper"
   },
   "devDependencies": {
     "@types/node": "^24",
@@ -40,14 +41,14 @@
     "acorn": "8.15.0"
   },
   "overrides": {
-    "@earendil-works/pi-coding-agent": "1.2.0",
-    "@earendil-works/pi-ai": "1.2.0",
-    "@earendil-works/pi-agent-core": "1.2.0",
-    "@earendil-works/chord": "1.2.0",
-    "@earendil-works/pi-telemetry": "1.2.0",
-    "@earendil-works/pi-tui": "1.2.0",
-    "@earendil-works/pi-codemode": "1.2.0",
-    "@earendil-works/pi-mcp": "1.2.0",
-    "@earendil-works/pi-durable": "1.2.0"
+    "@earendil-works/pi-coding-agent": "1.3.0",
+    "@earendil-works/pi-ai": "1.3.0",
+    "@earendil-works/pi-agent-core": "1.3.0",
+    "@earendil-works/chord": "1.3.0",
+    "@earendil-works/pi-telemetry": "1.3.0",
+    "@earendil-works/pi-tui": "1.3.0",
+    "@earendil-works/pi-codemode": "1.3.0",
+    "@earendil-works/pi-mcp": "1.3.0",
+    "@earendil-works/pi-durable": "1.3.0"
   }
 }

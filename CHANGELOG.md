@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+- **Feature (keys, client; #512, #513)** — `PiModelConfig` can declare the
+  Pi wire API and more pi-ai catalog fields. The new optional `api` is
+  `'openai-completions'` or `'openai-responses'`. When it is absent, the
+  projection keeps `'openai-completions'`. An `anthropic` profile must not
+  declare `api`. `compat` stays strict, and each API admits only its own keys
+  (`PI_COMPAT_KEYS_BY_API`). Both APIs now admit
+  `supportsLongCacheRetention`. The new optional strict `inputLimits` follows
+  pi-ai's `ModelInputLimitsSchema`. The durable host loads the
+  `openai-responses` stream. The prepared runtime entry refuses
+  `'openai-responses'`, `inputLimits` and `supportsLongCacheRetention` at
+  admission, because the frozen prepared wire carries none of them. The keys
+  README describes how to map a pi-ai catalog entry to `pi_model`.
+- **Changed (client, cloud-do)** — pin all nine official Pi packages to
+  exactly 1.3.0 (upstream `71023aec`, closureDigest `7950a1f4…`), with freshly
+  verified provenance. A preparation compiled for 1.2.0 declines with
+  `preparation_runtime_identity_mismatch`; prepare it again.
+- **Fixed (client)** — Pi 1.3.0 restores a resumed session's transcript
+  tools, so a tool that this task's MCP toolset added stayed inactive. The RPC
+  host and the subagent print host now reset a resumed default-tools session
+  to the current defaults and default-active extension tools before
+  `session_start`, as OAR 0.67.0 does.
+- **Changed (client)** — a bare Pi model id that more than one provider
+  offers now fails as ambiguous instead of picking by catalog order (upstream
+  `resolveCliModel`). Keys-profile launches always name the provider.
+- **Changed (client)** — update the private OAR source from 0.66.0 to 0.67.0
+  (`c264f17`). One selected file changed upstream, by one comment. The five
+  maintained BYOK deltas and the import closure stay the same. No public API
+  change. See `docs/notes/2026-10-18-pi-1.3-oar-0.67-upgrade.md`.
+
 ## 0.27.0 / @byok-sdk/keys 0.12.0 — 2026-10-17 (published)
 
 All nine packages are published on `latest` from `v0.27.0` (`cd977261`).

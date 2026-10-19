@@ -82,8 +82,6 @@ export { openAgentMemoryFilesystemHelper } from '../daemon/agent-memory-fs-helpe
 export type { AgentMemoryFilesystem } from '../daemon/agent-memory-filesystem';
 /** One file's state as reported by that filesystem authority. */
 export type { AgentMemoryFilesystemFileState } from '../daemon/agent-memory-filesystem';
-/** Product-owned deployment pointer to the helper binary; the SDK never searches PATH. */
-export type { AgentMemoryFilesystemHelperConfig } from '../daemon/agent-memory-filesystem';
 
 /** Serves `memory_recall`/`memory_save` as a stdio MCP server over host-provided streams. */
 export { serveAgentMemoryMcpOverStdio } from '../bin/agent-memory-mcp-server';

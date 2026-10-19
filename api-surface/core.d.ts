@@ -1057,6 +1057,7 @@ export {};
  * - the five `storage_*` codes (§12.7.7, see `quota.ts`)
  */
 export declare const CORE_ERROR_CODES: {
+    readonly routine_schedule_invalid: 'routine_schedule_invalid';
     readonly retention_input_invalid: 'retention_input_invalid';
     readonly retention_collect_failed: 'retention_collect_failed';
     readonly tenant_id_invalid: 'tenant_id_invalid';
@@ -1420,6 +1421,7 @@ export type { QuotaCollectExpiredInput } from './quota';
 export type { ObjectCollectExpiredInput } from './blob';
 export { InMemoryStorageLedger } from './in-memory/storage-ledger';
 export type { InMemoryObjectBytes } from './in-memory/blob';
+export * from './routine-schedule';
 // ==== @byok-sdk/core dist/mailbox.d.ts ====
 import type { CollectExpiredInput, CollectExpiredResult } from './retention';
 /**
@@ -2059,6 +2061,56 @@ export declare class CollectExpiredFailure extends ByokCoreError {
     readonly more?: boolean | undefined;
     constructor(committed: CollectExpiredCounts, failedRows: number, more?: boolean | undefined, options?: ErrorOptions);
 }
+// ==== @byok-sdk/core dist/routine-schedule.d.ts ====
+export declare const ROUTINE_DAYS_OF_WEEK: readonly ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+export type RoutineDayOfWeek = (typeof ROUTINE_DAYS_OF_WEEK)[number];
+/**
+ * One local time per matching day. No daysOfWeek and no dayOfMonth: every
+ * day. daysOfWeek: those weekdays only. dayOfMonth: that day of every month,
+ * or of `month` only. daysOfWeek and dayOfMonth never appear together;
+ * `month` needs `dayOfMonth`.
+ */
+export interface RoutineSchedule {
+    readonly minute: number;
+    readonly hour: number;
+    readonly daysOfWeek?: readonly RoutineDayOfWeek[];
+    readonly dayOfMonth?: number;
+    readonly month?: number;
+    readonly tz: string;
+}
+/**
+ * 368 days: a yearly date can be 366 days plus a DST shift apart (leap year
+ * in between, DST state flips). The embedded wake limit must match this value.
+ */
+export declare const ROUTINE_HORIZON_MS: number;
+/**
+ * Supported `now`: [2000-01-01T00:00Z, 2200-01-01T00:00Z). Before 1972 some
+ * zones have second-level offsets (Africa/Monrovia); past 2200 tz rules are
+ * projections. Date and Intl themselves cover ±8.64e15 ms.
+ */
+export declare const ROUTINE_MIN_NOW: number;
+export declare const ROUTINE_MAX_NOW: number;
+export type RoutineScheduleIssueCode = 'schedule_invalid' | 'schedule_unreachable' | 'schedule_beyond_horizon' | 'tz_invalid';
+export type RoutineScheduleCheck = {
+    readonly ok: true;
+} | {
+    readonly ok: false;
+    readonly code: RoutineScheduleIssueCode;
+    readonly message: string;
+};
+/** Validation only. The Host calls it when it applies create_routine / update_routine. */
+export declare function checkRoutineSchedule(schedule: RoutineSchedule): RoutineScheduleCheck;
+/**
+ * The first occurrence strictly after `now` (epoch ms): the instant at which
+ * the zone's wall clock shows the schedule's whole local minute on a matching
+ * date. Null when none falls within ROUTINE_HORIZON_MS. Throws on an invalid
+ * schedule.
+ *
+ * Scan from the local date before `now`; keep the running minimum `best` of
+ * candidates after `now`; stop at the first unshifted candidate, because a
+ * later local time never resolves earlier. Assumes a gap is at most one day.
+ */
+export declare function nextRoutineOccurrence(schedule: RoutineSchedule, now: number): number | null;
 // ==== @byok-sdk/core dist/sealed-provider-secret.d.ts ====
 /**
  * Sealed provider provisioning v1 (plan web-sealed-provisioning §3).

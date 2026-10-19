@@ -394,6 +394,88 @@ retention cannot remove the delivered/immutable/terminal facts. Receipt columns
 and composite primary key are validated on open. Capacity exhaustion is an
 error; deleting identity fences is not a quota strategy.
 
+### Bot turn outcome fragments and routine time points
+
+`@byok-sdk/protocol` publishes the `bot-turn-outcome.v1` action fragments. Each
+fragment is a schema inside the result-document subset. The Host composes the
+final schema for one execution, fills every id `enum` (roster, slots, rooms,
+routines, models, time zones) and freezes it in the offer as
+`terminalProjection: { mode: 'result-document', contract: 'bot-turn-outcome.v1', schema }`.
+The daemon validates only the format against that frozen schema, as for every
+result document. Semantic checks and application stay with the Host.
+
+The outcome root is a closed object. Each action kind is one optional property;
+`{}` means no actions. Every array has `maxItems` and every string has
+`maxLength`. `maxLength` counts code points. A code point is at most 6 bytes of
+canonical JSON, a finite number at most 25 bytes and an integer at most 24
+bytes. `composeBotTurnOutcomeSchema` computes a conservative upper bound with
+`resultOutcomeMaxBytes` and refuses a schema whose bound exceeds
+`RESULT_OUTCOME_MAX_BYTES`, so every outcome that the frozen schema accepts fits
+the K7 cap. The bound is not always attained, and a schema can have no valid
+instance as large as its bound. A confirmable-action draft is a
+Host schema with a finite bound of at most 16 KiB in the same measure. This
+static budget is a product contract; K7 still rejects any oversized outcome at
+`submit_result`. New objects in one outcome use
+Host-offered `localId` slots, so references to them are enum members. Only a
+Main Bot schema contains management actions and `create_routine.target`; only a
+room-turn schema contains `speech` and `room_call`, and it requires `speech`.
+The subset has no `pattern`, `uniqueItems` or `minProperties`. The Host
+therefore checks duplicates, impossible schedule dates and empty updates when it
+applies an outcome, and reports a refused action in the next ContextPack.
+
+A routine schedule is structured. `minute` (0-59) and `hour` (0-23) give one
+local time. `daysOfWeek` (1 to 7 of `mon`, `tue`, `wed`, `thu`, `fri`, `sat`,
+`sun`) limits it to those weekdays. `dayOfMonth` (1-31) limits it to that day
+of each month; with `month` (1-12), to that day of that month only. With no
+day field, the schedule runs every day. `daysOfWeek` and `dayOfMonth` never
+appear together, and `month` needs `dayOfMonth`. The fragment states each
+field's type, range and enum once, in a closed outer object. A `oneOf` of three
+closed branches lists only the allowed property names and the branch's own day
+field, so the schema refuses an out-of-range value or an invalid combination
+during the execution.
+
+Schema budget rule. `composeBotTurnOutcomeSchema` reports `not-subset`,
+`schema-over-budget` (the schema is above `RESULT_SCHEMA_MAX_BYTES`) and
+`over-budget` (the outcome bound is above `RESULT_OUTCOME_MAX_BYTES`) apart.
+The Host first offers only the fragments and objects that the execution needs.
+Only `schema-over-budget` lets the Host rebuild the routine fragments with
+`scheduleShape: 'flat'`, which drops the `oneOf`; the Host then refuses the two
+invalid combinations when it applies the outcome. This happens before the offer
+is frozen. If the schema is still too large, the Host blocks the execution with
+a visible reason or runs a defined batch selection. It never removes authorized
+ids from an enum silently.
+
+`@byok-sdk/core` publishes `checkRoutineSchedule` and
+`nextRoutineOccurrence(schedule, now)`. `checkRoutineSchedule` refuses a
+malformed schedule (`schedule_invalid`), a date that the month never has, such
+as April 31 (`schedule_unreachable`), February 29, whose next occurrence can be
+eight years away (`schedule_beyond_horizon`), and an unknown zone
+(`tz_invalid`). It accepts repeated weekdays and treats them as one. `tz` is an
+IANA zone name known to the engine's Intl data. Offset spellings are refused
+by the name shape or by Intl. For example, `+08:00` fails the name check;
+`UTC+8` is refused by Intl. `Etc/GMT+8` remains a valid zone name.
+`now` is a safe-integer epoch millisecond in
+[2000-01-01T00:00Z, 2200-01-01T00:00Z); other values throw `RangeError`. The
+function returns the first instant strictly after `now` at which the zone's wall
+clock shows a matching whole local minute, or null when none falls within
+`ROUTINE_HORIZON_MS` (368 days, a product horizon chosen from measured tz data).
+A skipped local time moves later by the gap; a repeated local time takes the
+earlier instant. Resolution uses offsets within one day. It assumes a gap of
+at most one day and at most one offset change in that window. The functions
+read no clock and need full ICU time-zone data.
+
+No SDK runtime component interprets recurring schedules. The daemon, the
+embedded server, the wake queue and the hosted cloud never call these
+functions. Host code calls them, on the device in Topology L, and passes only
+instants to `server.wakes.schedule`. They never pass null to it. Recommended wake key:
+`<routineId>:<version>:<t>`, where `version` and `t` are canonical decimal safe
+integers parsed from the right. An occurrence is identified by
+`(routineId, version, t)`; its trigger is decided once and stored. The Host
+offers time zones as an enum of canonical names, and the instant that the
+device Host computes is the one it schedules. A successor outside the wake
+limit stays in the Host outbox and is retried; a null successor is a visible
+stopped state, not a silent stop.
+
 ### Embedded wake queue
 
 Only `@byok-sdk/server` provides `wake: { consume(wake, signal) }` and
@@ -405,7 +487,7 @@ recovery must use SQLite. Wake rows share its EXCLUSIVE owner and coordinator.
 
 `schedule({ dedupKey, availableAt, payload? })` returns `{ wakeId, accepted }`.
 The key contains 1–256 Unicode characters, `availableAt` is a nonnegative safe
-integer no more than 366 days in the future, and payload is an opaque string of
+integer no more than 368 days in the future, and payload is an opaque string of
 at most 4 KiB UTF-8. Past times are immediately due. Invalid input throws
 `WakeInputError` with a closed code. An exact key/time/payload replay returns the
 original ID and `accepted: false`, including completed keys retained for seven
@@ -1186,10 +1268,10 @@ remain the only device protocol.
 ## Core pi runtime contract
 
 Pi is a required BYOK capability. The SDK pins the official unmodified
-`@earendil-works/pi-coding-agent@1.2.0` plus chord, pi-agent-core, pi-ai and
-pi-durable to exactly 1.2.0 (upstream commit
-`06a466935536f8c9bcacb2d5efc0fc021be1bdff`, closureDigest
-`99b01e3c2e80412e1a09afcd5289d1ed0297bfbfed37ef59dadf30783baab0d1`). pi-codemode, pi-mcp,
+`@earendil-works/pi-coding-agent@1.3.0` plus chord, pi-agent-core, pi-ai and
+pi-durable to exactly 1.3.0 (upstream commit
+`71023aec1546d6d677a65669c5665c0927ce0dd0`, closureDigest
+`7950a1f4a0e34241c861ca5d9ba566ad3255ed493b8b5c17c39f32587962bede`). pi-codemode, pi-mcp,
 pi-telemetry and pi-tui reach an install only through the caret ranges of the
 coding agent and pi-ai, so npm installs the newest compatible release of each.
 The SDK reads their installed version and does not gate it. Fork aliases and dual runtimes are
@@ -1220,8 +1302,8 @@ single-file product (`sdkHelperHost`). A client pin that does not name the
 recorded release is a refusal. The SDK does not attest the runtime executable at
 launch (ADR-037).
 
-Official coding-agent 1.2.0, like 1.0.4, ships no npm shrinkwrap. The npm
-physical root count has not been re-measured for 1.2.0. The local Bun install
+Official coding-agent 1.3.0, like 1.0.4, ships no npm shrinkwrap. The npm
+physical root count has not been re-measured for 1.3.0. The local Bun install
 has eleven resolved physical roots across nine official package names.
 The release check verifies all direct instances; no singleton guarantee is claimed.
 The scripted workflow probe covers the vendored arbiter's built-in
@@ -1876,8 +1958,28 @@ It makes the terminal durable before the content-free completion, and makes
 advance. A leftover `applying` record is reported `uncertain` and never
 re-executed. Busy, fetch, readback, identity or I/O failures leave the cursor
 in place. The capability is advertised only on a backend whose ledger write
-provably includes a directory fsync; today that means native Linux and excludes
-the macOS helper and Windows. Wire and failure detail: `docs/protocol.md` §2.4.
+provably includes a directory barrier. Linux uses its native descriptor backend.
+macOS uses the SDK release helper on a volume that accepts strict `F_FULLFSYNC`.
+Windows remains unavailable. The macOS helper uses `F_FULLFSYNC` for temporary
+files and pinned parent directories. It never falls back to ordinary `fsync`.
+Before advertising, the daemon opens the helper on the actual home volume.
+Each helper open syncs the home directory chain on that volume before a CAS.
+Shared home initialization syncs each new directory's parent on POSIX. A retry
+repeats the parent barrier for existing entries.
+
+The client release carries Darwin arm64 and x64 helpers. The SDK resolves its
+own path and checks the build manifest before each helper open. Arbitrary
+`agentMemoryFilesystem.helperBin` configuration is removed. The ordinary build
+needs no Go. `bun run build:release` builds and verifies native release assets.
+Helper builds use Go
+1.26.5, `CGO_ENABLED=0`, `-buildvcs=false` and `-trimpath`. Product re-signing is
+allowed. The `mach-o-content-v1` digest covers the Mach-O header, load commands
+and file content. It excludes the `LC_CODE_SIGNATURE` blob and command. It
+normalizes the header command counts and `__LINKEDIT` file and VM sizes. It
+accounts for the zero-filled command slot in unsigned Go x64 output. The
+signature must end at EOF. Wrong architecture, format, code or manifest fails
+closed. This check detects deployment errors. It does not verify signer trust.
+Windows PE digest support belongs to its separate platform slice. Wire and failure detail: `docs/protocol.md` §2.4.
 
 The daemon publishes the authenticated `conn.hello` capability snapshot as the
 first long-poll message; the hosted composition persists that snapshot before
@@ -2464,7 +2566,7 @@ The durable Pi lane runs in a separate `byok-pi-durable` executable launched thr
 
 ### Durable Pi lane (experimental, flag-gated)
 
-The durable Pi lane is disabled by default and advertised only as an adapter capability; protocol intersection remains the execution gate. The first slice runs one harness with one root conversation per execution (per-execution replica required). The lane runs YOLO, as every lane does since ADR-037; there is no SDK permission policy to compute. Tool permission follows the owner's YOLO ruling: the `beforeTool` hook admits calls without Host approval and emits no `needs_approval`; a throwing hook blocks the call. The structured file tools may reach any path except the durable replica store; there is no workspace containment. Bash is best-effort only (reject explicit `BYOK_*` assignments) and is not workspace-bound under YOLO—boundary is env isolation (`inheritEnv: false`) plus process/replica lock. YOLO does not relax replay: slice 1 declares no replay-safe tools; any future read-only allowlist requires a separate reviewed slice, and the environment allowlist still applies. Slice 1 is an unprepared ordinary path: harness `compaction.enabled` is false and `retry.maxRetries` is 0. This disables auto-retry, not checkpoint model-request resends; permitted same-execution recovery reports ordinary observed usage. Prepared-lane guarantees (first-request byte identity with counted artifact, at-most-once scoped fetch, prepared charge-once binding) do not apply. Harness events map onto existing AgentEvent variants using Pi 1.0 names: `run_end`→`turn_end`, `tool_execution_*`→`tool_use`/`tool_result`, `usage_changed`/`message_end`→`usage`, `task_failed`→`error`, result-doc writes→`artifact`; `snapshot` must not be replayed as live progress; needs_approval is unused; unmapped events follow the existing unknown-event rule. The final answer is written to a result document and delivered only through an explicitly selected `terminalProjection: result-document`. Background subagents, wake tasks, memory documents, fork, multi-client steering and remote execution environments are not part of this slice. Recurring schedules remain Host-driven; the device does not interpret cron.
+The durable Pi lane is disabled by default and advertised only as an adapter capability; protocol intersection remains the execution gate. The first slice runs one harness with one root conversation per execution (per-execution replica required). The lane runs YOLO, as every lane does since ADR-037; there is no SDK permission policy to compute. Tool permission follows the owner's YOLO ruling: the `beforeTool` hook admits calls without Host approval and emits no `needs_approval`; a throwing hook blocks the call. The structured file tools may reach any path except the durable replica store; there is no workspace containment. Bash is best-effort only (reject explicit `BYOK_*` assignments) and is not workspace-bound under YOLO—boundary is env isolation (`inheritEnv: false`) plus process/replica lock. YOLO does not relax replay: slice 1 declares no replay-safe tools; any future read-only allowlist requires a separate reviewed slice, and the environment allowlist still applies. Slice 1 is an unprepared ordinary path: harness `compaction.enabled` is false and `retry.maxRetries` is 0. This disables auto-retry, not checkpoint model-request resends; permitted same-execution recovery reports ordinary observed usage. Prepared-lane guarantees (first-request byte identity with counted artifact, at-most-once scoped fetch, prepared charge-once binding) do not apply. Harness events map onto existing AgentEvent variants using Pi 1.0 names: `run_end`→`turn_end`, `tool_execution_*`→`tool_use`/`tool_result`, `usage_changed`/`message_end`→`usage`, `task_failed`→`error`, result-doc writes→`artifact`; `snapshot` must not be replayed as live progress; needs_approval is unused; unmapped events follow the existing unknown-event rule. The final answer is written to a result document and delivered only through an explicitly selected `terminalProjection: result-document`. Background subagents, wake tasks, memory documents, fork, multi-client steering and remote execution environments are not part of this slice. Recurring schedules remain Host-driven; no SDK runtime component interprets them (see Bot turn outcome fragments and routine time points).
 
 ### Official Pi migration security and installation contract (2026-09-25 consolidation)
 
@@ -2476,7 +2578,7 @@ Prepared child environment is rebuilt through an explicit EnvironmentBuilder all
 
 A1'' compile uses only a placeholder key and injected capture-and-throw fetch against the actual baseUrl. The official OpenAI client reads exactly OPENAI_ADMIN_KEY, OPENAI_ORG_ID, OPENAI_PROJECT_ID, OPENAI_WEBHOOK_SECRET, OPENAI_LOG and OPENAI_CUSTOM_HEADERS. The approved purity contract is D independence plus this exact read set, not zero reads; an upgrade changing the set requires a fresh ruling. Poisoning these variables must leave D unchanged. OPENAI_LOG may cause a local request log during compile: the device owner deliberately enabled this debug setting; the accepted side effect remains local, does not change D and is not sent externally. No global env or transport monkey-patch is permitted.
 
-Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.2.0 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires a freshly collected provenance record and a fresh ruling. pi-codemode, pi-mcp, pi-telemetry and pi-tui remain transitive: their installed version is read, not gated. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in the closure inventory, eleven Bun-resolved official package instances on the collecting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.66.0 source at `packages/client/vendor/oar/beea52c/`, from upstream commit `beea52cef61391351234edc025a481875035e68c`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
+Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.3.0 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires a freshly collected provenance record and a fresh ruling. pi-codemode, pi-mcp, pi-telemetry and pi-tui remain transitive: their installed version is read, not gated. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in the closure inventory, eleven Bun-resolved official package instances on the collecting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.67.0 source at `packages/client/vendor/oar/c264f17/`, from upstream commit `c264f17040dd9513b43300886a80f3f6eddde7b1`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
 
 pi-durable 1.0.1 ruling (2026-10-04, approved by Aimpact): admitted at exactly 1.0.1. Its shipped code is byte-identical to 1.0.0 (version-only change), and the closure was freshly attested at closureDigest `c954b59594650ce35affbcefd0c4c00aa9ce0827573b48c3200e5f4eb3ee4628`.
 
@@ -2489,6 +2591,8 @@ pi-durable 1.0.4 ruling (2026-10-06, approved by the owner: 「我是要升到1.
 Pi 1.1.0 ruling (2026-10-09, requested by the owner: 「我要升1.1」): all nine official packages are pinned at exactly 1.1.0 (upstream commit `abe508e1b89912adde45528136c3221eb69acdd7`, closureDigest `68d4249f0ee52f0029d61900c8f62c0e424bd81eb8bfda47b679231794eca481`). Pi 1.1.0 adds `agent_settled.aborted`; the adapter maps it to a non-retryable failure, also when the optional session statistics fail or time out. Pi 1.1.0 reads `Date.now` and `performance.now` during compile to set the in-memory `durationMs` of the output message; the prepared request bytes do not change. The closureDigest change makes a preparation compiled for 1.0.4 decline with `preparation_runtime_identity_mismatch`; prepare it again.
 
 Pi 1.2.0 ruling (2026-10-13, requested by the owner: 「基本上按上游的来，我们可以少造轮子就不要自己维护，可重构尽量重构」/「你选继续吧」): all nine official packages are pinned at exactly 1.2.0 (upstream commit `06a466935536f8c9bcacb2d5efc0fc021be1bdff`, closureDigest `99b01e3c2e80412e1a09afcd5289d1ed0297bfbfed37ef59dadf30783baab0d1`). The 1.2.0 breaking changes that touch the SDK: pi-durable `ToolExecutionResult.content` is renamed `output` (cloud-do adapted; no public API change); `ToolTaskInput` and `ToolTaskResult` become tagged unions (test fixtures only); a Storage error now fails the whole Session (both consumers already fail closed, and cloud-do now drops a failed Session and reopens it from storage, so the interrupted run settles as `interrupted / CLOUD_EXECUTION_INTERRUPTED` and later submits run; the failed model turn is not resent); a bash or powershell nonzero exit returns an error result; `before_agent_start` fires for `triggerTurn` runs (the vendored pi-subagents watchdog is unaffected beyond a state reset); display-only write submissions are not used by the SDK. Known open item: a storage failure inside cloud-do `open()` still requires an isolate restart (existing contract at `packages/cloud-do/src/agent-do.ts:146`). The closureDigest change makes a preparation compiled for 1.1.0 decline with `preparation_runtime_identity_mismatch`; prepare it again.
+
+Pi 1.3.0 ruling (2026-10-18, requested by the owner: 「查一下OAR最新的版本是否支持pi 1.3，如果是，则我们一起升级依赖」): OAR 0.67.0 pins Pi 1.3.0, so all nine official packages are pinned at exactly 1.3.0 (upstream commit `71023aec1546d6d677a65669c5665c0927ce0dd0`, closureDigest `7950a1f4a0e34241c861ca5d9ba566ad3255ed493b8b5c17c39f32587962bede`). Upstream now pins its internal dependencies exactly, and the closure keeps the same nine package names. The 1.3.0 changes that touch the SDK: a resumed default-tools session restores the transcript's active tools, so a tool that this open's extensions register stays inactive; `resetResumedPiTools` restores the current native defaults and the default-active extension tools before `session_start`, in the RPC host and the subagent print host. It also clears the transcript's pending tool names, so a tool registered during `session_start` keeps its own `defaultActive` and exposure; OAR 0.67.0 sets the loadout once and keeps that gap. When Pi activates none of the registered tools, Pi 1.3.0 has no public way to clear them, so that resume fails. `resolveCliModel` reports a bare model id that more than one provider offers as ambiguous instead of picking by catalog order; the BYOK lanes always pass the provider. pi-ai no longer exports `utils/assistant-message-frame` (the SDK did not use it). A tool call whose arguments are not valid JSON now fails validation. pi-durable adds an optional SQLite table prefix; without one the schema is unchanged, and 1.3.0 opens a 1.2.0 database without migration. The `kimi-coding` built-in moves to OpenAI Chat Completions; SDK keys projections use their own provider ids and are unaffected. The closureDigest change makes a preparation compiled for 1.2.0 decline with `preparation_runtime_identity_mismatch`; prepare it again. The Summary and main-execution C calibrations were measured under the 1.2.0 identity and need a fresh ruling.
 
 Exactness of the direct pins has three independent checks: bun.lock exact versions and sha512 integrity under frozen install (the root `overrides` also hold the repo's own install of the indirect packages at the pin); the build entry check that each installed direct package is at the pin; release-pack and registry-readback isolated installs, which require the direct pins with the locked integrities and prove the coding agent against its official tarball. The indirect packages are read, not gated: the release gates log their installed version, and input preparation does not read them. The SDK does not attest the Pi executable at launch (ADR-037).
 
@@ -2536,7 +2640,7 @@ retain the existing fail-closed behavior.
 
 Codex reports `tokenUsage.last.totalTokens` against `modelContextWindow`;
 its cumulative `total` remains the provider cost authority. Claude reports
-`result.modelUsage`'s window using the init model identity. Official Pi 1.2.0
+`result.modelUsage`'s window using the init model identity. Official Pi 1.3.0
 reports `get_session_stats.contextUsage` as an estimate before task settlement;
 null occupancy stays unknown. On the prepared Pi lane, Host `pi_model`
 configuration is the context window authority even if runtime stats differ.

@@ -209,7 +209,8 @@ import {
   type AgentMemoryIntentTransport,
 } from './agent-memory-intent';
 import { isAgentMemoryFilesystemHelperSupported } from './agent-memory-fs-helper';
-import type { AgentMemoryFilesystemHelperConfig } from './agent-memory-filesystem';
+import { resolveAgentMemoryFilesystemHelper } from './agent-memory-helper-release';
+import { openAgentMemoryFilesystemHelper } from './agent-memory-fs-helper';
 import {
   AGENT_CONTENT_READ_CAPABILITIES,
   AgentContentReadPolicyEngine,
@@ -333,12 +334,6 @@ export interface DaemonConfig {
   };
   /** Optional, one-way hosted projection. Without all guards it has zero network activity. */
   agentMemory?: AgentMemoryHostedProjection;
-  /**
-   * Product-owned external secure-filesystem helper. The path must be absolute;
-   * the SDK never searches PATH or bundles a native addon. Required for Phase
-   * 2 on macOS. Windows remains fail-closed pending its native race proof.
-   */
-  agentMemoryFilesystem?: AgentMemoryFilesystemHelperConfig;
   /**
    * Explicit composition for SDK-reserved MCP helpers when this daemon is
    * embedded in a single-file/SEA product executable. The product entrypoint
@@ -617,10 +612,9 @@ export interface DaemonConfig {
    * OFF by default. The `agent-memory-intent.v1` capability is advertised only
    * while this transport is present AND `agentHome` is configured AND the
    * secure memory filesystem is available AND that backend's ledger write is
-   * a proven durable barrier (temp fsync, rename, directory fsync). Today that
-   * is the native Linux backend on a filesystem that honors directory fsync;
-   * Windows, macOS without a helper, and the external macOS helper backend do
-   * not advertise. A notice that arrives without the capability is NOT
+   * a proven durable barrier (temp sync, rename, directory sync). Linux uses
+   * native descriptors. macOS uses the verified SDK helper after a strict
+   * full-sync volume probe. Windows does not advertise. A notice that arrives without the capability is NOT
    * acknowledged: it fails `transport_unconfigured` or
    * `filesystem_unavailable` before any fetch. There is no control-socket
    * method for intents; the only entry is the mailbox notice.
@@ -1309,19 +1303,24 @@ export function buildDaemonWithAdapters(
   if (config.agentMemory !== undefined && config.agentHome === undefined) {
     throw new Error('DaemonConfig.agentMemory requires DaemonConfig.agentHome for the exact Agent memory authority');
   }
-  if (config.agentMemoryFilesystem !== undefined && config.agentHome === undefined) {
-    throw new Error('DaemonConfig.agentMemoryFilesystem requires DaemonConfig.agentHome for the exact Agent memory authority');
-  }
-  if (config.agentMemoryFilesystem !== undefined && (!path.isAbsolute(config.agentMemoryFilesystem.helperBin) || /[\u0000\r\n]/u.test(config.agentMemoryFilesystem.helperBin))) {
-    throw new Error('DaemonConfig.agentMemoryFilesystem.helperBin must be an explicit absolute executable path');
+  if (Object.hasOwn(config, 'agentMemoryFilesystem')) {
+    throw new Error('DaemonConfig.agentMemoryFilesystem is removed; an arbitrary helper is not admitted on this platform. Use the SDK release artifact.');
   }
   if (config.sdkHelperHost !== undefined) {
     resolveSdkReservedHelperBin('agent-message-mcp', config.sdkHelperHost);
   }
-  const externalAgentMemoryFilesystem = config.agentMemoryFilesystem !== undefined;
-  if (externalAgentMemoryFilesystem && !isAgentMemoryFilesystemHelperSupported()) {
-    throw new Error('DaemonConfig.agentMemoryFilesystem is not admitted on this platform without its native race proof');
+  // Platform support alone cannot admit memory. Compiled products and ordinary
+  // JS builds can have Agent homes without the SDK native release assets.
+  let resolveAgentMemoryFilesystemHelperBin: (() => string) | undefined;
+  if (config.agentHome !== undefined && isAgentMemoryFilesystemHelperSupported()) {
+    try {
+      resolveAgentMemoryFilesystemHelper();
+      resolveAgentMemoryFilesystemHelperBin = resolveAgentMemoryFilesystemHelper;
+    } catch (error) {
+      if (config.agentMemory !== undefined || config.agentMemoryIntents !== undefined) throw error;
+    }
   }
+  const externalAgentMemoryFilesystem = resolveAgentMemoryFilesystemHelperBin !== undefined;
   if (config.agentMemory !== undefined && !isAgentMemorySecureFilesystemAvailable(externalAgentMemoryFilesystem)) {
     throw new Error('DaemonConfig.agentMemory requires a platform with safe descriptor-relative filesystem operations');
   }
@@ -1488,7 +1487,7 @@ export function buildDaemonWithAdapters(
    */
   const preparationRuntimeEnv = () => buildRuntimeEnv({ ambient: process.env });
   const preparedToolSurface = createPreparedToolSurfaceAssembler({
-    memoryAvailable: () => isAgentMemorySecureFilesystemAvailable(config.agentMemoryFilesystem !== undefined),
+    memoryAvailable: () => isAgentMemorySecureFilesystemAvailable(resolveAgentMemoryFilesystemHelperBin !== undefined),
     toolsetRegistry,
     runtimeEnv: preparationRuntimeEnv,
     ...(agentMemoryDescribeBin === undefined ? {} : { agentMemoryDescribe: agentMemoryDescribeBin }),
@@ -2417,7 +2416,7 @@ export function buildDaemonWithAdapters(
       }),
       ...(agentMemoryMcpBin === undefined ? {} : { agentMemoryMcpBin }),
       ...(agentMemoryDescribeBin === undefined ? {} : { agentMemoryDescribeBin }),
-      ...(config.agentMemoryFilesystem === undefined ? {} : { agentMemoryFilesystemHelperBin: path.resolve(config.agentMemoryFilesystem.helperBin) }),
+      ...(resolveAgentMemoryFilesystemHelperBin === undefined ? {} : { resolveAgentMemoryFilesystemHelperBin }),
       ...(config.agentHome !== undefined && config.agentEgress !== undefined ? {
         agentMessageMcpBin: resolveAgentMessageMcpBin(config.sdkHelperHost),
         agentMessageMcpPreflight: preflightAgentMessageMcp,
@@ -4156,12 +4155,24 @@ export function buildDaemonWithAdapters(
    */
   async function provenAgentMemoryIntentBackend(): Promise<AgentMemoryIntentBackend | undefined> {
     if (config.agentMemoryIntents === undefined || config.agentHome === undefined || agentHomeManager === undefined) return undefined;
-    const helper = config.agentMemoryFilesystem;
-    if (!isAgentMemorySecureFilesystemAvailable(helper !== undefined)) return undefined;
-    const backend = helper === undefined
+    const helperBin = resolveAgentMemoryFilesystemHelperBin?.();
+    if (!isAgentMemorySecureFilesystemAvailable(helperBin !== undefined)) return undefined;
+    const backend = helperBin === undefined
       ? NATIVE_AGENT_MEMORY_INTENT_BACKEND
-      : helperAgentMemoryIntentBackend(path.resolve(helper.helperBin));
+      : helperAgentMemoryIntentBackend(helperBin);
     if (!backend.strictLedgerBarrier) return undefined;
+    if (helperBin !== undefined) {
+      // Probe the actual branded volume before advertising. The helper open
+      // validates the identity and strictly flushes the complete directory chain.
+      try {
+        const canonicalHome = await fs.realpath(config.agentHome.hostStorageRoot);
+        const stat = await fs.stat(canonicalHome, { bigint: true });
+        const probe = await openAgentMemoryFilesystemHelper({ helperBin, canonicalHome, homeIdentity: { dev: stat.dev, ino: stat.ino } });
+        await probe.close();
+      } catch {
+        return undefined;
+      }
+    }
     if (backend.openFilesystem === undefined && !(await probeAgentMemoryStrictDirectorySync(config.agentHome.hostStorageRoot))) {
       return undefined;
     }

@@ -35,7 +35,7 @@ import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 // thing that stops the restatement from drifting.
 import { buildPiProviderProjection, piProjectionProviderId } from '../../../keys/src/pi-provider-projection';
 import { ModelProviderProfileSchema } from '../../../keys/src/provider-profile';
-import { PiModelConfigSchema } from '../../../keys/src/pi-model-config';
+import { PI_PREPARED_COMPAT_KEYS, PiModelConfigSchema } from '../../../keys/src/pi-model-config';
 
 /**
  * The model that travels the prepared lane is read by FOUR independent
@@ -515,7 +515,11 @@ describe('input preparation model: the wire carries what the launcher projects',
     const wireCompat = InputPreparationModelSchema.shape.compat.unwrap();
 
     expect(Object.keys(wireLevelMap.shape)).toEqual(Object.keys(localLevelMap.shape));
-    expect(Object.keys(wireCompat.shape)).toEqual(Object.keys(localCompat.shape));
+    // The local compat is wider than the wire. The prepared runtime entry
+    // refuses every local key outside PI_PREPARED_COMPAT_KEYS, so the wire must
+    // carry exactly that set, and that set must be local keys only.
+    expect(Object.keys(wireCompat.shape)).toEqual(PI_PREPARED_COMPAT_KEYS);
+    expect(PI_PREPARED_COMPAT_KEYS.filter((key) => !Object.hasOwn(localCompat.shape, key))).toEqual([]);
 
     // The two closed value sets, compared rather than restated a third time.
     expect(wireCompat.shape.maxTokensField.unwrap().options)

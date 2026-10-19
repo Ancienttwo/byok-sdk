@@ -22,6 +22,8 @@ const object = (value: unknown): Record<string, unknown> => {
   return value as Record<string, unknown>;
 };
 const string = (value: unknown): string => { if (typeof value !== 'string' || !value || /[\0\r\n]/u.test(value)) throw new Error('durable config requires a single-line string'); return value; };
+const DURABLE_APIS = ['openai-completions', 'openai-responses', 'anthropic-messages'] as const;
+type DurableApi = (typeof DURABLE_APIS)[number];
 function projection(expectedProvider: string, expectedModel: string) {
   const bytes = readFileSync(path.join(string(process.env.PI_CODING_AGENT_DIR), 'models.json'));
   const digest = createHash('sha256').update(bytes).digest('hex');
@@ -32,7 +34,7 @@ function projection(expectedProvider: string, expectedModel: string) {
   if (Object.keys(provider).some(key => !['baseUrl','api','apiKey','authHeader','models'].includes(key)) || (provider.apiKey !== undefined && provider.apiKey !== 'byok:durable-ipc') || (provider.authHeader !== undefined && provider.authHeader !== true)) throw new Error('invalid durable provider projection');
   if (!Array.isArray(provider.models) || provider.models.length !== 1) throw new Error('durable requires one projected model');
   const entry = object(provider.models[0]);
-  if (entry.id !== expectedModel || (provider.api !== 'openai-completions' && provider.api !== 'anthropic-messages')) throw new Error('durable projected model or API differs');
+  if (entry.id !== expectedModel || !DURABLE_APIS.includes(provider.api as DurableApi)) throw new Error('durable projected model or API differs');
   return { provider, entry, digest };
 }
 
@@ -55,10 +57,12 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
   const key = await receiveLauncherCredential('durable', digest);
   if (process.connected) throw new Error('durable custody IPC still connected before tool construction');
   if (provider.apiKey !== undefined && !key) throw new Error('durable launcher credential missing');
-  const api = provider.api as 'openai-completions' | 'anthropic-messages';
+  const api = provider.api as DurableApi;
   const streams: ProviderStreams = api === 'openai-completions'
     ? await import('@earendil-works/pi-ai/api/openai-completions')
-    : await import('@earendil-works/pi-ai/api/anthropic-messages');
+    : api === 'openai-responses'
+      ? await import('@earendil-works/pi-ai/api/openai-responses')
+      : await import('@earendil-works/pi-ai/api/anthropic-messages');
   const model = { cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, ...entry, api, provider: expectedProvider, baseUrl: string(provider.baseUrl) } as unknown as Model<typeof api>;
   const models = createModels(); models.setProvider(createProvider({ id: expectedProvider, models: [model], api: streams, auth: { apiKey: { name: 'BYOK launcher', resolve: async () => ({ auth: key ? { apiKey: key } : {} }) } } }));
   const fail = (message: string): never => { throw new Error(message); };
