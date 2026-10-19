@@ -1,5 +1,8 @@
 # WO-10 acceptance follow-up
 
+当前范围：跨 Bot 委派推迟到 K8b，安排在 #530 和 #531 合入后的第一张工单。
+本轮跨 Bot 代码与测试已撤除（尚未写入，无需 revert）。
+
 Base: `fae8f2d6`. Branch: `codex/k8a-bot-collaboration`. PR: #530.
 
 ## P1 map
@@ -31,15 +34,15 @@ settle. Successful cancel retry leaves its failure status behind.
 - Correct the old K4 test title to 368 days without changing its assertions.
 
 Cross-Bot delegation (platform PRD sections 9.4 and 14.2) is deferred.
-PENDING-AIMPACT: ContextPack size/window/history policy, K4 stacking, and the
-relative imports into K4 internals. Do not change those boundaries or the PRD.
+The earlier ContextPack and K4-import hold is superseded by the latest local
+fix request. K4 already has Draft #532. No restack or PRD change is performed.
 
 ## Verification and delivery
 
 Add focused regressions. Justify any changed existing assertion in the PR body.
 Run root typecheck, focused tests, both affected example suites, API surface,
 and diff check. Get a read-only review of implementation and tests. Commit and
-push normally. Update the PR body with the final scope and observed checks.
+record the PR body in the requested local file. Do not push or run gh pr edit.
 Keep the PR draft state. Do not merge, rewrite history, or deploy.
 
 ## Review and regression evidence
@@ -73,7 +76,7 @@ unversioned state without replacing it. No migration or reset is included.
 | `bun run check:api-surface` | 0 | Nine package goldens match |
 | `git diff --check` | 0 | Passed |
 
-All checks above completed before push. Logs are under `/tmp`:
+All checks above passed before the prior push. Logs are under `/tmp`:
 `wo10-acceptance-typecheck-final.log`, `wo10-acceptance-package-final.log`,
 `wo10-acceptance-k4.log`, `wo10-acceptance-api.log`, and
 `wo10-acceptance-focused-final.log`.
@@ -81,11 +84,11 @@ All checks above completed before push. Logs are under `/tmp`:
 ## Scope left open
 
 Cross-Bot delegation is deferred. Full K8a first-row acceptance is not claimed.
-PENDING-AIMPACT remains unchanged: ContextPack size/window/history policy,
-K4 stacking, and relative imports into K4 internals. No PRD text was changed.
+The latest local follow-up implements the authorized ContextPack bounds and
+K4 package boundary. K4 Draft #532 already exists. No PRD text was changed.
 No paid Pi success-rate measurement, undraft, merge, history rewrite, branch
 removal, or deployment is part of this task.
 
 Result: the authorized acceptance fixes passed verification and the second
 read-only review. The PR body records the existing assertion change and all
-deferred scope. Full K8a first-row acceptance remains incomplete.
+deferred scope. Cross-Bot delegation belongs to the next K8b work order.

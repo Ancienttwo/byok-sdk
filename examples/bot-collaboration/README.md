@@ -1,7 +1,8 @@
 # Single Bot collaboration
 
 This copy-and-own example implements the single Bot part of K8a.
-It supports self continuations. Delegation to other Bots is deferred by Aimpact.
+It supports self continuations. 跨 Bot 委派推迟到 K8b，作为 #530 和 #531
+合入后的第一张 K8b 工单。本轮已撤除该范围，未写入跨 Bot 代码或测试。
 Platform PRD sections 9.4 and 14.2 are not fully implemented here.
 It uses the K4 Host execution core and K8-S public schema and calendar APIs.
 It has no paid runtime call. Tests use a synthetic adapter with the real SDK,
@@ -18,8 +19,8 @@ bun run --cwd examples/bot-collaboration typecheck
 bun run --cwd examples/bot-collaboration test
 ```
 
-`src/host.test.ts` is the complete embedded setup. Create one `BotCollaboration`
-per tenant and ledger. Give it a complete Agent execution template and a Host
+`src/host.test.ts` shows the embedded setup. Create one `BotCollaboration`
+per tenant and ledger. Give it a valid Agent execution template and a Host
 connector. Route the embedded server's `wake.consume` to `bot.consume`.
 Call `bot.recover()` after startup. Call `bot.close()` before closing the SDK
 server or the ledger. Do not call the K4 core's mutation methods directly.
@@ -35,13 +36,32 @@ provide a runtime sandbox. The deployment owns that boundary.
 
 The Host applies routine actions, confirmation cards, questions, then self
 continuations. Each turn freezes the ordinary Bot schema and its ContextPack
-in the K4 input.
+when its K4 intent is enqueued. Waiting turns and retries reuse that frozen
+input. The wait limit is five minutes before execution starts. A started
+execution waits for canonical device terminal evidence.
 The schema offers self delegation, `ask_user`, `confirmable_action`, and the
 three routine actions. It offers all current routine ids, up to eight.
 It never offers a `target` field or another Bot id. A user input starts one
 root budget. Self delegation permits four continuations for that root. It
 keeps hop at zero and does not consume the delegation budget. A refused action
 enters `ContextPack.rejectedActions`. Other accepted actions still apply.
+A rejected action is reserved by the next frozen input. It is not copied into
+later inputs. An unstarted terminal failure releases that reservation.
+
+ContextPack defaults are 12 recent turns (`contextTurnLimit`) and 32 KiB of
+serialized UTF-8 JSON (`contextMaxBytes`). A historyWindow notice states how
+many older turns were omitted. Turns carry action-name summaries, not full
+outcome documents. Routine context contains only its current definition.
+Cards and questions remain visible. If the selected pack exceeds the byte
+budget, the turn becomes `blocked` with a readable reason and an owner
+projection. It creates no execution or retry spin. No strings are silently
+cut to fit. Raising the budget or repairing the selected data and calling
+`drain()` retries admission.
+
+Schema composition first uses checked schedules. Only `schema-over-budget`
+permits a retry with flat schedules. If flat is still above the schema cap,
+the turn is explicitly blocked. `not-subset` and `over-budget` are Host defects
+and propagate as errors. No authorized routine id is dropped.
 
 Questions support text and single choice. An answer creates an `answer` turn.
 It is a new user input with its own stable budget root. Replaying the same
@@ -60,7 +80,7 @@ them does not cause later syncs to publish them again.
 The connector receives an AbortSignal and must deduplicate by the card id.
 The Host enforces `connectorTimeoutMs` (default 30 seconds), even if the
 connector ignores cancellation. A timeout releases the serial chain and
-returns an action_result with an unknown external outcome. A late connector
+commits a failed action_result with an unknown external outcome. A late connector
 result cannot overwrite that committed result. A crash after the
 external effect but before result commit can call it again with that id.
 No exactly-once external effect is claimed.
@@ -113,11 +133,11 @@ occurrence finish. Startup or explicit pause/resume retries the calendar.
 The collaboration application state has version 1. Unsupported and unversioned
 stored state is rejected without a reset or automatic migration.
 
-This example has one Bot and one owner. Cross-Bot delegation stays deferred.
-The full K8a first-row acceptance is not complete.
+This example has one Bot and one owner. 跨 Bot 委派推迟到 K8b。
+This report covers the single Bot slice only.
 Group chat and Main Bot actions belong to K8b. Paid Pi success-rate measurement belongs to WO-10b. Application history,
 versions and audit rows have no retention policy in this small example.
 
-PENDING-AIMPACT: ContextPack size, window, and history policy; K4 stacking;
-and the relative imports into K4 internals. This change does not select or
-change those policies. The PRD remains Aimpact's authority.
+K4 is tracked in Draft #532. This branch uses its package exports. No restack,
+PR status change, push, or deployment is performed in this local follow-up.
+The PRD remains Aimpact's authority.

@@ -1,7 +1,10 @@
 # WO-10 K8a VALIDATION
 
+当前范围：跨 Bot 委派推迟到 K8b，安排在 #530 和 #531 合入后的第一张工单。
+本轮跨 Bot 代码与测试已撤除（尚未写入，无需 revert）。
+
 Status: recorded local checks passed for the single Bot slice. Full K8a first-row
-acceptance is not complete. Cross-Bot delegation is deferred by Aimpact.
+acceptance for cross-Bot delegation is deferred to K8b.
 
 ## Scope
 
@@ -161,7 +164,7 @@ History, version, and audit retention remain product responsibilities.
 ## Result
 
 RESULT: the single Bot slice is implemented. Full K8a first-row acceptance
-is not complete. Cross-Bot delegation is deferred by Aimpact. The accepted
+does not cover cross-Bot delegation, which is deferred to K8b. The accepted
 branches are merged locally. There were no merge conflicts. Production example code passed the
 independent read-only Codex review. All five required checks passed on the
 recorded source commit. Those checks do not prove cross-Bot delegation.
@@ -170,8 +173,8 @@ No paid Pi success-rate measurement is claimed.
 Local commit chain: `d4530a14`, `eb83465e`, `cd469d6d`, `7bde22c1`, `0cfcc773`.
 The final validation commit contains documentation only.
 
-PENDING-AIMPACT: ContextPack size/window/history policy, K4 stacking, and
-relative imports into K4 internals. This follow-up does not decide these items.
+The earlier ContextPack and K4-import hold is superseded by the latest local
+fix request. K4 already has Draft #532. No restack is performed.
 
 ---
 
@@ -223,7 +226,7 @@ for these two implementation items. No PRD text is changed.
 - `routines.test.ts` binds the same horizon equality assertion to the public
   `WAKE_MAX_FUTURE_MS` name adopted from #523. No numeric expectation changes.
 
-Defaults: 12 recent turns and 32 KiB canonical UTF-8 ContextPack JSON. Selected
+Defaults: 12 recent turns and 32 KiB serialized UTF-8 ContextPack JSON. Selected
 turns carry action-name summaries, not full outcome documents. The window
 reports its omitted count. Only current routine definitions travel. Rejected
 actions are reserved by a frozen input; unstarted terminal failure releases
@@ -243,3 +246,13 @@ Blocked turns do not schedule a retry loop. These limits do not trim strings.
   payload. Repeated recovery must not make a second child or submit.
 - No cross-Bot path or test is added. Cross-Bot delegation is withdrawn from
   this scope and belongs to the first K8b work order after #530 and #531 land.
+
+## Current local-only delivery rules
+
+The corrected synchronization baseline is `04d18bdc` over origin/main
+`433deced`. It contains `a1c1226e`. It does not merge #531 head `23132486`.
+Cross-Bot delegation is withdrawn from #530 and deferred to K8b.
+K4 already has Draft #532. No new K4 PR is suggested or opened.
+The PR body is written only to the requested `_ops/bot-wo/PR-530-body.md`.
+No push, gh pr edit, package source change, or history rewrite is performed.
+Final checks and the audit-to-commit table follow after verification.
