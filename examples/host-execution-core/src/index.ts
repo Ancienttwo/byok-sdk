@@ -8,3 +8,7 @@ export type { IntentInput, Intent, ExecutionTemplate, RetryPolicy, RoutineDefini
 
 export { HostMemoryPage, memoryRevision, EMPTY_MEMORY_REVISION, RESIDENT_MEMORY_MAX_BYTES } from './memory';
 export type { MemoryApproval, MemoryBinding, MemoryOptions, MemoryContextPack } from './memory';
+export { hash, canonical, project, time } from './model';
+export type { LedgerState } from './model';
+export { enqueue } from './transitions';
+export { WAKE_HORIZON_MS, parseRoutineWakeKey } from './routines';

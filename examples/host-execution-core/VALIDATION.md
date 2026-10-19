@@ -876,3 +876,48 @@ The root run passed the Host example again: 65 passed, 6 skipped. Its example
 run began at `17:29:56`. Optional substrate and platform tests remain skipped.
 The final evidence JSON is local ignored state under `_ops/wo11/`. It is not
 part of the commit. The PR stays draft. PENDING-AIMPACT P3-1 stays open.
+
+## Merge train after WO-10 / PR #530
+
+Main base: `e9247c63de1a619bafb692f2bfe405bcc8804029`.
+Use `git fetch origin` and a normal `git merge origin/main`.
+
+### P1: Boundary
+
+The conflicts are in the Host example package entry points and export list.
+Main exposes the core package and `test-support` for bot-collaboration. This
+branch also exports the memory page and its types. Both sets are needed.
+
+### P2: Trace
+
+`BotCollaboration` imports `HostExecutionCore`, `HostLedger`, ledger helpers,
+`enqueue` and `WAKE_HORIZON_MS` from the Host package. Its constructor supplies
+`applyOutcome` and does not enable memory. The memory caller still supplies
+`options.memory`. The two paths use the same core and keep their current rules.
+
+### P3: Merge decision
+
+Keep main's package `exports` and core helper exports. Keep this branch's memory
+exports and runtime dependencies. The merged bot-collaboration files match main.
+The existing memory runtime and test files match the previous branch head.
+No test assertion, skip or timeout was changed for this merge. P3-1 remains
+PENDING-AIMPACT. No product decision or delegation scope changed.
+
+`bun install --frozen-lockfile` passed with no dependency change. The merged
+build and root typecheck passed. Logs and final results for this merge are
+kept in ignored local state under `_ops/wo11/main-merge-*`.
+
+### Final checks for the WO-10 merge
+
+| Command | Exit | Result |
+| --- | --- | --- |
+| `bun run build` | 0 | All workspace builds passed. |
+| `bun run typecheck` | 0 | All workspace typechecks passed. |
+| `bun run test` | 0 | 9560 Vitest tests passed, 237 skipped; cloud-do Node tests: 10 passed, 0 failed. |
+| `bun run check:api-surface` | 0 | All 9 package goldens match. |
+| `bun run check:version-authority` | 0 | Version authority check passed. |
+
+The complete root run includes bot-collaboration: 50 passed. It also includes
+Host execution: 65 passed, 6 Linux-only tests skipped. No failure required a
+source or test change. Optional substrate and platform tests remain skipped.
+Only this merge and its record will be pushed. The PR remains draft.
