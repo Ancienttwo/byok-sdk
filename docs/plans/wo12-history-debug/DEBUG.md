@@ -50,7 +50,8 @@ tasks. This is not enough to attribute that failure to host pressure. The
 failure occurs before the new history assertions.
 
 E4 changes only the current text from 18,000 emoji (72,000 UTF-8 bytes) to
-72,000 ASCII characters. The byte size stays the same. A pass supports an
+72,000 ASCII characters. Both carry the same 12-byte suffix, so each full
+request is 72,012 UTF-8 bytes. The byte size stays the same. A pass supports an
 encoding-sensitive delivery problem. The same offered/no-claim outcome rejects
 that hypothesis. All assertions and deadlines stay unchanged. Restore the
 original Unicode data and remove diagnostic logging after the experiment.

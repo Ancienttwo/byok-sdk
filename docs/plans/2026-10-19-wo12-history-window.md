@@ -97,8 +97,8 @@ notice object. The output JSON byte tests compare this against the real JSON.
 
 ## Final local result
 
-Implementation commit: `b23634ca`. It is followed by the review corrections
-and this validation record. No push or PR edit is performed.
+Implementation commit: `b23634ca`. Review corrections and the validation
+record are in `f797f8d1`. No push or PR edit is performed.
 
 Round 2 read-only code verdict: PASS. The reviewer confirmed F1/F2 and the
 cached byte accounting. It did not run commands or tests in that round.
@@ -112,6 +112,7 @@ restoring the next omitted row exceeds the actual serialized byte budget.
 | `bun ci` | Exit 0 | `/tmp/wo12-history-install.log` |
 | `bun run build` | Exit 0 | `/tmp/wo12-history-build.log` |
 | Latest pure history/room tests | 23/23; exit 0; 4.24 seconds | `/tmp/wo12-history-pure-verified.log` |
+| Ordinary Host and wake-retry regression | 16/16; exit 0; 46.06 seconds | `/tmp/wo12-history-ordinary-regression.log` |
 | Final related SDK cases | 3 passed, 1 failed; exit 1; 25.45 seconds | `/tmp/wo12-history-integration-final.log` |
 | Root typecheck | Exit 1; only observed diagnostic is the existing MAX_FUTURE_MS import | `/tmp/wo12-history-checks/typecheck.log` |
 | Latest example typecheck | Exit 1; same existing import | `/tmp/wo12-history-example-typecheck-final.log` |
@@ -122,7 +123,7 @@ The three passing SDK cases prove count-window speech, byte-window speech,
 and background/join/rejoin/frozen-offer behavior. Their assertions use the
 real daemon and submit_result helper. No model API call was made.
 
-The remaining SDK case preserves a 72,000-byte Unicode current request in
+The remaining SDK case preserves a 72,012-byte Unicode current request in
 its frozen offer and fits the selected ContextPack. Those assertions execute
 before the failed device-session wait. Its attempt remains offered and
 unclaimed, with connection open and zero active tasks. An equal-byte ASCII
@@ -145,3 +146,6 @@ The final test-only ordering change moves the large-request offer assertions
 before the device-session wait. No assertion is removed or weakened. It makes
 the passing history-admission checks distinct from the later SDK claim failure.
 All temporary diagnostic logging and ASCII substitutions are removed.
+
+The ordinary 1:1 Host and wake-retry tests also passed 16/16 after the history
+changes. This does not include the owner-deferred routines.test.ts import.
