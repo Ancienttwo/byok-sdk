@@ -31,6 +31,33 @@ Configuration changes alter the profile hash and registry revision, fencing
 stale tasks before credential access. The launcher projects the selected
 thinking level through its own argv, not delegated overrides.
 
+An `openai_compatible` profile can set `api` to `'openai-completions'` or
+`'openai-responses'`. When `api` is absent, Pi uses `'openai-completions'`.
+The projection writes `api` on the Pi provider. It never infers `api` from
+the base URL or the model name. An `anthropic` profile always projects
+`'anthropic-messages'` and must not set `api`.
+
+To make a `pi_model` from a pi-ai catalog entry:
+
+- Copy `api`, `contextWindow`, `maxTokens`, `reasoning`, `thinkingLevelMap`
+  and `inputLimits`. Add your own `thinkingLevel`.
+- Remove `id`, `name`, `provider`, `baseUrl`, `headers`, `cost`, `input` and
+  `type`. The profile declares identity, endpoint, credential and
+  capabilities.
+- Copy only the `compat` keys in `PI_COMPAT_KEYS_BY_API[api]`.
+  `'openai-completions'` accepts `supportsStore`, `supportsDeveloperRole`,
+  `supportsReasoningEffort`, `supportsUsageInStreaming`, `maxTokensField`,
+  `thinkingFormat`, `zaiToolStream` and `supportsLongCacheRetention`.
+  `'openai-responses'` accepts `supportsDeveloperRole` and
+  `supportsLongCacheRetention`.
+- If the entry needs another `compat` key, do not make a preset. The schema
+  refuses unknown keys. Request the key in an issue.
+
+The prepared runtime entry compiles `'openai-completions'` only. It refuses a
+profile that declares `'openai-responses'` or `inputLimits`. It also refuses
+`compat.supportsLongCacheRetention`, because the frozen prepared wire does not
+carry it.
+
 The SQLite profile schema changes in this candidate. Existing stores are
 rejected and preserved: explicitly provision a separate current-schema store
 after reviewing the old configuration. Do not delete an old store or infer its
