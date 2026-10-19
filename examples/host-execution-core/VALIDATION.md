@@ -921,3 +921,25 @@ The complete root run includes bot-collaboration: 50 passed. It also includes
 Host execution: 65 passed, 6 Linux-only tests skipped. No failure required a
 source or test change. Optional substrate and platform tests remain skipped.
 Only this merge and its record will be pushed. The PR remains draft.
+
+## Merge train after WO-12 / PR #531
+
+Normal merge `31cb5e1d21257823b8e6042a8261a7b5ae60c3e4` includes main at
+`6fa6f66e792145b008a594dfb39115e971b9958f`. The merge had no conflicts.
+No manual runtime, test assertion, skip or timeout change was needed.
+The bot-collaboration files and PRD match main. The memory implementation stays
+unchanged. PENDING-AIMPACT P3-1 stays open.
+
+| Command | Exit | Result |
+| --- | --- | --- |
+| `bun run build` | 0 | All workspace builds passed. |
+| `bun run typecheck` | 0 | All workspace typechecks passed. |
+| `bun run check:api-surface` | 0 | All 9 package goldens match. |
+| `bun run check:version-authority` | 0 | Version authority check passed. |
+| `bun run test` | 0 | 9604 Vitest tests passed, 237 skipped; cloud-do Node tests: 10 passed, 0 failed. |
+
+The root run includes bot-collaboration/group chat: 94 passed. It also includes
+Host execution: 65 passed, 6 Linux-only tests skipped. No test failure required
+repair. Optional substrate and platform tests remain skipped. Logs and results
+stay in ignored local state under `_ops/wo11/wo12-merge-*`.
+The PR stays draft. The coordinator owns readiness, CI acceptance and merge.
