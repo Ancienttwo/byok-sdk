@@ -4,6 +4,23 @@ Date: 2026-10-18. Baseline: `8e8839a3`.
 Branch: `codex/bot-k4-host-execution-core`.
 Environment: macOS, Node `v24.21.0`, Bun `1.4.3`.
 
+## Merge-train repair for PR 532
+
+Date: 2026-10-19. Prior head: `e5afad26`.
+CI run `39201151933` failed the same rollback assertion in both baseline and Node 26 jobs.
+An ordinary merge at `f85a80f5` brings in `origin/main@5b988a6e`. No rebase or force push is used.
+The merge completed without conflicts. Package changes come from main; this repair adds none.
+
+P1: The Host precheck and the rollback test shared a local 366-day constant.
+Main now exports `WAKE_MAX_FUTURE_MS` and admits wakes up to 368 days.
+P2: A wake 366 days ahead is still valid after a one-hour clock rollback: its delay is 366 days plus one hour, below 368 days.
+The real SDK therefore accepts it, so the Host stays `ok`. The focused test reproduced the CI failure after merge and build.
+P3: Use the SDK's public constant for the Host precheck. Build test candidates from that same public contract directly.
+At the SDK boundary, a one-hour rollback again makes the real SDK reject the wake.
+All error-state, pending-wake, outbox, persisted-error and successful-recovery assertions remain unchanged.
+The exact-boundary test still requires acceptance at the limit and deferral at limit plus one millisecond.
+The guide and README now describe the current public constant. The prior SDK export nit is closed by main's PR 523.
+
 ## V4 patch: preserve SDK schedule errors
 
 This patch starts at `5c86a4b8` and implements the owner's follow-up request.
@@ -302,6 +319,13 @@ The test observes one occurrence, one execution, identical input and one committ
 | Cancel classification | `unclaimed-expiry.test.ts`: real cancelled/unclaimed attempt, claimed cancel_requested state, then task.cancelled terminal. |
 
 ## Test changes and reasons
+
+Merge-train repair:
+
+- `scheduling-recovery.test.ts` now takes its boundary and rollback timestamps directly from the public SDK constant.
+  This keeps the test independent of the Host's local alias and checks the current SDK admission contract.
+  The boundary test name no longer embeds the old 366-day limit. No assertion, timeout or rollback amount is relaxed.
+  The focused old-source test failed after the main merge with expected `schedule_retrying`, actual `ok`.
 
 V4 patch changes:
 

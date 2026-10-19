@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import { WAKE_MAX_FUTURE_MS } from '@byok-sdk/server';
 import { hash } from './model';
-import { WAKE_HORIZON_MS } from './routines';
 import { nextIntervalOccurrence } from './schedule';
 import { openHost, template, type TestHost } from './test-support';
 
@@ -41,10 +41,10 @@ it('scans every Agent queue before reporting a permanent wake outbox error', asy
   }, { timeout: 5000 });
 });
 
-it('accepts the exact 366-day boundary and retries a later candidate through process backoff', async () => {
+it('accepts the exact SDK horizon boundary and retries a later candidate through process backoff', async () => {
   host = await openHost(); await host.offline();
   vi.useFakeTimers();
-  const now = Date.now(), at = now + WAKE_HORIZON_MS;
+  const now = Date.now(), at = now + WAKE_MAX_FUTURE_MS;
   await host.core.addRoutine(host.routine('boundary', { rule: { anchorMs: at, everyMs: 86_400_000 } }));
   await host.core.addRoutine(host.routine('beyond', { rule: { anchorMs: at + 1, everyMs: 86_400_000 } }));
   expect((await host.server.wakes.pending()).map(wake => wake.dedupKey)).toEqual([`boundary:1:${at}`]);
@@ -64,7 +64,7 @@ it('backs off after a wall-clock rollback makes the real SDK reject a previously
     return server.wakes.schedule(input);
   } } }) });
   await host.offline(); vi.useFakeTimers();
-  const now = Date.now(), at = now + WAKE_HORIZON_MS;
+  const now = Date.now(), at = now + WAKE_MAX_FUTURE_MS;
   rollback = true;
   await host.core.addRoutine(host.routine('rollback', { rule: { anchorMs: at, everyMs: 86_400_000 } }));
   expect(routine('rollback')).toMatchObject({ lifecycle: 'active', status: 'schedule_retrying' });
