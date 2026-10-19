@@ -24,15 +24,24 @@ export interface ReplyEntry {
   delegationId: string; from: string; request: string; verdict: Verdict; reason?: string;
   /** B taskId of the accepted reply body in `CollaborationState.replies`. */
   reply?: string; continuationRefused?: true;
+  /** The reply was accepted before a cancel. The cancel stopped the rest of the execution. */
+  partial?: true;
 }
+/** Frozen in the arbitration transaction (§8.8). `delivered` turns true after core.cancel. */
+export interface DelegationCancel { requestedAt: number; targetTurnId: string; delivered: boolean }
 export interface Delegation {
   id: string; root: string; fromBotId: string; fromTurnId: string; fromTaskId: string; index: number;
   toBotId: string; toAgentRef?: { agentId: string; profileRevision: string }; toDeviceId?: string;
   request: string; hop: number; requestTurnId?: string; chainTurnIds: string[]; batch: string;
   status: 'queued' | 'running' | 'reply_pending' | 'reply_held' | 'uncertain' | 'resolved';
   revision: number; nextCheckAt?: number; checks?: number; pendingSince?: number;
-  verdict?: Verdict; reason?: string; reply?: string; continuationRefused?: true; replyTurnId?: string;
+  verdict?: Verdict; reason?: string; reply?: string; continuationRefused?: true; partial?: true; replyTurnId?: string;
   uncertainSince?: number; resolvedAt?: number;
+  cancel?: DelegationCancel;
+  /** First observed claim of the current chain Turn (§8.3). */
+  claimed?: { turnId: string; at: number };
+  /** A chain Turn still open at the verdict. Its later terminal goes to audit only. */
+  lateTurnId?: string;
 }
 /** One A outcome. `slots` are the prepaid A reply units of this batch. */
 export interface Batch { id: string; delegationIds: string[]; slots: string[] }

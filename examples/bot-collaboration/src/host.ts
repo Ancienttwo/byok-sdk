@@ -6,10 +6,11 @@ import { HostLedger } from '@byok-sdk/example-host-execution-core';
 import { hash, project, time, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
 import { enqueue } from '@byok-sdk/example-host-execution-core';
 import { WAKE_HORIZON_MS } from '@byok-sdk/example-host-execution-core';
-import { addTurn, json, stateOf, type CollaborationState, type Routine, type Turn } from './model';
+import { addTurn, json, stateOf, type CollaborationState, type Delegation, type Routine, type Turn } from './model';
 import { turnInstruction, outcomeSchema, SYSTEM_PROMPT } from './schema';
-import { applyDelegate, BOT_REPLY_MAX_BYTES, DEFAULT_INSTRUCTION_MAX_BYTES, endChain, minimumInstructionBytes, observeStart,
-  reconcileReply, resolveDelegation, retryReply, settleDelegations } from './delegation';
+import { abandonDelegation, applyDelegate, arbitrateCancel, BOT_REPLY_MAX_BYTES, DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
+  delegationDue, endChain, minimumInstructionBytes, observeStart, reconcileReply, REPLY_UNCERTAIN_AFTER_MS, resolveDelegation, retryReply,
+  settleDelegations, type DelegationTimers } from './delegation';
 import { arm, consumeRoutine, createRoutine, lifecycle, operation, owned, switchVersion, updateRoutine } from './routines';
 
 import { activeBot, applyManagement, roomFields, same, updateBot, roomVisibility } from './team';
@@ -30,6 +31,10 @@ export interface BotOptions {
   contextTurnLimit?: number;
   /** UTF-8 bound of a whole bot_request or bot_reply instruction. Construction refuses a value below the proven minimum. */
   instructionMaxBytes?: number;
+  /** A cancel with no terminal after this time shows `uncertain` (§8.3). */
+  cancelGraceMs?: number;
+  /** A claimed chain Turn, or a reply check, with no verdict after this time shows `uncertain` (§8.3). */
+  uncertainAfterMs?: number;
 }
 /** Reply readback port (§3.3). The Host acceptance record stays the body authority. */
 export type MessageServer = { tasks: Partial<Pick<ByokServer['tasks'], 'agentMessage'>> };
@@ -46,6 +51,7 @@ export class BotCollaboration {
   private readonly contextMaxBytes: number;
   private readonly contextTurnLimit: number;
   private readonly instructionMaxBytes: number;
+  private readonly timers: DelegationTimers;
   constructor(readonly server: ExecutionServer & HomeServer & MessageServer, readonly ledger: HostLedger, private readonly options: BotOptions) {
     if (!options.botId || options.execution.payload.agentRef.agentId !== options.botId) throw new Error('Select this Bot Agent');
     if (options.execution.payload.requiredToolsets?.length) throw new Error('Bot executions cannot have connector toolsets');
@@ -58,6 +64,8 @@ export class BotCollaboration {
     this.instructionMaxBytes = time(options.instructionMaxBytes ?? DEFAULT_INSTRUCTION_MAX_BYTES);
     const minimum = minimumInstructionBytes(SYSTEM_PROMPT);
     if (this.instructionMaxBytes < minimum) throw new Error(`instructionMaxBytes must be at least ${minimum}`);
+    this.timers = { cancelGraceMs: time(options.cancelGraceMs ?? DEFAULT_CANCEL_GRACE_MS), uncertainAfterMs: time(options.uncertainAfterMs ?? REPLY_UNCERTAIN_AFTER_MS) };
+    if (this.timers.cancelGraceMs < 1 || this.timers.uncertainAfterMs < 1) throw new Error('Invalid delegation timers');
     this.core = new HostExecutionCore(server, ledger, { now: this.now, reconcileMs: 100,
       applyOutcome: (document, tx) => this.applyOutcome(document, tx) });
     ledger.transaction(s => {
@@ -97,6 +105,9 @@ export class BotCollaboration {
     if (!turn) throw new Error('Missing Bot turn');
     const schema = state.schemas[turn.id];
     if (!schema || !validateResultOutcome(schema, document).ok) throw new Error('Outcome differs from the frozen schema');
+    const delegation = turn.delegationId ? state.delegations[turn.delegationId] : undefined;
+    // A cancelled or resolved chain never applies B's staged outcome (§8.3, §8.8).
+    if (delegation && (delegation.verdict || delegation.cancel)) { state.audit.push(`Outcome audit only: ${tx.intent.taskId}`); return; }
     const outcome = document as BotTurnOutcome;
     turn.outcome = json(document);
     const accept = (action: string, work: () => void) => {
@@ -140,7 +151,7 @@ export class BotCollaboration {
     const { successor } = applyDelegate(state, turn, tx.intent.taskId, outcome, !!seat, this.now(), tx.publish, accept);
     if (turn.delegationId) {
       // A device terminal proves that this chain Turn ran.
-      observeStart(state, turn, tx.publish);
+      observeStart(state, turn, this.now(), tx.publish);
       if (!successor) endChain(state, turn, tx.intent.taskId, !!outcome.delegate?.some(action => action.to === turn.botId), this.now(), tx.publish);
     }
   }
@@ -166,24 +177,47 @@ export class BotCollaboration {
         state.audit.push(`Delegation message after verdict: ${delegation.id} ${input.taskId}`);
         return refuse('delegation_resolved');
       }
+      // Cancel and first acceptance meet in this transaction boundary (§8.8).
+      if (delegation?.cancel?.targetTurnId === turn.id) {
+        state.audit.push(`Delegation message after cancel: ${delegation.id} ${input.taskId}`);
+        return refuse('delegation_cancelled');
+      }
       if (delegation && Buffer.byteLength(input.payload.body, 'utf8') > BOT_REPLY_MAX_BYTES) return refuse('reply_too_large');
       state.replies[input.taskId] = { turnId: turn.id, messageId: input.payload.messageId, contentHash: input.payload.contentHash,
         contentType: input.payload.contentType, acceptedAt: this.now(), ...(delegation ? { body: input.payload.body } : {}) };
       return { outcome: 'accepted' as const };
     });
   }
-  /** Owner API ("End"): close a held reply or an uncertain reply check with `abandoned`. */
-  async abandonDelegation(id: string): Promise<void> {
-    await this.exclusive(async () => {
-      this.ledger.transaction(s => {
-        const state = stateOf(s.application), delegation = state.delegations[id];
-        if (!delegation) throw new Error('Delegation not found');
-        if (delegation.status !== 'reply_held' && delegation.status !== 'uncertain') throw new Error('Delegation cannot be ended in this state');
-        resolveDelegation(state, delegation, 'abandoned', this.now(), (key, value) => project(s, key, value),
-          delegation.status === 'reply_held' ? 'reply_held' : undefined);
-      });
-      await this.process();
+  /**
+   * Owner API ("Cancel", §8.8), from A's delegation chip or from B's `bot_request` Turn.
+   * It rejects when `core.cancel` fails. The cancel fact is already committed, and the timer delivers it later.
+   */
+  cancelDelegation(id: string): Promise<void> {
+    return this.exclusive(() => this.settleChain(id, (s, state, d) => arbitrateCancel(s, state, d, this.now(), (key, value) => project(s, key, value))));
+  }
+  /** Owner API ("End", §8.3): close a held reply or an uncertain delegation with `abandoned`. */
+  abandonDelegation(id: string): Promise<void> {
+    return this.exclusive(() => this.settleChain(id, (s, state, d) => abandonDelegation(s, state, d, this.now(), (key, value) => project(s, key, value))));
+  }
+  private async settleChain(id: string, decide: (s: LedgerState, state: CollaborationState, d: Delegation) => boolean): Promise<void> {
+    const deliver = this.ledger.transaction(s => {
+      const state = stateOf(s.application), d = state.delegations[id];
+      if (!d) throw new Error('Delegation not found');
+      return decide(s, state, d);
     });
+    if (deliver) await this.deliverCancels();
+    await this.process();
+  }
+  /**
+   * Deliver each committed cancel to its frozen target (§8.8). A crash before
+   * `delivered` leaves the fact for the next pass. It never picks a new Turn.
+   */
+  private async deliverCancels(): Promise<void> {
+    for (const d of Object.values(this.snapshot().delegations)) {
+      if (!d.cancel || d.cancel.delivered) continue;
+      await this.core.cancel(d.cancel.targetTurnId);
+      this.ledger.transaction(s => { stateOf(s.application).delegations[d.id]!.cancel!.delivered = true; });
+    }
   }
 
   /** Owner API. Advance the desired revision after a rejected persona delivery. */
@@ -293,6 +327,11 @@ export class BotCollaboration {
   drain(): Promise<void> { return this.exclusive(() => this.process()); }
   cancelTurn(id: string): Promise<void> {
     return this.exclusive(async () => {
+      const turn = this.snapshot().turns[id];
+      // A chain Turn cancels its whole delegation, so one verdict covers it (§8.8).
+      if (turn?.delegationId && !this.snapshot().delegations[turn.delegationId]!.verdict) {
+        return this.settleChain(turn.delegationId, (s, state, d) => arbitrateCancel(s, state, d, this.now(), (key, value) => project(s, key, value)));
+      }
       const admitted = this.ledger.transaction(s => {
         const turn = stateOf(s.application).turns[id];
         if (!turn) throw new Error('Turn not found');
@@ -401,7 +440,7 @@ export class BotCollaboration {
         }
       }
     }
-    settleDelegations(s, state, this.now(), (key, value) => project(s, key, value));
+    settleDelegations(s, state, this.now(), (key, value) => project(s, key, value), this.timers);
     for (const routine of Object.values(state.routines)) {
       routine.inflight = routine.inflight.filter(key => {
         const occurrence = state.occurrences[key]!;
@@ -481,8 +520,8 @@ export class BotCollaboration {
         const state = stateOf(s.application), row = state.delegations[d.id]!;
         const emit = (key: string, value: Json) => project(s, key, value);
         if (state.replies[intent.taskId]?.body !== undefined) resolveDelegation(state, row, 'answered', this.now(), emit, undefined, intent.taskId);
-        else if (failed) retryReply(row, this.now(), emit);
-        else reconcileReply(state, row, readback, this.now(), emit);
+        else if (failed) retryReply(row, this.now(), emit, this.timers.uncertainAfterMs);
+        else reconcileReply(state, row, readback, this.now(), emit, this.timers.uncertainAfterMs);
       });
     }
   }
@@ -519,6 +558,8 @@ export class BotCollaboration {
   private async process(): Promise<void> {
     let more: boolean;
     do {
+      // A failed delivery keeps `delivered = false`. The timer retries it.
+      await this.deliverCancels().catch(() => {});
       const admitted = this.ledger.transaction(s => this.sync(s));
       await flushHomes(this.server, this.ledger, this.now);
       await this.core.drain();
@@ -549,7 +590,8 @@ export class BotCollaboration {
         ...Object.values(state.cards).filter(c => c.state === 'pending').map(c => c.expiresAt),
         ...Object.values(state.team.seats).filter(seat => !seat.released && seat.deadline !== undefined).map(seat => seat.deadline!),
         ...state.team.homeOperations.filter(op => op.status === 'pending').map(op => Math.max(this.now() + 1000, op.retryAt ?? 0)),
-        ...Object.values(state.delegations).filter(d => d.nextCheckAt !== undefined).map(d => d.nextCheckAt!)];
+        ...delegationDue(state, this.timers),
+        ...Object.values(state.delegations).filter(d => d.cancel && !d.cancel.delivered).map(() => this.now() + 1000)];
       if (due.length) {
         this.timer = setTimeout(() => { void this.drain().catch(() => {}); }, Math.max(1, Math.min(60_000, Math.min(...due) - this.now())));
         this.timer.unref?.();

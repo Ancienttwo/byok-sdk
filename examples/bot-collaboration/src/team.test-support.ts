@@ -15,9 +15,13 @@ import { createBotPersonaProjection } from './persona';
  * Real embedded server, HTTP, daemon, persona writes, and submit_result helper.
  * `routeMessages` installs `host.consumeMessage` as the server consumer.
  * Otherwise the consumer accepts every message without a Host record.
+ * `holdMessage` runs before and after the Host acceptance transaction.
+ * `offline` closes the HTTP listener, so the daemon loses the server without a terminal.
+ * The Host keeps its in-process server port. `online` listens again on the same port.
  */
 export async function openTeam(options: { now?: () => number; holdProjection?: () => Promise<void>; routeMessages?: boolean;
-  wrapServer?: (server: ByokServer) => ConstructorParameters<typeof BotCollaboration>[0]; instructionMaxBytes?: number } = {}) {
+  wrapServer?: (server: ByokServer) => ConstructorParameters<typeof BotCollaboration>[0]; instructionMaxBytes?: number;
+  holdMessage?: (input: AgentMessageInput, stage: 'before' | 'after') => Promise<void> } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'k8b-'));
   const productId = 'k8b-test';
   let ledger = new HostLedger(join(root, 'host.sqlite'), `product:${productId}`);
@@ -26,12 +30,23 @@ export async function openTeam(options: { now?: () => number; holdProjection?: (
   const server = createByokServer({ productId, storage: { kind: 'sqlite', path: join(root, 'server.sqlite') },
     agentMessage: { consume: async input => {
       received.push(input);
-      return options.routeMessages ? host.consumeMessage(input) : { outcome: 'accepted' };
+      if (!options.routeMessages) return { outcome: 'accepted' };
+      await options.holdMessage?.(input, 'before');
+      const result = await host.consumeMessage(input);
+      await options.holdMessage?.(input, 'after');
+      return result;
     } },
     wake: { consume: (wake, signal) => host.consume(wake, signal) },
   });
-  const http = serve({ fetch: server.hono.fetch, port: 0, hostname: '127.0.0.1' });
-  if (!http.listening) await new Promise<void>(resolve => http.once('listening', resolve));
+  const listen = async (port: number) => {
+    const http = serve({ fetch: server.hono.fetch, port, hostname: '127.0.0.1' });
+    if (!http.listening) await new Promise<void>(resolve => http.once('listening', resolve));
+    return http;
+  };
+  const stop = (http: Awaited<ReturnType<typeof listen>>) => new Promise<void>((resolve, reject) => {
+    http.close(error => error ? reject(error) : resolve()); if ('closeAllConnections' in http) http.closeAllConnections();
+  });
+  let http: Awaited<ReturnType<typeof listen>> | undefined = await listen(0);
   const address = http.address();
   if (!address || typeof address === 'string') throw new Error('Missing HTTP address');
   const adapter = new BotStubAdapter();
@@ -54,6 +69,8 @@ export async function openTeam(options: { now?: () => number; holdProjection?: (
   await daemon.start(); await waitForReady(daemon);
   return { root, server, received, get ledger() { return ledger; }, daemon, adapter, deviceId, botOptions,
     get host() { return host; },
+    async offline() { await stop(http!); http = undefined; },
+    async online() { http = await listen(address.port); await waitForReady(daemon); },
     async reopen() {
       await host.close(); ledger.close();
       ledger = new HostLedger(join(root, 'host.sqlite'), `product:${productId}`);
@@ -61,9 +78,7 @@ export async function openTeam(options: { now?: () => number; holdProjection?: (
     },
     async close() {
       await host.close(); await daemon.stop(); await server.close(); ledger.close();
-      await new Promise<void>((resolve, reject) => {
-        http.close(error => error ? reject(error) : resolve()); if ('closeAllConnections' in http) http.closeAllConnections();
-      });
+      if (http) await stop(http);
       await rm(root, { recursive: true, force: true });
     },
   };
