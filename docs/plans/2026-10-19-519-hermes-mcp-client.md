@@ -1,10 +1,10 @@
 # #519 Hermes Agent as a byok MCP client (external Bot beta): Hermes deltas
 
-Baseline: byok-sdk `origin/main@5b988a6e` (2026-10-19). Main document #536 at `81dea819`. Upstream OAR `main@5296675b` (0.68.1). herdr 0.9.3. Local Hermes Agent `354ad3d4` (2026-10-18, `v0.22.2+1687.g354ad3d`).
+Baseline: byok-sdk `origin/main@5b988a6e` (2026-10-19). Main document #536 at `be211e82`. Upstream OAR `main@5296675b` (0.68.1). herdr 0.9.3. Local Hermes Agent `354ad3d4` (2026-10-18, `v0.22.2+1687.g354ad3d`).
 
 Status: plan only. It does not authorize implementation, release, issue edits or downstream changes.
 
-**Main document:** [#536](https://github.com/Ancienttwo/byok-sdk/pull/536), `docs/plans/2026-10-19-byok-mcp-server-external-bot-beta.md` (branch `claude/plan-514-grok-adapter`). Grok Bot is its first client. That document owns the architecture (§2), the tool catalogue (§3), auth (§4), quota, idempotency and cancellation (§5), client integration (§6), S0 (§7) and the shared questions (§9), now decided (§8.1 here). This document covers only what is different when Hermes is the client. It is slice B7 of #536 §8. Tool names below are the #536 drafts and follow any change there.
+**Main document:** [#536](https://github.com/Ancienttwo/byok-sdk/pull/536), `docs/plans/2026-10-19-byok-mcp-server-external-bot-beta.md` (branch `claude/plan-514-grok-adapter`). Grok Bot is its first client. That document owns the architecture (§2), the tool catalogue (§3), auth (§4), quota, idempotency and cancellation (§5), client integration (§6), S0 (§7), the decisions (§9, Q1–Q11 DECIDED; mirrored in §8.1 here) and the non-goals (§10). This document covers only what is different when Hermes is the client. It is slice B7 of #536 §8. Tool names below are the #536 drafts and follow any change there.
 
 ## Ruling followed
 
@@ -214,7 +214,7 @@ Ruling text as written in the product rulings record. The last column is what ea
 ### 8.2 Decided: structure and scope
 
 - Session mode and Bot mode are unchanged. The external Bot integration is a separate beta track. Grok Bot is the first MCP client; Hermes is the second. There is no separate stack (Aimpact, 2026-10-19, reaffirmed 14:11 HKT).
-- Out of beta v1 (about 14:15 HKT): no `byok_agent_message` and no Cross-Bot for external Bots. External Bots work together only through tasks and artifacts. This is revisited only after K8b Cross-Bot lands in Bot mode.
+- Out of beta v1 (about 14:15 HKT; #536 §0, §10): no `byok_agent_message` and no Cross-Bot for external Bots. External Bots work together only through tasks and artifacts. This is revisited only after K8b Cross-Bot lands in Bot mode.
 
 ### 8.3 Hermes-specific items the rulings do not cover
 
