@@ -16,6 +16,14 @@ The transport validates Origin against trusted configuration and bounds bodies,
 sessions, active calls and optional SSE queues. It owns no key or task ledger.
 See [the HTTP contract](mcp-server-http.md) for lifecycle and resource limits.
 
+The [B2 Host reference](../examples/byok-mcp-server/README.md) supplies a separate
+per-Bot key and admission ledger. It stores salted key hashes and immutable
+ownership bindings. Scope and quota checks use current authenticated key state.
+Task identity and quota reservation commit before dispatch. A retry reuses its
+saved identity without another quota charge. Only an SDK device-terminal readback
+can release a task slot. Revocation stops authorization; it does not cancel SDK
+tasks. The reference adds no task/result authority or B3 tool implementation.
+
 ## Canonical Terms
 
 - **subscription lane** — a dispatch through the user's existing Claude Code
