@@ -116,26 +116,61 @@ sealed its credential-free manifest and claimed the offer. Do not ship an
 adapter that supports both shapes or allocates process/temp/workspace/session
 resources during `prepare()`; reject unsupported input before claim instead.
 
+## Install sets
+
 Install the scoped packages your composition uses and import each one under
-its own name. For example, a self-hosted composition:
+its own name. Pick one of the three sets below. Each set lists its direct
+packages; npm installs the rest of the `@byok-sdk` graph through runtime
+dependencies. `scripts/release/install-matrix.test.mjs` checks each set
+against the package manifests and the `check:release-pack` smoke.
+
+<!-- BEGIN install-matrix -->
+
+### Self-hosted
+
+Use it for a self-hosted deployment, such as Aiphabee: `server` is the
+Hono/HTTP façade over the shared `cloud` kernel, `client` is the local
+daemon, and `keys` keeps provider credentials on the device.
 
 ```sh
-npm install @byok-sdk/server@0.27.0 @byok-sdk/client@0.27.0
+npm install @byok-sdk/client@0.27.0 @byok-sdk/server@0.27.0 @byok-sdk/keys@0.12.0
 ```
+
+Also installed: `@byok-sdk/cloud`, `@byok-sdk/core`, `@byok-sdk/protocol`.
 
 ```ts
 import { createByokServer } from '@byok-sdk/server';
 ```
 
-The Worker-only cloud-do package is published from 0.24.0. The example below
-names the published 0.27.0 stable release.
-See [the cloud-do README](packages/cloud-do/README.md) for the subclass and binding.
+### Hosted / Cloudflare
 
-~~~sh
-# Published stable version.
-npm install @byok-sdk/cloud-do@0.27.0
+Use it for a hosted service: `cloud` for the device routes, `cloud-dataplane`
+for the Postgres + R2 data plane (`@byok-sdk/cloud-dataplane/runtime` on
+Workers through Hyperdrive), `cloud-do` for Agent sessions in Cloudflare
+Durable Objects, and `ui-runtime` for the Live Activity Timeline. On a
+Node/VPS host without Durable Objects, leave out `@byok-sdk/cloud-do`.
+
+```sh
+npm install @byok-sdk/cloud@0.27.0 @byok-sdk/cloud-dataplane@0.27.0 @byok-sdk/cloud-do@0.27.0 @byok-sdk/ui-runtime@0.27.0
+```
+
+Also installed: `@byok-sdk/core`, `@byok-sdk/protocol`.
+
+### Worker
+
+Use it for a Cloudflare Worker that only hosts Agent sessions in Durable
+Objects (no `nodejs_compat`): `cloud-do` for the session runtime and
+`protocol` for the shared outcome validator. See
+[the cloud-do README](packages/cloud-do/README.md) for the subclass and binding.
+
+```sh
+npm install @byok-sdk/cloud-do@0.27.0 @byok-sdk/protocol@0.27.0
 npm install --save-dev @cloudflare/workers-types
-~~~
+```
+
+Also installed: none.
+
+<!-- END install-matrix -->
 
 The public dispatch packages are `@byok-sdk/client`, `@byok-sdk/server`,
 `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`, `@byok-sdk/cloud-do`, `@byok-sdk/core`,
