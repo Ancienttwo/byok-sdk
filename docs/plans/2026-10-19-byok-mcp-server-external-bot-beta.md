@@ -187,7 +187,9 @@ Asynchrony and cancellation:
 
 ## 7. S0 verification items
 
-Each item needs a command output, a recorded run, or a `file:line` before slice B1 starts. Items with a real Grok Bot need the user's own account.
+B1 gates only on S0 items 5–8. Their local evidence is recorded in [#545](https://github.com/Ancienttwo/byok-sdk/pull/545). Each gated item needs a command output, a recorded run, or a `file:line`.
+
+Aimpact ruling, 2026-10-19 19:24 SGT (session instruction, #514 track): the design is MCP-generic. Grok Bot account evidence must not gate B1. Items 1–4 are client-acceptance checks before beta release. Once the Host has public HTTPS, the PM bot itself runs the Grok Bot checks as an MCP client. These checks are not prerequisites for B1. B1 uses a standard MCP client for verification. Item 9 stays with #539.
 
 1. Grok Bot custom MCP: Streamable HTTP accepted; how the static bearer is entered; tool-call timeout; whether `isError` results reach the model.
 2. Reachability: the Cursor backend reaches the Host's public HTTPS URL; record the egress IPs if shown.

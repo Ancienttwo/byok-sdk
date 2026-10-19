@@ -4,6 +4,18 @@
 
 Describe the product intent, users, workflows, acceptance scenarios, and constraints before implementation.
 
+## Generic MCP server HTTP framing
+
+The SDK exposes a Host-mounted Streamable HTTP framing through
+`@byok-sdk/client/mcp-server/http`. It reuses the existing tools-only MCP core.
+The stdio entry and SDK-reserved helpers retain their existing contract.
+HTTP session identity is separate from task identity. MCP cancellation aborts
+the waiting call signal; only the Host task API cancels a task.
+The Host authenticates each caller before selecting its separate transport instance.
+The transport validates Origin against trusted configuration and bounds bodies,
+sessions, active calls and optional SSE queues. It owns no key or task ledger.
+See [the HTTP contract](mcp-server-http.md) for lifecycle and resource limits.
+
 ## Canonical Terms
 
 - **subscription lane** — a dispatch through the user's existing Claude Code

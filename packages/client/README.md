@@ -381,6 +381,10 @@ authority. See the [entry dependency contract](../../README.md#entry-dependencie
 
 ## Serving an MCP toolset over stdio
 
+For a Host-owned HTTP endpoint, use the separate
+[`@byok-sdk/client/mcp-server/http` entry](../../docs/mcp-server-http.md).
+It reuses this core and does not start a listener or implement tool semantics.
+
 `@byok-sdk/client/mcp-server` is the server counterpart to this package's MCP
 client authority: a tools-only stdio MCP server, transport and baseline only,
 with no product semantics in it. The SDK-reserved helpers

@@ -281,6 +281,44 @@
       "codegen": []
     }
   },
+  "@byok-sdk/client/mcp-server/http": {
+    "kind": "exports",
+    "policy": {
+      "purpose": "Tools-only MCP Streamable HTTP framing",
+      "budgetBytes": 32768,
+      "zod": false,
+      "codegen": false,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": false
+      }
+    },
+    "facts": {
+      "target": "packages/client/dist/mcp-server/http.js",
+      "conditions": [
+        "import"
+      ],
+      "types": [
+        "packages/client/dist/mcp-server/http.d.ts"
+      ],
+      "bareImports": [
+        "crypto",
+        "stream"
+      ],
+      "lazyImports": [],
+      "thirdParty": [],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [
+          "crypto",
+          "stream"
+        ],
+        "thirdParty": []
+      },
+      "codegen": []
+    }
+  },
   "@byok-sdk/client/package.json": {
     "kind": "exports",
     "policy": {

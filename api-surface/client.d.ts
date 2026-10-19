@@ -11835,6 +11835,32 @@ export declare class SeenRequestIds {
     /** `"7"` and `7` are different JSON-RPC ids and must not collide. */
     static key(id: McpServerRequestId): string;
 }
+// ==== @byok-sdk/client dist/mcp-server/http.d.ts ====
+import { type McpServerOptions } from './index';
+/** Maximum accepted HTTP request body, in UTF-8 bytes. */
+export declare const MCP_HTTP_MAX_BODY_BYTES: number;
+export interface McpHttpServerOptions extends Omit<McpServerOptions, 'input' | 'output' | 'onClose' | 'maxLineBytes'> {
+    /** Trusted public origin, e.g. https://host.example. Never derive it from the request Host header. */
+    readonly origin: string;
+    /** Positive integer, at most MCP_HTTP_MAX_BODY_BYTES. */
+    readonly maxBodyBytes?: number;
+    /** Bounds idle sessions as well as emitter subscriptions. Default 64. */
+    readonly maxSessions?: number;
+    /** Idle lifetime without pending core replies. SSE alone does not keep a session alive. Default 15 minutes. */
+    readonly idleTimeoutMs?: number;
+}
+export interface McpHttpServer {
+    /** Mount at one MCP endpoint after Host authentication. Each authenticated caller owns a separate instance. */
+    fetch(request: Request): Promise<Response>;
+    /** Abort calls, close SSE streams and release all session resources. Idempotent. */
+    close(): void;
+}
+/**
+ * Streamable HTTP framing for the existing bounded MCP core. No tool semantics,
+ * listener, auth or caller ledger. The Host owns routing, TLS and authentication.
+ * Sessions are scoped to this instance; never share it between authenticated callers.
+ */
+export declare function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServer;
 // ==== @byok-sdk/client dist/mcp-server/index.d.ts ====
 import { type McpServerRequestId } from './dispatch';
 /** The revisions this core implements and will answer `initialize` with. Final; see the module header for each entry's and each exclusion's citation. */
