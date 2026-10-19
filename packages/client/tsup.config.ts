@@ -13,6 +13,7 @@ export default defineConfig({
     'src/agent-memory/index.ts',
     'src/assertion-client/index.ts',
     'src/mcp-server/index.ts',
+    'src/mcp-server/http.ts',
     'src/adapters/pi/mcp-extension.ts',
     'src/adapters/pi/team-interaction-extension.ts',
     'src/bin/byok-agent.ts',
@@ -36,7 +37,19 @@ export default defineConfig({
   treeshake: true,
   // Let our plugin annotate these external edges before tsup short-circuits them.
   noExternal: ['pi-web-access', /^@byok-sdk\//],
-  esbuildPlugins: [workspaceExternals(), subagentsBuild(false)],
+  esbuildPlugins: [workspaceExternals(), subagentsBuild(false), {
+    name: 'mcp-http-core-entry',
+    setup(build) {
+      // Both public entries must use the same error class and method core.
+      // Inlining this import would create a private McpServerToolError copy.
+      build.onResolve({ filter: /^\.\/index$/ }, args => {
+        if (args.importer.replace(/\\/g, '/').endsWith('/src/mcp-server/http.ts')) {
+          return { path: './index.js', external: true };
+        }
+        return undefined;
+      });
+    },
+  }],
   // koffi is the win32 job-object backstop's native binding layer and an
   // `optionalDependencies` entry: it must stay a runtime resolution so a
   // non-win32 install (where the addon may be absent) never has it inlined,

@@ -54,6 +54,10 @@
       "types": "./dist/mcp-server/index.d.ts",
       "import": "./dist/mcp-server/index.js"
     },
+    "./mcp-server/http": {
+      "types": "./dist/mcp-server/http.d.ts",
+      "import": "./dist/mcp-server/http.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
