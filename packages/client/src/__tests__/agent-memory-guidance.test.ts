@@ -159,7 +159,7 @@ describe('Agent memory guidance', () => {
   });
 
   it('rejects explicit hosted Agent memory configuration where the secure filesystem primitive is unavailable', async () => {
-    if (isAgentMemorySecureFilesystemAvailable()) return;
+    if (isAgentMemorySecureFilesystemAvailable(process.platform === 'darwin')) return;
     const hostStorageRoot = await makeRoot();
     const workspaceRoot = await makeRoot();
 
@@ -175,7 +175,7 @@ describe('Agent memory guidance', () => {
     expect(resolveAgentMemoryMcpBin()).toBeUndefined();
   });
 
-  it('admits only an explicit external helper on a proven helper platform', async () => {
+  it('rejects the removed product-owned helper configuration', async () => {
     if (isAgentMemorySecureFilesystemAvailable()) return;
     const hostStorageRoot = await makeRoot();
     const workspaceRoot = await makeRoot();
@@ -192,10 +192,10 @@ describe('Agent memory guidance', () => {
     } as const;
 
     if (process.platform === 'darwin') {
-      expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi')])).not.toThrow();
+      expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi')])).toThrow('agentMemoryFilesystem is removed');
       expect(resolveAgentMemoryMcpBin(true)).toBeDefined();
     } else {
-      expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi')])).toThrow('is not admitted on this platform');
+      expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi')])).toThrow('agentMemoryFilesystem is removed');
       expect(resolveAgentMemoryMcpBin(true)).toBeUndefined();
     }
   });
