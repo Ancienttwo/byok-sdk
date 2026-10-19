@@ -1,0 +1,24 @@
+{
+  "name": "@byok-sdk/example-byok-mcp-server",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Copy-and-own external-Bot MCP authorization and admission ledger",
+  "license": "MIT",
+  "engines": { "node": ">=24.15.0" },
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "typecheck": "tsc --noEmit", "test": "vitest run" },
+  "dependencies": {
+    "@byok-sdk/client": "workspace:*",
+    "@byok-sdk/protocol": "workspace:*",
+    "@byok-sdk/server": "workspace:*"
+  },
+  "devDependencies": {
+    "@hono/node-server": "^2.0.10",
+    "@modelcontextprotocol/client": "2.0.0",
+    "@byok-sdk/testkit": "workspace:*",
+    "@types/node": "^24",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}

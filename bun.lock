@@ -48,6 +48,23 @@
         "vitest": "^4.1.10",
       },
     },
+    "examples/byok-mcp-server": {
+      "name": "@byok-sdk/example-byok-mcp-server",
+      "version": "0.0.1",
+      "dependencies": {
+        "@byok-sdk/client": "workspace:*",
+        "@byok-sdk/protocol": "workspace:*",
+        "@byok-sdk/server": "workspace:*",
+      },
+      "devDependencies": {
+        "@byok-sdk/testkit": "workspace:*",
+        "@hono/node-server": "^2.0.10",
+        "@modelcontextprotocol/client": "2.0.0",
+        "@types/node": "^24",
+        "typescript": "^7.0.2",
+        "vitest": "^4.1.10",
+      },
+    },
     "examples/codex-interaction-host": {
       "name": "@byok-sdk/example-codex-interaction-host",
       "version": "0.0.1",
@@ -359,6 +376,8 @@
     "@byok-sdk/example-basic": ["@byok-sdk/example-basic@workspace:examples/basic"],
 
     "@byok-sdk/example-bot-collaboration": ["@byok-sdk/example-bot-collaboration@workspace:examples/bot-collaboration"],
+
+    "@byok-sdk/example-byok-mcp-server": ["@byok-sdk/example-byok-mcp-server@workspace:examples/byok-mcp-server"],
 
     "@byok-sdk/example-codex-interaction-host": ["@byok-sdk/example-codex-interaction-host@workspace:examples/codex-interaction-host"],
 
