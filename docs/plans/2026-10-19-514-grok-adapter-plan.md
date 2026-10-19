@@ -11,7 +11,9 @@ Aimpact, 2026-10-19, about 13:45 HKT: 「可以顺手接入 grok cli，但 grok 
 - The ruling overturns PRD §7 and §12 Q4 ("不做 grok ACP adapter"). #514 and #536 continue. The PRD records the ruling in §7, §8 and the Q4 row.
 - Priority: **Grok Bot** is the main goal. In this plan, Grok Bot means a Bot in Bot mode whose executions run on Grok. The Grok Build CLI adapter is the means, not the goal. The capability matrix, the slice order and the acceptance below put the Bot scenario first. The CLI is only the runtime under the Bot.
 - The Pi + xAI model path stays for model-only use. It does not replace the Bot-first adapter work.
-- Not approved: Hermes #519. Not rewritten: PRD Q8 for other runtimes (§12 Q2 below).
+- Not approved: Hermes #519. Not rewritten: PRD Q8 for other runtimes.
+
+Second ruling, Aimpact, 2026-10-19, about 13:53 HKT: after the Grok Bot S0 isolation proof passes, PRD Q8 becomes "Pi + Grok". Claude and Codex stay excluded. Status: decided, not yet in effect (gated on S0). The PRD Q8 row stays "只 Pi" until the S0 pass is recorded (§12 Q2).
 - The xAI Grok app is a separate product. It is not a runtime and is out of scope.
 
 Revision 1 of this plan (commit `0ebfe78e`) was CLI-first. This revision changes §4, §5, §7, §10, §12 and the Task Breakdown. The inventory (§1) is unchanged.
@@ -244,7 +246,7 @@ Candidate native controls, all per session and without writing the user's config
 | Native memory off | `GROK_MEMORY=0` in the child env | Grok native memory (M1, B6) | Documented process-wide force-disable; v2 coverage not probed |
 | Sandbox profile | `[sandbox]` custom profile with `deny` | Kernel write-deny on home files (M1) | Documented; needs config or flag; not probed |
 
-Recommendation (§12 Q6): for an Agent execution only, the adapter passes an SDK-owned Bot agent profile in `_meta.agentProfile` that allows MCP tools only, and sets `GROK_MEMORY=0`. Non-Agent CLI tasks keep the user's harness unchanged. S0 must prove each control on Grok 1.0.62 before S2 uses it. If no control removes the native shell and file-write tools, the Bot lane on Grok does not ship, and the PRD Q8 decision stays as is.
+Recommendation (§12 Q6): for an Agent execution only, the adapter passes an SDK-owned Bot agent profile in `_meta.agentProfile` that allows MCP tools only, and sets `GROK_MEMORY=0`. Non-Agent CLI tasks keep the user's harness unchanged. S0 must prove each control on Grok 1.0.62 before S2 uses it. If no control removes the native shell and file-write tools, the Bot lane on Grok does not ship, and the Q8 change to "Pi + Grok" does not take effect.
 
 ## 8. Cancellation
 
@@ -310,7 +312,7 @@ Error text passes through the per-open credential redactor before it leaves the 
 | # | Question | Recommended answer |
 | --- | --- | --- |
 | Q1 | PRD Q4 vs #514 | **Answered** (Aimpact, 2026-10-19 about 13:45 HKT): build the adapter; Grok Bot first; CLI as the runtime under it; Pi + xAI stays for model-only use. |
-| Q2 | PRD Q8 says v1 Bot executions run on Pi only. The ruling makes Grok a Bot runtime. Amend Q8 for Grok only? | Yes, a narrow amendment after S0 proves §7.4: "Pi; Grok after its Bot isolation proof". Claude and Codex stay excluded. This PR does not edit the Q8 row. |
+| Q2 | PRD Q8 says v1 Bot executions run on Pi only. Amend it for Grok? | **Decided, not yet in effect** (Aimpact, 2026-10-19 about 13:53 HKT): Q8 becomes "Pi + Grok" after the S0 isolation proof passes. Claude and Codex stay excluded. Until then the PRD Q8 row stays "只 Pi". The PR that records the S0 pass edits the row. |
 | Q3 | Does the OAR Grok runtime fit the vendor policy? | Yes. Same pin, upstream bytes except the five deltas in §6, each at a seam the policy already names. |
 | Q4 | ACP SDK: npm dependency or vendored source? | Exact-pinned npm dependency (official library, Apache-2.0, about 5 MB unpacked). |
 | Q5 | v1 capability matrix | §5.1: `messageDraft`, `mcpToolsets` on; `resume`, `steer`, `approvalInteractive` off; `nativeInteractions` omitted. Resume returns later only if a non-Bot CLI user needs it. |
@@ -327,11 +329,11 @@ Execution by Codex after plan review. Each slice is one PR, draft until Aimpact 
 
 | Slice | Scope | Files | Done when |
 | --- | --- | --- | --- |
-| S0 | Bot probes on Grok 1.0.62. No product code. Record in `docs/researches/2026-10-xx-grok-bot-probes.md`. Probes, Bot first: (1) `_meta.agentProfile` JSON with MCP tools only removes native shell, file edit and web tools; (2) `GROK_MEMORY=0` stops memory v1 and v2 writes; (3) user rules, Claude-compat files and `config.toml` MCP servers under that profile; (4) reserved stdio helpers through `use_tool`: `submit_result`, `memory_save`, `send_agent_message`; (5) streamed `agent_message_chunk` timing for drafts; (6) permission requests under `--always-approve`; (7) auth signal; (8) cancel timing. Model calls need Aimpact approval. | docs only, scripts in `/tmp` | Q2, Q6 and Q9 have evidence; a failed (1) stops the Bot lane and is reported |
+| S0 | Bot probes on Grok 1.0.62. No product code. Record in `docs/researches/2026-10-xx-grok-bot-probes.md`. Probes, Bot first: (1) `_meta.agentProfile` JSON with MCP tools only removes native shell, file edit and web tools; (2) `GROK_MEMORY=0` stops memory v1 and v2 writes; (3) user rules, Claude-compat files and `config.toml` MCP servers under that profile; (4) reserved stdio helpers through `use_tool`: `submit_result`, `memory_save`, `send_agent_message`; (5) streamed `agent_message_chunk` timing for drafts; (6) permission requests under `--always-approve`; (7) auth signal; (8) cancel timing. Model calls need Aimpact approval. | docs only, scripts in `/tmp`; on pass, the PRD Q8 row | Q6 and Q9 have evidence. On pass: PRD Q8 row → "Pi + Grok" (Q2). On a failed (1): the Bot lane stops, Q8 stays "只 Pi", and the result is reported |
 | S1 | Vendor selection. Copy 26 files from `c264f17`. Apply the §6 deltas. Update `source-manifest.json` and `PROVENANCE.md`. Add the ACP SDK dependency, the bridge and its type check. | `vendor/oar/c264f17/**`, `src/runtime/grok-session-runtime.*`, `scripts/api-surface/oar-bridge-types.ts`, `package.json`, lockfile | Manifest and bridge checks pass; no new export yet |
 | S2 | Bot-lane adapter: descriptor, `detect`, `prepare`, `start`, `GrokSession`, `GrokProjection` with delta streaming and `progressStartsMessage`, Bot profile and env for Agent executions, fake runtime. | `src/adapters/grok/*`, `__tests__/fixtures/fake-grok.mjs`, adapter tests | §10.2 adapter and projection tests pass; BA5 passes |
 | S3 | Bot acceptance on the fake runtime: BA1–BA4 in the synthetic E2E harness (embedded server, daemon, fake grok). | tests, fixtures | BA1–BA4 pass on Linux CI |
-| S4 | Export, conformance, docs: `adapters/index.ts`; conformance runner; `docs/adapter-capabilities.md` Grok column; README runtime list; PRD Q8 row per Q2 if Aimpact agrees. | index, tests, docs | All five required checks pass |
+| S4 | Export, conformance, docs: `adapters/index.ts`; conformance runner; `docs/adapter-capabilities.md` Grok column; README runtime list. | index, tests, docs | All five required checks pass |
 | S5 | Live Grok Bot run (BA6, BA7) on the developer machine. | script only | Results recorded; needs approval |
 | S6 | Optional CLI-only follow-ups: native resume, non-Agent `AGENTS.md` discovery notes. Only on a new request. | — | — |
 
@@ -348,7 +350,7 @@ This PR changes two documents. Later slices are additive. The adapter does nothi
 - Child spend can be missing from `usage` (OAR documented gap).
 - A new runtime npm dependency enters `@byok-sdk/client`.
 - `PROVENANCE.md` states "No … ACP … included". S1 must rewrite that sentence and the history.
-- The PRD records the ruling in §1, §7, §8, §10 M0.7, §11 and the Q4 row. The Q8 row still says "Pi only". It waits for Aimpact (§12 Q2).
+- The PRD records the ruling in §1, §7, §8, §10 M0.7, §11 and the Q4 row. The Q8 row still says "只 Pi". Aimpact has decided "Pi + Grok", but the change waits for the S0 pass (§12 Q2).
 
 ## Verification of this plan
 

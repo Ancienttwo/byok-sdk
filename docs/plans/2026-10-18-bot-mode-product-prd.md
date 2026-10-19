@@ -22,7 +22,7 @@ SDK 侧的执行原语和记忆原语都已落地。K2 wake 队列、K5 `executi
 
 Aimpact 问：SDK 除了接 agent 模式的 harness，是否支持 Bot 模式接入，例如 Grok Bot、Muse 和 Hermes。这个问题有两种读法：
 
-1. 把 Grok、Hermes 当 runtime，由 SDK 驱动它们。SDK 不支持。adapter 只有 `PiAdapter`、`ClaudeAdapter`、`CodexAdapter`（`packages/client/src/adapters/index.ts`）。上游 OAR 有 `grok` runtime，SDK 还没有带进来。Aimpact 2026-10-19 改判为做 `GrokAdapter`，Grok Bot 优先，CLI 只作底层 runtime（§7）。Hermes 没有批准（#519）。
+1. 把 Grok、Hermes 当 runtime，由 SDK 驱动它们。SDK 现在不支持。adapter 只有 `PiAdapter`、`ClaudeAdapter`、`CodexAdapter`（`packages/client/src/adapters/index.ts`）。上游 OAR 有 `grok` runtime，SDK 还没有带进来。Aimpact 2026-10-19 改判为做 `GrokAdapter`，Grok Bot 优先，CLI 只作底层 runtime（§7）。Hermes 没有批准（#519）。
 2. 在 SDK 上做 Grok Bot、Hermes 那种 Bot 产品。SDK 支持大部分。这是本文的范围。
 
 仓库里这三个名字的含义：
