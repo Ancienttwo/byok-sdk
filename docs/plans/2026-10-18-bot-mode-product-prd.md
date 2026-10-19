@@ -281,14 +281,22 @@ S1 的"边写边显示"用 #500 的 draft lane。草稿只用于显示。接受�
 
 Bot 模式复用它定下的模式：ContextPack 在派发时冻结、同 home 的 strict fresh Summary 走 result-document 且无 `messageEgress`、消息处置和设备 terminal 分轴。Aiphabee 需要自己的等价链路，列在 §10 P6。群聊的共享对话也需要 ContextPack；v1 不为群对话做 Summary，群记录按条数和字节截断进 ContextPack，超出时显式阻塞。
 
-## 7. OAR grok ACP：已定不做
+## 7. OAR grok ACP：改判为做，Grok Bot 优先（2026-10-19）
 
-Aimpact 已定（§12 Q4）：不做 grok ACP adapter。Grok 走 Pi + xAI profile。事实留档：
+Aimpact 于 2026-10-19 约 13:45 HKT 改判（§12 Q4）：「可以顺手接入 grok cli，但 grok bot 才是重点」。它推翻 2026-10-18 的「不做 grok ACP adapter」。
 
-- 上游 OAR `c264f17` 的 `packages/oar/src/runtimes/grok/` 有 11 个文件，经 `shared/acp/`（19 个文件）驱动 Grok CLI。SDK 的 vendor 策略不带 ACP 和非 Codex runtime（PROVENANCE.md）。
+- 做 `GrokAdapter`（#514）。方案见 [#514 plan](2026-10-19-514-grok-adapter-plan.md)（PR #536）。
+- 重点是 Grok Bot：Bot 模式里用 Grok 跑 Bot。Grok Build CLI 的适配是顺手，只作底层 runtime。能力矩阵、切片顺序和验收都以 Bot 场景优先。
+- Pi + `xai` profile 保留给「只当模型」的用法。它不能代替 Bot 优先的 adapter 工作。
+- 本裁定不批准 Hermes（#519），也不为其他 runtime 整体改写 Q8。
+
+事实留档：
+
+- 上游 OAR `c264f17` 的 `packages/oar/src/runtimes/grok/` 有 11 个文件，经 `shared/acp/`（19 个文件）驱动 Grok CLI。SDK 现在的 vendor 选择只有 Codex（PROVENANCE.md）。#514 plan 在同一个 fork、同一个 pin 上加 Grok 选择。
 - Grok CLI 由 xAI 脚本安装，认证是 CLI 自己的（OAR 优先 `cached_token`），不走 keys launcher。
-- Grok 作为模型的路：Pi 加 `xai` profile。两个阻塞 issue 开着：#512（Pi 投影只会发 `openai-completions`，xAI 已把它标为 legacy）、#513（`PiModelConfigSchema.compat` 表达不了 pi-ai 1.2.0 的字段）。Aiphabee 的 bot 用 Grok 回复要先关它们，列在 P6 依赖。
-- Grok CLI 是否读 Agent home 里的指令文件没有核实。M0.7 是可选项，只在 Aimpact 要求时做。
+- Grok 作为模型的路：Pi 加 `xai` profile。两个阻塞 issue 开着：#512（Pi 投影只会发 `openai-completions`，xAI 已把它标为 legacy）、#513（`PiModelConfigSchema.compat` 表达不了 pi-ai 1.2.0 的字段）。
+- Grok Bot 不依赖 Grok 读 Agent home 里的指令文件。persona 和常驻记忆由 Host 放进 ContextPack，和 prepared Pi 一样。
+- Grok 默认带 shell、改文件和联网工具，还会读用户自己的规则、MCP 配置和原生记忆。Bot 执行要守 A1 和 M1，就要先证明能按 session 关掉这些（#514 plan §7.4，切片 S0）。证明不了，Grok Bot 不上线。
 
 ## 8. 非目标
 
@@ -300,7 +308,7 @@ Aimpact 已定（§12 Q4）：不做 grok ACP adapter。Grok 走 Pi + xAI profil
 - 把 Bot 搬到另一台设备。跨 Agent 读记忆。
 - 群对话的 Summary。向量检索、后台总结器、通用 Host 记忆服务。
 - SDK 执行有后果的动作。SDK 解析 cron。
-- grok ACP adapter（Q4）。Claude、Codex 作为 Bot 执行的 runtime（Q8）。
+- Claude、Codex 作为 Bot 执行的 runtime（Q8）。grok ACP adapter 已不是非目标（Q4，2026-10-19 改判，见 §7）。
 - 单独的演示 Host 目录（Q13）。把 K4、K8 提升为包（两个下游采用后再评估）。
 - Salesko 接入。执行计量和价格。
 - 复制 DeepSeek Bot、DS Bot App、Grok Bot 或 Hermes 的代码。
@@ -430,7 +438,7 @@ spec 修改：P1 加 README 链接；P2 改平台句子；P3 加 `bot-turn-outco
 | Q1 | Bot 模式的首个下游 | Aiphabee | 已定（Aimpact，2026-10-18） | 它已是 Topology L，bot 聊天跑在 Pi BYOK 上，routine 的 A1–A4 接入计划已有；Salesko 暂不做 |
 | Q2 | v1 记忆是否要审批门 | 不要。Bot 直接 `memory_save`；用户有记忆页看/改/删/forget | 已定（Aimpact，2026-10-18） | 三个 SDK 原语已落地；审批将来走同一条 intent 路径 |
 | Q3 | 记忆页改/删的 apply 边 | 用已落地的 `agent.memory.intent`，不加新消息 | 暂定默认，待 Aimpact 确认 | 0.24.0 已发布，带 at-most-once ledger 和 CAS 契约 |
-| Q4 | OAR grok ACP adapter | 不做；Grok 走 Pi + xAI profile | 已定（Aimpact，2026-10-18） | Bot 模式不因此多出能力；vendor 策略不带 ACP |
+| Q4 | OAR grok ACP adapter | 做 `GrokAdapter`（#514、PR #536）。Grok Bot 是重点，Grok Build CLI 只作底层 runtime。Pi + xAI 保留给只当模型的用法 | 已定（Aimpact，2026-10-19 约 13:45 HKT 改判，推翻 2026-10-18 的「不做」） | 原话「可以顺手接入 grok cli，但 grok bot 才是重点」。不批准 Hermes #519；不为其他 runtime 整体改写 Q8 |
 | Q5 | K4、K8 的目录名 | `examples/host-execution-core`、`examples/bot-collaboration` | 暂定默认，待 Aimpact 确认 | 和平台 PRD 的 K4/K8 一一对应；不提升为包 |
 | Q6 | K8 是否拆两步 | 拆：K8a 单 Bot 动作，K8b 群聊和 Main Bot | 暂定默认，待 Aimpact 确认 | 委派先把 outcome → apply → 再排队的整条路跑通；群聊的席位和晚到发言更复杂 |
 | Q7 | Salesko 的拓扑 | 删除 | — | Aiphabee 是 Topology L（平台 PRD §6） |
