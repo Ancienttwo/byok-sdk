@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { openTeam, type TestTeam } from './team.test-support';
 import { ROOM_GRACE_MS } from './rooms';
 import { stateOf } from './model';
+import { HISTORY_MAX_BYTES } from './history';
 import type { BotProfile } from './team-model';
 
 let fixture: TestTeam;
@@ -250,13 +251,34 @@ it('keeps background messages, persists join visibility, and freezes each select
   await finish(next.id, { speech: { kind: 'pass' } });
 });
 
-it('keeps a large current request intact outside the trimmed history and still posts through the real SDK', async () => {
+it('blocks an over-limit current Unicode Request with a measured reason and no SDK offer', async () => {
+  fixture = await openTeam();
+  const { profiles, room } = await createTeam(); await ready(profiles);
+  const request = '😀'.repeat(18000) + ' CURRENT-END';
+  const round = await host().roomInput('over-limit-current', room.id, request, [profiles[0]!.id]);
+  const seat = seats(round)[0]!;
+  const turn = host().snapshot().turns[seat.id]!;
+  const bytes = Buffer.byteLength(turn.request, 'utf8');
+  expect(bytes).toBeGreaterThan(HISTORY_MAX_BYTES);
+  const reason = `Current Request is ${bytes} UTF-8 bytes; budget is ${HISTORY_MAX_BYTES} bytes. Shorten the request and send it again.`;
+  expect(turn.blocked).toBe(reason);
+  expect(seat).toMatchObject({ status: 'blocked', released: true, reason });
+  expect(host().core.intent(seat.id)).toBeUndefined();
+  expect(fixture.adapter.starts).toHaveLength(1);
+  expect(host().snapshot().team.rooms[room.id]!.messages.at(-1)!.text).toBe(request);
+  expect(Object.values(fixture.ledger.snapshot().outbox)).toContainEqual(expect.objectContaining({
+    kind: 'projection', id: `blocked:${seat.id}`, value: { turnId: seat.id, reason },
+  }));
+});
+
+it('counts a large in-limit Unicode Request in the budget and still posts through the real SDK', async () => {
   fixture = await openTeam();
   const { profiles, room } = await createTeam(); await ready(profiles);
   await host().roomInput('large-background', room.id, 'Old '.repeat(20000), []);
-  const request = '😀'.repeat(18000) + ' CURRENT-END';
+  const request = '😀'.repeat(4096) + ' CURRENT-END';
   const round = await host().roomInput('large-current', room.id, request, [profiles[0]!.id]);
   const seat = seats(round)[0]!;
+  const turn = host().snapshot().turns[seat.id]!;
   const offer = await fixture.server.tasks.offer(host().core.intent(seat.id)!.taskId);
   if (!offer || !('instruction' in offer.payload) || typeof offer.payload.instruction !== 'string') throw new Error('Missing room offer');
   const [requestSection, contextSection] = offer.payload.instruction.split('ContextPack:\n');
@@ -265,7 +287,8 @@ it('keeps a large current request intact outside the trimmed history and still p
   expect(context.room.messages).toEqual([]);
   expect(context.historyWindow.notice).toContain('Earlier history was omitted');
   expect(context.historyWindow.omittedMessages).toBe(2);
-  expect(Buffer.byteLength(contextSection!, 'utf8')).toBeLessThanOrEqual(65536);
+  expect(context.historyWindow.currentRequestBytes).toBe(Buffer.byteLength(turn.request, 'utf8'));
+  expect(Buffer.byteLength(contextSection!, 'utf8') + context.historyWindow.currentRequestBytes).toBeLessThanOrEqual(HISTORY_MAX_BYTES);
   await running(seat.id);
   await finish(seat.id, { speech: { kind: 'post', text: 'The complete current request was available.' } });
   expect(seats(round)[0]!.status).toBe('post');

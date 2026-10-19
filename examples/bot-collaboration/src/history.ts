@@ -1,19 +1,24 @@
-export const HISTORY_MAX_BYTES = 65_536;
+export const HISTORY_MAX_BYTES = 32 * 1024;
 export const HISTORY_MAX_ITEMS = 100;
 export interface HistoryWindow {
   limit: number; maxBytes: number; omittedMessages: number; omittedTurns: number;
-  omittedRejections: number; metadataOverBudget: boolean; notice: string | null;
+  omittedRejections: number; currentRequestBytes: number; metadataOverBudget: boolean; notice: string | null;
 }
 export function historyWindow(kind: 'messages' | 'turns', omitted = 0): HistoryWindow {
   return { limit: HISTORY_MAX_ITEMS, maxBytes: HISTORY_MAX_BYTES,
     omittedMessages: kind === 'messages' ? omitted : 0, omittedTurns: kind === 'turns' ? omitted : 0,
-    omittedRejections: 0, metadataOverBudget: false, notice: null };
+    omittedRejections: 0, currentRequestBytes: 0, metadataOverBudget: false, notice: null };
 }
-/** Trim copied history arrays only. The Host freezes the current Request separately. */
+/** Reserve the frozen Request bytes, then trim copied history arrays only. */
 export function fitHistory<T extends { historyWindow: HistoryWindow; rejectedActions: unknown[] }>(
-  context: T, history: unknown[], kind: 'omittedMessages' | 'omittedTurns',
+  context: T, history: unknown[], kind: 'omittedMessages' | 'omittedTurns', request: string,
 ): T {
   const window = context.historyWindow;
+  const requestBytes = Buffer.byteLength(request, 'utf8');
+  if (requestBytes > window.maxBytes) {
+    throw new Error(`Current Request is ${requestBytes} UTF-8 bytes; budget is ${window.maxBytes} bytes. Shorten the request and send it again.`);
+  }
+  window.currentRequestBytes = requestBytes;
   const bytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value) ?? 'null', 'utf8');
   const pool = (values: unknown[], counter: 'omittedRejections' | typeof kind) => {
     const sizes = values.map(bytes);
@@ -23,7 +28,7 @@ export function fitHistory<T extends { historyWindow: HistoryWindow; rejectedAct
   const pools = [pool(context.rejectedActions, 'omittedRejections'), pool(history, kind)];
   // Serialize required metadata once. Empty arrays and object each contribute
   // two bytes; pool.extra and bytes(window)-2 account for their full values.
-  const base = Buffer.byteLength(JSON.stringify(context, (_key, value) =>
+  const base = requestBytes + Buffer.byteLength(JSON.stringify(context, (_key, value) =>
     value === history || value === context.rejectedActions ? [] : value === window ? {} : value), 'utf8');
   const notice = () => {
     window.notice = window.omittedMessages + window.omittedTurns + window.omittedRejections > 0
@@ -42,7 +47,7 @@ export function fitHistory<T extends { historyWindow: HistoryWindow; rejectedAct
   }
   if (overBudget()) {
     window.metadataOverBudget = true;
-    window.notice = [window.notice, 'Required non-history context exceeds the budget; no authority data was removed.'].filter(Boolean).join(' ');
+    window.notice = [window.notice, 'Required non-history context exceeds the remaining Request budget; no authority data was removed.'].filter(Boolean).join(' ');
   }
   return context;
 }

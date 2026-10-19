@@ -59,24 +59,36 @@ original Unicode data and remove diagnostic logging after the experiment.
 
 E4 result: the equal-byte ASCII control passed the complete SDK case in 7.67
 seconds. The original Unicode case is restored. No data substitution is kept
-to obtain a passing result. This supports an encoding-sensitive delivery issue,
-but does not prove its mechanism. The large Unicode offer is persisted as
-`offered`, remains unclaimed with connection open and activeTaskCount zero.
+to obtain a passing result. This showed an encoding-sensitive delay. It did
+not prove an SDK delivery defect. The large Unicode offer is persisted as
+`offered`, with no claim within the five-second observation window, an open
+connection, and activeTaskCount zero. The observation did not cover later claims.
 No SDK code is changed under this history-only scope.
 The test now checks its frozen offer and complete Request before waiting for
 device claim. All original assertions and deadlines remain. This separates
 history admission evidence from the later SDK dispatch result. Temporary
 `HISTORY_DIAG` writes are removed.
 
-## Conclusion
+## Review probe and corrected conclusion
 
-The history selection loop is not the observed long-run cause: pure tests
-passed, then the required count, byte-history, and membership SDK cases passed.
-The latest four-case SDK run has three passes and one remaining Unicode claim
-failure. The complete Unicode Request and cropped ContextPack assertions pass
-before that wait. The failure mechanism remains unconfirmed. No SDK production
-fix is made. Keep the original failing test and report validation as partial.
+REV-12-round2 used a separate probe at `/tmp/rev531r2/probe2.test.ts`. The
+72,012-byte Unicode request was claimed after 16.2–19.9 seconds. The earlier
+statement that it remained unclaimed was incorrect. The test observed no claim
+within five seconds. It did not observe a permanent failure to claim.
 
-The root typecheck failure is separately confirmed as the existing renamed
-wake constant import in routines.test.ts. It is the owner-deferred P1-1 and is
-not changed under this history work order.
+The review CPU profile showed whole-ledger JSON work in K4. The ledger was
+about 564 KB. It held five copies of the request text. In the startup window,
+the Unicode probe made 2,097 snapshots and 1,007 transactions. Snapshot work
+used about 12.1 seconds; transaction work used about 11.7 seconds. These totals
+overlap because transactions include snapshots. The processes shared one
+event loop. Host CPU work delayed server long-poll and claim handling. The
+review ran at load about 11. Earlier load above 500 does not explain this
+repeatable large-request failure. No SDK claim defect was proved.
+
+PM approved a byte cap on the current Request and accounting for those bytes
+in the context budget. Only a Request that alone exceeds the budget can block.
+The repair adds blocked and in-limit Unicode tests. It keeps every existing
+timeout, sleep, and retry setting. K4 performance work remains outside WO-12.
+See `../issues/draft-k4-ledger-json-performance.md` for the local issue draft.
+The wake constant rename is now authorized. Its old deferred status is closed
+by the REV-12-round2 repair.

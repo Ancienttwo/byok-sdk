@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { MAX_FUTURE_MS } from '@byok-sdk/server';
+import { WAKE_MAX_FUTURE_MS } from '@byok-sdk/server';
 import { ROUTINE_HORIZON_MS } from '@byok-sdk/core';
 import { WAKE_HORIZON_MS } from '../../host-execution-core/src/routines';
 import { stateOf } from './model';
@@ -20,7 +20,7 @@ function setup() {
 
 it('keeps the SDK, routine calendar and K4 horizon at 368 days', () => {
   expect(WAKE_HORIZON_MS).toBe(368 * 86_400_000);
-  expect(WAKE_HORIZON_MS).toBe(MAX_FUTURE_MS);
+  expect(WAKE_HORIZON_MS).toBe(WAKE_MAX_FUTURE_MS);
   expect(WAKE_HORIZON_MS).toBe(ROUTINE_HORIZON_MS);
 });
 

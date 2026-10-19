@@ -125,10 +125,11 @@ real daemon and submit_result helper. No model API call was made.
 
 The remaining SDK case preserves a 72,012-byte Unicode current request in
 its frozen offer and fits the selected ContextPack. Those assertions execute
-before the failed device-session wait. Its attempt remains offered and
-unclaimed, with connection open and zero active tasks. An equal-byte ASCII
-control passed; the original Unicode test is restored and still fails. The
-mechanism is not proven. No SDK code or test deadline is changed to hide it.
+before the failed device-session wait. Its attempt was offered and not claimed within the five-second observation
+window, with connection open and zero active tasks. An equal-byte ASCII
+control passed; the original Unicode test is restored and still fails. REV-12-round2 later proved that the Unicode offer is claimed after
+16.2–19.9 seconds. K4 whole-ledger JSON work delays the claim. This is not an
+SDK claim defect. No SDK code or test deadline was changed in that artifact.
 See `wo12-history-debug/DEBUG.md`. Verification is therefore PARTIAL, not green.
 
 Earlier runs under host load above 500 had SDK session/readback timeouts.
@@ -149,3 +150,12 @@ All temporary diagnostic logging and ASCII substitutions are removed.
 
 The ordinary 1:1 Host and wake-retry tests also passed 16/16 after the history
 changes. This does not include the owner-deferred routines.test.ts import.
+
+## Superseding REV-12-round2 repair
+
+The prior 72,012-byte request test admitted an input without any current-request
+byte limit. PM now requires a cap. See `2026-10-19-wo12-rev12-round2.md` for the
+new accounting, assertion rationale, wake constant rename, and validation.
+The earlier deferred P1-1 status above describes the old artifact only.
+The performance probe and corrected claim observation are in
+`wo12-history-debug/DEBUG.md`. K4 work is a separate local issue draft.

@@ -35,11 +35,11 @@ it('uses actual UTF-8 JSON bytes and keeps a suffix of complete messages without
   expect(context.room.messages).toEqual(saved.slice(-context.room.messages.length));
   expect(context.historyWindow.omittedMessages).toBe(20 - context.room.messages.length);
   expect(context.historyWindow.notice).toContain('Earlier history was omitted');
-  expect(Buffer.byteLength(JSON.stringify(context), 'utf8')).toBeLessThanOrEqual(HISTORY_MAX_BYTES);
+  expect(Buffer.byteLength(JSON.stringify(context), 'utf8') + Buffer.byteLength(turn.request, 'utf8')).toBeLessThanOrEqual(HISTORY_MAX_BYTES);
   const expanded = structuredClone(context);
   expanded.room.messages.unshift(saved[saved.length - context.room.messages.length - 1]!);
   expanded.historyWindow.omittedMessages--;
-  expect(Buffer.byteLength(JSON.stringify(expanded), 'utf8')).toBeGreaterThan(HISTORY_MAX_BYTES);
+  expect(Buffer.byteLength(JSON.stringify(expanded), 'utf8') + Buffer.byteLength(turn.request, 'utf8')).toBeGreaterThan(HISTORY_MAX_BYTES);
   expect(state.team.rooms.r!.messages).toEqual(saved);
 });
 
@@ -47,7 +47,7 @@ it('windows only this Bot private history and leaves the current request for the
   const { state } = setup();
   for (let i = 0; i < 150; i++) state.turns[`old-${i}`] = { id: `old-${i}`, root: `old-${i}`, botId: 'b1',
     source: 'user', request: 'History-'.repeat(400), hop: 0, status: 'succeeded' };
-  const turn: Turn = { id: 'current', root: 'current', botId: 'b1', source: 'user', request: 'CURRENT-' + '😀'.repeat(18000), hop: 0, status: 'queued' };
+  const turn: Turn = { id: 'current', root: 'current', botId: 'b1', source: 'user', request: 'CURRENT-' + '😀'.repeat(4096), hop: 0, status: 'queued' };
   state.turns[turn.id] = turn;
   state.turns.private = { ...turn, id: 'other', botId: 'b0', request: 'Other Bot secret' };
   const context = turnContext(state, turn);
@@ -58,9 +58,10 @@ it('windows only this Bot private history and leaves the current request for the
   expect(context.turns.some(t => t.id === turn.id)).toBe(false);
   expect(context.historyWindow.omittedTurns).toBe(150 - context.turns.length);
   expect(context.historyWindow.notice).toContain('Earlier history was omitted');
-  expect(Buffer.byteLength(JSON.stringify(context), 'utf8')).toBeLessThanOrEqual(HISTORY_MAX_BYTES);
+  expect(context.historyWindow.currentRequestBytes).toBe(Buffer.byteLength(turn.request, 'utf8'));
+  expect(Buffer.byteLength(JSON.stringify(context), 'utf8') + context.historyWindow.currentRequestBytes).toBeLessThanOrEqual(HISTORY_MAX_BYTES);
   expect(JSON.stringify(context)).not.toContain('Other Bot secret');
-  expect(state.turns[turn.id]!.request).toBe('CURRENT-' + '😀'.repeat(18000));
+  expect(state.turns[turn.id]!.request).toBe('CURRENT-' + '😀'.repeat(4096));
   expect(Object.keys(state.turns)).toHaveLength(152);
 });
 
@@ -191,4 +192,20 @@ it('inherits the visible caller post when an intermediate member passes and call
   const last = state.turns[state.team.rounds[round]!.seats[2]!]!;
   expect(JSON.parse(last.request)).toMatchObject({ request: 'Current caller post', requestFrom: 'b0' });
   expect(state.team.rooms.r!.messages).toHaveLength(2);
+});
+
+it('admits a current Request at the UTF-8 limit and refuses one extra emoji without changing history', () => {
+  const { state } = setup();
+  const turn: Turn = { id: 'boundary', root: 'boundary', botId: 'b1', source: 'user',
+    request: '😀'.repeat(HISTORY_MAX_BYTES / 4), hop: 0, status: 'queued' };
+  state.turns[turn.id] = turn;
+  const saved = structuredClone(state);
+  const context = turnContext(state, turn);
+  expect(context.historyWindow.currentRequestBytes).toBe(HISTORY_MAX_BYTES);
+  expect(context.historyWindow.metadataOverBudget).toBe(true);
+  expect(context.historyWindow.notice).toContain('Required non-history context exceeds');
+  expect(state).toEqual(saved);
+  expect(() => turnContext(state, { ...turn, request: turn.request + '😀' }))
+    .toThrow(`Current Request is ${HISTORY_MAX_BYTES + 4} UTF-8 bytes; budget is ${HISTORY_MAX_BYTES} bytes`);
+  expect(state).toEqual(saved);
 });

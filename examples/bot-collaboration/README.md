@@ -167,16 +167,22 @@ budget even if it fails, passes, or times out. Batch room calls are atomic.
 A late room_call after a round closes can open a new round. At most three such
 rounds share one user root. At most ten late posts share that root. A new user
 message starts a new root. ContextPack selects up to the most recent 100
-eligible messages. It drops oldest whole rows until the 64 KiB history byte
-budget fits. `historyWindow.notice` reports omitted messages and refusals.
-Overflow does not block a seat. The frozen Request section keeps the complete
-current request, even when that request is larger than the history budget.
+eligible messages. The 32 KiB budget counts the UTF-8 bytes of the frozen
+Request plus the serialized ContextPack. `historyWindow.currentRequestBytes`
+records the exact Request size, including the room request wrapper. The Host
+drops oldest whole rows until that budget fits. `historyWindow.notice` reports
+omitted messages and refusals.
+History overflow does not block a seat. The frozen Request section keeps the
+complete accepted request. Only a Request that alone exceeds 32 KiB blocks
+the turn. The seat reason and blocked projection report its byte count, the
+limit, and a request to shorten the input.
 For room_call seats, the visible caller post is the current request and its
 author id is retained. A pass inherits the earlier visible trigger. This
 request is preserved even if it has left the recent message window.
 The ledger retains its full audit history. No Summary is generated. Authority
 enums and required control metadata are not silently truncated. If non-history
-metadata alone exceeds the budget, the notice reports that separate condition.
+metadata plus the accepted Request exceeds the budget after history is removed,
+the notice reports that separate condition. That condition does not block.
 K8a owns its bounded cards/questions projection.
 
 Unmentioned messages are stored as background. They do not create a seat, but

@@ -63,7 +63,7 @@ export function turnContext(state: CollaborationState, turn: Turn) {
   if (turn.source === 'room_slot') {
     const result = { ...shared, ...roomContext(team, turn) };
     result.historyWindow.omittedRejections = ownRejections.length - shared.rejectedActions.length;
-    return fitHistory(result, result.room.messages, 'omittedMessages');
+    return fitHistory(result, result.room.messages, 'omittedMessages', turn.request);
   }
   const history = Object.values(state.turns).filter(t => t.botId === turn.botId && t.id !== turn.id);
   const turns = history.slice(-HISTORY_MAX_ITEMS);
@@ -73,7 +73,7 @@ export function turnContext(state: CollaborationState, turn: Turn) {
     cards: Object.values(state.cards).filter(c => state.turns[c.turnId]?.botId === turn.botId),
     questions: Object.values(state.questions).filter(q => state.turns[q.turnId]?.botId === turn.botId) };
   result.historyWindow.omittedRejections = ownRejections.length - shared.rejectedActions.length;
-  return fitHistory(result, turns, 'omittedTurns');
+  return fitHistory(result, turns, 'omittedTurns', turn.request);
 }
 export function contextPack(state: CollaborationState) {
   return {
