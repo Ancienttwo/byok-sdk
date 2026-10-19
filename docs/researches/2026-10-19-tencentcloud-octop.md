@@ -4,7 +4,8 @@
 > **性质**：调研记录。本文只记录事实和建议。它不构成实现授权，也不修改 spec、ADR 或 PRD。
 > **对象**：TencentCloud/Octop v1.0.2 和它的三个运行时库。版本固定在 §7 列出的提交。
 > **对照基线**：byok-sdk `main` @ `649f9f0b`。对照内容包括平台 PRD v3、K4 指南、K8 参考实现、产品 PRD 和 2026-10-19 产品裁定。
-> **待决事项**：§9 的三项适配，状态都是「待 owner 决定」。
+> **修订**：2026-10-19 按外部审阅（owner 转交）修订。建议分成两组，每项写明归属层。两处现状判断已更正。新增推进顺序（§3.5）。
+> **待决事项**：§9 的三项适配都「待 owner 确认」。§9 写的是审阅推荐，不是 owner 的裁定。
 
 ## 1. 结论
 
@@ -12,11 +13,15 @@
 - Octop 的「多租户」是同一信任域里的多用户。系统没有 tenant 层。用户隔离靠各个 router 检查 `agents.user_id`，管理员可以越过这个检查。
 - Octop 拥有自己的 agent loop。octop-harness 封装了 LangChain `deepagents`，所以 Octop 的很多机制是 loop 内的 middleware。
 - byok-sdk 桥接用户自己的 Claude Code、Codex 和 Pi，不拥有它们的 loop。byok-sdk 只能在边界上起作用：offer、ContextPack、outcome、terminal、mailbox 和 lease。本文按这条标准筛选。
-- 筛选结果：
-  - §3.1：4 项新建议。
-  - §3.2：11 项已有设计得到 Octop 印证。
-  - §3.3：3 项次要参考。
-  - §9：3 项适配，待 owner 决定。
+- 新建议分成两组。两组都不修改 wire protocol、K4 执行核心或 K7 结算。
+  - §3.1 Bot/Host 产品体验：3 项，归属 Host。
+  - §3.2 SDK 执行可靠性：4 项，归属 runtime adapter、daemon 或 launcher。
+- §3.3：11 项已有设计得到 Octop 印证。这些设计保留，只补针对性测试，不重构。
+- §3.4：3 项次要参考。§3.5：推进顺序。
+- §9：3 项适配，待 owner 确认。
+- 两处更正：
+  - byok-sdk 已经在取消时等待持久写入。这一项不再立项，改为补故障测试（§3.2 第 2 条）。
+  - 本地 Agent-home 备份不计入 `TenantStorageEntitlement`（§3.2 第 3 条）。
 - Octop 更大的价值是反面证据（§4）。它从正文推导控制语义；委派没有 hop 和预算上限；关键状态放在内存里；密钥和 agent 在同一进程。ADR-037 和 ADR-038 已经拒绝这些做法。
 - Octop 自己的默认安全策略也是无人值守：HITL 默认关闭，命令 guard 默认只告警。这是 ADR-037「无人值守时 gate 只会挂起」的独立佐证。
 
@@ -54,32 +59,82 @@
 - `H/` 是 octop-harness 的 `src/octop_harness/`。
 - `G/` 是 octop-gateway 的 `src/octop_gateway/`。
 
-行号对应 §7 的固定提交。
+Octop 的行号对应 §7 的固定提交。byok-sdk 的行号对应 `main` @ `649f9f0b`。
 
-### 3.1 新建议
+每项建议都写明归属层。两组建议都不修改 wire protocol、K4 执行核心或 K7 结算。
 
-**1. 结算时区分「正常结束」和「记录完整」**
+### 3.1 Bot/Host 产品体验
 
+**1. 同会话连续输入合并**
+
+- 归属：Host 输入接收层的可选策略。先在 Host 参考实现里试点。
+- Octop 的做法：agent 运行期间，同一 session 后到的消息合并成一个 turn，最多 20 条（`G/manager.py:728-737, 767-809`）。
+- 审阅推荐的规则和待确认问题见 §9.1。
+
+**2. IM 收发契约**
+
+- 归属：Host adapter。平台 PRD 没有 IM 章节。产品 PRD 把外部事件触发（邮件、Slack、webhook）列为 v1 非目标，并写明 SDK 不接收外部事件（[产品 PRD](../plans/2026-10-18-bot-mode-product-prd.md) 78、99、279 行）。本条只定义 Host adapter 的契约。
+- 规则：
+  - 回复路由和主动推送分开。只属于单次入站的回复凭据不能用于长期推送，例如消息 id、`response_url`、`context_token` 和 `webhook_url`。Octop 的对应实现见 `G/push_routing.py:7-18`。
+  - 每条输入带真实的发送者。审批和管理动作检查这个发送者（见 §4 第 1 条）。
+  - 发送结果分为 accepted、rejected 和 unknown。超时记为 unknown，不盲目重发。Octop 的 Telegram 只重试平台明确拒绝的 429，次数和等待时间都有上限（`G/channels/telegram/delivery.py:87-100`）。
+  - 默认只发最终结果（`O/infra/gateway/process/response_mode.py:20-22`）。
+  - 普通 bot 消息默认不触发执行。Bot 之间的协作走结构化委派，带去重、hop 上限和预算（ADR-038 决策 13；`examples/bot-collaboration/src/delegation.ts:11-12`）。
+- 不照抄的做法：
+  - Octop 在入口丢弃全部 bot 消息（`G/channels/discord.py:228-234`、`G/channels/feishu.py:484-487`）。审阅建议只采用「默认不触发执行」这条规则。
+  - 渠道 secret 在库里明文保存。
+  - 渠道注册时直接把健康状态记为已连接。
+- 可参考的接入方式：Octop 的钉钉接入使用 RFC 8628 device flow。`device_code` 留在服务端，前端只拿到不透明的 `registration_id`（`O/api/routers/channels.py:498-520`）。
+
+**3. 设备防休眠**
+
+- 归属：Host 应用。审阅推荐 §9.2 的选项 B，待 owner 确认。
+- 要点：默认关闭。开启后，只在接通电源并且有任务运行时，阻止系统空闲休眠。详细规则见 §9.2。
+
+### 3.2 SDK 执行可靠性
+
+**1. 执行记录完整性（诊断状态）**
+
+- 归属：runtime adapter 提供证据，Host 展示。
 - Octop 的做法：一个 turn 只有同时满足三个条件，才记为 `complete`。
   - 有最终回答。
   - 每个 tool_call 都有结果。
   - 没有解码错误或轨迹错误。
 
   否则记为 `partial`，错误码是 `capture_incomplete`（`O/infra/history/recorder.py:433-482`）。Octop 的文档说明，`complete` 只表示采集器的检查通过。
-- byok-sdk 现状：执行结算和 intent 结论分开记录（平台 PRD §9.2 第 5 条）。
-- 建议：能看到事件流的 lane（Pi）在结算证据里加一个「捕获完整」标记。Claude 和 Codex 可能只能从日志判断（推断）。
+- 规则：
+  - 诊断状态分为 complete、partial 和 unknown，并带证据来源和缺口原因。
+  - 这个状态只用于诊断，不改变 K7 的成功结算。
+  - 轨迹不完整时不自动重跑。
+  - 先在 Pi 上验证事件配对。
+- byok-sdk 现状：
+  - Pi 的 `tool_execution_start` 和 `tool_execution_end` 带同一个 `toolCallId`（`packages/client/src/adapters/pi/events.ts:118-136`）。映射器无状态，不检查配对（同文件 151-163 行）。无法解析的 JSON 行被直接忽略（`packages/client/src/adapters/pi/rpc-client.ts:255-261`）。
+  - Claude 的 tool_result 必须带 `tool_use_id`。没有对应 `tool_use` 的结果不按名称或内容匹配，工具名记为 `unknown`。adapter 不检查未闭合的调用（`packages/client/src/adapters/claude/events.ts:250-254`）。
+  - Codex 跟踪未完成的工具调用。turn 被中断时，它为每个未完成的调用补一个结果。其他状态下直接清空，不留标记（`packages/client/src/adapters/codex/projection.ts:193-208`）。
+  - `task.complete` 和 `task.fail` 没有完整性字段（`packages/protocol/src/messages.ts:1195-1237`）。`DaemonRecord` 的 turn 记录只统计 `toolUses` 和 `toolResults` 的数量，不按 id 配对（`packages/client/src/daemon/daemon-record.ts:87-88`）。
+  - K7 的规则保持不变：offer 要求 result document 时，没有暂存 `submit_result` 的成功完成按不可重试的 `result_not_submitted` 失败处理（`docs/spec.md:2565`）。
 
-**2. 持久写入不被取消打断**
+**2. 取消与持久写入：已实现，补故障测试**
 
+- 归属：SDK daemon。
 - Octop 的做法：写入在 executor 里执行，外层用 `asyncio.shield` 循环等待。即使被多次取消，也先等写入完成，再重新抛出取消（`O/infra/history/recorder.py:395-431`）。
-- byok-sdk 现状：terminal 先落盘再发出（ADR-038 决策 12）。Agent home 有单写者 lease。
-- 建议：
-  - 核对 daemon 在释放 Agent-home lease 之前，是否会等待还没写完的 journal。
-  - 补一个「写入中途取消」的测试。
-  - 本文没有核实 byok-sdk 的现状。
+- byok-sdk 已经实现同样的保证。`TaskRunner.finishOnce` 按以下顺序执行（`packages/client/src/daemon/task-runner.ts`）：
+  1. 等待 `session.close` 的回执（5429 行）。
+  2. 等待 terminal 提交（5432 行）。
+  3. 做记忆快照（5443 行），写入 terminal 证据（5446 行）。
+  4. 释放 Agent-home lease（5477 行）。
 
-**3. 维护任务的准入协议**
+  `finish()` 让并发的结束请求共用同一次尝试（5365 行）。
+- 已有测试：
+  - cancel 和 shutdown 共用一个 close 回执，并等待 terminal 提交（`packages/client/src/__tests__/task-runner-close-receipt.test.ts:53`）。
+  - 由 cancel 触发的 terminal 提交失败会被重试。重试成功之前，Agent home 一直被持有（`packages/client/src/__tests__/s10-f1-terminal-recovery.test.ts:238, 258`）。
+  - 排队中和已完成任务的重复 cancel（`packages/client/src/__tests__/task-runner-cancel-native.test.ts:246, 393`）。
+  - 真实 SIGKILL 之后的恢复（`packages/client/src/__tests__/execution-recovery-kill.test.ts:372`，只在 macOS 上运行）。
+- 建议：不再立项。补三类故障测试：写失败、重复取消、强杀恢复。缺口集中在由 cancel 发起的结束流程。例如 cancel 时 `session.close` 失败；cancel 作为发起方时的重复 cancel；结束流程中途 daemon 被强杀。
 
+**3. 维护任务的原则**
+
+- 归属：SDK daemon。原则随 Agent home 的清理、压缩和恢复功能一起落地。不新建维护服务。
 - Octop 的 `memory slim` 按以下顺序执行。第 1–2 步在 `O/infra/agents/memory/slim.py`，第 3–5 步在 octop-memory 的 `src/octop_memory/storage/backends/sqlite_checkpoint_live.py:26-81`。
   1. 占用 agent 的空闲预留。
   2. 最多等待 120 秒。等完后重新鉴权。
@@ -87,18 +142,21 @@
   4. 用 `BEGIN IMMEDIATE` 分批改写。批次以固定的 rowid 高水位为界，不追逐新写入的行。
   5. 如实报告部分完成的结果，不自动回滚。
 - 恢复时先做安全快照，失败就回滚（`O/infra/agents/memory/sqlite_restore.py`）。
-- 建议：将来对 Agent home 做压缩、清理或恢复时，按同样的顺序执行：拿 writer lease；有期限地等待；做校验过的备份；分批处理；如实报告。备份字节计入 `TenantStorageEntitlement`。
+- 保留的原则：
+  - 先拿 writer lease，有期限地等待，等完后重新鉴权。
+  - 改写之前先做校验过的备份。
+  - 分批处理，每批有固定的边界。
+  - 如实报告部分完成的结果。
+- 计量：本地 Agent-home 备份不计入 `TenantStorageEntitlement`。用户容量只统计 tenant 的 R2 对象字节和 Postgres inline 字节（[SDK 架构](../architecture/sdk-architecture.md) §12.7.6，1691 行）。Agent home 的内容是本地权威（`docs/spec.md:2031-2034`）。只有上传到受管云存储的部分计量。
 
-**4. 给下游 Host 的 IM 接入参考（平台 PRD §12）**
+**4. 进程树收容**
 
-- 回复路由和推送路由分开。只属于单次入站的字段（消息 id、`response_url`、`context_token`、`webhook_url`）不能用于主动推送（`G/push_routing.py:7-18`）。
-- 只在平台明确拒绝时重试。Telegram 只重试 429，次数和等待时间都有上限，并且只在上传流可以回退时重试（`G/channels/telegram/delivery.py:87-100`）。这样可以避免重复发送。
-- IM 默认只发最终消息（`O/infra/gateway/process/response_mode.py:20-22`）。这样消息条数更少。
-- 入口丢弃平台上由 bot 发出的消息（`G/channels/discord.py:228-234`、`G/channels/feishu.py:484-487`）。这是防止 bot 之间互相触发的第一道防线。
-- 钉钉接入使用 RFC 8628 device flow。`device_code` 留在服务端，前端只拿到不透明的 `registration_id`（`O/api/routers/channels.py:498-520`）。
-- 不要沿用的两点：渠道 secret 在库里明文保存；渠道注册时直接把健康状态记为已连接。
+- 归属：SDK launcher。审阅推荐 §9.3 的可选 cgroup v2 收容，待 owner 确认。
+- 要点：只在 Linux 上提供。每次执行使用一个独立的 cgroup。有 Linux 常驻需求时再做。详细规则见 §9.3。
 
-### 3.2 已有设计得到印证
+### 3.3 已有设计得到印证
+
+下表的设计保留，不重构。需要时只补针对性测试，例如第 1 行提到的 property test。
 
 | byok-sdk 已有设计 | Octop 的对应机制 | 差异或备注 |
 |---|---|---|
@@ -114,11 +172,18 @@
 | native interaction 的 requestId 按进程代际划分；一次性认领；不同答案报 `response_conflict`（`packages/client/src/native-interactions.ts:196-199, 254-266`）。 | HITL 待审批卡片只在内存里，TTL 30 分钟。 | byok-sdk 更强。 |
 | 有界 retention、持久 tombstone、防饿死游标（[#412 retention 调研](2026-10-14-cloud-retention.md)）。 | PostgreSQL 记忆清理按 namespace 取 advisory lock，用 `SKIP LOCKED` 分批，删除前先把要删的行写进 fsync 过的备份文件（`O/infra/agents/memory/postgres_storage.py:121-220`）。 | byok-sdk 更强。 |
 
-### 3.3 次要参考
+### 3.4 次要参考
 
 - **归档包校验**：Octop 对 skill 包做统一校验：总大小不超过 64 MB；拒绝绝对路径和 `..`；拒绝 symlink（`O/infra/skills/skill_packages.py:11, 58, 148-149`）。如果 Host 将来把 skill 包这类归档投影进 Agent home，入口可以用同样的规则。
 - **审计 actor**：Octop 把安全策略的修改记成常量 `ACTOR_ADMIN`，即使这项权限已经委派给非管理员（`O/api/routers/security.py:73`）。建议核对 byok-sdk 的审计记录是否写入真实的认证主体。本文没有核实。
 - **逻辑字节和物理回收分开报告**：Octop 的 PostgreSQL 清理报告明确写出 `physical_space_reclaimed: False`（`O/infra/agents/memory/postgres_storage.py:219`），因为删除行不等于归还磁盘空间。存储是 byok-sdk 的收费单位，所以 retention 报告也可以把这两个数分开。
+
+### 3.5 推进顺序（审阅建议）
+
+1. 第一批：输入合并试点（§3.1 第 1 条）和 IM 收发契约（§3.1 第 2 条）。
+2. 第二批：执行记录完整性（§3.2 第 1 条）和取消与落盘的故障测试（§3.2 第 2 条）。
+3. 第三批：Host 防休眠（§3.1 第 3 条）。有 Linux 常驻需求时，再做 cgroup 收容（§3.2 第 4 条）。
+4. 维护原则（§3.2 第 3 条）随清理、压缩和恢复功能落地，不单独排期。
 
 ## 4. 不要照搬
 
@@ -127,7 +192,7 @@
 1. **把所有 IM 发送者当成 agent owner。** Octop 在代码注释里说明这是设计选择：同一 agent 的 IM 成员共用 owner 的身份（`O/infra/gateway/process/message_keys.py:81-108`）。所以审批和管理类命令无法区分发送者。
    - 教训：如果 Host 把有多个人的 IM 群接到 Bot，每条人类输入都要带经过验证的发送者主体。审批和管理动作检查这个主体，不检查会话或 owner。
 2. **让模型代替用户回答权限请求。** Octop 文档写明：外部 coding agent 的权限请求出现在对话里，由 agent 调用 `action=respond` 提交选项 id（Octop `docs/acp.md:53, 64`）。代码只检查这个 id 在候选列表里，不检查它是否来自用户。
-   - 教训：Host 开启 native interaction 时，用户的决定只能经 Host 按 requestId 回传。byok-sdk 已经这样做（见 §3.2）。
+   - 教训：Host 开启 native interaction 时，用户的决定只能经 Host 按 requestId 回传。byok-sdk 已经这样做（见 §3.3）。
 3. **审批的过期和归属只在缓存层检查。**
    - 教训：过期和归属要在恢复执行的入口检查。
 4. **从正文推导控制语义。** 例子：
@@ -199,12 +264,21 @@
 - 第三方转载文章，只作背景，不作证据：[腾讯云开发者社区](https://developer.cloud.tencent.com/article/2743438)。
 - [octop.cloud](https://octop.cloud/) 是单页应用。抓取只得到页面元数据，没有正文。
 
+外部技术文档（§9.2、§9.3 引用）：
+
+- Apple：[kIOPMAssertionTypePreventUserIdleSystemSleep](https://developer.apple.com/documentation/iokit/kiopmassertiontypepreventuseridlesystemsleep)
+- Linux kernel：[Control Group v2](https://docs.kernel.org/admin-guide/cgroup-v2.html)
+- Linux man-pages：[PR_SET_CHILD_SUBREAPER](https://man7.org/linux/man-pages/man2/PR_SET_CHILD_SUBREAPER.2const.html)
+
 byok-sdk 侧对照文件：
 
 - [ADR-036](../architecture/adr-2026-10-03-cloud-generic-agent.md)、[ADR-037](../architecture/adr-2026-10-07-minimal-guardrails.md)、[ADR-038](../architecture/adr-2026-10-13-bot-platform.md)
 - [平台 PRD](2026-10-13_bot-platform-prd.md)、[产品 PRD](../plans/2026-10-18-bot-mode-product-prd.md)、[K4 指南](../host-execution-core.md)
-- [安全文档](../security.md)、[SDK 架构](../architecture/sdk-architecture.md)、[最小 guardrail 验收记录](../notes/2026-10-08-minimal-guardrails-acceptance.md)、[#412 retention 调研](2026-10-14-cloud-retention.md)
-- `packages/client/src/native-interactions.ts`、`examples/bot-collaboration/`、`examples/salesko-connector-broker/`
+- [spec](../spec.md)、[安全文档](../security.md)、[SDK 架构](../architecture/sdk-architecture.md)、[Host 运行时隔离矩阵](../host-runtime-isolation-matrix.md)、[最小 guardrail 验收记录](../notes/2026-10-08-minimal-guardrails-acceptance.md)、[#412 retention 调研](2026-10-14-cloud-retention.md)
+- `packages/client/src/daemon/`：`task-runner.ts`、`owned-process-ledger.ts`、`create-daemon.ts`、`daemon-record.ts`
+- `packages/client/src/adapters/`：`process-tree.ts`，以及 `pi/`、`claude/`、`codex/` 的事件映射
+- `packages/client/src/lifecycle/systemd.ts`、`packages/client/src/native-interactions.ts`、`packages/protocol/src/messages.ts`
+- `examples/host-execution-core/`、`examples/bot-collaboration/`、`examples/salesko-connector-broker/`
 
 ## 8. 方法、验证与残余风险
 
@@ -215,69 +289,105 @@ byok-sdk 侧对照文件：
 - 作者按行号复核了本文引用的 Octop 行号，包括 IM 身份映射、ACP 权限流程、密钥存储、默认后端、能力收窄、群策略、结算判定和用量记录。
 - 没有运行 Octop 的任何代码、测试或脚本。
 - byok-sdk 侧按 `main` @ `649f9f0b` 核对 §7 列出的文件。
+- 修订时按同一基线复核了 §3.2 和 §9 引用的 byok-sdk 代码、测试和文档行号。外部技术文档按 §7 的链接核对。
 
 残余风险：
 
 - 标为「推断」的结论没有端到端追踪，或者依赖不在源码树里的 LangGraph 和 deepagents 内部行为。
 - 克隆是 partial clone，`git log -S` 无法使用。「为什么」主要来自文档、CHANGELOG、代码注释和少数提交信息。
 - Octop 更新很快。本文结论只对 §7 的版本成立。
-- 对 byok-sdk 的映射是调研者的判断，不是 owner 的决定。
-- §3.1 第 2 条和 §3.3 的审计项，都需要先核实 byok-sdk 的现状。
+- 对 byok-sdk 的映射是调研者的判断，不是 owner 的决定。§9 的推荐来自外部审阅，也需要 owner 确认。
+- §3.2 第 2 条的测试缺口来自阅读代码。没有运行 byok-sdk 的测试。
+- §3.4 的审计项需要先核实 byok-sdk 的现状。
+- systemd 用户服务停止时，默认的 `KillMode=control-group` 可能已经结束服务 cgroup 里的残留进程（推断）。本文没有实测。
 
-## 9. 三项适配（待 owner 决定）
+## 9. 三项适配（待 owner 确认）
 
-本节只列事实、选项和需要回答的问题。三项都没有结论。
+本节列出事实、选项、审阅推荐和需要 owner 确认的问题。审阅推荐来自外部审阅（owner 转交），不是 owner 的裁定。
 
-### 9.1 合并排队中的同会话输入
+### 9.1 同会话连续输入合并
 
-- **状态**：「待 owner 决定」
+- **状态**：审阅推荐「Host 输入层的可选策略，先在 Host 参考实现里试点」。待 owner 确认。
+- **归属**：Host 输入接收层。K4 执行核心不变。
 - **Octop 证据**：agent 运行期间，同一 session 后到的消息会被合并成一个 turn，最多 20 条（`G/manager.py:728-737, 767-809`）。Octop 在共享的渠道队列里取出这些消息，会把其他 session 的消息放回队尾，导致顺序颠倒。
-- **byok-sdk 现状**：K4 为每个 Agent 维护一个 FIFO，用户、routine 和 Bot 触发共用，任何优先级规则都必须写明（K4 指南 §3）。目前没有合并策略。
+- **byok-sdk 现状**：
+  - K4 为每个 `(tenant, deviceId, agentId)` 维护一个 FIFO，用户、routine 和 Bot 触发共用（[K4 指南](../host-execution-core.md) §3，87–89 行）。参考实现按 `sequence` 选出每个 Agent 的队头（`examples/host-execution-core/src/core.ts:177-182`）。
+  - Bot 参考实现为每条用户消息生成一个 Turn、一个 intent 和一个 task（`examples/bot-collaboration/src/host.ts:79-92, 384`）。中间没有合并点。
+  - 当前 Request 的字节数先于历史记录计入预算。只有 Request 就超过预算时，Host 拒绝请求，并要求用户缩短（`examples/bot-collaboration/src/history.ts:23-31`）。
 - **可能的收益**：Bot 忙时，用户连发多条消息只需要一次执行，也不会用多次执行去回答已经过时的消息。
-- **需要 owner 回答的问题**：
-  1. 要不要合并？只合并用户输入，还是也包括 routine 和 Bot 触发？
-  2. 只合并还没提交的 intent 吗？已提交、未被认领的 offer 怎么处理？
-  3. 合并后的 intentKey 怎么定义？`taskId = H(intentKey, generation)` 怎么保持稳定？
-  4. 等待上限从最早的输入算，还是从最晚的输入算？
-  5. 条数和字节的上限是多少？
-  6. 一次回复对应多条消息时，UI 怎么显示？
+- **审阅推荐的规则**：
+  - 只合并连续的普通消息。这些消息的用户、会话、Agent、权限和配置都相同。
+  - 审批、取消、routine 和 Bot 委派是边界。不跨边界合并，也不改变边界前后的顺序。
+  - 在进入 K4 执行队列之前合并。已经入队的输入不动。
+  - 每个批次有持久的批次 ID。原始消息保留，可以逐条追踪。
+  - Agent 空闲时立即处理。Agent 忙时使用一个小窗口。窗口从第一条消息开始计时，不能延长。
+  - 批次有条数上限和字节上限。字节上限为 ContextPack 留出空间。
+  - 不照抄 Octop 的 20 条上限。超出上限时不静默丢弃消息。
+  - 先在 Host 参考实现里做。
+- **需要 owner 确认的问题**：
+  1. 是否采用这个策略？默认开启还是关闭？
+  2. 窗口时长、条数上限和字节上限取多少？
+  3. 批次 ID 怎么对应到 intentKey，使 `taskId = H(intentKey, generation)` 保持稳定？
+  4. 一次回复对应多条消息时，UI 怎么显示？
 
 ### 9.2 设备防休眠
 
-- **状态**：「待 owner 决定」
+- **状态**：审阅推荐选项 B，待 owner 确认。
+- **归属**：Host 应用。SDK 不持有电源断言。
 - **Octop 证据**：桌面端有 `PreventSleep` 开关，默认关闭（Octop `desktop/src/settings.go:23, 32`）。打开后一直持有休眠断言：
   - macOS 用 `caffeinate -dimsu`；
   - Linux 用 logind 的 D-Bus `Inhibit`；
   - Windows 用 `SetThreadExecutionState`。
 
-  实现见 Octop `desktop/src/preventsleep_darwin.go`、`desktop/src/preventsleep_linux.go` 和 `desktop/src/preventsleep_windows.go`。
-- **byok-sdk 现状**：平台 PRD §15 把「设备休眠时 routine 不运行」列为 BYOK 的固有限制。K2 用 60 秒等待上限加墙钟比较，设备醒来后只补跑一次。
+  实现见 Octop `desktop/src/preventsleep_darwin.go`、`desktop/src/preventsleep_linux.go` 和 `desktop/src/preventsleep_windows.go`。`caffeinate` 的 `-d` 参数还会阻止显示器休眠。
+- **byok-sdk 现状**：
+  - 平台 PRD §15 把「设备关机或休眠时 routine 不运行」列为 BYOK 的固有限制（[平台 PRD](2026-10-13_bot-platform-prd.md) 945 行）。
+  - 系统休眠会推迟定时器。K2 用 60 秒的等待上限加墙钟比较处理它（同文件 949 行）。设备醒来后，一个过期的 wake 最多补跑一次（[K4 指南](../host-execution-core.md) 160 行）。
+  - 仓库里没有 Host 桌面应用，也没有电源断言的代码。
 - **选项**：
   - A. 不做，保持 §15 的现状。
   - B. 由 Host 应用自己实现，SDK 只在 Host 指南里说明。
   - C. daemon 提供可选开关，只在 routine 时间窗附近持有断言。
   - D. daemon 提供可选开关，打开后一直持有断言（Octop 的做法）。
-- **需要 owner 回答的问题**：
-  1. 这个能力归 SDK，还是归 Host？
-  2. 只阻止系统空闲休眠，还是也阻止显示器休眠？
-  3. 只在接通电源时生效吗？
-  4. 三个平台的证明矩阵怎么安排？产品 PRD 对记忆证明已经裁定「不接受 Linux-only」。
+- **审阅推荐（选项 B）的规则**：
+  - 默认关闭。
+  - 开启后，只在接通电源并且有任务运行时，阻止系统空闲休眠。显示器可以关闭。
+  - 任务结束或取消时释放断言。多个任务用引用计数。
+  - 不承诺定时执行。
+  - 阻止空闲休眠、定时唤醒和醒后补跑是三个独立的机制。
+  - macOS 对应 `kIOPMAssertionTypePreventUserIdleSystemSleep`。Apple 文档说明：它只阻止因用户无操作引起的休眠；显示器仍可以变暗和休眠；合盖、Apple 菜单和低电量仍会让系统休眠。
+  - 三个平台都要验收：合盖、用户主动睡眠、拔掉电源、Host 进程异常退出。
+- **需要 owner 确认的问题**：
+  1. 是否采用选项 B 和上面的规则？
+  2. 三个平台的验收矩阵怎么安排？产品 PRD 对记忆证明已经裁定「不接受 Linux-only」（[产品 PRD](../plans/2026-10-18-bot-mode-product-prd.md) 239 行）。
 
-### 9.3 Linux cgroup 收容进程树
+### 9.3 进程树收容
 
-- **状态**：「待 owner 决定」
+- **状态**：审阅推荐可选的 cgroup v2 收容（选项 B），待 owner 确认。有 Linux 常驻需求时再做。
+- **归属**：SDK launcher。
 - **Octop 证据**：bwrap 后端使用 `--die-with-parent`、`--new-session` 和 `--unshare-pid`，整个进程树会随沙箱一起结束（`H/backends/bwrap_shell.py:86-100`）。但 bwrap 启动失败时，它会静默回退到宿主执行（`H/backends/bwrap_shell.py:232-238`）。
 - **byok-sdk 现状**：
+  - 在 POSIX 上，每个 runtime 根进程都是独立进程组的 leader（`packages/client/src/adapters/process-tree.ts:52-62`）。结束时，SDK 先结束进程组，再结束离开进程组的后代，并按启动时间核对每个 pid（同文件 700-705 行）。
+  - daemon 被 SIGKILL 或 OOM-kill 后，owned-process ledger 在下次启动时先结束残留的进程组，再回收 lease（#393、#406；`packages/client/src/daemon/create-daemon.ts:1985-1995`）。
+  - 仍然覆盖不到的残留：父进程已经退出、被 init 收养的进程。例如 Claude 和 Pi 在独立 session 中执行 `cmd &` 留下的后台进程（`packages/client/src/adapters/process-tree.ts:707-711`；[ADR-037](../architecture/adr-2026-10-07-minimal-guardrails.md) 72 行）。
   - 时长和输出上限都在 daemon 侧执行，不是 kernel、cgroup 或 rlimit 级别（[安全文档](../security.md) 877–880 行；[SDK 架构](../architecture/sdk-architecture.md) 946 行）。
-  - ADR-037 记录了 POSIX 残留：父进程先退出时，后台进程会被 init 收养，SDK 不结束它们。
+  - Linux 的 systemd 用户服务单元没有设置 `KillMode` 或 `Delegate=`（`packages/client/src/lifecycle/systemd.ts:170-186`）。
   - [最小 guardrail 验收记录](../notes/2026-10-08-minimal-guardrails-acceptance.md) 166–167 行已经提出，Linux 可以加 cgroup 或 child subreaper 作为更强的兜底。
 - **选项**：
   - A. 不做，保持 ADR-037 的现状。
-  - B. Linux 上可选的 cgroup scope。
+  - B. Linux 上可选的 cgroup v2 scope。
   - C. Linux 上可选的 `PR_SET_CHILD_SUBREAPER`。
   - D. PID namespace（Octop bwrap 的做法）。
-- **需要 owner 回答的问题**：
-  1. 只在 Linux 提供，是否符合平台一致性的要求？
-  2. 默认开启，还是可选？
-  3. ADR-037 记录了 Claude 以 root 运行时会拒绝跳过权限确认的启动参数。user namespace 可能让 agent 看到 root 身份（推断）。是否因此排除 namespace 方案？
-  4. 收容机制启动失败时，拒绝执行还是回退？ADR-037 的原则是拒绝不能执行的选项，不静默丢弃。
+- **审阅推荐（选项 B）的规则**：
+  - 这是可选能力，属于 SDK launcher。
+  - 每次执行使用一个独立的 cgroup scope。runtime 根进程在开始执行之前进入这个 scope。
+  - 取消或超时时，清理 scope 里的全部成员。确认 scope 里没有残留进程之后，才交接 Agent home 和 Git workspace。kernel 的 `cgroup.kill` 结束整个 cgroup 树，并能处理并发 fork。`cgroup.events` 的 `populated` 字段表示树里是否还有存活的进程。
+  - 配置要求 cgroup 而环境不支持时，明确拒绝执行，不降级。
+  - 设计 daemon 崩溃之后的清理。
+  - 这个能力只在 Linux 上有。文档和状态输出要如实说明。
+  - cgroup 只管进程归属和资源，不是完整的沙箱。它不限制文件、网络和系统调用。
+  - child subreaper 不等价。它让 daemon 收养孤儿进程，但不提供原子的整树结束。daemon 退出后，孤儿进程转给更上层的 subreaper 或 init。
+- **需要 owner 确认的问题**：
+  1. 是否采用选项 B？只在 Linux 上提供，是否符合平台一致性的要求？
+  2. 现在有没有 Linux 常驻部署的需求？
+  3. ADR-037 记录了 Claude 以 root 运行时会拒绝跳过权限确认的启动参数。user namespace 可能让 agent 看到 root 身份（推断）。是否因此排除选项 D？
