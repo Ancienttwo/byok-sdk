@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { CodexProjection } from '../adapters/codex/projection';
-import { createSessionKernel } from '../../vendor/oar/beea52c/shared/session-kernel';
+import { createSessionKernel } from '../../vendor/oar/c264f17/shared/session-kernel';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 function setup() {
   const kernel = createSessionKernel('root');
