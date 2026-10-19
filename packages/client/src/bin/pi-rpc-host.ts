@@ -130,7 +130,7 @@ export function parsePiRpcHostArgs(
   if (!configPath || !isAbsolute(configPath)) reject('--config must be an absolute path');
   if (values.get('--mode') !== 'rpc') reject('--mode rpc is required');
   const thinking = values.get('--thinking');
-  if (thinking !== undefined && !['off', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(thinking)) {
+  if (thinking !== undefined && !['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(thinking)) {
     reject('invalid --thinking level');
   }
   if (values.has('--provider') && !values.has('--model')) reject('--provider requires --model');
