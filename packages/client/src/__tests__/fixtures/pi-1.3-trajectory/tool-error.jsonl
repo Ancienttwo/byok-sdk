@@ -1,0 +1,7 @@
+{"type":"agent_start"}
+{"type":"turn_start"}
+{"type":"tool_execution_start","toolCallId":"call-one","toolName":"observe","args":{}}
+{"type":"tool_execution_end","toolCallId":"call-one","toolName":"observe","result":{"content":[{"type":"text","text":"synthetic result"}],"details":{}},"isError":true}
+{"type":"turn_end"}
+{"type":"agent_end"}
+{"type":"agent_settled","aborted":false}

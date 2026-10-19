@@ -1,0 +1,4 @@
+{"type":"agent_start"}
+{"type":"turn_start"}
+{"type":"tool_execution_start","toolCallId":"call-one","toolName":"observe","args":{}}
+{"type":"tool_execution_end"
