@@ -16,9 +16,26 @@ export interface Turn {
   refusalReport?: boolean;
   /** Budget unit that this Turn's execution spends when it is claimed. */
   unit?: string;
+  /** Input batch Turns: the user inputs that this one reply answers, in arrival order. */
+  inputIds?: string[];
   blockedReason?: string; profileFailure?: { sequence: number; revision: string; reason: string }; outcome?: Json; conclusion?: string; reported?: boolean;
 }
 export type Authority = 'owner' | 'bot';
+/** One durable record per user input while input coalescing is in use. `key` is the caller's input key. */
+export interface UserInput {
+  id: string; key: string; botId: string; request: string; bytes: number;
+  sender: string; authority: Authority; receivedAt: number; batchId: string;
+}
+export type SealReason = 'idle' | 'window' | 'items' | 'bytes' | 'boundary' | 'key_changed' | 'cancel' | 'policy_off' | 'archived';
+/**
+ * `id` is the first input's id and the batch Turn id. `key` is the coalescing key.
+ * `request` is the rendered Request while the batch is open; sealing moves it into the batch Turn.
+ * `bytes` is its UTF-8 size, framing included.
+ */
+export interface InputBatch {
+  id: string; botId: string; key: string; inputIds: string[]; bytes: number;
+  openedAt: number; sealAt: number; state: 'open' | 'sealed'; sealReason?: SealReason; request?: string;
+}
 export type Verdict = 'answered' | 'failed' | 'cancelled' | 'refused' | 'expired' | 'abandoned';
 export interface ReplyEntry {
   delegationId: string; from: string; request: string; verdict: Verdict; reason?: string;
@@ -88,6 +105,8 @@ export interface CollaborationState {
   schemas: Record<string, ResultSchema>; questions: Record<string, Question>; cards: Record<string, Card>;
   routines: Record<string, Routine>; occurrences: Record<string, Occurrence>; operations: WakeOp[];
   rejected: Rejection[]; audit: string[]; sequence: number;
+  /** Input coalescing. Both appear at the first coalesced input. */
+  inputs?: Record<string, UserInput>; inputBatches?: Record<string, InputBatch>;
 }
 export function stateOf(application: Record<string, Json>): CollaborationState {
   if (application.collaboration === undefined) application.collaboration = json({
@@ -100,12 +119,29 @@ export function stateOf(application: Record<string, Json>): CollaborationState {
 }
 export interface TurnFields {
   id: string; root: string; source: Turn['source']; request: string; botId: string; hop: number; authority: Authority;
-  delegationId?: string; replies?: ReplyEntry[]; refusalReport?: boolean; unit?: string;
+  delegationId?: string; replies?: ReplyEntry[]; refusalReport?: boolean; unit?: string; inputIds?: string[];
 }
-/** Idempotent by id. Hop and authority come from the caller; nothing resets them. */
+/**
+ * Idempotent by id. Hop and authority come from the caller; nothing resets them.
+ * A new Turn first seals its Bot's open input batch, so the queue keeps arrival order.
+ */
 export function addTurn(state: CollaborationState, fields: TurnFields): Turn {
+  const open = state.turns[fields.id] ? undefined : openInputBatch(state, fields.botId);
+  if (open) sealInputBatch(state, open, 'boundary');
   state.turns[fields.id] ??= { ...fields, status: 'queued' };
   state.budgets[fields.root] ??= { continuation: 0, delegation: 0 };
   return state.turns[fields.id]!;
+}
+/** A Bot has at most one open input batch. */
+export function openInputBatch(state: CollaborationState, botId: string): InputBatch | undefined {
+  return Object.values(state.inputBatches ?? {}).find(batch => batch.botId === botId && batch.state === 'open');
+}
+/** The batch becomes one user Turn with the batch id. Neither changes after this. */
+export function sealInputBatch(state: CollaborationState, batch: InputBatch, reason: SealReason): Turn {
+  const request = batch.request;
+  if (batch.state !== 'open' || request === undefined) throw new Error('Input batch is already sealed');
+  batch.state = 'sealed'; batch.sealReason = reason; delete batch.request;
+  return addTurn(state, { id: batch.id, root: batch.id, source: 'user', request, botId: batch.botId, hop: 0,
+    authority: state.inputs![batch.id]!.authority, inputIds: [...batch.inputIds] });
 }
 export function json(value: unknown): Json { return JSON.parse(JSON.stringify(value)) as Json; }

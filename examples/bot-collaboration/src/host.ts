@@ -19,6 +19,7 @@ import type { RoomFields } from '@byok-sdk/protocol';
 
 import { CurrentRequestTooLargeError, HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS } from './history';
 import { flushHomes, type HomeServer } from './home-projections';
+import { admitUserInput, coalescePolicy, sealBatchForCancel, sealDueBatches, type CoalescePolicy } from './coalesce';
 export interface BotOptions {
   botId: string; execution: ExecutionTemplate; now?: () => number;
   /** Host-owned model templates. New Bots stay on the selected template's device. */
@@ -35,6 +36,12 @@ export interface BotOptions {
   cancelGraceMs?: number;
   /** A claimed chain Turn, or a reply check, with no verdict after this time shows `uncertain` (§8.3). */
   uncertainAfterMs?: number;
+  /**
+   * Merge consecutive user inputs to a busy Bot into one Turn before K4 enqueue (#551). Absent means off.
+   * Defaults: windowMs 10_000, maxItems 8, maxBytes 8192. Construction refuses a value outside
+   * windowMs 1000 to 60_000, maxItems 2 to 16, or maxBytes 1024 to contextMaxBytes / 4.
+   */
+  coalesce?: Partial<CoalescePolicy>;
 }
 /** Reply readback port (§3.3). The Host acceptance record stays the body authority. */
 export type MessageServer = { tasks: Partial<Pick<ByokServer['tasks'], 'agentMessage'>> };
@@ -52,6 +59,7 @@ export class BotCollaboration {
   private readonly contextTurnLimit: number;
   private readonly instructionMaxBytes: number;
   private readonly timers: DelegationTimers;
+  private readonly coalesce?: CoalescePolicy;
   constructor(readonly server: ExecutionServer & HomeServer & MessageServer, readonly ledger: HostLedger, private readonly options: BotOptions) {
     if (!options.botId || options.execution.payload.agentRef.agentId !== options.botId) throw new Error('Select this Bot Agent');
     if (options.execution.payload.requiredToolsets?.length) throw new Error('Bot executions cannot have connector toolsets');
@@ -61,6 +69,7 @@ export class BotCollaboration {
     this.contextMaxBytes = time(options.contextMaxBytes ?? HISTORY_MAX_BYTES);
     this.contextTurnLimit = time(options.contextTurnLimit ?? HISTORY_MAX_ITEMS);
     if (this.contextMaxBytes < 1 || this.contextTurnLimit < 1) throw new Error('Invalid ContextPack limits');
+    if (options.coalesce) this.coalesce = coalescePolicy(options.coalesce, this.contextMaxBytes);
     this.instructionMaxBytes = time(options.instructionMaxBytes ?? DEFAULT_INSTRUCTION_MAX_BYTES);
     const minimum = minimumInstructionBytes(SYSTEM_PROMPT);
     if (this.instructionMaxBytes < minimum) throw new Error(`instructionMaxBytes must be at least ${minimum}`);
@@ -84,20 +93,22 @@ export class BotCollaboration {
     this.chain = next.catch(() => {});
     return next;
   }
-  async input(key: string, request: string, botId = this.options.botId): Promise<string> {
+  /**
+   * Returns the id of the Turn that answers this input. With `coalesce`, it is the batch id
+   * (the first batched input's id); that Turn appears when the batch seals.
+   */
+  input(key: string, request: string, botId = this.options.botId): Promise<string> {
     const id = hash(['user', botId, key]);
-    await this.exclusive(async () => {
-      this.ledger.transaction(s => {
+    return this.exclusive(async () => {
+      const turnId = this.ledger.transaction(s => {
         const state = stateOf(s.application);
         activeBot(state.team, botId);
-        const old = state.turns[id];
-        if (old && old.request !== request) throw new Error('Input identity conflict');
-        state.budgets[id] ??= { continuation: 0, delegation: 0 };
-        addTurn(state, { id, root: id, source: 'user', request, botId, hop: 0, authority: 'owner' });
+        // The sender is the owner until verified IM senders arrive (#552).
+        return admitUserInput(state, { id, key, botId, request, sender: 'owner', authority: 'owner' }, this.coalesce, this.now());
       });
       await this.process();
+      return turnId;
     });
-    return id;
   }
   private applyOutcome(document: unknown, tx: OutcomeTransaction): void {
     const state = stateOf(tx.application);
@@ -332,19 +343,22 @@ export class BotCollaboration {
       if (turn?.delegationId && !this.snapshot().delegations[turn.delegationId]!.verdict) {
         return this.settleChain(turn.delegationId, (s, state, d) => arbitrateCancel(s, state, d, this.now(), (key, value) => project(s, key, value)));
       }
+      let target = id;
       const admitted = this.ledger.transaction(s => {
-        const turn = stateOf(s.application).turns[id];
+        const state = stateOf(s.application);
+        target = sealBatchForCancel(state, id);
+        const turn = state.turns[target];
         if (!turn) throw new Error('Turn not found');
-        if (s.intents[hash(id)]) return true;
+        if (s.intents[hash(target)]) return true;
         if (!turn.conclusion) {
           turn.status = 'failed'; turn.conclusion = 'cancelled';
           delete turn.blockedReason;
-          project(s, `bot-turn:${id}`, json({ owner: turn.botId, ...turn }));
+          project(s, `bot-turn:${target}`, json({ owner: turn.botId, ...turn }));
           turn.reported = true;
         }
         return false;
       });
-      if (admitted) await this.core.cancel(id);
+      if (admitted) await this.core.cancel(target);
       await this.process();
     });
   }
@@ -374,6 +388,8 @@ export class BotCollaboration {
   }
   private sync(s: LedgerState): boolean {
     const state = stateOf(s.application);
+    // A batch sealed here is enqueued in this pass, before later Turns of its Bot.
+    sealDueBatches(state, this.coalesce, this.now());
     // Refresh passive state before any new offer freezes its ContextPack.
     for (const card of Object.values(state.cards)) {
       if (card.state === 'pending' && this.now() >= card.expiresAt) card.state = 'expired';

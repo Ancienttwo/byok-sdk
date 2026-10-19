@@ -2,7 +2,7 @@ export { BotCollaboration } from './host';
 export type { AgentMessageInput, BotOptions, MessageServer } from './host';
 export { BOT_REPLY_MAX_BYTES, DEFAULT_INSTRUCTION_MAX_BYTES, minimumInstructionBytes } from './delegation';
 export { SYSTEM_PROMPT, contextPack, outcomeSchema, DEFAULT_CONTEXT_MAX_BYTES, DEFAULT_CONTEXT_TURN_LIMIT } from './schema';
-export type { Card, CollaborationState, Definition, Delegation, Occurrence, ReplyEntry, Routine, Turn } from './model';
+export type { Card, CollaborationState, Definition, Delegation, InputBatch, Occurrence, ReplyEntry, Routine, SealReason, Turn, UserInput } from './model';
 export type { BotProfile, Room, Round, Seat, TeamState } from './team-model';
 export { ROOM_GRACE_MS, ROOM_CONTEXT_BYTES, ROOM_CONTEXT_MESSAGES } from './rooms';
 export { TEAM_NOTE_LIMIT } from './team';
