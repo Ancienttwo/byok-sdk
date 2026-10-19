@@ -394,6 +394,88 @@ retention cannot remove the delivered/immutable/terminal facts. Receipt columns
 and composite primary key are validated on open. Capacity exhaustion is an
 error; deleting identity fences is not a quota strategy.
 
+### Bot turn outcome fragments and routine time points
+
+`@byok-sdk/protocol` publishes the `bot-turn-outcome.v1` action fragments. Each
+fragment is a schema inside the result-document subset. The Host composes the
+final schema for one execution, fills every id `enum` (roster, slots, rooms,
+routines, models, time zones) and freezes it in the offer as
+`terminalProjection: { mode: 'result-document', contract: 'bot-turn-outcome.v1', schema }`.
+The daemon validates only the format against that frozen schema, as for every
+result document. Semantic checks and application stay with the Host.
+
+The outcome root is a closed object. Each action kind is one optional property;
+`{}` means no actions. Every array has `maxItems` and every string has
+`maxLength`. `maxLength` counts code points. A code point is at most 6 bytes of
+canonical JSON, a finite number at most 25 bytes and an integer at most 24
+bytes. `composeBotTurnOutcomeSchema` computes a conservative upper bound with
+`resultOutcomeMaxBytes` and refuses a schema whose bound exceeds
+`RESULT_OUTCOME_MAX_BYTES`, so every outcome that the frozen schema accepts fits
+the K7 cap. The bound is not always attained, and a schema can have no valid
+instance as large as its bound. A confirmable-action draft is a
+Host schema with a finite bound of at most 16 KiB in the same measure. This
+static budget is a product contract; K7 still rejects any oversized outcome at
+`submit_result`. New objects in one outcome use
+Host-offered `localId` slots, so references to them are enum members. Only a
+Main Bot schema contains management actions and `create_routine.target`; only a
+room-turn schema contains `speech` and `room_call`, and it requires `speech`.
+The subset has no `pattern`, `uniqueItems` or `minProperties`. The Host
+therefore checks duplicates, impossible schedule dates and empty updates when it
+applies an outcome, and reports a refused action in the next ContextPack.
+
+A routine schedule is structured. `minute` (0-59) and `hour` (0-23) give one
+local time. `daysOfWeek` (1 to 7 of `mon`, `tue`, `wed`, `thu`, `fri`, `sat`,
+`sun`) limits it to those weekdays. `dayOfMonth` (1-31) limits it to that day
+of each month; with `month` (1-12), to that day of that month only. With no
+day field, the schedule runs every day. `daysOfWeek` and `dayOfMonth` never
+appear together, and `month` needs `dayOfMonth`. The fragment states each
+field's type, range and enum once, in a closed outer object. A `oneOf` of three
+closed branches lists only the allowed property names and the branch's own day
+field, so the schema refuses an out-of-range value or an invalid combination
+during the execution.
+
+Schema budget rule. `composeBotTurnOutcomeSchema` reports `not-subset`,
+`schema-over-budget` (the schema is above `RESULT_SCHEMA_MAX_BYTES`) and
+`over-budget` (the outcome bound is above `RESULT_OUTCOME_MAX_BYTES`) apart.
+The Host first offers only the fragments and objects that the execution needs.
+Only `schema-over-budget` lets the Host rebuild the routine fragments with
+`scheduleShape: 'flat'`, which drops the `oneOf`; the Host then refuses the two
+invalid combinations when it applies the outcome. This happens before the offer
+is frozen. If the schema is still too large, the Host blocks the execution with
+a visible reason or runs a defined batch selection. It never removes authorized
+ids from an enum silently.
+
+`@byok-sdk/core` publishes `checkRoutineSchedule` and
+`nextRoutineOccurrence(schedule, now)`. `checkRoutineSchedule` refuses a
+malformed schedule (`schedule_invalid`), a date that the month never has, such
+as April 31 (`schedule_unreachable`), February 29, whose next occurrence can be
+eight years away (`schedule_beyond_horizon`), and an unknown zone
+(`tz_invalid`). It accepts repeated weekdays and treats them as one. `tz` is an
+IANA zone name known to the engine's Intl data. Offset spellings are refused
+by the name shape or by Intl. For example, `+08:00` fails the name check;
+`UTC+8` is refused by Intl. `Etc/GMT+8` remains a valid zone name.
+`now` is a safe-integer epoch millisecond in
+[2000-01-01T00:00Z, 2200-01-01T00:00Z); other values throw `RangeError`. The
+function returns the first instant strictly after `now` at which the zone's wall
+clock shows a matching whole local minute, or null when none falls within
+`ROUTINE_HORIZON_MS` (368 days, a product horizon chosen from measured tz data).
+A skipped local time moves later by the gap; a repeated local time takes the
+earlier instant. Resolution uses offsets within one day. It assumes a gap of
+at most one day and at most one offset change in that window. The functions
+read no clock and need full ICU time-zone data.
+
+No SDK runtime component interprets recurring schedules. The daemon, the
+embedded server, the wake queue and the hosted cloud never call these
+functions. Host code calls them, on the device in Topology L, and passes only
+instants to `server.wakes.schedule`. They never pass null to it. Recommended wake key:
+`<routineId>:<version>:<t>`, where `version` and `t` are canonical decimal safe
+integers parsed from the right. An occurrence is identified by
+`(routineId, version, t)`; its trigger is decided once and stored. The Host
+offers time zones as an enum of canonical names, and the instant that the
+device Host computes is the one it schedules. A successor outside the wake
+limit stays in the Host outbox and is retried; a null successor is a visible
+stopped state, not a silent stop.
+
 ### Embedded wake queue
 
 Only `@byok-sdk/server` provides `wake: { consume(wake, signal) }` and
@@ -2484,7 +2566,7 @@ The durable Pi lane runs in a separate `byok-pi-durable` executable launched thr
 
 ### Durable Pi lane (experimental, flag-gated)
 
-The durable Pi lane is disabled by default and advertised only as an adapter capability; protocol intersection remains the execution gate. The first slice runs one harness with one root conversation per execution (per-execution replica required). The lane runs YOLO, as every lane does since ADR-037; there is no SDK permission policy to compute. Tool permission follows the owner's YOLO ruling: the `beforeTool` hook admits calls without Host approval and emits no `needs_approval`; a throwing hook blocks the call. The structured file tools may reach any path except the durable replica store; there is no workspace containment. Bash is best-effort only (reject explicit `BYOK_*` assignments) and is not workspace-bound under YOLO—boundary is env isolation (`inheritEnv: false`) plus process/replica lock. YOLO does not relax replay: slice 1 declares no replay-safe tools; any future read-only allowlist requires a separate reviewed slice, and the environment allowlist still applies. Slice 1 is an unprepared ordinary path: harness `compaction.enabled` is false and `retry.maxRetries` is 0. This disables auto-retry, not checkpoint model-request resends; permitted same-execution recovery reports ordinary observed usage. Prepared-lane guarantees (first-request byte identity with counted artifact, at-most-once scoped fetch, prepared charge-once binding) do not apply. Harness events map onto existing AgentEvent variants using Pi 1.0 names: `run_end`→`turn_end`, `tool_execution_*`→`tool_use`/`tool_result`, `usage_changed`/`message_end`→`usage`, `task_failed`→`error`, result-doc writes→`artifact`; `snapshot` must not be replayed as live progress; needs_approval is unused; unmapped events follow the existing unknown-event rule. The final answer is written to a result document and delivered only through an explicitly selected `terminalProjection: result-document`. Background subagents, wake tasks, memory documents, fork, multi-client steering and remote execution environments are not part of this slice. Recurring schedules remain Host-driven; the device does not interpret cron.
+The durable Pi lane is disabled by default and advertised only as an adapter capability; protocol intersection remains the execution gate. The first slice runs one harness with one root conversation per execution (per-execution replica required). The lane runs YOLO, as every lane does since ADR-037; there is no SDK permission policy to compute. Tool permission follows the owner's YOLO ruling: the `beforeTool` hook admits calls without Host approval and emits no `needs_approval`; a throwing hook blocks the call. The structured file tools may reach any path except the durable replica store; there is no workspace containment. Bash is best-effort only (reject explicit `BYOK_*` assignments) and is not workspace-bound under YOLO—boundary is env isolation (`inheritEnv: false`) plus process/replica lock. YOLO does not relax replay: slice 1 declares no replay-safe tools; any future read-only allowlist requires a separate reviewed slice, and the environment allowlist still applies. Slice 1 is an unprepared ordinary path: harness `compaction.enabled` is false and `retry.maxRetries` is 0. This disables auto-retry, not checkpoint model-request resends; permitted same-execution recovery reports ordinary observed usage. Prepared-lane guarantees (first-request byte identity with counted artifact, at-most-once scoped fetch, prepared charge-once binding) do not apply. Harness events map onto existing AgentEvent variants using Pi 1.0 names: `run_end`→`turn_end`, `tool_execution_*`→`tool_use`/`tool_result`, `usage_changed`/`message_end`→`usage`, `task_failed`→`error`, result-doc writes→`artifact`; `snapshot` must not be replayed as live progress; needs_approval is unused; unmapped events follow the existing unknown-event rule. The final answer is written to a result document and delivered only through an explicitly selected `terminalProjection: result-document`. Background subagents, wake tasks, memory documents, fork, multi-client steering and remote execution environments are not part of this slice. Recurring schedules remain Host-driven; no SDK runtime component interprets them (see Bot turn outcome fragments and routine time points).
 
 ### Official Pi migration security and installation contract (2026-09-25 consolidation)
 
