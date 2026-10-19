@@ -1,3 +1,4 @@
+import { builtAgentMemoryFilesystemHelperBin } from './fixtures/agent-memory-helper-build';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
@@ -16,6 +17,10 @@ import * as memoryRuntime from '../daemon/agent-memory';
 import { CursorStore } from '../daemon/cursor-store';
 import * as helperClient from '../daemon/agent-memory-fs-helper';
 import type { AgentMemoryIntentTransport } from '../daemon/agent-memory-intent';
+
+const helperBuilt = builtAgentMemoryFilesystemHelperBin() !== undefined;
+const itProvenBackend = process.platform === 'darwin' && !helperBuilt ? it.skip : it;
+const itMacHelper = process.platform === 'darwin' && helperBuilt ? it : it.skip;
 
 const PI_FIXTURE = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
 const CLAUDE_FIXTURE = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
@@ -359,7 +364,7 @@ describe('conn.hello.capabilities (WP2I-S2: agent-memory-intent.v1)', () => {
     return hello.payload.capabilities ?? [];
   }
 
-  it('advertises with a transport and an Agent home with a proven Linux or SDK macOS backend', async () => {
+  itProvenBackend('advertises with a transport and an Agent home with a proven Linux or SDK macOS backend', async () => {
     const capabilities = await helloCapabilities({ transport });
     if (isAgentMemorySecureFilesystemAvailable(process.platform === 'darwin')) {
       expect(capabilities).toContain(AGENT_MEMORY_INTENT_CAPABILITY);
@@ -377,12 +382,12 @@ describe('conn.hello.capabilities (WP2I-S2: agent-memory-intent.v1)', () => {
     expect(await helloCapabilities({ transport, agentHome: false })).not.toContain(AGENT_MEMORY_INTENT_CAPABILITY);
   });
 
-  (process.platform === 'darwin' ? it : it.skip)('advertises on macOS only after the SDK helper passes the real volume probe', async () => {
+  itMacHelper('advertises on macOS only after the SDK helper passes the real volume probe', async () => {
     const capabilities = await helloCapabilities({ transport });
     expect(capabilities).toContain(AGENT_MEMORY_INTENT_CAPABILITY);
   });
 
-  (process.platform === 'darwin' ? it : it.skip).each(['ENOTSUP', 'EINVAL', 'EPERM', 'EIO'])('withholds macOS intents when the real-volume helper probe refuses %s', async code => {
+  itMacHelper.each(['ENOTSUP', 'EINVAL', 'EPERM', 'EIO'])('withholds macOS intents when the real-volume helper probe refuses %s', async code => {
     const probe = vi.spyOn(helperClient, 'openAgentMemoryFilesystemHelper').mockRejectedValue(Object.assign(new Error('strict volume barrier failed'), { code }));
     try {
       const capabilities = await helloCapabilities({ transport });

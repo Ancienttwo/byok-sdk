@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { resolveAgentMemoryFilesystemHelper } from '../daemon/agent-memory-helper-release';
+import { builtAgentMemoryFilesystemHelperBin } from './fixtures/agent-memory-helper-build';
 import { AgentHomeManager } from '../agent-home';
 import { AgentMemoryService, captureAgentMemorySnapshot, type AgentMemoryTaskContext } from '../daemon/agent-memory';
 import {
@@ -13,7 +13,7 @@ import {
 } from '../daemon/agent-memory-fs-helper';
 
 const roots: string[] = [];
-const helperBin = process.platform === 'darwin' ? resolveAgentMemoryFilesystemHelper() : undefined;
+const helperBin = builtAgentMemoryFilesystemHelperBin();
 const itWithHelper = helperBin !== undefined && isAgentMemoryFilesystemHelperSupported() ? it : it.skip;
 
 async function temporaryRoot(prefix: string): Promise<string> {

@@ -4,8 +4,11 @@ import { copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'no
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { verifyAgentMemoryHelperSourceDigest } from './agent-memory-helper-source.mjs';
 
 const source = fileURLToPath(new URL('../native/agent-memory-fs/', import.meta.url));
+const manifest = JSON.parse(readFileSync(new URL('../dist/native/agent-memory-fs/manifest.json', import.meta.url), 'utf8'));
+verifyAgentMemoryHelperSourceDigest(source, manifest);
 const flags = ['-buildvcs=false', '-trimpath'];
 const roots = [mkdtempSync(path.join(tmpdir(), 'byok-helper-build-a-')), mkdtempSync(path.join(tmpdir(), 'byok-helper-build-b-'))];
 try {

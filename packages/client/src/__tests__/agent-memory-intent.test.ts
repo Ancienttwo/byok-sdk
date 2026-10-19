@@ -34,7 +34,7 @@ import {
   validateAgentMemoryPath,
 } from '../daemon/agent-memory';
 import type { AgentMemoryFilesystem, AgentMemoryFilesystemFileState } from '../daemon/agent-memory-filesystem';
-import { resolveAgentMemoryFilesystemHelper } from '../daemon/agent-memory-helper-release';
+import { builtAgentMemoryFilesystemHelperBin } from './fixtures/agent-memory-helper-build';
 import { isAgentMemoryFilesystemHelperSupported, openAgentMemoryFilesystemHelper } from '../daemon/agent-memory-fs-helper';
 import {
   AGENT_MEMORY_INTENT_LEDGER_CAPACITY,
@@ -69,8 +69,8 @@ import { TestServer } from './fixtures/test-server';
  * Every trace runs against a REAL temp Agent home (real `AgentHomeManager`
  * leases and directories) and an injected fake Host transport. The memory
  * backend is either the native Linux descriptor backend (Linux only), the
- * product macOS helper (only when `BYOK_TEST_AGENT_MEMORY_FS_BIN` names a
- * built helper), or `FakeBackend`: an `AgentMemoryFilesystem` (the existing
+ * SDK macOS helper (after the explicit native release build), or
+ * `FakeBackend`: an `AgentMemoryFilesystem` (the existing
  * external-backend seam) over the same real files, which can inject a ledger
  * write whose rename is visible but whose fsync fails, and a power loss that
  * restores every file to its last durable state.
@@ -483,6 +483,10 @@ async function auditLines(canonicalHome: string): Promise<Array<Record<string, u
   if (content === undefined) return [];
   return content.split('\n').filter((line) => line.length > 0).map((line) => JSON.parse(line) as Record<string, unknown>);
 }
+
+const helperBin = builtAgentMemoryFilesystemHelperBin();
+const itHelper = helperBin !== undefined && isAgentMemoryFilesystemHelperSupported() ? it : it.skip;
+const itForeignHelper = process.platform === 'darwin' && helperBin === undefined ? it.skip : it;
 
 // ===========================================================================
 // Live path
@@ -1663,8 +1667,12 @@ describe('WP2I-S2 backend proof and fail-closed entry', () => {
     expect(w.host.fetches).toHaveLength(0);
   });
 
-  it('refuses a foreign helper rather than granting it either proof', () => {
-    expect(() => helperAgentMemoryIntentBackend('/opt/byok-agent-memory-fs')).toThrow();
+  itForeignHelper('refuses a foreign helper rather than granting it either proof', () => {
+    const message = process.platform === 'darwin' ? 'SDK release artifact' : 'SDK Agent memory helper is not admitted on this platform';
+    expect(() => helperAgentMemoryIntentBackend('/bin/sh')).toThrow(message);
+  });
+
+  it('retains both native Linux backend proofs', () => {
     expect(NATIVE_AGENT_MEMORY_INTENT_BACKEND).toEqual({ conflictProvesNoRename: true, strictLedgerBarrier: true });
   });
 
@@ -1887,8 +1895,7 @@ describe('WP2I-S2 native descriptor backend (Linux)', () => {
 // macOS helper backend (only with a built helper binary)
 // ===========================================================================
 
-const helperBin = process.platform === 'darwin' ? resolveAgentMemoryFilesystemHelper() : undefined;
-const itHelper = helperBin !== undefined && isAgentMemoryFilesystemHelperSupported() ? it : it.skip;
+
 
 describe('WP2I-S2 macOS SDK helper backend', () => {
   itHelper('applies replace and delete through the real SDK ledger and does not repeat an acknowledged CAS', async () => {

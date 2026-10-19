@@ -1887,7 +1887,9 @@ repeats the parent barrier for existing entries.
 
 The client release carries Darwin arm64 and x64 helpers. The SDK resolves its
 own path and checks the build manifest before each helper open. Arbitrary
-`agentMemoryFilesystem.helperBin` configuration is removed. Builds use Go
+`agentMemoryFilesystem.helperBin` configuration is removed. The ordinary build
+needs no Go. `bun run build:release` builds and verifies native release assets.
+Helper builds use Go
 1.26.5, `CGO_ENABLED=0`, `-buildvcs=false` and `-trimpath`. Product re-signing is
 allowed. The `mach-o-content-v1` digest covers the Mach-O header, load commands
 and file content. It excludes the `LC_CODE_SIGNATURE` blob and command. It

@@ -7,13 +7,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { agentMemoryHelperDigest } from '../daemon/agent-memory-helper-digest';
 import { resolveAgentMemoryFilesystemHelper, verifyAgentMemoryFilesystemHelper } from '../daemon/agent-memory-helper-release';
 import { helperAgentMemoryIntentBackend } from '../daemon/agent-memory-intent';
+import { hasAgentMemoryHelperBuild } from './fixtures/agent-memory-helper-build';
 import { AgentHomeManager } from '../agent-home';
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true }))); });
 const directory = new URL('../../dist/native/agent-memory-fs/', import.meta.url);
 
-describe('SDK Agent memory helper release content digest', () => {
+describe.skipIf(!hasAgentMemoryHelperBuild())('SDK Agent memory helper release content digest', () => {
   it.each(['arm64', 'x64'])('binds the %s image and rejects code, metadata, architecture and format changes', arch => {
     const bytes = readFileSync(new URL(`darwin-${arch}`, directory));
     const manifest = JSON.parse(readFileSync(new URL('manifest.json', directory), 'utf8'));

@@ -383,8 +383,8 @@ async function main() {
   if (frozen) {
     console.log('[release-publish] step 2/8: build skipped — --artifacts releases tarballs that are already packed');
   } else {
-    console.log('[release-publish] step 2/8: bun run build');
-    stream(bunBin, ['run', 'build']);
+    console.log('[release-publish] step 2/8: bun run build:release');
+    stream(bunBin, ['run', 'build:release']);
   }
 
   // --- Step 3: frozen artifacts, packed here or downloaded from CI ---------

@@ -169,6 +169,9 @@ jobs:
       - name: Build needed packages
         run: bun run build
 
+      - name: Build and verify SDK helper release assets
+        run: bun run --filter @byok-sdk/client build:agent-memory-helper
+
       - name: Test Go helper
         working-directory: packages/client/native/agent-memory-fs
         run: GOTOOLCHAIN=go1.26.5 go test -race ./...
@@ -326,6 +329,11 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
+
+      - name: Setup release helper Go toolchain
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: packages/client/native/agent-memory-fs/go.mod
 
       - name: Install dependencies
         run: bun ci
@@ -516,6 +524,11 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
+
+      - name: Setup release helper Go toolchain
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: packages/client/native/agent-memory-fs/go.mod
 
       - name: Install dependencies
         run: bun ci
@@ -1023,6 +1036,11 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
+
+      - name: Setup release helper Go toolchain
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: packages/client/native/agent-memory-fs/go.mod
 
       - name: Install dependencies
         run: bun ci

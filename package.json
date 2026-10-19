@@ -29,7 +29,8 @@
     "check:task-sync": "repo-harness run check-task-sync",
     "check:task-workflow": "repo-harness run check-task-workflow --strict",
     "sync:brain-docs": "repo-harness run sync-brain-docs --all",
-    "test:scripts": "node --test --test-concurrency=1 scripts/api-surface/check-api-surface.test.mjs scripts/api-surface/entry-closure.test.mjs scripts/api-surface/check-version-authority.test.mjs scripts/release/publish.test.mjs scripts/release/beta-release.test.mjs scripts/release/registry-contract.test.mjs scripts/release/registry-npm.test.mjs scripts/release/pack-and-smoke.test.mjs scripts/api-surface/check-provisioning-code-alignment.test.mjs scripts/api-surface/check-oar-bridge.test.mjs scripts/ci/check-tmpdir-leaks.test.mjs scripts/vitest/tmp-root.test.mjs"
+    "test:scripts": "node --test --test-concurrency=1 scripts/api-surface/check-api-surface.test.mjs scripts/api-surface/entry-closure.test.mjs scripts/api-surface/check-version-authority.test.mjs scripts/release/publish.test.mjs scripts/release/beta-release.test.mjs scripts/release/registry-contract.test.mjs scripts/release/registry-npm.test.mjs scripts/release/pack-and-smoke.test.mjs scripts/api-surface/check-provisioning-code-alignment.test.mjs scripts/api-surface/check-oar-bridge.test.mjs scripts/ci/check-tmpdir-leaks.test.mjs scripts/vitest/tmp-root.test.mjs packages/client/scripts/agent-memory-helper-source.test.mjs",
+    "build:release": "bun run build && bun run --filter @byok-sdk/client build:agent-memory-helper"
   },
   "devDependencies": {
     "@types/node": "^24",

@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { createHash } from 'node:crypto';
+import { agentMemoryHelperSourceDigest } from './agent-memory-helper-source.mjs';
 import { agentMemoryHelperDigest } from '../src/daemon/agent-memory-helper-digest.ts';
 
 const source = fileURLToPath(new URL('../native/agent-memory-fs/', import.meta.url));
@@ -19,12 +19,8 @@ for (const [arch, goarch] of [['arm64', 'arm64'], ['x64', 'amd64']]) {
   });
   entries[name] = { file: name, digest: agentMemoryHelperDigest(readFileSync(target), arch) };
 }
-const sourceHash = createHash('sha256');
-for (const name of readdirSync(source).filter(name => (name.endsWith('.go') && !name.endsWith('_test.go')) || name === 'go.mod').sort()) {
-  sourceHash.update(name).update('\0').update(readFileSync(`${source}/${name}`)).update('\0');
-}
 writeFileSync(new URL('manifest.json', output), `${JSON.stringify({
   version: 1, helperVersion: '2', protocol: 2, go: 'go1.26.5', flags,
-  sourceDigest: sourceHash.digest('hex'), signingPolicy: 'product-resigning-allowed',
+  sourceDigest: agentMemoryHelperSourceDigest(source), signingPolicy: 'product-resigning-allowed',
   digestAlgorithm: 'mach-o-content-v1', entries,
 }, null, 2)}\n`);

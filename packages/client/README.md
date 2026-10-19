@@ -331,8 +331,10 @@ Platform behavior is inherited from the daemon path, not restated: Linux uses
 the native descriptor-relative backend. macOS uses the SDK release helper.
 The daemon resolves the binary and checks its Mach-O content digest. Product
 re-signing is allowed. The helper requires strict `F_FULLFSYNC` on the home
-volume. Windows stays fail-closed. Build the SDK from source with Go 1.26.5.
-The client build emits both macOS architectures into `dist/native/agent-memory-fs`.
+volume. Windows stays fail-closed. The ordinary `bun run build` needs no Go.
+Run `bun run build:release` with Go 1.26.5 to build both macOS architectures
+under `dist/native/agent-memory-fs` and verify their source and reproducibility.
+Without these verified assets, a macOS daemon does not offer memory tools.
 
 Runtime dependencies, code-generation evidence and size budgets are recorded in the [entry dependency contract](../../README.md#entry-dependencies).
 

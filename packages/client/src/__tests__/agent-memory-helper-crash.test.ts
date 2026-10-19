@@ -67,6 +67,7 @@ vi.mock('node:child_process', async importOriginal => {
   } };
 });
 
+import { hasAgentMemoryHelperBuild } from './fixtures/agent-memory-helper-build';
 import { AgentHomeManager } from '../agent-home';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import { CursorStore } from '../daemon/cursor-store';
@@ -87,7 +88,7 @@ afterEach(async () => {
 });
 const sha = (value: string) => `sha256:${createHash('sha256').update(value).digest('hex')}`;
 
-describe.skipIf(process.platform !== 'darwin')('SDK helper process-crash boundaries', () => {
+describe.skipIf(process.platform !== 'darwin' || !hasAgentMemoryHelperBuild())('SDK helper process-crash boundaries', () => {
   async function world(operation: 'replace' | 'delete' = 'replace', memoryPath = 'notes/topic.md', options: { root?: string; deviceId?: string } = {}) {
     const root = options.root ?? await fs.mkdtemp(path.join(os.tmpdir(), 'byok-helper-crash-'));
     roots.push(root);

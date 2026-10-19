@@ -32,6 +32,7 @@ describe('Agent memory filesystem helper CI P1 regression', () => {
     expect(helperJob).toContain('go-version-file: packages/client/native/agent-memory-fs/go.mod');
     expect(helperJob).toContain('run: bun ci');
     expect(helperJob).toContain('run: bun run build');
+    expect(helperJob).toContain('run: bun run --filter @byok-sdk/client build:agent-memory-helper');
     expect(helperJob).toContain('working-directory: packages/client/native/agent-memory-fs');
     expect(helperJob).toContain('GOTOOLCHAIN=go1.26.5 go test -race ./...');
     expect(helperJob).toContain('go build -buildvcs=false -trimpath -o "$RUNNER_TEMP/byok-agent-memory-fs" .');

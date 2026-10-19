@@ -335,7 +335,7 @@ try {
   }
   mkdirSync(outDir, { recursive: true });
   run(nodeBin, ['scripts/release/check-package-graph.mjs']);
-  run(bunBin, ['run', 'build']);
+  run(bunBin, ['run', 'build:release']);
   run(nodeBin, ['scripts/api-surface/check-api-surface.mjs']);
   const smokeImports = runtimeSmokeImports(repoRoot);
 
