@@ -1,11 +1,17 @@
 # WO-10 K8a VALIDATION
 
-Status: PASS. Implementation, two review rounds, and required checks are complete.
+当前范围：跨 Bot 委派推迟到 K8b，安排在 #530 和 #531 合入后的第一张工单。
+本轮跨 Bot 代码与测试已撤除（尚未写入，无需 revert）。
+
+Status: recorded local checks passed for the single Bot slice. Full K8a first-row
+acceptance for cross-Bot delegation is deferred to K8b.
 
 ## Scope
 
-This work implements the first K8a row in PRD section 9. It does not measure
-paid Pi submit_result success rate. That work is WO-10b.
+This work implements self continuations and single Bot actions. Delegation to
+other Bots, as specified in platform PRD sections 9.4 and 14.2, is deferred.
+This report does not claim full K8a first-row coverage. Paid Pi submit_result
+success-rate measurement remains separate WO-10b work. The PRD is unchanged.
 
 Environment: macOS, Node `v24.21.0`, Bun `1.4.3`.
 
@@ -23,7 +29,7 @@ Base: WO-05 K4 `e5afad26`.
 | `0cfcc773` | Set the synthetic clock before Host and daemon startup | Not applicable |
 
 Both merges used `--no-ff`. There was no rebase. README and spec text merged
-automatically. No conflict-resolution changes were needed. No push or PR.
+automatically. No conflict-resolution changes were needed.
 
 ## P1 map
 
@@ -104,7 +110,8 @@ The full test command passed on the final source commit. The new example passed
 API surface matched all nine package goldens.
 Version authority passed. Docker-dependent dataplane tests used the repository's
 default skip behavior. No Docker substrate was started for this baseline.
-All later changes in this handoff are documentation only.
+These are historical results for `0cfcc773`. Later acceptance fixes and current
+checks are recorded in `2026-10-19-wo10-acceptance-followup.md`.
 
 WO-10 did not change inherited test assertions. The accepted wake-horizon
 merge carries its own boundary assertion changes. New WO-10 assertions cover
@@ -113,7 +120,8 @@ self budget and hop, four card states, answers, failed outcomes, rejections,
 ordinary schema authority, horizon parity, stable slot identity, snapshots,
 capacity, generation, pause/resume, cancellation, and wake operation order.
 The old K4 boundary test uses WAKE_HORIZON_MS. Its existing assertions now
-exercise 368 days without an assertion change. Its old title still says 366.
+exercise 368 days without an assertion change. The acceptance follow-up
+corrects its title from 366 to 368 without changing the assertions.
 
 ## Independent review
 
@@ -155,10 +163,233 @@ History, version, and audit retention remain product responsibilities.
 
 ## Result
 
-RESULT: DONE. K8a first-row scope is complete. The accepted branches are merged
-locally. There were no merge conflicts. Production example code passed the
+RESULT: the single Bot slice is implemented. Full K8a first-row acceptance
+does not cover cross-Bot delegation, which is deferred to K8b. The accepted
+branches are merged locally. There were no merge conflicts. Production example code passed the
 independent read-only Codex review. All five required checks passed on the
-final source commit. No paid Pi call, rebase, push, PR, or deployment occurred.
+recorded source commit. Those checks do not prove cross-Bot delegation.
+No paid Pi success-rate measurement is claimed.
 
 Local commit chain: `d4530a14`, `eb83465e`, `cd469d6d`, `7bde22c1`, `0cfcc773`.
 The final validation commit contains documentation only.
+
+The earlier ContextPack and K4-import hold is superseded by the latest local
+fix request. K4 already has Draft #532. No restack is performed.
+
+---
+
+## PRODUCT RULINGS 2026-10-19 (doc honesty)
+
+Aimpact approved product rulings that affect K8a collaboration scope. This note is documentation honesty only; no behavior change in this commit.
+
+- History: recent-N truncate by token budget + explicit truncation notice; do not block-when-full.
+- Non-@ messages: background context only; must not trigger a reply.
+- Late-joining Bots: messages after join only.
+- K4: separate Draft PR #532 first; restack this branch onto it afterward; remove squashed K4 copy from #529.
+- Cross-Bot delegation: deferred until after #530+#531 land (first WO of K8b).
+- #525 `BOT_TURN_OUTCOME_LIMITS` remains HOLD pending Aimpact confirm.
+
+## Corrected local scope, 2026-10-19
+
+Cross-Bot delegation is withdrawn from #530 and deferred to the first K8b work
+order after #530 and #531 land. No cross-Bot code or test was written in this
+round, so no revert is needed. Ordinary merge `04d18bdc` syncs origin/main at
+`433deced`; `a1c1226e` stays an ancestor. #531 head `23132486` is not merged.
+
+### P3 package boundary and schema tests
+
+- `host.test.ts`, `acceptance.test.ts`, `wake-retry.test.ts`, `routines.test.ts`:
+  imports now use the K4 package exports. Existing assertions are unchanged.
+  The test fixture is accessed through the package's test-support subpath.
+- New `schema-budget.test.ts`: verify checked-to-flat fallback only for
+  schema-over-budget, Host-defect errors without fallback, all eight routine
+  ids retained, bounded outcome/schema sizes, and a self-only delegate enum.
+- K4 exports expose existing functions only. Its runtime behavior is unchanged.
+
+The new scope permits ContextPack budgets and K4 package exports in this branch.
+The previous PENDING-AIMPACT notes below the historical checks are superseded
+for these two implementation items. No PRD text is changed.
+
+### P2-2 ContextPack tests and policy
+
+- New `context-budget.test.ts` checks the declared recent window, omitted-turn
+  count, outcome summaries, current routine definitions, unseen rejections,
+  UTF-8 overflow blocking, no execution or timer spin while blocked, flat
+  schema overflow blocking, and rejection release after unstarted cancellation.
+- The schema-block integration case asserts block/no intent and retention of
+  authorized ids. Its first draft incorrectly required two composer calls per
+  Host drain. One drain has two sync passes. That incidental call-count check
+  was replaced with semantic assertions. `schema-budget.test.ts` still proves
+  exactly one checked attempt and one flat fallback per schema composition.
+- New `host.test.ts` case uses the real SDK and daemon to check one-time Bot
+  feedback and frozen ContextPack identity. Existing assertions stay unchanged.
+- `routines.test.ts` binds the same horizon equality assertion to the public
+  `WAKE_MAX_FUTURE_MS` name adopted from #523. No numeric expectation changes.
+
+Defaults: 12 recent turns and 32 KiB serialized UTF-8 ContextPack JSON. Selected
+turns carry action-name summaries, not full outcome documents. The window
+reports its omitted count. Only current routine definitions travel. Rejected
+actions are reserved by a frozen input; unstarted terminal failure releases
+that reservation. A pack above its byte cap blocks with a persisted reason.
+Blocked turns do not schedule a retry loop. These limits do not trim strings.
+
+### P2-3 and P2-4 test changes
+
+- `acceptance.test.ts`: strengthen the hung-connector case with a persisted
+  `failed` conclusion. The four card decision states are unchanged. The existing
+  timeout, abort, queued input/answer/decision/wake progress, and late-result
+  assertions stay in place. No earlier expectation is removed.
+- `host.test.ts`: add only the self-continuation crash boundary. A wrapper throws
+  before the real `executions.submit`. The parent outcome marker and child input
+  must already be durable. A new SQLite HostLedger connection and `recover()`
+  must produce one child start, generation zero, and exactly the frozen offer
+  payload. Repeated recovery must not make a second child or submit.
+- No cross-Bot path or test is added. Cross-Bot delegation is withdrawn from
+  this scope and belongs to the first K8b work order after #530 and #531 land.
+
+## Current local-only delivery rules
+
+The corrected synchronization baseline is `04d18bdc` over origin/main
+`433deced`. It contains `a1c1226e`. It does not merge #531 head `23132486`.
+Cross-Bot delegation is withdrawn from #530 and deferred to K8b.
+K4 already has Draft #532. No new K4 PR is suggested or opened.
+The PR body is written only to the requested `_ops/bot-wo/PR-530-body.md`.
+No push, gh pr edit, package source change, or history rewrite is performed.
+Final checks and the audit-to-commit table follow after verification.
+
+### Admission review corrections and test changes
+
+Read-only review found three P2 admission gaps in the first local pass.
+Two new regression tests reproduced them: reducible history still measured
+36,340 bytes and an unchanged 40,000-character blocked request became runnable
+after 13 short inputs. `/tmp/wo10-local-admission-red.log` exited 1.
+
+- New `context-budget.test.ts` cases retain the current candidate in byte
+  accounting after it leaves chronological history, trim only older history
+  with an explicit omission count, cancel a blocked turn idempotently without
+  K4 intent, and settle a blocked routine occurrence so its pending version can
+  activate. No prior assertion is changed. The eight context cases passed in
+  `/tmp/wo10-local-admission-green.log`.
+- The declared 12-turn window is a maximum. Older entries can be omitted to
+  meet the byte budget. Current request and non-history data are not cut.
+  Irreducible overflow remains blocked. This keeps the recorded history ruling
+  while preventing current-request budget bypass.
+- Pre-admission cancellation is an application transaction. It publishes one
+  cancelled owner result. Sync never materializes that terminal turn.
+
+A second read-only review will check these corrections. Cross-Bot delegation
+stays withdrawn and deferred to K8b. No packages/ source is changed.
+
+## Local review result and item map
+
+The second independent read-only Codex review passed at `194fa0bc`.
+All three admission findings are closed. The reviewer also ran 36 in-memory
+counterexamples across candidate positions, turn counts, byte budgets, and
+UTF-8/escaped data. No weakened assertion was found. Final root checks are
+recorded separately below. No extra cross-Bot work is included.
+
+Paths in this table are relative to `examples/bot-collaboration/src` unless
+prefixed with `K4/` or `README`. Baseline commits are named explicitly.
+
+| Review item | Commit | Source | Test |
+| --- | --- | --- | --- |
+| Cross-Bot delegation 已撤除; deferred to K8b | `010ac94c` | `schema.ts:18`; `README.md:4` | `schema-budget.test.ts:28` |
+| P1-2 retry timer ignores blocked followers | baseline `fae8f2d6` | `host.ts:365` | `wake-retry.test.ts:35`, `:60` |
+| P2-1 failed routine does not block another | baseline `fae8f2d6` | `host.ts:282` | `wake-retry.test.ts:35` |
+| P2-2 recent window and byte admission | `4a892e1c`, `194fa0bc` | `schema.ts:36`; `host.ts:202` | `context-budget.test.ts:31`, `:49`, `:95`, `:105` |
+| P2-2 feedback consumption and frozen input | `4a892e1c` | `host.ts:239` | `context-budget.test.ts:78`; `host.test.ts:338` |
+| P2-2 blocked cancellation and routine settlement | `194fa0bc` | `host.ts:169` | `context-budget.test.ts:114`, `:129` |
+| P2-3 bounded connector and failed timeout | baseline `79aad194`, `bfea8795` | `host.ts:318`, `:344` | `acceptance.test.ts:51` |
+| P2-4 self-continuation pre-submit crash | `bfea8795` | `host.ts:235`; K4 frozen execution core | `host.test.ts:360` |
+| P3-1 durable card projection marker | baseline `79aad194` | `host.ts:268` | `acceptance.test.ts:80` |
+| P3-2 successful cancel clears stale retry status | baseline `79aad194` | `host.ts:292` | `wake-retry.test.ts:96` |
+| P3-3 composer checked/flat policy and bounds | `b7c36029`, `4a892e1c` | `schema.ts:15`; `host.ts:222` | `schema-budget.test.ts:9`, `:21`, `:28`; `context-budget.test.ts:63` |
+| P3-4 public K4 package imports | `b7c36029` | `K4/src/index.ts:9`; `host.ts:3` | `host.test.ts:35`; both example suites |
+| P3-5 malformed wake audit and resolve | baseline `79aad194` | `routines.ts:75` | `routines.test.ts:118` |
+| P3-6 documented five-minute wait | `010ac94c` | `README.md:40`; `host.ts:235` | `K4/src/unclaimed-expiry.test.ts:14` |
+| P3-7 context frozen on K4 enqueue | `4a892e1c`, `bfea8795`, `010ac94c` | `host.ts:235`; `README.md:39` | `host.test.ts:338`, `:360` |
+| P3-8 368-day boundary title | baseline `79aad194` | `K4/src/scheduling-recovery.test.ts:44` | Same test; all assertions retained |
+| P3-9 state version guard | baseline `79aad194` | `model.ts:35` | `acceptance.test.ts:128` |
+| Retained action order and decision errors | baseline `79aad194` | `host.ts:80`, `:135` | `acceptance.test.ts:101`, `:112`, `:138` |
+
+Cross-Bot withdrawal is a scope correction, not a pretend implementation or
+an empty revert. It was never written in this local round. packages/ and the
+accepted WO-07/WO-368 source are unchanged from `04d18bdc`.
+
+## Final local verification
+
+Source commit: `194fa0bc489b70c222b6003427cdd77dccb85f10`.
+The following checks all passed on this source. Later edits are documentation
+only. Raw logs and exit records are in `/tmp/wo10-local-final-checks/`.
+
+| Command | Exit | Seconds |
+| --- | --- | --- |
+| `bun run build` | 0 | 11.65 |
+| `bun run typecheck` | 0 | 6.82 |
+| `bun run --cwd examples/bot-collaboration test` | 0 | 24.22 |
+| `bun run --cwd examples/host-execution-core test` | 0 | 30.81 |
+| `bun run test` | 0 | 662.24 |
+| `bun run check:api-surface` | 0 | 7.45 |
+| `bun run check:version-authority` | 0 | 0.09 |
+| `git diff --check` | 0 | Passed |
+
+The explicit Bot suite passed 48/48; K4 passed 38/38. The root test command also
+passed. Nine API goldens match. Version authority passed. Docker-dependent
+dataplane and platform cases retain their original skip conditions. No test
+was disabled to obtain these results.
+
+Local commit sequence: `04d18bdc`, `b7c36029`, `4a892e1c`, `bfea8795`,
+`010ac94c`, `194fa0bc`, plus the final documentation commit.
+The normal main merge is retained. #531 was not merged in reverse.
+
+RESULT: DONE for this authorized local single Bot repair scope.
+Cross-Bot delegation is 已撤除 from #530 and deferred to K8b.
+No paid Pi measurement, push, gh pr edit, rebase, force-push, branch deletion,
+or deployment was performed. The only main-checkout output is the explicitly
+requested ignored `_ops/bot-wo/PR-530-body.md` text file. No tracked main file
+or packages/ source was edited.
+
+## Recent card and question context, 2026-10-19
+
+This section records the later PM ruling for REV-10-round2 P2-A.
+The three fixes at `194fa0bc` remain in place. No history was rewritten.
+Cross-Bot delegation stays withdrawn from #530 and deferred to K8b.
+
+P1 map: `sync()` builds and measures ContextPack before K4 enqueue. The
+`contextPack()` function selects its history. Cards and questions previously
+bypassed that selection and grew with the full application ledger.
+P2 trace: 40 confirmed cards with large drafts and 40 answered questions made
+a small new request blocked. A second probe with pending items produced
+44,479 bytes against a 4,096-byte cap. Both new tests failed on the old code.
+P3 decision: keep the current candidate and the existing frozen-input boundary.
+Select at most `contextTurnLimit` cards and questions each. Prefer pending
+cards and unanswered questions. Keep newer entries within each group. Remove
+settled entries, older turns, then pending entries until the pack fits.
+Report each omitted count. Keep the full ledger records. Do not cut strings.
+The existing UTF-8 cap remains a conservative byte-level token guard. It does
+not claim an exact model token count. Required data still uses the admission
+guard. Card, question, and turn history cannot cause an ordinary full-history
+block after it can be removed.
+
+Test changes and reasons:
+
+1. The existing exact `historyWindow` assertion retains `turnLimit: 3` and
+   `omittedTurns: 17`. It adds four exact zero counters for the new notice
+   fields. No old check is removed or relaxed.
+2. A new real embedded-server and SQLite test seeds 40 confirmed cards,
+   40 answered questions, and old pending entries. It checks K4 admission,
+   the frozen pack byte cap, per-category limits, pending priority, exact
+   omission counts, the candidate id, and unchanged ledger record counts.
+   This test failed with `blocked` on the old implementation.
+3. A new pending-history test uses a 4 KiB cap. It checks the byte cap, the
+   current request, and exact total and pending omission counts. This test
+   failed at 44,479 bytes on the old implementation.
+
+Focused checks: ContextPack 10/10, Bot suite 50/50, K4 suite 38/38, root
+typecheck, and `git diff --check` passed with exit 0. Independent read-only
+Codex review in Herdr `wA:p4R` returned PASS for this new delta. It checked
+18 extra local counterexamples and found no weakened test assertion.
+Red and green evidence: `/tmp/wo10-card-window-red.log` and
+`/tmp/wo10-card-window-green.log`. Suite logs use the same prefix.
+
+No push, gh pr edit, rebase, force-push, or merge-train action was performed.

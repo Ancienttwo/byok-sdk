@@ -1,7 +1,7 @@
 import { open, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createAgentHomeProjectionConsumer } from '@byok-sdk/client';
-import { hash } from '../../host-execution-core/src/model';
+import { hash } from '@byok-sdk/example-host-execution-core';
 
 /** Install on the daemon. SDK supplies the canonical home and writer lease. */
 export function createBotPersonaProjection() {

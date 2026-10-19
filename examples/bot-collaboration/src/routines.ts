@@ -1,8 +1,8 @@
 import { checkRoutineSchedule, nextRoutineOccurrence } from '@byok-sdk/core';
 import type { DueWake } from '@byok-sdk/server';
 import type { CreateRoutineAction, UpdateRoutineAction } from '@byok-sdk/protocol';
-import { hash } from '../../host-execution-core/src/model';
-import { parseRoutineWakeKey } from '../../host-execution-core/src/routines';
+import { hash } from '@byok-sdk/example-host-execution-core';
+import { parseRoutineWakeKey } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState, Definition, Routine, Slot } from './model';
 
 export function operation(state: CollaborationState, routine: Routine, kind: 'schedule' | 'cancel', slot: Slot): void {
@@ -69,9 +69,13 @@ export function lifecycle(state: CollaborationState, routine: Routine, value: Ro
   }
 }
 export function consumeRoutine(state: CollaborationState, wake: DueWake, now: number, addTurn: (id: string, request: string) => void): void {
-  if (state.occurrences[wake.dedupKey]) return;
   const parsed = parseRoutineWakeKey(wake.dedupKey);
   if (!parsed) { state.audit.push(`Invalid routine wake: ${wake.dedupKey.slice(0, 256)}`); return; }
+  if (wake.availableAt !== parsed.at) {
+    state.audit.push(`Wake time differs from reservation: ${wake.dedupKey}`);
+    return;
+  }
+  if (state.occurrences[wake.dedupKey]) return;
   const routine = state.routines[parsed.id];
   const decision = !routine || routine.lifecycle !== 'active' ? 'skipped'
     : routine.armed?.key !== wake.dedupKey ? 'superseded' : routine.inflight.length >= 2 ? 'capacity' : 'run';
@@ -79,7 +83,6 @@ export function consumeRoutine(state: CollaborationState, wake: DueWake, now: nu
     deliveredAt: wake.deliveredAt, decision, trigger: wake.deliveredAt - parsed.at > 60_000 ? 'catch_up' as const : 'scheduled' as const,
     settled: decision !== 'run' };
   if (!routine || decision === 'skipped' || decision === 'superseded') return;
-  if (wake.availableAt !== parsed.at) throw new Error('Wake time differs from reservation');
   routine.armed = null;
   if (decision === 'run') {
     const definition = structuredClone(routine.versions[parsed.version]!);

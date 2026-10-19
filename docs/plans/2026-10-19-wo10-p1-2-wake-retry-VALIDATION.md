@@ -1,5 +1,8 @@
 # WO-10 P1-2 wake retry validation
 
+当前范围：跨 Bot 委派推迟到 K8b，安排在 #530 和 #531 合入后的第一张工单。
+本轮跨 Bot 代码与测试已撤除（尚未写入，无需 revert）。
+
 Scope: P1-2 only, from `_ops/bot-wo/REV-batch2-claude.md`.
 Base: `56a4df05`. Branch: `codex/k8a-bot-collaboration`.
 Cross-Bot delegation (P1-1) stays deferred and unchanged.

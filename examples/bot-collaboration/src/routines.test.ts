@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { WAKE_MAX_FUTURE_MS } from '@byok-sdk/server';
 import { ROUTINE_HORIZON_MS } from '@byok-sdk/core';
-import { WAKE_HORIZON_MS } from '../../host-execution-core/src/routines';
+import { WAKE_HORIZON_MS } from '@byok-sdk/example-host-execution-core';
 import { stateOf } from './model';
 import { arm, consumeRoutine, createRoutine, lifecycle, updateRoutine } from './routines';
 import { outcomeSchema } from './schema';
@@ -113,4 +113,17 @@ it('rejects empty updates and stores duplicate weekdays as a set', () => {
   expect(routine).toMatchObject({ current: 1, pending: null, generation: 1 });
   updateRoutine(state, 'main', { routineId: routine.id, schedule: { ...schedule, daysOfWeek: ['mon', 'mon'] } }, now);
   expect(routine.versions[2]?.schedule).toEqual({ ...schedule, daysOfWeek: ['mon'] });
+});
+
+it('audits a mismatched wake time without poisoning the slot or rejecting delivery', () => {
+  const { state, routine } = setup();
+  const slot = routine.armed!;
+  let turns = 0;
+  const wake = { wakeId: 'mismatch', dedupKey: slot.key, availableAt: slot.at + 1, deliveredAt: slot.at, delivery: 1 };
+  expect(() => consumeRoutine(state, wake, slot.at, () => { turns++; })).not.toThrow();
+  expect(state.audit).toContain(`Wake time differs from reservation: ${slot.key}`);
+  expect(Object.values(state.occurrences)).toEqual([]);
+  expect(routine.armed).toEqual(slot);
+  consumeRoutine(state, { ...wake, availableAt: slot.at }, slot.at, () => { turns++; });
+  expect(turns).toBe(1);
 });

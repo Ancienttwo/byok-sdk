@@ -1,5 +1,5 @@
 import type { AgentHomeProjectionRequest } from '@byok-sdk/server';
-import type { ExecutionTemplate } from '../../host-execution-core/src/model';
+import type { ExecutionTemplate } from '@byok-sdk/example-host-execution-core';
 
 export interface BotProfile {
   id: string; name: string; role: string; persona: string; model: string;

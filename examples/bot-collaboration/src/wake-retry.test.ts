@@ -3,9 +3,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createByokServer } from '@byok-sdk/server';
-import type { ExecutionServer } from '../../host-execution-core/src/core';
-import { HostLedger } from '../../host-execution-core/src/ledger';
-import { template } from '../../host-execution-core/src/test-support';
+import type { ExecutionServer } from '@byok-sdk/example-host-execution-core';
+import { HostLedger } from '@byok-sdk/example-host-execution-core';
+import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration } from './host';
 import { stateOf } from './model';
 import { createRoutine } from './routines';
@@ -91,4 +91,21 @@ it('keeps a failed cancel ahead of its schedule without letting that blocked sch
   expect(transactions.mock.calls.length).toBeLessThanOrEqual(10);
   expect(bot.snapshot().operations.every(o => o.state !== 'pending')).toBe(true);
   expect((await server.wakes.pending()).map(w => w.dedupKey)).toEqual([armedKey]);
+});
+
+it('clears schedule_retrying after a completed routine cancellation succeeds on retry', async () => {
+  let fail = true;
+  await setup(server => ({ ...server, wakes: { ...server.wakes, cancel: async key => {
+    if (fail) throw new Error('cancel unavailable');
+    return server.wakes.cancel(key);
+  } } }));
+  const id = addRoutine('cancel-recovery');
+  await bot.drain();
+  await bot.setRoutineLifecycle(id, 'completed');
+  expect(bot.snapshot().routines[id]!.status).toBe('schedule_retrying');
+  fail = false;
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(bot.snapshot().routines[id]).toMatchObject({ lifecycle: 'completed', status: 'ok' });
+  expect(bot.snapshot().operations.every(o => o.state !== 'pending')).toBe(true);
+  expect(await server.wakes.pending()).toEqual([]);
 });

@@ -1,7 +1,7 @@
 import type { ByokServer } from '@byok-sdk/server';
-import { HostLedger } from '../../host-execution-core/src/ledger';
+import { HostLedger } from '@byok-sdk/example-host-execution-core';
 import { stateOf, json } from './model';
-import { project } from '../../host-execution-core/src/model';
+import { project } from '@byok-sdk/example-host-execution-core';
 import { projectionRequestId, same } from './team';
 
 export type HomeServer = Partial<Pick<ByokServer, 'enqueueAgentHomeProjection' | 'readAgentHomeProjection'>>;

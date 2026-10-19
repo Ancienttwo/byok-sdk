@@ -1,5 +1,5 @@
 import type { BotTurnOutcome } from '@byok-sdk/protocol';
-import { hash, type LedgerState } from '../../host-execution-core/src/model';
+import { hash, type LedgerState } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState, Turn } from './model';
 import type { Round, Seat, TeamState } from './team-model';
 import { activeBot, same, roomVisibility } from './team';
@@ -138,13 +138,13 @@ export function advanceRooms(s: LedgerState, state: CollaborationState, now: num
     add(seat.id, seat.botId, JSON.stringify({ roomId: round.roomId, roundId: round.id, request: message?.text, requestFrom: message?.from }));
   }
 }
-export function roomContext(team: TeamState, turn: Turn) {
+export function roomContext(team: TeamState, turn: Turn, turnLimit = ROOM_CONTEXT_MESSAGES) {
   const seat = team.seats[turn.id];
   if (!seat) throw new Error('Room seat not found');
   const round = team.rounds[seat.roundId]!, room = team.rooms[round.roomId]!;
   const visible = room.messages.slice(room.visibleFrom?.[seat.botId] ?? room.messages.length);
-  const messages = visible.slice(-ROOM_CONTEXT_MESSAGES);
-  return { historyWindow: historyWindow('messages', visible.length - messages.length),
+  const messages = visible.slice(-turnLimit);
+  return { historyWindow: historyWindow('messages', visible.length - messages.length, turnLimit),
     room: { id: room.id, name: room.name, members: room.members, announcement: room.announcement,
       visibility: 'after_join' as const, messages },
     round: { id: round.id, limit: round.limit, counts: round.counts }, seat: { id: seat.id, deadline: seat.deadline } };

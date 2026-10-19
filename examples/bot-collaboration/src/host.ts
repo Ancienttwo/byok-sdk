@@ -1,11 +1,11 @@
 import type { BotTurnOutcome, ResultSchema, UpdateRoutineAction } from '@byok-sdk/protocol';
-import { BOT_TURN_OUTCOME_CONTRACT, validateResultOutcome } from '@byok-sdk/protocol';
+import { BOT_TURN_OUTCOME_CONTRACT, BotTurnOutcomeSchemaError, validateResultOutcome } from '@byok-sdk/protocol';
 import type { DueWake } from '@byok-sdk/server';
-import { HostExecutionCore, type ExecutionServer, type OutcomeTransaction } from '../../host-execution-core/src/core';
-import { HostLedger } from '../../host-execution-core/src/ledger';
-import { hash, project, time, type ExecutionTemplate, type Json, type LedgerState } from '../../host-execution-core/src/model';
-import { enqueue } from '../../host-execution-core/src/transitions';
-import { WAKE_HORIZON_MS } from '../../host-execution-core/src/routines';
+import { HostExecutionCore, type ExecutionServer, type OutcomeTransaction } from '@byok-sdk/example-host-execution-core';
+import { HostLedger } from '@byok-sdk/example-host-execution-core';
+import { hash, project, time, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import { enqueue } from '@byok-sdk/example-host-execution-core';
+import { WAKE_HORIZON_MS } from '@byok-sdk/example-host-execution-core';
 import { json, stateOf, type CollaborationState, type Routine, type Turn } from './model';
 import { turnContext, outcomeSchema, SYSTEM_PROMPT, ROOM_SYSTEM_PROMPT } from './schema';
 import { arm, consumeRoutine, createRoutine, lifecycle, operation, owned, switchVersion, updateRoutine } from './routines';
@@ -14,13 +14,18 @@ import { activeBot, applyManagement, roomFields, updateBot, roomVisibility } fro
 import { advanceRooms, applySpeech, memberPresent, roomInput, type Mentions } from './rooms';
 import type { RoomFields } from '@byok-sdk/protocol';
 
+import { CurrentRequestTooLargeError, HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS } from './history';
 import { flushHomes, type HomeServer } from './home-projections';
 export interface BotOptions {
   botId: string; execution: ExecutionTemplate; now?: () => number;
   /** Host-owned model templates. New Bots stay on the selected template's device. */
   models?: Record<string, ExecutionTemplate>;
   /** Must deduplicate by id. A committed confirmation can be replayed after a crash. */
-  connector: (id: string, action: string, draft: Json) => Promise<Json>;
+  connector: (id: string, action: string, draft: Json, signal: AbortSignal) => Promise<Json>;
+  /** The Host also enforces this limit when a connector ignores cancellation. */
+  connectorTimeoutMs?: number;
+  contextMaxBytes?: number;
+  contextTurnLimit?: number;
 }
 
 /** Copy-and-own Host example. Use one instance per ledger tenant. */
@@ -30,10 +35,18 @@ export class BotCollaboration {
   private timer?: ReturnType<typeof setTimeout>;
   private closed = false;
   private readonly now: () => number;
+  private readonly connectorTimeoutMs: number;
+  private readonly contextMaxBytes: number;
+  private readonly contextTurnLimit: number;
   constructor(readonly server: ExecutionServer & HomeServer, readonly ledger: HostLedger, private readonly options: BotOptions) {
     if (!options.botId || options.execution.payload.agentRef.agentId !== options.botId) throw new Error('Select this Bot Agent');
     if (options.execution.payload.requiredToolsets?.length) throw new Error('Bot executions cannot have connector toolsets');
     this.now = () => time((options.now ?? Date.now)());
+    this.connectorTimeoutMs = time(options.connectorTimeoutMs ?? 30_000);
+    if (this.connectorTimeoutMs < 1 || this.connectorTimeoutMs > 2_147_483_647) throw new Error('Invalid connector timeout');
+    this.contextMaxBytes = time(options.contextMaxBytes ?? HISTORY_MAX_BYTES);
+    this.contextTurnLimit = time(options.contextTurnLimit ?? HISTORY_MAX_ITEMS);
+    if (this.contextMaxBytes < 1 || this.contextTurnLimit < 1) throw new Error('Invalid ContextPack limits');
     this.core = new HostExecutionCore(server, ledger, { now: this.now, reconcileMs: 100,
       applyOutcome: (document, tx) => this.applyOutcome(document, tx) });
     ledger.transaction(s => {
@@ -95,6 +108,26 @@ export class BotCollaboration {
       if (seat) throw new Error('Room seats cannot manage the team');
       work();
     }));
+    outcome.create_routine?.forEach((action, index) => accept('create_routine', () => {
+      createRoutine(state, turn.botId, tx.intent.taskId, index, action, this.now());
+    }));
+    outcome.update_routine?.forEach(action => accept('update_routine', () => updateRoutine(state, turn.botId, action, this.now())));
+    outcome.cancel_routine?.forEach(action => accept('cancel_routine', () => {
+      lifecycle(state, owned(state, turn.botId, action.routineId), 'completed', this.now());
+    }));
+    outcome.confirmable_action?.forEach((action, index) => {
+      const id = hash([tx.intent.taskId, 'confirmable_action', index]);
+      state.cards[id] = { id, turnId: turn.id, action: { action: action.action, summary: action.summary, draft: json(action.draft) },
+        state: 'pending', expiresAt: this.now() + 86_400_000 };
+      tx.publish(`card:${id}`, json(state.cards[id]));
+    });
+    if (outcome.ask_user) accept('ask_user', () => {
+      const question = outcome.ask_user!;
+      if (question.answerKind === 'single_choice' && new Set(question.options.map(o => o.id)).size !== question.options.length) throw new Error('Duplicate option id');
+      const id = hash([tx.intent.taskId, 'ask_user']);
+      state.questions[id] = { id, turnId: turn.id, value: question };
+      tx.publish(`question:${id}`, json(state.questions[id]));
+    });
     const delegated = new Set<string>();
     outcome.delegate?.forEach((action, index) => accept('delegate', () => {
       if (action.to !== turn.botId) throw new Error('Target is not this Bot');
@@ -106,27 +139,8 @@ export class BotCollaboration {
       // This single Bot schema only offers self. Hop and delegation stay unchanged.
       this.addTurn(state, hash([tx.intent.taskId, 'delegate', index]), turn.root, 'continuation', action.request, turn.botId);
     }));
-    if (outcome.ask_user) accept('ask_user', () => {
-      const question = outcome.ask_user!;
-      if (question.answerKind === 'single_choice' && new Set(question.options.map(o => o.id)).size !== question.options.length) throw new Error('Duplicate option id');
-      const id = hash([tx.intent.taskId, 'ask_user']);
-      state.questions[id] = { id, turnId: turn.id, value: question };
-      tx.publish(`question:${id}`, json(state.questions[id]));
-    });
-    outcome.confirmable_action?.forEach((action, index) => {
-      const id = hash([tx.intent.taskId, 'confirmable_action', index]);
-      state.cards[id] = { id, turnId: turn.id, action: { action: action.action, summary: action.summary, draft: json(action.draft) },
-        state: 'pending', expiresAt: this.now() + 86_400_000 };
-      tx.publish(`card:${id}`, json(state.cards[id]));
-    });
-    outcome.create_routine?.forEach((action, index) => accept('create_routine', () => {
-      createRoutine(state, turn.botId, tx.intent.taskId, index, action, this.now());
-    }));
-    outcome.update_routine?.forEach(action => accept('update_routine', () => updateRoutine(state, turn.botId, action, this.now())));
-    outcome.cancel_routine?.forEach(action => accept('cancel_routine', () => {
-      lifecycle(state, owned(state, turn.botId, action.routineId), 'completed', this.now());
-    }));
   }
+
   /** Owner API. Advance the desired revision after a rejected persona delivery. */
   async retryPersona(botId: string): Promise<void> {
     await this.exclusive(async () => {
@@ -191,13 +205,16 @@ export class BotCollaboration {
   }
   async decide(id: string, decision: 'confirmed' | 'rejected'): Promise<void> {
     await this.exclusive(async () => {
-      this.ledger.transaction(s => {
+      const error = this.ledger.transaction(s => {
         const state = stateOf(s.application), card = state.cards[id];
         if (!card) throw new Error('Card not found');
-        if (card.state !== 'pending') return;
-        card.state = this.now() >= card.expiresAt ? 'expired' : decision;
+        if (card.state === 'pending' && this.now() >= card.expiresAt) card.state = 'expired';
+        if (card.state === 'expired') return 'Card expired';
+        if (card.state !== 'pending') return card.state === decision ? undefined : `Card already ${card.state}`;
+        card.state = decision;
       });
       await this.process();
+      if (error) throw new Error(error);
     });
   }
   async setRoutineLifecycle(id: string, value: Routine['lifecycle']): Promise<void> {
@@ -230,8 +247,19 @@ export class BotCollaboration {
   drain(): Promise<void> { return this.exclusive(() => this.process()); }
   cancelTurn(id: string): Promise<void> {
     return this.exclusive(async () => {
-      if (!this.snapshot().turns[id]) throw new Error('Turn not found');
-      await this.core.cancel(id);
+      const admitted = this.ledger.transaction(s => {
+        const turn = stateOf(s.application).turns[id];
+        if (!turn) throw new Error('Turn not found');
+        if (s.intents[hash(id)]) return true;
+        if (!turn.conclusion) {
+          turn.status = 'failed'; turn.conclusion = 'cancelled';
+          delete turn.blockedReason;
+          project(s, `bot-turn:${id}`, json({ owner: turn.botId, ...turn }));
+          turn.reported = true;
+        }
+        return false;
+      });
+      if (admitted) await this.core.cancel(id);
       await this.process();
     });
   }
@@ -251,15 +279,27 @@ export class BotCollaboration {
       await this.process();
     });
   }
+  private blockTurn(state: LedgerState, turn: Turn, reason: string): void {
+    if (turn.blockedReason !== reason) project(state, `blocked:${turn.id}`, {
+      owner: turn.botId, turnId: turn.id, reason,
+    });
+    const seat = stateOf(state.application).team.seats[turn.id];
+    if (seat) { seat.status = 'blocked'; seat.released = true; seat.reason = reason; }
+    turn.status = 'blocked'; turn.blockedReason = reason;
+  }
   private sync(s: LedgerState): boolean {
     const state = stateOf(s.application);
+    // Refresh passive state before any new offer freezes its ContextPack.
+    for (const card of Object.values(state.cards)) {
+      if (card.state === 'pending' && this.now() >= card.expiresAt) card.state = 'expired';
+    }
     let materialized = false;
     advanceRooms(s, state, this.now(), (id, botId, request) => this.addTurn(state, id, id, 'room_slot', request, botId));
     for (const turn of Object.values(state.turns)) {
       const intent = s.intents[hash(turn.id)];
       const bot = state.team.bots[turn.botId];
       if (!intent && bot?.archived) { turn.status = 'failed'; turn.conclusion = 'cancelled'; }
-      if (!intent && (turn.status === 'failed' || turn.blocked)) continue;
+      if (!intent && (turn.conclusion || turn.source === 'room_slot' && state.team.seats[turn.id]?.status === 'blocked')) continue;
       if (intent && bot?.archived && !s.executions[intent.taskId]?.started && !intent.conclusion) intent.cancelReason = 'cancelled';
       if (!intent) {
         if (!bot || bot.readyRevision !== bot.revision) {
@@ -274,15 +314,15 @@ export class BotCollaboration {
           continue;
         }
         delete turn.profileFailure;
-        let schema: ResultSchema, context: unknown;
+        let schema: ResultSchema, context: ReturnType<typeof turnContext>;
         try {
           schema = outcomeSchema(turn.botId, state, turn, Object.keys(this.models()));
-          context = turnContext(state, turn);
+          context = turnContext(state, turn, this.contextTurnLimit, this.contextMaxBytes);
         } catch (error) {
-          turn.blocked = String(error instanceof Error ? error.message : error);
-          const seat = state.team.seats[turn.id];
-          if (seat) { seat.status = 'blocked'; seat.released = true; seat.reason = turn.blocked; }
-          project(s, `blocked:${turn.id}`, json({ turnId: turn.id, reason: turn.blocked }));
+          if (error instanceof BotTurnOutcomeSchemaError && error.code === 'schema-over-budget') {
+            this.blockTurn(s, turn, `Outcome schema over budget after flat fallback: ${error.message}`);
+          } else if (error instanceof CurrentRequestTooLargeError) this.blockTurn(s, turn, error.message);
+          else throw error;
           continue;
         }
         state.schemas[turn.id] = schema;
@@ -293,9 +333,14 @@ export class BotCollaboration {
             instruction: `${turn.source === 'room_slot' ? ROOM_SYSTEM_PROMPT : SYSTEM_PROMPT}\n\nRequest:\n${turn.request}\n\nContextPack:\n${JSON.stringify(context)}`,
             terminalProjection: { mode: 'result-document', contract: BOT_TURN_OUTCOME_CONTRACT, schema },
           } } });
+        for (const rejection of context.rejectedActions) rejection.consumedBy = turn.id;
+        delete turn.blockedReason;
         turn.status = 'processing';
         materialized = true;
       } else if (intent.conclusion) {
+        if (intent.conclusion !== 'succeeded' && !s.executions[intent.taskId]!.started) {
+          for (const rejection of state.rejected) if (rejection.consumedBy === turn.id) delete rejection.consumedBy;
+        }
         turn.status = intent.conclusion === 'succeeded' ? 'succeeded' : 'failed';
         turn.conclusion = intent.conclusion;
         if (!turn.reported) {
@@ -316,11 +361,15 @@ export class BotCollaboration {
         && !(routine.armed && routine.armed.at <= this.now())) switchVersion(state, routine, this.now());
     }
     for (const card of Object.values(state.cards)) {
-      if (card.state === 'pending' && this.now() >= card.expiresAt) card.state = 'expired';
       if (card.state !== 'pending' && (card.state !== 'confirmed' || card.result !== undefined || card.error !== undefined)) {
-        project(s, `card:${card.id}:${card.state}`, json(card));
+        if (!card.decisionReported) {
+          project(s, `card:${card.id}:${card.state}`, json(card));
+          card.decisionReported = true;
+        }
+        // Passive expiry is visible in ContextPack. It cannot start a paid turn.
+        if (card.state === 'expired') continue;
         const root = state.turns[card.turnId]!.root;
-        this.addTurn(state, hash(['action_result', card.id]), root, 'action_result', JSON.stringify({ cardId: card.id, state: card.state, result: card.result, error: card.error }), state.turns[card.turnId]!.botId);
+        this.addTurn(state, hash(['action_result', card.id]), root, 'action_result', JSON.stringify({ cardId: card.id, state: card.state, conclusion: card.conclusion, result: card.result, error: card.error }), state.turns[card.turnId]!.botId);
       }
     }
     return materialized;
@@ -348,7 +397,9 @@ export class BotCollaboration {
         this.ledger.transaction(s => {
           const state = stateOf(s.application), row = state.operations.find(o => o.sequence === op.sequence)!;
           row.state = 'done'; delete row.retryAt;
-          if (op.kind === 'schedule') state.routines[op.routineId]!.status = 'ok';
+          const routine = state.routines[op.routineId]!;
+          const retrying = state.operations.some(o => o.routineId === op.routineId && o.state === 'pending' && o.retryAt !== undefined);
+          if (!retrying && (op.kind === 'schedule' || routine.status === 'schedule_retrying')) routine.status = 'ok';
         });
       } catch (error) {
         this.ledger.transaction(s => {
@@ -361,15 +412,33 @@ export class BotCollaboration {
       }
     }
   }
+  private async callConnector(card: CollaborationState['cards'][string]): Promise<Json> {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        const error = new Error('Connector timed out; external outcome is unknown');
+        controller.abort(error);
+        reject(error);
+      }, this.connectorTimeoutMs);
+    });
+    try {
+      return json(await Promise.race([
+        Promise.resolve().then(() => this.options.connector(card.id, card.action.action, card.action.draft, controller.signal)),
+        deadline,
+      ]));
+    } finally { clearTimeout(timer); }
+  }
   private async flushCards(): Promise<void> {
     for (const card of Object.values(this.snapshot().cards)) {
       if (card.state !== 'confirmed' || card.result !== undefined || card.error !== undefined) continue;
       let result: Json | undefined, error: string | undefined;
-      try { result = json(await this.options.connector(card.id, card.action.action, card.action.draft)); }
+      try { result = await this.callConnector(card); }
       catch (cause) { error = String(cause instanceof Error ? cause.message : cause).slice(0, 1024); }
       this.ledger.transaction(s => {
         const row = stateOf(s.application).cards[card.id]!;
         if (error !== undefined) row.error = error; else row.result = result!;
+        row.conclusion = error === undefined ? 'succeeded' : 'failed';
       });
     }
   }
@@ -388,8 +457,8 @@ export class BotCollaboration {
       // Drain to a fixed point, so no application-only turn can lose its wake.
       const state = stateOf(ledger.application);
       more = admitted || materialized || Object.values(ledger.intents).some(intent => intent.phase === 'queued' && intent.cancelReason && !intent.conclusion)
-        || Object.values(state.turns).some(turn => !ledger.intents[hash(turn.id)] && !turn.blocked
-        && turn.status !== 'failed' && !state.team.bots[turn.botId]?.archived
+        || Object.values(state.turns).some(turn => !turn.conclusion && !ledger.intents[hash(turn.id)] && turn.status !== 'blocked'
+        && turn.status !== 'failed' && !!state.team.bots[turn.botId] && !state.team.bots[turn.botId]!.archived
         && state.team.bots[turn.botId]?.readyRevision === state.team.bots[turn.botId]?.revision);
     } while (more);
     clearTimeout(this.timer);

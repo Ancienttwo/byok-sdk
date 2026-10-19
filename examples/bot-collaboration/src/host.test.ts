@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { HostLedger } from '../../host-execution-core/src/ledger';
-import { openHost, template, type TestHost } from '../../host-execution-core/src/test-support';
-import type { ExecutionServer } from '../../host-execution-core/src/core';
+import { HostLedger } from '@byok-sdk/example-host-execution-core';
+import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
+import type { ExecutionServer } from '@byok-sdk/example-host-execution-core';
 import { BotCollaboration, type BotOptions } from './host';
 import { contextPack } from './schema';
 import { stateOf } from './model';
@@ -79,7 +79,7 @@ it('returns ask_user answers and keeps rejected and expired cards free of connec
   const cards = Object.values(bot.snapshot().cards);
   await bot.decide(cards[0]!.id, 'rejected');
   now += 86_400_001;
-  await bot.decide(cards[1]!.id, 'confirmed');
+  await expect(bot.decide(cards[1]!.id, 'confirmed')).rejects.toThrow('Card expired');
   expect(bot.snapshot().cards[cards[0]!.id]!.state).toBe('rejected');
   expect(bot.snapshot().cards[cards[1]!.id]!.state).toBe('expired');
   expect(connector).not.toHaveBeenCalled();
@@ -333,4 +333,62 @@ it('replays the same connector key after an external effect and a failed SQLite 
   const result = Object.values(bot.snapshot().turns).find(t => t.source === 'action_result')!;
   expect(result.request).toContain('external-1');
   await finish(result.id);
+});
+
+it('delivers rejected feedback to the Bot once while preserving the first frozen ContextPack', async () => {
+  await setup();
+  const root = await bot.input('feedback-root', 'Create a report');
+  await finish(root, { create_routine: [{ localId: 'new_routine_1', schedule: { hour: 9, minute: 0, dayOfMonth: 31, month: 4, tz: 'UTC' }, prompt: 'invalid' }],
+    delegate: [{ to: 'main', request: 'Explain the refusal' }] });
+  const child = Object.values(bot.snapshot().turns).find(t => t.source === 'continuation')!;
+  const task = bot.core.intent(child.id)!.taskId;
+  const frozen = structuredClone(fixture.ledger.snapshot().executions[task]!.input);
+  const firstContext = JSON.parse(String(frozen.payload.instruction).split('\n\nContextPack:\n')[1]!);
+  expect(firstContext.rejectedActions[0].reason).toContain('schedule_unreachable');
+  expect(bot.snapshot().rejected[0]!.consumedBy).toBe(child.id);
+  await finish(child.id);
+  await vi.waitFor(() => expect(fixture.daemon.status().activeTaskCount).toBe(0), { timeout: 5000 });
+  fixture.ledger.transaction(s => { stateOf(s.application).rejected.push({ botId: 'main', taskId: 'new-policy', action: 'delegate', reason: 'new-feedback' }); });
+  const next = await bot.input('feedback-next', 'What changed?');
+  const input = fixture.ledger.snapshot().executions[bot.core.intent(next)!.taskId]!.input;
+  const nextContext = JSON.parse(String(input.payload.instruction).split('\n\nContextPack:\n')[1]!);
+  expect(nextContext.rejectedActions.map((r: { reason: string }) => r.reason)).toEqual(['new-feedback']);
+  expect(fixture.ledger.snapshot().executions[task]!.input).toEqual(frozen);
+  await finish(next);
+});
+
+it('recovers one self continuation from a durable pre-submit failure with the same frozen input', async () => {
+  let failBeforeSubmit = false;
+  let blockedCalls = 0;
+  const options = await setup({}, server => ({ ...server, executions: { submit: async input => {
+    if (failBeforeSubmit) { blockedCalls++; throw new Error('crash boundary before executions.submit'); }
+    return server.executions.submit(input);
+  } } }));
+  const submit = vi.spyOn(fixture.server.executions, 'submit');
+  const root = await bot.input('pre-submit-parent', 'Continue this work');
+  failBeforeSubmit = true;
+  await finish(root, { delegate: [{ to: 'main', request: 'Recover this continuation' }] });
+  const child = Object.values(bot.snapshot().turns).find(turn => turn.source === 'continuation')!;
+  const intent = bot.core.intent(child.id)!;
+  const frozen = structuredClone(fixture.ledger.snapshot().executions[intent.taskId]!.input);
+  expect(blockedCalls).toBeGreaterThan(0);
+  expect(await fixture.server.tasks.offer(intent.taskId)).toBeUndefined();
+  expect(submit.mock.calls.filter(([input]) => input.taskId === intent.taskId)).toHaveLength(0);
+  expect(fixture.ledger.snapshot().applied[bot.core.intent(root)!.taskId]).toBe(true);
+  await vi.waitFor(() => expect(fixture.daemon.status().activeTaskCount).toBe(0), { timeout: 5000 });
+  await bot.close();
+  extra = new HostLedger(`${fixture.root}/host.sqlite`, fixture.ledger.tenant);
+  bot = new BotCollaboration(fixture.server, extra, options);
+  await bot.recover();
+  await running(child.id);
+  const offer = await fixture.server.tasks.offer(intent.taskId);
+  expect(offer).toMatchObject({ taskId: frozen.taskId, deviceId: frozen.deviceId });
+  expect(offer!.payload).toEqual(frozen.payload);
+  expect(extra.snapshot().executions[intent.taskId]!.input).toEqual(frozen);
+  await finish(child.id);
+  await Promise.all([bot.recover(), bot.recover()]);
+  expect(bot.core.intent(child.id)!.generation).toBe(0);
+  expect(fixture.adapter.starts.filter(start => start.manifest.taskId === intent.taskId)).toHaveLength(1);
+  expect(submit.mock.calls.filter(([input]) => input.taskId === intent.taskId)).toHaveLength(1);
+  expect(Object.values(bot.snapshot().turns).filter(turn => turn.source === 'continuation')).toHaveLength(1);
 });

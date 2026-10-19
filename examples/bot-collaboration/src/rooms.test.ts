@@ -1,10 +1,11 @@
 import { expect, it } from 'vitest';
-import { hash, type LedgerState } from '../../host-execution-core/src/model';
-import { template } from '../../host-execution-core/src/test-support';
+import { hash, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { stateOf, type Turn } from './model';
 import { advanceRooms, applySpeech, roomInput, ROOM_GRACE_MS } from './rooms';
 import { applyManagement, roomFields } from './team';
 import { outcomeSchema, turnContext } from './schema';
+import { HISTORY_MAX_BYTES } from './history';
 import { validateResultOutcome } from '@byok-sdk/protocol';
 
 function setup(count = 3, admin?: string) {
@@ -144,7 +145,7 @@ it('windows excess room history with a notice and keeps other Bots private turns
   expect(windowed.room.messages.at(-1)!.id).toBe('100');
   expect(windowed.historyWindow).toMatchObject({ omittedMessages: 1, metadataOverBudget: false });
   expect(windowed.historyWindow.notice).toContain('Earlier history was omitted');
-  expect(Buffer.byteLength(JSON.stringify(windowed), 'utf8')).toBeLessThanOrEqual(65536);
+  expect(Buffer.byteLength(JSON.stringify(windowed), 'utf8') + Buffer.byteLength(turn.request, 'utf8')).toBeLessThanOrEqual(HISTORY_MAX_BYTES);
   expect(state.team.rooms.r!.messages).toHaveLength(101);
   state.team.rooms.r!.messages = [{ id: 'huge', from: 'user', text: 'x'.repeat(65536), late: false }];
   const byteWindow = turnContext(state, turn);
@@ -152,7 +153,7 @@ it('windows excess room history with a notice and keeps other Bots private turns
   expect(byteWindow.room.messages).toEqual([]);
   expect(byteWindow.historyWindow.omittedMessages).toBe(1);
   expect(byteWindow.historyWindow.notice).toContain('Earlier history was omitted');
-  expect(Buffer.byteLength(JSON.stringify(byteWindow), 'utf8')).toBeLessThanOrEqual(65536);
+  expect(Buffer.byteLength(JSON.stringify(byteWindow), 'utf8') + Buffer.byteLength(turn.request, 'utf8')).toBeLessThanOrEqual(HISTORY_MAX_BYTES);
   expect(state.team.rooms.r!.messages[0]!.text).toHaveLength(65536);
 });
 

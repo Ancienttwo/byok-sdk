@@ -1,6 +1,6 @@
 export { BotCollaboration } from './host';
 export type { BotOptions } from './host';
-export { SYSTEM_PROMPT, contextPack, outcomeSchema } from './schema';
+export { SYSTEM_PROMPT, contextPack, outcomeSchema, DEFAULT_CONTEXT_MAX_BYTES, DEFAULT_CONTEXT_TURN_LIMIT } from './schema';
 export type { Card, CollaborationState, Definition, Occurrence, Routine, Turn } from './model';
 export type { BotProfile, Room, Round, Seat, TeamState } from './team-model';
 export { ROOM_GRACE_MS, ROOM_CONTEXT_BYTES, ROOM_CONTEXT_MESSAGES } from './rooms';

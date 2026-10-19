@@ -178,7 +178,7 @@ it('rechecks Main Bot role and lets a seat speak after history selection adds a 
   const round = await host().roomInput('over-context', room.id, 'This makes 101 entries', [profiles[1]!.id]);
   const seat = seats(round)[0]!;
   await running(seat.id);
-  expect(host().snapshot().turns[seat.id]).not.toHaveProperty('blocked');
+  expect(host().snapshot().turns[seat.id]).not.toHaveProperty('blockedReason');
   const offer = await fixture.server.tasks.offer(host().core.intent(seat.id)!.taskId);
   if (!offer || !('instruction' in offer.payload) || typeof offer.payload.instruction !== 'string') throw new Error('Missing room offer');
   const context = JSON.parse(offer.payload.instruction.split('ContextPack:\n')[1]!);
@@ -261,13 +261,13 @@ it('blocks an over-limit current Unicode Request with a measured reason and no S
   const bytes = Buffer.byteLength(turn.request, 'utf8');
   expect(bytes).toBeGreaterThan(HISTORY_MAX_BYTES);
   const reason = `Current Request is ${bytes} UTF-8 bytes; budget is ${HISTORY_MAX_BYTES} bytes. Shorten the request and send it again.`;
-  expect(turn.blocked).toBe(reason);
+  expect(turn.blockedReason).toBe(reason);
   expect(seat).toMatchObject({ status: 'blocked', released: true, reason });
   expect(host().core.intent(seat.id)).toBeUndefined();
   expect(fixture.adapter.starts).toHaveLength(1);
   expect(host().snapshot().team.rooms[room.id]!.messages.at(-1)!.text).toBe(request);
   expect(Object.values(fixture.ledger.snapshot().outbox)).toContainEqual(expect.objectContaining({
-    kind: 'projection', id: `blocked:${seat.id}`, value: { turnId: seat.id, reason },
+    kind: 'projection', id: `blocked:${seat.id}`, value: { owner: turn.botId, turnId: seat.id, reason },
   }));
 });
 
@@ -308,8 +308,8 @@ it('trims byte-heavy history and still posts for a normal current request', asyn
   expect(context.room.messages.map((message: { text: string }) => message.text)).toEqual([request]);
   expect(context.historyWindow.omittedMessages).toBe(1);
   expect(context.historyWindow.notice).toContain('Earlier history was omitted');
-  expect(Buffer.byteLength(contextText, 'utf8')).toBeLessThanOrEqual(65536);
-  expect(host().snapshot().turns[seat.id]).not.toHaveProperty('blocked');
+  expect(Buffer.byteLength(contextText, 'utf8') + Buffer.byteLength(host().snapshot().turns[seat.id]!.request, 'utf8')).toBeLessThanOrEqual(HISTORY_MAX_BYTES);
+  expect(host().snapshot().turns[seat.id]).not.toHaveProperty('blockedReason');
   await finish(seat.id, { speech: { kind: 'post', text: 'The byte window still permits speech.' } });
   expect(seats(round)[0]!.status).toBe('post');
 });

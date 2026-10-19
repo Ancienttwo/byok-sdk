@@ -16,8 +16,8 @@ bun run --cwd examples/bot-collaboration typecheck
 bun run --cwd examples/bot-collaboration test
 ```
 
-`src/host.test.ts` is the complete embedded setup. Create one `BotCollaboration`
-per tenant and ledger. Give it a complete Agent execution template and a Host
+`src/host.test.ts` shows the embedded setup. Create one `BotCollaboration`
+per tenant and ledger. Give it a valid Agent execution template and a Host
 connector. Route the embedded server's `wake.consume` to `bot.consume`.
 Call `bot.recover()` after startup. Call `bot.close()` before closing the SDK
 server or the ledger. Do not call the K4 core's mutation methods directly.
@@ -31,7 +31,11 @@ provide a runtime sandbox. The deployment owns that boundary.
 
 ## Actions and context
 
-Each turn freezes the ordinary Bot schema and its ContextPack in the K4 input.
+The Host applies routine actions, confirmation cards, questions, then self
+continuations. Each turn freezes the ordinary Bot schema and its ContextPack
+when its K4 intent is enqueued. Waiting turns and retries reuse that frozen
+input. The wait limit is five minutes before execution starts. A started
+execution waits for canonical device terminal evidence.
 The schema offers self delegation, `ask_user`, `confirmable_action`, and the
 three routine actions. It offers all current routine ids, up to eight.
 It never offers a `target` field or another Bot id. A user input starts one
@@ -43,11 +47,21 @@ Questions support text and single choice. An answer creates an `answer` turn.
 It is a new user input with its own stable budget root. Replaying the same
 answer does not reset that budget. Empty updates and duplicate targets or
 option ids are refused. Duplicate weekdays are stored as a set.
+An expired card can appear in the recent ContextPack window. It creates no model turn.
 A confirmation card starts as `pending`. The owner can choose `confirmed` or
 `rejected`. A card becomes `expired` after 24 hours. Only a committed
-`confirmed` card calls the Host connector. All three decisions return as an
-`action_result` turn. Connector success, error, and external id enter that turn.
-The connector must deduplicate by the supplied card id. A crash after the
+`confirmed` card calls the Host connector. Confirmation results and explicit
+rejection return as an `action_result` turn. Passive expiry creates no turn.
+Connector success, error, and external id enter that turn.
+Late and conflicting decisions return an error. Replaying the same completed
+decision is idempotent. Decision projections are committed once, so uploading
+them does not cause later syncs to publish them again.
+
+The connector receives an AbortSignal and must deduplicate by the card id.
+The Host enforces `connectorTimeoutMs` (default 30 seconds), even if the
+connector ignores cancellation. A timeout releases the serial chain and
+commits a failed action_result with an unknown external outcome. A late connector
+result cannot overwrite that committed result. A crash after the
 external effect but before result commit can call it again with that id.
 No exactly-once external effect is claimed.
 
@@ -89,10 +103,15 @@ An immediate terminal cannot leave a continuation without a wake.
 A schedule must match the active generation and armed slot. A cancel cannot
 be overtaken by a later schedule for the same key. Failed operations retain
 a retry time. A process timer retries them. Startup repairs a missing armed
-wake. Calendar errors stop the chain, record an audit, and let the accepted
+wake. A mismatched wake time records an audit and resolves without a retry
+loop. A successful cancel retry clears its stale failure status.
+Calendar errors stop the chain, record an audit, and let the accepted
 occurrence finish. Startup or explicit pause/resume retries the calendar.
 
 ## Boundaries
+
+The collaboration state has version 1. The Host rejects unsupported or
+unversioned stored state. It does not reset or migrate that state.
 
 This example has one team and one owner per ledger. Paid Pi success-rate
 measurement belongs to WO-10b. Application history,
@@ -183,7 +202,23 @@ The ledger retains its full audit history. No Summary is generated. Authority
 enums and required control metadata are not silently truncated. If non-history
 metadata plus the accepted Request exceeds the budget after history is removed,
 the notice reports that separate condition. That condition does not block.
-K8a owns its bounded cards/questions projection.
+Private turns use the same history window. They select at most 100 old turns.
+Cards and questions each retain at most 12 items. Pending work takes priority.
+The Host removes old refusals, settled items, old messages, then pending items.
+`historyWindow.turnLimit` names the message or turn count limit. Both room and
+private context also report `omittedTurns`, `omittedMessages`, `omittedCards`,
+`omittedQuestions`, `omittedPendingCards`, `omittedPendingQuestions`, and
+`omittedRejections`. Zero counts remain explicit. The same byte accounting
+includes the Request and all selected context. Full outcomes and old routine
+versions stay in the ledger. Context includes action names and the current
+routine definition.
+
+Rejected feedback is private to its Bot. The next frozen input reserves it.
+An execution that fails before it starts releases that reservation.
+A turn that cannot pass Request or schema admission has status `blocked` and
+`blockedReason`. It creates no intent. `cancelTurn` can cancel it before admission.
+Other schema composition errors propagate as Host defects. Only
+`schema-over-budget` permits the flat-schedule fallback.
 
 Unmentioned messages are stored as background. They do not create a seat, but
 a later selected member can see eligible background messages. Each member has

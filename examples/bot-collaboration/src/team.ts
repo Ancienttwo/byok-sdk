@@ -1,5 +1,5 @@
 import type { BotTurnOutcome, CreateBotAction, RoomFields, UpdateBotAction } from '@byok-sdk/protocol';
-import { hash, canonical, type ExecutionTemplate } from '../../host-execution-core/src/model';
+import { hash, canonical, type ExecutionTemplate } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState } from './model';
 import type { BotProfile, Room, TeamState } from './team-model';
 
