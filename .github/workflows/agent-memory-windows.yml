@@ -1,17 +1,14 @@
-name: Windows memory admission evidence
+name: Windows memory platform-refusal checks
 
 on:
-  pull_request:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  windows-denial:
-    name: Windows denial and flush observations (${{ matrix.runtime }})
+  windows-platform-refusal:
+    name: Windows platform refusal and flush diagnostics (${{ matrix.runtime }})
     runs-on: windows-latest
     strategy:
       fail-fast: false
@@ -28,7 +25,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: packages/client/native/agent-memory-fs/go.mod
-      - name: Record host profile (observations do not grant admission)
+      - name: Record host profile (no containment or S proof)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force .ci-artifacts/wo09 | Out-Null
@@ -37,7 +34,7 @@ jobs:
           whoami /all | Out-File -Append .ci-artifacts/wo09/profile.txt
           if ($LASTEXITCODE -ne 0) { throw 'whoami failed' }
           'Hosted token and storage profile are observations. Normal-user and S recovery acceptance remain unproved.' | Out-File -Append .ci-artifacts/wo09/profile.txt
-      - name: Test native denial, identity parity and observe flush APIs
+      - name: Check platform refusal and identity parity; collect flush diagnostics
         working-directory: packages/client/native/agent-memory-fs
         shell: pwsh
         run: |
@@ -47,11 +44,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'native Windows tests failed' }
           go build -buildvcs=false -trimpath -o "$env:RUNNER_TEMP/byok-agent-memory-fs.exe" .
           if ($LASTEXITCODE -ne 0) { throw 'helper build failed' }
-      - name: Run real helper with empty env and junction matrix
+      - name: Check platform refusal with empty env and junction fixtures
         shell: pwsh
         run: |
           & '${{ matrix.runtime }}' scripts/ci/agent-memory-windows-denial.mjs "$env:RUNNER_TEMP/byok-agent-memory-fs.exe" 2>&1 | Tee-Object .ci-artifacts/wo09/runtime.txt
-          if ($LASTEXITCODE -ne 0) { throw 'runtime denial matrix failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'runtime platform-refusal check failed' }
       - name: Install and build TypeScript packages
         shell: pwsh
         run: |
@@ -61,7 +58,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'TypeScript build failed' }
       - name: Check TypeScript identity and closed Windows gate
         run: bun run --filter @byok-sdk/client test -- src/__tests__/agent-memory-helper-identity.test.ts src/__tests__/agent-memory-windows-gate.test.ts
-      - name: Keep observations (not S acceptance)
+      - name: Keep diagnostics (not containment or S acceptance)
         if: always()
         uses: actions/upload-artifact@v4
         with:

@@ -51,10 +51,11 @@ func TestWindowsRuntimeIdentityMatchesNativeHandle(t *testing.T) {
 	}
 }
 
-// This observation does not grant B. CI records real API results, including
-// failure. No result proves namespace recovery after OS crash or power loss.
-// The calls are test-only. Production Windows admission stays closed.
-func TestWindowsDirectoryFlushObservation(t *testing.T) {
+// Diagnostic only: API failures are logged, not asserted as test failures.
+// A passing test does not show that a flush API is available or successful.
+// These calls prove neither containment nor model S recovery and do not grant B.
+// Production Windows admission stays closed.
+func TestWindowsDirectoryFlushDiagnosticsOnly(t *testing.T) {
 	directory := t.TempDir()
 	name, err := syscall.UTF16PtrFromString(directory)
 	if err != nil {
@@ -64,15 +65,15 @@ func TestWindowsDirectoryFlushObservation(t *testing.T) {
 	const share = syscall.FILE_SHARE_READ | syscall.FILE_SHARE_WRITE | syscall.FILE_SHARE_DELETE
 	const flags = syscall.FILE_FLAG_BACKUP_SEMANTICS | syscall.FILE_FLAG_OPEN_REPARSE_POINT
 	handle, err := syscall.CreateFile(name, access, share, nil, syscall.OPEN_EXISTING, flags, 0)
-	t.Logf("OBSERVATION ONLY: access=%#x share=%#x open=%d flags=%#x CreateFileW=%v", uint32(access), share, syscall.OPEN_EXISTING, flags, err)
+	t.Logf("DIAGNOSTIC ONLY; NO ACCEPTANCE ASSERTION: access=%#x share=%#x open=%d flags=%#x CreateFileW=%v", uint32(access), share, syscall.OPEN_EXISTING, flags, err)
 	if err != nil {
 		return
 	}
 	defer syscall.CloseHandle(handle)
-	t.Logf("OBSERVATION ONLY: FlushFileBuffers=%v", syscall.FlushFileBuffers(handle))
+	t.Logf("DIAGNOSTIC ONLY; NO ACCEPTANCE ASSERTION: FlushFileBuffers=%v", syscall.FlushFileBuffers(handle))
 	flush := syscall.NewLazyDLL("ntdll.dll").NewProc("NtFlushBuffersFileEx")
 	if err := flush.Find(); err != nil {
-		t.Logf("OBSERVATION ONLY: NtFlushBuffersFileEx export=%v", err)
+		t.Logf("DIAGNOSTIC ONLY; NO ACCEPTANCE ASSERTION: NtFlushBuffersFileEx export=%v", err)
 		return
 	}
 	// IO_STATUS_BLOCK has a pointer-sized union followed by ULONG_PTR.
@@ -82,12 +83,13 @@ func TestWindowsDirectoryFlushObservation(t *testing.T) {
 	}
 	status, _, _ := flush.Call(uintptr(handle), 0, 0, 0, uintptr(unsafe.Pointer(&ioStatus)))
 	runtime.KeepAlive(&ioStatus)
-	t.Logf("OBSERVATION ONLY: NtFlushBuffersFileEx flags=0 NTSTATUS=%#x IO_STATUS=%#x Information=%d", uint32(status), ioStatus.Status, ioStatus.Information)
+	t.Logf("DIAGNOSTIC ONLY; NO ACCEPTANCE ASSERTION: NtFlushBuffersFileEx flags=0 NTSTATUS=%#x IO_STATUS=%#x Information=%d", uint32(status), ioStatus.Status, ioStatus.Information)
 }
 
-// Unlike the original optional junction falsifier, this required matrix must
-// fail if its host cannot create the junction. It proves denial, not admission.
-func TestWindowsAdmissionDenialMatrix(t *testing.T) {
+// Platform-refusal check only: openSession returns unsupported_platform before
+// it reads any path. Junction fixtures do not exercise traversal or containment.
+// Fixture setup failures still fail this check. No storage barrier is tested.
+func TestWindowsPlatformRefusalWithJunctionFixtures(t *testing.T) {
 	outside := t.TempDir()
 	sentinel := filepath.Join(outside, "sentinel.txt")
 	if err := os.WriteFile(sentinel, []byte("outside sentinel"), 0o600); err != nil {

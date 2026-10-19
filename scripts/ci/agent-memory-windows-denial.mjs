@@ -1,5 +1,7 @@
-// Run with both Node and Bun on Windows. This tests denial with a real helper.
-// It does not prove an admitted backend, OS crash recovery or power recovery.
+// Platform-refusal checks with the real helper, under both Node and Bun.
+// openSession returns unsupported_platform before it reads any path. Junction
+// fixtures do not exercise traversal, containment or an admitted storage backend.
+// These checks prove neither model S recovery nor successful flush operations.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -65,7 +67,7 @@ try {
     }
   }
   console.log(JSON.stringify({
-    acceptance: 'DENIAL ONLY; S NOT PROVEN; B=false', runtime: process.versions,
+    acceptance: 'PLATFORM REFUSAL ONLY; NO CONTAINMENT OR S PROOF; B=false', runtime: process.versions,
     osRelease: os.release(), helperSha256: createHash('sha256').update(await readFile(helperBin)).digest('hex'),
     childEnvironment: {}, results,
   }, null, 2));

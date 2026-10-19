@@ -45,10 +45,12 @@ consumption state. It supplies no NTFS storage barrier.
 ## P3 decision
 
 Preserve the existing admission boundary. Add strict tagged identity checks
-and Windows denial/observation tests. Add a Windows CI matrix for Node and
-Bun with a real helper, empty child env and junction/reparse cases.
-Record native flush observations separately from acceptance. A green denial
-test is not a Windows containment proof or an S recovery proof.
+and Windows platform-refusal checks. The manual Windows workflow uses Node
+and Bun, a real helper, an empty child env and junction fixtures.
+`openSession` rejects Windows before it reads any path. These fixtures do not
+exercise path traversal or containment. Flush diagnostics log API failures
+without failing the test. A green run proves neither containment, successful
+flush operations nor model S recovery.
 
 Do not add a callable NTFS ledger backend until section 3 of WO-09a is
 proved under section 7. Do not add flags, weaker flush paths or error
@@ -59,7 +61,7 @@ has been supplied. These missing observations block the full proof.
 ## Task Breakdown
 
 1. Harden the protocol 2 tagged identity exchange. Keep Windows closed.
-2. Add native Windows denial and API observation tests. Keep existing tests.
+2. Add native Windows platform-refusal checks and API diagnostics. Keep existing tests.
 3. Add Node/Bun empty-env Windows CI and record its evidence limits.
 4. Record S in spec, protocol, backend comments and the decision document.
 5. Run five required checks and focused checks. Get independent read-only
@@ -96,15 +98,17 @@ unproved. It would not permit B or Host completion.
 | Power loss for a declared storage profile | No disposable device or virtual storage profile experiment. BLOCKED. |
 | #522 confirmed-state rollback regression | No Windows rollback experiment. The source counterexample is a conditional risk, not an observed NTFS failure. BLOCKED. |
 
-The Windows workflow is a denial/observation matrix. It is not the complete
-reparse race matrix for an admitted backend. It tests ordinary, root,
-ancestor, notes and .byok junction placement. Failure to create a required
-junction fails the matrix. It compares real Node/Bun stat identity with the
+The Windows workflow runs only on `workflow_dispatch`. It checks platform
+refusal with ordinary, root, ancestor, notes and .byok junction fixtures.
+`openSession` returns `unsupported_platform` before it reads these paths.
+The fixtures do not test traversal or containment. Failure to create a
+required junction fails fixture setup. It compares real Node/Bun stat identity with the
 Go pinned handle. It launches the real helper with an empty JS env object,
 checks open rejection and checks that a write cannot obtain a session.
 The Go runtime-parity child also requests an empty env; Go can add SystemRoot
 on Windows. No application credential is intentionally forwarded.
-The workflow has not run. Local-only authorization prohibits pushing it.
+The initial validation did not execute the Windows workflow. This review
+follow-up permits a normal push. It does not dispatch the manual workflow.
 
 ## References checked
 
@@ -187,9 +191,43 @@ both retained; the passing retry is `final/api-surface-fixed.json` and
 
 Local implementation commit: `c65240b6`. The follow-up commit contains the
 module-graph correction, declaration golden and this final validation report.
-No push, PR, merge or Windows deployment occurred.
+At that initial validation, no push, PR, merge or Windows deployment occurred.
 
 
 No Windows S proof has passed. Windows intents stay BLOCKED. B stays false.
 Q14 is not complete. No flag or weaker durability path has been added.
 Existing test files and assertions are unchanged.
+
+## PR #528 acceptance-review follow-up (2026-10-19)
+
+Scope: P3 only. The workflow and fixtures now say platform-refusal checks.
+The flush diagnostic has no API-success assertion. A passing diagnostic does
+not prove API availability, containment or durability. The Windows workflow
+now has only `workflow_dispatch`; PR and push events do not run it.
+No existing test assertion changed. Windows remains BLOCKED and B=false.
+
+Deferred items:
+
+- P2: do not merge #526 now. After #526 lands on main, use a normal merge to
+  resolve text and logic conflicts in spec/protocol, the helper and Windows
+  gate test. No rebase is authorized.
+- PENDING-AIMPACT: confirm the existing line `Aimpact 已选 S`. The line and
+  decision are unchanged by this follow-up.
+- The review reports the keys `pi-projection-windows.test.ts:270` timeout as
+  flaky and unrelated. No change is made to that test or its assertions.
+
+Follow-up checks before push:
+
+- `bun run typecheck`: exit 0.
+- Client Windows-gate and helper-identity focused tests: 2 files, 8 passed;
+  exit 0.
+- `GOTOOLCHAIN=go1.26.5 go test ./...`: exit 0 on macOS.
+- Windows amd64 Go test cross-compile: exit 0. This is not Windows execution.
+- Workflow YAML check: only `workflow_dispatch`; Node/Bun matrix retained;
+  exit 0.
+- `node --check scripts/ci/agent-memory-windows-denial.mjs`: exit 0.
+- `git diff --check`: exit 0.
+
+No exports changed. API-surface rerun is not required for this follow-up.
+No assertion condition or expected result changed. No manual Windows run is
+claimed. The PR must stay draft and BLOCKED.
