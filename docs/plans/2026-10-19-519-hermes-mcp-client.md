@@ -1,10 +1,10 @@
 # #519 Hermes Agent as a byok MCP client (external Bot beta): Hermes deltas
 
-Baseline: byok-sdk `origin/main@5b988a6e` (2026-10-19). Main document #536 at `e3cb330a`. Upstream OAR `main@5296675b` (0.68.1). herdr 0.9.3. Local Hermes Agent `354ad3d4` (2026-10-18, `v0.22.2+1687.g354ad3d`).
+Baseline: byok-sdk `origin/main@5b988a6e` (2026-10-19). Main document #536 at `81dea819`. Upstream OAR `main@5296675b` (0.68.1). herdr 0.9.3. Local Hermes Agent `354ad3d4` (2026-10-18, `v0.22.2+1687.g354ad3d`).
 
 Status: plan only. It does not authorize implementation, release, issue edits or downstream changes.
 
-**Main document:** [#536](https://github.com/Ancienttwo/byok-sdk/pull/536), `docs/plans/2026-10-19-byok-mcp-server-external-bot-beta.md` (branch `claude/plan-514-grok-adapter`). Grok Bot is its first client. That document owns the architecture (§2), the tool catalogue (§3), auth (§4), quota, idempotency and cancellation (§5), client integration (§6), S0 (§7) and the shared open questions (§9). This document covers only what is different when Hermes is the client. It is slice B7 of #536 §8. Tool names below are the #536 drafts and follow any change there.
+**Main document:** [#536](https://github.com/Ancienttwo/byok-sdk/pull/536), `docs/plans/2026-10-19-byok-mcp-server-external-bot-beta.md` (branch `claude/plan-514-grok-adapter`). Grok Bot is its first client. That document owns the architecture (§2), the tool catalogue (§3), auth (§4), quota, idempotency and cancellation (§5), client integration (§6), S0 (§7) and the shared questions (§9), now decided (§8.1 here). This document covers only what is different when Hermes is the client. It is slice B7 of #536 §8. Tool names below are the #536 drafts and follow any change there.
 
 ## Ruling followed
 
@@ -14,8 +14,10 @@ Aimpact, 2026-10-19 about 14:00 HKT. It replaces every earlier Grok and Hermes i
 - The server exposes existing byok Bot infrastructure as tools: dispatch work to coding agents (Pi, Codex, Claude), memory, routine, outcome and ledger.
 - No separate stack. Grok and Hermes are not `RuntimeAdapter`s as the main form.
 - Auth and quota are per Bot, with keys.
-- Recommended default, still to confirm: the external Bot keeps its own conversation memory; byok keeps tasks and artifacts (#536 §9 Q1).
+- Memory: the external Bot owns its conversation memory; byok owns tasks, artifacts and its own Agent-home memory (Q1, decided).
 - The Bot mode PRD does not change. This branch never changed it: `git diff --stat origin/main...HEAD` lists only this plan file.
+
+Then, 2026-10-19 14:11 HKT: Aimpact locked all recommended answers of #536 §9 Q1–Q11 as product rulings (§8.1). At about 14:15 HKT: beta v1 adds no `byok_agent_message` and no Cross-Bot for external Bots (§8.2). The structure stays: Session mode and Bot mode are unchanged; the external Bot integration is a separate beta track; Grok Bot is the first MCP client and Hermes the second; there is no separate stack.
 
 Superseded: plan v1 (`ab704346`, a `HermesAdapter` runtime) and plan v2 (`af9955c4`, Hermes as an external member of Bot mode). The file was renamed from `2026-10-19-519-hermes-adapter-plan.md`.
 
@@ -26,6 +28,7 @@ Superseded: plan v1 (`ab704346`, a `HermesAdapter` runtime) and plan v2 (`af9955
 3. Hermes must not code. The Bot profile turns off Hermes's own coding paths (`terminal`, `file`, `code_execution`, `delegation` and others). Then coding work can reach coding agents only through `byok_task_submit`.
 4. Results are asynchronous. `byok_task_submit` returns at once, and `byok_task_status` waits at most 50 s (#536 §5), well inside Hermes's 300 s MCP timeout. Hermes needs no push (#536 §6).
 5. Process ownership: the Hermes gateway belongs to the user. byok never runs `hermes` commands that open a session. The MCP server and the coding agents belong to the byok Host and device daemon, never to a process that Hermes started (#536 §2).
+6. A Hermes Bot works with other Bots only through tasks and artifacts. Beta v1 has no `byok_agent_message` and no Cross-Bot (§8.2).
 
 ## 1. Inventory (Hermes side)
 
@@ -33,7 +36,7 @@ Superseded: plan v1 (`ab704346`, a `HermesAdapter` runtime) and plan v2 (`af9955
 
 ### 1.1 OAR and Hermes
 
-OAR has no Hermes runtime (verified on upstream `main@5296675b`: runtime directories, `docs/runtimes/`, README, full-text search, issues and PRs). Under this ruling that fact only confirms that Hermes is a client, not a worker. herdr can start a `hermes` kind, but herdr is not on the beta execution path (#536 §9 Q8).
+OAR has no Hermes runtime (verified on upstream `main@5296675b`: runtime directories, `docs/runtimes/`, README, full-text search, issues and PRs). Under this ruling that fact only confirms that Hermes is a client, not a worker. herdr can start a `hermes` kind, but herdr is not on the execution path. Tasks go through the device daemon and OAR; herdr is only for visibility and webhook notices (Q8, decided).
 
 ### 1.2 Hermes MCP client
 
@@ -71,14 +74,16 @@ OAR has no Hermes runtime (verified on upstream `main@5296675b`: runtime directo
 | Server, tools, schemas | One server, `byok_*` tools (§3) | Same | Same. No Hermes-only tool |
 | Transport | Streamable HTTP, Host-owned (§2) | Remote HTTPS to a public Host URL | Loopback HTTP. stdio only as a thin client (§3.1) |
 | Credential | One byok bot key per Bot (§4) | Custom MCP "Bot's own credential" field | `Authorization` header in the profile `mcp_servers` entry; secret in the profile `.env` (§3.3) |
-| Identity | Key → devices, runtimes, optional `AgentRef` (§9 Q4) | One Grok Bot | One Hermes profile (§3.2) |
+| Identity | Key → devices, runtimes; one `AgentRef` for memory and routine tools (Q4, decided) | One Grok Bot | One Hermes profile (§3.2) |
 | Results | `byok_task_status`, wait ≤ 50 s (§5) | Loop plus optional routine-webhook push | Loop only. No push (§4.2) |
 | Who codes | Coding agents behind the device daemon | #536 | Hermes coding toolsets off (§4.1) |
-| Conversation memory | External Bot owns it (§9 Q1) | xAI side | Hermes profile memory (§5) |
-| byok memory | `byok_memory_read` read-only in v1 (§9 Q9) | Same | Same; never mirrored into Hermes memory (§5) |
+| Conversation memory | External Bot owns it (Q1, decided) | xAI side | Hermes profile memory (§5) |
+| byok memory | `byok_memory_read`, read-only in beta v1 (Q9, decided) | Same | Same; never mirrored into Hermes memory (§5) |
 | Routines | `byok_routine_*` (§3.2) | Same | Same; Hermes cron off (§4.4) |
 | Process | Host owns server; daemon owns agents | Remote client | User-owned Hermes gateway (§6) |
-| Data exposure | Results leave the Host (§9 Q10) | xAI/Cursor storage | Hermes `state.db`, Hermes memory provider, Hermes messaging platforms (§5) |
+| Quota | 4 running tasks, 60 submits per hour, 8 routines per key (Q7, decided) | Same | Same |
+| Cross-Bot | None in beta v1; tasks and artifacts only (§8.2) | Same | Same; Hermes `message_agent` never reaches byok Bots (§3.2) |
+| Data exposure | Host page discloses where results go (Q10, decided) | xAI/Cursor storage | Hermes `state.db`, Hermes memory provider, Hermes messaging platforms (§5) |
 
 ## 3. Connection
 
@@ -105,14 +110,15 @@ platform_toolsets:
 
 - One dedicated Hermes profile per byok bot key. The user creates the profile (`hermes profile create <name>`). byok does not write into `~/.hermes`.
 - Two profiles must not share a key. Quota and the task ledger are per key, and a key sees only its own tasks (#536 §4).
-- Routines and `byok_memory_read` need the key to bind one `AgentRef` (#536 §9 Q4). Since §4.4 moves scheduled work from Hermes cron to `byok_routine_*`, a Hermes key needs an `AgentRef` (Q2).
+- Each key binds to allowed devices and runtimes. Memory and routine tools also need one `AgentRef` per key. Without an `AgentRef`, the key gets task tools only (Q4, decided). §4.4 moves scheduled work from Hermes cron to `byok_routine_*`, so a Hermes key that schedules work must bind an `AgentRef` (H2).
 - Hermes's own Bot Mode (rooms, `message_agent`, peers) stays inside Hermes. Each Hermes Bot that calls byok uses its own key.
+- No Cross-Bot in beta v1: a Hermes Bot cannot message byok Bots, and byok has no `byok_agent_message` for it. To use another Bot's work, Hermes reads that work as a task result or an artifact it is allowed to see (§8.2).
 
 ### 3.3 Key custody
 
 - The secret lives in the profile `.env`, which Hermes already uses for secrets (`environment-variables.md:9`). Hermes, not byok, holds it at rest. The Host stores only a salted hash (#536 §4).
 - With `terminal` and `code_execution` off (§4.1), the model has no tool that can print the environment. With them on, the model could read the key. That is one more reason for §4.1.
-- byok model-provider keys (`packages/keys`) never go to Hermes. Hermes provider keys never go to byok. Coding agents use their own device lanes.
+- The byok bot key is a new Host-held key; `packages/keys` stays for model-provider keys on the device (Q2, decided). Those provider keys never go to Hermes. Hermes provider keys never go to byok. Coding agents use their own device lanes.
 - Revocation applies to the next call (#536 §4). A Hermes user who rotates the key edits only the `.env`.
 
 ## 4. Behavior deltas
@@ -125,7 +131,7 @@ The ruling says coding agents do the work. A Hermes profile with default toolset
 - Remove: `terminal` (`terminal`, `process_manage`), `file`, `code_execution`, `delegation`, `browser`, `computer_use`, `kanban`, `cronjob` (§4.4), `a2a`.
 - Use the allow-list, not `agent.disabled_toolsets`, which can remove shared tools by accident. A typo gives zero tools, so the setup check must show the resolved tool list.
 
-byok cannot enforce this. Hermes is the user's program, and the server sees only valid keys. Q1 asks for a setup confirmation.
+byok cannot enforce this. Hermes is the user's program, and the server sees only valid keys. H1 asks for a setup confirmation.
 
 ### 4.2 Long-running work and results
 
@@ -136,15 +142,15 @@ byok cannot enforce this. Hermes is the user's program, and the server sees only
 
 ### 4.3 Idempotency and retries
 
-- #536 §5 derives `taskId` from the key and either `clientRequestId` or the argument hash within a 15-minute window. A Hermes transport retry of the same call returns the same task with `deduplicated: true`.
+- If the client sends no `clientRequestId`, the task id is the hash of the arguments within a 15-minute window (Q6, decided; #536 §5). A Hermes transport retry of the same call returns the same task with `deduplicated: true`.
 - Hermes delta 1: S0 must show that a Hermes retry re-sends identical arguments [UNVERIFIED: Hermes MCP client retry policy]. If Hermes changes any argument, the window rule does not catch it.
 - Hermes delta 2: when the user asks to run the same task again within 15 minutes, the model must pass a new `clientRequestId`, or the server returns the old task. The Hermes setup page and the tool description must say this.
 - Cancel is only `byok_task_cancel`. Closing the Hermes session, an MCP `notifications/cancelled`, or a gateway stop does not cancel byok tasks (#536 §5).
 
 ### 4.4 Routine versus Hermes cron
 
-- Scheduled coding work uses `byok_routine_create` / `_list` / `_cancel` (#536 §3.2). byok then owns the schedule, the quota (8 routines per key) and the ledger.
-- Hermes cron (`cronjob_manage`) would be a second scheduler that byok cannot see or count. The Bot profile removes `cronjob` (Q3).
+- Scheduled coding work uses `byok_routine_create` / `_list` / `_cancel` (#536 §3.2). byok then owns the schedule, the quota (8 routines per key, Q7) and the ledger.
+- Hermes cron (`cronjob_manage`) would be a second scheduler that byok cannot see or count. The Bot profile removes `cronjob` (H3).
 
 ### 4.5 Outcome and ledger
 
@@ -154,14 +160,14 @@ byok cannot enforce this. Hermes is the user's program, and the server sees only
 
 ## 5. Memory boundary
 
-Default per #536 §9 Q1 (to confirm), with the Hermes details:
+Q1 (decided) with the Hermes details:
 
 - Hermes keeps the conversation memory: `MEMORY.md`, `USER.md` and any Hermes memory provider in that profile.
-- byok keeps tasks, artifacts, the ledgers and its own Agent-home memory. `byok_memory_read` is read-only in v1 (#536 §9 Q9). Its description names byok Agent-home memory in its first sentence (#536 §3.3).
+- byok keeps tasks, artifacts, the ledgers and its own Agent-home memory. `byok_memory_read` is read-only in beta v1; writes wait for PRD P5 (Q9, decided). Its description names byok Agent-home memory in its first sentence (#536 §3.3).
 - Hermes stores references (task ids, short summaries), not artifact bodies or byok memory text. Hermes memory is small anyway (2,200 and 1,375 characters).
 - Hermes's own `memory` tool and `byok_memory_read` coexist in one tool list. The setup page tells the user that the first is the Bot's notes and the second is a read view of byok's Agent memory.
 
-Data flow to disclose (#536 §9 Q10, Hermes form): task results, artifact URLs and byok memory text that Hermes reads enter Hermes `state.db`, Hermes memory, and possibly an external Hermes memory provider or a Hermes messaging platform. byok cannot track them after the tool returns. Short-lived artifact URLs (#536 §3.1) limit, but do not remove, that exposure.
+Data flow to disclose (Q10, decided: the Host page must disclose it). Hermes form: task results, artifact URLs and byok memory text that Hermes reads enter Hermes `state.db`, Hermes memory, and possibly an external Hermes memory provider or a Hermes messaging platform. byok cannot track them after the tool returns. Short-lived artifact URLs (#536 §3.1) limit, but do not remove, that exposure.
 
 ## 6. Gateway ownership and process risk
 
@@ -185,19 +191,43 @@ S0 runs on a scratch profile that S0 creates and deletes. It never touches the u
 
 One paid model run needs Aimpact approval. If item 3, 5 or 7 fails, stop and report.
 
-## 8. Open questions (Hermes-specific)
+## 8. Decisions and open items
 
-Shared questions are in #536 §9: the memory boundary (Q1), the key (Q2), placement (Q3), identity (Q4), idempotency (Q6), quota (Q7), herdr (Q8), memory write (Q9), disclosure (Q10). These are the Hermes deltas:
+### 8.1 Decided: #536 §9 Q1–Q11 (Aimpact, 2026-10-19 14:11 HKT)
 
-| # | Question | Recommended answer | Reason |
+Ruling text as written in the product rulings record. The last column is what each one means for Hermes in this document.
+
+| # | Ruling | Hermes consequence |
+| --- | --- | --- |
+| Q1 | Memory boundary: external Bot owns conversation memory; byok owns tasks, artifacts, and its own Agent-home memory. | Hermes profile memory is the conversation memory (§5) |
+| Q2 | Per-Bot key: new byok bot key held by the Host (`packages/keys` stays for model-provider keys on the device). | One byok bot key per Hermes profile; secret in the profile `.env` (§3.3) |
+| Q3 | Code location: `examples/byok-mcp-server` (copy-and-own, public server API); only HTTP transport goes into the SDK. | The Hermes guide (H1 slice) sits beside that example; no Hermes code |
+| Q4 | Identity mapping: each key binds to allowed devices and runtimes; memory/routine tools also need one AgentRef per key; without AgentRef, key gets task tools only. | §3.2; H2 below |
+| Q5 | Public reachability: Grok Bot MCP calls come from Cursor backend → Host needs public HTTPS URL; laptop Host needs relay/tunnel. | Not needed for Hermes; Hermes uses loopback HTTP (§3.1) |
+| Q6 | Idempotency: if client sends no clientRequestId, task id = hash of arguments within a 15-minute window. | §4.3 |
+| Q7 | Quota defaults: 4 running tasks, 60 submits/hour, 8 routines. | Same for Hermes keys |
+| Q8 | herdr role: NOT on the execution path; optional for visibility and webhook notices only. Tasks go daemon + OAR. | Hermes never drives herdr (§1.1, §6) |
+| Q9 | Memory writes in beta v1: read-only; writes wait for PRD P5. | `byok_memory_read` only (§5) |
+| Q10 | Disclosure: tool results go into xAI/Cursor storage; Host page must disclose this. | For Hermes the page names Hermes storage instead (§5) |
+| Q11 | Grok CLI worker runtime: optional (#514 plan / slice B8). | No effect on Hermes |
+
+### 8.2 Decided: structure and scope
+
+- Session mode and Bot mode are unchanged. The external Bot integration is a separate beta track. Grok Bot is the first MCP client; Hermes is the second. There is no separate stack (Aimpact, 2026-10-19, reaffirmed 14:11 HKT).
+- Out of beta v1 (about 14:15 HKT): no `byok_agent_message` and no Cross-Bot for external Bots. External Bots work together only through tasks and artifacts. This is revisited only after K8b Cross-Bot lands in Bot mode.
+
+### 8.3 Hermes-specific items the rulings do not cover
+
+These are Hermes client setup details below the Q1–Q11 level. They stay open with a recommendation. None of them changes a decided ruling.
+
+| # | Item | Recommended answer | Reason |
 | --- | --- | --- | --- |
-| Q1 | byok cannot enforce "Hermes must not code". Require the user to confirm the §4.1 toolset setup before the key is issued, with a check that shows the resolved tool list? | Yes | The ruling assigns coding to coding agents |
-| Q2 | Bind an `AgentRef` to every Hermes key, so `byok_routine_*` and `byok_memory_read` work (#536 §9 Q4)? | Yes | §4.4 moves scheduled work from Hermes cron to byok routines |
-| Q3 | Hermes cron in the Bot profile: off? | Off. Scheduled work uses byok routines | One scheduler, one quota |
-| Q4 | Hermes stores only references in its own memory, never artifact bodies or byok memory text? | Yes, stated in the setup page and the tool descriptions | Smaller exposure; Hermes memory is small |
-| Q5 | Is Hermes in the first beta cohort with Grok Bot, or second? | Second, after the Grok Bot client passes #536 S0 | Grok Bot is the declared first client |
-| Q6 | Platforms: macOS first; Windows when Hermes's own gateway passes S0 there? | Yes | The client side is Hermes's platform risk |
-| Q7 | #519 still asks for a `HermesAdapter` runtime. Retitle it to "Hermes as a byok MCP client (external Bot beta)"? | The issue owner retitles after this plan is accepted | This PR does not edit issues |
+| H1 | byok cannot enforce "Hermes must not code". Require the user to confirm the §4.1 toolset setup before the key is issued, with a check that shows the resolved tool list? | Yes | The ruling assigns coding to coding agents |
+| H2 | Bind an `AgentRef` to every Hermes key by default, so routine and memory tools work (Q4)? | Yes | §4.4 moves scheduled work to byok routines |
+| H3 | Hermes cron in the Bot profile: off? | Off. Scheduled work uses byok routines | One scheduler; the Q7 routine quota counts it |
+| H4 | Hermes keeps only references in its own memory, never artifact bodies or byok memory text? | Yes, in the guide and the tool descriptions | Follows Q1 and Q10; Hermes memory is small |
+| H5 | Platforms: macOS first; Windows when Hermes's own gateway passes S0 there? | Yes | The client side is Hermes's platform risk |
+| H6 | #519 still asks for a `HermesAdapter` runtime. Retitle it to "Hermes as a byok MCP client (external Bot beta)"? | The issue owner retitles it | This PR does not edit issues |
 
 ## 9. Slices (Hermes only; #536 B7, after #536 B1–B3)
 
