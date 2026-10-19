@@ -206,13 +206,14 @@ not prove API availability, containment or durability. The Windows workflow
 now has only `workflow_dispatch`; PR and push events do not run it.
 No existing test assertion changed. Windows remains BLOCKED and B=false.
 
+Aimpact confirmed S on 2026-10-19. S is unproven. B=false.
+WO-09 stays BLOCKED.
+
 Deferred items:
 
 - P2: do not merge #526 now. After #526 lands on main, use a normal merge to
   resolve text and logic conflicts in spec/protocol, the helper and Windows
   gate test. No rebase is authorized.
-- PENDING-AIMPACT: confirm the existing line `Aimpact 已选 S`. The line and
-  decision are unchanged by this follow-up.
 - The review reports the keys `pi-projection-windows.test.ts:270` timeout as
   flaky and unrelated. No change is made to that test or its assertions.
 
