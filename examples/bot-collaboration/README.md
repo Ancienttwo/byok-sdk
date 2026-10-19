@@ -48,15 +48,18 @@ enters `ContextPack.rejectedActions`. Other accepted actions still apply.
 A rejected action is reserved by the next frozen input. It is not copied into
 later inputs. An unstarted terminal failure releases that reservation.
 
-ContextPack defaults are 12 recent turns (`contextTurnLimit`) and 32 KiB of
+ContextPack defaults are at most 12 recent turns (`contextTurnLimit`) and 32 KiB of
 serialized UTF-8 JSON (`contextMaxBytes`). A historyWindow notice states how
-many older turns were omitted. Turns carry action-name summaries, not full
+many older turns were omitted. Older history is removed until the pack fits.
+The current request always remains in the measured pack, even when it was
+blocked before newer inputs arrived. Turns carry action-name summaries, not full
 outcome documents. Routine context contains only its current definition.
 Cards and questions remain visible. If the selected pack exceeds the byte
-budget, the turn becomes `blocked` with a readable reason and an owner
+budget after older history is removed, the turn becomes `blocked` with a readable reason and an owner
 projection. It creates no execution or retry spin. No strings are silently
 cut to fit. Raising the budget or repairing the selected data and calling
-`drain()` retries admission.
+`drain()` retries admission. `cancelTurn()` can settle a blocked turn before
+K4 admission. It creates no execution and lets pending routine versions settle.
 
 Schema composition first uses checked schedules. Only `schema-over-budget`
 permits a retry with flat schedules. If flat is still above the schema cap,

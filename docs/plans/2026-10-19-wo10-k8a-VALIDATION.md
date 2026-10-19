@@ -256,3 +256,26 @@ K4 already has Draft #532. No new K4 PR is suggested or opened.
 The PR body is written only to the requested `_ops/bot-wo/PR-530-body.md`.
 No push, gh pr edit, package source change, or history rewrite is performed.
 Final checks and the audit-to-commit table follow after verification.
+
+### Admission review corrections and test changes
+
+Read-only review found three P2 admission gaps in the first local pass.
+Two new regression tests reproduced them: reducible history still measured
+36,340 bytes and an unchanged 40,000-character blocked request became runnable
+after 13 short inputs. `/tmp/wo10-local-admission-red.log` exited 1.
+
+- New `context-budget.test.ts` cases retain the current candidate in byte
+  accounting after it leaves chronological history, trim only older history
+  with an explicit omission count, cancel a blocked turn idempotently without
+  K4 intent, and settle a blocked routine occurrence so its pending version can
+  activate. No prior assertion is changed. The eight context cases passed in
+  `/tmp/wo10-local-admission-green.log`.
+- The declared 12-turn window is a maximum. Older entries can be omitted to
+  meet the byte budget. Current request and non-history data are not cut.
+  Irreducible overflow remains blocked. This keeps the recorded history ruling
+  while preventing current-request budget bypass.
+- Pre-admission cancellation is an application transaction. It publishes one
+  cancelled owner result. Sync never materializes that terminal turn.
+
+A second read-only review will check these corrections. Cross-Bot delegation
+stays withdrawn and deferred to K8b. No packages/ source is changed.

@@ -33,11 +33,16 @@ export function outcomeSchema(botId: string, state: CollaborationState) {
 export const DEFAULT_CONTEXT_MAX_BYTES = 32 * 1024;
 export const DEFAULT_CONTEXT_TURN_LIMIT = 12;
 
-export function contextPack(state: CollaborationState, turnLimit = DEFAULT_CONTEXT_TURN_LIMIT) {
+export function contextPack(state: CollaborationState, turnLimit = DEFAULT_CONTEXT_TURN_LIMIT, currentTurnId?: string, maxBytes = DEFAULT_CONTEXT_MAX_BYTES) {
   if (!Number.isSafeInteger(turnLimit) || turnLimit < 1) throw new Error('Invalid ContextPack turn limit');
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new Error('Invalid ContextPack byte budget');
   const turns = Object.values(state.turns);
-  return {
-    historyWindow: { turnLimit, omittedTurns: Math.max(0, turns.length - turnLimit) },
+  const current = currentTurnId === undefined ? turns.at(-1) : state.turns[currentTurnId];
+  if (currentTurnId !== undefined && !current) throw new Error('Missing ContextPack candidate');
+  const history = turns.filter(turn => turn.id !== current?.id);
+  const selected = current ? [...(turnLimit === 1 ? [] : history.slice(1 - turnLimit)), current] : [];
+  const pack = () => ({
+    historyWindow: { turnLimit, omittedTurns: turns.length - selected.length },
     rejectedActions: state.rejected.filter(row => !row.consumedBy),
     questions: Object.values(state.questions), cards: Object.values(state.cards),
     routines: Object.values(state.routines).map(routine => ({
@@ -45,10 +50,16 @@ export function contextPack(state: CollaborationState, turnLimit = DEFAULT_CONTE
       lifecycle: routine.lifecycle, status: routine.status,
       definition: routine.versions[routine.current], lastError: routine.errors.at(-1),
     })),
-    turns: turns.slice(-turnLimit).map(turn => ({
+    turns: selected.map(turn => ({
       id: turn.id, root: turn.root, source: turn.source, request: turn.request,
       hop: turn.hop, status: turn.status, conclusion: turn.conclusion,
       outcomeSummary: turn.outcome && typeof turn.outcome === 'object' && !Array.isArray(turn.outcome) ? Object.keys(turn.outcome) : [],
     })),
-  };
+  });
+  let context = pack();
+  while (selected.length > 1 && Buffer.byteLength(JSON.stringify(context), 'utf8') > maxBytes) {
+    selected.shift();
+    context = pack();
+  }
+  return context;
 }

@@ -168,8 +168,19 @@ export class BotCollaboration {
   drain(): Promise<void> { return this.exclusive(() => this.process()); }
   cancelTurn(id: string): Promise<void> {
     return this.exclusive(async () => {
-      if (!this.snapshot().turns[id]) throw new Error('Turn not found');
-      await this.core.cancel(id);
+      const admitted = this.ledger.transaction(s => {
+        const turn = stateOf(s.application).turns[id];
+        if (!turn) throw new Error('Turn not found');
+        if (s.intents[hash(id)]) return true;
+        if (!turn.conclusion) {
+          turn.status = 'failed'; turn.conclusion = 'cancelled';
+          delete turn.blockedReason;
+          project(s, `bot-turn:${id}`, json({ owner: this.options.botId, ...turn }));
+          turn.reported = true;
+        }
+        return false;
+      });
+      if (admitted) await this.core.cancel(id);
       await this.process();
     });
   }
@@ -203,6 +214,7 @@ export class BotCollaboration {
     let materialized = false;
     for (const turn of Object.values(state.turns)) {
       const intent = s.intents[hash(turn.id)];
+      if (!intent && turn.conclusion) continue;
       if (!intent) {
         turn.status = 'queued';
         let schema: ResultSchema;
@@ -211,7 +223,7 @@ export class BotCollaboration {
           this.blockTurn(s, turn, `Outcome schema over budget after flat fallback: ${error.message}`);
           continue;
         }
-        const context = JSON.stringify(contextPack(state, this.contextTurnLimit));
+        const context = JSON.stringify(contextPack(state, this.contextTurnLimit, turn.id, this.contextMaxBytes));
         const bytes = Buffer.byteLength(context, 'utf8');
         if (bytes > this.contextMaxBytes) {
           this.blockTurn(s, turn, `ContextPack is ${bytes} bytes; budget is ${this.contextMaxBytes} bytes`);
@@ -344,7 +356,7 @@ export class BotCollaboration {
       const ledger = this.ledger.snapshot();
       // An immediate runtime terminal can create another turn on any pass.
       // Drain to a fixed point, so no application-only turn can lose its wake.
-      more = materialized || Object.values(stateOf(ledger.application).turns).some(turn => turn.status !== 'blocked' && !ledger.intents[hash(turn.id)]);
+      more = materialized || Object.values(stateOf(ledger.application).turns).some(turn => !turn.conclusion && turn.status !== 'blocked' && !ledger.intents[hash(turn.id)]);
     } while (more);
     clearTimeout(this.timer);
     if (!this.closed) {

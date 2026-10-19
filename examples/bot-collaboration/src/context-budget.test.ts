@@ -91,3 +91,56 @@ it('reserves rejected feedback in frozen input and releases it when the executio
   const next = await bot!.input('next-reader', 'read feedback');
   expect(bot!.snapshot().rejected[0]!.consumedBy).toBe(next);
 });
+
+it('reduces older history with an explicit notice when the current request fits', () => {
+  const state = stateOf({});
+  for (let n = 0; n < 2; n++) state.turns[`large-${n}`] = { id: `large-${n}`, root: 'root', source: 'user',
+    request: 'x'.repeat(18_000), hop: 0, status: 'succeeded' };
+  const context = contextPack(state, 12);
+  expect(Buffer.byteLength(JSON.stringify(context))).toBeLessThanOrEqual(32 * 1024);
+  expect(context.historyWindow.omittedTurns).toBe(1);
+  expect(context.turns.map(turn => turn.id)).toEqual(['large-1']);
+});
+
+it('cannot admit an unchanged oversized request by aging it out of the history window', async () => {
+  await setup();
+  const oversized = await bot!.input('oversized-current', 'x'.repeat(40_000));
+  expect(bot!.snapshot().turns[oversized]!.status).toBe('blocked');
+  for (let n = 0; n < 13; n++) await bot!.input(`short-${n}`, 'short');
+  expect(bot!.snapshot().turns[oversized]!.status).toBe('blocked');
+  expect(bot!.core.intent(oversized)).toBeUndefined();
+});
+
+it('cancels a blocked turn before admission without an intent or repeat publication', async () => {
+  vi.useFakeTimers();
+  await setup({ contextMaxBytes: 1 });
+  const id = await bot!.input('cancel-before-admission', 'request');
+  await bot!.cancelTurn(id);
+  expect(bot!.snapshot().turns[id]).toMatchObject({ status: 'failed', conclusion: 'cancelled', reported: true });
+  expect(bot!.core.intent(id)).toBeUndefined();
+  await bot!.core.flushProjections(async () => {});
+  await bot!.cancelTurn(id);
+  expect(Object.values(ledger!.snapshot().outbox).filter(row => row.kind === 'projection')).toEqual([]);
+  const transactions = vi.spyOn(ledger!, 'transaction');
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(transactions).not.toHaveBeenCalled();
+});
+
+it('settles a blocked routine occurrence on cancellation so a pending version can activate', async () => {
+  vi.useFakeTimers();
+  await setup({ contextMaxBytes: 512 });
+  const id = ledger!.transaction(s => createRoutine(stateOf(s.application), 'main', 'blocked-routine', 0,
+    { localId: 'new_routine_1', schedule: { minute: 0, hour: 9, tz: 'UTC' }, prompt: '😀'.repeat(500) }, Date.now()).id);
+  await bot!.drain();
+  const slot = bot!.snapshot().routines[id]!.armed!;
+  vi.setSystemTime(slot.at);
+  await bot!.consume({ wakeId: 'blocked-slot', dedupKey: slot.key, availableAt: slot.at, deliveredAt: slot.at, delivery: 1 }, new AbortController().signal);
+  const turn = Object.values(bot!.snapshot().turns)[0]!;
+  expect(turn.status).toBe('blocked');
+  await bot!.updateRoutine({ routineId: id, prompt: 'short' });
+  expect(bot!.snapshot().routines[id]!.pending).toBe(2);
+  await bot!.cancelTurn(turn.id);
+  expect(bot!.snapshot().occurrences[slot.key]!.settled).toBe(true);
+  expect(bot!.snapshot().routines[id]).toMatchObject({ current: 2, pending: null, inflight: [] });
+  expect(bot!.core.intent(turn.id)).toBeUndefined();
+});

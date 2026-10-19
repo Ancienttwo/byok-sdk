@@ -20,8 +20,9 @@ ledger. A new HostLedger connection and recover reuse the task id and payload.
 ## P3 decisions
 
 - Keep the prior per-routine outbox backoff and independent routine progress.
-- Use 12 recent turns and a 32 KiB selected ContextPack by default. Report the
-  omitted history count. Block irreducible overflow with a readable reason.
+- Use at most 12 recent turns and a 32 KiB selected ContextPack by default.
+  Keep the current request mandatory. Remove only older history, report its
+  omitted count, and block irreducible overflow with a readable reason.
 - Pass current routine definitions and action-name outcome summaries only.
 - Keep the 30-second connector deadline, abort signal, and failed conclusion.
 - Use K4 package exports instead of relative src imports.
