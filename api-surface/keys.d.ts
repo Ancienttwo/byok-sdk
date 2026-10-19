@@ -506,8 +506,8 @@ export declare function assertLiveModelResponse(value: string): void;
 // ==== @byok-sdk/keys dist/index.d.ts ====
 export { ByokKeysError, BYOK_KEYS_ERROR_CODES } from './errors';
 export type { ByokKeysErrorCode } from './errors';
-export { PiModelConfigSchema, PI_THINKING_LEVELS } from './pi-model-config';
-export type { PiModelConfig } from './pi-model-config';
+export { PiModelConfigSchema, PI_THINKING_LEVELS, PI_OPENAI_COMPATIBLE_APIS, PI_COMPAT_KEYS_BY_API } from './pi-model-config';
+export type { PiModelConfig, PiOpenAICompatibleApi } from './pi-model-config';
 export { MODEL_PROVIDER_ADAPTERS, MODEL_PROVIDER_KINDS, PROVIDER_AUTH_MODES, PROVIDER_MODEL_CAPABILITIES, ModelProviderProfileSchema, ProviderModelCapabilitySchema, ProviderProfileRefSchema, parseModelProviderProfile, exactProviderProfileBinding, assertExactProviderProfileBinding, } from './provider-profile';
 export type { ModelProviderAdapter, ModelProviderKind, ModelProviderProfile, ModelProviderProfileInput, ExactProviderProfileBinding, ProviderAuthMode, ProviderModelCapability, ProviderProfileRef, } from './provider-profile';
 export { MODEL_PROVIDER_VENDORS, MODEL_PROVIDER_VENDOR_IDS, modelProviderVendor, } from './provider-catalog';
@@ -666,8 +666,56 @@ export declare function chatCompletionText(payload: Record<string, unknown>): st
 // ==== @byok-sdk/keys dist/pi-model-config.d.ts ====
 import { z } from 'zod';
 export declare const PI_THINKING_LEVELS: readonly ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+/**
+ * The Pi wire APIs an `openai_compatible` profile may declare. Absent means
+ * `openai-completions`; an `anthropic` profile always projects
+ * `anthropic-messages` and declares none.
+ */
+export declare const PI_OPENAI_COMPATIBLE_APIS: readonly ['openai-completions', 'openai-responses'];
+export type PiOpenAICompatibleApi = (typeof PI_OPENAI_COMPATIBLE_APIS)[number];
+/**
+ * Every `compat` member this schema admits, for any API. Each API admits only
+ * its own subset of Pi's compat schema for that API (see
+ * {@link PI_COMPAT_KEYS_BY_API}); a member outside the subset is refused,
+ * never silently ignored.
+ */
+declare const compat: z.ZodObject<{
+    supportsStore: z.ZodOptional<z.ZodBoolean>;
+    supportsDeveloperRole: z.ZodOptional<z.ZodBoolean>;
+    supportsReasoningEffort: z.ZodOptional<z.ZodBoolean>;
+    supportsUsageInStreaming: z.ZodOptional<z.ZodBoolean>;
+    maxTokensField: z.ZodOptional<z.ZodEnum<{
+        max_completion_tokens: "max_completion_tokens";
+        max_tokens: "max_tokens";
+    }>>;
+    thinkingFormat: z.ZodOptional<z.ZodEnum<{
+        "ant-ling": "ant-ling";
+        baseten: "baseten";
+        "chat-template": "chat-template";
+        deepseek: "deepseek";
+        openai: "openai";
+        openrouter: "openrouter";
+        qwen: "qwen";
+        "qwen-chat-template": "qwen-chat-template";
+        "string-thinking": "string-thinking";
+        together: "together";
+        zai: "zai";
+    }>>;
+    zaiToolStream: z.ZodOptional<z.ZodBoolean>;
+    supportsLongCacheRetention: z.ZodOptional<z.ZodBoolean>;
+}, z.core.$strict>;
+export declare const PI_COMPAT_KEYS_BY_API: Readonly<Record<PiOpenAICompatibleApi, readonly (keyof z.infer<typeof compat>)[]>>;
+/**
+ * The compat keys the frozen prepared model wire carries. The prepared runtime
+ * entry refuses a profile that declares any other compat key.
+ */
+export declare const PI_PREPARED_COMPAT_KEYS: readonly string[];
 /** Local declared Pi configuration, without identity, endpoint, headers or secrets. */
 export declare const PiModelConfigSchema: z.ZodObject<{
+    api: z.ZodOptional<z.ZodEnum<{
+        "openai-completions": "openai-completions";
+        "openai-responses": "openai-responses";
+    }>>;
     contextWindow: z.ZodNumber;
     maxTokens: z.ZodNumber;
     reasoning: z.ZodBoolean;
@@ -712,9 +760,24 @@ export declare const PiModelConfigSchema: z.ZodObject<{
             zai: "zai";
         }>>;
         zaiToolStream: z.ZodOptional<z.ZodBoolean>;
+        supportsLongCacheRetention: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strict>;
+    inputLimits: z.ZodOptional<z.ZodObject<{
+        maxRequestBytes: z.ZodOptional<z.ZodNumber>;
+        images: z.ZodOptional<z.ZodObject<{
+            resize: z.ZodOptional<z.ZodObject<{
+                maxWidth: z.ZodOptional<z.ZodNumber>;
+                maxHeight: z.ZodOptional<z.ZodNumber>;
+                maxBytes: z.ZodOptional<z.ZodNumber>;
+                jpegQuality: z.ZodOptional<z.ZodNumber>;
+            }, z.core.$strict>>;
+            maxPerMessage: z.ZodOptional<z.ZodNumber>;
+            maxPerRequest: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strict>>;
+    }, z.core.$strict>>;
 }, z.core.$strict>;
 export type PiModelConfig = z.infer<typeof PiModelConfigSchema>;
+export {};
 // ==== @byok-sdk/keys dist/pi-provider-launcher-core.d.ts ====
 import { type ChildProcess } from 'node:child_process';
 import { type CommandRunner } from './command-runner';
@@ -763,6 +826,11 @@ export declare function parsePiProviderLauncherOptions(args: string[]): PiProvid
  * spawned. Refusing here means the admission (`--validate-only true`) answers
  * the same question the launch would, before any process exists. The
  * projection refuses a keyless profile for this entry too.
+ *
+ * A declared `pi_model.api: 'openai-responses'` is refused for the same
+ * reason. So are `pi_model.inputLimits` and any compat key outside
+ * {@link PI_PREPARED_COMPAT_KEYS}: the frozen prepared model wire does not
+ * carry them, and the prepared host refuses a projected entry that declares one.
  *
  * Deliberately NOT a silent narrowing of the profile: nothing here rewrites the
  * adapter or invents a credential.
@@ -908,9 +976,10 @@ export declare function piProjectionProviderId(profileRef: string): string;
  * The projected provider is namespaced by the profile's own ref, not by its
  * provider kind, so two independently configured endpoints of the same kind
  * project to two distinct Pi providers instead of colliding on one. Model
- * `input` modalities are projected from the profile's declared capabilities —
- * declared local configuration is the only authority; nothing is inferred from
- * the model name or base URL.
+ * `input` modalities are projected from the profile's declared capabilities,
+ * and the provider `api` from the adapter and `pi_model.api` — declared local
+ * configuration is the only authority; nothing is inferred from the model name
+ * or base URL.
  */
 export declare function buildPiProviderProjection(profile: ModelProviderProfile, runtimeEntry: PiLauncherRuntimeEntry): object;
 /**
@@ -1242,6 +1311,10 @@ export declare const ModelProviderProfileSchema: z.ZodObject<{
     kind: z.ZodLiteral<"model">;
     model: z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>;
     pi_model: z.ZodOptional<z.ZodObject<{
+        api: z.ZodOptional<z.ZodEnum<{
+            "openai-completions": "openai-completions";
+            "openai-responses": "openai-responses";
+        }>>;
         contextWindow: z.ZodNumber;
         maxTokens: z.ZodNumber;
         reasoning: z.ZodBoolean;
@@ -1286,7 +1359,21 @@ export declare const ModelProviderProfileSchema: z.ZodObject<{
                 zai: "zai";
             }>>;
             zaiToolStream: z.ZodOptional<z.ZodBoolean>;
+            supportsLongCacheRetention: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strict>;
+        inputLimits: z.ZodOptional<z.ZodObject<{
+            maxRequestBytes: z.ZodOptional<z.ZodNumber>;
+            images: z.ZodOptional<z.ZodObject<{
+                resize: z.ZodOptional<z.ZodObject<{
+                    maxWidth: z.ZodOptional<z.ZodNumber>;
+                    maxHeight: z.ZodOptional<z.ZodNumber>;
+                    maxBytes: z.ZodOptional<z.ZodNumber>;
+                    jpegQuality: z.ZodOptional<z.ZodNumber>;
+                }, z.core.$strict>>;
+                maxPerMessage: z.ZodOptional<z.ZodNumber>;
+                maxPerRequest: z.ZodOptional<z.ZodNumber>;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
     }, z.core.$strict>>;
     profile_ref: z.ZodString;
     provider_kind: z.ZodEnum<{
