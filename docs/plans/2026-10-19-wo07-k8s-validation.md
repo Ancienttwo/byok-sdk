@@ -258,11 +258,11 @@ Test assertion changes (P3-8): `packages/core/src/__tests__/constraints.test.ts`
   by the name shape or by Intl. `+08:00` fails the name check; `UTC+8` reaches
   Intl and is refused there. `Etc/GMT+8` stays valid. This is the smaller change
   because it corrects the wording without changing the accepted zone names.
-- P3-6: Add `Antarctica/Casey` to the yearly sweep. It now scans nine zones.
+- P3-7: Add `Antarctica/Casey` to the yearly sweep. It now scans nine zones.
   The comment states that a scan starting in 2026 does not replay Casey's
   2019 interval. This is current-rule coverage, not a claim to cover that
   historical maximum.
-- P3-7: The previous local follow-up already fixed callback indentation and
+- P3-6: The previous local follow-up already fixed callback indentation and
   moved the minute-scan comment above `dstOracle`. Recheck those positions and
   remove the remaining blank lines before the timed-test closures. The yearly
   diagnostic now obtains the zone count from `zones.length`. Existing oracle
