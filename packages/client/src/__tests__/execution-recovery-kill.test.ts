@@ -48,8 +48,8 @@ class JsonChild {
 
   constructor(executable: string, configPath: string) {
     const childEnv = { ...process.env };
-    // The compiled fixture uses its explicit per-test OS keychain, shared
-    // across these real process deaths and the final unpair child.
+    // Native custody survives these real process deaths and the final unpair:
+    // per-test Keychain on macOS, private D-Bus Secret Service on Linux CI.
     this.child = spawn(executable, [configPath], { env: childEnv, stdio: ['pipe', 'pipe', 'pipe'] });
     this.child.stdout.setEncoding('utf8');
     this.child.stderr.setEncoding('utf8');
@@ -370,7 +370,10 @@ afterAll(async () => {
   if (suiteRoot !== undefined) await fs.rm(suiteRoot, { recursive: true, force: true });
 });
 
-describe.skipIf(process.platform !== 'darwin')('compiled daemon SIGKILL execution recovery against reconstructed durable cloud stores', () => {
+// The owned-runtime fixture requires POSIX process groups, SIGKILL and Perl
+// setsid. Linux runs with the real Secret Service via with-secret-service.sh;
+// macOS uses the per-test Keychain above. Windows has a separate lifecycle gate.
+describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('compiled daemon SIGKILL execution recovery against reconstructed durable cloud stores', () => {
   it('publishes completion input atomically while the compiled runtime polls during a paused write', async () => {
     const cloud = await startCloud();
     const { deviceId } = await pair(cloud);
@@ -566,8 +569,7 @@ describe.skipIf(process.platform !== 'darwin')('compiled daemon SIGKILL executio
     expect(starts()).toHaveLength(1);
   }, 30_000);
 
-  // F3 stays in the native macOS suite: its compiled daemon uses the real
-  // Keychain credential fixture. Linux admission is a separate slice (F4).
+  // F3 shares the native macOS/Linux suite and its OS credential authority.
   // This fixture has an Agent home and no Git workspace configuration.
   it.each(['terminal:before-commit', 'terminal:after-commit'] as const)(
     '#554 F3: cancel initiates SIGKILL at %s and recovery keeps one terminal and one home writer',
