@@ -1,5 +1,5 @@
 import type { BotTurnOutcome } from '@byok-sdk/protocol';
-import { canonical, hash, taskId as taskIdOf, type Conclusion, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import { canonical, hash, taskId as taskIdOf, type Conclusion, type Intent, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
 import { addTurn, json, type Batch, type CollaborationState, type Delegation, type ReplyEntry, type Turn, type Verdict } from './model';
 
 /** Host cap on a delegated Bot's accepted reply (Q8). consumeMessage checks it too. */
@@ -19,6 +19,10 @@ export const REPLY_REQUEST_MAX_BYTES = 2 * (BOT_REPLY_MAX_BYTES + REPLY_META_MAX
 export const BOT_REQUEST_MAX_BYTES = 4000 + REPLY_META_MAX_BYTES + FRAME_MAX_BYTES;
 export const REPLY_RETRY_MAX_MS = 60_000;
 export const REPLY_UNCERTAIN_AFTER_MS = 30 * 60_000;
+/** §8.3 (Q9): a cancel with no terminal, and a claimed attempt with no terminal, show `uncertain`. */
+export const DEFAULT_CANCEL_GRACE_MS = 60_000;
+export interface DelegationTimers { cancelGraceMs: number; uncertainAfterMs: number }
+const DEFAULT_TIMERS: DelegationTimers = { cancelGraceMs: DEFAULT_CANCEL_GRACE_MS, uncertainAfterMs: REPLY_UNCERTAIN_AFTER_MS };
 const TEAM_BOT_LIMIT = 24;
 
 export function isCrossBot(turn: Turn): boolean { return turn.source === 'bot_request' || turn.source === 'bot_reply'; }
@@ -77,7 +81,7 @@ function close(d: Delegation, verdict: Verdict, now: number, reason?: string, re
 function entry(d: Delegation): ReplyEntry {
   return { delegationId: d.id, from: d.toBotId, request: d.request, verdict: d.verdict!,
     ...(d.reason ? { reason: d.reason } : {}), ...(d.reply ? { reply: d.reply } : {}),
-    ...(d.continuationRefused ? { continuationRefused: true as const } : {}) };
+    ...(d.continuationRefused ? { continuationRefused: true as const } : {}), ...(d.partial ? { partial: true as const } : {}) };
 }
 /** Delivery (§8.2): one reply Turn per report. It runs only when a prepaid A slot is free. */
 function report(state: CollaborationState, batch: Batch, rows: Delegation[], id: string, refusalReport: boolean): void {
@@ -175,17 +179,49 @@ export function applyDelegate(state: CollaborationState, turn: Turn, taskId: str
   return { successor };
 }
 
-/** Claim (first observed start spends the unit) and the queued -> running status. */
-export function observeStart(state: CollaborationState, turn: Turn, emit: Publish): void {
+/** Claim (first observed start spends the unit), the claim time of a chain Turn, and queued -> running. */
+export function observeStart(state: CollaborationState, turn: Turn, now: number, emit: Publish): void {
   claimUnit(state, turn.unit);
   const d = turn.delegationId ? state.delegations[turn.delegationId] : undefined;
-  if (d && d.status === 'queued') { d.status = 'running'; publish(d, emit); }
+  if (!d || d.verdict) return;
+  const fresh = d.claimed?.turnId !== turn.id;
+  if (fresh) d.claimed = { turnId: turn.id, at: now };
+  // A successor that starts after an uncertain claim runs again (§8.3: a later terminal gives the normal verdict).
+  if (d.status === 'queued' || fresh && d.status === 'uncertain' && !d.cancel) { d.status = 'running'; publish(d, emit); }
+}
+function uncertain(d: Delegation, now: number, emit: Publish): void {
+  d.status = 'uncertain'; d.uncertainSince = now; publish(d, emit);
+}
+/** Cancel verdict. A reply accepted before the cancel rides along as partial (§8.8). */
+function resolveCancel(state: CollaborationState, d: Delegation, taskId: string | undefined, now: number, emit: Publish): void {
+  const reply = taskId !== undefined && state.replies[taskId]?.body !== undefined ? taskId : undefined;
+  if (reply) d.partial = true;
+  resolveDelegation(state, d, 'cancelled', now, emit, 'user_cancelled', reply);
+}
+/**
+ * Arbitration transaction (§8.8). Freeze the cancel fact on the current chain
+ * Turn. That closes its first acceptance and blocks new successors. Without a
+ * K4 intent, close queue eligibility and set the verdict now. Returns true when
+ * core.cancel must still deliver the cancel.
+ */
+export function arbitrateCancel(s: LedgerState, state: CollaborationState, d: Delegation, now: number, emit: Publish): boolean {
+  if (d.verdict) throw new Error('Delegation already resolved');
+  if (d.cancel) return !d.cancel.delivered;
+  if (d.status !== 'queued' && d.status !== 'running' && d.status !== 'reply_pending') throw new Error('Delegation cannot be cancelled in this state; use abandonDelegation');
+  const target = state.turns[d.chainTurnIds.at(-1)!]!, intent = s.intents[hash(target.id)];
+  d.cancel = { requestedAt: now, targetTurnId: target.id, delivered: !intent || !!intent.conclusion };
+  if (!intent) {
+    target.status = 'failed'; target.conclusion = 'cancelled'; delete target.blockedReason;
+    emit(`bot-turn:${target.id}`, json({ owner: target.botId, ...target }));
+    target.reported = true;
+    resolveCancel(state, d, undefined, now, emit);
+  } else if (intent.conclusion) resolveCancel(state, d, intent.taskId, now, emit);
+  return !d.cancel.delivered;
 }
 
 /** B chain end after a success terminal: the Host acceptance record is the body authority (§3.3). */
 export function endChain(state: CollaborationState, turn: Turn, taskId: string, proposedSelf: boolean, now: number, emit: Publish): void {
   const d = state.delegations[turn.delegationId!]!;
-  if (d.verdict) { state.audit.push(`Delegation result after verdict: ${d.id} ${taskId}`); return; }
   if (proposedSelf) d.continuationRefused = true;
   if (state.replies[taskId]?.body !== undefined) { resolveDelegation(state, d, 'answered', now, emit, undefined, taskId); return; }
   Object.assign(d, { status: 'reply_pending', pendingSince: now, nextCheckAt: now, checks: 0 });
@@ -201,52 +237,95 @@ function started(s: LedgerState, key: string): boolean {
   return !!intent && Array.from({ length: intent.generation + 1 }, (_, g) => s.executions[taskIdOf(key, g)]).some(execution =>
     execution?.started || execution?.terminal !== undefined && execution.terminal.envelope.type !== 'task.decline');
 }
-const FAILURE: Partial<Record<Conclusion, { verdict: Verdict; reason?: string }>> = {
-  cancelled: { verdict: 'cancelled', reason: 'user_cancelled' }, expired: { verdict: 'expired' },
-  declined: { verdict: 'failed', reason: 'busy' }, failed: { verdict: 'failed' }, superseded: { verdict: 'failed' },
-};
-/** Units, running status, and verdicts of chain ends that did not succeed. Runs inside sync. */
-export function settleDelegations(s: LedgerState, state: CollaborationState, now: number, emit: Publish): void {
+const BUSY = new Set(['agent_home_writer_busy', 'agent_home_reader_busy']);
+/** §8.1: K4 conclusion of a chain end that did not succeed -> verdict. */
+function failure(s: LedgerState, intent: Intent | undefined, conclusion: Conclusion): { verdict: Verdict; reason?: string } {
+  if (conclusion === 'cancelled') {
+    // A Host cancel with reason expired: the claim raced the wait deadline (WO-05 ruling).
+    return intent?.cancelReason === 'expired' ? { verdict: 'expired', reason: 'claim_raced_deadline' } : { verdict: 'cancelled', reason: 'user_cancelled' };
+  }
+  if (conclusion === 'expired') return { verdict: 'expired' };
+  if (conclusion === 'declined') {
+    const envelope = intent && s.executions[intent.taskId]?.terminal?.envelope;
+    const code = envelope?.type === 'task.decline' ? envelope.payload.code : undefined;
+    return { verdict: 'failed', reason: !code || BUSY.has(code) ? 'busy' : code };
+  }
+  return { verdict: 'failed' };
+}
+/** Units, claims, cancels, uncertain states, and verdicts of chain ends that did not succeed. Runs inside sync. */
+export function settleDelegations(s: LedgerState, state: CollaborationState, now: number, emit: Publish, timers: DelegationTimers = DEFAULT_TIMERS): void {
   for (const turn of Object.values(state.turns)) {
     if (!turn.unit || state.units[turn.unit]?.state !== 'reserved') continue;
-    if (started(s, turn.id)) observeStart(state, turn, emit);
+    if (started(s, turn.id)) observeStart(state, turn, now, emit);
     else if (s.intents[hash(turn.id)]?.conclusion || turn.conclusion && !s.intents[hash(turn.id)]) releaseUnit(state, turn.unit);
   }
   for (const d of Object.values(state.delegations)) {
+    if (d.lateTurnId && s.intents[hash(d.lateTurnId)]?.conclusion) {
+      // A terminal after the verdict is audit only. It never reaches the initiator (§4.3).
+      state.audit.push(`Delegation terminal after verdict: ${d.id} ${s.intents[hash(d.lateTurnId)]!.taskId}`);
+      delete d.lateTurnId;
+    }
     if (d.verdict || !d.chainTurnIds.length) continue;
     const last = state.turns[d.chainTurnIds.at(-1)!]!, intent = s.intents[hash(last.id)];
-    if (started(s, last.id)) observeStart(state, last, emit);
-    if (d.status === 'reply_pending' || d.status === 'uncertain') {
+    if (started(s, last.id)) observeStart(state, last, now, emit);
+    if (d.cancel) {
+      const target = state.turns[d.cancel.targetTurnId]!, cancelled = s.intents[hash(target.id)];
+      if (cancelled?.conclusion || !cancelled && target.conclusion) resolveCancel(state, d, cancelled?.taskId, now, emit);
+      else if (d.status !== 'uncertain' && now - d.cancel.requestedAt >= timers.cancelGraceMs) uncertain(d, now, emit);
+      continue;
+    }
+    if (d.nextCheckAt !== undefined) {
       if (intent && state.replies[intent.taskId]?.body !== undefined) resolveDelegation(state, d, 'answered', now, emit, undefined, intent.taskId);
       continue;
     }
     const conclusion = intent?.conclusion ?? (last.conclusion as Conclusion | undefined);
-    if (!conclusion) continue;
+    if (!conclusion) {
+      // Display only: no resubmit and no new generation (§8.3).
+      if (d.status !== 'uncertain' && d.claimed?.turnId === last.id && now - d.claimed.at >= timers.uncertainAfterMs) uncertain(d, now, emit);
+      continue;
+    }
     // An archived target's outcome is audit only (§8.4), so its chain closes as refused.
     if (state.team.bots[last.botId]?.archived) { resolveDelegation(state, d, 'refused', now, emit, 'target_archived'); continue; }
     if (conclusion === 'succeeded') continue;
-    const mapped = FAILURE[conclusion] ?? { verdict: 'failed' as const };
+    const mapped = failure(s, intent, conclusion);
     resolveDelegation(state, d, mapped.verdict, now, emit, mapped.reason);
   }
+}
+/** "End" (§8.3). An attempt that can still run gets a K4 cancel. Its later terminal goes to audit only. */
+export function abandonDelegation(s: LedgerState, state: CollaborationState, d: Delegation, now: number, emit: Publish): boolean {
+  if (d.status !== 'reply_held' && d.status !== 'uncertain') throw new Error('Delegation cannot be ended in this state');
+  const last = d.chainTurnIds.at(-1)!, intent = s.intents[hash(last)];
+  if (intent && !intent.conclusion) {
+    d.cancel ??= { requestedAt: now, targetTurnId: last, delivered: false };
+    d.lateTurnId = last;
+  }
+  resolveDelegation(state, d, 'abandoned', now, emit, d.status === 'reply_held' ? 'reply_held' : undefined);
+  return !!d.cancel && !d.cancel.delivered;
+}
+/** Next time a delegation timer can change state without other events. */
+export function delegationDue(state: CollaborationState, timers: DelegationTimers): number[] {
+  return Object.values(state.delegations).flatMap(d => [
+    ...(d.nextCheckAt !== undefined ? [d.nextCheckAt] : []),
+    ...(!d.verdict && d.status !== 'uncertain' && d.cancel ? [d.cancel.requestedAt + timers.cancelGraceMs] : []),
+    ...(!d.verdict && d.status === 'running' && !d.cancel && d.claimed?.turnId === d.chainTurnIds.at(-1) ? [d.claimed!.at + timers.uncertainAfterMs] : []),
+  ]);
 }
 
 /** SDK readback for a reply_pending delegation without a Host record (§3.3). */
 export function reconcileReply(state: CollaborationState, d: Delegation, readback: { disposition?: { outcome: string } } | undefined,
-  now: number, emit: Publish): void {
+  now: number, emit: Publish, uncertainAfterMs = REPLY_UNCERTAIN_AFTER_MS): void {
   if (d.verdict || d.nextCheckAt === undefined) return;
   if (!readback || readback.disposition?.outcome === 'refused') { resolveDelegation(state, d, 'failed', now, emit, 'no_reply'); return; }
   if (readback.disposition?.outcome === 'held') {
     d.status = 'reply_held'; delete d.nextCheckAt; publish(d, emit); return;
   }
   // Pending, or accepted without a Host record: the Host alone authors the reply body.
-  retryReply(d, now, emit);
+  retryReply(d, now, emit, uncertainAfterMs);
 }
-export function retryReply(d: Delegation, now: number, emit: Publish): void {
+export function retryReply(d: Delegation, now: number, emit: Publish, uncertainAfterMs = REPLY_UNCERTAIN_AFTER_MS): void {
   d.checks = (d.checks ?? 0) + 1;
   d.nextCheckAt = now + Math.min(REPLY_RETRY_MAX_MS, 1000 * 2 ** (d.checks - 1));
-  if (d.status !== 'uncertain' && now - (d.pendingSince ?? now) >= REPLY_UNCERTAIN_AFTER_MS) {
-    d.status = 'uncertain'; d.uncertainSince = now; publish(d, emit);
-  }
+  if (d.status !== 'uncertain' && now - (d.pendingSince ?? now) >= uncertainAfterMs) uncertain(d, now, emit);
 }
 
 function frame(label: string, meta: Record<string, unknown>, body: string): string {
@@ -271,5 +350,6 @@ export function crossBotRequest(state: CollaborationState, turn: Turn): string {
   return (turn.replies ?? []).map((reply, index) => frame(`reply ${index + 1}`, {
     delegationId: reply.delegationId, from: sender(state, reply.from), request: cut(reply.request, 200), verdict: reply.verdict,
     ...(reply.reason ? { reason: reply.reason } : {}), ...(reply.continuationRefused ? { continuationRefused: true } : {}),
+    ...(reply.partial ? { partial: true } : {}),
   }, reply.reply ? state.replies[reply.reply]?.body ?? '' : '')).join('\n');
 }

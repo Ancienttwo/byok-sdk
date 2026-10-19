@@ -22,7 +22,7 @@ connector. Route the embedded server's `wake.consume` to `bot.consume`.
 Route its `agentMessage.consume` to `bot.consumeMessage`.
 Call `bot.recover()` after startup. Call `bot.close()` before closing the SDK
 server or the ledger. Do not call the K4 core's mutation methods directly.
-Use `input`, `answer`, `decide`, `cancelTurn`, `updateRoutine`, `setRoutineLifecycle`, and `abandonDelegation`.
+Use `input`, `answer`, `decide`, `cancelTurn`, `updateRoutine`, `setRoutineLifecycle`, `cancelDelegation`, and `abandonDelegation`.
 Read `snapshot` or upload K4 projections with `core.flushProjections`.
 
 The execution template selects this Bot's Agent. It must use a runtime profile
@@ -269,7 +269,7 @@ also stays outside this history-window change.
 
 ## Cross-Bot delegation
 
-This section covers slice X1 of `docs/plans/2026-10-19-k8b-cross-bot.md`.
+This section covers slices X1 and X2 of `docs/plans/2026-10-19-k8b-cross-bot.md`.
 A Bot can delegate one request to another Bot of the same team. The `to` enum
 lists this Bot first, then each active team Bot after its first persona
 readback. It lists Bot ids only. A room seat has no `delegate` fragment.
@@ -295,9 +295,35 @@ verdict is `answered` when the record exists. Otherwise the delegation is
 `reply_pending`. The Host timer reads `tasks.agentMessage` with a backoff from
 1 to 60 seconds. It does not wait for a K4 scan. No message gives `failed`
 (`no_reply`). Held gives `reply_held`; `abandonDelegation` then sets
-`abandoned`. After 30 minutes without a result, the delegation is
-`uncertain`. A failed, cancelled, or expired chain end gives `failed`,
-`cancelled`, or `expired`.
+`abandoned`. After `uncertainAfterMs` (default 30 minutes) without a result,
+the delegation is `uncertain`.
+
+Other chain ends map to verdicts as follows. `failed` gives `failed`.
+`declined` gives `failed` with `busy` or the decline code. `expired` gives
+`expired`. A Host cancel with reason `expired` gives `expired`
+(`claim_raced_deadline`). A user cancel gives `cancelled` (`user_cancelled`).
+
+`cancelDelegation(id)` works while the delegation is queued, running, or
+`reply_pending`. `cancelTurn` on a chain Turn calls it. One transaction
+freezes `cancel = { requestedAt, targetTurnId, delivered }` on the current
+chain Turn. That Turn then accepts no first message and applies no outcome.
+Without a K4 intent, the transaction closes the Turn and sets `cancelled`.
+It does not call `core.cancel`. With an intent, the Host calls `core.cancel`
+after the commit and then sets `delivered`. Each `process` pass delivers an
+undelivered cancel to its frozen target, so a restart completes it. When
+`core.cancel` fails, `cancelDelegation` rejects, but the cancel stays
+committed and the timer delivers it.
+
+A message accepted before the cancel stays. The verdict is then `cancelled`
+with that reply marked `partial`. A message after the cancel is refused
+(`delegation_cancelled`). A cancel with no terminal after `cancelGraceMs`
+(default 60 seconds) shows `uncertain`. A claimed chain Turn with no terminal
+after `uncertainAfterMs` also shows `uncertain`. The Host never resubmits and
+never starts a new generation. A later terminal gives the normal verdict.
+
+`abandonDelegation(id)` ends a `reply_held` or `uncertain` delegation with
+`abandoned`. When the attempt can still run, it also writes a K4 cancel. A
+terminal after the verdict goes to `audit` only.
 
 Every verdict reaches the initiator once, in a `bot_reply` Turn. Its id is
 `H('bot_reply', delegationId)`. When an outcome has no accepted item, one
