@@ -1,8 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { openHost, template, type TestHost } from '../../host-execution-core/src/test-support';
+import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration, type BotOptions } from './host';
 import { stateOf } from './model';
-import type { Json } from '../../host-execution-core/src/model';
+import type { Json } from '@byok-sdk/example-host-execution-core';
 
 let fixture: TestHost | undefined;
 let bot: BotCollaboration | undefined;

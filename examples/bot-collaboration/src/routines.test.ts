@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { MAX_FUTURE_MS } from '@byok-sdk/server';
 import { ROUTINE_HORIZON_MS } from '@byok-sdk/core';
-import { WAKE_HORIZON_MS } from '../../host-execution-core/src/routines';
+import { WAKE_HORIZON_MS } from '@byok-sdk/example-host-execution-core';
 import { stateOf } from './model';
 import { arm, consumeRoutine, createRoutine, lifecycle, updateRoutine } from './routines';
 import { outcomeSchema } from './schema';

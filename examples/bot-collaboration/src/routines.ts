@@ -1,8 +1,8 @@
 import { checkRoutineSchedule, nextRoutineOccurrence } from '@byok-sdk/core';
 import type { DueWake } from '@byok-sdk/server';
 import type { CreateRoutineAction, UpdateRoutineAction } from '@byok-sdk/protocol';
-import { hash } from '../../host-execution-core/src/model';
-import { parseRoutineWakeKey } from '../../host-execution-core/src/routines';
+import { hash } from '@byok-sdk/example-host-execution-core';
+import { parseRoutineWakeKey } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState, Definition, Routine, Slot } from './model';
 
 export function operation(state: CollaborationState, routine: Routine, kind: 'schedule' | 'cancel', slot: Slot): void {

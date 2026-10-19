@@ -1,5 +1,5 @@
 import type { AskUserAction, ConfirmableAction, ResultSchema, RoutineScheduleFields } from '@byok-sdk/protocol';
-import type { Json } from '../../host-execution-core/src/model';
+import type { Json } from '@byok-sdk/example-host-execution-core';
 
 export interface Turn {
   id: string; root: string; source: 'user' | 'continuation' | 'answer' | 'action_result' | 'routine';

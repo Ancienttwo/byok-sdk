@@ -185,3 +185,24 @@ Aimpact approved product rulings that affect K8a collaboration scope. This note 
 - K4: separate Draft PR #532 first; restack this branch onto it afterward; remove squashed K4 copy from #529.
 - Cross-Bot delegation: deferred until after #530+#531 land (first WO of K8b).
 - #525 `BOT_TURN_OUTCOME_LIMITS` remains HOLD pending Aimpact confirm.
+
+## Corrected local scope, 2026-10-19
+
+Cross-Bot delegation is withdrawn from #530 and deferred to the first K8b work
+order after #530 and #531 land. No cross-Bot code or test was written in this
+round, so no revert is needed. Ordinary merge `04d18bdc` syncs origin/main at
+`433deced`; `a1c1226e` stays an ancestor. #531 head `23132486` is not merged.
+
+### P3 package boundary and schema tests
+
+- `host.test.ts`, `acceptance.test.ts`, `wake-retry.test.ts`, `routines.test.ts`:
+  imports now use the K4 package exports. Existing assertions are unchanged.
+  The test fixture is accessed through the package's test-support subpath.
+- New `schema-budget.test.ts`: verify checked-to-flat fallback only for
+  schema-over-budget, Host-defect errors without fallback, all eight routine
+  ids retained, bounded outcome/schema sizes, and a self-only delegate enum.
+- K4 exports expose existing functions only. Its runtime behavior is unchanged.
+
+The new scope permits ContextPack budgets and K4 package exports in this branch.
+The previous PENDING-AIMPACT notes below the historical checks are superseded
+for these two implementation items. No PRD text is changed.

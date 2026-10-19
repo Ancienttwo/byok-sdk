@@ -1,11 +1,11 @@
 import type { BotTurnOutcome, ResultSchema, UpdateRoutineAction } from '@byok-sdk/protocol';
 import { BOT_TURN_OUTCOME_CONTRACT, validateResultOutcome } from '@byok-sdk/protocol';
 import type { DueWake } from '@byok-sdk/server';
-import { HostExecutionCore, type ExecutionServer, type OutcomeTransaction } from '../../host-execution-core/src/core';
-import { HostLedger } from '../../host-execution-core/src/ledger';
-import { hash, project, time, type ExecutionTemplate, type Json, type LedgerState } from '../../host-execution-core/src/model';
-import { enqueue } from '../../host-execution-core/src/transitions';
-import { WAKE_HORIZON_MS } from '../../host-execution-core/src/routines';
+import { HostExecutionCore, type ExecutionServer, type OutcomeTransaction } from '@byok-sdk/example-host-execution-core';
+import { HostLedger } from '@byok-sdk/example-host-execution-core';
+import { hash, project, time, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import { enqueue } from '@byok-sdk/example-host-execution-core';
+import { WAKE_HORIZON_MS } from '@byok-sdk/example-host-execution-core';
 import { json, stateOf, type CollaborationState, type Routine, type Turn } from './model';
 import { contextPack, outcomeSchema, SYSTEM_PROMPT } from './schema';
 import { arm, consumeRoutine, createRoutine, lifecycle, operation, owned, switchVersion, updateRoutine } from './routines';

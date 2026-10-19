@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { HostLedger } from '../../host-execution-core/src/ledger';
-import { openHost, template, type TestHost } from '../../host-execution-core/src/test-support';
-import type { ExecutionServer } from '../../host-execution-core/src/core';
+import { HostLedger } from '@byok-sdk/example-host-execution-core';
+import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
+import type { ExecutionServer } from '@byok-sdk/example-host-execution-core';
 import { BotCollaboration, type BotOptions } from './host';
 import { contextPack } from './schema';
 import { stateOf } from './model';
