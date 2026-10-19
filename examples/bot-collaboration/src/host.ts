@@ -221,13 +221,18 @@ export class BotCollaboration {
   }
   private async flushWakes(): Promise<void> {
     // All mutations and store calls run on this instance's single serial chain.
+    const blocked = new Set<string>();
     for (const op of this.snapshot().operations.filter(o => o.state === 'pending').sort((a, b) => a.sequence - b.sequence)) {
+      if (blocked.has(op.routineId)) continue;
       const routine = this.snapshot().routines[op.routineId]!;
       if (op.kind === 'schedule' && (routine.generation !== op.generation || routine.lifecycle !== 'active' || routine.armed?.key !== op.slot.key)) {
         this.ledger.transaction(s => { stateOf(s.application).operations.find(o => o.sequence === op.sequence)!.state = 'obsolete'; });
         continue;
       }
-      if (op.retryAt !== undefined && op.retryAt > this.now()) break;
+      if (op.retryAt !== undefined && op.retryAt > this.now()) {
+        blocked.add(op.routineId);
+        continue;
+      }
       try {
         if (op.kind === 'cancel') await this.server.wakes.cancel(op.slot.key);
         else {
@@ -245,7 +250,8 @@ export class BotCollaboration {
           row.error = String(error instanceof Error ? error.message : error).slice(0, 1024); row.retryAt = this.now() + 60_000;
           state.routines[op.routineId]!.status = 'schedule_retrying';
         });
-        break; // A failed operation must not be overtaken, even by a cancel.
+        // Only this routine waits. Its later operations cannot overtake the failure.
+        blocked.add(op.routineId);
       }
     }
   }
@@ -278,7 +284,11 @@ export class BotCollaboration {
     if (!this.closed) {
       // Durable state is authority. The timer only retries outbox work and expires cards.
       const state = this.snapshot();
-      const due = [...state.operations.filter(o => o.state === 'pending').map(o => o.retryAt ?? this.now() + 1),
+      const heads = new Map<string, number>();
+      for (const op of state.operations.filter(o => o.state === 'pending').sort((a, b) => a.sequence - b.sequence)) {
+        if (!heads.has(op.routineId)) heads.set(op.routineId, op.retryAt ?? this.now());
+      }
+      const due = [...heads.values(),
         ...Object.values(state.cards).filter(c => c.state === 'pending').map(c => c.expiresAt)];
       if (due.length) {
         this.timer = setTimeout(() => { void this.drain().catch(() => {}); }, Math.max(1, Math.min(60_000, Math.min(...due) - this.now())));
