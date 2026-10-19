@@ -324,7 +324,8 @@ per fan-out:
   outcome with no accepted item makes one refusal report Turn (§8.2). So one
   A outcome makes at most `max(n, 1)` A reply Turns.
 - The budget reserve covers this worst case (Q10, §6.2):
-  `reserve(n) = n + max(n, 1)` units. The first draft's `n + 1` did not cover
+  `reserve(n) = n + max(n, 1)` units. Root admission also counts every open
+  reservation of other batches on the same root (§6.2). The first draft's `n + 1` did not cover
   a late report: with 9 units used, accepting 2 reserved 3 (total 12), and
   one late report made 13 executions.
 
@@ -604,26 +605,57 @@ New map `CollaborationState.delegations: Record<string, Delegation>` in
   each B execution and each A reply execution. Generations of the same intent
   do not count.
 - Prepaid worst case (Q10). When an A outcome is applied, `n` is the number
-  of accepted cross-Bot items (0, 1 or 2). The Host reserves
-  `reserve(n) = n + max(n, 1)` units: `n` B executions and `max(n, 1)` A
-  reply Turns, which include late reports after an uncertain sibling and the
+  of accepted cross-Bot items (0, 1 or 2). The batch needs
+  `reserve(n) = n + max(n, 1)` units: `n` B units and `max(n, 1)` A reply
+  slots. The A slots cover late reports after an uncertain sibling and the
   refusal report when `n = 0`.
-- If `used + reserve(n)` exceeds 12, the Host refuses accepted items from the
-  last index (`budget_exhausted`) and recomputes. Those refusals ride in the
-  reply Turn of the same outcome.
-- Refusal report rule. At `n = 0` the reserve is one unit for the refusal
-  report Turn. If that unit is not free, the Turn is delivery only: it is
-  recorded in A's conversation, it does not start A's model, and it enters
-  A's next ContextPack (§8.2).
-- Use and release. A unit is used when its execution is claimed. When a
-  delegation or batch closes, the Host releases each reserved unit that was
-  not used: a B Turn that never ran (refused after acceptance, cancelled
-  before an intent, expired without a claim) and A reply units that the join
-  did not need.
-- Examples: used 8, fan-out 2 → reserve 4 → 12; with a late report the A
-  Turns are 2, as reserved. Used 9, fan-out 2 → 13 → refuse index 1 →
-  reserve 2 → 11. Used 11, fan-out 1 → 13 → refuse → refusal report reserve
-  1 → 12. Used 12 → refusal report is delivery only.
+- Units. Each unit has a stable id and moves once from `reserved` to `spent`
+  or to `released`. B unit: `H(delegationId, 'B')`. A slot:
+  `H(batch, 'A', k)` for `k < max(n, 1)`. `budgets[root]` keeps
+  `spent` and `reserved` counts. Each change to them runs in the same ledger
+  transaction as the unit change. A replayed event finds the unit already
+  moved and changes nothing.
+- Root admission. The check counts every open reservation on the root, from
+  every batch: `spent[root] + reserved[root] + reserve(n) ≤ 12`. If it fails,
+  the Host refuses accepted items from the last index (`budget_exhausted`)
+  and checks again. Those refusals ride in the reply Turn of the same
+  outcome. The first draft checked only `used + reserve(n)`. Two interleaved
+  batches could then commit 13 units (Codex round 2).
+- Invariant. `spent[root] + reserved[root] ≤ 12` at all times. Admission is
+  the only step that adds units. A claim moves one unit from `reserved` to
+  `spent`, so the sum does not change. A release lowers the sum.
+- Claim rule. Every B execution and every A reply execution holds exactly one
+  unit before K4 submits it. The first transaction that sees the intent
+  claimed (K4 `started`) spends that unit. Later generations of the same
+  intent reuse the spent unit. Continuations use the continuation budget, not
+  units. User input Turns use no units.
+- Release timing:
+  - B unit: released when the delegation gets a verdict and its first B Turn
+    was never claimed: refused after acceptance, cancelled before a claim, or
+    expired without a claim.
+  - A slot: a reply Turn takes one free slot when the Host inserts it. A
+    batch always keeps free slots for each of its delegations that is not yet
+    reported. After each report, the Host releases free slots above that
+    count. So a join that reports both delegations in one Turn releases one
+    slot, and a batch with an uncertain item keeps its slot for the late
+    report.
+  - A taken slot whose reply Turn ends without a claim is released.
+  - Initiator archived: the Host releases every free A slot of A's batches.
+- Refusal report rule. At `n = 0` the reserve is one A slot, from the same
+  free balance `12 − spent[root] − reserved[root]`. If the balance is 0, the
+  refusal report Turn is delivery only: it is recorded in A's conversation,
+  it does not start A's model, and it enters A's next ContextPack (§8.2).
+- Examples with no other open reservation: spent 8, fan-out 2 → reserve 4 →
+  12; with a late report the A Turns are 2, as reserved. Spent 9, fan-out 2
+  → 13 → refuse index 1 → reserve 2 → 11. Spent 11, fan-out 1 → 13 → refuse
+  → refusal report slot → 12. Free balance 0 → refusal report is delivery
+  only.
+- Interleaved example (Codex round 2): spent 5, old fan-out 2 reserves 4
+  (committed 9). Both old targets are claimed (spent 7, reserved 2). One old
+  target answers and one is uncertain. A's batch reply is claimed (spent 8,
+  reserved 1 for the late report). A fans out 2 again: `8 + 1 + 4 = 13`, so
+  index 1 is refused and `8 + 1 + 2 = 11` is accepted. The committed total
+  never exceeds 11, and the old late report still starts.
 - Continuation budget, 4 per root, is separate (product PRD Q11).
 - A↔B ping-pong is bounded by the budget. A→B→A is allowed, because a Bot can
   ask back, and it counts hop.
@@ -839,23 +871,26 @@ Slices X1–X6 and X2M are `examples/bot-collaboration/` code, tests and docs.
 Slice XS is the only SDK change. It gets its own SDK issue, like K8-S, and
 does not depend on #530 or #531.
 
-Prerequisite for every slice: #532 lands. Then #530 and #531 restack onto it
-and land (ruling 2026-10-19, "K4 sequencing" and "Cross-Bot delegation").
+Prerequisite for every example slice (X1–X6, X2M): #532 lands. Then #530 and
+#531 restack onto it and land (ruling 2026-10-19, "K4 sequencing" and "Cross-Bot delegation").
 Before that, #531 must implement the history rulings: recent-N truncation with
 a notice, no block on history, and the post-join cutoff. Cross-Bot relies on
 them (§3.7).
 
 | Slice | Scope | Depends on | Acceptance (platform PRD §14.2 unless noted) |
 |---|---|---|---|
-| X1 Core delegation | Action order fix (§1.1, §3.1); `Delegation` row; `bot_request`/`bot_reply` sources; `Turn.authority` and the authority gate (§6.1); `addTurn` with hop and authority (§4.2); `to` enum (§2.2); apply checks (archived, duplicate, hop, room seat, one cross-Bot item per outcome, worst-case reserve `reserve(1) = 2`); B ContextPack `delegation` block; `BOT_REPLY_MAX_BYTES` with the `consumeMessage` byte check; instruction encoding and construction check (§3.7); `consumeMessage`, `tasks.agentMessage` in the port type, `reply_pending`/`reply_held` and the reconcile loop (§3.3, §3.10); single reply Turn; refusal report Turn (§8.2); continuation chain on created successors (§3.6); projection events with revisions (§7) | #530, #531 | "A delegates to B on the same device"; "Host crashes after the delegation write and before submit"; "B's terminal or message is delivered twice"; "B fails or is interrupted, or no `submit_result`"; "outcome does not match the schema"; "chain exceeds the hop limit"; "over budget"; "B runs in its own conversation"; "Main Bot changes B's profile during a delegation"; "security: normal Bot schema". Added: (a) normal A → Main Bot B → B continues itself → no management fragments, and apply refuses management from an older offer; (b) hop 4 → self continuation → external delegate → `refused` (hop 5); (c) every refused item of an outcome → one refusal report Turn, whose schema has no `delegate`; (d) the last allowed continuation proposes another one → refused → verdict from this Turn's accepted reply; (e) B success terminal with no other open work → `reply_pending` → `answered` without a K4 scan; held → `reply_held`, End → `abandoned`; (f) queued → running → answered publishes three events with no identity conflict; (g) a second cross-Bot item → `fan_out_not_enabled`; (h) the §3.7 worst-case generator: every encoded instruction ≤ `instructionMaxBytes`, no Cross-Bot Turn blocks, `executions.submit` accepts it; a budget below the computed minimum is refused at construction; (i) used 11 → refusal report starts with the last unit; used 12 → refusal report is delivery only |
+| X1 Core delegation | Action order fix (§1.1, §3.1); `Delegation` row; `bot_request`/`bot_reply` sources; `Turn.authority` and the authority gate (§6.1); `addTurn` with hop and authority (§4.2); `to` enum (§2.2); apply checks (archived, duplicate, hop, room seat, one cross-Bot item per outcome, root admission `spent + reserved + reserve(1) ≤ 12` with the unit ledger (§6.2)); B ContextPack `delegation` block; `BOT_REPLY_MAX_BYTES` with the `consumeMessage` byte check; instruction encoding and construction check (§3.7); `consumeMessage`, `tasks.agentMessage` in the port type, `reply_pending`/`reply_held` and the reconcile loop (§3.3, §3.10); single reply Turn; refusal report Turn (§8.2); continuation chain on created successors (§3.6); projection events with revisions (§7) | #530, #531 | "A delegates to B on the same device"; "Host crashes after the delegation write and before submit"; "B's terminal or message is delivered twice"; "B fails or is interrupted, or no `submit_result`"; "outcome does not match the schema"; "chain exceeds the hop limit"; "over budget"; "B runs in its own conversation"; "Main Bot changes B's profile during a delegation"; "security: normal Bot schema". Added: (a) normal A → Main Bot B → B continues itself → no management fragments, and apply refuses management from an older offer; (b) hop 4 → self continuation → external delegate → `refused` (hop 5); (c) every refused item of an outcome → one refusal report Turn, whose schema has no `delegate`; (d) the last allowed continuation proposes another one → refused → verdict from this Turn's accepted reply; (e) B success terminal with no other open work → `reply_pending` → `answered` without a K4 scan; held → `reply_held`, End → `abandoned`; (f) queued → running → answered publishes three events with no identity conflict; (g) a second cross-Bot item → `fan_out_not_enabled`; (h) the §3.7 worst-case generator: every encoded instruction ≤ `instructionMaxBytes`, no Cross-Bot Turn blocks, `executions.submit` accepts it; a budget below the computed minimum is refused at construction; (i) spent 11 with no open reservation → refusal report starts with the last unit; free balance 0 → refusal report is delivery only; (j) unit ledger: replayed apply, claim and verdict events change no unit twice; `spent + reserved ≤ 12` after every transaction |
 | XS SDK fragment | `@byok-sdk/protocol`: `botTurnOutcomeFragments.cancelDelegation({ delegationIds })`, `'cancel_delegation'` in `BotTurnOutcomeKind`, `CancelDelegationAction { delegationId }`, `BotTurnOutcome.cancel_delegation?`, an item cap in `BOT_TURN_OUTCOME_LIMITS`; composition bound tests (≤ 65 536 bytes); api-surface golden; spec section "Bot turn outcome fragments and routine time points"; `bun run check:release-pack` | none | The fragment passes the K7 subset check. Composed schemas with the fragment stay within the outcome bound. The api-surface diff shows only the additions |
 | X2 Wait, cancel, uncertain | Verdict mapping (§8.1); `cancelDelegation`, `abandonDelegation`; cancel fact in the arbitration transaction, cancel without an intent, cancel redelivery after a crash (§8.8); cancel versus acceptance; `cancelGraceMs`, `uncertainAfterMs`; late terminals to audit | X1 | "B drops while running; cancel finds no terminal → uncertain, no resubmit; user ends it → `abandoned`; later terminal → audit only"; cancel before acceptance → `cancelled`, no reply; acceptance before cancel → `cancelled` with a partial reply. Added: cancel while the target waits for persona readback → `cancelled`, no `core.cancel` call; crash after the arbitration commit and before `core.cancel` → restart delivers the cancel to the frozen target |
 | X2M Main Bot cancel | Apply `cancel_delegation` (§8.8): enum of open delegations with the hidden-count notice, authority and room-seat checks, `main_bot_cancelled`, `already_resolved` | XS, X2 | A Main Bot with `authority = owner` cancels a running delegation → one `cancelled` verdict, A receives one report. A normal Bot schema and a Main Bot `bot_request` schema have no `cancel_delegation`. A resolved target → rejected action, no second verdict |
-| X3 Fan-in join | Two cross-Bot items per outcome; batch reply Turn; no empty batch; uncertain release; late single report; `reserve(n) = n + max(n, 1)` and release of unused units (§6.2) | X2 | Fan-out of 2 gives one A execution with both verdicts. One uncertain sibling releases the batch; its later verdict gives exactly one extra A Turn. Both uncertain → no batch Turn. Used 8 + fan-out 2 → reserve 4; with one late report the total is 12, never 13. Used 9 + fan-out 2 → index 1 refused, total ≤ 11. After a join with no late report, one unused A unit is released |
+| X3 Fan-in join | Two cross-Bot items per outcome; batch reply Turn; no empty batch; uncertain release; late single report; `reserve(n) = n + max(n, 1)`, root admission over all open reservations, A slot release after each report (§6.2) | X2 | Fan-out of 2 gives one A execution with both verdicts. One uncertain sibling releases the batch; its later verdict gives exactly one extra A Turn. Both uncertain → no batch Turn. Spent 8 + fan-out 2 with no open reservation → reserve 4; with one late report the total is 12, never 13. Spent 9 + fan-out 2 → index 1 refused, total ≤ 11. After a join with no late report, one A slot is released. Interleaved batches (§6.2 example): the second fan-out is cut to 1, the committed total stays ≤ 11, and the old late report starts. A randomized interleaving test of two batches with verdicts, uncertain items, late reports, claims and replays keeps `spent + reserved ≤ 12` after every transaction, and every reserved report can start |
 | X4 Lifecycle | Target archived in each state (§8.4); initiator archived (§8.5); enum refresh | X2 | Each row of §8.4 gives one `refused` verdict, and A receives one report. Initiator archived: verdict written, no reply Turn |
 | X5 Second device | B on a second `deviceId` with a daemon that has no Host code; `waiting_device` status; offline expiry; relay contract doc for two-process Topology L | X2 | "A delegates to B on another device; B's device has no Host code" on the embedded-server path only; "B's device is offline → waiting for device → `expired` → A receives one report". The hosted path and the two-process relay stay open (§3.9) |
 | X6 Docs | `examples/bot-collaboration/README.md` and VALIDATION; Host guide section; a follow-up docs PR for the PRD text (§9.4 item 3 reply key per Q2; `cancel_delegation` in the fixed apply order per Q7; product PRD §5.2, §9, §10 P4 scope) | X1–X5, X2M | Required checks pass. No PRD edit in the code slices |
 
+
+XS has no prerequisite. It also runs `bun run check:release-pack`, and it
+updates the protocol api-surface golden and the spec section in the same PR.
 
 Each slice runs the five required checks from `CLAUDE.md`: `bun run build`,
 `bun run typecheck`, `bun run test`, `bun run check:api-surface`,
@@ -864,8 +899,11 @@ PRD §5.8). A real Pi run of Cross-Bot is a paid call and needs separate
 approval. The `submit_result` success rate on Pi stays a launch gate (platform
 PRD §16).
 
-Rollback: every slice is example code, tests and docs. Revert the PR (platform
-PRD §13.1, K8 rollback).
+Rollback: the example slices are example code, tests and docs. Revert the PR
+(platform PRD §13.1, K8 rollback). XS is a public protocol change. Revert it
+before a release. After a release there is no compatibility layer (O10); the
+release notes give the steps, as for K8-S (platform PRD §13.1 on #524).
+Offers that already froze a schema are not affected.
 
 ## 12. Non-goals
 
@@ -911,7 +949,7 @@ review, Aimpact reopened Q7, Q8 and Q10 and decided them again on 2026-10-19
 | Q7 | Who can cancel a delegation? | The user or a Main Bot. The user cancels from A's chip or B's Turn. A Main Bot cancels through the new `cancel_delegation` outcome fragment (slice XS, an SDK change in K8b) | Decided (Aimpact, 2026-10-19 ~15:07 HKT reopen) | It matches platform PRD §9.4 ("user or Main Bot"); the 14:59 user-only decision is withdrawn |
 | Q8 | What is the reply size cap, and how is the context bound proven? | `BOT_REPLY_MAX_BYTES = 8 192`. The size bound is proven on the final encoded instruction: raw framed request text with no second JSON encoding, metadata at 6 bytes per code point, `R_reply ≤ 20 672` and `R_req ≤ 6 144` bytes, and a construction check `instructionMaxBytes ≥ P + max(R_reply, R_req) + F_max` (§3.7) | Decided (Aimpact, 2026-10-19 ~15:07 HKT reopen) | Encoding growth can then never trip the "block only if the current request alone exceeds the budget" rule (Codex P1-4) |
 | Q9 | When does a delegation become uncertain? | Cancel requested with no terminal for 60 s, or claimed with no terminal for 30 min | Decided (Aimpact, 2026-10-19 14:59 HKT) | It is display-only and enables "End"; 30 min avoids marking normal long runs as uncertain |
-| Q10 | How does a delegation count against the per-root budget of 12? | Prepay the worst case at acceptance: `reserve(n) = n + max(n, 1)` for `n` accepted cross-Bot items, which covers late reports after an uncertain sibling. Release unused units when the delegation or batch closes. A refusal report Turn uses one unit; with no free unit it is delivery only (§6.2) | Decided (Aimpact, 2026-10-19 ~15:07 HKT reopen) | `n + 1` did not cover a late report (Codex P1-3); this formula keeps every report deliverable within 12 |
+| Q10 | How does a delegation count against the per-root budget of 12? | Prepay the worst case at acceptance: `reserve(n) = n + max(n, 1)` for `n` accepted cross-Bot items, which covers late reports after an uncertain sibling. Admission is root-level: `spent + all unreleased reserves + reserve(n) ≤ 12`; a claim moves a unit from reserved to spent. Release a unit only when it can no longer be needed. A refusal report Turn uses one unit; with no free unit it is delivery only (§6.2) | Decided (Aimpact, 2026-10-19 ~15:07 HKT reopen) | `n + 1` did not cover a late report (Codex P1-3); this formula keeps every report deliverable within 12 |
 | Q11 | Is two-process Topology L sync in K8b? | No. K8b documents the relay contract; the Host service implements it downstream | Decided (Aimpact, 2026-10-19 14:59 HKT) | The §14.2 rows run in one ledger; the sync transport is Host-service work, as for K4 (Q19) |
 
 Follow-up: Q2 needs a separate PRD docs PR for platform PRD §9.4 item 3. The
@@ -929,7 +967,9 @@ This PR does not edit the PRD.
   encoded instruction (§3.7). The acceptance criterion is that this encoded
   bound holds, tested with a worst-case generator in X1.
 - Q10: prepay the worst case, `reserve(n) = n + max(n, 1)`, late reports
-  included, and release unused units when a delegation or batch closes. A
+  included. Admission is root-level: `spent + reserved + reserve(n) ≤ 12`,
+  counting every open reservation on the root. A unit is released only when
+  it can no longer be needed. A
   refusal report uses one unit, or is delivery only when no unit is free
   (§6.2).
 
@@ -939,7 +979,7 @@ This PR does not edit the PRD.
 |---|---|---|
 | P1-1 Management denial only by source | Fixed: durable `authority` field, checked by schema and apply | §6.1, §4.2, X1 (a) |
 | P1-2 Same projection id for each status | Fixed: `delegation:<id>:<revision>` events | §7, §9, X1 (f) |
-| P1-3 `n + 1` and slice order | Fixed: worst case and no empty batch defined; `reserve(n) = n + max(n, 1)` with release (Q10, 15:07); X1 limited to one item; X3 after X2 | §3.5, §6.2, §11, X1 (i), X3 |
+| P1-3 `n + 1`, root admission and slice order | Fixed: worst case and no empty batch defined; `reserve(n) = n + max(n, 1)` (Q10, 15:07); root admission over all open reservations with a unit ledger, claim invariant and release timing (Codex round 2); X1 limited to one item; X3 after X2 | §3.5, §6.2, §11, X1 (i), (j), X3 |
 | P1-4 8 KiB does not bound the encoded request | Fixed: bound proven on the final encoded instruction, plus a construction check (Q8, 15:07) | §3.2, §3.7, X1 (h) |
 | P1-5 All refused: A never receives it | Fixed: delivery separate from model start; one refusal report, no `delegate` in its schema; one unit, or delivery only (Q10, 15:07) | §8.2, §6.2, X1 (c), (i) |
 | P1-6 Chain end on a refused continuation | Fixed: chain moves only along created successors | §3.6, X1 (d) |
