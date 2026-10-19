@@ -126,6 +126,8 @@ separate evidence and authorization; see the
 4. Stage rollout, read back signature verification and agent operational health, then promote. Roll back through the host channel; do not delete quarantine or durable local/cloud truth.
 5. npm publication is a separate registry action, driven by `scripts/release/publish.mjs` against the tarballs CI already accepted. Exact package names/versions, tarball contents, provenance/2FA policy (attestation only under GitHub Actions OIDC) and registry readback are all verified before the release is tagged:
 
+   The default route is the `Release` workflow (`.github/workflows/release.yml`). It runs these steps on a GitHub-hosted runner with npm trusted publishing (OIDC): no token, no per-package 2FA, provenance attached. Its owner setup, constraints and recovery are in [npm trusted publishing](../../docs/releases/oidc-trusted-publishing.md). The steps below are the local route; the publisher logic and the recovery rules are the same for both.
+
    1. Confirm the CI run for the exact release commit is green, including its `npm-release-pack` job. Use the `push` run for the commit (`gh run list --branch main --workflow CI --event push --limit 1`), not a `pull_request` run: on pull-request events `github.sha` is the merge ref, so that run's artifact is named after a commit that is not `HEAD` and the dry run refuses it.
    2. Download that run's accepted tarballs: `gh run download <run-id> -n release-pack-<sha> -D <dir>`, where `<sha>` is the full 40-character commit id (`git rev-parse HEAD`).
    3. After approving the exact package/version/channel plan, dry run `node scripts/release/publish.mjs --artifacts <dir>` for stable; append `--tag rc` for an approved RC. It refuses unless the frozen schema-3 `release-manifest.json` names the release version, exact complete package set and reviewed registry baseline, and was packed from the current `HEAD`. Every tarball the publish set needs must be present and match its recorded SHA-256, SHA-512, package identity and runtime dependency maps. Older manifests are not defaulted or upgraded in place. It queries registry version availability and, for an RC, the explicit prior-publication baseline, then prints the ordered plan. It does not publish, perform post-publication readback or tag. Only the appropriate clean not-found response can establish version/package absence; authentication, transport, malformed-output and other read errors block. `--artifacts` avoids rebuilding/repacking; a bare dry run builds and packs.
@@ -139,18 +141,22 @@ separate evidence and authorization; see the
    PUT reporting "cannot publish over" is not proof that the first PUT failed.
    Never repack or overwrite published bytes.
 
-   - **Partial stable:** after readback matches the same frozen artifacts, the
-     publisher can continue with only the missing packages. This is the path
-     exercised by the [0.23 publication receipt](../../docs/releases/v0.23.0-publication.md#interruptions-and-resumption).
+   - **Partial stable:** re-run the same command. The publisher skips each
+     version that the registry holds with the frozen integrity, accepts a
+     failed upload only when the registry then shows the frozen integrity,
+     and continues with only the missing packages. Any other registry bytes
+     stop the run, in a dry run too. This is the path exercised by the
+     [0.23 publication receipt](../../docs/releases/v0.23.0-publication.md#interruptions-and-resumption).
    - **Partial prerelease:** the publisher refuses automatic continuation and
      requires a new exact prerelease version; the stable retry recipe does not
      apply. Re-enter version preparation, exact-SHA acceptance and approval.
-   - **Every package present:** the publisher refuses another execute run. Use
-     `node scripts/release/registry-readback.mjs --manifest <dir>/release-manifest.json`
-     (append `--tag rc` for the approved RC). Only after the complete readback
-     passes may an authorized operator create a missing annotated tag with the
-     exact source message (`v<version>`, blank line, `sourceGitSha <sha>`), then
-     push it separately. Do not treat tag creation as a registry repair.
+   - **Every package present, tag missing:** re-run the same command. The
+     publisher writes nothing to the registry. It waits for every exact
+     version on a bounded backoff, runs the complete readback with bounded
+     retries, and only then creates the annotated tag with the exact source
+     message (`v<version>`, blank line, `sourceGitSha <sha>`). Push it
+     separately. Do not treat tag creation as a registry repair.
+   - **Tag present:** the release is complete; the publisher refuses to run.
 
    Artifacts expire after 30 days; past that, re-run CI on the same commit rather than repacking locally.
 
