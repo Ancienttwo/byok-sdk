@@ -151,7 +151,17 @@ P5a supports explicit whole-file replacement and note deletion. It has no normal
 A user can authorize an initial write with `baseRevision` omitted. This uses sha256 of
 empty bytes. It can create or replace an empty file, or delete an empty note.
 It is not a read-only revision probe. A conflict ends the intent and returns `observed`.
-A second write needs a new user decision and a new `approvalRef`.
+For a nonempty file, use two approvals:
+
+1. The user approves the exact whole-file body with an EMPTY base. The first intent
+   returns `conflict{observed}` and changes no file. The Host shows that result.
+2. The user makes a new decision to replace the whole file, including unseen content.
+   The Host creates a new `intentId` and `approvalRef`. It sets `baseRevision` to
+   `observed.revision`, sets the approved body and recomputes the operation digest.
+   A concurrent device write can still return another conflict.
+
+If the file is absent or empty, the first write can apply. A second approval is then unnecessary.
+`observed` gives a revision, not the hidden contents. This is explicit whole-file replacement.
 The Host never puts the observed revision on an old draft by itself.
 Redacted text is read-only. P5b owns edit-view and `contentComplete`.
 
@@ -167,15 +177,30 @@ Pass the memory page to `HostExecutionCore` as `options.memory`.
 The scanner adds only the resident text and projection metadata to the inline instruction.
 It freezes this input before submit. Blob instructions need an embedder-owned composition step.
 Notes do not enter this ContextPack. The model can recall them through the SDK tools.
-Missing resident text and text above 8192 UTF-8 bytes block dispatch. No text is truncated.
-The queued intent keeps an explicit error in the Host outbox.
-A later valid projection lets the same queued intent proceed.
+An absent projection or null resident text omits resident memory from the instruction.
+This lets a new Agent run its first task and publish at task close. A new profile revision
+uses the same bootstrap path. No manual projection publish is required.
+Text above 8192 UTF-8 bytes puts the queue head in persisted `memory_blocked` state.
+Blob instructions also park with a clear reason. The Host can cancel that intent and
+enqueue a new intent with an inline instruction.
+No text is truncated. The block spends no attempt or generation.
+Only deadline wakes remain while blocked. Accepted projections recheck the blocked binding
+and commit a reconciliation wake. Startup recovery also rechecks stored blocks.
+
+To refresh after the size block, the user approves a whole-file `MEMORY.md` replacement
+of at most 8192 raw UTF-8 bytes. A verified `applied` completion invalidates the old display
+for ContextPack and wakes the parked queue. It keeps the old ordering metadata.
+The next core task runs without resident memory. Its normal task close sends a fresh,
+policy-approved projection. The replacement body never enters ContextPack directly.
+Late projections from older tasks keep the refresh pending. Only a projection from a
+new core submission after the repair clears it. Conflict, rejected, uncertain and
+oversized replacements cannot bypass the size block.
 
 Projection receipt time is `projectedAt`. It is not the device's file modification time.
 An applied intent does not create a projection. Task-close projection may still be old.
-The original timestamp stays visible until a later accepted projection replaces it.
+The original timestamp stays with the old display. An invalidated display is omitted from ContextPack.
 
 Linux tests use a real cloud mailbox, daemon, home lease, native CAS and device ACK.
 The runtime is synthetic. No model provider is called.
 Run `bun run --cwd examples/host-execution-core test src/memory-linux.test.ts` on Linux.
-Those three tests skip on other platforms. macOS and Windows proof stay in P2.
+These Linux tests skip on other platforms. macOS and Windows proof stay in P2.
