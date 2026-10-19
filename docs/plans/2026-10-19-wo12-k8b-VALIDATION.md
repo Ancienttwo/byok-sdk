@@ -227,3 +227,16 @@ Local source commits:
 
 Only `examples/bot-collaboration` and `docs/plans` changed. No inherited test
 assertion was changed. No push, PR, merge, paid Pi call, or deployment occurred.
+
+---
+
+## PRODUCT RULINGS 2026-10-19 (doc honesty)
+
+Aimpact approved product rulings that affect K8b group-chat scope (non-@ background, late-join history, cross-Bot deferral). This note is documentation honesty only; no behavior change in this commit.
+
+- History: recent-N truncate by token budget + explicit truncation notice; do not block-when-full.
+- Non-@ messages: background context only; must not trigger a reply.
+- Late-joining Bots: messages after join only.
+- K4: separate Draft PR #532 first; restack this branch onto it afterward; remove squashed K4 copy from #529.
+- Cross-Bot delegation: deferred until after #530+#531 land (first WO of K8b).
+- #525 `BOT_TURN_OUTCOME_LIMITS` remains HOLD pending Aimpact confirm.
