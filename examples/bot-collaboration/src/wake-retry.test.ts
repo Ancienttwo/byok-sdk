@@ -92,3 +92,20 @@ it('keeps a failed cancel ahead of its schedule without letting that blocked sch
   expect(bot.snapshot().operations.every(o => o.state !== 'pending')).toBe(true);
   expect((await server.wakes.pending()).map(w => w.dedupKey)).toEqual([armedKey]);
 });
+
+it('clears schedule_retrying after a completed routine cancellation succeeds on retry', async () => {
+  let fail = true;
+  await setup(server => ({ ...server, wakes: { ...server.wakes, cancel: async key => {
+    if (fail) throw new Error('cancel unavailable');
+    return server.wakes.cancel(key);
+  } } }));
+  const id = addRoutine('cancel-recovery');
+  await bot.drain();
+  await bot.setRoutineLifecycle(id, 'completed');
+  expect(bot.snapshot().routines[id]!.status).toBe('schedule_retrying');
+  fail = false;
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(bot.snapshot().routines[id]).toMatchObject({ lifecycle: 'completed', status: 'ok' });
+  expect(bot.snapshot().operations.every(o => o.state !== 'pending')).toBe(true);
+  expect(await server.wakes.pending()).toEqual([]);
+});

@@ -41,7 +41,7 @@ it('scans every Agent queue before reporting a permanent wake outbox error', asy
   }, { timeout: 5000 });
 });
 
-it('accepts the exact 366-day boundary and retries a later candidate through process backoff', async () => {
+it('accepts the exact 368-day boundary and retries a later candidate through process backoff', async () => {
   host = await openHost(); await host.offline();
   vi.useFakeTimers();
   const now = Date.now(), at = now + WAKE_HORIZON_MS;

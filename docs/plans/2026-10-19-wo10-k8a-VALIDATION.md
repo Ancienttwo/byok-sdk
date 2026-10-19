@@ -1,11 +1,14 @@
 # WO-10 K8a VALIDATION
 
-Status: PASS. Implementation, two review rounds, and required checks are complete.
+Status: recorded local checks passed for the single Bot slice. Full K8a first-row
+acceptance is not complete. Cross-Bot delegation is deferred by Aimpact.
 
 ## Scope
 
-This work implements the first K8a row in PRD section 9. It does not measure
-paid Pi submit_result success rate. That work is WO-10b.
+This work implements self continuations and single Bot actions. Delegation to
+other Bots, as specified in platform PRD sections 9.4 and 14.2, is deferred.
+This report does not claim full K8a first-row coverage. Paid Pi submit_result
+success-rate measurement remains separate WO-10b work. The PRD is unchanged.
 
 Environment: macOS, Node `v24.21.0`, Bun `1.4.3`.
 
@@ -23,7 +26,7 @@ Base: WO-05 K4 `e5afad26`.
 | `0cfcc773` | Set the synthetic clock before Host and daemon startup | Not applicable |
 
 Both merges used `--no-ff`. There was no rebase. README and spec text merged
-automatically. No conflict-resolution changes were needed. No push or PR.
+automatically. No conflict-resolution changes were needed.
 
 ## P1 map
 
@@ -104,7 +107,8 @@ The full test command passed on the final source commit. The new example passed
 API surface matched all nine package goldens.
 Version authority passed. Docker-dependent dataplane tests used the repository's
 default skip behavior. No Docker substrate was started for this baseline.
-All later changes in this handoff are documentation only.
+These are historical results for `0cfcc773`. Later acceptance fixes and current
+checks are recorded in `2026-10-19-wo10-acceptance-followup.md`.
 
 WO-10 did not change inherited test assertions. The accepted wake-horizon
 merge carries its own boundary assertion changes. New WO-10 assertions cover
@@ -113,7 +117,8 @@ self budget and hop, four card states, answers, failed outcomes, rejections,
 ordinary schema authority, horizon parity, stable slot identity, snapshots,
 capacity, generation, pause/resume, cancellation, and wake operation order.
 The old K4 boundary test uses WAKE_HORIZON_MS. Its existing assertions now
-exercise 368 days without an assertion change. Its old title still says 366.
+exercise 368 days without an assertion change. The acceptance follow-up
+corrects its title from 366 to 368 without changing the assertions.
 
 ## Independent review
 
@@ -155,10 +160,15 @@ History, version, and audit retention remain product responsibilities.
 
 ## Result
 
-RESULT: DONE. K8a first-row scope is complete. The accepted branches are merged
-locally. There were no merge conflicts. Production example code passed the
+RESULT: the single Bot slice is implemented. Full K8a first-row acceptance
+is not complete. Cross-Bot delegation is deferred by Aimpact. The accepted
+branches are merged locally. There were no merge conflicts. Production example code passed the
 independent read-only Codex review. All five required checks passed on the
-final source commit. No paid Pi call, rebase, push, PR, or deployment occurred.
+recorded source commit. Those checks do not prove cross-Bot delegation.
+No paid Pi success-rate measurement is claimed.
 
 Local commit chain: `d4530a14`, `eb83465e`, `cd469d6d`, `7bde22c1`, `0cfcc773`.
 The final validation commit contains documentation only.
+
+PENDING-AIMPACT: ContextPack size/window/history policy, K4 stacking, and
+relative imports into K4 internals. This follow-up does not decide these items.

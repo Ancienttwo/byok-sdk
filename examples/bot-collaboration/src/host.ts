@@ -13,7 +13,9 @@ import { arm, consumeRoutine, createRoutine, lifecycle, operation, owned, switch
 export interface BotOptions {
   botId: string; execution: ExecutionTemplate; now?: () => number;
   /** Must deduplicate by id. A committed confirmation can be replayed after a crash. */
-  connector: (id: string, action: string, draft: Json) => Promise<Json>;
+  connector: (id: string, action: string, draft: Json, signal: AbortSignal) => Promise<Json>;
+  /** The Host also enforces this limit when a connector ignores cancellation. */
+  connectorTimeoutMs?: number;
 }
 
 /** Copy-and-own Host example. Use one instance per ledger tenant. */
@@ -23,10 +25,13 @@ export class BotCollaboration {
   private timer?: ReturnType<typeof setTimeout>;
   private closed = false;
   private readonly now: () => number;
+  private readonly connectorTimeoutMs: number;
   constructor(readonly server: ExecutionServer, readonly ledger: HostLedger, private readonly options: BotOptions) {
     if (!options.botId || options.execution.payload.agentRef.agentId !== options.botId) throw new Error('Select this Bot Agent');
     if (options.execution.payload.requiredToolsets?.length) throw new Error('Bot executions cannot have connector toolsets');
     this.now = () => time((options.now ?? Date.now)());
+    this.connectorTimeoutMs = time(options.connectorTimeoutMs ?? 30_000);
+    if (this.connectorTimeoutMs < 1 || this.connectorTimeoutMs > 2_147_483_647) throw new Error('Invalid connector timeout');
     this.core = new HostExecutionCore(server, ledger, { now: this.now, reconcileMs: 100,
       applyOutcome: (document, tx) => this.applyOutcome(document, tx) });
     ledger.transaction(s => { stateOf(s.application); });
@@ -69,6 +74,26 @@ export class BotCollaboration {
         state.rejected.push({ taskId: tx.intent.taskId, action, reason: String(error instanceof Error ? error.message : error) });
       }
     };
+    outcome.create_routine?.forEach((action, index) => accept('create_routine', () => {
+      createRoutine(state, this.options.botId, tx.intent.taskId, index, action, this.now());
+    }));
+    outcome.update_routine?.forEach(action => accept('update_routine', () => updateRoutine(state, this.options.botId, action, this.now())));
+    outcome.cancel_routine?.forEach(action => accept('cancel_routine', () => {
+      lifecycle(state, owned(state, this.options.botId, action.routineId), 'completed', this.now());
+    }));
+    outcome.confirmable_action?.forEach((action, index) => {
+      const id = hash([tx.intent.taskId, 'confirmable_action', index]);
+      state.cards[id] = { id, turnId: turn.id, action: { action: action.action, summary: action.summary, draft: json(action.draft) },
+        state: 'pending', expiresAt: this.now() + 86_400_000 };
+      tx.publish(`card:${id}`, json(state.cards[id]));
+    });
+    if (outcome.ask_user) accept('ask_user', () => {
+      const question = outcome.ask_user!;
+      if (question.answerKind === 'single_choice' && new Set(question.options.map(o => o.id)).size !== question.options.length) throw new Error('Duplicate option id');
+      const id = hash([tx.intent.taskId, 'ask_user']);
+      state.questions[id] = { id, turnId: turn.id, value: question };
+      tx.publish(`question:${id}`, json(state.questions[id]));
+    });
     const delegated = new Set<string>();
     outcome.delegate?.forEach((action, index) => accept('delegate', () => {
       if (action.to !== this.options.botId) throw new Error('Target is not this Bot');
@@ -79,26 +104,6 @@ export class BotCollaboration {
       budget.continuation++;
       // This single Bot schema only offers self. Hop and delegation stay unchanged.
       this.addTurn(state, hash([tx.intent.taskId, 'delegate', index]), turn.root, 'continuation', action.request);
-    }));
-    if (outcome.ask_user) accept('ask_user', () => {
-      const question = outcome.ask_user!;
-      if (question.answerKind === 'single_choice' && new Set(question.options.map(o => o.id)).size !== question.options.length) throw new Error('Duplicate option id');
-      const id = hash([tx.intent.taskId, 'ask_user']);
-      state.questions[id] = { id, turnId: turn.id, value: question };
-      tx.publish(`question:${id}`, json(state.questions[id]));
-    });
-    outcome.confirmable_action?.forEach((action, index) => {
-      const id = hash([tx.intent.taskId, 'confirmable_action', index]);
-      state.cards[id] = { id, turnId: turn.id, action: { action: action.action, summary: action.summary, draft: json(action.draft) },
-        state: 'pending', expiresAt: this.now() + 86_400_000 };
-      tx.publish(`card:${id}`, json(state.cards[id]));
-    });
-    outcome.create_routine?.forEach((action, index) => accept('create_routine', () => {
-      createRoutine(state, this.options.botId, tx.intent.taskId, index, action, this.now());
-    }));
-    outcome.update_routine?.forEach(action => accept('update_routine', () => updateRoutine(state, this.options.botId, action, this.now())));
-    outcome.cancel_routine?.forEach(action => accept('cancel_routine', () => {
-      lifecycle(state, owned(state, this.options.botId, action.routineId), 'completed', this.now());
     }));
   }
   async answer(id: string, answer: string): Promise<void> {
@@ -120,13 +125,16 @@ export class BotCollaboration {
   }
   async decide(id: string, decision: 'confirmed' | 'rejected'): Promise<void> {
     await this.exclusive(async () => {
-      this.ledger.transaction(s => {
+      const error = this.ledger.transaction(s => {
         const state = stateOf(s.application), card = state.cards[id];
         if (!card) throw new Error('Card not found');
-        if (card.state !== 'pending') return;
-        card.state = this.now() >= card.expiresAt ? 'expired' : decision;
+        if (card.state === 'pending' && this.now() >= card.expiresAt) card.state = 'expired';
+        if (card.state === 'expired') return 'Card expired';
+        if (card.state !== 'pending') return card.state === decision ? undefined : `Card already ${card.state}`;
+        card.state = decision;
       });
       await this.process();
+      if (error) throw new Error(error);
     });
   }
   async setRoutineLifecycle(id: string, value: Routine['lifecycle']): Promise<void> {
@@ -175,6 +183,10 @@ export class BotCollaboration {
   }
   private sync(s: LedgerState): boolean {
     const state = stateOf(s.application);
+    // Refresh passive state before any new offer freezes its ContextPack.
+    for (const card of Object.values(state.cards)) {
+      if (card.state === 'pending' && this.now() >= card.expiresAt) card.state = 'expired';
+    }
     let materialized = false;
     for (const turn of Object.values(state.turns)) {
       const intent = s.intents[hash(turn.id)];
@@ -210,9 +222,13 @@ export class BotCollaboration {
         && !(routine.armed && routine.armed.at <= this.now())) switchVersion(state, routine, this.now());
     }
     for (const card of Object.values(state.cards)) {
-      if (card.state === 'pending' && this.now() >= card.expiresAt) card.state = 'expired';
       if (card.state !== 'pending' && (card.state !== 'confirmed' || card.result !== undefined || card.error !== undefined)) {
-        project(s, `card:${card.id}:${card.state}`, json(card));
+        if (!card.decisionReported) {
+          project(s, `card:${card.id}:${card.state}`, json(card));
+          card.decisionReported = true;
+        }
+        // Passive expiry is visible in ContextPack. It cannot start a paid turn.
+        if (card.state === 'expired') continue;
         const root = state.turns[card.turnId]!.root;
         this.addTurn(state, hash(['action_result', card.id]), root, 'action_result', JSON.stringify({ cardId: card.id, state: card.state, result: card.result, error: card.error }));
       }
@@ -242,7 +258,9 @@ export class BotCollaboration {
         this.ledger.transaction(s => {
           const state = stateOf(s.application), row = state.operations.find(o => o.sequence === op.sequence)!;
           row.state = 'done'; delete row.retryAt;
-          if (op.kind === 'schedule') state.routines[op.routineId]!.status = 'ok';
+          const routine = state.routines[op.routineId]!;
+          const retrying = state.operations.some(o => o.routineId === op.routineId && o.state === 'pending' && o.retryAt !== undefined);
+          if (!retrying && (op.kind === 'schedule' || routine.status === 'schedule_retrying')) routine.status = 'ok';
         });
       } catch (error) {
         this.ledger.transaction(s => {
@@ -255,11 +273,28 @@ export class BotCollaboration {
       }
     }
   }
+  private async callConnector(card: CollaborationState['cards'][string]): Promise<Json> {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        const error = new Error('Connector timed out; external outcome is unknown');
+        controller.abort(error);
+        reject(error);
+      }, this.connectorTimeoutMs);
+    });
+    try {
+      return json(await Promise.race([
+        Promise.resolve().then(() => this.options.connector(card.id, card.action.action, card.action.draft, controller.signal)),
+        deadline,
+      ]));
+    } finally { clearTimeout(timer); }
+  }
   private async flushCards(): Promise<void> {
     for (const card of Object.values(this.snapshot().cards)) {
       if (card.state !== 'confirmed' || card.result !== undefined || card.error !== undefined) continue;
       let result: Json | undefined, error: string | undefined;
-      try { result = json(await this.options.connector(card.id, card.action.action, card.action.draft)); }
+      try { result = await this.callConnector(card); }
       catch (cause) { error = String(cause instanceof Error ? cause.message : cause).slice(0, 1024); }
       this.ledger.transaction(s => {
         const row = stateOf(s.application).cards[card.id]!;

@@ -114,3 +114,16 @@ it('rejects empty updates and stores duplicate weekdays as a set', () => {
   updateRoutine(state, 'main', { routineId: routine.id, schedule: { ...schedule, daysOfWeek: ['mon', 'mon'] } }, now);
   expect(routine.versions[2]?.schedule).toEqual({ ...schedule, daysOfWeek: ['mon'] });
 });
+
+it('audits a mismatched wake time without poisoning the slot or rejecting delivery', () => {
+  const { state, routine } = setup();
+  const slot = routine.armed!;
+  let turns = 0;
+  const wake = { wakeId: 'mismatch', dedupKey: slot.key, availableAt: slot.at + 1, deliveredAt: slot.at, delivery: 1 };
+  expect(() => consumeRoutine(state, wake, slot.at, () => { turns++; })).not.toThrow();
+  expect(state.audit).toContain(`Wake time differs from reservation: ${slot.key}`);
+  expect(Object.values(state.occurrences)).toEqual([]);
+  expect(routine.armed).toEqual(slot);
+  consumeRoutine(state, { ...wake, availableAt: slot.at }, slot.at, () => { turns++; });
+  expect(turns).toBe(1);
+});

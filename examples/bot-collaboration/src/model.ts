@@ -9,7 +9,7 @@ export interface Turn {
 export interface Card {
   id: string; turnId: string; action: ConfirmableAction<Json>;
   state: 'pending' | 'confirmed' | 'rejected' | 'expired'; expiresAt: number;
-  result?: Json; error?: string;
+  result?: Json; error?: string; decisionReported?: boolean;
 }
 export interface Question { id: string; turnId: string; value: AskUserAction; answer?: string }
 export interface Definition { version: number; schedule: RoutineScheduleFields; prompt: string; target: string }
@@ -32,16 +32,20 @@ export interface WakeOp {
 }
 export interface Rejection { taskId: string; action: string; reason: string }
 export interface CollaborationState {
+  version: 1;
   turns: Record<string, Turn>; budgets: Record<string, { continuation: number; delegation: number }>;
   schemas: Record<string, ResultSchema>; questions: Record<string, Question>; cards: Record<string, Card>;
   routines: Record<string, Routine>; occurrences: Record<string, Occurrence>; operations: WakeOp[];
   rejected: Rejection[]; audit: string[]; sequence: number;
 }
 export function stateOf(application: Record<string, Json>): CollaborationState {
-  if (!application.collaboration) application.collaboration = {
+  if (application.collaboration === undefined) application.collaboration = {
+    version: 1,
     turns: {}, budgets: {}, schemas: {}, questions: {}, cards: {}, routines: {}, occurrences: {},
     operations: [], rejected: [], audit: [], sequence: 0,
   };
-  return application.collaboration as unknown as CollaborationState;
+  const state = application.collaboration as unknown as CollaborationState;
+  if (!state || state.version !== 1) throw new Error('Unsupported Bot collaboration state version');
+  return state;
 }
 export function json(value: unknown): Json { return JSON.parse(JSON.stringify(value)) as Json; }

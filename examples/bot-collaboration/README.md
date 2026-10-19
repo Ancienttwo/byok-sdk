@@ -1,6 +1,8 @@
 # Single Bot collaboration
 
-This copy-and-own example implements the first K8a row in the Bot PRD.
+This copy-and-own example implements the single Bot part of K8a.
+It supports self continuations. Delegation to other Bots is deferred by Aimpact.
+Platform PRD sections 9.4 and 14.2 are not fully implemented here.
 It uses the K4 Host execution core and K8-S public schema and calendar APIs.
 It has no paid runtime call. Tests use a synthetic adapter with the real SDK,
 daemon, HTTP transport, SQLite stores, and `submit_result` helper.
@@ -31,7 +33,9 @@ provide a runtime sandbox. The deployment owns that boundary.
 
 ## Actions and context
 
-Each turn freezes the ordinary Bot schema and its ContextPack in the K4 input.
+The Host applies routine actions, confirmation cards, questions, then self
+continuations. Each turn freezes the ordinary Bot schema and its ContextPack
+in the K4 input.
 The schema offers self delegation, `ask_user`, `confirmable_action`, and the
 three routine actions. It offers all current routine ids, up to eight.
 It never offers a `target` field or another Bot id. A user input starts one
@@ -43,11 +47,21 @@ Questions support text and single choice. An answer creates an `answer` turn.
 It is a new user input with its own stable budget root. Replaying the same
 answer does not reset that budget. Empty updates and duplicate targets or
 option ids are refused. Duplicate weekdays are stored as a set.
+An expired card stays in the next ContextPack. It creates no model turn.
 A confirmation card starts as `pending`. The owner can choose `confirmed` or
 `rejected`. A card becomes `expired` after 24 hours. Only a committed
-`confirmed` card calls the Host connector. All three decisions return as an
-`action_result` turn. Connector success, error, and external id enter that turn.
-The connector must deduplicate by the supplied card id. A crash after the
+`confirmed` card calls the Host connector. Confirmation results and explicit
+rejection return as an `action_result` turn. Passive expiry creates no turn.
+Connector success, error, and external id enter that turn.
+Late and conflicting decisions return an error. Replaying the same completed
+decision is idempotent. Decision projections are committed once, so uploading
+them does not cause later syncs to publish them again.
+
+The connector receives an AbortSignal and must deduplicate by the card id.
+The Host enforces `connectorTimeoutMs` (default 30 seconds), even if the
+connector ignores cancellation. A timeout releases the serial chain and
+returns an action_result with an unknown external outcome. A late connector
+result cannot overwrite that committed result. A crash after the
 external effect but before result commit can call it again with that id.
 No exactly-once external effect is claimed.
 
@@ -89,11 +103,21 @@ An immediate terminal cannot leave a continuation without a wake.
 A schedule must match the active generation and armed slot. A cancel cannot
 be overtaken by a later schedule for the same key. Failed operations retain
 a retry time. A process timer retries them. Startup repairs a missing armed
-wake. Calendar errors stop the chain, record an audit, and let the accepted
+wake. A mismatched wake time records an audit and resolves without a retry
+loop. A successful cancel retry clears its stale failure status.
+Calendar errors stop the chain, record an audit, and let the accepted
 occurrence finish. Startup or explicit pause/resume retries the calendar.
 
 ## Boundaries
 
-This example has one Bot and one owner. Group chat and Main Bot actions belong
-to K8b. Paid Pi success-rate measurement belongs to WO-10b. Application history,
+The collaboration application state has version 1. Unsupported and unversioned
+stored state is rejected without a reset or automatic migration.
+
+This example has one Bot and one owner. Cross-Bot delegation stays deferred.
+The full K8a first-row acceptance is not complete.
+Group chat and Main Bot actions belong to K8b. Paid Pi success-rate measurement belongs to WO-10b. Application history,
 versions and audit rows have no retention policy in this small example.
+
+PENDING-AIMPACT: ContextPack size, window, and history policy; K4 stacking;
+and the relative imports into K4 internals. This change does not select or
+change those policies. The PRD remains Aimpact's authority.

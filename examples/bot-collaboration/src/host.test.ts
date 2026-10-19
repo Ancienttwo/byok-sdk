@@ -79,7 +79,7 @@ it('returns ask_user answers and keeps rejected and expired cards free of connec
   const cards = Object.values(bot.snapshot().cards);
   await bot.decide(cards[0]!.id, 'rejected');
   now += 86_400_001;
-  await bot.decide(cards[1]!.id, 'confirmed');
+  await expect(bot.decide(cards[1]!.id, 'confirmed')).rejects.toThrow('Card expired');
   expect(bot.snapshot().cards[cards[0]!.id]!.state).toBe('rejected');
   expect(bot.snapshot().cards[cards[1]!.id]!.state).toBe('expired');
   expect(connector).not.toHaveBeenCalled();
