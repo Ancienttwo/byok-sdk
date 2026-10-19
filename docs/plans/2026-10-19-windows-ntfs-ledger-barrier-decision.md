@@ -1,14 +1,24 @@
 # WO-09a：Windows / NTFS strict ledger barrier 决策稿
 
-状态：PENDING-AIMPACT。待 Aimpact 选择故障模型。日期：2026-10-19。
+状态：Aimpact 已选 S；Windows 证明仍 BLOCKED。日期：2026-10-19。
 
-本稿只提出 spec 决策。它不批准 Windows admission，也不修改现行契约。
+本稿记录 spec 决策。它不批准 Windows admission，也不修改现行契约。
 当前结论：Windows 的 `B` 保持 `false`。`agent-memory-intent.v1` 不开放。
-建议选择 S，保留强故障模型。若选择 P/F，须接受系统故障后的永久分裂风险，并修改 Host admission。选项和依据见 §6。
+Aimpact 于 2026-10-19 选择 S。故障集合包括 process crash、OS crash 和断电。
+支持域限本地 NTFS、明确 OS build、普通用户 token。排除 SMB、同步目录和其他 FS。
+storage 必须兑现完整 flush。磁盘毁坏、谎报 flush 和备份回滚仍不在条件承诺内。
+S 尚未获证明。这项裁定不授予 B，也不完成 Q14。WO-09 保持 BLOCKED，直到按 §7 证明 §3。
+P/F/R 只作为未采用方案保留。原建议、选项和依据见 §6。
 Microsoft 已说明文件数据和 metadata 的 flush 语义。缺口是把这些语义绑定到本后端的完整操作和恢复结果。
 不能把“本单未证明 namespace barrier”写成“NTFS 无法提供 durability”。依据：[M1]、[M2]、[M4]；调用证据见 §2。
 
 ## 1. 决策范围与证据规则
+
+裁定来源：Aimpact 于 2026-10-19 的 doc-honesty 修订指令。原文节录：
+
+> Windows fault model S is CHOSEN (2026-10-19) but UNPROVEN; B=false; WO-09 stays BLOCKED.
+
+同一裁定记录见 [WO-09 文档的状态与支持域](https://github.com/Ancienttwo/byok-sdk/blob/f11fe428d136b6afcd7cfb9172f3e60724a5ff2e/docs/plans/2026-10-19-windows-ntfs-ledger-barrier-decision.md#L3-L11)。
 
 远端问题依据：[issue #522](https://github.com/Ancienttwo/byok-sdk/issues/522)。
 issue #522 在本次读取时没有评论。它是风险记录，不是本单完成的 Windows 故障复现。
@@ -47,7 +57,7 @@ issue #522 在本次读取时没有评论。它是风险记录，不是本单完
 
 - **文档事实**：Microsoft 文档直接说明的 API 行为。引用使用 `[M*]`。
 - **调用观察**：在上述基线读取的代码与契约。引用使用仓库路径和行号。
-- **推论或提案**：由前两类证据得到的边界，或等待 owner 接受的规则。它们不是 Windows 实测结论。
+- **推论或提案**：由前两类证据得到的边界或规则提案。它们不是 Windows 实测结论。
 
 本机是 macOS arm64。本单没有 Windows runner、OS-crash 实验或物理断电实验。
 §7 的用例是验收要求，不是通过记录。
@@ -191,7 +201,7 @@ OS-crash 与断电可使用同一条件契约，但两者的实验覆盖不能�
 
 出现以下任一条件，现有 B 必须保持 false：
 
-1. owner 尚未接受故障模型，或还没有相应 spec/protocol 修订。
+1. S 所需的 spec/protocol 修订尚未完成。
 2. 只有 temp 文件 flush、可见 readback 或 process kill 证据；没有所选模型的完整恢复证明。[M3]
 3. 使用 data-only/no-sync 作为强模型的必要屏障，或吞掉 flush/权限/不支持错误。[M1]、[M2]
 4. ledger 的 rename、memory replace/delete 或新目录链仍有一项未覆盖。[M3]、[M5]
@@ -203,13 +213,16 @@ OS-crash 与断电可使用同一条件契约，但两者的实验覆盖不能�
 写 uncertain terminal 也需要有效 barrier；否则保留 cursor 并报告 `local_io_failed`。
 这是 `agent-memory-intent.ts:635`、`:687`、`:909` 的现有行为。
 
-## 6. owner 可选择的故障模型
+## 6. 故障模型选项与裁定记录
 
-以下都是待选项。当前没有一项获批，也没有因本稿而令 B=true。
+以下保留裁定前的建议和选项，作为决策记录。Aimpact 已于 2026-10-19 选择 S。
+S 尚未获证明，B 仍为 false。P/F/R 未采用。
+
+原建议：建议选择 S，保留强故障模型。若选择 P/F，须接受系统故障后的永久分裂风险，并修改 Host admission。
 
 | 选项 | owner 接受的准确含义 | v1 与 B 的后果 |
 |---|---|---|
-| S：保留强模型（建议） | 覆盖 process-crash、OS-crash、断电；假设 storage 兑现完整 flush。支持域先限本地 NTFS、明确 OS build、普通用户 token。排除 SMB、同步目录、其他 FS、磁盘毁坏和备份回滚。 | WO-09 必须证明 §3。失败时阻塞 Windows intent，不能以 Linux-only 完成 Q14。证明齐全并修订 API 表述后才可授予 B。依据 [M2]、[M4]、[M5]。 |
+| S：保留强模型（已选；原建议） | 覆盖 process-crash、OS-crash、断电；假设 storage 兑现完整 flush。支持域先限本地 NTFS、明确 OS build、普通用户 token。排除 SMB、同步目录、其他 FS、磁盘毁坏和备份回滚。 | WO-09 必须证明 §3。失败时阻塞 Windows intent，不能以 Linux-only 完成 Q14。证明齐全并修订 API 表述后才可授予 B。依据 [M2]、[M4]、[M5]。 |
 | P：仅 process-crash | OS 与 storage 在 helper/daemon 故障期间继续正常工作。保留应用进程恢复与 at-most-once；明确排除系统 crash、突然重启和断电。仍执行并检查所有约定 flush。 | owner 接受系统故障后永久 Host/device 分裂风险。现有 B 继续 false，直到 spec、protocol 与 Host admission 明确采用较弱模型。依据 [M3] 和下述反例。 |
 | F：接受文件级保证 | 每次成功写有完整文件 flush，但 namespace recovery 未获证明。 | 这不是完整 strict 模型。若 owner 仍选择它，必须明确接受系统故障后 lost apply、重复 CAS 及无自动修复。不得单凭“文件已 flush”授予现有 B。依据 [M1]、[M2]、[M5]。 |
 | R：系统故障后先 reconcile | 允许尚未 reconcile 的完成事实过时。重启后先暂停新 intent，独立于设备 ledger/cursor 向 Host 枚举需核对的已完成意图。 | 这是另一个协议方案。须另定保留期、断点、内容来源、合法后续编辑及冲突规则。仅启动时检查本地 ledger 不够。现有代码和 B 均不具备该证明。依据 [M3] 的 cache 损失机制；现有缺口见 #522。 |
@@ -242,14 +255,14 @@ Q14 原文要求三端证明进入 v1；它没有接受上述弱化风险。
 WO-09 开始前须确定 Host 的明确 opt-in 和兼容边界；仅本地布尔配置不足。
 依据：`docs/plans/2026-10-18-bot-mode-product-prd.md:443`、`docs/protocol.md:978`。
 
-owner 的决定须填写：`选项 S/P/F/R`、`允许的故障集合`、`OS/FS/storage 假设`、`接受的残留风险`、`Host admission 规则`、`签名与日期`。
-没有决定前，WO-09 可做矩阵和原语实验，但不能开放 Windows intent。
+裁定记录：Aimpact 于 2026-10-19 选择 S。故障集合、支持域和 storage 假设见开头。
+WO-09 可继续矩阵和原语实验，但完成 §7 证明前保持 BLOCKED，不能开放 Windows intent。
 
 ### 可并入 spec 的拟议文字
 
-若选 S，并完成证明，在 Durable Agent homes 的 intent 段采用以下文字。
+S 已选。完成 §7 证明后，在 Durable Agent homes 的 intent 段采用以下文字。
 同步替换 `docs/protocol.md` 的 advertisement 限制和 B 的注释。
-本稿保留现行 spec 文件，等待裁定。
+本稿保留现行 spec 文件，等待 §7 证明。
 
 > A backend may advertise Agent memory intents only after it proves a durable barrier for its stated OS, file system and storage profile. On Windows, the profile is local NTFS with storage that honors flush requests. The barrier covers process failure, OS failure and power loss. It covers the ledger bytes, memory result, required metadata and name changes, and new parent directories. The device commits applying before CAS. It commits the memory result and terminal before Host completion. It commits ackedAt after matching Host readback and before cursor advance. An error blocks the next step. File flush alone is not proof of the full sequence. Windows remains disabled until this proof is complete.
 
@@ -338,5 +351,5 @@ M8 200 missing=[]
 `missing=[]` 表示所引关键条款的文本检查未发现缺项。它不证明 Windows API 调用或 durability。
 读者可直接审查上述摘录和 §8 的 Microsoft 链接，不需要访问原始临时日志。
 
-残留边界：owner 尚未裁定；Windows API/普通用户矩阵、OS crash 和物理断电尚无本单实测。
-WO-09 的 Windows intent 开放仍受 §5—§7 约束。
+残留边界：S 已选但尚未获证明；Windows API/普通用户矩阵、OS crash 和物理断电尚无本单实测。
+B 保持 false。WO-09 保持 BLOCKED，直到完成 §7 证明。
