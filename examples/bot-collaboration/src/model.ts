@@ -9,7 +9,7 @@ export interface Turn {
 export interface Card {
   id: string; turnId: string; action: ConfirmableAction<Json>;
   state: 'pending' | 'confirmed' | 'rejected' | 'expired'; expiresAt: number;
-  result?: Json; error?: string; decisionReported?: boolean;
+  result?: Json; error?: string; conclusion?: 'succeeded' | 'failed'; decisionReported?: boolean;
 }
 export interface Question { id: string; turnId: string; value: AskUserAction; answer?: string }
 export interface Definition { version: number; schedule: RoutineScheduleFields; prompt: string; target: string }

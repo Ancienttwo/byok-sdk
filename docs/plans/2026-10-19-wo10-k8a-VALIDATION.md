@@ -229,3 +229,17 @@ reports its omitted count. Only current routine definitions travel. Rejected
 actions are reserved by a frozen input; unstarted terminal failure releases
 that reservation. A pack above its byte cap blocks with a persisted reason.
 Blocked turns do not schedule a retry loop. These limits do not trim strings.
+
+### P2-3 and P2-4 test changes
+
+- `acceptance.test.ts`: strengthen the hung-connector case with a persisted
+  `failed` conclusion. The four card decision states are unchanged. The existing
+  timeout, abort, queued input/answer/decision/wake progress, and late-result
+  assertions stay in place. No earlier expectation is removed.
+- `host.test.ts`: add only the self-continuation crash boundary. A wrapper throws
+  before the real `executions.submit`. The parent outcome marker and child input
+  must already be durable. A new SQLite HostLedger connection and `recover()`
+  must produce one child start, generation zero, and exactly the frozen offer
+  payload. Repeated recovery must not make a second child or submit.
+- No cross-Bot path or test is added. Cross-Bot delegation is withdrawn from
+  this scope and belongs to the first K8b work order after #530 and #531 land.

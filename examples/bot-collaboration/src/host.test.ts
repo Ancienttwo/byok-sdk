@@ -356,3 +356,39 @@ it('delivers rejected feedback to the Bot once while preserving the first frozen
   expect(fixture.ledger.snapshot().executions[task]!.input).toEqual(frozen);
   await finish(next);
 });
+
+it('recovers one self continuation from a durable pre-submit failure with the same frozen input', async () => {
+  let failBeforeSubmit = false;
+  let blockedCalls = 0;
+  const options = await setup({}, server => ({ ...server, executions: { submit: async input => {
+    if (failBeforeSubmit) { blockedCalls++; throw new Error('crash boundary before executions.submit'); }
+    return server.executions.submit(input);
+  } } }));
+  const submit = vi.spyOn(fixture.server.executions, 'submit');
+  const root = await bot.input('pre-submit-parent', 'Continue this work');
+  failBeforeSubmit = true;
+  await finish(root, { delegate: [{ to: 'main', request: 'Recover this continuation' }] });
+  const child = Object.values(bot.snapshot().turns).find(turn => turn.source === 'continuation')!;
+  const intent = bot.core.intent(child.id)!;
+  const frozen = structuredClone(fixture.ledger.snapshot().executions[intent.taskId]!.input);
+  expect(blockedCalls).toBeGreaterThan(0);
+  expect(await fixture.server.tasks.offer(intent.taskId)).toBeUndefined();
+  expect(submit.mock.calls.filter(([input]) => input.taskId === intent.taskId)).toHaveLength(0);
+  expect(fixture.ledger.snapshot().applied[bot.core.intent(root)!.taskId]).toBe(true);
+  await vi.waitFor(() => expect(fixture.daemon.status().activeTaskCount).toBe(0), { timeout: 5000 });
+  await bot.close();
+  extra = new HostLedger(`${fixture.root}/host.sqlite`, fixture.ledger.tenant);
+  bot = new BotCollaboration(fixture.server, extra, options);
+  await bot.recover();
+  await running(child.id);
+  const offer = await fixture.server.tasks.offer(intent.taskId);
+  expect(offer).toMatchObject({ taskId: frozen.taskId, deviceId: frozen.deviceId });
+  expect(offer!.payload).toEqual(frozen.payload);
+  expect(extra.snapshot().executions[intent.taskId]!.input).toEqual(frozen);
+  await finish(child.id);
+  await Promise.all([bot.recover(), bot.recover()]);
+  expect(bot.core.intent(child.id)!.generation).toBe(0);
+  expect(fixture.adapter.starts.filter(start => start.manifest.taskId === intent.taskId)).toHaveLength(1);
+  expect(submit.mock.calls.filter(([input]) => input.taskId === intent.taskId)).toHaveLength(1);
+  expect(Object.values(bot.snapshot().turns).filter(turn => turn.source === 'continuation')).toHaveLength(1);
+});

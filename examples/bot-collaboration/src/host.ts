@@ -260,7 +260,7 @@ export class BotCollaboration {
         // Passive expiry is visible in ContextPack. It cannot start a paid turn.
         if (card.state === 'expired') continue;
         const root = state.turns[card.turnId]!.root;
-        this.addTurn(state, hash(['action_result', card.id]), root, 'action_result', JSON.stringify({ cardId: card.id, state: card.state, result: card.result, error: card.error }));
+        this.addTurn(state, hash(['action_result', card.id]), root, 'action_result', JSON.stringify({ cardId: card.id, state: card.state, conclusion: card.conclusion, result: card.result, error: card.error }));
       }
     }
     return materialized;
@@ -329,6 +329,7 @@ export class BotCollaboration {
       this.ledger.transaction(s => {
         const row = stateOf(s.application).cards[card.id]!;
         if (error !== undefined) row.error = error; else row.result = result!;
+        row.conclusion = error === undefined ? 'succeeded' : 'failed';
       });
     }
   }

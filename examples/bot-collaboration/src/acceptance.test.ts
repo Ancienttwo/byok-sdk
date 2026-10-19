@@ -70,6 +70,7 @@ it('bounds an uncooperative connector and releases queued input, answer, decisio
   expect(Object.values(bot!.snapshot().questions)[0]!.answer).toBe('Yes');
   expect(bot!.snapshot().audit).toContain('Invalid routine wake: malformed');
   expect(bot!.snapshot().cards[card.id]!.error).toContain('Connector timed out');
+  expect(bot!.snapshot().cards[card.id]!.conclusion).toBe('failed');
   complete({ externalId: 'late-result' });
   await bot!.drain();
   expect(bot!.snapshot().cards[card.id]!.result).toBeUndefined();
