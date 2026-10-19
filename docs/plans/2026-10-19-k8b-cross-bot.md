@@ -1,8 +1,9 @@
 # K8b Cross-Bot: Bot↔Bot delegation in Bot mode (plan)
 
 Issue: [#540](https://github.com/Ancienttwo/byok-sdk/issues/540).
-Status: plan only. No implementation code. Code starts only after Aimpact
-approves this plan.
+Status: plan only. No implementation code. Aimpact decided Q1–Q11 as
+recommended on 2026-10-19 14:59 HKT (§13). Implementation waits for the
+dependencies in §11.
 Baseline: `origin/main@5b988a6e`. In-flight inputs: #532
 (`codex/bot-k4-host-execution-core@e5afad26`), #530
 (`codex/k8a-bot-collaboration@c9dabb9e`), #531
@@ -266,8 +267,9 @@ per fan-out:
   exactly one reply Turn.
 
 This refines platform PRD §9.4 item 3 ("reply Turn key `H(delegationId)`").
-A batch of one keeps that key. A batch of two uses the batch key. A PRD text
-sync follows in a separate docs PR if Aimpact accepts Q2.
+A batch of one keeps that key. A batch of two uses the batch key. Aimpact
+decided Q2 (§13). The PRD text changes in a separate follow-up docs PR, not in
+this PR.
 
 ### 3.6 B's continuation keeps the delegation open
 
@@ -631,11 +633,11 @@ them (§3.7).
 | Slice | Scope | Depends on | Acceptance (platform PRD §14.2 unless noted) |
 |---|---|---|---|
 | X1 Core delegation | `Delegation` row; `bot_request`/`bot_reply` sources; `to` enum; apply checks (archived, duplicate, hop, prepaid budget, room seat); `bot_request` schema without management; B ContextPack `delegation` block; `BOT_REPLY_MAX_BYTES`; `consumeMessage` and `tasks.agentMessage` readback; single-delegation reply Turn; continuation chain (§3.6); `delegation:<id>` projection | #530, #531 | "A delegates to B on the same device"; "Host crashes after the delegation write and before submit"; "B's terminal or message is delivered twice"; "B fails or is interrupted, or no `submit_result`"; "outcome does not match the schema"; "chain exceeds the hop limit"; "over budget"; "B runs in its own conversation"; "Main Bot changes B's profile during a delegation"; "security: normal Bot schema"; plus: a `bot_request` on a Main Bot has no management fragments |
-| X2 Fan-in join | Batch reply Turn, uncertain release, late single reply | X1; Q2 = yes | Fan-out of 2 gives one A execution with both verdicts. One uncertain sibling releases the batch; its later verdict gives exactly one extra A Turn. Budget use is `n + 1` |
+| X2 Fan-in join | Batch reply Turn, uncertain release, late single reply | X1 | Fan-out of 2 gives one A execution with both verdicts. One uncertain sibling releases the batch; its later verdict gives exactly one extra A Turn. Budget use is `n + 1` |
 | X3 Wait, cancel, uncertain | Verdict mapping (§8.1); `cancelDelegation`, `abandonDelegation`; cancel versus acceptance; `cancelGraceMs`, `uncertainAfterMs`; deadlines in the scan timer; late terminals to audit | X1 | "B drops while running; cancel finds no terminal → uncertain, no resubmit; user ends it → `abandoned`; later terminal → audit only"; cancel before acceptance → `cancelled`, no reply; acceptance before cancel → `cancelled` with a partial reply |
 | X4 Lifecycle | Target archived in each state (§8.4); initiator archived (§8.5); enum refresh | X1 | Each row of §8.4 gives one `refused` verdict and A receives one report. Initiator archived: verdict written, no reply Turn |
 | X5 Second device | B on a second `deviceId` with a daemon that has no Host code; `waiting_device` status; offline expiry; relay contract doc for two-process Topology L | X1, X3 | "A delegates to B on another device (Topology H); B's device has no Host code"; "B's device is offline → waiting for device → `expired` → A receives one report" |
-| X6 Docs | `examples/bot-collaboration/README.md` and VALIDATION; Host guide section; a follow-up docs PR for the PRD text (§9.4 item 3 key if Q2 is accepted; product PRD §5.2, §9, §10 P4 scope) | X1–X5 | Required checks pass. No PRD edit in the code slices |
+| X6 Docs | `examples/bot-collaboration/README.md` and VALIDATION; Host guide section; a follow-up docs PR for the PRD text (§9.4 item 3 reply key per Q2; product PRD §5.2, §9, §10 P4 scope) | X1–X5 | Required checks pass. No PRD edit in the code slices |
 
 Each slice runs the five required checks from `CLAUDE.md`: `bun run build`,
 `bun run typecheck`, `bun run test`, `bun run check:api-surface`,
@@ -661,8 +663,8 @@ PRD §13.1, K8 rollback).
   not use delegation. It stays a later K8b work order (PRD-revisions
   2026-10-19).
 - New SDK API: a `message` outcome kind, a `cancel_delegation` fragment, or a
-  higher `delegateMaxItems`. Each needs its own SDK issue if Aimpact wants it
-  (Q1, Q3, Q7).
+  higher `delegateMaxItems`. Q1, Q3 and Q7 exclude them from v1. A later
+  change needs its own SDK issue.
 - A run-time action channel to the Host (K9). Synchronous delegation (platform
   PRD §9.7).
 - Cross-team or cross-owner delegation. Moving a Bot to another device.
@@ -672,21 +674,28 @@ PRD §13.1, K8 rollback).
 - Claude or Codex as the Bot runtime. Bot mode stays Pi-only (product PRD Q8,
   2026-10-18 meaning).
 
-## 13. Open questions for Aimpact
+## 13. Decided questions
 
-Each question has a recommended default. Without an answer, slices use the
-default.
+Aimpact decided Q1–Q11 on 2026-10-19 14:59 HKT. Each decision is the
+recommended default of the first draft of this plan. Slices implement these
+decisions. A change to a decision needs a new Aimpact ruling.
 
-| # | Question | Recommended default | Rationale |
-|---|---|---|---|
-| Q1 | Do we need a separate "message, no reply" action? | No. One action, `delegate`; a plain message is a delegation with a short reply | A new kind is an SDK change and a fire-and-forget message breaks the one-verdict rule (I8) |
-| Q2 | Should the Host join a fan-out into one reply Turn? | Yes. One `bot_reply` Turn per A outcome; uncertain items report later on their own | The PM answers the user once with all results, and the fan-out uses one A execution, not two |
-| Q3 | Is a fan-out of 2 per outcome enough? | Yes for v1. Keep the frozen `delegateMaxItems = 2`; more targets take another round | The cap is frozen public API since #525; raising it is an SDK change with no data yet |
-| Q4 | Who can a Bot address? | Any active Bot in the same team. No per-Bot allowlist, no cross-team | One owner owns every Bot in a ledger; the enum and the apply-time recheck already bound the scope |
-| Q5 | May a Main Bot use management actions on a `bot_request` Turn? | No. `bot_request` Turns never get management fragments | Another Bot's request text must not be able to create, delete or rewire Bots |
-| Q6 | May a group member delegate privately from a room seat? | No. In-room addressing stays `room_call` | A private hand-off moves room content into 1:1 conversations and puts the answer where the user did not ask |
-| Q7 | Who can cancel a delegation? | The user only, from A's chip or B's Turn. Main Bot cancel waits for its own SDK issue | Main Bot cancel needs a new outcome fragment; user cancel uses the existing K4 cancel path |
-| Q8 | What is the reply size cap? | `BOT_REPLY_MAX_BYTES = 8 192` in B's frozen `messageEgress.maxBytes` | It keeps every reply inside A's context budget, so the "block only if the current request alone is over budget" rule never strands a reply |
-| Q9 | When does a delegation become uncertain? | Cancel requested with no terminal for 60 s, or claimed with no terminal for 30 min | It is display-only and enables "End"; 30 min avoids marking normal long runs as uncertain |
-| Q10 | How does a delegation count against the per-root budget of 12? | Each B execution and each A reply execution counts; the reply is prepaid when the delegation is accepted | The reply then never fails for lack of budget, which keeps the one-report rule |
-| Q11 | Is two-process Topology L sync in K8b? | No. K8b documents the relay contract; the Host service implements it downstream | The §14.2 rows run in one ledger; the sync transport is Host-service work, as for K4 (Q19) |
+| # | Question | Decision | Status | Rationale |
+|---|---|---|---|---|
+| Q1 | Do we need a separate "message, no reply" action? | No. One action, `delegate`; a plain message is a delegation with a short reply | Decided (Aimpact, 2026-10-19 14:59 HKT) | A new kind is an SDK change and a fire-and-forget message breaks the one-verdict rule (I8) |
+| Q2 | Should the Host join a fan-out into one reply Turn? | Yes. One `bot_reply` Turn per A outcome; uncertain items report later on their own | Decided (Aimpact, 2026-10-19 14:59 HKT) | The PM answers the user once with all results, and the fan-out uses one A execution, not two |
+| Q3 | Is a fan-out of 2 per outcome enough? | Yes for v1. Keep the frozen `delegateMaxItems = 2`; more targets take another round | Decided (Aimpact, 2026-10-19 14:59 HKT) | The cap is frozen public API since #525; raising it is an SDK change with no data yet |
+| Q4 | Who can a Bot address? | Any active Bot in the same team. No per-Bot allowlist, no cross-team | Decided (Aimpact, 2026-10-19 14:59 HKT) | One owner owns every Bot in a ledger; the enum and the apply-time recheck already bound the scope |
+| Q5 | May a Main Bot use management actions on a `bot_request` Turn? | No. `bot_request` Turns never get management fragments | Decided (Aimpact, 2026-10-19 14:59 HKT) | Another Bot's request text must not be able to create, delete or rewire Bots |
+| Q6 | May a group member delegate privately from a room seat? | No. In-room addressing stays `room_call` | Decided (Aimpact, 2026-10-19 14:59 HKT) | A private hand-off moves room content into 1:1 conversations and puts the answer where the user did not ask |
+| Q7 | Who can cancel a delegation? | The user only, from A's chip or B's Turn. Main Bot cancel waits for its own SDK issue | Decided (Aimpact, 2026-10-19 14:59 HKT) | Main Bot cancel needs a new outcome fragment; user cancel uses the existing K4 cancel path |
+| Q8 | What is the reply size cap? | `BOT_REPLY_MAX_BYTES = 8 192` in B's frozen `messageEgress.maxBytes` | Decided (Aimpact, 2026-10-19 14:59 HKT) | It keeps every reply inside A's context budget, so the "block only if the current request alone is over budget" rule never strands a reply |
+| Q9 | When does a delegation become uncertain? | Cancel requested with no terminal for 60 s, or claimed with no terminal for 30 min | Decided (Aimpact, 2026-10-19 14:59 HKT) | It is display-only and enables "End"; 30 min avoids marking normal long runs as uncertain |
+| Q10 | How does a delegation count against the per-root budget of 12? | Each B execution and each A reply execution counts; the reply is prepaid when the delegation is accepted | Decided (Aimpact, 2026-10-19 14:59 HKT) | The reply then never fails for lack of budget, which keeps the one-report rule |
+| Q11 | Is two-process Topology L sync in K8b? | No. K8b documents the relay contract; the Host service implements it downstream | Decided (Aimpact, 2026-10-19 14:59 HKT) | The §14.2 rows run in one ledger; the sync transport is Host-service work, as for K4 (Q19) |
+
+Follow-up: Q2 needs a separate PRD docs PR for platform PRD §9.4 item 3. The
+reply Turn key becomes `H('bot_reply', A.taskId)` for a fan-out batch. A
+single delegation or a late uncertain report keeps the PRD key `H(delegationId)`,
+written here with a domain tag as `H('bot_reply', delegationId)` (§3.4, §3.5).
+This PR does not edit the PRD.
