@@ -200,7 +200,7 @@ The pre-sync server's 366-day bound rejected that instant with
 `WAKE_AVAILABLE_AT_INVALID`. The included #523 raises the bound to 368 days,
 so that example no longer exceeds the server horizon.
 
-PENDING-AIMPACT: confirm `BOT_TURN_OUTCOME_LIMITS` before merge.
+ACCEPTED 2026-10-19 ~13:13 SGT (Aimpact): `BOT_TURN_OUTCOME_LIMITS` proposed values frozen; no further product hold.
 Those proposed limits are frozen public API values and are enforced by the
 fragments. No limit value changes in this follow-up. No product decision is
 inferred from the acceptance review.
@@ -275,7 +275,7 @@ Test assertion changes (P3-8): `packages/core/src/__tests__/constraints.test.ts`
   unchanged. They now contain the #523 changes imported by PM merge
   `6190f3cd`: a 368-day `WAKE_MAX_FUTURE_MS` and updated assertions.
   No further runtime edits are made. Proposed `BOT_TURN_OUTCOME_LIMITS` stay
-  unchanged and PENDING-AIMPACT.
+  unchanged; ACCEPTED 2026-10-19 ~13:13 SGT (Aimpact) as frozen public API.
 
 ### This round's verification
 
