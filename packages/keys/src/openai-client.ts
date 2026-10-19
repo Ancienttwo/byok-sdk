@@ -103,13 +103,21 @@ export class OpenAiCompatibleChatClient {
   /**
    * Round-trip the configured key against the provider
    * (`providers.ts:797-828`). An empty completion fails, so a provider that
-   * accepts anything cannot be mistaken for a working configuration.
+   * accepts anything cannot be mistaken for a working configuration. A
+   * reasoning-only length response gets one retry with a 2048-token budget.
+   * Both requests share the configured request deadline.
    */
   async testConnection(
     signal: AbortSignal = new AbortController().signal,
   ): Promise<void> {
-    const payload = await this.createChatCompletion(
-      {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(new ByokKeysError(
+      'PROVIDER_REQUEST_TIMEOUT',
+      'Model provider connection validation timed out',
+    )), this.#requestTimeoutMs);
+    const probeSignal = AbortSignal.any([signal, controller.signal]);
+    try {
+      const request: ChatCompletionRequest = {
         max_tokens: 32,
         messages: [
           {
@@ -120,11 +128,29 @@ export class OpenAiCompatibleChatClient {
         ],
         response_format: { type: 'json_object' },
         temperature: 0,
-      },
-      signal,
-    );
-    assertLiveModelResponse(chatCompletionText(payload));
+      };
+      let payload = await this.createChatCompletion(request, probeSignal);
+      if (isReasoningOnlyLengthResponse(payload)) {
+        payload = await this.createChatCompletion({ ...request, max_tokens: 2048 }, probeSignal);
+      }
+      assertLiveModelResponse(chatCompletionText(payload));
+    } finally {
+      clearTimeout(timer);
+    }
   }
+}
+
+/** Retry only when output tokens were spent on reasoning instead of an answer. */
+function isReasoningOnlyLengthResponse(payload: Record<string, unknown>): boolean {
+  const choice = objectValue(Array.isArray(payload.choices) ? payload.choices[0] : undefined);
+  const message = objectValue(choice?.message);
+  const content = message?.content;
+  const empty = content == null || (typeof content === 'string' && content.trim().length === 0);
+  const usage = objectValue(payload.usage);
+  const reasoningTokens = objectValue(usage?.completion_tokens_details)?.reasoning_tokens;
+  const hasReasoning = (typeof message?.reasoning_content === 'string' && message.reasoning_content.trim().length > 0)
+    || (typeof reasoningTokens === 'number' && reasoningTokens > 0);
+  return choice?.finish_reason === 'length' && empty && hasReasoning;
 }
 
 /**

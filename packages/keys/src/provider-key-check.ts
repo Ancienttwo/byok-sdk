@@ -14,7 +14,9 @@ export interface ProviderKeyCheckOptions {
 }
 
 /**
- * One live round trip with a just-provisioned key (plan D13, A10). The result
+ * A bounded live check with a just-provisioned key (plan D13, A10). An
+ * OpenAI-compatible reasoning-only length response can cause one retry.
+ * Both requests share this check's deadline. The result
  * is a hint for the UI, never a readiness decision, and is a closed-set code:
  *
  * - `credential_rejected` only for an explicit credential rejection (HTTP 401);
