@@ -546,7 +546,7 @@ export class BotCollaboration {
         const state = stateOf(s.application), row = state.delegations[d.id]!;
         const emit = (key: string, value: Json) => project(s, key, value);
         if (state.replies[intent.taskId]?.body !== undefined) resolveDelegation(state, row, 'answered', this.now(), emit, undefined, intent.taskId);
-        else if (failed) retryReply(row, this.now(), emit, this.timers.uncertainAfterMs);
+        else if (failed) retryReply(state, row, this.now(), emit, this.timers.uncertainAfterMs);
         else reconcileReply(state, row, readback, this.now(), emit, this.timers.uncertainAfterMs);
       });
     }

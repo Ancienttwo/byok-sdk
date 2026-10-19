@@ -49,22 +49,38 @@ it('A delegates to B on the same device: queued -> running -> answered, one repl
   expect(t.host().snapshot().budgets[root]).toMatchObject({ delegation: 2, reserved: 0 });
 });
 
-it('refuses a second cross-Bot item with fan_out_not_enabled and reports it in the accepted reply Turn', async () => {
+it('fan-out of 2: both targets run, one batch reply Turn carries both verdicts, and the join releases one A slot', async () => {
   fixture = await openTeam({ routeMessages: true });
   const [a, b] = await t.createBots(2) as [string, string];
   const root = await t.host().input('fan-out', 'Ask two Bots', a);
   await t.finish(root, { delegate: [{ to: b, request: 'first' }, { to: 'main', request: 'second' }] });
-  const first = t.delegationOf(t.taskOf(root), 0), second = t.delegationOf(t.taskOf(root), 1);
-  expect(second).toMatchObject({ status: 'resolved', verdict: 'refused', reason: 'fan_out_not_enabled' });
-  expect(t.host().snapshot().turns[second.id]).toBeUndefined();
-  expect(t.host().snapshot().rejected).toContainEqual(expect.objectContaining({ botId: a, action: 'delegate', reason: 'fan_out_not_enabled' }));
-  expect(t.host().snapshot().budgets[root]).toMatchObject({ reserved: 2 });
+  const task = t.taskOf(root);
+  const first = t.delegationOf(task, 0), second = t.delegationOf(task, 1);
+  expect([first, second].map(d => [d.toBotId, d.status, d.batch])).toEqual([[b, 'queued', task], ['main', 'queued', task]]);
+  expect(t.host().snapshot().batches[task]!.slots).toEqual([hash([task, 'A', 0]), hash([task, 'A', 1])]);
+  expect(t.host().snapshot().budgets[root]).toMatchObject({ delegation: 0, reserved: 4 });
   await t.finish(first.id);
-  const replyId = hash(['bot_reply', first.id]);
-  expect(t.host().snapshot().turns[replyId]!.replies!.map(r => [r.delegationId, r.verdict, r.reason])).toEqual([
-    [first.id, 'answered', undefined], [second.id, 'refused', 'fan_out_not_enabled']]);
-  expect(t.delegation(second.id).replyTurnId).toBe(replyId);
-  await t.finish(replyId);
+  // The first verdict waits for its sibling: no reply Turn yet.
+  expect(t.delegation(first.id)).toMatchObject({ verdict: 'answered' });
+  expect(t.delegation(first.id).replyTurnId).toBeUndefined();
+  expect(Object.values(t.host().snapshot().turns).filter(turn => turn.source === 'bot_reply')).toEqual([]);
+  await t.finish(second.id);
+  const batchId = hash(['bot_reply', task]);
+  const reply = t.host().snapshot().turns[batchId]!;
+  expect(reply).toMatchObject({ botId: a, source: 'bot_reply', authority: 'owner', hop: 0, root, unit: hash([task, 'A', 0]) });
+  expect(reply.refusalReport).toBeUndefined();
+  expect(reply.replies!.map(r => [r.delegationId, r.from, r.verdict])).toEqual([[first.id, b, 'answered'], [second.id, 'main', 'answered']]);
+  expect([t.delegation(first.id).replyTurnId, t.delegation(second.id).replyTurnId]).toEqual([batchId, batchId]);
+  expect(t.host().snapshot().units[hash([task, 'A', 1])]!.state).toBe('released');
+  expect(t.events(first.id).map(e => [e.status, e.replyTurnId])).toEqual([
+    ['queued', undefined], ['running', undefined], ['resolved', undefined], ['resolved', batchId]]);
+  await t.running(batchId);
+  expect(t.instruction(batchId)).toContain('--- reply 1 (2 bytes) ---');
+  expect(t.instruction(batchId)).toContain('--- reply 2 (2 bytes) ---');
+  await t.finish(batchId);
+  // One A execution for the whole fan-out.
+  expect(Object.values(t.host().snapshot().turns).filter(turn => turn.source === 'bot_reply')).toHaveLength(1);
+  expect(t.host().snapshot().budgets[root]).toMatchObject({ delegation: 3, reserved: 0 });
 });
 
 it('delivers all refused items of one outcome in one refusal report Turn whose schema has no delegate', async () => {
