@@ -539,3 +539,407 @@ The Host service owns definition commands, version changes, CAS, sync and read-t
 The service-owned command, visibility, credential-log audit and one-hour idle traffic rows from platform PRD section 14.1 are downstream checks.
 They are documented in the Host guide, not claimed as tested here.
 No packages/ source is changed. No push or PR was made. The main checkout was not changed.
+
+## WO-11 P5a: scope and design
+
+Date: 2026-10-19. Branch: `codex/p5a-memory-page`.
+The initial branch has no K4 example. Commit `31ef0823` copies the example and guide
+from the read-only K4 worktree at `e5afad26b42108cb4aa5b14f9f674291bc168b81`.
+The earlier sections of this file are copied K4 evidence. They are not WO-11 checks.
+No file in the reference worktree was changed.
+
+### P1: Boundary
+
+The Host owns the approval, pending body, notice retry, placement check, terminal
+readback and policy-approved resident projection. The SDK owns the home lease,
+filesystem CAS, device intent ledger and ACK. `memory.ts` adds the Host half.
+No SDK package source or wire field changes.
+
+### P2: Real path
+
+The synthetic Linux test uses a real cloud mailbox and daemon. The Host approves an
+intent and commits it before notice delivery. The daemon calls the Host transport.
+The native backend applies one CAS under the real home lease. The Host commits the
+content-free completion and removes the pending body. The test checks file content,
+note removal, device ACK and persisted readback after the Host ledger reopens.
+
+A real task closes through the reserved result helper. Its redactor emits the resident
+profile through the projection port. The Host uses only that policy-approved text.
+The test then replaces memory with 8193 UTF-8 bytes. A later real task-close projection
+makes ContextPack construction fail. The old projection remains unchanged until that
+new projection arrives. A separate real embedded-server test checks that a missing
+projection blocks submit and that an accepted pack stays frozen in the offered input.
+
+### P3: Decision
+
+WO-01 v2 forbids a read-only interpretation of the EMPTY revision. P5a uses it only
+for an authorized whole-file write. A conflict ends one intent. A new user approval
+must select the next base and body. No automatic rebase runs. Redacted text remains
+read-only. P5b edit-view and `contentComplete` are not implemented.
+
+The Host profile is opaque JSON with one `residentMemory` member. It is not an SDK
+edit-view format. It contains no file paths or source revisions. The outer mutation
+hash and byte count still bind the profile. Authorization is checked on publish and
+ContextPack read. The stored Host receipt time is retained on an idempotent publish.
+The 8 KiB limit counts UTF-8 bytes. The receiver never truncates text.
+
+### Test change audit
+
+No existing K4 assertion was modified or removed.
+The two added files contain 15 Host tests and 3 Linux synthetic tests.
+The first draft incorrectly matched an absent `content` member against an explicit
+undefined member. The correction uses `not.toHaveProperty`, which checks actual
+absence. The Linux fixture now supplies the real egress policy before it submits a
+task. This satisfies SDK capability admission. It does not bypass the gate.
+A temporary failure diagnostic was removed before commit.
+
+Herdr reported `pane_not_found` for this process's inherited pane. No other existing
+pane was controlled. The read-only gatekeeper route is allowed by AGENTS.md.
+Round 1 found no confirmed P1/P2 implementation issue and no weakened assertions.
+It held acceptance for the unresolved test results. Round 2 reviewed the final evidence.
+
+### WO-11 observed checks
+
+Local runtime: Node 24.21.0 and Bun 1.4.3. Linux uses Node 24.21.0 and Bun 1.4.2
+from the WO-01 probe image `byok-bot-m0-memory-intent:r2-base`.
+The image has the same package and script baseline as this branch: the source diff
+against `becc9f57` is empty for `packages/` and `scripts/`.
+Each Linux run installs the current lockfile with `--frozen-lockfile`.
+The source archive excludes node_modules and macOS metadata sidecar files.
+
+| Command | Exit | Evidence |
+| --- | --- | --- |
+| `bun run build` | 0 | All workspace builds completed. |
+| `bun run typecheck` | 0 | All workspace typechecks completed. |
+| `bun run check:api-surface` | 0 | All 9 package goldens match. |
+| `bun run check:version-authority` | 0 | Dispatch 0.27.0 and keys 0.12.0 match README and spec. |
+| `bun run --cwd examples/host-execution-core typecheck` | 0 | Final example and Linux fixture compile. |
+| `bun run --cwd examples/host-execution-core test` on macOS | 0 | 52 passed, 3 Linux tests skipped. |
+| `bun run test src/memory-linux.test.ts` in the example on Linux | 0 | 3 passed. Real replace, delete, conflict, ACK, task-close projection and limit block. |
+| Earlier `bun run test` in the example on Linux | 1 | 54 passed, 1 K4 retry-generation timeout. All 3 new Linux tests passed. |
+| `bun run test src/core.test.ts -t "retries a retryable device failure"` on Linux | 0 | Final core: 1 passed. K4 baseline core: 1 passed. |
+| `bun run --cwd packages/client test src/__tests__/daemon-control-socket.test.ts` | 0 | 15 passed in a focused rerun. |
+
+The initial Linux run also included macOS AppleDouble files as test inputs. The archive
+step was corrected. Those binary sidecars are absent from the source tree and later runs.
+A first fixture run omitted `agentEgress.policy`. The SDK correctly refused capability
+admission. The final fixture configures the policy and uses the same admission path.
+A later full Linux run timed out before runtime start in the projection test. An isolated
+run passed. That full Linux run and the focused file both pass all new tests. The final complete result follows below.
+The K4 retry timeout also passes in isolation with both final and baseline core source.
+These focused results do not turn the failed full Linux command into a pass.
+
+The exact cause of the earlier full-run timing failures is unconfirmed. The final Linux full run passes without K4 changes.
+No test deadline, assertion or SDK implementation was changed to hide them.
+Raw logs, archives and the diagnostic record are in the ignored `_ops/wo-11/` directory.
+
+The first exact root `bun run test` exited 1 after client: 3991 passed, 30 skipped,
+1 shutdown test timeout. The sequential root command stopped before later workspaces.
+The same unchanged client file passed 15/15 in its focused rerun. The exact full root
+rerun then passed. The final evidence below records its result separately.
+
+A later self-review reproduced one notice error blocking the rest of the scan.
+The added test first failed with one delivery call instead of two. Commit `0732d0ec`
+continues the scan, retains each failed pending row and reports an AggregateError.
+The prior lost-response test now checks the exact original error inside `errors`.
+It keeps all existing retry and persistence assertions. Final Host tests pass 15/15.
+The root rerun had not reached the example when this fix was committed. All earlier
+workspace source was unchanged. The example therefore runs the final notice code.
+
+### Final WO-11 evidence
+
+| Command | Exit | Evidence |
+| --- | --- | --- |
+| `bun run typecheck` after `0732d0ec` | 0 | All workspace typechecks completed. |
+| `bun run --cwd examples/host-execution-core test src/memory.test.ts` | 0 | 15 passed, including notice delivery after one failure. |
+| `bun run test` in the Linux example after `0732d0ec` | 0 | 56 passed in 7 files. No Linux test skipped. |
+| Exact root `bun run test` rerun | 0 | Vitest: 9341 passed, 203 skipped. Cloud-do Node tests: 10 passed. |
+| Final example in the root rerun on macOS | 0 | 53 passed, 3 Linux tests skipped. |
+
+Final Linux log: `_ops/wo-11/linux-example-verified.log`.
+Exit readback: `_ops/wo-11/linux-verified-exit.txt` contains `linux-example-verified=0`.
+The full command includes all 3 real Linux memory tests and the unchanged K4 tests.
+
+Root exit readback: `_ops/wo-11/test-final-exit.txt` contains `test-final=0`.
+Root log: `_ops/wo-11/test-final.log`.
+The 203 skips include the 3 Linux memory tests. All 3 pass in the separate Linux full run.
+The optional Docker dataplane substrate was not started. Its 139 tests remain skipped.
+
+Round 2 found no P1/P2 code or test issue. It verified Linux 56/56 and the notice fix.
+It requested accurate historical labels and a README scope correction. Both were made.
+The root exit 0 resolves its last verification condition. No implementation changed
+since `0732d0ec`. Later changes only record evidence and correct scope text.
+
+P5a is complete for this slice. P5b edit-view and macOS/Windows proof remain outside it.
+No push, PR, merge or package publication was performed.
+
+The read-only reviewer returned `VERDICT: PASS` after it read the final root exit.
+It found no P1/P2 issue and recommended a local documentation commit with no push.
+
+## PR 529 acceptance fixes (2026-10-19)
+
+This section supersedes the earlier missing-projection blocking rule.
+Scope: the two P1 findings and README flow from the read-only acceptance review.
+K4 stacking stays PENDING-AIMPACT. The K4 copy and pushed history stay in place.
+
+### P1 map, P2 trace, P3 decision
+
+`HostExecutionCore.begin` reads `HostMemoryPage.contextPack` before submit. The SDK
+publishes only at task close. Requiring a projection before submit made first execution
+impossible. The former exception also kept a queue head queued and scheduled now+1
+wakes. Regression tests reproduced both failures before the fix.
+
+Missing or null memory now yields an empty pack. The original instruction can run.
+Oversized text and blob composition failures persist `memory_blocked`, the prior phase
+and the error. They spend no attempt or generation. Only deadline wakes remain.
+A projection commit rechecks the exact binding and commits a reconciliation wake.
+A duplicate publish retries a failed wake. `recover` covers a missed process-local signal.
+A blocked routine occurrence also participates in the existing supersede rule.
+
+A verified applied small MEMORY replacement invalidates the old display for ContextPack.
+It keeps ordering metadata and stores no new projection. The core binds a fresh submission
+to that repair before sending it. Its task-close projection clears the marker. Older task
+projections keep the marker. Submitted raw text never becomes model memory directly.
+
+### Assertion changes
+
+- Missing projection, null text and a new profile previously had to throw. They now
+  must return `{}`. This implements the reviewed PRD bootstrap rule.
+- The existing frozen-input test now seeds an oversized projection before it enqueues.
+  It retains zero-attempt, no-offer and frozen-offered-instruction assertions. The later
+  projection sequences move forward to preserve monotone ordering after the new seed.
+- Resident memory is now optional in the exported example type. The existing content
+  assertions retain the same expected strings and byte counts.
+- The Linux helper now submits through the real core, not directly through cloud. It
+  waits for core settlement. All original filesystem, CAS, ACK and readback assertions
+  remain. Restart now closes and recovers the core with the Host ledger.
+- A new missing-file test checks the empty pack before first submit. It then checks the
+  empty file created by the SDK (`agent-home.ts` home initialization) and runs a new profile.
+  It does not require the SDK to preserve file absence after initialization.
+
+New tests bound oversized and blob wakes for two seconds, cover persisted restart,
+missed notification recovery, duplicate wake delivery, stale projection replay and a real
+Linux bootstrap/repair path. No manual projection publish substitutes for Linux bootstrap.
+
+### Final acceptance-fix verification
+
+| Command | Exit | Result |
+| --- | --- | --- |
+| `bun run build` | 0 | Workspace builds completed. |
+| `bun run typecheck` | 0 | All workspaces, including changed example types and tests. |
+| `bun run check:api-surface` | 0 | Nine package goldens match. No SDK export changed. |
+| `bun run check:version-authority` | 0 | README/spec train remains aligned. |
+| `bun run --cwd examples/host-execution-core test` | 0 | 59 passed, 6 Linux tests skipped on macOS. |
+| Linux example `bun run test src/memory-linux.test.ts src/memory.test.ts` | 0 | 27 passed. |
+| Linux example `bun run test` | 0 | 65 passed in 7 files. |
+| Exact root `bun run test`, after build completed | 0 | 9347 Vitest passed, 206 skipped. Cloud-do Node tests: 10 passed. |
+
+The first broad root run overlapped build and read missing dist entry files. It exited 1
+with 15 client failures. The corrected sequential root run passed without a source fix.
+The first local full example had a startup timeout. Its completed-build rerun passed.
+Both initial logs remain available. No deadline or SDK test assertion was changed.
+
+Readbacks and raw logs are under `_ops/wo-11-review/`. The final root readback is
+`test-final=0`. Linux full readback is `linux-full=0`. The two-second blocked wake tests
+pass with at most one oversized deadline wake and no added blob wake after restart.
+Read-only review found no code, test or documentation finding. It checked the changed
+assertions and the PENDING-AIMPACT note. Only verification evidence changed after
+implementation commit `932b48c5` and guide commit `c8ce3115`.
+The reviewer returned `VERDICT: PASS` after it directly read `test-final=0`.
+
+## WO-11 re-review repair, 2026-10-19
+
+Scope: PR #529 after the read-only review of `e92980af`.
+
+### P1: Boundary
+
+The change stays in the Host memory example. SDK wire types do not change.
+`HostMemoryPage.contextPack` checks the current device/profile binding, projection
+permission and resident byte count. `HostExecutionCore.begin` prepares the input.
+The FIFO key is tenant, device and Agent ID. Profile revisions share that queue.
+
+Merge `1a9dce13` uses the normal `git merge origin/main` path. For the add/add
+conflicts, use main's K4 files as the current side and `31ef0823` as the common
+K4 baseline. Apply only the memory delta from the previous branch head.
+This keeps main's horizon and coalescing fixes. The PRD file matches main's v3.
+`git diff origin/main...HEAD` contains only memory example files, its documentation
+and its workspace dependency entries. It contains no second K4 implementation.
+
+### P2: Trace and reproduction
+
+A real enqueue commits an intent and enters `drain`, `scan`, `reconcile`, then
+`begin`. The old catch in `begin` parks every memory preparation error. A stale
+rev1 binding fails `isCurrent`. The parked rev1 head prevents rev2 from reaching
+SDK submit. A blob instruction fails before ContextPack and has the same result.
+
+Before the fix, run:
+
+```sh
+bun run --cwd examples/host-execution-core test src/memory.test.ts -t 'starts profile rev2|restores a deadline wake'
+```
+
+Result: exit 1; three regressions fail. Neither rev2 case reaches the real adapter
+session within five seconds. The cases cover a stale queued head and a head that
+was already blocked by size before the upgrade. In the wake test, the SDK has no
+pending wake after the projection reconciliation schedule fails.
+
+### P3: Decision and invariant
+
+Only oversized text and unauthorized projections throw `MemoryBlockedError`.
+Only that error parks an intent. Other preparation errors settle as `failed`,
+without a new attempt or generation. The stored intent and Host result projection
+keep `preparationError`. The FIFO can then process the next intent.
+Recovery rechecks old blocks. An active scan also rechecks a blocked queue head.
+Thus a profile upgrade can release a head that was already blocked before the
+upgrade. The tenant/device/Agent FIFO key stays unchanged.
+
+After a failed projection reconciliation schedule, make one bounded attempt to
+restore a deadline wake with a fresh key. Do not reuse a cancelled wake key.
+If both schedules fail, keep the fallback deadline in the durable outbox and
+return both errors. Do not start a timer retry loop. A duplicate projection can
+request an earlier scan. Recovery or a later drain can retry the durable state.
+A restored deadline can expire the waiting intent. It does not promise execution
+before that deadline when no earlier retry arrives.
+
+PENDING-AIMPACT P3-1 remains unchanged. An applied small replacement still
+invalidates the old projection, including a previously valid projection. The
+next task can run without resident memory. The owner must decide that behavior.
+
+### Existing assertion changes in this repair
+
+1. The blob test now requires terminal failure instead of `memory_blocked`.
+   This is the requested P2-1 outcome. It still checks zero attempts, zero
+   generations, no SDK offer and durable state after restart. It also checks
+   that the next inline intent starts and that the result keeps the reason.
+   A new fixture checks recovery of a blob block saved by the previous version.
+   Cancellation is no longer needed to release this terminal intent.
+2. The duplicate projection test no longer requires reuse of the failed wake
+   key. The failed key and the previous deadline key are cancelled before the
+   fallback is scheduled. The test now requires fresh keys, the exact fallback
+   deadline and an earlier scan after duplicate publish. It retains the real
+   adapter start and one-attempt checks. No manual drain supplies that start.
+
+The earlier P5a assertion changes remain documented in the PR body. Main's K4
+assertion fixes are inherited through the merge and are not PR memory changes.
+
+### Local environment and preliminary checks
+
+Node: `v24.21.0`. Bun: `1.4.3`. Platform: macOS.
+`node_modules` was present. The first build failed because installed Pi dependency
+files did not match main's pinned inventory. Run `bun install --frozen-lockfile`:
+exit 0; 12 packages installed; no lockfile change. The next build passed.
+The first focused run found that duplicate publish did not replace the fallback
+deadline. Re-arm the scan on projection notifications, including duplicate ones.
+The next focused run passed: 27 tests. It began before a later type-only assertion
+change in the test file. Do not use that focused run as final-file evidence.
+The example typecheck found a union access in the new profile test. Use a structural
+assertion for the offer. The next example typecheck passed.
+The final full example run is `.wo11-example-test.log`, started at `17:17:12`.
+It began after that assertion change. It passed: 65 tests, with 6 Linux-only tests
+skipped; exit 0. This run covers the final source and test file.
+It includes both profile cases, blob settlement and recovery, authorization repair,
+deadline expiry without duplicate publish, bounded fallback failure, and duplicate
+publish recovery.
+
+### Read-only review
+
+Result: PASS. The review checked the full memory diff against main, the repair
+against the merge head, and the recorded checks. It found no blocking issue and
+no assertion change that hides the reported bug. It also checked the unchanged
+P3-1 behavior and the exact PRD match.
+
+Two evidence notes were resolved. The final test-file evidence now names
+`.wo11-example-test.log` at `17:17:12`, with 65 passed and 6 skipped. The earlier
+focused run is not final-file evidence. The local results JSON is not a source
+artifact and must not enter the commit.
+
+A Host callback exception is a terminal preparation failure under this rule.
+Repair the Host and submit a new intent for that work. Linux-only memory tests
+are not platform proof on this macOS run. A double wake schedule failure keeps
+durable state but still needs recovery or a later drain for progress.
+
+### Final required checks before push
+
+All commands ran in this worktree. Build finished before typecheck and tests.
+No production source or test changed during this final check chain.
+
+| Command | Exit | Observed result |
+| --- | --- | --- |
+| `bun run build` | 0 | All workspace builds passed; `.wo11-build.log`. |
+| `bun run typecheck` | 0 | All workspace typechecks passed; `.wo11-typecheck.log`. |
+| `bun run --cwd examples/host-execution-core test` | 0 | 65 passed, 6 Linux-only tests skipped; `.wo11-example-test.log`, start `17:17:12`. |
+| `bun run test` | 0 | 9510 Vitest tests passed, 237 skipped; cloud-do Node tests: 10 passed, 0 failed; `.wo11-test.log`. |
+| `bun run check:api-surface` | 0 | All 9 package goldens match; `.wo11-api-surface.log`. |
+| `bun run check:version-authority` | 0 | README and spec match the dispatch train and keys version; `.wo11-version-authority.log`. |
+
+The root run passed the Host example again: 65 passed, 6 skipped. Its example
+run began at `17:29:56`. Optional substrate and platform tests remain skipped.
+The final evidence JSON is local ignored state under `_ops/wo11/`. It is not
+part of the commit. The PR stays draft. PENDING-AIMPACT P3-1 stays open.
+
+## Merge train after WO-10 / PR #530
+
+Main base: `e9247c63de1a619bafb692f2bfe405bcc8804029`.
+Use `git fetch origin` and a normal `git merge origin/main`.
+
+### P1: Boundary
+
+The conflicts are in the Host example package entry points and export list.
+Main exposes the core package and `test-support` for bot-collaboration. This
+branch also exports the memory page and its types. Both sets are needed.
+
+### P2: Trace
+
+`BotCollaboration` imports `HostExecutionCore`, `HostLedger`, ledger helpers,
+`enqueue` and `WAKE_HORIZON_MS` from the Host package. Its constructor supplies
+`applyOutcome` and does not enable memory. The memory caller still supplies
+`options.memory`. The two paths use the same core and keep their current rules.
+
+### P3: Merge decision
+
+Keep main's package `exports` and core helper exports. Keep this branch's memory
+exports and runtime dependencies. The merged bot-collaboration files match main.
+The existing memory runtime and test files match the previous branch head.
+No test assertion, skip or timeout was changed for this merge. P3-1 remains
+PENDING-AIMPACT. No product decision or delegation scope changed.
+
+`bun install --frozen-lockfile` passed with no dependency change. The merged
+build and root typecheck passed. Logs and final results for this merge are
+kept in ignored local state under `_ops/wo11/main-merge-*`.
+
+### Final checks for the WO-10 merge
+
+| Command | Exit | Result |
+| --- | --- | --- |
+| `bun run build` | 0 | All workspace builds passed. |
+| `bun run typecheck` | 0 | All workspace typechecks passed. |
+| `bun run test` | 0 | 9560 Vitest tests passed, 237 skipped; cloud-do Node tests: 10 passed, 0 failed. |
+| `bun run check:api-surface` | 0 | All 9 package goldens match. |
+| `bun run check:version-authority` | 0 | Version authority check passed. |
+
+The complete root run includes bot-collaboration: 50 passed. It also includes
+Host execution: 65 passed, 6 Linux-only tests skipped. No failure required a
+source or test change. Optional substrate and platform tests remain skipped.
+Only this merge and its record will be pushed. The PR remains draft.
+
+## Merge train after WO-12 / PR #531
+
+Normal merge `31cb5e1d21257823b8e6042a8261a7b5ae60c3e4` includes main at
+`6fa6f66e792145b008a594dfb39115e971b9958f`. The merge had no conflicts.
+No manual runtime, test assertion, skip or timeout change was needed.
+The bot-collaboration files and PRD match main. The memory implementation stays
+unchanged. PENDING-AIMPACT P3-1 stays open.
+
+| Command | Exit | Result |
+| --- | --- | --- |
+| `bun run build` | 0 | All workspace builds passed. |
+| `bun run typecheck` | 0 | All workspace typechecks passed. |
+| `bun run check:api-surface` | 0 | All 9 package goldens match. |
+| `bun run check:version-authority` | 0 | Version authority check passed. |
+| `bun run test` | 0 | 9604 Vitest tests passed, 237 skipped; cloud-do Node tests: 10 passed, 0 failed. |
+
+The root run includes bot-collaboration/group chat: 94 passed. It also includes
+Host execution: 65 passed, 6 Linux-only tests skipped. No test failure required
+repair. Optional substrate and platform tests remain skipped. Logs and results
+stay in ignored local state under `_ops/wo11/wo12-merge-*`.
+The PR stays draft. The coordinator owns readiness, CI acceptance and merge.

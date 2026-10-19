@@ -126,7 +126,86 @@ The same ruling assigns same-routine-ID version changes to K8a with `update_rout
 This includes current/pending versions, scheduling generation and the in-flight limit.
 This reference keeps each routine ID's definition immutable. Use a new ID to change a definition.
 
-It does not implement Bot delegation, group chat, confirmable actions, routine outcome
-actions, memory pages or synthetic end-to-end slices beyond chat, routines and crash recovery.
+K8 actions and group chat remain in their own work orders.
+P5a adds Host memory commands and Linux synthetic memory tests below.
 
 See [VALIDATION.md](VALIDATION.md) for commands, results and acceptance limits.
+
+## P5a memory page
+
+`src/memory.ts` adds the Host half of memory intents. It uses the existing SDK wire.
+The Host stores pending bodies in its separate SQLite ledger.
+It removes the body in the same transaction that stores a terminal readback.
+This is logical removal. It does not erase database backups or old WAL pages.
+
+Use `HostMemoryPage.approve` only after the Host authenticates the user and authorizes
+one exact operation. Supply the current device and Agent profile from Host state.
+Bind `transport(deviceId)` to the authenticated device, then inject it as
+`DaemonConfig.agentMemoryIntents`. Do not take the device ID from a request body.
+Call `flushNotices` after approval and at Host startup. Retry it after a transport error.
+Its callback calls the public cloud `enqueueAgentMemoryIntentNotice` API.
+The embedded server facade has no memory-notice method. The callback must use the
+owning cloud composition. Never insert a mailbox row by hand.
+
+P5a supports explicit whole-file replacement and note deletion. It has no normal editor.
+A user can authorize an initial write with `baseRevision` omitted. This uses sha256 of
+empty bytes. It can create or replace an empty file, or delete an empty note.
+It is not a read-only revision probe. A conflict ends the intent and returns `observed`.
+For a nonempty file, use two approvals:
+
+1. The user approves the exact whole-file body with an EMPTY base. The first intent
+   returns `conflict{observed}` and changes no file. The Host shows that result.
+2. The user makes a new decision to replace the whole file, including unseen content.
+   The Host creates a new `intentId` and `approvalRef`. It sets `baseRevision` to
+   `observed.revision`, sets the approved body and recomputes the operation digest.
+   A concurrent device write can still return another conflict.
+
+If the file is absent or empty, the first write can apply. A second approval is then unnecessary.
+`observed` gives a revision, not the hidden contents. This is explicit whole-file replacement.
+The Host never puts the observed revision on an old draft by itself.
+Redacted text is read-only. P5b owns edit-view and `contentComplete`.
+
+The embedder redactor can emit the Host-owned opaque JSON profile
+`{"residentMemory":"policy-approved resident text"}` through the existing projection port.
+Use `null` when the snapshot has no `MEMORY.md`. Send no paths or raw source revisions.
+This profile is not an SDK edit-view format and conveys no completeness proof.
+Set `authorizeProjection` to check the exact task, device, session, runtime, grant,
+policy revision and writer epoch from trusted Host records. The model destination
+must also be allowed by that policy. The example calls this check again at ContextPack read.
+
+Pass the memory page to `HostExecutionCore` as `options.memory`.
+The scanner adds only the resident text and projection metadata to the inline instruction.
+It freezes this input before submit. Blob instructions need an embedder-owned composition step.
+Notes do not enter this ContextPack. The model can recall them through the SDK tools.
+An absent projection or null resident text omits resident memory from the instruction.
+This lets a new Agent run its first task and publish at task close. A new profile revision
+uses the same bootstrap path. No manual projection publish is required.
+Text above 8192 UTF-8 bytes puts the queue head in persisted `memory_blocked` state.
+Unauthorized projections also park until repair. A changed placement or profile and
+a blob instruction settle as `failed` before submit. The result includes `preparationError`.
+The next intent for that Agent can start. Submit a new intent with an inline instruction
+to replace a failed blob intent.
+No text is truncated. The block spends no attempt or generation.
+Only deadline wakes remain while blocked. Accepted projections recheck the blocked binding
+and commit a reconciliation wake. If that schedule fails, the core makes one attempt
+to restore a deadline wake. Duplicate publish can request an earlier scan again.
+If the fallback fails too, the durable outbox keeps its deadline for recovery or a later drain.
+Startup recovery also rechecks stored blocks and settles failures that cannot be repaired.
+
+To refresh after the size block, the user approves a whole-file `MEMORY.md` replacement
+of at most 8192 raw UTF-8 bytes. A verified `applied` completion invalidates the old display
+for ContextPack and wakes the parked queue. It keeps the old ordering metadata.
+The next core task runs without resident memory. Its normal task close sends a fresh,
+policy-approved projection. The replacement body never enters ContextPack directly.
+Late projections from older tasks keep the refresh pending. Only a projection from a
+new core submission after the repair clears it. Conflict, rejected, uncertain and
+oversized replacements cannot bypass the size block.
+
+Projection receipt time is `projectedAt`. It is not the device's file modification time.
+An applied intent does not create a projection. Task-close projection may still be old.
+The original timestamp stays with the old display. An invalidated display is omitted from ContextPack.
+
+Linux tests use a real cloud mailbox, daemon, home lease, native CAS and device ACK.
+The runtime is synthetic. No model provider is called.
+Run `bun run --cwd examples/host-execution-core test src/memory-linux.test.ts` on Linux.
+These Linux tests skip on other platforms. macOS and Windows proof stay in P2.
