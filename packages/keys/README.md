@@ -369,7 +369,7 @@ whatever `index.ts` re-exports; nothing here is reachable by deep import.
 | `custody.ts` | Credential-custody contract: configuration lock, pending markers, operation watermarks, receipts, and the closed rejection / key-check code sets |
 | `device-sealing-key.ts` | `DeviceSealingKeyStore` — the enrollment-bound P-256 sealing key in the OS credential store |
 | `sealed-provisioning.ts` | `applySealedProviderProvisioning` — device-side validation and crash-safe commit of a sealed provisioning request |
-| `provider-key-check.ts` | `checkProviderKey` — one bounded live check with a closed-set outcome |
+| `provider-key-check.ts` | `checkProviderKey` — one bounded live check with a closed-set outcome; a reasoning-only length response gets one 2048-token retry within the same deadline |
 | `pi-provider-projection.ts` | Credential-blind Pi `models.json` projection for one validated profile/model |
 | `pi-provider-launcher-core.ts` | Closed launcher argv contract, the public `runPiProviderLauncher` entry, the custody snapshot the launcher reads its key through, and auth-mode-aware exact secret resolution |
 | `bin/pi-provider-launcher.ts` | No-listener credential-custody executable: `runPiProviderLauncher` with the platform OS store and its default storage options |

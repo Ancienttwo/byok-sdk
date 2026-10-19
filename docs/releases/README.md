@@ -3,6 +3,14 @@
 Per-release records live beside this file (`vX.Y.Z.md`, `vX.Y.Z-publication.md`).
 This page holds the standing steps that every release repeats.
 
+## Publishing
+
+Publish through the `Release` workflow with npm trusted publishing (OIDC). The
+one-time owner setup, the constraints and the recovery steps are in
+[npm trusted publishing](oidc-trusted-publishing.md). The full release
+checklist is in the
+[release responsibility runbook](../../deploy/runbooks/release-responsibility.md#release-checklist).
+
 ## Protocol compatibility baseline
 
 `packages/protocol/src/__tests__/compat.test.ts` decides wire compatibility

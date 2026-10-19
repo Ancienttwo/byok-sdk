@@ -653,7 +653,9 @@ export declare class OpenAiCompatibleChatClient {
     /**
      * Round-trip the configured key against the provider
      * (`providers.ts:797-828`). An empty completion fails, so a provider that
-     * accepts anything cannot be mistaken for a working configuration.
+     * accepts anything cannot be mistaken for a working configuration. A
+     * reasoning-only length response gets one retry with a 2048-token budget.
+     * Both requests share the configured request deadline.
      */
     testConnection(signal?: AbortSignal): Promise<void>;
 }
@@ -1213,7 +1215,9 @@ export interface ProviderKeyCheckOptions {
     readonly timeoutMs?: number;
 }
 /**
- * One live round trip with a just-provisioned key (plan D13, A10). The result
+ * A bounded live check with a just-provisioned key (plan D13, A10). An
+ * OpenAI-compatible reasoning-only length response can cause one retry.
+ * Both requests share this check's deadline. The result
  * is a hint for the UI, never a readiness decision, and is a closed-set code:
  *
  * - `credential_rejected` only for an explicit credential rejection (HTTP 401);

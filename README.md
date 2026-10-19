@@ -116,26 +116,64 @@ sealed its credential-free manifest and claimed the offer. Do not ship an
 adapter that supports both shapes or allocates process/temp/workspace/session
 resources during `prepare()`; reject unsupported input before claim instead.
 
+## Install sets
+
 Install the scoped packages your composition uses and import each one under
-its own name. For example, a self-hosted composition:
+its own name. Pick one of the three sets below. Each set lists its direct
+packages; npm installs the rest of the `@byok-sdk` graph through runtime
+dependencies. `scripts/release/install-matrix.test.mjs` checks each set's
+versions and its "Also installed" list against the package manifests. It
+checks the Worker set against the Worker consumer that the
+`check:release-pack` smoke installs. The Self-hosted and Hosted sets are
+fixed by the #535 ruling.
+
+<!-- BEGIN install-matrix -->
+
+### Self-hosted
+
+Use it for a self-hosted deployment, such as Aiphabee: `server` is the
+Hono/HTTP façade over the shared `cloud` kernel, `client` is the local
+daemon, and `keys` keeps provider credentials on the device.
 
 ```sh
-npm install @byok-sdk/server@0.27.0 @byok-sdk/client@0.27.0
+npm install @byok-sdk/client@0.27.0 @byok-sdk/server@0.27.0 @byok-sdk/keys@0.12.0
 ```
+
+Also installed: `@byok-sdk/cloud`, `@byok-sdk/core`, `@byok-sdk/protocol`.
 
 ```ts
 import { createByokServer } from '@byok-sdk/server';
 ```
 
-The Worker-only cloud-do package is published from 0.24.0. The example below
-names the published 0.27.0 stable release.
-See [the cloud-do README](packages/cloud-do/README.md) for the subclass and binding.
+### Hosted / Cloudflare
 
-~~~sh
-# Published stable version.
-npm install @byok-sdk/cloud-do@0.27.0
+Use it for a hosted service: `cloud` for the device routes, `cloud-dataplane`
+for the Postgres + R2 data plane (`@byok-sdk/cloud-dataplane/runtime` on
+Workers through Hyperdrive), `cloud-do` for Agent sessions in Cloudflare
+Durable Objects, and `ui-runtime` for the Live Activity Timeline. On a
+Node/VPS host without Durable Objects, leave out `@byok-sdk/cloud-do`.
+
+```sh
+npm install @byok-sdk/cloud@0.27.0 @byok-sdk/cloud-dataplane@0.27.0 @byok-sdk/cloud-do@0.27.0 @byok-sdk/ui-runtime@0.27.0
+```
+
+Also installed: `@byok-sdk/core`, `@byok-sdk/protocol`.
+
+### Worker
+
+Use it for a Cloudflare Worker that only hosts Agent sessions in Durable
+Objects (no `nodejs_compat`): `cloud-do` for the session runtime and
+`protocol` for the shared outcome validator. See
+[the cloud-do README](packages/cloud-do/README.md) for the subclass and binding.
+
+```sh
+npm install @byok-sdk/cloud-do@0.27.0 @byok-sdk/protocol@0.27.0
 npm install --save-dev @cloudflare/workers-types
-~~~
+```
+
+Also installed: none.
+
+<!-- END install-matrix -->
 
 The public dispatch packages are `@byok-sdk/client`, `@byok-sdk/server`,
 `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`, `@byok-sdk/cloud-do`, `@byok-sdk/core`,
@@ -221,6 +259,8 @@ transcript as shared history.
 
 For fresh user, routine and Bot work, see the [Host execution core guide](docs/host-execution-core.md)
 and its [copy-and-own reference](examples/host-execution-core/README.md).
+For single Bot actions, see the [Bot collaboration reference](examples/bot-collaboration/README.md).
+It supports self continuations. 跨 Bot 委派推迟到 K8b（#530 和 #531 合入后的第一张 K8b 工单）。
 
 The SDK maintains the [downstream integration guide](docs/agent-diagnostics-integration.md)
 for diagnostic UI, local CLI wiring, bounded health repair, support bundles,
@@ -343,15 +383,15 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | --- | --- | --- | --- | ---: |
 | `@byok-sdk/client` | Local daemon composition | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2053644 B |
 | `@byok-sdk/client/adapters` | Runtime adapters; private hosts load lazily | — | forbidden | 339125 B |
-| `@byok-sdk/client/agent-memory` | Embedded Agent memory service | — | forbidden | 60671 B |
+| `@byok-sdk/client/agent-memory` | Embedded Agent memory service | — | forbidden | 67063 B |
 | `@byok-sdk/client/assertion-client` | Task/device assertions; core includes protected Zod probes | `zod` | allowed | 171848 B |
 | `@byok-sdk/client/mcp-server` | Tools-only MCP server | — | forbidden | 17719 B |
 | `@byok-sdk/client/package.json` | Package metadata | — | forbidden | 4442 B |
 | `@byok-sdk/client#byok-pi-runtime-host` | Private Pi runtime host | `@cfworker/json-schema`, `@earendil-works/chord`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, `@earendil-works/pi-codemode`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-durable`, `@earendil-works/pi-mcp`, `@earendil-works/pi-tui`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `@mozilla/readability`, `balanced-match`, `boolbase`, `brace-expansion`, `chalk`, `cross-spawn`, `css-select`, `css-what`, `cssom`, `diff`, `dom-serializer`, `domelementtype`, `domhandler`, `domutils`, `entities`, `eventsource`, `eventsource-parser`, `get-east-asian-width`, `graceful-fs`, `grok-mermaid`, `highlight.js`, `hosted-git-info`, `htmlparser2`, `ignore`, `isexe`, `linkedom`, `lru-cache`, `marked`, `minimatch`, `nth-check`, `openai`, `p-limit`, `partial-json`, `path-key`, `pkce-challenge`, `proper-lockfile`, `retry`, `semver`, `shebang-command`, `shebang-regex`, `signal-exit`, `turndown`, `typebox`, `uhyphen`, `undici`, `which`, `yaml`, `yocto-queue`, `zod` | allowed | 5441036 B |
 | `@byok-sdk/client#byok-pi-runtime-host-sealed` | Private sealed Pi runtime host | `@cfworker/json-schema`, `@earendil-works/chord`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, `@earendil-works/pi-codemode`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-durable`, `@earendil-works/pi-mcp`, `@earendil-works/pi-tui`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `@mozilla/readability`, `balanced-match`, `boolbase`, `brace-expansion`, `chalk`, `cross-spawn`, `css-select`, `css-what`, `cssom`, `diff`, `dom-serializer`, `domelementtype`, `domhandler`, `domutils`, `entities`, `eventsource`, `eventsource-parser`, `get-east-asian-width`, `graceful-fs`, `grok-mermaid`, `highlight.js`, `hosted-git-info`, `htmlparser2`, `ignore`, `isexe`, `linkedom`, `lru-cache`, `marked`, `minimatch`, `nth-check`, `openai`, `p-limit`, `partial-json`, `path-key`, `pkce-challenge`, `proper-lockfile`, `retry`, `semver`, `shebang-command`, `shebang-regex`, `signal-exit`, `turndown`, `typebox`, `uhyphen`, `undici`, `which`, `yaml`, `yocto-queue`, `zod` | allowed | 5386681 B |
 | `@byok-sdk/client#byok-pi-todo-runtime` | Private pure todo runtime | — | forbidden | 431889 B |
-| `@byok-sdk/cloud` | Cloud coordination and HTTP handlers | `@cfworker/json-schema`, `hono`, `zod` | allowed | 533443 B |
-| `@byok-sdk/cloud-dataplane` | Postgres stores and Node operations | `@cfworker/json-schema`, `@nodable/entities`, `anynum`, `aws4fetch`, `fast-xml-builder`, `fast-xml-parser`, `hono`, `is-unsafe`, `path-expression-matcher`, `pg`, `pg-connection-string`, `pg-int8`, `pg-pool`, `pg-protocol`, `pg-types`, `postgres-array`, `postgres-bytea`, `postgres-date`, `postgres-interval`, `strnum`, `xml-naming`, `xtend`, `zod` | allowed | 783315 B |
+| `@byok-sdk/cloud` | Cloud coordination and HTTP handlers | `@cfworker/json-schema`, `hono`, `zod` | allowed | 533699 B |
+| `@byok-sdk/cloud-dataplane` | Postgres stores and Node operations | `@cfworker/json-schema`, `@nodable/entities`, `anynum`, `aws4fetch`, `fast-xml-builder`, `fast-xml-parser`, `hono`, `is-unsafe`, `path-expression-matcher`, `pg`, `pg-connection-string`, `pg-int8`, `pg-pool`, `pg-protocol`, `pg-types`, `postgres-array`, `postgres-bytea`, `postgres-date`, `postgres-interval`, `strnum`, `xml-naming`, `xtend`, `zod` | allowed | 783571 B |
 | `@byok-sdk/cloud-dataplane/package.json` | Package metadata | — | forbidden | 1941 B |
 | `@byok-sdk/cloud-dataplane/runtime` | Worker online stores; pg requires nodejs_compat | `@cfworker/json-schema`, `@nodable/entities`, `anynum`, `aws4fetch`, `fast-xml-builder`, `fast-xml-parser`, `hono`, `is-unsafe`, `path-expression-matcher`, `pg`, `pg-connection-string`, `pg-int8`, `pg-pool`, `pg-protocol`, `pg-types`, `postgres-array`, `postgres-bytea`, `postgres-date`, `postgres-interval`, `strnum`, `xml-naming`, `xtend`, `zod` | allowed | 777868 B |
 | `@byok-sdk/cloud-do` | Durable Object session runtime | `@earendil-works/chord`, `@earendil-works/pi-ai`, `@earendil-works/pi-durable`, `typebox` | forbidden | 196394 B |
@@ -361,12 +401,12 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/core/package.json` | Package metadata | — | forbidden | 1397 B |
 | `@byok-sdk/keys` | Local provider credential custody | `zod` | allowed | 290208 B |
 | `@byok-sdk/keys/package.json` | Package metadata | — | forbidden | 1466 B |
-| `@byok-sdk/protocol` | Wire schemas and codecs; codegen negative control | `@cfworker/json-schema`, `zod` | allowed | 127135 B |
+| `@byok-sdk/protocol` | Wire schemas and codecs; codegen negative control | `@cfworker/json-schema`, `zod` | allowed | 127391 B |
 | `@byok-sdk/protocol/constants` | Schema-free protocol values | — | forbidden | 4429 B |
 | `@byok-sdk/protocol/package.json` | Package metadata | — | forbidden | 1667 B |
 | `@byok-sdk/server` | Resident Node server | `@cfworker/json-schema`, `hono`, `zod` | allowed | 700489 B |
 | `@byok-sdk/server/package.json` | Package metadata | — | forbidden | 1609 B |
-| `@byok-sdk/ui-runtime` | UI folds; current cloud/Hono/Zod closure | `@cfworker/json-schema`, `hono`, `zod` | allowed | 561703 B |
+| `@byok-sdk/ui-runtime` | UI folds; current cloud/Hono/Zod closure | `@cfworker/json-schema`, `hono`, `zod` | allowed | 561959 B |
 | `@byok-sdk/ui-runtime/package.json` | Package metadata | — | forbidden | 1337 B |
 | `bin:byok-agent` | Device daemon CLI | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2064821 B |
 | `bin:byok-agent-memory-mcp` | Agent memory MCP helper | — | forbidden | 49477 B |

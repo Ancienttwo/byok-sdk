@@ -179,7 +179,8 @@ export function isAgentMemorySecureFilesystemAvailable(externalHelperConfigured 
     && typeof fsConstants.O_DIRECTORY === 'number'
     && typeof fsConstants.O_NONBLOCK === 'number'
     && existsSync(SECURE_DIRECTORY_DESCRIPTOR_ROOT);
-  // Windows remains fail-closed until its real reparse/junction proof exists.
+  // Windows requires both reparse containment and model S recovery proof.
+  // File flush or a successful readback alone does not prove OS/power recovery.
   return nativeLinux || (externalHelperConfigured && process.platform === 'darwin');
 }
 

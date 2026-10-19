@@ -130,7 +130,7 @@ export function parsePiRpcHostArgs(
   if (!configPath || !isAbsolute(configPath)) reject('--config must be an absolute path');
   if (values.get('--mode') !== 'rpc') reject('--mode rpc is required');
   const thinking = values.get('--thinking');
-  if (thinking !== undefined && !['off', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(thinking)) {
+  if (thinking !== undefined && !['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(thinking)) {
     reject('invalid --thinking level');
   }
   if (values.has('--provider') && !values.has('--model')) reject('--provider requires --model');
@@ -149,13 +149,22 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
   const args = parsePiRpcHostArgs(argv, failUsage);
   const config = parsePiRpcHostConfig(readPiHostConfig(args.configPath, args.configDigest));
   let providerApiKey: { provider: string; apiKey: string } | undefined;
-  if (config.credentialSource === 'keys-profile') providerApiKey = await receiveKeysProfileCredential(args);
+  let sessionDir: string | undefined;
+  if (config.credentialSource === 'keys-profile') {
+    providerApiKey = await receiveKeysProfileCredential(args);
+    // Keys validates and owns this launch value. Pi's session API does not
+    // read this env name; its default uses the disposable agent projection.
+    sessionDir = process.env.PI_CODING_AGENT_SESSION_DIR;
+    if (!sessionDir || !isAbsolute(sessionDir) || /[\u0000\r\n]/u.test(sessionDir)) {
+      fail('keys-profile launch requires an absolute single-line session directory');
+    }
+  }
   else if (process.connected) fail('an undeclared custody IPC channel is open');
   const localeAnchor = packaging === 'bundled' ? verifyTodoLocaleAssets(bundledAssetRoot) : verifyTodoLocaleAssets();
   const { createTodoExtension } = await import('#byok-pi-todo-runtime');
   const todoExtension = createTodoExtension(localeAnchor);
   await runPiSessionRuntime({
-    cwd: config.cwd, session: args.session,
+    cwd: config.cwd, session: args.session, sessionDir,
     provider: args.provider, model: args.model, thinking: args.thinking,
     // The user's own Pi extensions and skills load beside the SDK's own, as in
     // OAR: the SDK does not presume how the user configures Pi.

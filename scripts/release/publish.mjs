@@ -10,23 +10,32 @@ import { iterateTarballFiles } from './pi-runtime-identity.mjs';
 import { runtimeDependencyMetadata } from './registry-contract.mjs';
 
 // One-command release driver for the fixed-version train: version gate -> build ->
-// pack-and-smoke -> publish plan -> registry account gate -> npm publish -> registry
-// readback -> annotated tag, so a release is one invocation and one OTP instead of
-// eight hand-sequenced commands.
+// pack-and-smoke -> publish plan -> registry auth gate -> npm publish -> registry
+// readback -> annotated tag, so a release is one invocation instead of eight
+// hand-sequenced commands.
 //
 // --artifacts <dir> consumes the release-manifest.json that CI packed for the exact
 // HEAD: the build and the pack are skipped, every tarball the publish set needs is
 // re-hashed against the frozen manifest, and any mismatch aborts. It is mutually
 // exclusive with --out-dir, which only relocates a fresh local pack.
 //
-// Default mode is a dry run: steps 1-4 execute for real and the ordered publish plan
-// plus the tag that will follow it are printed, but nothing is published, read back
-// or tagged — a readback against unpublished versions can only lie. Steps 5-8 run
-// behind --execute and nothing else. The annotated tag is created last, after the
-// registry has been read back, so a tag never points at an unpublished train.
+// Default mode is a dry run (--dry-run says so explicitly): steps 1-4 execute for
+// real and the full release plan is printed — every package with its action, the
+// auth mode, provenance, dist-tag, readback schedule and the tag that follows —
+// but nothing is published, read back or tagged. Steps 5-8 run behind --execute
+// and nothing else. The annotated tag is created last, after the registry has been
+// read back, so a tag never points at an unpublished train.
 //
-// Every step is fail-closed: the first failure aborts. There are no retries, no
-// partial-success paths, and no alternate route when a precondition is missing.
+// --trusted-publishing authenticates through npm trusted publishing (GitHub Actions
+// OIDC) instead of an npm session and OTP; see docs/releases/oidc-trusted-publishing.md.
+//
+// Writes are fail-closed and never retried. A run converges instead: a package the
+// registry already holds with the frozen integrity is skipped, a failed publish
+// whose upload landed anyway is accepted only on the frozen integrity, and a re-run
+// of the same command resumes from the first package that is not on the registry —
+// or, when every package is published but the tag is missing, from the readback.
+// Only registry reads wait: npm can 404 a version it accepted for minutes
+// (v0.23.0, v0.26.0), so the readback polls on a bounded backoff before it fails.
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 const packagesDir = path.join(repoRoot, 'packages');
@@ -96,20 +105,28 @@ export function assertPrereleaseReadyToPublish(entries, expectations, distTag, r
 }
 
 export function parseArguments(argv) {
-  const parsed = { execute: false, otp: undefined, outDir: undefined, artifacts: undefined, tag: undefined };
+  const parsed = {
+    execute: false, otp: undefined, outDir: undefined, artifacts: undefined, tag: undefined, trustedPublishing: false,
+  };
   const valueFlags = new Map([
     ['--otp', 'otp'],
     ['--out-dir', 'outDir'],
     ['--artifacts', 'artifacts'],
     ['--tag', 'tag'],
   ]);
+  const switches = new Map([
+    ['--execute', 'execute'],
+    ['--trusted-publishing', 'trustedPublishing'],
+    ['--dry-run', undefined],
+  ]);
   const seen = new Set();
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
-    if (argument === '--execute') {
-      if (seen.has(argument)) throw new Error('--execute may be provided only once');
+    if (switches.has(argument)) {
+      if (seen.has(argument)) throw new Error(`${argument} may be provided only once`);
       seen.add(argument);
-      parsed.execute = true;
+      const destination = switches.get(argument);
+      if (destination) parsed[destination] = true;
       continue;
     }
     const destination = valueFlags.get(argument);
@@ -123,6 +140,12 @@ export function parseArguments(argv) {
     if (!value || value.startsWith('--')) throw new Error(`${argument} requires a value`);
     parsed[destination] = value;
     index += 1;
+  }
+  if (seen.has('--dry-run') && parsed.execute) {
+    throw new Error('--dry-run and --execute are mutually exclusive: a dry run prints the plan, --execute releases it');
+  }
+  if (parsed.trustedPublishing && parsed.otp !== undefined) {
+    throw new Error('--otp has no meaning with --trusted-publishing: OIDC publishing carries no one-time password');
   }
   if (parsed.outDir !== undefined && parsed.artifacts !== undefined) {
     throw new Error(
@@ -284,7 +307,7 @@ export function verifyFrozenArtifacts({ artifactsDir, headSha, trainVersion, pub
     if (!isDeepStrictEqual(frozenDependencies, runtimeDependencyMetadata(packedManifest, `${entry.name} packed manifest`))) {
       throw new Error(`${entry.name}: frozen dependency metadata differs from tarball bytes`);
     }
-    return { ...entry, file: artifact.file, sha256: artifact.sha256 };
+    return { ...entry, file: artifact.file, sha256: artifact.sha256, sha512Integrity: artifact.sha512Integrity };
   });
 }
 
@@ -308,6 +331,224 @@ export function assertRegistryAccountPolicy({ whoami, profile }) {
   }
 }
 
+// npm trusted publishing needs npm 11.5.1 or later; older clients never ask for the OIDC token.
+const trustedPublishingNpm = [11, 5, 1];
+const longLivedTokenVariables = ['NODE_AUTH_TOKEN', 'NPM_TOKEN', 'NPM_CONFIG__AUTHTOKEN', 'npm_config__authToken'];
+
+/**
+ * The --trusted-publishing half of the auth gate. npm accepts OIDC publishing from
+ * GitHub-hosted runners only, and only when the job may mint an ID token. A
+ * long-lived token in the environment is refused: npm would fall back to it, and the
+ * point of the mode is that no publish credential outlives the job.
+ */
+export function assertTrustedPublishingEnvironment({ env, npmVersion }) {
+  if (env.GITHUB_ACTIONS !== 'true') {
+    throw new Error('--trusted-publishing needs a GitHub Actions run: npm trusts the OIDC identity of a GitHub workflow, not a local shell');
+  }
+  if (env.RUNNER_ENVIRONMENT !== 'github-hosted') {
+    throw new Error(
+      `--trusted-publishing needs a GitHub-hosted runner, this runner reports RUNNER_ENVIRONMENT=${JSON.stringify(env.RUNNER_ENVIRONMENT ?? null)}; ` +
+        'npm does not accept OIDC publishing from self-hosted runners',
+    );
+  }
+  if (!env.ACTIONS_ID_TOKEN_REQUEST_URL || !env.ACTIONS_ID_TOKEN_REQUEST_TOKEN) {
+    throw new Error('--trusted-publishing found no OIDC token endpoint; the publishing job needs `permissions: id-token: write`');
+  }
+  const present = longLivedTokenVariables.filter((name) => typeof env[name] === 'string' && env[name] !== '');
+  if (present.length > 0) {
+    throw new Error(`--trusted-publishing refuses a long-lived npm token in the environment (${present.join(', ')}); remove it from the job`);
+  }
+  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(typeof npmVersion === 'string' ? npmVersion.trim() : '');
+  const difference = match
+    ? match.slice(1).map((part, index) => Number(part) - trustedPublishingNpm[index]).find((delta) => delta !== 0) ?? 0
+    : -1;
+  if (difference < 0) {
+    throw new Error(`--trusted-publishing needs npm ${trustedPublishingNpm.join('.')} or later, found ${JSON.stringify(npmVersion ?? null)}`);
+  }
+}
+
+// Registry reads lag registry writes. These schedules bound every wait; writes have none.
+// Total waits: about 3 minutes for visibility (v0.26.0 needed about 2), 35 seconds
+// to see whether a failed upload landed, and under 3 minutes of readback retries.
+export const registryVisibilityDelaysMs = Object.freeze([5_000, 10_000, 20_000, 40_000, 60_000, 60_000]);
+export const publishLandedDelaysMs = Object.freeze([5_000, 10_000, 20_000]);
+export const readbackRetryDelaysMs = Object.freeze([15_000, 30_000, 60_000, 60_000]);
+
+export const sleep = (milliseconds) => new Promise((resolve) => { setTimeout(resolve, milliseconds); });
+
+function seconds(milliseconds) {
+  return `${milliseconds / 1000}s`;
+}
+
+/** Calls `probe` until it returns something other than undefined; undefined once the schedule is spent. */
+export async function pollRegistry(probe, { delays, sleep: wait }) {
+  for (let attempt = 0; ; attempt += 1) {
+    const value = probe();
+    if (value !== undefined) return value;
+    if (attempt >= delays.length) return undefined;
+    await wait(delays[attempt]);
+  }
+}
+
+function assertFrozenIntegrity(entry, integrity) {
+  if (integrity !== entry.sha512Integrity) {
+    throw new Error(
+      `${entry.name}@${entry.version}: the registry holds integrity ${JSON.stringify(integrity)}, the frozen artifact is ` +
+        `${entry.sha512Integrity} — these are not the frozen bytes; stop and investigate before releasing anything else`,
+    );
+  }
+}
+
+/**
+ * A package counts as already released only when the registry holds the bytes this
+ * release froze. Every already-published package is read back by exact version before
+ * the plan is printed, so a frozen pack that is a different build of a published
+ * version (an unbumped train, a stale artifact) fails here, in a dry run as well.
+ */
+export async function assertPublishedMatchFrozen({ entries, frozenManifest, readIntegrity, sleep: wait, delays = publishLandedDelaysMs }) {
+  const artifacts = new Map((Array.isArray(frozenManifest?.packages) ? frozenManifest.packages : []).map((artifact) => [artifact.package, artifact]));
+  for (const entry of entries) {
+    const artifact = artifacts.get(entry.name);
+    if (!artifact || artifact.version !== entry.version) {
+      throw new Error(`${entry.name}@${entry.version} is on the registry but the frozen artifacts carry no ${entry.version} entry for it`);
+    }
+    const integrity = await pollRegistry(() => readIntegrity(entry), { delays, sleep: wait });
+    if (integrity === undefined) {
+      throw new Error(`${entry.name}@${entry.version}: the registry stopped serving a version it reported as published; re-run once it is visible`);
+    }
+    assertFrozenIntegrity({ ...entry, sha512Integrity: artifact.sha512Integrity }, integrity);
+  }
+}
+
+/**
+ * Publishes the plan in order. `readIntegrity(entry)` returns the registry's
+ * dist.integrity for the exact version, or undefined on E404; `publishTarball(entry)`
+ * performs one upload and throws on failure. A version the registry already holds is
+ * skipped on the frozen integrity and aborts on any other. A failed upload is accepted
+ * only when the registry then shows the frozen integrity (npm can report failure for
+ * an upload that landed — v0.23.0). A failed upload that did not land stops the run:
+ * re-running the same command resumes from that package.
+ */
+export async function publishPlan({
+  plan, publishTarball, readIntegrity, sleep: wait, log, landedDelays = publishLandedDelaysMs, prerelease = false,
+}) {
+  const outcome = { published: [], skipped: [] };
+  for (const entry of plan) {
+    const existing = readIntegrity(entry);
+    if (existing !== undefined) {
+      assertFrozenIntegrity(entry, existing);
+      outcome.skipped.push(entry.name);
+      log(`skipped ${entry.name}@${entry.version}: already on the registry with the frozen integrity`);
+      continue;
+    }
+    try {
+      publishTarball(entry);
+    } catch (error) {
+      const publishError = error instanceof Error ? error.message : String(error);
+      let landed;
+      try {
+        landed = await pollRegistry(() => readIntegrity(entry), { delays: landedDelays, sleep: wait });
+      } catch (readError) {
+        throw new Error(
+          `${entry.name}@${entry.version}: npm publish failed and the registry read that followed failed too ` +
+            `(${readError instanceof Error ? readError.message : String(readError)})\n${publishError}`,
+        );
+      }
+      if (landed === undefined) {
+        const done = outcome.published.length + outcome.skipped.length;
+        const next = prerelease
+          ? 'a partially published prerelease does not resume; prepare a new exact prerelease version'
+          : `re-run the same command to resume from ${entry.name}`;
+        throw new Error(
+          `${entry.name}@${entry.version}: npm publish failed and the registry does not hold this version ` +
+            `(${done} of ${plan.length} planned package(s) are on the registry); ${next}\n${publishError}`,
+        );
+      }
+      assertFrozenIntegrity(entry, landed);
+      log(`${entry.name}@${entry.version}: npm publish reported a failure, but the registry holds the frozen bytes`);
+    }
+    outcome.published.push(entry.name);
+    log(`published ${entry.name}@${entry.version}`);
+  }
+  return outcome;
+}
+
+/**
+ * Waits until the registry serves every exact version of the train. An E404 is the
+ * only answer that waits; `isPublished` throws on anything else and that aborts.
+ */
+export async function waitForRegistryVisibility({ entries, isPublished: published, sleep: wait, log, delays = registryVisibilityDelaysMs }) {
+  let pending = entries;
+  for (let attempt = 0; ; attempt += 1) {
+    pending = pending.filter((entry) => !published(entry.name, entry.version));
+    if (pending.length === 0) return attempt + 1;
+    const names = pending.map((entry) => `${entry.name}@${entry.version}`).join(', ');
+    if (attempt >= delays.length) {
+      throw new Error(
+        `the registry still answers E404 for ${names} after ${attempt + 1} probe(s); nothing was tagged — ` +
+          're-run the same command later to resume from the readback',
+      );
+    }
+    log(`waiting ${seconds(delays[attempt])} for registry propagation of ${names}`);
+    await wait(delays[attempt]);
+  }
+}
+
+/**
+ * Runs the full readback, retrying on the bounded schedule. Every failure is retried,
+ * not only E404: the readback also installs from the registry, whose CDN can serve a
+ * stale packument after the exact-version reads already agree. A real mismatch still
+ * fails, after the schedule.
+ */
+export async function readbackWithRetry({ readback, sleep: wait, log, delays = readbackRetryDelaysMs }) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      readback();
+      return attempt + 1;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (attempt >= delays.length) {
+        throw new Error(
+          `registry readback failed after ${attempt + 1} attempt(s); nothing was tagged — re-run the same command ` +
+            `to resume from the readback\n${message}`,
+        );
+      }
+      log(`readback attempt ${attempt + 1} failed (${message.split('\n')[0]}); retrying in ${seconds(delays[attempt])}`);
+      await wait(delays[attempt]);
+    }
+  }
+}
+
+/** The complete plan a dry run prints and --execute follows. */
+export function describeReleasePlan({ entries, plan, registryState, tag, distTag, trustedPublishing, provenance }) {
+  const lines = [];
+  if (plan.length === 0) {
+    lines.push(`nothing to publish: every package is already on the registry; this run resumes with the readback and tag ${tag}`);
+  } else {
+    lines.push(`publish ${plan.length} package(s) in this order:`);
+    for (const [index, entry] of plan.entries()) {
+      lines.push(`  ${index + 1}. ${entry.name}@${entry.version}  ${entry.file}  sha256:${entry.sha256}`);
+    }
+  }
+  const skipped = entries.filter((entry) => registryState.get(entry.name));
+  if (skipped.length > 0) {
+    lines.push(`skip ${skipped.length} package(s) already on the registry:`);
+    for (const entry of skipped) lines.push(`  - ${entry.name}@${entry.version}`);
+  }
+  lines.push(trustedPublishing
+    ? 'auth: npm trusted publishing (GitHub Actions OIDC); no token, no OTP'
+    : 'auth: the local npm session; tfa.mode auth-and-writes is required');
+  lines.push(provenance ? 'provenance: attached (--provenance)' : 'provenance: not attached (not a GitHub Actions run)');
+  lines.push(`dist-tag: ${distTag ?? 'latest (npm default)'}`);
+  const visibility = registryVisibilityDelaysMs.reduce((total, delay) => total + delay, 0);
+  lines.push(
+    `readback: wait up to ${seconds(visibility)} for all ${entries.length} exact versions, then the full readback with ` +
+      `up to ${readbackRetryDelaysMs.length} retr${readbackRetryDelaysMs.length === 1 ? 'y' : 'ies'}`,
+  );
+  lines.push(`tag: annotated ${tag} at HEAD, created only after the readback passes`);
+  return lines;
+}
+
 function view(selector, fields, allowNotFound = false) {
   return npmView({ invocation: npmInvocation, cwd: repoRoot, selector, fields, allowNotFound });
 }
@@ -320,14 +561,27 @@ function isPublished(name, version) {
   throw new Error(`npm view ${name}@${version} reported version ${JSON.stringify(result.value)}`);
 }
 
+/** The registry's dist.integrity for name@version, or undefined on a clean 404. */
+function publishedIntegrity(name, version) {
+  const result = view(`${name}@${version}`, ['dist.integrity'], true);
+  if (!result.found) return undefined;
+  if (typeof result.value !== 'string' || result.value === '') {
+    throw new Error(`npm view ${name}@${version} dist.integrity reported ${JSON.stringify(result.value)}`);
+  }
+  return result.value;
+}
+
 const registry = {
   packageExists: (name) => npmPackageExists({ invocation: npmInvocation, cwd: repoRoot, name }),
   distTags: (name) => npmDistTags({ invocation: npmInvocation, cwd: repoRoot, name }),
 };
 
 async function main() {
-  const { execute, otp, outDir: requestedOut, artifacts: requestedArtifacts, tag: requestedTag } = parseArguments(process.argv.slice(2));
+  const {
+    execute, otp, outDir: requestedOut, artifacts: requestedArtifacts, tag: requestedTag, trustedPublishing,
+  } = parseArguments(process.argv.slice(2));
   if (otp && !execute) throw new Error('--otp is only meaningful with --execute');
+  const log = (message) => console.log(`[release-publish] ${message}`);
 
   // --- Step 1: version consistency + registry candidacy -------------------
   const manifests = readPublicManifests(packagesDir);
@@ -349,41 +603,52 @@ async function main() {
       );
     }
   }
-  console.log(`[release-publish] step 1/8: release train version ${trainVersion} across ${trainEntries.length} public package(s)`);
+  log(`step 1/8: release train version ${trainVersion} across ${trainEntries.length} public package(s)`);
   for (const entry of manifests.values()) {
-    if (independentPackages.has(entry.name)) console.log(`[release-publish] ${entry.name} versions independently at ${entry.version}`);
+    if (independentPackages.has(entry.name)) log(`${entry.name} versions independently at ${entry.version}`);
   }
 
-  // A version that is already fully on the registry is a released version, not a
-  // candidate: republishing it is impossible and re-tagging it is a lie. A version
-  // only partially on the registry is the current candidate — a release interrupted
-  // between publishes — and the remaining packages are exactly the publish set.
+  // The tag is the release's completion marker: it exists only once the registry
+  // has been read back, so an existing tag means there is nothing left to do.
+  const tag = `v${trainVersion}`;
+  const existingTag = spawnSync('git', ['rev-parse', '-q', '--verify', `refs/tags/${tag}`], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (existingTag.status === 0) throw new Error(`tag ${tag} already exists at ${existingTag.stdout.trim()}`);
+
+  // A version only partially on the registry is a release interrupted between
+  // publishes; the remaining packages are exactly the publish set. A version fully on
+  // the registry without its tag is a release interrupted after the last publish; it
+  // resumes with the readback and the tag and publishes nothing.
   const registryState = new Map();
   for (const entry of manifests.values()) {
     registryState.set(entry.name, isPublished(entry.name, entry.version));
   }
   assertNoPartialPrereleaseRegistryState([...manifests.values()], registryState, distTag);
-  const trainPublished = trainEntries.filter((entry) => registryState.get(entry.name));
-  if (trainPublished.length === trainEntries.length) {
-    throw new Error(`release train version ${trainVersion} is already published for every public package — bump the version before releasing`);
-  }
-  if (trainPublished.length > 0) {
-    console.log(
-      `[release-publish] ${trainVersion} is a partially published candidate; already on the registry: ` +
-        trainPublished.map((entry) => entry.name).join(', '),
-    );
+  const pendingEntries = [...manifests.values()].filter((entry) => !registryState.get(entry.name));
+  const alreadyPublished = [...manifests.values()].filter((entry) => registryState.get(entry.name));
+  if (pendingEntries.length === 0) {
+    log(`every package of ${trainVersion} is on the registry but ${tag} does not exist: resuming with the readback and tag`);
+  } else if (alreadyPublished.length > 0) {
+    log(`${trainVersion} is a partially published candidate; already on the registry: ${alreadyPublished.map((entry) => entry.name).join(', ')}`);
   }
 
   const registryExpectations = readRegistryExpectations(repoRoot, [...manifests.keys()]);
-  assertPrereleaseRegistryBaseline([...manifests.values()], registryExpectations, distTag, registry);
+  // The prerelease baseline describes the registry before the first write; a resume
+  // that writes nothing has no baseline left to check, and the readback covers it.
+  if (pendingEntries.length > 0) {
+    assertPrereleaseRegistryBaseline([...manifests.values()], registryExpectations, distTag, registry);
+  }
 
   // --- Step 2: build -------------------------------------------------------
   const bunBin = process.platform === 'win32' ? 'bun.exe' : 'bun';
   const frozen = requestedArtifacts !== undefined;
   if (frozen) {
-    console.log('[release-publish] step 2/8: build skipped — --artifacts releases tarballs that are already packed');
+    log('step 2/8: build skipped — --artifacts releases tarballs that are already packed');
   } else {
-    console.log('[release-publish] step 2/8: bun run build:release');
+    log('step 2/8: bun run build:release');
     stream(bunBin, ['run', 'build:release']);
   }
 
@@ -392,71 +657,84 @@ async function main() {
   const outDir = path.resolve(repoRoot, requestedArtifacts ?? requestedOut ?? path.join(ephemeralRoot, 'artifacts'));
   try {
     if (frozen) {
-      console.log(`[release-publish] step 3/8: pack skipped — verifying frozen artifacts in ${outDir}`);
+      log(`step 3/8: pack skipped — verifying frozen artifacts in ${outDir}`);
     } else {
-      console.log(`[release-publish] step 3/8: pack-and-smoke into ${outDir}`);
+      log(`step 3/8: pack-and-smoke into ${outDir}`);
       stream(nodeBin, ['scripts/release/pack-and-smoke.mjs', '--out-dir', outDir]);
     }
 
     const releaseManifestPath = path.join(outDir, 'release-manifest.json');
     const headSha = capture('git', ['rev-parse', 'HEAD']);
-    const publishSet = topologicalOrder([...manifests.values()].filter((entry) => !registryState.get(entry.name)));
-    if (publishSet.length === 0) throw new Error('publish set is empty — nothing to release');
+    const publishSet = topologicalOrder(pendingEntries);
     const plan = verifyFrozenArtifacts({ artifactsDir: outDir, headSha, trainVersion, publishSet });
-    assertFrozenRegistryExpectations(JSON.parse(readFileSync(releaseManifestPath, 'utf8')), registryExpectations,
+    const frozenManifest = JSON.parse(readFileSync(releaseManifestPath, 'utf8'));
+    assertFrozenRegistryExpectations(frozenManifest, registryExpectations,
       Object.fromEntries([...manifests.values()].map((entry) => [entry.name, entry.version])));
-    console.log(`[release-publish] frozen artifacts verified against ${headSha}`);
-
-    // --- Step 4: publish plan, in dependency order -------------------------
-    const tag = `v${trainVersion}`;
-    console.log(`[release-publish] step 4/8: publish ${plan.length} package(s) in this order, then tag ${tag}:`);
-    for (const [index, entry] of plan.entries()) {
-      console.log(`[release-publish]   ${index + 1}. ${entry.name}@${entry.version}  ${entry.file}  sha256:${entry.sha256}`);
-    }
-
-    if (!execute) {
-      console.log(
-        '[release-publish] dry run: steps 5-8 (registry account gate, npm publish, registry readback, git tag) ' +
-          'skipped; rerun with --execute to release',
-      );
-      return;
-    }
-
-    // --- Step 5: registry account gate and tag precondition ------------------
-    // Everything that can refuse the release runs before the first irreversible
-    // action, so a refusal never leaves a half-released train behind.
-    console.log('[release-publish] step 5/8: registry account gate');
-    const existingTag = spawnSync('git', ['rev-parse', '-q', '--verify', `refs/tags/${tag}`], {
-      cwd: repoRoot,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
+    await assertPublishedMatchFrozen({
+      entries: alreadyPublished,
+      frozenManifest,
+      sleep,
+      readIntegrity: (entry) => publishedIntegrity(entry.name, entry.version),
     });
-    if (existingTag.status === 0) throw new Error(`tag ${tag} already exists at ${existingTag.stdout.trim()}`);
-    const whoami = capture(npmInvocation.command, [...npmInvocation.prefix, 'whoami']);
-    const profileOutput = capture(npmInvocation.command, [...npmInvocation.prefix, 'profile', 'get', '--json']);
-    let profile;
-    try {
-      profile = JSON.parse(profileOutput);
-    } catch {
-      throw new Error(`npm profile get --json returned unreadable output:\n${profileOutput}`);
-    }
-    assertRegistryAccountPolicy({ whoami, profile });
-    console.log(`[release-publish] npm account ${whoami} requires a second factor on writes`);
+    log(`frozen artifacts verified against ${headSha}; ${alreadyPublished.length} already-published package(s) hold the frozen bytes`);
 
-    // Recheck after build/pack/account checks, immediately before irreversible writes.
-    // Any exact RC publication during preparation invalidates this plan.
-    assertPrereleaseReadyToPublish([...manifests.values()], registryExpectations, distTag, { ...registry, isPublished });
-
-    // --- Step 6: publish -----------------------------------------------------
+    // --- Step 4: the full release plan ---------------------------------------
     // Provenance attestations are signed from the GitHub OIDC token, so the flag is
     // only meaningful inside GitHub Actions; a local release says so instead.
     const attestProvenance = process.env.GITHUB_ACTIONS === 'true';
-    if (!attestProvenance) {
-      console.log('[release-publish] provenance is not attached: attestations need GitHub Actions OIDC and this is not a GitHub Actions run');
+    log(`step 4/8: release plan for ${tag}:`);
+    for (const line of describeReleasePlan({
+      entries: [...manifests.values()], plan, registryState, tag, distTag, trustedPublishing, provenance: attestProvenance,
+    })) {
+      log(line);
     }
-    console.log(`[release-publish] step 6/8: npm publish ${plan.length} tarball(s)`);
-    for (const entry of plan) {
-      stream(npmInvocation.command, [
+
+    if (!execute) {
+      log('dry run: steps 5-8 (registry auth gate, npm publish, registry readback, git tag) skipped; rerun with --execute to release');
+      return;
+    }
+
+    // --- Step 5: registry auth gate -------------------------------------------
+    // Everything that can refuse the release runs before the first irreversible
+    // action, so a refusal never leaves a half-released train behind.
+    if (plan.length === 0) {
+      log('step 5/8: registry auth gate skipped — this run writes nothing to the registry');
+    } else if (trustedPublishing) {
+      log('step 5/8: registry auth gate (trusted publishing)');
+      assertTrustedPublishingEnvironment({
+        env: process.env,
+        npmVersion: capture(npmInvocation.command, [...npmInvocation.prefix, '--version']),
+      });
+      log('GitHub-hosted OIDC publishing: no long-lived npm token is present');
+    } else {
+      log('step 5/8: registry account gate');
+      const whoami = capture(npmInvocation.command, [...npmInvocation.prefix, 'whoami']);
+      const profileOutput = capture(npmInvocation.command, [...npmInvocation.prefix, 'profile', 'get', '--json']);
+      let profile;
+      try {
+        profile = JSON.parse(profileOutput);
+      } catch {
+        throw new Error(`npm profile get --json returned unreadable output:\n${profileOutput}`);
+      }
+      assertRegistryAccountPolicy({ whoami, profile });
+      log(`npm account ${whoami} requires a second factor on writes`);
+    }
+
+    // Recheck after build/pack/account checks, immediately before irreversible writes.
+    // Any exact RC publication during preparation invalidates this plan.
+    if (plan.length > 0) {
+      assertPrereleaseReadyToPublish([...manifests.values()], registryExpectations, distTag, { ...registry, isPublished });
+    }
+
+    // --- Step 6: publish -----------------------------------------------------
+    log(`step 6/8: npm publish ${plan.length} tarball(s)`);
+    await publishPlan({
+      plan,
+      log,
+      prerelease: Boolean(distTag),
+      sleep,
+      readIntegrity: (entry) => publishedIntegrity(entry.name, entry.version),
+      publishTarball: (entry) => stream(npmInvocation.command, [
         ...npmInvocation.prefix,
         'publish',
         path.join(outDir, entry.file),
@@ -465,25 +743,29 @@ async function main() {
         ...(attestProvenance ? ['--provenance'] : []),
         ...(distTag ? ['--tag', distTag] : []),
         ...(otp ? ['--otp', otp] : []),
-      ]);
-      console.log(`[release-publish] published ${entry.name}@${entry.version}`);
-    }
+      ]),
+    });
 
     // --- Step 7: registry readback ------------------------------------------
-    console.log('[release-publish] step 7/8: registry readback');
-    stream(nodeBin, [
-      'scripts/release/registry-readback.mjs',
-      '--manifest',
-      releaseManifestPath,
-      ...(distTag ? ['--tag', distTag] : []),
-    ]);
+    log('step 7/8: registry readback');
+    await waitForRegistryVisibility({ entries: [...manifests.values()], isPublished, sleep, log });
+    await readbackWithRetry({
+      sleep,
+      log,
+      readback: () => stream(nodeBin, [
+        'scripts/release/registry-readback.mjs',
+        '--manifest',
+        releaseManifestPath,
+        ...(distTag ? ['--tag', distTag] : []),
+      ]),
+    });
 
     // --- Step 8: annotated tag ----------------------------------------------
     // Last, and only once the registry itself confirms the train: a tag created any
     // earlier can outlive a failed publish and name a release that does not exist.
-    console.log(`[release-publish] step 8/8: git tag -a ${tag}`);
+    log(`step 8/8: git tag -a ${tag}`);
     capture('git', ['tag', '-a', tag, '-m', `${tag}\n\nsourceGitSha ${headSha}`]);
-    console.log(`[release-publish] OK: ${plan.length} package(s) published, read back and tagged ${tag}`);
+    log(`OK: ${plan.length} package(s) published, ${manifests.size} read back and tagged ${tag}`);
   } finally {
     if (ephemeralRoot) rmSync(ephemeralRoot, { recursive: true, force: true });
   }

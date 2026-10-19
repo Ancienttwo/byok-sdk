@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -311,8 +312,9 @@ func (s *session) currentIdentity() (rootIdentity, error) {
 func openSession(req openRequest) (*session, *protocolError) {
 	if runtime.GOOS == "windows" {
 		// Cross-builds prove the handle identity implementation compiles, but a
-		// Windows reparse/junction race matrix is required before this authority
-		// may be admitted. Never report a successful open before that proof.
+		// Windows containment and model S recovery proof are both required.
+		// Model S covers process crash, OS crash and power loss. A successful
+		// flush observation or denial matrix is not that proof.
 		return nil, failure("unsupported_platform", "secure filesystem is not admitted on this platform")
 	}
 	if !validRequestID(req.ID) || req.Protocol != protocolVersion || req.Op != "open" || !validRootIdentity(req.ExpectedIdentity) {
@@ -830,16 +832,16 @@ func validRequestID(value string) bool {
 func validRootIdentity(identity rootIdentity) bool {
 	switch identity.Kind {
 	case "unix":
-		return validDecimal(identity.Dev) && validDecimal(identity.Ino) && identity.VolumeSerial == "" && identity.FileIndex == ""
+		return validIdentityDecimal(identity.Dev, 64) && validIdentityDecimal(identity.Ino, 64) && identity.VolumeSerial == "" && identity.FileIndex == ""
 	case "windows":
-		return validDecimal(identity.VolumeSerial) && validDecimal(identity.FileIndex) && identity.Dev == "" && identity.Ino == ""
+		return validIdentityDecimal(identity.VolumeSerial, 32) && validIdentityDecimal(identity.FileIndex, 64) && identity.Dev == "" && identity.Ino == ""
 	default:
 		return false
 	}
 }
 
-func validDecimal(value string) bool {
-	if len(value) == 0 || len(value) > 20 {
+func validIdentityDecimal(value string, bits int) bool {
+	if len(value) == 0 || len(value) > 20 || (len(value) > 1 && value[0] == '0') {
 		return false
 	}
 	for _, character := range value {
@@ -847,7 +849,8 @@ func validDecimal(value string) bool {
 			return false
 		}
 	}
-	return true
+	_, err := strconv.ParseUint(value, 10, bits)
+	return err == nil
 }
 
 func validRevision(value string) bool {

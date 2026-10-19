@@ -423,6 +423,18 @@ The subset has no `pattern`, `uniqueItems` or `minProperties`. The Host
 therefore checks duplicates, impossible schedule dates and empty updates when it
 applies an outcome, and reports a refused action in the next ContextPack.
 
+`botTurnOutcomeFragments.cancelDelegation({ delegationIds })` adds the optional
+`cancel_delegation` array. Each item has one required `delegationId` from the
+Host-filled enum of open delegations. The array has 1 to 2 items;
+`BOT_TURN_OUTCOME_LIMITS.cancelDelegationMaxItems` is 2. Omit the field for no
+cancel action. Each item is a closed object. `CancelDelegationAction` and
+`BotTurnOutcome.cancel_delegation` expose this shape in the public types.
+The Host offers this fragment only to a Main Bot turn with owner authority,
+outside room seats. The Host checks the same authority when it applies the
+outcome, after management actions and before routine actions. It applies the
+same durable cancellation arbitration as a user cancel. The fragment only
+defines the format; cancellation and its verdict remain Host policy.
+
 A routine schedule is structured. `minute` (0-59) and `hour` (0-23) give one
 local time. `daysOfWeek` (1 to 7 of `mon`, `tue`, `wed`, `thu`, `fri`, `sat`,
 `sun`) limits it to those weekdays. `dayOfMonth` (1-31) limits it to that day
@@ -1979,7 +1991,22 @@ normalizes the header command counts and `__LINKEDIT` file and VM sizes. It
 accounts for the zero-filled command slot in unsigned Go x64 output. The
 signature must end at EOF. Wrong architecture, format, code or manifest fails
 closed. This check detects deployment errors. It does not verify signer trust.
-Windows PE digest support belongs to its separate platform slice. Wire and failure detail: `docs/protocol.md` §2.4.
+Windows PE digest support belongs to its separate platform slice.
+
+For Windows, the accepted fault model S covers process crash, OS crash and
+power loss. Its proposed support domain is local NTFS on an explicit OS
+build with a normal user token and storage that honors full flush requests.
+SMB, synced directories and other file systems are excluded. Admission needs
+proof that ledger bytes, memory replace/delete results, required metadata,
+name changes and new parent directories survive that fault set. The order is
+durable applying, CAS, durable memory result, durable terminal, matching Host
+complete/readback, durable ackedAt, then cursor advance. A barrier error blocks
+the next step. Corrupt ledger recovery must fail closed. A file flush or
+visible readback alone does not prove that order. Windows remains BLOCKED
+and B remains false until the proof and recovery experiments pass. Linux
+checks do not complete Q14's Windows requirement. The acceptance contract is
+`docs/plans/2026-10-19-windows-ntfs-ledger-barrier-decision.md` sections 3 and 7.
+Wire and failure detail: `docs/protocol.md` §2.4.
 
 The daemon publishes the authenticated `conn.hello` capability snapshot as the
 first long-poll message; the hosted composition persists that snapshot before

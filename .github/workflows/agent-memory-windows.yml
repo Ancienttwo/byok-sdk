@@ -1,0 +1,67 @@
+name: Windows memory platform-refusal checks
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-platform-refusal:
+    name: Windows platform refusal and flush diagnostics (${{ matrix.runtime }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [node, bun]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: packages/client/native/agent-memory-fs/go.mod
+      - name: Record host profile (no containment or S proof)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .ci-artifacts/wo09 | Out-Null
+          Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber | Format-List | Out-File .ci-artifacts/wo09/profile.txt
+          Get-Volume | Select-Object DriveLetter,FileSystem,UniqueId,DriveType | Format-List | Out-File -Append .ci-artifacts/wo09/profile.txt
+          whoami /all | Out-File -Append .ci-artifacts/wo09/profile.txt
+          if ($LASTEXITCODE -ne 0) { throw 'whoami failed' }
+          'Hosted token and storage profile are observations. Normal-user and S recovery acceptance remain unproved.' | Out-File -Append .ci-artifacts/wo09/profile.txt
+      - name: Check platform refusal and identity parity; collect flush diagnostics
+        working-directory: packages/client/native/agent-memory-fs
+        shell: pwsh
+        run: |
+          $env:GOTOOLCHAIN = 'go1.26.5'
+          $env:BYOK_TEST_AGENT_MEMORY_JS_RUNTIME = (Get-Command '${{ matrix.runtime }}').Source
+          go test -v ./... 2>&1 | Tee-Object ../../../../.ci-artifacts/wo09/go.txt
+          if ($LASTEXITCODE -ne 0) { throw 'native Windows tests failed' }
+          go build -buildvcs=false -trimpath -o "$env:RUNNER_TEMP/byok-agent-memory-fs.exe" .
+          if ($LASTEXITCODE -ne 0) { throw 'helper build failed' }
+      - name: Check platform refusal with empty env and junction fixtures
+        shell: pwsh
+        run: |
+          & '${{ matrix.runtime }}' scripts/ci/agent-memory-windows-denial.mjs "$env:RUNNER_TEMP/byok-agent-memory-fs.exe" 2>&1 | Tee-Object .ci-artifacts/wo09/runtime.txt
+          if ($LASTEXITCODE -ne 0) { throw 'runtime platform-refusal check failed' }
+      - name: Install and build TypeScript packages
+        shell: pwsh
+        run: |
+          bun ci
+          if ($LASTEXITCODE -ne 0) { throw 'dependency install failed' }
+          bun run build
+          if ($LASTEXITCODE -ne 0) { throw 'TypeScript build failed' }
+      - name: Check TypeScript identity and closed Windows gate
+        run: bun run --filter @byok-sdk/client test -- src/__tests__/agent-memory-helper-identity.test.ts src/__tests__/agent-memory-windows-gate.test.ts
+      - name: Keep diagnostics (not containment or S acceptance)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wo09-windows-${{ matrix.runtime }}-${{ github.sha }}
+          path: .ci-artifacts/wo09
+          if-no-files-found: error

@@ -3,7 +3,7 @@ import { PiRpcClient } from '../adapters/pi/rpc-client';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 
 const clientRoot = resolve(import.meta.dirname, '../..');
@@ -121,6 +121,26 @@ describe('SDK ordinary Pi RPC entry', () => {
     expect(stderr).toContain('an undeclared custody IPC channel is open');
   }, 20_000);
 
+  it.each([undefined, '', 'relative', '/tmp/session\ninvalid'])('refuses an invalid keys-profile session directory (%j) after custody', async (sessionDir) => {
+    const f = custodyFixture('keys-profile');
+    const child = spawn(bun, f.argv, {
+      cwd: f.sealed, env: { ...f.env, PI_CODING_AGENT_SESSION_DIR: sessionDir }, stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+      timeout: 15_000,
+    });
+    let stderr = '', stdout = '';
+    child.stderr!.on('data', data => { stderr += data; });
+    child.stdout!.on('data', data => { stdout += data; });
+    child.once('message', (request: { configDigest: string }) => child.send({
+      type: 'byok.pi.rpc.credential', configDigest: request.configDigest, secret: 'sk-session-dir-test',
+    }));
+    const code = await new Promise<number | null>(done => child.once('close', done));
+    expect(code).toBe(1);
+    expect(stderr).toContain('keys-profile launch requires an absolute single-line session directory');
+    expect(stderr).not.toContain('sk-session-dir-test');
+    expect(stdout).toBe('');
+    expect(existsSync(join(f.root, 'agent', 'sessions'))).toBe(false);
+  }, 20_000);
+
   it('resumes only an exact native session id and rejects a mismatched header cwd', () => {
     const f = fixture();
     const sessionDir = join(f.root, 'sessions');
@@ -139,6 +159,23 @@ describe('SDK ordinary Pi RPC entry', () => {
     `);
     expect(result).toEqual({ id, cwd:f.cwd, prefix:true, mismatch:true });
   });
+
+  it('keeps Pi settings as the session directory authority for device auth', async () => {
+    const f = fixture();
+    const sessionDir = join(f.root, 'user-sessions');
+    mkdirSync(join(f.cwd, '.pi'));
+    writeFileSync(join(f.cwd, '.pi', 'settings.json'), JSON.stringify({ sessionDir }));
+    const rpc = new PiRpcClient({
+      command: bun, cwd: f.cwd,
+      args: [f.entry, `--config-digest=${f.digest}`, '--config', f.configPath, '--mode', 'rpc', '--provider', 'anthropic', '--model', 'claude-sonnet-4-5'],
+      env: { ...f.env, PI_CODING_AGENT_SESSION_DIR: join(f.root, 'ambient-session-decoy') },
+    });
+    try {
+      const state = await rpc.send({ type: 'get_state' });
+      expect(state.success).toBe(true);
+      expect(dirname((state.data as { sessionFile: string }).sessionFile)).toBe(sessionDir);
+    } finally { await rpc.dispose(); }
+  }, 25_000);
 
   it('starts all inline factories under sealed process cwd with explicit config and native RPC', async () => {
     const f = fixture();
