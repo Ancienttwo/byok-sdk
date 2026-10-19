@@ -1309,12 +1309,18 @@ export function buildDaemonWithAdapters(
   if (config.sdkHelperHost !== undefined) {
     resolveSdkReservedHelperBin('agent-message-mcp', config.sdkHelperHost);
   }
-  // Resolve assets when memory is used. A compiled daemon that only uses
-  // Agent homes and egress does not need the native memory release assets.
-  const resolveAgentMemoryFilesystemHelperBin = config.agentHome !== undefined && isAgentMemoryFilesystemHelperSupported()
-    ? resolveAgentMemoryFilesystemHelper
-    : undefined;
-  if (config.agentMemoryIntents !== undefined) resolveAgentMemoryFilesystemHelperBin?.();
+  // Platform support alone cannot admit memory. Compiled products and ordinary
+  // JS builds can have Agent homes without the SDK native release assets.
+  let resolveAgentMemoryFilesystemHelperBin: (() => string) | undefined;
+  if (config.agentHome !== undefined && isAgentMemoryFilesystemHelperSupported()) {
+    try {
+      resolveAgentMemoryFilesystemHelper();
+      resolveAgentMemoryFilesystemHelperBin = resolveAgentMemoryFilesystemHelper;
+    } catch (error) {
+      if (config.agentMemoryIntents !== undefined) throw error;
+      resolveAgentMemoryFilesystemHelperBin = undefined;
+    }
+  }
   const externalAgentMemoryFilesystem = resolveAgentMemoryFilesystemHelperBin !== undefined;
   if (config.agentMemory !== undefined && !isAgentMemorySecureFilesystemAvailable(externalAgentMemoryFilesystem)) {
     throw new Error('DaemonConfig.agentMemory requires a platform with safe descriptor-relative filesystem operations');
