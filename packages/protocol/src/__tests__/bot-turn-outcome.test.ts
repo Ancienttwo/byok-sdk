@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { checkResultSchema, resultOutcomeMaxBytes, validateResultOutcome, type ResultSchema } from '../result-schema';
 import { TerminalProjectionSelectionSchema } from '../terminal-projection';
 import {
-  botTurnOutcomeFragments as F, composeBotTurnOutcomeSchema, BotTurnOutcomeSchemaError,
+  botTurnOutcomeFragments as F, composeBotTurnOutcomeSchema, BotTurnOutcomeSchemaError, BOT_TURN_OUTCOME_LIMITS,
   type NonEmptyIds, type RoutineScheduleShape,
 } from '../bot-turn-outcome';
+import type { BotTurnOutcome, BotTurnOutcomeKind, CancelDelegationAction } from '../index';
 import { worstCaseInstance } from './bot-outcome-fixtures';
 const bytes = (v: unknown) => new TextEncoder().encode(JSON.stringify(v)).length;
 // Host context. Ids are 64 ASCII characters, the idMaxLength worst case.
@@ -62,6 +63,48 @@ const room = () => composeBotTurnOutcomeSchema({ speech: F.speech(), room_call: 
 
 
 describe('Bot turn outcome fragments', () => {
+  it('admits at most two cancel requests for Host-listed delegations', () => {
+    const delegationIds = [id('delegation', 0), id('delegation', 1)] as const;
+    const kind: BotTurnOutcomeKind = 'cancel_delegation';
+    const first: CancelDelegationAction = { delegationId: delegationIds[0] };
+    const second: CancelDelegationAction = { delegationId: delegationIds[1] };
+    const schema = composeBotTurnOutcomeSchema({ [kind]: F.cancelDelegation({ delegationIds }) });
+    expect(BOT_TURN_OUTCOME_LIMITS.cancelDelegationMaxItems).toBe(2);
+    expect(checkResultSchema(schema).ok).toBe(true);
+    expect(TerminalProjectionSelectionSchema.safeParse({ mode: 'result-document', contract: 'bot-turn-outcome.v1', schema }).success).toBe(true);
+    for (const cancel_delegation of [[first], [first, second]]) {
+      const outcome: BotTurnOutcome = { cancel_delegation };
+      expect(validateResultOutcome(schema, outcome).ok).toBe(true);
+      expect(validateResultOutcome(conversation(), outcome).ok).toBe(false);
+      expect(validateResultOutcome(room(), { speech: { kind: 'pass' }, ...outcome }).ok).toBe(false);
+    }
+    expect(validateResultOutcome(schema, {}).ok).toBe(true);
+    for (const cancel_delegation of [
+      [], [first, second, first], [{ delegationId: 'unknown' }], [{}],
+      [{ delegationId: delegationIds[0], reason: 'stop' }], [{ delegationId: 1 }],
+    ]) expect(validateResultOutcome(schema, { cancel_delegation }).ok).toBe(false);
+  });
+
+  it('bounds a Main Bot outcome with 24 open delegations and a full cancel array', () => {
+    const delegationIds = Array.from({ length: 24 }, (_, i) => id('delegation', i)) as unknown as NonEmptyIds;
+    expect(() => composeBotTurnOutcomeSchema({
+      ...mainBotFragments(timeZones, routines),
+      cancel_delegation: F.cancelDelegation({ delegationIds }),
+    })).toThrow(expect.objectContaining({ code: 'schema-over-budget' }));
+    const schema = composeBotTurnOutcomeSchema({
+      ...mainBotFragments(timeZones, routines, 'flat'),
+      cancel_delegation: F.cancelDelegation({ delegationIds }),
+    });
+    expect(checkResultSchema(schema).ok).toBe(true);
+    const bound = resultOutcomeMaxBytes(schema)!;
+    expect(bound).toBe(62085);
+    expect(bound).toBeLessThanOrEqual(65536);
+    const witness = worstCaseInstance(schema) as BotTurnOutcome;
+    expect(witness.cancel_delegation).toHaveLength(2);
+    expect(validateResultOutcome(schema, witness).ok).toBe(true);
+    expect(bytes(witness)).toBeLessThanOrEqual(bound);
+  });
+
   it.each([['conversation', conversation, 43261], ['main', mainBot, 61895], ['room', room, 16710]] as const)
     ('admits the %s variant and its largest witness', (_name, build, expectedBound) => {
       const schema = build();

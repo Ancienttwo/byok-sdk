@@ -5,10 +5,11 @@ import {
 
 export const BOT_TURN_OUTCOME_CONTRACT = 'bot-turn-outcome.v1';
 
-/** Proposed code-point and item caps. Product confirmation is pending. */
+/** Code-point and item caps for Bot turn outcomes. */
 export const BOT_TURN_OUTCOME_LIMITS = Object.freeze({
   delegateMaxItems: 2,
   delegateRequestMaxLength: 1_000,
+  cancelDelegationMaxItems: 2,
   askUserQuestionMaxLength: 400,
   askUserOptionsMaxItems: 6,
   askUserOptionIdMaxLength: 24,
@@ -107,6 +108,10 @@ export const botTurnOutcomeFragments = {
   delegate(o: { to: NonEmptyIds }): ResultSchema {
     return list(closed({ to: oneOfIds(o.to), request: text(L.delegateRequestMaxLength) }, ['to', 'request']), L.delegateMaxItems);
   },
+  /** Owner-authorized Main Bot turns only. The Host lists open delegations. */
+  cancelDelegation(o: { delegationIds: NonEmptyIds }): ResultSchema {
+    return list(closed({ delegationId: oneOfIds(o.delegationIds) }, ['delegationId']), L.cancelDelegationMaxItems);
+  },
   askUser(): ResultSchema {
     const question = text(L.askUserQuestionMaxLength);
     const option = closed({ id: text(L.askUserOptionIdMaxLength), label: text(L.askUserOptionLabelMaxLength) }, ['id', 'label']);
@@ -180,7 +185,7 @@ export const botTurnOutcomeFragments = {
 };
 
 export type BotTurnOutcomeKind =
-  | 'delegate' | 'ask_user' | 'confirmable_action' | 'create_routine' | 'update_routine' | 'cancel_routine'
+  | 'delegate' | 'cancel_delegation' | 'ask_user' | 'confirmable_action' | 'create_routine' | 'update_routine' | 'cancel_routine'
   | 'speech' | 'room_call' | 'create_bot' | 'update_bot' | 'delete_bot' | 'create_room' | 'update_room' | 'team_note';
 
 /**
@@ -220,6 +225,7 @@ export function composeBotTurnOutcomeSchema(
 export type BotTurnOutcomeFragments = Partial<Readonly<Record<BotTurnOutcomeKind, ResultSchema>>>;
 
 export interface DelegateAction { readonly to: string; readonly request: string }
+export interface CancelDelegationAction { readonly delegationId: string }
 export type AskUserAction =
   | { readonly question: string; readonly answerKind: 'text' }
   | { readonly question: string; readonly answerKind: 'single_choice';
@@ -253,6 +259,7 @@ export interface TeamNoteAction { readonly text: string }
 /** Shape of a document that passed a schema composed from these fragments. */
 export interface BotTurnOutcome {
   readonly delegate?: readonly DelegateAction[];
+  readonly cancel_delegation?: readonly CancelDelegationAction[];
   readonly ask_user?: AskUserAction;
   readonly confirmable_action?: readonly ConfirmableAction[];
   readonly create_routine?: readonly CreateRoutineAction[];

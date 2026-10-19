@@ -423,6 +423,18 @@ The subset has no `pattern`, `uniqueItems` or `minProperties`. The Host
 therefore checks duplicates, impossible schedule dates and empty updates when it
 applies an outcome, and reports a refused action in the next ContextPack.
 
+`botTurnOutcomeFragments.cancelDelegation({ delegationIds })` adds the optional
+`cancel_delegation` array. Each item has one required `delegationId` from the
+Host-filled enum of open delegations. The array has 1 to 2 items;
+`BOT_TURN_OUTCOME_LIMITS.cancelDelegationMaxItems` is 2. Omit the field for no
+cancel action. Each item is a closed object. `CancelDelegationAction` and
+`BotTurnOutcome.cancel_delegation` expose this shape in the public types.
+The Host offers this fragment only to a Main Bot turn with owner authority,
+outside room seats. The Host checks the same authority when it applies the
+outcome, after management actions and before routine actions. It applies the
+same durable cancellation arbitration as a user cancel. The fragment only
+defines the format; cancellation and its verdict remain Host policy.
+
 A routine schedule is structured. `minute` (0-59) and `hour` (0-23) give one
 local time. `daysOfWeek` (1 to 7 of `mon`, `tue`, `wed`, `thu`, `fri`, `sat`,
 `sun`) limits it to those weekdays. `dayOfMonth` (1-31) limits it to that day
