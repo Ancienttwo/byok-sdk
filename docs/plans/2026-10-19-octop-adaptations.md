@@ -9,9 +9,10 @@
 - **权威**：`docs/spec.md` 是产品真相。平台 PRD、产品 PRD、K4 指南和 K8b 计划定义契约。本方案只细化执行。
 - **裁定状态**：
   - 第一批和第二批按审阅推荐的推进顺序排期（#548 §3.5）。
-  - 第三批两项都待 owner 确认：§9.2 防休眠选项 B，§9.3 cgroup v2。
-  - 第一批的试点位置待 owner 确认。
-  - §14 列出全部开放问题。
+  - owner 于 2026-10-19 裁定：§14 的 Q1–Q8 全部按推荐。
+  - 第三批两项已确认：§9.2 防休眠选项 B（Q1）；§9.3 cgroup v2 选项 B（Q2），有 Linux 常驻需求时再排期。
+  - 第一批先在 `examples/bot-collaboration` 试点（Q3）。
+  - §14 列出全部开放问题和裁定。
 - **Issue**：#548 修订后，owner 授权开出 6 个 issue：① [#551](https://github.com/Ancienttwo/byok-sdk/issues/551)、② [#552](https://github.com/Ancienttwo/byok-sdk/issues/552)、③ [#553](https://github.com/Ancienttwo/byok-sdk/issues/553)、④ [#554](https://github.com/Ancienttwo/byok-sdk/issues/554)、⑤ [#555](https://github.com/Ancienttwo/byok-sdk/issues/555)、⑥ [#556](https://github.com/Ancienttwo/byok-sdk/issues/556)。
   - issue 定义范围和验收。本方案细化设计和切片。
   - 本方案与 issue 的差异列在 §12。
@@ -22,12 +23,12 @@
 
 | # | 项目 | 组 | 归属层 | 批次 | 主要落点 | owner 状态 |
 |---|---|---|---|---|---|---|
-| ① | 同会话连续输入合并（#551） | Bot/Host 产品体验 | Host 参考实现 | 第一批 | `examples/bot-collaboration/src/coalesce.ts`（新）、`host.ts`、`model.ts` | 审阅推荐；试点位置待定（Q3） |
+| ① | 同会话连续输入合并（#551） | Bot/Host 产品体验 | Host 参考实现 | 第一批 | `examples/bot-collaboration/src/coalesce.ts`（新）、`host.ts`、`model.ts` | 审阅推荐；试点位置已确认（Q3） |
 | ② | IM 收发契约（#552） | Bot/Host 产品体验 | Host adapter | 第一批 | `docs/host-im-adapter.md`（新）；`examples/bot-collaboration/src/channel.ts`（新） | 审阅推荐 |
 | ③ | 执行记录完整性（#553） | SDK 执行可靠性 | SDK adapter 和 daemon；Host 只展示 | 第二批 | `packages/client/src/adapters/*`、`daemon/execution-record.ts`（新） | 审阅推荐 |
 | ④ | 取消与落盘故障测试（#554） | SDK 执行可靠性 | 只有文档和测试 | 第二批 | `packages/client/src/__tests__/*` | 已实现，只补测试 |
-| ⑤ | Host 防休眠（#555） | Bot/Host 产品体验 | Host 应用（下游）；SDK 仓库只出指南 | 第三批 | K4 指南 §7 新小节；Aiphabee | §9.2 选项 B 待确认（Q1） |
-| ⑥ | cgroup v2 进程树收容（#556） | SDK 执行可靠性 | SDK launcher | 第三批，有 Linux 常驻需求时再做 | `adapters/process-tree.ts`、`adapters/cgroup-v2.ts`（新）、`daemon/owned-process-ledger.ts` | §9.3 选项 B 待确认（Q2） |
+| ⑤ | Host 防休眠（#555） | Bot/Host 产品体验 | Host 应用（下游）；SDK 仓库只出指南 | 第三批 | K4 指南 §7 新小节；Aiphabee | §9.2 选项 B 已确认（Q1） |
+| ⑥ | cgroup v2 进程树收容（#556） | SDK 执行可靠性 | SDK launcher | 第三批，有 Linux 常驻需求时再做 | `adapters/process-tree.ts`、`adapters/cgroup-v2.ts`（新）、`daemon/owned-process-ledger.ts` | §9.3 选项 B 已确认（Q2） |
 | 维护 | 维护原则 | SDK 执行可靠性 | SDK daemon；现在只成文 | 随清理、压缩或恢复功能 | `docs/host-local-storage-layout.md` | 审阅推荐 |
 
 全部切片都不改下面这些：
@@ -99,7 +100,7 @@
 - Host 参考实现：`examples/bot-collaboration`（copy-and-own）。
 - 这是可选策略，默认关闭。
 - K4 执行核心、SDK 包和 wire 都不改。
-- 试点位置待 owner 确认（Q3）。本节按 `examples/bot-collaboration` 写。
+- 试点位置已确认：先在 `examples/bot-collaboration` 做（Q3）。
 
 ### 4.2 问题与成功标准
 
@@ -252,7 +253,7 @@ cancelTurn(id)，并且 id 是 open 批次或它的成员 → 先封口（cancel
 - 每次状态变化发一个 `input-batch:<batchId>:<revision>`：open 是 1，sealed 是 2。空闲时直接封口的批次只发 2。
 - K4 的 `project()` 不允许同一 id 对应不同的值（`examples/host-execution-core/src/model.ts:96-101`）。所以沿用 Cross-Bot 的 revision 做法。
 - `bot-turn:<id>` 投影带上 `inputIds`。
-- UI 显示（#551 待确认第 4 条；建议值，见 Q4）：
+- UI 显示（#551 待确认第 4 条；已按 Q4 确认）：
   - 一个批次只有一个回复。UI 只显示一次这个回复，并按 `inputIds` 标出它回答的全部成员消息。
   - IM 渠道把回复挂在最新一条成员消息下（§5.4）。
 
@@ -753,7 +754,7 @@ interface ExecutionRecord {
 - **3a 的云端状态是推断**：F3 实测结果不同时，按 #554 的规则另开 issue。不改断言去迁就结果。
 - **回退**：revert 测试 PR。
 
-## 8. ⑤ Host 防休眠（§9.2 推荐 B，待 owner 确认）
+## 8. ⑤ Host 防休眠（§9.2 选项 B，owner 已确认）
 
 ### 8.1 归属层
 
@@ -761,9 +762,9 @@ interface ExecutionRecord {
 - Host 应用：下游的桌面 Host，例如 Aiphabee。
 - SDK 仓库只交付两样东西：
   - K4 指南 §7 里的一个小节。
-  - 一个可选的参考策略模块（S2）。要不要做由 owner 决定（Q1）。
+  - 一个可选的参考策略模块（S2）。按 Q1 的裁定先不做，等 Aiphabee 需要时再做。
 - SDK daemon 不持有电源断言。
-- §9.2 选项 B 是审阅推荐，待 owner 确认（Q1）。
+- owner 已确认 §9.2 选项 B（Q1，2026-10-19）。
 
 ### 8.2 问题与成功标准
 
@@ -848,7 +849,7 @@ want && !held → acquire(reason)
 
 | 切片 | 范围 | 测试 | 依赖 |
 |---|---|---|---|
-| S1 Host 指南 | `docs/host-execution-core.md` §7「Wake behavior」末尾新增小节「Device sleep (optional)」（#555 的建议）：P1–P7、平台 API 表、验收矩阵，并写明它与 wake 和醒后补跑互相独立。不新增编号章节，所以 §8–§12 的现有引用不变 | 文档评审 | owner 确认 Q1 |
+| S1 Host 指南 | `docs/host-execution-core.md` §7「Wake behavior」末尾新增小节「Device sleep (optional)」（#555 的建议）：P1–P7、平台 API 表、验收矩阵，并写明它与 wake 和醒后补跑互相独立。不新增编号章节，所以 §8–§12 的现有引用不变 | 文档评审 | 无（Q1 已确认） |
 | S2 参考策略（可选） | `power.ts` 和 fake 端口测试 | 引用计数；拔电；关闭开关；FIFO 两个任务之间不释放；默认关闭 | S1；owner 要求时才做 |
 | S3 下游实现 | Aiphabee 的三平台实现和手动验收记录 | 见 §8.7 | S1 |
 
@@ -878,7 +879,7 @@ want && !held → acquire(reason)
 - **用户误解**：用户可能以为开启后 routine 能在休眠中运行。文案要写明不会。
 - **回退**：关闭开关，或者 Host 删除这个功能。SDK 侧只有文档。
 
-## 9. ⑥ cgroup v2 进程树收容（§9.3，Linux，待 owner 确认）
+## 9. ⑥ cgroup v2 进程树收容（§9.3，Linux，owner 已确认）
 
 ### 9.1 归属层
 
@@ -889,7 +890,7 @@ want && !held → acquire(reason)
   - `packages/client/src/daemon/owned-process-ledger.ts`：崩溃恢复。
   - `createDaemon` 的配置。
 - 只在 Linux 上提供。
-- §9.3 选项 B 是审阅推荐，待 owner 确认（Q2）。有 Linux 常驻需求时再做。
+- owner 已确认 §9.3 选项 B（Q2，2026-10-19）。有 Linux 常驻需求时再排期。
 
 ### 9.2 问题与成功标准
 
@@ -1019,7 +1020,7 @@ class ProcessContainmentUnsupportedError extends Error {
 
 | 切片 | 范围 | 测试 | 依赖 |
 |---|---|---|---|
-| C0 探测与诊断 | `probeCgroupV2()`；诊断检查只读报告；Linux CI job 骨架，在委派的 scope 里跑测试 | 用 fixture 解析 `/proc/self/cgroup` 和 mountinfo；在真实 Linux 上探测成功和失败；实测 systemd `KillMode` 的行为 | owner 确认 Q2；F4 的结论 |
+| C0 探测与诊断 | `probeCgroupV2()`；诊断检查只读报告；Linux CI job 骨架，在委派的 scope 里跑测试 | 用 fixture 解析 `/proc/self/cgroup` 和 mountinfo；在真实 Linux 上探测成功和失败；实测 systemd `KillMode` 的行为 | 出现 Linux 常驻需求（Q2 已确认）；F4 的结论 |
 | C1 启动与处置 | 配置项；带类型的错误；垫片 helper 和全部 spawn 站点；daemon 自身移进叶子节点；处置新增的步骤；cgroup 记录 | 单元：argv 构造，没有注入。Linux 集成：`setsid sh -c 'sleep 600 &'` 和双 fork，cancel 或超时（`maxDurationMs`）之后全部进程消失，`populated 0`；同一用例在 `process-tree` 模式下留下残留，作为对照；环境不支持 → 带类型的错误。macOS 和 Windows：配置 `cgroup-v2` → 带类型的错误 | C0 |
 | C2 崩溃恢复 | `reconcile()` 处理 cgroup 记录和没有记录的目录 | Linux：SIGKILL daemon；重启前残留存在；重启后清空，之后才回收 lease；清不掉 → 拒绝启动 | C1、F4 |
 | C3 文档与安装 | 安全文档、架构表、ADR-037 附注、诊断文档；systemd 单元的 `Delegate=yes` 选项；README 说明三种委派方式 | 五项必检 | C1 |
@@ -1113,7 +1114,7 @@ class ProcessContainmentUnsupportedError extends Error {
   ③  T0 → T1 → T3      （T2 等 Pi 验证后由 owner 决定，Q5）
   ④  F1、F2、F3 并行 → F4
 
-第三批（待 owner 确认）
+第三批（owner 已确认；⑥ 等 Linux 常驻需求）
   ⑤  S1 →（S2 可选）→ S3 下游
   ⑥  C0 → C1 → C2 → C3   （C0 需要 F4 的 Linux 结论）
 
@@ -1134,7 +1135,7 @@ class ProcessContainmentUnsupportedError extends Error {
 
 | 项目 | Issue | 本方案切片 | 本方案与 issue 的差异 |
 |---|---|---|---|
-| ① | [#551](https://github.com/Ancienttwo/byok-sdk/issues/551) | I1–I4 | 范围一致。补充：Agent 变空闲时提前封口（S4）。#551「待 owner 确认」第 3 条已在 §4.5 回答；第 4 条在 §4.4 给出建议值（Q4） |
+| ① | [#551](https://github.com/Ancienttwo/byok-sdk/issues/551) | I1–I4 | 范围一致。补充：Agent 变空闲时提前封口（S4）。#551「待 owner 确认」的 4 条已按 Q4 确认：第 3 条见 §4.5，第 4 条见 §4.4 |
 | ② | [#552](https://github.com/Ancienttwo/byok-sdk/issues/552) | M1–M4 | 范围一致。M1 按 #552 的建议新建 `docs/host-im-adapter.md`。补充 R6（结构化点名）和 R7（渠道凭据） |
 | ③ | [#553](https://github.com/Ancienttwo/byok-sdk/issues/553) | T0–T3 | T0 是新增的前置切片。Pi 的解码计数可能按 T0 的结论收窄（§6.4）。T2 等 Pi 验证后由 owner 决定 |
 | ④ | [#554](https://github.com/Ancienttwo/byok-sdk/issues/554) | F1–F4 | F1–F3 与 #554 的 8 个场景一一对应（§7.2）。3a 和 3b 用现有的 journal 故障点，不加 test seam。F4（Linux）是新增的调查 |
@@ -1185,15 +1186,17 @@ class ProcessContainmentUnsupportedError extends Error {
 - GNOME 只看 gnome-session inhibit 这一点来自 GNOME 源码，不是文档。GNOME 2026 年改过这段代码，所以行为取决于 GNOME 版本。
 - ① 的默认参数没有数据支撑，要靠试点数据调整（Q4）。
 
-## 14. 开放问题（需 owner 拍板）
+## 14. 开放问题与 owner 裁定
 
-| # | 问题 | 推荐 | 影响 |
-|---|---|---|---|
-| Q1 | §9.2（#555）：是否采纳选项 B（Host 应用实现，SDK 只出指南）？SDK 仓库要不要 S2 参考策略模块？三平台真机验收放在哪里？产品 PRD 对记忆证明已裁定「不接受 Linux-only」（239 行） | 采纳 B。S2 先不做，等 Aiphabee 需要时再做。三平台真机验收都放在 Aiphabee，按 §8.7 的矩阵记录 | ⑤ 能否开工 |
-| Q2 | §9.3（#556）：是否采纳可选的 cgroup v2？只在 Linux 上提供，是否符合平台一致性的要求？现在有没有 Linux 常驻部署的需求？systemd 单元的 `Delegate=yes` 是否作为安装选项？是否确认排除选项 C 和 D？ | 采纳 B，默认关闭。Windows 已经有 Job Object；cgroup v2 让 Linux 有同等的收容，macOS 仍有残留，状态和文档如实写明（G5）。没有常驻需求就不排期。`Delegate=yes` 只在开启时写入。排除 C 和 D | ⑥ 能否排期 |
-| Q3 | 第一批试点先在 `examples/bot-collaboration` 做，还是直接在 Aiphabee 做？ | 先在 `examples/bot-collaboration` 做：CI 可测，copy-and-own，不依赖外部仓库。Aiphabee 之后按 I4 切片移植 | ① 和 ② 的落点 |
-| Q4 | ①（#551「待 owner 确认」1–4）：策略是否默认关闭？默认参数是否用 `windowMs = 10 s`、`maxItems = 8`、`maxBytes = 8 KiB`？intentKey 是否取批次 Turn id，即第一条输入的 id？一个回复对应多条消息时，是否按 §4.4 显示？是否接受一个批次共用一个 root 预算？ | 默认关闭。接受这些默认值，试点后按数据调整。intentKey 按 §4.5，UI 按 §4.4。接受共用 root 预算 | ① I1 |
-| Q5 | ③（#553）：Pi 验证之后，要不要做 T2（Claude 和 Codex 的证据）？以后要不要给 terminal 加可选的 wire 字段，让 Topology H 也能看到记录？ | T2 等 T1 有了 Pi 的数据再定。wire 字段现在不做：它是核心协议改动，等有 Topology H 的需求再议 | ③ 的范围 |
-| Q6 | ② 的 1:1 对话里，非 owner 的发送者怎么处理？群里的审批是否只限 owner？ | 1:1 拒绝非 owner。群里的审批只限 owner | ② M2 |
-| Q7 | ② 的 `unknown` 投递：确认参考实现不自动重发，只提供手动重发入口？ | 确认 | ② M3 |
-| Q8 | 是否把 SIGKILL 恢复套件扩展到 Linux CI（④ F4）？它是 ⑥ 的前置条件 | 先调查原因，再决定 | ④ F4、⑥ C0 |
+owner 于 2026-10-19 裁定：Q1–Q8 全部按推荐。
+
+| # | 问题 | 推荐 | 影响 | 裁定 |
+|---|---|---|---|---|
+| Q1 | §9.2（#555）：是否采纳选项 B（Host 应用实现，SDK 只出指南）？SDK 仓库要不要 S2 参考策略模块？三平台真机验收放在哪里？产品 PRD 对记忆证明已裁定「不接受 Linux-only」（239 行） | 采纳 B。S2 先不做，等 Aiphabee 需要时再做。三平台真机验收都放在 Aiphabee，按 §8.7 的矩阵记录 | ⑤ 能否开工 | 按推荐（2026-10-19） |
+| Q2 | §9.3（#556）：是否采纳可选的 cgroup v2？只在 Linux 上提供，是否符合平台一致性的要求？现在有没有 Linux 常驻部署的需求？systemd 单元的 `Delegate=yes` 是否作为安装选项？是否确认排除选项 C 和 D？ | 采纳 B，默认关闭。Windows 已经有 Job Object；cgroup v2 让 Linux 有同等的收容，macOS 仍有残留，状态和文档如实写明（G5）。没有常驻需求就不排期。`Delegate=yes` 只在开启时写入。排除 C 和 D | ⑥ 能否排期 | 按推荐（2026-10-19） |
+| Q3 | 第一批试点先在 `examples/bot-collaboration` 做，还是直接在 Aiphabee 做？ | 先在 `examples/bot-collaboration` 做：CI 可测，copy-and-own，不依赖外部仓库。Aiphabee 之后按 I4 切片移植 | ① 和 ② 的落点 | 按推荐（2026-10-19） |
+| Q4 | ①（#551「待 owner 确认」1–4）：策略是否默认关闭？默认参数是否用 `windowMs = 10 s`、`maxItems = 8`、`maxBytes = 8 KiB`？intentKey 是否取批次 Turn id，即第一条输入的 id？一个回复对应多条消息时，是否按 §4.4 显示？是否接受一个批次共用一个 root 预算？ | 默认关闭。接受这些默认值，试点后按数据调整。intentKey 按 §4.5，UI 按 §4.4。接受共用 root 预算 | ① I1 | 按推荐（2026-10-19） |
+| Q5 | ③（#553）：Pi 验证之后，要不要做 T2（Claude 和 Codex 的证据）？以后要不要给 terminal 加可选的 wire 字段，让 Topology H 也能看到记录？ | T2 等 T1 有了 Pi 的数据再定。wire 字段现在不做：它是核心协议改动，等有 Topology H 的需求再议 | ③ 的范围 | 按推荐（2026-10-19） |
+| Q6 | ② 的 1:1 对话里，非 owner 的发送者怎么处理？群里的审批是否只限 owner？ | 1:1 拒绝非 owner。群里的审批只限 owner | ② M2 | 按推荐（2026-10-19） |
+| Q7 | ② 的 `unknown` 投递：确认参考实现不自动重发，只提供手动重发入口？ | 确认 | ② M3 | 按推荐（2026-10-19） |
+| Q8 | 是否把 SIGKILL 恢复套件扩展到 Linux CI（④ F4）？它是 ⑥ 的前置条件 | 先调查原因，再决定 | ④ F4、⑥ C0 | 按推荐（2026-10-19） |
