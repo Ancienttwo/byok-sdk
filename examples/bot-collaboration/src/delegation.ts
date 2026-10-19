@@ -328,7 +328,7 @@ export function retryReply(d: Delegation, now: number, emit: Publish, uncertainA
   if (d.status !== 'uncertain' && now - (d.pendingSince ?? now) >= uncertainAfterMs) uncertain(d, now, emit);
 }
 
-function frame(label: string, meta: Record<string, unknown>, body: string): string {
+export function frame(label: string, meta: Record<string, unknown>, body: string): string {
   const line = canonical(meta);
   if (bytes(line) > REPLY_META_MAX_BYTES) throw new Error(`Delegation metadata exceeds ${REPLY_META_MAX_BYTES} bytes`);
   return `--- ${label} (${bytes(body)} bytes) ---\n${line}\n${body}\n--- end ${label} ---`;
