@@ -87,18 +87,26 @@ async function digest(filePath: string): Promise<string> {
   return createHash('sha256').update(await fs.readFile(filePath)).digest('hex');
 }
 
+/**
+ * An unbound loopback port below the OS ephemeral ranges (Linux 32768-60999,
+ * macOS and Windows 49152-65535). A released ephemeral port can go to another
+ * test worker's listen(0) before the owner probe, and the probe then fails
+ * closed. The kernel never assigns a port in this range by itself.
+ */
 async function unusedLoopbackPort(): Promise<number> {
-  const server = createServer();
-  const port = await new Promise<number>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      if (!address || typeof address === 'string') reject(new Error('test listener did not expose a TCP port'));
-      else resolve(address.port);
+  const first = 20_000 + (process.pid % 1_000) * 10;
+  for (let offset = 0; offset < 10_000; offset += 1) {
+    const port = 20_000 + ((first - 20_000 + offset) % 10_000);
+    const server = createServer();
+    const bound = await new Promise<boolean>((resolve, reject) => {
+      server.once('error', (err: NodeJS.ErrnoException) => (err.code === 'EADDRINUSE' ? resolve(false) : reject(err)));
+      server.listen({ host: '127.0.0.1', port, exclusive: true }, () => resolve(true));
     });
-  });
-  await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
-  return port;
+    if (!bound) continue;
+    await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    return port;
+  }
+  throw new Error('no unbound loopback port below the ephemeral ranges');
 }
 
 describe('diagnostics collector', () => {
