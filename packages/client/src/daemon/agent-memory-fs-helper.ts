@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import path from 'node:path';
 
 import type { AgentHomeLease } from '../agent-home';
+import { verifyAgentMemoryFilesystemHelper } from './agent-memory-helper-release';
 import { AgentMemoryError, AgentMemoryRevisionConflictError } from './agent-memory';
 import type { AgentMemoryFilesystem, AgentMemoryFilesystemFileState } from './agent-memory-filesystem';
 
@@ -31,7 +32,7 @@ class HelperRevisionConflict extends Error {
 }
 
 function safeHelperPath(value: unknown): string {
-  if (typeof value !== 'string' || !path.isAbsolute(value) || value.length === 0 || /[\u0000\r\n]/u.test(value)) {
+  if (typeof value !== 'string' || !path.isAbsolute(value) || /[\u0000\r\n]/u.test(value)) {
     throw new AgentMemoryError('Agent memory filesystem helper must be an explicit absolute executable path');
   }
   return path.resolve(value);
@@ -111,8 +112,11 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
   private stderrBytes = 0;
   private closed = false;
   private fatalError: Error | undefined;
+  private readonly exited: Promise<void>;
+  private closing: Promise<void> | undefined;
 
   private constructor(private readonly child: ChildProcessWithoutNullStreams) {
+    this.exited = new Promise(resolve => { child.once('exit', () => resolve()); child.once('error', () => resolve()); });
     child.stdout.on('data', (chunk: Buffer | string) => this.handleStdoutChunk(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
     child.stderr.on('data', (chunk: Buffer | string) => {
       this.stderrBytes += Buffer.byteLength(chunk);
@@ -127,7 +131,7 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
 
   static async open(input: Readonly<{ helperBin: string; canonicalHome: string; homeIdentity: AgentHomeLease['homeIdentity'] }>): Promise<AgentMemoryFilesystemHelperClient> {
     if (!helperPlatformSupported()) throw new AgentMemoryError('Agent memory filesystem helper is not admitted on this platform');
-    const helperBin = safeHelperPath(input.helperBin);
+    const helperBin = verifyAgentMemoryFilesystemHelper(safeHelperPath(input.helperBin));
     const child = spawn(helperBin, ['serve'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: false,
@@ -188,24 +192,33 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
     return Object.freeze([...result.paths] as string[]);
   }
 
-  async close(): Promise<void> {
-    if (this.closed) return;
+  close(): Promise<void> {
+    if (this.closing !== undefined) return this.closing;
     this.closed = true;
+    this.closing = this.closeAndWait();
+    return this.closing;
+  }
+
+  private async closeAndWait(): Promise<void> {
     try {
-      if (this.child.exitCode === null && this.child.signalCode === null && this.fatalError === undefined) await this.requestWhileClosing('close', {});
+      if (this.child.exitCode === null && this.child.signalCode === null && this.fatalError === undefined) await this.requestInternal('close', {});
     } finally {
       this.child.stdin.end();
-      if (this.child.exitCode === null && this.child.signalCode === null) this.child.kill();
+      if (this.child.exitCode === null && this.child.signalCode === null) {
+        let timer: NodeJS.Timeout | undefined;
+        try {
+          await Promise.race([this.exited, new Promise<void>(resolve => {
+            timer = setTimeout(() => { this.child.kill('SIGKILL'); resolve(); }, 1_000);
+          })]);
+          await this.exited;
+        } finally { if (timer !== undefined) clearTimeout(timer); }
+      }
       this.rejectPending(new AgentMemoryError('Agent memory filesystem helper is closed'));
     }
   }
 
   private request(op: string, fields: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
     if (this.closed) return Promise.reject(new AgentMemoryError('Agent memory filesystem helper is closed'));
-    return this.requestInternal(op, fields);
-  }
-
-  private requestWhileClosing(op: string, fields: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
     return this.requestInternal(op, fields);
   }
 
