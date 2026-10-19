@@ -6,7 +6,8 @@ recommended on 2026-10-19 14:59 HKT (§13). A Codex read-only review
 (`_ops/bot-wo/REV-K8B-cross-bot-plan-codex.md`: 7 P1, 4 P2, no P0) found
 gaps. This revision fixes the technical findings. Aimpact reopened and
 decided Q7, Q8 and Q10 on 2026-10-19 ~15:07 HKT (§13.1). §13.2 lists each
-finding and its state.
+finding and its state. Aimpact set the `cancel_delegation` item cap and
+approved this plan on 2026-10-19 16:01 HKT (§13, Q12).
 Implementation waits for the dependencies in §11.
 Baseline: `origin/main@5b988a6e`. In-flight inputs: #532
 (`codex/bot-k4-host-execution-core@260570ae`; the first draft read
@@ -815,8 +816,9 @@ Cross-Bot Turn blocks because of its size.
     reason `main_bot_cancelled`. A delegation that is already resolved gives
     a rejected action (`already_resolved`) in the Main Bot's next
     ContextPack.
-  - The item cap goes into `BOT_TURN_OUTCOME_LIMITS` in the XS PR. It needs
-    the same Aimpact limit confirmation as #525.
+  - Item cap: at most 2 items per outcome, the same as `delegateMaxItems`
+    (Q12, Aimpact 2026-10-19 16:01 HKT). The XS PR adds it to
+    `BOT_TURN_OUTCOME_LIMITS` as `cancelDelegationMaxItems = 2`.
 - B's staged outcome is never applied after a cancel. K7 sends no document
   with a cancelled terminal.
 
@@ -880,7 +882,7 @@ them (§3.7).
 | Slice | Scope | Depends on | Acceptance (platform PRD §14.2 unless noted) |
 |---|---|---|---|
 | X1 Core delegation | Action order fix (§1.1, §3.1); `Delegation` row; `bot_request`/`bot_reply` sources; `Turn.authority` and the authority gate (§6.1); `addTurn` with hop and authority (§4.2); `to` enum (§2.2); apply checks (archived, duplicate, hop, room seat, one cross-Bot item per outcome, root admission `spent + reserved + reserve(1) ≤ 12` with the unit ledger (§6.2)); B ContextPack `delegation` block; `BOT_REPLY_MAX_BYTES` with the `consumeMessage` byte check; instruction encoding and construction check (§3.7); `consumeMessage`, `tasks.agentMessage` in the port type, `reply_pending`/`reply_held` and the reconcile loop (§3.3, §3.10); single reply Turn; refusal report Turn (§8.2); continuation chain on created successors (§3.6); projection events with revisions (§7) | #530, #531 | "A delegates to B on the same device"; "Host crashes after the delegation write and before submit"; "B's terminal or message is delivered twice"; "B fails or is interrupted, or no `submit_result`"; "outcome does not match the schema"; "chain exceeds the hop limit"; "over budget"; "B runs in its own conversation"; "Main Bot changes B's profile during a delegation"; "security: normal Bot schema". Added: (a) normal A → Main Bot B → B continues itself → no management fragments, and apply refuses management from an older offer; (b) hop 4 → self continuation → external delegate → `refused` (hop 5); (c) every refused item of an outcome → one refusal report Turn, whose schema has no `delegate`; (d) the last allowed continuation proposes another one → refused → verdict from this Turn's accepted reply; (e) B success terminal with no other open work → `reply_pending` → `answered` without a K4 scan; held → `reply_held`, End → `abandoned`; (f) queued → running → answered publishes three events with no identity conflict; (g) a second cross-Bot item → `fan_out_not_enabled`; (h) the §3.7 worst-case generator: every encoded instruction ≤ `instructionMaxBytes`, no Cross-Bot Turn blocks, `executions.submit` accepts it; a budget below the computed minimum is refused at construction; (i) spent 11 with no open reservation → refusal report starts with the last unit; free balance 0 → refusal report is delivery only; (j) unit ledger: replayed apply, claim and verdict events change no unit twice; `spent + reserved ≤ 12` after every transaction |
-| XS SDK fragment | `@byok-sdk/protocol`: `botTurnOutcomeFragments.cancelDelegation({ delegationIds })`, `'cancel_delegation'` in `BotTurnOutcomeKind`, `CancelDelegationAction { delegationId }`, `BotTurnOutcome.cancel_delegation?`, an item cap in `BOT_TURN_OUTCOME_LIMITS`; composition bound tests (≤ 65 536 bytes); api-surface golden; spec section "Bot turn outcome fragments and routine time points"; `bun run check:release-pack` | none | The fragment passes the K7 subset check. Composed schemas with the fragment stay within the outcome bound. The api-surface diff shows only the additions |
+| XS SDK fragment | `@byok-sdk/protocol`: `botTurnOutcomeFragments.cancelDelegation({ delegationIds })`, `'cancel_delegation'` in `BotTurnOutcomeKind`, `CancelDelegationAction { delegationId }`, `BotTurnOutcome.cancel_delegation?`, `cancelDelegationMaxItems = 2` in `BOT_TURN_OUTCOME_LIMITS` (Q12); composition bound tests (≤ 65 536 bytes); api-surface golden; spec section "Bot turn outcome fragments and routine time points"; `bun run check:release-pack` | none | The fragment passes the K7 subset check. Composed schemas with the fragment stay within the outcome bound. The fragment rejects a third item. The api-surface diff shows only the additions |
 | X2 Wait, cancel, uncertain | Verdict mapping (§8.1); `cancelDelegation`, `abandonDelegation`; cancel fact in the arbitration transaction, cancel without an intent, cancel redelivery after a crash (§8.8); cancel versus acceptance; `cancelGraceMs`, `uncertainAfterMs`; late terminals to audit | X1 | "B drops while running; cancel finds no terminal → uncertain, no resubmit; user ends it → `abandoned`; later terminal → audit only"; cancel before acceptance → `cancelled`, no reply; acceptance before cancel → `cancelled` with a partial reply. Added: cancel while the target waits for persona readback → `cancelled`, no `core.cancel` call; crash after the arbitration commit and before `core.cancel` → restart delivers the cancel to the frozen target |
 | X2M Main Bot cancel | Apply `cancel_delegation` (§8.8): enum of open delegations with the hidden-count notice, authority and room-seat checks, `main_bot_cancelled`, `already_resolved` | XS, X2 | A Main Bot with `authority = owner` cancels a running delegation → one `cancelled` verdict, A receives one report. A normal Bot schema and a Main Bot `bot_request` schema have no `cancel_delegation`. A resolved target → rejected action, no second verdict |
 | X3 Fan-in join | Two cross-Bot items per outcome; batch reply Turn; no empty batch; uncertain release; late single report; `reserve(n) = n + max(n, 1)`, root admission over all open reservations, A slot release after each report (§6.2) | X2 | Fan-out of 2 gives one A execution with both verdicts. One uncertain sibling releases the batch; its later verdict gives exactly one extra A Turn. Both uncertain → no batch Turn. Spent 8 + fan-out 2 with no open reservation → reserve 4; with one late report the total is 12, never 13. Spent 9 + fan-out 2 → index 1 refused, total ≤ 11. After a join with no late report, one A slot is released. Interleaved batches (§6.2 example): the second fan-out is cut to 1, the committed total stays ≤ 11, and the old late report starts. A randomized interleaving test of two batches with verdicts, uncertain items, late reports, claims and replays keeps `spent + reserved ≤ 12` after every transaction, and every reserved report can start |
@@ -951,6 +953,7 @@ review, Aimpact reopened Q7, Q8 and Q10 and decided them again on 2026-10-19
 | Q9 | When does a delegation become uncertain? | Cancel requested with no terminal for 60 s, or claimed with no terminal for 30 min | Decided (Aimpact, 2026-10-19 14:59 HKT) | It is display-only and enables "End"; 30 min avoids marking normal long runs as uncertain |
 | Q10 | How does a delegation count against the per-root budget of 12? | Prepay the worst case at acceptance: `reserve(n) = n + max(n, 1)` for `n` accepted cross-Bot items, which covers late reports after an uncertain sibling. Admission is root-level: `spent + all unreleased reserves + reserve(n) ≤ 12`; a claim moves a unit from reserved to spent. Release a unit only when it can no longer be needed. A refusal report Turn uses one unit; with no free unit it is delivery only (§6.2) | Decided (Aimpact, 2026-10-19 ~15:07 HKT reopen) | `n + 1` did not cover a late report (Codex P1-3); this formula keeps every report deliverable within 12 |
 | Q11 | Is two-process Topology L sync in K8b? | No. K8b documents the relay contract; the Host service implements it downstream | Decided (Aimpact, 2026-10-19 14:59 HKT) | The §14.2 rows run in one ledger; the sync transport is Host-service work, as for K4 (Q19) |
+| Q12 | What is the `cancel_delegation` item cap per outcome? | 2, the same as `delegateMaxItems` (`cancelDelegationMaxItems = 2`) | Decided (Aimpact, 2026-10-19 16:01 HKT) | It matches the fan-out cap, so one Main Bot outcome can cancel a full fan-out |
 
 Follow-up: Q2 needs a separate PRD docs PR for platform PRD §9.4 item 3. The
 reply Turn key becomes `H('bot_reply', A.taskId)` for a fan-out batch. A
@@ -972,6 +975,9 @@ This PR does not edit the PRD.
   it can no longer be needed. A
   refusal report uses one unit, or is delivery only when no unit is free
   (§6.2).
+- Q12 (Aimpact, 2026-10-19 16:01 HKT): `cancel_delegation` allows at most 2
+  items per outcome, the same as `delegateMaxItems`. Aimpact also approved
+  this plan at that time.
 
 ### 13.2 Codex review findings
 
