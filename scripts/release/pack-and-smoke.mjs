@@ -335,7 +335,7 @@ try {
   }
   mkdirSync(outDir, { recursive: true });
   run(nodeBin, ['scripts/release/check-package-graph.mjs']);
-  run(bunBin, ['run', 'build']);
+  run(bunBin, ['run', 'build:release']);
   run(nodeBin, ['scripts/api-surface/check-api-surface.mjs']);
   const smokeImports = runtimeSmokeImports(repoRoot);
 
@@ -537,6 +537,7 @@ try {
           `${installedAgentVersion.stdout}${installedAgentVersion.stderr}`,
       );
     }
+    console.log(run(nodeBin, [path.join(repoRoot, 'packages/client/scripts/packed-agent-memory-helper-smoke.mjs'), smokeDir]));
     console.log(run(nodeBin, [path.join(repoRoot, 'packages/client/scripts/packed-cli-mcp-smoke.mjs'), '--install-root', smokeDir]));
     const expectedAgentVersionOutput = `${clientManifest.version}\n`;
     if (installedAgentVersion.stdout !== expectedAgentVersionOutput || installedAgentVersion.stderr !== '') {

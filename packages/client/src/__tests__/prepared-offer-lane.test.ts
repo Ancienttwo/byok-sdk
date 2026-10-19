@@ -192,7 +192,7 @@ const MODEL: InputPreparationModelV1 = {
 
 /** The SDK memory helpers and an external secure-fs helper, as a memory-capable daemon configures them. */
 const MEMORY_BINS = {
-  agentMemoryFilesystemHelperBin: '/external/proved-agent-memory-helper',
+  resolveAgentMemoryFilesystemHelperBin: () => '/external/proved-agent-memory-helper',
   agentMemoryMcpBin: { command: '/sdk/agent-memory-mcp', args: [] },
   agentMemoryDescribeBin: { command: '/sdk/agent-memory-describe', args: [] },
 } as const;

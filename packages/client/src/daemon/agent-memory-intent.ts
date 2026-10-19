@@ -40,6 +40,7 @@ import {
 } from './agent-memory';
 import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
 import { openAgentMemoryFilesystemHelper } from './agent-memory-fs-helper';
+import { verifyAgentMemoryFilesystemHelper } from './agent-memory-helper-release';
 import { snapshotPlainData } from '../util/plain-data';
 
 /**
@@ -175,23 +176,17 @@ export const NATIVE_AGENT_MEMORY_INTENT_BACKEND: AgentMemoryIntentBackend = Obje
   strictLedgerBarrier: true,
 });
 
-/**
- * External macOS helper backend. The helper binary is product-deployed and the
- * SDK cannot prove, in this repository and at runtime, that the configured
- * binary orders its revision conflict before the rename or that its successful
- * `replace` includes a strict directory fsync. Both proofs are therefore
- * absent: this backend never advertises intents, and a conflict on it would be
- * reported as `uncertain`.
- */
+/** SDK release helper: verified Mach-O code, strict barriers, pre-rename CAS. */
 export function helperAgentMemoryIntentBackend(helperBin: string): AgentMemoryIntentBackend {
+  const verifiedBin = verifyAgentMemoryFilesystemHelper(helperBin);
   return Object.freeze({
     openFilesystem: (lease: AgentHomeLease) => openAgentMemoryFilesystemHelper({
-      helperBin,
+      helperBin: verifiedBin,
       canonicalHome: lease.canonicalHome,
       homeIdentity: lease.homeIdentity,
     }),
-    conflictProvesNoRename: false,
-    strictLedgerBarrier: false,
+    conflictProvesNoRename: true,
+    strictLedgerBarrier: true,
   });
 }
 

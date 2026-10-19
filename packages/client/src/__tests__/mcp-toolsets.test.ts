@@ -800,7 +800,7 @@ describe('TaskRunner host toolset context nonce injection', () => {
     const sent: Envelope[] = [];
     const runner = await agentRunner(adapter, sent, twoToolsets, {
       agentMemoryMcpBin: { command: 'node', args: ['memory-mcp.js'] },
-      ...(process.platform === 'darwin' ? { agentMemoryFilesystemHelperBin: '/opt/byok-agent-memory-fs' } : {}),
+      ...(process.platform === 'darwin' ? { resolveAgentMemoryFilesystemHelperBin: () => '/opt/byok-agent-memory-fs' } : {}),
     });
 
     await offerAgentTask(runner, 'task-reserved-clean', ['salesko.read.v1']);
