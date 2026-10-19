@@ -159,7 +159,7 @@ Counters live in the beta server's ledger. The existing per-device `rateLimit` s
 Idempotency:
 
 - `taskId = H(keyId, clientRequestId)` when the client sends `clientRequestId`.
-- Without it, `taskId = H(keyId, sha256(canonical arguments), window)`. The window is 15 minutes, and the server keeps the first `taskId` of a window in its ledger. A client retry of the same call therefore returns the same task with `deduplicated: true`. No model-chosen key is needed (#539 ask b). A deliberate repeat inside the window needs a different `clientRequestId`.
+- Without it, `taskId = H(keyId, sha256(canonical arguments), window)`. The window is 15 minutes, and the server keeps the first `taskId` of a window in its ledger. A client retry of the same call therefore returns the same task with `deduplicated: true`. No model-chosen key is needed (#539 ask b). A deliberate repeat inside the window needs a different `clientRequestId`. The `byok_task_submit` description tells the model this: for a deliberate rerun (for example, the user says "run it again") within 15 minutes, send a new `clientRequestId`, or the old task comes back.
 - The server calls `dispatch` with that pre-persisted `taskId`. A kernel conflict on retry is resolved by reading the task back, as `executions.submit` documents.
 - Routine occurrences use `H(routineId, version, t)`; `routine_create` is idempotent on `(keyId, localId)`.
 
@@ -216,7 +216,7 @@ Each item needs a command output, a recorded run, or a `file:line` before slice 
 | Q1 | Memory boundary | External Bot owns its conversation memory. byok owns tasks, artifacts and its own Agent-home memory. Confirm. |
 | Q2 | What is the per-Bot "key"? | A new Host-side byok bot key (§4). `packages/keys` stays for model-provider credentials on the device. Confirm. |
 | Q3 | Where does the beta live? | `examples/byok-mcp-server` (copy-and-own) on the public server API; only the HTTP framing goes into the SDK. Lift into a package after a second user. |
-| Q4 | Identity mapping | A key binds to allowed devices and runtimes. Memory and routines also need one `AgentRef` per key. Without an `AgentRef`, the key gets task tools only. |
+| Q4 | Identity mapping | A key binds to allowed devices and runtimes. Memory and routines also need one `AgentRef` per key. Without an `AgentRef`, the key gets task tools only. Hermes keys need an `AgentRef`, because #539 moves Hermes scheduled work from Hermes cron to `byok_routine_*`. |
 | Q5 | Public reachability for Grok Bot | The Host needs a public HTTPS URL. A Topology L Host on a laptop needs a relay or tunnel; AiphaBee's hosted Worker MCP is the existing pattern. |
 | Q6 | Idempotency without a client key | Arguments hash plus a 15-minute window, with optional `clientRequestId` (§5). |
 | Q7 | Quota defaults | §5 table. |
