@@ -492,3 +492,16 @@ spec 修改：P1 加 README 链接；P2 改平台句子；K8-S 加 outcome 片�
 未裁定的产品重签策略、NTFS 故障模型和上限数值仍保持原状态。此次验收列出的长记录策略（§6 与 §11）、未点名消息隐私、后来加入成员的可见范围，以及 Q5/Q6 也保持待 Aimpact 裁定。
 
 [#195]: https://github.com/Ancienttwo/byok-sdk/issues/195
+
+---
+
+## PRODUCT RULINGS 2026-10-19 (Aimpact approved 12:43 SGT)
+
+Source: Aimpact approval batch. Also mirrored at `_ops/bot-wo/PRODUCT-RULINGS-2026-10-19.md` (local ops).
+
+1. **History / context window** — recent-N truncate by token budget with an explicit truncation notice; do **not** block-when-full.
+2. **Non-@ messages** — may enter model context as background only; must **not** trigger a reply.
+3. **Late-joining Bots** — see only messages after join (no older history).
+4. **K4 sequencing** — separate PR first (`codex/bot-k4-host-execution-core`, Draft #532); then restack #529/#530/#531 onto it; remove squashed K4 copy from #529.
+5. **Cross-Bot delegation** — defer until after #530+#531 land; first WO of K8b.
+6. **#525 hold** — `BOT_TURN_OUTCOME_LIMITS` public API freeze pending Aimpact confirm of numeric caps; do not merge #525 until PM confirms.
