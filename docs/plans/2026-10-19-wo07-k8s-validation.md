@@ -135,12 +135,12 @@ budgets therefore changed with the two direct package budgets.
 
 ## Dependency and limits
 
-WO-368 owns `MAX_FUTURE_MS` and the two wake horizon assertions.
-WO-368 commit `6042c8f1` exists on `codex/wake-horizon-368`. It is not in this
-branch. This slice does not change those files. On this baseline the server still has a
-366-day wake limit. A 368-day core horizon therefore needs WO-368 before Host
-integration. The new spec section states the core contract. The existing wake
-queue paragraph retains the baseline limit for WO-368 to update.
+WO-368 (#523) is now included through PM merge `6190f3cd` and local ordinary
+merge `9ebfa8e2`. Its landed commit is `706ed9ef`. The server constant is now
+exported as `WAKE_MAX_FUTURE_MS` and equals 368 days. The updated wake horizon
+assertions are also included. The spec and core use the same 368-day horizon.
+The merge-order dependency is satisfied and is no longer a blocker. No further
+runtime or limit-value edits are part of this synchronization.
 
 Core resolution uses the engine's ICU data. It assumes a gap of at most one day
 and at most one offset change in the resolution window. The measured zone and
@@ -188,16 +188,17 @@ Removing the Bot export would remove the requested Host API. A consumer bundle
 size claim would require a separate application build. The PR body records the
 static closure cost instead of claiming such a measurement.
 
-Merge order: PR #523 first, then PR #525, then the WO-10 consumer PR #530.
-PR #523 was still OPEN when checked in this follow-up. Do not merge main into
-this branch. The horizon parity test remains conditional on #523 reaching main.
-No server horizon constant or wake assertion changes in this follow-up.
+At the earlier acceptance follow-up, PR #523 was still OPEN and this branch
+did not include it. That merge-order concern is superseded by the remote
+synchronization below: #523 is now included through `6190f3cd`. The earlier
+follow-up itself did not change the server horizon or wake assertions.
 
 A real-path probe uses yearly March 10 at 12:00 in `America/New_York`.
 From `2031-03-10T16:00:00Z`, core returns `2032-03-10T17:00:00Z`.
 The gap is 31,626,000,000 ms: 366 days plus one hour.
-The current server's 366-day bound rejects that instant with
-`WAKE_AVAILABLE_AT_INVALID`. PR #523 must land before this Host integration.
+The pre-sync server's 366-day bound rejected that instant with
+`WAKE_AVAILABLE_AT_INVALID`. The included #523 raises the bound to 368 days,
+so that example no longer exceeds the server horizon.
 
 PENDING-AIMPACT: confirm `BOT_TURN_OUTCOME_LIMITS` before merge.
 Those proposed limits are frozen public API values and are enforced by the
@@ -229,7 +230,7 @@ or change its Draft status. The text below is staged for Aimpact to publish.
 
 ### PR body additions
 
-Merge dependency (P2-1): #523 (WO-368) must merge before #525 or in the same batch. It changes server `MAX_FUTURE_MS` to 368 days and updates the two horizon assertions in `wakes.test.ts`. Otherwise, the 366-day server bound at `packages/server/src/wakes/types.ts:42` conflicts with the 368-day spec and core horizon (`docs/spec.md:458` in the reviewed revision). For yearly March 10 at 12:00 in `America/New_York`, core returns `2032-03-10T17:00:00Z` from `2031-03-10T16:00:00Z`. The gap is 366 days plus one hour. The server then rejects the wake with `WAKE_AVAILABLE_AT_INVALID`. This branch does not change the server bound or those wake assertions.
+Included dependency (P2-1): This branch now includes #523 (WO-368) through PM merge `6190f3cd`, preserved by local merge `9ebfa8e2`. The server constant is now exported as `WAKE_MAX_FUTURE_MS` and equals 368 days. The two wake horizon assertions are included. The spec and core also use 368 days. The requirement to merge #523 first is satisfied; merge order is no longer a blocker. The New York yearly example has a 366-day-plus-one-hour gap and now fits the server bound. This synchronization makes no further runtime or limit-value edits.
 
 Test assertion changes (P3-8): `packages/core/src/__tests__/constraints.test.ts` has two deliberate allowlist additions. First, add module `./routine-schedule` so the root can expose the new pure helper module. Second, add six runtime exports: `ROUTINE_DAYS_OF_WEEK`, `ROUTINE_HORIZON_MS`, `ROUTINE_MIN_NOW`, `ROUTINE_MAX_NOW`, `checkRoutineSchedule`, and `nextRoutineOccurrence`. The tests still require exact module and export lists. Dependency and clock restrictions remain in place. No assertion was removed or relaxed.
 
@@ -270,8 +271,10 @@ Test assertion changes (P3-8): `packages/core/src/__tests__/constraints.test.ts`
   pure Host calendar contract next to the one-shot wake boundary that consumes
   its instants. The durable-lane text already points readers to this section.
   Moving it would add diff without changing the contract.
-- Item 9: Leave the server's 366-day constant and `wakes.test.ts` unchanged.
-  They remain owned by #523. Proposed `BOT_TURN_OUTCOME_LIMITS` also stay
+- Item 9: The closure round left the server constant and `wakes.test.ts`
+  unchanged. They now contain the #523 changes imported by PM merge
+  `6190f3cd`: a 368-day `WAKE_MAX_FUTURE_MS` and updated assertions.
+  No further runtime edits are made. Proposed `BOT_TURN_OUTCOME_LIMITS` stay
   unchanged and PENDING-AIMPACT.
 
 ### This round's verification
@@ -295,4 +298,43 @@ The two paragraphs under `PR body additions` match
 `/Users/chris/Projects/byok-sdk/_ops/bot-wo/PR-525-body.md` exactly.
 This local file is prepared for Aimpact. No push or `gh pr edit` runs here.
 Logs are in this worktree under `_ops/wo07-closure/`: `typecheck.log`,
+`api-surface.log`, `protocol-test.log`, and `core-test.log`.
+
+
+## Remote branch synchronization (2026-10-19)
+
+Ran `git fetch origin` and
+`git merge --no-ff origin/codex/k8s-outcome-fragments` on this branch.
+Merge commit: `9ebfa8e2384525193646c20a261df9635857723c`.
+Parents: local `4453f0ec` and remote `6190f3cd`.
+The ordinary merge completed without conflicts. No rebase or force push ran.
+The PM history includes #523 and #518. Its runtime and dependency changes are
+kept as merged. The local follow-up edits only this validation document and the
+staged PR body file. No further runtime code or limit values change.
+
+The merged spec already states 368 days in both the routine horizon and the
+embedded wake queue sections. Searching `docs/spec.md` for `366` finds no
+matches. No further spec edit is needed. The 366-day-plus-one-hour interval in
+the historical New York example is an actual time gap, not a stale limit.
+
+`bun ci` aligned the installed dependencies with the merged lockfile.
+`bun run build` rebuilt all workspace dist files before the checks below.
+Both commands completed with exit 0.
+
+| Check after merge | Exit code | Result |
+| --- | ---: | --- |
+| `git diff --check` | 0 | Passed. |
+| `bun run typecheck` | 0 | All workspaces passed. |
+| `bun run check:api-surface` | 0 | All nine declaration goldens and entry policies passed. |
+| `packages/protocol`: `bun run test` | 0 | 33 files, 1,333 tests passed. |
+| `packages/core`: `bun run test` | 0 | 16 files, 454 tests passed. |
+
+A source-level probe also completed with exit 0. It checked
+`WAKE_MAX_FUTURE_MS === ROUTINE_HORIZON_MS` and passed the New York yearly
+instant through `validateWakeInput`. The instant is accepted after this merge.
+No new parity test or runtime change is introduced by that read-only probe.
+The root full test suite is not rerun; the requested package suites run in full.
+No push or PR edit is part of this synchronization.
+
+Local logs: `_ops/wo07-sync/install.log`, `build.log`, `typecheck.log`,
 `api-surface.log`, `protocol-test.log`, and `core-test.log`.
