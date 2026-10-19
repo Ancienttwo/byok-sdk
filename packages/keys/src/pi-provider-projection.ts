@@ -51,12 +51,13 @@ export function piProjectionProviderId(profileRef: string): string {
  * The projected provider is namespaced by the profile's own ref, not by its
  * provider kind, so two independently configured endpoints of the same kind
  * project to two distinct Pi providers instead of colliding on one. Model
- * `input` modalities are projected from the profile's declared capabilities —
- * declared local configuration is the only authority; nothing is inferred from
- * the model name or base URL.
+ * `input` modalities are projected from the profile's declared capabilities,
+ * and the provider `api` from the adapter and `pi_model.api` — declared local
+ * configuration is the only authority; nothing is inferred from the model name
+ * or base URL.
  */
 export function buildPiProviderProjection(profile: ModelProviderProfile, runtimeEntry: PiLauncherRuntimeEntry): object {
-  const { thinkingLevel: _, ...modelSettings } = requirePiModelConfig(profile);
+  const { thinkingLevel: _, api, ...modelSettings } = requirePiModelConfig(profile);
   const projectedProviderId = piProjectionProviderId(profile.profile_ref);
   return {
     providers: {
@@ -65,7 +66,7 @@ export function buildPiProviderProjection(profile: ModelProviderProfile, runtime
         api:
           profile.adapter === 'anthropic'
             ? 'anthropic-messages'
-            : 'openai-completions',
+            : (api ?? 'openai-completions'),
         apiKey: piApiKey(profile, runtimeEntry),
         ...(profile.auth_mode === 'bearer' ? { authHeader: true } : {}),
         models: [

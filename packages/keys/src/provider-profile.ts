@@ -195,6 +195,13 @@ export const ModelProviderProfileSchema = z
         path: ['auth_mode'],
       });
     }
+    if (profile.adapter === 'anthropic' && profile.pi_model?.api !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Anthropic profiles project anthropic-messages and declare no Pi api',
+        path: ['pi_model', 'api'],
+      });
+    }
     const vendor = modelProviderVendor(profile.provider_kind);
     if (vendor !== undefined && vendor.adapter !== profile.adapter) {
       ctx.addIssue({
