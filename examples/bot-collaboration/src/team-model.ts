@@ -18,7 +18,7 @@ export interface Round {
 export interface Seat {
   id: string; roundId: string; botId: string;
   status: 'waiting' | 'queued' | 'running' | 'late' | 'post' | 'pass' | 'failed' | 'busy' | 'removed' | 'blocked';
-  released: boolean; deadline?: number; startedAt?: number; late: boolean; reason?: string;
+  triggerMessageId?: string; released: boolean; deadline?: number; startedAt?: number; late: boolean; reason?: string;
 }
 export interface HomeOperation {
   sequence: number; botId: string; request: AgentHomeProjectionRequest;

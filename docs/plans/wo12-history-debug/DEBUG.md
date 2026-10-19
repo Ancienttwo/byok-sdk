@@ -39,3 +39,43 @@ H2. It does not prove that every integration failure has that cause. No
 production fix, timeout change, or assertion relaxation was made in response.
 H3 has no separate confirming evidence. The worker had exited before its
 ledger could be read. Keep the failed logs and retry when conditions improve.
+
+## Large-request observation and bounded experiment
+
+After pressure eased, the 101-entry speech and late-join/rejoin/frozen-offer
+integrations passed. The large-current-request case still failed. A temporary
+four-line diagnostic found its room intent inflight and delivered, with an
+SDK attempt still offered, no claimed owner, connection open, and zero active
+tasks. This is not enough to attribute that failure to host pressure. The
+failure occurs before the new history assertions.
+
+E4 changes only the current text from 18,000 emoji (72,000 UTF-8 bytes) to
+72,000 ASCII characters. The byte size stays the same. A pass supports an
+encoding-sensitive delivery problem. The same offered/no-claim outcome rejects
+that hypothesis. All assertions and deadlines stay unchanged. Restore the
+original Unicode data and remove diagnostic logging after the experiment.
+
+
+E4 result: the equal-byte ASCII control passed the complete SDK case in 7.67
+seconds. The original Unicode case is restored. No data substitution is kept
+to obtain a passing result. This supports an encoding-sensitive delivery issue,
+but does not prove its mechanism. The large Unicode offer is persisted as
+`offered`, remains unclaimed with connection open and activeTaskCount zero.
+No SDK code is changed under this history-only scope.
+The test now checks its frozen offer and complete Request before waiting for
+device claim. All original assertions and deadlines remain. This separates
+history admission evidence from the later SDK dispatch result. Temporary
+`HISTORY_DIAG` writes are removed.
+
+## Conclusion
+
+The history selection loop is not the observed long-run cause: pure tests
+passed, then the required count, byte-history, and membership SDK cases passed.
+The latest four-case SDK run has three passes and one remaining Unicode claim
+failure. The complete Unicode Request and cropped ContextPack assertions pass
+before that wait. The failure mechanism remains unconfirmed. No SDK production
+fix is made. Keep the original failing test and report validation as partial.
+
+The root typecheck failure is separately confirmed as the existing renamed
+wake constant import in routines.test.ts. It is the owner-deferred P1-1 and is
+not changed under this history work order.

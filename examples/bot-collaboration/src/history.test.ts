@@ -36,6 +36,10 @@ it('uses actual UTF-8 JSON bytes and keeps a suffix of complete messages without
   expect(context.historyWindow.omittedMessages).toBe(20 - context.room.messages.length);
   expect(context.historyWindow.notice).toContain('Earlier history was omitted');
   expect(Buffer.byteLength(JSON.stringify(context), 'utf8')).toBeLessThanOrEqual(HISTORY_MAX_BYTES);
+  const expanded = structuredClone(context);
+  expanded.room.messages.unshift(saved[saved.length - context.room.messages.length - 1]!);
+  expanded.historyWindow.omittedMessages--;
+  expect(Buffer.byteLength(JSON.stringify(expanded), 'utf8')).toBeGreaterThan(HISTORY_MAX_BYTES);
   expect(state.team.rooms.r!.messages).toEqual(saved);
 });
 
@@ -53,7 +57,7 @@ it('windows only this Bot private history and leaves the current request for the
   expect(context.turns.at(-1)!.id).toBe('old-149');
   expect(context.turns.some(t => t.id === turn.id)).toBe(false);
   expect(context.historyWindow.omittedTurns).toBe(150 - context.turns.length);
-  expect(context.historyWindow.notice).toContain('current request');
+  expect(context.historyWindow.notice).toContain('Earlier history was omitted');
   expect(Buffer.byteLength(JSON.stringify(context), 'utf8')).toBeLessThanOrEqual(HISTORY_MAX_BYTES);
   expect(JSON.stringify(context)).not.toContain('Other Bot secret');
   expect(state.turns[turn.id]!.request).toBe('CURRENT-' + '😀'.repeat(18000));
@@ -87,6 +91,8 @@ it('hides pre-join messages and an older round root request from a called late j
   expect(context.room.messages.map(m => m.text)).toEqual(['POST-JOIN-CALL']);
   expect(JSON.stringify(context)).not.toContain('PRE-JOIN-SECRET');
   expect(late.request).not.toContain('PRE-JOIN-SECRET');
+  expect(JSON.parse(late.request).request).toBe('POST-JOIN-CALL');
+  expect(JSON.stringify(context)).not.toContain('visibleFrom');
   expect(first.request).toContain('PRE-JOIN-SECRET');
   expect(state.team.rooms.r!.messages).toHaveLength(2);
 });
@@ -113,6 +119,76 @@ it('reports required metadata overflow without pruning authority or hard blockin
   if (!('room' in context)) throw new Error('Expected room context');
   expect(context.room.messages).toEqual([]);
   expect(context.historyWindow.metadataOverBudget).toBe(true);
+  expect(context.historyWindow.omittedMessages).toBe(1);
+  expect(context.historyWindow.notice).toContain('Earlier history was omitted');
   expect(context.historyWindow.notice).toContain('Required non-history context exceeds');
   expect(context.teamNotes).toEqual(state.team.notes);
+});
+
+it('keeps exactly the newest 100 small private turns independently of the byte limit', () => {
+  const { state } = setup();
+  for (let i = 0; i < 150; i++) state.turns[`old-${i}`] = { id: `old-${i}`, root: `old-${i}`, botId: 'b1',
+    source: 'user', request: 'Small', hop: 0, status: 'succeeded' };
+  const turn: Turn = { id: 'current', root: 'current', botId: 'b1', source: 'user', request: 'Current', hop: 0, status: 'queued' };
+  const context = turnContext(state, turn);
+  if (!('turns' in context)) throw new Error('Expected private context');
+  expect(context.turns).toHaveLength(100);
+  expect(context.turns[0]!.id).toBe('old-50');
+  expect(context.turns.at(-1)!.id).toBe('old-149');
+  expect(context.historyWindow.omittedTurns).toBe(50);
+});
+
+it('does not claim an invisible pre-join request is present when a pass calls a later member', () => {
+  const { state, advance, membersAs } = setup(['b0', 'b1']);
+  const round = roomInput(state, 'old-root', 'r', 'PRE-JOIN-REQUEST', ['b0']); advance();
+  const first = state.turns[state.team.rounds[round]!.seats[0]!]!;
+  membersAs(['b0', 'b1', 'b2'], 'join');
+  applySpeech(state, first, { speech: { kind: 'pass' }, room_call: { members: ['b2'] } }, 'call', 0, (_kind, work) => work());
+  for (let i = 0; i < 101; i++) roomInput(state, `background-${i}`, 'r', `After join ${i}`, []);
+  advance();
+  const late = state.turns[state.team.rounds[round]!.seats[1]!]!;
+  const context = turnContext(state, late);
+  expect(JSON.parse(late.request)).not.toHaveProperty('request');
+  expect(JSON.stringify(context)).not.toContain('PRE-JOIN-REQUEST');
+  expect(JSON.stringify(context)).not.toContain('visibleFrom');
+  expect(context.historyWindow.notice).toBe('Earlier history was omitted.');
+});
+
+it('keeps an autonomous caller post in the frozen Request even after it leaves the recent message window', () => {
+  const { state, advance, membersAs } = setup(['b0', 'b1']);
+  const round = roomInput(state, 'old-root', 'r', 'PRE-JOIN-REQUEST', ['b0']); advance();
+  const seatId = state.team.rounds[round]!.seats[0]!;
+  membersAs(['b0', 'b1', 'b2'], 'join');
+  Object.assign(state.team.seats[seatId]!, { status: 'late', released: true, late: true });
+  state.team.rounds[round]!.closed = true;
+  applySpeech(state, state.turns[seatId]!, { speech: { kind: 'post', text: 'CURRENT CALLER REQUEST' }, room_call: { members: ['b2'] } },
+    'autonomous-call', 0, (_kind, work) => work());
+  for (let i = 0; i < 101; i++) roomInput(state, `background-${i}`, 'r', `New background ${i}`, []);
+  advance();
+  const called = Object.values(state.turns).find(t => t.botId === 'b2')!;
+  const context = turnContext(state, called);
+  if (!('room' in context)) throw new Error('Expected room context');
+  expect(JSON.parse(called.request)).toMatchObject({ request: 'CURRENT CALLER REQUEST', requestFrom: 'b0' });
+  expect(context.room.messages).toHaveLength(100);
+  expect(context.room.messages.some(message => message.text === 'CURRENT CALLER REQUEST')).toBe(false);
+  expect(context.historyWindow.omittedMessages).toBe(2);
+  expect(JSON.stringify(context)).not.toContain('PRE-JOIN-REQUEST');
+  expect(JSON.stringify(context)).not.toContain('visibleFrom');
+});
+
+
+it('inherits the visible caller post when an intermediate member passes and calls another member', () => {
+  const { state, advance } = setup();
+  const round = roomInput(state, 'root', 'r', 'Older root request', ['b0']); advance();
+  const first = state.turns[state.team.rounds[round]!.seats[0]!]!;
+  applySpeech(state, first, { speech: { kind: 'post', text: 'Current caller post' }, room_call: { members: ['b1'] } },
+    'first-call', 0, (_kind, work) => work());
+  advance();
+  const middle = state.turns[state.team.rounds[round]!.seats[1]!]!;
+  applySpeech(state, middle, { speech: { kind: 'pass' }, room_call: { members: ['b2'] } },
+    'pass-call', 0, (_kind, work) => work());
+  advance();
+  const last = state.turns[state.team.rounds[round]!.seats[2]!]!;
+  expect(JSON.parse(last.request)).toMatchObject({ request: 'Current caller post', requestFrom: 'b0' });
+  expect(state.team.rooms.r!.messages).toHaveLength(2);
 });

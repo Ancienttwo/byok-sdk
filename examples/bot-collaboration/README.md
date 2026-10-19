@@ -171,6 +171,9 @@ eligible messages. It drops oldest whole rows until the 64 KiB history byte
 budget fits. `historyWindow.notice` reports omitted messages and refusals.
 Overflow does not block a seat. The frozen Request section keeps the complete
 current request, even when that request is larger than the history budget.
+For room_call seats, the visible caller post is the current request and its
+author id is retained. A pass inherits the earlier visible trigger. This
+request is preserved even if it has left the recent message window.
 The ledger retains its full audit history. No Summary is generated. Authority
 enums and required control metadata are not silently truncated. If non-history
 metadata alone exceeds the budget, the notice reports that separate condition.

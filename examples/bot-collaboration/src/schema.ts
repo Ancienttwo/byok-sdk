@@ -57,7 +57,7 @@ export function outcomeSchema(botId: string, state: CollaborationState, turn?: T
 export function turnContext(state: CollaborationState, turn: Turn) {
   const team = state.team;
   const shared = { teamNotes: team.notes, roster: Object.values(team.bots).filter(b => !b.archived).map(b => ({ id: b.id, name: b.name, role: b.role, mainBot: b.mainBot })),
-    rejectedActions: state.rejected.filter(rejection => rejection.botId === turn.botId), rooms: Object.values(team.rooms).map(({ messages: _messages, ...room }) => room) };
+    rejectedActions: state.rejected.filter(rejection => rejection.botId === turn.botId), rooms: Object.values(team.rooms).map(({ messages: _messages, visibleFrom: _visibility, ...room }) => room) };
   const ownRejections = shared.rejectedActions;
   shared.rejectedActions = ownRejections.slice(-HISTORY_MAX_ITEMS);
   if (turn.source === 'room_slot') {

@@ -256,7 +256,7 @@ it('keeps a large current request intact outside the trimmed history and still p
   await host().roomInput('large-background', room.id, 'Old '.repeat(20000), []);
   const request = '😀'.repeat(18000) + ' CURRENT-END';
   const round = await host().roomInput('large-current', room.id, request, [profiles[0]!.id]);
-  const seat = seats(round)[0]!; await running(seat.id);
+  const seat = seats(round)[0]!;
   const offer = await fixture.server.tasks.offer(host().core.intent(seat.id)!.taskId);
   if (!offer || !('instruction' in offer.payload) || typeof offer.payload.instruction !== 'string') throw new Error('Missing room offer');
   const [requestSection, contextSection] = offer.payload.instruction.split('ContextPack:\n');
@@ -266,6 +266,27 @@ it('keeps a large current request intact outside the trimmed history and still p
   expect(context.historyWindow.notice).toContain('Earlier history was omitted');
   expect(context.historyWindow.omittedMessages).toBe(2);
   expect(Buffer.byteLength(contextSection!, 'utf8')).toBeLessThanOrEqual(65536);
+  await running(seat.id);
   await finish(seat.id, { speech: { kind: 'post', text: 'The complete current request was available.' } });
+  expect(seats(round)[0]!.status).toBe('post');
+});
+
+it('trims byte-heavy history and still posts for a normal current request', async () => {
+  fixture = await openTeam();
+  const { profiles, room } = await createTeam(); await ready(profiles);
+  await host().roomInput('byte-heavy-background', room.id, '😀'.repeat(20000), []);
+  const request = 'Answer the current small request';
+  const round = await host().roomInput('byte-heavy-current', room.id, request, [profiles[1]!.id]);
+  const seat = seats(round)[0]!;
+  const offer = await fixture.server.tasks.offer(host().core.intent(seat.id)!.taskId);
+  if (!offer || !('instruction' in offer.payload) || typeof offer.payload.instruction !== 'string') throw new Error('Missing room offer');
+  const contextText = offer.payload.instruction.split('ContextPack:\n')[1]!;
+  const context = JSON.parse(contextText);
+  expect(context.room.messages.map((message: { text: string }) => message.text)).toEqual([request]);
+  expect(context.historyWindow.omittedMessages).toBe(1);
+  expect(context.historyWindow.notice).toContain('Earlier history was omitted');
+  expect(Buffer.byteLength(contextText, 'utf8')).toBeLessThanOrEqual(65536);
+  expect(host().snapshot().turns[seat.id]).not.toHaveProperty('blocked');
+  await finish(seat.id, { speech: { kind: 'post', text: 'The byte window still permits speech.' } });
   expect(seats(round)[0]!.status).toBe('post');
 });

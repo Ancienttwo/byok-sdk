@@ -23,8 +23,8 @@ a later member's frozen request.
 ## P3 decisions
 
 Use the existing 100-entry count as a recent-message limit. Use the existing
-64 KiB value as the ContextPack history byte budget. Drop oldest whole history
-rows, then older refusal rows if necessary. Report every omission. The current
+64 KiB value as the ContextPack history byte budget. Drop older refusal rows first, then oldest whole history
+rows if necessary. Cache encoded row lengths and measure metadata once. Report every omission. The current
 request remains in the separate frozen Request section. Do not prune authority
 ids or control records to hide size. If required non-history metadata alone
 exceeds the budget, report it in the notice instead of a history block. K8a
@@ -68,3 +68,80 @@ No push, force push, PR edit, or routine-target implementation is authorized.
 
 These are product-contract changes, not changes to make an old failure pass.
 No timeout, retry, worker setting, unrelated assertion, or SDK limit is relaxed.
+
+
+## Read-only review corrections
+
+Round 1: Claude in Herdr pane `w9:p2X`, no file edits or tests. It accepted
+the changed block assertions as the explicit product ruling. It confirmed
+post-join filtering, both membership edit paths, and frozen offer selection.
+It asked to fix two Medium issues: the universal current-request claim in the
+notice, and the visibility offsets copied into the room catalogue.
+
+The notice now reports omission only. A called seat persists its triggering
+post id and freezes that visible post with its author in Request. A pass
+inherits the previous trigger. An invisible pre-join trigger is not copied.
+Context room catalogues omit visibleFrom. No join counts enter Agent context.
+The follow-up also prioritizes messages over older refusals, appends metadata
+notices instead of replacing omission notices, and caches serialized lengths.
+It adds an independent 100-small-turn count test and both call-trigger cases.
+The private-history notice assertion changes from a current-request text claim
+to the correct omission text. Its complete-current-request assertion remains.
+
+Byte accounting uses one serialization of metadata with empty selected arrays
+and an empty historyWindow object. Add each serialized row once, add commas
+between retained rows, and replace the two-byte window object with its current
+serialized length. Removing a row subtracts that row plus one comma only if
+another row remains. Each of at most 200 removals serializes only the small
+notice object. The output JSON byte tests compare this against the real JSON.
+
+## Final local result
+
+Implementation commit: `b23634ca`. It is followed by the review corrections
+and this validation record. No push or PR edit is performed.
+
+Round 2 read-only code verdict: PASS. The reviewer confirmed F1/F2 and the
+cached byte accounting. It did not run commands or tests in that round.
+Readbacks are `/tmp/wo12-history-review-round1.json` and
+`/tmp/wo12-history-review-round2.json`. The two optional test suggestions were
+then added without an implementation change: pass inherits a visible trigger;
+restoring the next omitted row exceeds the actual serialized byte budget.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| `bun ci` | Exit 0 | `/tmp/wo12-history-install.log` |
+| `bun run build` | Exit 0 | `/tmp/wo12-history-build.log` |
+| Latest pure history/room tests | 23/23; exit 0; 4.24 seconds | `/tmp/wo12-history-pure-verified.log` |
+| Final related SDK cases | 3 passed, 1 failed; exit 1; 25.45 seconds | `/tmp/wo12-history-integration-final.log` |
+| Root typecheck | Exit 1; only observed diagnostic is the existing MAX_FUTURE_MS import | `/tmp/wo12-history-checks/typecheck.log` |
+| Latest example typecheck | Exit 1; same existing import | `/tmp/wo12-history-example-typecheck-final.log` |
+| API surface | Exit 0; 9 goldens match | `/tmp/wo12-history-checks/api-surface.log` |
+| Version authority | Exit 0 | `/tmp/wo12-history-checks/version-authority.log` |
+
+The three passing SDK cases prove count-window speech, byte-window speech,
+and background/join/rejoin/frozen-offer behavior. Their assertions use the
+real daemon and submit_result helper. No model API call was made.
+
+The remaining SDK case preserves a 72,000-byte Unicode current request in
+its frozen offer and fits the selected ContextPack. Those assertions execute
+before the failed device-session wait. Its attempt remains offered and
+unclaimed, with connection open and zero active tasks. An equal-byte ASCII
+control passed; the original Unicode test is restored and still fails. The
+mechanism is not proven. No SDK code or test deadline is changed to hide it.
+See `wo12-history-debug/DEBUG.md`. Verification is therefore PARTIAL, not green.
+
+Earlier runs under host load above 500 had SDK session/readback timeouts.
+The failed four-file run and later focused attempts remain at
+`/tmp/wo12-history-focused-1.log`, `/tmp/wo12-history-related-retry.log`,
+and `/tmp/wo12-history-related-final.log`. Do not attribute the remaining
+Unicode failure only to that earlier pressure.
+
+P1-1 remains deferred as requested. Latest fetched origin/main `2e06fa91`
+does not contain `a1c1226e`. The code still awaits the accepted #530 merge for
+the renamed wake constant. No alias or value substitution is added here.
+Main Bot routine target remains deferred and documented in README.
+
+The final test-only ordering change moves the large-request offer assertions
+before the device-session wait. No assertion is removed or weakened. It makes
+the passing history-admission checks distinct from the later SDK claim failure.
+All temporary diagnostic logging and ASCII substitutions are removed.

@@ -9,7 +9,7 @@ import { HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS, historyWindow } from './history';
 export const ROOM_CONTEXT_BYTES = HISTORY_MAX_BYTES;
 export const ROOM_CONTEXT_MESSAGES = HISTORY_MAX_ITEMS;
 export type Mentions = readonly string[] | 'all';
-function reserve(team: TeamState, round: Round, botId: string): void {
+function reserve(team: TeamState, round: Round, botId: string, triggerMessageId?: string): void {
   const room = team.rooms[round.roomId]!;
   activeBot(team, botId);
   if (!room.members.includes(botId)) throw new Error('Called Bot is not a member');
@@ -18,9 +18,9 @@ function reserve(team: TeamState, round: Round, botId: string): void {
   const id = hash([round.id, round.seats.length, botId]);
   round.counts[botId] = (round.counts[botId] ?? 0) + 1;
   round.seats.push(id);
-  team.seats[id] = { id, roundId: round.id, botId, status: 'waiting', released: false, late: false };
+  team.seats[id] = { id, roundId: round.id, botId, status: 'waiting', released: false, late: false, ...(triggerMessageId ? { triggerMessageId } : {}) };
 }
-function newRound(team: TeamState, id: string, root: string, roomId: string, input: string, members: readonly string[]): Round {
+function newRound(team: TeamState, id: string, root: string, roomId: string, input: string, members: readonly string[], triggerMessageId?: string): Round {
   const room = team.rooms[roomId];
   if (!room) throw new Error('Room not found');
   const distinct = [...new Set(members)];
@@ -28,7 +28,7 @@ function newRound(team: TeamState, id: string, root: string, roomId: string, inp
   distinct.forEach(botId => { if (!room.members.includes(botId)) throw new Error('Mention is not a member'); activeBot(team, botId); });
   const round: Round = { id, root, roomId, input, seats: [], counts: {}, limit: distinct.length + 4 + (room.admin ? 4 : 0),
     ...(room.admin ? { admin: room.admin } : {}), closed: distinct.length === 0 };
-  distinct.forEach(botId => reserve(team, round, botId));
+  distinct.forEach(botId => reserve(team, round, botId, triggerMessageId));
   team.rounds[id] = round;
   return round;
 }
@@ -81,13 +81,14 @@ export function applySpeech(state: CollaborationState, turn: Turn, document: Bot
     if (new Set(members).size !== members.length) throw new Error('Duplicate room_call member');
     // A batch is atomic. Refusal must not consume any seat or round budget.
     const copy = structuredClone(team);
+    const triggerMessageId = document.speech?.kind === 'post' ? seat.id : seat.triggerMessageId;
     if (round.closed) {
       if (copy.roots[round.root]!.autonomous >= 3) throw new Error('Autonomous round budget is 3');
       const id = hash([taskId, 'room_call']);
-      newRound(copy, id, round.root, round.roomId, JSON.stringify({ calledBy: seat.botId }), members);
+      newRound(copy, id, round.root, round.roomId, JSON.stringify({ calledBy: seat.botId }), members, triggerMessageId);
       copy.roots[round.root]!.autonomous++;
     } else {
-      for (const botId of members) reserve(copy, copy.rounds[round.id]!, botId);
+      for (const botId of members) reserve(copy, copy.rounds[round.id]!, botId, triggerMessageId);
     }
     state.team = copy;
   });
@@ -131,10 +132,10 @@ export function advanceRooms(s: LedgerState, state: CollaborationState, now: num
     if (seat.status !== 'waiting') continue;
     seat.status = 'queued'; seat.deadline = now + ROOM_GRACE_MS;
     const room = team.rooms[round.roomId]!;
-    const rootIndex = room.messages.findIndex(message => message.id === round.root);
+    const requestIndex = room.messages.findIndex(message => message.id === (seat.triggerMessageId ?? round.root));
     const visibleFrom = room.visibleFrom?.[seat.botId] ?? room.messages.length;
-    const request = rootIndex >= visibleFrom ? room.messages[rootIndex]?.text : undefined;
-    add(seat.id, seat.botId, JSON.stringify({ roomId: round.roomId, roundId: round.id, request }));
+    const message = requestIndex >= visibleFrom ? room.messages[requestIndex] : undefined;
+    add(seat.id, seat.botId, JSON.stringify({ roomId: round.roomId, roundId: round.id, request: message?.text, requestFrom: message?.from }));
   }
 }
 export function roomContext(team: TeamState, turn: Turn) {

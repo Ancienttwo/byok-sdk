@@ -14,19 +14,35 @@ export function fitHistory<T extends { historyWindow: HistoryWindow; rejectedAct
   context: T, history: unknown[], kind: 'omittedMessages' | 'omittedTurns',
 ): T {
   const window = context.historyWindow;
+  const bytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value) ?? 'null', 'utf8');
+  const pool = (values: unknown[], counter: 'omittedRejections' | typeof kind) => {
+    const sizes = values.map(bytes);
+    return { values, counter, sizes, extra: sizes.reduce((sum, size) => sum + size, 0) + Math.max(0, values.length - 1) };
+  };
+  // New room/private messages take priority over older policy feedback.
+  const pools = [pool(context.rejectedActions, 'omittedRejections'), pool(history, kind)];
+  // Serialize required metadata once. Empty arrays and object each contribute
+  // two bytes; pool.extra and bytes(window)-2 account for their full values.
+  const base = Buffer.byteLength(JSON.stringify(context, (_key, value) =>
+    value === history || value === context.rejectedActions ? [] : value === window ? {} : value), 'utf8');
   const notice = () => {
     window.notice = window.omittedMessages + window.omittedTurns + window.omittedRejections > 0
-      ? 'Earlier history was omitted. The current request is provided separately and remains unchanged.' : null;
+      ? 'Earlier history was omitted.' : null;
   };
-  const bytes = () => Buffer.byteLength(JSON.stringify(context), 'utf8');
+  const overBudget = () => base + pools.reduce((sum, row) => sum + row.extra, 0) + bytes(window) - 2 > window.maxBytes;
   notice();
-  while (history.length && bytes() > window.maxBytes) { history.shift(); window[kind]++; notice(); }
-  while (context.rejectedActions.length && bytes() > window.maxBytes) {
-    context.rejectedActions.shift(); window.omittedRejections++; notice();
+  for (const row of pools) {
+    while (row.values.length && overBudget()) {
+      const size = row.sizes.shift()!;
+      row.values.shift();
+      row.extra -= size + (row.values.length ? 1 : 0);
+      window[row.counter]++;
+      notice();
+    }
   }
-  if (bytes() > window.maxBytes) {
+  if (overBudget()) {
     window.metadataOverBudget = true;
-    window.notice = 'Required non-history context exceeds the budget; no authority data was removed. The current request remains unchanged.';
+    window.notice = [window.notice, 'Required non-history context exceeds the budget; no authority data was removed.'].filter(Boolean).join(' ');
   }
   return context;
 }
