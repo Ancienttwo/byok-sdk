@@ -519,3 +519,6 @@ export type { HarnessId, HarnessInfo } from './messages';
 export { CUSTOM_HARNESS_CAPABILITY } from './version';
 
 export { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from './input-preparation';
+
+export * from './bot-turn-outcome';
+export { resultOutcomeMaxBytes } from './result-schema';
