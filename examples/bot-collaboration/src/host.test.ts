@@ -348,7 +348,7 @@ it('delivers rejected feedback to the Bot once while preserving the first frozen
   expect(bot.snapshot().rejected[0]!.consumedBy).toBe(child.id);
   await finish(child.id);
   await vi.waitFor(() => expect(fixture.daemon.status().activeTaskCount).toBe(0), { timeout: 5000 });
-  fixture.ledger.transaction(s => { stateOf(s.application).rejected.push({ taskId: 'new-policy', action: 'delegate', reason: 'new-feedback' }); });
+  fixture.ledger.transaction(s => { stateOf(s.application).rejected.push({ botId: 'main', taskId: 'new-policy', action: 'delegate', reason: 'new-feedback' }); });
   const next = await bot.input('feedback-next', 'What changed?');
   const input = fixture.ledger.snapshot().executions[bot.core.intent(next)!.taskId]!.input;
   const nextContext = JSON.parse(String(input.payload.instruction).split('\n\nContextPack:\n')[1]!);
