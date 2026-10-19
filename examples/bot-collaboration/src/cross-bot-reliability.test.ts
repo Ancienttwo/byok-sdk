@@ -235,3 +235,26 @@ it('target archived while its Turn runs: the result is audit only and the delega
   expect(Object.values(t.host().snapshot().turns).filter(turn => turn.source === 'bot_reply')).toEqual([
     expect.objectContaining({ id: hash(['bot_reply', d.id]), replies: [expect.objectContaining({ verdict: 'refused', reason: 'target_archived' })] })]);
 });
+
+it('keeps a target with a pending newer profile in the enum; its bot_request waits for the readback', async () => {
+  let hold: Promise<void> | undefined, release!: () => void;
+  fixture = await openTeam({ routeMessages: true, holdProjection: () => hold ?? Promise.resolve() });
+  const [a, b] = await t.createBots(2) as [string, string];
+  hold = new Promise(resolve => { release = resolve; });
+  const update = await t.host().input('pending-profile', 'Update Bot 2');
+  await t.finish(update, { update_bot: [{ botId: b, persona: 'Pending persona' }] });
+  expect(t.host().snapshot().team.bots[b]).toMatchObject({ revision: '2', readyRevision: null });
+  const root = await t.host().input('ask-pending', 'Ask Bot 2', a);
+  await t.running(root);
+  expect(t.host().snapshot().schemas[root]!.properties!.delegate!.items!.properties!.to!.enum).toEqual([a, 'main', b]);
+  await t.finish(root, { delegate: [{ to: b, request: 'After your new profile' }] });
+  const d = t.delegationOf(t.taskOf(root));
+  expect(d).toMatchObject({ status: 'queued', toAgentRef: { agentId: b, profileRevision: '2' } });
+  await t.host().drain();
+  expect(t.host().core.intent(d.id)).toBeUndefined();
+  release(); hold = undefined;
+  await t.running(d.id);
+  expect(t.host().core.intent(d.id)!.execution.payload.agentRef.profileRevision).toBe('2');
+  await t.finish(d.id);
+  expect(t.delegation(d.id).verdict).toBe('answered');
+});
