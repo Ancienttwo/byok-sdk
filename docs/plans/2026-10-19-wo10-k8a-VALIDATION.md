@@ -348,3 +348,48 @@ No paid Pi measurement, push, gh pr edit, rebase, force-push, branch deletion,
 or deployment was performed. The only main-checkout output is the explicitly
 requested ignored `_ops/bot-wo/PR-530-body.md` text file. No tracked main file
 or packages/ source was edited.
+
+## Recent card and question context, 2026-10-19
+
+This section records the later PM ruling for REV-10-round2 P2-A.
+The three fixes at `194fa0bc` remain in place. No history was rewritten.
+Cross-Bot delegation stays withdrawn from #530 and deferred to K8b.
+
+P1 map: `sync()` builds and measures ContextPack before K4 enqueue. The
+`contextPack()` function selects its history. Cards and questions previously
+bypassed that selection and grew with the full application ledger.
+P2 trace: 40 confirmed cards with large drafts and 40 answered questions made
+a small new request blocked. A second probe with pending items produced
+44,479 bytes against a 4,096-byte cap. Both new tests failed on the old code.
+P3 decision: keep the current candidate and the existing frozen-input boundary.
+Select at most `contextTurnLimit` cards and questions each. Prefer pending
+cards and unanswered questions. Keep newer entries within each group. Remove
+settled entries, older turns, then pending entries until the pack fits.
+Report each omitted count. Keep the full ledger records. Do not cut strings.
+The existing UTF-8 cap remains a conservative byte-level token guard. It does
+not claim an exact model token count. Required data still uses the admission
+guard. Card, question, and turn history cannot cause an ordinary full-history
+block after it can be removed.
+
+Test changes and reasons:
+
+1. The existing exact `historyWindow` assertion retains `turnLimit: 3` and
+   `omittedTurns: 17`. It adds four exact zero counters for the new notice
+   fields. No old check is removed or relaxed.
+2. A new real embedded-server and SQLite test seeds 40 confirmed cards,
+   40 answered questions, and old pending entries. It checks K4 admission,
+   the frozen pack byte cap, per-category limits, pending priority, exact
+   omission counts, the candidate id, and unchanged ledger record counts.
+   This test failed with `blocked` on the old implementation.
+3. A new pending-history test uses a 4 KiB cap. It checks the byte cap, the
+   current request, and exact total and pending omission counts. This test
+   failed at 44,479 bytes on the old implementation.
+
+Focused checks: ContextPack 10/10, Bot suite 50/50, K4 suite 38/38, root
+typecheck, and `git diff --check` passed with exit 0. Independent read-only
+Codex review in Herdr `wA:p4R` returned PASS for this new delta. It checked
+18 extra local counterexamples and found no weakened test assertion.
+Red and green evidence: `/tmp/wo10-card-window-red.log` and
+`/tmp/wo10-card-window-green.log`. Suite logs use the same prefix.
+
+No push, gh pr edit, rebase, force-push, or merge-train action was performed.

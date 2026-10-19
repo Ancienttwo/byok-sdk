@@ -49,13 +49,21 @@ A rejected action is reserved by the next frozen input. It is not copied into
 later inputs. An unstarted terminal failure releases that reservation.
 
 ContextPack defaults are at most 12 recent turns (`contextTurnLimit`) and 32 KiB of
-serialized UTF-8 JSON (`contextMaxBytes`). A historyWindow notice states how
-many older turns were omitted. Older history is removed until the pack fits.
+serialized UTF-8 JSON (`contextMaxBytes`). The byte cap is a conservative token
+guard for byte-level tokenizers. It does not measure a model's exact token count.
+Cards and questions each use the same recent-N limit. Pending cards and unanswered
+questions take priority over settled items. Within each group, newer items stay.
+The `historyWindow` notice reports `omittedTurns`, `omittedCards`, and
+`omittedQuestions`. It also reports `omittedPendingCards` and
+`omittedPendingQuestions` if pending work cannot fit. These counts include zero.
+The Host removes settled cards and questions, then older turns, then pending
+items until the pack fits. It retains the full records in the application ledger.
 The current request always remains in the measured pack, even when it was
 blocked before newer inputs arrived. Turns carry action-name summaries, not full
 outcome documents. Routine context contains only its current definition.
-Cards and questions remain visible. If the selected pack exceeds the byte
-budget after older history is removed, the turn becomes `blocked` with a readable reason and an owner
+Card and question history cannot block a new request. If the required pack
+still exceeds the byte budget after all optional history is removed,
+the turn becomes `blocked` with a readable reason and an owner
 projection. It creates no execution or retry spin. No strings are silently
 cut to fit. Raising the budget or repairing the selected data and calling
 `drain()` retries admission. `cancelTurn()` can settle a blocked turn before
@@ -70,7 +78,7 @@ Questions support text and single choice. An answer creates an `answer` turn.
 It is a new user input with its own stable budget root. Replaying the same
 answer does not reset that budget. Empty updates and duplicate targets or
 option ids are refused. Duplicate weekdays are stored as a set.
-An expired card stays in the next ContextPack. It creates no model turn.
+An expired card can appear in the recent ContextPack window. It creates no model turn.
 A confirmation card starts as `pending`. The owner can choose `confirmed` or
 `rejected`. A card becomes `expired` after 24 hours. Only a committed
 `confirmed` card calls the Host connector. Confirmation results and explicit

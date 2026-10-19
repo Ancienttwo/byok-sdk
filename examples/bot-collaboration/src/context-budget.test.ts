@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import * as protocol from '@byok-sdk/protocol';
 import { createByokServer } from '@byok-sdk/server';
-import { HostLedger } from '@byok-sdk/example-host-execution-core';
+import { hash, HostLedger } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration, type BotOptions } from './host';
 import { stateOf } from './model';
@@ -36,7 +36,8 @@ it('selects a declared recent window, summarizes outcomes and includes only curr
   const routine = createRoutine(state, 'main', 'seed', 0, { localId: 'new_routine_1', schedule: { minute: 0, hour: 9, tz: 'UTC' }, prompt: 'old-definition' }, Date.UTC(2026, 9, 19, 8));
   updateRoutine(state, 'main', { routineId: routine.id, prompt: 'current-definition' }, Date.UTC(2026, 9, 19, 8));
   const context = contextPack(state, 3);
-  expect(context.historyWindow).toEqual({ turnLimit: 3, omittedTurns: 17 });
+  expect(context.historyWindow).toEqual({ turnLimit: 3, omittedTurns: 17,
+    omittedCards: 0, omittedQuestions: 0, omittedPendingCards: 0, omittedPendingQuestions: 0 });
   expect(context.turns.map(t => t.id)).toEqual(['turn-17', 'turn-18', 'turn-19']);
   expect(context.turns.every(t => t.outcomeSummary.includes('delegate'))).toBe(true);
   expect(JSON.stringify(context)).not.toContain('full-document-must-stay-out');
@@ -100,6 +101,60 @@ it('reduces older history with an explicit notice when the current request fits'
   expect(Buffer.byteLength(JSON.stringify(context))).toBeLessThanOrEqual(32 * 1024);
   expect(context.historyWindow.omittedTurns).toBe(1);
   expect(context.turns.map(turn => turn.id)).toEqual(['large-1']);
+});
+
+it('admits a new turn after large settled cards and questions fill the history', async () => {
+  await setup();
+  ledger!.transaction(s => {
+    const state = stateOf(s.application);
+    state.cards.pending = { id: 'pending', turnId: 'old-0', state: 'pending', expiresAt: Date.now() + 86_400_000,
+      action: { action: 'send_message', summary: 'Send', draft: { text: 'approve this' } } };
+    state.questions.pending = { id: 'pending', turnId: 'old-0', value: { question: 'answer this', answerKind: 'text' } };
+    for (let n = 0; n < 40; n++) {
+      const id = `old-${n}`;
+      state.turns[id] = { id, root: id, source: 'user', request: 'old request', hop: 0, status: 'succeeded', conclusion: 'succeeded' };
+      const reply = hash(['action_result', id]);
+      state.turns[reply] = { id: reply, root: id, source: 'action_result', request: 'old result', hop: 0, status: 'succeeded', conclusion: 'succeeded' };
+      state.cards[id] = { id, turnId: id, state: 'confirmed', expiresAt: Date.now() + 86_400_000,
+        action: { action: 'send_message', summary: 'Send', draft: { text: '😀'.repeat(1000) } }, result: { sent: true }, decisionReported: true };
+      state.questions[id] = { id, turnId: id, value: { question: 'x'.repeat(1000), answerKind: 'text' }, answer: 'x'.repeat(1000) };
+    }
+  });
+  const id = await bot!.input('after-card-history', 'new request');
+  expect(bot!.snapshot().turns[id]!.status).toBe('processing');
+  const task = bot!.core.intent(id)!.taskId;
+  const instruction = String(ledger!.snapshot().executions[task]!.input.payload.instruction);
+  const context = JSON.parse(instruction.split('\n\nContextPack:\n')[1]!);
+  expect(Buffer.byteLength(JSON.stringify(context))).toBeLessThanOrEqual(32 * 1024);
+  expect(context.cards.length).toBeLessThanOrEqual(12);
+  expect(context.questions.length).toBeLessThanOrEqual(12);
+  expect(context.cards).toContainEqual(expect.objectContaining({ id: 'pending' }));
+  expect(context.questions).toContainEqual(expect.objectContaining({ id: 'pending' }));
+  expect(context.questions).toContainEqual(expect.objectContaining({ id: 'old-39' }));
+  expect(context.questions).not.toContainEqual(expect.objectContaining({ id: 'old-0' }));
+  expect(context.cards).not.toContainEqual(expect.objectContaining({ id: 'old-0' }));
+  expect(context.historyWindow.omittedCards).toBe(41 - context.cards.length);
+  expect(context.historyWindow.omittedQuestions).toBe(41 - context.questions.length);
+  expect(context.turns.at(-1).id).toBe(id);
+  expect(Object.keys(bot!.snapshot().cards)).toHaveLength(41);
+  expect(Object.keys(bot!.snapshot().questions)).toHaveLength(41);
+});
+
+it('bounds pending context too and counts pending omissions without hiding the current request', () => {
+  const state = stateOf({});
+  state.turns.current = { id: 'current', root: 'root', source: 'user', request: 'small request', hop: 0, status: 'queued' };
+  for (let n = 0; n < 20; n++) {
+    const id = `pending-${n}`;
+    state.cards[id] = { id, turnId: 'old', state: 'pending', expiresAt: Date.now() + 86_400_000,
+      action: { action: 'send_message', summary: 'Send', draft: { text: 'x'.repeat(1000) } } };
+    state.questions[id] = { id, turnId: 'old', value: { question: 'x'.repeat(1000), answerKind: 'text' } };
+  }
+  const context = contextPack(state, 12, 'current', 4096);
+  expect(Buffer.byteLength(JSON.stringify(context))).toBeLessThanOrEqual(4096);
+  expect(context.turns[0]!.request).toBe('small request');
+  expect(context.historyWindow).toMatchObject({ omittedCards: 20 - context.cards.length,
+    omittedQuestions: 20 - context.questions.length, omittedPendingCards: 20 - context.cards.length,
+    omittedPendingQuestions: 20 - context.questions.length });
 });
 
 it('cannot admit an unchanged oversized request by aging it out of the history window', async () => {

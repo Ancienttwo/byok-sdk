@@ -41,10 +41,26 @@ export function contextPack(state: CollaborationState, turnLimit = DEFAULT_CONTE
   if (currentTurnId !== undefined && !current) throw new Error('Missing ContextPack candidate');
   const history = turns.filter(turn => turn.id !== current?.id);
   const selected = current ? [...(turnLimit === 1 ? [] : history.slice(1 - turnLimit)), current] : [];
+  const cards = Object.values(state.cards);
+  const questions = Object.values(state.questions);
+  // Pending items take priority. Each category still has a bounded recent window.
+  const pendingCard = (card: typeof cards[number]) => card.state === 'pending';
+  const pendingQuestion = (question: typeof questions[number]) => question.answer === undefined;
+  const recent = <T>(rows: T[], pending: (row: T) => boolean) => [
+    ...rows.filter(row => !pending(row)), ...rows.filter(pending),
+  ].slice(-turnLimit);
+  const selectedCards = recent(cards, pendingCard);
+  const selectedQuestions = recent(questions, pendingQuestion);
   const pack = () => ({
-    historyWindow: { turnLimit, omittedTurns: turns.length - selected.length },
+    historyWindow: {
+      turnLimit, omittedTurns: turns.length - selected.length,
+      omittedCards: cards.length - selectedCards.length,
+      omittedQuestions: questions.length - selectedQuestions.length,
+      omittedPendingCards: cards.filter(pendingCard).length - selectedCards.filter(pendingCard).length,
+      omittedPendingQuestions: questions.filter(pendingQuestion).length - selectedQuestions.filter(pendingQuestion).length,
+    },
     rejectedActions: state.rejected.filter(row => !row.consumedBy),
-    questions: Object.values(state.questions), cards: Object.values(state.cards),
+    questions: selectedQuestions, cards: selectedCards,
     routines: Object.values(state.routines).map(routine => ({
       id: routine.id, owner: routine.owner, current: routine.current, pending: routine.pending,
       lifecycle: routine.lifecycle, status: routine.status,
@@ -57,8 +73,14 @@ export function contextPack(state: CollaborationState, turnLimit = DEFAULT_CONTE
     })),
   });
   let context = pack();
-  while (selected.length > 1 && Buffer.byteLength(JSON.stringify(context), 'utf8') > maxBytes) {
-    selected.shift();
+  while (Buffer.byteLength(JSON.stringify(context), 'utf8') > maxBytes) {
+    // Remove settled history before pending work. Never remove the candidate.
+    if (selectedCards.length && !pendingCard(selectedCards[0]!)) selectedCards.shift();
+    else if (selectedQuestions.length && !pendingQuestion(selectedQuestions[0]!)) selectedQuestions.shift();
+    else if (selected.length > 1) selected.shift();
+    else if (selectedCards.length) selectedCards.shift();
+    else if (selectedQuestions.length) selectedQuestions.shift();
+    else break;
     context = pack();
   }
   return context;
