@@ -1,6 +1,6 @@
 # WO-09a：Windows / NTFS strict ledger barrier 决策稿
 
-状态：待 Aimpact 选择故障模型。日期：2026-10-19。
+状态：PENDING-AIMPACT。待 Aimpact 选择故障模型。日期：2026-10-19。
 
 本稿只提出 spec 决策。它不批准 Windows admission，也不修改现行契约。
 当前结论：Windows 的 `B` 保持 `false`。`agent-memory-intent.v1` 不开放。
@@ -10,14 +10,38 @@ Microsoft 已说明文件数据和 metadata 的 flush 语义。缺口是把这�
 
 ## 1. 决策范围与证据规则
 
-工单依据：主 checkout 的 `_ops/bot-wo/batch-2.md` 的 WO-09a 节；[issue #522](https://github.com/Ancienttwo/byok-sdk/issues/522)；WO-02 v3 §5.4。
+远端问题依据：[issue #522](https://github.com/Ancienttwo/byok-sdk/issues/522)。
 issue #522 在本次读取时没有评论。它是风险记录，不是本单完成的 Windows 故障复现。
 
-本 worktree 的源码基线为 `8e8839a38524d5323bb32011edc7392c80df528f`。
-WO-02 v3 固定在本地 commit `c7407c74596c7ea2475b216b56d73a8196f593da`。
-其路径为 `docs/researches/2026-10-18-bot-mode-m0-platform-gap.md`。
-可用 `git show c7407c74:docs/researches/2026-10-18-bot-mode-m0-platform-gap.md` 读取。
-本稿不依赖该 sibling worktree 的后续修改。
+源码基线：[8e8839a3](https://github.com/Ancienttwo/byok-sdk/tree/8e8839a38524d5323bb32011edc7392c80df528f)。
+下文的仓库 `file:line` 均指该基线。
+
+原工单与 WO-02 v3 调研稿未随本 PR 发布。下面内联本稿使用的原文节录，读者无需访问本机文件或本地 Git 对象。
+这些节录是任务范围和先前调研结论，不是 Aimpact 的故障模型裁定。
+
+**原工单 WO-09a：**
+
+> 目标：写出 Windows 故障模型的 spec 决策稿，和矩阵并行（WO-02 v3 §5.4，#522）。
+>
+> 范围：NTFS 下 strict ledger barrier 的定义、能证明到哪一级（process-crash / 文件级 / 断电）、`FlushFileBuffers`/`NtFlushBuffersFileEx` 的可用性、B 保持 false 的条件、owner 要接受的弱化故障模型选项。
+>
+> 验收：Aimpact 能据此选一个故障模型；每个结论有 Microsoft 文档或实测引用。
+>
+> WO-09（代码）等 WO-09a 的故障模型被接受。
+
+**WO-02 v3 §1：共享目录缺口。**
+
+> 共享缺口：新 home/`.byok` 的目录项持久化尚未证明。 `packages/client/src/agent-home.ts:280` 的 mkdir 后没有父目录 sync。Linux native 声明的 `B=true` 也依赖这些目录已经持久建立。P2-mac 负责共享初始化修复，并补 Linux 回归；P2-win 接入自己的屏障实现。当前没有足以豁免 Linux 的理由。
+
+**WO-02 v3 §4.3：部署产物证明。**
+
+> 最小交付链：固定源码/toolchain/参数 → native 测试 → SDK 包内产物 → 所选签名策略与清单 → packed/install 测试 → SDK 解析路径并检查部署 → 实际 home 卷能力探测。
+
+**WO-02 v3 §5.4：barrier 与未裁定状态。**
+
+> 定义先于 boolean。 在声明支持的 OS、文件系统和故障模型内，一次成功 ledger write 必须使完整下一状态成为可恢复权威。至少要求：`applying` 成功之后即使进程中断，恢复不能把它读成“从未尝试”；terminal 成功之前不 complete；`ackedAt` 成功之前不 resolve。损坏或无法判断时拒绝继续，不能把 ledger 重置为空。
+>
+> 证据和决定未齐前，`B=false`、capability 不开放；Q14 本身不批准削弱 at-most-once。
 
 证据分为三类：
 
@@ -39,7 +63,7 @@ WO-02 v3 固定在本地 commit `c7407c74596c7ea2475b216b56d73a8196f593da`。
 | 广播与入口 | `packages/client/src/daemon/create-daemon.ts:4157` 检查 transport、home、安全 filesystem、B。native backend 另做目录 sync probe。processor 在 `agent-memory-intent.ts:546` 于 fetch 前拒绝缺少 B 的 backend。 |
 | 实际 ledger 写入 | `agent-memory-intent.ts:622` 的 `writeLedger` 调用 strict whole-file rewrite。`packages/client/src/daemon/agent-memory.ts:353` 在 helper 存在时委托普通 `filesystem.replace`。没有另一个 strict RPC。 |
 | Go filesystem | `packages/client/native/agent-memory-fs/main.go:409` sync 临时文件，`:421` rename，`:425` sync parent。`:755` 用 `Open(".")` 再 `Sync()`。Windows `openSession` 在 `:311` 仍关闭。这段 parent sync 不是已通过的 Windows 方案。 |
-| 新目录 | `packages/client/src/agent-home.ts:280` 的 mkdir 后没有父目录屏障。新 home、`.byok`、新 `notes` 子目录都必须纳入证明。WO-02 §1、§4.2 已列共享缺口。 |
+| 新目录 | `packages/client/src/agent-home.ts:280` 的 mkdir 后没有父目录屏障。新 home、`.byok`、新 `notes` 子目录都必须纳入证明。§1 内联的 WO-02 共享目录节录记录了该缺口。 |
 
 ### P2 trace：一次 intent 的实际顺序
 
@@ -173,7 +197,7 @@ OS-crash 与断电可使用同一条件契约，但两者的实验覆盖不能�
 4. ledger 的 rename、memory replace/delete 或新目录链仍有一项未覆盖。[M3]、[M5]
 5. 只证明 ledger 双槽不回退，没有证明 `applied` 对应的 memory 结果。[M2]、[M4]
 6. 依赖 admin volume flush，但实际部署使用普通用户 token。[M1]
-7. helper 发布物、实际 home 卷、普通用户权限或目标 OS API 未被验证。不得用源码测试替代部署证明。见 WO-02 §4.3；[M1]、[M7]。
+7. helper 发布物、实际 home 卷、普通用户权限或目标 OS API 未被验证。不得用源码测试替代部署证明。见 §1 内联的 WO-02 部署产物节录；[M1]、[M7]。
 
 `B=false` 时继续禁止广播和执行 intent。不得把 `uncertain` 当作屏障失败后的通行证。
 写 uncertain terminal 也需要有效 barrier；否则保留 cursor 并报告 `local_io_failed`。
@@ -283,8 +307,36 @@ Vitest 合计 9,288 passed、200 skipped。cloud-do 的 Node tests 另有 10 pas
 
 文档核对通过：M1—M8 的 ID 齐全；所有显式 `file:line` 目标存在；本分支只增加本稿。
 M1—M8 的 8 个 Microsoft URL 均返回 HTTP 200。程序逐项检查了所引关键条款，人工核对了含义与推论边界。
-本机完整日志位于 `/var/folders/nz/1kt960ns5kq331c5qw2sh6sc0000gn/T/wo09a-checks-j57ctt24/`。
-该临时目录不属于 Git 交付物。
+上述表格和计数是实现时日志的内联摘录。关键输出如下，仅移除对齐空格。
+这些摘录保留当次结果，不表示本次文档修订又运行了整套测试。
+
+```text
+@byok-sdk/client:test | Test Files 343 passed | 1 skipped (344)
+@byok-sdk/client:test | Tests 3992 passed | 30 skipped (4022)
+@byok-sdk/cloud-dataplane:test | Test Files 10 passed | 33 skipped (43)
+@byok-sdk/cloud-dataplane:test | Tests 94 passed | 139 skipped (233)
+@byok-sdk/cloud-do:test | ℹ tests 10
+@byok-sdk/cloud-do:test | ℹ pass 10
+@byok-sdk/cloud-do:test | ℹ fail 0
+api-surface: 9 package golden(s) match the built declarations
+version-authority: README.md and docs/spec.md agree with the dispatch train 0.27.0 (packages/core/package.json) and @byok-sdk/keys@0.12.0
+```
+
+Microsoft 引用检查的原始输出节录：
+
+```text
+M1 200 missing=[]
+M2 200 missing=[]
+M3 200 missing=[]
+M4 200 missing=[]
+M5 200 missing=[]
+M6 200 missing=[]
+M7 200 missing=[]
+M8 200 missing=[]
+```
+
+`missing=[]` 表示所引关键条款的文本检查未发现缺项。它不证明 Windows API 调用或 durability。
+读者可直接审查上述摘录和 §8 的 Microsoft 链接，不需要访问原始临时日志。
 
 残留边界：owner 尚未裁定；Windows API/普通用户矩阵、OS crash 和物理断电尚无本单实测。
 WO-09 的 Windows intent 开放仍受 §5—§7 约束。
