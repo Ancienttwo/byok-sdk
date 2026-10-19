@@ -26,6 +26,7 @@ import {
   SessionManager,
 } from '@earendil-works/pi-coding-agent';
 import { subagentsExtension } from './pi-extension-factories.js';
+import { resetResumedPiTools } from './pi-session-runtime';
 import { readFileSync } from 'node:fs';
 import { parsePiPrintArgv } from '../subagents/print-argv';
 import { assertSubagentProviderCredential } from '../subagents/credential-guard';
@@ -94,6 +95,7 @@ export async function runSubagentPrint(argv: readonly string[]): Promise<number>
       modelRuntime: services.modelRuntime, settingsManager: services.settingsManager, resourceLoader: services.resourceLoader,
       model: resolved?.model,
     });
+    resetResumedPiTools(created.session, services.settingsManager, cwd);
     return { ...created, services, diagnostics: services.diagnostics };
   }, { cwd: plan.cwd, agentDir, sessionManager });
   return runPrintMode(runtime, { mode: 'json', initialMessage: plan.task });
