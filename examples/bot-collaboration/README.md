@@ -1,9 +1,6 @@
-# Single Bot collaboration
+# Bot collaboration
 
-This copy-and-own example implements the single Bot part of K8a.
-It supports self continuations. 跨 Bot 委派推迟到 K8b，作为 #530 和 #531
-合入后的第一张 K8b 工单。本轮已撤除该范围，未写入跨 Bot 代码或测试。
-Platform PRD sections 9.4 and 14.2 are not fully implemented here.
+This copy-and-own example implements K8a and K8b in the Bot PRD.
 It uses the K4 Host execution core and K8-S public schema and calendar APIs.
 It has no paid runtime call. Tests use a synthetic adapter with the real SDK,
 daemon, HTTP transport, SQLite stores, and `submit_result` helper.
@@ -44,35 +41,7 @@ three routine actions. It offers all current routine ids, up to eight.
 It never offers a `target` field or another Bot id. A user input starts one
 root budget. Self delegation permits four continuations for that root. It
 keeps hop at zero and does not consume the delegation budget. A refused action
-enters `ContextPack.rejectedActions`. Other accepted actions still apply.
-A rejected action is reserved by the next frozen input. It is not copied into
-later inputs. An unstarted terminal failure releases that reservation.
-
-ContextPack defaults are at most 12 recent turns (`contextTurnLimit`) and 32 KiB of
-serialized UTF-8 JSON (`contextMaxBytes`). The byte cap is a conservative token
-guard for byte-level tokenizers. It does not measure a model's exact token count.
-Cards and questions each use the same recent-N limit. Pending cards and unanswered
-questions take priority over settled items. Within each group, newer items stay.
-The `historyWindow` notice reports `omittedTurns`, `omittedCards`, and
-`omittedQuestions`. It also reports `omittedPendingCards` and
-`omittedPendingQuestions` if pending work cannot fit. These counts include zero.
-The Host removes settled cards and questions, then older turns, then pending
-items until the pack fits. It retains the full records in the application ledger.
-The current request always remains in the measured pack, even when it was
-blocked before newer inputs arrived. Turns carry action-name summaries, not full
-outcome documents. Routine context contains only its current definition.
-Card and question history cannot block a new request. If the required pack
-still exceeds the byte budget after all optional history is removed,
-the turn becomes `blocked` with a readable reason and an owner
-projection. It creates no execution or retry spin. No strings are silently
-cut to fit. Raising the budget or repairing the selected data and calling
-`drain()` retries admission. `cancelTurn()` can settle a blocked turn before
-K4 admission. It creates no execution and lets pending routine versions settle.
-
-Schema composition first uses checked schedules. Only `schema-over-budget`
-permits a retry with flat schedules. If flat is still above the schema cap,
-the turn is explicitly blocked. `not-subset` and `over-budget` are Host defects
-and propagate as errors. No authorized routine id is dropped.
+enters only its originating Bot's `ContextPack.rejectedActions`. Other accepted actions still apply.
 
 Questions support text and single choice. An answer creates an `answer` turn.
 It is a new user input with its own stable budget root. Replaying the same
@@ -141,14 +110,157 @@ occurrence finish. Startup or explicit pause/resume retries the calendar.
 
 ## Boundaries
 
-The collaboration application state has version 1. Unsupported and unversioned
-stored state is rejected without a reset or automatic migration.
+The collaboration state has version 1. The Host rejects unsupported or
+unversioned stored state. It does not reset or migrate that state.
 
-This example has one Bot and one owner. 跨 Bot 委派推迟到 K8b。
-This report covers the single Bot slice only.
-Group chat and Main Bot actions belong to K8b. Paid Pi success-rate measurement belongs to WO-10b. Application history,
+This example has one team and one owner per ledger. Paid Pi success-rate
+measurement belongs to WO-10b. Application history,
 versions and audit rows have no retention policy in this small example.
 
-K4 is tracked in Draft #532. This branch uses its package exports. No restack,
-PR status change, push, or deployment is performed in this local follow-up.
-The PRD remains Aimpact's authority.
+
+## Group chat and Main Bot
+
+The supplied Agent template is the initial Main Bot. A team can have multiple
+Main Bots. `setMainBot(botId, value)` is an owner API. The Host must authenticate
+its owner APIs before calling them. `input(key, request, botId)` selects a Bot.
+The default is the initial Main Bot. Ordinary turns keep the K8a actions.
+
+Give the Host the real server home projection API. Install
+`createBotPersonaProjection()` as the daemon's `agentHome.projection` consumer.
+It validates the opaque profile digest. It writes persona text to the Bot's
+own `AGENTS.md` under the SDK writer lease. New profiles and updates wait for
+an exact `applied` or `idempotent` readback. The readback must match device,
+AgentRef, request id, and digest. New execution input then uses that revision.
+Already frozen executions keep their old input. A pending projection does not
+permit dispatch. All management actions participate in the K4 outcome commit.
+
+Main Bot schemas offer six actions: `create_bot`, `update_bot`, `delete_bot`,
+`create_room`, `update_room`, and `team_note`. The Host checks the current role
+again when applying each action. Creation offers three local Bot slots and one
+local room slot. A room can use those Bot slots in the same outcome. Model ids
+come from `BotOptions.models`. The default model id is `default`. Each model
+has a Host-owned execution template. A Bot update cannot move its device.
+Profiles cap the active team at 24 Bots. Team notes cap at 20 entries of 300
+characters. Every team Bot receives these notes. Other Bots' private turns and
+persona text do not enter its ContextPack. No cross-home memory read occurs.
+`delete_bot` archives the profile and cancels unstarted work. Running results
+become audit only. It does not delete the Agent home.
+
+Profile deliveries share the Host serial consumer. The consumer waits for known
+old intents to settle. Device terminal readback can precede writer cleanup.
+A projection can therefore stay pending after it hits that lease. The Host
+reads every prior delivery before retry. It stores a new delivery id before
+sending the same revision and digest. Delay starts at one second and caps at
+60 seconds. Recovery reuses stored ids. Old duplicate controls cannot replace
+a newer revision. Each revision remains gated on an exact accepted readback.
+
+Use `roomInput(key, roomId, text, mentions)` for a user message. `mentions` is
+an ordered Bot id list or the structured value `all`. The default is empty.
+The Host never scans text for names or `[PASS]`. Rooms support mention mode.
+An admin identity grants a larger budget. It does not create an implicit seat.
+The optional admin mode is refused. `updateRoom` is an authenticated owner API
+for membership, admin, name, and announcement changes.
+
+A room turn is a fresh member Agent execution. It uses `bot-turn-outcome.v1`
+with required `speech`, plus optional `room_call`. It has no messageEgress.
+`{ speech: { kind: 'post', text: 'Evidence' } }` writes shared history.
+`{ speech: { kind: 'pass' } }` is an explicit pass. Empty or blank speech,
+missing outcome, and execution failure are visible seat failures. A textual
+mention in a post cannot create a seat. Main Bot room seats have the same speech-only authority as other members.
+Management actions are available only outside room seats. Only structured `room_call.members` can add seats after a Bot speaks.
+
+Seats run in reservation order within a round. Each seat enters the same K4
+FIFO as that Bot's own turns. The waiting grace is 240 seconds. First observed claim starts a separate
+240-second running grace. This persisted deadline does not reset on later
+scans or recovery. The K4 fallback
+waiting bound stays at 300 seconds. Room admission cancels waiting work first.
+If the member is still waiting at grace, the seat becomes `busy`. If it has
+started, the round can proceed while its writer stays held in K4. A later post
+uses its seat id and enters history once. Removed waiting seats are invalid.
+Removed running members can produce audit evidence, but cannot post or call.
+Already completed post, pass, and failure states remain unchanged.
+
+A round permits initial seats + 4, plus 4 when it has an admin. Each member
+gets at most two seats; the round admin gets at most four. A reservation spends
+budget even if it fails, passes, or times out. Batch room calls are atomic.
+A late room_call after a round closes can open a new round. At most three such
+rounds share one user root. At most ten late posts share that root. A new user
+message starts a new root. ContextPack selects up to the most recent 100
+eligible messages. The 32 KiB budget counts the UTF-8 bytes of the frozen
+Request plus the serialized ContextPack. `historyWindow.currentRequestBytes`
+records the exact Request size, including the room request wrapper. The Host
+drops oldest whole rows until that budget fits. `historyWindow.notice` reports
+omitted messages and refusals.
+History overflow does not block a seat. The frozen Request section keeps the
+complete accepted request. Only a Request that alone exceeds 32 KiB blocks
+the turn. The seat reason and blocked projection report its byte count, the
+limit, and a request to shorten the input.
+For room_call seats, the visible caller post is the current request and its
+author id is retained. A pass inherits the earlier visible trigger. This
+request is preserved even if it has left the recent message window.
+The ledger retains its full audit history. No Summary is generated. Authority
+enums and required control metadata are not silently truncated. If non-history
+metadata plus the accepted Request exceeds the budget after history is removed,
+the notice reports that separate condition. That condition does not block.
+Private turns use the same history window. They select at most 100 old turns.
+Cards and questions each retain at most 12 items. Pending work takes priority.
+The Host removes old refusals, settled items, old messages, then pending items.
+`historyWindow.turnLimit` names the message or turn count limit. Both room and
+private context also report `omittedTurns`, `omittedMessages`, `omittedCards`,
+`omittedQuestions`, `omittedPendingCards`, `omittedPendingQuestions`, and
+`omittedRejections`. Zero counts remain explicit. The same byte accounting
+includes the Request and all selected context. Full outcomes and old routine
+versions stay in the ledger. Context includes action names and the current
+routine definition.
+
+Rejected feedback is private to its Bot. The next frozen input reserves it.
+An execution that fails before it starts releases that reservation.
+A turn that cannot pass Request or schema admission has status `blocked` and
+`blockedReason`. It creates no intent. `cancelTurn` can cancel it before admission.
+Other schema composition errors propagate as Host defects. Only
+`schema-over-budget` permits the flat-schedule fallback.
+
+Unmentioned messages are stored as background. They do not create a seat, but
+a later selected member can see eligible background messages. Each member has
+a persisted append offset in `visibleFrom`. New members see only messages
+appended after joining. Retained members keep their offset. Leaving and
+rejoining resets it. Both owner edits and Main Bot room edits use this rule.
+A pre-join root request is also excluded from a new member's Request section.
+A delayed post appended after joining is visible. Already frozen offers keep
+their selected window. A room without an earlier offset starts at the next
+user input; its older history is not disclosed.
+
+`src/group-chat.test.ts` uses a real embedded SDK, daemon, HTTP transport,
+SQLite reopen, persona writes, and submit_result helper. `src/rooms.test.ts`
+checks budgets, authority, atomic refusal, and context limits as state rules.
+`roomInput` and all other mutations use the same serial Host consumer. Do not
+call K4 mutation APIs directly. Upload projections with `core.flushProjections`
+or read `snapshot().team` for room history, seats, and profile delivery state.
+
+## Persona delivery failures
+
+A stale or conflicting persona completion stays in the owner ledger. It emits
+an owner projection with the Bot id, revision, reason, and recoverable status.
+Waiting turns expose `profileFailure`. They remain queued and cannot execute
+with an unconfirmed persona. The authenticated owner can call
+`retryPersona(botId)` after resolving the device-side problem. This creates
+the same desired persona at the next profile revision. It retains the failed
+operation for audit. An exact accepted readback still gates dispatch. Retry
+also survives a Host restart. It does not bypass schema or persona admission.
+A stale device may need profile-state reconciliation before retry can succeed.
+Transient delivery errors remain pending and use the existing automatic retry.
+
+The supplied `createBotPersonaProjection` consumer requires POSIX directory
+open and fsync support. It is not supported on Windows. Node on Windows can
+return EPERM when it opens a directory. This consumer does not skip that
+barrier or claim Windows durability. A Windows deployment must supply its own
+persona consumer with a defined persistence contract. The Host failure and
+retry API does not remove that platform limit.
+
+
+## Deferred Main Bot routine target
+
+Main Bot `create_routine.target` for another Bot is not implemented. Routine
+creation remains self-only in this example. Aimpact did not approve that
+extension for this PR. A later K8b work order must add it. Cross-Bot delegation
+also stays outside this history-window change.
