@@ -429,7 +429,9 @@ export async function assertPublishedMatchFrozen({ entries, frozenManifest, read
  * an upload that landed — v0.23.0). A failed upload that did not land stops the run:
  * re-running the same command resumes from that package.
  */
-export async function publishPlan({ plan, publishTarball, readIntegrity, sleep: wait, log, landedDelays = publishLandedDelaysMs }) {
+export async function publishPlan({
+  plan, publishTarball, readIntegrity, sleep: wait, log, landedDelays = publishLandedDelaysMs, prerelease = false,
+}) {
   const outcome = { published: [], skipped: [] };
   for (const entry of plan) {
     const existing = readIntegrity(entry);
@@ -442,13 +444,24 @@ export async function publishPlan({ plan, publishTarball, readIntegrity, sleep: 
     try {
       publishTarball(entry);
     } catch (error) {
-      const landed = await pollRegistry(() => readIntegrity(entry), { delays: landedDelays, sleep: wait });
+      const publishError = error instanceof Error ? error.message : String(error);
+      let landed;
+      try {
+        landed = await pollRegistry(() => readIntegrity(entry), { delays: landedDelays, sleep: wait });
+      } catch (readError) {
+        throw new Error(
+          `${entry.name}@${entry.version}: npm publish failed and the registry read that followed failed too ` +
+            `(${readError instanceof Error ? readError.message : String(readError)})\n${publishError}`,
+        );
+      }
       if (landed === undefined) {
         const done = outcome.published.length + outcome.skipped.length;
+        const next = prerelease
+          ? 'a partially published prerelease does not resume; prepare a new exact prerelease version'
+          : `re-run the same command to resume from ${entry.name}`;
         throw new Error(
           `${entry.name}@${entry.version}: npm publish failed and the registry does not hold this version ` +
-            `(${done} of ${plan.length} planned package(s) are on the registry); re-run the same command to resume from ` +
-            `${entry.name}\n${error instanceof Error ? error.message : String(error)}`,
+            `(${done} of ${plan.length} planned package(s) are on the registry); ${next}\n${publishError}`,
         );
       }
       assertFrozenIntegrity(entry, landed);
@@ -718,6 +731,7 @@ async function main() {
     await publishPlan({
       plan,
       log,
+      prerelease: Boolean(distTag),
       sleep,
       readIntegrity: (entry) => publishedIntegrity(entry.name, entry.version),
       publishTarball: (entry) => stream(npmInvocation.command, [

@@ -121,8 +121,11 @@ resources during `prepare()`; reject unsupported input before claim instead.
 Install the scoped packages your composition uses and import each one under
 its own name. Pick one of the three sets below. Each set lists its direct
 packages; npm installs the rest of the `@byok-sdk` graph through runtime
-dependencies. `scripts/release/install-matrix.test.mjs` checks each set
-against the package manifests and the `check:release-pack` smoke.
+dependencies. `scripts/release/install-matrix.test.mjs` checks each set's
+versions and its "Also installed" list against the package manifests. It
+checks the Worker set against the Worker consumer that the
+`check:release-pack` smoke installs. The Self-hosted and Hosted sets are
+fixed by the #535 ruling.
 
 <!-- BEGIN install-matrix -->
 

@@ -15,7 +15,10 @@ name: Release
 # re-hashes every tarball against the frozen release-manifest.json. Nothing is
 # built or packed here.
 #
-# Re-running the workflow for the same commit is the recovery path. publish.mjs
+# The `sha` input pins the approved commit: a dispatch whose main tip has moved
+# refuses to run, so a plan is never released from code nobody reviewed.
+#
+# Re-running the original run (`gh run rerun <id>`) is the recovery path. publish.mjs
 # skips versions already on the registry with the frozen bytes, resumes from the
 # first unpublished package, and, when every package is published but the tag is
 # missing, resumes with the readback and the tag.
@@ -23,6 +26,10 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
+      sha:
+        description: Full 40-character commit on main to release. The run refuses any other commit.
+        type: string
+        required: true
       execute:
         description: Publish for real. Leave unchecked to print the full release plan only.
         type: boolean
@@ -52,6 +59,15 @@ jobs:
       id-token: write
       actions: read
     steps:
+      - name: Refuse a commit other than the approved one
+        env:
+          APPROVED_SHA: ${{ inputs.sha }}
+        run: |
+          if [ "$GITHUB_SHA" != "$APPROVED_SHA" ]; then
+            echo "::error::this run is at $GITHUB_SHA, the approved commit is $APPROVED_SHA"
+            exit 1
+          fi
+
       - name: Checkout with tags
         uses: actions/checkout@v7
         with:

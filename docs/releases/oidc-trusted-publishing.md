@@ -110,19 +110,22 @@ and admin access to the GitHub repository.
 2. Print the plan. Nothing is published:
 
    ```sh
-   gh workflow run release.yml --ref main -f execute=false
+   gh workflow run release.yml --ref main -f sha=<sha> -f execute=false
    ```
 
-   For a prerelease, add `-f dist-tag=rc`. The plan lists each package with
+   `<sha>` is the full 40-character release commit. The run refuses to start
+   when the `main` tip is another commit. For a prerelease, add
+   `-f dist-tag=rc`. The plan lists each package with
    its action (publish or skip), the auth mode, provenance, the dist-tag, the
    readback schedule and the tag.
 3. Get the owner's authorization for that exact plan. Then run the release:
 
    ```sh
-   gh workflow run release.yml --ref main -f execute=true
+   gh workflow run release.yml --ref main -f sha=<sha> -f execute=true
    ```
 
-   The owner approves the `npm-release` deployment. The job publishes the
+   Use the same `<sha>` as the plan. If `main` has moved, the run stops, and
+   the release needs a new plan. The owner approves the `npm-release` deployment. The job publishes the
    packages in dependency order. It waits for the registry to serve every
    exact version, reads the registry back, makes the annotated
    `v<version>` tag and pushes it.
@@ -131,8 +134,11 @@ and admin access to the GitHub repository.
 
 ## Recovery
 
-Run the same workflow again for the same commit. Do not repack. Do not bump
-the version to recover.
+Re-run the original run: `gh run rerun <run-id>`. A re-run keeps the commit
+and the inputs of the original run, so it cannot pick up a newer `main`. The
+owner approves the `npm-release` deployment again. Do not repack. Do not bump
+the version to recover. A new dispatch works only while `main` is still at
+the release commit.
 
 - **A publish failed in the middle.** The next run skips each version that
   the registry holds with the frozen integrity. It continues from the first

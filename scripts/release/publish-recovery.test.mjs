@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import {
   assertPublishedMatchFrozen,
@@ -80,6 +82,44 @@ test('--dry-run, --execute and --trusted-publishing parse into one explicit mode
     () => parseArguments(['--execute', '--trusted-publishing', '--otp', '123456']),
     /--otp has no meaning with --trusted-publishing/,
   );
+});
+
+test('a failed prerelease upload says it cannot resume, and a failed follow-up read keeps the npm error', async () => {
+  const registry = fakeRegistry({ failOn: new Set(['@byok-sdk/core']) });
+  const { sleep, log } = recorder();
+  await assert.rejects(
+    publishPlan({ plan, sleep, log, prerelease: true, readIntegrity: registry.readIntegrity, publishTarball: registry.publishTarball }),
+    /registry\); a partially published prerelease does not resume; prepare a new exact prerelease version\nnpm publish byok-sdk-core-0\.14\.0\.tgz failed \(1\)/,
+  );
+  let reads = 0;
+  await assert.rejects(
+    publishPlan({
+      plan,
+      sleep,
+      log,
+      publishTarball: registry.publishTarball,
+      readIntegrity: (entry) => {
+        reads += 1;
+        if (reads > 1) throw new Error('npm view @byok-sdk/core@0.14.0 failed (1, ETIMEDOUT)');
+        return registry.readIntegrity(entry);
+      },
+    }),
+    /npm publish failed and the registry read that followed failed too \(npm view @byok-sdk\/core@0\.14\.0 failed \(1, ETIMEDOUT\)\)\nnpm publish byok-sdk-core-0\.14\.0\.tgz failed \(1\)/,
+  );
+});
+
+test('the trusted-publishing gate and the empty-plan branch both sit before the first publish', () => {
+  const source = readFileSync(fileURLToPath(new URL('./publish.mjs', import.meta.url)), 'utf8');
+  const main = source.indexOf('async function main()');
+  const trustedGate = source.indexOf('assertTrustedPublishingEnvironment({\n', main);
+  const emptyPlanGate = source.indexOf('registry auth gate skipped', main);
+  const firstPublish = source.indexOf("'publish',", main);
+  const readback = source.indexOf("'scripts/release/registry-readback.mjs'", main);
+  const createTag = source.indexOf("['tag', '-a'", main);
+  assert.ok(main > 0 && trustedGate > main && emptyPlanGate > main, 'main() calls the trusted-publishing gate and names the empty-plan branch');
+  assert.ok(trustedGate < firstPublish, 'the trusted-publishing gate must precede the first publish');
+  assert.ok(emptyPlanGate < firstPublish, 'the empty-plan branch is decided before the first publish');
+  assert.ok(firstPublish < readback && readback < createTag, 'an empty plan still reaches the tag only through the readback');
 });
 
 test('a clean run publishes the plan once, in order', async () => {
