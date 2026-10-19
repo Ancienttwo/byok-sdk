@@ -234,7 +234,7 @@ function documentFailure(
 }
 
 /** Walks one subschema of an already-canonical (pure JSON) document. */
-function checkSubschema(node: unknown, pointer: string, depth: number, sink: IssueSink): void {
+function checkSubschema(node: unknown, pointer: string, depth: number, sink: IssueSink, requireObjectRoot = true): void {
   if (!isObject(node)) {
     sink.add(pointer, 'schema', 'a subschema must be a JSON object');
     return;
@@ -246,7 +246,7 @@ function checkSubschema(node: unknown, pointer: string, depth: number, sink: Iss
   for (const key of Object.keys(node)) {
     if (!KEYWORDS.has(key)) sink.add(pointerTo(pointer, key), key, 'keyword is outside the result schema subset');
   }
-  if (depth === 0 && node.type !== 'object') {
+  if (requireObjectRoot && depth === 0 && node.type !== 'object') {
     sink.add(pointerTo(pointer, 'type'), 'type', "the root schema must declare type: 'object'");
   }
 
@@ -362,4 +362,111 @@ export function validateResultOutcome(schema: unknown, outcome: unknown): Result
   const sink = new IssueSink();
   for (const unit of result.errors as readonly OutputUnit[]) sink.add(fragmentToPointer(unit.instanceLocation), unit.keyword, unit.error);
   return { ok: false, reason: 'schema-mismatch', bytes: document.bytes, issues: sink.issues, truncated: sink.truncated };
+}
+
+const MAX_BYTES_PER_CODE_POINT = 6;
+/**
+ * Longest JSON.stringify of a finite double: 25, e.g. "-0.0000012345678901234567"
+ * (fixed notation down to 1e-6 with 17 significant digits and a sign). Exponent
+ * forms are at most 24 ("-1.7976931348623157e+308").
+ */
+const MAX_NUMBER_BYTES = 25;
+/**
+ * Longest JSON.stringify of an integer-valued double: 22 in fixed notation
+ * ("-999999999999999900000", |x| < 1e21) and 24 in exponent notation.
+ */
+const MAX_INTEGER_BYTES = 24;
+/** Below this magnitude JSON.stringify writes an integer in plain decimal digits. */
+const DECIMAL_LIMIT = 1e21;
+const enc = new TextEncoder();
+const size = (v: unknown) => enc.encode(JSON.stringify(v)).length;
+
+type Node = ResultSchema;
+
+function typeBound(node: Node, type: string): number | null {
+  switch (type) {
+    case 'null': return 4;
+    case 'boolean': return 5;
+    case 'integer': {
+      // Tighten only when both ends are finite and below 1e21 in magnitude:
+      // then every integer in range is plain decimal and its length grows with |x|.
+      const lo = typeof node.minimum === 'number' ? Math.ceil(node.minimum) : undefined;
+      const hi = typeof node.maximum === 'number' ? Math.floor(node.maximum) : undefined;
+      if (lo === undefined || hi === undefined || !(Math.abs(lo) < DECIMAL_LIMIT) || !(Math.abs(hi) < DECIMAL_LIMIT)) return MAX_INTEGER_BYTES;
+      return Math.min(MAX_INTEGER_BYTES, Math.max(String(lo).length, String(hi).length));
+    }
+    case 'number':
+      return MAX_NUMBER_BYTES;
+    case 'string':
+      return typeof node.maxLength === 'number' ? 2 + MAX_BYTES_PER_CODE_POINT * node.maxLength : null;
+    case 'array': {
+      if (node.maxItems === 0) return 2;
+      if (typeof node.maxItems !== 'number' || node.items === undefined) return null;
+      const item = outcomeBound(node.items);
+      return item === null ? null : 2 + node.maxItems * item + Math.max(0, node.maxItems - 1);
+    }
+    case 'object': {
+      if (node.additionalProperties !== false) return null;
+      const entries = Object.entries(node.properties ?? {});
+      let total = 2 + Math.max(0, entries.length - 1);
+      for (const [name, sub] of entries) {
+        const b = outcomeBound(sub);
+        if (b === null) return null;
+        total += size(name) + 1 + b;
+      }
+      return total;
+    }
+    default: return null;
+  }
+}
+
+/** Conservative upper bound in canonical UTF-8 bytes, or null when no finite bound follows from the schema. */
+function outcomeBound(schema: ResultSchema): number | null {
+  const node = schema as Node;
+  const bounds: number[] = [];
+  if (Object.hasOwn(node, 'const')) bounds.push(size(node.const));
+  if (Array.isArray(node.enum)) bounds.push(Math.max(...node.enum.map(size)));
+  if (Array.isArray(node.oneOf)) {
+    const branches = node.oneOf.map(outcomeBound);
+    if (branches.every((b): b is number => b !== null)) bounds.push(Math.max(...branches));
+  }
+  if (node.type !== undefined) {
+    const types = Array.isArray(node.type) ? node.type : [node.type];
+    const each = types.map(t => typeBound(node, t));
+    if (each.every((b): b is number => b !== null)) bounds.push(Math.max(...each));
+  }
+  return bounds.length === 0 ? null : Math.min(...bounds);
+}
+
+/**
+ * Conservative canonical UTF-8 bound, or null for an invalid or unbounded schema.
+ * Strings cost at most 6 bytes per code point. Number costs 25; integer costs
+ * 24, tightened only when both ends have magnitude below 1e21. A bound need
+ * not be attainable when constraints intersect or oneOf branches overlap.
+ */
+export function resultOutcomeMaxBytes(schema: ResultSchema): number | null {
+  // Inspect data descriptors before canonicalization can invoke a callback.
+  const pending: unknown[] = [schema];
+  const seen = new Set<object>();
+  while (pending.length > 0) {
+    const value = pending.pop();
+    if (typeof value === 'function') return null;
+    if (value === null || typeof value !== 'object' || seen.has(value)) continue;
+    seen.add(value);
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== null && prototype !== Object.prototype && prototype !== Array.prototype) return null;
+    for (const [name, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
+      if (name === 'toJSON' && (!Object.hasOwn(descriptor, 'value') || typeof descriptor.value === 'function')) return null;
+      if (!descriptor.enumerable) continue;
+      if (!Object.hasOwn(descriptor, 'value')) return null;
+      pending.push(descriptor.value);
+    }
+  }
+  const document = canonicalDocument(schema, RESULT_SCHEMA_MAX_BYTES);
+  if (!document.ok) return null;
+  const sink = new IssueSink();
+  // A fragment can be any instance type, unlike a result-document root.
+  checkSubschema(document.canonical, '', 0, sink, false);
+  if (!sink.empty) return null;
+  return outcomeBound(document.canonical as ResultSchema);
 }
