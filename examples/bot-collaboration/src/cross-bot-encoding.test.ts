@@ -11,7 +11,7 @@ import { BotCollaboration } from './host';
 import { stateOf, type CollaborationState, type Turn } from './model';
 import { createRoutine } from './routines';
 import { outcomeSchema, SYSTEM_PROMPT, turnInstruction } from './schema';
-import { BOT_REPLY_MAX_BYTES, DEFAULT_INSTRUCTION_MAX_BYTES, minimumInstructionBytes } from './delegation';
+import { BOT_REPLY_MAX_BYTES, DEFAULT_INSTRUCTION_MAX_BYTES, minimumInstructionBytes, OPEN_DELEGATION_ENTRY_MAX_BYTES, OPEN_DELEGATIONS_MAX_BYTES } from './delegation';
 
 let root: string | undefined;
 let fixture: TestTeam | undefined;
@@ -116,4 +116,23 @@ it('measures the Main Bot schema with 24 delegate ids: eight routines fit; rooms
   try { outcomeSchema(main.id, state, turn); } catch (cause) { error = cause; }
   expect(error).toBeInstanceOf(protocol.BotTurnOutcomeSchemaError);
   expect(error).toMatchObject({ code: 'schema-over-budget', message: expect.stringMatching(/^schema is 17\d{3} bytes; cap 16384$/) });
+});
+
+it('bounds a Main Bot reply Turn that lists 24 worst-case open delegations, with the rest only counted', () => {
+  const { state, turns: [reply] } = worstCase(worst(1000));
+  const main = Object.values(state.team.bots)[0]!;
+  const template = state.delegations[reply!.replies![0]!.delegationId]!;
+  for (let n = 0; n < 25; n++) {
+    const id = hash(['open', n]);
+    state.delegations[id] = { ...template, id, request: worst(1000), status: 'reply_pending', verdict: undefined, reply: undefined };
+  }
+  const turn: Turn = { ...reply!, id: hash(['bot_reply', 'main']), botId: main.id };
+  state.turns[turn.id] = turn;
+  const minimum = minimumInstructionBytes(SYSTEM_PROMPT);
+  check(state, turn, minimum);
+  const { context } = turnInstruction(state, turn, { turnLimit: 100, contextMaxBytes: 32_768, instructionMaxBytes: minimum });
+  expect(context.openDelegations).toMatchObject({ omitted: 1 });
+  expect(context.openDelegations!.items).toHaveLength(24);
+  expect(bytes(JSON.stringify(context.openDelegations!.items[0]))).toBeLessThanOrEqual(OPEN_DELEGATION_ENTRY_MAX_BYTES);
+  expect(bytes(`"openDelegations":${JSON.stringify(context.openDelegations)}`)).toBeLessThanOrEqual(OPEN_DELEGATIONS_MAX_BYTES);
 });

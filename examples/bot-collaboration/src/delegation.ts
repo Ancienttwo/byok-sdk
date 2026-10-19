@@ -1,6 +1,6 @@
 import type { BotTurnOutcome } from '@byok-sdk/protocol';
 import { canonical, hash, taskId as taskIdOf, type Conclusion, type Intent, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
-import { addTurn, json, type Batch, type CollaborationState, type Delegation, type ReplyEntry, type Turn, type Verdict } from './model';
+import { addTurn, json, type Batch, type CollaborationState, type Delegation, type DelegationCancel, type ReplyEntry, type Turn, type Verdict } from './model';
 
 /** Host cap on a delegated Bot's accepted reply (Q8). consumeMessage checks it too. */
 export const BOT_REPLY_MAX_BYTES = 8192;
@@ -24,16 +24,23 @@ export const DEFAULT_CANCEL_GRACE_MS = 60_000;
 export interface DelegationTimers { cancelGraceMs: number; uncertainAfterMs: number }
 const DEFAULT_TIMERS: DelegationTimers = { cancelGraceMs: DEFAULT_CANCEL_GRACE_MS, uncertainAfterMs: REPLY_UNCERTAIN_AFTER_MS };
 const TEAM_BOT_LIMIT = 24;
+/** §8.8: the Main Bot cancel enum lists at most this many open delegations, newest first. */
+export const OPEN_DELEGATIONS_MAX_ITEMS = 24;
+const OPEN_REQUEST_MAX_CODE_POINTS = 80;
+/** Listed entry: three 64-byte ids, status, request <= 80 code points at 6 bytes each, keys. */
+export const OPEN_DELEGATION_ENTRY_MAX_BYTES = 768;
+/** The listed entries, the omitted count and its notice, and the keys. */
+export const OPEN_DELEGATIONS_MAX_BYTES = OPEN_DELEGATIONS_MAX_ITEMS * OPEN_DELEGATION_ENTRY_MAX_BYTES + 256;
 
 export function isCrossBot(turn: Turn): boolean { return turn.source === 'bot_request' || turn.source === 'bot_reply'; }
 /** UTF-8 bytes of the instruction parts around the Request and ContextPack sections. */
 export function instructionOverhead(prompt: string): number {
   return Buffer.byteLength(`${prompt}\n\nRequest:\n\n\nContextPack:\n`, 'utf8');
 }
-/** Construction check (§3.7): P + max(R_reply, R_req) + F_max. */
+/** Construction check (§3.7): P + max(R_reply, R_req) + F_max. A Main Bot reply Turn also lists open delegations (§8.8). */
 export function minimumInstructionBytes(prompt: string): number {
   return instructionOverhead(prompt) + Math.max(REPLY_REQUEST_MAX_BYTES, BOT_REQUEST_MAX_BYTES)
-    + TEAM_BOT_LIMIT * ROSTER_ENTRY_MAX_BYTES + CONTEXT_FIXED_MAX_BYTES;
+    + TEAM_BOT_LIMIT * ROSTER_ENTRY_MAX_BYTES + CONTEXT_FIXED_MAX_BYTES + OPEN_DELEGATIONS_MAX_BYTES;
 }
 
 type Publish = (id: string, value: Json) => void;
@@ -196,7 +203,22 @@ function uncertain(d: Delegation, now: number, emit: Publish): void {
 function resolveCancel(state: CollaborationState, d: Delegation, taskId: string | undefined, now: number, emit: Publish): void {
   const reply = taskId !== undefined && state.replies[taskId]?.body !== undefined ? taskId : undefined;
   if (reply) d.partial = true;
-  resolveDelegation(state, d, 'cancelled', now, emit, 'user_cancelled', reply);
+  resolveDelegation(state, d, 'cancelled', now, emit, d.cancel!.reason ?? 'user_cancelled', reply);
+}
+const CANCELLABLE = new Set<Delegation['status']>(['queued', 'running', 'reply_pending']);
+/**
+ * Open delegations that a Main Bot can cancel (§8.8): no verdict, no cancel yet,
+ * and a state that a cancel can act on. Newest first; the rest are only counted.
+ */
+export function openDelegations(state: CollaborationState): { items: Delegation[]; omitted: number } {
+  const open = Object.values(state.delegations).filter(d => !d.verdict && !d.cancel && CANCELLABLE.has(d.status)).reverse();
+  return { items: open.slice(0, OPEN_DELEGATIONS_MAX_ITEMS), omitted: Math.max(0, open.length - OPEN_DELEGATIONS_MAX_ITEMS) };
+}
+/** ContextPack view of the cancel enum. The enum is never cut without this notice. */
+export function openDelegationsContext(state: CollaborationState) {
+  const { items, omitted } = openDelegations(state);
+  return { items: items.map(d => ({ id: d.id, from: d.fromBotId, to: d.toBotId, status: d.status, request: cut(d.request, OPEN_REQUEST_MAX_CODE_POINTS) })),
+    omitted, notice: omitted ? `${omitted} more open delegations are not listed. The owner can cancel them.` : null };
 }
 /**
  * Arbitration transaction (§8.8). Freeze the cancel fact on the current chain
@@ -204,12 +226,13 @@ function resolveCancel(state: CollaborationState, d: Delegation, taskId: string 
  * K4 intent, close queue eligibility and set the verdict now. Returns true when
  * core.cancel must still deliver the cancel.
  */
-export function arbitrateCancel(s: LedgerState, state: CollaborationState, d: Delegation, now: number, emit: Publish): boolean {
+export function arbitrateCancel(s: Pick<LedgerState, 'intents'>, state: CollaborationState, d: Delegation, now: number, emit: Publish,
+  reason?: DelegationCancel['reason']): boolean {
   if (d.verdict) throw new Error('Delegation already resolved');
   if (d.cancel) return !d.cancel.delivered;
-  if (d.status !== 'queued' && d.status !== 'running' && d.status !== 'reply_pending') throw new Error('Delegation cannot be cancelled in this state; use abandonDelegation');
+  if (!CANCELLABLE.has(d.status)) throw new Error('Delegation cannot be cancelled in this state; use abandonDelegation');
   const target = state.turns[d.chainTurnIds.at(-1)!]!, intent = s.intents[hash(target.id)];
-  d.cancel = { requestedAt: now, targetTurnId: target.id, delivered: !intent || !!intent.conclusion };
+  d.cancel = { requestedAt: now, targetTurnId: target.id, delivered: !intent || !!intent.conclusion, ...(reason ? { reason } : {}) };
   if (!intent) {
     target.status = 'failed'; target.conclusion = 'cancelled'; delete target.blockedReason;
     emit(`bot-turn:${target.id}`, json({ owner: target.botId, ...target }));

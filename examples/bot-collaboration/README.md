@@ -321,6 +321,20 @@ with that reply marked `partial`. A message after the cancel is refused
 after `uncertainAfterMs` also shows `uncertain`. The Host never resubmits and
 never starts a new generation. A later terminal gives the normal verdict.
 
+A Main Bot cancels through the `cancel_delegation` outcome fragment. Only a
+Main Bot Turn with `authority = owner` outside a room seat gets it. Its
+`delegationId` enum lists open delegations: no verdict, no cancel yet, and
+status `queued`, `running`, or `reply_pending`. The list is newest first and
+has at most 24 ids. The ContextPack `openDelegations` block shows each listed
+id with its Bots, status, and the first 80 code points of the request. It
+also counts the omitted delegations and shows a notice. The owner cancels
+those with `cancelDelegation`. Apply runs after the management actions and
+before the routine actions. It checks room seat, owner authority, and the
+Main Bot role again. Then it runs the same arbitration transaction. The cancel fact records
+`reason: 'main_bot_cancelled'`, and the verdict keeps that reason. A resolved
+delegation gives the rejected action `already_resolved` and no second
+verdict. The Main Bot sees it in its next ContextPack.
+
 `abandonDelegation(id)` ends a `reply_held` or `uncertain` delegation with
 `abandoned`. When the attempt can still run, it also writes a K4 cancel. A
 terminal after the verdict goes to `audit` only.
@@ -341,8 +355,10 @@ A `bot_request` or `bot_reply` instruction puts request text and reply bodies
 once, as raw UTF-8 in length-framed blocks. History, team notes, rooms, and
 routines are trimmed oldest first. `instructionMaxBytes` (default 65 536)
 bounds the whole instruction. Construction refuses a value below
-`minimumInstructionBytes(SYSTEM_PROMPT)`.
+`minimumInstructionBytes(SYSTEM_PROMPT)`. The minimum includes the
+`openDelegations` block of a Main Bot reply Turn.
 
 A Main Bot with 24 Bots, 8 routines, and a room exceeds the outcome schema cap
 of 16 384 bytes. The Host blocks such a Turn with a visible reason. It does
-not cut an enum.
+not cut an enum. Without the room, 24 open delegations in the
+`cancel_delegation` enum still fit (15 949 bytes).

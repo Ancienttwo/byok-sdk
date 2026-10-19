@@ -27,8 +27,8 @@ export interface ReplyEntry {
   /** The reply was accepted before a cancel. The cancel stopped the rest of the execution. */
   partial?: true;
 }
-/** Frozen in the arbitration transaction (§8.8). `delivered` turns true after core.cancel. */
-export interface DelegationCancel { requestedAt: number; targetTurnId: string; delivered: boolean }
+/** Frozen in the arbitration transaction (§8.8). `delivered` turns true after core.cancel. No `reason` means a user cancel. */
+export interface DelegationCancel { requestedAt: number; targetTurnId: string; delivered: boolean; reason?: 'main_bot_cancelled' }
 export interface Delegation {
   id: string; root: string; fromBotId: string; fromTurnId: string; fromTaskId: string; index: number;
   toBotId: string; toAgentRef?: { agentId: string; profileRevision: string }; toDeviceId?: string;

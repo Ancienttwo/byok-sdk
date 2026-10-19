@@ -13,7 +13,7 @@ import { abandonDelegation, applyDelegate, arbitrateCancel, BOT_REPLY_MAX_BYTES,
   settleDelegations, type DelegationTimers } from './delegation';
 import { arm, consumeRoutine, createRoutine, lifecycle, operation, owned, switchVersion, updateRoutine } from './routines';
 
-import { activeBot, applyManagement, roomFields, same, updateBot, roomVisibility } from './team';
+import { activeBot, applyManagement, requireMain, roomFields, same, updateBot, roomVisibility } from './team';
 import { advanceRooms, applySpeech, memberPresent, roomInput, type Mentions } from './rooms';
 import type { RoomFields } from '@byok-sdk/protocol';
 
@@ -121,12 +121,22 @@ export class BotCollaboration {
       state.audit.push(`Outcome audit only: ${tx.intent.taskId}`); return;
     }
     if (seat) applySpeech(state, turn, outcome, tx.intent.taskId, this.now(), accept);
-    applyManagement(state, turn.botId, tx.intent.taskId, outcome, this.models(), (kind, work) => accept(kind, () => {
+    const managed = (kind: string, work: () => void) => accept(kind, () => {
       // Also deny management from room offers frozen before this policy change.
       if (seat) throw new Error('Room seats cannot manage the team');
       // Another Bot's request never drives management, at any depth (§6.1).
       if (turn.authority !== 'owner') throw new Error('Management needs owner authority');
       work();
+    });
+    applyManagement(state, turn.botId, tx.intent.taskId, outcome, this.models(), managed);
+    // Main Bot cancel (§8.8): after management, before the routine actions, in the same arbitration as cancelDelegation.
+    // Only this Turn's intent changes in the terminal transaction, so the committed intents are current for the target.
+    outcome.cancel_delegation?.forEach(action => managed('cancel_delegation', () => {
+      requireMain(state.team, turn.botId);
+      const d = state.delegations[action.delegationId];
+      if (!d) throw new Error('Delegation not found');
+      if (d.verdict) throw new Error('already_resolved');
+      arbitrateCancel(this.ledger.snapshot(), state, d, this.now(), tx.publish, 'main_bot_cancelled');
     }));
     outcome.create_routine?.forEach((action, index) => accept('create_routine', () => {
       createRoutine(state, turn.botId, tx.intent.taskId, index, action, this.now(), turn.authority ?? 'bot');
@@ -563,6 +573,8 @@ export class BotCollaboration {
       const admitted = this.ledger.transaction(s => this.sync(s));
       await flushHomes(this.server, this.ledger, this.now);
       await this.core.drain();
+      // A Main Bot cancel applied in this drain commits with delivered = false.
+      await this.deliverCancels().catch(() => {});
       let materialized = this.ledger.transaction(s => this.sync(s));
       await this.flushCards();
       materialized = this.ledger.transaction(s => this.sync(s)) || materialized;
