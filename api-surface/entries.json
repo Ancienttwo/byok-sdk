@@ -168,6 +168,7 @@
         "child_process",
         "crypto",
         "fs",
+        "module",
         "path"
       ],
       "lazyImports": [],
@@ -179,6 +180,7 @@
           "child_process",
           "crypto",
           "fs",
+          "module",
           "path"
         ],
         "thirdParty": []
@@ -380,6 +382,7 @@
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/anthropic-messages",
         "@earendil-works/pi-ai/api/openai-completions",
+        "@earendil-works/pi-ai/api/openai-responses",
         "@earendil-works/pi-coding-agent",
         "@earendil-works/pi-durable/storage/sqlite/node",
         "promise.try",
@@ -711,6 +714,7 @@
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/anthropic-messages",
         "@earendil-works/pi-ai/api/openai-completions",
+        "@earendil-works/pi-ai/api/openai-responses",
         "@earendil-works/pi-coding-agent",
         "@earendil-works/pi-durable/storage/sqlite/node",
         "promise.try",

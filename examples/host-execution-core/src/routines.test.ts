@@ -37,14 +37,30 @@ it('skips three days of missed slots and runs exactly one catch_up with an injec
 
 it('keeps one running occurrence and only the latest queued slot, then pause stops new slots', async () => {
   host = await openHost();
-  await host.core.addRoutine(host.routine('coalesce', { rule: { anchorMs: Date.now() + 30, everyMs: 100 } }));
+  const now = Date.now();
+  // Mock only the wall clock. Fake timers would let vi.waitFor advance it.
+  vi.setSystemTime(now);
+  await host.core.addRoutine(host.routine('coalesce', { rule: { anchorMs: now, everyMs: 100 } }));
   await vi.waitFor(() => expect(host.adapter.starts).toHaveLength(1));
+  for (const slot of [1, 2]) {
+    vi.setSystemTime(now + slot * 100);
+    await host.server.wakes.schedule({ dedupKey: `coalesce-clock:${slot}`, availableAt: Date.now() });
+    await vi.waitFor(() => expect(occurrences()).toHaveLength(slot + 1));
+  }
   await vi.waitFor(() => expect(occurrences().length).toBeGreaterThanOrEqual(3));
   expect(intents().filter(row => row.phase === 'inflight')).toHaveLength(1);
   expect(intents().filter(row => row.phase === 'queued')).toHaveLength(1);
   expect(occurrences().some(row => row.conclusion === 'superseded')).toBe(true);
+  const latest = occurrences().find(row => row.trigger.plannedAt === now + 200)!;
+  expect(host.ledger.snapshot().intents[latest.intentId]?.phase).toBe('queued');
   await host.core.lifecycle('coalesce', 'paused');
   const count = occurrences().length;
+  // Cross later slots and observe a real SDK completion while the routine is paused.
+  vi.setSystemTime(now + 1000);
+  await host.server.wakes.schedule({ dedupKey: 'coalesce-clock:paused', availableAt: Date.now() });
+  await vi.waitFor(async () => {
+    expect((await host.server.wakes.pending()).some(wake => wake.dedupKey === 'coalesce-clock:paused')).toBe(false);
+  });
   // The SDK invalidates delivery before its complete write commits.
   // Wait for that write before checking that the paused routine has no wakes.
   await vi.waitFor(async () => {

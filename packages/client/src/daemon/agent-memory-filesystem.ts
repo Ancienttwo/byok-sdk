@@ -18,8 +18,3 @@ export interface AgentMemoryFilesystemFileState {
   readonly revision: string;
   readonly byteCount: number;
 }
-
-/** Product-owned deployment pointer. The SDK never searches PATH. */
-export interface AgentMemoryFilesystemHelperConfig {
-  readonly helperBin: string;
-}

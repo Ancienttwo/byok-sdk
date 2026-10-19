@@ -4,6 +4,94 @@ Date: 2026-10-18. Baseline: `8e8839a3`.
 Branch: `codex/bot-k4-host-execution-core`.
 Environment: macOS, Node `v24.21.0`, Bun `1.4.3`.
 
+## Coalescing observation repair on 260570ae
+
+Date: 2026-10-19. Baseline: `260570ae`, including the owner's ordinary merge of `origin/main@2e06fa91`.
+CI run `39212142718`, Node 26 job `117928000884`, failed the exact one-queued assertion at `src/routines.test.ts:44`.
+It reported 37/38 passing tests. The downloaded job log is `coalesce-ci-node26.log` under `_ops/wo-05/`.
+
+P1: `recordOccurrence` creates the replacement queued occurrence. The independent Host scan expires an old queued intent at `retryUntil`.
+P2: At the next 100 ms slot, scan can supersede the old queued occurrence before SDK delivery creates its replacement.
+Three committed occurrences and one in-flight execution can therefore coexist with zero queued intents during that window.
+A temporary real-SDK probe held the fourth wake before the Host consume call and ran the normal Host scan.
+The original one-queued assertion then failed with the same empty-array result. The three-occurrence and one-in-flight assertions passed.
+The probe source and failure log are retained only in ignored `_ops/wo-05/coalesce-gap.probe.test.ts` and `coalesce-gap-red.log`.
+
+P3: Control the shared wall clock with `vi.setSystemTime`, without fake timers.
+Advance two slots explicitly and wait for each occurrence commit through the real SDK wake path.
+Hold the clock before the next cutoff while checking the original one-running, one-queued and superseded assertions.
+Also check that the queued intent belongs to the latest slot.
+After pause, cross later slots and wait for a public SDK wake completion before checking no new occurrences.
+The existing pending-wake, current-terminal, lifecycle and cannot-resume assertions remain unchanged.
+There is no fixed sleep, test retry, timeout increase, Host change or SDK change.
+
+### Coalescing repair checks
+
+All five complete K4 runs used `44b5287c`, in sequence, with no edits between runs.
+
+| Command | Exit | Evidence |
+| --- | --- | --- |
+| `bun ci` | 0 | Merged lockfile installed; `coalesce-install.log`. |
+| `bun run build` | 0 | Workspace build completed; `coalesce-build.log`. |
+| `bun run typecheck` | 0 | Workspace typechecks completed; `coalesce-typecheck.log`. |
+| `bun run --cwd examples/host-execution-core test src/routines.test.ts -t 'keeps one running occurrence'` | 0 | Focused case passed; `coalesce-focused.log`. |
+| `bun run --cwd examples/host-execution-core test`, run 1 | 0 | 38/38 in 62.18 seconds; `coalesce-k4-1.log`. |
+| `bun run --cwd examples/host-execution-core test`, run 2 | 0 | 38/38 in 59.68 seconds; `coalesce-k4-2.log`. |
+| `bun run --cwd examples/host-execution-core test`, run 3 | 0 | 38/38 in 61.82 seconds; `coalesce-k4-3.log`. |
+| `bun run --cwd examples/host-execution-core test`, run 4 | 0 | 38/38 in 62.60 seconds; `coalesce-k4-4.log`. |
+| `bun run --cwd examples/host-execution-core test`, run 5 | 0 | 38/38 in 60.45 seconds; `coalesce-k4-5.log`. |
+| `bun run check:api-surface` | 0 | All 9 package goldens match; `coalesce-api-surface.log`. |
+| `bun run check:version-authority` | 0 | Dispatch 0.27.0 and keys 0.12.0 agree; `coalesce-version-authority.log`. |
+| `git diff --check` | 0 | No whitespace errors. |
+
+Logs and sequential exit receipts are in ignored `_ops/wo-05/`.
+The temporary diagnostic exited 1 at the original one-queued assertion, as intended. It is not part of the final suite.
+This test-only follow-up reruns the requested K4 suite and typecheck. It does not claim a new whole-workspace test pass.
+The previous interrupted workspace run remains recorded below.
+The read-only gatekeeper checked `260570ae..44b5287c` and returned PASS for the original semantics and assertion integrity.
+It did not run tests or edit files. This local check does not replace p1G's requested hunk re-check.
+The only changed tracked files are this record and `src/routines.test.ts`. Production code and SDK packages are unchanged.
+
+## Merge-train repair for PR 532
+
+Date: 2026-10-19. Prior head: `e5afad26`.
+CI run `39201151933` failed the same rollback assertion in both baseline and Node 26 jobs.
+An ordinary merge at `f85a80f5` brings in `origin/main@5b988a6e`. No rebase or force push is used.
+The merge completed without conflicts. Package changes come from main; this repair adds none.
+
+P1: The Host precheck and the rollback test shared a local 366-day constant.
+Main now exports `WAKE_MAX_FUTURE_MS` and admits wakes up to 368 days.
+P2: A wake 366 days ahead is still valid after a one-hour clock rollback: its delay is 366 days plus one hour, below 368 days.
+The real SDK therefore accepts it, so the Host stays `ok`. The focused test reproduced the CI failure after merge and build.
+P3: Use the SDK's public constant for the Host precheck. Build test candidates from that same public contract directly.
+At the SDK boundary, a one-hour rollback again makes the real SDK reject the wake.
+All error-state, pending-wake, outbox, persisted-error and successful-recovery assertions remain unchanged.
+The exact-boundary test still requires acceptance at the limit and deferral at limit plus one millisecond.
+The guide and README now describe the current public constant. The prior SDK export nit is closed by main's PR 523.
+
+### Merge-train checks
+
+| Command | Exit | Evidence |
+| --- | --- | --- |
+| `bun ci` | 0 | Frozen dependencies match the merged lockfile; `merge-train-install.log`. |
+| `bun run build` | 0 | All workspace builds completed; `merge-train-build.log`. |
+| `bun run typecheck` | 0 | All workspace typechecks completed; `merge-train-typecheck.log`. |
+| `bun run --cwd examples/host-execution-core test src/scheduling-recovery.test.ts` | 0 | 9/9 passed; `merge-train-focused.log`. |
+| `bun run --cwd examples/host-execution-core test` | 0 | 5 files, 38/38 passed in 44.30 seconds; `merge-train-k4.log`. |
+| `bun run test` | 130 | Interrupted after multiple client-suite failures; no complete root-suite pass is claimed. See `merge-train-full-test.log`. |
+| `bun run check:api-surface` | 0 | Built declarations match all 9 package goldens; `merge-train-api-surface.log`. |
+| `bun run check:version-authority` | 0 | Dispatch 0.27.0 and keys 0.12.0 agree; `merge-train-version-authority.log`. |
+| `git diff --check` | 0 | No whitespace errors. |
+
+Logs are in this worktree's ignored `_ops/wo-05/` directory.
+The old-source rollback probe exited 1 after merge and build (`merge-train-red.log`).
+CI logs for baseline and Node 26 show the same failure (`merge-train-ci-baseline.log`, `merge-train-ci-node26.log`).
+The read-only gatekeeper reviewed only `f85a80f5..a6adaad2` and returned PASS with no weakened assertion.
+It did not review main's changes, run tests or modify files.
+The additional root run reported failures in client admission, journal, daemon, approval and other SDK tests before interruption.
+Their causes are not diagnosed by this K4 repair. The SDK package diff against `origin/main@5b988a6e` is empty.
+The requested K4 suite and typecheck completed successfully. No source or test changes followed `a6adaad2`.
+
 ## V4 patch: preserve SDK schedule errors
 
 This patch starts at `5c86a4b8` and implements the owner's follow-up request.
@@ -302,6 +390,24 @@ The test observes one occurrence, one execution, identical input and one committ
 | Cancel classification | `unclaimed-expiry.test.ts`: real cancelled/unclaimed attempt, claimed cancel_requested state, then task.cancelled terminal. |
 
 ## Test changes and reasons
+
+Coalescing observation repair:
+
+- `routines.test.ts` now advances the same wall clock used by the Host and SDK one slot at a time.
+  It waits for exact occurrence counts at each slot, then preserves all original queue assertions before advancing time again.
+  The newest-slot assertion strengthens the existing coalescing check.
+- The paused phase advances beyond multiple future slots and observes an SDK completion before the original unchanged count check.
+  This preserves the no-new-occurrence guarantee even though the wall clock is controlled.
+- Only `vi.setSystemTime` is used. Enabling fake timers would make Vitest's `vi.waitFor` advance the clock automatically.
+  The first diagnostic setup exposed that behavior; its log is `coalesce-gap-auto-clock.log`.
+  The final diagnostic reproduced the reported empty-queue failure without automatic clock advancement.
+
+Merge-train repair:
+
+- `scheduling-recovery.test.ts` now takes its boundary and rollback timestamps directly from the public SDK constant.
+  This keeps the test independent of the Host's local alias and checks the current SDK admission contract.
+  The boundary test name no longer embeds the old 366-day limit. No assertion, timeout or rollback amount is relaxed.
+  The focused old-source test failed after the main merge with expected `schedule_retrying`, actual `ok`.
 
 V4 patch changes:
 

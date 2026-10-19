@@ -1,7 +1,7 @@
 export { ByokKeysError, BYOK_KEYS_ERROR_CODES } from './errors';
 export type { ByokKeysErrorCode } from './errors';
-export { PiModelConfigSchema, PI_THINKING_LEVELS } from './pi-model-config';
-export type { PiModelConfig } from './pi-model-config';
+export { PiModelConfigSchema, PI_THINKING_LEVELS, PI_OPENAI_COMPATIBLE_APIS, PI_COMPAT_KEYS_BY_API } from './pi-model-config';
+export type { PiModelConfig, PiOpenAICompatibleApi } from './pi-model-config';
 
 export {
   MODEL_PROVIDER_ADAPTERS,

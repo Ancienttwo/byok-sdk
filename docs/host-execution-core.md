@@ -64,8 +64,8 @@ Optional `quietHours: { startMinute, endMinute }` uses UTC minutes since midnigh
 Quiet hours can cross midnight. Defer the slot to their end; do not drop it.
 Inject a shared pure `nextOccurrence` function for cron, other zones, DST or business calendars.
 Use that same function in the Host service. Return a time strictly after the input time, or null.
-The core checks the 368-day K2 horizon before it writes a schedule outbox row.
-The Host's `WAKE_HORIZON_MS` matches the SDK's `MAX_FUTURE_MS`.
+The core checks the SDK horizon, currently 368 days, before writing a schedule outbox row.
+The Host's `WAKE_HORIZON_MS` uses the public `WAKE_MAX_FUTURE_MS` export from `@byok-sdk/server`.
 It retains a later candidate on the routine with status `schedule_retrying`, without a schedule row.
 Process-local backoff starts at 60 seconds, doubles to one hour, and retries the same candidate.
 Startup also retries it. A wall-clock rollback rejection from the SDK enters the same state.

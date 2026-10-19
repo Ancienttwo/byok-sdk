@@ -75,6 +75,78 @@ describe('Bot turn outcome fragments', () => {
       expect(bytes(witness)).toBeLessThanOrEqual(bound);
     });
 
+  it.each<[string, Record<string, unknown>, boolean]>([
+    ['daily', {}, true],
+    ['weekly', { daysOfWeek: ['mon', 'fri'] }, true],
+    ['all weekdays', { daysOfWeek: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] }, true],
+    ['duplicate weekdays', { daysOfWeek: ['mon', 'mon'] }, true],
+    ['monthly', { dayOfMonth: 31 }, true],
+    ['yearly', { dayOfMonth: 31, month: 12 }, true],
+    ['calendar checks stay with Host', { dayOfMonth: 31, month: 4 }, true],
+    ['February 29 stays with Host', { dayOfMonth: 29, month: 2 }, true],
+    ['weekday and date', { daysOfWeek: ['mon'], dayOfMonth: 1 }, false],
+    ['weekday and month', { daysOfWeek: ['mon'], month: 2 }, false],
+    ['all day selectors', { daysOfWeek: ['mon'], dayOfMonth: 1, month: 2 }, false],
+    ['month without date', { month: 2 }, false],
+    ['empty weekdays', { daysOfWeek: [] }, false],
+    ['too many weekdays', { daysOfWeek: Array(8).fill('mon') }, false],
+    ['unknown weekday', { daysOfWeek: ['MON'] }, false],
+    ['numeric weekday', { daysOfWeek: [1] }, false],
+    ['weekday string', { daysOfWeek: 'mon' }, false],
+    ['date below range', { dayOfMonth: 0 }, false],
+    ['date above range', { dayOfMonth: 32 }, false],
+    ['fractional date', { dayOfMonth: 1.5 }, false],
+    ['month below range', { dayOfMonth: 1, month: 0 }, false],
+    ['month above range', { dayOfMonth: 1, month: 13 }, false],
+    ['month string', { dayOfMonth: 1, month: '2' }, false],
+    ['unknown field', { cron: '0 9 * * *' }, false],
+  ])('matches the v3 three-branch schema: %s', (_name, dayFields, validDayFields) => {
+    const checked = F.createRoutine({ localIds: routineSlots, timeZones }).items!.properties!.schedule!;
+    const time: Record<string, ResultSchema> = {
+      minute: { type: 'integer', minimum: 0, maximum: 59 },
+      hour: { type: 'integer', minimum: 0, maximum: 23 },
+      tz: { enum: ['Asia/Shanghai', 'UTC'] },
+    };
+    // Independent v3 reference: each closed branch repeats its field schemas.
+    const v3: ResultSchema = { oneOf: [
+      { type: 'object', additionalProperties: false, required: ['minute', 'hour', 'tz'], properties: { ...time } },
+      { type: 'object', additionalProperties: false, required: ['minute', 'hour', 'tz', 'daysOfWeek'], properties: {
+        ...time, daysOfWeek: { type: 'array', minItems: 1, maxItems: 7, items: { enum: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] } },
+      } },
+      { type: 'object', additionalProperties: false, required: ['minute', 'hour', 'tz', 'dayOfMonth'], properties: {
+        ...time, dayOfMonth: { type: 'integer', minimum: 1, maximum: 31 }, month: { type: 'integer', minimum: 1, maximum: 12 },
+      } },
+    ] };
+    const root = (schedule: ResultSchema): ResultSchema => ({
+      type: 'object', additionalProperties: false, required: ['schedule'], properties: { schedule },
+    });
+    const checkedRoot = root(checked), v3Root = root(v3);
+    expect(checkResultSchema(checkedRoot).ok).toBe(true);
+    expect(checkResultSchema(v3Root).ok).toBe(true);
+    for (const minute of [0, 59, -1, 60, 1.5, '0', undefined]) {
+      for (const hour of [0, 23, 24, undefined]) {
+        for (const tz of ['UTC', 'Asia/Shanghai', 'Mars/Phobos']) {
+          const schedule = {
+            ...(minute === undefined ? {} : { minute }),
+            ...(hour === undefined ? {} : { hour }), tz, ...dayFields,
+          };
+          const outcome = { schedule };
+          const actual = validateResultOutcome(checkedRoot, outcome).ok;
+          const reference = validateResultOutcome(v3Root, outcome).ok;
+          const expected = validDayFields && (minute === 0 || minute === 59)
+            && (hour === 0 || hour === 23) && tz !== 'Mars/Phobos';
+          const context = JSON.stringify(schedule);
+          expect(actual, context).toBe(reference);
+          expect(actual, context).toBe(expected);
+        }
+      }
+    }
+    for (const schedule of [null, [], 'daily']) {
+      expect(validateResultOutcome(checkedRoot, { schedule }).ok).toBe(false);
+      expect(validateResultOutcome(v3Root, { schedule }).ok).toBe(false);
+    }
+  });
+
   it('keeps checked field combinations in the schema and leaves flat combinations to the Host', () => {
     for (const extra of [{ daysOfWeek: ['mon'], dayOfMonth: 1 }, { month: 3 }]) {
       for (const shape of ['checked', 'flat'] as const) {

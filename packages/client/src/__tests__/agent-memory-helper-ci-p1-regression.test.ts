@@ -20,7 +20,9 @@ describe('Agent memory filesystem helper CI P1 regression', () => {
 
   it('builds and tests the Go helper on the macOS admission platform', () => {
     const helperJob = ciJob(workflow, 'agent-memory-helper');
-    expect(helperJob).toContain('runs-on: macos-latest');
+    expect(helperJob).toContain('runs-on: ${{ matrix.os }}');
+    expect(helperJob).toContain('os: macos-latest');
+    expect(helperJob).toContain('os: macos-15-intel');
     expect(helperJob).not.toContain('needs:');
     expect(helperJob).toContain('uses: actions/checkout@v7');
     expect(helperJob).toContain('uses: actions/setup-node@v7');
@@ -30,14 +32,19 @@ describe('Agent memory filesystem helper CI P1 regression', () => {
     expect(helperJob).toContain('go-version-file: packages/client/native/agent-memory-fs/go.mod');
     expect(helperJob).toContain('run: bun ci');
     expect(helperJob).toContain('run: bun run build');
+    expect(helperJob).toContain('run: bun run --filter @byok-sdk/client build:agent-memory-helper');
     expect(helperJob).toContain('working-directory: packages/client/native/agent-memory-fs');
-    expect(helperJob).toContain('GOTOOLCHAIN=go1.26.5 go test ./...');
-    expect(helperJob).toContain('go build -o "$RUNNER_TEMP/byok-agent-memory-fs" .');
+    expect(helperJob).toContain('GOTOOLCHAIN=go1.26.5 go test -race ./...');
+    expect(helperJob).toContain('go build -buildvcs=false -trimpath -o "$RUNNER_TEMP/byok-agent-memory-fs" .');
   });
 
   it('executes the TypeScript-to-Go helper contract with the built helper binary', () => {
     const helperJob = ciJob(workflow, 'agent-memory-helper');
-    expect(helperJob).toContain('BYOK_TEST_AGENT_MEMORY_FS_BIN="$RUNNER_TEMP/byok-agent-memory-fs"');
+    expect(helperJob).toContain('agent-memory-intent.test.ts');
+    expect(helperJob).toContain('daemon-conn-hello-capabilities.test.ts');
+    expect(helperJob).toContain('node packages/client/scripts/agent-memory-runtime-smoke.mjs');
+    expect(helperJob).toContain('bun packages/client/scripts/agent-memory-runtime-smoke.mjs');
+    expect(helperJob).toContain('bun run check:release-pack');
     expect(helperJob).toContain(
       'bun run --filter @byok-sdk/client test -- src/__tests__/agent-memory-fs-helper.test.ts',
     );
