@@ -9,6 +9,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { decodeEnvelope } from '@byok-sdk/protocol';
+import { AgentHomeBusyError, AgentHomeManager } from '../agent-home';
 
 interface ChildConfig {
   readonly deviceCredentials?: { readonly macosKeychainPath: string };
@@ -564,6 +565,82 @@ describe.skipIf(process.platform !== 'darwin')('compiled daemon SIGKILL executio
     expect(journalRows('SELECT truth_state FROM journal_terminal')).toEqual([{ truth_state: 'confirmed' }]);
     expect(starts()).toHaveLength(1);
   }, 30_000);
+
+  // F3 stays in the native macOS suite: its compiled daemon uses the real
+  // Keychain credential fixture. Linux admission is a separate slice (F4).
+  // This fixture has an Agent home and no Git workspace configuration.
+  it.each(['terminal:before-commit', 'terminal:after-commit'] as const)(
+    '#554 F3: cancel initiates SIGKILL at %s and recovery keeps one terminal and one home writer',
+    async fault => {
+      const cloud = await startCloud();
+      const { daemon, deviceId } = await pair(cloud, { agentHome: true, journalFault: fault });
+      const agentRef = { agentId: 'cancel-recovery-agent', profileRevision: '1' };
+      const offer = await cloud.rpc('enqueueFreshOffer', {
+        deviceId, taskId: randomUUID(), instruction: 'cancel before runtime completion', agentRef,
+      }) as { taskId: string };
+      await waitForAttempt(cloud, offer.taskId, 'running');
+      const homes = new AgentHomeManager({ hostStorageRoot: path.join(current!.daemonBase.storeDir, 'agent-home') });
+      const { canonicalHome } = await homes.layout.resolve(agentRef);
+      const marker = path.join(canonicalHome, '.byok', 'agent-home.lease');
+      const originalMarker = await fs.readFile(marker, 'utf8');
+      await expect(homes.acquire(agentRef)).rejects.toBeInstanceOf(AgentHomeBusyError);
+
+      // The real cloud RPC appends task.cancel to the live daemon mailbox.
+      // No finish command or turn_end can select the terminal in this test.
+      await cloud.rpc('cancelTask', { taskId: offer.taskId, reason: 'operator cancel before kill' });
+      expect((await daemon.exited()).signal).toBe('SIGKILL');
+      await waitForFile(path.join(current!.daemonBase.controlDir, `${offer.taskId}.interrupted`));
+      await waitForFile(path.join(current!.daemonBase.controlDir, `${fault.replaceAll(':', '-')}.reached`));
+      expect(await fs.readFile(marker, 'utf8')).toBe(originalMarker);
+      await expect(homes.acquire(agentRef)).rejects.toBeInstanceOf(AgentHomeBusyError);
+      expect(starts().map(start => start.taskId)).toEqual([offer.taskId]);
+
+      const beforeCommit = fault === 'terminal:before-commit';
+      const pending = journalRows('SELECT bytes, terminal_type, truth_state FROM journal_terminal');
+      if (beforeCommit) expect(pending).toEqual([]);
+      else {
+        expect(pending).toEqual([expect.objectContaining({ terminal_type: 'cancelled', truth_state: 'pending' })]);
+        expect(decodeEnvelope(String(pending[0]!.bytes))).toMatchObject({ type: 'task.cancelled', task_id: offer.taskId });
+      }
+
+      await startDaemon({ agentHome: true });
+      await waitForAttempt(cloud, offer.taskId, 'cancelled');
+      await waitForJournalTruth('confirmed');
+      const body = String(await cloud.rpc('readTerminalBody', { taskId: offer.taskId }));
+      if (beforeCommit) {
+        expect(decodeEnvelope(body)).toMatchObject({ type: 'task.fail', task_id: offer.taskId,
+          payload: { reason: 'daemon_interrupted', retryable: false } });
+      } else expect(body).toBe(pending[0]!.bytes);
+      expect(journalRows('SELECT terminal_type, truth_state FROM journal_terminal')).toEqual([
+        { terminal_type: beforeCommit ? 'failed' : 'cancelled', truth_state: 'confirmed' },
+      ]);
+      const wire = await cloud.rpc('readWire') as Array<{ type: string; task_id?: string }>;
+      expect(wire.filter(row => row.task_id === offer.taskId && ['task.complete', 'task.fail', 'task.cancelled'].includes(row.type)))
+        .toEqual([expect.objectContaining({ type: beforeCommit ? 'task.fail' : 'task.cancelled' })]);
+      expect(starts().map(start => start.taskId)).toEqual([offer.taskId]);
+
+      // Only the same daemon owner may reclaim crash residue. Prove that
+      // path through a new real offer, rather than using another owner id.
+      expect(await fs.readFile(marker, 'utf8')).toBe(originalMarker);
+      await expect(homes.acquire(agentRef)).rejects.toBeInstanceOf(AgentHomeBusyError);
+      const successor = await cloud.rpc('enqueueFreshOffer', {
+        deviceId, taskId: randomUUID(), instruction: 'take the recovered writer lease', agentRef,
+      }) as { taskId: string };
+      await waitForAttempt(cloud, successor.taskId, 'running');
+      expect(starts().map(start => start.taskId)).toEqual([offer.taskId, successor.taskId]);
+      const recoveredMarker = JSON.parse(await fs.readFile(marker, 'utf8')) as { ownerId: string; leaseId: string };
+      const priorMarker = JSON.parse(originalMarker) as { ownerId: string; leaseId: string };
+      expect(recoveredMarker.ownerId).toBe(priorMarker.ownerId);
+      expect(recoveredMarker.leaseId).not.toBe(priorMarker.leaseId);
+      await expect(homes.acquire(agentRef)).rejects.toBeInstanceOf(AgentHomeBusyError);
+      await cloud.rpc('cancelTask', { taskId: successor.taskId, reason: 'release recovered writer' });
+      await waitForAttempt(cloud, successor.taskId, 'cancelled');
+      const next = await vi.waitFor(() => homes.acquire(agentRef));
+      try { await expect(homes.acquire(agentRef)).rejects.toBeInstanceOf(AgentHomeBusyError); }
+      finally { await next.lease.release(); }
+      await expect(fs.access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
+    },
+  );
 
   it('settles an oversized result as a bounded durable failure without rerunning after restart', async () => {
     const cloud = await startCloud();
