@@ -25,6 +25,33 @@ After pause, cross later slots and wait for a public SDK wake completion before 
 The existing pending-wake, current-terminal, lifecycle and cannot-resume assertions remain unchanged.
 There is no fixed sleep, test retry, timeout increase, Host change or SDK change.
 
+### Coalescing repair checks
+
+All five complete K4 runs used `44b5287c`, in sequence, with no edits between runs.
+
+| Command | Exit | Evidence |
+| --- | --- | --- |
+| `bun ci` | 0 | Merged lockfile installed; `coalesce-install.log`. |
+| `bun run build` | 0 | Workspace build completed; `coalesce-build.log`. |
+| `bun run typecheck` | 0 | Workspace typechecks completed; `coalesce-typecheck.log`. |
+| `bun run --cwd examples/host-execution-core test src/routines.test.ts -t 'keeps one running occurrence'` | 0 | Focused case passed; `coalesce-focused.log`. |
+| `bun run --cwd examples/host-execution-core test`, run 1 | 0 | 38/38 in 62.18 seconds; `coalesce-k4-1.log`. |
+| `bun run --cwd examples/host-execution-core test`, run 2 | 0 | 38/38 in 59.68 seconds; `coalesce-k4-2.log`. |
+| `bun run --cwd examples/host-execution-core test`, run 3 | 0 | 38/38 in 61.82 seconds; `coalesce-k4-3.log`. |
+| `bun run --cwd examples/host-execution-core test`, run 4 | 0 | 38/38 in 62.60 seconds; `coalesce-k4-4.log`. |
+| `bun run --cwd examples/host-execution-core test`, run 5 | 0 | 38/38 in 60.45 seconds; `coalesce-k4-5.log`. |
+| `bun run check:api-surface` | 0 | All 9 package goldens match; `coalesce-api-surface.log`. |
+| `bun run check:version-authority` | 0 | Dispatch 0.27.0 and keys 0.12.0 agree; `coalesce-version-authority.log`. |
+| `git diff --check` | 0 | No whitespace errors. |
+
+Logs and sequential exit receipts are in ignored `_ops/wo-05/`.
+The temporary diagnostic exited 1 at the original one-queued assertion, as intended. It is not part of the final suite.
+This test-only follow-up reruns the requested K4 suite and typecheck. It does not claim a new whole-workspace test pass.
+The previous interrupted workspace run remains recorded below.
+The read-only gatekeeper checked `260570ae..44b5287c` and returned PASS for the original semantics and assertion integrity.
+It did not run tests or edit files. This local check does not replace p1G's requested hunk re-check.
+The only changed tracked files are this record and `src/routines.test.ts`. Production code and SDK packages are unchanged.
+
 ## Merge-train repair for PR 532
 
 Date: 2026-10-19. Prior head: `e5afad26`.
