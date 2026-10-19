@@ -1,6 +1,7 @@
 import type { ByokServer } from '@byok-sdk/server';
 import { HostLedger } from '../../host-execution-core/src/ledger';
-import { stateOf } from './model';
+import { stateOf, json } from './model';
+import { project } from '../../host-execution-core/src/model';
 import { projectionRequestId, same } from './team';
 
 export type HomeServer = Partial<Pick<ByokServer, 'enqueueAgentHomeProjection' | 'readAgentHomeProjection'>>;
@@ -53,7 +54,11 @@ export async function flushHomes(server: HomeServer, ledger: HostLedger, now: ()
           row.status = 'applied';
           const bot = state.team.bots[op.botId]!;
           if (bot.revision === op.request.payload.agentRef.profileRevision) bot.readyRevision = bot.revision;
-        } else { row.status = 'failed'; row.error = terminal.status; }
+        } else {
+          row.status = 'failed'; row.error = terminal.status;
+          project(s, `persona-failed:${row.sequence}`, json({ owner: row.botId,
+            revision: row.request.payload.agentRef.profileRevision, reason: row.error, recoverable: true }));
+        }
       });
     } catch (error) {
       ledger.transaction(s => { stateOf(s.application).team.homeOperations.find(o => o.sequence === op.sequence)!.error = String(error instanceof Error ? error.message : error); });

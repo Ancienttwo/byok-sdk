@@ -37,7 +37,7 @@ three routine actions. It offers all current routine ids, up to eight.
 It never offers a `target` field or another Bot id. A user input starts one
 root budget. Self delegation permits four continuations for that root. It
 keeps hop at zero and does not consume the delegation budget. A refused action
-enters `ContextPack.rejectedActions`. Other accepted actions still apply.
+enters only its originating Bot's `ContextPack.rejectedActions`. Other accepted actions still apply.
 
 Questions support text and single choice. An answer creates an `answer` turn.
 It is a new user input with its own stable budget root. Replaying the same
@@ -147,8 +147,8 @@ with required `speech`, plus optional `room_call`. It has no messageEgress.
 `{ speech: { kind: 'post', text: 'Evidence' } }` writes shared history.
 `{ speech: { kind: 'pass' } }` is an explicit pass. Empty or blank speech,
 missing outcome, and execution failure are visible seat failures. A textual
-mention in a post cannot create a seat. A Main Bot room turn also has management
-actions. Only structured `room_call.members` can add seats after a Bot speaks.
+mention in a post cannot create a seat. Main Bot room seats have the same speech-only authority as other members.
+Management actions are available only outside room seats. Only structured `room_call.members` can add seats after a Bot speaks.
 
 Seats run in reservation order within a round. Each seat enters the same K4
 FIFO as that Bot's own turns. The waiting grace is 240 seconds. First observed claim starts a separate
@@ -176,3 +176,23 @@ checks budgets, authority, atomic refusal, and context limits as state rules.
 `roomInput` and all other mutations use the same serial Host consumer. Do not
 call K4 mutation APIs directly. Upload projections with `core.flushProjections`
 or read `snapshot().team` for room history, seats, and profile delivery state.
+
+## Persona delivery failures
+
+A stale or conflicting persona completion stays in the owner ledger. It emits
+an owner projection with the Bot id, revision, reason, and recoverable status.
+Waiting turns expose `profileFailure`. They remain queued and cannot execute
+with an unconfirmed persona. The authenticated owner can call
+`retryPersona(botId)` after resolving the device-side problem. This creates
+the same desired persona at the next profile revision. It retains the failed
+operation for audit. An exact accepted readback still gates dispatch. Retry
+also survives a Host restart. It does not clear a history-policy block.
+A stale device may need profile-state reconciliation before retry can succeed.
+Transient delivery errors remain pending and use the existing automatic retry.
+
+The supplied `createBotPersonaProjection` consumer requires POSIX directory
+open and fsync support. It is not supported on Windows. Node on Windows can
+return EPERM when it opens a directory. This consumer does not skip that
+barrier or claim Windows durability. A Windows deployment must supply its own
+persona consumer with a defined persistence contract. The Host failure and
+retry API does not remove that platform limit.

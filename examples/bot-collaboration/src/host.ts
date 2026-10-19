@@ -7,10 +7,10 @@ import { hash, project, time, type ExecutionTemplate, type Json, type LedgerStat
 import { enqueue } from '../../host-execution-core/src/transitions';
 import { WAKE_HORIZON_MS } from '../../host-execution-core/src/routines';
 import { json, stateOf, type CollaborationState, type Routine, type Turn } from './model';
-import { turnContext, outcomeSchema, SYSTEM_PROMPT } from './schema';
+import { turnContext, outcomeSchema, SYSTEM_PROMPT, ROOM_SYSTEM_PROMPT } from './schema';
 import { arm, consumeRoutine, createRoutine, lifecycle, operation, owned, switchVersion, updateRoutine } from './routines';
 
-import { activeBot, applyManagement, roomFields } from './team';
+import { activeBot, applyManagement, roomFields, updateBot } from './team';
 import { advanceRooms, applySpeech, memberPresent, roomInput, type Mentions } from './rooms';
 import type { RoomFields } from '@byok-sdk/protocol';
 
@@ -81,7 +81,7 @@ export class BotCollaboration {
     turn.outcome = json(document);
     const accept = (action: string, work: () => void) => {
       try { work(); } catch (error) {
-        state.rejected.push({ taskId: tx.intent.taskId, action, reason: String(error instanceof Error ? error.message : error) });
+        state.rejected.push({ botId: turn.botId, taskId: tx.intent.taskId, action, reason: String(error instanceof Error ? error.message : error) });
       }
     };
     const bot = state.team.bots[turn.botId];
@@ -90,7 +90,11 @@ export class BotCollaboration {
       state.audit.push(`Outcome audit only: ${tx.intent.taskId}`); return;
     }
     if (seat) applySpeech(state, turn, outcome, tx.intent.taskId, this.now(), accept);
-    applyManagement(state, turn.botId, tx.intent.taskId, outcome, this.models(), accept);
+    applyManagement(state, turn.botId, tx.intent.taskId, outcome, this.models(), (kind, work) => accept(kind, () => {
+      // Also deny management from room offers frozen before this policy change.
+      if (seat) throw new Error('Room seats cannot manage the team');
+      work();
+    }));
     const delegated = new Set<string>();
     outcome.delegate?.forEach((action, index) => accept('delegate', () => {
       if (action.to !== turn.botId) throw new Error('Target is not this Bot');
@@ -122,6 +126,23 @@ export class BotCollaboration {
     outcome.cancel_routine?.forEach(action => accept('cancel_routine', () => {
       lifecycle(state, owned(state, turn.botId, action.routineId), 'completed', this.now());
     }));
+  }
+  /** Owner API. Advance the desired revision after a rejected persona delivery. */
+  async retryPersona(botId: string): Promise<void> {
+    await this.exclusive(async () => {
+      this.ledger.transaction(s => {
+        const state = stateOf(s.application), bot = activeBot(state.team, botId);
+        const failed = state.team.homeOperations.find(op => op.botId === botId
+          && op.request.payload.agentRef.profileRevision === bot.revision && op.status === 'failed');
+        if (!failed) throw new Error('No failed persona delivery for the current revision');
+        updateBot(state, { botId, persona: bot.persona }, this.models());
+        for (const turn of Object.values(state.turns)) {
+          if (turn.botId === botId && !s.intents[hash(turn.id)]) delete turn.profileFailure;
+        }
+        project(s, `persona-retry:${bot.id}:${bot.revision}`, json({ owner: bot.id, revision: bot.revision, status: 'pending' }));
+      });
+      await this.process();
+    });
   }
   async setMainBot(botId: string, mainBot: boolean): Promise<void> {
     await this.exclusive(async () => {
@@ -240,7 +261,18 @@ export class BotCollaboration {
       if (!intent && (turn.status === 'failed' || turn.blocked)) continue;
       if (intent && bot?.archived && !s.executions[intent.taskId]?.started && !intent.conclusion) intent.cancelReason = 'cancelled';
       if (!intent) {
-        if (!bot || bot.readyRevision !== bot.revision) continue;
+        if (!bot || bot.readyRevision !== bot.revision) {
+          const failed = state.team.homeOperations.find(op => op.botId === turn.botId
+            && op.request.payload.agentRef.profileRevision === bot?.revision && op.status === 'failed');
+          if (failed) {
+            turn.profileFailure = { sequence: failed.sequence, revision: failed.request.payload.agentRef.profileRevision,
+              reason: failed.error ?? 'Persona delivery failed' };
+            project(s, `persona-turn-failed:${turn.id}:${failed.sequence}`, json({ owner: turn.botId, turnId: turn.id,
+              status: 'blocked', recoverable: true, ...turn.profileFailure }));
+          }
+          continue;
+        }
+        delete turn.profileFailure;
         let schema: ResultSchema, context: unknown;
         try {
           schema = outcomeSchema(turn.botId, state, turn, Object.keys(this.models()));
@@ -257,7 +289,7 @@ export class BotCollaboration {
         const { messageEgress: _egress, ...roomPayload } = base.payload;
         enqueue(s, this.ledger.tenant, { key: turn.id, source: turn.source === 'routine' ? 'routine' : turn.source === 'user' || turn.source === 'answer' ? 'user' : 'bot',
           waitUntil: this.now() + 300_000, execution: { ...base, ...(turn.source === 'room_slot' ? { agentMessageContext: undefined } : {}), payload: { ...(turn.source === 'room_slot' ? roomPayload : base.payload),
-            instruction: `${SYSTEM_PROMPT}\n\nRequest:\n${turn.request}\n\nContextPack:\n${JSON.stringify(context)}`,
+            instruction: `${turn.source === 'room_slot' ? ROOM_SYSTEM_PROMPT : SYSTEM_PROMPT}\n\nRequest:\n${turn.request}\n\nContextPack:\n${JSON.stringify(context)}`,
             terminalProjection: { mode: 'result-document', contract: BOT_TURN_OUTCOME_CONTRACT, schema },
           } } });
         turn.status = 'processing';

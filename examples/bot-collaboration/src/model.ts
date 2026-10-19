@@ -5,7 +5,7 @@ import type { Json } from '../../host-execution-core/src/model';
 export interface Turn {
   id: string; root: string; botId: string; source: 'user' | 'continuation' | 'answer' | 'action_result' | 'routine' | 'room_slot';
   request: string; hop: number; status: 'queued' | 'processing' | 'succeeded' | 'failed';
-  blocked?: string; outcome?: Json; conclusion?: string; reported?: boolean;
+  blocked?: string; profileFailure?: { sequence: number; revision: string; reason: string }; outcome?: Json; conclusion?: string; reported?: boolean;
 }
 export interface Card {
   id: string; turnId: string; action: ConfirmableAction<Json>;
@@ -31,7 +31,7 @@ export interface WakeOp {
   sequence: number; routineId: string; generation: number; kind: 'schedule' | 'cancel'; slot: Slot;
   state: 'pending' | 'done' | 'obsolete'; error?: string; retryAt?: number;
 }
-export interface Rejection { taskId: string; action: string; reason: string }
+export interface Rejection { botId: string; taskId: string; action: string; reason: string }
 export interface CollaborationState {
   team: TeamState; turns: Record<string, Turn>; budgets: Record<string, { continuation: number; delegation: number }>;
   schemas: Record<string, ResultSchema>; questions: Record<string, Question>; cards: Record<string, Card>;
