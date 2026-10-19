@@ -200,6 +200,105 @@ After you fix the calendar, await `lifecycle(id, 'paused')`, then await `lifecyc
 The hook must check current lifecycle and the reserved wake identity.
 Do not depend on cancel returning true to pause a routine.
 
+### Device sleep (optional)
+
+This is a Host feature. The SDK daemon and launcher hold no power assertion.
+The Host can prevent idle system sleep while it has work to run. The setting is off by default.
+
+Three mechanisms are independent:
+
+- Idle-sleep prevention keeps the device awake while it has admitted work. This subsection defines it.
+- The SDK wake queue rechecks the wall clock after sleep. The rules above do not change.
+- Catch-up after sleep creates at most one occurrence (section 6). Its rules do not change.
+
+A sleeping or powered-off device runs no routine. This is a BYOK limit in [platform PRD section 15](researches/2026-10-13_bot-platform-prd.md).
+This feature does not change that limit. It does not wake the device for a routine.
+The setting text must tell the user this.
+
+Rules:
+
+1. Off by default. If the user has not enabled the setting, the Host never requests an assertion.
+2. Hold the assertion only when `enabled && onAC && activeCount > 0`.
+3. Prevent idle system sleep only. Let the display sleep.
+4. Hold one assertion for all active work. Release it immediately when the count becomes zero,
+   the device changes to battery power, or the user disables the setting.
+   Request it again when the device is on AC power and the count is above zero.
+5. Do not block user sleep, lid-close sleep or low-battery sleep.
+6. Leave no assertion after the Host process exits, also after a crash.
+   Use an OS mechanism that the kernel or OS service releases with the process.
+7. Show the state and its cause: off; active with the task count; inactive with no active task;
+   inactive on battery power; or inactive because the OS denied the request.
+
+The active count includes these items for this device. Count each taskId once.
+
+- A claimed execution with no device terminal.
+- The FIFO head of each Agent, which is the open intent with the lowest `sequence`.
+  Count it when its phase is `queued` or `inflight`, or `backoff` with `notBefore <= now`.
+
+Do not count a head in phase `memory_blocked` or in a future `backoff`. Do not count intents behind a head.
+They cannot run until the head settles. When the head settles, the next intent becomes the head in the same commit.
+So the assertion stays between two FIFO items of one Agent.
+Recompute after each Host ledger commit, each observed claim or device terminal,
+each power source change, each setting change and Host start.
+
+| Platform | Request | Release | Process exit | Power source | Assertion list |
+| --- | --- | --- | --- | --- | --- |
+| macOS | `IOPMAssertionCreateWithName` with `kIOPMAssertionTypePreventUserIdleSystemSleep` | `IOPMAssertionRelease` | Released by the OS | IOKit power source; Electron `on-ac` and `on-battery` | `pmset -g assertions` |
+| Windows | `PowerCreateRequest`, then `PowerSetRequest(PowerRequestSystemRequired)` | `PowerClearRequest`, then `CloseHandle` | Handle closes with the process (inferred) | `GetSystemPowerStatus`; Electron `on-ac` and `on-battery` | `powercfg /requests` |
+| Linux, GNOME | gnome-session `Inhibit` with flag 4 (suspend) | `Uninhibit`, or disconnect from the session bus | Released at bus disconnect | Poll Electron `powerMonitor.isOnBatteryPower()` | `gnome-session-inhibit --list` |
+| Linux, other | logind `Inhibit("idle", who, why, "block")` | Close the returned file descriptor | The kernel closes the descriptor | Same as GNOME | `systemd-inhibit --list` |
+
+Sources: [Apple assertion type](https://developer.apple.com/documentation/iokit/kiopmassertiontypepreventuseridlesystemsleep),
+[IOKit release notes](https://developer.apple.com/library/archive/releasenotes/Darwin/RN-IOKitPowerManagment/index.html),
+[PowerSetRequest](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-powersetrequest),
+[modern standby](https://learn.microsoft.com/en-us/windows-hardware/design/device-experiences/prepare-software-for-modern-standby),
+[logind inhibitor locks](https://www.freedesktop.org/software/systemd/man/latest/org.freedesktop.login1.html),
+[logind.conf](https://www.freedesktop.org/software/systemd/man/latest/logind.conf.html),
+[gnome-session Inhibit](https://gnome.pages.gitlab.gnome.org/gnome-session/re04.html),
+[Electron powerSaveBlocker](https://www.electronjs.org/docs/latest/api/power-save-blocker) and
+[Electron powerMonitor](https://www.electronjs.org/docs/latest/api/power-monitor).
+
+- macOS: this assertion type does not stop lid-close, Apple menu or low-battery sleep. The display can sleep.
+  Do not copy `caffeinate -dimsu`. Its `-d` keeps the display awake. Its `-s` creates a system-sleep assertion.
+- Electron: use `powerSaveBlocker.start('prevent-app-suspension')`. It allows the display to sleep.
+  Do not use `prevent-display-sleep`. It has higher precedence and keeps the display on.
+  Electron has no `on-ac` or `on-battery` event on Linux, so poll the power source there.
+- Windows: prefer a power request to `SetThreadExecutionState`. That state belongs to the calling thread.
+  No Microsoft document says that a power request ends with its process. Test rule 6 on a real device.
+- Windows conflict: `PowerSetRequest` says that user sleep ends power requests.
+  Examples of user sleep are the power button, lid close and the Start menu.
+  The modern standby guide says that a power request on AC power can block one standby phase indefinitely.
+  Test lid close and the power button on a Modern Standby device. Use the result in the setting text.
+- Linux: do not take a `sleep` lock. Since systemd 257, a `block` lock also stops sleep that its own holder requests.
+  The power and sleep keys obey it, so it breaks rule 5. Lid close ignores inhibitors by default (`LidSwitchIgnoreInhibited=yes`).
+- Linux, GNOME: a logind `idle` lock is not sufficient. That lock affects only logind `IdleAction`, which defaults to `ignore`.
+  GNOME automatic suspend checks gnome-session inhibitors. This comes from gnome-settings-daemon source, not from a document.
+  gnome-session documents `Inhibit` as an internal D-Bus API. Record the GNOME version in the checklist.
+- Linux, other desktops: the desktop power manager decides automatic suspend. Test each desktop before you claim support.
+  A logind `idle` lock is effective only where the desktop power manager or `IdleAction` obeys it.
+  Taking a logind lock needs polkit permission. Report a denied request as inactive with its cause.
+
+#### Device sleep acceptance
+
+This repository has no Host app, so it records no device result.
+The downstream Host runs this checklist on one real device for each platform: macOS, Windows and Linux.
+Record the command output for each row. On Linux, record the desktop and its version.
+Claim support only for the desktops that you tested.
+
+| Rule | Scenario | Expected result | Evidence |
+| --- | --- | --- | --- |
+| 1 | Setting off. A task runs. Idle time exceeds the system sleep time. | The system sleeps as configured. | No Host assertion in the list. |
+| 2, 3 | Setting on, AC power. A task runs. The user is idle. | The system stays awake. The display sleeps as configured. | Exactly one Host assertion. Its reason includes the Host name. |
+| 4 | Setting on. The last task ends. | The assertion is released. | No Host assertion in the list. |
+| 4 | Setting on. A task runs. Disconnect AC power. | The assertion is released. Battery sleep settings apply. | No Host assertion in the list. |
+| 4 | Setting on, battery power. A task runs. Connect AC power. | The assertion is requested again. | Exactly one Host assertion. |
+| 5 | Setting on. Close the lid with no external display. | The system sleeps. | System log after wake. |
+| 5 | Setting on. The user selects sleep, or presses the power button. | The system sleeps. | System log after wake. |
+| 6 | Setting on. Kill the Host process with `kill -9` or Task Manager. | The assertion is released. | No Host assertion in the list. |
+| 4 | Setting on. The user disables the setting. | The assertion is released. | No Host assertion in the list. |
+| — | A routine is due while the system sleeps. | It does not run. After wake, at most one catch-up runs. | Host ledger. |
+| 5 | Windows Modern Standby device, AC power. Close the lid. | Record the actual result. Compare it with the Windows conflict above. | `powercfg /requests`, `powercfg /sleepstudy`. |
+
 ## 8. Outcome, messages and upload
 
 User-visible output uses optional required `messageEgress`.
