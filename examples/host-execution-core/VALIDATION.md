@@ -4,6 +4,27 @@ Date: 2026-10-18. Baseline: `8e8839a3`.
 Branch: `codex/bot-k4-host-execution-core`.
 Environment: macOS, Node `v24.21.0`, Bun `1.4.3`.
 
+## Coalescing observation repair on 260570ae
+
+Date: 2026-10-19. Baseline: `260570ae`, including the owner's ordinary merge of `origin/main@2e06fa91`.
+CI run `39212142718`, Node 26 job `117928000884`, failed the exact one-queued assertion at `src/routines.test.ts:44`.
+It reported 37/38 passing tests. The downloaded job log is `coalesce-ci-node26.log` under `_ops/wo-05/`.
+
+P1: `recordOccurrence` creates the replacement queued occurrence. The independent Host scan expires an old queued intent at `retryUntil`.
+P2: At the next 100 ms slot, scan can supersede the old queued occurrence before SDK delivery creates its replacement.
+Three committed occurrences and one in-flight execution can therefore coexist with zero queued intents during that window.
+A temporary real-SDK probe held the fourth wake before the Host consume call and ran the normal Host scan.
+The original one-queued assertion then failed with the same empty-array result. The three-occurrence and one-in-flight assertions passed.
+The probe source and failure log are retained only in ignored `_ops/wo-05/coalesce-gap.probe.test.ts` and `coalesce-gap-red.log`.
+
+P3: Control the shared wall clock with `vi.setSystemTime`, without fake timers.
+Advance two slots explicitly and wait for each occurrence commit through the real SDK wake path.
+Hold the clock before the next cutoff while checking the original one-running, one-queued and superseded assertions.
+Also check that the queued intent belongs to the latest slot.
+After pause, cross later slots and wait for a public SDK wake completion before checking no new occurrences.
+The existing pending-wake, current-terminal, lifecycle and cannot-resume assertions remain unchanged.
+There is no fixed sleep, test retry, timeout increase, Host change or SDK change.
+
 ## Merge-train repair for PR 532
 
 Date: 2026-10-19. Prior head: `e5afad26`.
@@ -342,6 +363,17 @@ The test observes one occurrence, one execution, identical input and one committ
 | Cancel classification | `unclaimed-expiry.test.ts`: real cancelled/unclaimed attempt, claimed cancel_requested state, then task.cancelled terminal. |
 
 ## Test changes and reasons
+
+Coalescing observation repair:
+
+- `routines.test.ts` now advances the same wall clock used by the Host and SDK one slot at a time.
+  It waits for exact occurrence counts at each slot, then preserves all original queue assertions before advancing time again.
+  The newest-slot assertion strengthens the existing coalescing check.
+- The paused phase advances beyond multiple future slots and observes an SDK completion before the original unchanged count check.
+  This preserves the no-new-occurrence guarantee even though the wall clock is controlled.
+- Only `vi.setSystemTime` is used. Enabling fake timers would make Vitest's `vi.waitFor` advance the clock automatically.
+  The first diagnostic setup exposed that behavior; its log is `coalesce-gap-auto-clock.log`.
+  The final diagnostic reproduced the reported empty-queue failure without automatic clock advancement.
 
 Merge-train repair:
 
