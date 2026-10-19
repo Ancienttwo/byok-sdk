@@ -39,8 +39,9 @@ function safeHelperPath(value: unknown): string {
 }
 
 function helperPlatformSupported(): boolean {
-  // Windows remains closed until the native reparse/junction matrix is run on
-  // a real Windows host. Linux retains its existing native descriptor backend;
+  // Windows requires containment and model S recovery proof (process/OS crash
+  // and power loss). A green denial matrix does not grant admission.
+  // Linux retains its existing native descriptor backend;
   // the external process authority is admitted only for the proven macOS gap.
   return process.platform === 'darwin';
 }
@@ -49,8 +50,34 @@ export function isAgentMemoryFilesystemHelperSupported(): boolean {
   return helperPlatformSupported();
 }
 
-function unixIdentity(homeIdentity: AgentHomeLease['homeIdentity']): Readonly<Record<string, string>> {
-  return Object.freeze({ kind: 'unix', dev: homeIdentity.dev.toString(10), ino: homeIdentity.ino.toString(10) });
+/** Private protocol 2 identity. Decimal strings keep all 64 bits. */
+export type AgentMemoryHelperIdentity =
+  | Readonly<{ kind: 'unix'; dev: string; ino: string }>
+  | Readonly<{ kind: 'windows'; volumeSerial: string; fileIndex: string }>;
+
+function unsigned(value: bigint, bits: 32 | 64): string {
+  if (typeof value !== 'bigint' || value < 0n || value >= (1n << BigInt(bits))) {
+    throw new AgentMemoryError('Agent memory filesystem helper root identity is invalid');
+  }
+  return value.toString(10);
+}
+
+/** Serialization is not platform admission or a durability proof. */
+export function agentMemoryHelperIdentity(home: AgentHomeLease['homeIdentity'], platform: NodeJS.Platform): AgentMemoryHelperIdentity {
+  if (platform === 'win32') {
+    return Object.freeze({ kind: 'windows', volumeSerial: unsigned(home.dev, 32), fileIndex: unsigned(home.ino, 64) });
+  }
+  if (platform !== 'darwin' && platform !== 'linux') {
+    throw new AgentMemoryError('Agent memory filesystem helper identity is not supported on this platform');
+  }
+  return Object.freeze({ kind: 'unix', dev: unsigned(home.dev, 64), ino: unsigned(home.ino, 64) });
+}
+
+export function agentMemoryHelperIdentityMatches(value: unknown, expected: AgentMemoryHelperIdentity): boolean {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const actual = value as Record<string, unknown>;
+  const entries = Object.entries(expected);
+  return Object.keys(actual).length === entries.length && entries.every(([key, entry]) => actual[key] === entry);
 }
 
 function responseRecord(value: unknown): HelperResponse | undefined {
@@ -132,6 +159,7 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
   static async open(input: Readonly<{ helperBin: string; canonicalHome: string; homeIdentity: AgentHomeLease['homeIdentity'] }>): Promise<AgentMemoryFilesystemHelperClient> {
     if (!helperPlatformSupported()) throw new AgentMemoryError('Agent memory filesystem helper is not admitted on this platform');
     const helperBin = verifyAgentMemoryFilesystemHelper(safeHelperPath(input.helperBin));
+    const expected = agentMemoryHelperIdentity(input.homeIdentity, process.platform);
     const child = spawn(helperBin, ['serve'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: false,
@@ -142,14 +170,10 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
     try {
       const result = await client.request('open', {
         root: path.resolve(input.canonicalHome),
-        expectedIdentity: unixIdentity(input.homeIdentity),
+        expectedIdentity: expected,
       });
       if (result.helperVersion !== AGENT_MEMORY_FILESYSTEM_HELPER_VERSION) throw new AgentMemoryError('Agent memory filesystem helper version mismatch');
-      const identity = result.identity;
-      if (identity === null || typeof identity !== 'object' || Array.isArray(identity)) throw new AgentMemoryError('Agent memory filesystem helper omitted root identity');
-      const actual = identity as Record<string, unknown>;
-      const expected = unixIdentity(input.homeIdentity);
-      if (actual.kind !== expected.kind || actual.dev !== expected.dev || actual.ino !== expected.ino) throw new AgentMemoryError('Agent memory filesystem helper root identity mismatch');
+      if (!agentMemoryHelperIdentityMatches(result.identity, expected)) throw new AgentMemoryError('Agent memory filesystem helper root identity mismatch');
       return client;
     } catch (error) {
       await client.close().catch(() => {});

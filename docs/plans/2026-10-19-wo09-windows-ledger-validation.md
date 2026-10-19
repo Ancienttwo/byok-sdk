@@ -1,0 +1,315 @@
+# WO-09: Windows ledger implementation and VALIDATION
+
+Status: BLOCKED for Windows admission. B remains false. Local checks are complete.
+Branch: `codex/p2-win-ledger`. Base: `e829f553` (WO-09a).
+
+## Owner decision
+
+Aimpact selected S on 2026-10-19. The fault set covers process crash, OS
+crash and power loss. The proposed support domain is local NTFS on an
+explicit Windows build with a normal user token. SMB, synced directories
+and other file systems are excluded. Storage must honor full flush requests.
+This decision does not grant Windows admission or complete Q14.
+
+## P1 map
+
+- `agent-home.ts` captures the leased home identity as bigint dev/ino.
+- `agent-memory.ts` selects native Linux or the macOS helper.
+- `agent-memory-fs-helper.ts` verifies the SDK release helper and starts it
+  with an empty env.
+  It exchanges tagged identity over protocol 2.
+- Go `openSession` rejects Windows before it grants a session.
+- Go `identity_windows.go` reads the volume serial and file index by handle.
+- `agent-memory-intent.ts` requires B before fetch. `create-daemon.ts`
+  uses that proof and secure filesystem admission before advertisement.
+
+There is no `.codegraph` index in this worktree. The referenced
+`.ai/context/capabilities.json` and `context-map.json` are absent.
+No scoped agent context will be added.
+
+## P2 trace
+
+`applying barrier -> CAS -> memory result barrier -> terminal barrier ->
+Host complete/readback -> ackedAt barrier -> cursor`.
+The existing helper writes a unique temp file, syncs it, renames it and
+syncs the parent. Delete renames to a tombstone and removes it with parent
+syncs. A file flush before rename does not itself cover later name changes.
+A readback can return cached bytes. It cannot replace a storage barrier.
+
+The RAFT reference uses `tmp + wx + write + sync + rename + parent sync +
+readback`. Its Windows parent sync treats EACCES, EISDIR, EINVAL and EPERM
+as success. That path does not meet S. Its concurrent-write test checks
+complete visible generations and temp cleanup. It does not test OS crash
+or power loss. `agentVisibleDeliveryLedger.ts` manages process-local
+consumption state. It supplies no NTFS storage barrier.
+
+## P3 decision
+
+Preserve the existing admission boundary. Add strict tagged identity checks
+and Windows platform-refusal checks. The manual Windows workflow uses Node
+and Bun, a real helper, an empty child env and junction fixtures.
+`openSession` rejects Windows before it reads any path. These fixtures do not
+exercise path traversal or containment. Flush diagnostics log API failures
+without failing the test. A green run proves neither containment, successful
+flush operations nor model S recovery.
+
+Do not add a callable NTFS ledger backend until section 3 of WO-09a is
+proved under section 7. Do not add flags, weaker flush paths or error
+suppression. Keep Windows TS admission closed, Go open closed and B=false.
+The verified macOS release helper retains B=true after its volume probe.
+The local machine is macOS. No Windows or destructive recovery environment
+has been supplied. These missing observations block the full proof.
+
+## Task Breakdown
+
+1. Harden the protocol 2 tagged identity exchange. Keep Windows closed.
+2. Add native Windows platform-refusal checks and API diagnostics. Keep existing tests.
+3. Add Node/Bun empty-env Windows CI and record its evidence limits.
+4. Record S in spec, protocol, backend comments and the decision document.
+5. Run five required checks and focused checks. Get independent read-only
+   Codex review in a separate Herdr pane. Commit locally. Do not push.
+
+## Section 3 proof obligations
+
+| Obligation | Evidence and result |
+|---|---|
+| Complete next state; no reset of corrupt ledger | Existing processor has strict ledger parsing. No NTFS recovery result. BLOCKED. |
+| Durable applying before CAS | Existing processor orders the write first. No admitted Windows barrier. BLOCKED. |
+| Durable memory replace/delete and terminal before complete | The helper has no proven Windows namespace barrier. A test-only directory flush probe is not a backend. BLOCKED. |
+| Durable ackedAt before cursor | Existing processor orders the write before return. Windows durability is unproved. BLOCKED. |
+| Barrier error stops the next step | Existing intent tests cover ordering failures. Windows admission rejects the request before fetch or CAS. This preserves denial; it does not prove a successful Windows write. |
+| Safe collection of durable acked records | Existing processor contract is unchanged. No Windows durable ackedAt or recovery experiment. BLOCKED. |
+
+The conditional sequence proof in WO-09a still depends on platform evidence.
+No Windows operation can satisfy its missing durable_S premise in this run.
+The proof is incomplete. This is not a claim that NTFS cannot meet S.
+There is no NTFS ledger backend implementation in this delivery. A double-slot
+ledger alone would leave memory rename/delete and first-directory durability
+unproved. It would not permit B or Host completion.
+
+## Section 7 fallible acceptance
+
+| Required evidence | Observed status |
+|---|---|
+| Explicit OS build, local NTFS identity, ordinary token, deployed helper digest | No Windows run. CI is prepared to retain OS/volume/token/digest observations. Hosted credentials are not assumed to be an ordinary token. BLOCKED. |
+| API availability, access/share/open flags, Nt flags, return and IO status | Windows-only test calls writable directory CreateFileW, FlushFileBuffers and NtFlushBuffersFileEx(flags=0). It logs errors as errors. Not executed here. Observation is not an acceptance result. BLOCKED. |
+| New/existing ledger, memory replace/delete, home/.byok/notes namespace | No admitted implementation or recovery evidence. BLOCKED. |
+| Failure injection at every real barrier | Existing processor tests are not delegated Windows API spies. No Windows injection run. BLOCKED. |
+| Process crash at each sequence window; fresh/existing home; Node/Bun | No Windows crash run. Empty-env helper denial is prepared for both runtimes. Denial does not exercise a successful write. BLOCKED. |
+| OS crash with independent Host receipts | No disposable Windows environment or independent Host experiment. BLOCKED. |
+| Power loss for a declared storage profile | No disposable device or virtual storage profile experiment. BLOCKED. |
+| #522 confirmed-state rollback regression | No Windows rollback experiment. The source counterexample is a conditional risk, not an observed NTFS failure. BLOCKED. |
+
+The Windows workflow runs only on `workflow_dispatch`. It checks platform
+refusal with ordinary, root, ancestor, notes and .byok junction fixtures.
+`openSession` returns `unsupported_platform` before it reads these paths.
+The fixtures do not test traversal or containment. Failure to create a
+required junction fails fixture setup. It compares real Node/Bun stat identity with the
+Go pinned handle. It launches the real helper with an empty JS env object,
+checks open rejection and checks that a write cannot obtain a session.
+The Go runtime-parity child also requests an empty env; Go can add SystemRoot
+on Windows. No application credential is intentionally forwarded.
+The initial validation did not execute the Windows workflow. This review
+follow-up permits a normal push. It does not dispatch the manual workflow.
+
+## References checked
+
+- [FlushFileBuffers](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers) requires a write-capable handle. Volume flush requires administrator rights.
+- [NtFlushBuffersFileEx](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntflushbuffersfileex) flags 0 includes data, metadata and storage-cache synchronization. Other flags have narrower guarantees.
+- [CreateFileW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew) gives positive NTFS write-through metadata evidence, including rename. This helper does not bind its rename operations to that guarantee.
+- [MoveFileExW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefileexw) documents write-through moves. A pathname call alone does not prove the pinned-root and recovery requirements of this SDK.
+- RAFT local files read: `packages/computer/src/durableFile.ts`, its test, and `packages/daemon/src/agentVisibleDeliveryLedger.ts`, under `/Users/chris/Projects/RAFT-study`.
+
+## VALIDATION
+
+Environment: macOS arm64, Node v24.21.0, Bun 1.4.3. The repository and new
+Windows CI pin Bun 1.4.2. Local tests do not establish Bun 1.4.2 or Windows
+acceptance. Go checks use GOTOOLCHAIN=go1.26.5 from go.mod.
+
+- `bun ci`: exit 0; lockfile unchanged.
+- Focused TypeScript checks: 4 files, 12 tests passed; exit 0.
+- Native Go tests: exit 0.
+- Windows amd64 Go test cross-compile: exit 0. No Windows code was executed.
+- Real macOS TS-to-Go helper integration: 1 file, 2 tests passed; exit 0.
+- Node and Bun each started the real macOS helper with `env: {}` and read
+  version 2; exit 0. This does not establish Windows empty-env behavior.
+- `node --check scripts/ci/agent-memory-windows-denial.mjs`: exit 0.
+- Workflow YAML parse and Node/Bun matrix check from the client package:
+  exit 0. A first root-level parser command could not resolve the client-only
+  `yaml` dependency. The package-local command passed without source changes.
+- Independent read-only Codex review: completed in Herdr pane `wA:p4N`,
+  new tab `wA:t21` (`WO-09-review`). The original tab had 3 panes.
+  Reviewer `wo09-review` found no actionable findings. It accepted the bounded
+  code change subject to pending checks. It kept release acceptance BLOCKED.
+  It found no weakened test or false S/Q14 claim. It changed no file.
+- First required run: build 0, typecheck 0, test 1, API surface 1,
+  version authority 0. The test found that a separate identity file expanded
+  the fixed embedded-memory module graph. Identity functions now remain in
+  the existing helper file. The original graph assertion is unchanged.
+  API surface reported only the deliberate B contract comment change. The
+  golden comment now carries that same contract. The first run did not add
+  an exported declaration to a reachable module.
+- Second independent read-only Codex review: same pane and reviewer, round 2.
+  No actionable findings. The reviewer verified that the moved functions are
+  unchanged, the 15-module graph matches baseline, external imports are
+  unchanged and no pre-existing test assertion changed. It also compared
+  the then-current golden with comments removed and found no signature drift.
+  That comparison did not replace the final built-declaration scan.
+  It accepted the bounded code change, subject to final required checks.
+  Model S release acceptance remains BLOCKED. No third round was requested.
+- Final affected checks: 5 files, 21 tests passed; exit 0. This includes the
+  original embedded-entry constraints. Real macOS helper integration also
+  passed again after relocation: 2 tests, exit 0.
+- The complete rerun passed tests but found one more API-surface difference:
+  moving exported identity helpers into the existing reachable module added
+  their internal declarations to the declaration closure. The final generated
+  client golden adds `AgentMemoryHelperIdentity`, `agentMemoryHelperIdentity`
+  and `agentMemoryHelperIdentityMatches`, plus the B contract comment. The
+  public entrypoint export lists are unchanged. This is deliberate declaration
+  tracking, not a weaker assertion. No source code changed after the complete
+  test rerun. The full API-surface check then passed.
+
+### Final required checks
+
+| Command | Exit | Seconds |
+|---|---|---|
+| `bun run build` | 0 | 20.50 |
+| `bun run typecheck` | 0 | 10.09 |
+| `bun run test` | 0 | 643.40 |
+| `bun run check:api-surface` | 0 | 7.03 |
+| `bun run check:version-authority` | 0 | 0.07 |
+
+Vitest totals: 9,296 passed and 200 skipped. Client: 4,000 passed and 30
+skipped. Cloud-dataplane: 94 passed and 139 skipped. Cloud-do Node tests add
+10 passed and 0 failed. No optional Docker substrate was started. Skipped
+tests are not accepted evidence.
+
+Logs and exit records are in `_ops/wo09-validation/`. Initial failures remain
+in `results.json` and numbered logs. The complete corrected run is in
+`final/results.json`. Its API-surface failure and the final passing retry are
+both retained; the passing retry is `final/api-surface-fixed.json` and
+`final/api-surface-fixed.log`. The independent review transcript is
+`review.txt`. These are ignored local operation records.
+
+Local implementation commit: `c65240b6`. The follow-up commit contains the
+module-graph correction, declaration golden and this final validation report.
+At that initial validation, no push, PR, merge or Windows deployment occurred.
+
+
+No Windows S proof has passed. Windows intents stay BLOCKED. B stays false.
+Q14 is not complete. No flag or weaker durability path has been added.
+Existing test files and assertions are unchanged.
+
+## PR #528 acceptance-review follow-up (2026-10-19)
+
+Scope: P3 only. The workflow and fixtures now say platform-refusal checks.
+The flush diagnostic has no API-success assertion. A passing diagnostic does
+not prove API availability, containment or durability. The Windows workflow
+now has only `workflow_dispatch`; PR and push events do not run it.
+No existing test assertion changed. Windows remains BLOCKED and B=false.
+
+Aimpact confirmed S on 2026-10-19. S is unproven. B=false.
+WO-09 stays BLOCKED.
+
+Deferred items:
+
+- P2: do not merge #526 now. After #526 lands on main, use a normal merge to
+  resolve text and logic conflicts in spec/protocol, the helper and Windows
+  gate test. No rebase is authorized.
+- The review reports the keys `pi-projection-windows.test.ts:270` timeout as
+  flaky and unrelated. No change is made to that test or its assertions.
+
+Follow-up checks before push:
+
+- `bun run typecheck`: exit 0.
+- Client Windows-gate and helper-identity focused tests: 2 files, 8 passed;
+  exit 0.
+- `GOTOOLCHAIN=go1.26.5 go test ./...`: exit 0 on macOS.
+- Windows amd64 Go test cross-compile: exit 0. This is not Windows execution.
+- Workflow YAML check: only `workflow_dispatch`; Node/Bun matrix retained;
+  exit 0.
+- `node --check scripts/ci/agent-memory-windows-denial.mjs`: exit 0.
+- `git diff --check`: exit 0.
+
+No exports changed. API-surface rerun is not required for this follow-up.
+No assertion condition or expected result changed. No manual Windows run is
+claimed. The PR must stay draft and BLOCKED.
+
+## Main integration: PR #526, #527, #524 and #532
+
+### P1 map
+
+Main at `2fdab7d0` includes the macOS helper release and barrier support.
+The helper client must keep both release verification and tagged identity
+validation. The Windows workflow remains `workflow_dispatch` only.
+Its labels remain platform-refusal checks.
+
+### P2 trace
+
+On win32, `helperAgentMemoryIntentBackend` calls release verification.
+The resolver throws `SDK Agent memory helper is not admitted on this platform`
+before it returns a backend. The old test tried to read `strictLedgerBarrier`
+from that result. The focused test failed at that call after the merge.
+No Windows backend exists, so it cannot grant B.
+
+### P3 decision
+
+Keep the main PRD v3 and the final #527 decision document without changes.
+Keep the main macOS barrier and release rules in spec and protocol.
+Keep the Windows model S requirements after those rules.
+Change the Windows test to require the platform-refusal throw.
+The remaining filesystem-admission and helper-open checks stay intact.
+Keep release verification before spawn and tagged identity validation on open.
+S is chosen but unproven. Windows B=false. WO-09 stays BLOCKED.
+
+### Assertion change
+
+`agent-memory-windows-gate.test.ts`: replace the returned-backend B=false
+assertion with an exact platform-refusal message check. #526 rejects win32
+before backend construction. This check follows that stronger boundary.
+It does not admit a backend or weaken a production gate.
+
+### Entry budget
+
+The combined helper graph measures 60,966 workspace bytes.
+The prior entry budget was 60,360 bytes. Tagged identity validation and
+release verification are both required. Keep both checks.
+Set the entry budget to 67,063 bytes, with 10 percent headroom rounded up.
+The generated README table uses the same value. The entry still has no
+third-party dependencies, Zod or code generation. Declaration goldens match.
+
+### Local checks for the main integration
+
+Host: macOS arm64. Node v24.21.0. Bun 1.4.3. Go tests use Go 1.26.5.
+
+- `bun install`: exit 0. It replaced stale Pi 1.2.0 build inputs after the
+  main merge. The first build failed on that old input. No lockfile changed.
+- `bun run build`: exit 0 after the install.
+- `bun run typecheck`: exit 0.
+- `bun run check:api-surface`: exit 0 after the reviewed entry budget update.
+  All nine declaration goldens match. No new public entrypoint was added.
+- `bun run check:version-authority`: exit 0.
+- `bun run --filter @byok-sdk/client build:agent-memory-helper`: exit 0.
+  Darwin arm64 and x64 release assets match two independent source builds.
+- `bun run --filter @byok-sdk/client test -- agent-memory agent-home-directory-barrier daemon-conn-hello-capabilities`:
+  exit 0. 22 files passed and one skipped. 212 tests passed and 33 skipped.
+  This includes the Windows gate and tagged identity tests.
+- `GOTOOLCHAIN=go1.26.5 go test ./...`: exit 0 on macOS.
+- `GOOS=windows GOARCH=amd64 GOTOOLCHAIN=go1.26.5 go test -c`:
+  exit 0. This is a cross-compile, not a Windows execution result.
+- Node and Bun `agent-memory-runtime-smoke.mjs`: both exit 0.
+  Both report identity accepted and strictBarrier passed on macOS arm64.
+- `bun run test:scripts`: exit 0. 108 tests passed.
+
+The manual Windows workflow was not dispatched. Windows S recovery proof
+is still absent. These checks do not complete Q14 or grant Windows B.
+
+### Read-only review
+
+The independent review found no blocking issue or test change that hides a
+production bug. It confirmed that win32 refusal precedes path reads, that
+release verification and identity validation both remain, and that the
+budget follows the entry contract's measured bytes plus 10 percent rule.
+The review noted unstaged files. All four noted files were staged before
+commit. The main PRD and decision document are byte-identical to main.
+The three platform-refusal files are byte-identical to `f11fe428`.

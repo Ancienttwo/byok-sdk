@@ -1979,7 +1979,22 @@ normalizes the header command counts and `__LINKEDIT` file and VM sizes. It
 accounts for the zero-filled command slot in unsigned Go x64 output. The
 signature must end at EOF. Wrong architecture, format, code or manifest fails
 closed. This check detects deployment errors. It does not verify signer trust.
-Windows PE digest support belongs to its separate platform slice. Wire and failure detail: `docs/protocol.md` §2.4.
+Windows PE digest support belongs to its separate platform slice.
+
+For Windows, the accepted fault model S covers process crash, OS crash and
+power loss. Its proposed support domain is local NTFS on an explicit OS
+build with a normal user token and storage that honors full flush requests.
+SMB, synced directories and other file systems are excluded. Admission needs
+proof that ledger bytes, memory replace/delete results, required metadata,
+name changes and new parent directories survive that fault set. The order is
+durable applying, CAS, durable memory result, durable terminal, matching Host
+complete/readback, durable ackedAt, then cursor advance. A barrier error blocks
+the next step. Corrupt ledger recovery must fail closed. A file flush or
+visible readback alone does not prove that order. Windows remains BLOCKED
+and B remains false until the proof and recovery experiments pass. Linux
+checks do not complete Q14's Windows requirement. The acceptance contract is
+`docs/plans/2026-10-19-windows-ntfs-ledger-barrier-decision.md` sections 3 and 7.
+Wire and failure detail: `docs/protocol.md` §2.4.
 
 The daemon publishes the authenticated `conn.hello` capability snapshot as the
 first long-poll message; the hosted composition persists that snapshot before

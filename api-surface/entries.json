@@ -148,7 +148,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Embedded Agent memory service",
-      "budgetBytes": 60360,
+      "budgetBytes": 67063,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
