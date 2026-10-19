@@ -5,12 +5,14 @@ import { createServer, type Server, type ServerResponse } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import type { AgentEvent } from '@byok-sdk/protocol';
+import { SessionManager } from '@earendil-works/pi-coding-agent';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { PI_RPC_IPC_KEY_MARKER } from '../adapters/pi/launcher-credential';
 import { buildRuntimeEnv } from '../daemon/environment';
 import type { Session } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { resolveBunBin } from './support/test-bun-bin';
+import { testExecutionScratch } from './fixtures/execution-scratch';
 // Relative and test-only: the shipped graph keeps `@byok-sdk/keys` and the dispatch packages disjoint.
 import { buildPiProviderProjection } from '../../../keys/src/pi-provider-projection';
 import { parseModelProviderProfile } from '../../../keys/src/provider-profile';
@@ -99,23 +101,64 @@ describe('pi-rpc BYOK key custody (#385)', () => {
       created_at: '2026-10-13T00:00:00.000Z', updated_at: '2026-10-13T00:00:00.000Z', display_name: 'Probe', enabled: true, kind: 'model',
       model: 'probe', profile_ref: 'probe', provider_kind: 'custom', pi_model: { ...PI_MODEL_FIXTURE, reasoning: false, thinkingLevel: 'off' } } }));
 
-    const adapter = new PiAdapter({ byokLauncher: { command: process.execPath, args: [launcher], profileDbPath, sessionDir: path.join(root, 'sessions') } });
+    const sessionDir = path.join(root, 'sessions');
+    const scratch = await testExecutionScratch();
+    const adapter = new PiAdapter({ byokLauncher: { command: process.execPath, args: [launcher], profileDbPath, sessionDir } });
     const session = await startPreparedOperation(adapter, {
       instruction,
       dispatchSelection: { lane: 'byok', runtimeId: 'pi', providerId: 'probe', modelId: 'probe' },
-    }, { workspaceDir: home, env: buildRuntimeEnv({ ambient: process.env }) });
+    }, { workspaceDir: home, scratch, env: buildRuntimeEnv({ ambient: process.env }) });
     sessions.push(session);
     const events: AgentEvent[] = [];
     for await (const event of session.events) { events.push(event); if (event.type === 'turn_end' || event.type === 'error') break; }
     const launches = readFileSync(path.join(control, 'launches.jsonl'), 'utf8').trim().split('\n')
       .map(line => JSON.parse(line) as { args: string[]; env: Record<string, string>; stdio: unknown });
-    return { events, received, hostEnvironments, launches };
+    return { events, received, hostEnvironments, launches, session, sessionDir, home, scratch };
   }
 
   const toolCall = (name: string, args: Record<string, unknown>): Respond => (res, ordinal) => {
     if (ordinal === 1) stream(res, { role: 'assistant', tool_calls: [{ index: 0, id: `call-${name}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }] }, 'tool_calls');
     else stream(res, { role: 'assistant', content: 'done' }, 'stop');
   };
+
+  it.skipIf(BUN_BIN === undefined).each(['default', 'project settings'])('keeps the exact native sessionRef in sessionDir after RPC scratch disposal with %s (#517)', async (settings) => {
+    const instruction = 'Keep this transcript after scratch cleanup.';
+    const lane = await runLane(instruction, (res) => stream(res, { role: 'assistant', content: 'done' }, 'stop'), async (home) => {
+      if (settings === 'project settings') {
+        await fs.mkdir(path.join(home, '.pi'));
+        await fs.writeFile(path.join(home, '.pi', 'settings.json'), JSON.stringify({ sessionDir: path.join(home, 'settings-session-decoy') }));
+      }
+    });
+    expect(lane.events.filter(event => event.type === 'error')).toEqual([]);
+    expect(lane.events.at(-1)?.type).toBe('turn_end');
+    expect(lane.received.map(request => request.authorization)).toEqual([`Bearer ${CANARY}`]);
+    expect(lane.launches).toHaveLength(1);
+    const projection = lane.launches[0]!.env.PI_CODING_AGENT_DIR!;
+    expect(path.dirname(projection)).toBe(lane.scratch.sdkDir);
+    expect(await fs.readFile(path.join(projection, 'models.json'), 'utf8')).toContain(PI_RPC_IPC_KEY_MARKER);
+    const projectedFiles = await fs.readdir(path.join(projection, 'sessions'), { recursive: true })
+      .catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return []; throw error; });
+    const projectedTranscripts = projectedFiles.filter(file => file.endsWith(`_${lane.session.sessionRef}.jsonl`))
+      .map(file => path.join(projection, 'sessions', file));
+
+    await lane.session.close();
+    expect(await fs.access(projection).then(() => true, () => false)).toBe(false);
+    expect(await fs.access(lane.scratch.sdkDir).then(() => true, () => false)).toBe(false);
+    expect(await fs.access(path.join(lane.home, 'settings-session-decoy')).then(() => true, () => false)).toBe(false);
+    const matches = (await SessionManager.list(lane.home, lane.sessionDir))
+      .filter(candidate => candidate.id === lane.session.sessionRef);
+    expect(matches, `sessionRef=${lane.session.sessionRef}; transcripts under scratch projection before disposal: ${JSON.stringify(projectedTranscripts)}`).toHaveLength(1);
+    expect(projectedTranscripts).toEqual([]);
+    expect(path.dirname(matches[0]!.path)).toBe(lane.sessionDir);
+    const saved = SessionManager.open(matches[0]!.path, lane.sessionDir);
+    expect(saved.getSessionId()).toBe(lane.session.sessionRef);
+    expect(saved.getCwd()).toBe(lane.home);
+    const messages = saved.buildSessionContext().messages;
+    expect(messages.map(message => message.role)).toEqual(['system', 'user', 'assistant']);
+    expect(JSON.stringify(messages.find(message => message.role === 'user'))).toContain(instruction);
+    expect(JSON.stringify(messages.find(message => message.role === 'assistant'))).toContain('done');
+    expect(await fs.readFile(matches[0]!.path, 'utf8')).not.toContain(CANARY);
+  }, 60_000);
 
   // On Windows this runs in the non-administrator release-pack lane: an
   // elevated token's new directories are owned by BUILTIN\Administrators, and
