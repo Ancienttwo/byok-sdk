@@ -149,7 +149,6 @@ it('agrees with the minute-scan oracle near ten DST transitions', () => {
     if (want === null || got !== want) { dstFail++; if (dstFail <= 5) console.log(`  MISMATCH ${show(schedule)} now=${iso(now)} got=${iso(got)} want=${iso(want)}`); }
   }
   report(dstFail === 0, `${dstCases} random daily/weekly schedules (${dstWeekly} weekly) near 10 DST transitions agree with the scan oracle (${dstFail} mismatches; oracle null counts as a mismatch)`);
-
 }, 30_000);
 
 it('keeps yearly schedules within the horizon, including DST and leap years', () => {
@@ -161,7 +160,8 @@ it('keeps yearly schedules within the horizon, including DST and leap years', ()
   }
   {
     let worst = 0, worstAt = '', nulls = 0;
-    const zones = [NY, 'Europe/London', 'Australia/Sydney', 'Antarctica/Troll', 'America/Santiago', 'Australia/Lord_Howe', 'Africa/Cairo', 'Pacific/Apia'];
+    // Casey is included for current rules. This 2026 start does not replay its 2019 interval.
+    const zones = [NY, 'Antarctica/Casey', 'Europe/London', 'Australia/Sydney', 'Antarctica/Troll', 'America/Santiago', 'Australia/Lord_Howe', 'Africa/Cairo', 'Pacific/Apia'];
     for (const tz of zones) for (let month = 1; month <= 12; month++) for (const dayOfMonth of [1, 9, 10, 12, 15, 28]) {
       const schedule = { minute: 0, hour: 12, dayOfMonth, month, tz };
       let t = at('2026-01-01T00:00:00Z');
@@ -172,7 +172,7 @@ it('keeps yearly schedules within the horizon, including DST and leap years', ()
         t = next;
       }
     }
-    report(nulls === 0 && worst <= ROUTINE_HORIZON_MS, `yearly sweep 2026-2056, 8 zones × 72 dates: max gap ${(worst / 86_400_000).toFixed(4)} d (${worstAt}); nulls=${nulls}`);
+    report(nulls === 0 && worst <= ROUTINE_HORIZON_MS, `yearly sweep 2026-2056, ${zones.length} zones × 72 dates: max gap ${(worst / 86_400_000).toFixed(4)} d (${worstAt}); nulls=${nulls}`);
   }
   let maxGap = 0;
   for (const [dayOfMonth, month, hour] of [[1, 1, 0], [31, 12, 0], [28, 2, 0], [10, 3, 12]] as const) {
@@ -195,5 +195,4 @@ it('keeps yearly schedules within the horizon, including DST and leap years', ()
     report(!check.ok && check.code === 'schedule_beyond_horizon',
       `Feb 29 yearly: longest wait between Feb 29s in [2000, 2200) is ${worstYears} years (${worstFrom} → ${worstFrom + worstYears}) → ${check.ok ? 'ok' : check.code}`);
   }
-
 }, 30_000);
