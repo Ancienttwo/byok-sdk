@@ -62,7 +62,13 @@ export function roomFields(team: TeamState, fields: RoomFields): Omit<Room, 'id'
   if (!members.length || members.length > 12 || new Set(members).size !== members.length) throw new Error('Room needs 1 to 12 distinct members');
   members.forEach(id => activeBot(team, id));
   if (fields.admin && !members.includes(fields.admin)) throw new Error('Admin must be a room member');
-  return { name: fields.name, members, ...(fields.admin ? { admin: fields.admin } : {}), mode: 'mention', announcement: fields.announcement ?? '' };
+  return { name: fields.name, members, visibleFrom: Object.fromEntries(members.map(id => [id, 0])), ...(fields.admin ? { admin: fields.admin } : {}), mode: 'mention', announcement: fields.announcement ?? '' };
+}
+/** Append offsets stay valid because the ledger retains its complete audit history. */
+export function roomVisibility(room: Room, members: readonly string[]): Record<string, number> {
+  return Object.fromEntries(members.map(id => [id,
+    room.members.includes(id) ? room.visibleFrom?.[id] ?? room.messages.length : room.messages.length,
+  ]));
 }
 export function applyManagement(state: CollaborationState, actor: string, taskId: string, outcome: BotTurnOutcome,
   models: Record<string, ExecutionTemplate>, accept: (action: string, work: () => void) => void): void {
@@ -74,6 +80,7 @@ export function applyManagement(state: CollaborationState, actor: string, taskId
     activeBot(team, action.botId).archived = true;
     for (const room of Object.values(team.rooms)) {
       room.members = room.members.filter(id => id !== action.botId);
+      if (room.visibleFrom) delete room.visibleFrom[action.botId];
       if (room.admin === action.botId) delete room.admin;
     }
   }));
@@ -94,6 +101,7 @@ export function applyManagement(state: CollaborationState, actor: string, taskId
     const fields = { ...room, ...resolve(action) };
     if (!action.admin && !fields.members.includes(fields.admin ?? '')) delete fields.admin;
     const next = roomFields(team, fields);
+    next.visibleFrom = roomVisibility(room, next.members);
     Object.assign(room, next);
     if (!next.admin) delete room.admin;
   }));

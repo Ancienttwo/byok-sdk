@@ -8,6 +8,7 @@ export interface BotProfile {
 }
 export interface Room {
   id: string; name: string; members: string[]; admin?: string; mode: 'mention'; announcement: string;
+  visibleFrom: Record<string, number>;
   messages: Array<{ id: string; from: string; text: string; late: boolean }>;
 }
 export interface Round {

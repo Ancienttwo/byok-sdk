@@ -166,9 +166,25 @@ gets at most two seats; the round admin gets at most four. A reservation spends
 budget even if it fails, passes, or times out. Batch room calls are atomic.
 A late room_call after a round closes can open a new round. At most three such
 rounds share one user root. At most ten late posts share that root. A new user
-message starts a new root. Group history caps at 100 entries and ContextPack
-caps at 64 KiB. Excess data blocks the seat with an explicit projection. The
-Host does not truncate history, summarize it, or silently drop enum members.
+message starts a new root. ContextPack selects up to the most recent 100
+eligible messages. It drops oldest whole rows until the 64 KiB history byte
+budget fits. `historyWindow.notice` reports omitted messages and refusals.
+Overflow does not block a seat. The frozen Request section keeps the complete
+current request, even when that request is larger than the history budget.
+The ledger retains its full audit history. No Summary is generated. Authority
+enums and required control metadata are not silently truncated. If non-history
+metadata alone exceeds the budget, the notice reports that separate condition.
+K8a owns its bounded cards/questions projection.
+
+Unmentioned messages are stored as background. They do not create a seat, but
+a later selected member can see eligible background messages. Each member has
+a persisted append offset in `visibleFrom`. New members see only messages
+appended after joining. Retained members keep their offset. Leaving and
+rejoining resets it. Both owner edits and Main Bot room edits use this rule.
+A pre-join root request is also excluded from a new member's Request section.
+A delayed post appended after joining is visible. Already frozen offers keep
+their selected window. A room without an earlier offset starts at the next
+user input; its older history is not disclosed.
 
 `src/group-chat.test.ts` uses a real embedded SDK, daemon, HTTP transport,
 SQLite reopen, persona writes, and submit_result helper. `src/rooms.test.ts`
@@ -186,7 +202,7 @@ with an unconfirmed persona. The authenticated owner can call
 `retryPersona(botId)` after resolving the device-side problem. This creates
 the same desired persona at the next profile revision. It retains the failed
 operation for audit. An exact accepted readback still gates dispatch. Retry
-also survives a Host restart. It does not clear a history-policy block.
+also survives a Host restart. It does not bypass schema or persona admission.
 A stale device may need profile-state reconciliation before retry can succeed.
 Transient delivery errors remain pending and use the existing automatic retry.
 
@@ -196,3 +212,11 @@ return EPERM when it opens a directory. This consumer does not skip that
 barrier or claim Windows durability. A Windows deployment must supply its own
 persona consumer with a defined persistence contract. The Host failure and
 retry API does not remove that platform limit.
+
+
+## Deferred Main Bot routine target
+
+Main Bot `create_routine.target` for another Bot is not implemented. Routine
+creation remains self-only in this example. Aimpact did not approve that
+extension for this PR. A later K8b work order must add it. Cross-Bot delegation
+also stays outside this history-window change.

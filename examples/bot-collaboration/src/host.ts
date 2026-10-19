@@ -10,7 +10,7 @@ import { json, stateOf, type CollaborationState, type Routine, type Turn } from 
 import { turnContext, outcomeSchema, SYSTEM_PROMPT, ROOM_SYSTEM_PROMPT } from './schema';
 import { arm, consumeRoutine, createRoutine, lifecycle, operation, owned, switchVersion, updateRoutine } from './routines';
 
-import { activeBot, applyManagement, roomFields, updateBot } from './team';
+import { activeBot, applyManagement, roomFields, updateBot, roomVisibility } from './team';
 import { advanceRooms, applySpeech, memberPresent, roomInput, type Mentions } from './rooms';
 import type { RoomFields } from '@byok-sdk/protocol';
 
@@ -166,6 +166,7 @@ export class BotCollaboration {
         const fields = { ...room, ...update };
         if (!update.admin && !fields.members.includes(fields.admin ?? '')) delete fields.admin;
         const next = roomFields(team, fields);
+        next.visibleFrom = roomVisibility(room, next.members);
         Object.assign(room, next); if (!next.admin) delete room.admin;
       });
       await this.process();

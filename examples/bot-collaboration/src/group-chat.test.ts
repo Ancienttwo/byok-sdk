@@ -164,7 +164,7 @@ it('freezes old profiles, applies update_bot and update_room, and archives delet
   await expect(host().input('archived', 'No', profiles[0]!.id)).rejects.toThrow('archived');
 });
 
-it('rechecks Main Bot role at terminal apply and blocks over-budget context without truncation', async () => {
+it('rechecks Main Bot role and lets a seat speak after history selection adds a truncation notice', async () => {
   fixture = await openTeam();
   const stale = await host().input('stale-main', 'Write a note'); await running(stale);
   await host().setMainBot('main', false);
@@ -174,10 +174,22 @@ it('rechecks Main Bot role at terminal apply and blocks over-budget context with
   await host().setMainBot('main', true);
   const { profiles, room } = await createTeam(); await ready(profiles);
   fixture.ledger.transaction(s => { stateOf(s.application).team.rooms[room.id]!.messages = Array.from({ length: 100 }, (_, i) => ({ id: String(i), from: 'user', text: 'History', late: false })); });
-  const blocked = await host().roomInput('over-context', room.id, 'This makes 101 entries', [profiles[1]!.id]);
-  expect(seats(blocked)[0]).toMatchObject({ status: 'blocked', reason: 'Room ContextPack exceeds 100 entries' });
-  expect(host().core.intent(seats(blocked)[0]!.id)).toBeUndefined();
+  const round = await host().roomInput('over-context', room.id, 'This makes 101 entries', [profiles[1]!.id]);
+  const seat = seats(round)[0]!;
+  await running(seat.id);
+  expect(host().snapshot().turns[seat.id]).not.toHaveProperty('blocked');
+  const offer = await fixture.server.tasks.offer(host().core.intent(seat.id)!.taskId);
+  if (!offer || !('instruction' in offer.payload) || typeof offer.payload.instruction !== 'string') throw new Error('Missing room offer');
+  const context = JSON.parse(offer.payload.instruction.split('ContextPack:\n')[1]!);
+  expect(context.room.messages).toHaveLength(100);
+  expect(context.room.messages[0].id).toBe('1');
+  expect(context.room.messages.at(-1).text).toBe('This makes 101 entries');
+  expect(context.historyWindow.omittedMessages).toBe(1);
+  expect(context.historyWindow.notice).toContain('Earlier history was omitted');
   expect(host().snapshot().team.rooms[room.id]!.messages).toHaveLength(101);
+  await finish(seat.id, { speech: { kind: 'post', text: 'I can speak after history selection.' } });
+  expect(seats(round)[0]!.status).toBe('post');
+  expect(host().snapshot().team.rooms[room.id]!.messages.at(-1)!.text).toBe('I can speak after history selection.');
 });
 
 it.each(['failure', 'missing outcome', 'cancellation'] as const)('settles a running late seat after real SDK %s without writing a post', async cause => {
@@ -198,4 +210,62 @@ it.each(['failure', 'missing outcome', 'cancellation'] as const)('settles a runn
   await fixture.reopen();
   expect(seats(round)[0]!.status).toBe('failed');
   expect(host().snapshot().team.rooms[room.id]!.messages.some(m => m.id === first.id)).toBe(false);
+});
+
+it('keeps background messages, persists join visibility, and freezes each selected history window', async () => {
+  fixture = await openTeam();
+  const { profiles, room } = await createTeam(); await ready(profiles);
+  const late = profiles[2]!;
+  await host().updateRoom(room.id, { members: profiles.slice(0, 2).map(b => b.id) });
+  const before = await host().roomInput('pre-join', room.id, 'PRE-JOIN-SECRET', []);
+  expect(seats(before)).toEqual([]);
+  const join = await host().input('join-member', 'Add the member');
+  await finish(join, { update_room: [{ roomId: room.id, members: profiles.map(b => b.id) }] });
+  const background = await host().roomInput('after-join', room.id, 'Visible background after join', []);
+  expect(seats(background)).toEqual([]);
+  expect(fixture.adapter.starts).toHaveLength(2);
+  await fixture.reopen();
+  const round = await host().roomInput('late-request', room.id, 'Current visible request', [late.id]);
+  const seat = seats(round)[0]!; await running(seat.id);
+  const offer = await fixture.server.tasks.offer(host().core.intent(seat.id)!.taskId);
+  if (!offer || !('instruction' in offer.payload) || typeof offer.payload.instruction !== 'string') throw new Error('Missing room offer');
+  const frozen = offer.payload.instruction;
+  const context = JSON.parse(frozen.split('ContextPack:\n')[1]!);
+  expect(context.room.messages.map((m: { text: string }) => m.text)).toEqual(['Visible background after join', 'Current visible request']);
+  expect(frozen).not.toContain('PRE-JOIN-SECRET');
+  await host().roomInput('later-background', room.id, 'Appended after the offer', []);
+  expect((await fixture.server.tasks.offer(host().core.intent(seat.id)!.taskId))?.payload).toHaveProperty('instruction', frozen);
+  await finish(seat.id, { speech: { kind: 'post', text: 'Visible reply' } });
+  await host().updateRoom(room.id, { members: profiles.slice(0, 2).map(b => b.id) });
+  await host().roomInput('absent', room.id, 'ABSENT-SECRET', []);
+  await host().updateRoom(room.id, { members: profiles.map(b => b.id) });
+  const rejoined = await host().roomInput('rejoined', room.id, 'After rejoin only', [late.id]);
+  const next = seats(rejoined)[0]!; await running(next.id);
+  const nextOffer = await fixture.server.tasks.offer(host().core.intent(next.id)!.taskId);
+  if (!nextOffer || !('instruction' in nextOffer.payload) || typeof nextOffer.payload.instruction !== 'string') throw new Error('Missing rejoined offer');
+  const nextContext = JSON.parse(nextOffer.payload.instruction.split('ContextPack:\n')[1]!);
+  expect(nextContext.room.messages.map((m: { text: string }) => m.text)).toEqual(['After rejoin only']);
+  expect(nextOffer.payload.instruction).not.toContain('ABSENT-SECRET');
+  expect(nextOffer.payload.instruction).not.toContain('Visible background after join');
+  await finish(next.id, { speech: { kind: 'pass' } });
+});
+
+it('keeps a large current request intact outside the trimmed history and still posts through the real SDK', async () => {
+  fixture = await openTeam();
+  const { profiles, room } = await createTeam(); await ready(profiles);
+  await host().roomInput('large-background', room.id, 'Old '.repeat(20000), []);
+  const request = '😀'.repeat(18000) + ' CURRENT-END';
+  const round = await host().roomInput('large-current', room.id, request, [profiles[0]!.id]);
+  const seat = seats(round)[0]!; await running(seat.id);
+  const offer = await fixture.server.tasks.offer(host().core.intent(seat.id)!.taskId);
+  if (!offer || !('instruction' in offer.payload) || typeof offer.payload.instruction !== 'string') throw new Error('Missing room offer');
+  const [requestSection, contextSection] = offer.payload.instruction.split('ContextPack:\n');
+  expect(requestSection).toContain(request);
+  const context = JSON.parse(contextSection!);
+  expect(context.room.messages).toEqual([]);
+  expect(context.historyWindow.notice).toContain('Earlier history was omitted');
+  expect(context.historyWindow.omittedMessages).toBe(2);
+  expect(Buffer.byteLength(contextSection!, 'utf8')).toBeLessThanOrEqual(65536);
+  await finish(seat.id, { speech: { kind: 'post', text: 'The complete current request was available.' } });
+  expect(seats(round)[0]!.status).toBe('post');
 });

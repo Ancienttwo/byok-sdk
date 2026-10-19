@@ -2,7 +2,8 @@ import { botTurnOutcomeFragments as f, composeBotTurnOutcomeSchema, type NonEmpt
 import type { CollaborationState, Turn } from './model';
 
 import { NEW_BOTS, NEW_ROOMS } from './team';
-import { roomContext, ROOM_CONTEXT_BYTES } from './rooms';
+import { roomContext } from './rooms';
+import { HISTORY_MAX_ITEMS, historyWindow, fitHistory } from './history';
 
 export const SYSTEM_PROMPT = `You are the owner's Bot. Use submit_result for Host actions.
 Reply through messageEgress. Use ask_user when you only need an answer.
@@ -57,13 +58,22 @@ export function turnContext(state: CollaborationState, turn: Turn) {
   const team = state.team;
   const shared = { teamNotes: team.notes, roster: Object.values(team.bots).filter(b => !b.archived).map(b => ({ id: b.id, name: b.name, role: b.role, mainBot: b.mainBot })),
     rejectedActions: state.rejected.filter(rejection => rejection.botId === turn.botId), rooms: Object.values(team.rooms).map(({ messages: _messages, ...room }) => room) };
-  const result = turn.source === 'room_slot' ? { ...shared, ...roomContext(team, turn) } : { ...contextPack(state), ...shared,
-    turns: Object.values(state.turns).filter(t => t.botId === turn.botId),
+  const ownRejections = shared.rejectedActions;
+  shared.rejectedActions = ownRejections.slice(-HISTORY_MAX_ITEMS);
+  if (turn.source === 'room_slot') {
+    const result = { ...shared, ...roomContext(team, turn) };
+    result.historyWindow.omittedRejections = ownRejections.length - shared.rejectedActions.length;
+    return fitHistory(result, result.room.messages, 'omittedMessages');
+  }
+  const history = Object.values(state.turns).filter(t => t.botId === turn.botId && t.id !== turn.id);
+  const turns = history.slice(-HISTORY_MAX_ITEMS);
+  const result = { ...contextPack(state), ...shared, turns,
+    historyWindow: historyWindow('turns', history.length - turns.length),
     routines: Object.values(state.routines).filter(r => r.owner === turn.botId),
     cards: Object.values(state.cards).filter(c => state.turns[c.turnId]?.botId === turn.botId),
     questions: Object.values(state.questions).filter(q => state.turns[q.turnId]?.botId === turn.botId) };
-  if (Buffer.byteLength(JSON.stringify(result), 'utf8') > ROOM_CONTEXT_BYTES) throw new Error('ContextPack exceeds 64 KiB');
-  return result;
+  result.historyWindow.omittedRejections = ownRejections.length - shared.rejectedActions.length;
+  return fitHistory(result, turns, 'omittedTurns');
 }
 export function contextPack(state: CollaborationState) {
   return {

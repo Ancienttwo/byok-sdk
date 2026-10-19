@@ -2,11 +2,12 @@ import type { BotTurnOutcome } from '@byok-sdk/protocol';
 import { hash, type LedgerState } from '../../host-execution-core/src/model';
 import type { CollaborationState, Turn } from './model';
 import type { Round, Seat, TeamState } from './team-model';
-import { activeBot, same } from './team';
+import { activeBot, same, roomVisibility } from './team';
 
 export const ROOM_GRACE_MS = 240_000;
-export const ROOM_CONTEXT_BYTES = 65_536;
-export const ROOM_CONTEXT_MESSAGES = 100;
+import { HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS, historyWindow } from './history';
+export const ROOM_CONTEXT_BYTES = HISTORY_MAX_BYTES;
+export const ROOM_CONTEXT_MESSAGES = HISTORY_MAX_ITEMS;
 export type Mentions = readonly string[] | 'all';
 function reserve(team: TeamState, round: Round, botId: string): void {
   const room = team.rooms[round.roomId]!;
@@ -39,6 +40,7 @@ export function roomInput(state: CollaborationState, key: string, roomId: string
   const prior = team.rounds[id];
   if (prior) { if (!same(prior.input, input)) throw new Error('Room input identity conflict'); return id; }
   newRound(team, id, id, roomId, input, mentions === 'all' ? room.members : mentions);
+  room.visibleFrom = roomVisibility(room, room.members);
   team.roots[id] = { autonomous: 0, late: 0 };
   room.messages.push({ id, from: 'user', text, late: false });
   return id;
@@ -128,14 +130,21 @@ export function advanceRooms(s: LedgerState, state: CollaborationState, now: num
     if (!seat) { round.closed = true; continue; }
     if (seat.status !== 'waiting') continue;
     seat.status = 'queued'; seat.deadline = now + ROOM_GRACE_MS;
-    add(seat.id, seat.botId, JSON.stringify({ roomId: round.roomId, roundId: round.id }));
+    const room = team.rooms[round.roomId]!;
+    const rootIndex = room.messages.findIndex(message => message.id === round.root);
+    const visibleFrom = room.visibleFrom?.[seat.botId] ?? room.messages.length;
+    const request = rootIndex >= visibleFrom ? room.messages[rootIndex]?.text : undefined;
+    add(seat.id, seat.botId, JSON.stringify({ roomId: round.roomId, roundId: round.id, request }));
   }
 }
 export function roomContext(team: TeamState, turn: Turn) {
   const seat = team.seats[turn.id];
-  if (!seat) return {};
+  if (!seat) throw new Error('Room seat not found');
   const round = team.rounds[seat.roundId]!, room = team.rooms[round.roomId]!;
-  if (room.messages.length > ROOM_CONTEXT_MESSAGES) throw new Error('Room ContextPack exceeds 100 entries');
-  return { room: { id: room.id, name: room.name, members: room.members, announcement: room.announcement, messages: room.messages },
+  const visible = room.messages.slice(room.visibleFrom?.[seat.botId] ?? room.messages.length);
+  const messages = visible.slice(-ROOM_CONTEXT_MESSAGES);
+  return { historyWindow: historyWindow('messages', visible.length - messages.length),
+    room: { id: room.id, name: room.name, members: room.members, announcement: room.announcement,
+      visibility: 'after_join' as const, messages },
     round: { id: round.id, limit: round.limit, counts: round.counts }, seat: { id: seat.id, deadline: seat.deadline } };
 }

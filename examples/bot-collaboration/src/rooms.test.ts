@@ -127,7 +127,7 @@ it('limits late posts to ten per user root and autonomous rounds to three', () =
   expect(fresh.rejected).toContain('room_call: Autonomous round budget is 3');
 });
 
-it('blocks excess room history and keeps other Bots private turns out of context', () => {
+it('windows excess room history with a notice and keeps other Bots private turns out of context', () => {
   const { state, advance } = setup();
   roomInput(state, 'context', 'r', 'Discuss', ['b1']); advance();
   const turn = Object.values(state.turns)[0]!;
@@ -137,9 +137,23 @@ it('blocks excess room history and keeps other Bots private turns out of context
   expect(JSON.stringify(turnContext(state, { ...turn, source: 'user' }))).not.toContain('private owner message');
   expect(turnContext(state, turn)).toHaveProperty('teamNotes', [{ id: 'note', text: 'Shared rule' }]);
   state.team.rooms.r!.messages = Array.from({ length: 101 }, (_, i) => ({ id: String(i), from: 'b0', text: 'text', late: false }));
-  expect(() => turnContext(state, turn)).toThrow('100 entries');
+  const windowed = turnContext(state, turn);
+  if (!('room' in windowed)) throw new Error('Expected room context');
+  expect(windowed.room.messages).toHaveLength(100);
+  expect(windowed.room.messages[0]!.id).toBe('1');
+  expect(windowed.room.messages.at(-1)!.id).toBe('100');
+  expect(windowed.historyWindow).toMatchObject({ omittedMessages: 1, metadataOverBudget: false });
+  expect(windowed.historyWindow.notice).toContain('Earlier history was omitted');
+  expect(Buffer.byteLength(JSON.stringify(windowed), 'utf8')).toBeLessThanOrEqual(65536);
+  expect(state.team.rooms.r!.messages).toHaveLength(101);
   state.team.rooms.r!.messages = [{ id: 'huge', from: 'user', text: 'x'.repeat(65536), late: false }];
-  expect(() => turnContext(state, turn)).toThrow('64 KiB');
+  const byteWindow = turnContext(state, turn);
+  if (!('room' in byteWindow)) throw new Error('Expected room context');
+  expect(byteWindow.room.messages).toEqual([]);
+  expect(byteWindow.historyWindow.omittedMessages).toBe(1);
+  expect(byteWindow.historyWindow.notice).toContain('Earlier history was omitted');
+  expect(Buffer.byteLength(JSON.stringify(byteWindow), 'utf8')).toBeLessThanOrEqual(65536);
+  expect(state.team.rooms.r!.messages[0]!.text).toHaveLength(65536);
 });
 
 it('refuses duplicate local slots and invalid room edits without partial room mutation', () => {
