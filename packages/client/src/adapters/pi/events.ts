@@ -107,6 +107,9 @@ export function mapPiMessageToAgentEvent(msg: PiRpcMessage): AgentEvent | undefi
       });
     }
 
+    // Routine unless it carries a text delta: every other assistant stream
+    // step (text/thinking/toolcall start, delta and end) has no event of its
+    // own, so it stays in `ROUTINE_PI_EVENT_TYPES` like `message_end`.
     case 'message_update': {
       const delta = msg.assistantMessageEvent as { type?: string; delta?: string } | undefined;
       if (delta?.type === 'text_delta' && typeof delta.delta === 'string') {
@@ -170,6 +173,8 @@ export function mapPiMessageToAgentEvent(msg: PiRpcMessage): AgentEvent | undefi
     case 'extension_error':
       return { type: 'error', message: typeof msg.error === 'string' ? msg.error : 'pi extension error' };
 
+    // Routine unless the native retry policy is exhausted; a successful retry
+    // stays in `ROUTINE_PI_EVENT_TYPES` like `message_end`.
     case 'auto_retry_end':
       if (msg.success === false) {
         return {
@@ -200,6 +205,7 @@ export function mapPiMessageToAgentEvent(msg: PiRpcMessage): AgentEvent | undefi
     case 'summarization_retry_finished':
     case 'session_info_changed':
     case 'thinking_level_changed':
+    case 'entry_appended': // a session-tree entry was persisted
       return undefined;
 
     default:
@@ -227,6 +233,7 @@ export const ROUTINE_PI_EVENT_TYPES: ReadonlySet<string> = new Set([
   'turn_start',
   'turn_end',
   'message_start',
+  'message_update',
   'message_end',
   'bash_execution_update',
   'tool_execution_update',
@@ -234,11 +241,13 @@ export const ROUTINE_PI_EVENT_TYPES: ReadonlySet<string> = new Set([
   'compaction_start',
   'compaction_end',
   'auto_retry_start',
+  'auto_retry_end',
   'summarization_retry_scheduled',
   'summarization_retry_attempt_start',
   'summarization_retry_finished',
   'session_info_changed',
   'thinking_level_changed',
+  'entry_appended',
 ]);
 
 /** Official get_session_stats observation; no provider counters are inferred. */

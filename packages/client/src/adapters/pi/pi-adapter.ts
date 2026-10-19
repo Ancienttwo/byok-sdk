@@ -26,6 +26,7 @@ import {
   type RuntimeOperationStartInput,
   type RuntimePreparedLaunchV1,
   type Session,
+  type SessionEvidence,
 } from '../../types';
 import { AGENT_MEMORY_MCP_SERVER_NAME, AGENT_RESULT_MCP_SERVER_NAME, isReservedMcpServerName } from '../../sdk-reserved-mcp';
 import { McpAuthorityError } from '../../mcp/authority-error';
@@ -194,6 +195,10 @@ export class PiAdapter implements RuntimeAdapter {
     // authority on what a toolset contains. Claude and Codex list the tools
     // themselves, so pi is the one bundled adapter that needs this.
     requiresMcpToolsetToolObservation: true,
+    // Octop T0 (`docs/notes/2026-10-20-octop-t0-pi-trajectory.md`): Pi 1.3.0
+    // pairs `tool_execution_start`/`_end` by `toolCallId` over RPC, and
+    // `PiSession` turns only a non-aborted `agent_settled` into `turn_end`.
+    trajectoryEvidence: 'event-stream',
     capabilities: {
       steer: true,
       resume: true,
@@ -205,7 +210,9 @@ export class PiAdapter implements RuntimeAdapter {
 
   constructor(private readonly options: PiAdapterOptions = {}) {
     if (options.durablePi !== undefined && typeof options.durablePi !== 'boolean') throw new Error('PiAdapterOptions.durablePi must be boolean; pass replicaRoot through durableContext');
-    if (options.durablePi === true) this.descriptor = freezeRuntimeAdapterDescriptor({ ...this.descriptor, capabilities: { ...this.descriptor.capabilities, durablePi: true, steer: false, resume: false } });
+    // T0 verified the RPC lanes only. The durable worker's own frames and
+    // respawn path are unverified, so it declares no trajectory evidence.
+    if (options.durablePi === true) this.descriptor = freezeRuntimeAdapterDescriptor({ ...this.descriptor, trajectoryEvidence: undefined, capabilities: { ...this.descriptor.capabilities, durablePi: true, steer: false, resume: false } });
     validatePiByokLauncherConfig(options.byokLauncher);
     if (options.sdkHelperHost !== undefined) resolveSdkReservedHelperBin('pi-rpc', options.sdkHelperHost);
   }
@@ -1182,5 +1189,10 @@ class PiSession implements Session {
     // rather than a silent no-op so a future caller (or a misbehaving
     // server) gets a clear error instead of a hang.
     throw new Error('pi adapter does not support approval resume: pi never emits needs_approval in M0/M1');
+  }
+
+  /** Pi reports every tool result itself; this adapter never makes one up. */
+  evidence(): SessionEvidence {
+    return { decodeDropped: this.rpc.decodeDropped, unmappedFrames: this.rpc.unmappedFrames, syntheticToolResults: 0 };
   }
 }

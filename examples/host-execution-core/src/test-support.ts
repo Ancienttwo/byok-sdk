@@ -27,6 +27,7 @@ export async function openHost(options: HostOptions & {
   agentMessage?: CreateByokServerOptions['agentMessage'];
   consume?: (wake: DueWake, signal: AbortSignal, next: () => Promise<void>) => Promise<void>;
   wrapServer?: (server: ExecutionServer) => ExecutionServer;
+  adapter?: BotStubAdapter;
 } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'hc-'));
   const productId = 'host-core-test';
@@ -42,7 +43,7 @@ export async function openHost(options: HostOptions & {
   if (!http.listening) await new Promise<void>(resolve => http.once('listening', resolve));
   const address = http.address();
   if (!address || typeof address === 'string') throw new Error('Missing HTTP address');
-  const adapter = new BotStubAdapter();
+  const adapter = options.adapter ?? new BotStubAdapter();
   const credentials = new InMemoryDeviceCredentialStore();
   const config = { productId, productName: 'Host Core', localAgentRelease: { version: '0.0.0-test' },
     serverUrl: `http://127.0.0.1:${address.port}`, workspaceRoot: path.join(root, 'workspace'), storeDir: path.join(root, 'sdk'),

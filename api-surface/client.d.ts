@@ -613,6 +613,8 @@ export declare class PiRpcClient {
     private readonly stderrRing;
     /** Count of pi RPC message types `PiSession` (pi-adapter.ts) has told us have no `AgentEvent` mapping and aren't routine bookkeeping — see `recordUnmappedFrame`. */
     private readonly unmappedFrameCounts;
+    /** Stdout lines that were not a JSON object, plus a last line the process never terminated — see `onLine` and `onClosed`. */
+    private decodeDroppedLines;
     constructor(options: PiRpcClientOptions);
     /**
      * Send a command, resolved with its correlated `response` message.
@@ -630,6 +632,16 @@ export declare class PiRpcClient {
     get events(): AsyncIterable<PiRpcMessage>;
     /** Local transport diagnostic retained when the process closes; consumers must classify it explicitly. */
     get terminalError(): Error | undefined;
+    /**
+     * Stdout frames this client dropped because it could not decode them: a
+     * complete line that is not a JSON object, or the unterminated last line of
+     * a process that ended mid-write. Pi writes every RPC frame as one JSON
+     * object and LF, and its stdout guard sends ordinary writes to stderr, so
+     * there is no expected noise to exclude (Octop T0).
+     */
+    get decodeDropped(): number;
+    /** Total of the frames `recordUnmappedFrame` counted, across every type. */
+    get unmappedFrames(): number;
     /**
      * Record a pi RPC message `type` that `PiSession` (pi-adapter.ts) decided
      * has no `AgentEvent` mapping and isn't routine bookkeeping (see
@@ -4879,7 +4891,11 @@ export type DaemonRecord = Extract<DaemonEvent, {
     runtimeId: string;
     stage: 'signal' | 'quiescence' | 'cleanup';
     reasonBytes: number;
-} | {
+}
+/** Already content-free: counts and closed codes (`execution-record.ts`). */
+ | Extract<DaemonEvent, {
+    kind: 'execution-record';
+}> | {
     kind: 'agent-memory-intent-integrity';
     ts: string;
     intentId: string;
@@ -5224,6 +5240,87 @@ export declare function buildRuntimeEnv(options: {
  * Pi lanes use it (see this module's own doc comment).
  */
 export declare function buildAllowlistedEnv(options: BuildAllowlistedEnvOptions): Record<string, string>;
+// ==== @byok-sdk/client dist/daemon/execution-record.d.ts ====
+import type { AgentEvent } from '@byok-sdk/protocol';
+import type { RuntimeAdapterDescriptor, Session } from '../types';
+/**
+ * Octop ③ (#553): a local, content-free diagnostic that says whether the SDK
+ * saw the whole event trajectory of one started execution. `TaskRunner`
+ * publishes it after the semantic terminal is committed, and it never changes
+ * that terminal: not its type, not `retryable`, not outcome application, and
+ * it never starts a retry.
+ *
+ * - `complete`: the adapter declares an evidence source, every tool call has
+ *   exactly one result, no frame was dropped or invented, and the runtime sent
+ *   `turn_end`. It is about collection only; a failed task can be complete.
+ * - `partial`: a declared source with at least one gap.
+ * - `unknown`: no declared source, or more open tool calls than the record
+ *   tracks. A Host that has no record for a terminal also shows `unknown`.
+ */
+export type ExecutionRecordStatus = 'complete' | 'partial' | 'unknown';
+/**
+ * Why a declared record is not complete. A record lists only the gaps it saw,
+ * each with its count.
+ *
+ * - `unpaired_tool_call`: a `tool_use` with no result when the terminal was
+ *   decided, with no `toolCallId`, or with an id that was already used.
+ * - `orphan_tool_result`: a `tool_result` with no `toolCallId`, or for an id
+ *   that no open call had.
+ * - `duplicate_tool_result`: a second result for an answered id.
+ * - `synthetic_tool_result`: a result the adapter made itself ({@link Session.evidence}).
+ * - `decode_dropped`: runtime output the adapter could not decode ({@link Session.evidence}).
+ * - `unmapped_frame`: runtime frames of an unexpected type ({@link Session.evidence}).
+ * - `stream_ended_early`: the runtime ended or failed its event stream before `turn_end`.
+ * - `no_turn_end`: the daemon decided the terminal (cancel, reject, limit,
+ *   shutdown) before `turn_end`.
+ * - `spill_unstored`: a tool input or output too large to travel inline whose
+ *   full bytes could not be stored (`spill.unstoredReason`).
+ */
+export type ExecutionRecordGap = 'unpaired_tool_call' | 'orphan_tool_result' | 'duplicate_tool_result' | 'synthetic_tool_result' | 'decode_dropped' | 'unmapped_frame' | 'stream_ended_early' | 'no_turn_end' | 'spill_unstored';
+/** Why a record is `unknown`. */
+export type ExecutionRecordUnknown = 'source_not_declared' | 'evidence_overflow';
+/** One started execution's record. Counts and closed codes only: never a tool input, output, path or reason text. */
+export interface ExecutionRecord {
+    taskId: string;
+    terminal: 'complete' | 'failed' | 'cancelled';
+    status: ExecutionRecordStatus;
+    source: 'event-stream' | 'none';
+    gaps: Array<{
+        reason: ExecutionRecordGap;
+        count: number;
+    }>;
+    unknownReason?: ExecutionRecordUnknown;
+}
+/** Open tool calls one execution tracks. One more makes its record `unknown` (`evidence_overflow`). */
+export declare const MAX_OPEN_TOOL_CALLS = 4096;
+/**
+ * Builds one execution's record from the events `TaskRunner.pump` accepts for
+ * the task, before they are batched. In memory only, and it never awaits. It
+ * stops at the terminal decision, because the pump stops passing it events
+ * there. The adapter counts it reads at `finish` cover the whole session up to
+ * `Session.close()`, so a frame cut short while the runtime shuts down is a
+ * gap too.
+ */
+export declare class ExecutionRecordAccumulator {
+    private readonly taskId;
+    private readonly source;
+    private readonly session;
+    private readonly open;
+    /** The latest answered ids, kept only to tell a repeated result from an orphan. Bounded like `open`. */
+    private readonly answered;
+    private readonly counts;
+    private turnEnded;
+    private streamEndedEarly;
+    private overflowed;
+    constructor(taskId: string, source: RuntimeAdapterDescriptor['trajectoryEvidence'], session: Pick<Session, 'evidence'>);
+    observe(event: AgentEvent): void;
+    /** The runtime ended or failed its event stream on its own, before the daemon decided a terminal. */
+    streamEnded(): void;
+    /** Reads `Session.evidence()` once, so call it after `Session.close()` resolved. */
+    finish(terminal: ExecutionRecord['terminal']): ExecutionRecord;
+    private openCall;
+    private answerCall;
+}
 // ==== @byok-sdk/client dist/daemon/git-workspace-store.d.ts ====
 import type { GitErrorCategory, GitWorkspaceObservation } from './git-workspace';
 export type GitWorkspacePhase = 'preparing' | 'active' | 'completed' | 'failed' | 'cancelled' | 'interrupted' | 'salvage';
@@ -6673,6 +6770,7 @@ export declare function prependAgentMemoryReaderGuidance(instruction: string): s
 import type { RetentionClassId, RetentionTrigger, SweepReport } from './retention/registry';
 import { type AgentEvent, type BlobRef, type Envelope, type TaskState } from '@byok-sdk/protocol';
 import type { DaemonLifecycle } from './daemon-lifecycle';
+import type { ExecutionRecord } from './execution-record';
 import type { RuntimeObservation } from '../runtime-detection';
 import type { ServiceEnvironmentStatus } from '../lifecycle/service-environment';
 /**
@@ -6897,6 +6995,19 @@ export type DaemonEvent = ({
     reason: string;
 }
 /**
+ * Octop ③ (#553): whether the SDK saw one started execution's whole event
+ * trajectory — counts and closed codes only (`execution-record.ts`).
+ * Emitted once, after that task's terminal event (`completed`, `failed`,
+ * `cancelled` or a terminal `outbound-rejected`), unless the task registry
+ * evicted the task first (`MAX_TRACKED_TASKS`). A record whose terminal
+ * never settles in this process is not emitted. A diagnostic only: no task
+ * state depends on it.
+ */
+ | ({
+    kind: 'execution-record';
+    ts: string;
+} & ExecutionRecord)
+/**
  * WP2I-S2: the Host's durable readback for a Host-approved Agent memory
  * intent contradicted the device's durable terminal (`disposition`
  * `conflict`, or `host_terminal` against a local terminal). The integrity
@@ -7026,6 +7137,13 @@ export declare class DaemonObserver {
      */
     private readonly approvalIdByEnvelope;
     private readonly pendingApprovalIdByTask;
+    /**
+     * Octop ③ (#553): execution records published before the server settled
+     * their task's terminal, held so that the `execution-record` event follows
+     * the terminal event. Only a task `taskInfo` tracks as nonterminal has an
+     * entry, so `MAX_TRACKED_TASKS` bounds it too; see `evictIfNeeded`.
+     */
+    private readonly heldExecutionRecords;
     subscribe(listener: DaemonEventListener): Unsubscribe;
     /** Current locally-known tasks, in first-seen order. */
     tasks(): DaemonTaskInfo[];
@@ -7114,6 +7232,14 @@ export declare class DaemonObserver {
         stage: 'signal' | 'quiescence' | 'cleanup';
         reason: string;
     }): void;
+    /**
+     * Octop ③ (#553): `TaskRunner` publishes a record after `Session.close()`,
+     * which can finish before the server settles the terminal. Such a record
+     * waits until its task's terminal event goes out. A task this registry no
+     * longer tracks gets its record at once.
+     */
+    noteExecutionRecord(record: ExecutionRecord): void;
+    private releaseExecutionRecord;
     /**
      * Finding F4: wired from `TaskRunnerDeps.onApprovalDispatched`, called
      * synchronously by `TaskRunner.dispatchApproval` BEFORE its own
@@ -8037,6 +8163,7 @@ import { type RuntimeDisposalStage } from '../runtime-failure';
 import { type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
 import type { AgentResultDescribeParams, AgentResultDescribeResult, AgentResultSubmitParams, AgentResultSubmitResult, TaskQueueWatermark } from './control-protocol';
+import { type ExecutionRecord } from './execution-record';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
 import { type ProgressBatcherOptions } from './progress-batcher';
 import type { SessionWorkspaceStore } from './session-workspace-store';
@@ -8304,6 +8431,13 @@ export interface TaskRunnerDeps {
         stage: RuntimeDisposalStage;
         reason: string;
     }) => void;
+    /**
+     * Local-only diagnostic: one {@link ExecutionRecord} per started execution,
+     * after `Session.close()` and the terminal commit. It never changes the
+     * terminal, its retryability or any retry decision. A throwing callback is
+     * logged and ignored.
+     */
+    onExecutionRecord?: (record: ExecutionRecord) => void;
     /**
      * Local audit signal emitted only after bounded Agent-home terminal
      * evidence retries are exhausted. The wire terminal still proceeds so a
@@ -9354,6 +9488,12 @@ export declare class TaskRunner {
     private homeFinalizations;
     private finish;
     private finishOnce;
+    /**
+     * Once per execution, after `Session.close()` (so adapter counters are
+     * final) and the terminal commit. Synchronous and in memory: it cannot hold
+     * the terminal or the lease release, and a failure here is only logged.
+     */
+    private publishExecutionRecord;
     private settleSemanticTerminal;
     /**
      * Release the preparation pin this Execution holds, if it took one.
@@ -9956,7 +10096,7 @@ export type OperationalHealthFixResult = {
     sizeBytes: number;
 };
 // ==== @byok-sdk/client dist/index.d.ts ====
-export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, Session, GitWorkspaceConfig, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types';
+export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, Session, SessionEvidence, GitWorkspaceConfig, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types';
 export type { AgentRef } from './agent-home';
 export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseCorruptError, AgentHomeReaderRunMissingError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjection, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home';
 export { AgentSessionHandoffStore, AgentSessionHandoffStoreError, AgentSessionHandoffCorruptError, AgentSessionHandoffMismatchError, } from './daemon/agent-session-handoff-store';
@@ -10082,6 +10222,7 @@ export { DaemonObserver } from './daemon/observer';
 export type { DaemonEvent, DaemonEventKind, DaemonEventListener, DaemonTaskInfo, Unsubscribe } from './daemon/observer';
 export { createDaemonRecordProjector, DAEMON_RECORD_KINDS, isDaemonRecordKind } from './daemon/daemon-record';
 export type { DaemonRecord, DaemonRecordKind, DaemonRecordProjector, DaemonTurnRecord } from './daemon/daemon-record';
+export type { ExecutionRecord, ExecutionRecordGap, ExecutionRecordStatus, ExecutionRecordUnknown } from './daemon/execution-record';
 export { createServiceLifecycle, UnsupportedServicePlatformError } from './lifecycle/create-service-lifecycle';
 export type { CreateServiceLifecycleOptions } from './lifecycle/create-service-lifecycle';
 export { nodeAgentProgram, sanitizeServiceName } from './lifecycle/service-types';
@@ -12720,6 +12861,23 @@ export interface Session {
      * implies something upstream expected approval support that isn't there.
      */
     resolveApproval(approved: boolean, reason?: string): Promise<void>;
+    /**
+     * Runtime output this session could not turn into `events`, as counts for
+     * the whole session up to `close()`. The daemon reads it once, after
+     * `close()` resolved, and only when the descriptor declares
+     * `trajectoryEvidence`. A declaring adapter that omits it states that
+     * nothing below its event stream can drop or invent a frame.
+     */
+    evidence?(): SessionEvidence;
+}
+/** Counts behind one session's event stream; see {@link Session.evidence}. Never a frame, a line or a tool payload. */
+export interface SessionEvidence {
+    /** Runtime output frames that could not be decoded, including a truncated frame left at the end of the stream. */
+    readonly decodeDropped: number;
+    /** Decoded frames of a type the adapter neither maps to an event nor expects as bookkeeping. */
+    readonly unmappedFrames: number;
+    /** Tool results the adapter produced itself instead of observing them from the runtime. */
+    readonly syntheticToolResults: number;
 }
 /**
  * Immutable runtime facts shared by discovery and one prepared operation.
@@ -12759,6 +12917,13 @@ export interface RuntimeAdapterDescriptor {
      * tool interaction.
      */
     readonly progressEventsAreMessages?: boolean;
+    /**
+     * Declares `Session.events` as the evidence source of the daemon's local
+     * execution record (`daemon/execution-record.ts`): every tool call and
+     * result carries its `toolCallId`, and `turn_end` means the runtime
+     * completed. Absent: every record of this adapter is `unknown`.
+     */
+    readonly trajectoryEvidence?: 'event-stream';
 }
 /** The pure input to one adapter admission decision. It contains no credential values or workspace resources. */
 export interface RuntimeAdapterPrepareInput {

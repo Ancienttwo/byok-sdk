@@ -105,6 +105,7 @@ import type {
   TaskQueueWatermark,
 } from './control-protocol';
 import { DEFAULT_MAX_INLINE_EVENT_BYTES, spillOversizedEvent } from './event-spill';
+import { ExecutionRecordAccumulator, type ExecutionRecord } from './execution-record';
 import { buildRuntimeEnv } from './environment';
 import { toRuntimeInfoCapabilities } from './runtime-capabilities';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
@@ -490,6 +491,13 @@ export interface TaskRunnerDeps {
     reason: string;
   }) => void;
   /**
+   * Local-only diagnostic: one {@link ExecutionRecord} per started execution,
+   * after `Session.close()` and the terminal commit. It never changes the
+   * terminal, its retryability or any retry decision. A throwing callback is
+   * logged and ignored.
+   */
+  onExecutionRecord?: (record: ExecutionRecord) => void;
+  /**
    * Local audit signal emitted only after bounded Agent-home terminal
    * evidence retries are exhausted. The wire terminal still proceeds so a
    * cloud task cannot remain Claimed/Running forever behind auxiliary local
@@ -797,6 +805,9 @@ interface ActiveTask {
   artifactBytesSoFar?: number;
   /** Device monotonic-ish wall-clock anchor taken only after a Session started. */
   startedAtMs: number;
+  /** Fed by `pump` until the terminal decision; published once by `finishOnce`. */
+  executionRecord: ExecutionRecordAccumulator;
+  executionRecordPublished?: boolean;
   /**
    * Last runtime usage observation received before this task's terminal
    * signal. This is intentionally NOT accumulated: Codex and Claude expose a
@@ -924,6 +935,16 @@ async function settledOrWithdrawn(attempts: readonly Promise<unknown>[], signal:
 function closingReply(active: ActiveTask): string | undefined {
   const text = active.finalTextParts.join('');
   return text.trim() === '' ? undefined : text;
+}
+
+/** The execution record's terminal for the semantic terminal envelope this runner sent. */
+function executionTerminalOf(envelope: Envelope | undefined): ExecutionRecord['terminal'] | undefined {
+  switch (envelope?.type) {
+    case 'task.complete': return 'complete';
+    case 'task.fail': return 'failed';
+    case 'task.cancelled': return 'cancelled';
+    default: return undefined;
+  }
 }
 
 /**
@@ -3023,6 +3044,7 @@ export class TaskRunner {
         approvalQueue: [],
         outputBytesSoFar: 0,
         startedAtMs: Date.now(),
+        executionRecord: new ExecutionRecordAccumulator(taskId, pick.descriptor.trajectoryEvidence, session),
         ...(preparedObservation === undefined ? {} : { prepared: preparedObservation }),
         ...(messageRequirement === undefined ? {} : {
           messageRequirement,
@@ -4031,6 +4053,9 @@ export class TaskRunner {
         // reason as the two above — see this loop's own top-of-body checks.
         if (this.tasks.get(active.taskId) !== active || active.finalizationStarted) return;
         if (active.beingTornDown) continue; // skip the aborted spill, then drain queued interrupt usage
+        // After the spill (it reads `spill.unstoredReason`) and the teardown
+        // guards, so the record ends exactly where the terminal decision is.
+        active.executionRecord.observe(event);
 
         // M5 batch-3 (workstream 2): DaemonConfig.maxTaskOutputBytes
         // enforcement — see `estimateEventBytes`'s own doc comment for
@@ -4307,6 +4332,7 @@ export class TaskRunner {
       // check alone doesn't cover that path's pre-finish() hard-kill
       // `close()` call.
       if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
+      active.executionRecord.streamEnded();
       const failure = projectRuntimeBoundaryFailure(undefined, 'run');
       console.error('[byok/client] runtime adapter events iterable ended without terminal authority');
       await this.fail(active.taskId, failure.reason, failure.retryable);
@@ -4321,6 +4347,9 @@ export class TaskRunner {
         );
         return;
       }
+      // The runner fails the task as the runtime's `run` failure below, so the
+      // record counts the throw as the runtime ending its stream.
+      active.executionRecord.streamEnded();
       const failure = projectRuntimeBoundaryFailure(err, 'run');
       if (failure.contractViolation) {
         // Never the error object itself (issue #395); see the start() case.
@@ -5434,6 +5463,7 @@ export class TaskRunner {
       return false;
     }
     if (this.tasks.get(taskId) !== active) return true;
+    this.publishExecutionRecord(active);
     if (active.agentBinding !== undefined && active.agentRef !== undefined && active.agentHandoff !== undefined) {
       const agentRef = active.agentRef;
       const handoff = active.agentHandoff;
@@ -5496,6 +5526,24 @@ export class TaskRunner {
     this.revokeAgentMemoryContext(taskId);
     this.deleteHostToolsetContexts(taskId);
     return true;
+  }
+
+  /**
+   * Once per execution, after `Session.close()` (so adapter counters are
+   * final) and the terminal commit. Synchronous and in memory: it cannot hold
+   * the terminal or the lease release, and a failure here is only logged.
+   */
+  private publishExecutionRecord(active: ActiveTask): void {
+    if (active.executionRecordPublished) return;
+    active.executionRecordPublished = true;
+    const terminal = executionTerminalOf(active.semanticTerminal?.envelope);
+    if (terminal === undefined) return;
+    try {
+      this.deps.onExecutionRecord?.(active.executionRecord.finish(terminal));
+    } catch {
+      // stderr is a service log: no adapter or listener error text (issue #395).
+      console.error(`[byok/client] execution record for task ${active.taskId} was not published`);
+    }
   }
 
   private settleSemanticTerminal(active: ActiveTask, prepare?: () => Promise<Envelope>): Promise<boolean> {

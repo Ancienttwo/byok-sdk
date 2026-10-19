@@ -10,6 +10,7 @@ import {
   type RuntimeOperationStartInput,
   type RuntimePreparedLaunchV1,
   type Session,
+  type SessionEvidence,
 } from '../../types';
 import { AsyncQueue } from '../../util/async-queue';
 
@@ -43,6 +44,8 @@ export class StubSession implements Session {
   steerErrorPersistent: Error | undefined;
   /** Test hook: counts every `steer()` invocation regardless of outcome (throw or success) — lets a test observe retry attempts even while `steerErrorPersistent` means `steerCalls` never gets appended to. */
   steerAttempts = 0;
+  /** Test hook: what `evidence()` reports; the daemon reads it only for a declaring adapter. */
+  evidenceCounts: SessionEvidence = { decodeDropped: 0, unmappedFrames: 0, syntheticToolResults: 0 };
   private closeGate: Promise<void> | undefined;
   private steerGate: Promise<void> | undefined;
   private terminalFailure: Error | undefined;
@@ -134,6 +137,10 @@ export class StubSession implements Session {
     this.resolveApprovalCalls.push(reason === undefined ? { approved } : { approved, reason });
   }
 
+  evidence(): SessionEvidence {
+    return this.evidenceCounts;
+  }
+
   /** Test helper: push a normalized event as if the runtime produced it. */
   emit(event: AgentEvent): void {
     this.queue.push(event);
@@ -216,18 +223,24 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
    * before admission. Pass `false` for a stub whose runtime lists the tools
    * itself and must therefore never make an offer wait on a `tools/list`
    * probe.
+   *
+   * `trajectoryEvidence` (5th param) defaults to absent, like a custom
+   * adapter that declares no evidence source: its execution records are
+   * `unknown`.
    */
   constructor(
     id = 'pi',
     detectResult: RuntimeDetectResult = { kind: 'available', version: '0.0.0' },
     capabilities: RuntimeCapabilities = DEFAULT_STUB_CAPABILITIES,
     requiresMcpToolsetToolObservation = true,
+    trajectoryEvidence?: RuntimeAdapterDescriptor['trajectoryEvidence'],
   ) {
     this.detectResult = detectResult;
     this.descriptor = freezeRuntimeAdapterDescriptor({
       id,
       supportsDispatchSelection: true,
       requiresMcpToolsetToolObservation,
+      trajectoryEvidence,
       capabilities,
     });
   }
