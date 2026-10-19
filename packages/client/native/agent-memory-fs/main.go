@@ -352,6 +352,14 @@ func openSession(req openRequest) (*session, *protocolError) {
 	if actual != req.ExpectedIdentity {
 		return nil, failure("root_identity_mismatch", "root identity does not match")
 	}
+	if err := syncHomeChain(req.Root, root); err != nil {
+		return nil, failure("io_failure", "home directory barrier failed")
+	}
+	// Recheck the name after the chain barrier and before publishing authority.
+	post, err = os.Lstat(req.Root)
+	if err != nil || !os.SameFile(after, post) {
+		return nil, failure("unsafe_root", "root changed")
+	}
 	closeRoot = false
 	return &session{root: root, identity: actual}, nil
 }
@@ -406,11 +414,12 @@ func (s *session) replace(req replaceRequest) (fileState, *protocolError) {
 	if _, writeErr := temp.Write(content); writeErr != nil {
 		return fileState{}, failure("io_failure", "filesystem operation failed")
 	}
-	if syncErr := temp.Sync(); syncErr != nil || temp.Close() != nil {
+	if syncErr := strictSync(temp); syncErr != nil || temp.Close() != nil {
 		return fileState{}, failure("io_failure", "filesystem operation failed")
 	}
 	temp = nil
 
+	beforeFinalCAS()
 	final, err := parent.readState(leaf, req.MaxBytes)
 	if err != nil {
 		return fileState{}, err
@@ -445,6 +454,7 @@ func (s *session) delete(req deleteRequest) (map[string]bool, *protocolError) {
 	if !before.Exists || before.Revision != req.ExpectedRevision {
 		return nil, revisionConflict(before.Revision)
 	}
+	beforeFinalCAS()
 	final, err := parent.readState(leaf, maxFileBytes)
 	if err != nil {
 		return nil, err
@@ -506,7 +516,7 @@ func (s *session) append(req appendRequest) (fileState, *protocolError) {
 		return fileState{}, failure("size_limit", "file exceeds the requested byte limit")
 	}
 	_, writeErr := file.Write(content)
-	syncErr := file.Sync()
+	syncErr := strictSync(file)
 	closeErr := file.Close()
 	if writeErr != nil || syncErr != nil || closeErr != nil {
 		return fileState{}, failure("io_failure", "filesystem operation failed")
@@ -758,7 +768,7 @@ func (p *pinnedDirectory) sync() error {
 		return err
 	}
 	defer file.Close()
-	return file.Sync()
+	return strictSync(file)
 }
 
 func (p *pinnedDirectory) Close() {

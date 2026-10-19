@@ -42,7 +42,7 @@ describe('routine schedule contract', () => {
 });
 
 // Oracle helpers. The weekday comes from Intl's own weekday name, not from the
-// getUTCDay() table in routine.ts; the scan walks instants, not local dates.
+// getUTCDay() table in routine-schedule.ts; the scan walks instants, not local dates.
 const weekdayFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short' });
 const weekdayOf = (localAsUtc: number) => weekdayFmt.format(localAsUtc).toLowerCase() as RoutineDayOfWeek;
 function dateMatches(s: RoutineSchedule, localAsUtc: number): boolean {
@@ -83,23 +83,20 @@ function fixedOracle(s: RoutineSchedule, offsetMin: number, now: number): number
 }
 const fixed: [string, number][] = [['UTC', 0], ['Asia/Shanghai', 480], ['Asia/Kolkata', 330], ['Asia/Kathmandu', 345]];
 it('agrees with the fixed-offset instant oracle for 400 schedules', () => {
-let diffCases = 0, diffFail = 0, skipped = 0;
-const kindsSeen = new Map<string, number>();
-for (let i = 0; i < 400; i++) {
-  const [tz, off] = pick(fixed);
-  const schedule = randomSchedule(tz, ['daily', 'weekly', 'monthly', 'yearly']);
-  const now = at('2024-01-01T00:00:00Z') + Math.floor(rand() * 10 * 365 * 86_400_000) + Math.floor(rand() * 60_000);
-  if (!checkRoutineSchedule(schedule).ok) { skipped++; continue; }
-  const kind = schedule.daysOfWeek ? 'weekly' : schedule.month ? 'yearly' : schedule.dayOfMonth ? 'monthly' : 'daily';
-  kindsSeen.set(kind, (kindsSeen.get(kind) ?? 0) + 1);
-  diffCases++;
-  const got = nextRoutineOccurrence(schedule, now), want = fixedOracle(schedule, off, now);
-  if (got !== want) { diffFail++; if (diffFail <= 5) console.log(`  MISMATCH ${show(schedule)} now=${iso(now)} got=${iso(got)} want=${iso(want)}`); }
-}
-report(diffFail === 0, `${diffCases} random schedules agree with the oracle (${[...kindsSeen].map(([k, n]) => `${k} ${n}`).join(', ')}; ${skipped} rejected by checkRoutineSchedule, ${diffFail} mismatches)`);
-
-// Oracle: scan instants minute by minute; a local time seen first after now
-// is a candidate; local times jumped over are gap candidates at prev + (L - Lprev).
+  let diffCases = 0, diffFail = 0, skipped = 0;
+  const kindsSeen = new Map<string, number>();
+  for (let i = 0; i < 400; i++) {
+    const [tz, off] = pick(fixed);
+    const schedule = randomSchedule(tz, ['daily', 'weekly', 'monthly', 'yearly']);
+    const now = at('2024-01-01T00:00:00Z') + Math.floor(rand() * 10 * 365 * 86_400_000) + Math.floor(rand() * 60_000);
+    if (!checkRoutineSchedule(schedule).ok) { skipped++; continue; }
+    const kind = schedule.daysOfWeek ? 'weekly' : schedule.month ? 'yearly' : schedule.dayOfMonth ? 'monthly' : 'daily';
+    kindsSeen.set(kind, (kindsSeen.get(kind) ?? 0) + 1);
+    diffCases++;
+    const got = nextRoutineOccurrence(schedule, now), want = fixedOracle(schedule, off, now);
+    if (got !== want) { diffFail++; if (diffFail <= 5) console.log(`  MISMATCH ${show(schedule)} now=${iso(now)} got=${iso(got)} want=${iso(want)}`); }
+  }
+  report(diffFail === 0, `${diffCases} random schedules agree with the oracle (${[...kindsSeen].map(([k, n]) => `${k} ${n}`).join(', ')}; ${skipped} rejected by checkRoutineSchedule, ${diffFail} mismatches)`);
 });
 
 const fmt = new Map<string, Intl.DateTimeFormat>();
@@ -109,6 +106,8 @@ function local(tz: string, t: number): number {
   const p = Object.fromEntries(f.formatToParts(t).map(x => [x.type, Number(x.value)]));
   return Date.UTC(p.year!, p.month! - 1, p.day!, p.hour!, p.minute!);
 }
+// Oracle: scan instants minute by minute; a local time seen first after now
+// is a candidate; local times jumped over are gap candidates at prev + (L - Lprev).
 function dstOracle(s: RoutineSchedule, now: number): number | null {
   const seen = new Set<number>();
   const matches = (L: number) => { const d = new Date(L); return d.getUTCMinutes() === s.minute && d.getUTCHours() === s.hour && dateMatches(s, L); };
@@ -135,66 +134,65 @@ const transitions: [string, string][] = [
   ['America/Santiago', '2026-04-05T03:00:00Z'], ['America/Santiago', '2026-09-06T04:00:00Z'],
 ];
 it('agrees with the minute-scan oracle near ten DST transitions', () => {
-let dstCases = 0, dstFail = 0, dstWeekly = 0;
-for (let i = 0; i < 120; i++) {
-  const [tz, edge] = pick(transitions);
-  const schedule = randomSchedule(tz, ['daily', 'weekly']);
-  // Near the transition: an hour within ±2 of the change makes gap and overlap times likely.
-  const edgeLocalHour = new Date(local(tz, at(edge))).getUTCHours();
-  if (rand() < 0.6) (schedule as { hour: number }).hour = (edgeLocalHour + int(-2, 1) + 24) % 24;
-  const now = at(edge) - Math.floor(rand() * 26 * 3_600_000) + Math.floor(rand() * 4 * 3_600_000);
-  const want = dstOracle(schedule, now);
-  const got = nextRoutineOccurrence(schedule, now);
-  dstCases++;
-  if (schedule.daysOfWeek) dstWeekly++;
-  if (want === null || got !== want) { dstFail++; if (dstFail <= 5) console.log(`  MISMATCH ${show(schedule)} now=${iso(now)} got=${iso(got)} want=${iso(want)}`); }
-}
-report(dstFail === 0, `${dstCases} random daily/weekly schedules (${dstWeekly} weekly) near 10 DST transitions agree with the scan oracle (${dstFail} mismatches; oracle null counts as a mismatch)`);
-
+  let dstCases = 0, dstFail = 0, dstWeekly = 0;
+  for (let i = 0; i < 120; i++) {
+    const [tz, edge] = pick(transitions);
+    const schedule = randomSchedule(tz, ['daily', 'weekly']);
+    // Near the transition: an hour within ±2 of the change makes gap and overlap times likely.
+    const edgeLocalHour = new Date(local(tz, at(edge))).getUTCHours();
+    if (rand() < 0.6) (schedule as { hour: number }).hour = (edgeLocalHour + int(-2, 1) + 24) % 24;
+    const now = at(edge) - Math.floor(rand() * 26 * 3_600_000) + Math.floor(rand() * 4 * 3_600_000);
+    const want = dstOracle(schedule, now);
+    const got = nextRoutineOccurrence(schedule, now);
+    dstCases++;
+    if (schedule.daysOfWeek) dstWeekly++;
+    if (want === null || got !== want) { dstFail++; if (dstFail <= 5) console.log(`  MISMATCH ${show(schedule)} now=${iso(now)} got=${iso(got)} want=${iso(want)}`); }
+  }
+  report(dstFail === 0, `${dstCases} random daily/weekly schedules (${dstWeekly} weekly) near 10 DST transitions agree with the scan oracle (${dstFail} mismatches; oracle null counts as a mismatch)`);
 }, 30_000);
 
 it('keeps yearly schedules within the horizon, including DST and leap years', () => {
-{
-  const now = at('2031-03-10T16:00:00.001Z'); // 12:00 EDT, just after the 2031 occurrence
-  const next = nextRoutineOccurrence({ minute: 0, hour: 12, dayOfMonth: 10, month: 3, tz: NY }, now);
-  const gapH = next === null ? NaN : (next - now) / 3_600_000;
-  report(next === at('2032-03-10T17:00:00Z'), `yearly Mar 10 12:00 NY across leap 2032 and a DST flip: next=${iso(next)} gap=${(gapH / 24).toFixed(4)} d (${gapH > 366 * 24 ? '> 366 d wake limit' : '≤ 366 d'})`);
-}
-{
-  let worst = 0, worstAt = '', nulls = 0;
-  const zones = [NY, 'Europe/London', 'Australia/Sydney', 'Antarctica/Troll', 'America/Santiago', 'Australia/Lord_Howe', 'Africa/Cairo', 'Pacific/Apia'];
-  for (const tz of zones) for (let month = 1; month <= 12; month++) for (const dayOfMonth of [1, 9, 10, 12, 15, 28]) {
-    const schedule = { minute: 0, hour: 12, dayOfMonth, month, tz };
-    let t = at('2026-01-01T00:00:00Z');
-    for (let n = 0; n < 30; n++) {
-      const next = nextRoutineOccurrence(schedule, t);
-      if (next === null) { nulls++; break; }
-      if (next - t > worst) { worst = next - t; worstAt = `${month}/${dayOfMonth} 12:00 ${tz} ${iso(t)}→${iso(next)}`; }
-      t = next;
+  {
+    const now = at('2031-03-10T16:00:00.001Z'); // 12:00 EDT, just after the 2031 occurrence
+    const next = nextRoutineOccurrence({ minute: 0, hour: 12, dayOfMonth: 10, month: 3, tz: NY }, now);
+    const gapH = next === null ? NaN : (next - now) / 3_600_000;
+    report(next === at('2032-03-10T17:00:00Z'), `yearly Mar 10 12:00 NY across leap 2032 and a DST flip: next=${iso(next)} gap=${(gapH / 24).toFixed(4)} d; horizon=${ROUTINE_HORIZON_MS / 86_400_000} d`);
+  }
+  {
+    let worst = 0, worstAt = '', nulls = 0;
+    // Casey is included for current rules. This 2026 start does not replay its 2019 interval.
+    const zones = [NY, 'Antarctica/Casey', 'Europe/London', 'Australia/Sydney', 'Antarctica/Troll', 'America/Santiago', 'Australia/Lord_Howe', 'Africa/Cairo', 'Pacific/Apia'];
+    for (const tz of zones) for (let month = 1; month <= 12; month++) for (const dayOfMonth of [1, 9, 10, 12, 15, 28]) {
+      const schedule = { minute: 0, hour: 12, dayOfMonth, month, tz };
+      let t = at('2026-01-01T00:00:00Z');
+      for (let n = 0; n < 30; n++) {
+        const next = nextRoutineOccurrence(schedule, t);
+        if (next === null) { nulls++; break; }
+        if (next - t > worst) { worst = next - t; worstAt = `${month}/${dayOfMonth} 12:00 ${tz} ${iso(t)}→${iso(next)}`; }
+        t = next;
+      }
+    }
+    report(nulls === 0 && worst <= ROUTINE_HORIZON_MS, `yearly sweep 2026-2056, ${zones.length} zones × 72 dates: max gap ${(worst / 86_400_000).toFixed(4)} d (${worstAt}); nulls=${nulls}`);
+  }
+  let maxGap = 0;
+  for (const [dayOfMonth, month, hour] of [[1, 1, 0], [31, 12, 0], [28, 2, 0], [10, 3, 12]] as const) {
+    let t = at('2027-06-01T00:00:00Z');
+    for (let n = 0; n < 12; n++) {
+      const next = nextRoutineOccurrence({ minute: 0, hour, dayOfMonth, month, tz: NY }, t)!;
+      maxGap = Math.max(maxGap, next - t); t = next;
     }
   }
-  report(nulls === 0 && worst <= ROUTINE_HORIZON_MS, `yearly sweep 2026-2056, 8 zones × 72 dates: max gap ${(worst / 86_400_000).toFixed(4)} d (${worstAt}); nulls=${nulls}`);
-}
-let maxGap = 0;
-for (const [dayOfMonth, month, hour] of [[1, 1, 0], [31, 12, 0], [28, 2, 0], [10, 3, 12]] as const) {
-  let t = at('2027-06-01T00:00:00Z');
-  for (let n = 0; n < 12; n++) {
-    const next = nextRoutineOccurrence({ minute: 0, hour, dayOfMonth, month, tz: NY }, t)!;
-    maxGap = Math.max(maxGap, next - t); t = next;
+  report(maxGap <= ROUTINE_HORIZON_MS, `largest gap over 12 years of yearly schedules (NY) = ${(maxGap / 86_400_000).toFixed(4)} d ≤ ${ROUTINE_HORIZON_MS / 86_400_000} d`);
+  {
+    // Feb 29 is reachable, but the wait can be 8 years (2096 → 2104: 2100 is not a leap year).
+    let worstYears = 0, worstFrom = 0, prev = 0;
+    for (let y = 2000; y < 2200; y++) {
+      if (new Date(Date.UTC(y, 1, 29)).getUTCMonth() !== 1) continue;
+      if (prev && y - prev > worstYears) { worstYears = y - prev; worstFrom = prev; }
+      prev = y;
+    }
+    const check = checkRoutineSchedule({ minute: 0, hour: 0, dayOfMonth: 29, month: 2, tz: 'UTC' });
+    report(!check.ok && check.code === 'schedule_beyond_horizon',
+      `Feb 29 yearly: longest wait between Feb 29s in [2000, 2200) is ${worstYears} years (${worstFrom} → ${worstFrom + worstYears}) → ${check.ok ? 'ok' : check.code}`);
   }
-}
-report(maxGap <= ROUTINE_HORIZON_MS, `largest gap over 12 years of yearly schedules (NY) = ${(maxGap / 86_400_000).toFixed(4)} d ≤ ${ROUTINE_HORIZON_MS / 86_400_000} d`);
-{
-  // Feb 29 is reachable, but the wait can be 8 years (2096 → 2104: 2100 is not a leap year).
-  let worstYears = 0, worstFrom = 0, prev = 0;
-  for (let y = 2000; y < 2200; y++) {
-    if (new Date(Date.UTC(y, 1, 29)).getUTCMonth() !== 1) continue;
-    if (prev && y - prev > worstYears) { worstYears = y - prev; worstFrom = prev; }
-    prev = y;
-  }
-  const check = checkRoutineSchedule({ minute: 0, hour: 0, dayOfMonth: 29, month: 2, tz: 'UTC' });
-  report(!check.ok && check.code === 'schedule_beyond_horizon',
-    `Feb 29 yearly: longest wait between Feb 29s in [2000, 2200) is ${worstYears} years (${worstFrom} → ${worstFrom + worstYears}) → ${check.ok ? 'ok' : check.code}`);
-}
-
 }, 30_000);

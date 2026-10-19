@@ -683,8 +683,8 @@ export interface TaskRunnerDeps {
   agentMemoryMcpBin?: Readonly<ResolvedAgentMemoryMcpBin>;
   /** SDK-owned task-free Agent-memory descriptor helper a preparation observes. */
   agentMemoryDescribeBin?: Readonly<ResolvedAgentMemoryMcpBin>;
-  /** Explicit external secure-fs helper. No PATH discovery or bundled native addon exists. */
-  agentMemoryFilesystemHelperBin?: string;
+  /** Resolve the verified SDK helper only when memory needs filesystem authority. */
+  resolveAgentMemoryFilesystemHelperBin?: () => string;
   /** Optional local-to-hosted redacted projection port. Omission is zero-network. */
   agentMemoryHostedProjection?: AgentMemoryHostedProjection;
 }
@@ -2574,7 +2574,7 @@ export class TaskRunner {
         if (agentMemory !== 'none') {
           const describe = this.deps.agentMemoryDescribeBin;
           if (describe === undefined || this.deps.agentMemoryMcpBin === undefined
-            || !isAgentMemorySecureFilesystemAvailable(this.deps.agentMemoryFilesystemHelperBin !== undefined)) {
+            || !isAgentMemorySecureFilesystemAvailable(this.deps.resolveAgentMemoryFilesystemHelperBin !== undefined)) {
             declineMemory('unsupported_input: agent_memory_unavailable');
             return;
           }
@@ -3412,7 +3412,7 @@ export class TaskRunner {
     const requestedRuntime = payload.harnessId ?? payload.dispatchSelection?.runtimeId ?? payload.runtime;
     const requiresAgentMemoryMcp = preparation === undefined && agentRef !== undefined
       && this.deps.agentMemoryMcpBin !== undefined
-      && isAgentMemorySecureFilesystemAvailable(this.deps.agentMemoryFilesystemHelperBin !== undefined);
+      && isAgentMemorySecureFilesystemAvailable(this.deps.resolveAgentMemoryFilesystemHelperBin !== undefined);
     let pick: PickResult;
     try {
       pick = await this.pickAdapter(
@@ -3743,7 +3743,7 @@ export class TaskRunner {
 
   private async quiesceAndSnapshotAgentMemory(active: ActiveTask): Promise<void> {
     if (active.agentBinding === undefined || active.agentRef === undefined || active.agentHandoff === undefined) return;
-    if (!isAgentMemorySecureFilesystemAvailable(this.deps.agentMemoryFilesystemHelperBin !== undefined)) return;
+    if (!isAgentMemorySecureFilesystemAvailable(this.deps.resolveAgentMemoryFilesystemHelperBin !== undefined)) return;
     if (this.deps.tenantId === undefined) {
       console.error(`[byok/client] Agent memory quiescent snapshot skipped for ${active.taskId}: exact tenant context is unavailable`);
       return;
@@ -3774,7 +3774,7 @@ export class TaskRunner {
   }
 
   private async bindAgentMemoryFilesystem(context: AgentMemoryTaskContext): Promise<AgentMemoryTaskContext> {
-    const helperBin = this.deps.agentMemoryFilesystemHelperBin;
+    const helperBin = this.deps.resolveAgentMemoryFilesystemHelperBin?.();
     if (helperBin === undefined) return context;
     let filesystem = this.memoryFilesystemByTask.get(context.taskId);
     if (filesystem === undefined) {

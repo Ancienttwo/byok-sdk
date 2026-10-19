@@ -84,6 +84,13 @@ vi.mock('node:child_process', async (importOriginal) => ({
   spawn: helperHarness.spawn,
 }));
 
+// Transport-only fault injection. Deployment admission has its own real
+// release-artifact tests; this seam lets the fake child reach EPIPE.
+vi.mock('../daemon/agent-memory-helper-release', () => ({
+  resolveAgentMemoryFilesystemHelper: () => '/opt/byok-agent-memory-fs',
+  verifyAgentMemoryFilesystemHelper: (bin: string) => bin,
+}));
+
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>();
   return {
@@ -120,7 +127,7 @@ describe('Agent memory helper P1 regressions', () => {
         workspaceRoot: path.join(process.cwd(), '.tmp-agent-memory-linux-helper-workspace'),
         agentHome: { hostStorageRoot: path.join(process.cwd(), '.tmp-agent-memory-linux-helper-home') },
         agentMemory: {},
-        agentMemoryFilesystem: { helperBin: '/opt/byok-agent-memory-fs' },
+        ...{ agentMemoryFilesystem: { helperBin: '/opt/byok-agent-memory-fs' } },
       }, [new StubRuntimeAdapter('pi')])).toThrow('is not admitted on this platform');
     });
   });
