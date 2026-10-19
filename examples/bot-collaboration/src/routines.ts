@@ -3,7 +3,7 @@ import type { DueWake } from '@byok-sdk/server';
 import type { CreateRoutineAction, UpdateRoutineAction } from '@byok-sdk/protocol';
 import { hash } from '@byok-sdk/example-host-execution-core';
 import { parseRoutineWakeKey } from '@byok-sdk/example-host-execution-core';
-import type { CollaborationState, Definition, Routine, Slot } from './model';
+import type { Authority, CollaborationState, Definition, Routine, Slot } from './model';
 
 export function operation(state: CollaborationState, routine: Routine, kind: 'schedule' | 'cancel', slot: Slot): void {
   state.operations.push({ sequence: ++state.sequence, routineId: routine.id, generation: routine.generation, kind, slot, state: 'pending' });
@@ -24,14 +24,15 @@ function check(definition: Definition): void {
   if (!check.ok) throw new Error(`${check.code}: ${check.message}`);
   if ('daysOfWeek' in definition.schedule) definition.schedule = { ...definition.schedule, daysOfWeek: [...new Set(definition.schedule.daysOfWeek)] };
 }
-export function createRoutine(state: CollaborationState, owner: string, taskId: string, index: number, action: CreateRoutineAction, now: number): Routine {
+export function createRoutine(state: CollaborationState, owner: string, taskId: string, index: number, action: CreateRoutineAction, now: number,
+  authority?: Authority): Routine {
   if (action.target !== undefined) throw new Error('An ordinary Bot cannot supply target');
   if (Object.values(state.routines).filter(r => r.owner === owner && r.lifecycle !== 'completed').length >= 8) throw new Error('Routine limit is 8');
   const definition = { version: 1, schedule: action.schedule, prompt: action.prompt, target: owner };
   check(definition);
   const id = hash([taskId, 'create_routine', index]);
   const routine: Routine = { id, owner, current: 1, pending: null, generation: 1, versions: { 1: definition }, lifecycle: 'active',
-    armed: null, inflight: [], status: 'ok', errors: [] };
+    armed: null, inflight: [], status: 'ok', errors: [], ...(authority ? { authority } : {}) };
   state.routines[id] = routine;
   arm(state, routine, now, now);
   return routine;
@@ -68,7 +69,7 @@ export function lifecycle(state: CollaborationState, routine: Routine, value: Ro
     else arm(state, routine, now, now);
   }
 }
-export function consumeRoutine(state: CollaborationState, wake: DueWake, now: number, addTurn: (id: string, request: string) => void): void {
+export function consumeRoutine(state: CollaborationState, wake: DueWake, now: number, addTurn: (id: string, request: string, routine: Routine) => void): void {
   const parsed = parseRoutineWakeKey(wake.dedupKey);
   if (!parsed) { state.audit.push(`Invalid routine wake: ${wake.dedupKey.slice(0, 256)}`); return; }
   if (wake.availableAt !== parsed.at) {
@@ -89,7 +90,7 @@ export function consumeRoutine(state: CollaborationState, wake: DueWake, now: nu
     const turnId = hash(['routine', wake.dedupKey]);
     Object.assign(row, { definition, turnId });
     routine.inflight.push(wake.dedupKey);
-    addTurn(turnId, definition.prompt);
+    addTurn(turnId, definition.prompt, routine);
   }
   // Pending updates drain accepted work. They never refill the old chain.
   if (routine.pending === null) arm(state, routine, Math.max(wake.deliveredAt, parsed.at), now, wake.dedupKey);

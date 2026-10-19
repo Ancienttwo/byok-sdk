@@ -19,9 +19,10 @@ bun run --cwd examples/bot-collaboration test
 `src/host.test.ts` shows the embedded setup. Create one `BotCollaboration`
 per tenant and ledger. Give it a valid Agent execution template and a Host
 connector. Route the embedded server's `wake.consume` to `bot.consume`.
+Route its `agentMessage.consume` to `bot.consumeMessage`.
 Call `bot.recover()` after startup. Call `bot.close()` before closing the SDK
 server or the ledger. Do not call the K4 core's mutation methods directly.
-Use `input`, `answer`, `decide`, `cancelTurn`, `updateRoutine`, and `setRoutineLifecycle`.
+Use `input`, `answer`, `decide`, `cancelTurn`, `updateRoutine`, `setRoutineLifecycle`, and `abandonDelegation`.
 Read `snapshot` or upload K4 projections with `core.flushProjections`.
 
 The execution template selects this Bot's Agent. It must use a runtime profile
@@ -31,16 +32,17 @@ provide a runtime sandbox. The deployment owns that boundary.
 
 ## Actions and context
 
-The Host applies routine actions, confirmation cards, questions, then self
-continuations. Each turn freezes the ordinary Bot schema and its ContextPack
+The Host applies management actions, routine actions, confirmation cards,
+questions, then delegations. Each turn freezes the ordinary Bot schema and its ContextPack
 when its K4 intent is enqueued. Waiting turns and retries reuse that frozen
 input. The wait limit is five minutes before execution starts. A started
 execution waits for canonical device terminal evidence.
-The schema offers self delegation, `ask_user`, `confirmable_action`, and the
+The schema offers delegation, `ask_user`, `confirmable_action`, and the
 three routine actions. It offers all current routine ids, up to eight.
-It never offers a `target` field or another Bot id. A user input starts one
-root budget. Self delegation permits four continuations for that root. It
-keeps hop at zero and does not consume the delegation budget. A refused action
+It never offers a `target` field. A user input starts one
+root budget. Self delegation permits four continuations for that root. A
+continuation keeps the hop, authority, and open delegation of its parent.
+It does not consume the Bot budget. A refused action
 enters only its originating Bot's `ContextPack.rejectedActions`. Other accepted actions still apply.
 
 Questions support text and single choice. An answer creates an `answer` turn.
@@ -264,3 +266,57 @@ Main Bot `create_routine.target` for another Bot is not implemented. Routine
 creation remains self-only in this example. Aimpact did not approve that
 extension for this PR. A later K8b work order must add it. Cross-Bot delegation
 also stays outside this history-window change.
+
+## Cross-Bot delegation
+
+This section covers slice X1 of `docs/plans/2026-10-19-k8b-cross-bot.md`.
+A Bot can delegate one request to another Bot of the same team. The `to` enum
+lists this Bot first, then each active team Bot after its first persona
+readback. It lists Bot ids only. A room seat has no `delegate` fragment.
+
+The Host applies one cross-Bot item for each outcome. It refuses an item with
+a delegation verdict and a reason: `room_seat`, `duplicate_target`,
+`target_archived`, `hop_limit`, `fan_out_not_enabled`, or `budget_exhausted`.
+A refusal also enters the initiator's `rejectedActions`.
+An accepted item creates a `bot_request` Turn for the target. Its id is
+`H(taskId, 'delegate', index)`. Its hop is the initiator's hop plus one, at
+most four. B's ContextPack holds B's own history and a `delegation` block.
+B's reply cap is `BOT_REPLY_MAX_BYTES` (8 192 UTF-8 bytes).
+
+Each Turn stores `authority`: `owner` for user input and answers, `bot` for a
+`bot_request`. Continuations, replies, action results, and routine Turns
+inherit it. Management needs a Main Bot and `owner` authority, both in the
+schema and at apply time.
+
+`consumeMessage` checks the exact task, device, AgentRef, and destination
+binding in one ledger transaction. It stores an accepted delegated reply by
+task id. That record is the only reply body authority. At the chain end, the
+verdict is `answered` when the record exists. Otherwise the delegation is
+`reply_pending`. The Host timer reads `tasks.agentMessage` with a backoff from
+1 to 60 seconds. It does not wait for a K4 scan. No message gives `failed`
+(`no_reply`). Held gives `reply_held`; `abandonDelegation` then sets
+`abandoned`. After 30 minutes without a result, the delegation is
+`uncertain`. A failed, cancelled, or expired chain end gives `failed`,
+`cancelled`, or `expired`.
+
+Every verdict reaches the initiator once, in a `bot_reply` Turn. Its id is
+`H('bot_reply', delegationId)`. When an outcome has no accepted item, one
+refusal report Turn `H('bot_reply', taskId)` holds all its refusals. That
+report has no `delegate` fragment. Status changes publish
+`delegation:<id>:<revision>` projections.
+
+The root Bot budget is 12 units. An accepted item reserves one B unit and one
+A reply slot. A refusal report reserves one slot when one is free. Otherwise
+it is delivery only: it does not start a model, and it enters the next
+ContextPack. A unit is spent at the first observed claim and released when it
+can no longer be needed. `spent + reserved <= 12` holds after each transaction.
+
+A `bot_request` or `bot_reply` instruction puts request text and reply bodies
+once, as raw UTF-8 in length-framed blocks. History, team notes, rooms, and
+routines are trimmed oldest first. `instructionMaxBytes` (default 65 536)
+bounds the whole instruction. Construction refuses a value below
+`minimumInstructionBytes(SYSTEM_PROMPT)`.
+
+A Main Bot with 24 Bots, 8 routines, and a room exceeds the outcome schema cap
+of 16 384 bytes. The Host blocks such a Turn with a visible reason. It does
+not cut an enum.

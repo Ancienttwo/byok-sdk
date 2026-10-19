@@ -1,16 +1,18 @@
 import type { BotTurnOutcome, ResultSchema, UpdateRoutineAction } from '@byok-sdk/protocol';
 import { BOT_TURN_OUTCOME_CONTRACT, BotTurnOutcomeSchemaError, validateResultOutcome } from '@byok-sdk/protocol';
-import type { DueWake } from '@byok-sdk/server';
+import type { ByokServer, CreateByokServerOptions, DueWake } from '@byok-sdk/server';
 import { HostExecutionCore, type ExecutionServer, type OutcomeTransaction } from '@byok-sdk/example-host-execution-core';
 import { HostLedger } from '@byok-sdk/example-host-execution-core';
 import { hash, project, time, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
 import { enqueue } from '@byok-sdk/example-host-execution-core';
 import { WAKE_HORIZON_MS } from '@byok-sdk/example-host-execution-core';
-import { json, stateOf, type CollaborationState, type Routine, type Turn } from './model';
-import { turnContext, outcomeSchema, SYSTEM_PROMPT, ROOM_SYSTEM_PROMPT } from './schema';
+import { addTurn, json, stateOf, type CollaborationState, type Routine, type Turn } from './model';
+import { turnInstruction, outcomeSchema, SYSTEM_PROMPT } from './schema';
+import { applyDelegate, BOT_REPLY_MAX_BYTES, DEFAULT_INSTRUCTION_MAX_BYTES, endChain, minimumInstructionBytes, observeStart,
+  reconcileReply, resolveDelegation, retryReply, settleDelegations } from './delegation';
 import { arm, consumeRoutine, createRoutine, lifecycle, operation, owned, switchVersion, updateRoutine } from './routines';
 
-import { activeBot, applyManagement, roomFields, updateBot, roomVisibility } from './team';
+import { activeBot, applyManagement, roomFields, same, updateBot, roomVisibility } from './team';
 import { advanceRooms, applySpeech, memberPresent, roomInput, type Mentions } from './rooms';
 import type { RoomFields } from '@byok-sdk/protocol';
 
@@ -26,7 +28,12 @@ export interface BotOptions {
   connectorTimeoutMs?: number;
   contextMaxBytes?: number;
   contextTurnLimit?: number;
+  /** UTF-8 bound of a whole bot_request or bot_reply instruction. Construction refuses a value below the proven minimum. */
+  instructionMaxBytes?: number;
 }
+/** Reply readback port (§3.3). The Host acceptance record stays the body authority. */
+export type MessageServer = { tasks: Partial<Pick<ByokServer['tasks'], 'agentMessage'>> };
+export type AgentMessageInput = Parameters<NonNullable<CreateByokServerOptions['agentMessage']>['consume']>[0];
 
 /** Copy-and-own Host example. Use one instance per ledger tenant. */
 export class BotCollaboration {
@@ -38,7 +45,8 @@ export class BotCollaboration {
   private readonly connectorTimeoutMs: number;
   private readonly contextMaxBytes: number;
   private readonly contextTurnLimit: number;
-  constructor(readonly server: ExecutionServer & HomeServer, readonly ledger: HostLedger, private readonly options: BotOptions) {
+  private readonly instructionMaxBytes: number;
+  constructor(readonly server: ExecutionServer & HomeServer & MessageServer, readonly ledger: HostLedger, private readonly options: BotOptions) {
     if (!options.botId || options.execution.payload.agentRef.agentId !== options.botId) throw new Error('Select this Bot Agent');
     if (options.execution.payload.requiredToolsets?.length) throw new Error('Bot executions cannot have connector toolsets');
     this.now = () => time((options.now ?? Date.now)());
@@ -47,6 +55,9 @@ export class BotCollaboration {
     this.contextMaxBytes = time(options.contextMaxBytes ?? HISTORY_MAX_BYTES);
     this.contextTurnLimit = time(options.contextTurnLimit ?? HISTORY_MAX_ITEMS);
     if (this.contextMaxBytes < 1 || this.contextTurnLimit < 1) throw new Error('Invalid ContextPack limits');
+    this.instructionMaxBytes = time(options.instructionMaxBytes ?? DEFAULT_INSTRUCTION_MAX_BYTES);
+    const minimum = minimumInstructionBytes(SYSTEM_PROMPT);
+    if (this.instructionMaxBytes < minimum) throw new Error(`instructionMaxBytes must be at least ${minimum}`);
     this.core = new HostExecutionCore(server, ledger, { now: this.now, reconcileMs: 100,
       applyOutcome: (document, tx) => this.applyOutcome(document, tx) });
     ledger.transaction(s => {
@@ -74,15 +85,11 @@ export class BotCollaboration {
         const old = state.turns[id];
         if (old && old.request !== request) throw new Error('Input identity conflict');
         state.budgets[id] ??= { continuation: 0, delegation: 0 };
-        this.addTurn(state, id, id, 'user', request, botId);
+        addTurn(state, { id, root: id, source: 'user', request, botId, hop: 0, authority: 'owner' });
       });
       await this.process();
     });
     return id;
-  }
-  private addTurn(state: CollaborationState, id: string, root: string, source: Turn['source'], request: string, botId = this.options.botId): void {
-    state.turns[id] ??= { id, root, botId, source, request, hop: 0, status: 'queued' };
-    state.budgets[root] ??= { continuation: 0, delegation: 0 };
   }
   private applyOutcome(document: unknown, tx: OutcomeTransaction): void {
     const state = stateOf(tx.application);
@@ -106,10 +113,12 @@ export class BotCollaboration {
     applyManagement(state, turn.botId, tx.intent.taskId, outcome, this.models(), (kind, work) => accept(kind, () => {
       // Also deny management from room offers frozen before this policy change.
       if (seat) throw new Error('Room seats cannot manage the team');
+      // Another Bot's request never drives management, at any depth (§6.1).
+      if (turn.authority !== 'owner') throw new Error('Management needs owner authority');
       work();
     }));
     outcome.create_routine?.forEach((action, index) => accept('create_routine', () => {
-      createRoutine(state, turn.botId, tx.intent.taskId, index, action, this.now());
+      createRoutine(state, turn.botId, tx.intent.taskId, index, action, this.now(), turn.authority ?? 'bot');
     }));
     outcome.update_routine?.forEach(action => accept('update_routine', () => updateRoutine(state, turn.botId, action, this.now())));
     outcome.cancel_routine?.forEach(action => accept('cancel_routine', () => {
@@ -128,17 +137,53 @@ export class BotCollaboration {
       state.questions[id] = { id, turnId: turn.id, value: question };
       tx.publish(`question:${id}`, json(state.questions[id]));
     });
-    const delegated = new Set<string>();
-    outcome.delegate?.forEach((action, index) => accept('delegate', () => {
-      if (action.to !== turn.botId) throw new Error('Target is not this Bot');
-      if (delegated.has(action.to)) throw new Error('Duplicate delegation target');
-      delegated.add(action.to);
-      const budget = state.budgets[turn.root]!;
-      if (budget.continuation >= 4) throw new Error('Continuation budget is 4');
-      budget.continuation++;
-      // This single Bot schema only offers self. Hop and delegation stay unchanged.
-      this.addTurn(state, hash([tx.intent.taskId, 'delegate', index]), turn.root, 'continuation', action.request, turn.botId);
-    }));
+    const { successor } = applyDelegate(state, turn, tx.intent.taskId, outcome, !!seat, this.now(), tx.publish, accept);
+    if (turn.delegationId) {
+      // A device terminal proves that this chain Turn ran.
+      observeStart(state, turn, tx.publish);
+      if (!successor) endChain(state, turn, tx.intent.taskId, !!outcome.delegate?.some(action => action.to === turn.botId), this.now(), tx.publish);
+    }
+  }
+
+  /**
+   * Install as the server's `agentMessage.consume`. One ledger transaction
+   * checks the exact binding and records the first acceptance (§3.3).
+   */
+  async consumeMessage(input: AgentMessageInput): Promise<{ outcome: 'accepted' | 'refused'; reasonCode?: string }> {
+    if (this.closed) throw new Error('Bot Host is closed');
+    return this.ledger.transaction(s => {
+      const state = stateOf(s.application);
+      const refuse = (reasonCode: string) => ({ outcome: 'refused' as const, reasonCode });
+      const prior = state.replies[input.taskId];
+      if (prior) return prior.messageId === input.payload.messageId && prior.contentHash === input.payload.contentHash ? { outcome: 'accepted' as const } : refuse('message_conflict');
+      const intent = Object.values(s.intents).find(row => row.taskId === input.taskId);
+      if (!intent) return refuse(s.executions[input.taskId] ? 'stale_generation' : 'unknown_task');
+      const frozen = s.executions[input.taskId]!.input, turn = state.turns[intent.key];
+      if (!turn || input.tenant !== this.ledger.tenant || input.deviceId !== frozen.deviceId
+        || !same(input.payload.agentRef, frozen.payload.agentRef) || !same(input.context, frozen.agentMessageContext)) return refuse('binding_mismatch');
+      const delegation = turn.delegationId ? state.delegations[turn.delegationId] : undefined;
+      if (delegation?.verdict) {
+        state.audit.push(`Delegation message after verdict: ${delegation.id} ${input.taskId}`);
+        return refuse('delegation_resolved');
+      }
+      if (delegation && Buffer.byteLength(input.payload.body, 'utf8') > BOT_REPLY_MAX_BYTES) return refuse('reply_too_large');
+      state.replies[input.taskId] = { turnId: turn.id, messageId: input.payload.messageId, contentHash: input.payload.contentHash,
+        contentType: input.payload.contentType, acceptedAt: this.now(), ...(delegation ? { body: input.payload.body } : {}) };
+      return { outcome: 'accepted' as const };
+    });
+  }
+  /** Owner API ("End"): close a held reply or an uncertain reply check with `abandoned`. */
+  async abandonDelegation(id: string): Promise<void> {
+    await this.exclusive(async () => {
+      this.ledger.transaction(s => {
+        const state = stateOf(s.application), delegation = state.delegations[id];
+        if (!delegation) throw new Error('Delegation not found');
+        if (delegation.status !== 'reply_held' && delegation.status !== 'uncertain') throw new Error('Delegation cannot be ended in this state');
+        resolveDelegation(state, delegation, 'abandoned', this.now(), (key, value) => project(s, key, value),
+          delegation.status === 'reply_held' ? 'reply_held' : undefined);
+      });
+      await this.process();
+    });
   }
 
   /** Owner API. Advance the desired revision after a rejected persona delivery. */
@@ -198,7 +243,8 @@ export class BotCollaboration {
         if (!answer.trim() || question.value.answerKind === 'single_choice' && !question.value.options.some(o => o.id === answer)) throw new Error('Invalid answer');
         question.answer = answer;
         const turnId = hash(['answer', id]);
-        this.addTurn(state, turnId, turnId, 'answer', JSON.stringify({ question: question.value, answer }), state.turns[question.turnId]!.botId);
+        addTurn(state, { id: turnId, root: turnId, source: 'answer', request: JSON.stringify({ question: question.value, answer }),
+          botId: state.turns[question.turnId]!.botId, hop: 0, authority: 'owner' });
       });
       await this.process();
     });
@@ -237,9 +283,9 @@ export class BotCollaboration {
     }
     else this.ledger.transaction(s => {
       const state = stateOf(s.application);
-      consumeRoutine(state, wake, this.now(), (id, request) => {
+      consumeRoutine(state, wake, this.now(), (id, request, routine) => {
         const occurrence = state.occurrences[wake.dedupKey]!;
-        this.addTurn(state, id, id, 'routine', request, occurrence.definition!.target);
+        addTurn(state, { id, root: id, source: 'routine', request, botId: occurrence.definition!.target, hop: 0, authority: routine.authority ?? 'bot' });
       });
     });
     await this.process();
@@ -294,7 +340,8 @@ export class BotCollaboration {
       if (card.state === 'pending' && this.now() >= card.expiresAt) card.state = 'expired';
     }
     let materialized = false;
-    advanceRooms(s, state, this.now(), (id, botId, request) => this.addTurn(state, id, id, 'room_slot', request, botId));
+    // Seats never manage or delegate (§5), so no seat Turn carries owner authority.
+    advanceRooms(s, state, this.now(), (id, botId, request) => addTurn(state, { id, root: id, source: 'room_slot', request, botId, hop: 0, authority: 'bot' }));
     for (const turn of Object.values(state.turns)) {
       const intent = s.intents[hash(turn.id)];
       const bot = state.team.bots[turn.botId];
@@ -314,10 +361,10 @@ export class BotCollaboration {
           continue;
         }
         delete turn.profileFailure;
-        let schema: ResultSchema, context: ReturnType<typeof turnContext>;
+        let schema: ResultSchema, frozen: ReturnType<typeof turnInstruction>;
         try {
           schema = outcomeSchema(turn.botId, state, turn, Object.keys(this.models()));
-          context = turnContext(state, turn, this.contextTurnLimit, this.contextMaxBytes);
+          frozen = turnInstruction(state, turn, { turnLimit: this.contextTurnLimit, contextMaxBytes: this.contextMaxBytes, instructionMaxBytes: this.instructionMaxBytes });
         } catch (error) {
           if (error instanceof BotTurnOutcomeSchemaError && error.code === 'schema-over-budget') {
             this.blockTurn(s, turn, `Outcome schema over budget after flat fallback: ${error.message}`);
@@ -327,13 +374,18 @@ export class BotCollaboration {
         }
         state.schemas[turn.id] = schema;
         const base = bot.execution;
-        const { messageEgress: _egress, ...roomPayload } = base.payload;
+        const { messageEgress: egress, ...roomPayload } = base.payload;
+        // A delegated reply is capped at BOT_REPLY_MAX_BYTES, and its cursor is B's Turn.
+        const chain = turn.delegationId && egress ? {
+          agentMessageContext: { ...base.agentMessageContext!, freshnessCursor: turn.id },
+          payload: { ...base.payload, messageEgress: { ...egress, maxBytes: Math.min(egress.maxBytes, BOT_REPLY_MAX_BYTES) } },
+        } : undefined;
+        const execution = turn.source === 'room_slot' ? { ...base, agentMessageContext: undefined, payload: roomPayload } : { ...base, ...chain };
         enqueue(s, this.ledger.tenant, { key: turn.id, source: turn.source === 'routine' ? 'routine' : turn.source === 'user' || turn.source === 'answer' ? 'user' : 'bot',
-          waitUntil: this.now() + 300_000, execution: { ...base, ...(turn.source === 'room_slot' ? { agentMessageContext: undefined } : {}), payload: { ...(turn.source === 'room_slot' ? roomPayload : base.payload),
-            instruction: `${turn.source === 'room_slot' ? ROOM_SYSTEM_PROMPT : SYSTEM_PROMPT}\n\nRequest:\n${turn.request}\n\nContextPack:\n${JSON.stringify(context)}`,
+          waitUntil: this.now() + 300_000, execution: { ...execution, payload: { ...execution.payload, instruction: frozen.instruction,
             terminalProjection: { mode: 'result-document', contract: BOT_TURN_OUTCOME_CONTRACT, schema },
           } } });
-        for (const rejection of context.rejectedActions) rejection.consumedBy = turn.id;
+        for (const rejection of frozen.context.rejectedActions) rejection.consumedBy = turn.id;
         delete turn.blockedReason;
         turn.status = 'processing';
         materialized = true;
@@ -349,6 +401,7 @@ export class BotCollaboration {
         }
       }
     }
+    settleDelegations(s, state, this.now(), (key, value) => project(s, key, value));
     for (const routine of Object.values(state.routines)) {
       routine.inflight = routine.inflight.filter(key => {
         const occurrence = state.occurrences[key]!;
@@ -368,8 +421,10 @@ export class BotCollaboration {
         }
         // Passive expiry is visible in ContextPack. It cannot start a paid turn.
         if (card.state === 'expired') continue;
-        const root = state.turns[card.turnId]!.root;
-        this.addTurn(state, hash(['action_result', card.id]), root, 'action_result', JSON.stringify({ cardId: card.id, state: card.state, conclusion: card.conclusion, result: card.result, error: card.error }), state.turns[card.turnId]!.botId);
+        const origin = state.turns[card.turnId]!;
+        addTurn(state, { id: hash(['action_result', card.id]), root: origin.root, source: 'action_result', botId: origin.botId,
+          request: JSON.stringify({ cardId: card.id, state: card.state, conclusion: card.conclusion, result: card.result, error: card.error }),
+          hop: origin.hop, authority: origin.authority ?? 'bot' });
       }
     }
     return materialized;
@@ -412,6 +467,25 @@ export class BotCollaboration {
       }
     }
   }
+  /** Example reconcile loop (§3.10). K4 arms no scan after a settled intent, so the Host checks replies itself. */
+  private async flushReplies(): Promise<void> {
+    for (const d of Object.values(this.snapshot().delegations)) {
+      if (d.verdict || d.nextCheckAt === undefined || d.nextCheckAt > this.now()) continue;
+      const intent = this.core.intent(d.chainTurnIds.at(-1)!)!;
+      let readback: Awaited<ReturnType<NonNullable<MessageServer['tasks']['agentMessage']>>> | undefined, failed = false;
+      try {
+        if (!this.server.tasks.agentMessage) throw new Error('Agent message readback API required');
+        readback = await this.server.tasks.agentMessage(intent.taskId, intent.execution.deviceId, intent.execution.payload.agentRef);
+      } catch { failed = true; }
+      this.ledger.transaction(s => {
+        const state = stateOf(s.application), row = state.delegations[d.id]!;
+        const emit = (key: string, value: Json) => project(s, key, value);
+        if (state.replies[intent.taskId]?.body !== undefined) resolveDelegation(state, row, 'answered', this.now(), emit, undefined, intent.taskId);
+        else if (failed) retryReply(row, this.now(), emit);
+        else reconcileReply(state, row, readback, this.now(), emit);
+      });
+    }
+  }
   private async callConnector(card: CollaborationState['cards'][string]): Promise<Json> {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -452,6 +526,8 @@ export class BotCollaboration {
       await this.flushCards();
       materialized = this.ledger.transaction(s => this.sync(s)) || materialized;
       await this.flushWakes();
+      await this.flushReplies();
+      materialized = this.ledger.transaction(s => this.sync(s)) || materialized;
       const ledger = this.ledger.snapshot();
       // An immediate runtime terminal can create another turn on any pass.
       // Drain to a fixed point, so no application-only turn can lose its wake.
@@ -472,7 +548,8 @@ export class BotCollaboration {
       const due = [...heads.values(),
         ...Object.values(state.cards).filter(c => c.state === 'pending').map(c => c.expiresAt),
         ...Object.values(state.team.seats).filter(seat => !seat.released && seat.deadline !== undefined).map(seat => seat.deadline!),
-        ...state.team.homeOperations.filter(op => op.status === 'pending').map(op => Math.max(this.now() + 1000, op.retryAt ?? 0))];
+        ...state.team.homeOperations.filter(op => op.status === 'pending').map(op => Math.max(this.now() + 1000, op.retryAt ?? 0)),
+        ...Object.values(state.delegations).filter(d => d.nextCheckAt !== undefined).map(d => d.nextCheckAt!)];
       if (due.length) {
         this.timer = setTimeout(() => { void this.drain().catch(() => {}); }, Math.max(1, Math.min(60_000, Math.min(...due) - this.now())));
         this.timer.unref?.();
