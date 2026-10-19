@@ -69,6 +69,6 @@ describe.skipIf(process.platform !== 'darwin')('macOS native deployment admissio
     expect(result.plainDaemonAdmitted).toBe(true);
     expect(result.memoryAdmitted).toBe(false);
     expect(result.memoryError).toBe(result.assetError);
-    expect(result.assetError).toMatch(/@byok-sdk\/client\/package\.json|ENOENT/);
+    expect(result.assetError).toBe('Error: SDK Agent memory helper release assets missing; build with `bun run build:release`');
   }, 30_000);
 });
