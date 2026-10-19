@@ -2,7 +2,7 @@
 import type { AgentMessageDraftEvent } from './types';
 export type { AgentMessageDraftEvent } from './types';
 import type { WakeRecord, WakeScheduleInput, WakeScheduleResult } from './wakes/types';
-export { WakeHookMissingError, WakeConflictError, WakeInputError, WakeClosedError, MAX_FUTURE_MS } from './wakes/types';
+export { WakeHookMissingError, WakeConflictError, WakeInputError, WakeClosedError, WAKE_MAX_FUTURE_MS } from './wakes/types';
 export type { DueWake, WakeRecord, WakeScheduleInput, WakeScheduleResult, WakeConsumer, WakeInputErrorCode } from './wakes/types';
 import { type MaintenanceReport } from '@byok-sdk/cloud';
 export type { AgentExecutionInput } from '@byok-sdk/cloud';
@@ -1301,6 +1301,6 @@ export declare class WakeClosedError extends Error {
 export declare const WAKE_WAIT_MS = 60000;
 export declare const WAKE_RETENTION_MS: number;
 /** Maximum allowed delay from the current time for a scheduled wake. */
-export declare const MAX_FUTURE_MS: number;
+export declare const WAKE_MAX_FUTURE_MS: number;
 export declare function validateWakeKey(key: unknown): asserts key is string;
 export declare function validateWakeInput(input: WakeScheduleInput, now: number): WakeScheduleInput;

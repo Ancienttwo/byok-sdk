@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createByokServer, WakeClosedError, WakeConflictError, WakeHookMissingError, MAX_FUTURE_MS, type ByokServer, type DueWake } from '../index';
+import { createByokServer, WakeClosedError, WakeConflictError, WakeHookMissingError, WAKE_MAX_FUTURE_MS, type ByokServer, type DueWake } from '../index';
 import { MemoryWakeStore, type WakeStore } from '../wakes/store';
 import { createSqliteEmbeddedStores } from '../stores/sqlite';
 import { createWebCrypto } from '@byok-sdk/cloud';
@@ -55,7 +55,7 @@ describe.each(['memory', 'sqlite'] as const)('embedded wakes (%s)', kind => {
   });
   it('allows exact input boundaries, including Unicode character and UTF-8 byte bounds', async () => {
     const server = open(async () => {});
-    expect(MAX_FUTURE_MS).toBe(368 * 86400000);
+    expect(WAKE_MAX_FUTURE_MS).toBe(368 * 86400000);
     expect((await server.wakes.schedule({ dedupKey: '😀'.repeat(256), availableAt: NOW + 368 * 86400000, payload: 'x'.repeat(4096) })).accepted).toBe(true);
     expect((await server.wakes.pending())[0]?.deliveries).toBe(0);
   });
