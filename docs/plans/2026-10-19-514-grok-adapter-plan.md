@@ -11,7 +11,7 @@ Aimpact, 2026-10-19, about 14:00 HKT. This ruling replaces all earlier Grok and 
 
 - The external Bot beta line is a byok MCP server. External Bots (Grok Bot, Hermes) connect to it as MCP clients. The MCP server exposes the existing byok Bot infrastructure as tools. Coding agents (Pi, Codex, Claude) do the work.
 - Grok and Hermes are not made into `RuntimeAdapter`s as the main form. The main design is the parent beta document.
-- The Grok CLI can still be connected as a side item. This plan describes that side item: `GrokAdapter` as one more coding-agent runtime, like Codex. It is optional and has no product priority.
+- The Grok CLI can still be connected as a side item (beta Q11, DECIDED 2026-10-19 14:11 HKT: optional, slice B8). This plan describes that side item: `GrokAdapter` as one more coding-agent runtime, like Codex. It is optional and has no product priority.
 - The Bot mode PRD (`docs/plans/2026-10-18-bot-mode-product-prd.md`) does not change. PRD §7 / Q4 and Q8 stay as they are. Earlier commits on this branch changed the PRD. Those changes are reverted.
 
 Revision 2 of this plan (Grok as a Bot-mode runtime) is withdrawn. This revision returns to the revision 1 design (a coding-agent runtime) and drops the Q4 gate.

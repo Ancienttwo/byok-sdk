@@ -1,6 +1,6 @@
 # byok MCP server for external Bots (beta)
 
-Status: beta plan, docs only. No product code. Date: 2026-10-19.
+Status: beta plan, docs only. No product code. Date: 2026-10-19. Q1–Q11 DECIDED (Aimpact, 2026-10-19 14:11 HKT; §9).
 PR: [#536](https://github.com/Ancienttwo/byok-sdk/pull/536) (this main document). Hermes client deltas: [#539](https://github.com/Ancienttwo/byok-sdk/pull/539), `docs/plans/2026-10-19-519-hermes-mcp-client.md`. Optional Grok CLI runtime: [#514 plan](2026-10-19-514-grok-adapter-plan.md).
 Baseline: byok-sdk `origin/main@5b988a6e` (includes K8-S, #525). OAR `c264f17` (0.67.0).
 
@@ -9,10 +9,14 @@ Baseline: byok-sdk `origin/main@5b988a6e` (includes K8-S, #525). OAR `c264f17` (
 Aimpact, 2026-10-19, about 14:00 HKT. This ruling replaces all earlier Grok and Hermes instructions.
 
 - The external Bot beta line is one byok MCP server. External Bots (Grok Bot first, then Hermes) connect to it as MCP clients.
-- The MCP server exposes the existing byok Bot infrastructure as tools: dispatch work to coding agents (Pi, Codex, Claude, through OAR and herdr), memory, routines, outcomes and ledgers.
+- The MCP server exposes the existing byok Bot infrastructure as tools: dispatch work to coding agents (Pi, Codex, Claude), memory, routines, outcomes and ledgers. Tasks go through the device daemon and OAR; herdr is not on the execution path (Q8).
 - Do not build a second, separate stack. Do not make Grok or Hermes a `RuntimeAdapter` as the main form.
 - Auth and quota are per Bot, with keys.
-- Recommended default, to be confirmed: the external Bot owns its own conversation memory; byok owns tasks and artifacts.
+- Memory boundary (Q1, decided): the external Bot owns its conversation memory; byok owns tasks, artifacts and its own Agent-home memory.
+
+Aimpact, 2026-10-19 14:11 HKT: all recommended answers Q1–Q11 are product-locked (§9). Product structure stays: Session mode and Bot mode do not change (Bot mode is Pi-only; PRD Q4 and Q8 keep their 2026-10-18 meaning). External-bot integration is a separate beta track, not Bot mode. Grok Bot is the first MCP client and Hermes the second. There is no separate stack.
+
+Out of beta v1 (Aimpact, about 14:15 HKT): no `byok_agent_message` and no Cross-Bot collaboration for external Bots. External Bots work together only through tasks and artifacts. Revisit after K8b Cross-Bot lands in Bot mode.
 
 The Bot mode PRD (`docs/plans/2026-10-18-bot-mode-product-prd.md`) does not change. Beta and Bot mode are different things. In Bot mode, byok runs the Bot (persona, memory, fresh executions). In this beta, a third-party Bot talks to the user and uses byok as a tool server. Coding agents still do the work.
 
@@ -85,8 +89,8 @@ User ── chat ──> External Bot (Grok Bot app | Hermes)        owns conver
 
 - The MCP server runs in the Host process, beside `@byok-sdk/server`. It is long-lived and Host-owned. Coding agents are never children of a client-started process; they stay children of the device daemon (#539 ask c).
 - Transport: Streamable HTTP. Grok Bot reaches it through Remote HTTPS, so the Host needs a public HTTPS endpoint. Hermes uses loopback HTTP. A stdio entry, if any, is a thin client with no task state.
-- Execution: every task goes through the paired device daemon and its adapters. OAR runs where it already runs (the vendored Codex session). herdr is not on the execution path in the beta. It can stay a visibility and notify tool for operators (§9 Q8).
-- Placement (recommended): a copy-and-own example `examples/byok-mcp-server` on the public `@byok-sdk/server` API, beside K4's `examples/host-execution-core`. The one SDK slice is the HTTP framing for the existing MCP core. This follows PRD §5.1 (reference implementations in `examples/`) and AiphaBee K-D1 (prove the shape before lifting it into a package).
+- Execution: every task goes through the paired device daemon and its adapters. OAR runs where it already runs (the vendored Codex session). herdr is not on the execution path. It is optional, for visibility and webhook notices only (Q8, decided).
+- Placement (Q3, decided): a copy-and-own example `examples/byok-mcp-server` on the public `@byok-sdk/server` API, beside K4's `examples/host-execution-core`. The one SDK slice is the HTTP framing for the existing MCP core. This follows PRD §5.1 (reference implementations in `examples/`) and AiphaBee K-D1 (prove the shape before lifting it into a package).
 
 ## 3. Tool catalogue
 
@@ -144,7 +148,7 @@ Coding agents inside a task keep using `memory_recall`/`memory_save` through `by
 
 ## 5. Quota, idempotency, cancellation
 
-Quota (abuse limits, not billing; ADR-038 has no execution metering). Defaults, to be confirmed (§9 Q7):
+Quota (abuse limits, not billing; ADR-038 has no execution metering). The first three rows are the decided Q7 defaults. The last two rows are implementation limits outside Q7; B2 reviews them.
 
 | Limit | Default | On refusal |
 | --- | --- | --- |
@@ -209,21 +213,23 @@ Each item needs a command output, a recorded run, or a `file:line` before slice 
 | B7 | Hermes client deltas. | #539 |
 | B8 | Optional Grok CLI runtime. | #514 plan |
 
-## 9. Open questions (待决)
+## 9. Decisions (Q1–Q11, DECIDED)
 
-| # | Question | Recommended answer |
+Aimpact approved every recommended answer on 2026-10-19 at 14:11 HKT. Record: `_ops/bot-wo/PRODUCT-RULINGS-2026-10-19.md`, "External-bot beta Q1–Q11 — DECIDED". The text below matches that record.
+
+| # | Topic | Decision |
 | --- | --- | --- |
-| Q1 | Memory boundary | External Bot owns its conversation memory. byok owns tasks, artifacts and its own Agent-home memory. Confirm. |
-| Q2 | What is the per-Bot "key"? | A new Host-side byok bot key (§4). `packages/keys` stays for model-provider credentials on the device. Confirm. |
-| Q3 | Where does the beta live? | `examples/byok-mcp-server` (copy-and-own) on the public server API; only the HTTP framing goes into the SDK. Lift into a package after a second user. |
-| Q4 | Identity mapping | A key binds to allowed devices and runtimes. Memory and routines also need one `AgentRef` per key. Without an `AgentRef`, the key gets task tools only. Hermes keys need an `AgentRef`, because #539 moves Hermes scheduled work from Hermes cron to `byok_routine_*`. |
-| Q5 | Public reachability for Grok Bot | The Host needs a public HTTPS URL. A Topology L Host on a laptop needs a relay or tunnel; AiphaBee's hosted Worker MCP is the existing pattern. |
-| Q6 | Idempotency without a client key | Arguments hash plus a 15-minute window, with optional `clientRequestId` (§5). |
-| Q7 | Quota defaults | §5 table. |
-| Q8 | herdr role | Not on the execution path. Optional operator visibility and the webhook pattern only. Screen-inferred completion is not a task result. |
-| Q9 | Memory write in beta v1 | Read only. `byok_memory_propose` waits for the PRD P5 Host half. |
-| Q10 | Disclosure | Tool results enter the external Bot's cloud. The Host page must say so, as AiphaBee K3 does. |
-| Q11 | Grok CLI as a worker runtime | Optional (#514 plan). Not needed for the beta. |
+| Q1 | Memory boundary | The external Bot owns its conversation memory. byok owns tasks, artifacts and its own Agent-home memory. |
+| Q2 | Per-Bot key | A new byok bot key held by the Host (§4). `packages/keys` stays for model-provider keys on the device. |
+| Q3 | Code location | `examples/byok-mcp-server` (copy-and-own, public server API). Only the HTTP transport goes into the SDK. |
+| Q4 | Identity mapping | Each key binds to allowed devices and runtimes. Memory and routine tools also need one `AgentRef` per key. Without an `AgentRef`, the key gets task tools only. Hermes keys therefore need an `AgentRef`, because #539 moves Hermes scheduled work to `byok_routine_*`. |
+| Q5 | Public reachability | Grok Bot MCP calls come from the Cursor backend, so the Host needs a public HTTPS URL. A laptop Host needs a relay or tunnel. |
+| Q6 | Idempotency | If the client sends no `clientRequestId`, the task id is a hash of the arguments within a 15-minute window (§5). |
+| Q7 | Quota defaults | 4 running tasks, 60 submits per hour, 8 routines (§5). |
+| Q8 | herdr role | Not on the execution path. Optional, for visibility and webhook notices only. Tasks go through the daemon and OAR. |
+| Q9 | Memory writes in beta v1 | Read-only. Writes wait for PRD P5. |
+| Q10 | Disclosure | Tool results go into xAI/Cursor storage. The Host page must disclose this. |
+| Q11 | Grok CLI worker runtime | Optional (#514 plan, slice B8). |
 
 ## 10. Non-goals
 
@@ -232,6 +238,7 @@ Each item needs a command output, a recorded run, or a `file:line` before slice 
 - Grok or Hermes as the main `RuntimeAdapter` form.
 - Running `bot-turn-outcome.v1` actions (`confirmable_action` and the rest) for external Bots.
 - Proxying the task-scoped reserved helpers to external clients.
+- `byok_agent_message` or Cross-Bot collaboration for external Bots in beta v1 (they work together only through tasks and artifacts).
 - Billing or execution metering.
 - Local command execution through the Grok desktop app (AiphaBee K4 rejected it: data flows back to Cursor, and approvals expire per command).
 
