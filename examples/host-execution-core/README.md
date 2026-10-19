@@ -181,11 +181,16 @@ An absent projection or null resident text omits resident memory from the instru
 This lets a new Agent run its first task and publish at task close. A new profile revision
 uses the same bootstrap path. No manual projection publish is required.
 Text above 8192 UTF-8 bytes puts the queue head in persisted `memory_blocked` state.
-Blob instructions also park with a clear reason. The Host can cancel that intent and
-enqueue a new intent with an inline instruction.
+Unauthorized projections also park until repair. A changed placement or profile and
+a blob instruction settle as `failed` before submit. The result includes `preparationError`.
+The next intent for that Agent can start. Submit a new intent with an inline instruction
+to replace a failed blob intent.
 No text is truncated. The block spends no attempt or generation.
 Only deadline wakes remain while blocked. Accepted projections recheck the blocked binding
-and commit a reconciliation wake. Startup recovery also rechecks stored blocks.
+and commit a reconciliation wake. If that schedule fails, the core makes one attempt
+to restore a deadline wake. Duplicate publish can request an earlier scan again.
+If the fallback fails too, the durable outbox keeps its deadline for recovery or a later drain.
+Startup recovery also rechecks stored blocks and settles failures that cannot be repaired.
 
 To refresh after the size block, the user approves a whole-file `MEMORY.md` replacement
 of at most 8192 raw UTF-8 bytes. A verified `applied` completion invalidates the old display

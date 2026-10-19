@@ -1,5 +1,5 @@
 import type { ByokServer, DueWake } from '@byok-sdk/server';
-import type { HostMemoryPage, MemoryBinding } from './memory';
+import { MemoryBlockedError, type HostMemoryPage, type MemoryBinding } from './memory';
 import { HostLedger } from './ledger';
 import { canonical, hash, project, taskId, time, validateInput, type Attempt, type Intent, type IntentInput,
   type Json, type LedgerState, type Routine, type RoutineDefinition, type Terminal } from './model';
@@ -47,9 +47,21 @@ export class HostExecutionCore {
     this.stopMemoryUpdates = options.memory?.onChange(binding => {
       const wake = this.memoryWaking.then(async () => {
         if (this.stopped) return;
-        if (this.resumeMemory(binding)) this.armScan(this.now() + this.reconcileMs);
+        this.resumeMemory(binding);
+        this.armScan(this.now() + this.reconcileMs);
         const result = await this.flushWakes();
-        if (result.failures.length) throw new AggregateError(result.failures, 'Memory reconciliation wake failed');
+        if (result.failures.length) {
+          // The earlier deadline wake may already be cancelled. Make one bounded
+          // attempt to restore deadline coverage, without an immediate retry loop.
+          const scan = this.ledger.snapshot().scanWake;
+          if (scan && result.failedKeys.has(`schedule:${scan.dedupKey}`)) {
+            this.ledger.transaction(state => { cancelWake(state, scan.dedupKey); state.scanWake = null; });
+            this.armScan(Infinity);
+            const fallback = await this.flushWakes(result.failedKeys);
+            result.failures.push(...fallback.failures);
+          }
+          throw new AggregateError(result.failures, 'Memory reconciliation wake failed');
+        }
       });
       this.memoryWaking = wake.catch(() => {});
       return wake;
@@ -243,7 +255,7 @@ export class HostExecutionCore {
       const due = Math.max(now + 1, Math.min(...open.map(intent => {
         if (intent.phase === 'memory_blocked') return Math.min(intent.waitUntil, intent.retryUntil ?? Infinity);
         if (intent.phase === 'backoff') return Math.min(intent.notBefore, intent.waitUntil, intent.retryUntil ?? Infinity);
-        if (intent.phase === 'queued') return open.some(other => other.agent === intent.agent && other.sequence < intent.sequence) ? intent.waitUntil : readyAt;
+        if (intent.phase === 'queued') return open.some(other => other.agent === intent.agent && other.sequence < intent.sequence) ? intent.waitUntil : Math.min(intent.waitUntil, intent.retryUntil ?? Infinity, readyAt);
         return Math.min(now + this.reconcileMs, state.executions[intent.taskId]!.started ? Infinity : intent.waitUntil);
       })));
       if (state.scanWake && state.scanWake.availableAt > now && state.scanWake.availableAt <= due) return;
@@ -293,7 +305,12 @@ export class HostExecutionCore {
       for (const intent of Object.values(state.intents)) {
         if (intent.phase !== 'memory_blocked' || binding && (intent.execution.deviceId !== binding.deviceId
           || canonical(intent.execution.payload.agentRef) !== canonical(binding.agentRef))) continue;
-        try { this.memoryInstruction(intent); } catch { continue; }
+        try { this.memoryInstruction(intent); }
+        catch (error) {
+          this.memoryFailure(state, intent, error);
+          changed = intent.phase !== 'memory_blocked' || changed;
+          continue;
+        }
         intent.phase = intent.memoryBlocked!.resume;
         delete intent.memoryBlocked;
         const outbox = state.outbox[`intent:${intent.id}`];
@@ -303,6 +320,19 @@ export class HostExecutionCore {
       return changed;
     });
   }
+  private memoryFailure(state: LedgerState, intent: Intent, error: unknown): void {
+    const reason = String(error instanceof Error ? error.message : error).slice(0, 1024);
+    if (!(error instanceof MemoryBlockedError)) {
+      intent.preparationError = reason;
+      delete intent.memoryBlocked;
+      settle(state, intent, 'failed');
+      return;
+    }
+    intent.memoryBlocked = { resume: intent.memoryBlocked?.resume ?? (intent.phase === 'backoff' ? 'backoff' : 'queued'), reason };
+    intent.phase = 'memory_blocked';
+    const outbox = state.outbox[`intent:${intent.id}`];
+    if (outbox) outbox.lastError = reason;
+  }
   private begin(intent: Intent): Intent | undefined {
     return this.ledger.transaction(state => {
       const row = state.intents[intent.id]!;
@@ -311,11 +341,7 @@ export class HostExecutionCore {
       let instruction: string | undefined;
       try { instruction = this.memoryInstruction(row); }
       catch (error) {
-        const reason = String(error instanceof Error ? error.message : error).slice(0, 1024);
-        row.memoryBlocked = { resume: row.phase === 'backoff' ? 'backoff' : 'queued', reason };
-        row.phase = 'memory_blocked';
-        const outbox = state.outbox[`intent:${row.id}`];
-        if (outbox) outbox.lastError = reason;
+        this.memoryFailure(state, row, error);
         return undefined;
       }
       if (row.phase === 'backoff') {
@@ -331,11 +357,15 @@ export class HostExecutionCore {
     });
   }
   private async reconcile(intent: Intent): Promise<boolean> {
-    if (intent.phase === 'memory_blocked') return false;
+    if (intent.phase === 'memory_blocked') {
+      if (!this.resumeMemory({ deviceId: intent.execution.deviceId, agentRef: intent.execution.payload.agentRef })) return false;
+      intent = this.intent(intent.key)!;
+      if (intent.conclusion) return true;
+    }
     if (intent.phase === 'backoff' && this.now() < intent.notBefore) return false;
     if (intent.phase === 'queued' || intent.phase === 'backoff') {
       const begun = this.begin(intent);
-      if (!begun) return false;
+      if (!begun) return !!this.intent(intent.key)?.conclusion;
       intent = begun;
       await this.submit(intent);
       return true;

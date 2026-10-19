@@ -11,6 +11,8 @@ import { HostLedger } from './ledger';
 import { canonical, hash } from './model';
 import type { LedgerState } from './model';
 
+// Only repairable projection failures can hold an Agent queue.
+export class MemoryBlockedError extends Error {}
 export const RESIDENT_MEMORY_MAX_BYTES = 8 * 1024;
 export function memoryRevision(text: string): string { return `sha256:${createHash('sha256').update(text, 'utf8').digest('hex')}`; }
 export const EMPTY_MEMORY_REVISION = memoryRevision('');
@@ -232,8 +234,8 @@ export class HostMemoryPage {
     if (!this.options.isCurrent(binding)) throw new Error('Memory placement or profile changed');
     const projection = this.ledger.snapshot().memory?.projections[bindingKey(binding)];
     if (!projection || projection.text === null || projection.invalidatedByIntent) return {};
-    if (!this.options.authorizeProjection(binding.deviceId, projection.mutation)) throw new Error('Memory projection no longer authorized');
-    if (Buffer.byteLength(projection.text, 'utf8') > RESIDENT_MEMORY_MAX_BYTES) throw new Error('Memory blocked: MEMORY.md exceeds 8 KiB. Reduce its size.');
+    if (!this.options.authorizeProjection(binding.deviceId, projection.mutation)) throw new MemoryBlockedError('Memory projection no longer authorized');
+    if (Buffer.byteLength(projection.text, 'utf8') > RESIDENT_MEMORY_MAX_BYTES) throw new MemoryBlockedError('Memory blocked: MEMORY.md exceeds 8 KiB. Reduce its size.');
     return { residentMemory: { text: projection.text, projectedAt: projection.projectedAt,
       mutationId: projection.mutation.mutationId, policyRevision: projection.mutation.policyRevision } };
   }

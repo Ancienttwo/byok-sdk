@@ -746,3 +746,133 @@ Read-only review found no code, test or documentation finding. It checked the ch
 assertions and the PENDING-AIMPACT note. Only verification evidence changed after
 implementation commit `932b48c5` and guide commit `c8ce3115`.
 The reviewer returned `VERDICT: PASS` after it directly read `test-final=0`.
+
+## WO-11 re-review repair, 2026-10-19
+
+Scope: PR #529 after the read-only review of `e92980af`.
+
+### P1: Boundary
+
+The change stays in the Host memory example. SDK wire types do not change.
+`HostMemoryPage.contextPack` checks the current device/profile binding, projection
+permission and resident byte count. `HostExecutionCore.begin` prepares the input.
+The FIFO key is tenant, device and Agent ID. Profile revisions share that queue.
+
+Merge `1a9dce13` uses the normal `git merge origin/main` path. For the add/add
+conflicts, use main's K4 files as the current side and `31ef0823` as the common
+K4 baseline. Apply only the memory delta from the previous branch head.
+This keeps main's horizon and coalescing fixes. The PRD file matches main's v3.
+`git diff origin/main...HEAD` contains only memory example files, its documentation
+and its workspace dependency entries. It contains no second K4 implementation.
+
+### P2: Trace and reproduction
+
+A real enqueue commits an intent and enters `drain`, `scan`, `reconcile`, then
+`begin`. The old catch in `begin` parks every memory preparation error. A stale
+rev1 binding fails `isCurrent`. The parked rev1 head prevents rev2 from reaching
+SDK submit. A blob instruction fails before ContextPack and has the same result.
+
+Before the fix, run:
+
+```sh
+bun run --cwd examples/host-execution-core test src/memory.test.ts -t 'starts profile rev2|restores a deadline wake'
+```
+
+Result: exit 1; three regressions fail. Neither rev2 case reaches the real adapter
+session within five seconds. The cases cover a stale queued head and a head that
+was already blocked by size before the upgrade. In the wake test, the SDK has no
+pending wake after the projection reconciliation schedule fails.
+
+### P3: Decision and invariant
+
+Only oversized text and unauthorized projections throw `MemoryBlockedError`.
+Only that error parks an intent. Other preparation errors settle as `failed`,
+without a new attempt or generation. The stored intent and Host result projection
+keep `preparationError`. The FIFO can then process the next intent.
+Recovery rechecks old blocks. An active scan also rechecks a blocked queue head.
+Thus a profile upgrade can release a head that was already blocked before the
+upgrade. The tenant/device/Agent FIFO key stays unchanged.
+
+After a failed projection reconciliation schedule, make one bounded attempt to
+restore a deadline wake with a fresh key. Do not reuse a cancelled wake key.
+If both schedules fail, keep the fallback deadline in the durable outbox and
+return both errors. Do not start a timer retry loop. A duplicate projection can
+request an earlier scan. Recovery or a later drain can retry the durable state.
+A restored deadline can expire the waiting intent. It does not promise execution
+before that deadline when no earlier retry arrives.
+
+PENDING-AIMPACT P3-1 remains unchanged. An applied small replacement still
+invalidates the old projection, including a previously valid projection. The
+next task can run without resident memory. The owner must decide that behavior.
+
+### Existing assertion changes in this repair
+
+1. The blob test now requires terminal failure instead of `memory_blocked`.
+   This is the requested P2-1 outcome. It still checks zero attempts, zero
+   generations, no SDK offer and durable state after restart. It also checks
+   that the next inline intent starts and that the result keeps the reason.
+   A new fixture checks recovery of a blob block saved by the previous version.
+   Cancellation is no longer needed to release this terminal intent.
+2. The duplicate projection test no longer requires reuse of the failed wake
+   key. The failed key and the previous deadline key are cancelled before the
+   fallback is scheduled. The test now requires fresh keys, the exact fallback
+   deadline and an earlier scan after duplicate publish. It retains the real
+   adapter start and one-attempt checks. No manual drain supplies that start.
+
+The earlier P5a assertion changes remain documented in the PR body. Main's K4
+assertion fixes are inherited through the merge and are not PR memory changes.
+
+### Local environment and preliminary checks
+
+Node: `v24.21.0`. Bun: `1.4.3`. Platform: macOS.
+`node_modules` was present. The first build failed because installed Pi dependency
+files did not match main's pinned inventory. Run `bun install --frozen-lockfile`:
+exit 0; 12 packages installed; no lockfile change. The next build passed.
+The first focused run found that duplicate publish did not replace the fallback
+deadline. Re-arm the scan on projection notifications, including duplicate ones.
+The next focused run passed: 27 tests. It began before a later type-only assertion
+change in the test file. Do not use that focused run as final-file evidence.
+The example typecheck found a union access in the new profile test. Use a structural
+assertion for the offer. The next example typecheck passed.
+The final full example run is `.wo11-example-test.log`, started at `17:17:12`.
+It began after that assertion change. It passed: 65 tests, with 6 Linux-only tests
+skipped; exit 0. This run covers the final source and test file.
+It includes both profile cases, blob settlement and recovery, authorization repair,
+deadline expiry without duplicate publish, bounded fallback failure, and duplicate
+publish recovery.
+
+### Read-only review
+
+Result: PASS. The review checked the full memory diff against main, the repair
+against the merge head, and the recorded checks. It found no blocking issue and
+no assertion change that hides the reported bug. It also checked the unchanged
+P3-1 behavior and the exact PRD match.
+
+Two evidence notes were resolved. The final test-file evidence now names
+`.wo11-example-test.log` at `17:17:12`, with 65 passed and 6 skipped. The earlier
+focused run is not final-file evidence. The local results JSON is not a source
+artifact and must not enter the commit.
+
+A Host callback exception is a terminal preparation failure under this rule.
+Repair the Host and submit a new intent for that work. Linux-only memory tests
+are not platform proof on this macOS run. A double wake schedule failure keeps
+durable state but still needs recovery or a later drain for progress.
+
+### Final required checks before push
+
+All commands ran in this worktree. Build finished before typecheck and tests.
+No production source or test changed during this final check chain.
+
+| Command | Exit | Observed result |
+| --- | --- | --- |
+| `bun run build` | 0 | All workspace builds passed; `.wo11-build.log`. |
+| `bun run typecheck` | 0 | All workspace typechecks passed; `.wo11-typecheck.log`. |
+| `bun run --cwd examples/host-execution-core test` | 0 | 65 passed, 6 Linux-only tests skipped; `.wo11-example-test.log`, start `17:17:12`. |
+| `bun run test` | 0 | 9510 Vitest tests passed, 237 skipped; cloud-do Node tests: 10 passed, 0 failed; `.wo11-test.log`. |
+| `bun run check:api-surface` | 0 | All 9 package goldens match; `.wo11-api-surface.log`. |
+| `bun run check:version-authority` | 0 | README and spec match the dispatch train and keys version; `.wo11-version-authority.log`. |
+
+The root run passed the Host example again: 65 passed, 6 skipped. Its example
+run began at `17:29:56`. Optional substrate and platform tests remain skipped.
+The final evidence JSON is local ignored state under `_ops/wo11/`. It is not
+part of the commit. The PR stays draft. PENDING-AIMPACT P3-1 stays open.

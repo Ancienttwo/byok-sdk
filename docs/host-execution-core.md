@@ -337,10 +337,17 @@ projection bytes. The receiver checks the outer schema, hash, grant and monotone
 It stores Host receipt time with the text. ContextPack checks authorization again and reads
 only the exact device and Agent profile. Missing or null resident memory is omitted, so
 bootstrap can submit the first task. Text over 8 KiB parks the intent in persistent
-`memory_blocked` state before submit. Blob composition failures use that same state.
+`memory_blocked` state before submit. Unauthorized projections also park until repair.
+A changed placement or profile and a blob instruction settle as `failed` before submit.
+The result records `preparationError`. These failures spend no attempt or generation.
+The next intent for that Agent can start. Startup recovery also settles old blocks
+whose cause cannot be repaired by a projection.
 Blocked heads keep deadline wakes. They do not schedule now+1 polling wakes.
 Accepted projections recheck the exact blocked binding and commit a reconciliation wake.
-Startup recovery covers a crash between the projection commit and that wake.
+If that schedule fails, the core makes one attempt to restore a deadline wake.
+A duplicate projection publish can request an earlier scan again. If the fallback
+also fails, the deadline stays in the durable outbox. Recovery or a later drain
+retries it. Startup recovery covers a crash between projection commit and wake.
 
 A verified applied `MEMORY.md` replacement of at most 8192 raw UTF-8 bytes invalidates
 the old display for ContextPack. The queued task can then run without resident memory.

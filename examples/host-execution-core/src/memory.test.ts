@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { AgentMemoryIntentCompletion, AgentMemoryProjectionMutation } from '@byok-sdk/protocol';
 import { HostLedger } from './ledger';
+import { enqueue } from './transitions';
 import { HostMemoryPage, EMPTY_MEMORY_REVISION, memoryRevision, type MemoryApproval } from './memory';
 import { openHost, type TestHost } from './test-support';
 
@@ -198,26 +199,127 @@ it('parks an oversized queue head without hot wake polling', async () => {
 });
 
 
-it('keeps a blob instruction parked after restart and supports cancellation without attempts', async () => {
-  const host = await openHost({ memory: page });
+it('settles a blob instruction without attempts and starts the next inline intent', async () => {
+  const host = await openHost({ memory: page, reconcileMs: 100 });
   try {
-    const input = host.intent('blob-parked');
+    const input = host.intent('blob-rejected');
     input.execution.payload.instruction = { blobRef: { blobId: 'blob', contentHash: memoryRevision('blob'), size: 4, contentType: 'text/plain' } };
-    const wakes = vi.spyOn(host.server.wakes, 'schedule');
-    await host.core.enqueue(input);
+    const rejected = await host.core.enqueue(input);
+    expect(rejected).toMatchObject({ phase: 'settled', conclusion: 'failed', attempts: 0, generation: 0,
+      preparationError: 'Memory ContextPack requires an inline instruction' });
+    expect(rejected.memoryBlocked).toBeUndefined();
+    expect(await host.server.tasks.offer(rejected.taskId)).toBeUndefined();
+    const next = await host.core.enqueue(host.intent('inline-after-blob'));
+    await vi.waitFor(() => expect(host.adapter.sessions.has(next.taskId)).toBe(true), { timeout: 5000 });
     await host.restartCore();
-    const afterRestart = wakes.mock.calls.length;
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    expect(host.core.intent(input.key)).toMatchObject({ phase: 'memory_blocked', attempts: 0, generation: 0,
-      memoryBlocked: { resume: 'queued', reason: 'Memory ContextPack requires an inline instruction' } });
-    expect(wakes.mock.calls.length).toBe(afterRestart);
-    expect(await host.server.tasks.offer(host.core.intent(input.key)!.taskId)).toBeUndefined();
-    await host.core.cancel(input.key);
-    expect(host.core.intent(input.key)).toMatchObject({ conclusion: 'cancelled', attempts: 0 });
+    expect(host.core.intent(input.key)).toEqual(rejected);
+    const results: unknown[] = [];
+    await host.core.flushProjections(async (_id, value) => { results.push(value); });
+    expect(results).toContainEqual(expect.objectContaining({ intentKey: input.key, conclusion: 'failed',
+      preparationError: rejected.preparationError }));
   } finally { await host.close(); }
 });
 
-it('retries the durable projection wake on duplicate publish without a manual drain', async () => {
+it('settles a legacy blob block during startup recovery', async () => {
+  const host = await openHost({ memory: page });
+  try {
+    await host.core.close();
+    const input = host.intent('legacy-blob');
+    input.execution.payload.instruction = { blobRef: { blobId: 'blob', contentHash: memoryRevision('blob'), size: 4, contentType: 'text/plain' } };
+    host.ledger.transaction(state => {
+      const row = enqueue(state, host.ledger.tenant, input);
+      row.phase = 'memory_blocked';
+      row.memoryBlocked = { resume: 'queued', reason: 'Memory ContextPack requires an inline instruction' };
+    });
+    await host.restartCore();
+    expect(host.core.intent(input.key)).toMatchObject({ phase: 'settled', conclusion: 'failed', attempts: 0,
+      preparationError: 'Memory ContextPack requires an inline instruction' });
+    expect(host.core.intent(input.key)?.memoryBlocked).toBeUndefined();
+    expect(await host.server.tasks.offer(host.core.intent(input.key)!.taskId)).toBeUndefined();
+  } finally { await host.close(); }
+});
+
+it.each(['queued', 'memory_blocked'] as const)('starts profile rev2 behind a stale rev1 %s head', async initial => {
+  let revision = '1';
+  page = new HostMemoryPage(ledger, { ...options(), isCurrent: value => value.agentRef.profileRevision === revision });
+  const host = await openHost({ memory: page, reconcileMs: 100 });
+  try {
+    const old = host.intent(`stale-profile-${initial}`);
+    if (initial === 'memory_blocked') {
+      await page.projectionPort(host.deviceId).publish({ mutation: projection('x'.repeat(8193)) });
+      expect(await host.core.enqueue(old)).toMatchObject({ phase: 'memory_blocked', attempts: 0 });
+    }
+    revision = '2';
+    if (initial === 'queued') await host.core.enqueue(old);
+    const next = host.intent(`current-profile-${initial}`);
+    next.execution.payload.agentRef.profileRevision = revision;
+    const accepted = await host.core.enqueue(next);
+    await vi.waitFor(() => expect(host.adapter.sessions.has(accepted.taskId)).toBe(true), { timeout: 5000 });
+    expect(host.core.intent(old.key)).toMatchObject({ phase: 'settled', conclusion: 'failed', attempts: 0 });
+    expect(host.core.intent(next.key)).toMatchObject({ phase: 'inflight', attempts: 1 });
+    expect(await host.server.tasks.offer(host.core.intent(old.key)!.taskId)).toBeUndefined();
+    const offer = await host.server.tasks.offer(accepted.taskId);
+    expect(offer).toMatchObject({ payload: { agentRef: { profileRevision: '2' } } });
+  } finally { await host.close(); }
+});
+
+it('keeps an unauthorized projection blocked until an authorized projection arrives', async () => {
+  let authorized = true;
+  page = new HostMemoryPage(ledger, { ...options(), authorizeProjection: () => authorized });
+  const host = await openHost({ memory: page, reconcileMs: 100 });
+  try {
+    const port = page.projectionPort(host.deviceId);
+    await port.publish({ mutation: projection('old authorized text') });
+    authorized = false;
+    const intent = await host.core.enqueue(host.intent('authorization-repair'));
+    expect(intent).toMatchObject({ phase: 'memory_blocked', attempts: 0 });
+    expect(await host.server.tasks.offer(intent.taskId)).toBeUndefined();
+    authorized = true;
+    await port.publish({ mutation: projection('authorized again', { sourceSeq: 2 }) });
+    await vi.waitFor(() => expect(host.adapter.sessions.has(intent.taskId)).toBe(true), { timeout: 5000 });
+    expect(host.core.intent(intent.key)).toMatchObject({ phase: 'inflight', attempts: 1 });
+  } finally { await host.close(); }
+});
+
+it('restores a deadline wake when the projection reconciliation wake fails', async () => {
+  const host = await openHost({ memory: page, reconcileMs: 100 });
+  try {
+    const port = page.projectionPort(host.deviceId);
+    await port.publish({ mutation: projection('x'.repeat(8193)) });
+    const intent = await host.core.enqueue(host.intent('refresh-wake-failure', { waitUntil: Date.now() + 2000 }));
+    const wakes = vi.spyOn(host.server.wakes, 'schedule').mockRejectedValueOnce(new Error('schedule failed'));
+    await expect(port.publish({ mutation: projection('repaired', { sourceSeq: 2 }) })).rejects.toThrow('Memory reconciliation wake failed');
+    expect(await host.server.wakes.pending()).toEqual([expect.objectContaining({ availableAt: intent.waitUntil })]);
+    expect(wakes).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => expect(host.core.intent(intent.key)).toMatchObject({ phase: 'settled', conclusion: 'expired', attempts: 0 }), { timeout: 5000 });
+    expect(host.adapter.sessions.has(intent.taskId)).toBe(false);
+  } finally { await host.close(); }
+});
+
+it('bounds projection wake fallback failures and retains the deadline outbox for recovery', async () => {
+  const host = await openHost({ memory: page, reconcileMs: 100 });
+  try {
+    const port = page.projectionPort(host.deviceId);
+    await port.publish({ mutation: projection('x'.repeat(8193)) });
+    const intent = await host.core.enqueue(host.intent('persistent-refresh-wake-failure'));
+    const wakes = vi.spyOn(host.server.wakes, 'schedule')
+      .mockRejectedValueOnce(new Error('initial failure')).mockRejectedValueOnce(new Error('fallback failure'));
+    await expect(port.publish({ mutation: projection('repaired', { sourceSeq: 2 }) }))
+      .rejects.toMatchObject({ errors: [new Error('initial failure'), new Error('fallback failure')] });
+    expect(wakes).toHaveBeenCalledTimes(2);
+    const scan = host.ledger.snapshot().scanWake!;
+    expect(scan.availableAt).toBe(intent.waitUntil);
+    expect(host.ledger.snapshot().outbox[`schedule:${scan.dedupKey}`]).toMatchObject({ kind: 'schedule', lastError: 'fallback failure' });
+    expect(await host.server.wakes.pending()).toEqual([]);
+    await new Promise(resolve => setTimeout(resolve, 500));
+    expect(wakes).toHaveBeenCalledTimes(2);
+    await host.restartCore();
+    await vi.waitFor(() => expect(host.adapter.sessions.has(intent.taskId)).toBe(true), { timeout: 5000 });
+    expect(host.core.intent(intent.key)).toMatchObject({ phase: 'inflight', attempts: 1 });
+  } finally { await host.close(); }
+});
+
+it('starts on duplicate publish after restoring a fallback deadline wake', async () => {
   const host = await openHost({ memory: page, reconcileMs: 100 });
   try {
     const port = page.projectionPort(host.deviceId);
@@ -230,7 +332,10 @@ it('retries the durable projection wake on duplicate publish without a manual dr
     await port.publish({ mutation: refreshed });
     await vi.waitFor(() => expect(host.adapter.sessions.has(intent.taskId)).toBe(true), { timeout: 5000 });
     expect(host.core.intent(intent.key)).toMatchObject({ phase: 'inflight', attempts: 1 });
-    expect(wakes.mock.calls[1]![0].dedupKey).toBe(wakes.mock.calls[0]![0].dedupKey);
+    const [failed, fallback, retry] = wakes.mock.calls.slice(0, 3).map(call => call[0]);
+    expect(new Set([failed!.dedupKey, fallback!.dedupKey, retry!.dedupKey]).size).toBe(3);
+    expect(fallback!.availableAt).toBe(intent.waitUntil);
+    expect(retry!.availableAt).toBeLessThan(fallback!.availableAt);
   } finally { await host.close(); }
 });
 
