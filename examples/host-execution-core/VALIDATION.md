@@ -569,3 +569,74 @@ No push, PR, merge or package publication was performed.
 
 The read-only reviewer returned `VERDICT: PASS` after it read the final root exit.
 It found no P1/P2 issue and recommended a local documentation commit with no push.
+
+## PR 529 acceptance fixes (2026-10-19)
+
+This section supersedes the earlier missing-projection blocking rule.
+Scope: the two P1 findings and README flow from the read-only acceptance review.
+K4 stacking stays PENDING-AIMPACT. The K4 copy and pushed history stay in place.
+
+### P1 map, P2 trace, P3 decision
+
+`HostExecutionCore.begin` reads `HostMemoryPage.contextPack` before submit. The SDK
+publishes only at task close. Requiring a projection before submit made first execution
+impossible. The former exception also kept a queue head queued and scheduled now+1
+wakes. Regression tests reproduced both failures before the fix.
+
+Missing or null memory now yields an empty pack. The original instruction can run.
+Oversized text and blob composition failures persist `memory_blocked`, the prior phase
+and the error. They spend no attempt or generation. Only deadline wakes remain.
+A projection commit rechecks the exact binding and commits a reconciliation wake.
+A duplicate publish retries a failed wake. `recover` covers a missed process-local signal.
+A blocked routine occurrence also participates in the existing supersede rule.
+
+A verified applied small MEMORY replacement invalidates the old display for ContextPack.
+It keeps ordering metadata and stores no new projection. The core binds a fresh submission
+to that repair before sending it. Its task-close projection clears the marker. Older task
+projections keep the marker. Submitted raw text never becomes model memory directly.
+
+### Assertion changes
+
+- Missing projection, null text and a new profile previously had to throw. They now
+  must return `{}`. This implements the reviewed PRD bootstrap rule.
+- The existing frozen-input test now seeds an oversized projection before it enqueues.
+  It retains zero-attempt, no-offer and frozen-offered-instruction assertions. The later
+  projection sequences move forward to preserve monotone ordering after the new seed.
+- Resident memory is now optional in the exported example type. The existing content
+  assertions retain the same expected strings and byte counts.
+- The Linux helper now submits through the real core, not directly through cloud. It
+  waits for core settlement. All original filesystem, CAS, ACK and readback assertions
+  remain. Restart now closes and recovers the core with the Host ledger.
+- A new missing-file test checks the empty pack before first submit. It then checks the
+  empty file created by the SDK (`agent-home.ts` home initialization) and runs a new profile.
+  It does not require the SDK to preserve file absence after initialization.
+
+New tests bound oversized and blob wakes for two seconds, cover persisted restart,
+missed notification recovery, duplicate wake delivery, stale projection replay and a real
+Linux bootstrap/repair path. No manual projection publish substitutes for Linux bootstrap.
+
+### Final acceptance-fix verification
+
+| Command | Exit | Result |
+| --- | --- | --- |
+| `bun run build` | 0 | Workspace builds completed. |
+| `bun run typecheck` | 0 | All workspaces, including changed example types and tests. |
+| `bun run check:api-surface` | 0 | Nine package goldens match. No SDK export changed. |
+| `bun run check:version-authority` | 0 | README/spec train remains aligned. |
+| `bun run --cwd examples/host-execution-core test` | 0 | 59 passed, 6 Linux tests skipped on macOS. |
+| Linux example `bun run test src/memory-linux.test.ts src/memory.test.ts` | 0 | 27 passed. |
+| Linux example `bun run test` | 0 | 65 passed in 7 files. |
+| Exact root `bun run test`, after build completed | 0 | 9347 Vitest passed, 206 skipped. Cloud-do Node tests: 10 passed. |
+
+The first broad root run overlapped build and read missing dist entry files. It exited 1
+with 15 client failures. The corrected sequential root run passed without a source fix.
+The first local full example had a startup timeout. Its completed-build rerun passed.
+Both initial logs remain available. No deadline or SDK test assertion was changed.
+
+Readbacks and raw logs are under `_ops/wo-11-review/`. The final root readback is
+`test-final=0`. Linux full readback is `linux-full=0`. The two-second blocked wake tests
+pass with at most one oversized deadline wake and no added blob wake after restart.
+Read-only review found no code, test or documentation finding. It checked the changed
+assertions and the PENDING-AIMPACT note. Only verification evidence changed after
+implementation commit `932b48c5` and guide commit `c8ce3115`.
+The reviewer returned `VERDICT: PASS` after it directly read `test-final=0`.
