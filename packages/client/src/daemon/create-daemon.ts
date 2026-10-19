@@ -1317,8 +1317,7 @@ export function buildDaemonWithAdapters(
       resolveAgentMemoryFilesystemHelper();
       resolveAgentMemoryFilesystemHelperBin = resolveAgentMemoryFilesystemHelper;
     } catch (error) {
-      if (config.agentMemoryIntents !== undefined) throw error;
-      resolveAgentMemoryFilesystemHelperBin = undefined;
+      if (config.agentMemory !== undefined || config.agentMemoryIntents !== undefined) throw error;
     }
   }
   const externalAgentMemoryFilesystem = resolveAgentMemoryFilesystemHelperBin !== undefined;

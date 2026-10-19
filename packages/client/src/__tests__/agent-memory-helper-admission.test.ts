@@ -68,7 +68,7 @@ describe.skipIf(process.platform !== 'darwin')('macOS native deployment admissio
     const result = JSON.parse(execFileSync(executable, [directory], { encoding: 'utf8' }));
     expect(result.plainDaemonAdmitted).toBe(true);
     expect(result.memoryAdmitted).toBe(false);
-    expect(result.memoryError).toContain('requires a platform with safe descriptor-relative filesystem operations');
+    expect(result.memoryError).toBe(result.assetError);
     expect(result.assetError).toMatch(/@byok-sdk\/client\/package\.json|ENOENT/);
   }, 30_000);
 });

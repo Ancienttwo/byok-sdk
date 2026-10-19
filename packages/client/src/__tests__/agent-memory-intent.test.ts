@@ -1894,9 +1894,6 @@ describe('WP2I-S2 native descriptor backend (Linux)', () => {
 // ===========================================================================
 // macOS helper backend (only with a built helper binary)
 // ===========================================================================
-
-
-
 describe('WP2I-S2 macOS SDK helper backend', () => {
   itHelper('applies replace and delete through the real SDK ledger and does not repeat an acknowledged CAS', async () => {
     const w = await world();
