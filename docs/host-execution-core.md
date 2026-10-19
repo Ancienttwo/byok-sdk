@@ -24,6 +24,8 @@ Topology H has no device-local Host. Its service schedules calls to the Cloud fr
 The embedded wake queue is not a hosted scheduler.
 Neither topology runs BYOK work in the cloud or keeps the user's model keys there.
 
+An IM channel is a Host adapter. See the [Host IM adapter guide](host-im-adapter.md).
+
 ## 2. Composition and clocks
 
 Construct one core per embedded tenant. Use a separate Host database.
