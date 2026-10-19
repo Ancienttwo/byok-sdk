@@ -218,3 +218,81 @@ recorded. This follow-up does not claim a new full-suite pass.
 Local evidence is under `_ops/wo07-review/` in this worktree:
 `closure-measurements.json`, `horizon-probe.json`, `typecheck.log`,
 `core-focused.log`, and `api-surface.log`.
+
+
+## Claude cross-review closure (local only)
+
+Input: the read-only #525 section in
+`/Users/chris/Projects/byok-sdk/_ops/bot-wo/REV-batch2-claude.md`.
+Aimpact approved the bounded closure. This round does not push, edit the PR,
+or change its Draft status. The text below is staged for Aimpact to publish.
+
+### PR body additions
+
+Merge dependency (P2-1): #523 (WO-368) must merge before #525 or in the same batch. It changes server `MAX_FUTURE_MS` to 368 days and updates the two horizon assertions in `wakes.test.ts`. Otherwise, the 366-day server bound at `packages/server/src/wakes/types.ts:42` conflicts with the 368-day spec and core horizon (`docs/spec.md:458` in the reviewed revision). For yearly March 10 at 12:00 in `America/New_York`, core returns `2032-03-10T17:00:00Z` from `2031-03-10T16:00:00Z`. The gap is 366 days plus one hour. The server then rejects the wake with `WAKE_AVAILABLE_AT_INVALID`. This branch does not change the server bound or those wake assertions.
+
+Test assertion changes (P3-8): `packages/core/src/__tests__/constraints.test.ts` has two deliberate allowlist additions. First, add module `./routine-schedule` so the root can expose the new pure helper module. Second, add six runtime exports: `ROUTINE_DAYS_OF_WEEK`, `ROUTINE_HORIZON_MS`, `ROUTINE_MIN_NOW`, `ROUTINE_MAX_NOW`, `checkRoutineSchedule`, and `nextRoutineOccurrence`. The tests still require exact module and export lists. Dependency and clock restrictions remain in place. No assertion was removed or relaxed.
+
+### Coverage and documentation decisions
+
+- P3-1: Add a protocol matrix with 24 day-field shapes, seven minute values,
+  four hour values, and three zone names. It compares checked-oneOf with an
+  independent v3 schema that repeats the fields in three closed branches.
+  All 2,016 combinations use `validateResultOutcome`. The matrix also checks
+  expected validity, so agreement alone cannot pass if both schemas are wrong.
+  Each row also rejects null, array, and string schedules in both schemas.
+- P3-3: Add February 31, June 31, and September 31 to the shared core fixture.
+  Each must report `schedule_unreachable`. The existing table-driven test also
+  checks the public `routine_schedule_invalid` error for each rejected case.
+- P3-2: The review found the horizon-null branch at
+  `routine-schedule.ts:164` unreachable with the accepted schedule domain and
+  current real tzdata. Its mutation to `return best` passed all 71 routine
+  tests in that review. This is a core branch-coverage limit. K4 injects null
+  to test Host handling of an initial null and a null successor in
+  `examples/host-execution-core/src/scheduling-recovery.test.ts:80` and `:94`
+  in the `bot-k4-host-execution-core` worktree. Those tests cover consumer
+  behavior; they do not make the core branch reachable. No production date
+  range or new injection parameter is added solely to cover that branch.
+- P3-4: Keep `TZ_NAME` unchanged. Clarify the spec: offset spellings are refused
+  by the name shape or by Intl. `+08:00` fails the name check; `UTC+8` reaches
+  Intl and is refused there. `Etc/GMT+8` stays valid. This is the smaller change
+  because it corrects the wording without changing the accepted zone names.
+- P3-6: Add `Antarctica/Casey` to the yearly sweep. It now scans nine zones.
+  The comment states that a scan starting in 2026 does not replay Casey's
+  2019 interval. This is current-rule coverage, not a claim to cover that
+  historical maximum.
+- P3-7: The previous local follow-up already fixed callback indentation and
+  moved the minute-scan comment above `dstOracle`. Recheck those positions and
+  remove the remaining blank lines before the timed-test closures. The yearly
+  diagnostic now obtains the zone count from `zones.length`. Existing oracle
+  assertions, expected instants, sample counts, and timeouts remain intact.
+- P3-5: Keep the spec section before `Embedded wake queue`. This places the
+  pure Host calendar contract next to the one-shot wake boundary that consumes
+  its instants. The durable-lane text already points readers to this section.
+  Moving it would add diff without changing the contract.
+- Item 9: Leave the server's 366-day constant and `wakes.test.ts` unchanged.
+  They remain owned by #523. Proposed `BOT_TURN_OUTCOME_LIMITS` also stay
+  unchanged and PENDING-AIMPACT.
+
+### This round's verification
+
+| Check | Exit code | Result |
+| --- | ---: | --- |
+| `git diff --check` | 0 | Passed. |
+| `bun run typecheck` | 0 | All workspaces passed. |
+| `bun run check:api-surface` | 0 | All nine declaration goldens and entry policies passed. |
+| `packages/protocol`: `bun run test` | 0 | 33 files, 1,333 tests passed. |
+| `packages/core`: `bun run test` | 0 | 16 files, 454 tests passed. |
+
+The root `bun run test` is not repeated, as authorized for this tests-and-docs
+slice. No production source, public export, dependency, or limit value changes
+in this round. `TZ_NAME` is unchanged. The protocol and core package test suites
+run in full. The final cleanup after these runs removes one blank line only.
+The K4 null-injection test source was read; that other worktree's tests were not
+rerun in this round.
+
+The two paragraphs under `PR body additions` match
+`/Users/chris/Projects/byok-sdk/_ops/bot-wo/PR-525-body.md` exactly.
+This local file is prepared for Aimpact. No push or `gh pr edit` runs here.
+Logs are in this worktree under `_ops/wo07-closure/`: `typecheck.log`,
+`api-surface.log`, `protocol-test.log`, and `core-test.log`.

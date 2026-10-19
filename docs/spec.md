@@ -451,7 +451,10 @@ malformed schedule (`schedule_invalid`), a date that the month never has, such
 as April 31 (`schedule_unreachable`), February 29, whose next occurrence can be
 eight years away (`schedule_beyond_horizon`), and an unknown zone
 (`tz_invalid`). It accepts repeated weekdays and treats them as one. `tz` is an
-IANA zone name known to the engine's Intl data; offset strings are refused. `now` is a safe-integer epoch millisecond in
+IANA zone name known to the engine's Intl data. Offset spellings are refused
+by the name shape or by Intl. For example, `+08:00` fails the name check;
+`UTC+8` is refused by Intl. `Etc/GMT+8` remains a valid zone name.
+`now` is a safe-integer epoch millisecond in
 [2000-01-01T00:00Z, 2200-01-01T00:00Z); other values throw `RangeError`. The
 function returns the first instant strictly after `now` at which the zone's wall
 clock shows a matching whole local minute, or null when none falls within
