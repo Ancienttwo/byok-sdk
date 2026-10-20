@@ -8,8 +8,29 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
+	"unsafe"
 )
+
+// The test claims NTFS, so it checks the file system of the actual temp volume.
+func requireNTFS(t *testing.T, root *os.Root) {
+	t.Helper()
+	directory, err := root.Open(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer directory.Close()
+	var name [syscall.MAX_PATH + 1]uint16
+	query := syscall.NewLazyDLL("kernel32.dll").NewProc("GetVolumeInformationByHandleW")
+	ok, _, callErr := query.Call(directory.Fd(), 0, 0, 0, 0, 0, uintptr(unsafe.Pointer(&name[0])), uintptr(len(name)))
+	if ok == 0 {
+		t.Fatalf("GetVolumeInformationByHandleW failed: %v", callErr)
+	}
+	if fileSystem := syscall.UTF16ToString(name[:]); fileSystem != "NTFS" {
+		t.Fatalf("temp volume file system is %q, not NTFS", fileSystem)
+	}
+}
 
 // #522 window on real NTFS: the memory rename is visible, then the parent
 // directory barrier runs. The spy only records each real platformStrictSync
@@ -38,6 +59,7 @@ func TestWindowsMemoryResultBarrierFailsClosedOnNTFS(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer root.Close()
+			requireNTFS(t, root)
 			active := &session{root: root}
 
 			original := strictSync
