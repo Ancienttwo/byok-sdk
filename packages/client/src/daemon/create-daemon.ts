@@ -2377,6 +2377,7 @@ export function buildDaemonWithAdapters(
         errorCategory: event.errorCategory,
       }),
       onRuntimeDisposalFailure: (event) => observer.noteRuntimeDisposalFailure(event),
+      onExecutionRecord: (record) => observer.noteExecutionRecord(record),
 
       // M4 Phase 3: the SAME `ApprovalRegistry` instance the control
       // socket's own `approvals.list`/`approvals.resolve` methods already

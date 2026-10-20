@@ -32,17 +32,18 @@ function newRound(team: TeamState, id: string, root: string, roomId: string, inp
   team.rounds[id] = round;
   return round;
 }
-export function roomInput(state: CollaborationState, key: string, roomId: string, text: string, mentions: Mentions): string {
+/** `from` is the sender's principal id (#552). Without it, the message is from `user` and the input identity is the K8b one. */
+export function roomInput(state: CollaborationState, key: string, roomId: string, text: string, mentions: Mentions, from?: string): string {
   const team = state.team, room = team.rooms[roomId];
   if (!room) throw new Error('Room not found');
   if (!text.trim()) throw new Error('Room input is empty');
-  const id = hash(['room-input', roomId, key]), input = JSON.stringify({ text, mentions });
+  const id = hash(['room-input', roomId, key]), input = JSON.stringify({ text, mentions, from });
   const prior = team.rounds[id];
   if (prior) { if (!same(prior.input, input)) throw new Error('Room input identity conflict'); return id; }
   newRound(team, id, id, roomId, input, mentions === 'all' ? room.members : mentions);
   room.visibleFrom = roomVisibility(room, room.members);
   team.roots[id] = { autonomous: 0, late: 0 };
-  room.messages.push({ id, from: 'user', text, late: false });
+  room.messages.push({ id, from: from ?? 'user', text, late: false });
   return id;
 }
 export function memberPresent(team: TeamState, seat: Seat): boolean {

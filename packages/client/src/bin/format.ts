@@ -168,6 +168,17 @@ export function formatDaemonEventLine(event: DaemonEvent): string {
       return `${prefix} agent-memory-intent-integrity intentId=${event.intentId} disposition=${event.disposition}`;
     case 'runtime-disposal-failed':
       return `${prefix} runtime-disposal-failed taskId=${event.taskId} runtime=${event.runtimeId} stage=${event.stage} reason=${quote(event.reason)}`;
+    case 'execution-record': {
+      const parts = [
+        `${prefix} execution-record taskId=${event.taskId}`,
+        `terminal=${event.terminal}`,
+        `status=${event.status}`,
+        `source=${event.source}`,
+        event.unknownReason !== undefined ? `unknownReason=${event.unknownReason}` : undefined,
+        event.gaps.length > 0 ? `gaps=${event.gaps.map((gap) => `${gap.reason}:${gap.count}`).join(',')}` : undefined,
+      ].filter((part): part is string => part !== undefined);
+      return parts.join(' ');
+    }
     case 'git-workspace': {
       const parts = [
         `${prefix} git-workspace taskId=${event.taskId}`,

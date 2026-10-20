@@ -20,8 +20,11 @@ import type { RoomFields } from '@byok-sdk/protocol';
 import { CurrentRequestTooLargeError, HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS } from './history';
 import { flushHomes, type HomeServer } from './home-projections';
 import { admitUserInput, coalescePolicy, projectInputBatches, sealBatchForCancel, sealDueBatches, type CoalescePolicy } from './coalesce';
+import { classifyInbound, inboundKey, isOwner, verified, type InboundClass, type InboundMessage, type Principal, type PrincipalArg } from './channel';
 export interface BotOptions {
   botId: string; execution: ExecutionTemplate; now?: () => number;
+  /** Owner principal id (#552 R2). Default `owner`. Only the human principal with this id passes the owner checks. */
+  owner?: string;
   /** Host-owned model templates. New Bots stay on the selected template's device. */
   models?: Record<string, ExecutionTemplate>;
   /** Must deduplicate by id. A committed confirmation can be replayed after a crash. */
@@ -60,9 +63,13 @@ export class BotCollaboration {
   private readonly instructionMaxBytes: number;
   private readonly timers: DelegationTimers;
   private readonly coalesce?: CoalescePolicy;
+  /** The default principal of the owner APIs: the caller that the Host authenticated as the owner. */
+  private readonly owner: Principal;
   constructor(readonly server: ExecutionServer & HomeServer & MessageServer, readonly ledger: HostLedger, private readonly options: BotOptions) {
     if (!options.botId || options.execution.payload.agentRef.agentId !== options.botId) throw new Error('Select this Bot Agent');
     if (options.execution.payload.requiredToolsets?.length) throw new Error('Bot executions cannot have connector toolsets');
+    this.owner = { id: options.owner ?? 'owner', kind: 'human' };
+    if (!verified(this.owner)) throw new Error('Invalid owner principal');
     this.now = () => time((options.now ?? Date.now)());
     this.connectorTimeoutMs = time(options.connectorTimeoutMs ?? 30_000);
     if (this.connectorTimeoutMs < 1 || this.connectorTimeoutMs > 2_147_483_647) throw new Error('Invalid connector timeout');
@@ -96,19 +103,52 @@ export class BotCollaboration {
   /**
    * Returns the id of the Turn that answers this input. With `coalesce`, it is the batch id
    * (the first batched input's id); that Turn appears when the batch seals.
+   * Only the owner starts a 1:1 execution (R2).
    */
-  input(key: string, request: string, botId = this.options.botId): Promise<string> {
+  input(key: string, request: string, botId = this.options.botId, ...by: PrincipalArg): Promise<string> {
     const id = hash(['user', botId, key]);
     return this.exclusive(async () => {
+      const principal = this.ownerOnly(by, 'input', botId);
       const turnId = this.ledger.transaction(s => {
         const state = stateOf(s.application);
         activeBot(state.team, botId);
-        // The sender is the owner until verified IM senders arrive (#552).
-        return admitUserInput(state, { id, key, botId, request, sender: 'owner', authority: 'owner' }, this.coalesce, this.now());
+        return admitUserInput(state, { id, key, botId, request, sender: principal.id, authority: 'owner' }, this.coalesce, this.now());
       });
       await this.process();
       return turnId;
     });
+  }
+  /**
+   * IM entry (#552). Classify one message that the channel adapter translated (docs/host-im-adapter.md §3).
+   * The input key is `inboundKey(message)`. Only audit rows record a refused or 1:1 bot message.
+   * `id` is the Turn id of `owner_input`, or the room input id of `room_input` and `bot_background`.
+   */
+  async receive(message: InboundMessage): Promise<{ kind: InboundClass; id?: string }> {
+    const kind = classifyInbound(message, this.owner.id), { channel, conversation, platformMessageId, sender } = message;
+    if (kind === 'owner_input') return { kind, id: await this.input(inboundKey(message), message.text, conversation.id, sender) };
+    if (kind === 'room_input' || kind === 'bot_background') {
+      return { kind, id: await this.roomInput(inboundKey(message), conversation.id, message.text, message.mentions, sender) };
+    }
+    const who = verified(sender) ? ` ${sender.kind}:${sender.id}` : '';
+    await this.exclusive(async () => this.audit(`Inbound ${kind}: ${channel} ${conversation.kind}:${conversation.id} ${platformMessageId}${who}`));
+    return { kind };
+  }
+  /** Adapter data can be unverified, so one row is at most 1024 characters. */
+  private audit(line: string): void {
+    this.ledger.transaction(s => { stateOf(s.application).audit.push(line.slice(0, 1024)); });
+  }
+  /** R2: refuse an unverified principal. The audit row commits before the error. */
+  private verifiedOnly(principal: Principal | undefined, action: string, target: string): Principal {
+    if (verified(principal)) return principal;
+    this.audit(`Action refused unverified_sender: ${action} ${target}`);
+    throw new Error(`unverified_sender: ${action} needs a verified principal`);
+  }
+  /** R2: only the owner principal acts. An omitted principal is the owner. A given `undefined` is unverified. */
+  private ownerOnly(by: PrincipalArg, action: string, target: string): Principal {
+    const principal = this.verifiedOnly(by.length ? by[0] : this.owner, action, target);
+    if (isOwner(principal, this.owner.id)) return principal;
+    this.audit(`Action refused not_owner: ${action} ${target} ${principal.kind}:${principal.id}`);
+    throw new Error(`not_owner: ${action} needs the owner principal`);
   }
   private applyOutcome(document: unknown, tx: OutcomeTransaction): void {
     const state = stateOf(tx.application);
@@ -213,12 +253,18 @@ export class BotCollaboration {
    * Owner API ("Cancel", §8.8), from A's delegation chip or from B's `bot_request` Turn.
    * It rejects when `core.cancel` fails. The cancel fact is already committed, and the timer delivers it later.
    */
-  cancelDelegation(id: string): Promise<void> {
-    return this.exclusive(() => this.settleChain(id, (s, state, d) => arbitrateCancel(s, state, d, this.now(), (key, value) => project(s, key, value))));
+  cancelDelegation(id: string, ...by: PrincipalArg): Promise<void> {
+    return this.exclusive(() => {
+      this.ownerOnly(by, 'cancelDelegation', id);
+      return this.settleChain(id, (s, state, d) => arbitrateCancel(s, state, d, this.now(), (key, value) => project(s, key, value)));
+    });
   }
   /** Owner API ("End", §8.3): close a held reply or an uncertain delegation with `abandoned`. */
-  abandonDelegation(id: string): Promise<void> {
-    return this.exclusive(() => this.settleChain(id, (s, state, d) => abandonDelegation(s, state, d, this.now(), (key, value) => project(s, key, value))));
+  abandonDelegation(id: string, ...by: PrincipalArg): Promise<void> {
+    return this.exclusive(() => {
+      this.ownerOnly(by, 'abandonDelegation', id);
+      return this.settleChain(id, (s, state, d) => abandonDelegation(s, state, d, this.now(), (key, value) => project(s, key, value)));
+    });
   }
   private async settleChain(id: string, decide: (s: LedgerState, state: CollaborationState, d: Delegation) => boolean): Promise<void> {
     const deliver = this.ledger.transaction(s => {
@@ -264,10 +310,14 @@ export class BotCollaboration {
       await this.process();
     });
   }
-  async roomInput(key: string, roomId: string, text: string, mentions: Mentions = []): Promise<string> {
+  /** Any verified human can post in a room. The room message records the principal id; without one it is from `user`. */
+  async roomInput(key: string, roomId: string, text: string, mentions: Mentions = [], ...by: PrincipalArg): Promise<string> {
     let id!: string;
     await this.exclusive(async () => {
-      this.ledger.transaction(s => { id = roomInput(stateOf(s.application), key, roomId, text, mentions); });
+      const principal = by.length ? this.verifiedOnly(by[0], 'roomInput', roomId) : undefined;
+      // R5: a bot message is room background. Its mention entities select no seat.
+      const called = principal?.kind === 'bot' ? [] : mentions;
+      this.ledger.transaction(s => { id = roomInput(stateOf(s.application), key, roomId, text, called, principal?.id); });
       await this.process();
     });
     return id;
@@ -286,8 +336,9 @@ export class BotCollaboration {
       await this.process();
     });
   }
-  async answer(id: string, answer: string): Promise<void> {
+  async answer(id: string, answer: string, ...by: PrincipalArg): Promise<void> {
     await this.exclusive(async () => {
+      this.ownerOnly(by, 'answer', id);
       this.ledger.transaction(s => {
         const state = stateOf(s.application), question = state.questions[id];
         if (!question) throw new Error('Question not found');
@@ -304,8 +355,10 @@ export class BotCollaboration {
       await this.process();
     });
   }
-  async decide(id: string, decision: 'confirmed' | 'rejected'): Promise<void> {
+  /** For IM, call it only from a verified button callback, never for a text command (R2). */
+  async decide(id: string, decision: 'confirmed' | 'rejected', ...by: PrincipalArg): Promise<void> {
     await this.exclusive(async () => {
+      this.ownerOnly(by, 'decide', id);
       const error = this.ledger.transaction(s => {
         const state = stateOf(s.application), card = state.cards[id];
         if (!card) throw new Error('Card not found');
@@ -346,8 +399,9 @@ export class BotCollaboration {
     await this.process();
   });
   drain(): Promise<void> { return this.exclusive(() => this.process()); }
-  cancelTurn(id: string): Promise<void> {
+  cancelTurn(id: string, ...by: PrincipalArg): Promise<void> {
     return this.exclusive(async () => {
+      this.ownerOnly(by, 'cancelTurn', id);
       const turn = this.snapshot().turns[id];
       // A chain Turn cancels its whole delegation, so one verdict covers it (§8.8).
       if (turn?.delegationId && !this.snapshot().delegations[turn.delegationId]!.verdict) {
@@ -547,7 +601,7 @@ export class BotCollaboration {
         const state = stateOf(s.application), row = state.delegations[d.id]!;
         const emit = (key: string, value: Json) => project(s, key, value);
         if (state.replies[intent.taskId]?.body !== undefined) resolveDelegation(state, row, 'answered', this.now(), emit, undefined, intent.taskId);
-        else if (failed) retryReply(row, this.now(), emit, this.timers.uncertainAfterMs);
+        else if (failed) retryReply(state, row, this.now(), emit, this.timers.uncertainAfterMs);
         else reconcileReply(state, row, readback, this.now(), emit, this.timers.uncertainAfterMs);
       });
     }

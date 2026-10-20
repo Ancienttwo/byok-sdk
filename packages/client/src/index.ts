@@ -13,6 +13,7 @@ export type {
   RuntimeDetectionAdvisory,
   RuntimeDetectionRefusalReason,
   Session,
+  SessionEvidence,
   GitWorkspaceConfig,
   McpStdioServerConfig,
   McpToolsetConfig,
@@ -487,6 +488,8 @@ export type { DaemonEvent, DaemonEventKind, DaemonEventListener, DaemonTaskInfo,
 // authenticated live views. See `daemon/daemon-record.ts`.
 export { createDaemonRecordProjector, DAEMON_RECORD_KINDS, isDaemonRecordKind } from './daemon/daemon-record';
 export type { DaemonRecord, DaemonRecordKind, DaemonRecordProjector, DaemonTurnRecord } from './daemon/daemon-record';
+// Octop ③ (#553): the local execution record a `DaemonEvent` carries. See `daemon/execution-record.ts`.
+export type { ExecutionRecord, ExecutionRecordGap, ExecutionRecordStatus, ExecutionRecordUnknown } from './daemon/execution-record';
 
 // M3-4: OS service lifecycle (launchd/systemd/WinSW) — see `lifecycle/create-service-lifecycle.ts`.
 export { createServiceLifecycle, UnsupportedServicePlatformError } from './lifecycle/create-service-lifecycle';

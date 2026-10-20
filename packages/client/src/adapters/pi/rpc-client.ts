@@ -87,6 +87,8 @@ export class PiRpcClient {
   private readonly stderrRing: string[] = [];
   /** Count of pi RPC message types `PiSession` (pi-adapter.ts) has told us have no `AgentEvent` mapping and aren't routine bookkeeping — see `recordUnmappedFrame`. */
   private readonly unmappedFrameCounts = new Map<string, number>();
+  /** Stdout lines that were not a JSON object, plus a last line the process never terminated — see `onLine` and `onClosed`. */
+  private decodeDroppedLines = 0;
 
   constructor(private readonly options: PiRpcClientOptions) {
     const spawnFn = options.spawnFn ?? spawn;
@@ -156,6 +158,24 @@ export class PiRpcClient {
   /** Local transport diagnostic retained when the process closes; consumers must classify it explicitly. */
   get terminalError(): Error | undefined {
     return this.exitError;
+  }
+
+  /**
+   * Stdout frames this client dropped because it could not decode them: a
+   * complete line that is not a JSON object, or the unterminated last line of
+   * a process that ended mid-write. Pi writes every RPC frame as one JSON
+   * object and LF, and its stdout guard sends ordinary writes to stderr, so
+   * there is no expected noise to exclude (Octop T0).
+   */
+  get decodeDropped(): number {
+    return this.decodeDroppedLines;
+  }
+
+  /** Total of the frames `recordUnmappedFrame` counted, across every type. */
+  get unmappedFrames(): number {
+    let total = 0;
+    for (const count of this.unmappedFrameCounts.values()) total += count;
+    return total;
   }
 
   /**
@@ -253,12 +273,17 @@ export class PiRpcClient {
   }
 
   private onLine(line: string): void {
-    let msg: PiRpcMessage;
+    let parsed: unknown;
     try {
-      msg = JSON.parse(line) as PiRpcMessage;
+      parsed = JSON.parse(line);
     } catch {
-      return; // a stray non-JSON line is not this client's concern
+      parsed = undefined;
     }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      this.decodeDroppedLines += 1; // not an RPC frame; see `decodeDropped`
+      return;
+    }
+    const msg = parsed as PiRpcMessage;
     this.options.onFrame?.(msg);
     if (msg.type === 'response' && typeof msg.id === 'string' && this.pending.has(msg.id)) {
       const waiter = this.pending.get(msg.id);
@@ -341,6 +366,12 @@ export class PiRpcClient {
   private onClosed(err: Error): void {
     if (this.closed) return;
     this.closed = true;
+    // `close` delivers every stdout byte first, so a non-empty buffer here is
+    // a frame the process never finished writing.
+    if (this.buffer.length > 0) {
+      this.decodeDroppedLines += 1;
+      this.buffer = '';
+    }
     // An adoption failure outranks the exit status of the termination it
     // itself requested: reporting `exit code=null, signal=SIGKILL` would bury
     // the only reason anyone can act on.

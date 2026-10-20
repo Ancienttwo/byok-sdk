@@ -8,6 +8,7 @@ import { isTaskOfferType,
   type TaskState,
 } from '@byok-sdk/protocol';
 import type { DaemonLifecycle } from './daemon-lifecycle';
+import type { ExecutionRecord } from './execution-record';
 import type { RuntimeObservation } from '../runtime-detection';
 import type { ServiceEnvironmentStatus } from '../lifecycle/service-environment';
 
@@ -128,6 +129,16 @@ export type DaemonEvent =
   | { kind: 'stale-approval-decision'; ts: string; taskId: string; decision: 'approve' | 'reject'; reason?: string }
   | { kind: 'git-workspace'; ts: string; taskId: string; workspaceId: string; phase: string; headChanged?: boolean; commitsSinceBaseline?: number; dirty?: { staged: number; unstaged: number; untracked: number; conflicted: number }; errorCategory?: string }
   | { kind: 'runtime-disposal-failed'; ts: string; taskId: string; runtimeId: string; stage: 'signal' | 'quiescence' | 'cleanup'; reason: string }
+  /**
+   * Octop ③ (#553): whether the SDK saw one started execution's whole event
+   * trajectory — counts and closed codes only (`execution-record.ts`).
+   * Emitted once, after that task's terminal event (`completed`, `failed`,
+   * `cancelled` or a terminal `outbound-rejected`), unless the task registry
+   * evicted the task first (`MAX_TRACKED_TASKS`). A record whose terminal
+   * never settles in this process is not emitted. A diagnostic only: no task
+   * state depends on it.
+   */
+  | ({ kind: 'execution-record'; ts: string } & ExecutionRecord)
   /**
    * WP2I-S2: the Host's durable readback for a Host-approved Agent memory
    * intent contradicted the device's durable terminal (`disposition`
@@ -284,6 +295,13 @@ export class DaemonObserver {
    */
   private readonly approvalIdByEnvelope = new Map<string, string>();
   private readonly pendingApprovalIdByTask = new Map<string, string>();
+  /**
+   * Octop ③ (#553): execution records published before the server settled
+   * their task's terminal, held so that the `execution-record` event follows
+   * the terminal event. Only a task `taskInfo` tracks as nonterminal has an
+   * entry, so `MAX_TRACKED_TASKS` bounds it too; see `evictIfNeeded`.
+   */
+  private readonly heldExecutionRecords = new Map<string, ExecutionRecord>();
 
   subscribe(listener: DaemonEventListener): Unsubscribe {
     this.listeners.add(listener);
@@ -408,6 +426,7 @@ export class DaemonObserver {
           summary: envelope.payload.summary,
           sessionRef: envelope.payload.sessionRef,
         });
+        this.releaseExecutionRecord(taskId);
         return;
       }
       case 'task.fail': {
@@ -415,6 +434,7 @@ export class DaemonObserver {
         const retryable = envelope.payload.retryable ?? false;
         this.upsertTask(taskId, terminalTaskPatch(envelope)!);
         this.emit({ kind: 'failed', ts, taskId, reason: envelope.payload.reason, retryable });
+        this.releaseExecutionRecord(taskId);
         return;
       }
       case 'task.decline': {
@@ -428,6 +448,7 @@ export class DaemonObserver {
         const taskId = envelope.task_id;
         this.upsertTask(taskId, terminalTaskPatch(envelope)!);
         this.emit({ kind: 'cancelled', ts, taskId, reason: envelope.payload.reason });
+        this.releaseExecutionRecord(taskId);
         return;
       }
       default:
@@ -442,6 +463,7 @@ export class DaemonObserver {
       if (patch === undefined || rejection.taskId === undefined) throw new Error('terminal rejection has no local terminal envelope');
       this.upsertTask(rejection.taskId, { ...patch, delivery: 'rejected' });
       this.emit({ kind: 'outbound-rejected', ts: nowIso(), ...rejection, terminal: true, taskState: patch.state });
+      this.releaseExecutionRecord(rejection.taskId);
     } else {
       this.emit({ kind: 'outbound-rejected', ts: nowIso(), ...rejection, terminal: false });
     }
@@ -553,6 +575,28 @@ export class DaemonObserver {
   }): void {
     this.emit({ kind: 'runtime-disposal-failed', ts: nowIso(), ...event });
   }
+
+  /**
+   * Octop ③ (#553): `TaskRunner` publishes a record after `Session.close()`,
+   * which can finish before the server settles the terminal. Such a record
+   * waits until its task's terminal event goes out. A task this registry no
+   * longer tracks gets its record at once.
+   */
+  noteExecutionRecord(record: ExecutionRecord): void {
+    const state = this.taskInfo.get(record.taskId)?.state;
+    if (state === undefined || isTerminalState(state)) {
+      this.emit({ kind: 'execution-record', ts: nowIso(), ...record });
+      return;
+    }
+    this.heldExecutionRecords.set(record.taskId, record);
+  }
+
+  private releaseExecutionRecord(taskId: string): void {
+    const record = this.heldExecutionRecords.get(taskId);
+    if (record === undefined) return;
+    this.heldExecutionRecords.delete(taskId);
+    this.emit({ kind: 'execution-record', ts: nowIso(), ...record });
+  }
   /**
    * Finding F4: wired from `TaskRunnerDeps.onApprovalDispatched`, called
    * synchronously by `TaskRunner.dispatchApproval` BEFORE its own
@@ -613,6 +657,8 @@ export class DaemonObserver {
         `[byok/client] daemon task registry exceeded ${MAX_TRACKED_TASKS} entries with none terminal — evicting the oldest nonterminal task (${oldest}) from local observability only (its actual execution is unaffected)`,
       );
       this.taskInfo.delete(oldest);
+      // Nothing tracks the terminal its held record waits for any more.
+      this.releaseExecutionRecord(oldest);
     }
   }
 

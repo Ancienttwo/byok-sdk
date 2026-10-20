@@ -62,6 +62,8 @@ export type DaemonRecord =
       errorCategory?: string;
     }
   | { kind: 'runtime-disposal-failed'; ts: string; taskId: string; runtimeId: string; stage: 'signal' | 'quiescence' | 'cleanup'; reasonBytes: number }
+  /** Already content-free: counts and closed codes (`execution-record.ts`). */
+  | Extract<DaemonEvent, { kind: 'execution-record' }>
   | { kind: 'agent-memory-intent-integrity'; ts: string; intentId: string; disposition: 'conflict' | 'host_terminal' }
   | { kind: 'device-assertion'; ts: string; result: 'issued'; lane: AssertionLane; taskId?: string; audience: string; jti: string; expiresAt: string }
   | { kind: 'device-assertion'; ts: string; result: 'denied'; lane: AssertionLane; taskId?: string; reason: string; audienceBytes?: number }
@@ -119,6 +121,7 @@ const KIND_SET: Record<DaemonRecordKind, true> = {
   'stale-approval-decision': true,
   'git-workspace': true,
   'runtime-disposal-failed': true,
+  'execution-record': true,
   'agent-memory-intent-integrity': true,
   'device-assertion': true,
   'environment-resolved': true,
@@ -359,6 +362,17 @@ function recordOf(event: Exclude<DaemonEvent, { kind: 'progress' }>): DaemonReco
         runtimeId: event.runtimeId,
         stage: event.stage,
         reasonBytes: bytes(event.reason),
+      };
+    case 'execution-record':
+      return {
+        kind: 'execution-record',
+        ts,
+        taskId: event.taskId,
+        terminal: event.terminal,
+        status: event.status,
+        source: event.source,
+        gaps: event.gaps.map(({ reason, count }) => ({ reason, count })),
+        ...(event.unknownReason === undefined ? {} : { unknownReason: event.unknownReason }),
       };
     case 'agent-memory-intent-integrity':
       return { kind: 'agent-memory-intent-integrity', ts, intentId: event.intentId, disposition: event.disposition };

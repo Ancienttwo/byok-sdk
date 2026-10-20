@@ -23,6 +23,7 @@ Route its `agentMessage.consume` to `bot.consumeMessage`.
 Call `bot.recover()` after startup. Call `bot.close()` before closing the SDK
 server or the ledger. Do not call the K4 core's mutation methods directly.
 Use `input`, `answer`, `decide`, `cancelTurn`, `updateRoutine`, `setRoutineLifecycle`, `cancelDelegation`, and `abandonDelegation`.
+Use `receive` for IM messages ([IM channel input](#im-channel-input)).
 Read `snapshot` or upload K4 projections with `core.flushProjections`.
 
 The execution template selects this Bot's Agent. It must use a runtime profile
@@ -124,7 +125,8 @@ versions and audit rows have no retention policy in this small example.
 
 The supplied Agent template is the initial Main Bot. A team can have multiple
 Main Bots. `setMainBot(botId, value)` is an owner API. The Host must authenticate
-its owner APIs before calling them. `input(key, request, botId)` selects a Bot.
+its owner APIs before calling them, unless it passes a verified principal
+([IM channel input](#im-channel-input)). `input(key, request, botId)` selects a Bot.
 The default is the initial Main Bot. Ordinary turns keep the K8a actions.
 
 Give the Host the real server home projection API. Install
@@ -156,8 +158,9 @@ sending the same revision and digest. Delay starts at one second and caps at
 60 seconds. Recovery reuses stored ids. Old duplicate controls cannot replace
 a newer revision. Each revision remains gated on an exact accepted readback.
 
-Use `roomInput(key, roomId, text, mentions)` for a user message. `mentions` is
+Use `roomInput(key, roomId, text, mentions, principal)` for a user message. `mentions` is
 an ordered Bot id list or the structured value `all`. The default is empty.
+The optional `principal` is the verified sender ([IM channel input](#im-channel-input)).
 The Host never scans text for names or `[PASS]`. Rooms support mention mode.
 An admin identity grants a larger budget. It does not create an implicit seat.
 The optional admin mode is refused. `updateRoom` is an authenticated owner API
@@ -269,14 +272,15 @@ also stays outside this history-window change.
 
 ## Cross-Bot delegation
 
-This section covers slices X1 and X2 of `docs/plans/2026-10-19-k8b-cross-bot.md`.
-A Bot can delegate one request to another Bot of the same team. The `to` enum
+This section covers slices X1, X2, X2M and X3 of
+`docs/plans/2026-10-19-k8b-cross-bot.md`.
+A Bot can delegate requests to other Bots of the same team. The `to` enum
 lists this Bot first, then each active team Bot after its first persona
 readback. It lists Bot ids only. A room seat has no `delegate` fragment.
 
-The Host applies one cross-Bot item for each outcome. It refuses an item with
+One outcome can hold two cross-Bot items. The Host refuses an item with
 a delegation verdict and a reason: `room_seat`, `duplicate_target`,
-`target_archived`, `hop_limit`, `fan_out_not_enabled`, or `budget_exhausted`.
+`target_archived`, `hop_limit`, or `budget_exhausted`.
 A refusal also enters the initiator's `rejectedActions`.
 An accepted item creates a `bot_request` Turn for the target. Its id is
 `H(taskId, 'delegate', index)`. Its hop is the initiator's hop plus one, at
@@ -339,14 +343,25 @@ verdict. The Main Bot sees it in its next ContextPack.
 `abandoned`. When the attempt can still run, it also writes a K4 cancel. A
 terminal after the verdict goes to `audit` only.
 
-Every verdict reaches the initiator once, in a `bot_reply` Turn. Its id is
-`H('bot_reply', delegationId)`. When an outcome has no accepted item, one
-refusal report Turn `H('bot_reply', taskId)` holds all its refusals. That
+Every verdict reaches the initiator once, in a `bot_reply` Turn. The accepted
+items of one outcome form a batch. The first report waits until each accepted
+item has a verdict or is `uncertain`. It holds every verdict of the batch so
+far, refusals included. Its id is `H('bot_reply', taskId)` for two accepted
+items and `H('bot_reply', delegationId)` for one. When every accepted item is
+`uncertain`, there is no batch Turn. A verdict after the first report, or
+after that state, reports in its own Turn `H('bot_reply', delegationId)`.
+When an outcome has no accepted item, one refusal report Turn
+`H('bot_reply', taskId)` holds all its refusals. That
 report has no `delegate` fragment. Status changes publish
 `delegation:<id>:<revision>` projections.
 
-The root Bot budget is 12 units. An accepted item reserves one B unit and one
-A reply slot. A refusal report reserves one slot when one is free. Otherwise
+The root Bot budget is 12 units. An outcome with `n` accepted items reserves
+`n + max(n, 1)` units: one B unit and one A reply slot for each item.
+Admission counts every open reservation on the root. When the units are not
+free, the Host refuses accepted items from the last index
+(`budget_exhausted`) and checks again. After each report, the batch releases
+its free slots above the number of unreported items. A refusal report
+reserves one slot when one is free. Otherwise
 it is delivery only: it does not start a model, and it enters the next
 ContextPack. A unit is spent at the first observed claim and released when it
 can no longer be needed. `spent + reserved <= 12` holds after each transaction.
@@ -362,3 +377,50 @@ A Main Bot with 24 Bots, 8 routines, and a room exceeds the outcome schema cap
 of 16 384 bytes. The Host blocks such a Turn with a visible reason. It does
 not cut an enum. Without the room, 24 open delegations in the
 `cancel_delegation` enum still fit (15 949 bytes).
+
+## IM channel input
+
+This section covers slice M2 of the Octop plan for issue #552.
+The rules are in the [Host IM adapter guide](../../docs/host-im-adapter.md).
+A channel adapter takes the sender from authenticated platform data and gives
+a `Principal` with an `id` and the `kind` `human` or `bot`. Give principal ids
+a namespace that no Bot id uses, for example `im:<platform user id>`. Room
+history shows both kinds of id in `from`. The adapter maps the platform chat
+to a Bot id (`direct`) or a room id (`group`). It maps mention entities to Bot
+ids.
+
+`receive(message)` classifies one `InboundMessage` with `classifyInbound`, in
+the order of the guide's §3. The first match wins.
+
+| Sender and conversation | Result |
+| --- | --- |
+| No verified principal | `unverified_sender`. Audit only. |
+| Bot, 1:1 | `bot_audit`. Audit only. No Turn. |
+| Bot, group | `bot_background`. A room message without a seat, also with mention entities. |
+| Owner, 1:1 | `owner_input`. `input` with the principal. |
+| Other human, 1:1 | `not_owner`. Audit only. |
+| Human, group | `room_input`. `roomInput` with the principal. Mention entities select seats. |
+
+The input key is `inboundKey(message)`, the hash of channel, conversation id,
+and platform message id. A redelivered event returns the same id. The Host
+never scans text for mentions.
+
+`BotOptions.owner` is the owner principal id. The default is `owner`. Only the
+human principal with this id passes the owner check. These owner APIs take an
+optional last `principal`: `input`, `answer`, `decide`, `cancelTurn`,
+`cancelDelegation`, and `abandonDelegation`. The check runs first. Without a
+principal argument, the call acts as the owner, so the Host must authenticate
+the caller. A given `undefined`, `null`, or malformed principal is refused with
+`unverified_sender`. Any other principal that is not the owner is refused with
+`not_owner`. Each refusal writes an audit row before the call rejects. For an
+IM action, pass the principal that the adapter verified. Accept an approval
+only from a verified button callback, never from a text command.
+
+`roomInput` takes the same optional `principal`, with the same
+`unverified_sender` rule. Any verified human can post. The room message
+records the principal id in `from`, and a seat request records it in
+`requestFrom`. Without a principal, `from` is `user`. A bot principal's
+mentions select no seat. The other owner APIs take no principal.
+
+This example does not implement echoes, reply and push routes, or the
+delivery outbox yet (slice M3).

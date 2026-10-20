@@ -341,6 +341,7 @@ function parseRecordLine(line: string | undefined): DaemonRecord | undefined {
     case 'stale-approval-decision':
     case 'git-workspace':
     case 'runtime-disposal-failed':
+    case 'execution-record':
       return typeof raw.taskId === 'string' ? (raw as unknown as DaemonRecord) : undefined;
     default:
       return raw as unknown as DaemonRecord;

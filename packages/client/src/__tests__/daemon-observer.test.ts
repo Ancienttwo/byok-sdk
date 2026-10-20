@@ -112,9 +112,11 @@ describe('daemon local observability (DaemonObserver)', () => {
     // (matches daemon-task-loop.test.ts's identical assertion) — the
     // observer emits one `progress` DaemonEvent per normalized AgentEvent,
     // so that single envelope yields two local `progress` events here.
-    await vi.waitFor(() => expect(taskEvents(events, 'task-seq-1').some((event) => event.kind === 'completed')).toBe(true));
+    //
+    // Octop ③ (#553): a started task's execution record follows its terminal event.
+    await vi.waitFor(() => expect(taskEvents(events, 'task-seq-1').some((event) => event.kind === 'execution-record')).toBe(true));
     const kinds = taskEvents(events, 'task-seq-1').map((e) => e.kind);
-    expect(kinds).toEqual(['offered', 'claimed', 'started', 'progress', 'progress', 'completed']);
+    expect(kinds).toEqual(['offered', 'claimed', 'started', 'progress', 'progress', 'completed', 'execution-record']);
 
     const completed = events.find((e) => e.kind === 'completed' && e.taskId === 'task-seq-1');
     if (completed?.kind !== 'completed') throw new Error('unreachable');

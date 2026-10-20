@@ -204,6 +204,24 @@ export interface Session {
    * implies something upstream expected approval support that isn't there.
    */
   resolveApproval(approved: boolean, reason?: string): Promise<void>;
+  /**
+   * Runtime output this session could not turn into `events`, as counts for
+   * the whole session up to `close()`. The daemon reads it once, after
+   * `close()` resolved, and only when the descriptor declares
+   * `trajectoryEvidence`. A declaring adapter that omits it states that
+   * nothing below its event stream can drop or invent a frame.
+   */
+  evidence?(): SessionEvidence;
+}
+
+/** Counts behind one session's event stream; see {@link Session.evidence}. Never a frame, a line or a tool payload. */
+export interface SessionEvidence {
+  /** Runtime output frames that could not be decoded, including a truncated frame left at the end of the stream. */
+  readonly decodeDropped: number;
+  /** Decoded frames of a type the adapter neither maps to an event nor expects as bookkeeping. */
+  readonly unmappedFrames: number;
+  /** Tool results the adapter produced itself instead of observing them from the runtime. */
+  readonly syntheticToolResults: number;
 }
 
 /**
@@ -244,6 +262,13 @@ export interface RuntimeAdapterDescriptor {
    * tool interaction.
    */
   readonly progressEventsAreMessages?: boolean;
+  /**
+   * Declares `Session.events` as the evidence source of the daemon's local
+   * execution record (`daemon/execution-record.ts`): every tool call and
+   * result carries its `toolCallId`, and `turn_end` means the runtime
+   * completed. Absent: every record of this adapter is `unknown`.
+   */
+  readonly trajectoryEvidence?: 'event-stream';
 }
 
 /** The pure input to one adapter admission decision. It contains no credential values or workspace resources. */
@@ -495,6 +520,7 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
     supportsDispatchSelection: descriptor.supportsDispatchSelection === true,
     requiresMcpToolsetToolObservation: descriptor.requiresMcpToolsetToolObservation === true,
     ...(descriptor.progressEventsAreMessages === true ? { progressEventsAreMessages: true } : {}),
+    ...(descriptor.trajectoryEvidence === 'event-stream' ? { trajectoryEvidence: 'event-stream' as const } : {}),
     capabilities: Object.freeze({
       ...(descriptor.capabilities.durablePi === undefined ? {} : { durablePi: descriptor.capabilities.durablePi === true }),
       ...(descriptor.capabilities.nativeInteractions === undefined ? {} : {
