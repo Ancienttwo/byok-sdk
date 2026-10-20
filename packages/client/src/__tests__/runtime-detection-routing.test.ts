@@ -38,6 +38,7 @@ afterEach(async () => {
 
 it('retains the SDK finite refusal through the strict decoder', () => {
   expect(validateRuntimeDetectResult({ kind: 'refused', reason: 'app_server_unavailable' })).toEqual({ kind: 'refused', reason: 'app_server_unavailable' });
+  expect(validateRuntimeDetectResult({ kind: 'refused', reason: 'acp_unavailable' })).toEqual({ kind: 'refused', reason: 'acp_unavailable' });
 });
 it('refuses the removed attestation refusal reasons', () => {
   for (const reason of ['install_record_mismatch', 'installation_observation_unsupported', 'native_identity_mismatch']) {

@@ -12723,7 +12723,8 @@ export interface RuntimeDetectionAdvisory {
     readonly reason: 'runtime_version_unqualified';
     readonly qualifiedVersion: string;
 }
-export type RuntimeDetectionRefusalReason = 'app_server_unavailable';
+/** `app_server_unavailable`: Codex has no `app-server`. `acp_unavailable`: an ACP runtime has no stdio ACP mode. */
+export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unavailable';
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
     /** Supports display-only Agent message drafts. Omission means unsupported. */
