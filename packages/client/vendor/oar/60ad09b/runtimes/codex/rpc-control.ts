@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR c264f17 to bound control RPCs and record timeout rejection (Apache-2.0).
+// BYOK change: Modified from OAR 60ad09b to bound control RPCs and record timeout rejection (Apache-2.0).
 import { SessionNotFoundError } from "../../contracts/session-not-found-error.js";
 import { SessionUnavailableError, type SessionUnavailableReason } from "../../contracts/session-unavailable-error.js";
 import { emptyInputRefusal } from "../../shared/control-input.js";

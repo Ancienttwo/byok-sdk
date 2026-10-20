@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR c264f17 for injected processes, native-first recording, bounded request refusal, caller-selected sandbox and session credential redaction without sealSession (Apache-2.0).
+// BYOK change: Modified from OAR 60ad09b for injected processes, native-first recording, bounded request refusal, caller-selected sandbox and session credential redaction without sealSession (Apache-2.0).
 /* oxlint-disable import/max-dependencies -- The adapter composes protocol, input and process-lifetime mechanisms. */
 import type { AvailableInstallation } from "../../contracts/installation.js"; // BYOK change: direct type-only contract import.
 import { randomUUID } from "node:crypto";

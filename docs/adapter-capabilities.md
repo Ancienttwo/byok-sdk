@@ -42,7 +42,7 @@ The trajectory evidence row has its own Pi evidence; see
 
 `GrokAdapter` runs Grok Build over ACP: `grok agent --always-approve
 --no-leader stdio`, through the vendored OAR Grok profile
-(`packages/client/vendor/oar/c264f17`). The ACP stack is a private entry that
+(`packages/client/vendor/oar/60ad09b`). The ACP stack is a private entry that
 loads at session start, so `@byok-sdk/client/adapters` carries no ACP
 dependency.
 

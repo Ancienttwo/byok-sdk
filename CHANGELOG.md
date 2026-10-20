@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Changed (client)** — update the private OAR source to 0.68.2
+  (`60ad09b`). Keep the nine BYOK deltas. Update the source manifest and
+  bridge paths. The ACP profile now permits a separate session-start timeout;
+  Grok keeps its current timeout. No public API or npm dependency changes.
+
 - **Feature (client; Octop T1, #553)** — the daemon makes one local execution
   record for each started execution. The record tells whether the SDK saw the
   whole event trajectory: `complete`, `partial` with counted gaps, or
