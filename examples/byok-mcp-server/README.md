@@ -1,12 +1,12 @@
-# External-Bot MCP beta: B2, B3 and B4
+# External-Bot MCP beta: B2, B3, B4 and B5
 
 This private, copy-and-own example supplies the Host authorization and admission
-ledger (B2), the task tool catalogue (B3) and the routine tools (B4) from
+ledger (B2), the task tool catalogue (B3), the routine tools (B4) and the
+read-only memory tool (B5) from
 [the beta plan](../../docs/plans/2026-10-19-byok-mcp-server-external-bot-beta.md).
 It reuses the public B1 HTTP transport, the public `@byok-sdk/server` API and the
-K4 Host execution core (`examples/host-execution-core`) for routines.
+K4 Host execution core (`examples/host-execution-core`) for routines and memory.
 It adds no public SDK API or new SDK runtime dependency.
-Memory tools belong to B5.
 There is no listener, admin HTTP route, default key or model invocation here.
 
 ## Host composition
@@ -47,7 +47,8 @@ the policy is invalid. Only authenticated caller handles reach that callback. Th
 list excludes denied scopes. A manual call still checks current ledger state.
 Domain refusals use JSON text with `isError: true`, `code`, `message` and optional
 `retryAfterSeconds`. `createTaskTools` returns the B3 registrations and
-`createRoutineTools` the B4 registrations; pass both arrays as `tools`. The B2 tests
+`createRoutineTools` the B4 registrations and `createMemoryTools` the B5
+registration; pass the arrays the Host offers as `tools`. The B2 tests
 register local protocol probes only to exercise this boundary.
 
 ## Keys and ownership
@@ -66,7 +67,8 @@ new key to change them. Rotation does not transfer old tasks to the new key.
 
 Scopes are `tasks.dispatch`, `tasks.read`, `tasks.cancel`, `artifacts.read`,
 `routines.read`, `routines.write`, `memory.read` and `memory.write`. Memory and
-routine grants require one AgentRef. Beta v1 has no memory-write tool. Task-only
+routine grants require one AgentRef. Beta v1 has no memory-write tool
+(`byok_memory_propose` waits for beta plan §9 Q9 and PRD P5). Task-only
 keys need no AgentRef. A saved AgentRef records the key's context; it does not
 force the Host to turn an ordinary coding task into an Agent execution.
 
@@ -268,6 +270,53 @@ finishes, as a running task does. Call `retireRevokedRoutines(ledger, core)` at
 Host startup, after `core.recover()`, to finish a retirement that a crash or a
 listener failure interrupted.
 
+## Memory tool (B5)
+
+| Tool | Scope | Input | Result |
+| --- | --- | --- | --- |
+| `byok_memory_read` | `memory.read` | `{ path? }` (only `MEMORY.md`, the default) | `{ path, text, revision?, projectedAt? }` |
+
+The tool reads byok's own Agent-home memory for the key's AgentRef. It is not
+the external Bot's own memory, and its description says so in its first sentence.
+It is read-only. There is no `byok_memory_propose`.
+
+The Host passes its K4 `HostMemoryPage` and a `placement` callback:
+
+```ts
+const page = new HostMemoryPage(hostLedger, { isCurrent, notify, authorizeProjection });
+const tools = [...createTaskTools({ sdk, ledger, blobBaseUrl: sdkOrigin }),
+  ...createMemoryTools({ ledger, memory: page, placement: agentRef => currentDevice(agentRef) })];
+```
+
+The page receives the device's redacted `agent.memory.projection` mutations
+through `projectionPort(deviceId)`. Its `contextPack` is the only read: the tool
+keeps no copy of memory text and does not read the K4 ledger directly.
+`placement` names the device that holds the Agent's home now. It must come from
+the same trusted Host state as the page's `isCurrent`. The tool never takes an
+Agent or a device from arguments.
+
+- `text` is the redacted resident memory in K4's profile
+  `{ residentMemory: string | null }`. The device's Host-owned redactor decides it.
+- `revision` is the projection's `mutationId`, and `projectedAt` is when the Host
+  accepted it. The revision names a projection, not a file. The projection
+  contract carries no source revision, so it cannot be a compare-and-swap base.
+- `text` is `null` with no `revision` when the page holds no current projection:
+  none yet, a projection whose policy shows no resident memory, or an applied
+  `MEMORY.md` write whose refreshed projection has not arrived. Stale text never
+  comes back.
+- `path` accepts only `MEMORY.md`. K4's profile carries no `notes/` files, so a
+  `notes/**` path is `invalid_input`. Serving notes needs a Host redactor profile
+  that carries them; that is not part of this beta.
+
+Refusals: no current placement gives `unavailable` (retry hint 60 s). A placement
+on a device that the key does not grant gives `forbidden`. When the page refuses
+the read (placement or Agent profile changed, projection grant revoked, or
+`MEMORY.md` over K4's 8 KiB resident limit), the tool gives one fixed
+`unavailable` message for the Host owner. A changed Agent profile needs a new key
+with the new AgentRef. Memory reads have no quota counter; the beta plan sets none.
+Every result enters the external Bot vendor's storage (beta plan §9 Q10); only
+redacted text that the Host policy projected leaves.
+
 ## Storage boundary
 
 Choose a dedicated private directory and regular SQLite file. POSIX directories
@@ -382,3 +431,33 @@ No existing assertion changed. One test was added to `ledger.test.ts`. No test o
 runtime timeout was added or increased. B3 helpers (`json`, `input`, `integer`,
 `selectDevice`) moved to module scope for reuse, with no behavior change.
 Not tested: a Host that injects another K4 calendar, and a device without Agent-home support.
+
+### B5 verification record: 2026-10-20
+
+The [B5 plan](../../docs/plans/2026-10-20-byok-mcp-beta-b5.md) records P1/P2/P3.
+`memory.test.ts` runs K4's `HostMemoryPage` on a temporary SQLite ledger and the beta
+endpoint on a loopback origin with the standard MCP HTTP client. The device side is
+synthetic: redacted mutations go through the page's own `projectionPort`, and one
+MEMORY.md write goes through the page's intent transport. The tests cover the read,
+newer and null projections, stale hiding after an applied write and its refresh,
+per-key Agent isolation, bad input, missing and ungranted placement, a changed
+profile, a revoked projection grant, the 8 KiB limit, scope filtering and revocation.
+No runtime, paid model or account is used. Mutation checks: dropping the device
+grant check, the path check or the Host placement, or returning another revision,
+each made a test fail.
+
+Node `v24.18.0`, Bun `1.4.3`, macOS arm64, `TMPDIR` set to a fresh short directory.
+The commands ran on the final source.
+
+| Command from the repository root | Result |
+| --- | --- |
+| `bun run build` | Exit 0. |
+| `bun run typecheck` | Exit 0. |
+| `bun run test` | Exit 1. `@byok-sdk/client`: 4,184 passed, 67 skipped, 2 failed (`mcp-server-http.test.ts` "isolates equal request IDs and cancellation", `task-runner-cancel-native.test.ts` 10 s timeout). This slice changes no file under `packages/`. In isolation the native test passed and the HTTP test failed in 2 of 3 runs; it is a pre-existing flake, reported, not changed. |
+| `bun run check:api-surface` | Exit 0 in check mode. All 9 package goldens match. |
+| `bun run check:version-authority` | Exit 0. |
+| `bun run --cwd examples/byok-mcp-server test` | Exit 0. 39 tests passed in 7 files. |
+
+No existing test file or assertion changed. No test or runtime timeout was added
+or increased. Not tested: the real-device projection path (it needs the secure
+memory filesystem) and a Host redactor.
