@@ -31,6 +31,9 @@ export type { ClaudeAdapterOptions } from './claude/claude-adapter';
 export { CodexAdapter } from './codex/codex-adapter';
 export type { CodexAdapterOptions, CodexSandboxSetting } from './codex/codex-adapter';
 
+export { GrokAdapter } from './grok/grok-adapter';
+export type { GrokAdapterOptions } from './grok/grok-adapter';
+
 export { NativeInteractionController, NativeInteractionError } from '../native-interactions';
 export type {
   NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity,

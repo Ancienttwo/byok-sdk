@@ -8,19 +8,19 @@ they are not a second runtime-selection registry.
 
 ## Current matrix
 
-| Capability | Claude | Codex | Pi |
-| --- | --- | --- | --- |
-| Resume a known native session | Supported; exact `--resume` identity | Supported; exact `thread/resume` identity | Not requalified in this slice |
-| Redirect the active turn (`steer`) | Unsupported; typed rejection | Supported; exact active `expectedTurnId` | Not requalified in this slice |
-| New instruction after an idle turn (`followUp`) | Supported, same native session | Supported, same native thread | Not requalified in this slice |
-| Native session fork | Unsupported; no SDK `Session` operation | Unsupported; no SDK `Session` operation | No new support introduced |
-| Native session rollback | Unsupported; no SDK `Session` operation | Unsupported; no SDK `Session` operation | No new support introduced |
-| Legacy boolean interactive approval | Unsupported | Unsupported | No new support introduced |
-| Native approval / structured question replies, default construction | Unsupported and omitted | Unsupported and omitted | No new support introduced |
-| Local native interaction opt-in | allow-once / deny / cancel; structured AskUserQuestion | allow-once / allow-session / deny / cancel; structured question IDs | Unsupported |
-| Recover pending native interactions after process restart | Unsupported | Unsupported | No new support introduced |
-| Host browser/mobile reconnect | Host-owned; not native session resume | Host-owned; not native session resume | Host-owned |
-| Trajectory evidence for the execution record (`trajectoryEvidence`) | Not declared; records are `unknown` | Not declared; records are `unknown` | Declared (`event-stream`); not declared with `durablePi: true` |
+| Capability | Claude | Codex | Grok | Pi |
+| --- | --- | --- | --- | --- |
+| Resume a known native session | Supported; exact `--resume` identity | Supported; exact `thread/resume` identity | Supported; exact ACP `session/resume` identity | Not requalified in this slice |
+| Redirect the active turn (`steer`) | Unsupported; typed rejection | Supported; exact active `expectedTurnId` | Unsupported; typed rejection | Not requalified in this slice |
+| New instruction after an idle turn (`followUp`) | Supported, same native session | Supported, same native thread | Supported, same native session | Not requalified in this slice |
+| Native session fork | Unsupported; no SDK `Session` operation | Unsupported; no SDK `Session` operation | Unsupported; no SDK `Session` operation | No new support introduced |
+| Native session rollback | Unsupported; no SDK `Session` operation | Unsupported; no SDK `Session` operation | Unsupported; no SDK `Session` operation | No new support introduced |
+| Legacy boolean interactive approval | Unsupported | Unsupported | Unsupported | No new support introduced |
+| Native approval / structured question replies, default construction | Unsupported and omitted | Unsupported and omitted | Unsupported and omitted | No new support introduced |
+| Local native interaction opt-in | allow-once / deny / cancel; structured AskUserQuestion | allow-once / allow-session / deny / cancel; structured question IDs | Unsupported; every permission request is answered `cancelled` | Unsupported |
+| Recover pending native interactions after process restart | Unsupported | Unsupported | Unsupported | No new support introduced |
+| Host browser/mobile reconnect | Host-owned; not native session resume | Host-owned; not native session resume | Host-owned; not native session resume | Host-owned |
+| Trajectory evidence for the execution record (`trajectoryEvidence`) | Not declared; records are `unknown` | Not declared; records are `unknown` | Not declared; records are `unknown` | Declared (`event-stream`); not declared with `durablePi: true` |
 
 By default Claude and Codex run YOLO
 ([ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md)): Claude with
@@ -38,10 +38,57 @@ runtime name or using a custom harness does not inherit another adapter's pass.
 The trajectory evidence row has its own Pi evidence; see
 [Trajectory evidence](#trajectory-evidence).
 
+## Grok
+
+`GrokAdapter` runs Grok Build over ACP: `grok agent --always-approve
+--no-leader stdio`, through the vendored OAR Grok profile
+(`packages/client/vendor/oar/c264f17`). The ACP stack is a private entry that
+loads at session start, so `@byok-sdk/client/adapters` carries no ACP
+dependency.
+
+- Identity: the descriptor id is `grok`. It is not a frozen wire runtime id,
+  so a task selects it with the custom-harness identity (`harnessId: 'grok'`,
+  server capability `custom-harness`). It takes no dispatch selection. The
+  model is the `model` adapter option (`session/set_model`).
+- Ownership: the SDK spawns, adopts and reaps the agent process and every
+  `terminal/create` command Grok asks the client to run. Each gets the explicit
+  task environment. The retained records have the same 16 MiB default budget
+  as Codex.
+- Permissions: Grok runs in its own approve-all mode. A permission request
+  that still reaches the client (a user's own rule or hook) is answered
+  `cancelled` and recorded. The SDK adds no second permission layer.
+- MCP toolsets: task stdio servers go in the ACP `mcpServers` of
+  `session/new` and `session/resume`.
+- Closing reply: Grok streams text. The adapter emits one `progress` event per
+  text run; a tool call or the turn end closes a run. The daemon publishes the
+  last run as the closing reply when Grok does not call `send_agent_message`.
+  Sub-agent sessions produce no events for the parent.
+- Resume: ACP `session/resume` with the exact id. Its answer carries no id, so
+  the resumed identity is the requested one by construction; the conformance
+  identity-drift case does not apply. A missing session fails closed.
+- Interrupt: `session/cancel`, then a wait for the cancelled prompt answer,
+  bounded by `interruptTimeoutMs` (default 1000 ms). OAR still kills the
+  process when Grok answers nothing for 10 s.
+- Detection: `grok --version` (advisory when it is not the qualified 1.0.52,
+  the newest OAR live evidence), `grok agent stdio --help` (else
+  `refused: acp_unavailable`), and a login signal: `$GROK_HOME/auth.json`
+  (default `~/.grok/auth.json`) exists, or `XAI_API_KEY` is set. The file is
+  never read and no session opens.
+- Agent memory: the daemon puts the memory guidance, including the
+  memory-reader read-only rule, into the prompt text, so Grok receives it with
+  each instruction. Grok loads `AGENTS.md` from the git root down to `cwd`, so
+  a memory-reader run directory may not load the persona in the Agent home.
+  That case has no live evidence.
+- Platforms: macOS and Linux. Windows uses the shared process-tree path but has
+  no Grok evidence.
+
+The fixture suite proves the adapter contract against a fake ACP agent. It is
+not live certification. No live Grok run is part of CI.
+
 ## What the qualification suite proves
 
 `packages/client/src/__tests__/adapter-capability-conformance.test.ts` runs the
-same assertions for the actual Claude and Codex adapters. Its test-only runner
+same assertions for the actual Claude, Codex and Grok adapters. Its test-only runner
 lives in `fixtures/adapter-capability-conformance.ts`; it uses the established
 prepared-operation path and existing synthetic CLI fixtures. It adds no
 production transport, provider dependency, or package dependency cycle.

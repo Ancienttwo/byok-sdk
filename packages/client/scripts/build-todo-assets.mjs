@@ -76,6 +76,8 @@ for (const name of ['LICENSE', 'PROVENANCE.md', 'source-manifest.json']) {
   await copyFile(new URL(name, vendor), new URL(`${layout.basePath}/${name}`, assets));
 }
 await copyFile(new URL('src/bin/pi-todo-runtime.d.ts', root), new URL('dist/bin/pi-todo-runtime.d.ts', root));
+// The private ACP runtime entry's hand-written declaration, as for the todo runtime above.
+await copyFile(new URL('src/runtime/acp-session-runtime.d.ts', root), new URL('dist/runtime/acp-session-runtime.d.ts', root));
 for (const name of ['THIRD-PARTY.md', 'third-party-manifest.json']) {
   await copyFile(new URL(`vendor/${name}`, root), new URL(name, assets));
 }

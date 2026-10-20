@@ -157,6 +157,10 @@ transport-free adapter surface:
 import { PiAdapter, ClaudeAdapter, CodexAdapter } from '@byok-sdk/client/adapters';
 ```
 
+`GrokAdapter` (Grok Build over ACP) is in the same entry. It is not in the
+default adapter set: a Host constructs it explicitly, and a task selects it
+with `harnessId: 'grok'`. See `docs/adapter-capabilities.md`.
+
 Version 0.4.0 intentionally breaks custom adapters: they expose a frozen
 descriptor and side-effect-free `prepare()` that returns one prepared
 operation; the old direct `start()` surface is removed. A published

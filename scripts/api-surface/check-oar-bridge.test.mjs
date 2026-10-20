@@ -3,7 +3,8 @@
 // The SDK projection imports built protocol types, so run after `bun run build`.
 // On re-vendor, update the c264f17 pins together in these four files:
 // packages/client/src/runtime/codex-session-runtime.js,
-// packages/client/src/runtime/oar-process-tree.js, this test, and
+// packages/client/src/runtime/oar-process-tree.js,
+// packages/client/src/runtime/acp-session-runtime.js, this test, and
 // scripts/api-surface/oar-bridge-types.ts.
 // The bridge is outside the API golden. New type exports need explicit checks.
 import assert from 'node:assert/strict';
@@ -46,6 +47,23 @@ test('OAR process-tree JS bridge re-exports the checked vendored functions', () 
     ['descendantsOf', 'descendantsOf'],
     ['killEntries', 'killEntries'],
     ['readProcessTable', 'readProcessTable'],
+  ]);
+});
+
+test('OAR ACP JS bridge re-exports the checked vendored values', () => {
+  const source = readFileSync(path.join(repoRoot, 'packages/client/src/runtime/acp-session-runtime.js'), 'utf8');
+  const { body } = parse(source, { ecmaVersion: 'latest', sourceType: 'module' });
+  const reexports = body.map((statement) => {
+    assert.equal(statement.type, 'ExportNamedDeclaration');
+    return [
+      statement.source?.value,
+      statement.specifiers.map(({ local, exported }) => [local.name, exported.name]),
+    ];
+  });
+  assert.deepEqual(reexports, [
+    ['../../vendor/oar/c264f17/contracts/session-not-found-error.js', [['SessionNotFoundError', 'SessionNotFoundError']]],
+    ['../../vendor/oar/c264f17/contracts/runtime-failure-error.js', [['RuntimeFailureError', 'RuntimeFailureError']]],
+    ['../../vendor/oar/c264f17/runtimes/grok/session.js', [['grokSession', 'grokSession']]],
   ]);
 });
 
