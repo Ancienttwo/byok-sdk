@@ -19,7 +19,7 @@ import type { RoomFields } from '@byok-sdk/protocol';
 
 import { CurrentRequestTooLargeError, HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS } from './history';
 import { flushHomes, type HomeServer } from './home-projections';
-import { admitUserInput, coalescePolicy, sealBatchForCancel, sealDueBatches, type CoalescePolicy } from './coalesce';
+import { admitUserInput, coalescePolicy, projectInputBatches, sealBatchForCancel, sealDueBatches, type CoalescePolicy } from './coalesce';
 import { classifyInbound, inboundKey, isOwner, verified, type InboundClass, type InboundMessage, type Principal, type PrincipalArg } from './channel';
 export interface BotOptions {
   botId: string; execution: ExecutionTemplate; now?: () => number;
@@ -546,6 +546,7 @@ export class BotCollaboration {
           hop: origin.hop, authority: origin.authority ?? 'bot' });
       }
     }
+    projectInputBatches(state, (key, value) => project(s, key, value));
     return materialized;
   }
   private async flushWakes(): Promise<void> {
@@ -662,7 +663,7 @@ export class BotCollaboration {
     } while (more);
     clearTimeout(this.timer);
     if (!this.closed) {
-      // Durable state is authority. The timer only retries outbox work and expires cards.
+      // Durable state is authority. The timer only retries outbox work, expires cards and seals input batches at their window end.
       const state = this.snapshot();
       const heads = new Map<string, number>();
       for (const op of state.operations.filter(o => o.state === 'pending').sort((a, b) => a.sequence - b.sequence)) {
@@ -673,6 +674,7 @@ export class BotCollaboration {
         ...Object.values(state.team.seats).filter(seat => !seat.released && seat.deadline !== undefined).map(seat => seat.deadline!),
         ...state.team.homeOperations.filter(op => op.status === 'pending').map(op => Math.max(this.now() + 1000, op.retryAt ?? 0)),
         ...delegationDue(state, this.timers),
+        ...Object.values(state.inputBatches ?? {}).filter(batch => batch.state === 'open').map(batch => batch.sealAt),
         ...Object.values(state.delegations).filter(d => d.cancel && !d.cancel.delivered).map(() => this.now() + 1000)];
       if (due.length) {
         this.timer = setTimeout(() => { void this.drain().catch(() => {}); }, Math.max(1, Math.min(60_000, Math.min(...due) - this.now())));

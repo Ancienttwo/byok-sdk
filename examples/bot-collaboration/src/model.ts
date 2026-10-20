@@ -30,11 +30,11 @@ export type SealReason = 'idle' | 'window' | 'items' | 'bytes' | 'boundary' | 'k
 /**
  * `id` is the first input's id and the batch Turn id. `key` is the coalescing key.
  * `request` is the rendered Request while the batch is open; sealing moves it into the batch Turn.
- * `bytes` is its UTF-8 size, framing included.
+ * `bytes` is its UTF-8 size, framing included. `revision` is the last projected revision: 1 is open, 2 is sealed.
  */
 export interface InputBatch {
   id: string; botId: string; key: string; inputIds: string[]; bytes: number;
-  openedAt: number; sealAt: number; state: 'open' | 'sealed'; sealReason?: SealReason; request?: string;
+  openedAt: number; sealAt: number; state: 'open' | 'sealed'; sealReason?: SealReason; request?: string; revision?: 1 | 2;
 }
 export type Verdict = 'answered' | 'failed' | 'cancelled' | 'refused' | 'expired' | 'abandoned';
 export interface ReplyEntry {
