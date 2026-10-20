@@ -122,3 +122,54 @@ export type CheckTreeTable = Assert<Equal<TreeBridge.ProcessTable, VendorTree.Pr
 export type CheckTreeRead = Assert<Equal<typeof TreeBridge.readProcessTable, typeof VendorTree.readProcessTable>>;
 export type CheckTreeWalk = Assert<Equal<typeof TreeBridge.descendantsOf, typeof VendorTree.descendantsOf>>;
 export type CheckTreeKill = Assert<Equal<typeof TreeBridge.killEntries, typeof VendorTree.killEntries>>;
+
+// The ACP bridge: one start signature for every vendored ACP runtime, with
+// the SDK-owned agent process, terminal processes and explicit environment.
+import type * as AcpBridge from '../../packages/client/src/runtime/acp-session-runtime.js';
+import type { StartAcpSession as VendorStartAcp, AcpSessionOptions, AcpSessionHooks } from '../../packages/client/vendor/oar/c264f17/shared/acp/session.js';
+import type { SpawnAcpLineProcess } from '../../packages/client/vendor/oar/c264f17/shared/acp/process.js';
+import type { SpawnAcpTerminal } from '../../packages/client/vendor/oar/c264f17/shared/acp/terminal.js';
+import type { AdapterSession } from '../../packages/client/vendor/oar/c264f17/contracts/session.js';
+import type { spawnOwnedTerminalProcess } from '../../packages/client/src/runtime/owned-terminal-process.js';
+
+type AcpBridgeArgs = Parameters<AcpBridge.StartAcpSession>;
+type AcpBridgeOptions = Mutable<
+  Pick<AcpSessionOptions, 'cwd' | 'env' | 'resume' | 'model' | 'mcpServers'>
+>;
+type AcpBridgeHooks = Mutable<Omit<AcpSessionHooks, 'onRecord'>> & {
+  onRecord?: (record: AcpBridge.AcpRecord) => void;
+};
+type AcpBridgeSession = {
+  readonly id: AdapterSession['id'];
+  prompt(...args: FirstInput<AdapterSession['prompt']>): Promise<AcpBridge.AcpControl>;
+  abort(...args: Parameters<AdapterSession['abort']>): Promise<AcpBridge.AcpControl>;
+  records(): readonly AcpBridge.AcpRecord[];
+  dispose: AdapterSession['dispose'];
+};
+
+export type CheckAcpExports = Assert<Equal<keyof typeof AcpBridge, 'SessionNotFoundError'>>;
+export type CheckAcpNotFound = Assert<Equal<typeof AcpBridge.SessionNotFoundError, typeof Bridge.SessionNotFoundError>>;
+export type CheckAcpControl = Assert<Equal<AcpBridge.AcpControl, BridgeControl>>;
+export type CheckAcpRecord = Assert<Equal<AcpBridge.AcpRecord, Flatten<BridgeRecord>>>;
+export type CheckAcpSession = Assert<Equal<AcpBridge.RawAcpSession, AcpBridgeSession>>;
+// Name each intentional omission so new vendor members fail this check.
+export type CheckAcpSessionMembers = Assert<Equal<
+  Exclude<keyof AdapterSession, 'capabilities' | 'steer' | 'queue' | 'withdraw' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown'>,
+  keyof AcpBridge.RawAcpSession
+>>;
+export type CheckAcpVendorSession = Assert<Assignable<AdapterSession, AcpBridge.RawAcpSession>>;
+export type CheckAcpParameters = Assert<Equal<AcpBridgeArgs, [
+  spawn: typeof spawnOwnedLineProcess,
+  spawnTerminal: typeof spawnOwnedTerminalProcess,
+  installation: BridgeInstallation,
+  options: AcpBridgeOptions,
+  hooks?: Mutable<AcpBridgeHooks>,
+]>>;
+export type CheckAcpReturn = Assert<Equal<ReturnType<AcpBridge.StartAcpSession>, Promise<AcpBridge.RawAcpSession>>>;
+export type CheckAcpVendorStart = Assert<Assignable<VendorStartAcp, AcpBridge.StartAcpSession>>;
+export type CheckAcpVendorHook = Assert<Equal<NonNullable<AcpSessionHooks['onRecord']>, (record: RawEvent) => void>>;
+export type CheckAcpHookRecord = Assert<Assignable<RawEvent, AcpBridge.AcpRecord>>;
+// The real SDK transports fit the vendor seams.
+export type CheckAcpSpawn = Assert<Assignable<typeof spawnOwnedLineProcess, SpawnAcpLineProcess>>;
+export type CheckAcpTerminalSpawn = Assert<Assignable<typeof spawnOwnedTerminalProcess, SpawnAcpTerminal>>;
+export type CheckAcpEnv = Assert<Equal<Readonly<ReturnType<typeof buildRuntimeEnv>>, AcpBridgeArgs[3]['env']>>;

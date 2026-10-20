@@ -10,11 +10,14 @@ interface SpawnDependencies {
   spawnFn?: (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
   platform?: NodeJS.Platform;
   jobObject?: { assign(pid: number): Promise<{ release(): void }> };
+  /** Names the runtime in disposal and adoption failures. */
+  label?: string;
 }
 
 /** JSONL transport over the existing BYOK owned-tree adoption/disposal authority. */
 // Structural return types keep the BYOK source declaration build independent of the unconnected vendor tree.
 export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
+  const label = deps.label ?? 'codex app-server';
   return (command: string, args: readonly string[], options: { readonly env: Readonly<Record<string, string>>; readonly cwd?: string }) => {
     if (options.env === undefined) throw new Error('owned line process requires an explicit filtered environment');
     const child = (deps.spawnFn ?? spawn)(command, [...args], withOwnedProcessTree({
@@ -48,7 +51,7 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
 
     const cleanup = (): Promise<void> => {
       if (disposal === undefined) {
-        disposal = disposeOwnedProcessTree({ child, waitClosed: () => closeReceipt, isClosed: () => closed, label: 'codex app-server' }).catch(error => { disposal = undefined; throw error; });
+        disposal = disposeOwnedProcessTree({ child, waitClosed: () => closeReceipt, isClosed: () => closed, label }).catch(error => { disposal = undefined; throw error; });
       }
       return disposal;
     };
@@ -103,7 +106,7 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
     child.stderr.on('error', fail);
     child.once('error', fail);
     child.once('spawn', () => {
-      void adoptOwnedProcessTree({ child, label: 'codex app-server', platform: deps.platform, jobObject: deps.jobObject }).then(() => {
+      void adoptOwnedProcessTree({ child, label, platform: deps.platform, jobObject: deps.jobObject }).then(() => {
         adopted = true;
         resolveSpawn();
         flush();
