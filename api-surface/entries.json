@@ -353,7 +353,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private ACP runtime stack (Grok)",
-      "budgetBytes": 83519,
+      "budgetBytes": 83640,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

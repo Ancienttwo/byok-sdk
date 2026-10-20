@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR c264f17 for injected processes, bounded RPCs and server replies (Apache-2.0).
+// BYOK change: Modified from OAR 60ad09b for injected processes, bounded RPCs and server replies (Apache-2.0).
 // BYOK change: The caller owns process creation and must enforce bounded kill/exited semantics.
 export interface LineProcess {
   readonly spawned: Promise<void>;

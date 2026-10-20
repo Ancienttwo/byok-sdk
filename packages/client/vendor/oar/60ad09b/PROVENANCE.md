@@ -1,6 +1,6 @@
-# OAR c264f17 private runtime fork
+# OAR 60ad09b private runtime fork
 
-Source: https://github.com/botiverse/oar, version 0.67.0, fixed commit `c264f17040dd9513b43300886a80f3f6eddde7b1`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
+Source: https://github.com/botiverse/oar, version 0.68.2, fixed commit `60ad09b9b97bdd005360504fda2de0d59826f08c`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
 
 `source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 81 source files plus LICENSE. Seventy-two source files keep upstream bytes. Nine source files contain BYOK changes. The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, plus the shared ACP session stack (`shared/acp/`) and the Grok Build session (`runtimes/grok/session.ts`) with their import closure. No Cursor, CLI, arena, executable manager, other runtime or branded resources are included. The Grok install, update, inventory, model-list and account-usage modules are not included.
 
@@ -339,3 +339,16 @@ The five maintained files keep their BYOK deltas. Only their change notices name
 Upstream 0.66.1 to 0.67.0 also changes the executable manager (Windows npm and pnpm shim launch), the pi and pi-durable runtimes (Pi 1.3.0, resumed tool reset, command exit codes) and adds the `forms` entry. These modules remain outside the selected closure. No upstream npm dependency enters the SDK.
 
 Build assets copy this source's LICENSE, PROVENANCE.md and source-manifest.json to `dist/assets/provenance/oar/c264f17/`.
+
+### 0.67.0 → 0.68.2 re-vendor
+
+The base is tag v0.68.2, commit `60ad09b9b97bdd005360504fda2de0d59826f08c`.
+Three selected files changed upstream. `contracts/session-options.ts` and
+`contracts/session.ts` update comments. `shared/acp/profile.ts` adds an optional
+`sessionStartTimeoutMs` for session/new and session/resume. Grok does not set
+it, so its current timeout stays in effect. All nine BYOK deltas remain.
+The source inventory and npm dependencies stay the same.
+
+The other upstream changes affect modules outside this fork: Claude and Kimi
+startup, Windows executable launch, Pi startup, Cursor and observe views.
+Build assets copy this source provenance to `dist/assets/provenance/oar/60ad09b/`.
