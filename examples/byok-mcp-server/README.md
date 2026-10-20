@@ -9,6 +9,7 @@ K4 Host execution core (`examples/host-execution-core`) for routines and memory.
 It adds no public SDK API or new SDK runtime dependency.
 There is no listener, admin HTTP route, default key or model invocation here.
 
+- [Hermes client guide, setup check and live acceptance checklist (B7)](docs/hermes.md)
 ## Host composition
 
 ```ts
