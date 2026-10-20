@@ -2061,8 +2061,8 @@ export interface AgentMemoryIntentBackend {
 }
 /**
  * Native Linux descriptor backend: every CAS conflict is thrown before its
- * rename (`agent-memory.ts` replace/delete), and ledger writes use the strict
- * directory-fsync variant.
+ * rename (`agent-memory.ts` replace/delete), and both the memory CAS and the
+ * ledger writes use the strict directory-fsync variant.
  */
 export declare const NATIVE_AGENT_MEMORY_INTENT_BACKEND: AgentMemoryIntentBackend;
 /** SDK release helper: verified Mach-O code, strict barriers, pre-rename CAS. */
@@ -2335,7 +2335,9 @@ export interface AgentMemoryHomeCompareAndSwap {
  * Native backend: every conflict is thrown before the rename that would
  * install new bytes (replace compares before the temp file, before its write
  * and after it; delete compares twice before its tombstone rename), so a
- * conflict means this call renamed nothing.
+ * conflict means this call renamed nothing. Its directory fsync is strict, as
+ * for the intent ledger: a success proves the rename reached the directory on
+ * disk, and an `EINVAL`/`EPERM` refusal after it throws {@link AgentMemoryIoError}.
  */
 export declare function compareAndSwapAgentMemoryHomeFile(binding: AgentMemoryHomeBinding, input: AgentMemoryHomeCompareAndSwap): Promise<AgentMemoryFilesystemFileState>;
 /** Read one SDK-internal state file under `.byok` through the pinned home. */
