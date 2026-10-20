@@ -484,6 +484,7 @@ flowchart TB
     Pi(["PiAdapter<br/>RPC session"]):::adapter
     Claude(["ClaudeAdapter<br/>stream-json + control_request"]):::adapter
     Codex(["CodexAdapter<br/>app-server + OAR kernel"]):::adapter
+    Hermes(["HermesAdapter<br/>ACP viewer + owned gateway"]):::adapter
   end
 
   subgraph Local["Local state and OS integration"]
@@ -508,6 +509,7 @@ flowchart TB
   Runner --> Pi
   Runner --> Claude
   Runner --> Codex
+  Runner --> Hermes
   Auth --> Stores
   Conn --> Stores
   Runner --> Git
@@ -529,7 +531,7 @@ Library exports 分成六组：
 | --- | --- |
 | daemon | `createDaemon`、`createDaemonWithAdapters`、`Daemon*`、credential-blind `readDeviceEnrollmentStatus` / `readDeviceEnrollmentIdentity` / `DeviceEnrollment*`、按 operation allowlist 限定的 `createStoredDeviceProofSigner`（不外泄私钥）、`retireInputPreparation`、`BlobClient`；`AuthManager`、secret-bearing local record/store、`StoredDeviceProofSigner` 均为 package-internal |
 | adapter contract | `RuntimeAdapter`、`RuntimeAdapterDescriptor`、`PreparedRuntimeOperation`、`RuntimeOperationManifest`、`RuntimeOperationStartInput`、`Session`、`RuntimeCapabilities`、`RuntimeExecutionFailure` 及其 closed phase/category/retry types、`RuntimeDisposalFailure` 及 stage、`PolicyUnsupportedError` |
-| bundled adapters | `PiAdapter`、`ClaudeAdapter`、`CodexAdapter` 与 options |
+| bundled adapters | `PiAdapter`、`ClaudeAdapter`、`CodexAdapter`、`HermesAdapter`（custom harness，Host 显式加入）与 options |
 | observability | `DaemonObserver`、event/task projection types |
 | Git workspace | `GitWorkspaceManager`、`GitWorkspaceStore`、ledger/lease/observation types |
 | OS integration | service lifecycle factories/generators、`ensureSecureDir`、Windows DACL error |

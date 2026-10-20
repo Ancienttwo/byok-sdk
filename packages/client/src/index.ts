@@ -534,6 +534,9 @@ export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter';
 
 export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from './adapters/codex/codex-adapter';
 
+export { HermesAdapter, type HermesAdapterOptions } from './adapters/hermes/hermes-adapter';
+export type { HermesModelSelection } from './adapters/hermes/hermes-home';
+
 export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError } from './diagnostics/device-doctor';
 export type {
   DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus,

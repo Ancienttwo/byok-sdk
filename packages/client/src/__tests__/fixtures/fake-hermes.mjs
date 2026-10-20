@@ -1,0 +1,180 @@
+#!/usr/bin/env node
+// Synthetic Hermes Agent CLI for HermesAdapter tests. No Python, no model.
+//
+//   hermes --version                 version line (FAKE_HERMES_VERSION)
+//   hermes gateway run ...           long-lived gateway that answers the
+//                                    control-socket `identify` verb, as the
+//                                    real gateway does (gateway/control_socket.py)
+//   hermes [--yolo] acp              ACP v1 agent over stdio (the viewer)
+//
+// The viewer refuses session/new unless a ready gateway serves its
+// HERMES_HOME, as the real viewer cannot run a turn without one. Every
+// observable input is appended to FAKE_HERMES_RECEIPT as one JSON line.
+import { appendFileSync, existsSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
+import net from 'node:net';
+import path from 'node:path';
+import readline from 'node:readline';
+import { spawnProcessTreeDescendant } from './process-tree-receipt.mjs';
+
+const argv = process.argv.slice(2);
+const env = process.env;
+const home = env.HERMES_HOME;
+const receipt = (entry) => {
+  if (env.FAKE_HERMES_RECEIPT) appendFileSync(env.FAKE_HERMES_RECEIPT, `${JSON.stringify({ pid: process.pid, ...entry })}\n`);
+};
+
+if (argv.includes('--version')) {
+  console.log(env.FAKE_HERMES_VERSION ?? 'Hermes Agent v0.22.2+2364.g0b10b9f (2026.9.24) · stable · local 0b10b9f8155a');
+  console.log('Install directory: /synthetic/hermes-agent');
+  process.exit(0);
+}
+
+const hermesEnv = Object.keys(env).filter((name) => name.startsWith('HERMES_')).sort();
+
+function serveIdentify(socketPath, identity) {
+  if (existsSync(socketPath)) unlinkSync(socketPath);
+  const server = net.createServer((socket) => {
+    let buffer = '';
+    socket.on('data', (chunk) => {
+      buffer += chunk;
+      if (!buffer.includes('\n')) return;
+      socket.end(`${JSON.stringify({ ok: true, protocol: 1, id: 1, result: identity() })}\n`);
+    });
+  });
+  server.listen(socketPath);
+  return server;
+}
+
+if (argv[0] === 'gateway' && argv[1] === 'run') {
+  receipt({ mode: 'gateway', argv, home, cwd: process.cwd(), hermesEnv, seededCache: existsSync(path.join(home, 'models_dev_cache.json')) });
+  if (env.FAKE_HERMES_GATEWAY_IGNORE_SIGTERM === '1') process.on('SIGTERM', () => {});
+  if (env.FAKE_HERMES_PROCESS_TREE_FILE) {
+    await spawnProcessTreeDescendant({
+      receiptFile: env.FAKE_HERMES_PROCESS_TREE_FILE,
+      rootPid: process.pid,
+      ignoreTerm: env.FAKE_HERMES_GATEWAY_IGNORE_SIGTERM === '1',
+    });
+  }
+  // The real gateway prints a banner on stdout even with --quiet.
+  console.log('Hermes Gateway Starting...');
+  const readyAt = Date.now() + Number(env.FAKE_HERMES_GATEWAY_READY_DELAY_MS ?? 0);
+  const served = realpathSync(home);
+  serveIdentify(path.join(home, 'gateway.sock'), () => ({
+    kind: 'hermes-gateway',
+    pid: env.FAKE_HERMES_GATEWAY_WRONG_PID === '1' ? process.pid + 100_000 : process.pid,
+    state: env.FAKE_HERMES_GATEWAY_NEVER_READY === '1' || Date.now() < readyAt ? 'starting' : 'ready',
+    served_profiles: [{ profile_id: served, home: served }],
+  }));
+  // A gateway fetches model metadata into its home; the adapter carries it to the next profile.
+  writeFileSync(path.join(home, 'models_dev_cache.json'), JSON.stringify({ synthetic: true }));
+  setInterval(() => {}, 60_000);
+} else if (argv.includes('acp')) {
+  runViewer();
+} else {
+  console.error(`fake-hermes: unsupported arguments ${argv.join(' ')}`);
+  process.exit(2);
+}
+
+function identifyGateway() {
+  return new Promise((resolve) => {
+    const socket = net.createConnection(path.join(home, 'gateway.sock'));
+    let buffer = '';
+    socket.on('connect', () => socket.write('{"protocol":1,"id":1,"verb":"identify"}\n'));
+    socket.on('data', (chunk) => {
+      buffer += chunk;
+      if (buffer.includes('\n')) { socket.destroy(); resolve(JSON.parse(buffer).result); }
+    });
+    socket.on('error', () => resolve(undefined));
+  });
+}
+
+function runViewer() {
+  receipt({ mode: 'acp', argv, home, cwd: process.cwd(), hermesEnv });
+  const send = (message) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`);
+  const update = (sessionId, value) => send({ method: 'session/update', params: { sessionId, update: value } });
+  const sessionId = env.FAKE_HERMES_SESSION_ID ?? 'fake-hermes-session-1';
+  let nextId = 1000;
+  const waiting = new Map();
+  let pendingPrompt;
+  let turns = 0;
+
+  const ask = (method, params) => new Promise((resolve) => {
+    const id = nextId++;
+    waiting.set(id, resolve);
+    send({ id, method, params });
+  });
+
+  async function prompt(id, params) {
+    turns += 1;
+    const text = params.prompt?.[0]?.text ?? '';
+    receipt({ mode: 'acp', method: 'session/prompt', text, turn: turns });
+    if (env.FAKE_HERMES_FAIL_DETAILS) {
+      send({ id, error: { code: -32603, message: 'Internal error', data: { details: env.FAKE_HERMES_FAIL_DETAILS } } });
+      return;
+    }
+    update(sessionId, { sessionUpdate: 'session_info_update', title: text });
+    update(sessionId, { sessionUpdate: 'agent_message_chunk', messageId: `m${turns}`, content: { type: 'text', text: 'Hello' } });
+    update(sessionId, { sessionUpdate: 'agent_message_chunk', messageId: `m${turns}`, content: { type: 'text', text: ` turn ${turns}` } });
+    if (env.FAKE_HERMES_HANG === '1' || env.FAKE_HERMES_IGNORE_CANCEL === '1') {
+      pendingPrompt = id;
+      return;
+    }
+    update(sessionId, { sessionUpdate: 'tool_call', toolCallId: `t${turns}`, title: 'terminal: ls', kind: 'execute', status: 'pending', rawInput: { command: 'ls' } });
+    if (env.FAKE_HERMES_PERMISSION === '1') {
+      const answer = await ask('session/request_permission', {
+        sessionId,
+        toolCall: { toolCallId: `t${turns}`, title: 'write_file: .env' },
+        options: [{ optionId: 'once', name: 'Allow once', kind: 'allow_once' }, { optionId: 'deny', name: 'Deny', kind: 'reject_once' }],
+      });
+      receipt({ mode: 'acp', method: 'permission-answer', answer });
+    }
+    update(sessionId, { sessionUpdate: 'tool_call_update', toolCallId: `t${turns}`, status: 'completed', rawOutput: 'file.txt' });
+    update(sessionId, { sessionUpdate: 'agent_message_chunk', messageId: `m${turns}b`, content: { type: 'text', text: 'Done.' } });
+    update(sessionId, { sessionUpdate: 'usage_update', used: 20, size: 1000 });
+    send({ id, result: { stopReason: 'end_turn', usage: { inputTokens: 11, outputTokens: 3, totalTokens: 14 } } });
+  }
+
+  readline.createInterface({ input: process.stdin }).on('line', async (line) => {
+    const message = JSON.parse(line);
+    if (message.method === undefined) {
+      waiting.get(message.id)?.(message.result ?? message.error);
+      waiting.delete(message.id);
+      return;
+    }
+    const { id, method, params } = message;
+    if (method === 'initialize') {
+      receipt({ mode: 'acp', method, params });
+      const setup = { id: 'hermes-setup', name: 'Configure Hermes provider', type: 'terminal', args: ['--setup'] };
+      send({ id, result: {
+        protocolVersion: 1,
+        agentCapabilities: { loadSession: true, promptCapabilities: { image: true } },
+        authMethods: env.FAKE_HERMES_AUTH === '0' ? [setup] : [{ id: 'custom', name: 'custom runtime credentials' }, setup],
+      } });
+    } else if (method === 'session/new') {
+      const gateway = await identifyGateway();
+      receipt({ mode: 'acp', method, params, gatewayPid: gateway?.pid });
+      if (gateway?.state !== 'ready') {
+        send({ id, error: { code: -32603, message: 'Internal error', data: { details: 'Gateway connection failed; no local fallback' } } });
+        return;
+      }
+      if (env.FAKE_HERMES_VIEWER_TAKES_SOCKET === '1') {
+        // Stand-in for a viewer that started its own gateway for this home.
+        serveIdentify(path.join(home, 'gateway.sock'), () => ({ pid: process.pid, state: 'ready', served_profiles: [{ home: realpathSync(home) }] }));
+      }
+      send({ id, result: { sessionId, modes: { currentModeId: 'default', availableModes: [] } } });
+    } else if (method === 'session/set_mode') {
+      receipt({ mode: 'acp', method, params });
+      send({ id, result: {} });
+    } else if (method === 'session/prompt') {
+      void prompt(id, params);
+    } else if (method === 'session/cancel') {
+      receipt({ mode: 'acp', method, params });
+      if (pendingPrompt !== undefined && env.FAKE_HERMES_IGNORE_CANCEL !== '1') {
+        send({ id: pendingPrompt, result: { stopReason: 'cancelled', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } } });
+        pendingPrompt = undefined;
+      }
+    } else if (id !== undefined) {
+      send({ id, error: { code: -32601, message: `Method not found: ${method}` } });
+    }
+  });
+}

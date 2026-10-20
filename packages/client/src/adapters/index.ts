@@ -31,6 +31,10 @@ export type { ClaudeAdapterOptions } from './claude/claude-adapter';
 export { CodexAdapter } from './codex/codex-adapter';
 export type { CodexAdapterOptions, CodexSandboxSetting } from './codex/codex-adapter';
 
+export { HermesAdapter } from './hermes/hermes-adapter';
+export type { HermesAdapterOptions } from './hermes/hermes-adapter';
+export type { HermesModelSelection } from './hermes/hermes-home';
+
 export { NativeInteractionController, NativeInteractionError } from '../native-interactions';
 export type {
   NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity,

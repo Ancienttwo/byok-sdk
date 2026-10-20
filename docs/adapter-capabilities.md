@@ -38,6 +38,32 @@ runtime name or using a custom harness does not inherit another adapter's pass.
 The trajectory evidence row has its own Pi evidence; see
 [Trajectory evidence](#trajectory-evidence).
 
+## Hermes adapter (custom harness)
+
+`HermesAdapter` (id `hermes`, #519) is outside the matrix above and outside
+the shared conformance runner, which assumes native resume. It runs on the
+custom-harness path (`harnessId: 'hermes'`). Its descriptor declares:
+
+| Capability | Hermes |
+| --- | --- |
+| Resume a known native session | Unsupported; each execution has a fresh Hermes profile, `prepare()` rejects `sessionRef` |
+| Redirect the active turn (`steer`) | Unsupported; typed `SteerUnsupportedError` |
+| New instruction after an idle turn (`followUp`) | Supported, same ACP session |
+| Task MCP toolsets (`mcpToolsets`) | Supported; ACP `session/new.mcpServers` stdio entries |
+| Legacy boolean interactive approval, native interactions, message drafts | Unsupported and omitted |
+| Trajectory evidence | Not declared |
+
+Hermes runs edits in ACP mode `dont_ask` and commands under `--yolo`. A
+permission request that still arrives (Hermes's sensitive-path guard) is
+answered `cancelled`. The adapter owns the Hermes gateway process tree and
+checks the gateway identity before and after the viewer attaches.
+
+Evidence: `hermes-adapter.test.ts` (synthetic `fake-hermes.mjs`, offline) and
+the [S0 note](notes/2026-10-20-519-hermes-acp-s0.md), which records one real
+Hermes `0.22.2+2364.g0b10b9f` turn with a fake model endpoint on macOS. No
+live-provider run, Linux run or Windows run is part of this evidence.
+`prepare()` refuses on Windows.
+
 ## What the qualification suite proves
 
 `packages/client/src/__tests__/adapter-capability-conformance.test.ts` runs the
