@@ -10,6 +10,7 @@ It adds no public SDK API or new SDK runtime dependency.
 There is no listener, admin HTTP route, default key or model invocation here.
 - [Grok Bot client guide and owner acceptance checklist (B6)](docs/grok-bot.md)
 
+- [Hermes client guide, setup check and live acceptance checklist (B7)](docs/hermes.md)
 ## Host composition
 
 ```ts
