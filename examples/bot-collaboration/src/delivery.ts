@@ -100,7 +100,9 @@ export function acceptDeliveryEcho(row: Delivery, platformMessageId: string): bo
     row.platformMessageId = platformMessageId;
     return true;
   }
-  if (row.state !== 'sending' && row.state !== 'unknown') return false;
+  // A readback can report absence before a delayed platform echo arrives.
+  const waitingRetry = row.state === 'pending' && row.attempts > 0;
+  if (row.state !== 'sending' && row.state !== 'unknown' && !waitingRetry) return false;
   row.state = 'accepted';
   row.platformMessageId = platformMessageId;
   delete row.code;

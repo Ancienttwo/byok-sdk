@@ -184,6 +184,19 @@ it('lets an exact echo win over a later send result or timeout', () => {
   expect(acceptDeliveryEcho(delivery({ state: 'sending' }), '')).toBe(false);
 });
 
+it('accepts a late exact echo during the retry wait after absent readback', () => {
+  const row = delivery();
+  expect(startDelivery(row, 0)).toBe(true);
+  unknownDelivery(row, 1, 'timeout');
+  readbackDelivery(row, 'absent', 50);
+  expect(row).toMatchObject({ state: 'pending', attempts: 1, nextAttemptAt: 1_050 });
+  expect(acceptDeliveryEcho(row, 'late-echo')).toBe(true);
+  expect(row).toMatchObject({ state: 'accepted', attempts: 1, platformMessageId: 'late-echo' });
+  expect(row).not.toHaveProperty('nextAttemptAt');
+  expect(row).not.toHaveProperty('code');
+  expect(startDelivery(row, 1_050)).toBe(false);
+});
+
 it('recovers only sending rows as unknown and makes restart recovery idempotent', () => {
   for (const state of ['pending', 'sending', 'unknown', 'accepted', 'rejected'] as const) {
     const row = delivery({ state, attempts: 1, code: 'previous' });
