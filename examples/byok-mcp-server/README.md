@@ -1,35 +1,39 @@
-# External-Bot MCP beta: B2
+# External-Bot MCP beta: B2 and B3
 
 This private, copy-and-own example supplies the Host authorization and admission
-ledger from [the beta plan](../../docs/plans/2026-10-19-byok-mcp-server-external-bot-beta.md).
-It reuses the public B1 HTTP transport. It adds no public SDK API or new SDK runtime dependency.
-The task tool catalogue belongs to B3. Routines and memory tools belong to B4/B5.
+ledger (B2) and the task tool catalogue (B3) from
+[the beta plan](../../docs/plans/2026-10-19-byok-mcp-server-external-bot-beta.md).
+It reuses the public B1 HTTP transport and the public `@byok-sdk/server` API.
+It adds no public SDK API or new SDK runtime dependency.
+Routines and memory tools belong to B4/B5.
 There is no listener, admin HTTP route, default key or model invocation here.
 
 ## Host composition
 
 ```ts
 import type { ByokServer } from '@byok-sdk/server';
-import { BetaLedger, createBetaMcpServer, type ScopedTool } from './src/index';
+import { BetaLedger, createBetaMcpServer, createTaskTools } from './src/index';
 
 export function composeBeta(
   sdk: ByokServer,
   filename: string,
   tenant: string,
   origin: string,
-  tools: readonly ScopedTool[],
+  sdkOrigin: string,
 ) {
   const ledger = new BetaLedger(filename, tenant, { tasks: sdk.tasks });
   try {
     const endpoint = createBetaMcpServer({ ledger, origin,
-      serverInfo: { name: 'byok-host', version: '1' }, tools });
+      serverInfo: { name: 'byok-host', version: '1' },
+      tools: createTaskTools({ sdk, ledger, blobBaseUrl: sdkOrigin }) });
     return { ledger, fetch: endpoint.fetch,
       close() { endpoint.close(); ledger.close(); } };
   } catch (error) { ledger.close(); throw error; }
 }
 ```
 
-The Host supplies its SDK instance, trusted tenant, private file and public origin.
+The Host supplies its SDK instance, trusted tenant, private file, public MCP origin
+and the origin where it serves the SDK routes (`sdk.hono`), for artifact URLs.
 It mounts `fetch` at the MCP endpoint behind its TLS termination. Use HTTPS for
 remote clients and loopback HTTP locally. B1 owns framing, body limits, session
 limits and the MCP protocol. The wrapper checks Origin before authentication.
@@ -41,8 +45,8 @@ a Host callback. Discovery can use the explicit `authenticated` policy. Omitting
 the policy is invalid. Only authenticated caller handles reach that callback. The tool
 list excludes denied scopes. A manual call still checks current ledger state.
 Domain refusals use JSON text with `isError: true`, `code`, `message` and optional
-`retryAfterSeconds`. This example registers no placeholder `byok_*` task tool.
-The tests register local protocol probes only to exercise this boundary.
+`retryAfterSeconds`. `createTaskTools` returns the B3 registrations. The B2 tests
+register local protocol probes only to exercise this boundary.
 
 ## Keys and ownership
 
@@ -84,7 +88,7 @@ revocation and idempotency again before it checks device/runtime grants and quot
 It saves the identity and immutable binding before returning. It does not dispatch.
 
 `instruction` is at most 32 KiB of UTF-8. `workspace` is an opaque registered ID,
-not a raw path. B3 must resolve that ID in its Host registry. Unknown arguments,
+not a raw path. B3 refuses it until the SDK can select a workspace. Unknown arguments,
 lossy/non-finite JSON, cycles, accessors and excessive nesting are refused before
 admission. Object keys have a deterministic order; array order stays significant.
 
@@ -132,6 +136,70 @@ Clock corrections can change these abuse windows. There is no persisted future
 clock and no billing promise. Occupied-slot limits do not depend on wall time.
 The Host must use `consumeStatusRead` before each status query. Tool names do not
 implicitly perform ledger operations. B3 wires the specific task handlers.
+
+## Task tools (B3)
+
+| Tool | Scope | Input | Result |
+| --- | --- | --- | --- |
+| `byok_whoami` | authenticated | `{}` | Key ID, label, scopes, runtimes, granted devices, quota limits and use now |
+| `byok_runtimes` | `tasks.read` | `{}` | Per granted device: the key's runtimes, `installed` (`null` while presence is stale), version |
+| `byok_task_submit` | `tasks.dispatch` | `{ runtime, instruction, toolsets?, clientRequestId? }` | `{ taskId, state, deduplicated }` |
+| `byok_task_status` | `tasks.read` | `{ taskId, waitSeconds? }` (0–50) | `{ taskId, state, finalMessage?, document?, artifacts, reason?, code?, retryable? }` |
+| `byok_task_cancel` | `tasks.cancel` | `{ taskId, reason? }` | `{ taskId, state }` |
+| `byok_task_list` | `tasks.read` | `{ cursor?, limit? (1–50, default 20), state? }` | `{ tasks: [{ taskId, runtime, createdAt, state }], nextCursor? }` |
+| `byok_artifact_url` | `artifacts.read` | `{ taskId, index }` | `{ taskId, index, url, contentType, size }` |
+
+Each handler takes the caller from the authenticated key and reaches the SDK only
+through that key's saved reservations. A foreign or unknown `taskId` gives `not_found`.
+
+Submit follows the B2 contract. It calls `lookupTask` first, so a retry reuses the
+saved binding and its device, even when that device is offline. For a new
+admission it reconciles the key's open slots, selects a device and calls
+`reserveTask`. Device selection keeps the key's device order and prefers a
+device whose fresh presence reports the runtime. It then prefers an offline
+device (the SDK queues the work) over an online device without the runtime. A
+key with no registered granted device gets `unavailable` before admission.
+
+Dispatch uses `sdk.dispatch` with the saved task ID, device, runtime, instruction
+and toolsets. If an offer already exists, or dispatch fails, submit reads the
+offer back and accepts it only when type, device, runtime, instruction and
+toolsets match the binding exactly. Otherwise the call fails, and a retry of the
+same call dispatches again. A reservation whose slot is released only reads back.
+
+Submit refuses these inputs before admission, so they use no quota:
+
+- `toolsets` that the SDK would refuse: it takes 1–16 distinct lowercase IDs.
+
+- `resultSchema`: the SDK carries a terminal projection only on Agent-bound
+  offers. Plain `dispatch` and the `task.offer` wire message have no field for it.
+- `workspace`: `DispatchInput` has no workspace selection, and the daemon ignores
+  the wire `workspaceHint`. A Host workspace registry needs an SDK field first.
+
+`state` is the SDK task state. Two ledger states exist when the SDK has no task:
+`Reserved` (admitted, not dispatched; a retry of the same submit dispatches it)
+and `Unknown` (slot released, SDK record gone). The list `state` filter accepts
+these two as well. Cancel of a `Reserved` task changes nothing: a later retry of
+the same submit still dispatches it. The tool description says so. Status waits only for a task in a
+non-terminal SDK state. It reads the task every 500 ms until the state changes,
+the wait ends or the MCP call is cancelled. MCP cancellation ends the wait only.
+
+Status, cancel and list release a slot when they read an SDK terminal and
+`reconcileTask` finds the exact device terminal. Submit and whoami reconcile the
+key's open slots first. Host cancellation alone frees no slot; the device's
+`task.cancelled` does. Cancel of a terminal task returns its state and sends nothing.
+
+`artifacts` lists `TaskResult.artifactRefs` by index, with content type and size.
+The SDK keeps no artifact name for a finished task, so there is none here. The
+current daemon reports files as live `task.artifact` events and sets no
+`artifactRefs` on `task.complete`; daemon tasks therefore list no artifacts.
+`byok_artifact_url` resolves the SDK's signed blob path against `blobBaseUrl`.
+That origin must be HTTPS, or HTTP on loopback, as for the MCP origin.
+The URL expires with the SDK blob grant (15 minutes by default).
+
+A dispatch that the SDK refuses before the task exists (for example, a device
+without `toolset-selection`) keeps its slot, as B2 requires for any missing SDK
+task. Device selection does not read device capabilities, which `machines.list`
+does not expose. To clear such slots, revoke the key and issue a new one.
 
 ## Storage boundary
 
@@ -184,3 +252,32 @@ Read-only Claude Opus security and test-integrity review, round 2: PASS. The fin
 root test condition is met. No existing test file or assertion changed. No test
 or runtime timeout was added or increased. The optional Docker/Postgres substrate
 was not started. Skipped cases are not verified cases.
+
+### B3 verification record: 2026-10-20
+
+The [B3 plan](../../docs/plans/2026-10-20-byok-mcp-beta-b3.md) records P1/P2/P3.
+B3 tests drive the tools with the standard MCP HTTP client over a loopback socket.
+`tools.test.ts` uses the real device daemon from `@byok-sdk/client`, paired to the
+embedded server, with a scripted `RuntimeAdapter` defined in this example. It covers
+submit, retry, status long poll, the outcome, slot release, list, cancel and the
+pre-admission refusals. `tools-artifacts.test.ts` uses the testkit device simulator
+for a terminal with `artifactRefs` (the download is fetched and compared), list
+paging, toolset offers and a dispatch that the SDK refuses. No paid model or account
+is used. Mutation checks: removing the status slot release, reversing the list order,
+forcing the offer type and weakening the toolset check each made a test fail.
+
+Node `v24.21.0`, Bun `1.4.3`, macOS arm64. The commands ran on the final source.
+
+| Command from the repository root | Result |
+| --- | --- |
+| `bun run build` | Exit 0. |
+| `bun run typecheck` | Exit 0. |
+| `bun run test` | Exit 0. 9,993 Vitest tests passed; 245 skipped. All 10 Node tests passed. |
+| `bun run check:api-surface` | Exit 0 in check mode. All 9 package goldens match. |
+| `bun run check:version-authority` | Exit 0. |
+| `bun run --cwd examples/byok-mcp-server test` | Exit 0. 29 tests passed in 5 files (three runs). |
+
+Read-only Claude Opus security and test-integrity review, round 2: PASS. No existing
+test file or assertion changed. No test or runtime timeout was added or increased.
+Not tested: an MCP cancellation that ends a status wait early (the wait loop checks
+the call signal).
