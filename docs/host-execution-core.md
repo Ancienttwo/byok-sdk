@@ -91,6 +91,7 @@ Never use the SDK database or an Agent home for Host storage.
 Use one FIFO per `(tenant, deviceId, agentId)` for user, routine and Bot triggers.
 A profile revision does not create another queue. Default order is committed enqueue order.
 Any priority rule must be explicit. Do not rely on daemon queuing for product work.
+Input coalescing is an explicit Host policy before enqueue ([example](../examples/bot-collaboration/README.md#input-coalescing)).
 The core permits at most one writer execution in flight per Agent.
 Other Agents can progress independently. SDK Agent-home admission remains the final authority.
 A device terminal does not prove native session cleanup or home release.

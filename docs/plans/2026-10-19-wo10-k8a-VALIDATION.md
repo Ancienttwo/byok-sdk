@@ -393,3 +393,43 @@ Red and green evidence: `/tmp/wo10-card-window-red.log` and
 `/tmp/wo10-card-window-green.log`. Suite logs use the same prefix.
 
 No push, gh pr edit, rebase, force-push, or merge-train action was performed.
+
+## Octop input coalescing, 2026-10-20
+
+This section records slice I1 of `docs/plans/2026-10-19-octop-adaptations.md`
+§4.6 (issue #551). I1 merged as `2f75d82e` (#561). Slice I3 adds this record,
+the README section "Input coalescing", and one line in K4 guide §3. I3 changes
+no source or test. Slice I2 (window timer, `recover()` tests, and
+`input-batch` projections) is a separate PR and is not recorded here.
+
+Paths in this table are relative to `examples/bot-collaboration/src`. Line
+numbers refer to `d3e71375`. The criteria are plan §4.2 S1–S9.
+
+| Criterion | Source | Test |
+| --- | --- | --- |
+| S1 policy off is unchanged | `coalesce.ts:69`; `host.ts:115` | `coalesce.test.ts:60`; `coalesce-host.test.ts:35` |
+| S2 idle input enqueues at once with the same id and instruction | `coalesce.ts:96` | `coalesce.test.ts:79`, `:89` |
+| S3 busy inputs merge into one Turn and one execution | `coalesce.ts:76`, `:35` | `coalesce.test.ts:111`; `coalesce-host.test.ts:49` |
+| S4 fixed window and early idle seal | `coalesce.ts:42`, `:51`; `host.ts:456` | `coalesce.test.ts:135`, `:151`; `coalesce-host.test.ts:70` |
+| S5 boundaries keep arrival order | `model.ts:131`; `coalesce.ts:77` | `coalesce.test.ts:199`, `:222`; `coalesce-host.test.ts:96`; `coalesce-team.test.ts:10` |
+| S6 no enqueued intent changes | `model.ts:131`, `:143` | `coalesce.test.ts:286` |
+| S7 no input is dropped; item and byte caps; long input blocks visibly | `coalesce.ts:77`, `:82` | `coalesce.test.ts:103`, `:164`, `:175` |
+| S8 replay returns the batch id; changed text conflicts | `coalesce.ts:60` | `coalesce.test.ts:249`; crash recovery in I2 |
+| S9 merged Request fits the ContextPack budget | `coalesce.ts:11`, `:82` | `coalesce.test.ts:46`, `:175` |
+| Cancel through a batch or member id | `coalesce.ts:100`; `host.ts:413` | `coalesce.test.ts:236`; `coalesce-host.test.ts:124` |
+| Seal when the policy is off or the Bot is archived | `coalesce.ts:44` | `coalesce.test.ts:272` |
+
+I3 checks ran on branch `claude/octop-i3-coalesce-docs`, based on
+`d3e71375`. Environment: macOS. Raw logs are in `/tmp/octop-i3-checks/`.
+
+| Command | Exit | Seconds |
+| --- | --- | --- |
+| `bun run build` | 0 | 18 |
+| `bun run typecheck` | 0 | 9 |
+| `bun run test` | 0 | 1048 |
+| `bun run check:api-surface` | 0 | 8 |
+| `bun run check:version-authority` | 0 | 0 |
+| `git diff --check` | 0 | Passed |
+
+The Bot suite passed 186/186 in 25 files. Nine API goldens match. This slice changes
+no test and adds no skip. Existing skip conditions are unchanged.

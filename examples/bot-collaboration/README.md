@@ -378,6 +378,84 @@ of 16 384 bytes. The Host blocks such a Turn with a visible reason. It does
 not cut an enum. Without the room, 24 open delegations in the
 `cancel_delegation` enum still fit (15 949 bytes).
 
+## Input coalescing
+
+This section covers slice I1 of the Octop plan for issue #551.
+Input coalescing is an optional Host policy. It runs before K4 enqueue.
+K4, the SDK, and the wire do not change.
+
+`BotOptions.coalesce` turns it on. Without it, `input` makes the same state
+change as before: one Turn, one K4 intent, and one execution for each input.
+A field that you do not give takes its default. Construction refuses a value
+that is not an integer or is out of range.
+
+| Field | Default | Range |
+| --- | --- | --- |
+| `windowMs` | 10 000 | 1 000 to 60 000 |
+| `maxItems` | 8 | 2 to 16 |
+| `maxBytes` | 8 192 | 1 024 to `contextMaxBytes / 4` |
+
+A Bot is busy when it has a Turn that is not concluded and not blocked.
+An input to an idle Bot seals at once as a one-input batch. Its Turn id,
+Request, intent key, and frozen instruction are the same as without the policy.
+An input to a busy Bot opens a batch or joins the open batch of that Bot.
+A Bot has at most one open batch. Inputs join one batch only when the Bot,
+conversation, sender principal id, authority, Bot revision, and Bot model are
+the same. In this example, each Bot has one 1:1 conversation, so the Bot id
+also identifies the conversation. Room input never coalesces.
+
+A sealed batch becomes one `user` Turn. Its id is the id of the first input.
+`input` returns this id for each member. The K4 intent key is this Turn id, so
+task identity, FIFO order, generation, and cancel readback do not change. The
+batch Turn is the budget root. Continuation and delegation budgets count once
+for the whole batch, not once for each input. Neither the batch nor its Turn
+changes after the seal. The Host never changes an enqueued intent.
+
+A one-input batch keeps the raw text as its Request. A batch with more inputs
+has one notice line, then each input in arrival order. Each input is framed
+once as raw UTF-8, with the frame of Cross-Bot replies. The metadata line holds
+`inputId` and `receivedAt`. The Host renders the merged Request before each
+join. If it is larger than `maxBytes`, the Host seals the batch and opens a new
+batch for the input. So a merged Request always fits the ContextPack budget.
+A long single input stays alone and unframed. An input over the ContextPack
+budget blocks with a visible reason, as before.
+
+| Seal reason | Condition |
+| --- | --- |
+| `idle` | The Bot is idle. |
+| `window` | `windowMs` passed after the first input. Later inputs do not extend it. |
+| `items` | The batch has `maxItems` inputs. |
+| `bytes` | The next input makes the merged Request larger than `maxBytes`. |
+| `boundary` | Another new Turn of this Bot arrives. |
+| `key_changed` | The sender, authority, or Bot configuration changed. |
+| `cancel` | `cancelTurn` names the batch or a member input. |
+| `policy_off` | The Host restarted without `coalesce`. |
+| `archived` | The Bot is archived. |
+
+Every other new Turn of the Bot seals its open batch first: `answer`,
+`action_result`, `routine`, `room_slot`, `bot_request`, `bot_reply`, and
+`continuation`. So the queue keeps arrival order. A replayed Turn does not
+seal. The seal check runs at the start of each Host sync and before each new
+input. `recover()` runs a sync first, so a due batch seals after a restart.
+
+`cancelTurn` takes a batch id or a member input id. It cancels the whole batch.
+A replay of `input` with the same key and text returns the batch Turn id and
+does not join again. A replay with a changed text throws
+`Input identity conflict`. Each input has a durable record in
+`snapshot().inputs` with its `batchId`. `snapshot().inputBatches` holds the
+batches. The `bot-turn:<id>` projection carries `inputIds` in arrival order.
+Show the one reply once, and mark each member message from `inputIds`.
+
+From the second input, a reply can wait up to `windowMs` plus the running
+execution. A batch Turn freezes its ContextPack at enqueue, as every waiting
+Turn does. The Host does not read message text for meaning, so a later input
+such as "never mind" does not withdraw an earlier input. The model reads all
+inputs in order and answers them together.
+
+This example does not yet arm a timer at the window end, or publish
+`input-batch` projections (slice I2). Until then, a batch of a busy Bot seals
+at the next Host call or when the Bot becomes idle.
+
 ## IM channel input
 
 This section covers slice M2 of the Octop plan for issue #552.
