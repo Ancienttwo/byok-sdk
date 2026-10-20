@@ -34,7 +34,7 @@ jobs:
           whoami /all | Out-File -Append .ci-artifacts/wo09/profile.txt
           if ($LASTEXITCODE -ne 0) { throw 'whoami failed' }
           'Hosted token and storage profile are observations. Normal-user and S recovery acceptance remain unproved.' | Out-File -Append .ci-artifacts/wo09/profile.txt
-      - name: Check platform refusal and identity parity; collect flush diagnostics
+      - name: Check platform refusal, identity parity and NTFS post-rename barrier failure; collect flush diagnostics
         working-directory: packages/client/native/agent-memory-fs
         shell: pwsh
         run: |
