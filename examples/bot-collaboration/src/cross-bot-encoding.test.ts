@@ -124,7 +124,7 @@ it('bounds a Main Bot reply Turn that lists 24 worst-case open delegations, with
   const template = state.delegations[reply!.replies![0]!.delegationId]!;
   for (let n = 0; n < 25; n++) {
     const id = hash(['open', n]);
-    state.delegations[id] = { ...template, id, request: worst(1000), status: 'reply_pending', verdict: undefined, reply: undefined };
+    state.delegations[id] = { ...template, id, request: worst(1000), status: 'waiting_device', verdict: undefined, reply: undefined };
   }
   const turn: Turn = { ...reply!, id: hash(['bot_reply', 'main']), botId: main.id };
   state.turns[turn.id] = turn;
