@@ -79,6 +79,12 @@ jobs:
           if ($token -notmatch "\\$user\b") { throw 'test did not run as the standard user' }
           if ($token -match 'S-1-5-32-544') { throw 'standard user token holds Administrators' }
           if ($process.ExitCode -ne 0) { throw "standard-user tests failed: exit $($process.ExitCode)" }
+          # A renamed test would match nothing and still exit 0.
+          $output = Get-Content -Raw (Join-Path $work 'go.txt')
+          if ($output -match '--- FAIL') { throw 'standard-user tests reported a failure' }
+          foreach ($name in 'TestWindowsMemoryResultBarrierFailsClosedOnNTFS', 'TestWindowsProcessKillAtEachBarrierPointOnNTFS', 'TestWindowsProcessKillAtRandomTimesOnNTFS') {
+            if ($output -notmatch "--- PASS: $name \(") { throw "standard-user run did not pass $name" }
+          }
       - name: Check platform refusal with empty env and junction fixtures
         shell: pwsh
         run: |

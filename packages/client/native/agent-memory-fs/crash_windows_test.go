@@ -451,20 +451,21 @@ func TestWindowsProcessKillAtEachBarrierPointOnNTFS(t *testing.T) {
 				state := host.observe()
 				checkCrashPoint(t, host, target.intent, step, stage, state)
 
+				ledger, settledLedger := "none", "none"
+				if state.record != nil {
+					ledger = fmt.Sprintf("%d %s", state.record.Intent, state.record.Phase)
+					settledLedger = checkCrashRecoveryOnly(t, host, state)
+				}
 				recovery := host.run(target.intent+1, "", nil, 0)
 				final := host.observe()
 				if final.record == nil || final.record.Intent != target.intent+1 || final.record.Phase != "acked" {
 					t.Fatalf("recovery after %s/%s did not finish: %+v lines=%q", step, stage, final.record, recovery.lines)
 				}
-				ledger := "none"
-				if state.record != nil {
-					ledger = fmt.Sprintf("%d %s", state.record.Intent, state.record.Phase)
-					if recovery.lines[0] != "recovered "+ledger {
-						t.Fatalf("recovery did not start from the killed record %s: %q", ledger, recovery.lines)
-					}
+				if state.record != nil && recovery.lines[0] != "recovered "+settledLedger {
+					t.Fatalf("recovery did not start from the settled record %s: %q", settledLedger, recovery.lines)
 				}
-				t.Logf("OBSERVED kill at %s/%s: ledger=%s memoryExists=%v leftovers=%d recovery=%q",
-					step, stage, ledger, state.memoryExists, state.leftovers, recovery.lines)
+				t.Logf("OBSERVED kill at %s/%s: ledger=%s settled=%s memoryExists=%v leftovers=%d recovery=%q",
+					step, stage, ledger, settledLedger, state.memoryExists, state.leftovers, recovery.lines)
 			}
 			// Four helper writes with five points each, and one point after the
 			// Host send. A delete has no temp file but two directory barriers.
@@ -474,6 +475,23 @@ func TestWindowsProcessKillAtEachBarrierPointOnNTFS(t *testing.T) {
 			t.Logf("OBSERVED %d kill points for %s", points, target.name)
 		})
 	}
+}
+
+// checkCrashRecoveryOnly runs one child that only recovers. Recovery must
+// settle the killed record and must not write memory: applying becomes
+// uncertain with no second CAS, and a terminal is completed again.
+func checkCrashRecoveryOnly(t *testing.T, host *crashHost, killed crashState) string {
+	t.Helper()
+	run := host.run(killed.record.Intent, "", nil, 0)
+	want := map[string]string{"applying": "uncertain", "applied": "acked", "acked": "acked", "uncertain": "uncertain"}[killed.record.Phase]
+	settled := host.observe()
+	if settled.record.Intent != killed.record.Intent || settled.record.Phase != want {
+		t.Fatalf("recovery settled %d %s to %d %s, want %s: %q", killed.record.Intent, killed.record.Phase, settled.record.Intent, settled.record.Phase, want, run.lines)
+	}
+	if settled.memoryExists != killed.memoryExists || settled.memory != killed.memory {
+		t.Fatalf("recovery of %d %s wrote memory: %s -> %s", killed.record.Intent, killed.record.Phase, killed.memory, settled.memory)
+	}
+	return fmt.Sprintf("%d %s", settled.record.Intent, settled.record.Phase)
 }
 
 func checkCrashPoint(t *testing.T, host *crashHost, intent int, step, stage string, state crashState) {
@@ -554,6 +572,10 @@ func TestWindowsProcessKillAtRandomTimesOnNTFS(t *testing.T) {
 	final := host.last
 	if final.Intent <= 4 {
 		t.Fatalf("killed children made no progress: ledger=%d %s", final.Intent, final.Phase)
+	}
+	// Most kills must land after start-up, and in each ledger phase.
+	if beforeReady >= rounds/2 || phases["applying"] == 0 || phases["applied"] == 0 || phases["acked"] == 0 {
+		t.Fatalf("random kills missed the intent windows: beforeReady=%d phases=%v", beforeReady, phases)
 	}
 	t.Logf("OBSERVED %d random kills: startup=%v perIntent=%v beforeReady=%d phases=%v final ledger=%d %s applied=%d",
 		rounds, startup, perIntent, beforeReady, phases, final.Intent, final.Phase, len(host.applied))
