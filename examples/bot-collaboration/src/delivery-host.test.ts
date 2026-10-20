@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { freezeRuntimeAdapterDescriptor } from '@byok-sdk/client';
 import { BotStubAdapter } from '../../basic/goal-btw.test-support';
 import { afterEach, expect, it, vi } from 'vitest';
+import { tenantId } from '@byok-sdk/core';
 import { HostLedger } from '@byok-sdk/example-host-execution-core';
 import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration, type AgentMessageInput, type BotOptions } from './host';
@@ -49,7 +50,7 @@ async function openDeliveryHost(port: ChannelPort, rest: Partial<BotOptions> = {
   }
   function message(id: string, body = 'Final answer'): AgentMessageInput {
     const intent = bot.core.intent(id)!;
-    return { tenant: ledger().tenant, taskId: intent.taskId, deviceId: fixture.deviceId,
+    return { tenant: tenantId(ledger().tenant), taskId: intent.taskId, deviceId: fixture.deviceId,
       context: intent.execution.agentMessageContext!, payload: { agentRef: intent.execution.payload.agentRef,
         sessionRef: randomUUID(), contract: 'conversation-turn/v1', messageId: randomUUID(), cursor: 1,
         contentType: 'text/markdown', body, contentHash: `sha256:${createHash('sha256').update(body).digest('hex')}`, byteCount: Buffer.byteLength(body) } };
