@@ -6,16 +6,34 @@ import (
 	"errors"
 	"os"
 	"syscall"
+	"unsafe"
 )
 
-var procReOpenFile = syscall.NewLazyDLL("kernel32.dll").NewProc("ReOpenFile")
+var (
+	ntdll                     = syscall.NewLazyDLL("ntdll.dll")
+	procNtCreateFile          = ntdll.NewProc("NtCreateFile")
+	procRtlNtStatusToDosError = ntdll.NewProc("RtlNtStatusToDosError")
+)
 
-// FlushFileBuffers needs a handle with GENERIC_WRITE. os.Root opens a
-// directory read-only, so NTFS refuses that flush with access denied.
-// ReOpenFile gives a second handle to the same object. It does not resolve a
-// path, so a rename of the directory name cannot redirect the barrier. Its
-// documentation names CreateFile handles, and os.Root uses NtCreateFile, so
-// the barrier also proves the new handle has the same volume and file index.
+type ntUnicodeString struct {
+	Length, MaximumLength uint16
+	Buffer                *uint16
+}
+
+type ntObjectAttributes struct {
+	Length                   uint32
+	RootDirectory            syscall.Handle
+	ObjectName               *ntUnicodeString
+	Attributes               uint32
+	SecurityDescriptor       uintptr
+	SecurityQualityOfService uintptr
+}
+
+// FlushFileBuffers needs write access. os.Root opens a directory read-only, so
+// NTFS refuses that flush with access denied. NtCreateFile with an empty name
+// relative to the pinned handle opens that directory again, as Root.Open(".")
+// does, without a path. ReOpenFile refuses write access to these handles.
+// The new handle must also have the same volume and file index.
 func platformStrictSync(file *os.File) error {
 	info, err := file.Stat()
 	if err != nil {
@@ -24,13 +42,30 @@ func platformStrictSync(file *os.File) error {
 	if !info.IsDir() {
 		return file.Sync()
 	}
-	const share = syscall.FILE_SHARE_READ | syscall.FILE_SHARE_WRITE | syscall.FILE_SHARE_DELETE
-	handle, _, callErr := procReOpenFile.Call(file.Fd(), syscall.GENERIC_READ|syscall.GENERIC_WRITE, share, syscall.FILE_FLAG_BACKUP_SEMANTICS)
-	if syscall.Handle(handle) == syscall.InvalidHandle {
-		return callErr
+	const (
+		fileWriteData        = 0x2
+		fileReadAttributes   = 0x80
+		fileOpen             = 1
+		fileDirectoryFile    = 0x1
+		fileSynchronousIO    = 0x20
+		fileOpenForBackup    = 0x4000
+		fileOpenReparsePoint = 0x200000
+		share                = syscall.FILE_SHARE_READ | syscall.FILE_SHARE_WRITE | syscall.FILE_SHARE_DELETE
+	)
+	original := syscall.Handle(file.Fd())
+	var name ntUnicodeString
+	attributes := ntObjectAttributes{Length: uint32(unsafe.Sizeof(ntObjectAttributes{})), RootDirectory: original, ObjectName: &name}
+	var ioStatus struct{ Status, Information uintptr }
+	var handle syscall.Handle
+	status, _, _ := procNtCreateFile.Call(uintptr(unsafe.Pointer(&handle)), fileWriteData|fileReadAttributes|syscall.SYNCHRONIZE,
+		uintptr(unsafe.Pointer(&attributes)), uintptr(unsafe.Pointer(&ioStatus)), 0, 0, share, fileOpen,
+		fileDirectoryFile|fileSynchronousIO|fileOpenForBackup|fileOpenReparsePoint, 0, 0)
+	if status != 0 {
+		code, _, _ := procRtlNtStatusToDosError.Call(status)
+		return syscall.Errno(code)
 	}
-	flushErr := flushSameObject(syscall.Handle(file.Fd()), syscall.Handle(handle))
-	closeErr := syscall.CloseHandle(syscall.Handle(handle))
+	flushErr := flushSameObject(original, handle)
+	closeErr := syscall.CloseHandle(handle)
 	if flushErr != nil {
 		return flushErr
 	}
