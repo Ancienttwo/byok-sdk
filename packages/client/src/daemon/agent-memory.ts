@@ -282,7 +282,10 @@ async function syncDirectory(directory: Awaited<ReturnType<typeof fs.open>>): Pr
 async function syncDirectoryStrict(directory: Awaited<ReturnType<typeof fs.open>>): Promise<void> {
   await directory.sync();
 }
-async function replaceNative(context: AgentMemoryHomeBinding, relativePath: string, expected: string, content: string): Promise<FileState> {
+function syncDirectoryMode(directory: Awaited<ReturnType<typeof fs.open>>, mode: 'tolerant' | 'strict'): Promise<void> {
+  return mode === 'strict' ? syncDirectoryStrict(directory) : syncDirectory(directory);
+}
+async function replaceNative(context: AgentMemoryHomeBinding, relativePath: string, expected: string, content: string, directorySync: 'tolerant' | 'strict'): Promise<FileState> {
   const byteCount = encoder.encode(content).byteLength;
   if (byteCount > AGENT_MEMORY_MAX_FILE_BYTES) throw new AgentMemoryValidationError('memory content exceeds its bounded file size');
   return withMemoryParent(context, relativePath, async (directory, fileName) => {
@@ -298,7 +301,7 @@ async function replaceNative(context: AgentMemoryHomeBinding, relativePath: stri
       await handle.writeFile(content, 'utf8'); await handle.sync(); await handle.close(); handle = undefined;
       const finalCheck = await readPinnedFile(directory, fileName);
       if (finalCheck.revision !== expected || finalCheck.exists !== before.exists) throw new AgentMemoryRevisionConflictError(expected, finalCheck.revision);
-      await fs.rename(temporary, `${parent}/${fileName}`); await syncDirectory(directory);
+      await fs.rename(temporary, `${parent}/${fileName}`); await syncDirectoryMode(directory, directorySync);
       return Object.freeze({ exists: true, content, revision: digest(content), byteCount });
     } catch (error) {
       await handle?.close().catch(() => {}); await fs.rm(temporary, { force: true }).catch(() => {});
@@ -307,11 +310,11 @@ async function replaceNative(context: AgentMemoryHomeBinding, relativePath: stri
     }
   });
 }
-async function replace(context: AgentMemoryHomeBinding, relativePath: string, expected: string, content: string): Promise<FileState> {
+async function replace(context: AgentMemoryHomeBinding, relativePath: string, expected: string, content: string, directorySync: 'tolerant' | 'strict' = 'tolerant'): Promise<FileState> {
   if (context.filesystem !== undefined) return context.filesystem.replace(relativePath, expected, content, AGENT_MEMORY_MAX_FILE_BYTES);
-  return replaceNative(context, relativePath, expected, content);
+  return replaceNative(context, relativePath, expected, content, directorySync);
 }
-async function removeNative(context: AgentMemoryHomeBinding, relativePath: string, expected: string): Promise<void> {
+async function removeNative(context: AgentMemoryHomeBinding, relativePath: string, expected: string, directorySync: 'tolerant' | 'strict'): Promise<void> {
   if (relativePath === 'MEMORY.md') throw new AgentMemoryValidationError('MEMORY.md may not be deleted');
   await withMemoryParent(context, relativePath, async (directory, fileName) => {
     const before = await readPinnedFile(directory, fileName);
@@ -321,17 +324,18 @@ async function removeNative(context: AgentMemoryHomeBinding, relativePath: strin
     try {
       const check = await readPinnedFile(directory, fileName);
       if (!check.exists || check.revision !== expected) throw new AgentMemoryRevisionConflictError(expected, check.revision);
-      await fs.rename(`${parent}/${fileName}`, tombstone); await syncDirectory(directory); await fs.rm(tombstone); await syncDirectory(directory);
+      await fs.rename(`${parent}/${fileName}`, tombstone); await syncDirectoryMode(directory, directorySync);
+      await fs.rm(tombstone); await syncDirectoryMode(directory, directorySync);
     } catch (error) {
       if (error instanceof AgentMemoryError) throw error;
       throw new AgentMemoryIoError('could not atomically delete memory file');
     }
   });
 }
-async function remove(context: AgentMemoryHomeBinding, relativePath: string, expected: string): Promise<void> {
+async function remove(context: AgentMemoryHomeBinding, relativePath: string, expected: string, directorySync: 'tolerant' | 'strict' = 'tolerant'): Promise<void> {
   if (relativePath === 'MEMORY.md') throw new AgentMemoryValidationError('MEMORY.md may not be deleted');
   if (context.filesystem !== undefined) return context.filesystem.delete(relativePath, expected);
-  return removeNative(context, relativePath, expected);
+  return removeNative(context, relativePath, expected, directorySync);
 }
 
 /** Read one SDK-internal bounded state file through the same pinned home authority. */
@@ -368,7 +372,7 @@ async function replaceInternalFile(context: AgentMemoryHomeBinding, fileName: st
       const check = await readPinnedFile(directory, fileName, AGENT_MEMORY_MAX_LOCAL_LOG_BYTES);
       if (check.revision !== expectedRevision || check.exists !== before.exists) throw new AgentMemoryRevisionConflictError(expectedRevision, check.revision);
       await fs.rename(temporary, `${parent}/${fileName}`);
-      await (directorySync === 'strict' ? syncDirectoryStrict(directory) : syncDirectory(directory));
+      await syncDirectoryMode(directory, directorySync);
       return Object.freeze({ exists: true, content, revision: digest(content), byteCount });
     } catch (error) {
       await handle?.close().catch(() => {}); await fs.rm(temporary, { force: true }).catch(() => {});
@@ -591,7 +595,9 @@ export interface AgentMemoryHomeCompareAndSwap {
  * Native backend: every conflict is thrown before the rename that would
  * install new bytes (replace compares before the temp file, before its write
  * and after it; delete compares twice before its tombstone rename), so a
- * conflict means this call renamed nothing.
+ * conflict means this call renamed nothing. Its directory fsync is strict, as
+ * for the intent ledger: a success proves the rename reached the directory on
+ * disk, and an `EINVAL`/`EPERM` refusal after it throws {@link AgentMemoryIoError}.
  */
 export async function compareAndSwapAgentMemoryHomeFile(binding: AgentMemoryHomeBinding, input: AgentMemoryHomeCompareAndSwap): Promise<AgentMemoryFilesystemFileState> {
   const home = agentMemoryHomeBinding(binding);
@@ -601,13 +607,13 @@ export async function compareAndSwapAgentMemoryHomeFile(binding: AgentMemoryHome
   if (input.operation === 'delete') {
     if (input.content !== undefined) throw new AgentMemoryValidationError('delete does not accept content');
     return exclusiveAgentMemoryHome(home.canonicalHome, async () => {
-      await remove(home, relativePath, expectedRevision);
+      await remove(home, relativePath, expectedRevision, 'strict');
       return EMPTY_FILE_STATE;
     });
   }
   if (input.operation !== 'replace' || typeof input.content !== 'string') throw new AgentMemoryValidationError('replace requires string content');
   const content = input.content;
-  return exclusiveAgentMemoryHome(home.canonicalHome, () => replace(home, relativePath, expectedRevision, content));
+  return exclusiveAgentMemoryHome(home.canonicalHome, () => replace(home, relativePath, expectedRevision, content, 'strict'));
 }
 
 /** Read one SDK-internal state file under `.byok` through the pinned home. */

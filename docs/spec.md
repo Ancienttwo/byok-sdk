@@ -1985,7 +1985,9 @@ the intent to the notice Agent and to its own enrolled tenant and device
 through the recomputed `operationDigest`, and it applies the existing sha256
 CAS at most once under the task-free Agent-home lease. The ledger
 `.byok/agent-memory-intents-v1.json` makes `applying` durable before the CAS.
-It makes the terminal durable before the content-free completion, and makes
+The CAS directory fsync is strict. If it fails after the rename, the terminal
+is `uncertain`, never `applied`.
+The ledger makes the terminal durable before the content-free completion, and makes
 `ackedAt` durable after the Host readback matches. Only then does the cursor
 advance. A leftover `applying` record is reported `uncertain` and never
 re-executed. Busy, fetch, readback, identity or I/O failures leave the cursor
