@@ -678,6 +678,34 @@ admitted work. Runtime/grants remain separate from the native Codex session.
 
 MIT licensed. Node.js 24.15.0 or newer.
 
+### Hermes Agent adapter
+
+`HermesAdapter` drives Hermes Agent (`hermes`, Nous Research) over ACP stdio.
+A Host adds it to its explicit adapter list. The daemon does not build it by
+default:
+
+```ts
+import { HermesAdapter } from '@byok-sdk/client/adapters';
+
+const hermes = new HermesAdapter({
+  home: '/var/lib/example-host/hermes', // SDK-owned Hermes root; never ~/.hermes
+  model: { provider: 'openrouter', model: '<model id>' }, // optional
+});
+```
+
+Offers select it with `harnessId: 'hermes'`. `home` is a root that the SDK
+owns; give each Host process its own root. Each execution gets a fresh Hermes
+profile under it, with Hermes memory and kanban dispatch off, and the adapter
+deletes the profile when the execution ends. The adapter starts the Hermes
+gateway itself and owns its process tree. It never reads or writes the user's
+`~/.hermes`. Provider
+credentials come from the runtime environment; `model.keyEnv` names the
+variable for a `custom` endpoint. The first `detect()` on a new root waits
+while Hermes builds its Python environment there (up to `probeTimeoutMs`,
+default 180 s). A turn start takes about 20 s, so a Host may raise
+`startupTimeoutMs`. Qualified build and limits:
+[S0 note](../../docs/notes/2026-10-20-519-hermes-acp-s0.md).
+
 ### Direct adapter environments
 
 Hosts that use `@byok-sdk/client/adapters` can import `buildRuntimeEnv` from that

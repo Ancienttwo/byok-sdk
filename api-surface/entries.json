@@ -96,7 +96,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 345176,
+      "budgetBytes": 415785,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {

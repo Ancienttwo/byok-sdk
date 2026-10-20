@@ -443,6 +443,71 @@ export declare class GrokAdapter implements RuntimeAdapter {
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
 }
+// ==== @byok-sdk/client dist/adapters/hermes/hermes-adapter.d.ts ====
+import { spawn as nodeSpawn } from 'node:child_process';
+import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult } from '../../types';
+import type { ResolvedBin } from '../codex/resolve-bin';
+/** Provider choice written into each execution profile. Credentials stay in the environment. */
+export interface HermesModelSelection {
+    /** Hermes provider id, for example `openrouter`, `anthropic` or `custom`. */
+    readonly provider: string;
+    readonly model: string;
+    /** Endpoint for an OpenAI-compatible `custom` provider. It must not carry credentials. */
+    readonly baseUrl?: string;
+    /** Name of the environment variable that holds the provider key. The value never enters the file. */
+    readonly keyEnv?: string;
+}
+export interface HermesAdapterOptions {
+    /**
+     * Absolute path of the Hermes root that this SDK owns, for example under the
+     * Host's store directory. Each execution runs in a fresh profile home below
+     * it (`hermes-home.ts`). It must not be the user's `~/.hermes`. Give each
+     * Host process its own root. The first `detect()` on a new root waits while
+     * Hermes builds its environment there.
+     */
+    home: string;
+    /** Provider and model for every execution. Absent: Hermes picks a provider from the credentials in the environment. */
+    model?: HermesModelSelection;
+    resolveBin?: () => ResolvedBin;
+    spawnFn?: typeof nodeSpawn;
+    /** Deadline of the `detect()` ACP probe. Covers a first environment build in a new root. Default 180 s. */
+    probeTimeoutMs?: number;
+    /** Deadline for the owned gateway to report ready. Default 20 s. */
+    gatewayReadyTimeoutMs?: number;
+    /** Deadline for a cancelled turn to settle before the session fails. Default 1 s. */
+    interruptTimeoutMs?: number;
+}
+/**
+ * Hermes Agent over ACP stdio (`hermes acp`). The `hermes acp` process is a
+ * viewer: tools, MCP servers and the model loop run in a Hermes gateway. A
+ * viewer that finds no gateway starts a detached one that outlives it, so the
+ * adapter starts the gateway itself as an owned process tree, waits until the
+ * gateway names that pid as ready, and only then starts the viewer. Both
+ * trees are disposed at `close()`.
+ */
+export declare class HermesAdapter implements RuntimeAdapter {
+    private readonly root;
+    private readonly options;
+    /** Profile homes of this adapter's open sessions; the stale-profile sweep keeps them. */
+    private readonly liveHomes;
+    get descriptor(): import("..").RuntimeAdapterDescriptor;
+    constructor(options: HermesAdapterOptions);
+    private command;
+    private rootEnvironment;
+    /**
+     * Prepares the SDK root, deletes profiles a dead Host left, runs
+     * `hermes --version`, then one ACP `initialize` in a throwaway profile with
+     * the same config and environment a turn gets. `initialize` does not reach
+     * the gateway. `authPresent` is true when Hermes offers a provider auth
+     * method, which it does only when that provider's credentials resolve. On a
+     * new root the probe waits while Hermes builds its Python environment.
+     */
+    detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
+    private probeAcp;
+    /** Cheap admission, as Codex: the version probe only. The ACP probe and root build belong to `detect()`. */
+    prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
+    private start;
+}
 // ==== @byok-sdk/client dist/adapters/index.d.ts ====
 export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, } from '../types';
 export { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
@@ -456,6 +521,8 @@ export { CodexAdapter } from './codex/codex-adapter';
 export type { CodexAdapterOptions, CodexSandboxSetting } from './codex/codex-adapter';
 export { GrokAdapter } from './grok/grok-adapter';
 export type { GrokAdapterOptions } from './grok/grok-adapter';
+export { HermesAdapter } from './hermes/hermes-adapter';
+export type { HermesAdapterOptions, HermesModelSelection } from './hermes/hermes-adapter';
 export { NativeInteractionController, NativeInteractionError } from '../native-interactions';
 export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from '../native-interactions';
 export { buildRuntimeEnv } from '../daemon/environment';
@@ -10279,6 +10346,7 @@ export { ClaudeAdapter } from './adapters/claude/claude-adapter';
 export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter';
 export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from './adapters/codex/codex-adapter';
 export { GrokAdapter, type GrokAdapterOptions } from './adapters/grok/grok-adapter';
+export { HermesAdapter, type HermesAdapterOptions, type HermesModelSelection } from './adapters/hermes/hermes-adapter';
 export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError } from './diagnostics/device-doctor';
 export type { DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus, RepairDeviceEnrollmentMetadataInput, DeviceMetadataRepairResult, DeviceMetadataRepairErrorCode, } from './diagnostics/device-doctor';
 export { quarantineDeviceOperationalHealth, exportDeviceSupportBundle, archiveAgentTerminalMessages, DeviceOperatorError } from './diagnostics/operator-actions';
