@@ -3,13 +3,15 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "Copy-and-own external-Bot MCP authorization ledger and task tools",
+  "description": "Copy-and-own external-Bot MCP authorization ledger, task tools and routine tools",
   "license": "MIT",
   "engines": { "node": ">=24.15.0" },
   "exports": { ".": "./src/index.ts" },
   "scripts": { "typecheck": "tsc --noEmit", "test": "vitest run" },
   "dependencies": {
     "@byok-sdk/client": "workspace:*",
+    "@byok-sdk/core": "workspace:*",
+    "@byok-sdk/example-host-execution-core": "workspace:*",
     "@byok-sdk/protocol": "workspace:*",
     "@byok-sdk/server": "workspace:*"
   },

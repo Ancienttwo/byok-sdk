@@ -25,18 +25,27 @@ const TERMINAL: ReadonlySet<TaskState> = new Set(['Complete', 'Failed', 'Cancell
 const VIEW_STATES = [...TASK_STATES, 'Reserved', 'Unknown'] as const;
 type ViewState = typeof VIEW_STATES[number];
 
-function json(value: unknown): Record<string, unknown> { return { content: [{ type: 'text', text: JSON.stringify(value) }] }; }
-function input(args: Readonly<Record<string, unknown>> | undefined, allowed: readonly string[], required: readonly string[] = []): Record<string, unknown> {
+export function json(value: unknown): Record<string, unknown> { return { content: [{ type: 'text', text: JSON.stringify(value) }] }; }
+export function input(args: Readonly<Record<string, unknown>> | undefined, allowed: readonly string[], required: readonly string[] = []): Record<string, unknown> {
   const value = object(args ?? {});
   if (Object.keys(value).some(key => !allowed.includes(key)) || required.some(key => value[key] === undefined)) invalid();
   return value;
 }
-function integer(value: unknown, min: number, max: number, fallback?: number): number {
+export function integer(value: unknown, min: number, max: number, fallback?: number): number {
   if (value === undefined && fallback !== undefined) return fallback;
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < min || value > max) invalid();
   return value;
 }
 const taskIdProperty = { type: 'string', description: 'A taskId that byok_task_submit returned to this key.' } as const;
+
+/** Ranks granted devices: runtime advertised now, then offline (queued work), then online without it. */
+export async function selectDevice(sdk: Pick<ByokServer, 'machines'>, key: KeyInfo, runtime: RuntimeId): Promise<string> {
+  const machines = new Map((await sdk.machines.list()).map(machine => [machine.deviceId, machine]));
+  const rank = (machine: MachineInfo) => machine.runtimes?.some(fact => fact.id === runtime) ? 0 : machine.connected ? 2 : 1;
+  const granted = key.deviceIds.flatMap(id => machines.get(id) ?? []).sort((a, b) => rank(a) - rank(b));
+  if (!granted[0]) throw new BetaError('unavailable', 'No granted device is registered', 60);
+  return granted[0].deviceId;
+}
 
 /** The B3 task catalogue. Each handler reaches the SDK only through the caller's saved ledger reservations. */
 export function createTaskTools(options: TaskToolOptions): ScopedTool[] {
@@ -71,14 +80,6 @@ export function createTaskTools(options: TaskToolOptions): ScopedTool[] {
       ...(result?.retryable === undefined ? {} : { retryable: result.retryable }) };
   }
 
-  /** Ranks granted devices: runtime advertised now, then offline (queued work), then online without it. */
-  async function selectDevice(key: KeyInfo, runtime: RuntimeId): Promise<string> {
-    const machines = new Map((await sdk.machines.list()).map(machine => [machine.deviceId, machine]));
-    const rank = (machine: MachineInfo) => machine.runtimes?.some(fact => fact.id === runtime) ? 0 : machine.connected ? 2 : 1;
-    const granted = key.deviceIds.flatMap(id => machines.get(id) ?? []).sort((a, b) => rank(a) - rank(b));
-    if (!granted[0]) throw new BetaError('unavailable', 'No granted device is registered', 60);
-    return granted[0].deviceId;
-  }
   function verifyOffer(offer: NonNullable<Awaited<ReturnType<TaskToolServer['tasks']['offer']>>>, reservation: TaskReservation): void {
     const payload = offer.payload as Readonly<Record<string, unknown>>;
     const args = reservation.binding.arguments;
@@ -171,7 +172,7 @@ export function createTaskTools(options: TaskToolOptions): ScopedTool[] {
         let reservation = ledger.lookupTask(caller, parsed);
         if (!reservation) {
           await reconcileOpen(caller);
-          reservation = ledger.reserveTask(caller, parsed, await selectDevice(ledger.authorize(caller, 'tasks.dispatch'), parsed.runtime));
+          reservation = ledger.reserveTask(caller, parsed, await selectDevice(sdk, ledger.authorize(caller, 'tasks.dispatch'), parsed.runtime));
         }
         // A released reservation already reached a device terminal: read it back, never dispatch it again.
         if (!reservation.slotReleased) await ensureDispatched(reservation);

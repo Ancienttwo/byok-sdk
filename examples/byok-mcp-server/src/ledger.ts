@@ -243,15 +243,24 @@ export class BetaLedger {
     }
     return this.transaction(() => { this.db.prepare('UPDATE beta_tasks SET released=1 WHERE task_id=?').run(taskId); return true; });
   }
+  private priorRoutine(keyId: string, localId: string, argsHash: string): Row | undefined {
+    const prior = this.db.prepare('SELECT * FROM beta_routines WHERE key_id=? AND local_id=?').get(keyId, localId);
+    if (prior && prior.args_hash !== argsHash) throw new BetaError('idempotency_conflict', 'Routine identity has different arguments');
+    return prior;
+  }
+  /** The saved reservation for this key and local ID, without admitting a new one. */
+  lookupRoutine(caller: Caller, localId: string, definition: unknown): RoutineReservation | undefined {
+    text(localId); const argsHash = hash(definition);
+    const key = this.authorize(caller, 'routines.write');
+    const prior = this.priorRoutine(key.keyId, localId, argsHash);
+    return prior ? this.routine(prior, true) : undefined;
+  }
   reserveRoutine(caller: Caller, localId: string, definition: unknown): RoutineReservation {
     text(localId); const argsHash = hash(definition);
     return this.transaction(() => {
       const key = this.authorize(caller, 'routines.write'); const now = this.now();
-      const prior = this.db.prepare('SELECT * FROM beta_routines WHERE key_id=? AND local_id=?').get(key.keyId, localId);
-      if (prior) {
-        if (prior.args_hash !== argsHash) throw new BetaError('idempotency_conflict', 'Routine identity has different arguments');
-        return this.routine(prior, true);
-      }
+      const prior = this.priorRoutine(key.keyId, localId, argsHash);
+      if (prior) return this.routine(prior, true);
       if (this.count('SELECT COUNT(*) AS n FROM beta_routines WHERE key_id=? AND released=0', key.keyId) >= key.quota.routines) throw new BetaError('quota_exceeded', 'Routine slots are full', 1);
       const routineId = hash(['byok-mcp-routine-v1', this.tenant, key.keyId, localId]);
       this.db.prepare('INSERT INTO beta_routines (routine_id,key_id,local_id,args_hash,created_at) VALUES (?,?,?,?,?)').run(routineId, key.keyId, localId, argsHash, now);
@@ -267,6 +276,26 @@ export class BetaLedger {
     const row = this.db.prepare('SELECT * FROM beta_routines WHERE routine_id=? AND key_id=?').get(routineId, key.keyId);
     if (!row) throw new BetaError('not_found', 'Resource not found');
     return this.routine(row, true);
+  }
+  /** This key's routine reservations, newest first. The cursor is opaque to callers. */
+  listRoutines(caller: Caller, query: { cursor?: string; limit: number }): { routines: RoutineReservation[]; nextCursor?: string } {
+    const key = this.authorize(caller, 'routines.read');
+    if (!Number.isSafeInteger(query.limit) || query.limit < 1 || query.limit > 100) invalid();
+    const after = query.cursor === undefined ? undefined : /^(\d{1,16})\.([a-f0-9]{64})$/.exec(query.cursor);
+    if (query.cursor !== undefined && !after) invalid();
+    const rows = after
+      ? this.db.prepare('SELECT * FROM beta_routines WHERE key_id=? AND (created_at<? OR (created_at=? AND routine_id<?)) ORDER BY created_at DESC, routine_id DESC LIMIT ?')
+        .all(key.keyId, Number(after[1]), Number(after[1]), after[2]!, query.limit + 1)
+      : this.db.prepare('SELECT * FROM beta_routines WHERE key_id=? ORDER BY created_at DESC, routine_id DESC LIMIT ?').all(key.keyId, query.limit + 1);
+    const routines = rows.slice(0, query.limit).map(row => this.routine(row, true));
+    const last = routines.at(-1);
+    return { routines, ...(rows.length > query.limit && last ? { nextCursor: `${last.createdAt}.${last.routineId}` } : {}) };
+  }
+  /** Routines that still hold a slot although their key is revoked, for trusted Host retirement. */
+  revokedRoutines(): string[] {
+    this.assertOpen();
+    return this.db.prepare('SELECT r.routine_id FROM beta_routines r JOIN beta_keys k ON k.key_id=r.key_id WHERE r.released=0 AND k.revoked_at IS NOT NULL ORDER BY r.created_at')
+      .all().map(row => String(row.routine_id));
   }
   /** Call only after the owning K4/Host routine is confirmed completed. Not an MCP command. */
   releaseRoutineSlot(routineId: string): boolean {
