@@ -1,6 +1,6 @@
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, promises as fs, readFileSync } from 'node:fs';
+import { existsSync, promises as fs, readFileSync, statSync, type Stats } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -1839,13 +1839,14 @@ describe('WP2I-S2 native descriptor backend (Linux)', () => {
     expect((await w.record(intent.intentId))?.state).toBe('applying');
   });
 
-  async function withDirectoryFsyncFailure<T>(code: string, armed: () => boolean, run: () => Promise<T>): Promise<T> {
+  async function withDirectoryFsyncFailure<T>(code: string, armed: (directory: Stats) => boolean, run: () => Promise<T>): Promise<T> {
     const probe = await fs.open(os.tmpdir(), 'r');
     const prototype = Object.getPrototypeOf(probe) as { sync: (this: Awaited<ReturnType<typeof fs.open>>) => Promise<void> };
     await probe.close();
     const original = prototype.sync;
     prototype.sync = async function sync(this: Awaited<ReturnType<typeof fs.open>>) {
-      if (armed() && (await this.stat()).isDirectory()) throw Object.assign(new Error(`${code}: injected directory fsync refusal`), { code });
+      const stat = await this.stat();
+      if (stat.isDirectory() && armed(stat)) throw Object.assign(new Error(`${code}: injected directory fsync refusal`), { code });
       return original.call(this);
     };
     try {
@@ -1873,13 +1874,21 @@ describe('WP2I-S2 native descriptor backend (Linux)', () => {
     }
   });
 
+  /** True when the synced directory handle is the directory now at `target`. */
+  function sameDirectory(directory: Stats, target: string): boolean {
+    if (!existsSync(target)) return false;
+    const actual = statSync(target);
+    return actual.dev === directory.dev && actual.ino === directory.ino;
+  }
+
   itNative('L7: an EINVAL directory fsync on the terminal write blocks complete and resolve; recovery re-barriers', async () => {
     const w = await nativeWorld();
     const intent = await makeIntent({ path: 'notes/host-a.md', operation: 'replace', base: EMPTY, content: 'alpha' });
     w.host.add(intent);
-    // Armed once the CAS installed the bytes: the CAS's own tolerant directory
-    // fsync swallows EINVAL, the strict terminal ledger write must not.
-    const armed = () => existsSync(w.memoryFile('notes/host-a.md')) && readFileSync(w.memoryFile('notes/host-a.md'), 'utf8') === 'alpha';
+    // Armed on the ledger directory once the CAS installed the bytes: only the
+    // strict terminal ledger write sees the refusal, never the CAS itself.
+    const armed = (directory: Stats) => sameDirectory(directory, path.dirname(w.ledgerFile))
+      && existsSync(w.memoryFile('notes/host-a.md')) && readFileSync(w.memoryFile('notes/host-a.md'), 'utf8') === 'alpha';
     await withDirectoryFsyncFailure('EINVAL', armed, async () => {
       expect(await failureReason(w.nativeProcessor()(notice(intent)))).toBe('local_io_failed');
     });
@@ -1888,6 +1897,50 @@ describe('WP2I-S2 native descriptor backend (Linux)', () => {
     const result = await w.nativeProcessor()(notice(intent));
     expect(result.kind === 'acknowledged' && result.completion.outcome).toBe('applied');
     expect(w.host.completes).toHaveLength(1);
+  });
+
+  // #522: the Host must never hold `applied` for a memory rename that no
+  // directory barrier made durable. A crash would roll the memory back while
+  // the Host keeps `applied` and the cursor stays advanced.
+  itNative.each(['EINVAL', 'EPERM', 'EIO'])('#522: a %s directory fsync after the memory replace rename is uncertain, never applied', async (code) => {
+    const w = await nativeWorld();
+    const intent = await makeIntent({ path: 'notes/host-a.md', operation: 'replace', base: EMPTY, content: 'alpha' });
+    w.host.add(intent);
+    let refusals = 0;
+    const armed = (directory: Stats) => {
+      const refuse = sameDirectory(directory, path.join(w.canonicalHome, 'notes')) && existsSync(w.memoryFile('notes/host-a.md'));
+      if (refuse) refusals += 1;
+      return refuse;
+    };
+    const result = await withDirectoryFsyncFailure(code, armed, () => w.nativeProcessor()(notice(intent)));
+    if (result.kind !== 'acknowledged') throw new Error('unreachable');
+    // The rename is visible, but visibility is not durability.
+    expect(result.completion).toEqual({ ...completionIdentity(intent), outcome: 'uncertain', observed: { exists: true, revision: sha('alpha') } });
+    expect(w.host.completes.map((completion) => completion.outcome)).toEqual(['uncertain']);
+    expect(await w.record(intent.intentId)).toMatchObject({ state: 'uncertain', ackedAt: expect.any(String) });
+    // Only the CAS barrier on `notes/` was refused, and only once.
+    expect(refusals).toBe(1);
+  });
+
+  itNative.each(['EINVAL', 'EPERM', 'EIO'])('#522: a %s directory fsync after the memory delete rename is uncertain, never applied', async (code) => {
+    const w = await nativeWorld();
+    await w.homes.prepare(AGENT).then((binding) => binding.lease.release());
+    await w.writeMemory('notes/host-a.md', 'alpha');
+    const intent = await makeIntent({ path: 'notes/host-a.md', operation: 'delete', base: sha('alpha') });
+    w.host.add(intent);
+    let refusals = 0;
+    const armed = (directory: Stats) => {
+      const refuse = sameDirectory(directory, path.join(w.canonicalHome, 'notes')) && !existsSync(w.memoryFile('notes/host-a.md'));
+      if (refuse) refusals += 1;
+      return refuse;
+    };
+    const result = await withDirectoryFsyncFailure(code, armed, () => w.nativeProcessor()(notice(intent)));
+    if (result.kind !== 'acknowledged') throw new Error('unreachable');
+    expect(result.completion).toEqual({ ...completionIdentity(intent), outcome: 'uncertain', observed: { exists: false, revision: EMPTY } });
+    expect(w.host.completes.map((completion) => completion.outcome)).toEqual(['uncertain']);
+    expect(await w.record(intent.intentId)).toMatchObject({ state: 'uncertain', ackedAt: expect.any(String) });
+    // Only the CAS barrier on `notes/` was refused, and only once.
+    expect(refusals).toBe(1);
   });
 });
 
