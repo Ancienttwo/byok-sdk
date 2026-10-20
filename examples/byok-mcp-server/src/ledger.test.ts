@@ -190,6 +190,26 @@ describe('atomic quota admission and rolling counters', () => {
     expect(f.ledger.quota(caller).routines).toBe(8);
   });
 
+  it('looks up and pages one key\'s routine reservations without admitting new ones', () => {
+    let now = 1_000_000; const f = fixture({ now: () => now });
+    const issued = f.ledger.issueKey({ ...spec, scopes: ['routines.read', 'routines.write'], agentRef: { agentId: 'main', profileRevision: '1' } });
+    const caller = f.ledger.authenticate(`Bearer ${issued.token}`);
+    const definition = { schedule: { minute: 0, hour: 9, tz: 'UTC' }, task: args };
+    expect(f.ledger.lookupRoutine(caller, 'r-0', definition)).toBeUndefined();
+    expect(f.ledger.quota(caller).routines).toBe(0);
+    const rows = Array.from({ length: 3 }, (_, i) => { now += 1; return f.ledger.reserveRoutine(caller, `r-${i}`, definition); });
+    expect(f.ledger.lookupRoutine(caller, 'r-0', definition)).toEqual({ ...rows[0], deduplicated: true });
+    code(() => f.ledger.lookupRoutine(caller, 'r-0', { different: true }), 'idempotency_conflict');
+    code(() => f.ledger.lookupRoutine(f.caller, 'r-0', definition), 'forbidden');
+    const first = f.ledger.listRoutines(caller, { limit: 2 });
+    expect(first.routines.map(row => row.localId)).toEqual(['r-2', 'r-1']);
+    const second = f.ledger.listRoutines(caller, { limit: 2, cursor: first.nextCursor! });
+    expect(second).toEqual({ routines: [{ ...rows[0], deduplicated: true }] });
+    for (const limit of [0, 101]) code(() => f.ledger.listRoutines(caller, { limit }), 'invalid_input');
+    code(() => f.ledger.listRoutines(caller, { limit: 1, cursor: 'not-a-cursor' }), 'invalid_input');
+    code(() => f.ledger.listRoutines(f.caller, { limit: 1 }), 'forbidden');
+  });
+
   it('rechecks revocation after lookup and does not persist a future clock after repair', () => {
     let now = 1_000_000; const f = fixture({ now: () => now });
     expect(f.ledger.lookupTask(f.caller, args)).toBeUndefined();

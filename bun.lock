@@ -53,6 +53,8 @@
       "version": "0.0.1",
       "dependencies": {
         "@byok-sdk/client": "workspace:*",
+        "@byok-sdk/core": "workspace:*",
+        "@byok-sdk/example-host-execution-core": "workspace:*",
         "@byok-sdk/protocol": "workspace:*",
         "@byok-sdk/server": "workspace:*",
       },

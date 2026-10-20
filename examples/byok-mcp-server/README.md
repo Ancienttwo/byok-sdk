@@ -1,11 +1,12 @@
-# External-Bot MCP beta: B2 and B3
+# External-Bot MCP beta: B2, B3 and B4
 
 This private, copy-and-own example supplies the Host authorization and admission
-ledger (B2) and the task tool catalogue (B3) from
+ledger (B2), the task tool catalogue (B3) and the routine tools (B4) from
 [the beta plan](../../docs/plans/2026-10-19-byok-mcp-server-external-bot-beta.md).
-It reuses the public B1 HTTP transport and the public `@byok-sdk/server` API.
+It reuses the public B1 HTTP transport, the public `@byok-sdk/server` API and the
+K4 Host execution core (`examples/host-execution-core`) for routines.
 It adds no public SDK API or new SDK runtime dependency.
-Routines and memory tools belong to B4/B5.
+Memory tools belong to B5.
 There is no listener, admin HTTP route, default key or model invocation here.
 
 ## Host composition
@@ -45,7 +46,8 @@ a Host callback. Discovery can use the explicit `authenticated` policy. Omitting
 the policy is invalid. Only authenticated caller handles reach that callback. The tool
 list excludes denied scopes. A manual call still checks current ledger state.
 Domain refusals use JSON text with `isError: true`, `code`, `message` and optional
-`retryAfterSeconds`. `createTaskTools` returns the B3 registrations. The B2 tests
+`retryAfterSeconds`. `createTaskTools` returns the B3 registrations and
+`createRoutineTools` the B4 registrations; pass both arrays as `tools`. The B2 tests
 register local protocol probes only to exercise this boundary.
 
 ## Keys and ownership
@@ -201,6 +203,71 @@ without `toolset-selection`) keeps its slot, as B2 requires for any missing SDK
 task. Device selection does not read device capabilities, which `machines.list`
 does not expose. To clear such slots, revoke the key and issue a new one.
 
+## Routine tools (B4)
+
+| Tool | Scope | Input | Result |
+| --- | --- | --- | --- |
+| `byok_routine_create` | `routines.write` | `{ localId, schedule, task: { runtime, instruction, toolsets?, resultSchema? } }` | `{ routineId, lifecycle, nextAt, deduplicated }` |
+| `byok_routine_list` | `routines.read` | `{ cursor?, limit? (1–50, default 20) }` | `{ routines: [{ routineId, localId, createdAt, lifecycle, status?, nextAt, schedule?, runtime?, lastOccurrence? }], nextCursor? }` |
+| `byok_routine_cancel` | `routines.write` | `{ routineId }` | `{ routineId, state: "completed" }` |
+
+The routines run on the Host's own K4 `HostExecutionCore`. The Host creates that
+core with `nextOccurrence: routineScheduleCalendar` and installs `core.consume` as
+the SDK's `wake.consume`. It passes the core, its Agent egress policy, `waitMs`
+(how long an occurrence may wait for its device) and `lateAfterMs` (the catch-up
+threshold) to `createRoutineTools`. K4 is the only scheduler: it stores the
+definition, the next one-shot wake `<routineId>:1:<t>`, every occurrence and its
+outcome. The beta ledger stores only key ownership and the routine slot.
+
+```ts
+const core = new HostExecutionCore(sdk, hostLedger, { nextOccurrence: routineScheduleCalendar });
+const tools = [...createTaskTools({ sdk, ledger, blobBaseUrl: sdkOrigin }),
+  ...createRoutineTools({ sdk, ledger, core, egressPolicy, waitMs: 3_600_000, lateAfterMs: 300_000 })];
+```
+
+`schedule` is the SDK `RoutineSchedule`: `{ minute, hour, tz }` plus either
+`daysOfWeek` or `dayOfMonth` (with optional `month`). `tz` is an IANA zone. The beta
+plan's `{ cron, tz }` has no dialect in this repository; K4 and K8a both use this
+shape and `nextRoutineOccurrence`. The calendar refuses any other rule.
+
+Create refuses these inputs before admission, so they use no slot: an invalid
+schedule (`checkRoutineSchedule`), a `clientRequestId` (an occurrence takes its
+identity from `(routineId, version, t)`), a `workspace`, toolsets the SDK would
+refuse, a `resultSchema` outside the SDK result subset, and a runtime the key may
+not use. A key with no registered granted device gets `unavailable`.
+
+Each occurrence is a fresh Agent execution of the key's AgentRef on the device
+saved at creation. `toolsets` become `requiredToolsets`. A `resultSchema` becomes a
+`result-document` projection with contract `byok-mcp-routine-v1`; without one the
+projection is `none`. K4 runs one occurrence per Agent at a time and keeps only the
+latest queued slot.
+
+`localId` deduplicates: the same arguments return the same routine with
+`deduplicated: true`, and other arguments give `idempotency_conflict`. A routine
+never changes. To change one, cancel it and create one with a new `localId`. A
+retry of a cancelled routine's create returns `completed` and schedules nothing.
+
+`lifecycle` is K4's `active` or `completed`. Two ledger states exist when K4 has no
+routine: `reserved` (admitted, K4 did not commit; a retry of the same create
+schedules it) and `completed` (cancelled before K4 committed). `nextAt` is K4's next
+wake time, or `null`. `lastOccurrence` is the newest occurrence: `plannedAt`,
+`trigger` (`scheduled` or `catch_up`), `taskId`, `attempts`, K4's `conclusion` once
+settled, and the result `document` when it succeeded. These task IDs are not
+`byok_task_*` tasks: `byok_task_status` answers `not_found` for them.
+
+Cancel sets K4's lifecycle to `completed`. No new occurrence starts; one that
+already started finishes, and list then shows its outcome. Then the slot is
+released. K4 completion is the only release authority: list also releases a
+completed routine whose release was lost. Paused routines and same-ID versions
+(K8a `update_routine`) are not part of the beta.
+
+Revocation stops a key's routines. A future occurrence would be a new call for a
+revoked key, so `createRoutineTools` completes that key's routines on K4 from the
+ledger's revocation listener, as cancel does. An occurrence that already started
+finishes, as a running task does. Call `retireRevokedRoutines(ledger, core)` at
+Host startup, after `core.recover()`, to finish a retirement that a crash or a
+listener failure interrupted.
+
 ## Storage boundary
 
 Choose a dedicated private directory and regular SQLite file. POSIX directories
@@ -281,3 +348,37 @@ Read-only Claude Opus security and test-integrity review, round 2: PASS. No exis
 test file or assertion changed. No test or runtime timeout was added or increased.
 Not tested: an MCP cancellation that ends a status wait early (the wait loop checks
 the call signal).
+
+### B4 verification record: 2026-10-20
+
+The [B4 plan](../../docs/plans/2026-10-20-byok-mcp-beta-b4.md) records P1/P2/P3.
+`routines.test.ts` uses K4's test Host: the embedded server, the real device daemon
+with Agent homes and egress, and the stub Pi runtime that calls the real
+`submit_result` helper. The beta endpoint runs on a loopback origin with the
+standard MCP HTTP client. Only `Date` is mocked, as in K4's routine tests. The tests
+cover create, retry and conflict, the one-shot wake, two due occurrences and their
+outcomes, cancel during a run, pre-admission refusals, the routine cap, foreign IDs,
+a failure before the K4 commit, a cancel that races a retry, a lost slot release,
+and revocation with startup retirement. Two failures are injected with spies: a
+rejected `addRoutine` or `lifecycle` call before K4 commits, and a throwing slot
+release. No paid model or account is used. Mutation checks: dropping the released-slot
+guard, the reservation reread, the runtime grant check, the tz check, the outcome
+document, the newest-occurrence order, the list release, the revocation listener or
+the cancel readback each made a test fail.
+
+Node `v24.18.0`, Bun `1.4.3`, macOS arm64, `TMPDIR` set to a fresh short directory.
+The commands ran on the final source.
+
+| Command from the repository root | Result |
+| --- | --- |
+| `bun run build` | Exit 0. |
+| `bun run typecheck` | Exit 0. |
+| `bun run test` | Exit 0. 10,001 Vitest tests passed; 243 skipped. All 10 Node tests passed. |
+| `bun run check:api-surface` | Exit 0 in check mode. All 9 package goldens match. |
+| `bun run check:version-authority` | Exit 0. |
+| `bun run --cwd examples/byok-mcp-server test` | Exit 0. 35 tests passed in 6 files (three runs). |
+
+No existing assertion changed. One test was added to `ledger.test.ts`. No test or
+runtime timeout was added or increased. B3 helpers (`json`, `input`, `integer`,
+`selectDevice`) moved to module scope for reuse, with no behavior change.
+Not tested: a Host that injects another K4 calendar, and a device without Agent-home support.
