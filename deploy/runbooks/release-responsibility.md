@@ -77,9 +77,13 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 
 ## Version selection
 
+The next source candidate is 0.28.0 / keys 0.13.0. It is not published.
+See the [preparation handoff](../../docs/releases/v0.28.0-handoff.md).
+The published `latest` baseline remains 0.27.0 / keys 0.12.0.
+
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
-The approved source manifests name the stable train 0.27.0 and
-independent keys 0.12.0. Both are MINOR lines. The train moves the wire to
+The previous stable source manifests name train 0.27.0 and
+independent keys 0.12.0. Both are MINOR lines. That train moved the wire to
 protocol major 3 (#468), adds `executions.submit` (#470), typed home-busy
 decline codes (#471) and the Agent message draft lane (#500), and has pre-1.0 breaking cuts in protocol, client,
 server, cloud, cloud-dataplane and core. keys makes `buildPiProviderProjection`
@@ -99,7 +103,8 @@ readback and the declared absent `latest` after an RC. Missing tags/versions or
 failed registry reads do not establish package absence.
 
 Source preparation and npm execution need separate authorization. The owner
-provided both for this release. Live qualification and production rollout
+provided both for 0.27.0. The 0.28.0 candidate has source-preparation
+authorization only. Live qualification and production rollout
 remain separate operations.
 The [publication record](../../docs/releases/v0.27.0-publication.md) confirms
 the exact source, package order and completed registry readback.
@@ -169,7 +174,6 @@ separate evidence and authorization; see the
    - **Tag present:** the release is complete; the publisher refuses to run.
 
    Artifacts expire after 30 days; past that, re-run CI on the same commit rather than repacking locally.
-
 
 ## Migration and rollback boundary
 

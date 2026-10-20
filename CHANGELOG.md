@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 0.28.0 / @byok-sdk/keys 0.13.0 — source candidate
+
+This candidate is not published. See the [release notes](docs/releases/v0.28.0.md).
+
+- **Feature (client)** — add `GrokAdapter` and `HermesAdapter` over ACP.
+- **Feature (client)** — add the MCP Streamable HTTP transport at `./mcp-server/http`.
+- **Feature (protocol, core)** — add Bot outcome fragments, delegation cancel
+  requests and calendar routines; extend scheduled wakes to 368 days.
+- **Feature (examples)** — add the Host execution core, Bot collaboration,
+  Cross-Bot delegation and scoped external-Bot MCP tools as copy-and-own examples.
+- **Breaking (client)** — remove `DaemonConfig.agentMemoryFilesystem` and
+  `AgentMemoryFilesystemHelperConfig`; macOS uses verified SDK helper assets.
+- **Fixed (client)** — enforce the memory CAS barrier and retain the strict
+  platform admission limits; Windows memory intents remain unavailable.
+- **Fixed (client, keys)** — accept Pi max thinking, retain BYOK session files
+  outside launch scratch and retry reasoning-only key probes once.
+- **Release** — add publisher recovery; keep local npm OTP as the current route.
+
 - **Changed (client)** — update the private OAR source to 0.68.2
   (`60ad09b`). Keep the nine BYOK deltas. Update the source manifest and
   bridge paths. The ACP profile now permits a separate session-start timeout;
