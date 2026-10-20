@@ -16,6 +16,26 @@ import { createRoutine } from './routines';
 class DraftAdapter extends BotStubAdapter {
   override readonly descriptor = freezeRuntimeAdapterDescriptor({ ...new BotStubAdapter().descriptor,
     capabilities: { ...new BotStubAdapter().descriptor.capabilities, messageDraft: true } });
+  private readonly startWaiters = new Map<string, Set<() => void>>();
+  started(taskId: string): Promise<void> {
+    if (this.sessions.has(taskId)) return Promise.resolve();
+    return new Promise(resolve => {
+      const waiters = this.startWaiters.get(taskId) ?? new Set<() => void>();
+      waiters.add(resolve); this.startWaiters.set(taskId, waiters);
+    });
+  }
+  override async prepare(input: Parameters<BotStubAdapter['prepare']>[0]): ReturnType<BotStubAdapter['prepare']> {
+    const prepared = await super.prepare(input);
+    if (prepared.kind !== 'prepared') return prepared;
+    const operation = prepared.operation;
+    return { ...prepared, operation: { ...operation, start: async start => {
+      const session = await operation.start(start);
+      const taskId = start.manifest.taskId;
+      for (const resolve of this.startWaiters.get(taskId) ?? []) resolve();
+      this.startWaiters.delete(taskId);
+      return session;
+    } } };
+  }
 }
 const conversation = { kind: 'direct', id: 'main' } as const;
 const owner = { id: 'owner', kind: 'human' } as const;
@@ -29,7 +49,8 @@ async function openDeliveryHost(port: ChannelPort, rest: Partial<BotOptions> = {
   let bot!: BotCollaboration;
   const received: AgentMessageInput[] = [];
   let now = Date.now();
-  const fixture: TestHost = await openHost({ adapter: new DraftAdapter(), consume: (wake, signal) => bot.consume(wake, signal),
+  const adapter = new DraftAdapter();
+  const fixture: TestHost = await openHost({ adapter, consume: (wake, signal) => bot.consume(wake, signal),
     agentMessage: { consume: async input => { received.push(input); return bot.consumeMessage(input); } } });
   const base = template(fixture.deviceId);
   const options: BotOptions = { botId: 'main', execution: { ...base,
@@ -42,11 +63,12 @@ async function openDeliveryHost(port: ChannelPort, rest: Partial<BotOptions> = {
   const ledger = () => reopened ?? fixture.ledger;
   const rows = () => Object.values(bot.snapshot().channel?.deliveries ?? {});
   async function running(id: string) {
-    await vi.waitFor(async () => {
-      await bot.drain();
-      expect(fixture.adapter.sessions.has(bot.core.intent(id)?.taskId ?? '')).toBe(true);
-    });
-    return fixture.adapter.sessions.get(bot.core.intent(id)!.taskId)!;
+    await bot.drain();
+    const intent = bot.core.intent(id)!;
+    expect(intent).toBeDefined();
+    await adapter.started(intent.taskId);
+    expect(fixture.adapter.sessions.has(intent.taskId)).toBe(true);
+    return fixture.adapter.sessions.get(intent.taskId)!;
   }
   function message(id: string, body = 'Final answer'): AgentMessageInput {
     const intent = bot.core.intent(id)!;
