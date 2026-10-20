@@ -6,9 +6,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import { HermesAdapter, type HermesAdapterOptions } from '../adapters/hermes/hermes-adapter';
 import { hermesProfileConfig } from '../adapters/hermes/hermes-home';
-import { SteerUnsupportedError, type Session } from '../types';
+import { sealRuntimeOperationManifest, SteerUnsupportedError, type Session } from '../types';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 import { startPreparedOperation } from './fixtures/prepared-operation';
+import { testExecutionScratch } from './fixtures/execution-scratch';
 
 const fixture = fileURLToPath(new URL('./fixtures/fake-hermes.mjs', import.meta.url));
 const sessions: Session[] = [];
@@ -35,7 +36,18 @@ async function setup(env: NodeJS.ProcessEnv = {}, options: Partial<HermesAdapter
   };
   const entries = async (): Promise<Array<Record<string, any>>> =>
     (await fs.readFile(receipt, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
-  return { root, workspaceDir, adapter, open, entries };
+  return { root, workspaceDir, adapter, open, entries, env: resources.env };
+}
+
+/** detect() and prepare() use the ambient environment a task child gets, not task resources. */
+async function withAmbientReceipt<T>(run: (read: () => Promise<Array<Record<string, any>>>) => Promise<T>): Promise<T> {
+  const file = path.join(await tempDir('br-'), 'ambient.jsonl');
+  process.env.FAKE_HERMES_RECEIPT = file;
+  try {
+    return await run(async () => (await fs.readFile(file, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map((line) => JSON.parse(line)));
+  } finally {
+    delete process.env.FAKE_HERMES_RECEIPT;
+  }
 }
 
 async function turn(session: Session): Promise<AgentEvent[]> {
@@ -65,6 +77,21 @@ describe('HermesAdapter construction and descriptor', () => {
     expect(() => new HermesAdapter({ home: '/tmp/x', model: { provider: 'custom', model: 'm', keyEnv: 'NOT A NAME' } })).toThrow(/keyEnv/);
     expect(() => new HermesAdapter({ home: '/tmp/x', model: { provider: 'custom', model: 'm', keyEnv: 'BYOK_KEY' } })).toThrow(/BYOK_ or HERMES_/);
     expect(() => new HermesAdapter({ home: '/tmp/x', model: { provider: 'custom', model: 'm', keyEnv: 'HERMES_KEY' } })).toThrow(/BYOK_ or HERMES_/);
+    expect(() => new HermesAdapter({ home: '/tmp/x', model: { provider: 'custom', model: 'm', baseUrl: 'https://user:secret@example.test/v1' } })).toThrow(/credentials/);
+  });
+
+  it('refuses a root that reaches ~/.hermes through a symlink', async () => {
+    const fakeUserHome = await tempDir('bu-');
+    await fs.mkdir(path.join(fakeUserHome, '.hermes'));
+    const link = path.join(await tempDir('bl-'), 'link');
+    await fs.symlink(path.join(fakeUserHome, '.hermes'), link);
+    const previous = process.env.HOME;
+    process.env.HOME = fakeUserHome;
+    try {
+      expect(() => new HermesAdapter({ home: link })).toThrow(/~\/\.hermes/);
+    } finally {
+      process.env.HOME = previous;
+    }
   });
 
   it('declares egress and MCP toolsets only, as a frozen custom harness', () => {
@@ -84,32 +111,42 @@ describe('HermesAdapter construction and descriptor', () => {
     expect(config).toContain('gateway:\n  standalone: true\n');
     expect(config).toContain('memory:\n  memory_enabled: false\n  user_profile_enabled: false\n');
     expect(config).toContain('kanban:\n  dispatch_in_gateway: false\n');
+    expect(config).toContain('updates:\n  check: false\n');
     expect(config).toContain('model:\n  provider: "custom"\n  default: "fake-model"\n  base_url: "http://127.0.0.1:1/v1"\n  key_env: "FAKE_KEY"\n');
     expect(hermesProfileConfig(undefined)).not.toContain('model:');
   });
 });
 
 describe('HermesAdapter detect', () => {
-  it('reports the version and provider auth from one ACP initialize in a throwaway profile', async () => {
+  it('reports the version and provider auth from one ACP initialize in a throwaway profile, all under the SDK root', async () => {
     const { adapter, root } = await setup();
-    // detect() gets the ambient environment a task child gets, not task resources.
-    process.env.FAKE_HERMES_RECEIPT = path.join(await tempDir('br-'), 'detect.jsonl');
-    try {
+    await withAmbientReceipt(async (read) => {
       expect(await adapter.detect()).toEqual({
         kind: 'available',
         version: 'Hermes Agent v0.22.2+2364.g0b10b9f (2026.9.24) · stable · local 0b10b9f8155a',
         authPresent: true,
       });
-      const probe = (await fs.readFile(process.env.FAKE_HERMES_RECEIPT, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
-      expect(probe.map((entry) => entry.method ?? entry.mode)).toEqual(['acp', 'initialize']);
-      expect(path.dirname(probe[0].home)).toBe(path.join(root, 'profiles'));
-      expect(probe[0].argv).toEqual(['acp']);
+      const probe = await read();
+      expect(probe.map((entry) => entry.method ?? entry.mode)).toEqual(['version', 'acp', 'initialize']);
+      // Never the user's ~/.hermes: the version probe runs with the root as HERMES_HOME, update check off.
+      expect(probe[0]).toMatchObject({ home: root, hermesEnv: ['HERMES_HOME'] });
+      expect(await fs.readFile(path.join(root, 'config.yaml'), 'utf8')).toContain('updates:\n  check: false\n');
+      expect(path.dirname(probe[1]!.home)).toBe(path.join(root, 'profiles'));
+      expect(path.basename(probe[1]!.home)).toMatch(/^byok-detect-/);
+      expect(probe[1]!.argv).toEqual(['acp']);
       // The probe profile is gone; no gateway was started.
       expect(await fs.readdir(path.join(root, 'profiles'))).toEqual([]);
-    } finally {
-      await fs.rm(process.env.FAKE_HERMES_RECEIPT, { force: true });
-      delete process.env.FAKE_HERMES_RECEIPT;
-    }
+    });
+  });
+
+  it('deletes stale SDK profiles that no gateway serves and keeps everything else', async () => {
+    const { adapter, root } = await setup();
+    const profiles = path.join(root, 'profiles');
+    for (const name of ['byok-stale', 'byok-recent', 'user-profile']) await fs.mkdir(path.join(profiles, name), { recursive: true });
+    const hourAgo = new Date(Date.now() - 60 * 60_000);
+    for (const name of ['byok-stale', 'user-profile']) await fs.utimes(path.join(profiles, name), hourAgo, hourAgo);
+    expect((await adapter.detect()).kind).toBe('available');
+    expect((await fs.readdir(profiles)).sort()).toEqual(['byok-recent', 'user-profile']);
   });
 
   it('reports missing provider credentials and an unqualified build without refusing', async () => {
@@ -142,14 +179,25 @@ describe('HermesAdapter detect', () => {
 
 describe('HermesAdapter prepare', () => {
   it('rejects a dispatch selection and a native resume before any process starts', async () => {
-    const { adapter, entries } = await setup();
-    expect(await adapter.prepare({
-      offer: { instruction: 'x', dispatchSelection: { lane: 'subscription', runtimeId: 'codex' } } as TaskOfferPayload,
-      descriptor: adapter.descriptor, requiredToolsetIds: [],
-    })).toMatchObject({ kind: 'reject', retryable: false });
-    expect(await adapter.prepare({ offer: { instruction: 'x', sessionRef: 's' }, descriptor: adapter.descriptor, requiredToolsetIds: [] }))
-      .toMatchObject({ kind: 'reject', reason: 'hermes does not resume native sessions', retryable: false });
-    expect(await entries()).toEqual([]);
+    const { adapter } = await setup();
+    await withAmbientReceipt(async (read) => {
+      expect(await adapter.prepare({
+        offer: { instruction: 'x', dispatchSelection: { lane: 'subscription', runtimeId: 'codex' } } as TaskOfferPayload,
+        descriptor: adapter.descriptor, requiredToolsetIds: [],
+      })).toMatchObject({ kind: 'reject', retryable: false });
+      expect(await adapter.prepare({ offer: { instruction: 'x', sessionRef: 's' }, descriptor: adapter.descriptor, requiredToolsetIds: [] }))
+        .toMatchObject({ kind: 'reject', reason: 'hermes does not resume native sessions', retryable: false });
+      expect(await read()).toEqual([]);
+    });
+  });
+
+  it('admits with the version probe only; the ACP probe stays in detect()', async () => {
+    const { adapter, root } = await setup();
+    await withAmbientReceipt(async (read) => {
+      expect((await adapter.prepare({ offer: task, descriptor: adapter.descriptor, requiredToolsetIds: [] })).kind).toBe('prepared');
+      expect((await read()).map((entry) => entry.mode)).toEqual(['version']);
+      expect(await fs.readdir(root)).toEqual(['config.yaml']);
+    });
   });
 });
 
@@ -275,21 +323,57 @@ describe('HermesAdapter session', () => {
   });
 
   it('refuses to start when another gateway serves the execution profile', async () => {
-    const { open, root } = await setup({ FAKE_HERMES_GATEWAY_WRONG_PID: '1' });
+    const { open, root, entries } = await setup({ FAKE_HERMES_GATEWAY_WRONG_PID: '1' });
     await expect(open()).rejects.toMatchObject({ phase: 'start', retry: 'non-retryable', message: 'another Hermes gateway serves the execution profile' });
     expect(await fs.readdir(path.join(root, 'profiles'))).toEqual([]);
+    for (const entry of await entries()) expect(alive(entry.pid)).toBe(false);
   });
 
-  it('refuses a viewer that attached to a gateway the session does not own', async () => {
-    const { open, root } = await setup({ FAKE_HERMES_VIEWER_TAKES_SOCKET: '1' });
+  it('refuses a viewer that attached to a gateway the session does not own, and stops that gateway', async () => {
+    const { open, root, entries } = await setup({ FAKE_HERMES_VIEWER_TAKES_SOCKET: '1' });
     await expect(open()).rejects.toMatchObject({ phase: 'start', message: 'hermes acp attached to a gateway this session does not own' });
     expect(await fs.readdir(path.join(root, 'profiles'))).toEqual([]);
+    for (const entry of await entries()) expect(alive(entry.pid)).toBe(false);
   });
 
   it('fails retryably when the gateway does not report ready in time', async () => {
     const { open, entries } = await setup({ FAKE_HERMES_GATEWAY_NEVER_READY: '1' }, { gatewayReadyTimeoutMs: 300 });
     await expect(open()).rejects.toMatchObject({ phase: 'start', retry: 'retryable', message: 'hermes gateway did not report ready in time' });
+    const log = await entries();
     // The viewer never started, so it could not start a gateway of its own.
-    expect((await entries()).filter((entry) => entry.mode === 'acp')).toEqual([]);
+    expect(log.map((entry) => entry.mode)).toEqual(['gateway']);
+    expect(alive(log[0]!.pid)).toBe(false);
+  });
+
+  it('stops startup on an abort signal and disposes the owned gateway', async () => {
+    const { adapter, entries, workspaceDir, root, env } = await setup({ FAKE_HERMES_GATEWAY_READY_DELAY_MS: '10000' });
+    const prepared = await adapter.prepare({ offer: task, descriptor: adapter.descriptor, requiredToolsetIds: [] });
+    if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
+    const controller = new AbortController();
+    const starting = prepared.operation.start({
+      kind: 'instruction', instruction: 'hello', signal: controller.signal, env,
+      scratch: await testExecutionScratch(),
+      manifest: sealRuntimeOperationManifest({
+        taskId: 'abort', runtimeId: 'hermes', descriptor: adapter.descriptor, requiredToolsetIds: [],
+        workspace: { workspaceDir }, forwardedEnvironmentNames: [],
+      }),
+    });
+    setTimeout(() => controller.abort(), 500);
+    await expect(starting).rejects.toMatchObject({ phase: 'start', retry: 'retryable', message: 'hermes start was aborted' });
+    const log = await entries();
+    expect(log.map((entry) => entry.mode)).toEqual(['gateway']);
+    expect(alive(log[0]!.pid)).toBe(false);
+    expect(await fs.readdir(path.join(root, 'profiles'))).toEqual([]);
+  });
+
+  it('fails the session and disposes everything when the gateway dies mid-turn', async () => {
+    const { open, entries, root } = await setup({ FAKE_HERMES_KILL_GATEWAY_ON_PROMPT: '1' });
+    const session = await open();
+    const failure = await turn(session).then(() => undefined, (error: unknown) => error);
+    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(failure).toMatchObject({ phase: 'run', category: 'infrastructure', message: 'hermes gateway exited' });
+    await session.close();
+    for (const entry of await entries()) if (entry.method === undefined) expect(alive(entry.pid)).toBe(false);
+    expect(await fs.readdir(path.join(root, 'profiles'))).toEqual([]);
   });
 });

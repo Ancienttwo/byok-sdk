@@ -1,5 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import type { HermesModelSelection } from './hermes-adapter';
+import { identifyHermesGateway } from './gateway-identity';
 
 /**
  * Hermes home layout owned by the SDK.
@@ -8,8 +10,9 @@ import path from 'node:path';
  * (`<root>/installs/`), and building it for a new root takes minutes. A
  * profile home `<root>/profiles/<name>` shares that environment. So the SDK
  * owns one root, given by the Host, and gives each execution a fresh profile
- * home under it. The profile is deleted when the execution ends. Nothing is
- * read from or written to the user's own `~/.hermes`.
+ * home under it. The profile is deleted when the execution ends. Every
+ * `hermes` command the adapter runs has `HERMES_HOME` set to the root or to a
+ * profile, so nothing reads or writes the user's own `~/.hermes`.
  *
  * Hermes runs one gateway per root that serves every profile. A profile with
  * `gateway.standalone: true` gets a gateway of its own (`gateway run --force`),
@@ -18,27 +21,28 @@ import path from 'node:path';
  * `hermes-version.ts`.
  */
 
-/** Provider choice written into each execution profile. Credentials stay in the environment. */
-export interface HermesModelSelection {
-  /** Hermes provider id, for example `openrouter`, `anthropic` or `custom`. */
-  readonly provider: string;
-  readonly model: string;
-  /** Endpoint for an OpenAI-compatible `custom` provider. */
-  readonly baseUrl?: string;
-  /** Name of the environment variable that holds the provider key. The value never enters the file. */
-  readonly keyEnv?: string;
-}
-
 /** Model metadata caches Hermes fetches over the network on first use. Not credentials. */
 const CARRIED_CACHE_FILES = ['models_dev_cache.json', 'models_dev_cache.etag', 'provider_models_cache.json', 'context_length_cache.yaml'] as const;
 const CACHE_DIR = 'byok-cache';
+const PROFILE_PREFIX = 'byok-';
+/** A profile this old with no gateway answering for it belongs to a Host that died. */
+const STALE_PROFILE_MS = 15 * 60_000;
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** Hermes otherwise checks GitHub for updates on `--version` and at gateway start (`hermes_cli/source_check.py`). */
+const NO_UPDATE_CHECK = ['updates:', '  check: false'];
+const ROOT_CONFIG = `${['# Written by @byok-sdk/client. Root of the SDK-owned Hermes profiles.', ...NO_UPDATE_CHECK].join('\n')}\n`;
 
 export function assertHermesModelSelection(value: HermesModelSelection, label: string): void {
   for (const key of ['provider', 'model'] as const) {
     if (typeof value[key] !== 'string' || value[key].trim().length === 0) throw new TypeError(`${label}.${key} must be a non-empty string`);
   }
-  if (value.baseUrl !== undefined && (typeof value.baseUrl !== 'string' || !/^https?:\/\//.test(value.baseUrl))) throw new TypeError(`${label}.baseUrl must be an http(s) URL`);
+  if (value.baseUrl !== undefined) {
+    let url: URL | undefined;
+    try { url = typeof value.baseUrl === 'string' ? new URL(value.baseUrl) : undefined; } catch { url = undefined; }
+    if (url === undefined || (url.protocol !== 'http:' && url.protocol !== 'https:')) throw new TypeError(`${label}.baseUrl must be an http(s) URL`);
+    // The URL is written to the profile file; a credential must stay in the environment (`keyEnv`).
+    if (url.username !== '' || url.password !== '') throw new TypeError(`${label}.baseUrl must not carry credentials`);
+  }
   if (value.keyEnv !== undefined && (typeof value.keyEnv !== 'string' || !ENV_NAME.test(value.keyEnv))) throw new TypeError(`${label}.keyEnv must be an environment variable name`);
   // The runtime environment drops BYOK_* (`buildRuntimeEnv`) and the adapter drops HERMES_*: such a key never reaches Hermes.
   if (value.keyEnv !== undefined && /^(BYOK|HERMES)_/i.test(value.keyEnv)) throw new TypeError(`${label}.keyEnv must not start with BYOK_ or HERMES_`);
@@ -55,6 +59,7 @@ export function hermesProfileConfig(model: HermesModelSelection | undefined): st
     '  user_profile_enabled: false',
     'kanban:',
     '  dispatch_in_gateway: false',
+    ...NO_UPDATE_CHECK,
   ];
   if (model !== undefined) {
     lines.push('model:', `  provider: ${JSON.stringify(model.provider)}`, `  default: ${JSON.stringify(model.model)}`);
@@ -64,15 +69,27 @@ export function hermesProfileConfig(model: HermesModelSelection | undefined): st
   return `${lines.join('\n')}\n`;
 }
 
-/** Creates `<root>/profiles/<name>` with the SDK config and the carried model caches. */
-export async function createHermesProfile(root: string, name: string, model: HermesModelSelection | undefined): Promise<string> {
+/** Creates the root and its `config.yaml` (update check off) when they are missing or differ. */
+export async function ensureHermesRoot(root: string): Promise<void> {
+  await fs.mkdir(root, { recursive: true, mode: 0o700 });
+  const file = path.join(root, 'config.yaml');
+  if (await fs.readFile(file, 'utf8').catch(() => undefined) !== ROOT_CONFIG) await fs.writeFile(file, ROOT_CONFIG, { mode: 0o600 });
+}
+
+/** Creates `<root>/profiles/byok-<id>` with the SDK config and the carried model caches. */
+export async function createHermesProfile(root: string, id: string, model: HermesModelSelection | undefined): Promise<string> {
   const profiles = path.join(root, 'profiles');
   await fs.mkdir(profiles, { recursive: true, mode: 0o700 });
-  const home = path.join(profiles, name);
+  const home = path.join(profiles, `${PROFILE_PREFIX}${id}`);
   await fs.mkdir(home, { mode: 0o700 });
-  await fs.writeFile(path.join(home, 'config.yaml'), hermesProfileConfig(model), { mode: 0o600 });
-  for (const file of CARRIED_CACHE_FILES) {
-    await fs.copyFile(path.join(root, CACHE_DIR, file), path.join(home, file)).catch(() => {});
+  try {
+    await fs.writeFile(path.join(home, 'config.yaml'), hermesProfileConfig(model), { mode: 0o600 });
+    for (const file of CARRIED_CACHE_FILES) {
+      await fs.copyFile(path.join(root, CACHE_DIR, file), path.join(home, file)).catch(() => {});
+    }
+  } catch (error) {
+    await fs.rm(home, { recursive: true, force: true });
+    throw error;
   }
   return home;
 }
@@ -88,4 +105,23 @@ export async function removeHermesProfile(root: string, home: string): Promise<v
       .catch(() => fs.rm(temporary, { force: true }).catch(() => {}));
   }
   await fs.rm(home, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+}
+
+/**
+ * Deletes SDK profiles that a dead Host left behind. The daemon's owned
+ * process ledger already reaps such a Host's gateway process group at the next
+ * start. A profile is kept while it is in `live`, while it is younger than
+ * {@link STALE_PROFILE_MS}, or while any gateway answers for it.
+ */
+export async function sweepStaleHermesProfiles(root: string, live: ReadonlySet<string>, now = Date.now()): Promise<void> {
+  const profiles = path.join(root, 'profiles');
+  const names = await fs.readdir(profiles).catch(() => [] as string[]);
+  for (const name of names) {
+    const home = path.join(profiles, name);
+    if (!name.startsWith(PROFILE_PREFIX) || live.has(home)) continue;
+    const stat = await fs.lstat(home).catch(() => undefined);
+    if (stat === undefined || !stat.isDirectory() || now - stat.mtimeMs < STALE_PROFILE_MS) continue;
+    if (await identifyHermesGateway(home) !== undefined) continue;
+    await fs.rm(home, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }).catch(() => {});
+  }
 }

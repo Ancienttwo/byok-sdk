@@ -24,6 +24,7 @@ const receipt = (entry) => {
 };
 
 if (argv.includes('--version')) {
+  receipt({ mode: 'version', home, hermesEnv: Object.keys(env).filter((name) => name.startsWith('HERMES_')).sort() });
   console.log(env.FAKE_HERMES_VERSION ?? 'Hermes Agent v0.22.2+2364.g0b10b9f (2026.9.24) · stable · local 0b10b9f8155a');
   console.log('Install directory: /synthetic/hermes-agent');
   process.exit(0);
@@ -115,6 +116,12 @@ function runViewer() {
     update(sessionId, { sessionUpdate: 'session_info_update', title: text });
     update(sessionId, { sessionUpdate: 'agent_message_chunk', messageId: `m${turns}`, content: { type: 'text', text: 'Hello' } });
     update(sessionId, { sessionUpdate: 'agent_message_chunk', messageId: `m${turns}`, content: { type: 'text', text: ` turn ${turns}` } });
+    if (env.FAKE_HERMES_KILL_GATEWAY_ON_PROMPT === '1') {
+      // The gateway dies mid-turn; the real viewer then loses its turn with no answer.
+      process.kill((await identifyGateway()).pid, 'SIGKILL');
+      pendingPrompt = id;
+      return;
+    }
     if (env.FAKE_HERMES_HANG === '1' || env.FAKE_HERMES_IGNORE_CANCEL === '1') {
       pendingPrompt = id;
       return;

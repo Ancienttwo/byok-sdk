@@ -416,7 +416,16 @@ export declare function resolveCodexBin(): ResolvedBin;
 import { spawn as nodeSpawn } from 'node:child_process';
 import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult } from '../../types';
 import type { ResolvedBin } from '../codex/resolve-bin';
-import { type HermesModelSelection } from './hermes-home';
+/** Provider choice written into each execution profile. Credentials stay in the environment. */
+export interface HermesModelSelection {
+    /** Hermes provider id, for example `openrouter`, `anthropic` or `custom`. */
+    readonly provider: string;
+    readonly model: string;
+    /** Endpoint for an OpenAI-compatible `custom` provider. It must not carry credentials. */
+    readonly baseUrl?: string;
+    /** Name of the environment variable that holds the provider key. The value never enters the file. */
+    readonly keyEnv?: string;
+}
 export interface HermesAdapterOptions {
     /**
      * Absolute path of the Hermes root that this SDK owns, for example under the
@@ -447,55 +456,26 @@ export interface HermesAdapterOptions {
 export declare class HermesAdapter implements RuntimeAdapter {
     private readonly root;
     private readonly options;
+    /** Profile homes of this adapter's open sessions; the stale-profile sweep keeps them. */
+    private readonly liveHomes;
     get descriptor(): import("..").RuntimeAdapterDescriptor;
     constructor(options: HermesAdapterOptions);
     private command;
+    private rootEnvironment;
     /**
-     * `hermes --version`, then one ACP `initialize` in a throwaway profile under
-     * the SDK root with the same config and environment a turn gets.
-     * `initialize` does not reach the gateway. `authPresent` is true when Hermes
-     * offers a provider auth method, which it does only when that provider's
-     * credentials resolve.
+     * Prepares the SDK root, deletes profiles a dead Host left, runs
+     * `hermes --version`, then one ACP `initialize` in a throwaway profile with
+     * the same config and environment a turn gets. `initialize` does not reach
+     * the gateway. `authPresent` is true when Hermes offers a provider auth
+     * method, which it does only when that provider's credentials resolve. On a
+     * new root the probe waits while Hermes builds its Python environment.
      */
-    detect(): Promise<RuntimeDetectResult>;
+    detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
     private probeAcp;
+    /** Cheap admission, as Codex: the version probe only. The ACP probe and root build belong to `detect()`. */
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
 }
-// ==== @byok-sdk/client dist/adapters/hermes/hermes-home.d.ts ====
-/**
- * Hermes home layout owned by the SDK.
- *
- * Hermes keeps its Python environment under the default home root
- * (`<root>/installs/`), and building it for a new root takes minutes. A
- * profile home `<root>/profiles/<name>` shares that environment. So the SDK
- * owns one root, given by the Host, and gives each execution a fresh profile
- * home under it. The profile is deleted when the execution ends. Nothing is
- * read from or written to the user's own `~/.hermes`.
- *
- * Hermes runs one gateway per root that serves every profile. A profile with
- * `gateway.standalone: true` gets a gateway of its own (`gateway run --force`),
- * which the SDK starts and owns for the execution. Hermes calls `standalone` a
- * temporary compatibility setting; the qualified version is in
- * `hermes-version.ts`.
- */
-/** Provider choice written into each execution profile. Credentials stay in the environment. */
-export interface HermesModelSelection {
-    /** Hermes provider id, for example `openrouter`, `anthropic` or `custom`. */
-    readonly provider: string;
-    readonly model: string;
-    /** Endpoint for an OpenAI-compatible `custom` provider. */
-    readonly baseUrl?: string;
-    /** Name of the environment variable that holds the provider key. The value never enters the file. */
-    readonly keyEnv?: string;
-}
-export declare function assertHermesModelSelection(value: HermesModelSelection, label: string): void;
-/** The whole profile `config.yaml`. JSON string literals are valid YAML double-quoted scalars. */
-export declare function hermesProfileConfig(model: HermesModelSelection | undefined): string;
-/** Creates `<root>/profiles/<name>` with the SDK config and the carried model caches. */
-export declare function createHermesProfile(root: string, name: string, model: HermesModelSelection | undefined): Promise<string>;
-/** Keeps the profile's model caches for the next execution, then deletes the profile. */
-export declare function removeHermesProfile(root: string, home: string): Promise<void>;
 // ==== @byok-sdk/client dist/adapters/index.d.ts ====
 export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, } from '../types';
 export { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
@@ -508,8 +488,7 @@ export type { ClaudeAdapterOptions } from './claude/claude-adapter';
 export { CodexAdapter } from './codex/codex-adapter';
 export type { CodexAdapterOptions, CodexSandboxSetting } from './codex/codex-adapter';
 export { HermesAdapter } from './hermes/hermes-adapter';
-export type { HermesAdapterOptions } from './hermes/hermes-adapter';
-export type { HermesModelSelection } from './hermes/hermes-home';
+export type { HermesAdapterOptions, HermesModelSelection } from './hermes/hermes-adapter';
 export { NativeInteractionController, NativeInteractionError } from '../native-interactions';
 export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from '../native-interactions';
 export { buildRuntimeEnv } from '../daemon/environment';
@@ -10330,8 +10309,7 @@ export type { CopyPiRuntimeAssetsOptions, PiRuntimeAssetForm } from './adapters/
 export { ClaudeAdapter } from './adapters/claude/claude-adapter';
 export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter';
 export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from './adapters/codex/codex-adapter';
-export { HermesAdapter, type HermesAdapterOptions } from './adapters/hermes/hermes-adapter';
-export type { HermesModelSelection } from './adapters/hermes/hermes-home';
+export { HermesAdapter, type HermesAdapterOptions, type HermesModelSelection } from './adapters/hermes/hermes-adapter';
 export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError } from './diagnostics/device-doctor';
 export type { DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus, RepairDeviceEnrollmentMetadataInput, DeviceMetadataRepairResult, DeviceMetadataRepairErrorCode, } from './diagnostics/device-doctor';
 export { quarantineDeviceOperationalHealth, exportDeviceSupportBundle, archiveAgentTerminalMessages, DeviceOperatorError } from './diagnostics/operator-actions';
