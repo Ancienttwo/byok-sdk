@@ -104,6 +104,12 @@
       "vendoredSha256": "3ad3527215355ce516e4d1f4b59578094a7741037ea550e093b04091664d6108"
     },
     {
+      "path": "contracts/runtime-failure-error.ts",
+      "sourcePath": "packages/oar/src/contracts/runtime-failure-error.ts",
+      "upstreamSha256": "5c88ce1c1bcced7ae2e4eed1f922a3a20e0f6afb97a8cc437c766a16e968f221",
+      "vendoredSha256": "5c88ce1c1bcced7ae2e4eed1f922a3a20e0f6afb97a8cc437c766a16e968f221"
+    },
+    {
       "path": "contracts/runtime.ts",
       "sourcePath": "packages/oar/src/contracts/runtime.ts",
       "upstreamSha256": "0108b05b9ed682d4bba65b05f963926b7a3bf5d712cfd7cd7fc8515732aee978",
@@ -246,10 +252,152 @@
       "vendoredSha256": "cbca7b2720b16d2275c2fe547a8326e90b4178ab07792c0b17a9561edb329c95"
     },
     {
+      "path": "runtimes/grok/failure.ts",
+      "sourcePath": "packages/oar/src/runtimes/grok/failure.ts",
+      "upstreamSha256": "2cd9ae621c33e6151014e1e600567b9dca894b65bdb746eceef176e8ff477d8e",
+      "vendoredSha256": "2cd9ae621c33e6151014e1e600567b9dca894b65bdb746eceef176e8ff477d8e"
+    },
+    {
+      "path": "runtimes/grok/options.ts",
+      "sourcePath": "packages/oar/src/runtimes/grok/options.ts",
+      "upstreamSha256": "977f19727b3dddce422b2cb7dbd95da41529b78dc5b3b865c9a5aea61e3b0c7e",
+      "vendoredSha256": "977f19727b3dddce422b2cb7dbd95da41529b78dc5b3b865c9a5aea61e3b0c7e"
+    },
+    {
+      "path": "runtimes/grok/session.ts",
+      "sourcePath": "packages/oar/src/runtimes/grok/session.ts",
+      "upstreamSha256": "512658ff46dc3c8895651996236d916f0444eb03faeb6f21dc108a7cd8b71844",
+      "vendoredSha256": "512658ff46dc3c8895651996236d916f0444eb03faeb6f21dc108a7cd8b71844"
+    },
+    {
+      "path": "runtimes/grok/spontaneous-usage.ts",
+      "sourcePath": "packages/oar/src/runtimes/grok/spontaneous-usage.ts",
+      "upstreamSha256": "5072df7f323bdc26aeafc4138076376c405b49f56982c2effff237f73c91005c",
+      "vendoredSha256": "5072df7f323bdc26aeafc4138076376c405b49f56982c2effff237f73c91005c"
+    },
+    {
       "path": "shared/abort-fallback.ts",
       "sourcePath": "packages/oar/src/shared/abort-fallback.ts",
       "upstreamSha256": "665fad321bdcfc1b1e9d67f7f8beb621e2d796cd61383d8fb2d27e52573670a3",
       "vendoredSha256": "665fad321bdcfc1b1e9d67f7f8beb621e2d796cd61383d8fb2d27e52573670a3"
+    },
+    {
+      "path": "shared/acp/additional-directories.ts",
+      "sourcePath": "packages/oar/src/shared/acp/additional-directories.ts",
+      "upstreamSha256": "f8c5d6ea21e938d87217b8e3dd31f5bcc999df8e9137b9ec97720b256747f72b",
+      "vendoredSha256": "f8c5d6ea21e938d87217b8e3dd31f5bcc999df8e9137b9ec97720b256747f72b"
+    },
+    {
+      "path": "shared/acp/client-app.ts",
+      "sourcePath": "packages/oar/src/shared/acp/client-app.ts",
+      "upstreamSha256": "4a821105abe5278e6405ca55aeeababab61e760a32fae3792350a472844e3a31",
+      "vendoredSha256": "1a7fea4fe472d1d5102fc51afbccb5d8a19fe9fe6cb3ba2edfbdbf792c0baefa",
+      "delta": "No permissive fallback: every session/request_permission is answered cancelled (cancelPermission) instead of the broadest allow on offer. The request and the answer stay recorded."
+    },
+    {
+      "path": "shared/acp/effort.ts",
+      "sourcePath": "packages/oar/src/shared/acp/effort.ts",
+      "upstreamSha256": "e477087f188219c7bf6328e43e387d5b4ba4f4e88844fc51f778e7017bdf6f5b",
+      "vendoredSha256": "e477087f188219c7bf6328e43e387d5b4ba4f4e88844fc51f778e7017bdf6f5b"
+    },
+    {
+      "path": "shared/acp/errors.ts",
+      "sourcePath": "packages/oar/src/shared/acp/errors.ts",
+      "upstreamSha256": "9649efd9b8f92ed244910e324713833f4a7aaa086b75b94eded1ca227b685126",
+      "vendoredSha256": "9649efd9b8f92ed244910e324713833f4a7aaa086b75b94eded1ca227b685126"
+    },
+    {
+      "path": "shared/acp/failure.ts",
+      "sourcePath": "packages/oar/src/shared/acp/failure.ts",
+      "upstreamSha256": "f3b375e0620a2133aeed185a28e2b7837b1bcc4fa20ddc38ca4bb07f8adf59fb",
+      "vendoredSha256": "f3b375e0620a2133aeed185a28e2b7837b1bcc4fa20ddc38ca4bb07f8adf59fb"
+    },
+    {
+      "path": "shared/acp/launch-args.ts",
+      "sourcePath": "packages/oar/src/shared/acp/launch-args.ts",
+      "upstreamSha256": "3dd9726594f9e4ceb2a3e7ea8839164b399079a5dd7811e844287c746e3a1c53",
+      "vendoredSha256": "3dd9726594f9e4ceb2a3e7ea8839164b399079a5dd7811e844287c746e3a1c53"
+    },
+    {
+      "path": "shared/acp/mcp-servers.ts",
+      "sourcePath": "packages/oar/src/shared/acp/mcp-servers.ts",
+      "upstreamSha256": "4ba04c5733810f0cc1bd69b6ba19929a85a6d7bbfcfb2cc79a8da9585154d7ed",
+      "vendoredSha256": "4ba04c5733810f0cc1bd69b6ba19929a85a6d7bbfcfb2cc79a8da9585154d7ed"
+    },
+    {
+      "path": "shared/acp/model.ts",
+      "sourcePath": "packages/oar/src/shared/acp/model.ts",
+      "upstreamSha256": "56921b4c5187c5be8fd62950132bc01bf7b8942a31c6e1638e8c9809a5e4e71a",
+      "vendoredSha256": "56921b4c5187c5be8fd62950132bc01bf7b8942a31c6e1638e8c9809a5e4e71a"
+    },
+    {
+      "path": "shared/acp/opening.ts",
+      "sourcePath": "packages/oar/src/shared/acp/opening.ts",
+      "upstreamSha256": "b57be839d67d9c7117c2a18347a4391892226ed7c8e1c0f2588124448e42becf",
+      "vendoredSha256": "b57be839d67d9c7117c2a18347a4391892226ed7c8e1c0f2588124448e42becf"
+    },
+    {
+      "path": "shared/acp/process.ts",
+      "sourcePath": "packages/oar/src/shared/acp/process.ts",
+      "upstreamSha256": "1e3dbe88a17395ecdd9c7c80a256a980c49da34ef0834ea6343c96ae62c21b8d",
+      "vendoredSha256": "0b2d68a8a701b3a86fa519dcdecf2b7c1bb33db05f179aa35cd5a1499e56095f",
+      "delta": "Caller-owned process: startAcpProcess takes an injected SpawnAcpLineProcess and passes exactly the explicit filtered env and cwd; no executable manager, killTree option or resources reader. The owned process splits stdout into bounded lines; each line goes back to the official ndJsonStream with its newline, and each written message goes through the acknowledged stdin write, so the SDK keeps its own framing, parse-error answers and write order."
+    },
+    {
+      "path": "shared/acp/profile.ts",
+      "sourcePath": "packages/oar/src/shared/acp/profile.ts",
+      "upstreamSha256": "f917c18dd44f95e58313f195d997fcacfe4f1dc368aca8b79ac574a1955e4594",
+      "vendoredSha256": "f917c18dd44f95e58313f195d997fcacfe4f1dc368aca8b79ac574a1955e4594"
+    },
+    {
+      "path": "shared/acp/projection.ts",
+      "sourcePath": "packages/oar/src/shared/acp/projection.ts",
+      "upstreamSha256": "63f281c2d253dd8ac7c7cb53466cb70adee50989a16af4bd2bc0ed933dbeef4e",
+      "vendoredSha256": "63f281c2d253dd8ac7c7cb53466cb70adee50989a16af4bd2bc0ed933dbeef4e"
+    },
+    {
+      "path": "shared/acp/records.ts",
+      "sourcePath": "packages/oar/src/shared/acp/records.ts",
+      "upstreamSha256": "89133d0ad5d49978d9712f3090242f53de272c6d6c57117434a12d4b0c051afd",
+      "vendoredSha256": "89133d0ad5d49978d9712f3090242f53de272c6d6c57117434a12d4b0c051afd"
+    },
+    {
+      "path": "shared/acp/resume-cwd.ts",
+      "sourcePath": "packages/oar/src/shared/acp/resume-cwd.ts",
+      "upstreamSha256": "21e3b9c8f4bdd62e50fb7aa1b508b40015a70697490096e2934d183a6aba2180",
+      "vendoredSha256": "21e3b9c8f4bdd62e50fb7aa1b508b40015a70697490096e2934d183a6aba2180"
+    },
+    {
+      "path": "shared/acp/session.ts",
+      "sourcePath": "packages/oar/src/shared/acp/session.ts",
+      "upstreamSha256": "46ed3c3e73c29df0273672ab09d907d128ace09f0824c4fc46e93590d7d04921",
+      "vendoredSha256": "a7877f95c120d602d58806cf1fa35a11518f8ce9f678ca0bbd972ebe3c998f82",
+      "delta": "Raw adapter for the SDK: acpSession(profile) returns a start function that takes the injected agent-process spawn, the injected terminal spawn and a required explicit filtered env (no sessionEnvironment ambient merge). It returns AdapterSession without sealSession/withSessionCredentials, builds one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control, and takes onReady, onRecord, maxBytes and onLimit hooks for the session kernel. A throwing kernel construction or onReady releases the process and the terminal host. The exit observer's terminal disposal is the same one dispose awaits, and a repeated dispose retries a failed terminal reap. No resources reader."
+    },
+    {
+      "path": "shared/acp/terminal.ts",
+      "sourcePath": "packages/oar/src/shared/acp/terminal.ts",
+      "upstreamSha256": "cd943c545a0b00eb90107434416e9a9c78bc6af2fb3fb11b410244288740faac",
+      "vendoredSha256": "161b2b3955d02213a80f4eae952c1733b84236e0fb5e34769535cf21037c42ef",
+      "delta": "Caller-owned terminal processes: createAcpTerminalHost takes an injected SpawnAcpTerminal that spawns, adopts and reaps each hosted command in the SDK process-tree authority with the session's explicit env plus the request's env entries. terminal/kill asks that tree to stop; release and dispose end the tree and wait for it. A released or disposed terminal stays tracked until its tree is gone. One disposal serves concurrent callers; a failed reap rejects and a later dispose retries every tree still alive. A terminal/create after disposal began is refused. No cross-spawn and no executable manager."
+    },
+    {
+      "path": "shared/acp/token-usage.ts",
+      "sourcePath": "packages/oar/src/shared/acp/token-usage.ts",
+      "upstreamSha256": "6431385b107739674b6d6d60c5a914f309bbe96782fb76b0d8997ee93fb55dea",
+      "vendoredSha256": "6431385b107739674b6d6d60c5a914f309bbe96782fb76b0d8997ee93fb55dea"
+    },
+    {
+      "path": "shared/acp/turns.ts",
+      "sourcePath": "packages/oar/src/shared/acp/turns.ts",
+      "upstreamSha256": "a10a8ead6b16be8609c3a0fffb23f31c9e4a1ed970f5d97226eaa13f280eda5b",
+      "vendoredSha256": "a10a8ead6b16be8609c3a0fffb23f31c9e4a1ed970f5d97226eaa13f280eda5b"
+    },
+    {
+      "path": "shared/acp/usage-wait.ts",
+      "sourcePath": "packages/oar/src/shared/acp/usage-wait.ts",
+      "upstreamSha256": "ebddb960fdf5d0b99f0aaf9153b86b6e7ce5f9acf87ebb115d8d7e53541ea19c",
+      "vendoredSha256": "ebddb960fdf5d0b99f0aaf9153b86b6e7ce5f9acf87ebb115d8d7e53541ea19c"
     },
     {
       "path": "shared/additional-directories.ts",
@@ -262,6 +410,12 @@
       "sourcePath": "packages/oar/src/shared/control-input.ts",
       "upstreamSha256": "4ec197e2d4dcfcbe9654bd60be5d5b45d469f323b9606530cf6f9384cea4962d",
       "vendoredSha256": "4ec197e2d4dcfcbe9654bd60be5d5b45d469f323b9606530cf6f9384cea4962d"
+    },
+    {
+      "path": "shared/credential-redaction.ts",
+      "sourcePath": "packages/oar/src/shared/credential-redaction.ts",
+      "upstreamSha256": "2d9375ae2a85c0cf3847f31631bce19e48bf2791170e62c2f9f980ce14e42351",
+      "vendoredSha256": "2d9375ae2a85c0cf3847f31631bce19e48bf2791170e62c2f9f980ce14e42351"
     },
     {
       "path": "shared/credential-redactor.ts",
@@ -280,6 +434,12 @@
       "sourcePath": "packages/oar/src/shared/failure-class.ts",
       "upstreamSha256": "b499c00723b79fbbd8bea072cc1d6a1e9221d711c388a9f3ddd5956c741a7f2a",
       "vendoredSha256": "b499c00723b79fbbd8bea072cc1d6a1e9221d711c388a9f3ddd5956c741a7f2a"
+    },
+    {
+      "path": "shared/held-input.ts",
+      "sourcePath": "packages/oar/src/shared/held-input.ts",
+      "upstreamSha256": "3caed53a460080b6d656903b590010e7c155a89f9e423c2e649ad97179cc0402",
+      "vendoredSha256": "3caed53a460080b6d656903b590010e7c155a89f9e423c2e649ad97179cc0402"
     },
     {
       "path": "shared/input-images.ts",

@@ -412,6 +412,37 @@ export interface ResolvedBin {
  * has no other seam to use.
  */
 export declare function resolveCodexBin(): ResolvedBin;
+// ==== @byok-sdk/client dist/adapters/grok/grok-adapter.d.ts ====
+import { type spawn as nodeSpawn } from 'node:child_process';
+import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult } from '../../types';
+import type { ResolvedBin } from '../codex/resolve-bin';
+export interface GrokAdapterOptions {
+    /** Grok model id for every session (`session/set_model`). Absent: the user's Grok default. */
+    model?: string;
+    resolveBin?: () => ResolvedBin;
+    spawnFn?: typeof nodeSpawn;
+    maxRetainedBytes?: number;
+    interruptTimeoutMs?: number;
+}
+/**
+ * Grok Build over ACP (`grok agent --always-approve --no-leader stdio`),
+ * through the vendored OAR Grok profile. The SDK owns the agent process,
+ * every terminal command Grok asks the client to run, the environment, the
+ * record budget and the permission policy (requests are cancelled).
+ *
+ * `grok` is not a frozen wire runtime id, so a task reaches this adapter by
+ * the custom-harness identity (`harnessId: 'grok'`). It takes no dispatch
+ * selection; the model is the adapter's `model` option.
+ */
+export declare class GrokAdapter implements RuntimeAdapter {
+    private readonly options;
+    get descriptor(): import("..").RuntimeAdapterDescriptor;
+    constructor(options?: GrokAdapterOptions);
+    /** Reads the version, probes ACP mode and looks for a login signal. It never opens a session or writes Grok's home. */
+    detect(): Promise<RuntimeDetectResult>;
+    prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
+    private start;
+}
 // ==== @byok-sdk/client dist/adapters/hermes/hermes-adapter.d.ts ====
 import { spawn as nodeSpawn } from 'node:child_process';
 import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult } from '../../types';
@@ -488,6 +519,8 @@ export { ClaudeAdapter } from './claude/claude-adapter';
 export type { ClaudeAdapterOptions } from './claude/claude-adapter';
 export { CodexAdapter } from './codex/codex-adapter';
 export type { CodexAdapterOptions, CodexSandboxSetting } from './codex/codex-adapter';
+export { GrokAdapter } from './grok/grok-adapter';
+export type { GrokAdapterOptions } from './grok/grok-adapter';
 export { HermesAdapter } from './hermes/hermes-adapter';
 export type { HermesAdapterOptions, HermesModelSelection } from './hermes/hermes-adapter';
 export { NativeInteractionController, NativeInteractionError } from '../native-interactions';
@@ -2128,8 +2161,8 @@ export interface AgentMemoryIntentBackend {
 }
 /**
  * Native Linux descriptor backend: every CAS conflict is thrown before its
- * rename (`agent-memory.ts` replace/delete), and ledger writes use the strict
- * directory-fsync variant.
+ * rename (`agent-memory.ts` replace/delete), and both the memory CAS and the
+ * ledger writes use the strict directory-fsync variant.
  */
 export declare const NATIVE_AGENT_MEMORY_INTENT_BACKEND: AgentMemoryIntentBackend;
 /** SDK release helper: verified Mach-O code, strict barriers, pre-rename CAS. */
@@ -2402,7 +2435,9 @@ export interface AgentMemoryHomeCompareAndSwap {
  * Native backend: every conflict is thrown before the rename that would
  * install new bytes (replace compares before the temp file, before its write
  * and after it; delete compares twice before its tombstone rename), so a
- * conflict means this call renamed nothing.
+ * conflict means this call renamed nothing. Its directory fsync is strict, as
+ * for the intent ledger: a success proves the rename reached the directory on
+ * disk, and an `EINVAL`/`EPERM` refusal after it throws {@link AgentMemoryIoError}.
  */
 export declare function compareAndSwapAgentMemoryHomeFile(binding: AgentMemoryHomeBinding, input: AgentMemoryHomeCompareAndSwap): Promise<AgentMemoryFilesystemFileState>;
 /** Read one SDK-internal state file under `.byok` through the pinned home. */
@@ -10310,6 +10345,7 @@ export type { CopyPiRuntimeAssetsOptions, PiRuntimeAssetForm } from './adapters/
 export { ClaudeAdapter } from './adapters/claude/claude-adapter';
 export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter';
 export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from './adapters/codex/codex-adapter';
+export { GrokAdapter, type GrokAdapterOptions } from './adapters/grok/grok-adapter';
 export { HermesAdapter, type HermesAdapterOptions, type HermesModelSelection } from './adapters/hermes/hermes-adapter';
 export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError } from './diagnostics/device-doctor';
 export type { DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus, RepairDeviceEnrollmentMetadataInput, DeviceMetadataRepairResult, DeviceMetadataRepairErrorCode, } from './diagnostics/device-doctor';
@@ -12791,7 +12827,8 @@ export interface RuntimeDetectionAdvisory {
     readonly reason: 'runtime_version_unqualified';
     readonly qualifiedVersion: string;
 }
-export type RuntimeDetectionRefusalReason = 'app_server_unavailable';
+/** `app_server_unavailable`: Codex has no `app-server`. `acp_unavailable`: an ACP runtime has no stdio ACP mode. */
+export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unavailable';
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
     /** Supports display-only Agent message drafts. Omission means unsupported. */

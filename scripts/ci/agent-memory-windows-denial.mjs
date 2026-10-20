@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, open, readFile, readdir, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -66,8 +66,19 @@ try {
       if (junction) await unlink(junction);
     }
   }
+  // Observation only (#522): this runtime's directory fsync on NTFS. A path
+  // that treats its refusal as success has no directory barrier at all.
+  const directory = await open(scratch, 'r');
+  let directoryFsync = 'ok';
+  try {
+    await directory.sync();
+  } catch (error) {
+    directoryFsync = error.code ?? String(error);
+  } finally {
+    await directory.close();
+  }
   console.log(JSON.stringify({
-    acceptance: 'PLATFORM REFUSAL ONLY; NO CONTAINMENT OR S PROOF; B=false', runtime: process.versions,
+    acceptance: 'PLATFORM REFUSAL ONLY; NO CONTAINMENT OR S PROOF; B=false', runtime: process.versions, directoryFsync,
     osRelease: os.release(), helperSha256: createHash('sha256').update(await readFile(helperBin)).digest('hex'),
     childEnvironment: {}, results,
   }, null, 2));

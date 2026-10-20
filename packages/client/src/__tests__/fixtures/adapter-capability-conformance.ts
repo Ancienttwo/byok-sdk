@@ -10,7 +10,8 @@ import { SteerUnsupportedError, type RuntimeAdapter, type Session } from '../../
 export interface AdapterCapabilityFixture {
   readonly adapter: RuntimeAdapter;
   readonly sessionRef: string;
-  readonly mismatchedIdentityEnvironment: NodeJS.ProcessEnv;
+  /** Absent when the native resume reports no identity of its own (ACP `session/resume`). */
+  readonly mismatchedIdentityEnvironment?: NodeJS.ProcessEnv;
   start(input?: {
     sessionRef?: string;
     running?: boolean;
@@ -24,6 +25,11 @@ export interface AdapterCapabilityFixture {
 export interface AdapterCapabilityQualification {
   readonly id: string;
   readonly steer: boolean;
+  /**
+   * False when the native resume answer carries no session id, so the resumed
+   * identity is the requested one by construction and cannot drift.
+   */
+  readonly resumeReportsIdentity: boolean;
   create(): Promise<AdapterCapabilityFixture>;
 }
 
@@ -67,7 +73,7 @@ export function runAdapterCapabilityConformance(qualification: AdapterCapability
       await expect(fixture.start({ sessionRef: 'nonexistent-conformance-session' })).rejects.toThrow();
     });
 
-    it('rejects native resume identity drift', async () => {
+    it.runIf(qualification.resumeReportsIdentity)('rejects native resume identity drift', async () => {
       await expect(fixture.start({
         sessionRef: fixture.sessionRef,
         env: fixture.mismatchedIdentityEnvironment,

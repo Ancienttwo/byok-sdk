@@ -92,17 +92,134 @@ let httpServer;
 let startChild;
 let startStderr = '';
 let failed = false;
+let lastCliPid;
+const startedAt = performance.now();
+let stepStartedAt = startedAt;
+const httpSockets = new Set();
+const pairRequests = [];
 
 function log(line) {
-  console.log(line);
+  const now = performance.now();
+  if (line.startsWith('==>')) stepStartedAt = now;
+  const duration = line.startsWith('PASS:') ? ` duration_ms=${Math.ceil(now - stepStartedAt)}` : '';
+  console.log(`[+${Math.ceil(now - startedAt)}ms] ${line}${duration}`);
+}
+
+function diagnostic(line) {
+  console.error(`[+${Math.ceil(performance.now() - startedAt)}ms] ${line}`);
+}
+
+function connectionState() {
+  return {
+    sampled_ms: Math.ceil(performance.now() - startedAt),
+    cliPid: lastCliPid, daemonPid: startChild?.pid, daemonExitCode: startChild?.exitCode,
+    daemonSignal: startChild?.signalCode, serverListening: httpServer?.listening,
+    pairRequests: pairRequests.map((entry) => ({ ...entry })),
+    httpSockets: [...httpSockets].map((socket) => ({
+      localPort: socket.localPort, remotePort: socket.remotePort,
+      readyState: socket.readyState, destroyed: socket.destroyed,
+      bytesRead: socket.bytesRead, bytesWritten: socket.bytesWritten,
+    })),
+  };
+}
+
+async function snapshotState() {
+  diagnostic('--- IPC state after failure ---');
+  diagnostic(JSON.stringify(connectionState()));
+  for (const name of ['control.sock', 'control.token', 'device.json', 'mutex.sock', 'daemon-owner.json']) {
+    const state = await fs.lstat(path.join(storeDir, name)).then(
+      (stat) => ({ socket: stat.isSocket(), file: stat.isFile(), size: stat.size }),
+      (error) => ({ error: error.code }),
+    );
+    diagnostic(`${name}: ${JSON.stringify(state)}`);
+  }
+}
+
+async function snapshotProcesses() {
+  const requestedAt = Math.ceil(performance.now() - startedAt);
+  if (process.platform === 'win32') {
+    return 'process snapshot unavailable on Windows';
+  }
+  try {
+    // comm excludes argv: pairing codes and credential command stdin stay private.
+    const { stdout } = await execFileAsync('ps', ['-A', '-o', 'pid=,ppid=,etime=,stat=,comm='], { timeout: 1000 });
+    const rows = stdout.trim().split('\n').map((line) => ({
+      line, pid: Number(line.trim().split(/\s+/)[0]), ppid: Number(line.trim().split(/\s+/)[1]),
+    }));
+    const owned = new Set([process.pid]);
+    for (let count = 0; count !== owned.size;) {
+      count = owned.size;
+      for (const row of rows) if (owned.has(row.ppid)) owned.add(row.pid);
+    }
+    return `--- process tree: requested_ms=${requestedAt} collected_ms=${Math.ceil(performance.now() - startedAt)} pid ppid etime stat comm ---\n` +
+      rows.filter((row) => owned.has(row.pid)).map((row) => row.line).join('\n');
+  } catch (error) {
+    return `process snapshot failed: ${error.code ?? error.message}`;
+  }
 }
 
 async function runCli(args, timeoutMs = 15000) {
-  const { stdout, stderr } = await execFileAsync(process.execPath, [byokAgentBin, ...args], {
+  const started = performance.now();
+  let snapshot;
+  let beforeKill;
+  // Reserve one second for best-effort sampling. Keep execFile's original
+  // deadline and stream disposal, including pipes inherited by descendants.
+  const timer = setTimeout(() => {
+    beforeKill = connectionState();
+    snapshot = snapshotProcesses();
+  }, Math.max(0, timeoutMs - 1000));
+  const command = execFileAsync(process.execPath, [byokAgentBin, ...args], {
     timeout: timeoutMs,
     env: process.env,
   });
-  return { stdout, stderr };
+  const child = command.child;
+  lastCliPid = child.pid;
+  try {
+    const output = await command;
+    log(`${args[0]}: pid=${child.pid} duration_ms=${Math.ceil(performance.now() - started)}`);
+    return output;
+  } catch (error) {
+    clearTimeout(timer);
+    diagnostic(`CLI failed: ${JSON.stringify({
+      command: args[0], pid: child.pid, duration_ms: Math.ceil(performance.now() - started),
+      timeoutMs, killed: child.killed, signal: error.signal ?? child.signalCode,
+      code: error.code ?? child.exitCode, stdout: error.stdout ?? '', stderr: error.stderr ?? '',
+    })}`);
+    if (beforeKill) diagnostic(`IPC state near deadline: ${JSON.stringify(beforeKill)}`);
+    diagnostic(await (snapshot ?? snapshotProcesses()));
+    // Do not include execFile's message: it contains the pairing code in argv.
+    throw new Error(`${args[0]} failed (pid=${child.pid})`);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function timedCleanup(label, operation) {
+  const started = performance.now();
+  log(`cleanup ${label}: begin`);
+  try {
+    return await operation();
+  } finally {
+    log(`cleanup ${label}: duration_ms=${Math.ceil(performance.now() - started)}`);
+  }
+}
+
+async function diagnosticFetch(request, env) {
+  if (new URL(request.url).pathname !== '/byok/pair') return byok.hono.fetch(request, env);
+  const started = performance.now();
+  const entry = { arrived_ms: Math.ceil(started - startedAt) };
+  pairRequests.push(entry);
+  const onAbort = () => { entry.aborted_ms = Math.ceil(performance.now() - startedAt); };
+  request.signal.addEventListener('abort', onAbort, { once: true });
+  try {
+    const response = await byok.hono.fetch(request, env);
+    entry.status = response.status;
+    return response;
+  } finally {
+    entry.duration_ms = Math.ceil(performance.now() - started);
+    request.signal.removeEventListener('abort', onAbort);
+    log(`HTTP /byok/pair: arrived_ms=${entry.arrived_ms} duration_ms=${entry.duration_ms} status=${entry.status ?? 'error'}`);
+  }
 }
 
 function waitForChildExit(child, timeoutMs) {
@@ -140,8 +257,13 @@ function waitForStartupLine(child, marker, timeoutMs) {
 }
 
 try {
+  log(`runtime: platform=${process.platform} arch=${process.arch} node=${process.version} pid=${process.pid}`);
   const port = await new Promise((resolve) => {
-    httpServer = serve({ fetch: byok.hono.fetch, port: 0 }, (info) => resolve(info.port));
+    httpServer = serve({ fetch: diagnosticFetch, port: 0 }, (info) => resolve(info.port));
+    httpServer.on('connection', (socket) => {
+      httpSockets.add(socket);
+      socket.once('close', () => httpSockets.delete(socket));
+    });
   });
   const serverUrl = `http://127.0.0.1:${port}`;
   log(`==> real @byok-sdk/server reference implementation listening at ${serverUrl}`);
@@ -214,6 +336,7 @@ try {
 } catch (err) {
   failed = true;
   console.error('FAIL:', err instanceof Error ? err.stack : err);
+  await snapshotState().catch((error) => diagnostic(`IPC snapshot failed: ${error.message}`));
   if (startStderr) {
     console.error('--- start child stderr ---');
     console.error(startStderr);
@@ -221,15 +344,15 @@ try {
 } finally {
   // Best-effort cleanup regardless of where the assertions above failed.
   if (startChild && startChild.exitCode === null && startChild.signalCode === null) {
-    startChild.kill('SIGKILL');
+    await timedCleanup('start child kill', async () => { startChild.kill('SIGKILL'); });
   }
   if (httpServer) {
-    await new Promise((resolve) => {
+    await timedCleanup('HTTP server close', () => new Promise((resolve) => {
       httpServer.close(() => resolve(undefined));
       httpServer.closeAllConnections?.();
-    });
+    }));
   }
-  await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
+  await timedCleanup('work directory remove', () => fs.rm(workDir, { recursive: true, force: true }).catch(() => {}));
 }
 
 process.exit(failed ? 1 : 0);

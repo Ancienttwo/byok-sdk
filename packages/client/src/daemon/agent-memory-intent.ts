@@ -173,8 +173,8 @@ export interface AgentMemoryIntentBackend {
 
 /**
  * Native Linux descriptor backend: every CAS conflict is thrown before its
- * rename (`agent-memory.ts` replace/delete), and ledger writes use the strict
- * directory-fsync variant.
+ * rename (`agent-memory.ts` replace/delete), and both the memory CAS and the
+ * ledger writes use the strict directory-fsync variant.
  */
 export const NATIVE_AGENT_MEMORY_INTENT_BACKEND: AgentMemoryIntentBackend = Object.freeze({
   conflictProvesNoRename: true,

@@ -226,7 +226,22 @@ export function observeStart(state: CollaborationState, turn: Turn, now: number,
   const fresh = d.claimed?.turnId !== turn.id;
   if (fresh) d.claimed = { turnId: turn.id, at: now };
   // A successor that starts after an uncertain claim runs again (§8.3: a later terminal gives the normal verdict).
-  if (d.status === 'queued' || fresh && d.status === 'uncertain' && !d.cancel) { d.status = 'running'; publish(d, emit); }
+  if (d.status === 'queued' || d.status === 'waiting_device' || fresh && d.status === 'uncertain' && !d.cancel) { d.status = 'running'; publish(d, emit); }
+}
+/** Presence is display evidence only. It never controls submit, expiry, or a verdict. */
+export function observeDevices(s: LedgerState, state: CollaborationState, devices: ReadonlyMap<string, boolean>, emit: Publish): void {
+  for (const d of Object.values(state.delegations)) {
+    if (d.verdict || d.cancel || d.status !== 'queued' && d.status !== 'waiting_device') continue;
+    const intent = s.intents[hash(d.chainTurnIds.at(-1) ?? '')];
+    // Persona waits and FIFO waits remain queued. Only a delivered, unclaimed offer waits for a device.
+    const execution = intent && s.executions[intent.taskId];
+    if (!intent || intent.conclusion || intent.phase !== 'inflight' || execution?.submission !== 'delivered'
+      || execution.started || execution.attempt?.status !== 'offered') continue;
+    const connected = devices.get(intent.execution.deviceId);
+    if (connected === undefined) continue;
+    const status = connected ? 'queued' : 'waiting_device';
+    if (d.status !== status) { d.status = status; publish(d, emit); }
+  }
 }
 /** Display only (§8.3). An uncertain delegation no longer holds back its batch. */
 function uncertain(state: CollaborationState, d: Delegation, now: number, emit: Publish): void {
@@ -247,7 +262,7 @@ function resolveCancel(state: CollaborationState, d: Delegation, taskId: string 
   if (reply) d.partial = true;
   resolveDelegation(state, d, 'cancelled', now, emit, d.cancel!.reason ?? 'user_cancelled', reply);
 }
-const CANCELLABLE = new Set<Delegation['status']>(['queued', 'running', 'reply_pending']);
+const CANCELLABLE = new Set<Delegation['status']>(['queued', 'waiting_device', 'running', 'reply_pending']);
 /**
  * Open delegations that a Main Bot can cancel (§8.8): no verdict, no cancel yet,
  * and a state that a cancel can act on. Newest first; the rest are only counted.

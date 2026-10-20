@@ -56,7 +56,7 @@ export function parseRuntimeObservations(value: unknown): RuntimeObservation[] |
   return observations;
 }
 
-const REFUSAL_REASONS: readonly RuntimeDetectionRefusalReason[] = Object.freeze(['app_server_unavailable']);
+const REFUSAL_REASONS: readonly RuntimeDetectionRefusalReason[] = Object.freeze(['app_server_unavailable', 'acp_unavailable']);
 const MAX_VERSION_CHARS = 256;
 
 function isVersionText(value: unknown): value is string {

@@ -21,6 +21,7 @@ export default defineConfig({
     'src/bin/byok-pi-durable.ts',
     'src/bin/byok-pi-rpc.ts',
     'src/bin/pi-runtime-host.ts',
+    'src/runtime/acp-session-runtime.js',
     'src/bin/byok-agent-message-mcp.ts',
     'src/bin/byok-agent-result-mcp.ts',
     'src/bin/byok-agent-memory-mcp.ts',
@@ -55,7 +56,7 @@ export default defineConfig({
   // non-win32 install (where the addon may be absent) never has it inlined,
   // and so the win32 branch loads the host's own prebuilt addon.
   external: [
-    'koffi', '#byok-pi-runtime-host', '#byok-pi-runtime-host-sealed', '#byok-pi-todo-runtime',
+    'koffi', '#byok-acp-runtime', '#byok-pi-runtime-host', '#byok-pi-runtime-host-sealed', '#byok-pi-todo-runtime',
     'typebox', 'typebox/compile',
     '@mozilla/readability', 'linkedom', 'p-limit', 'promise.try',
     'turndown', 'unpdf', 'undici', 'jiti', 'yaml',

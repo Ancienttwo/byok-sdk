@@ -939,7 +939,10 @@ first, so an unacknowledged record is never evicted.
    `exists: false` and the empty-bytes digest. Any other CAS result, or any
    failure other than a revision conflict, is `uncertain` with the current
    observation. A revision conflict is `conflict` only on a backend that proves
-   a conflict renamed nothing.
+   a conflict renamed nothing. The CAS directory fsync is strict, as for the
+   ledger. A refused directory fsync after the rename, `EINVAL` and `EPERM`
+   included, is such a failure. The Host never receives `applied` for a memory
+   result that no barrier made durable.
 5. The completion (`AgentMemoryIntentCompletionSchema`, content-free) goes to
    the Host only after its terminal record was durably written.
 6. The Host answers with its durable readback (`AgentMemoryIntentReadbackSchema`):

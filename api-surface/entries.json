@@ -39,6 +39,7 @@
         "zod"
       ],
       "lazyImports": [
+        "#byok-acp-runtime",
         "#byok-pi-runtime-host",
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
@@ -95,7 +96,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 390309,
+      "budgetBytes": 415785,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -123,6 +124,7 @@
         "util"
       ],
       "lazyImports": [
+        "#byok-acp-runtime",
         "koffi"
       ],
       "thirdParty": [],
@@ -323,7 +325,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 4442,
+      "budgetBytes": 5029,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -345,6 +347,65 @@
         "thirdParty": []
       },
       "codegen": []
+    }
+  },
+  "@byok-sdk/client#byok-acp-runtime": {
+    "kind": "imports",
+    "policy": {
+      "purpose": "Private ACP runtime stack (Grok)",
+      "budgetBytes": 83519,
+      "zod": true,
+      "codegen": true,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": true
+      }
+    },
+    "facts": {
+      "target": "packages/client/dist/runtime/acp-session-runtime.js",
+      "conditions": [
+        "default"
+      ],
+      "types": [
+        "packages/client/dist/runtime/acp-session-runtime.d.ts"
+      ],
+      "bareImports": [
+        "@agentclientprotocol/sdk",
+        "crypto",
+        "fs",
+        "path",
+        "string_decoder",
+        "url"
+      ],
+      "lazyImports": [],
+      "thirdParty": [
+        "@agentclientprotocol/sdk",
+        "zod"
+      ],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [
+          "crypto",
+          "fs",
+          "path",
+          "string_decoder",
+          "url"
+        ],
+        "thirdParty": []
+      },
+      "codegen": [
+        {
+          "file": "zod/v4/core/doc.js",
+          "line": 28,
+          "rule": "Function reference"
+        },
+        {
+          "file": "zod/v4/core/util.js",
+          "line": 156,
+          "rule": "Function reference"
+        }
+      ]
     }
   },
   "@byok-sdk/client#byok-pi-runtime-host": {

@@ -505,7 +505,7 @@ K5 和 K6 可以并行，也可以和 K1–K3 并行。K7 在两者之后：它�
 
 第 6 条按 WO-05 裁定细化：到期先 `tasks.cancel`，再读 `tasks.attempt`。状态为 `cancelled` 且无 claimed runtime 或 owner 时，结论为 `expired`。已有 claim 或状态是 `cancel_requested` 时，保持 FIFO 占用，等设备 terminal 后结为 `cancelled`。接受到期与 claim 的竞态。K4 允许 `tasks.attempt`、`tasks.get`；产品快照不能代替 attempt。`tasks.cancel` 不改为返回 attempt。（依据 R5）
 
-K4 的 routine 定义按 id 不可变，改定义换新 id。同 id 的 current/pending、调度 generation 和在途上限归 K8a 的 `update_routine`。K4 合成端到端覆盖聊天、routine 和崩溃恢复；委派与确认归 K8a，记忆页及三端证明归产品 PRD P5/P2。服务端各行见 §14.1。（依据 R6）
+K4 的 routine 定义按 id 不可变，改定义换新 id。同 id 的 current/pending、调度 generation 和在途上限归 K8a 的 `update_routine`。K4 合成端到端覆盖聊天、routine 和崩溃恢复；自委派续作与确认归 K8a，跨 Bot 委派归 K8b，记忆页及三端证明归产品 PRD P5/P2。服务端各行见 §14.1。（依据 R6）
 
 ### 9.3 Bot 执行的 outcome 契约
 
@@ -532,6 +532,7 @@ outcome 的根是封闭对象，每种动作一个可选字段，各有个数上
 | 动作字段 | 字段 | 谁能用 | Host 的处理 |
 |---|---|---|---|
 | `delegate` | `to`（含自己）、`request`（≤ 1 000 码点） | 所有 Bot | 新建委派（§9.4）；给自己时走产品 PRD §5.6 的续作预算 |
+| `cancel_delegation`（最多 2） | `delegationId`（Host 的开放委派 enum） | Main Bot，且 Turn 的 `authority = owner`，不在群席位 | 按 §9.4 运行同一取消仲裁；不能因角色取得 Bot 来源的 owner 权限 |
 | `ask_user` | `question` ≤ 400 码点、`answerKind`（`text` 或 `single_choice`）；单选 options 2–6 项，id ≤ 24、label ≤ 80 码点 | 所有 Bot | 建问题卡片。回答作为新一轮 `user` 输入，同 `examples/basic/clarification.ts` 的做法 |
 | `confirmable_action` | `action`（Host 动作名）、`summary`（≤ 300 码点）、`draft`（该动作的 Host 草稿 schema，有有限上界，最坏 ≤ 16 KiB） | 所有 Bot | 建确认卡。用户确认后，Host 用自己的凭据执行；Bot 不直接执行有后果的动作。结果作为 `action_result` Turn 回到对话（产品 PRD §5.4） |
 | `create_routine` | `localId`（Host 槽位）、`schedule`（本节结构化字段）、`prompt`（≤ 500 码点）、`target`（仅 Main Bot schema 可带；默认自己） | 所有 Bot；`target` 指向别人只有 Main Bot | 用 `checkRoutineSchedule` 校验，失败则拒绝动作并写进下一次 ContextPack；落 routine 账本，算下一个时点，调 `wakes.schedule`（§12） |
@@ -549,17 +550,22 @@ outcome 的根是封闭对象，每种动作一个可选字段，各有个数上
 - 执行没交 outcome 就结束是 `task.fail`（K7）：回复照常显示，动作一个都不应用。执行失败、被取消或中断时，即使暂存过 outcome，terminal 也不带它，动作同样一个都不应用。
 - 同一份 outcome 里引用新建的 Bot 或群，用 Host 预发的 localId 槽位。
 
-Bot 的 name/role/persona 上限提议值为 40/80/300 码点；群的 name/announcement 为 40/300 码点。动作 key 是 `H(taskId, kind, 数组下标)`。Host 在一个事务里按固定顺序应用：`create_bot` → `update_bot` → `delete_bot` → `create_room` → `update_room` → `team_note` → routine 三动作 → `confirmable_action` → `ask_user` → `delegate`。（依据 R3）
+Bot 的 name/role/persona 上限提议值为 40/80/300 码点；群的 name/announcement 为 40/300 码点。动作 key 是 `H(taskId, kind, 数组下标)`。Host 在一个事务里按固定顺序应用：`create_bot` → `update_bot` → `delete_bot` → `create_room` → `update_room` → `team_note` → `cancel_delegation` → routine 三动作 → `confirmable_action` → `ask_user` → `delegate`。（依据 R3）
 
 ### 9.4 委派
 
 1. A 的 outcome 里有 `delegate`。Host 在应用 A 的 outcome 的事务里：
    - 插入委派，key 是 `H(A.taskId, 'delegate', 下标)`。同一个 terminal 应用两次也不会产生第二个委派。（依据 R3）
    - 计算 `hop`：A 这一轮的 hop 加 1，用户输入的 hop 是 0。默认上限 4，超过时结论为 `refused`。
-   - 检查这条用户输入派生的 Bot 自发执行预算，默认 12 次。超过时结论为 `refused`。
+   - 检查 root 的 Bot 执行预算，默认 12。接受 n 个目标预留 `n + max(n, 1)` 单位，覆盖 B 执行和最坏的 A 回报。准入同时计算此前所有开放预留。`spent + reserved` 不能超过 12。容量不够时从最后一项起拒绝，理由是 `budget_exhausted`。自委派使用独立的 4 次续作预算，不增加 hop。（K8b Q10）
    - 在 B 的 canonical 对话里插入 Turn，来源 `bot_request`，用结构化元数据记录发起方和委派 id；在 B 的队列里排 intent。
 2. B 的执行照常排队。B 正在自己的对话里执行时，委派等待；busy 拒绝只在读到设备 terminal 后换代。
-3. B 的 terminal 到达后，Host 结算 B 的 Turn，给出委派结论，并在 A 的对话里插入 Turn（来源 `bot_reply`），内容是 B 被接受的回复和委派结论；在 A 的队列里排 intent。回传 Turn 的 key 是 `H(delegationId)`，所以只有一个。
+3. B 的链结束后，Host 用 canonical terminal 和 Host 接受的回复记录给出结论。它在 A 的对话里插入 `bot_reply` Turn，再进入 A 的队列。不能从 outcome 文档或模型正文推导被接受的回复。（K8b Q2）
+   - 一个 outcome 最多接受两个目标。单目标的回报 key 是 `H('bot_reply', delegationId)`。两个目标共用 `H('bot_reply', A.taskId)`。
+   - 批次中的每个已接受委派都有结论或为 uncertain，且至少一个有结论时，创建一次批次回报。它包含当时的全部结论，包括该 outcome 的拒绝项。
+   - 全部目标都 uncertain 时，不创建空批次回报。批次放行后才取得的结论，用 `H('bot_reply', delegationId)` 单独回报。
+   - 每个委派只写一次 `replyTurnId`，最多属于一个回报 Turn。没有接受项时，一次拒绝回报 `H('bot_reply', A.taskId)` 包含全部拒绝项。没有预算时只落可见记录，不启动模型。拒绝回报不含 `delegate`。
+   - B 的已提交续作继承委派 id、原 hop 和 authority。只有真实创建的 successor 才延长链。最终回复来自链尾 Turn。
 4. 每个委派只有一个结论：
 
 | 结论 | 条件 |
@@ -573,7 +579,11 @@ Bot 的 name/role/persona 上限提议值为 40/80/300 码点；群的 name/anno
 
 5. 不确定：B 的执行已经请求取消但读不到 terminal，或者 B 的设备掉线超过 Host 的阈值。两边的对话都显示「不确定」，Host 不自动重派，委派暂时没有结论。读到 terminal 后按第 4 条给出结论；用户也可以结束它，结论为 `abandoned`。结论给出之后才到达的 terminal 只留作 B 对话里的审计记录，不转给 A。这和 §12.4 第 9 条对 occurrence 的处理一致：都不换代、不重派。区别是委派允许用户关闭，发起方不用一直等。
 6. 发起方 A 已被删除时，回传 Turn 不再创建，结论只记在账本里。
-7. 跨设备委派走同样的流程。Topology L 下，两台设备上的 Host 进程经 Host 服务端同步，每一跳最多多等一个同步间隔。
+7. 跨设备委派走同样的流程。Topology L 下，两台设备上的 Host 进程经 Host 服务端同步。在线且可同步时，每一跳最多多等一个同步间隔。离线时没有这个时限。X5 只证明单 embedded server 和两个已注册 daemon 的路径。hosted `submitAgentExecution` 与两个 Topology L Host 进程的 relay 仍是开放验收项。产品 PRD Q19 不豁免 §14.2 的跨设备行。两台物理电脑和真实 Pi 也需要各自的证据。
+8. Main Bot 通过 `cancel_delegation` 取消。只有非群席位且 `authority = owner` 的 Main Bot Turn 获得片段。每次 outcome 最多两项。Host 枚举最新的至多 24 个可取消委派，并在 ContextPack 显示未列出数。用户仍可在 UI 取消其他委派。（K8b Q7、Q12）
+   - schema 和 apply 都检查 Main Bot 角色、owner authority 和群席位限制。动作在管理之后、routine 之前应用。
+   - 动作运行同一个取消仲裁事务。取消先提交则拒绝首次消息；接受先提交则保留该回复并标记 partial。结论均为 `cancelled`，Main Bot 路径记录 `main_bot_cancelled`。
+   - 已结算目标返回 `already_resolved`，不产生第二个结论。尚无 K4 intent 时直接关闭待执行 Turn；已有 intent 时持久记录取消，并在事务后发送。重启重送同一冻结目标的取消。
 
 ### 9.5 群聊
 
@@ -978,3 +988,10 @@ K8 参考实现，Topology L 和 H 各跑一遍。群聊按 §9.5 的默认 `men
 [#414]: https://github.com/Ancienttwo/byok-sdk/issues/414
 [#418]: https://github.com/Ancienttwo/byok-sdk/issues/418
 [#420]: https://github.com/Ancienttwo/byok-sdk/issues/420
+
+
+## K8b Cross-Bot 文档对齐（2026-10-20）
+
+本次只同步已批准的 [K8b 计划](../plans/2026-10-19-k8b-cross-bot.md) Q2、Q7、Q10、Q12 和 §3.9。
+这不增加产品裁定，不代表真实 Pi、hosted 路径或两进程 relay 已通过。
+参考实现的验收映射见 [VALIDATION](https://github.com/Ancienttwo/byok-sdk/pull/578)。

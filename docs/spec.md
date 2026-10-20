@@ -652,8 +652,9 @@ existing optional `version` and `authPresent` facts. Custom adapters must author
 this shape; old `present` shapes, mixed authorities, unknown kinds, and malformed
 metadata are rejected. There is no compatibility translation.
 
-`refused` requires exactly `kind` and `reason`. Its only reason is
-`app_server_unavailable`. No other arm accepts `reason`; arbitrary error text
+`refused` requires exactly `kind` and `reason`. Its reasons are
+`app_server_unavailable` (Codex has no `app-server`) and `acp_unavailable`
+(an ACP runtime such as Grok has no stdio ACP mode). No other arm accepts `reason`; arbitrary error text
 is never parsed into a reason. Daemon registration, task selection and explicit local
 `runtimes`/offline doctor call `detect(signal?)` on the actual adapter. Detection never
 chooses the task lane; `resources.kind` retains that authority. The SDK does
@@ -1985,7 +1986,9 @@ the intent to the notice Agent and to its own enrolled tenant and device
 through the recomputed `operationDigest`, and it applies the existing sha256
 CAS at most once under the task-free Agent-home lease. The ledger
 `.byok/agent-memory-intents-v1.json` makes `applying` durable before the CAS.
-It makes the terminal durable before the content-free completion, and makes
+The CAS directory fsync is strict. If it fails after the rename, the terminal
+is `uncertain`, never `applied`.
+The ledger makes the terminal durable before the content-free completion, and makes
 `ackedAt` durable after the Host readback matches. Only then does the cursor
 advance. A leftover `applying` record is reported `uncertain` and never
 re-executed. Busy, fetch, readback, identity or I/O failures leave the cursor

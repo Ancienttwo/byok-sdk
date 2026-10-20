@@ -1,0 +1,52 @@
+import type { FailureClass, FrameBody, TurnOutcome } from "../../contracts/session.js";
+import { acpErrorReason, rpcErrorCode, type AcpFailureReader } from "../../shared/acp/failure.js";
+import { asRecord, type JsonRecord } from "../../shared/json.js";
+
+/*
+ * A prompt grok answered with an error (docs/spec/runtime-matrix.md#opencode-kimi-grok-antigravity-acp),
+ * observed on 1.0.46 against a scripted provider: -32003 "Rate limited" for
+ * every 429 (throttling, a usage limit, an exhausted balance: grok's code
+ * does not tell them apart); otherwise -32603 "Internal error", whose cause
+ * is the `error_type` of the `retry_state` update that ended grok's retries.
+ */
+
+const RATE_LIMITED = -32_003;
+
+const ERROR_TYPES: Readonly<Partial<Record<string, FailureClass>>> = {
+  auth: "auth",
+  rate_limited: "rate_limited",
+  context_length: "input_too_large",
+  api: "provider",
+};
+
+/** The last `retry_state` update that ended grok's retries (`failed` or `exhausted`). */
+function finalRetryState(frames: readonly FrameBody[]): Record<string, unknown> | null {
+  for (const frame of frames.toReversed()) {
+    const update = frame.type === "_x.ai/session_notification" ? asRecord(asRecord(frame.native)?.update) : null;
+    if (update?.sessionUpdate === "retry_state" && (update.type === "failed" || update.type === "exhausted")) {
+      return update;
+    }
+  }
+  return null;
+}
+
+export const grokFailureOutcome: AcpFailureReader = (error, frames) => {
+  const reason = acpErrorReason(error);
+  if (rpcErrorCode(error) === RATE_LIMITED) {
+    return { kind: "failed", reason, failure: "rate_limited" };
+  }
+  const update = finalRetryState(frames);
+  const named = typeof update?.error_type === "string" ? ERROR_TYPES[update.error_type] : undefined;
+  return named === undefined ? null : { kind: "failed", reason, failure: named };
+};
+
+/** Grok validates its schema and reports either a value or a typed error field, even with end_turn. */
+export function grokPromptOutcome(response: JsonRecord): TurnOutcome {
+  if (response.stopReason === "cancelled") { return { kind: "aborted" }; }
+  // oxlint-disable-next-line eslint/no-underscore-dangle -- `_meta` is the native ACP extension envelope.
+  const meta = asRecord(response._meta);
+  if (typeof meta?.structuredOutputError === "string") {
+    return { kind: "failed", failure: "output_schema", reason: meta.structuredOutputError };
+  }
+  return { kind: "completed", ...(meta !== null && Object.hasOwn(meta, "structuredOutput") ? { structuredOutput: meta.structuredOutput } : {}) };
+}

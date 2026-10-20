@@ -31,6 +31,8 @@ export type { ClaudeAdapterOptions } from './claude/claude-adapter';
 export { CodexAdapter } from './codex/codex-adapter';
 export type { CodexAdapterOptions, CodexSandboxSetting } from './codex/codex-adapter';
 
+export { GrokAdapter } from './grok/grok-adapter';
+export type { GrokAdapterOptions } from './grok/grok-adapter';
 export { HermesAdapter } from './hermes/hermes-adapter';
 export type { HermesAdapterOptions, HermesModelSelection } from './hermes/hermes-adapter';
 

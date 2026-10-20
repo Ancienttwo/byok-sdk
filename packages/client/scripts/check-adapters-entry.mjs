@@ -65,6 +65,8 @@ assert.equal(manifest.devDependencies?.['pi-subagents'], '0.60.0');
 // retired: the SDK owns its MCP connection, observation and tool projection
 // (`src/mcp/`), so there is no second MCP authority in the graph to pin.
 assert.equal(manifest.dependencies?.['@modelcontextprotocol/client'], '2.0.0');
+// The ACP wire library behind the private `#byok-acp-runtime` entry (vendored OAR shared/acp).
+assert.equal(manifest.dependencies?.['@agentclientprotocol/sdk'], '1.4.0');
 assert.equal(manifest.dependencies?.['pi-mcp-adapter'], undefined);
 assert.equal(manifest.dependencies?.['@juicesharp/rpiv-todo'], undefined);
 assert.equal(manifest.dependencies?.['@juicesharp/rpiv-i18n'], '2.8.0');
@@ -98,7 +100,7 @@ const adapters = await import(new URL('../dist/adapters/index.js', import.meta.u
 const root = await import(new URL('../dist/index.js', import.meta.url));
 assert.deepEqual(
   Object.keys(adapters).sort(),
-  ['ClaudeAdapter', 'CodexAdapter', 'HermesAdapter', 'NativeInteractionController', 'NativeInteractionError', 'PI_PACKAGE_NAME', 'PiAdapter', 'RuntimeDisposalFailure', 'RuntimeExecutionFailure', 'RuntimeStartupDisposalFailure', 'ScratchRootPathError', 'buildRuntimeEnv', 'createExecutionScratch'],
+  ['ClaudeAdapter', 'CodexAdapter', 'GrokAdapter', 'HermesAdapter', 'NativeInteractionController', 'NativeInteractionError', 'PI_PACKAGE_NAME', 'PiAdapter', 'RuntimeDisposalFailure', 'RuntimeExecutionFailure', 'RuntimeStartupDisposalFailure', 'ScratchRootPathError', 'buildRuntimeEnv', 'createExecutionScratch'],
 );
 const crossEntryFailure = new adapters.RuntimeExecutionFailure({
   phase: 'start',
@@ -117,6 +119,9 @@ assert.equal(root.isRuntimeStartupDisposalFailure(new adapters.RuntimeStartupDis
 assert.equal(new adapters.PiAdapter().descriptor.id, 'pi');
 assert.equal(new adapters.ClaudeAdapter().descriptor.id, 'claude');
 assert.equal(new adapters.CodexAdapter().descriptor.id, 'codex');
+assert.equal(new adapters.GrokAdapter().descriptor.id, 'grok');
+// The ACP stack and its protocol SDK are a private lazy entry, never part of this one.
+assert.doesNotMatch(bundledEntry, /@agentclientprotocol\/sdk/);
 
 // The SDK root must not evaluate the prepared-input compile graph just because
 // it was imported. The compile calls the official public entry

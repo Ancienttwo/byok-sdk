@@ -54,7 +54,7 @@ export interface Delegation {
   id: string; root: string; fromBotId: string; fromTurnId: string; fromTaskId: string; index: number;
   toBotId: string; toAgentRef?: { agentId: string; profileRevision: string }; toDeviceId?: string;
   request: string; hop: number; requestTurnId?: string; chainTurnIds: string[]; batch: string;
-  status: 'queued' | 'running' | 'reply_pending' | 'reply_held' | 'uncertain' | 'resolved';
+  status: 'queued' | 'waiting_device' | 'running' | 'reply_pending' | 'reply_held' | 'uncertain' | 'resolved';
   revision: number; nextCheckAt?: number; checks?: number; pendingSince?: number;
   verdict?: Verdict; reason?: string; reply?: string; continuationRefused?: true; partial?: true; replyTurnId?: string;
   uncertainSince?: number; resolvedAt?: number;

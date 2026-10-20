@@ -168,6 +168,7 @@ K7 子集没有 `pattern`、`format`、`uniqueItems`、`$ref`。schedule 用结�
 | 动作 | 字段 | 谁能用 | Host 的处理 |
 |---|---|---|---|
 | `delegate`（最多 2） | `to`（enum，含自己）、`request` ≤ 1 000 码点 | 所有 Bot | 新建委派，key `H(A.taskId, 'delegate', 下标)`。`to` 是自己时是续作（§5.6），用续作预算 |
+| `cancel_delegation`（最多 2，K8b Q12 已定） | `delegationId`（Host 开放委派 enum） | Main Bot，且 Turn 的 `authority = owner`，不在群席位 | 管理动作后运行统一取消仲裁；最新 24 个目标，ContextPack 显示未列出数。已结算则 `already_resolved` |
 | `ask_user`（最多 1） | `question` ≤ 400 码点、`answerKind`；单选 `options` 2–6 项，id ≤ 24、label ≤ 80 码点 | 所有 Bot | 建问题卡片。回答作为新一轮 `user` 输入 |
 | `confirmable_action`（最多 1） | `action`（Host enum）、`summary` ≤ 300 码点、`draft`（Host 草稿 schema，有有限上界，最坏 ≤ 16 KiB） | 所有 Bot | 建确认卡（§5.4） |
 | `create_routine`（最多 1） | `localId`（Host 槽位）、`schedule { minute, hour, daysOfWeek? 或 dayOfMonth? 加 month?, tz }`（§5.5）、`prompt` ≤ 500 码点、`target`（默认自己） | 所有 Bot；`target` 指向别人只有 Main Bot | 校验 schedule，落 routine 账本，算下一个时点，`wakes.schedule`（§5.5） |
@@ -182,17 +183,21 @@ K7 子集没有 `pattern`、`format`、`uniqueItems`、`$ref`。schedule 用结�
 
 只有 Main Bot 的 schema 含管理类动作。只有群发言执行的 schema 含必填的 `speech`（`post` 或 `pass`）和可选的 `room_call`。对话变体的 `{}` 表示没有动作。没交 outcome 的成功执行是 `task.fail`（K7）。Host 预发 localId 槽位，并在同一 outcome 的引用中使用这些槽位。
 
-动作 key 是 `H(taskId, kind, 数组下标)`。Host 在同一个事务里按固定顺序应用：`create_bot` → `update_bot` → `delete_bot` → `create_room` → `update_room` → `team_note` → routine 三动作 → `confirmable_action` → `ask_user` → `delegate`。（依据 R3）
+动作 key 是 `H(taskId, kind, 数组下标)`。Host 在同一个事务里按固定顺序应用：`create_bot` → `update_bot` → `delete_bot` → `create_room` → `update_room` → `team_note` → `cancel_delegation` → routine 三动作 → `confirmable_action` → `ask_user` → `delegate`。（依据 R3）
 
 **Turn 来源**加一种：`action_result`，承载待确认动作的执行结果（§5.4）。原有五种是 `user`、`routine`、`bot_request`、`bot_reply`、`room_slot`。
 
-**委派**：异步。A 交出委派后执行就结束。每个委派只有一个结论：`answered`、`failed`、`cancelled`、`refused`、`expired`、`abandoned`。不确定时不自动重派，用户可以关闭。回传 Turn 的 key 是 `H(delegationId)`。
+**委派**：异步。A 交出委派后执行就结束。每个委派只有一个结论：`answered`、`failed`、`cancelled`、`refused`、`expired`、`abandoned`。不确定时不自动重派，用户可以关闭。
+
+K8b Q2 的回报规则：一个接受目标用 `H('bot_reply', delegationId)`；两个接受目标用 `H('bot_reply', A.taskId)`。每个目标都有结论或 uncertain，且至少一个有结论时，放行一次批次回报。全部 uncertain 时不建空回报。后来取得的结论单独回报。`replyTurnId` 使每个委派最多属于一个回报。没有接受项时，一个 outcome 的全部拒绝共用一次回报。没有空闲预算时只交付记录，不启动模型。拒绝回报没有 `delegate`。
+
+K8b Q10 的 root 准入：n 个接受目标预留 `n + max(n, 1)` 单位，同时计入其他开放预留。`spent + reserved <= 12`。续作独立上限为 4。Bot 来源 Turn 及其续作、回报不会因 Main Bot 角色取得 owner authority。Main Bot 的 `cancel_delegation` 使用和用户相同的取消仲裁，记录 `main_bot_cancelled`。取消先提交时拒绝首次回复；接受先提交时保留 partial 回复。
 
 **群聊（修订二，Aimpact 已定）**：默认模式是"未被点名不发言"。席位只来自 UI 的结构化 mention 或 outcome 的 `room_call`。平台 PRD §9.5 的 `admin` 模式降为可选。预算默认值不变。成员失败或没交 outcome 显示为失败，不算 PASS。
 
 **Main Bot**：可以有多个。首次建团队时建一个默认 Main Bot。`delete_bot` 归档档案，SDK 不删 home。
 
-交付物：`examples/bot-collaboration`（§12 Q5），建在 K4 之上。按 §12 Q6 拆两步：K8a 是委派、`ask_user`、`confirmable_action`、routine 三动作和长任务规则；`update_routine` 含同 id 的版本管理。K4 保持定义不可变。K8b 是群聊和 Main Bot。K8-S 可先于 K8a 独立交付，不依赖 K4。参考实现暴露的其他 SDK 缺口另开 issue。（依据 R3、R6）
+交付物：`examples/bot-collaboration`（§12 Q5），建在 K4 之上。按 §12 Q6 拆两步：K8a 是自委派续作、`ask_user`、`confirmable_action`、routine 三动作和长任务规则；`update_routine` 含同 id 的版本管理。K4 保持定义不可变。K8b 是群聊、Main Bot 和跨 Bot 委派。跨 Bot 委派等 #530、#531 合并后实施，按已批准的 K8b X1–X6、X2M 和独立 XS 切片交付。K8-S 可先于 K8a 独立交付，不依赖 K4。参考实现暴露的其他 SDK 缺口另开 issue。（依据 R3、R6）
 
 验收：平台 PRD §14.2 已定行，加 §9 的新行。群聊行已按 mention-only 默认写明。标为「待 Aimpact 裁定」的行不能记为已通过。
 
@@ -329,11 +334,11 @@ Aimpact 已定（§12 Q4）：不做 grok ACP adapter。Grok 走 Pi + xAI profil
 |---|---|---|
 | M0 | 每个核验项有命令输出或源码引用；每个 falsifier 落到"可表达"或"修订稿" | 文档 |
 | K4 | 平台 PRD §13.1 K4 行；§14.1 Topology L 执行各行在 SDK 仓库合成 Host 跑通；服务端各行归下游（§5.1）；稳定 slot 身份、armed、持久恢复、outbox 单消费者和 `calendar_error` 有场景测试 | SDK 仓库合成 Host |
-| 合成端到端 | §5.8 的各项按归属交付：K4 的聊天/routine/崩溃；K8a 的委派/确认；P5 的 replace/delete。Linux CI 先跑；记忆页三端在 P2 后补 | fake runtime |
+| 合成端到端 | §5.8 的各项按归属交付：K4 的聊天/routine/崩溃；K8a 的自委派续作/确认；K8b 的跨 Bot 委派；P5 的 replace/delete。Linux CI 先跑；记忆页三端在 P2 后补 | fake runtime |
 | K8-S | api-surface 新增片段、组合函数和纯函数；片段通过 K7 子集校验；字段范围与 `oneOf` 组合有测试；core 覆盖 `schedule_invalid`、`schedule_unreachable`、`schedule_beyond_horizon`、`tz_invalid`，以及 DST gap/overlap、Lord Howe、Samoa、月末、闰年；server 368 天边界测试；workerd 定向样例 | SDK 单测 |
-| K8a | 平台 PRD §14.2 委派行；`to` = 自己走续作预算；`confirmable_action` 四态；`create_routine` → wake → 执行 → 结果回 owner；取消后无新 occurrence；普通 Bot 不可用 `target` 指向别人；同 id 的结算后切换、pending 时暂停/恢复、update 与旧 hook 交错；定义并验证在途上限 | SDK 仓库合成 Host |
+| K8a | `to` = 自己走续作预算；`confirmable_action` 四态；`create_routine` → wake → 执行 → 结果回 owner；取消后无新 occurrence；普通 Bot 不可用 `target` 指向别人；同 id 的结算后切换、pending 时暂停/恢复、update 与旧 hook 交错；定义并验证在途上限 | SDK 仓库合成 Host |
 | K8a | `submit_result` 成功率在 Pi 上测量并记录 | 真实 runtime，付费调用另行授权 |
-| K8b | 平台 PRD §14.2 已定的 mention-only 群聊行；未被点名的成员没有执行；待裁定行保持开放 | SDK 仓库合成 Host |
+| K8b | 平台 PRD §14.2 的 Cross-Bot 行和已定 mention-only 群聊行；未被点名没有执行。委派覆盖 fan-in、取消仲裁、预算、续作 authority、生命周期和双设备 embedded-server 路径。hosted 和两进程 relay 行保持 OPEN，Q19 不豁免 | SDK 仓库合成 Host；真实设备和下游行另验收 |
 | 平台证明 macOS | 配置 helper 后 `agent-memory-intent.v1` 广播；两项证明的定向测试在 `macos-latest` 通过；spec 的平台句子更新 | SDK 单测 + CI |
 | 平台证明 Windows | reparse/junction 矩阵在 `windows-latest` 通过；`memory_recall`/`memory_save` 在 Windows 可用；intent 两项证明通过并广播；NTFS 屏障语义写进 spec | SDK 单测 + CI |
 | 记忆页 | 改 → `applied` → 下一次执行 recall 到新内容；`conflict` 不合并；forget 不删对话和 Summary；`MEMORY.md` 删除被拒；8 KiB 上限阻塞 | SDK 集成测试，三端各跑 |
@@ -378,21 +383,21 @@ Aimpact 已定（§12 Q4）：不做 grok ACP adapter。Grok 走 Pi + xAI profil
 - 验收：§9 的两行平台证明。
 - 风险：NTFS 若仅能证明 process-crash/文件级保证，须 Aimpact 明确接受；未决或未证实时 `strictLedgerBarrier` 保持 false，v1 仍受阻。Host 保留 applied 而设备 memory/ledger 回退由 [#522](https://github.com/Ancienttwo/byok-sdk/issues/522) 跟踪。helper 超时后 lease 可能先于退出释放由 [#521](https://github.com/Ancienttwo/byok-sdk/issues/521) 跟踪，仍是未复现的源码推断。Windows 矩阵另覆盖 alias、大小写和 DACL。（依据 R2）
 
-### P3 K8a：委派、待确认动作、routine 动作、长任务规则
+### P3 K8a：自委派续作、待确认动作、routine 动作、长任务规则
 
 - 目标：单 Bot 的全部动作在参考实现里跑通；outcome 片段进 SDK。
-- 范围：K8-S（`@byok-sdk/protocol` 片段和预算组合函数 + `@byok-sdk/core` 结构化 schedule 纯函数 + server wake 上限 368 天及两处边界测试 + spec + api-surface）；`examples/bot-collaboration` 的委派（含自委派）、`ask_user`、`confirmable_action`、routine 三动作；同 id `update_routine` 的 current/pending、调度 generation、在途上限和对应测试归 K8a，不归 K8-S 或 K4。长任务规则进示例 system prompt；`submit_result` 成功率在 Pi 上测量。（依据 R3、R6）
+- 范围：K8-S（`@byok-sdk/protocol` 片段和预算组合函数 + `@byok-sdk/core` 结构化 schedule 纯函数 + server wake 上限 368 天及两处边界测试 + spec + api-surface）；`examples/bot-collaboration` 的自委派续作、`ask_user`、`confirmable_action`、routine 三动作；同 id `update_routine` 的 current/pending、调度 generation、在途上限和对应测试归 K8a，不归 K8-S 或 K4。长任务规则进示例 system prompt；`submit_result` 成功率在 Pi 上测量。（依据 R3、R6）
 - 依赖：K8-S 依赖 M0.4、M0.5，可独立先做；K8a 依赖 P1 和 K8-S。
 - 验收：§9 的 K8-S 行和两条 K8a 行。
 - 风险：模型不调用 `submit_result` 会让执行 fail closed，比例现在没有数据；K8-S 改 api-surface，要走 `check:api-surface`；续作预算 4 次对多步任务可能不够，先按默认值测。
 
-### P4 K8b：群聊、Main Bot
+### P4 K8b：群聊、Main Bot、跨 Bot 委派
 
-- 目标：群聊和团队管理在参考实现里跑通。
-- 范围：mention-only 群聊、席位预算、晚到发言、Main Bot 的 `create_bot`/`update_bot`/`delete_bot`/`create_room`/`update_room`/`team_note`。
-- 依赖：P3。
-- 验收：§9 的 K8b 行。
-- 风险：群记录不做 Summary，长群撞 ContextPack 预算，v1 显式阻塞；`create_bot` 后 persona 落设备要等 `readAgentHomeProjection` 确认，被常驻 reader 拖慢。
+- 目标：群聊、团队管理和同团队跨 Bot 委派在参考实现里跑通。
+- 范围：mention-only 群聊、席位预算、晚到发言、Main Bot 的 `create_bot`/`update_bot`/`delete_bot`/`create_room`/`update_room`/`team_note`。加 K8b X1–X6 和 X2M：单目标及 fan-in 委派、回复接受、取消与 uncertain、生命周期、root 预留和双设备路径。XS 的 `cancel_delegation` 是独立 SDK 切片，其余不改 SDK wire。
+- 依赖：P3。Cross-Bot 先等 K4 #532、K8a #530 和群聊 #531 合并。X2M 另依赖 XS。
+- 验收：§9 的 K8b 行，映射见 [VALIDATION](https://github.com/Ancienttwo/byok-sdk/pull/578)。hosted `submitAgentExecution`、两进程 Topology L relay、两台物理电脑和真实 Pi 仍需各自的执行证据。
+- 风险：群记录不做 Summary。按已定历史规则截取最近记录并显示 notice；只有当前请求本身超限才阻塞。`create_bot` 后 persona 落设备要等 `readAgentHomeProjection` 确认。双设备合成测试不能替代 hosted、relay 或真实 Pi 证据。
 
 ### P5a 记忆页：显式整文件替换、删笔记和两层 ContextPack
 
@@ -505,3 +510,10 @@ Source: Aimpact approval batch. Also mirrored at `_ops/bot-wo/PRODUCT-RULINGS-20
 4. **K4 sequencing** — separate PR first (`codex/bot-k4-host-execution-core`, Draft #532); then restack #529/#530/#531 onto it; remove squashed K4 copy from #529.
 5. **Cross-Bot delegation** — defer until after #530+#531 land; first WO of K8b.
 6. **#525 hold** — `BOT_TURN_OUTCOME_LIMITS` public API freeze pending Aimpact confirm of numeric caps; do not merge #525 until PM confirms.
+
+
+## K8b Cross-Bot 文档对齐（2026-10-20）
+
+本次按已批准的 [K8b 计划](2026-10-19-k8b-cross-bot.md) 对齐 §5.2、§9 和 §10 P4。
+Q2 决定 fan-in 回报 key。Q7 决定取消片段和顺序。Q10 决定最坏预留。Q12 把取消项数定为 2。
+历史批准记录保持原义。这里不增加裁定，不把合成或 Draft PR 当作产品上线验收。

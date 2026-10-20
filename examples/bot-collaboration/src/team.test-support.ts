@@ -10,6 +10,7 @@ import { HostLedger } from '@byok-sdk/example-host-execution-core';
 import { policy, template } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration, type AgentMessageInput, type BotOptions } from './host';
 import { createBotPersonaProjection } from './persona';
+import { enrollSecondDevice } from './second-device.test-support';
 
 /**
  * Real embedded server, HTTP, daemon, persona writes, and submit_result helper.
@@ -19,7 +20,7 @@ import { createBotPersonaProjection } from './persona';
  * `offline` closes the HTTP listener, so the daemon loses the server without a terminal.
  * The Host keeps its in-process server port. `online` listens again on the same port.
  */
-export async function openTeam(options: { now?: () => number; holdProjection?: () => Promise<void>; routeMessages?: boolean;
+export async function openTeam(options: { now?: () => number; holdProjection?: () => Promise<void>; routeMessages?: boolean; secondDevice?: boolean;
   wrapServer?: (server: ByokServer) => ConstructorParameters<typeof BotCollaboration>[0]; instructionMaxBytes?: number;
   holdMessage?: (input: AgentMessageInput, stage: 'before' | 'after') => Promise<void> } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'k8b-'));
@@ -28,6 +29,7 @@ export async function openTeam(options: { now?: () => number; holdProjection?: (
   let host!: BotCollaboration;
   const received: AgentMessageInput[] = [];
   const server = createByokServer({ productId, storage: { kind: 'sqlite', path: join(root, 'server.sqlite') },
+    ...(options.secondDevice ? { longPollHoldMs: 100, presenceTtlMs: 1000 } : {}),
     agentMessage: { consume: async input => {
       received.push(input);
       if (!options.routeMessages) return { outcome: 'accepted' };
@@ -59,15 +61,18 @@ export async function openTeam(options: { now?: () => number; holdProjection?: (
   }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });
   const pairing = await server.pairing.createPairingCode({ productId });
   const { deviceId } = await daemon.pair(pairing.code);
+  const secondDevice = options.secondDevice ? await enrollSecondDevice(`http://127.0.0.1:${address.port}`,
+    (await server.pairing.createPairingCode({ productId })).code, join(root, 'second-device'), policy) : undefined;
   const base = template(deviceId);
   const botOptions: BotOptions = { botId: 'main', execution: { ...base,
     agentMessageContext: { destinationBinding: 'owner', freshnessCursor: 'k8b' }, payload: { ...base.payload,
       messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 65536 },
     } }, connector: async id => ({ id }), now: options.now, instructionMaxBytes: options.instructionMaxBytes };
+  if (secondDevice) botOptions.models = { local: botOptions.execution, remote: { ...botOptions.execution, deviceId: secondDevice.deviceId } };
   const port = options.wrapServer?.(server) ?? server;
   host = new BotCollaboration(port, ledger, botOptions);
   await daemon.start(); await waitForReady(daemon);
-  return { root, server, received, get ledger() { return ledger; }, daemon, adapter, deviceId, botOptions,
+  return { root, server, received, get ledger() { return ledger; }, daemon, adapter, deviceId, botOptions, secondDevice,
     get host() { return host; },
     async offline() { await stop(http!); http = undefined; },
     async online() { http = await listen(address.port); await waitForReady(daemon); },
@@ -77,7 +82,7 @@ export async function openTeam(options: { now?: () => number; holdProjection?: (
       host = new BotCollaboration(port, ledger, botOptions); await host.recover();
     },
     async close() {
-      await host.close(); await daemon.stop(); await server.close(); ledger.close();
+      await host.close(); await daemon.stop(); await secondDevice?.close(); await server.close(); ledger.close();
       if (http) await stop(http);
       await rm(root, { recursive: true, force: true });
     },

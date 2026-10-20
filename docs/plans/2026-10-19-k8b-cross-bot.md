@@ -1,7 +1,14 @@
 # K8b Cross-Bot: Bot↔Bot delegation in Bot mode (plan)
 
 Issue: [#540](https://github.com/Ancienttwo/byok-sdk/issues/540).
-Status: plan only. No implementation code. Aimpact decided Q1–Q11 as
+Execution note (2026-10-20): X1–X4 and X2M are in the X5 base.
+Draft [#578](https://github.com/Ancienttwo/byok-sdk/pull/578) adds X5 and the
+X6 example/Host documentation. Draft
+[#579](https://github.com/Ancienttwo/byok-sdk/pull/579) aligns the PRD text.
+See the [acceptance record](../../examples/bot-collaboration/VALIDATION.md) for
+terminal checks and open hosted/relay rows. The original plan follows.
+
+Status at plan approval: docs only. Aimpact decided Q1–Q11 as
 recommended on 2026-10-19 14:59 HKT (§13). A Codex read-only review
 (`_ops/bot-wo/REV-K8B-cross-bot-plan-codex.md`: 7 P1, 4 P2, no P0) found
 gaps. This revision fixes the technical findings. Aimpact reopened and
