@@ -148,7 +148,8 @@ Profiles cap the active team at 24 Bots. Team notes cap at 20 entries of 300
 characters. Every team Bot receives these notes. Other Bots' private turns and
 persona text do not enter its ContextPack. No cross-home memory read occurs.
 `delete_bot` archives the profile and cancels unstarted work. Running results
-become audit only. It does not delete the Agent home.
+become audit only. Delegated work for the archived Bot is also cancelled when
+it runs (see Cross-Bot delegation). It does not delete the Agent home.
 
 Profile deliveries share the Host serial consumer. The consumer waits for known
 old intents to settle. Device terminal readback can precede writer cleanup.
@@ -272,7 +273,7 @@ also stays outside this history-window change.
 
 ## Cross-Bot delegation
 
-This section covers slices X1, X2, X2M and X3 of
+This section covers slices X1, X2, X2M, X3 and X4 of
 `docs/plans/2026-10-19-k8b-cross-bot.md`.
 A Bot can delegate requests to other Bots of the same team. The `to` enum
 lists this Bot first, then each active team Bot after its first persona
@@ -342,6 +343,24 @@ verdict. The Main Bot sees it in its next ContextPack.
 `abandonDelegation(id)` ends a `reply_held` or `uncertain` delegation with
 `abandoned`. When the attempt can still run, it also writes a K4 cancel. A
 terminal after the verdict goes to `audit` only.
+
+When the target Bot is archived, the next `process` pass cancels its open
+delegations. It uses the same arbitration transaction, with the cancel reason
+`target_archived`. This applies in every open state: queued, running,
+`reply_pending`, `reply_held`, and `uncertain`. A Turn without a K4 intent
+closes at once. A queued intent settles as `cancelled`. A submitted attempt
+gets `tasks.cancel` and an attempt readback. A claimed attempt gets
+`tasks.cancel`, and the Host waits for its terminal. The verdict is `refused`
+(`target_archived`). A reply accepted before the archive does not go to the
+initiator. The Host writes an `audit` note for it. A cancel with no terminal
+follows the `uncertain` rules above. Archived Bots leave the `to` enum and the
+roster at the next schema build. A delegation cancelled by the archive leaves
+the `cancel_delegation` enum.
+
+When the initiator is archived, the target's work continues. The verdict is
+still written, but the Host creates no `bot_reply` Turn and releases the free
+reply slots. The delegation row and its projection show
+`undelivered: 'initiator_archived'`.
 
 Every verdict reaches the initiator once, in a `bot_reply` Turn. The accepted
 items of one outcome form a batch. The first report waits until each accepted

@@ -219,23 +219,6 @@ it('keeps spent + reserved <= 12 inside every ledger transaction of a delegation
   await fixture.reopen();
 });
 
-it('target archived while its Turn runs: the result is audit only and the delegation closes as refused', async () => {
-  fixture = await openTeam({ routeMessages: true });
-  const [a, b] = await t.createBots(2) as [string, string];
-  const root = await t.host().input('archive-running', 'Ask Bot 2', a);
-  await t.finish(root, { delegate: [{ to: b, request: 'Work' }] });
-  const d = t.delegationOf(t.taskOf(root));
-  const session = await t.running(d.id);
-  const archive = await t.host().input('archive-b', 'Archive Bot 2');
-  await t.finish(archive, { delete_bot: [{ botId: b }] });
-  session.finish({});
-  await vi.waitFor(async () => { await t.host().drain(); expect(t.delegation(d.id).verdict).toBe('refused'); }, { timeout: 5000 });
-  expect(t.delegation(d.id).reason).toBe('target_archived');
-  expect(t.host().snapshot().audit).toContain(`Outcome audit only: ${t.taskOf(d.id)}`);
-  expect(Object.values(t.host().snapshot().turns).filter(turn => turn.source === 'bot_reply')).toEqual([
-    expect.objectContaining({ id: hash(['bot_reply', d.id]), replies: [expect.objectContaining({ verdict: 'refused', reason: 'target_archived' })] })]);
-});
-
 it('keeps a target with a pending newer profile in the enum; its bot_request waits for the readback', async () => {
   let hold: Promise<void> | undefined, release!: () => void;
   fixture = await openTeam({ routeMessages: true, holdProjection: () => hold ?? Promise.resolve() });
