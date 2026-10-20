@@ -4,6 +4,9 @@ Issue: #540. Approved plan: [Cross-Bot](../../docs/plans/2026-10-19-k8b-cross-bo
 Implementation base: `b5a456f0`. X5 source: `208a91bc`.
 X5 and this X6 documentation are in Draft PR
 [#578](https://github.com/Ancienttwo/byok-sdk/pull/578).
+The separate PRD text is in Draft PR
+[#579](https://github.com/Ancienttwo/byok-sdk/pull/579), based on
+`origin/main@b5a456f0`. It changes no code or tests.
 This document records repository evidence. It does not claim a production pass.
 
 ## P1 map
@@ -63,11 +66,31 @@ a paid model or a deployment.
 ## Required checks
 
 Environment: macOS, Node v24.21.0, Bun 1.4.3.
-The full five-command run is in progress. Its evidence is
-`_ops/k8b-x5/required/results.json` in the working tree.
-Build and typecheck passed. The final focused X5 run passed 12/12 tests across
-four files, exit 0, 53.76 seconds. Final full-suite results will replace this
-paragraph before the session closes. A pending or failed command is not PASS.
+
+All five required checks passed. The full `bun run test` passed on the final
+X5 code, exit 0, 1053.04 seconds. Bot collaboration passed 252/252 tests in
+33 files, 266.02 seconds. The final focused X5 run passed 12/12 tests across
+four files, 53.76 seconds. No full-suite retry was needed.
+
+| Command | Exit | Seconds |
+| --- | --- | --- |
+| `bun run build` | 0 | 11.78 |
+| `bun run typecheck` | 0 | 7.11 |
+| `bun run test` | 0 | 1053.04 |
+| `bun run check:api-surface` | 0 | 5.57 |
+| `bun run check:version-authority` | 0 | 0.07 |
+
+The final build, typecheck and two contract checks ran after the small
+example follow-ups. The full test had already read those final example files.
+Source code is `208a91bc`; later commits change Markdown only.
+API surface matched all nine package goldens. Version authority passed.
+Docker-dependent dataplane tests used the repository's default skips.
+No Docker substrate or paid Pi call was started.
+
+Local evidence: `_ops/k8b-x5/required/effective.json`, `results.json`,
+`final-checks.json`, `test.log`, and the four `*-final.log` files.
+`_ops/k8b-x5/focused.log` records the focused run.
+Hosted CI is separate and can remain queued or running on these Draft PRs.
 
 No inherited test assertion or timeout changed. The existing encoding fixture
 uses the longer state string. Its byte assertions and constants stay equal.
@@ -79,7 +102,7 @@ Small follow-up fixes have local evidence and no third independent verdict.
 
 | Row | State | Missing evidence |
 | --- | --- | --- |
-| Two-device embedded-server delegation | Focused PASS | Full-suite terminal result pending above |
+| Two-device embedded-server delegation | PASS | Synthetic runtime; same test computer. Physical and hosted gaps remain below |
 | Hosted `submitAgentExecution` cross-device path | OPEN | Downstream hosted Host adapter and execution evidence |
 | Two Topology L Host processes | OPEN | Implemented service relay and durable request/verdict recovery tests |
 | Two physical computers | OPEN | A run on separate machines; synthetic machine identity does not prove this |

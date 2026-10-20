@@ -75,21 +75,32 @@ can still make the short synthetic presence lease expire during an online test.
 
 ## Verification
 
-Evidence is in this worktree under `_ops/k8b-x5/` and ignored log files.
-`required/results.json` records every required command, exit and duration.
-The full required check run is in progress at the first X5 Draft PR commit.
-The follow-up documentation records its terminal results.
+Environment: macOS, Node v24.21.0, Bun 1.4.3.
 
-The initial four-test run failed at enrollment. Later focused runs
-exposed task-cleanup, claim-observation and frozen-clock fixture races.
-No failed result is reported as a pass. The final focused results are recorded
-below. Build and typecheck have passed. The required full test,
-API surface and version authority results remain pending at that point.
+All five required checks passed. The full `bun run test` passed on the final
+X5 code, exit 0, 1053.04 seconds. Bot collaboration passed 252/252 tests in
+33 files, 266.02 seconds. The final focused X5 run passed 12/12 tests across
+four files, 53.76 seconds. No full-suite retry was needed.
 
-Final focused run: 12/12 tests across four files passed, exit 0, 53.76 seconds.
-Files: cross-bot-device, delegation-device, cross-bot-discovery and
-cross-bot-encoding. Evidence: `_ops/k8b-x5/focused.log`.
-The final example typecheck also passed after the discovery I/O change.
+| Command | Exit | Seconds |
+| --- | --- | --- |
+| `bun run build` | 0 | 11.78 |
+| `bun run typecheck` | 0 | 7.11 |
+| `bun run test` | 0 | 1053.04 |
+| `bun run check:api-surface` | 0 | 5.57 |
+| `bun run check:version-authority` | 0 | 0.07 |
+
+The final build, typecheck and two contract checks ran after the small
+example follow-ups. The full test had already read those final example files.
+Source code is `208a91bc`; later commits change Markdown only.
+API surface matched all nine package goldens. Version authority passed.
+Docker-dependent dataplane tests used the repository's default skips.
+No Docker substrate or paid Pi call was started.
+
+Local evidence: `_ops/k8b-x5/required/effective.json`, `results.json`,
+`final-checks.json`, `test.log`, and the four `*-final.log` files.
+`_ops/k8b-x5/focused.log` records the focused run.
+Hosted CI is separate and can remain queued or running on these Draft PRs.
 
 ## Acceptance limits
 
