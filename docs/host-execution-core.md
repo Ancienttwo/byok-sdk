@@ -475,3 +475,56 @@ The example supplies copy-and-own Host functions. A downstream Host owns authent
 user and device routes, grant records, current placement, notice retry scheduling and UI.
 P5a does not add SDK wire fields or an edit-view profile. Synthetic Linux tests cover the
 real mailbox and filesystem path. They do not establish macOS or Windows platform proof.
+
+## K8b: Cross-Bot delegation
+
+The [collaboration example](../examples/bot-collaboration/README.md#cross-bot-delegation)
+adds same-team Bot delegation above K4. Keep one collaboration Host per ledger
+tenant. User, routine and Bot work share each device/Agent FIFO. The Host
+owns Bot placement, authority, budgets, verdicts and report membership.
+K4 owns immutable submit input, attempt generations and canonical settlement.
+
+Wire `createByokServer({ agentMessage: { consume } })` to
+`BotCollaboration.consumeMessage`. Supply the server's home projection APIs
+and `tasks.agentMessage` readback. Install `createBotPersonaProjection()` on
+each daemon. Supply `machines.list` for device wait display. Authenticate the
+owner before using `input`, `cancelDelegation` or `abandonDelegation`, or pass
+the verified principal supported by the example. Do not call K4 mutation APIs
+around the collaboration Host's serial consumer.
+
+A delegates through its `submit_result` outcome. The Host freezes B's
+AgentRef and device from the team profile. It creates B's `bot_request` Turn
+and submits it through K4. B sees its own context and the delegation metadata.
+B's accepted message record is the reply body authority. A terminal or an
+outcome document alone cannot supply that body. The verdict arrives in A's
+`bot_reply` Turn. A runs a fresh execution to process the report.
+
+A fan-out accepts at most two targets. One report joins their verdicts when
+each target has a verdict or is uncertain. No report starts while both are
+uncertain. A later verdict has its own report. `replyTurnId` gives each
+delegation at most one report membership. Root admission includes every open
+reservation: `spent + reserved <= 12`. Continuations have their separate
+four-execution budget. Hop cannot exceed four. A Bot-origin Turn and its
+successors never gain management authority from a Main Bot role.
+
+The reference emits `delegation:<id>:<revision>`. Deduplicate by event id and
+keep the highest revision per delegation. Show target, request, status and
+refusal reason in both relevant conversations. Show Cancel for queued,
+waiting, running and reply-pending work. Show End for uncertain or held work.
+End sets `abandoned`. After a verdict, late device results enter audit only.
+A partial reply is visible only when acceptance committed before cancellation.
+A's conversation does not display B's draft as A's message.
+
+`waiting_device` is a presence display for a delivered, unclaimed offer.
+Discovery is bounded to one second. Its failure does not stop submission or
+decide expiry. Reconnect keeps the same frozen input. K4 cancels at the
+original wait deadline and reads the attempt. A claim racing that cancel
+needs terminal evidence. A lost claimed device follows the existing uncertain
+rules. No replacement execution starts from uncertain state alone.
+
+The [second-device contract](../examples/bot-collaboration/SECOND-DEVICE.md)
+defines the unimplemented two-process relay. The
+[acceptance matrix](../examples/bot-collaboration/VALIDATION.md) separates real
+embedded SDK evidence from synthetic runtime and downstream gaps. Hosted
+`submitAgentExecution`, two Topology L Host processes and paid Pi acceptance
+remain open. Product PRD Q19 does not waive the cross-device §14.2 rows.

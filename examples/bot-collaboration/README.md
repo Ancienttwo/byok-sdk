@@ -33,8 +33,9 @@ provide a runtime sandbox. The deployment owns that boundary.
 
 ## Actions and context
 
-The Host applies management actions, routine actions, confirmation cards,
-questions, then delegations. Each turn freezes the ordinary Bot schema and its ContextPack
+The Host applies management actions, Main Bot delegation cancels, routine
+actions, confirmation cards, questions, then delegations. Each turn freezes
+the ordinary Bot schema and its ContextPack
 when its K4 intent is enqueued. Waiting turns and retries reuse that frozen
 input. The wait limit is five minutes before execution starts. A started
 execution waits for canonical device terminal evidence.
@@ -273,8 +274,9 @@ also stays outside this history-window change.
 
 ## Cross-Bot delegation
 
-This section covers slices X1, X2, X2M, X3 and X4 of
-`docs/plans/2026-10-19-k8b-cross-bot.md`.
+This section covers slices X1–X6 and X2M of the
+[approved plan](../../docs/plans/2026-10-19-k8b-cross-bot.md).
+See the [acceptance matrix](VALIDATION.md) for evidence and open rows.
 A Bot can delegate requests to other Bots of the same team. The `to` enum
 lists this Bot first, then each active team Bot after its first persona
 readback. It lists Bot ids only. A room seat has no `delegate` fragment.
@@ -308,8 +310,8 @@ Other chain ends map to verdicts as follows. `failed` gives `failed`.
 `expired`. A Host cancel with reason `expired` gives `expired`
 (`claim_raced_deadline`). A user cancel gives `cancelled` (`user_cancelled`).
 
-`cancelDelegation(id)` works while the delegation is queued, running, or
-`reply_pending`. `cancelTurn` on a chain Turn calls it. One transaction
+`cancelDelegation(id)` works while the delegation is queued, `waiting_device`,
+running, or `reply_pending`. `cancelTurn` on a chain Turn calls it. One transaction
 freezes `cancel = { requestedAt, targetTurnId, delivered }` on the current
 chain Turn. That Turn then accepts no first message and applies no outcome.
 Without a K4 intent, the transaction closes the Turn and sets `cancelled`.
@@ -329,8 +331,8 @@ never starts a new generation. A later terminal gives the normal verdict.
 A Main Bot cancels through the `cancel_delegation` outcome fragment. Only a
 Main Bot Turn with `authority = owner` outside a room seat gets it. Its
 `delegationId` enum lists open delegations: no verdict, no cancel yet, and
-status `queued`, `running`, or `reply_pending`. The list is newest first and
-has at most 24 ids. The ContextPack `openDelegations` block shows each listed
+status `queued`, `waiting_device`, `running`, or `reply_pending`. The list is
+newest first and has at most 24 ids. The ContextPack `openDelegations` block shows each listed
 id with its Bots, status, and the first 80 code points of the request. It
 also counts the omitted delegations and shows a notice. The owner cancels
 those with `cancelDelegation`. Apply runs after the management actions and
@@ -346,7 +348,7 @@ terminal after the verdict goes to `audit` only.
 
 When the target Bot is archived, the next `process` pass cancels its open
 delegations. It uses the same arbitration transaction, with the cancel reason
-`target_archived`. This applies in every open state: queued, running,
+`target_archived`. This applies in every open state: queued, `waiting_device`, running,
 `reply_pending`, `reply_held`, and `uncertain`. A Turn without a K4 intent
 closes at once. A queued intent settles as `cancelled`. A submitted attempt
 gets `tasks.cancel` and an attempt readback. A claimed attempt gets
@@ -396,6 +398,38 @@ A Main Bot with 24 Bots, 8 routines, and a room exceeds the outcome schema cap
 of 16 384 bytes. The Host blocks such a Turn with a visible reason. It does
 not cut an enum. Without the room, 24 open delegations in the
 `cancel_delegation` enum still fit (15 949 bytes).
+
+### Second-device placement and device wait
+
+One embedded server and one Host ledger can serve Bots on two enrolled
+devices. Supply `BotOptions.models` with Host-owned templates for each device:
+
+```ts
+const models = {
+  local: localExecution,
+  remote: { ...remoteExecution, deviceId: enrolledSecondDeviceId },
+};
+```
+
+A `create_bot` action selects `model: 'remote'`. The Host copies that
+execution template's device into the Bot profile. A model update keeps the
+Bot's device. This is creation placement, not home migration.
+Install `createBotPersonaProjection()` on both daemons. Wait for exact persona
+readback before dispatch. Device B needs SDK daemon and runtime code, with
+its own credential store and Agent homes. It needs no collaboration Host.
+
+Supply `server.machines.list` for wait display. A delivered, unclaimed offer
+shows `waiting_device` only when that device's presence has expired. Persona
+and FIFO waits remain queued. Missing or failed discovery, including the
+one-second I/O bound, supplies no new offline fact. Presence does not control
+dispatch or verdicts. K4 keeps the original five-minute deadline. Reconnect
+can claim the same frozen task. Expiry cancels and reads the attempt before
+reporting `expired` once to A. A claim race still needs terminal evidence.
+
+See [Second device and relay contract](SECOND-DEVICE.md). Its two-process
+Topology L relay is a contract only. The synthetic two-daemon test proves
+the embedded-server path. Hosted `submitAgentExecution`, two physical
+computers, two Host processes, and paid Pi behavior remain outside that proof.
 
 ## Input coalescing
 
