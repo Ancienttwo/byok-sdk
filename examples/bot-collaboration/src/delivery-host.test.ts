@@ -70,6 +70,25 @@ async function openDeliveryHost(port: ChannelPort, rest: Partial<BotOptions> = {
     expect(fixture.adapter.sessions.has(intent.taskId)).toBe(true);
     return fixture.adapter.sessions.get(intent.taskId)!;
   }
+  async function finish(id: string, document: unknown = {}) {
+    const session = await running(id), taskId = bot.core.intent(id)!.taskId;
+    const events = fixture.server.events.subscribe()[Symbol.asyncIterator]();
+    try {
+      session.finish(document);
+      for (;;) {
+        const next = await events.next();
+        if (next.done) throw new Error('Server event stream ended before the task terminal');
+        const event = next.value;
+        if (event.kind !== 'task.state' || event.taskId !== taskId || !['Complete', 'Failed', 'Cancelled'].includes(event.state)) continue;
+        expect(event.state).toBe('Complete');
+        // Read through the server API after its real terminal notification.
+        expect(await fixture.server.tasks.deviceTerminal(taskId)).toBeDefined();
+        await bot.drain();
+        expect(bot.snapshot().turns[id]!.status).toBe('succeeded');
+        return;
+      }
+    } finally { await events.return?.(); }
+  }
   function message(id: string, body = 'Final answer'): AgentMessageInput {
     const intent = bot.core.intent(id)!;
     return { tenant: tenantId(ledger().tenant), taskId: intent.taskId, deviceId: fixture.deviceId,
@@ -77,7 +96,7 @@ async function openDeliveryHost(port: ChannelPort, rest: Partial<BotOptions> = {
         sessionRef: randomUUID(), contract: 'conversation-turn/v1', messageId: randomUUID(), cursor: 1,
         contentType: 'text/markdown', body, contentHash: `sha256:${createHash('sha256').update(body).digest('hex')}`, byteCount: Buffer.byteLength(body) } };
   }
-  return { fixture, received, options, get bot() { return bot; }, ledger, rows, running, message,
+  return { fixture, received, options, get bot() { return bot; }, ledger, rows, running, finish, message,
     async publish() {
       const root = (await bot.receive(inbound('contract', now + 600_000))).id!;
       await running(root);
@@ -220,8 +239,7 @@ it('keeps draft and typed activity out of the delivery outbox until a final mess
   session.emit({ type: 'tool_use', toolCallId: 'tool-1', tool: 'read', input: { path: 'README.md' } });
   await h.bot.drain();
   expect(send).not.toHaveBeenCalled(); expect(h.rows()).toEqual([]);
-  session.finish({});
-  await vi.waitFor(async () => { await h!.bot.drain(); expect(h!.bot.snapshot().turns[root]!.status).toBe('succeeded'); });
+  await h.finish(root);
   expect(h.received).toHaveLength(1);
   expect(send).toHaveBeenCalledTimes(1);
   expect(h.rows()[0]).toMatchObject({ state: 'accepted', body: h.received[0]!.payload.body });
@@ -275,12 +293,11 @@ it('selects the latest authenticated inbound route for a coalesced reply', async
   const send = vi.fn<ChannelPort['send']>(async () => ({ result: 'accepted', platformMessageId: 'batch-final' }));
   h = await openDeliveryHost({ send }, { coalesce: {} });
   const busy = await h.bot.input('busy', 'Work first');
-  const running = await h.running(busy);
+  await h.running(busy);
   const first = await h.bot.receive(inbound('batch-1', h.options.now!() + 600_000));
   const second = await h.bot.receive(inbound('batch-2', h.options.now!() + 600_000));
   expect(second.id).toBe(first.id);
-  running.finish({});
-  await vi.waitFor(async () => { await h!.bot.drain(); expect(h!.bot.snapshot().turns[busy]!.status).toBe('succeeded'); });
+  await h.finish(busy);
   await h.running(first.id!);
   await h.bot.consumeMessage(h.message(first.id!)); await h.bot.drain();
   expect(send).toHaveBeenCalledTimes(1);
@@ -309,11 +326,10 @@ it('delivers the final message, card summary and question through the received r
   const send = vi.fn<ChannelPort['send']>(async input => ({ result: 'accepted', platformMessageId: `platform-${input.deliveryId}` }));
   h = await openDeliveryHost({ send });
   const root = (await h.bot.receive(inbound('actions', h.options.now!() + 600_000))).id!;
-  (await h.running(root)).finish({
+  await h.finish(root, {
     confirmable_action: [{ action: 'send_message', summary: 'Confirm this external message', draft: { text: 'Unapproved draft body' } }],
     ask_user: { question: 'Which account should receive it?', answerKind: 'text' },
   });
-  await vi.waitFor(async () => { await h!.bot.drain(); expect(h!.bot.snapshot().turns[root]!.status).toBe('succeeded'); });
   const state = h.bot.snapshot();
   const card = Object.values(state.cards)[0]!, question = Object.values(state.questions)[0]!;
   expect(card).toMatchObject({ state: 'pending', action: { draft: { text: 'Unapproved draft body' } } });
@@ -338,8 +354,7 @@ it('delivers a real room speech post to its group reply route and sends nothing 
   const send = vi.fn<ChannelPort['send']>(async input => ({ result: 'accepted', platformMessageId: `platform-${input.deliveryId}` }));
   h = await openDeliveryHost({ send });
   const setup = await h.bot.input('create-delivery-room', 'Create a review room');
-  (await h.running(setup)).finish({ create_room: [{ localId: 'new_room_1', name: 'Delivery room', members: ['main'] }] });
-  await vi.waitFor(async () => { await h!.bot.drain(); expect(h!.bot.snapshot().turns[setup]!.status).toBe('succeeded'); });
+  await h.finish(setup, { create_room: [{ localId: 'new_room_1', name: 'Delivery room', members: ['main'] }] });
   const room = Object.values(h.bot.snapshot().team.rooms)[0]!;
   expect(room).toMatchObject({ name: 'Delivery room', members: ['main'] });
   expect(send).not.toHaveBeenCalled();
@@ -350,8 +365,8 @@ it('delivers a real room speech post to its group reply route and sends nothing 
   const post = await h.bot.receive(group);
   expect(post.kind).toBe('room_input');
   const seat = h.bot.snapshot().team.rounds[post.id!]!.seats[0]!;
-  (await h.running(seat)).finish({ speech: { kind: 'post', text: 'The group review is complete.' } });
-  await vi.waitFor(async () => { await h!.bot.drain(); expect(h!.bot.snapshot().team.seats[seat]!.status).toBe('post'); });
+  await h.finish(seat, { speech: { kind: 'post', text: 'The group review is complete.' } });
+  expect(h.bot.snapshot().team.seats[seat]!.status).toBe('post');
   expect(h.bot.snapshot().team.rooms[room.id]!.messages).toContainEqual(expect.objectContaining({ id: seat, from: 'main', text: 'The group review is complete.' }));
   expect(h.rows()).toEqual([expect.objectContaining({ messageId: `speech:${seat}`, body: 'The group review is complete.',
     state: 'accepted', conversation: { kind: 'group', id: room.id }, route: { kind: 'reply', inboundId: inboundKey(group) } })]);
@@ -361,8 +376,8 @@ it('delivers a real room speech post to its group reply route and sends nothing 
     replyRoute: { kind: 'reply', channel: 'fake', inboundId: 'group-pass', token: 'secret-pass', expiresAt: h.options.now!() + 600_000 } };
   const pass = await h.bot.receive(passInbound);
   const passSeat = h.bot.snapshot().team.rounds[pass.id!]!.seats[0]!;
-  (await h.running(passSeat)).finish({ speech: { kind: 'pass' } });
-  await vi.waitFor(async () => { await h!.bot.drain(); expect(h!.bot.snapshot().team.seats[passSeat]!.status).toBe('pass'); });
+  await h.finish(passSeat, { speech: { kind: 'pass' } });
+  expect(h.bot.snapshot().team.seats[passSeat]!.status).toBe('pass');
   expect(send).toHaveBeenCalledTimes(1);
   expect(h.rows()).toHaveLength(1);
 });
