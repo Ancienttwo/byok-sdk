@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR c264f17 so no permission request gets a permissive fallback (Apache-2.0).
+// BYOK change: Modified from OAR 60ad09b so no permission request gets a permissive fallback (Apache-2.0).
 /* oxlint-disable typescript/promise-function-async -- SDK handlers deliberately return terminal promises directly. */
 import {
   client as createClient,
