@@ -100,6 +100,38 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
     if (process.platform !== 'win32') expect(() => process.kill(-children[0]!, 0)).toThrow();
   });
 
+  it('reports a failed terminal reap and reaps the tree on the next dispose', async () => {
+    const { dir, log } = workspace();
+    const children: number[] = [];
+    let failOnce = true;
+    const owned = createOwnedTerminalSpawn({
+      spawnFn: (command, args, options) => {
+        const child = spawn(command, [...args], options);
+        if (child.pid !== undefined) children.push(child.pid);
+        return child;
+      },
+    });
+    const spawnTerminal: typeof spawnOwnedTerminalProcess = (command, args, options) => {
+      const terminal = owned(command, args, options);
+      return {
+        ...terminal,
+        dispose: () => {
+          if (!failOnce) return terminal.dispose();
+          failOnce = false;
+          return Promise.reject(new Error('terminal tree did not quiesce'));
+        },
+      };
+    };
+    const session = await open({ PATH: process.env.PATH ?? '', FAKE_ACP_LOG: log }, dir, {}, spawnTerminal);
+    expect((await session.prompt('terminal-hang')).response.body.kind).toBe('accepted');
+    await vi.waitFor(() => expect(facts(log).some(fact => fact.kind === 'terminal')).toBe(true));
+    await expect(session.dispose()).rejects.toThrow('terminal tree did not quiesce');
+    expect(__hostExitBackstopForTests.registeredPids()).toContain(children[0]);
+    await session.dispose();
+    expect(__hostExitBackstopForTests.registeredPids()).not.toContain(children[0]);
+    if (process.platform !== 'win32') expect(() => process.kill(-children[0]!, 0)).toThrow();
+  });
+
   it('fails the session through onLimit when retained records exceed the byte budget', async () => {
     const { dir } = workspace();
     const onLimit = vi.fn((): never => { throw new Error('acp retained record byte budget exceeded'); });

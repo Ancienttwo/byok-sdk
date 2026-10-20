@@ -154,7 +154,11 @@ export type CheckAcpRuntimeFailure = Assert<Assignable<VendorRuntimeFailureError
 export type CheckAcpRuntimeFailureFields = Assert<Equal<Pick<VendorRuntimeFailureError, 'name'>, Pick<AcpBridge.RuntimeFailureError, 'name'>>>;
 export type CheckGrokVendor = Assert<Equal<typeof vendorGrokSession, VendorStartAcp>>;
 export type CheckGrokBridge = Assert<Equal<typeof AcpBridge.grokSession, AcpBridge.StartAcpSession>>;
-export type CheckAcpNotFound = Assert<Equal<typeof AcpBridge.SessionNotFoundError, typeof Bridge.SessionNotFoundError>>;
+export type CheckAcpNotFound = Assert<Equal<AcpBridge.SessionNotFoundError, VendorSessionNotFoundError>>;
+export type CheckAcpNotFoundConstructor = Assert<Equal<
+  ConstructorParameters<typeof AcpBridge.SessionNotFoundError>,
+  ConstructorParameters<typeof VendorSessionNotFoundError>
+>>;
 export type CheckAcpControl = Assert<Equal<AcpBridge.AcpControl, BridgeControl>>;
 export type CheckAcpRecord = Assert<Equal<AcpBridge.AcpRecord, Flatten<BridgeRecord>>>;
 export type CheckAcpSession = Assert<Equal<AcpBridge.RawAcpSession, AcpBridgeSession>>;

@@ -1,6 +1,13 @@
 import type { spawnOwnedLineProcess } from './owned-line-process';
 import type { spawnOwnedTerminalProcess } from './owned-terminal-process';
-export { SessionNotFoundError } from './codex-session-runtime';
+// Self-contained: the build copies this declaration to dist for the private `#byok-acp-runtime` import.
+/** A resume of a missing native session: the vendored typed error, never matched by name or message. */
+export declare class SessionNotFoundError extends Error {
+  readonly name: 'SessionNotFoundError';
+  readonly sessionId: string;
+  readonly cause: { readonly method: string; readonly native: Readonly<Record<string, unknown>> };
+  constructor(sessionId: string, message: string, cause: { readonly method: string; readonly native: Readonly<Record<string, unknown>> });
+}
 /** The open failed because the runtime refused the login (`auth`) or the model (`model_unavailable`): the vendored typed error, never matched by name or message. */
 export declare class RuntimeFailureError extends Error {
   readonly name: 'RuntimeFailureError';

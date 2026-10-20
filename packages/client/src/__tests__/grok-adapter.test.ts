@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import { GrokAdapter } from '../adapters/grok/grok-adapter';
 import { SteerUnsupportedError, type Session } from '../types';
-import { RuntimeExecutionFailure } from '../runtime-failure';
+import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
+import * as processTree from '../adapters/process-tree';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 
 const fixture = fileURLToPath(new URL('./fixtures/fake-acp-agent.mjs', import.meta.url));
@@ -203,6 +204,26 @@ describe('GrokAdapter sessions', () => {
   it('fails as infrastructure when the agent exits on its own', async () => {
     const failure = await failureOf(await open(adapter(), { instruction: 'exit' }, await ctx()));
     expect(failure).toMatchObject({ category: 'infrastructure', message: 'grok agent exited' });
+  });
+
+  it('reports a failed terminal reap from close, even after the agent failed, and retries it', async () => {
+    const resources = await ctx();
+    const s = await open(adapter(), { instruction: 'terminal-hang' }, resources);
+    await vi.waitFor(() => expect(facts(resources.log).some(fact => fact.kind === 'terminal')).toBe(true));
+    const real = processTree.disposeOwnedProcessTree;
+    let failed = false;
+    const spy = vi.spyOn(processTree, 'disposeOwnedProcessTree').mockImplementation(async (options) => {
+      if (options.label === 'acp terminal' && !failed) {
+        failed = true;
+        throw new RuntimeDisposalFailure({ stage: 'quiescence', reason: 'acp terminal tree did not quiesce' });
+      }
+      return real(options);
+    });
+    // A prior failure must not hide the reap failure.
+    await s.interrupt().catch(() => {});
+    await expect(s.close()).rejects.toBeInstanceOf(RuntimeDisposalFailure);
+    await s.close();
+    expect(spy.mock.calls.filter(([options]) => options.label === 'acp terminal').length).toBeGreaterThanOrEqual(2);
   });
 
   it('closes idempotently during an active turn and ends the agent process', async () => {

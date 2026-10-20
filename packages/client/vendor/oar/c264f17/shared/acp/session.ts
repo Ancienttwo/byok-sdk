@@ -134,8 +134,9 @@ async function openAcpRuntimeSession(
       throw withoutCredentials(error);
     });
     // BYOK change: budget and required projection before any record; the redactor runs before retention and the budget.
-    const kernel = createSessionKernel(opened.sessionId, { ...hooks, redact: credentials.redactValue });
+    let kernel: ReturnType<typeof createSessionKernel>;
     try {
+      kernel = createSessionKernel(opened.sessionId, { ...hooks, redact: credentials.redactValue });
       hooks.onReady?.(opened.sessionId);
     } catch (error) {
       await release();
@@ -210,7 +211,10 @@ async function openAcpRuntimeSession(
       // BYOK change: no `resources` reader; the SDK process-tree authority owns the tree.
       dispose: guard(async () => {
         if (disposeRequest !== null) {
-          return; // already released: the stream holds our dispose request
+          // Already released: the stream holds our dispose request. BYOK change:
+          // a retry after a failed terminal reap reaps what is still alive.
+          await terminalHost.dispose();
+          return;
         }
         // Read BEFORE this dispose is recorded: only an observed exit can say
         // so here, and it is the stream's word, not an adapter flag.

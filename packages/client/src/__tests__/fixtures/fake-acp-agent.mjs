@@ -61,7 +61,7 @@ async function prompt(message) {
   log({ kind: 'prompt', text: full });
   // The daemon may put rules before the task; the last line selects the scenario.
   const input = full.trim().split('\n').at(-1) ?? '';
-  if (input === 'hold') { pending.set(message.id, input); return; }
+  if (input === 'hold' || process.env.FAKE_ACP_HANG === '1') { pending.set(message.id, 'hold'); return; }
   if (input === 'hold-silent') { pending.set(message.id, 'silent'); return; }
   if (input === 'exit') { process.exit(9); }
   if (input === 'fail') { error(message.id, -32603, 'model provider failed'); return; }

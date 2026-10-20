@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { expect, vi } from 'vitest';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
+import { GrokAdapter } from '../adapters/grok/grok-adapter';
 import type { RuntimeAdapter, Session } from '../types';
 import {
   runAdapterCapabilityConformance,
@@ -13,14 +14,14 @@ import {
 } from './fixtures/adapter-capability-conformance';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 
-type QualifiedRuntime = 'claude' | 'codex';
+type QualifiedRuntime = 'claude' | 'codex' | 'grok';
 
 async function createFixture(id: QualifiedRuntime): Promise<AdapterCapabilityFixture> {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), `byok-${id}-conformance-`));
   const home = path.join(directory, 'home');
   await fs.mkdir(home);
   const receipt = path.join(directory, 'rpc.jsonl');
-  const binary = fileURLToPath(new URL(`./fixtures/fake-${id}.mjs`, import.meta.url));
+  const binary = fileURLToPath(new URL(id === 'grok' ? './fixtures/fake-acp-agent.mjs' : `./fixtures/fake-${id}.mjs`, import.meta.url));
   const invocations: string[][] = [];
   const sessions: Session[] = [];
   const resolveBin = vi.fn(() => ({ command: binary, source: 'path' as const }));
@@ -30,8 +31,8 @@ async function createFixture(id: QualifiedRuntime): Promise<AdapterCapabilityFix
   }) as typeof spawn;
   const adapter: RuntimeAdapter = id === 'claude'
     ? new ClaudeAdapter({ resolveBin, spawnFn })
-    : new CodexAdapter({ resolveBin, spawnFn });
-  const sessionRef = id === 'claude' ? 'fake-claude-session-1' : 'fake-thread-1';
+    : id === 'codex' ? new CodexAdapter({ resolveBin, spawnFn }) : new GrokAdapter({ resolveBin, spawnFn });
+  const sessionRef = { claude: 'fake-claude-session-1', codex: 'fake-thread-1', grok: 'fake-grok-session' }[id];
 
   async function frames(): Promise<Array<{ method?: string; params?: unknown }>> {
     return (await fs.readFile(receipt, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
@@ -40,9 +41,11 @@ async function createFixture(id: QualifiedRuntime): Promise<AdapterCapabilityFix
   return {
     adapter,
     sessionRef,
-    mismatchedIdentityEnvironment: id === 'claude'
-      ? { FAKE_CLAUDE_REPORTED_SESSION_ID: 'different-session' }
-      : { FAKE_CODEX_REPORTED_THREAD_ID: 'different-thread' },
+    ...(id === 'grok' ? {} : {
+      mismatchedIdentityEnvironment: id === 'claude'
+        ? { FAKE_CLAUDE_REPORTED_SESSION_ID: 'different-session' }
+        : { FAKE_CODEX_REPORTED_THREAD_ID: 'different-thread' },
+    }),
     async start(input = {}) {
       const session = await startPreparedOperation(adapter, {
         instruction: 'conformance turn',
@@ -54,9 +57,8 @@ async function createFixture(id: QualifiedRuntime): Promise<AdapterCapabilityFix
           PATH: process.env.PATH,
           HOME: home,
           ...(id === 'codex' ? { FAKE_CODEX_RPC_RECEIPT: receipt } : {}),
-          ...(input.running ? id === 'claude'
-            ? { FAKE_CLAUDE_HANG_AFTER_TOOL: '1' }
-            : { FAKE_CODEX_HANG: '1' } : {}),
+          ...(id === 'grok' ? { FAKE_ACP_LOG: receipt } : {}),
+          ...(input.running ? { claude: { FAKE_CLAUDE_HANG_AFTER_TOOL: '1' }, codex: { FAKE_CODEX_HANG: '1' }, grok: { FAKE_ACP_HANG: '1' } }[id] : {}),
           ...input.env,
         },
       });
@@ -68,6 +70,12 @@ async function createFixture(id: QualifiedRuntime): Promise<AdapterCapabilityFix
         const invocation = invocations.find((args) => args.includes('--resume'));
         expect(invocation).toBeDefined();
         expect(invocation![invocation!.indexOf('--resume') + 1]).toBe(sessionRef);
+      } else if (id === 'grok') {
+        const opens = (await frames()).filter((fact) => (fact as { kind?: string }).kind === 'open');
+        expect(opens).toContainEqual(expect.objectContaining({
+          method: 'session/resume', params: expect.objectContaining({ sessionId: sessionRef }),
+        }));
+        expect(opens.some(({ method }) => method === 'session/new')).toBe(false);
       } else {
         const recorded = await frames();
         expect(recorded).toContainEqual(expect.objectContaining({
@@ -77,7 +85,7 @@ async function createFixture(id: QualifiedRuntime): Promise<AdapterCapabilityFix
       }
     },
     async assertSteerReceipt(text) {
-      if (id !== 'codex') throw new Error('Claude has no qualified steering receipt');
+      if (id !== 'codex') throw new Error(`${id} has no qualified steering receipt`);
       expect(await frames()).toContainEqual(expect.objectContaining({
         method: 'turn/steer',
         params: expect.objectContaining({ expectedTurnId: 'turn-1', input: [{ type: 'text', text }] }),
@@ -96,10 +104,15 @@ async function createFixture(id: QualifiedRuntime): Promise<AdapterCapabilityFix
 }
 
 runAdapterCapabilityConformance({
-  id: 'claude', steer: false,
+  id: 'claude', steer: false, resumeReportsIdentity: true,
   create: () => createFixture('claude'),
 });
 runAdapterCapabilityConformance({
-  id: 'codex', steer: true,
+  id: 'codex', steer: true, resumeReportsIdentity: true,
   create: () => createFixture('codex'),
+});
+// ACP `session/resume` answers with no session id: the resumed identity is the requested one.
+runAdapterCapabilityConformance({
+  id: 'grok', steer: false, resumeReportsIdentity: false,
+  create: () => createFixture('grok'),
 });

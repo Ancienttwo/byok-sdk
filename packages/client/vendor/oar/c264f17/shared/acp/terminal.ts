@@ -142,7 +142,17 @@ export function createAcpTerminalHost(
   options: AcpTerminalHostOptions = {},
 ): AcpTerminalHost {
   const terminals = new Map<string, TerminalState>();
+  // BYOK change: a released or disposed terminal stays here until its tree is
+  // gone, so a later dispose (or its retry after a failed reap) still waits for it.
+  const stopping = new Map<string, TerminalState>();
+  let closing = false;
   let disposal: Promise<void> | undefined; // BYOK change: shared by every dispose caller.
+  const stop = async (state: TerminalState): Promise<void> => {
+    terminals.delete(state.terminalId);
+    stopping.set(state.terminalId, state);
+    await stopTerminal(state);
+    stopping.delete(state.terminalId);
+  };
 
   const create = async (params: CreateTerminalRequest): Promise<CreateTerminalResponse> => {
     if (params.command.length === 0) {
@@ -151,7 +161,7 @@ export function createAcpTerminalHost(
     if (params.cwd !== undefined && params.cwd !== null && !path.isAbsolute(params.cwd)) {
       invalid("ACP terminal cwd must be an absolute path");
     }
-    if (disposal !== undefined) {
+    if (closing) {
       // BYOK change: a command started after the reap began would escape it.
       throw RequestError.internalError(undefined, "ACP terminal host is disposed");
     }
@@ -246,8 +256,7 @@ export function createAcpTerminalHost(
 
   const release = async (params: ReleaseTerminalRequest): Promise<ReleaseTerminalResponse> => {
     const state = terminalFor(terminals, params);
-    terminals.delete(state.terminalId);
-    await stopTerminal(state);
+    await stop(state); // BYOK change: tracked until the tree is gone.
     return {};
   };
 
@@ -257,16 +266,16 @@ export function createAcpTerminalHost(
     waitForExit,
     kill,
     release,
-    // BYOK change: one disposal for every caller. The exit observer starts it
-    // unawaited; the session's own dispose must still wait for the same reap.
+    // BYOK change: one disposal for every concurrent caller. The exit observer
+    // starts it unawaited; the session's own dispose waits for the same reap.
+    // A failed reap is reported and a later call retries every tree still alive.
     dispose() {
-      disposal ??= (async () => {
-        const active = [...terminals.values()];
-        terminals.clear();
-        await Promise.all(active.map(async (state) => {
-          await stopTerminal(state);
-        }));
-      })();
+      closing = true;
+      disposal ??= Promise.all([...terminals.values(), ...stopping.values()].map(stop))
+        .then(() => undefined, (error: unknown) => {
+          disposal = undefined;
+          throw error;
+        });
       return disposal;
     },
   };

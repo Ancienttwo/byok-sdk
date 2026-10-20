@@ -412,6 +412,37 @@ export interface ResolvedBin {
  * has no other seam to use.
  */
 export declare function resolveCodexBin(): ResolvedBin;
+// ==== @byok-sdk/client dist/adapters/grok/grok-adapter.d.ts ====
+import { type spawn as nodeSpawn } from 'node:child_process';
+import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult } from '../../types';
+import type { ResolvedBin } from '../codex/resolve-bin';
+export interface GrokAdapterOptions {
+    /** Grok model id for every session (`session/set_model`). Absent: the user's Grok default. */
+    model?: string;
+    resolveBin?: () => ResolvedBin;
+    spawnFn?: typeof nodeSpawn;
+    maxRetainedBytes?: number;
+    interruptTimeoutMs?: number;
+}
+/**
+ * Grok Build over ACP (`grok agent --always-approve --no-leader stdio`),
+ * through the vendored OAR Grok profile. The SDK owns the agent process,
+ * every terminal command Grok asks the client to run, the environment, the
+ * record budget and the permission policy (requests are cancelled).
+ *
+ * `grok` is not a frozen wire runtime id, so a task reaches this adapter by
+ * the custom-harness identity (`harnessId: 'grok'`). It takes no dispatch
+ * selection; the model is the adapter's `model` option.
+ */
+export declare class GrokAdapter implements RuntimeAdapter {
+    private readonly options;
+    get descriptor(): import("..").RuntimeAdapterDescriptor;
+    constructor(options?: GrokAdapterOptions);
+    /** Reads the version, probes ACP mode and looks for a login signal. It never opens a session or writes Grok's home. */
+    detect(): Promise<RuntimeDetectResult>;
+    prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
+    private start;
+}
 // ==== @byok-sdk/client dist/adapters/index.d.ts ====
 export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, } from '../types';
 export { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
@@ -423,6 +454,8 @@ export { ClaudeAdapter } from './claude/claude-adapter';
 export type { ClaudeAdapterOptions } from './claude/claude-adapter';
 export { CodexAdapter } from './codex/codex-adapter';
 export type { CodexAdapterOptions, CodexSandboxSetting } from './codex/codex-adapter';
+export { GrokAdapter } from './grok/grok-adapter';
+export type { GrokAdapterOptions } from './grok/grok-adapter';
 export { NativeInteractionController, NativeInteractionError } from '../native-interactions';
 export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from '../native-interactions';
 export { buildRuntimeEnv } from '../daemon/environment';
@@ -10243,6 +10276,7 @@ export type { CopyPiRuntimeAssetsOptions, PiRuntimeAssetForm } from './adapters/
 export { ClaudeAdapter } from './adapters/claude/claude-adapter';
 export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter';
 export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from './adapters/codex/codex-adapter';
+export { GrokAdapter, type GrokAdapterOptions } from './adapters/grok/grok-adapter';
 export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError } from './diagnostics/device-doctor';
 export type { DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus, RepairDeviceEnrollmentMetadataInput, DeviceMetadataRepairResult, DeviceMetadataRepairErrorCode, } from './diagnostics/device-doctor';
 export { quarantineDeviceOperationalHealth, exportDeviceSupportBundle, archiveAgentTerminalMessages, DeviceOperatorError } from './diagnostics/operator-actions';

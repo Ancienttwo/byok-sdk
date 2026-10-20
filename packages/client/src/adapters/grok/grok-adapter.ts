@@ -16,18 +16,12 @@ import {
   type RuntimeOperationStartInput,
   type Session,
 } from '../../types';
-import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
+import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
 import { buildRuntimeEnv } from '../../daemon/environment';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process';
-import {
-  grokSession,
-  RuntimeFailureError,
-  SessionNotFoundError,
-  type AcpRecord,
-  type RawAcpSession,
-} from '../../runtime/acp-session-runtime';
+import type { AcpRecord, RawAcpSession } from '../../runtime/acp-session-runtime';
 import { AsyncQueue } from '../../util/async-queue';
 import type { ResolvedBin } from '../codex/resolve-bin';
 import { GrokProjection, type GrokTurnOutcome } from './projection';
@@ -133,9 +127,11 @@ export class GrokAdapter implements RuntimeAdapter {
     const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
     const spawnAgent = createOwnedLineProcessSpawn({ spawnFn: this.options.spawnFn, label: 'grok agent' });
     const spawnTerminal = createOwnedTerminalSpawn({ spawnFn: this.options.spawnFn });
+    // The ACP stack and its protocol SDK load only when a Grok session starts.
+    const acp = await import('#byok-acp-runtime');
     const session = new GrokSession(input.scratch, this.options.model, this.options.interruptTimeoutMs ?? DEFAULT_INTERRUPT_MS, input.manifest.sessionRef);
     try {
-      const raw = await grokSession(
+      const raw = await acp.grokSession(
         (bin, args, options) => {
           const child = spawnAgent(bin, args, options);
           session.own(child);
@@ -173,7 +169,7 @@ export class GrokAdapter implements RuntimeAdapter {
         throw new RuntimeStartupDisposalFailure(() => session.close(), { cause: disposal });
       }
       // A missing session, a refused login or a refused model cannot succeed on retry: fail closed.
-      if (error instanceof SessionNotFoundError || error instanceof RuntimeFailureError)
+      if (error instanceof acp.SessionNotFoundError || error instanceof acp.RuntimeFailureError)
         throw new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason: error.message });
       throw new RuntimeExecutionFailure({
         phase: 'start',
@@ -320,7 +316,8 @@ class GrokSession implements Session {
           try {
             await this.raw?.dispose();
           } catch (error) {
-            if (!this.failure) throw error;
+            // A failed reap of Grok's terminal trees is always reported: a later close retries it.
+            if (!this.failure || isRuntimeDisposalFailure(error)) throw error;
           } finally {
             await this.child?.dispose();
             await this.scratch.release();

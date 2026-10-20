@@ -371,15 +371,15 @@
       "path": "shared/acp/session.ts",
       "sourcePath": "packages/oar/src/shared/acp/session.ts",
       "upstreamSha256": "46ed3c3e73c29df0273672ab09d907d128ace09f0824c4fc46e93590d7d04921",
-      "vendoredSha256": "6a17fa128f1a39b6f89cdd3a0448be4a22d039ccab491e707cced6b27b8168df",
-      "delta": "Raw adapter for the SDK: acpSession(profile) returns a start function that takes the injected agent-process spawn, the injected terminal spawn and a required explicit filtered env (no sessionEnvironment ambient merge). It returns AdapterSession without sealSession/withSessionCredentials, builds one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control, and takes onReady, onRecord, maxBytes and onLimit hooks for the session kernel. A throwing onReady releases the process and the terminal host. The exit observer's terminal disposal is the same one dispose awaits. No resources reader."
+      "vendoredSha256": "a7877f95c120d602d58806cf1fa35a11518f8ce9f678ca0bbd972ebe3c998f82",
+      "delta": "Raw adapter for the SDK: acpSession(profile) returns a start function that takes the injected agent-process spawn, the injected terminal spawn and a required explicit filtered env (no sessionEnvironment ambient merge). It returns AdapterSession without sealSession/withSessionCredentials, builds one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control, and takes onReady, onRecord, maxBytes and onLimit hooks for the session kernel. A throwing kernel construction or onReady releases the process and the terminal host. The exit observer's terminal disposal is the same one dispose awaits, and a repeated dispose retries a failed terminal reap. No resources reader."
     },
     {
       "path": "shared/acp/terminal.ts",
       "sourcePath": "packages/oar/src/shared/acp/terminal.ts",
       "upstreamSha256": "cd943c545a0b00eb90107434416e9a9c78bc6af2fb3fb11b410244288740faac",
-      "vendoredSha256": "5b7223d947b312ea0d1a8524ed1e4aa236f8d1161794472b3b90df22805b59d8",
-      "delta": "Caller-owned terminal processes: createAcpTerminalHost takes an injected SpawnAcpTerminal that spawns, adopts and reaps each hosted command in the SDK process-tree authority with the session's explicit env plus the request's env entries. terminal/kill asks that tree to stop; release and dispose end the tree and wait for it. One memoized disposal serves every caller, and a terminal/create after it began is refused. No cross-spawn and no executable manager."
+      "vendoredSha256": "161b2b3955d02213a80f4eae952c1733b84236e0fb5e34769535cf21037c42ef",
+      "delta": "Caller-owned terminal processes: createAcpTerminalHost takes an injected SpawnAcpTerminal that spawns, adopts and reaps each hosted command in the SDK process-tree authority with the session's explicit env plus the request's env entries. terminal/kill asks that tree to stop; release and dispose end the tree and wait for it. A released or disposed terminal stays tracked until its tree is gone. One disposal serves concurrent callers; a failed reap rejects and a later dispose retries every tree still alive. A terminal/create after disposal began is refused. No cross-spawn and no executable manager."
     },
     {
       "path": "shared/acp/token-usage.ts",
