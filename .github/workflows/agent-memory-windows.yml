@@ -52,7 +52,8 @@ jobs:
           # The runner token is an administrator. A new local account in Users
           # only runs the same test binary, so the barrier is not admin-only.
           $user = 'byokntfs'
-          $password = 'Aa1!' + [guid]::NewGuid().ToString('N')
+          # net user prompts for confirmation above 14 characters.
+          $password = 'Aa1!' + [guid]::NewGuid().ToString('N').Substring(0, 10)
           net user $user $password /add | Out-Null
           if ($LASTEXITCODE -ne 0) { throw 'standard user creation failed' }
           $work = Join-Path $env:RUNNER_TEMP 'standard-user'
