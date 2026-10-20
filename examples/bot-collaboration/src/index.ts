@@ -1,7 +1,7 @@
 export { BotCollaboration } from './host';
 export type { AgentMessageInput, BotOptions, MessageServer } from './host';
 export { classifyInbound, inboundKey } from './channel';
-export type { InboundClass, InboundMessage, Principal } from './channel';
+export type { ChannelOptions, ChannelPort, Conversation, Delivery, DeliveryState, InboundClass, InboundMessage, Principal, PushRoute, ReplyRoute } from './channel';
 export { BOT_REPLY_MAX_BYTES, DEFAULT_INSTRUCTION_MAX_BYTES, minimumInstructionBytes } from './delegation';
 export { SYSTEM_PROMPT, contextPack, outcomeSchema, DEFAULT_CONTEXT_MAX_BYTES, DEFAULT_CONTEXT_TURN_LIMIT } from './schema';
 export type { Card, CollaborationState, Definition, Delegation, InputBatch, Occurrence, ReplyEntry, Routine, SealReason, Turn, UserInput } from './model';

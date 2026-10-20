@@ -477,7 +477,7 @@ at the next Host call or when the Bot becomes idle.
 
 ## IM channel input
 
-This section covers slice M2 of the Octop plan for issue #552.
+This section covers slices M2 and M3 of the Octop plan for issue #552.
 The rules are in the [Host IM adapter guide](../../docs/host-im-adapter.md).
 A channel adapter takes the sender from authenticated platform data and gives
 a `Principal` with an `id` and the `kind` `human` or `bot`. Give principal ids
@@ -492,6 +492,7 @@ the order of the guide's §3. The first match wins.
 | Sender and conversation | Result |
 | --- | --- |
 | No verified principal | `unverified_sender`. Audit only. |
+| Own bot account, listed in `channel.self` | `echo`. Exact delivery reconciliation only. No Turn or seat. |
 | Bot, 1:1 | `bot_audit`. Audit only. No Turn. |
 | Bot, group | `bot_background`. A room message without a seat, also with mention entities. |
 | Owner, 1:1 | `owner_input`. `input` with the principal. |
@@ -517,7 +518,89 @@ only from a verified button callback, never from a text command.
 `unverified_sender` rule. Any verified human can post. The room message
 records the principal id in `from`, and a seat request records it in
 `requestFrom`. Without a principal, `from` is `user`. A bot principal's
-mentions select no seat. The other owner APIs take no principal.
+mentions select no seat. The delivery owner APIs below use the same principal rule.
 
-This example does not implement echoes, reply and push routes, or the
-delivery outbox yet (slice M3).
+### Delivery outbox
+
+Set `BotOptions.channel` to enable the Host outbox:
+
+```ts
+channel: {
+  port: channelPort,
+  self: { slack: ['im:our-bot-account'] },
+  sendTimeoutMs: 15_000,
+}
+```
+
+`ChannelPort` sends final text and can read back a delivery id. Its `send`
+result is `accepted` with a platform message id, or an explicit `rejected`
+result with a code, retryability and optional `retryAfterMs`. The port owns
+platform authentication and keeps bot tokens in the Host credential broker.
+The Host never puts the port or a channel secret in a Bot toolset.
+
+Add a `replyRoute` to an authenticated `InboundMessage`. Its channel must
+match the message, and its `inboundId` must equal `platformMessageId`.
+The Host saves it with input admission, before it can process a reply.
+An input batch uses its newest member's route. The route reference in a
+Delivery is the Host's `inboundKey`; the port receives the original platform
+inbound id and credential. Reply tokens stay in Host-only ledger state.
+Do not publish or log the raw ledger or `snapshot()` as an IM view.
+
+Push is off by default. These owner APIs operate on a direct Bot conversation
+or a group room:
+
+```ts
+const routeId = await bot.enablePushRoute(
+  { kind: 'direct', id: 'main' }, 'slack', 'platform-conversation-id', principal,
+);
+await bot.revokePushRoute(routeId, principal);
+const newDeliveryId = await bot.resendDelivery(unknownDeliveryId, principal);
+```
+
+Enabling a replacement revokes the old push route of that conversation.
+A push target is a non-secret platform target, never a reply credential.
+Only the owner can enable, revoke or resend. As with the other owner APIs,
+an omitted principal means that the Host already authenticated the owner.
+A manual resend requires a usable reply route or an active push route. It
+creates a new id and preserves the old unknown row. It can show a duplicate
+message if the original send arrived.
+
+`consumeMessage` records first acceptance and its pending Delivery in the
+same SQLite transaction. Exact redelivery creates no second row. Applied
+room posts, confirmation summaries and questions also create deliveries in
+their acceptance transaction. Drafts and typed activity create no delivery.
+Routine output uses only its own conversation's opted-in push route.
+Without a route, the Host keeps the content in its UI and audits
+`no_push_route` or `reply_route_expired`.
+
+Each process pass calls `flushDeliveries`. It commits `sending` and an
+attempt increment before calling the port. The default business deadline is
+15 seconds. A timeout, exception or lost connection gives `unknown` and no
+automatic resend. An explicit retryable rejection waits for the larger of
+Retry-After and exponential backoff. At most three sends run. A required
+wait above 60 seconds is final rejection; it is never shortened.
+
+Call `recover()` before serving work after restart. It maps persisted
+`sending` to `unknown`. A port's optional readback can confirm `accepted`,
+prove `absent`, or return `unsupported`. Only proven absence permits a
+bounded retry. Readback must complete within the adapter's own I/O budget.
+Unknown rows have no automatic retry timer. A Host drain can check readback;
+an authenticated echo can reconcile them without a drain.
+
+An echo must come from a verified bot principal listed in `channel.self`
+for that channel. Match its conversation and either `deliveryId` from native
+platform data or an already-known `platformMessageId`. Never take an echo id
+from message text. A different bot, human, channel or conversation cannot
+confirm a delivery. Echoes can arrive while `send` is pending; they do not
+wait behind the send operation.
+
+Reply tokens are removed at expiry. They are also removed after the root
+has no open Turn or seat and no pending/sending delivery on that route.
+Metadata and delivery audit remain. All delivery state is Host state; it
+does not change K4, K7, the SDK message disposition or wire messages.
+
+The ledger is a single-owner reference. Use one Host instance per tenant.
+The reusable fake-channel test factory is `channelContract` in
+`src/channel-contract.ts`. Its harness lets downstream adapters run the same
+Host delivery cases with controlled platform results. A real platform adapter
+still needs the downstream acceptance in M4.

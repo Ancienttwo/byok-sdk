@@ -240,11 +240,11 @@ So a timeout gives `unknown`, not a resend.
 
 ## 6. Acceptance scope
 
-The [Bot collaboration example](../examples/bot-collaboration/README.md#im-channel-input) implements the inbound classification of §3, except the echo row.
-It checks the owner principal for 1:1 input, cards, questions, Turn cancel, and delegation cancel and end (R2).
-Its tests cover R6, and R2 and R5 without push routes, resends and echoes.
-It does not implement reply and push routes, deliveries or echoes yet (R1, R3, R4).
-Issue #552 tracks them in that example.
+The [Bot collaboration example](../examples/bot-collaboration/README.md#im-channel-input) implements the inbound classification of §3 and the M3 delivery outbox.
+Its owner checks include push opt-in, revocation and manual resend.
+It persists delivery rows with accepted content, commits sending before I/O, and maps sending to unknown at recovery.
+Its fake-channel contract covers reply/push routing, rejection retry limits, uncertainty, readback, echoes and final-only delivery.
+See `channelContract` in the example's `src/channel-contract.ts` for the reusable Host test harness.
 Real platform adapters and their acceptance belong to the downstream Host.
 This guide does not prove the reply, echo, idempotency or readback behavior of any platform.
 Each adapter verifies these facts for its platform.

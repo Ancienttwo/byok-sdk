@@ -20,11 +20,15 @@ import type { RoomFields } from '@byok-sdk/protocol';
 import { CurrentRequestTooLargeError, HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS } from './history';
 import { flushHomes, type HomeServer } from './home-projections';
 import { admitUserInput, coalescePolicy, projectInputBatches, sealBatchForCancel, sealDueBatches, type CoalescePolicy } from './coalesce';
-import { classifyInbound, inboundKey, isOwner, verified, type InboundClass, type InboundMessage, type Principal, type PrincipalArg } from './channel';
+import { classifyInbound, inboundKey, isOwner, verified, type ChannelOptions, type Conversation, type InboundClass, type InboundMessage, type Principal, type PrincipalArg } from './channel';
+import { acceptDeliveryEcho, readbackDelivery, recoverDelivery, settleDelivery, startDelivery, unknownDelivery } from './delivery';
+import { cleanReplyTokens, deliveryRoute, echoCandidates, enablePush, queueDelivery, refuseRoute, rememberInbound, resendUnknown, revokePush } from './delivery-routing';
 export interface BotOptions {
   botId: string; execution: ExecutionTemplate; now?: () => number;
   /** Owner principal id (#552 R2). Default `owner`. Only the human principal with this id passes the owner checks. */
   owner?: string;
+  /** Optional Host IM outbox. Push stays off until an owner enables a route. */
+  channel?: ChannelOptions;
   /** Host-owned model templates. New Bots stay on the selected template's device. */
   models?: Record<string, ExecutionTemplate>;
   /** Must deduplicate by id. A committed confirmation can be replayed after a crash. */
@@ -58,6 +62,7 @@ export class BotCollaboration {
   private closed = false;
   private readonly now: () => number;
   private readonly connectorTimeoutMs: number;
+  private readonly deliveryTimeoutMs: number;
   private readonly contextMaxBytes: number;
   private readonly contextTurnLimit: number;
   private readonly instructionMaxBytes: number;
@@ -73,6 +78,8 @@ export class BotCollaboration {
     this.now = () => time((options.now ?? Date.now)());
     this.connectorTimeoutMs = time(options.connectorTimeoutMs ?? 30_000);
     if (this.connectorTimeoutMs < 1 || this.connectorTimeoutMs > 2_147_483_647) throw new Error('Invalid connector timeout');
+    this.deliveryTimeoutMs = time(options.channel?.sendTimeoutMs ?? 15_000);
+    if (this.deliveryTimeoutMs < 1 || this.deliveryTimeoutMs > 2_147_483_647) throw new Error('Invalid delivery timeout');
     this.contextMaxBytes = time(options.contextMaxBytes ?? HISTORY_MAX_BYTES);
     this.contextTurnLimit = time(options.contextTurnLimit ?? HISTORY_MAX_ITEMS);
     if (this.contextMaxBytes < 1 || this.contextTurnLimit < 1) throw new Error('Invalid ContextPack limits');
@@ -124,14 +131,71 @@ export class BotCollaboration {
    * `id` is the Turn id of `owner_input`, or the room input id of `room_input` and `bot_background`.
    */
   async receive(message: InboundMessage): Promise<{ kind: InboundClass; id?: string }> {
-    const kind = classifyInbound(message, this.owner.id), { channel, conversation, platformMessageId, sender } = message;
-    if (kind === 'owner_input') return { kind, id: await this.input(inboundKey(message), message.text, conversation.id, sender) };
-    if (kind === 'room_input' || kind === 'bot_background') {
+    if (this.closed) throw new Error('Bot Host is closed');
+    const kind = classifyInbound(message, this.owner.id, this.options.channel?.self), { channel, conversation, platformMessageId, sender } = message;
+    if (kind === 'echo') {
+      // A send can be waiting for this echo. Do not queue it behind that send.
+      this.ledger.transaction(s => {
+        const state = stateOf(s.application), matches = echoCandidates(state, message);
+        if (matches.length !== 1 || !acceptDeliveryEcho(matches[0]!, platformMessageId)) state.audit.push(`Delivery unmatched_echo: ${channel} ${platformMessageId}`.slice(0, 1024));
+        cleanReplyTokens(s, state, this.now());
+      });
+      return { kind };
+    }
+    if (kind === 'owner_input' || kind === 'room_input') return this.exclusive(async () => {
+      const principal = kind === 'owner_input' ? this.ownerOnly([sender], 'input', conversation.id) : this.verifiedOnly(sender, 'roomInput', conversation.id);
+      const id = this.ledger.transaction(s => {
+        const state = stateOf(s.application), key = inboundKey(message);
+        let root: string;
+        if (kind === 'owner_input') {
+          activeBot(state.team, conversation.id);
+          root = admitUserInput(state, { id: hash(['user', conversation.id, key]), key, botId: conversation.id,
+            request: message.text, sender: principal.id, authority: 'owner' }, this.coalesce, this.now());
+        } else root = roomInput(state, key, conversation.id, message.text, message.mentions, principal.id);
+        if (this.options.channel) rememberInbound(state, message, root);
+        return root;
+      });
+      await this.process();
+      return { kind, id };
+    });
+    if (kind === 'bot_background') {
       return { kind, id: await this.roomInput(inboundKey(message), conversation.id, message.text, message.mentions, sender) };
     }
     const who = verified(sender) ? ` ${sender.kind}:${sender.id}` : '';
     await this.exclusive(async () => this.audit(`Inbound ${kind}: ${channel} ${conversation.kind}:${conversation.id} ${platformMessageId}${who}`));
     return { kind };
+  }
+  /** Owner opt-in for one canonical conversation. Enabling a replacement revokes its old route. */
+  enablePushRoute(conversation: Conversation, channel: string, target: string, ...by: PrincipalArg): Promise<string> {
+    return this.exclusive(async () => {
+      const principal = this.ownerOnly(by, 'enablePushRoute', conversation.id);
+      if (!this.options.channel) throw new Error('Channel is not configured');
+      return this.ledger.transaction(s => {
+        const state = stateOf(s.application);
+        if (typeof conversation.id !== 'string' || !conversation.id.trim()) throw new Error('Invalid conversation');
+        if (conversation.kind === 'direct') {
+          if (!Object.hasOwn(state.team.bots, conversation.id)) throw new Error('Bot not found');
+          activeBot(state.team, conversation.id);
+        } else if (conversation.kind !== 'group' || !Object.hasOwn(state.team.rooms, conversation.id)) throw new Error('Room not found');
+        return enablePush(state, conversation, channel, target, principal.id, this.now()).id;
+      });
+    });
+  }
+  revokePushRoute(id: string, ...by: PrincipalArg): Promise<void> {
+    return this.exclusive(async () => {
+      this.ownerOnly(by, 'revokePushRoute', id);
+      this.ledger.transaction(s => revokePush(stateOf(s.application), id, this.now()));
+      await this.process();
+    });
+  }
+  resendDelivery(id: string, ...by: PrincipalArg): Promise<string> {
+    return this.exclusive(async () => {
+      this.ownerOnly(by, 'resendDelivery', id);
+      if (!this.options.channel) throw new Error('Channel is not configured');
+      const next = this.ledger.transaction(s => resendUnknown(stateOf(s.application), id, this.now()));
+      await this.process();
+      return next.id;
+    });
   }
   /** Adapter data can be unverified, so one row is at most 1024 characters. */
   private audit(line: string): void {
@@ -171,7 +235,12 @@ export class BotCollaboration {
     if (!bot || bot.archived || seat && (!memberPresent(state.team, seat) || ['removed', 'busy', 'blocked'].includes(seat.status))) {
       state.audit.push(`Outcome audit only: ${tx.intent.taskId}`); return;
     }
-    if (seat) applySpeech(state, turn, outcome, tx.intent.taskId, this.now(), accept);
+    if (seat) {
+      applySpeech(state, turn, outcome, tx.intent.taskId, this.now(), accept);
+      if (this.options.channel && state.team.seats[turn.id]?.status === 'post' && outcome.speech?.kind === 'post') {
+        queueDelivery(this.ledger.snapshot(), state, turn, tx.intent.taskId, `speech:${turn.id}`, outcome.speech.text, this.now());
+      }
+    }
     const managed = (kind: string, work: () => void) => accept(kind, () => {
       // Also deny management from room offers frozen before this policy change.
       if (seat) throw new Error('Room seats cannot manage the team');
@@ -201,6 +270,7 @@ export class BotCollaboration {
       state.cards[id] = { id, turnId: turn.id, action: { action: action.action, summary: action.summary, draft: json(action.draft) },
         state: 'pending', expiresAt: this.now() + 86_400_000 };
       tx.publish(`card:${id}`, json(state.cards[id]));
+      if (this.options.channel) queueDelivery(this.ledger.snapshot(), state, turn, tx.intent.taskId, `card:${id}`, action.summary, this.now());
     });
     if (outcome.ask_user) accept('ask_user', () => {
       const question = outcome.ask_user!;
@@ -208,6 +278,7 @@ export class BotCollaboration {
       const id = hash([tx.intent.taskId, 'ask_user']);
       state.questions[id] = { id, turnId: turn.id, value: question };
       tx.publish(`question:${id}`, json(state.questions[id]));
+      if (this.options.channel) queueDelivery(this.ledger.snapshot(), state, turn, tx.intent.taskId, `question:${id}`, question.question, this.now());
     });
     const { successor } = applyDelegate(state, turn, tx.intent.taskId, outcome, !!seat, this.now(), tx.publish, accept);
     if (turn.delegationId) {
@@ -223,7 +294,8 @@ export class BotCollaboration {
    */
   async consumeMessage(input: AgentMessageInput): Promise<{ outcome: 'accepted' | 'refused'; reasonCode?: string }> {
     if (this.closed) throw new Error('Bot Host is closed');
-    return this.ledger.transaction(s => {
+    let queued = false;
+    const result = this.ledger.transaction(s => {
       const state = stateOf(s.application);
       const refuse = (reasonCode: string) => ({ outcome: 'refused' as const, reasonCode });
       const prior = state.replies[input.taskId];
@@ -246,8 +318,11 @@ export class BotCollaboration {
       if (delegation && Buffer.byteLength(input.payload.body, 'utf8') > BOT_REPLY_MAX_BYTES) return refuse('reply_too_large');
       state.replies[input.taskId] = { turnId: turn.id, messageId: input.payload.messageId, contentHash: input.payload.contentHash,
         contentType: input.payload.contentType, acceptedAt: this.now(), ...(delegation ? { body: input.payload.body } : {}) };
+      if (this.options.channel) queued = !!queueDelivery(s, state, turn, input.taskId, input.payload.messageId, input.payload.body, this.now());
       return { outcome: 'accepted' as const };
     });
+    if (queued) queueMicrotask(() => { if (!this.closed) void this.drain().catch(() => {}); });
+    return result;
   }
   /**
    * Owner API ("Cancel", §8.8), from A's delegation chip or from B's `bot_request` Turn.
@@ -428,7 +503,10 @@ export class BotCollaboration {
   }
   recover(): Promise<void> {
     return this.exclusive(async () => {
-      this.ledger.transaction(s => { this.sync(s); });
+      this.ledger.transaction(s => {
+        for (const row of Object.values(stateOf(s.application).channel?.deliveries ?? {})) recoverDelivery(row);
+        this.sync(s);
+      });
       await this.core.recover();
       const pending = new Set((await this.server.wakes.pending()).map(w => w.dedupKey));
       this.ledger.transaction(s => {
@@ -546,6 +624,7 @@ export class BotCollaboration {
           hop: origin.hop, authority: origin.authority ?? 'bot' });
       }
     }
+    cleanReplyTokens(s, state, this.now());
     projectInputBatches(state, (key, value) => project(s, key, value));
     return materialized;
   }
@@ -636,6 +715,45 @@ export class BotCollaboration {
       });
     }
   }
+  private async flushDeliveries(): Promise<void> {
+    const port = this.options.channel?.port;
+    if (!port) return;
+    if (port.readback) for (const old of Object.values(this.snapshot().channel?.deliveries ?? {}).filter(row => row.state === 'unknown')) {
+      try {
+        const result = await port.readback(old.id);
+        this.ledger.transaction(s => {
+          const row = stateOf(s.application).channel?.deliveries[old.id];
+          if (row) readbackDelivery(row, result, this.now());
+        });
+      } catch { continue; } // Missing readback evidence leaves this row unknown.
+    }
+    for (const old of Object.values(this.snapshot().channel?.deliveries ?? {})) {
+      const claim = this.ledger.transaction(s => {
+        const state = stateOf(s.application), row = state.channel!.deliveries[old.id]!;
+        if (row.state !== 'pending' || (row.nextAttemptAt ?? 0) > this.now()) return;
+        const route = deliveryRoute(state, row, this.now());
+        if (!route) { refuseRoute(state, row); return; }
+        if (startDelivery(row, this.now())) return { row, route };
+      });
+      if (!claim) continue;
+      const controller = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => { controller.abort(); reject(new Error('delivery_timeout')); }, this.deliveryTimeoutMs);
+      });
+      try {
+        const result = await Promise.race([
+          Promise.resolve().then(() => port.send({ deliveryId: claim.row.id, route: claim.route, body: claim.row.body }, controller.signal)), deadline,
+        ]);
+        this.ledger.transaction(s => settleDelivery(stateOf(s.application).channel!.deliveries[claim.row.id]!, claim.row.attempts, result, this.now()));
+      } catch {
+        // send has started: neither an exception nor a deadline proves absence.
+        this.ledger.transaction(s => unknownDelivery(stateOf(s.application).channel!.deliveries[claim.row.id]!, claim.row.attempts,
+          controller.signal.aborted ? 'send_timeout' : 'send_failed'));
+      } finally { clearTimeout(timer); }
+    }
+    this.ledger.transaction(s => cleanReplyTokens(s, stateOf(s.application), this.now()));
+  }
   private async process(): Promise<void> {
     let more: boolean;
     do {
@@ -652,6 +770,7 @@ export class BotCollaboration {
       await this.flushWakes();
       await this.flushReplies();
       materialized = this.ledger.transaction(s => this.sync(s)) || materialized;
+      await this.flushDeliveries();
       const ledger = this.ledger.snapshot();
       // An immediate runtime terminal can create another turn on any pass.
       // Drain to a fixed point, so no application-only turn can lose its wake.
@@ -670,6 +789,8 @@ export class BotCollaboration {
         if (!heads.has(op.routineId)) heads.set(op.routineId, op.retryAt ?? this.now());
       }
       const due = [...heads.values(),
+        ...(this.options.channel ? Object.values(state.channel?.deliveries ?? {}).filter(row => row.state === 'pending').map(row => row.nextAttemptAt ?? this.now()) : []),
+        ...Object.values(state.channel?.inbounds ?? {}).filter(row => row.reply?.token).map(row => row.reply!.expiresAt),
         ...Object.values(state.cards).filter(c => c.state === 'pending').map(c => c.expiresAt),
         ...Object.values(state.team.seats).filter(seat => !seat.released && seat.deadline !== undefined).map(seat => seat.deadline!),
         ...state.team.homeOperations.filter(op => op.status === 'pending').map(op => Math.max(this.now() + 1000, op.retryAt ?? 0)),

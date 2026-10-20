@@ -1,6 +1,7 @@
 import type { AskUserAction, ConfirmableAction, ResultSchema, RoutineScheduleFields } from '@byok-sdk/protocol';
 import { emptyTeam, type TeamState } from './team-model';
 import type { Json } from '@byok-sdk/example-host-execution-core';
+import type { ChannelState } from './delivery-routing';
 
 export interface Turn {
   id: string; root: string; botId: string;
@@ -115,6 +116,8 @@ export interface CollaborationState {
   rejected: Rejection[]; audit: string[]; sequence: number;
   /** Input coalescing. Both appear at the first coalesced input. */
   inputs?: Record<string, UserInput>; inputBatches?: Record<string, InputBatch>;
+  /** Host-only routes and final-content outbox. Never included in ContextPack or projections. */
+  channel?: ChannelState;
 }
 export function stateOf(application: Record<string, Json>): CollaborationState {
   if (application.collaboration === undefined) application.collaboration = json({
