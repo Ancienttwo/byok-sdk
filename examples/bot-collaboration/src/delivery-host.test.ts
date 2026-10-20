@@ -287,3 +287,20 @@ it('selects the latest authenticated inbound route for a coalesced reply', async
   expect(send.mock.calls[0]![0]).toMatchObject({ route: { kind: 'reply', inboundId: 'batch-2', token: 'secret-batch-2' } });
   expect(h.rows()[0]!.route).toEqual({ kind: 'reply', inboundId: inboundKey(inbound('batch-2')) });
 });
+
+it('lets a late verified echo stop a readback-authorized pending retry before its due time', async () => {
+  const send = vi.fn<ChannelPort['send']>(async () => { throw new Error('receipt lost'); });
+  const readback = vi.fn<NonNullable<ChannelPort['readback']>>(async () => 'absent');
+  h = await openDeliveryHost({ send, readback });
+  await h.publish(); await h.bot.drain();
+  const row = h.rows()[0]!;
+  expect(row).toMatchObject({ state: 'pending', attempts: 1, nextAttemptAt: h.options.now!() + 1_000 });
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(readback).toHaveBeenCalledWith(row.id);
+  expect(await h.bot.receive({ ...inbound('late-echo'), replyRoute: undefined,
+    sender: { id: 'own-bot', kind: 'bot' }, deliveryId: row.id })).toEqual({ kind: 'echo' });
+  expect(h.rows()[0]).toMatchObject({ id: row.id, state: 'accepted', attempts: 1, platformMessageId: 'late-echo' });
+  await h.advance(1_000); await h.bot.drain();
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(h.rows()[0]).toMatchObject({ state: 'accepted', attempts: 1 });
+});
