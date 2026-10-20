@@ -194,6 +194,25 @@ export class BetaLedger {
     if (!row) throw new BetaError('not_found', 'Resource not found');
     return this.task(row, true);
   }
+  /** This key's reservations, newest first. The cursor is opaque to callers. */
+  listTasks(caller: Caller, query: { cursor?: string; limit: number }): { tasks: TaskReservation[]; nextCursor?: string } {
+    const key = this.authorize(caller, 'tasks.read');
+    if (!Number.isSafeInteger(query.limit) || query.limit < 1 || query.limit > 100) invalid();
+    const after = query.cursor === undefined ? undefined : /^(\d{1,16})\.([a-f0-9]{64})$/.exec(query.cursor);
+    if (query.cursor !== undefined && !after) invalid();
+    const rows = after
+      ? this.db.prepare('SELECT * FROM beta_tasks WHERE key_id=? AND (created_at<? OR (created_at=? AND task_id<?)) ORDER BY created_at DESC, task_id DESC LIMIT ?')
+        .all(key.keyId, Number(after[1]), Number(after[1]), after[2]!, query.limit + 1)
+      : this.db.prepare('SELECT * FROM beta_tasks WHERE key_id=? ORDER BY created_at DESC, task_id DESC LIMIT ?').all(key.keyId, query.limit + 1);
+    const tasks = rows.slice(0, query.limit).map(row => this.task(row, true));
+    const last = tasks.at(-1);
+    return { tasks, ...(rows.length > query.limit && last ? { nextCursor: `${last.createdAt}.${last.taskId}` } : {}) };
+  }
+  /** Task IDs that still hold one of this key's slots, for trusted Host reconciliation. */
+  openTasks(caller: Caller): string[] {
+    const key = this.authorize(caller);
+    return this.db.prepare('SELECT task_id FROM beta_tasks WHERE key_id=? AND released=0 ORDER BY created_at').all(key.keyId).map(row => String(row.task_id));
+  }
   consumeStatusRead(caller: Caller, taskId: string): void {
     this.transaction(() => {
       const task = this.requireTask(caller, taskId); const key = this.authorize(caller); const now = this.now();

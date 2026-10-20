@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "Copy-and-own external-Bot MCP authorization and admission ledger",
+  "description": "Copy-and-own external-Bot MCP authorization ledger and task tools",
   "license": "MIT",
   "engines": { "node": ">=24.15.0" },
   "exports": { ".": "./src/index.ts" },
