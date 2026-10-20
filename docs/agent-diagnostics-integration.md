@@ -131,6 +131,7 @@ byok-agent doctor --repair restore-enrollment-metadata --expected-device-id DEVI
 | Agent 凭证失效、任务执行后断连/中断 | 授权入口准确绑定；无自动重跑导致重复业务写入 |
 | 登记投影缺失/过期、重复修复、错误 tenant/device、缺少 OS authority | 仅正确权威可恢复；重复为 not-needed；拒绝路径不替换投影、不写凭证 |
 | bundle 导出及重复目标路径 | 脱敏材料本地生成；旧文件不覆盖，无后台自动上传 |
+| 执行记录为 `complete`、`partial`，或没有记录；source policy 允许失败重试 | 按第 7 节的文案显示；任务状态只来自 terminal；`partial` 不触发重试或重跑；没有记录显示 `unknown` |
 
 验收记录保存 SDK/CLI artifact 身份、宿主版本、OS、目标绑定、检查时间、脱敏结果与动作回执。源码检查成功不能替代实际分发版本验收。
 
@@ -167,7 +168,96 @@ const archiveReceipt = await archiveAgentTerminalMessages(config, {
 - 三个 API 不启动/停止 supervisor，不读取 OS/provider 凭据、不重跑任务。Host 必须分别展示 action receipt、服务恢复和独立 Agent 验证；释放 lease 失败也拒绝报告完整成功。
 - `DeviceOperatorError.code` 是封闭的 `confirmation-required`、`invalid-input`、`daemon-running`、`store-busy`、`agent-busy`、`owned-process-residue`、`target-mismatch`、`source-unavailable`、`output-exists`、`operation-failed`。不解析 message，也不从错误反推成功。错误不附带任意 OS 文本、路径或 cause。
 
-## 7. P3：SDK 后续能力缺口与实施边界
+## 7. 执行记录：读取与展示
+
+本节对应 #553（Octop ③）。daemon 为每个已启动的执行产生一条本地执行记录。记录说明 SDK 是否看到了这次执行的完整事件轨迹。它是采集诊断。它不是任务结果、Agent 健康或设备健康的证明。
+
+记录不改变 terminal 类型、`retryable`、outcome 应用和 K4 结论，也不触发重跑。它不上 wire。记录只有计数和封闭的原因码，不含工具名、工具输入输出、路径或错误文本。
+
+```ts
+import type { ExecutionRecord } from '@byok-sdk/client';
+// { taskId, terminal: 'complete' | 'failed' | 'cancelled',
+//   status: 'complete' | 'partial' | 'unknown', source: 'event-stream' | 'none',
+//   gaps: Array<{ reason, count }>, unknownReason?: 'source_not_declared' | 'evidence_overflow' }
+```
+
+### 读取方式
+
+| 宿主形态 | 读取方式 | 限制 |
+| --- | --- | --- |
+| 嵌入式 daemon：宿主进程自己调用 `createDaemon` | `daemon.subscribe(listener)`，只取 `kind === 'execution-record'` 的 `DaemonEvent` | 只是实时事件，不回放。在 `daemon.start()` 之前订阅。需要保留时，由宿主写入自己的存储 |
+| 服务 daemon：`byok-agent start` 在另一个进程运行 | 逐行读 `<storeDir>/audit.jsonl`，只取 `kind` 为 `execution-record` 的 `DaemonRecord` | 文件有大小上限，轮转时删除旧行。需要长期显示时，宿主读到后自己保存。文件权限是 0600，只有 daemon 的 OS 用户能读 |
+| 运维人员 | `byok-agent tasks --follow` 显示一行 `execution-record` | 人读视图，数据来自 control socket 的 `tasks.subscribe`。SDK 不导出 control-socket client。宿主不要解析这一行 |
+| Topology H 的宿主服务 | 读不到 | 记录不离开设备。宿主服务按 `unknown` 处理，不能从 terminal 推出 `complete` |
+
+```ts
+import type { DaemonEvent } from '@byok-sdk/client';
+
+// daemon 是宿主自己 createDaemon(config) 得到的实例。
+const records = new Map<string, Extract<DaemonEvent, { kind: 'execution-record' }>>();
+const unsubscribe = daemon.subscribe((event) => {
+  if (event.kind === 'execution-record') records.set(event.taskId, event);
+});
+await daemon.start();
+```
+
+`storeDir` 必须来自该安装的 daemon 配置，不能猜默认目录。读取 `audit.jsonl` 时，按当前消费的 SDK 版本校验每行结构，跳过不认识的 kind。`execution-record` 行畸形，或 status、原因码不认识时，按 `unknown` 处理，不能显示为 `complete`。
+
+按 `taskId` 把记录关联到一次执行。一个 intent 重试后有多次执行，每次执行各有自己的记录，或者没有记录。记录通常在该任务的 terminal 事件之后到达。observer 的本地任务表超过上限、提前淘汰该任务时，记录会立即发出。不要依赖到达顺序。
+
+下面这些执行没有记录。宿主显示 `unknown`：
+
+- 执行没有启动：被 decline、认领前取消，或 runtime 启动失败。
+- `Session.close()` 或 terminal 提交一直失败，daemon 在重试前退出。
+- daemon 在服务端确认 terminal 之前退出，暂存的记录丢失。
+- daemon 崩溃后，由恢复流程补报 terminal（例如 `daemon_interrupted`）。
+- 记录在宿主订阅之前已经发出，或已被 `audit.jsonl` 轮转删除。
+
+不要阻塞界面等待记录。没有记录时先显示 `unknown`，记录到达后再更新。
+
+### 展示规则
+
+1. 把记录显示在这次执行的任务结果旁边（第 2 节第 4 步）。不放进设备诊断，也不计入 doctor `checks`。
+2. 任务状态以 canonical device terminal 为准（[K4 指南第 5 节](host-execution-core.md#5-settlement-and-retry)）。记录里的 `terminal` 只用于对照。
+3. 不按记录重试、取消、重跑或改变结论。`partial` 不用失败样式显示。
+4. 不为解释缺口去读取 transcript、工具内容或 runtime 的本地会话文件。
+5. 执行中断或结果不确定时，仍按第 3 节处理。先核对外部副作用。
+
+### 展示文案
+
+| status | 标签 | 说明 |
+| --- | --- | --- |
+| `complete` | 轨迹采集完整 | SDK 看到了这次执行的完整事件轨迹。这只表示采集检查通过，不表示任务成功或结果正确。任务失败时也可能显示这个状态。 |
+| `partial` | 轨迹采集不完整 | SDK 没有看到完整的事件轨迹。这是采集诊断，不是任务失败。任务结果以任务状态为准。 |
+| `unknown` | 轨迹未知 | 没有可用的采集证据。不能判断轨迹是否完整。 |
+
+`partial` 下面逐条列出缺口。`{count}` 用记录里的计数替换。
+
+| 原因码 | 文案 |
+| --- | --- |
+| `unpaired_tool_call` | {count} 个工具调用没有配对的结果。执行可能被中断。这不表示工具没有运行。 |
+| `orphan_tool_result` | {count} 个工具结果没有对应的调用。 |
+| `duplicate_tool_result` | {count} 个工具结果是重复的。 |
+| `synthetic_tool_result` | {count} 个工具结果由 SDK adapter 补出，不是 runtime 报告的。 |
+| `decode_dropped` | {count} 段 runtime 输出无法解析，已丢弃。 |
+| `unmapped_frame` | {count} 段 runtime 输出类型未知，没有转成事件。 |
+| `stream_ended_early` | runtime 在正常结束前停止了输出，例如 runtime 报错或进程退出。 |
+| `no_turn_end` | 执行在 runtime 正常结束前被停止，例如取消、资源上限或本地服务关闭。 |
+| `spill_unstored` | {count} 个过大的工具输入或输出没有完整保存。 |
+
+`unknown` 的说明按原因选择：
+
+| 条件 | 文案 |
+| --- | --- |
+| `unknownReason: source_not_declared` | 这个 runtime 不提供轨迹证据。 |
+| `unknownReason: evidence_overflow` | 未结束的工具调用超过记录上限，记录不再计数。 |
+| 没有记录 | 没有读到这次执行的记录。 |
+
+取消正在运行的工具时，记录是 `unpaired_tool_call` 加 `no_turn_end`。进程被杀时，记录通常是 `unpaired_tool_call`、`decode_dropped` 和 `stream_ended_early`。这两种记录都不能区分「工具没有运行」和「工具运行了但结束事件丢失」。
+
+当前只有默认的 `PiAdapter`（RPC 模式）声明证据来源。`durablePi: true` 的 Pi、Claude 和 Codex 不声明，它们的记录都是 `unknown`（`source_not_declared`）。见 [adapter 能力文档](adapter-capabilities.md#trajectory-evidence)。
+
+## 8. P3：SDK 后续能力缺口与实施边界
 
 现状可交付 CLI 诊断页、有限 health 隔离和本地支持材料导出。尚不能交付通用的“单 Agent 自动修复”。SDK 需要承担的后续范围是：
 
@@ -175,7 +265,7 @@ const archiveReceipt = await archiveAgentTerminalMessages(config, {
 - 建立精确 AgentRef/device 绑定的诊断证据组合，区分 device 故障、Agent 配置、runtime 与 task 结果；缺少证据保持未知。
 - 对每项新增修复先定义影响范围、前置条件、用户授权、执行回执与复查标准，再开放动作；数据恢复不能通过泛化 `--fix` 隐式增加。
 
-当前已实现公开诊断 API、显式登记投影修复，以及上述 source-candidate operator API；上述 AgentRef 级组合与其他新修复动作仍待实现，没有远程命令通道或自动重试策略。10 倍设备/Agent 数量下，首先承压的是逐设备本地探测和支持材料读取；下游应按需触发、限制并发并标示报告时间，不能把缓存报告或 lossy presence 升格为 readiness authority。
+当前已实现公开诊断 API、显式登记投影修复、单次执行的执行记录（第 7 节），以及上述 source-candidate operator API；上述 AgentRef 级组合与其他新修复动作仍待实现，没有远程命令通道或自动重试策略。10 倍设备/Agent 数量下，首先承压的是逐设备本地探测和支持材料读取；下游应按需触发、限制并发并标示报告时间，不能把缓存报告或 lossy presence 升格为 readiness authority。
 
 ## 源码与 SDK 回归入口
 
@@ -184,3 +274,5 @@ const archiveReceipt = await archiveAgentTerminalMessages(config, {
 - [public exports](../packages/client/src/index.ts)、[package exports](../packages/client/package.json)
 - [journal recovery contract](../packages/client/src/daemon/journal/journal.ts)
 - [diagnostics tests](../packages/client/src/__tests__/diagnostics.test.ts)、[support bundle tests](../packages/client/src/__tests__/support-bundle.test.ts)
+- [execution record](../packages/client/src/daemon/execution-record.ts)、[DaemonEvent](../packages/client/src/daemon/observer.ts)、[DaemonRecord](../packages/client/src/daemon/daemon-record.ts)
+- [execution record tests](../packages/client/src/__tests__/execution-record.test.ts)、[TaskRunner tests](../packages/client/src/__tests__/task-runner-execution-record.test.ts)、[Pi tests](../packages/client/src/__tests__/pi-execution-record.test.ts)、[K4 conclusion test](../examples/host-execution-core/src/execution-record.test.ts)
