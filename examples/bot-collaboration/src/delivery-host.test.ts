@@ -304,3 +304,65 @@ it('lets a late verified echo stop a readback-authorized pending retry before it
   expect(send).toHaveBeenCalledTimes(1);
   expect(h.rows()[0]).toMatchObject({ state: 'accepted', attempts: 1 });
 });
+
+it('delivers the final message, card summary and question through the received reply route', async () => {
+  const send = vi.fn<ChannelPort['send']>(async input => ({ result: 'accepted', platformMessageId: `platform-${input.deliveryId}` }));
+  h = await openDeliveryHost({ send });
+  const root = (await h.bot.receive(inbound('actions', h.options.now!() + 600_000))).id!;
+  (await h.running(root)).finish({
+    confirmable_action: [{ action: 'send_message', summary: 'Confirm this external message', draft: { text: 'Unapproved draft body' } }],
+    ask_user: { question: 'Which account should receive it?', answerKind: 'text' },
+  });
+  await vi.waitFor(async () => { await h!.bot.drain(); expect(h!.bot.snapshot().turns[root]!.status).toBe('succeeded'); });
+  const state = h.bot.snapshot();
+  const card = Object.values(state.cards)[0]!, question = Object.values(state.questions)[0]!;
+  expect(card).toMatchObject({ state: 'pending', action: { draft: { text: 'Unapproved draft body' } } });
+  expect(question.value.question).toBe('Which account should receive it?');
+  expect(h.received).toHaveLength(1);
+  const final = h.received[0]!;
+  const deliveries = h.rows();
+  expect(deliveries).toHaveLength(3);
+  expect(deliveries).toEqual(expect.arrayContaining([
+    expect.objectContaining({ messageId: final.payload.messageId, body: final.payload.body, state: 'accepted' }),
+    expect.objectContaining({ messageId: `card:${card.id}`, body: 'Confirm this external message', state: 'accepted' }),
+    expect.objectContaining({ messageId: `question:${question.id}`, body: 'Which account should receive it?', state: 'accepted' }),
+  ]));
+  expect(deliveries.find(row => row.messageId === `card:${card.id}`)!.body).not.toBe('Unapproved draft body');
+  expect(send).toHaveBeenCalledTimes(3);
+  for (const [input] of send.mock.calls) {
+    expect(input.route).toMatchObject({ kind: 'reply', channel: 'fake', inboundId: 'actions', token: 'secret-actions' });
+  }
+});
+
+it('delivers a real room speech post to its group reply route and sends nothing for pass', async () => {
+  const send = vi.fn<ChannelPort['send']>(async input => ({ result: 'accepted', platformMessageId: `platform-${input.deliveryId}` }));
+  h = await openDeliveryHost({ send });
+  const setup = await h.bot.input('create-delivery-room', 'Create a review room');
+  (await h.running(setup)).finish({ create_room: [{ localId: 'new_room_1', name: 'Delivery room', members: ['main'] }] });
+  await vi.waitFor(async () => { await h!.bot.drain(); expect(h!.bot.snapshot().turns[setup]!.status).toBe('succeeded'); });
+  const room = Object.values(h.bot.snapshot().team.rooms)[0]!;
+  expect(room).toMatchObject({ name: 'Delivery room', members: ['main'] });
+  expect(send).not.toHaveBeenCalled();
+  // This direct route must never become authority to push into the room.
+  await h.bot.enablePushRoute(conversation, 'fake', 'direct-target');
+  const group: InboundMessage = { ...inbound('group-post', h.options.now!() + 600_000),
+    conversation: { kind: 'group', id: room.id }, sender: outsider, mentions: ['main'] };
+  const post = await h.bot.receive(group);
+  expect(post.kind).toBe('room_input');
+  const seat = h.bot.snapshot().team.rounds[post.id!]!.seats[0]!;
+  (await h.running(seat)).finish({ speech: { kind: 'post', text: 'The group review is complete.' } });
+  await vi.waitFor(async () => { await h!.bot.drain(); expect(h!.bot.snapshot().team.seats[seat]!.status).toBe('post'); });
+  expect(h.bot.snapshot().team.rooms[room.id]!.messages).toContainEqual(expect.objectContaining({ id: seat, from: 'main', text: 'The group review is complete.' }));
+  expect(h.rows()).toEqual([expect.objectContaining({ messageId: `speech:${seat}`, body: 'The group review is complete.',
+    state: 'accepted', conversation: { kind: 'group', id: room.id }, route: { kind: 'reply', inboundId: inboundKey(group) } })]);
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(send.mock.calls[0]![0].route).toMatchObject({ kind: 'reply', inboundId: 'group-post', token: 'secret-group-post' });
+  const passInbound: InboundMessage = { ...group, platformMessageId: 'group-pass',
+    replyRoute: { kind: 'reply', channel: 'fake', inboundId: 'group-pass', token: 'secret-pass', expiresAt: h.options.now!() + 600_000 } };
+  const pass = await h.bot.receive(passInbound);
+  const passSeat = h.bot.snapshot().team.rounds[pass.id!]!.seats[0]!;
+  (await h.running(passSeat)).finish({ speech: { kind: 'pass' } });
+  await vi.waitFor(async () => { await h!.bot.drain(); expect(h!.bot.snapshot().team.seats[passSeat]!.status).toBe('pass'); });
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(h.rows()).toHaveLength(1);
+});
