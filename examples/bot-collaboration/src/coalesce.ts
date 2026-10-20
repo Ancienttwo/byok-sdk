@@ -1,6 +1,6 @@
-import { hash } from '@byok-sdk/example-host-execution-core';
+import { hash, type Json } from '@byok-sdk/example-host-execution-core';
 import { frame } from './delegation';
-import { addTurn, openInputBatch, sealInputBatch, type Authority, type CollaborationState, type InputBatch, type SealReason, type UserInput } from './model';
+import { addTurn, json, openInputBatch, sealInputBatch, type Authority, type CollaborationState, type InputBatch, type SealReason, type UserInput } from './model';
 
 /** Values that apply when `BotOptions.coalesce` is present (owner ruling on #551). */
 export const COALESCE_DEFAULTS = { windowMs: 10_000, maxItems: 8, maxBytes: 8192 } as const;
@@ -50,6 +50,20 @@ function sealIfDue(state: CollaborationState, batch: InputBatch, policy: Coalesc
 /** Runs first in each Host sync. The window counts from the first input; later inputs never extend it. */
 export function sealDueBatches(state: CollaborationState, policy: CoalescePolicy | undefined, now: number): void {
   for (const batch of Object.values(state.inputBatches ?? {})) if (batch.state === 'open') sealIfDue(state, batch, policy, now);
+}
+
+/**
+ * Runs last in each Host sync, so it sees every seal of that pass and of earlier transactions.
+ * Revision 1 shows the batch at its first projection while open. A batch that seals before then projects only revision 2.
+ */
+export function projectInputBatches(state: CollaborationState, emit: (key: string, value: Json) => void): void {
+  for (const batch of Object.values(state.inputBatches ?? {})) {
+    const revision = batch.state === 'open' ? 1 : 2;
+    if ((batch.revision ?? 0) >= revision) continue;
+    batch.revision = revision;
+    emit(`input-batch:${batch.id}:${revision}`, json({ owner: batch.botId, id: batch.id, revision, state: batch.state, sealReason: batch.sealReason,
+      inputIds: batch.inputIds, openedAt: batch.openedAt, sealAt: batch.sealAt }));
+  }
 }
 
 /**

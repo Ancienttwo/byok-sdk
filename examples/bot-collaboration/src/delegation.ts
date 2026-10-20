@@ -77,7 +77,7 @@ export function releaseUnit(state: CollaborationState, id: string | undefined): 
 function publish(d: Delegation, emit: Publish): void {
   d.revision++;
   emit(`delegation:${d.id}:${d.revision}`, json({ id: d.id, revision: d.revision, fromBotId: d.fromBotId, toBotId: d.toBotId,
-    request: d.request, status: d.status, verdict: d.verdict, reason: d.reason, replyTurnId: d.replyTurnId }));
+    request: d.request, status: d.status, verdict: d.verdict, reason: d.reason, replyTurnId: d.replyTurnId, undelivered: d.undelivered }));
 }
 function close(d: Delegation, verdict: Verdict, now: number, reason?: string, reply?: string): void {
   d.verdict = verdict; d.status = 'resolved'; d.resolvedAt = now;
@@ -95,7 +95,9 @@ function report(state: CollaborationState, batch: Batch, rows: Delegation[], id:
   const origin = state.turns[rows[0]!.fromTurnId]!;
   const initiator = state.team.bots[origin.botId];
   if (!initiator || initiator.archived) {
+    // §8.5: the verdict stays in the ledger, with no reply Turn. The projection shows why.
     for (const slot of batch.slots) if (!state.units[slot]!.turnId) releaseUnit(state, slot);
+    for (const row of rows) row.undelivered = 'initiator_archived';
     return;
   }
   const slot = batch.slots.find(unit => state.units[unit]!.state === 'reserved' && !state.units[unit]!.turnId);
@@ -121,7 +123,7 @@ function report(state: CollaborationState, batch: Batch, rows: Delegation[], id:
 function deliver(state: CollaborationState, batch: Batch, d?: Delegation): Delegation[] {
   const rows = batch.delegationIds.map(id => state.delegations[id]!);
   const accepted = rows.filter(row => row.requestTurnId);
-  const unreported = rows.filter(row => row.verdict && !row.replyTurnId);
+  const unreported = rows.filter(row => row.verdict && !row.replyTurnId && !row.undelivered);
   if (!batch.released) {
     if (accepted.some(row => !row.verdict && row.status !== 'uncertain')) return [];
     batch.released = true;
@@ -231,9 +233,17 @@ function uncertain(state: CollaborationState, d: Delegation, now: number, emit: 
   d.status = 'uncertain'; d.uncertainSince = now; publish(d, emit);
   for (const row of deliver(state, state.batches[d.batch]!)) publish(row, emit);
 }
-/** Cancel verdict. A reply accepted before the cancel rides along as partial (§8.8). */
+/**
+ * Cancel verdict. A reply accepted before the cancel rides along as partial (§8.8).
+ * An archived target gives `refused`, and its accepted reply is audit only (§8.4).
+ */
 function resolveCancel(state: CollaborationState, d: Delegation, taskId: string | undefined, now: number, emit: Publish): void {
   const reply = taskId !== undefined && state.replies[taskId]?.body !== undefined ? taskId : undefined;
+  if (d.cancel!.reason === 'target_archived') {
+    if (reply) state.audit.push(`Delegation reply after archive: ${d.id} ${reply}`);
+    resolveDelegation(state, d, 'refused', now, emit, 'target_archived');
+    return;
+  }
   if (reply) d.partial = true;
   resolveDelegation(state, d, 'cancelled', now, emit, d.cancel!.reason ?? 'user_cancelled', reply);
 }
@@ -256,13 +266,14 @@ export function openDelegationsContext(state: CollaborationState) {
  * Arbitration transaction (§8.8). Freeze the cancel fact on the current chain
  * Turn. That closes its first acceptance and blocks new successors. Without a
  * K4 intent, close queue eligibility and set the verdict now. Returns true when
- * core.cancel must still deliver the cancel.
+ * core.cancel must still deliver the cancel. An archived target is cancelled in
+ * every open state (§8.4).
  */
 export function arbitrateCancel(s: Pick<LedgerState, 'intents'>, state: CollaborationState, d: Delegation, now: number, emit: Publish,
   reason?: DelegationCancel['reason']): boolean {
   if (d.verdict) throw new Error('Delegation already resolved');
   if (d.cancel) return !d.cancel.delivered;
-  if (!CANCELLABLE.has(d.status)) throw new Error('Delegation cannot be cancelled in this state; use abandonDelegation');
+  if (reason !== 'target_archived' && !CANCELLABLE.has(d.status)) throw new Error('Delegation cannot be cancelled in this state; use abandonDelegation');
   const target = state.turns[d.chainTurnIds.at(-1)!]!, intent = s.intents[hash(target.id)];
   d.cancel = { requestedAt: now, targetTurnId: target.id, delivered: !intent || !!intent.conclusion, ...(reason ? { reason } : {}) };
   if (!intent) {
@@ -323,6 +334,9 @@ export function settleDelegations(s: LedgerState, state: CollaborationState, now
     if (d.verdict || !d.chainTurnIds.length) continue;
     const last = state.turns[d.chainTurnIds.at(-1)!]!, intent = s.intents[hash(last.id)];
     if (started(s, last.id)) observeStart(state, last, now, emit);
+    // §8.4: archiving the target is a Host cancel of its current chain Turn. deliverCancels sends it.
+    if (!d.cancel && state.team.bots[d.toBotId]?.archived) arbitrateCancel(s, state, d, now, emit, 'target_archived');
+    if (d.verdict) continue;
     if (d.cancel) {
       const target = state.turns[d.cancel.targetTurnId]!, cancelled = s.intents[hash(target.id)];
       if (cancelled?.conclusion || !cancelled && target.conclusion) resolveCancel(state, d, cancelled?.taskId, now, emit);
@@ -339,8 +353,6 @@ export function settleDelegations(s: LedgerState, state: CollaborationState, now
       if (d.status !== 'uncertain' && d.claimed?.turnId === last.id && now - d.claimed.at >= timers.uncertainAfterMs) uncertain(state, d, now, emit);
       continue;
     }
-    // An archived target's outcome is audit only (§8.4), so its chain closes as refused.
-    if (state.team.bots[last.botId]?.archived) { resolveDelegation(state, d, 'refused', now, emit, 'target_archived'); continue; }
     if (conclusion === 'succeeded') continue;
     const mapped = failure(s, intent, conclusion);
     resolveDelegation(state, d, mapped.verdict, now, emit, mapped.reason);

@@ -31,11 +31,11 @@ export type SealReason = 'idle' | 'window' | 'items' | 'bytes' | 'boundary' | 'k
 /**
  * `id` is the first input's id and the batch Turn id. `key` is the coalescing key.
  * `request` is the rendered Request while the batch is open; sealing moves it into the batch Turn.
- * `bytes` is its UTF-8 size, framing included.
+ * `bytes` is its UTF-8 size, framing included. `revision` is the last projected revision: 1 is open, 2 is sealed.
  */
 export interface InputBatch {
   id: string; botId: string; key: string; inputIds: string[]; bytes: number;
-  openedAt: number; sealAt: number; state: 'open' | 'sealed'; sealReason?: SealReason; request?: string;
+  openedAt: number; sealAt: number; state: 'open' | 'sealed'; sealReason?: SealReason; request?: string; revision?: 1 | 2;
 }
 export type Verdict = 'answered' | 'failed' | 'cancelled' | 'refused' | 'expired' | 'abandoned';
 export interface ReplyEntry {
@@ -45,8 +45,11 @@ export interface ReplyEntry {
   /** The reply was accepted before a cancel. The cancel stopped the rest of the execution. */
   partial?: true;
 }
-/** Frozen in the arbitration transaction (§8.8). `delivered` turns true after core.cancel. No `reason` means a user cancel. */
-export interface DelegationCancel { requestedAt: number; targetTurnId: string; delivered: boolean; reason?: 'main_bot_cancelled' }
+/**
+ * Frozen in the arbitration transaction (§8.8). `delivered` turns true after core.cancel. No `reason` means a user cancel.
+ * `target_archived` is the Host cancel when the target Bot is archived (§8.4). Its verdict is `refused`.
+ */
+export interface DelegationCancel { requestedAt: number; targetTurnId: string; delivered: boolean; reason?: 'main_bot_cancelled' | 'target_archived' }
 export interface Delegation {
   id: string; root: string; fromBotId: string; fromTurnId: string; fromTaskId: string; index: number;
   toBotId: string; toAgentRef?: { agentId: string; profileRevision: string }; toDeviceId?: string;
@@ -60,6 +63,8 @@ export interface Delegation {
   claimed?: { turnId: string; at: number };
   /** A chain Turn still open at the verdict. Its later terminal goes to audit only. */
   lateTurnId?: string;
+  /** The verdict has no reply Turn because the initiator is archived (§8.5). */
+  undelivered?: 'initiator_archived';
 }
 /**
  * One A outcome. `slots` are the prepaid A reply units of this batch.
