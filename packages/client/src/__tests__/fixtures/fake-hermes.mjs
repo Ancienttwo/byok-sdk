@@ -10,7 +10,8 @@
 // The viewer refuses session/new unless a ready gateway serves its
 // HERMES_HOME, as the real viewer cannot run a turn without one. Every
 // observable input is appended to FAKE_HERMES_RECEIPT as one JSON line.
-import { appendFileSync, existsSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { appendFileSync, existsSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -89,6 +90,27 @@ function identifyGateway() {
   });
 }
 
+/**
+ * Stand-in for the detached gateway a real viewer starts when it finds none:
+ * a double-forked orphan in its own session that takes over the control
+ * socket. Nothing in the viewer's process tree leads to it, so only the
+ * adapter's explicit stop can end it. It exits by itself after 20 s.
+ */
+async function startForeignGateway() {
+  const socketPath = path.join(home, 'gateway.sock');
+  const readyFile = `${socketPath}.foreign`;
+  const server = `const net=require('node:net'),fs=require('node:fs');const [sock,served,ready]=process.argv.slice(1);
+try{fs.unlinkSync(sock)}catch{}setTimeout(()=>process.exit(0),20000);
+net.createServer(s=>{let b='';s.on('data',c=>{b+=c;if(b.includes('\\n'))s.end(JSON.stringify({ok:true,protocol:1,id:1,result:{pid:process.pid,state:'ready',served_profiles:[{home:served}]}})+'\\n')})}).listen(sock,()=>fs.writeFileSync(ready,String(process.pid)));`;
+  const launcher = `const {spawn}=require('node:child_process');spawn(process.execPath,['-e',process.argv[1],...process.argv.slice(2)],{detached:true,stdio:'ignore'}).unref();`;
+  spawn(process.execPath, ['-e', launcher, server, socketPath, realpathSync(home), readyFile], { stdio: 'ignore' });
+  for (let waited = 0; waited < 5_000; waited += 20) {
+    if (existsSync(readyFile)) return Number(readFileSync(readyFile, 'utf8'));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error('foreign gateway did not start');
+}
+
 function runViewer() {
   receipt({ mode: 'acp', argv, home, cwd: process.cwd(), hermesEnv });
   const send = (message) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`);
@@ -164,10 +186,7 @@ function runViewer() {
         send({ id, error: { code: -32603, message: 'Internal error', data: { details: 'Gateway connection failed; no local fallback' } } });
         return;
       }
-      if (env.FAKE_HERMES_VIEWER_TAKES_SOCKET === '1') {
-        // Stand-in for a viewer that started its own gateway for this home.
-        serveIdentify(path.join(home, 'gateway.sock'), () => ({ pid: process.pid, state: 'ready', served_profiles: [{ home: realpathSync(home) }] }));
-      }
+      if (env.FAKE_HERMES_VIEWER_TAKES_SOCKET === '1') receipt({ mode: 'foreign-gateway', pid: await startForeignGateway() });
       send({ id, result: { sessionId, modes: { currentModeId: 'default', availableModes: [] } } });
     } else if (method === 'session/set_mode') {
       receipt({ mode: 'acp', method, params });

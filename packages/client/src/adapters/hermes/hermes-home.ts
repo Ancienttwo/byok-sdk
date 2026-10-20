@@ -73,7 +73,16 @@ export function hermesProfileConfig(model: HermesModelSelection | undefined): st
 export async function ensureHermesRoot(root: string): Promise<void> {
   await fs.mkdir(root, { recursive: true, mode: 0o700 });
   const file = path.join(root, 'config.yaml');
-  if (await fs.readFile(file, 'utf8').catch(() => undefined) !== ROOT_CONFIG) await fs.writeFile(file, ROOT_CONFIG, { mode: 0o600 });
+  if (await fs.readFile(file, 'utf8').catch(() => undefined) === ROOT_CONFIG) return;
+  // Write then rename: a concurrent `hermes --version` never reads a truncated config with the update check on.
+  const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    await fs.writeFile(temporary, ROOT_CONFIG, { mode: 0o600 });
+    await fs.rename(temporary, file);
+  } catch (error) {
+    await fs.rm(temporary, { force: true });
+    throw error;
+  }
 }
 
 /** Creates `<root>/profiles/byok-<id>` with the SDK config and the carried model caches. */
@@ -111,7 +120,8 @@ export async function removeHermesProfile(root: string, home: string): Promise<v
  * Deletes SDK profiles that a dead Host left behind. The daemon's owned
  * process ledger already reaps such a Host's gateway process group at the next
  * start. A profile is kept while it is in `live`, while it is younger than
- * {@link STALE_PROFILE_MS}, or while any gateway answers for it.
+ * {@link STALE_PROFILE_MS}, or while any gateway answers for it. `live` knows
+ * only this process's sessions, so one root serves one Host process.
  */
 export async function sweepStaleHermesProfiles(root: string, live: ReadonlySet<string>, now = Date.now()): Promise<void> {
   const profiles = path.join(root, 'profiles');

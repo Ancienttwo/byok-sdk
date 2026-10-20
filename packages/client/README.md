@@ -690,10 +690,11 @@ const hermes = new HermesAdapter({
 ```
 
 Offers select it with `harnessId: 'hermes'`. `home` is a root that the SDK
-owns. Each execution gets a fresh Hermes profile under it, with Hermes memory
-and kanban dispatch off, and the adapter deletes the profile when the
-execution ends. The adapter starts the Hermes gateway itself and owns its
-process tree. It never reads or writes the user's `~/.hermes`. Provider
+owns; give each Host process its own root. Each execution gets a fresh Hermes
+profile under it, with Hermes memory and kanban dispatch off, and the adapter
+deletes the profile when the execution ends. The adapter starts the Hermes
+gateway itself and owns its process tree. It never reads or writes the user's
+`~/.hermes`. Provider
 credentials come from the runtime environment; `model.keyEnv` names the
 variable for a `custom` endpoint. The first `detect()` on a new root waits
 while Hermes builds its Python environment there (up to `probeTimeoutMs`,

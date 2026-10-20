@@ -94,6 +94,19 @@ describe('HermesAdapter construction and descriptor', () => {
     }
   });
 
+  it('refuses a ~/.hermes root that does not exist yet below a symlinked home', async () => {
+    const fakeUserHome = await tempDir('bu-');
+    const link = path.join(await tempDir('bl-'), 'link');
+    await fs.symlink(fakeUserHome, link);
+    const previous = process.env.HOME;
+    process.env.HOME = fakeUserHome;
+    try {
+      expect(() => new HermesAdapter({ home: path.join(link, '.hermes') })).toThrow(/~\/\.hermes/);
+    } finally {
+      process.env.HOME = previous;
+    }
+  });
+
   it('declares egress and MCP toolsets only, as a frozen custom harness', () => {
     const { descriptor } = new HermesAdapter({ home: '/tmp/x' });
     expect(descriptor).toEqual({

@@ -23,7 +23,7 @@ import { AsyncQueue } from '../../util/async-queue';
 import { classifyDetectError } from '../detect-outcome';
 import type { ResolvedBin } from '../codex/resolve-bin';
 import { AcpConnection, AcpMethodNotFound, AcpRpcError } from './acp-connection';
-import { identifyHermesGateway } from './gateway-identity';
+import { identifyHermesGateway, type HermesGatewayIdentity } from './gateway-identity';
 import {
   assertHermesModelSelection, createHermesProfile, ensureHermesRoot, removeHermesProfile, sweepStaleHermesProfiles,
 } from './hermes-home';
@@ -57,8 +57,9 @@ export interface HermesAdapterOptions {
   /**
    * Absolute path of the Hermes root that this SDK owns, for example under the
    * Host's store directory. Each execution runs in a fresh profile home below
-   * it (`hermes-home.ts`). It must not be the user's `~/.hermes`. The first
-   * `detect()` on a new root waits while Hermes builds its environment there.
+   * it (`hermes-home.ts`). It must not be the user's `~/.hermes`. Give each
+   * Host process its own root. The first `detect()` on a new root waits while
+   * Hermes builds its environment there.
    */
   home: string;
   /** Provider and model for every execution. Absent: Hermes picks a provider from the credentials in the environment. */
@@ -126,11 +127,36 @@ function probeHermesVersion(command: string, env: Record<string, string>): Promi
   });
 }
 
-/** Real path where it exists, so a symlink or a case variant cannot hide `~/.hermes`. */
+/**
+ * Real path of the nearest existing ancestor plus the rest, so a symlink or a
+ * case variant cannot hide `~/.hermes`, even below a directory not yet created.
+ */
 function canonicalPath(value: string): string {
-  let resolved: string;
-  try { resolved = realpathSync.native(value); } catch { resolved = path.resolve(value); }
+  let existing = path.resolve(value);
+  const rest: string[] = [];
+  for (;;) {
+    try {
+      existing = realpathSync.native(existing);
+      break;
+    } catch {
+      const parent = path.dirname(existing);
+      if (parent === existing) break;
+      rest.unshift(path.basename(existing));
+      existing = parent;
+    }
+  }
+  const resolved = path.join(existing, ...rest);
   return process.platform === 'darwin' || process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+/** A busy gateway can miss one `identify` deadline; ask a few times before treating it as gone. */
+async function identifyAfterAttach(home: string): Promise<HermesGatewayIdentity | undefined> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const identity = await identifyHermesGateway(home);
+    if (identity !== undefined) return identity;
+    await new Promise((resolve) => setTimeout(resolve, GATEWAY_POLL_MS));
+  }
+  return undefined;
 }
 
 /** SIGKILL to a detached Hermes gateway's own process group (it starts in a new session), else to the pid. */
@@ -307,10 +333,11 @@ export class HermesAdapter implements RuntimeAdapter {
       session.ready(opened.sessionId);
       await open('session/set_mode', { sessionId: opened.sessionId, modeId: EDIT_MODE });
       // The viewer must have attached to the owned gateway, not to one it started itself.
-      const attached = await identifyHermesGateway(home);
-      if (attached?.pid !== gatewayPid) {
+      const attached = await identifyAfterAttach(home);
+      if (attached === undefined) throw infrastructure('start', 'hermes gateway did not answer identify after attach', 'retryable');
+      if (attached.pid !== gatewayPid) {
         // Only this execution uses the fresh profile, so a gateway that serves it was started for it.
-        if (attached !== undefined && attached.servedHomes.includes(await fs.realpath(home))) stopProcessGroup(attached.pid);
+        if (attached.servedHomes.includes(await fs.realpath(home))) stopProcessGroup(attached.pid);
         throw infrastructure('start', 'hermes acp attached to a gateway this session does not own');
       }
       if (input.signal?.aborted) throw infrastructure('start', 'hermes start was aborted', 'retryable');
