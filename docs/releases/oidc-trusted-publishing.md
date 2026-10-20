@@ -1,14 +1,20 @@
 # npm trusted publishing (OIDC)
 
-Status: the workflow and the publisher support are in the repository. The npm
-trusted publishers and the GitHub environment do not exist yet. The owner
-must do the one-time setup below before the first OIDC release.
+Status: the workflow and the publisher support are in the repository.
+The current release route uses the owner's local npm session and OTP on
+release day. OIDC setup and the first OIDC publication are separate owner
+operations. They are not required for the current release route.
+
+Keep the nine-package setup below as the plan for that later change.
+Do not treat the workflow file or a passing local test as proof that npm
+trust is configured or that an OIDC publication has passed.
 
 ## Outcome
 
-One release is one workflow run. The run publishes all nine packages with
-npm trusted publishing. It uses no npm token. It does not ask for 2FA once
-per package. Each package gets a provenance attestation.
+After the owner enables and verifies OIDC, one release is one workflow run.
+The run publishes all nine packages with npm trusted publishing. It uses no
+npm token. It does not ask for 2FA once per package. Each package gets a
+provenance attestation.
 
 - Workflow: [`.github/workflows/release.yml`](../../.github/workflows/release.yml).
 - Driver: `node scripts/release/publish.mjs --trusted-publishing --artifacts <dir>`.
@@ -72,8 +78,9 @@ The npm documentation gives these constraints. They were read on 2026-10-19
 
 ## One-time owner setup
 
-Only the owner can do these steps. They need the npm owner account with 2FA
-and admin access to the GitHub repository.
+Do these steps when the owner chooses to enable OIDC. They are not a gate
+for local OTP publication. Only the owner can do them. They need the npm
+owner account with 2FA and admin access to the GitHub repository.
 
 1. **Make the GitHub environment.** In the repository settings, add the
    environment `npm-release`. Add the owner as a required reviewer. Limit
@@ -104,6 +111,9 @@ and admin access to the GitHub repository.
    publishing continues to work, because it does not use a token.
 
 ## Release procedure
+
+Use this procedure only after the owner completes the setup above.
+Until then, use the [current local route](#local-fallback).
 
 1. Merge the release preparation to `main`. Wait for the `ci.yml` push run
    for that commit to pass. That run keeps `release-pack-<sha>` for 30 days.
@@ -162,8 +172,13 @@ the release commit.
 
 ## Local fallback
 
-The local path is not removed. The owner can use it when OIDC is not
-available:
+This is the current release route. The owner completes npm write 2FA on
+release day. OIDC setup is not a prerequisite. The same route remains
+available as a fallback after OIDC is enabled.
+
+Use the accepted CI artifacts for the exact release commit. Print the plan
+first. After the owner authorizes that package/version/channel plan, run the
+publish command in an interactive terminal:
 
 ```sh
 node scripts/release/publish.mjs --artifacts <dir> --dry-run

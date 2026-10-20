@@ -126,7 +126,17 @@ separate evidence and authorization; see the
 4. Stage rollout, read back signature verification and agent operational health, then promote. Roll back through the host channel; do not delete quarantine or durable local/cloud truth.
 5. npm publication is a separate registry action, driven by `scripts/release/publish.mjs` against the tarballs CI already accepted. Exact package names/versions, tarball contents, provenance/2FA policy (attestation only under GitHub Actions OIDC) and registry readback are all verified before the release is tagged:
 
-   The default route is the `Release` workflow (`.github/workflows/release.yml`). It runs these steps on a GitHub-hosted runner with npm trusted publishing (OIDC): no token, no per-package 2FA, provenance attached. Its owner setup, constraints and recovery are in [npm trusted publishing](../../docs/releases/oidc-trusted-publishing.md). The steps below are the local route; the publisher logic and the recovery rules are the same for both.
+   The current route uses the owner's local npm session and OTP on release
+   day. Follow the local steps below. Enabling OIDC is a separate owner
+   operation. It does not block this route.
+
+   The prepared `Release` workflow (`.github/workflows/release.yml`) runs
+   on a GitHub-hosted runner. It uses OIDC without a token or per-package
+   2FA and attaches provenance. Adopt that route after the owner completes
+   the setup and verifies the first OIDC publication. The nine-package
+   setup, constraints and recovery are in
+   [npm trusted publishing](../../docs/releases/oidc-trusted-publishing.md).
+   The publisher logic and recovery rules are the same for both routes.
 
    1. Confirm the CI run for the exact release commit is green, including its `npm-release-pack` job. Use the `push` run for the commit (`gh run list --branch main --workflow CI --event push --limit 1`), not a `pull_request` run: on pull-request events `github.sha` is the merge ref, so that run's artifact is named after a commit that is not `HEAD` and the dry run refuses it.
    2. Download that run's accepted tarballs: `gh run download <run-id> -n release-pack-<sha> -D <dir>`, where `<sha>` is the full 40-character commit id (`git rev-parse HEAD`).

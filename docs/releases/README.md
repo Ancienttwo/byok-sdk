@@ -5,11 +5,16 @@ This page holds the standing steps that every release repeats.
 
 ## Publishing
 
-Publish through the `Release` workflow with npm trusted publishing (OIDC). The
-one-time owner setup, the constraints and the recovery steps are in
-[npm trusted publishing](oidc-trusted-publishing.md). The full release
-checklist is in the
+The current route uses the owner's local npm session and OTP on release
+day. Use the accepted CI artifacts, print the plan, then obtain the owner's
+publication authorization. Follow the
 [release responsibility runbook](../../deploy/runbooks/release-responsibility.md#release-checklist).
+
+The `Release` workflow supports npm trusted publishing (OIDC). Enable it
+only when the owner chooses to complete the separate setup and verify the
+first OIDC publication. Current releases do not require live npm trust.
+The nine-package setup, constraints and recovery steps are in
+[npm trusted publishing](oidc-trusted-publishing.md).
 
 ## Protocol compatibility baseline
 
