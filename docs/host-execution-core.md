@@ -154,6 +154,18 @@ The reference defaults to three attempts, with five-minute and fifteen-minute ba
 Failure retries are off by default. The waiting budget and next routine slot can end retry eligibility earlier.
 Generation changes only when backoff expires and the old terminal has already been stored.
 
+The SDK daemon also makes one local execution record for each started execution (#553).
+The record tells whether the SDK saw the whole event trajectory: `complete`, `partial` or `unknown`.
+It is diagnostic evidence only. K4 does not read it.
+It does not change the device terminal, `retryable`, outcome application, the intent conclusion or generation.
+Do not retry, cancel or conclude an intent because of the record.
+If the Host keeps the record, store it as evidence of the execution with the same taskId.
+Show `unknown` for an execution with no record. Topology H gets no record, because the record does not leave the device.
+The reference core has no daemon handle, so it does not read or show the record.
+The [K4 execution record test](../examples/host-execution-core/src/execution-record.test.ts) uses a policy that retries failures.
+In that test, a `partial` run and a `complete` run both conclude `succeeded`, with one attempt, generation 0 and one outcome application.
+Read paths and display text are in section 7 of the [downstream diagnostics guide](agent-diagnostics-integration.md).
+
 ## 6. Occurrence transaction
 
 Use `SHA-256([routineId, definitionVersion, { kind, plannedAt }])` as the occurrence key.

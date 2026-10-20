@@ -20,6 +20,7 @@ they are not a second runtime-selection registry.
 | Local native interaction opt-in | allow-once / deny / cancel; structured AskUserQuestion | allow-once / allow-session / deny / cancel; structured question IDs | Unsupported |
 | Recover pending native interactions after process restart | Unsupported | Unsupported | No new support introduced |
 | Host browser/mobile reconnect | Host-owned; not native session resume | Host-owned; not native session resume | Host-owned |
+| Trajectory evidence for the execution record (`trajectoryEvidence`) | Not declared; records are `unknown` | Not declared; records are `unknown` | Declared (`event-stream`); not declared with `durablePi: true` |
 
 By default Claude and Codex run YOLO
 ([ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md)): Claude with
@@ -34,6 +35,8 @@ and its existing tests are unchanged; this matrix does not downgrade its
 already implemented capabilities or certify them without evidence. Custom
 adapters must qualify their own descriptor and behavior. Sharing an upstream
 runtime name or using a custom harness does not inherit another adapter's pass.
+The trajectory evidence row has its own Pi evidence; see
+[Trajectory evidence](#trajectory-evidence).
 
 ## What the qualification suite proves
 
@@ -134,6 +137,44 @@ implemented by this matrix. Pending prompt display is not replay authority.
 An approval answer is not a steer message. Follow-up text is not a structured
 answer. Never substitute one operation to make an unsupported feature appear
 to succeed.
+
+## Trajectory evidence
+
+`RuntimeAdapterDescriptor.trajectoryEvidence: 'event-stream'` declares
+`Session.events` as the evidence source of the daemon's local execution record
+(#553). The declaration states these facts:
+
+- Every `tool_use` and `tool_result` carries its `toolCallId`.
+- `turn_end` means that the runtime completed.
+- `Session.evidence()` counts runtime output that the session could not turn
+  into events: undecoded frames, unmapped frames, and tool results that the
+  adapter made itself. The counts cover the whole session up to `close()`.
+  A declaring adapter without `evidence()` states that nothing below its event
+  stream can drop or invent a frame.
+
+An adapter without the declaration gets `unknown` records
+(`source_not_declared`). A declaration names the collection surface. It does
+not prove that each run is complete. The record never changes the terminal or
+a retry decision. Downstream read paths and display text are in section 7 of
+the [downstream diagnostics guide](agent-diagnostics-integration.md).
+
+- Pi: `PiAdapter` declares `event-stream`. With `durablePi: true` it does not
+  declare it, because T0 did not verify the durable worker's own frames and
+  respawn path. `PiSession.evidence()` counts stdout lines that are not a JSON
+  object, an unterminated last line, and unmapped frame types. It reports no
+  synthetic results. The evidence is the
+  [Octop T0 note](notes/2026-10-20-octop-t0-pi-trajectory.md) and
+  `pi-execution-record.test.ts`. T0 read the emit path of the pinned Pi 1.3.0,
+  ran its core with a synthetic model stream, and replayed synthetic RPC
+  records. No live Pi run or provider call is part of this evidence. A killed
+  Pi process has no pairing guarantee. A run that a kill cuts short is
+  `partial`.
+- Claude and Codex: not declared. Slice T2 of #553 would add their counts.
+  The owner decides on T2 after Pi verification.
+- Custom adapters: declare only with your own evidence for the facts above.
+  Treat the runtime's routine bookkeeping frames as expected, not unmapped.
+  If you do not, every normal run is `partial`. A shared runtime name does not
+  inherit the Pi declaration.
 
 ## References and ownership
 
