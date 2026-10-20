@@ -9,7 +9,7 @@ import { WAKE_HORIZON_MS } from '@byok-sdk/example-host-execution-core';
 import { addTurn, json, stateOf, type CollaborationState, type Delegation, type Routine, type Turn } from './model';
 import { turnInstruction, outcomeSchema, SYSTEM_PROMPT } from './schema';
 import { abandonDelegation, applyDelegate, arbitrateCancel, BOT_REPLY_MAX_BYTES, DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
-  delegationDue, endChain, minimumInstructionBytes, observeStart, reconcileReply, REPLY_UNCERTAIN_AFTER_MS, resolveDelegation, retryReply,
+  delegationDue, endChain, minimumInstructionBytes, observeDevices, observeStart, reconcileReply, REPLY_UNCERTAIN_AFTER_MS, resolveDelegation, retryReply,
   settleDelegations, type DelegationTimers } from './delegation';
 import { arm, consumeRoutine, createRoutine, lifecycle, operation, owned, switchVersion, updateRoutine } from './routines';
 
@@ -70,7 +70,7 @@ export class BotCollaboration {
   private readonly coalesce?: CoalescePolicy;
   /** The default principal of the owner APIs: the caller that the Host authenticated as the owner. */
   private readonly owner: Principal;
-  constructor(readonly server: ExecutionServer & HomeServer & MessageServer, readonly ledger: HostLedger, private readonly options: BotOptions) {
+  constructor(readonly server: ExecutionServer & HomeServer & MessageServer & Partial<Pick<ByokServer, 'machines'>>, readonly ledger: HostLedger, private readonly options: BotOptions) {
     if (!options.botId || options.execution.payload.agentRef.agentId !== options.botId) throw new Error('Select this Bot Agent');
     if (options.execution.payload.requiredToolsets?.length) throw new Error('Bot executions cannot have connector toolsets');
     this.owner = { id: options.owner ?? 'owner', kind: 'human' };
@@ -765,6 +765,7 @@ export class BotCollaboration {
       // A Main Bot cancel applied in this drain commits with delivered = false.
       await this.deliverCancels().catch(() => {});
       let materialized = this.ledger.transaction(s => this.sync(s));
+      await this.refreshDevices();
       await this.flushCards();
       materialized = this.ledger.transaction(s => this.sync(s)) || materialized;
       await this.flushWakes();
@@ -802,6 +803,21 @@ export class BotCollaboration {
         this.timer.unref?.();
       }
     }
+  }
+  private async refreshDevices(): Promise<void> {
+    if (!this.server.machines) return;
+    if (!Object.values(this.snapshot().delegations).some(d => !d.verdict && !d.cancel && (d.status === 'queued' || d.status === 'waiting_device'))) return;
+    // A discovery failure must not block execution or invent an offline fact.
+    let devices: Awaited<ReturnType<ByokServer['machines']['list']>>;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      devices = await Promise.race([
+        this.server.machines.list(),
+        new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('Device discovery timed out')), 1000); }),
+      ]);
+    } catch { return; } finally { clearTimeout(timer); }
+    this.ledger.transaction(s => observeDevices(s, stateOf(s.application), new Map(devices.map(d => [d.deviceId, d.connected])),
+      (key, value) => project(s, key, value)));
   }
   async close(): Promise<void> {
     this.closed = true; clearTimeout(this.timer); await this.chain; clearTimeout(this.timer); await this.core.close();
