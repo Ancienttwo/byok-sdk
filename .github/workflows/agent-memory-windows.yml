@@ -33,8 +33,8 @@ jobs:
           Get-Volume | Select-Object DriveLetter,FileSystem,UniqueId,DriveType | Format-List | Out-File -Append .ci-artifacts/wo09/profile.txt
           whoami /all | Out-File -Append .ci-artifacts/wo09/profile.txt
           if ($LASTEXITCODE -ne 0) { throw 'whoami failed' }
-          'Hosted token and storage profile are observations. Normal-user and S recovery acceptance remain unproved.' | Out-File -Append .ci-artifacts/wo09/profile.txt
-      - name: Check platform refusal, identity parity and NTFS post-rename barrier failure; collect flush diagnostics
+          'Hosted token and storage profile are observations. Process kills test model P only. OS-crash and power-loss recovery remain unproved.' | Out-File -Append .ci-artifacts/wo09/profile.txt
+      - name: Check platform refusal, identity parity, NTFS directory barrier and process-kill recovery; collect flush diagnostics
         working-directory: packages/client/native/agent-memory-fs
         shell: pwsh
         run: |
@@ -44,6 +44,40 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'native Windows tests failed' }
           go build -buildvcs=false -trimpath -o "$env:RUNNER_TEMP/byok-agent-memory-fs.exe" .
           if ($LASTEXITCODE -ne 0) { throw 'helper build failed' }
+          go test -c -o "$env:RUNNER_TEMP/agent-memory-fs-tests.exe" .
+          if ($LASTEXITCODE -ne 0) { throw 'test binary build failed' }
+      - name: Check NTFS directory barrier and process-kill recovery as a standard user
+        shell: pwsh
+        run: |
+          # The runner token is an administrator. A new local account in Users
+          # only runs the same test binary, so the barrier is not admin-only.
+          $user = 'byokntfs'
+          $password = 'Aa1!' + [guid]::NewGuid().ToString('N')
+          net user $user $password /add | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'standard user creation failed' }
+          $work = Join-Path $env:RUNNER_TEMP 'standard-user'
+          New-Item -ItemType Directory -Force (Join-Path $work 'tmp') | Out-Null
+          Copy-Item "$env:RUNNER_TEMP/agent-memory-fs-tests.exe" $work
+          icacls $work /grant "${user}:(OI)(CI)F" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'work directory grant failed' }
+          @(
+            '@echo off'
+            "set TMP=$work\tmp"
+            "set TEMP=$work\tmp"
+            "whoami /all > `"$work\token.txt`""
+            "`"$work\agent-memory-fs-tests.exe`" -test.v -test.count=1 -test.run `"^(TestWindowsMemoryResultBarrierFailsClosedOnNTFS|TestWindowsProcessKillAtEachBarrierPointOnNTFS|TestWindowsProcessKillAtRandomTimesOnNTFS)$`" > `"$work\go.txt`" 2>&1"
+            'exit /b %ERRORLEVEL%'
+          ) | Set-Content -Encoding ascii (Join-Path $work 'run.cmd')
+          $credential = [pscredential]::new($user, (ConvertTo-SecureString $password -AsPlainText -Force))
+          $process = Start-Process -FilePath (Join-Path $work 'run.cmd') -Credential $credential -WorkingDirectory $work -Wait -PassThru
+          Copy-Item (Join-Path $work 'token.txt') .ci-artifacts/wo09/standard-user-token.txt -ErrorAction SilentlyContinue
+          Copy-Item (Join-Path $work 'go.txt') .ci-artifacts/wo09/standard-user-go.txt -ErrorAction SilentlyContinue
+          Get-Content (Join-Path $work 'token.txt')
+          Get-Content (Join-Path $work 'go.txt')
+          $token = Get-Content -Raw (Join-Path $work 'token.txt')
+          if ($token -notmatch "\\$user\b") { throw 'test did not run as the standard user' }
+          if ($token -match 'S-1-5-32-544') { throw 'standard user token holds Administrators' }
+          if ($process.ExitCode -ne 0) { throw "standard-user tests failed: exit $($process.ExitCode)" }
       - name: Check platform refusal with empty env and junction fixtures
         shell: pwsh
         run: |
