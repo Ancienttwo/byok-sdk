@@ -1,0 +1,351 @@
+import { execFile, type spawn as nodeSpawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import path from 'node:path';
+import { promisify } from 'node:util';
+import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { ExecutionScratch } from '../../daemon/retention/scratch';
+import {
+  freezeRuntimeAdapterDescriptor,
+  PolicyUnsupportedError,
+  SteerUnsupportedError,
+  type RuntimeAdapter,
+  type RuntimeAdapterPrepareInput,
+  type RuntimeAdapterPrepareResult,
+  type RuntimeDetectResult,
+  type RuntimeOperationStartInput,
+  type Session,
+} from '../../types';
+import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
+import { buildRuntimeEnv } from '../../daemon/environment';
+import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
+import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
+import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process';
+import {
+  grokSession,
+  RuntimeFailureError,
+  SessionNotFoundError,
+  type AcpRecord,
+  type RawAcpSession,
+} from '../../runtime/acp-session-runtime';
+import { AsyncQueue } from '../../util/async-queue';
+import type { ResolvedBin } from '../codex/resolve-bin';
+import { GrokProjection, type GrokTurnOutcome } from './projection';
+import { resolveGrokBin } from './resolve-bin';
+import { isQualifiedGrokVersion, QUALIFIED_GROK_VERSION } from './grok-version';
+
+const execFileAsync = promisify(execFile);
+const DETECT_TIMEOUT_MS = 5000;
+const DEFAULT_RETAINED_BYTES = 16 * 1024 * 1024;
+const DEFAULT_INTERRUPT_MS = 1000;
+
+export interface GrokAdapterOptions {
+  /** Grok model id for every session (`session/set_model`). Absent: the user's Grok default. */
+  model?: string;
+  resolveBin?: () => ResolvedBin;
+  spawnFn?: typeof nodeSpawn;
+  maxRetainedBytes?: number;
+  interruptTimeoutMs?: number;
+}
+
+/**
+ * Grok Build over ACP (`grok agent --always-approve --no-leader stdio`),
+ * through the vendored OAR Grok profile. The SDK owns the agent process,
+ * every terminal command Grok asks the client to run, the environment, the
+ * record budget and the permission policy (requests are cancelled).
+ *
+ * `grok` is not a frozen wire runtime id, so a task reaches this adapter by
+ * the custom-harness identity (`harnessId: 'grok'`). It takes no dispatch
+ * selection; the model is the adapter's `model` option.
+ */
+export class GrokAdapter implements RuntimeAdapter {
+  get descriptor() { return freezeRuntimeAdapterDescriptor({
+    id: 'grok',
+    supportsDispatchSelection: false,
+    capabilities: {
+      steer: false,
+      resume: true,
+      approvalInteractive: false,
+      mcpToolsets: true,
+    },
+  }); }
+
+  constructor(private readonly options: GrokAdapterOptions = {}) {
+    const retained = options.maxRetainedBytes ?? DEFAULT_RETAINED_BYTES;
+    if (!Number.isSafeInteger(retained) || retained < 1) throw new TypeError('invalid Grok retention budget');
+    const interrupt = options.interruptTimeoutMs ?? DEFAULT_INTERRUPT_MS;
+    if (!Number.isFinite(interrupt) || interrupt <= 0 || interrupt > 2_147_483_647) throw new TypeError('invalid Grok interrupt timeout');
+    if (options.model !== undefined && options.model.trim() === '') throw new TypeError('GrokAdapterOptions.model must not be blank');
+    this.options = { ...options };
+  }
+
+  /** Reads the version, probes ACP mode and looks for a login signal. It never opens a session or writes Grok's home. */
+  async detect(): Promise<RuntimeDetectResult> {
+    try {
+      const command = (this.options.resolveBin ?? resolveGrokBin)().command;
+      const version = await probeRuntimeVersion(command, DETECT_TIMEOUT_MS);
+      if (version.kind !== 'available') return version;
+      const text = version.stdout.trim() || version.stderr.trim();
+      try {
+        await execFileAsync(command, ['agent', 'stdio', '--help'], {
+          timeout: DETECT_TIMEOUT_MS,
+          killSignal: 'SIGKILL',
+          env: buildRuntimeEnv({ ambient: process.env }),
+        });
+      } catch {
+        return { kind: 'refused', reason: 'acp_unavailable' };
+      }
+      return {
+        kind: 'available',
+        version: text,
+        authPresent: grokAuthPresent(process.env),
+        ...(!isQualifiedGrokVersion(text)
+          ? { advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: QUALIFIED_GROK_VERSION } as const }
+          : {}),
+      };
+    } catch (error) {
+      return classifyDetectError(error);
+    }
+  }
+
+  async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    if (input.offer.dispatchSelection !== undefined)
+      return { kind: 'reject', reason: 'grok cannot execute a dispatch selection', retryable: false };
+    const detected = await this.detect();
+    if (detected.kind !== 'available')
+      return {
+        kind: 'reject',
+        reason: `grok installation refused: ${detected.kind === 'refused' ? detected.reason : detected.kind}`,
+        retryable: false,
+      };
+    const command = (this.options.resolveBin ?? resolveGrokBin)().command;
+    return { kind: 'prepared', operation: { start: (start) => this.start(start, command) } };
+  }
+
+  private async start(input: RuntimeOperationStartInput, command: string): Promise<Session> {
+    if (input.kind !== 'instruction' || typeof input.instruction !== 'string')
+      throw authority('grok requires a resolved instruction');
+    if (input.manifest.dispatchSelection !== undefined)
+      throw authority('prepared grok operation received a manifest with a dispatch selection');
+    const cwd = input.manifest.cwd;
+    if (!cwd) throw authority('grok manifest has no sealed cwd');
+    // As OAR: the servers go in the ACP mcpServers of session/new or session/resume.
+    const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
+    const spawnAgent = createOwnedLineProcessSpawn({ spawnFn: this.options.spawnFn, label: 'grok agent' });
+    const spawnTerminal = createOwnedTerminalSpawn({ spawnFn: this.options.spawnFn });
+    const session = new GrokSession(input.scratch, this.options.model, this.options.interruptTimeoutMs ?? DEFAULT_INTERRUPT_MS, input.manifest.sessionRef);
+    try {
+      const raw = await grokSession(
+        (bin, args, options) => {
+          const child = spawnAgent(bin, args, options);
+          session.own(child);
+          void child.exited.then(() => session.exited(), (error) => session.fail(error));
+          return child;
+        },
+        spawnTerminal,
+        { kind: 'available', via: 'executable', command },
+        {
+          cwd,
+          env: { ...input.env, ...input.scratch.env } as Record<string, string>,
+          ...(this.options.model === undefined ? {} : { model: this.options.model }),
+          ...(mcpServers.length === 0 ? {} : { mcpServers }),
+          ...(input.manifest.sessionRef === undefined ? {} : { resume: input.manifest.sessionRef }),
+        },
+        {
+          maxBytes: this.options.maxRetainedBytes ?? DEFAULT_RETAINED_BYTES,
+          onReady: (id) => session.ready(id),
+          onRecord: (record) => session.record(record),
+          onLimit: () => {
+            const error = infrastructure('grok retained record byte budget exceeded');
+            session.fail(error);
+            throw error;
+          },
+        },
+      );
+      session.bind(raw);
+      if (input.signal?.aborted) throw infrastructure('grok start was aborted');
+      await session.prompt(input.instruction);
+      return session;
+    } catch (error) {
+      try {
+        await session.close();
+      } catch (disposal) {
+        throw new RuntimeStartupDisposalFailure(() => session.close(), { cause: disposal });
+      }
+      // A missing session, a refused login or a refused model cannot succeed on retry: fail closed.
+      if (error instanceof SessionNotFoundError || error instanceof RuntimeFailureError)
+        throw new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason: error.message });
+      throw new RuntimeExecutionFailure({
+        phase: 'start',
+        category: isRuntimeExecutionFailure(error) ? error.category : 'infrastructure',
+        retry: isRuntimeExecutionFailure(error) ? error.retry : 'retryable',
+        reason: error instanceof Error ? error.message : 'grok open failed',
+      });
+    }
+  }
+}
+
+/** Grok's own login file, or an API key in the runtime env. Existence only; the file is never read. */
+function grokAuthPresent(env: NodeJS.ProcessEnv): boolean {
+  if (env.XAI_API_KEY) return true;
+  const home = env.GROK_HOME || path.join(homedir(), '.grok');
+  return existsSync(path.join(home, 'auth.json'));
+}
+
+const authority = (reason: string) =>
+  new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason });
+const infrastructure = (reason: string) =>
+  new RuntimeExecutionFailure({ phase: 'run', category: 'infrastructure', retry: 'non-retryable', reason });
+
+class GrokSession implements Session {
+  sessionRef = '';
+  private raw?: RawAcpSession;
+  private child?: { dispose(): Promise<void>; kill(): void };
+  private projection?: GrokProjection;
+  private readonly queue = new AsyncQueue<AgentEvent>();
+  private failure?: RuntimeExecutionFailure;
+  private active = false;
+  private readonly interruptWaiters = new Set<() => void>();
+  private stopping = false;
+  private closeAttempt?: Promise<void>;
+
+  constructor(
+    private readonly scratch: ExecutionScratch,
+    private readonly model: string | undefined,
+    private readonly interruptMs: number,
+    private readonly expectedSessionRef?: string,
+  ) {}
+
+  own(child: { dispose(): Promise<void>; kill(): void }): void {
+    this.child = child;
+  }
+  ready(id: string): void {
+    if (this.expectedSessionRef !== undefined && id !== this.expectedSessionRef) throw authority('grok resume returned a different session id');
+    this.sessionRef = id;
+    this.projection = new GrokProjection(id);
+  }
+  bind(raw: RawAcpSession): void {
+    this.raw = raw;
+  }
+  record(record: AcpRecord): void {
+    try {
+      this.projection?.consume(record, (event) => this.queue.push(event), (turn) => this.turnEnded(turn));
+    } catch (error) {
+      this.fail(error);
+      throw error;
+    }
+  }
+  private turnEnded(turn: GrokTurnOutcome): void {
+    this.active = false;
+    for (const resolve of this.interruptWaiters) resolve();
+    if (turn.kind === 'failed')
+      this.fail(new RuntimeExecutionFailure({
+        phase: 'run',
+        category: 'semantic',
+        retry: turn.failure === 'rate_limited' ? 'retryable' : 'non-retryable',
+        reason: turn.reason,
+      }));
+  }
+  fail(error: unknown): void {
+    this.failure ??= isRuntimeExecutionFailure(error)
+      ? error
+      : infrastructure(error instanceof Error ? error.message : 'grok runtime failed');
+    this.flushPendingUsage();
+    this.queue.end();
+    void this.close().catch(() => {});
+  }
+  exited(): void {
+    if (!this.stopping) this.fail(infrastructure('grok agent exited'));
+  }
+  get events(): AsyncIterable<AgentEvent> {
+    const self = this;
+    return (async function* () {
+      try {
+        for await (const event of self.queue) yield event;
+      } catch (error) {
+        self.fail(error);
+        throw self.failure;
+      }
+      if (self.failure) throw self.failure;
+    })();
+  }
+  async prompt(input: string): Promise<void> {
+    if (!this.raw) throw infrastructure('grok session is not open');
+    if (this.active) throw infrastructure('grok turn is already active');
+    this.active = true;
+    try {
+      const result = await this.raw.prompt(input);
+      if (result.response.body.kind !== 'accepted') throw infrastructure(result.response.body.reason ?? 'grok prompt refused');
+    } catch (error) {
+      this.active = false;
+      throw error;
+    }
+  }
+  async followUp(task: TaskOfferPayload): Promise<void> {
+    if (typeof task.instruction !== 'string') throw new PolicyUnsupportedError('grok requires a string instruction');
+    if (task.dispatchSelection !== undefined) throw new PolicyUnsupportedError(`grok persistent session runs ${this.model ?? 'the default model'} and takes no dispatch selection`);
+    await this.prompt(task.instruction);
+  }
+  async steer(): Promise<void> {
+    // Grok's `_meta.sendNow` cancels the running prompt and re-runs its tool calls: not an injection.
+    throw new SteerUnsupportedError('grok', 'grok cannot inject into an active turn');
+  }
+  async interrupt(): Promise<void> {
+    if (!this.raw || !this.active) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let resolveTurn!: () => void;
+    const turnSettled = new Promise<void>(resolve => { resolveTurn = resolve; });
+    this.interruptWaiters.add(resolveTurn);
+    try {
+      await Promise.race([
+        // session/cancel is a notification; the cancelled prompt answer carries the final usage and outcome.
+        this.raw.abort().then(async result => { if (result.response.body.kind === 'accepted') await turnSettled; }),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(infrastructure('grok interrupt timed out')), this.interruptMs);
+        }),
+      ]);
+    } catch (error) {
+      this.fail(error);
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      this.interruptWaiters.delete(resolveTurn);
+    }
+  }
+  async close(): Promise<void> {
+    this.stopping = true;
+    if (!this.closeAttempt) {
+      const promise = Promise.resolve().then(async () => {
+        try {
+          try {
+            await this.raw?.dispose();
+          } catch (error) {
+            if (!this.failure) throw error;
+          } finally {
+            await this.child?.dispose();
+            await this.scratch.release();
+          }
+        } finally {
+          // The cancelled prompt answer can follow the cancel; end the consumer only after disposal drained stdout.
+          this.flushPendingUsage();
+          this.queue.end();
+        }
+        this.raw = undefined;
+        this.projection = undefined;
+        this.child = undefined;
+      });
+      this.closeAttempt = promise.catch((error) => {
+        this.closeAttempt = undefined;
+        throw error;
+      });
+    }
+    await this.closeAttempt;
+  }
+  private flushPendingUsage(): void {
+    const usage = this.projection?.takePendingUsage();
+    if (usage) this.queue.push(usage);
+  }
+  async resolveApproval(): Promise<void> {
+    throw new PolicyUnsupportedError('Grok has no interactive approval product lane');
+  }
+}

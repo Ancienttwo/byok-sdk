@@ -130,7 +130,9 @@ import type { StartAcpSession as VendorStartAcp, AcpSessionOptions, AcpSessionHo
 import type { SpawnAcpLineProcess } from '../../packages/client/vendor/oar/c264f17/shared/acp/process.js';
 import type { SpawnAcpTerminal } from '../../packages/client/vendor/oar/c264f17/shared/acp/terminal.js';
 import type { AdapterSession } from '../../packages/client/vendor/oar/c264f17/contracts/session.js';
+import type { RuntimeFailureError as VendorRuntimeFailureError } from '../../packages/client/vendor/oar/c264f17/contracts/runtime-failure-error.js';
 import type { spawnOwnedTerminalProcess } from '../../packages/client/src/runtime/owned-terminal-process.js';
+import type { grokSession as vendorGrokSession } from '../../packages/client/vendor/oar/c264f17/runtimes/grok/session.js';
 
 type AcpBridgeArgs = Parameters<AcpBridge.StartAcpSession>;
 type AcpBridgeOptions = Mutable<
@@ -147,7 +149,11 @@ type AcpBridgeSession = {
   dispose: AdapterSession['dispose'];
 };
 
-export type CheckAcpExports = Assert<Equal<keyof typeof AcpBridge, 'SessionNotFoundError'>>;
+export type CheckAcpExports = Assert<Equal<keyof typeof AcpBridge, 'SessionNotFoundError' | 'RuntimeFailureError' | 'grokSession'>>;
+export type CheckAcpRuntimeFailure = Assert<Assignable<VendorRuntimeFailureError, AcpBridge.RuntimeFailureError>>;
+export type CheckAcpRuntimeFailureFields = Assert<Equal<Pick<VendorRuntimeFailureError, 'name'>, Pick<AcpBridge.RuntimeFailureError, 'name'>>>;
+export type CheckGrokVendor = Assert<Equal<typeof vendorGrokSession, VendorStartAcp>>;
+export type CheckGrokBridge = Assert<Equal<typeof AcpBridge.grokSession, AcpBridge.StartAcpSession>>;
 export type CheckAcpNotFound = Assert<Equal<typeof AcpBridge.SessionNotFoundError, typeof Bridge.SessionNotFoundError>>;
 export type CheckAcpControl = Assert<Equal<AcpBridge.AcpControl, BridgeControl>>;
 export type CheckAcpRecord = Assert<Equal<AcpBridge.AcpRecord, Flatten<BridgeRecord>>>;

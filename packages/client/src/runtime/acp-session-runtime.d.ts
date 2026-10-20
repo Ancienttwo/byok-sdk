@@ -1,6 +1,11 @@
 import type { spawnOwnedLineProcess } from './owned-line-process';
 import type { spawnOwnedTerminalProcess } from './owned-terminal-process';
 export { SessionNotFoundError } from './codex-session-runtime';
+/** The open failed because the runtime refused the login (`auth`) or the model (`model_unavailable`): the vendored typed error, never matched by name or message. */
+export declare class RuntimeFailureError extends Error {
+  readonly name: 'RuntimeFailureError';
+  readonly failure: string;
+}
 export interface AcpControl {
   // ControlResult also permits an exit response with a numeric or null code.
   response: { body: { kind: string; code?: string | number | null; reason?: string } };
@@ -44,3 +49,5 @@ export type StartAcpSession = (
     onLimit?: () => never;
   },
 ) => Promise<RawAcpSession>;
+/** OAR's Grok Build profile: `grok agent --always-approve --no-leader stdio`. */
+export declare const grokSession: StartAcpSession;

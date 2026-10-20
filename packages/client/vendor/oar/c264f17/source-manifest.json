@@ -252,6 +252,30 @@
       "vendoredSha256": "cbca7b2720b16d2275c2fe547a8326e90b4178ab07792c0b17a9561edb329c95"
     },
     {
+      "path": "runtimes/grok/failure.ts",
+      "sourcePath": "packages/oar/src/runtimes/grok/failure.ts",
+      "upstreamSha256": "2cd9ae621c33e6151014e1e600567b9dca894b65bdb746eceef176e8ff477d8e",
+      "vendoredSha256": "2cd9ae621c33e6151014e1e600567b9dca894b65bdb746eceef176e8ff477d8e"
+    },
+    {
+      "path": "runtimes/grok/options.ts",
+      "sourcePath": "packages/oar/src/runtimes/grok/options.ts",
+      "upstreamSha256": "977f19727b3dddce422b2cb7dbd95da41529b78dc5b3b865c9a5aea61e3b0c7e",
+      "vendoredSha256": "977f19727b3dddce422b2cb7dbd95da41529b78dc5b3b865c9a5aea61e3b0c7e"
+    },
+    {
+      "path": "runtimes/grok/session.ts",
+      "sourcePath": "packages/oar/src/runtimes/grok/session.ts",
+      "upstreamSha256": "512658ff46dc3c8895651996236d916f0444eb03faeb6f21dc108a7cd8b71844",
+      "vendoredSha256": "512658ff46dc3c8895651996236d916f0444eb03faeb6f21dc108a7cd8b71844"
+    },
+    {
+      "path": "runtimes/grok/spontaneous-usage.ts",
+      "sourcePath": "packages/oar/src/runtimes/grok/spontaneous-usage.ts",
+      "upstreamSha256": "5072df7f323bdc26aeafc4138076376c405b49f56982c2effff237f73c91005c",
+      "vendoredSha256": "5072df7f323bdc26aeafc4138076376c405b49f56982c2effff237f73c91005c"
+    },
+    {
       "path": "shared/abort-fallback.ts",
       "sourcePath": "packages/oar/src/shared/abort-fallback.ts",
       "upstreamSha256": "665fad321bdcfc1b1e9d67f7f8beb621e2d796cd61383d8fb2d27e52573670a3",
@@ -386,6 +410,12 @@
       "sourcePath": "packages/oar/src/shared/control-input.ts",
       "upstreamSha256": "4ec197e2d4dcfcbe9654bd60be5d5b45d469f323b9606530cf6f9384cea4962d",
       "vendoredSha256": "4ec197e2d4dcfcbe9654bd60be5d5b45d469f323b9606530cf6f9384cea4962d"
+    },
+    {
+      "path": "shared/credential-redaction.ts",
+      "sourcePath": "packages/oar/src/shared/credential-redaction.ts",
+      "upstreamSha256": "2d9375ae2a85c0cf3847f31631bce19e48bf2791170e62c2f9f980ce14e42351",
+      "vendoredSha256": "2d9375ae2a85c0cf3847f31631bce19e48bf2791170e62c2f9f980ce14e42351"
     },
     {
       "path": "shared/credential-redactor.ts",

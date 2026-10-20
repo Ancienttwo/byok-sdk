@@ -62,6 +62,8 @@ test('OAR ACP JS bridge re-exports the checked vendored values', () => {
   });
   assert.deepEqual(reexports, [
     ['../../vendor/oar/c264f17/contracts/session-not-found-error.js', [['SessionNotFoundError', 'SessionNotFoundError']]],
+    ['../../vendor/oar/c264f17/contracts/runtime-failure-error.js', [['RuntimeFailureError', 'RuntimeFailureError']]],
+    ['../../vendor/oar/c264f17/runtimes/grok/session.js', [['grokSession', 'grokSession']]],
   ]);
 });
 

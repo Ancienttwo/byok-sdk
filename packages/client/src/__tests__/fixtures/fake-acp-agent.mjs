@@ -57,13 +57,15 @@ function promptText(params) {
 }
 
 async function prompt(message) {
-  const input = promptText(message.params);
-  log({ kind: 'prompt', text: input });
+  const full = promptText(message.params);
+  log({ kind: 'prompt', text: full });
+  // The daemon may put rules before the task; the last line selects the scenario.
+  const input = full.trim().split('\n').at(-1) ?? '';
   if (input === 'hold') { pending.set(message.id, input); return; }
   if (input === 'hold-silent') { pending.set(message.id, 'silent'); return; }
   if (input === 'exit') { process.exit(9); }
   if (input === 'fail') { error(message.id, -32603, 'model provider failed'); return; }
-  if (input === 'rate-limited') { error(message.id, -32603, 'rate limit exceeded', { code: 'RATE_LIMITED' }); return; }
+  if (input === 'rate-limited') { error(message.id, -32003, 'Rate limited'); return; }
   if (input === 'huge') { text('x'.repeat(256 * 1024)); result(message.id, answer()); return; }
   if (input === 'tool') {
     text('Let me look. ');

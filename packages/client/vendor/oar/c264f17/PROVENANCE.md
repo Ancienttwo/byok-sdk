@@ -2,7 +2,7 @@
 
 Source: https://github.com/botiverse/oar, version 0.67.0, fixed commit `c264f17040dd9513b43300886a80f3f6eddde7b1`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
 
-`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 76 source files plus LICENSE. Sixty-seven source files keep upstream bytes. Nine source files contain BYOK changes. The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, plus the shared ACP session stack (`shared/acp/`) and its import closure. No Cursor, CLI, arena, executable manager, other runtime or branded resources are included.
+`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 81 source files plus LICENSE. Seventy-two source files keep upstream bytes. Nine source files contain BYOK changes. The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, plus the shared ACP session stack (`shared/acp/`) and the Grok Build session (`runtimes/grok/session.ts`) with their import closure. No Cursor, CLI, arena, executable manager, other runtime or branded resources are included. The Grok install, update, inventory, model-list and account-usage modules are not included.
 
 The SDK typechecks this source with the ES2024 library (`packages/client/tsconfig.json`, `scripts/api-surface/tsconfig.oar-bridge.json`). The emit target stays ES2022, and the Node 24 engine floor provides the ES2023/ES2024 built-ins upstream uses (`Array.prototype.toSorted`, `Promise.withResolvers`).
 
@@ -22,9 +22,9 @@ Policy: follow upstream. A file is maintained only where the SDK's ownership of 
 
 The SDK default record budget is 16 MiB. The SDK releases the retained stream at completion. The SDK JS/declaration bridge (`src/runtime/codex-session-runtime.{js,d.ts}`) exposes text-only `prompt` and `steer`, `abort`, `records` and `dispose`; `scripts/api-surface/oar-bridge-types.ts` checks it against these sources.
 
-The SDK bridge `src/runtime/acp-session-runtime.{js,d.ts}` declares one start signature for every vendored ACP runtime: text-only `prompt`, `abort`, `records` and `dispose`. `scripts/api-surface/oar-bridge-types.ts` checks it against these sources.
+The SDK bridge `src/runtime/acp-session-runtime.{js,d.ts}` declares one start signature for every vendored ACP runtime: text-only `prompt`, `abort`, `records` and `dispose`. It exports `grokSession` from the Grok profile, which keeps upstream bytes. `scripts/api-surface/oar-bridge-types.ts` checks it against these sources.
 
-Not vendored: `shared/session-credentials.ts`, `shared/seal-session.ts`, `shared/environment.ts`, `shared/home-initialization.ts`, the executable manager, observe modules other than `graph.ts`, and all runtimes other than Codex. One upstream npm dependency enters the SDK: `@agentclientprotocol/sdk`, exact pin `1.4.0` (the version in OAR's lockfile at this commit, Apache-2.0), which owns the ACP wire. `cross-spawn` does not enter; the terminal delta replaces it.
+Not vendored: `shared/session-credentials.ts`, `shared/seal-session.ts`, `shared/environment.ts`, `shared/home-initialization.ts`, the executable manager, observe modules other than `graph.ts`, and all runtimes other than Codex and the Grok session. One upstream npm dependency enters the SDK: `@agentclientprotocol/sdk`, exact pin `1.4.0` (the version in OAR's lockfile at this commit, Apache-2.0), which owns the ACP wire. `cross-spawn` does not enter; the terminal delta replaces it.
 
 ## History
 
@@ -33,6 +33,8 @@ The sections below record each step as it was made. Deltas they describe may sin
 ### ACP selection (#514)
 
 Same base commit. Add the shared ACP session stack for ACP runtimes such as Grok Build: all 19 files of `shared/acp/`, plus `shared/held-input.ts` and `contracts/runtime-failure-error.ts` from its import closure. The other files of that closure were already selected. Four files carry BYOK deltas (`process.ts`, `session.ts`, `terminal.ts`, `client-app.ts`). Each delta sits at a seam the policy names: process, environment, record budget or interaction. The handshake order, deadlines, MCP credential redaction, resume selection, prompt and abort machinery keep upstream bytes.
+
+Then add the Grok Build session for `GrokAdapter`: `runtimes/grok/{session,failure,options,spontaneous-usage}.ts` and `shared/credential-redaction.ts`, all with upstream bytes. The profile runs `grok agent --always-approve --no-leader stdio`.
 
 ### BYOK S1 changes
 
