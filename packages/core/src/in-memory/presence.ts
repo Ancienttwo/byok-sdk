@@ -48,10 +48,11 @@ export class InMemoryPresenceStore implements PresenceStore {
     const now = this.#clock.now();
     const key = tenantKey(tenant, input.deviceId);
     const existing = this.#hints.get(key);
+    // A backward clock step has zero elapsed time: only positive intervals throttle.
     if (
-      existing !== undefined &&
+      existing &&
       now.toISOString() < existing.expiresAt &&
-      now.getTime() - Date.parse(existing.observedAt) < input.minimumIntervalMs
+      Math.max(0, Number(now) - Date.parse(existing.observedAt)) < input.minimumIntervalMs
     ) {
       throw new ByokCoreError(
         'hint_rate_limited',

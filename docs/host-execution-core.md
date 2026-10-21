@@ -23,7 +23,7 @@ Memory storage loses its wakes at exit. The daemon runs with the user's local cr
 Use the server package's [identity-stable loopback listener](../packages/server/README.md#identity-stable-loopback-listener)
 with an immutable Host-owned port assignment to preserve the daemon's cursor URL across restarts.
 Topology H has no device-local Host. Its service schedules calls to the Cloud fresh-execution API.
-The embedded wake queue is not a hosted scheduler.
+The embedded wake queue is not a hosted scheduler. A Topology H Host on Cloudflare Workers also follows the [hosted Host contract](hosted-host-contract.md).
 Neither topology runs BYOK work in the cloud or keeps the user's model keys there.
 
 An IM channel is a Host adapter. See the [Host IM adapter guide](host-im-adapter.md).
@@ -176,7 +176,7 @@ Read paths and display text are in section 7 of the [downstream diagnostics guid
 Use `SHA-256([routineId, definitionVersion, { kind, plannedAt }])` as the occurrence key.
 Trigger kind is `scheduled` or `catch_up`. Preserve the original planned time.
 Commit the occurrence, its intent and the next time together.
-Compute the next time from the current wall clock. Skip intervening missed slots.
+Compute the next time from the later of the current wall clock and the delivered slot. Skip intervening missed slots.
 One overdue wake creates at most one catch-up after sleep.
 A repeated wake uses the committed trigger and next time. It cannot reclassify the same slot later.
 
@@ -475,6 +475,13 @@ is not a projection and never enters ContextPack directly. Old ordering metadata
 Late old-task projections cannot clear the refresh marker. The core binds the next
 submission to that marker before sending it to the SDK. Only its task-close projection
 can clear the marker. A valid pack is frozen with the execution input.
+
+Terminal memory intent rows and their approval keys stay in the Host ledger until the Host
+selects them with `acknowledgedMemoryIntentIds` in an explicit `HostLedger.compact` call.
+Pending rows and rows of an unfinished restore are refused. Compaction moves each row to an
+expiring retired copy outside the JSON body. Until the copy expires, an approval replay returns
+the original row and device replays get the stored readback. After that, the same approval
+reference is a new request. See [memory retention](../examples/host-execution-core/README.md#memory-retention).
 
 The example supplies copy-and-own Host functions. A downstream Host owns authenticated
 user and device routes, grant records, current placement, notice retry scheduling and UI.

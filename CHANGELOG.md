@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Feature (examples)** — K4 `HostLedger.compact` also removes acknowledged
+  terminal memory intents and their approval keys. Inside the retention window,
+  approval and device replays get the original row. `MemoryOptions.now` must
+  return integer milliseconds from the same clock as the compaction `now`.
+  Routine occurrence identities now expire with their slot, and the derived
+  `occurrence:` key shape is reserved for routine occurrences (#602).
+- **Fix (examples)** — a K4 routine wake that arrives before the Host clock
+  reaches its slot now reserves the next slot. Before, the routine reserved the
+  delivered slot again (#602).
 - **Feature (keys, client)** — add a separate local provider custody launcher
   for Hermes. The Host's keys process reads the selected profile key under the
   custody lock at each start; the daemon environment carries no provider key.
@@ -40,6 +49,15 @@
   its own error text. The README states that the allowlist governs Bot turns only.
   The Host's direct `bot.core.enqueue` call bypasses it. This completes the five
   low-severity follow-ups of #622; #606 stays open.
+- **Fixed (core, cloud-dataplane, conformance, server)** — a presence publication
+  with `minimumIntervalMs: 0` no longer fails with `hint_rate_limited` when the
+  clock moved backwards. The embedded server renews the lease on each accepted
+  envelope and each poll, so after a wall-clock rollback `POST /byok/messages`
+  and `GET /byok/events` returned HTTP 500 until the clock caught up. Memory and
+  SQLite storage were both affected. The lease is now `now + TTL` on the store
+  clock. Heartbeats with a non-zero minimum interval keep their throttle. The
+  conformance suite now covers the rollback case, and `advanceTime` accepts a
+  negative value (#674).
 - **Feature (client, protocol)** — adapter metadata for Hosts (#635). Each
   built-in descriptor declares `platforms`. Runtime detection refuses another
   platform with `platform_unsupported` before any probe; Grok and Hermes
