@@ -22,7 +22,8 @@
   stay as the fallback when the event stream is not available (#630).
 - **Feature (client)** — MCP server core keeps tool `title`, `annotations`,
   `outputSchema` and `_meta`, and streams request-scoped progress over stdio and
-  bounded HTTP POST SSE, also in stateless mode (#631).
+  bounded stateful HTTP POST SSE. Stateless HTTP rejects progress requests with
+  400 (#631).
 - **Feature (examples)** — K4 memory page adds a bounded whole-tree restore
   with a queue gate and a per-file result summary (#632). Each file is a CAS
   write; the restore is not an atomic tree rollback.

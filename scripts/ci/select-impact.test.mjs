@@ -106,3 +106,15 @@ test('actual exported migration runner selects installed-tarball upgrade validat
   assert.deepEqual(plan.dirs, ['packages/cloud-dataplane']);
   assert.deepEqual(plan.families, ['dataplane', 'release-pack-migrate']);
 });
+
+
+test('native asset packaging fixtures select their real platform smoke without broad fallback', () => {
+  for (const path of ['examples/packaging/native-assets-fixture.ts', 'examples/packaging/native-assets-smoke.mjs']) {
+    assert.deepEqual(selectImpact([path]), {
+      dirs: ['examples/packaging'], files: [path], families: ['packageability-smoke'], reason: 'impacted',
+    });
+  }
+  for (const path of ['examples/packaging/native-assets-unknown.ts', 'examples/packaging/unreviewed-smoke.mjs']) {
+    assert.throws(() => selectImpact([path]), /reviewed release validation required/i);
+  }
+});

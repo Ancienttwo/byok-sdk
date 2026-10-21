@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2076751,
+      "budgetBytes": 2064521,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -41,6 +41,7 @@
       ],
       "lazyImports": [
         "#byok-acp-runtime",
+        "#byok-hermes-session",
         "#byok-pi-runtime-host",
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
@@ -127,6 +128,7 @@
       ],
       "lazyImports": [
         "#byok-acp-runtime",
+        "#byok-hermes-session",
         "koffi"
       ],
       "thirdParty": [],
@@ -152,7 +154,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Embedded Agent memory service",
-      "budgetBytes": 69515,
+      "budgetBytes": 69427,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -290,7 +292,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Tools-only MCP Streamable HTTP framing",
-      "budgetBytes": 36564,
+      "budgetBytes": 36482,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -409,6 +411,42 @@
           "rule": "Function reference"
         }
       ]
+    }
+  },
+  "@byok-sdk/client#byok-hermes-session": {
+    "kind": "imports",
+    "policy": {
+      "purpose": "Private Hermes session runtime; loaded only when starting an execution",
+      "budgetBytes": 12529,
+      "zod": false,
+      "codegen": false,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": false
+      }
+    },
+    "facts": {
+      "target": "packages/client/dist/adapters/hermes/hermes-session-runtime.js",
+      "conditions": [
+        "default"
+      ],
+      "types": [
+        "packages/client/dist/adapters/hermes/hermes-session-runtime.d.ts"
+      ],
+      "bareImports": [
+        "fs"
+      ],
+      "lazyImports": [],
+      "thirdParty": [],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [
+          "fs"
+        ],
+        "thirdParty": []
+      },
+      "codegen": []
     }
   },
   "@byok-sdk/client#byok-pi-runtime-host": {
@@ -713,7 +751,7 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 96326,
+          "line": 96325,
           "rule": "opaque import()"
         },
         {
@@ -1597,6 +1635,7 @@
         "child_process",
         "crypto",
         "fs",
+        "module",
         "path",
         "zod"
       ],
@@ -1611,6 +1650,7 @@
           "child_process",
           "crypto",
           "fs",
+          "module",
           "path"
         ],
         "thirdParty": []
@@ -1796,6 +1836,7 @@
         "fs",
         "hono",
         "http",
+        "module",
         "path",
         "zod"
       ],
@@ -1813,6 +1854,7 @@
           "crypto",
           "fs",
           "http",
+          "module",
           "path"
         ],
         "thirdParty": [
@@ -2282,6 +2324,7 @@
         "child_process",
         "crypto",
         "fs",
+        "module",
         "path",
         "zod"
       ],
@@ -2296,6 +2339,7 @@
           "child_process",
           "crypto",
           "fs",
+          "module",
           "path"
         ],
         "thirdParty": []

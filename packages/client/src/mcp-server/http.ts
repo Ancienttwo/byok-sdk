@@ -9,10 +9,7 @@ export const MCP_HTTP_MAX_BODY_BYTES = 4 * 1_048_576;
 const HTTP_VERSIONS = MCP_SERVER_SUPPORTED_PROTOCOL_VERSIONS.filter(version => version !== '2024-11-05');
 
 export interface McpHttpServerOptions extends Omit<McpServerOptions, 'input' | 'output' | 'onClose' | 'maxLineBytes'> {
-  /**
-   * Stateful by default. Stateless mode retains no sessions; only a tools/call carrying
-   * `_meta.progressToken` streams that call's progress and result over its own POST SSE response.
-   */
+  /** Stateful by default. Stateless mode retains no sessions and disallows SSE. */
   readonly sessionMode?: 'stateful' | 'stateless';
   /** Trusted public origin, e.g. https://host.example. Never derive it from the request Host header. */
   readonly origin: string;
@@ -102,9 +99,6 @@ export function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServe
       else reply.stream.close();
     }
     else reply.resolve(response);
-    // A stateless progress response resolves at headers; retain its core until
-    // the call finishes, errors or its response stream is cancelled.
-    if (stateless && reply.token !== undefined) dispose(session);
   }
 
   function endSse(session: Session): void {
@@ -274,6 +268,11 @@ export function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServe
       // bound and abort unrelated calls in the same session.
       if (Buffer.byteLength(frame, 'utf8') > maxBodyBytes) return failure(413, 'MCP encoded message limit exceeded');
       const classified = classifyJsonRpcMessage(message);
+      const meta = classified.kind === 'request' && classified.method === 'tools/call' ? classified.params?._meta : undefined;
+      const token = meta !== null && typeof meta === 'object' && !Array.isArray(meta)
+        ? (meta as Record<string, unknown>).progressToken : undefined;
+      const progressToken = typeof token === 'string' || (typeof token === 'number' && Number.isFinite(token)) ? token : undefined;
+      if (stateless && progressToken !== undefined) return failure(400, 'Stateless MCP does not support progress streams');
       if (stateless) {
         const initializing = classified.kind === 'request' && classified.method === 'initialize';
         if (!initializing && version === null) return failure(400, 'MCP protocol version required in stateless mode');
@@ -316,10 +315,6 @@ export function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServe
       const key = classified.id === undefined ? 'invalid' : SeenRequestIds.key(classified.id);
       if (session.pending.has(key)) return failure(400, 'MCP request id already in flight');
       if (pendingCount >= maxInFlight) return failure(503, 'Too many MCP requests');
-      const meta = classified.kind === 'request' && classified.method === 'tools/call' ? classified.params?._meta : undefined;
-      const token = meta !== null && typeof meta === 'object' && !Array.isArray(meta)
-        ? (meta as Record<string, unknown>).progressToken : undefined;
-      const progressToken = typeof token === 'string' || (typeof token === 'number' && Number.isFinite(token)) ? token : undefined;
       if (progressToken !== undefined && [...session.pending.values()].some(reply => reply.token === progressToken)) {
         return failure(400, 'MCP progress token already in flight');
       }
@@ -338,12 +333,12 @@ export function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServe
               finishReply(current, key, new Response(null, { status: 202 }));
             },
           }, new ByteLengthQueuingStrategy({ highWaterMark: MCP_SERVER_MAX_PENDING_BYTES }));
-          resolve(new Response(stream, { headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store', ...(stateless ? {} : { 'mcp-session-id': current.id }) } }));
+          resolve(new Response(stream, { headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store', 'mcp-session-id': current.id } }));
         }
         pendingCount++;
         current.input.write(`${frame}\n`);
       });
-      return stateless && progressToken === undefined ? response.finally(() => dispose(current)) : response;
+      return stateless ? response.finally(() => dispose(current)) : response;
     },
     close() {
       if (closed) return;

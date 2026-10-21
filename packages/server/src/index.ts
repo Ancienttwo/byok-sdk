@@ -1,3 +1,4 @@
+import { ProjectionWaiters } from './projection-waiters';
 export { listenLoopback } from './loopback';
 export type { LoopbackPortStore, LoopbackHandler, LoopbackListenerOptions, LoopbackListener } from './loopback';
 

@@ -386,7 +386,6 @@ export function serveMcpOverStdio(options: McpServerOptions): McpServerHandle {
 
   function handleToolsList(id: McpServerRequestId): void {
     const tools = options.tools.map(tool => ({
-      // Reserved helper bytes are frozen in this order; new fields follow inputSchema.
       name: tool.name,
       ...(tool.description === undefined ? {} : { description: tool.description }),
       inputSchema: tool.inputSchema,

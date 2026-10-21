@@ -25,7 +25,7 @@ async function running(id: string) {
   return fixture.adapter.sessions.get(bot.core.intent(id)!.taskId)!;
 }
 async function finish(id: string, document: unknown = {}) {
-  (await running(id)).finish(document);
+  await (await running(id)).finish(document);
   await vi.waitFor(async () => { await bot.drain(); expect(bot.snapshot().turns[id]?.status).toBe('succeeded'); }, { timeout: 5000 });
 }
 function projection(id: string) {

@@ -48,6 +48,9 @@ the stale local source branch was not substituted. Other sources were cherry-pic
   cores now retire on reply completion/cancellation/error; ordinary JSON retains
   its existing finalizer. Stateless SSE omits session IDs. Focused combined tests
   cover completion, reader cancellation, server close and unread queue overflow.
+  Superseded on 2026-10-22: main's merged #647 makes stateless HTTP reject
+  progress requests with 400. The owner chose main's contract when this branch
+  merged main `1e5326eb`, so the stateless progress SSE code and its tests are gone.
 - API budget conflicts kept interim values until the single cumulative workspace
   build. Only measured exceeded entries changed to exact resulting sizes:
 
