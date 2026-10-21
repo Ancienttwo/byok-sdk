@@ -321,6 +321,10 @@ jobs:
           src/unclaimed-expiry.test.ts
           src/crash-recovery.test.ts
 
+      - name: K4 Host retention on Windows
+        if: matrix.os == 'windows-latest'
+        run: bun run --cwd examples/host-execution-core test src/retention.test.ts
+
       # SDK Windows v1 gate for sealed provider provisioning (plan A11): the
       # device sealing key, configure/replace/delete custody, and the
       # launcher's custody snapshot against the REAL Windows Credential
