@@ -515,6 +515,15 @@ device Host computes is the one it schedules. A successor outside the wake
 limit stays in the Host outbox and is retried; a null successor is a visible
 stopped state, not a silent stop.
 
+The copy-and-own K4 Host execution example keeps a bounded diagnostic history of
+ignored routine wake deliveries in `LedgerState.ignoredWakes`: unknown keys,
+missing or inactive routines, and keys without a matching current reservation.
+The newest 128 observations contain only a timestamp, closed reason code and
+SHA-256 key digest, never the raw key or payload. This history grants no execution
+or deduplication authority; committed occurrence replay and current scan wakes
+keep their existing behavior. This is the audit slice of #612, not Host job
+registration or execution-free occurrences.
+
 ### Embedded wake queue
 
 Only `@byok-sdk/server` provides `wake: { consume(wake, signal) }` and
