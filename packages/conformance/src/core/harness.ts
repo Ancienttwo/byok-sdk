@@ -37,7 +37,7 @@ export interface CoreCompositionHandle {
    * that would silently pin the suite to one implementation.
    */
   now(): string;
-  /** Moves the composition's clock forward. Must affect every TTL the stores observe. */
+  /** Moves the composition's clock by a signed delta (negative simulates rollback). Must affect every TTL the stores observe. */
   advanceTime(ms: number): void | Promise<void>;
   /** Optional teardown for compositions holding connections. */
   dispose?(): void | Promise<void>;

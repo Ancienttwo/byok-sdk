@@ -49,6 +49,15 @@
   its own error text. The README states that the allowlist governs Bot turns only.
   The Host's direct `bot.core.enqueue` call bypasses it. This completes the five
   low-severity follow-ups of #622; #606 stays open.
+- **Fixed (core, cloud-dataplane, conformance, server)** — a presence publication
+  with `minimumIntervalMs: 0` no longer fails with `hint_rate_limited` when the
+  clock moved backwards. The embedded server renews the lease on each accepted
+  envelope and each poll, so after a wall-clock rollback `POST /byok/messages`
+  and `GET /byok/events` returned HTTP 500 until the clock caught up. Memory and
+  SQLite storage were both affected. The lease is now `now + TTL` on the store
+  clock. Heartbeats with a non-zero minimum interval keep their throttle. The
+  conformance suite now covers the rollback case, and `advanceTime` accepts a
+  negative value (#674).
 
 ## 0.28.1 / @byok-sdk/keys 0.13.1 — 2026-10-21 (published)
 
