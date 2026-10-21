@@ -27,9 +27,25 @@ Use `receive` for IM messages ([IM channel input](#im-channel-input)).
 Read `snapshot` or upload K4 projections with `core.flushProjections`.
 
 The execution template selects this Bot's Agent. It must use a runtime profile
-without external connector tools or credentials. The example refuses required
-MCP toolsets. The Host connector stays outside the Agent. This example does not
+without external-effect connector tools or ambient credentials. Required MCP
+toolsets are refused by default. A Host may explicitly declare logical IDs with
+`readOnlyToolsets: ['market.read']` when it controls the local tool server and
+enforces read-only behavior there. The execution's `requiredToolsets` still
+selects those IDs through the ordinary daemon admission path. This declaration
+is not inferred from model output or MCP annotations and is not proof that a
+tool has no effects. The Host connector stays outside the Agent. This example does not
 provide a runtime sandbox. The deployment owns that boundary.
+
+The constructor owns copies of execution/model templates and the allowlist;
+mutating the caller's configuration later cannot widen admission. Every model, restored Bot execution and outstanding frozen intent/execution
+must satisfy the policy, as must Bot creation,
+updates and turn enqueue. A restart with a narrower policy fails closed when
+persisted Bot templates or pending execution inputs require removed IDs. Settled
+historical execution records remain readable. Change those templates through an
+authorized Host migration before reopening; this slice adds no migration API.
+Effectful actions still use `confirmable_action` and owner confirmation.
+This is the same-device read-only toolset slice of #606; external-authority
+storage, Windows persona persistence and two-process relay remain separate.
 
 ## Actions and context
 
@@ -118,7 +134,7 @@ The collaboration state has version 1. The Host rejects unsupported or
 unversioned stored state. It does not reset or migrate that state.
 
 This example has one team and one owner per ledger. Paid Pi success-rate
-measurement belongs to WO-10b. Application history,
+measurement belongs to [WO-10b](../../docs/submit-result-measurement.md); the method defines per-runtime/model/platform cells and does not supply live data. Application history,
 versions and audit rows have no retention policy in this small example.
 
 

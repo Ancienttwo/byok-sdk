@@ -52,7 +52,7 @@ export interface MemoryOptions {
   now?: () => number;
   /** Resolve current placement and profile from trusted Host state on each call. */
   isCurrent(binding: MemoryBinding): boolean;
-  /** Call the cloud's capability-gated enqueueAgentMemoryIntentNotice. Retry is safe. */
+  /** Call the embedded server or cloud capability-gated enqueueAgentMemoryIntentNotice. Retry is safe. */
   notify(deviceId: string, notice: { intentId: string; agentRef: AgentRef }): Promise<unknown>;
   /** Validate the task, session, runtime, grant, policy and writer epoch before accepting a projection. */
   authorizeProjection(deviceId: string, mutation: AgentMemoryProjectionMutation): boolean;

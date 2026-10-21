@@ -14,6 +14,11 @@ the waiting call signal; only the Host task API cancels a task.
 The Host authenticates each caller before selecting its separate transport instance.
 The transport validates Origin against trusted configuration and bounds bodies,
 sessions, active calls and optional SSE queues. It owns no key or task ledger.
+The default stateful mode retains caller sessions. Explicit `sessionMode: 'stateless'`
+uses a request-scoped tools-only core without session IDs or affinity. The Host
+authenticates and authorizes every request; Origin, protocol and body validation
+remain enforced. Stateless mode has no SSE, session expiry/DELETE invalidation
+or cross-request cancellation. It does not add an external session store.
 See [the HTTP contract](mcp-server-http.md) for lifecycle and resource limits.
 
 The [B2 Host reference](../examples/byok-mcp-server/README.md) supplies a separate
@@ -514,6 +519,15 @@ offers time zones as an enum of canonical names, and the instant that the
 device Host computes is the one it schedules. A successor outside the wake
 limit stays in the Host outbox and is retried; a null successor is a visible
 stopped state, not a silent stop.
+
+The copy-and-own K4 Host execution example keeps a bounded diagnostic history of
+ignored routine wake deliveries in `LedgerState.ignoredWakes`: unknown keys,
+missing or inactive routines, and keys without a matching current reservation.
+The newest 128 observations contain only a timestamp, closed reason code and
+SHA-256 key digest, never the raw key or payload. This history grants no execution
+or deduplication authority; committed occurrence replay and current scan wakes
+keep their existing behavior. This is the audit slice of #612, not Host job
+registration or execution-free occurrences.
 
 ### Embedded wake queue
 
@@ -1987,7 +2001,10 @@ one exact `replace` or `delete` of one memory file and remains the only approval
 authority; the device-local `MEMORY.md` and `notes/**` remain the only memory
 content authority. Cloud admits the strict `{ intentId, agentRef }` notice only
 for a device whose durable capability snapshot carries `agent-memory-intent.v1`
-and that is not revoked, and it keeps no intent receipt. The daemon fetches the
+and that is not revoked, and it keeps no intent receipt. The embedded server exposes
+`enqueueAgentMemoryIntentNotice(deviceId, input)` with the same admission and
+deduplication rules, binding its own tenant. It adds no Host approval or completion
+route. The daemon fetches the
 immutable intent over the Host's own device-authenticated transport. It binds
 the intent to the notice Agent and to its own enrolled tenant and device
 through the recomputed `operationDigest`, and it applies the existing sha256
@@ -2009,10 +2026,33 @@ Each helper open syncs the home directory chain on that volume before a CAS.
 Shared home initialization syncs each new directory's parent on POSIX. A retry
 repeats the parent barrier for existing entries.
 
+Daemon task memory admission has a local `DaemonConfig.agentMemoryMcp` switch.
+Absent or `auto` preserves platform/helper-based admission. `off` omits the SDK
+memory MCP and prepared descriptor bindings: ordinary Agent tasks acquire no SDK
+memory tools, and prepared `read`/`read-write` selections fail closed while `none`
+remains supported. Other required helpers retain their own admission gates.
+Invalid values are construction errors. This switch does not change the wire,
+Agent-home initialization/leases/guidance, runtime filesystem authority, or the
+explicit hosted projection and memory intent transport opt-ins. An off switch
+alone does not resolve native helper assets; configured projection/intents still
+require their existing helper and platform proofs.
+
 The client release carries Darwin arm64 and x64 helpers. The SDK resolves its
 own path and checks the build manifest before each helper open. Arbitrary
 `agentMemoryFilesystem.helperBin` configuration is removed. The ordinary build
 needs no Go. `bun run build:release` builds and verifies native release assets.
+Single-file products copy these SDK-owned release assets at build time using
+`copyAgentMemoryHelperAssets({ outDir })` from `@byok-sdk/client`. The destination
+must be new or empty; copying verifies both target binaries and their manifest
+and never overwrites existing files. Ship that directory with the product and
+set `DaemonConfig.agentMemoryHelperAssetRoot` to its absolute installed path.
+An explicit invalid root fails daemon construction even without a configured
+memory projection or intent feed. Resolution and every helper open verify the
+same manifest and content digest; no arbitrary binary path, digest override or
+PATH search is admitted. The directory is a deployment integrity boundary, not
+a signer authentication mechanism. Omitting the option retains installed SDK
+package resolution. Windows admission is unchanged.
+
 Helper builds use Go
 1.26.5, `CGO_ENABLED=0`, `-buildvcs=false` and `-trimpath`. Product re-signing is
 allowed. The `mach-o-content-v1` digest covers the Mach-O header, load commands
@@ -2921,3 +2961,15 @@ Without `storage.scratchRoot`, derive the default from the canonical store ident
 An explicit `storage.scratchRoot` must pass validation; an excessive length fails construction. A failed root never triggers a substitute. External roots persist their store ownership. A standalone root is exclusive to its process and must be provisioned fresh on process restart. No silent runtime or root fallback is provided.
 
 Legacy shared-temp prefixes are an operator-invoked migration: doctor inventories exact production names, and only `doctor --fix --yes` with a stopped daemon deletes matching, same-uid real directories. SDK startup never scans shared OS temp. Remove this one-shot scanner in the next minor release. See `docs/migrations/client-retention-399.md` for removed APIs and Host migration.
+
+
+### K8 Host-declared read-only toolsets
+
+The copy-and-own Bot collaboration example refuses required toolsets by default.
+A Host may declare an immutable `readOnlyToolsets` list of logical IDs, enforced
+across initial/model templates, restored Bots, creation, update and enqueue.
+The daemon still owns concrete tool definitions and ordinary capability admission.
+Only the Host's local tool service can enforce actual read-only behavior; model
+annotations are not authorization. External effects retain owner-confirmed Host
+connector execution. This additive slice does not qualify external-authority
+storage, Windows persona persistence or two-process relay.

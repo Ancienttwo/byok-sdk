@@ -15,16 +15,19 @@ import { HostLedger } from './ledger';
 import { HostMemoryPage, memoryRevision, type MemoryApproval } from './memory';
 import { policy, template } from './test-support';
 
-async function openMemoryHost() {
+async function openMemoryHost(mode: 'cloud' | 'embedded') {
   const root = await mkdtemp(path.join(tmpdir(), 'memory-e2e-'));
   const tenant = tenantId('product:memory-page');
   let agentRef = { agentId: 'main', profileRevision: '1' };
   const productId = 'memory-page';
-  const composition = createInMemoryByokCloud({ instanceProductId: productId, longPollHoldMs: 30 });
-  const cloud = composition.cloud;
-  await composition.core.quota.writeEntitlement(tenant, { version: 1n, hardLimitBytes: 1_000_000_000n,
+  let core!: HostExecutionCore;
+  const embedded = mode === 'embedded' ? createByokServer({ productId, longPollHoldMs: 30,
+    wake: { consume: (wake, signal) => core.consume(wake, signal) } }) : undefined;
+  const composition = embedded ? undefined : createInMemoryByokCloud({ instanceProductId: productId, longPollHoldMs: 30 });
+  const cloud = composition?.cloud;
+  await composition?.core.quota.writeEntitlement(tenant, { version: 1n, hardLimitBytes: 1_000_000_000n,
     maxObjectBytes: 100_000_000n, maxInlineBytes: 1_000_000n, mailboxLimitBytes: 100_000_000n, retentionPolicyId: 'test' });
-  const http = serve({ fetch: request => Promise.resolve(cloud.fetch(request)), port: 0, hostname: '127.0.0.1' });
+  const http = serve({ fetch: request => Promise.resolve(embedded ? embedded.hono.fetch(request) : cloud!.fetch(request)), port: 0, hostname: '127.0.0.1' });
   if (!http.listening) await new Promise<void>(resolve => http.once('listening', resolve));
   const address = http.address();
   if (!address || typeof address === 'string') throw new Error('Missing address');
@@ -32,16 +35,16 @@ async function openMemoryHost() {
   let deviceId = '';
   const options = {
     isCurrent: (binding: { deviceId: string; agentRef: typeof agentRef }) => binding.deviceId === deviceId && JSON.stringify(binding.agentRef) === JSON.stringify(agentRef),
-    notify: (device: string, notice: { intentId: string; agentRef: typeof agentRef }) => cloud.enqueueAgentMemoryIntentNotice(tenant, device, notice),
+    notify: (device: string, notice: { intentId: string; agentRef: typeof agentRef }) => embedded
+      ? embedded.enqueueAgentMemoryIntentNotice(device, notice) : cloud!.enqueueAgentMemoryIntentNotice(tenant, device, notice),
     authorizeProjection: (_device: string, mutation: { grantRef: string; policyRevision: string; writerEpoch: number }) => mutation.grantRef === 'memory-test-grant' && mutation.policyRevision === 'memory-test-policy' && mutation.writerEpoch === 1,
   };
   let page = new HostMemoryPage(ledger, options);
-  let core: HostExecutionCore;
-  const wakeServer = createByokServer({ productId, wake: { consume: (wake, signal) => core.consume(wake, signal) } });
-  const executionServer: ExecutionServer = {
-    executions: { submit: input => cloud.submitAgentExecution(tenant, input) },
-    tasks: { offer: id => cloud.readTaskOffer(tenant, id), attempt: id => cloud.readTaskAttempt(tenant, id),
-      deviceTerminal: id => cloud.readDeviceTerminal(tenant, id), cancel: async (id, reason) => { await cloud.cancelTask(tenant, id, reason); } },
+  const wakeServer = embedded ?? createByokServer({ productId, wake: { consume: (wake, signal) => core.consume(wake, signal) } });
+  const executionServer: ExecutionServer = embedded ?? {
+    executions: { submit: input => cloud!.submitAgentExecution(tenant, input) },
+    tasks: { offer: id => cloud!.readTaskOffer(tenant, id), attempt: id => cloud!.readTaskAttempt(tenant, id),
+      deviceTerminal: id => cloud!.readDeviceTerminal(tenant, id), cancel: async (id, reason) => { await cloud!.cancelTask(tenant, id, reason); } },
     wakes: wakeServer.wakes,
   };
   core = new HostExecutionCore(executionServer, ledger, { memory: page, reconcileMs: 100 });
@@ -63,11 +66,11 @@ async function openMemoryHost() {
       port: { publish: input => page.projectionPort(deviceId).publish(input) },
     },
   }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore(), longPoll: { retryDelayMs: 20, idleDelayMs: 20 } });
-  const pairing = await cloud.createPairingCode(tenant, { productId });
+  const pairing = await (embedded ? embedded.pairing.createPairingCode({ productId }) : cloud!.createPairingCode(tenant, { productId }));
   deviceId = (await daemon.pair(pairing.code)).deviceId;
   await daemon.start(); await waitForReady(daemon);
   return {
-    root, home, cloud, composition, adapter, deviceId, get agentRef() { return agentRef; }, daemon, get core() { return core; },
+    root, home, notify: options.notify, offer: executionServer.tasks.offer, adapter, deviceId, get agentRef() { return agentRef; }, daemon, get core() { return core; },
     setProfileRevision(revision: string) { agentRef = { ...agentRef, profileRevision: revision }; }, get page() { return page; }, get ledger() { return ledger; },
     async command(rest: Partial<MemoryApproval> = {}) {
       const row = await page.approve({ deviceId, agentRef, approvalRef: randomUUID(), path: 'MEMORY.md', operation: 'replace', content: 'replacement private-value\n', expiresAt: Date.now() + 60_000, ...rest });
@@ -91,7 +94,7 @@ async function openMemoryHost() {
       await vi.waitFor(() => expect(adapter.sessions.has(taskId)).toBe(true), { timeout: 10_000 });
       const session = adapter.sessions.get(taskId)!;
       session.finish({ text: 'done' });
-      await vi.waitFor(async () => expect(await cloud.readDeviceTerminal(tenant, taskId)).toMatchObject({ envelope: { type: 'task.complete' } }), { timeout: 10_000 });
+      await vi.waitFor(async () => expect(await executionServer.tasks.deviceTerminal(taskId)).toMatchObject({ envelope: { type: 'task.complete' } }), { timeout: 10_000 });
       await waitForTaskCleanup(daemon, session);
       await core.drain();
       return core.intent(input.key)!;
@@ -104,9 +107,9 @@ async function openMemoryHost() {
   };
 }
 
-describe.skipIf(process.platform !== 'linux')('memory page with real Linux mailbox, daemon, home lease and CAS', () => {
+describe.skipIf(process.platform !== 'linux').each(['cloud', 'embedded'] as const)('memory page with real Linux %s mailbox, daemon, home lease and CAS', mode => {
   let host: Awaited<ReturnType<typeof openMemoryHost>>;
-  beforeEach(async () => { host = await openMemoryHost(); });
+  beforeEach(async () => { host = await openMemoryHost(mode); });
   afterEach(async () => { await host?.close(); });
 
   it('replaces MEMORY.md, deletes a note, purges bodies, and survives Host restart', async () => {
@@ -121,7 +124,13 @@ describe.skipIf(process.platform !== 'linux')('memory page with real Linux mailb
     await host.restartLedger();
     expect(host.page.intent(replaced.intent.intentId)!.readback).toEqual(replaced.readback);
     expect(host.page.intent(deleted.intent.intentId)!.readback).toEqual(deleted.readback);
-    await host.cloud.enqueueAgentMemoryIntentNotice(tenantId('product:memory-page'), host.deviceId, { intentId: replaced.intent.intentId, agentRef: host.agentRef });
+    const beforeRepeat = await readFile(path.join(host.home, 'MEMORY.md'), 'utf8');
+    const notice = { intentId: replaced.intent.intentId, agentRef: host.agentRef };
+    const repeated = await host.notify(host.deviceId, notice);
+    expect(await host.notify(host.deviceId, notice)).toEqual(repeated);
+    expect(await readFile(path.join(host.home, 'MEMORY.md'), 'utf8')).toBe(beforeRepeat);
+    // This verifies stable mailbox identity/sequence and retained content. The
+    // ack count below checks retained ledger state, not processing of a new notice.
     const deviceLedger = path.join(host.home, '.byok', 'agent-memory-intents-v1.json');
     await vi.waitFor(async () => {
       const state = JSON.parse(await readFile(deviceLedger, 'utf8'));
@@ -158,16 +167,16 @@ describe.skipIf(process.platform !== 'linux')('memory page with real Linux mailb
 });
 
 
-describe.skipIf(process.platform !== 'linux')('memory bootstrap and refresh through the core', () => {
+describe.skipIf(process.platform !== 'linux').each(['cloud', 'embedded'] as const)('memory bootstrap and refresh through the %s core', mode => {
   let host: Awaited<ReturnType<typeof openMemoryHost>>;
-  beforeEach(async () => { host = await openMemoryHost(); });
+  beforeEach(async () => { host = await openMemoryHost(mode); });
   afterEach(async () => { await host?.close(); });
 
   it('starts a new Agent through the core and receives its first task-close projection', async () => {
     expect(host.ledger.snapshot().memory?.projections ?? {}).toEqual({});
     const intent = await host.project();
     expect(intent).toMatchObject({ conclusion: 'succeeded', attempts: 1 });
-    const offer = await host.cloud.readTaskOffer(tenantId('product:memory-page'), intent.taskId);
+    const offer = await host.offer(intent.taskId);
     expect(offer?.payload).toHaveProperty('instruction', template(host.deviceId).payload.instruction);
     expect(host.page.contextPack({ deviceId: host.deviceId, agentRef: host.agentRef }).residentMemory?.text).toBe('original [redacted]\n');
   });
@@ -196,7 +205,7 @@ describe.skipIf(process.platform !== 'linux')('memory bootstrap and refresh thro
     expect(result.readback?.completion.outcome).toBe('applied');
     expect(host.page.contextPack({ deviceId: host.deviceId, agentRef: host.agentRef })).toEqual({});
     await vi.waitFor(() => expect(host.adapter.sessions.has(blocked.taskId)).toBe(true), { timeout: 10_000 });
-    const offer = await host.cloud.readTaskOffer(tenantId('product:memory-page'), blocked.taskId);
+    const offer = await host.offer(blocked.taskId);
     expect(offer?.payload).toHaveProperty('instruction', input.execution.payload.instruction);
     const session = host.adapter.sessions.get(blocked.taskId)!;
     session.finish({ text: 'refreshed' });

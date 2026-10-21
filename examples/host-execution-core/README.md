@@ -88,6 +88,23 @@ Every transaction reads and rewrites the whole JSON ledger. History cleanup is e
 executions with terminal documents, occurrences, slot dedup keys, outcome markers and calendar audits
 remain in that JSON body. This is not a large-dataset storage design.
 
+Ignored routine wakes are visible in `ledger.snapshot().ignoredWakes`. The optional
+array retains the newest `IGNORED_WAKE_AUDIT_LIMIT` (128) observations in delivery
+order, discarding the oldest. Each record contains `at`, `reason`, and `wakeKeyHash`
+(SHA-256 of `canonical(dedupKey)`, computable with the exported `hash` helper).
+It stores no raw wake key, ID, or payload. Reasons are `unknown_key`,
+`missing_routine`, `inactive_routine`, and `reservation_mismatch` (no current
+reservation or a different key). Repeated ignored deliveries each leave an
+observation; this bounded history is diagnostic, never replay/dedup authority.
+Already committed slots still increment their occurrence's replay count, and
+current scan wakes are not ignored. A matching reservation with altered time or
+payload still throws and rolls back; it is not treated as an ignored delivery.
+These records persist with the Host ledger and are absent before the first ignored
+wake, including in previously created version-1 ledgers.
+
+This audit slice addresses part of #612. Host job handlers and occurrences without
+Agent execution are not implemented; a Host still routes its own jobs separately.
+
 While work is in flight, the core normally creates a new `host-scan` wake every `reconcileMs`
 (default 1,000 ms). Earlier deadlines can cause earlier scans. The SDK retains done wake rows for seven days.
 One scan per second is about 86,400 completed rows per day, or 604,800 over seven days, before bounded cleanup.
@@ -189,9 +206,12 @@ one exact operation. Supply the current device and Agent profile from Host state
 Bind `transport(deviceId)` to the authenticated device, then inject it as
 `DaemonConfig.agentMemoryIntents`. Do not take the device ID from a request body.
 Call `flushNotices` after approval and at Host startup. Retry it after a transport error.
-Its callback calls the public cloud `enqueueAgentMemoryIntentNotice` API.
-The embedded server facade has no memory-notice method. The callback must use the
-owning cloud composition. Never insert a mailbox row by hand.
+For an embedded server, inject `notify: (deviceId, notice) =>
+server.enqueueAgentMemoryIntentNotice(deviceId, notice)`. The server binds its own
+tenant and preserves the cloud capability, revocation and exact-notice checks.
+A hosted composition uses `cloud.enqueueAgentMemoryIntentNotice(tenant, deviceId, notice)`.
+Both APIs send only `{ intentId, agentRef }`; intent fetch, approval and terminal
+readback remain on the authenticated Host transport. Never insert a mailbox row by hand.
 
 P5a supports explicit whole-file replacement and note deletion. It has no normal editor.
 A user can authorize an initial write with `baseRevision` omitted. This uses sha256 of

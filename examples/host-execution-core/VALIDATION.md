@@ -67,17 +67,47 @@ assertion, CI configuration or skip was changed to conceal it. No full-workspace
 
 Logs: `/tmp/byok-602-root-test.log`, `/tmp/byok-602-disposal-baseline.log`,
 `/tmp/byok-602-disposal-patched.log`, and other `/tmp/byok-602-*` files. Independent source, test,
-README and measurement review found no actionable issue. The patch remains Draft because the full
-workspace gate failed as described above; this record does not turn the isolated passes into a
-passing full gate.
+README and measurement review found no actionable issue. The local full workspace
+failure described above remains uncharacterized, and this record does not count the isolated passes
+as a passing local full gate. CI on PR head `f9a3e699` passed all 54 checks (push run
+`39534023952`, pull_request run `39534047488`). In the push run both Linux `build, typecheck, test`
+lanes (jobs `119006349881` and `119006349906`) ran `src/retention.test.ts`, and its 13 tests passed.
 The existing built-adapter Windows job now also runs the new retention suite after its normal
 install/build. This adds platform qualification without changing any assertions, skips or existing
-gates. Windows execution is pending CI; it was not run on this Mac. PR #619 separately adds other
-K4 Windows suites and may require an ordinary merge resolution in this workflow insertion area.
+gates. The retention suite passed 13/13 on `windows-latest` with no skips (run `39534023952`, job
+`119006349932`; run `39534047488`, job `119006426984`); Windows was not run on this Mac. PR #619
+separately adds other K4 Windows suites, and both workflow steps were kept when main was merged.
 
 Date: 2026-10-18. Baseline: `8e8839a3`.
 Branch: `codex/bot-k4-host-execution-core`.
 Environment: macOS, Node `v24.21.0`, Bun `1.4.3`.
+
+## Windows non-memory qualification gate (#611)
+
+Added on 2026-10-21 against baseline
+`ad0d2d2591d8b5eb6ebb4c7f47cfc5463ca5f779`. Windows execution evidence is
+**PENDING** until the new `K4 Windows Host execution qualification` step passes
+on the exact PR HEAD in `built adapter lifecycle smoke (windows-latest)`.
+This addition alone is not a Windows product acceptance claim.
+
+The step uses the existing Windows job's pinned Node version, dependency install
+and package build. Bun invokes the package test script; Vitest executes on Node.
+It runs the unchanged `core`, `execution-record`, `routines`,
+`scheduling-recovery`, `unclaimed-expiry` and `crash-recovery` test files.
+These qualify SQLite Host ledger/FIFO behavior, outcome application, routines,
+expiry, recovery and child-process termination/restart with a stub runtime and
+real local server/daemon. Credentials are injected in memory. No model is called.
+No assertion, timeout or platform skip is changed for this gate.
+
+The selection is deliberately non-memory: it does not run `memory.test.ts`
+(Host-side memory model) or `memory-linux.test.ts` (Linux device-memory integration),
+and does not assert Windows recall/save, projection or intent support. Windows
+Agent memory remains fail-closed under #605. K8 persona and live model/platform
+qualification are not covered; #611 remains open for that remaining scope and
+for recorded successful Windows CI evidence. Local macOS execution cannot
+substitute for this Windows gate. The exact six-file command passed on macOS
+against the unchanged baseline: 6 files, 39 tests, no skips. The workflow YAML
+parsed successfully and `git diff --check` passed; no full local suite was run.
 
 ## Coalescing observation repair on 260570ae
 

@@ -207,7 +207,7 @@ jobs:
 
       - name: Run SDK helper, intent and capability contracts
         run: |
-          bun run --filter @byok-sdk/client test -- src/__tests__/agent-memory-fs-helper.test.ts src/__tests__/agent-memory-helper-release.test.ts src/__tests__/agent-memory-helper-release-errors.test.ts src/__tests__/agent-memory-helper-admission.test.ts src/__tests__/agent-memory-helper-crash.test.ts src/__tests__/agent-memory-intent.test.ts src/__tests__/daemon-conn-hello-capabilities.test.ts src/__tests__/agent-home-directory-barrier.test.ts
+          bun run --filter @byok-sdk/client test -- src/__tests__/agent-memory-fs-helper.test.ts src/__tests__/agent-memory-helper-release.test.ts src/__tests__/agent-memory-helper-assets.test.ts src/__tests__/agent-memory-helper-release-errors.test.ts src/__tests__/agent-memory-helper-admission.test.ts src/__tests__/agent-memory-helper-crash.test.ts src/__tests__/agent-memory-intent.test.ts src/__tests__/daemon-conn-hello-capabilities.test.ts src/__tests__/agent-home-directory-barrier.test.ts
 
       - name: Prove real Node and Bun helper identity
         run: |
@@ -306,6 +306,20 @@ jobs:
 
       - name: Run built adapter lifecycle smoke
         run: bun run --filter @byok-sdk/client smoke:adapters
+
+      # K4 non-memory Host paths use the same built Node substrate on Windows.
+      # Keep the full assertions; device memory and K8 persona qualification
+      # remain separate platform contracts (#605 and #611).
+      - name: K4 Windows Host execution qualification
+        if: matrix.os == 'windows-latest'
+        run: >-
+          bun run --cwd examples/host-execution-core test --
+          src/core.test.ts
+          src/execution-record.test.ts
+          src/routines.test.ts
+          src/scheduling-recovery.test.ts
+          src/unclaimed-expiry.test.ts
+          src/crash-recovery.test.ts
 
       - name: K4 Host retention on Windows
         if: matrix.os == 'windows-latest'

@@ -693,6 +693,7 @@ export interface TaskRunnerDeps {
   agentMemoryDescribeBin?: Readonly<ResolvedAgentMemoryMcpBin>;
   /** Resolve the verified SDK helper only when memory needs filesystem authority. */
   resolveAgentMemoryFilesystemHelperBin?: () => string;
+  agentMemoryHelperAssetRoot?: string;
   /** Optional local-to-hosted redacted projection port. Omission is zero-network. */
   agentMemoryHostedProjection?: AgentMemoryHostedProjection;
 }
@@ -3802,6 +3803,7 @@ export class TaskRunner {
     if (filesystem === undefined) {
       filesystem = openAgentMemoryFilesystemHelper({
         helperBin,
+        assetRoot: this.deps.agentMemoryHelperAssetRoot,
         canonicalHome: context.canonicalHome,
         homeIdentity: context.homeIdentity,
       });

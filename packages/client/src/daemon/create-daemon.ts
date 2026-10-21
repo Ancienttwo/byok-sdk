@@ -332,8 +332,13 @@ export interface DaemonConfig {
     hostStorageRoot: string;
     projection?: AgentHomeProjection;
   };
+  /** Task memory MCP admission. Absent/auto preserves platform-based admission; off disables both ordinary and prepared memory tools.
+   * This does not disable Agent-home guidance or explicit hosted projection/intent transports, and is not a filesystem sandbox. */
+  agentMemoryMcp?: 'auto' | 'off';
   /** Optional, one-way hosted projection. Without all guards it has zero network activity. */
   agentMemory?: AgentMemoryHostedProjection;
+  /** Absolute directory copied by copyAgentMemoryHelperAssets. Only SDK release assets are admitted; not a helper executable or digest override. */
+  agentMemoryHelperAssetRoot?: string;
   /**
    * Explicit composition for SDK-reserved MCP helpers when this daemon is
    * embedded in a single-file/SEA product executable. The product entrypoint
@@ -1300,8 +1305,17 @@ export function buildDaemonWithAdapters(
       'DaemonConfig.agentHome and DaemonConfig.gitWorkspace are mutually exclusive; Agent home is the only workspace authority for Agent offers',
     );
   }
+  if (config.agentMemoryMcp !== undefined && config.agentMemoryMcp !== 'auto' && config.agentMemoryMcp !== 'off') {
+    throw new Error('DaemonConfig.agentMemoryMcp must be auto or off when present');
+  }
+  const agentMemoryMcpEnabled = config.agentMemoryMcp !== 'off';
   if (config.agentMemory !== undefined && config.agentHome === undefined) {
     throw new Error('DaemonConfig.agentMemory requires DaemonConfig.agentHome for the exact Agent memory authority');
+  }
+  if (config.agentMemoryHelperAssetRoot !== undefined) {
+    if (config.agentHome === undefined) throw new Error('DaemonConfig.agentMemoryHelperAssetRoot requires agentHome');
+    // Explicit configuration must fail closed even without projection or intent transport.
+    resolveAgentMemoryFilesystemHelper(config.agentMemoryHelperAssetRoot);
   }
   if (Object.hasOwn(config, 'agentMemoryFilesystem')) {
     throw new Error('DaemonConfig.agentMemoryFilesystem is removed; an arbitrary helper is not admitted on this platform. Use the SDK release artifact.');
@@ -1312,22 +1326,23 @@ export function buildDaemonWithAdapters(
   // Platform support alone cannot admit memory. Compiled products and ordinary
   // JS builds can have Agent homes without the SDK native release assets.
   let resolveAgentMemoryFilesystemHelperBin: (() => string) | undefined;
-  if (config.agentHome !== undefined && isAgentMemoryFilesystemHelperSupported()) {
+  if (config.agentHome !== undefined && (agentMemoryMcpEnabled || config.agentMemory !== undefined || config.agentMemoryIntents !== undefined)
+    && isAgentMemoryFilesystemHelperSupported()) {
     try {
-      resolveAgentMemoryFilesystemHelper();
-      resolveAgentMemoryFilesystemHelperBin = resolveAgentMemoryFilesystemHelper;
+      resolveAgentMemoryFilesystemHelper(config.agentMemoryHelperAssetRoot);
+      resolveAgentMemoryFilesystemHelperBin = () => resolveAgentMemoryFilesystemHelper(config.agentMemoryHelperAssetRoot);
     } catch (error) {
-      if (config.agentMemory !== undefined || config.agentMemoryIntents !== undefined) throw error;
+      if (config.agentMemoryHelperAssetRoot !== undefined || config.agentMemory !== undefined || config.agentMemoryIntents !== undefined) throw error;
     }
   }
   const externalAgentMemoryFilesystem = resolveAgentMemoryFilesystemHelperBin !== undefined;
   if (config.agentMemory !== undefined && !isAgentMemorySecureFilesystemAvailable(externalAgentMemoryFilesystem)) {
     throw new Error('DaemonConfig.agentMemory requires a platform with safe descriptor-relative filesystem operations');
   }
-  const agentMemoryMcpBin = config.agentHome === undefined
+  const agentMemoryMcpBin = !agentMemoryMcpEnabled || config.agentHome === undefined
     ? undefined
     : resolveAgentMemoryMcpBin(externalAgentMemoryFilesystem, config.sdkHelperHost);
-  const agentMemoryDescribeBin = config.agentHome === undefined
+  const agentMemoryDescribeBin = !agentMemoryMcpEnabled || config.agentHome === undefined
     ? undefined
     : resolveAgentMemoryDescribeBin(externalAgentMemoryFilesystem, config.sdkHelperHost);
   const localAgentRelease = resolveLocalAgentReleaseIdentity(config.localAgentRelease);
@@ -1487,7 +1502,7 @@ export function buildDaemonWithAdapters(
    */
   const preparationRuntimeEnv = () => buildRuntimeEnv({ ambient: process.env });
   const preparedToolSurface = createPreparedToolSurfaceAssembler({
-    memoryAvailable: () => isAgentMemorySecureFilesystemAvailable(resolveAgentMemoryFilesystemHelperBin !== undefined),
+    memoryAvailable: () => agentMemoryMcpEnabled && isAgentMemorySecureFilesystemAvailable(resolveAgentMemoryFilesystemHelperBin !== undefined),
     toolsetRegistry,
     runtimeEnv: preparationRuntimeEnv,
     ...(agentMemoryDescribeBin === undefined ? {} : { agentMemoryDescribe: agentMemoryDescribeBin }),
@@ -2418,6 +2433,7 @@ export function buildDaemonWithAdapters(
       ...(agentMemoryMcpBin === undefined ? {} : { agentMemoryMcpBin }),
       ...(agentMemoryDescribeBin === undefined ? {} : { agentMemoryDescribeBin }),
       ...(resolveAgentMemoryFilesystemHelperBin === undefined ? {} : { resolveAgentMemoryFilesystemHelperBin }),
+      ...(config.agentMemoryHelperAssetRoot === undefined ? {} : { agentMemoryHelperAssetRoot: config.agentMemoryHelperAssetRoot }),
       ...(config.agentHome !== undefined && config.agentEgress !== undefined ? {
         agentMessageMcpBin: resolveAgentMessageMcpBin(config.sdkHelperHost),
         agentMessageMcpPreflight: preflightAgentMessageMcp,
@@ -4160,7 +4176,7 @@ export function buildDaemonWithAdapters(
     if (!isAgentMemorySecureFilesystemAvailable(helperBin !== undefined)) return undefined;
     const backend = helperBin === undefined
       ? NATIVE_AGENT_MEMORY_INTENT_BACKEND
-      : helperAgentMemoryIntentBackend(helperBin);
+      : helperAgentMemoryIntentBackend(helperBin, config.agentMemoryHelperAssetRoot);
     if (!backend.strictLedgerBarrier) return undefined;
     if (helperBin !== undefined) {
       // Probe the actual branded volume before advertising. The helper open
@@ -4168,7 +4184,7 @@ export function buildDaemonWithAdapters(
       try {
         const canonicalHome = await fs.realpath(config.agentHome.hostStorageRoot);
         const stat = await fs.stat(canonicalHome, { bigint: true });
-        const probe = await openAgentMemoryFilesystemHelper({ helperBin, canonicalHome, homeIdentity: { dev: stat.dev, ino: stat.ino } });
+        const probe = await openAgentMemoryFilesystemHelper({ helperBin, assetRoot: config.agentMemoryHelperAssetRoot, canonicalHome, homeIdentity: { dev: stat.dev, ino: stat.ino } });
         await probe.close();
       } catch {
         return undefined;
