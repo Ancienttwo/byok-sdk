@@ -9,15 +9,18 @@ export const MCP_HTTP_MAX_BODY_BYTES = 4 * 1_048_576;
 const HTTP_VERSIONS = MCP_SERVER_SUPPORTED_PROTOCOL_VERSIONS.filter(version => version !== '2024-11-05');
 
 export interface McpHttpServerOptions extends Omit<McpServerOptions, 'input' | 'output' | 'onClose' | 'maxLineBytes'> {
-  /** Stateful by default. Stateless mode retains no sessions and disallows SSE. */
+  /**
+   * Stateful by default. Stateless mode retains no sessions; only a tools/call carrying
+   * `_meta.progressToken` streams that call's progress and result over its own POST SSE response.
+   */
   readonly sessionMode?: 'stateful' | 'stateless';
   /** Trusted public origin, e.g. https://host.example. Never derive it from the request Host header. */
   readonly origin: string;
   /** Positive integer, at most MCP_HTTP_MAX_BODY_BYTES. */
   readonly maxBodyBytes?: number;
-  /** Bounds idle sessions as well as emitter subscriptions. Default 64. */
+  /** Bounds idle sessions as well as emitter subscriptions. Default 64. Applies only in stateful mode. */
   readonly maxSessions?: number;
-  /** Idle lifetime without pending core replies. SSE alone does not keep a session alive. Default 15 minutes. */
+  /** Idle lifetime without pending core replies. SSE alone does not keep a session alive. Default 15 minutes. Applies only in stateful mode. */
   readonly idleTimeoutMs?: number;
 }
 

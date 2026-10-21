@@ -34,7 +34,8 @@ Mount only the intended endpoint. Bind local listeners to loopback.
 
 Set `sessionMode: 'stateless'` when each request may reach a different instance.
 The default remains `stateful`. No session ID is issued or retained in stateless
-mode; each POST uses and releases its own tools-only core. For a Workers-style
+mode; each POST uses its own tools-only core and releases it when its reply ends.
+A progress call's reply ends when its SSE stream ends (see below). For a Workers-style
 Host, authenticate every request before constructing caller-scoped options:
 
 ```ts
@@ -49,8 +50,10 @@ export default {
       tools: toolsForCaller(caller),
       callTool: call => callToolForCaller(caller, call),
     });
-    try { return await mcp.fetch(request); }
-    finally { mcp.close(); }
+    const response = await mcp.fetch(request);
+    // A progress call streams SSE after the headers; its core closes when the call ends.
+    if (response.headers.get('content-type') !== 'text/event-stream') mcp.close();
+    return response;
   },
 };
 ```
@@ -68,10 +71,19 @@ rejected before tool dispatch. Supplying a session ID returns 400. GET and
 DELETE return 405. `toolsListChanged` is rejected at construction. Ordinary
 notifications return 202; cross-request cancellation notifications return 400,
 since no request registry is shared between calls or instances. A disconnected
-HTTP client does not cancel its call. Host shutdown still aborts active calls.
+HTTP client does not cancel a plain JSON call. Host shutdown still aborts active calls.
+
+Only a POST `tools/call` that carries `_meta.progressToken` gets an SSE response.
+Standard clients send that token when the caller passes `onprogress`. There is no
+GET SSE stream. The response headers return before the call ends, so its core stays
+open until the call completes, is cancelled, overflows the progress buffer or the
+instance closes. If the client cancels the progress stream, the SDK aborts that
+call. Do not close the instance as soon as `fetch` returns an SSE response: that
+aborts the running handler and ends the stream with an error. The example above
+closes only non-SSE responses. Plain JSON requests behave as before.
 
 There is no session expiry, DELETE-based invalidation, replay/id deduplication
-across requests, SSE or external session store in this mode. Request IDs may
+across requests, GET SSE or external session store in this mode. Request IDs may
 repeat on separate POSTs. `maxSessions`/`idleTimeoutMs` affect only stateful mode;
 body, pending-call and running-tool bounds remain per instance. A Host creating
 an instance per request must enforce its own aggregate concurrency limits.
