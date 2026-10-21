@@ -1987,7 +1987,10 @@ one exact `replace` or `delete` of one memory file and remains the only approval
 authority; the device-local `MEMORY.md` and `notes/**` remain the only memory
 content authority. Cloud admits the strict `{ intentId, agentRef }` notice only
 for a device whose durable capability snapshot carries `agent-memory-intent.v1`
-and that is not revoked, and it keeps no intent receipt. The daemon fetches the
+and that is not revoked, and it keeps no intent receipt. The embedded server exposes
+`enqueueAgentMemoryIntentNotice(deviceId, input)` with the same admission and
+deduplication rules, binding its own tenant. It adds no Host approval or completion
+route. The daemon fetches the
 immutable intent over the Host's own device-authenticated transport. It binds
 the intent to the notice Agent and to its own enrolled tenant and device
 through the recomputed `operationDigest`, and it applies the existing sha256
