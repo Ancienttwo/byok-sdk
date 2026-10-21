@@ -1,13 +1,65 @@
 # Changelog
 
-- Client MCP core: preserve tool title, annotations and output schema, and provide
-  request-scoped progress over stdio and bounded HTTP POST SSE (Refs #631).
-
 ## Unreleased
 
-- **Feature (client)** — add a pinned Windows x64 native asset copier, distribution
-  metadata and per-adapter asset roots for relocated runtime process ownership (#627).
-  Darwin copying reuses the existing memory-helper API; Windows memory is unchanged.
+- **Feature (keys, client)** — add a separate local provider custody launcher
+  for Hermes. Provider credentials stay in keys custody and do not enter the
+  daemon environment (#608).
+- **Feature (client)** — add an opt-in task-free export of Agent memory for
+  Host-side device-change backups (#625).
+- **Fixed (server, client, keys)** — load `node:sqlite` without
+  `createRequire(import.meta.url)`, so CJS and relocated SEA single-file hosts
+  can open the server store, the client journal and keys (#626).
+- **Feature (client)** — add a pinned Windows x64 native asset copier,
+  distribution metadata and per-adapter asset roots for relocated runtime
+  process ownership (#627). Darwin copying reuses the existing memory-helper
+  API; Windows memory is unchanged.
+- **Feature (examples)** — K4 Host ingests required replies and their
+  projection in the same ledger transaction as the intent conclusion (#629).
+- **Feature (examples, server)** — K4 Host drains on `server.events` terminal
+  hints and notifies the Host after a committed outbox write. Durable scans
+  stay as the fallback when the event stream is not available (#630).
+- **Feature (client)** — MCP server core keeps tool `title`, `annotations`,
+  `outputSchema` and `_meta`, and streams request-scoped progress over stdio and
+  bounded HTTP POST SSE, also in stateless mode (#631).
+- **Feature (examples)** — K4 memory page adds a bounded whole-tree restore
+  with a queue gate and a per-file result summary (#632). Each file is a CAS
+  write; the restore is not an atomic tree rollback.
+- **Feature (protocol, client)** — `tool_use` and `tool_result` events carry
+  the authoritative MCP `server` and `tool` identity (#633).
+- **Docs (client)** — document which user-level runtime configuration each
+  adapter loads and the available isolation boundaries (#634).
+- **Feature (server, cloud)** — Hosts can await the durable terminal state of an
+  Agent-home projection instead of polling (#637).
+
+## 0.28.1 / @byok-sdk/keys 0.13.1 — source candidate
+
+The owner selected 0.28.1 as a one-release exception to the default pre-1.0
+MINOR policy for additive changes. This candidate is not published. See the
+[release notes](docs/releases/v0.28.1.md) for scope and outstanding qualification.
+The eight aligned manifests and lock records move to 0.28.1; keys moves to
+0.13.1 with an exact packed core edge of 0.28.1.
+
+- **Fixed (client)** — isolate concurrent Hermes root configuration writes
+  (#599); preserve required closing replies when normal completion lacks a
+  usable result outcome, while retaining task failure, no result document and
+  cancellation precedence (#642 candidate).
+- **Fixed (examples)** — retire all affected routines before awaiting wake
+  cancellation (#601). Add explicit transactional compaction of acknowledged
+  settled Host history, retaining unsettled work, unacknowledged outbox entries
+  and retired intent identities (#623 candidate); no automatic deletion or
+  total-database size bound.
+- **Fixed (client)** — route the canonical Agent persona into fresh Grok
+  sessions without expanding folder trust (#643 candidate). Persona-bearing
+  resumes fail before spawn; live Grok qualification remains outstanding.
+- **Feature (server, client)** — expose embedded memory-intent notices (#616),
+  verified relocated memory-helper assets (#617), stateless tools-only MCP HTTP
+  (#621) and an identity-stable native loopback listener (#638). Additive public
+  APIs remain subject to the next-MINOR rule.
+- **Changed (examples, validation)** — add ignored routine-wake audit records
+  (#620), Host-declared read-only Bot toolsets (#622), Windows K4 non-memory CI
+  (#619) and the per-runtime result measurement method (#615). These slices do
+  not complete their remaining issue scope or admit Windows memory operations.
 
 - **Feature (client)** — add `DaemonConfig.agentMemoryMcp: 'auto' | 'off'` to
   disable SDK task memory tools while retaining Agent homes. The default is

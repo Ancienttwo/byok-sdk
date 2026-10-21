@@ -55,7 +55,10 @@ await core.recover();
 ```
 
 `enqueue` takes a stable intent key, source, complete execution template, waiting deadline and retry policy.
-`addRoutine` takes an immutable definition mirror.
+`addRoutine` takes an immutable definition mirror. It can select `hostJob` instead of
+`execution` for deterministic Host work. Registered handlers return a persisted summary
+and may explicitly request an Agent intent. See [Host job registration, failure and replay
+semantics](../examples/host-execution-core/README.md#host-jobs-and-execution-free-occurrences).
 An execution has an explicit runtime, AgentRef, egress policy and terminal projection.
 Freeze all input context, including any selected server-held message context.
 The core assigns taskId. It never adds SessionRef or changes execution mode.

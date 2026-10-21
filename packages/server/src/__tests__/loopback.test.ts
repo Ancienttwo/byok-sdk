@@ -1,4 +1,4 @@
-import { createServer } from 'node:http';
+import { createServer, Server } from 'node:http';
 import { connect } from 'node:net';
 import { afterEach, expect, it, vi } from 'vitest';
 import { listenLoopback, type LoopbackListener, type LoopbackPortStore } from '../loopback';
@@ -176,4 +176,74 @@ it('mounts the embedded SDK and accepts native-fetch daemon pairing and long pol
   cleanups.push(listener.close);
   const daemon = await connectFakeDaemonLongPoll(listener.serverUrl, sdk, { productId: 'loopback-test' });
   expect((await sdk.machines.list())[0]?.deviceId).toBe(daemon.deviceId);
+});
+
+
+it('retries a real new-identity collision on a different port and removes failed bind callbacks', async () => {
+  // Reserve two adjacent real sockets. Whichever random candidate is drawn
+  // first must collide; release only its neighbour after the kernel error.
+  const held = [createServer(), createServer()];
+  const closeHeld = async (server: Server) => {
+    if (server.listening) await new Promise<void>(resolve => server.close(() => resolve()));
+  };
+  cleanups.push(async () => { for (const server of held) await closeHeld(server); });
+  let first = 0;
+  for (let attempt = 0; attempt < 16; attempt++) {
+    await new Promise<void>((resolve, reject) => {
+      const ready = () => { held[0]!.off('error', reject); resolve(); };
+      held[0]!.once('error', reject);
+      held[0]!.listen(0, '127.0.0.1', ready);
+    });
+    first = (held[0]!.address() as { port: number }).port;
+    if (first === 65535) { await closeHeld(held[0]!); continue; }
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const failed = (error: Error) => { held[1]!.off('listening', ready); reject(error); };
+        const ready = () => { held[1]!.off('error', failed); resolve(); };
+        held[1]!.once('error', failed);
+        held[1]!.once('listening', ready);
+        held[1]!.listen(first + 1, '127.0.0.1');
+      });
+      break;
+    } catch (error) {
+      await closeHeld(held[0]!);
+      if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw error;
+    }
+  }
+  expect(held.every(server => server.listening)).toBe(true);
+  // Node itself installs setupConnectionsTracking on HTTP servers. Preserve
+  // native listeners while proving that the SDK's pending ready callback left.
+  const nativeListening = createServer().listeners('listening');
+  const attempts: Array<{ server: Server; port: number }> = [];
+  const collisions: string[] = [];
+  let released: Promise<void> | undefined;
+  const original = Server.prototype.listen;
+  const spy = vi.spyOn(Server.prototype, 'listen').mockImplementation(function (this: Server, ...args: Parameters<typeof original>) {
+    const selected = (args[0] as unknown as { port: number }).port;
+    attempts.push({ server: this, port: selected });
+    if (attempts.length === 1) this.once('error', (error: NodeJS.ErrnoException) => {
+      collisions.push(error.code!);
+      released = closeHeld(held[selected === first ? 1 : 0]!);
+    });
+    // Pass through to the real kernel. No fake bind result, timer or port RNG.
+    return original.apply(this, args);
+  });
+  const portStore = store();
+  try {
+    const listener = await listenLoopback({ portStore,
+      portRange: { min: first, maxExclusive: first + 2 },
+      createHandler: () => () => new Response('retried'),
+    });
+    cleanups.push(listener.close);
+    await released;
+    expect(collisions).toEqual(['EADDRINUSE']);
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]!.port).not.toBe(attempts[0]!.port);
+    expect(attempts[0]!.server.listening).toBe(false);
+    expect(attempts[0]!.server.listeners('listening')).toEqual(nativeListening);
+    expect(attempts[0]!.server.listenerCount('error')).toBe(0);
+    expect(portStore.claim).toHaveBeenCalledExactlyOnceWith(attempts[1]!.port);
+    expect(await portStore.read()).toBe(attempts[1]!.port);
+    expect(await (await fetch(listener.serverUrl)).text()).toBe('retried');
+  } finally { spy.mockRestore(); }
 });

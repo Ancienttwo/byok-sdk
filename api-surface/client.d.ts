@@ -382,6 +382,11 @@ export interface CodexAdapterOptions {
     spawnFn?: typeof nodeSpawn;
     maxRetainedBytes?: number;
     interruptTimeoutMs?: number;
+    /**
+     * Deadline in milliseconds for the session open, each prompt and each steer.
+     * Default 30000. On expiry the session fails and the app-server is killed.
+     */
+    operationTimeoutMs?: number;
     /** Opt-in local Host UI; independent of the remote boolean approval lane. */
     nativeInteractions?: NativeInteractionHostOptions;
 }
@@ -7760,6 +7765,7 @@ export type ResultReplyFailure = 'required-reply-result-missing' | 'required-rep
 export declare function isResultReplyFailure(value: string): value is ResultReplyFailure;
 /** Stable across restart; do not persist filesystem/backend exception text. */
 export declare function resultReplyFailureReason(kind: ResultReplyFailure, contract: string): string;
+export declare function resultReplyFailureFromState(value: string): ResultReplyFailure | undefined;
 // ==== @byok-sdk/client dist/daemon/retention/config.d.ts ====
 import { type ExpiringClassId } from './registry';
 export declare class LocalStorageConfigError extends Error {
@@ -8809,6 +8815,7 @@ export interface TaskRunnerDeps {
     terminalJournal?: boolean;
     /** Durable normal-turn result failure intent, before handing off a required reply. */
     recordResultReplyFailure?(taskId: string, failure: ResultReplyFailure): Promise<void>;
+    recordAgentMessageAccepted?(taskId: string): Promise<void>;
     durablePi?: boolean;
     recordDurableTransition?(taskId: string, leaseId: string, kind: string, ordinal: number): Promise<void>;
     /** SDK-owned, task-scoped MCP helper. Required only for offers declaring messageEgress. */
@@ -8937,6 +8944,7 @@ export declare class TaskRunner {
     /** Per-task index over {@link hostToolsetContextByToken}, so one cancel revokes every server's nonce at once. */
     private readonly hostToolsetContextTokensByTask;
     private readonly recoveredMessageOutboxes;
+    private readonly cancelledRecoveredMessages;
     private readonly recoveredMessageRetryTimers;
     /**
      * Finding F4 (cancel lost during the offer-processing window): a
@@ -9129,10 +9137,15 @@ export declare class TaskRunner {
         deleted: boolean;
     }>;
     /** Restore activated, unaccepted message drafts before transport admission on daemon restart. */
-    recoverAgentMessageOutboxes(agentsRoot: string): Promise<void>;
+    recoverAgentMessageOutboxes(agentsRoot: string, resultFailureTasks?: ReadonlyMap<string, {
+        agentRef: AgentRef;
+        contract: string;
+    }>, isCancelled?: (taskId: string) => Promise<boolean>): Promise<void>;
     private agentMessageOutbox;
     /** A recovery terminal must not close first-message admission before this durable draft has a disposition. */
     hasPendingRecoveredAgentMessage(taskId: string): boolean;
+    cancelRecoveredAgentMessage(taskId: string, persist: () => Promise<void>): Promise<void>;
+    recoveredAgentMessageState(taskId: string): 'pending' | 'held' | 'refused' | 'missing';
     /** Retry stable recovered records after a transport handshake/re-handshake. */
     retryRecoveredAgentMessages(): void;
     private canPublishAgentMessage;

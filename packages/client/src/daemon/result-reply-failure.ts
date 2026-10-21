@@ -9,3 +9,8 @@ export function resultReplyFailureReason(kind: ResultReplyFailure, contract: str
     ? `result_not_submitted: the offer requires result contract ${contract}, but the runtime ended its turn without a staged submit_result outcome`
     : `result_unreadable: the staged result for contract ${contract} could not be read or validated`;
 }
+
+export function resultReplyFailureFromState(value: string): ResultReplyFailure | undefined {
+  const failure = value.endsWith('-accepted') ? value.slice(0, -'-accepted'.length) : value;
+  return isResultReplyFailure(failure) ? failure : undefined;
+}

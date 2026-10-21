@@ -9,6 +9,51 @@ The separate PRD text is in Draft PR
 `origin/main@b5a456f0`. It changes no code or tests.
 This document records repository evidence. It does not claim a production pass.
 
+## Windows CI qualification / issue #611 (2026-10-21)
+
+Baseline: main `80a340836fe38abec718e2980d39d91b33964ac4`.
+The Windows leg of `built adapter lifecycle smoke` now invokes
+`node scripts/ci/run-windows-bot-tests.mjs` after its pinned Node install,
+Bun install and full build. Vitest executes on Node; this is not a separate
+Bun-runtime qualification. K8 source changes and runner changes select this
+job family through `selectImpact`.
+
+Local macOS arm64, Node 24.18.0 / Bun 1.4.3: the exact eligibility runner passed
+20 files / 182 tests, zero skipped among the selected files. Workspace build,
+typecheck, API surface and version authority are checked separately. Windows
+execution and main-green acceptance remain pending until the PR's job and
+subsequent main run pass; local results do not establish Windows support.
+
+### Explicit Windows exclusions
+
+Each excluded file is printed with its reason in the Windows job log. These
+14 suites call `openTeam`, whose actual `createBotPersonaProjection` consumer
+opens and fsyncs a directory. That persistence contract is POSIX-only (see
+README); no replacement consumer or weakened durability barrier is supplied.
+Entire suite files are excluded, including any mixed pure cases within them.
+Linux/macOS normal package runs keep all tests. This CI slice does not qualify
+Windows persona persistence, physical devices or live models.
+
+- `src/acceptance-fixes.test.ts`
+- `src/channel-team.test.ts`
+- `src/coalesce-team.test.ts`
+- `src/cross-bot-cancel.test.ts`
+- `src/cross-bot-chain.test.ts`
+- `src/cross-bot-device.test.ts`
+- `src/cross-bot-discovery.test.ts`
+- `src/cross-bot-encoding.test.ts`
+- `src/cross-bot-join.test.ts`
+- `src/cross-bot-lifecycle.test.ts`
+- `src/cross-bot-reliability.test.ts`
+- `src/cross-bot.test.ts`
+- `src/group-chat.test.ts`
+- `src/main-bot-cancel.test.ts`
+
+`windows-examples.test.mjs` checks this list against the actual persona-fixture
+imports, so a new persona suite requires an explicit inventory decision. It
+also proves that K4/K8 and runner changes retain the Windows job selection.
+No existing test assertion, timeout or platform condition was edited.
+
 ## P1 map
 
 `BotCollaboration` owns team profiles, placement, authority, delegation rows,

@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2069201,
+      "budgetBytes": 2063277,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -152,7 +152,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Embedded Agent memory service",
-      "budgetBytes": 68657,
+      "budgetBytes": 68197,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1116,7 +1116,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Cloud coordination and HTTP handlers",
-      "budgetBytes": 534369,
+      "budgetBytes": 534412,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1169,7 +1169,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 784241,
+      "budgetBytes": 784284,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1661,7 +1661,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Wire schemas and codecs; codegen negative control",
-      "budgetBytes": 127926,
+      "budgetBytes": 128104,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1867,7 +1867,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 562629,
+      "budgetBytes": 562672,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

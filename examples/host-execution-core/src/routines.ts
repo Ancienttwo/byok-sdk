@@ -1,5 +1,5 @@
 import { WAKE_MAX_FUTURE_MS, type DueWake, type WakeScheduleInput } from '@byok-sdk/server';
-import { hash, time, type IgnoredWakeAudit, type LedgerState, type Routine, type RoutineDefinition } from './model';
+import { hash, time, type ExecutionTemplate, type IgnoredWakeAudit, type LedgerState, type Occurrence, type Routine, type RoutineDefinition } from './model';
 import { cancelWake, enqueue, settle } from './transitions';
 import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
 
@@ -7,7 +7,7 @@ import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
 export const WAKE_HORIZON_MS = WAKE_MAX_FUTURE_MS;
 /** Retain the newest ignored deliveries without growing the Host JSON ledger indefinitely. */
 export const IGNORED_WAKE_AUDIT_LIMIT = 128;
-function auditIgnoredWake(state: LedgerState, wake: DueWake, now: number, reason: IgnoredWakeAudit['reason']): void {
+export function auditIgnoredWake(state: LedgerState, wake: DueWake, now: number, reason: IgnoredWakeAudit['reason']): void {
   const rows = state.ignoredWakes ??= [];
   rows.push({ at: now, reason, wakeKeyHash: hash(wake.dedupKey) });
   if (rows.length > IGNORED_WAKE_AUDIT_LIMIT) rows.splice(0, rows.length - IGNORED_WAKE_AUDIT_LIMIT);
@@ -70,7 +70,7 @@ export function applyPlan(state: LedgerState, routine: Routine, plan: WakePlan, 
   scheduleNext(state, routine, now);
 }
 
-/** Called inside the same transaction that creates the occurrence and its intent. */
+/** Called inside the same transaction that creates the occurrence and its work. */
 export function recordOccurrence(state: LedgerState, tenant: string, wake: DueWake, now: number, nextTime: NextOccurrence): void {
   const existing = state.slots[hash(wake.dedupKey)];
   if (existing) {
@@ -97,19 +97,41 @@ export function recordOccurrence(state: LedgerState, tenant: string, wake: DueWa
   const next = plan.next;
 
   for (const prior of Object.values(state.occurrences).filter(row => row.routineId === definition.id && !row.conclusion)) {
+    if (!prior.intentId) {
+      if (prior.job) prior.job.executionSuperseded = true;
+      continue;
+    }
     const intent = state.intents[prior.intentId]!;
     // A new slot ends old retries. Keep a running occurrence and only the latest queued occurrence.
     intent.retryUntil = Math.min(intent.retryUntil ?? now, now);
     if (intent.phase === 'queued' || intent.phase === 'backoff' || intent.phase === 'memory_blocked') settle(state, intent, 'superseded');
   }
-  const intent = enqueue(state, tenant, { key: `occurrence:${key}`, source: 'routine', execution: definition.execution,
-    waitUntil: time(now + definition.waitMs), retry: definition.retry });
-  intent.occurrence = key;
-  if (next) intent.retryUntil = next.availableAt;
-  state.occurrences[key] = { key, routineId: definition.id, definitionVersion: definition.version,
-    trigger, wakeKey: wake.dedupKey, recordedAt: now, nextAt: next?.availableAt ?? null, intentId: intent.id, attempts: 0 };
+  const occurrence: Occurrence = { key, routineId: definition.id, definitionVersion: definition.version,
+    trigger, wakeKey: wake.dedupKey, recordedAt: now, nextAt: next?.availableAt ?? null, attempts: 0 };
+  state.occurrences[key] = occurrence;
+  if (definition.hostJob) {
+    occurrence.job = { attempts: 0 };
+    state.outbox[`host-job:${key}`] = { kind: 'host-job', occurrenceKey: key };
+  } else {
+    const intent = enqueue(state, tenant, { key: `occurrence:${key}`, source: 'routine', execution: definition.execution,
+      waitUntil: time(now + definition.waitMs), retry: definition.retry });
+    intent.occurrence = key;
+    if (next) intent.retryUntil = next.availableAt;
+    occurrence.intentId = intent.id;
+  }
   state.slots[hash(wake.dedupKey)] = key;
   applyPlan(state, routine, plan, now);
+}
+
+/** A Host decision joins the existing FIFO atomically with its result summary. */
+export function promoteOccurrence(state: LedgerState, tenant: string, occurrence: Occurrence, execution: ExecutionTemplate): void {
+  const routine = state.routines[hash(occurrence.routineId)]!;
+  const intent = enqueue(state, tenant, { key: `occurrence:${occurrence.key}`, source: 'routine', execution,
+    waitUntil: time(occurrence.recordedAt + routine.definition.waitMs), retry: routine.definition.retry });
+  intent.occurrence = occurrence.key;
+  occurrence.intentId = intent.id;
+  if (occurrence.job?.executionSuperseded) settle(state, intent, 'superseded');
+  else if (routine.lifecycle === 'active' && occurrence.nextAt !== null) intent.retryUntil = occurrence.nextAt;
 }
 
 export function setLifecycle(state: LedgerState, id: string, lifecycle: Routine['lifecycle'], now: number, nextTime: NextOccurrence): void {
@@ -121,7 +143,7 @@ export function setLifecycle(state: LedgerState, id: string, lifecycle: Routine[
   if (lifecycle === 'paused' && routine.next) {
     const cancelledSlot = routine.next.availableAt;
     for (const occurrence of Object.values(state.occurrences)) {
-      if (occurrence.routineId !== id || occurrence.conclusion) continue;
+      if (occurrence.routineId !== id || occurrence.conclusion || !occurrence.intentId) continue;
       const intent = state.intents[occurrence.intentId]!;
       // This cutoff belonged to the successor we are cancelling, not to a
       // committed superseding occurrence. Keep the independent waiting bound.

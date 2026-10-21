@@ -200,18 +200,25 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.28.0`; publication requires separate release
+aligned dispatch release is `0.28.1`; publication requires separate release
 authorization and registry readback. The current independent keys release is
-`0.13.0`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.28.0`, proven from an isolated standard npm install rather
+`0.13.1`; its packed and published `@byok-sdk/core` edge must be the exact current
+dispatch release, `0.28.1`, proven from an isolated standard npm install rather
 than the workspace graph.
 
-0.28.0 / keys 0.13.0 is an unpublished source candidate. Both are MINOR
-releases. The train adds public adapters, Bot outcome fragments, schedules
-and an MCP HTTP transport. keys adds Pi API and catalog fields.
-The memory helper configuration has a pre-1.0 breaking cut.
-See the [candidate notes](releases/v0.28.0.md). Publication requires the
-accepted final-commit CI artifact and separate owner authorization.
+For this release only, the owner's 2026-10-21 instruction to continue the
+0.28.1 release selects PATCH despite the included additive APIs and persistence
+changes. This explicit exception does not change the general policy above or
+waive validation, publication authorization, or registry readback. keys 0.13.1
+updates its exact packed core dependency; keys remains independently versioned.
+See the [0.28.1 candidate notes](releases/v0.28.1.md).
+
+Public registry metadata read on 2026-10-21 reports all eight aligned packages
+at latest 0.28.0 and keys at latest 0.13.0. The older 0.28.0 source-candidate
+notes describe preparation history, not current registry availability. The
+0.28.1 / keys 0.13.1 versions were absent at that read; recheck before publishing.
+Publication requires the accepted final-commit CI artifact and separate owner
+authorization.
 
 0.27.0 / keys 0.12.0 is published on `latest` from `v0.27.0` (`cd977261`).
 Complete registry readback and isolated installation passed on 2026-10-17.
@@ -528,8 +535,15 @@ missing or inactive routines, and keys without a matching current reservation.
 The newest 128 observations contain only a timestamp, closed reason code and
 SHA-256 key digest, never the raw key or payload. This history grants no execution
 or deduplication authority; committed occurrence replay and current scan wakes
-keep their existing behavior. This is the audit slice of #612, not Host job
-registration or execution-free occurrences.
+keep their existing behavior. Non-current `host-scan:` keys use `stale_scan`.
+K4 also accepts immutable Host-job routine definitions with registered synchronous
+or asynchronous handlers. Slot admission and pending work commit before the handler;
+its JSON summary and optional Agent intent commit atomically afterward. A summary-only
+result records an occurrence without an Agent execution. Failures retain pending work
+and reject the drain; recovery retries it with the same occurrence identity. External
+Host effects require occurrence-key idempotency across crashes. Pause/completed stop
+new slots, not admitted jobs. This remains Host example code, not an SDK scheduler.
+See the [K4 Host job contract](../examples/host-execution-core/README.md#host-jobs-and-execution-free-occurrences).
 
 ### K4 Host reply transaction
 
@@ -2106,14 +2120,26 @@ The client release carries Darwin arm64 and x64 helpers. The SDK resolves its
 own path and checks the build manifest before each helper open. Arbitrary
 `agentMemoryFilesystem.helperBin` configuration is removed. The ordinary build
 needs no Go. `bun run build:release` builds and verifies native release assets.
+The native reproducibility check rejects release-pin drift. After changing
+native sources, maintainers explicitly regenerate the pin by running
+`node packages/client/scripts/build-agent-memory-helper.mjs` then
+`node packages/client/scripts/check-agent-memory-helper-build.mjs --write-pin`;
+the latter verifies two clean source-path builds before writing the pin.
 Single-file products copy these SDK-owned release assets at build time using
 `copyAgentMemoryHelperAssets({ outDir })` from `@byok-sdk/client`. The destination
 must be new or empty; copying verifies both target binaries and their manifest
 and never overwrites existing files. Ship that directory with the product and
-set `DaemonConfig.agentMemoryHelperAssetRoot` to its absolute installed path.
+set `DaemonConfig.agentMemoryHelperAssetRoot` to its absolute installed path
+only on macOS (Darwin arm64/x64); omit it on Linux and Windows. A configured
+root on other platforms is rejected. Failed copies remove files created by the
+call and preserve any pre-existing empty destination directory.
 An explicit invalid root fails daemon construction even without a configured
 memory projection or intent feed. Resolution and every helper open verify the
-same manifest and content digest; no arbitrary binary path, digest override or
+manifest metadata, source digest and both target digests against the committed
+release identity compiled into the SDK, and the binary against that identity's
+content digest. Assets must come from the same SDK build as the Host bundle.
+Explicit-root missing-file errors direct the Host to deploy the copy API output.
+No arbitrary binary path, digest override or
 PATH search is admitted. The directory is a deployment integrity boundary, not
 a signer authentication mechanism. Omitting the option retains installed SDK
 package resolution. Windows admission is unchanged.
