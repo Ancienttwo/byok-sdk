@@ -1,3 +1,4 @@
+import { ProjectionWaiters } from './projection-waiters';
 import type { AgentMessageDraftEvent } from './types';
 export type { AgentMessageDraftEvent } from './types';
 import { WakeScheduler } from './wakes/scheduler';
@@ -206,6 +207,10 @@ export interface ByokServer {
     agentRef: AgentRef,
     requestId: string,
   ): Promise<AgentHomeProjectionStatusReadback | undefined>;
+  /** Wait without polling for durable terminal readback. Unknown requests return undefined; abort or server close rejects. */
+  awaitAgentHomeProjection(
+    deviceId: string, agentRef: AgentRef, requestId: string, options?: { signal?: AbortSignal },
+  ): Promise<AgentHomeProjectionStatusReadback | undefined>;
   tasks: {
     /** Canonical durable attempt, including cancellation intent; not a resource-release observation. */
     attempt(taskId: string): Promise<TaskAttempt | undefined>;
@@ -350,6 +355,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       composition.clock,
     );
 
+  const projectionWaiters = new ProjectionWaiters();
   const cloud: ByokCloud = createByokCloud({
     core: composition.core,
     cloud: composition.cloud,
@@ -362,6 +368,10 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     // route's decision, not just of the pairing claims.
     instanceProductId: opts.productId,
     observer: {
+      onAgentHomeProjectionCompleted: (readback) => {
+        if (readback.tenantId === tenant) projectionWaiters.notify(
+          agentHomeProjectionRequestKey(readback.deviceId, readback.agentRef, readback.requestId));
+      },
       onInboundCommitted: (input) => relay.onInboundCommitted(input),
       onInboundRefused: ({ reason }) => { inboundRefusals[reason] += 1; },
     },
@@ -671,14 +681,37 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     relay.emitServerEvent(report.steps.some(step => step.status === 'failed') ? { kind: 'maintenance.failed', report } : { kind: 'maintenance.completed', report });
     return report;
   }, maintenanceIntervalMs, (error) => relay.emitServerEvent({ kind: 'maintenance.failed', errorCode: error instanceof ByokCloudError ? error.code : 'maintenance_step_failed' }));
+  async function readAgentHomeProjection(deviceId: string, agentRef: AgentRef, requestId: string): Promise<AgentHomeProjectionStatusReadback | undefined> {
+    // The durable request lookup is exact to the device and AgentRef. The
+    // stored request remains the authority for the projection hash.
+    const stored = await composition.cloud.receipts.get(
+      tenant,
+      agentHomeProjectionRequestKey(deviceId, agentRef, requestId),
+    );
+    if (stored === undefined) return undefined;
+    let desired: AgentHomeProjectionPayload;
+    try {
+      desired = AgentHomeProjectionPayloadSchema.parse(JSON.parse(stored.body));
+    } catch {
+      return undefined;
+    }
+    return cloud.getAgentHomeProjectionStatus(tenant, deviceId, {
+      requestId: desired.requestId,
+      agentRef: desired.agentRef,
+      projectionHash: desired.projectionHash,
+    });
+  }
+
   const draftShutdown = new AbortController();
   const draftReads = new Set<Promise<unknown>>();
   let closePromise: Promise<void> | undefined;
   function close(): Promise<void> {
     draftShutdown.abort();
+    projectionWaiters.stop();
     return closePromise ??= Promise.all([scheduler.close(), wakes.close()])
       .finally(async () => {
         await Promise.allSettled(draftReads);
+        await projectionWaiters.drain();
         relay.stop();
         await composition.close();
       })
@@ -732,29 +765,11 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       return cloud.enqueueAgentMemoryIntentNotice(tenant, deviceId, input);
     },
 
-    async readAgentHomeProjection(
-      deviceId: string,
-      agentRef: AgentRef,
-      requestId: string,
-    ): Promise<AgentHomeProjectionStatusReadback | undefined> {
-      // The durable request lookup is exact to the device and AgentRef. The
-      // stored request remains the authority for the projection hash.
-      const stored = await composition.cloud.receipts.get(
-        tenant,
-        agentHomeProjectionRequestKey(deviceId, agentRef, requestId),
-      );
-      if (stored === undefined) return undefined;
-      let desired: AgentHomeProjectionPayload;
-      try {
-        desired = AgentHomeProjectionPayloadSchema.parse(JSON.parse(stored.body));
-      } catch {
-        return undefined;
-      }
-      return cloud.getAgentHomeProjectionStatus(tenant, deviceId, {
-        requestId: desired.requestId,
-        agentRef: desired.agentRef,
-        projectionHash: desired.projectionHash,
-      });
+    readAgentHomeProjection,
+    async awaitAgentHomeProjection(deviceId, agentRef, requestId, options = {}) {
+      const exactAgent = AgentRefSchema.parse(agentRef);
+      const key = agentHomeProjectionRequestKey(deviceId, exactAgent, requestId);
+      return projectionWaiters.wait(key, () => readAgentHomeProjection(deviceId, exactAgent, requestId), options.signal);
     },
 
     executions: {

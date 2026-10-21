@@ -109,6 +109,10 @@ export interface ByokServer {
     enqueueAgentMemoryIntentNotice(deviceId: string, input: AgentMemoryIntentNoticeInput): Promise<EnqueuedAgentControl>;
     /** Durable desired-state and terminal-outcome readback for one exact device-and-Agent request. */
     readAgentHomeProjection(deviceId: string, agentRef: AgentRef, requestId: string): Promise<AgentHomeProjectionStatusReadback | undefined>;
+    /** Wait without polling for durable terminal readback. Unknown requests return undefined; abort or server close rejects. */
+    awaitAgentHomeProjection(deviceId: string, agentRef: AgentRef, requestId: string, options?: {
+        signal?: AbortSignal;
+    }): Promise<AgentHomeProjectionStatusReadback | undefined>;
     tasks: {
         /** Canonical durable attempt, including cancellation intent; not a resource-release observation. */
         attempt(taskId: string): Promise<TaskAttempt | undefined>;
