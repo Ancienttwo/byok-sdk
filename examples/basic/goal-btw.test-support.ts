@@ -2,18 +2,22 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
-import { freezeRuntimeAdapterDescriptor, type Daemon, type RuntimeAdapter, type RuntimeAdapterPrepareInput,
+import { freezeRuntimeAdapterDescriptor, RuntimeDisposalFailure, type Daemon, type RuntimeAdapter, type RuntimeAdapterPrepareInput,
   type RuntimeAdapterPrepareResult, type RuntimeOperationStartInput, type RuntimeDetectResult, type Session } from '@byok-sdk/client';
 import { expect, vi } from 'vitest';
 type Event = Session['events'] extends AsyncIterable<infer E> ? E : never;
-async function submitResult(input: RuntimeOperationStartInput, outcome: unknown): Promise<unknown> {
+async function submitResult(input: RuntimeOperationStartInput, outcome: unknown, signal: AbortSignal): Promise<unknown> {
   const server = input.mcpServers?.byokagentresult;
   if (!server) throw new Error('result-document fixture did not receive byokagentresult');
+  signal.throwIfAborted();
   const child = spawn(server.command, [...(server.args ?? [])], { env: { ...process.env, ...server.env }, stdio: ['pipe', 'pipe', 'pipe'] });
   const lines = createInterface({ input: child.stdout });
   let nextId = 0;
   const pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>();
-  const ended = new Promise<void>(resolve => child.once('exit', () => resolve()));
+  // `close` proves stdio is closed too, and also fires after a failed spawn.
+  const ended = new Promise<void>(resolve => child.once('close', () => resolve()));
+  const abort = () => { for (const request of pending.values()) request.reject(new Error('result helper closed')); pending.clear(); };
+  signal.addEventListener('abort', abort, { once: true });
   child.on('error', error => { for (const request of pending.values()) request.reject(error); pending.clear(); });
   child.on('exit', () => { for (const request of pending.values()) request.reject(new Error('result helper exited before response')); pending.clear(); });
   child.stderr.resume();
@@ -25,6 +29,7 @@ async function submitResult(input: RuntimeOperationStartInput, outcome: unknown)
     if (response.error) request.reject(new Error(response.error.message)); else request.resolve(response.result);
   });
   const request = (method: string, params: unknown): Promise<unknown> => new Promise((resolve, reject) => {
+    signal.throwIfAborted();
     const id = ++nextId; pending.set(id, { resolve, reject });
     child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
   });
@@ -32,7 +37,14 @@ async function submitResult(input: RuntimeOperationStartInput, outcome: unknown)
     await request('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'example-stub', version: '1' } });
     child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
     return await request('tools/call', { name: 'submit_result', arguments: outcome });
-  } finally { lines.close(); child.kill(); await ended; }
+  } finally {
+    signal.removeEventListener('abort', abort);
+    lines.close();
+    // If signaling fails, retain ownership until close; Session.close reports
+    // bounded disposal failure rather than pretending the process is gone.
+    try { child.kill('SIGKILL'); } catch { /* disposal receipt remains pending */ }
+    await ended;
+  }
 }
 
 export class BotStubSession implements Session {
@@ -40,6 +52,9 @@ export class BotStubSession implements Session {
 
   readonly sessionRef = randomUUID();
   interrupted = false; closed = false; steered = 0; followedUp = 0;
+  private readonly resultAbort = new AbortController();
+  private readonly finishing = new Set<Promise<void>>();
+  private closing: Promise<void> | undefined;
   private pending: Event[] = [];
   private failure: Error | undefined;
   private wake: (() => void) | undefined;
@@ -56,16 +71,35 @@ export class BotStubSession implements Session {
   emit(event: Event): void { this.pending.push(event); this.wake?.(); this.wake = undefined; }
   /** Resolves after fixture result submission and event injection; failures still travel through events. */
   finish(document: unknown, submit = true): Promise<void> {
-    return (async () => {
-      if (submit && this.input.mcpServers?.byokagentresult) await submitResult(this.input, document);
+    if (this.closed) return Promise.resolve();
+    const finishing = (async () => {
+      if (submit && this.input.mcpServers?.byokagentresult) await submitResult(this.input, document, this.resultAbort.signal);
+      if (this.closed) return;
       this.emit({ type: 'progress', text: JSON.stringify(document) }); this.emit({ type: 'turn_end' });
-    })().catch(error => { this.failure = error; this.wake?.(); this.wake = undefined; });
+    })().catch(error => {
+      if (!this.closed) { this.failure = error; this.wake?.(); this.wake = undefined; }
+    }).finally(() => { this.finishing.delete(finishing); });
+    this.finishing.add(finishing);
+    return finishing;
   }
   fail(): void { this.failure = new Error('stub failed'); this.wake?.(); this.wake = undefined; }
   async steer(): Promise<void> { this.steered += 1; }
   async followUp(): Promise<void> { this.followedUp += 1; }
   async interrupt(): Promise<void> { this.interrupted = true; }
-  async close(): Promise<void> { this.closed = true; this.wake?.(); }
+  close(): Promise<void> {
+    if (this.closing) return this.closing;
+    this.closed = true; this.wake?.(); this.wake = undefined;
+    this.resultAbort.abort();
+    // Test-only disposal bound, separate from every business observation window.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    this.closing = Promise.race([
+      Promise.all([...this.finishing]).then(() => {}),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new RuntimeDisposalFailure({ stage: 'quiescence', reason: 'result helper did not close' })), 1000);
+      }),
+    ]).finally(() => { clearTimeout(timer); this.closing = undefined; });
+    return this.closing;
+  }
   async resolveApproval(): Promise<void> { /* no approval */ }
 }
 export class BotStubAdapter implements RuntimeAdapter {

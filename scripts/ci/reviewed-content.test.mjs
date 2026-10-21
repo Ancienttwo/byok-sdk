@@ -126,3 +126,8 @@ test('shared goal fixture selects its consumers without broadening unknown root 
   assert.deepEqual(plan.families, ['adapter-lifecycle-smoke']);
   assert.throws(() => selectImpact(['examples/basic/other.test-support.ts']));
 });
+
+test('result-helper close regression selects only its exact basic workspace path', () => {
+  assert.deepEqual(selectImpact(['examples/basic/goal-btw-close.test.ts']).dirs, ['examples/basic']);
+  assert.throws(() => selectImpact(['examples/basic/goal-btw-close-other.test.ts']));
+});
