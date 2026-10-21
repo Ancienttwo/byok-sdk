@@ -17,9 +17,9 @@ export interface McpHttpServerOptions extends Omit<McpServerOptions, 'input' | '
   readonly allowedOrigins?: readonly string[];
   /** Positive integer, at most MCP_HTTP_MAX_BODY_BYTES. */
   readonly maxBodyBytes?: number;
-  /** Bounds idle sessions as well as emitter subscriptions. Default 64. */
+  /** Bounds idle sessions as well as emitter subscriptions. Default 64. Applies only in stateful mode. */
   readonly maxSessions?: number;
-  /** Idle lifetime without pending core replies. SSE alone does not keep a session alive. Default 15 minutes. */
+  /** Idle lifetime without pending core replies. SSE alone does not keep a session alive. Default 15 minutes. Applies only in stateful mode. */
   readonly idleTimeoutMs?: number;
 }
 

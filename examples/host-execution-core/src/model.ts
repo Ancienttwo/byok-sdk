@@ -29,6 +29,8 @@ export interface Execution {
   input: AgentExecutionInput;
   submission: 'reserved' | 'uncertain' | 'delivered';
   started: boolean;
+  /** At most one acceptance per execution; retained/compacted with its execution. */
+  messageReceipt?: { messageId: string; contentHash: string };
   attempt?: Attempt;
   terminal?: Terminal;
 }

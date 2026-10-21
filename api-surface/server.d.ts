@@ -596,7 +596,7 @@ export declare function isSqliteCapableNodeVersion(nodeVersion: string): boolean
  * to decide whether to skip the SQLite-backed reference-store tests (rather
  * than fail them), and what anything else should call before assuming a
  * `SqliteTaskStore`/`SqliteBlobStore` can be constructed: it attempts the
- * real `require('node:sqlite')` (via {@link loadSqliteModule}, memoized) and
+ * real built-in lookup (via {@link loadSqliteModule}, memoized) and
  * reports whether that succeeded, so it agrees with reality regardless of
  * whether the current runtime is old, too-new-but-flagged, or fully capable.
  */

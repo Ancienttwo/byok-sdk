@@ -395,3 +395,40 @@ behind; the clients here take generic `messages` / `max_tokens` / `system`
 parameters instead of building domain prompts.
 
 Runtime dependencies and size budgets: [entry dependency contract](../../README.md#entry-dependencies).
+
+### Hermes custody launcher
+
+`runHermesProviderLauncher` runs in a dedicated Host process with an
+account-scoped `SecretStore`, never in the daemon:
+
+```ts
+import { parseHermesProviderLauncherRequest, runHermesProviderLauncher } from '@byok-sdk/keys';
+try {
+  const request = parseHermesProviderLauncherRequest(process.argv.slice(2));
+  await runHermesProviderLauncher(request, {
+    createSecretStore: () => createHostAccountScopedStore(),
+  });
+} catch {
+  // Do not print raw backend errors: a Host store can put sensitive data in them.
+  process.stderr.write('Hermes custody launch rejected\n');
+  process.exitCode = 1;
+}
+```
+
+The closed argv grammar carries the profile database path, exact non-secret
+binding and optional fixed gateway/viewer launch role. Validation emits only
+non-secret model metadata and reads no key. Launch re-reads the exact profile
+under its configuration lock, rejects pending custody changes, obtains the
+profile-specific key, closes SQLite and uses POSIX `process.execve` to replace
+the launcher with Hermes. The original PID remains the gateway identity.
+No plaintext is returned to the daemon or written to a profile/config file.
+Only the selected key is injected as `SDK_HERMES_PROVIDER_KEY`; inherited
+provider/loader variables are removed. The Host executable and target Hermes
+binary remain trusted code and must not log credentials.
+
+This slice supports enabled `openai_compatible` + `bearer` profiles without
+`pi_model` overrides. It deliberately refuses unsupported provider semantics;
+it does not translate Pi Responses/compat configuration. Windows and runtimes
+without `process.execve` fail closed. Use absolute executable paths and a
+supported POSIX Node runtime. No built-in OS-store selection is implied: the
+Host supplies its own account scope just as for its Pi custody launcher.
