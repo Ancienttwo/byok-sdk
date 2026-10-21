@@ -87,7 +87,9 @@ async function complete(ledger: BetaLedger, core: RoutineToolOptions['core'], ro
  * after `core.recover()`, to finish a retirement that a crash interrupted.
  */
 export async function retireRevokedRoutines(ledger: BetaLedger, core: RoutineToolOptions['core']): Promise<void> {
-  for (const routineId of ledger.revokedRoutines()) await complete(ledger, core, routineId, false);
+  // lifecycle commits synchronously before awaiting wake I/O. Start every retirement
+  // first, so one slow cancellation cannot leave another revoked routine active.
+  await Promise.all(ledger.revokedRoutines().map(routineId => complete(ledger, core, routineId, false)));
 }
 
 /** The B4 routine catalogue on K4's routine ledger. The beta ledger owns only key ownership and the routine slot. */
