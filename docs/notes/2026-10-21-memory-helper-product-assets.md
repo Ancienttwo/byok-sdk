@@ -20,7 +20,47 @@ and memory-service path, not a full product CLI/MCP distribution. macOS CI
 builds native assets before running the test. Ordinary JS-only builds retain
 existing native-test skips.
 
-Initial validation preserved in /tmp/byok-603-focused.log: the new test's
+Initial validation: the new test's
 esbuild resolution failed (replaced with the repository's Bun bundler); an
 existing test was denied Unix socket creation in the sandbox (EPERM). The
 socket-enabled focused run passed 15 tests. No assertion or timeout was relaxed.
+
+## Release binding follow-up
+
+The baseline accepted a changed helper if its adjacent manifest declared the
+new digest. The resolver now binds manifest metadata, source digest and both
+Darwin target digests to a generated identity compiled into the SDK. A manifest
+remains a deployment projection, not a caller authority. Explicit pin updates
+run only after both independent clean builds match the release bytes. Ordinary
+native builds reject drift; product re-signing keeps the same content identity.
+
+Explicit-root missing files report deployment guidance. Copy failures remove
+only files created by that call and retain a pre-existing destination directory.
+The asset-root option is macOS-only; the docs now state that boundary.
+
+The follow-up regression coverage uses esbuild with no externals for the isolated
+helper/service bundle and flips a code byte after successful re-signing. A daemon
+integration test uses the copied root for the actual-volume probe, Host intent
+application and task filesystem opens, then calls real stdio MCP recall/save via
+`sdkHelperHost`. The adapter fixture captures the daemon's MCP launch contract;
+no helper or filesystem implementation is replaced. Copy I/O failure injection
+covers both a new and an existing empty destination and a successful retry.
+
+Public declarations are unchanged. The client static closure grew by 1,085 bytes
+for the compiled identity and cleanup path; its budget and generated README row
+were updated from 2,057,010 to the measured 2,058,095 bytes. No dependency policy,
+test assertion or timeout was relaxed.
+
+Validation on macOS arm64: workspace build and typecheck, client typecheck,
+API-surface and version-authority gates passed. Both native targets reproduced
+byte-for-byte from two independent source paths. The final five-file memory
+regression run passed 30 tests; the release source checks passed four tests.
+The packed-helper smoke script passed against the local built client (this was
+not a fresh tarball installation or a publication test).
+
+The full workspace test command stopped in client: 4,261 passed, 43 skipped and
+two failures. The expected module graph was updated to include the data-only pin
+and passed the final regression run. The remaining observed failure is the
+unchanged `mcp-server-http.test.ts:134` independent-client cancellation assertion,
+with a connection-closed rejection during cleanup. It is outside #603 and was
+not modified or rerun. The whole suite is therefore not claimed green.
