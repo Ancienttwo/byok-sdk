@@ -331,14 +331,18 @@ export function selectImpact(paths, context = {}) {
     const relative = match[3];
     if (!workspaceGraph[dir]) requireMapping(path);
     if (/^(?:README|AGENTS|CLAUDE)\.md$/.test(relative)) continue;
-    // A workspace smoke script is accepted only when a platform family owns it.
-    if (owned && /^scripts\/[a-z0-9-]+\.mjs$/.test(relative)) { dirs.add(dir); continue; }
     if (/^(?:tsconfig(?:\.[a-z-]+)?\.json|vitest\.config\.[cm]?ts)$/.test(relative)) { dirs.add(dir); continue; }
     if (dir === 'packages/client' && /^native\/agent-memory-fs\/.+\.(?:go|mod|sum)$/.test(relative)) {
       dirs.add(dir); families.add('npm-release-pack'); continue;
     }
-    if (dir === 'packages/client' && /^scripts\/(?:build|check|verify|copy)-agent-memory-helper[^/]*\.[cm]?[jt]s$/.test(relative)) {
+    if (dir === 'packages/client' && /^scripts\/(?:(?:build|check|verify|copy)-agent-memory-helper[^/]*|agent-memory-helper-source)\.[cm]?[jt]s$/.test(relative)) {
       dirs.add(dir); families.add('npm-release-pack'); continue;
+    }
+    // A workspace smoke script is accepted only when a platform family owns it.
+    if (owned && /^scripts\/[a-z0-9-]+\.mjs$/.test(relative)) {
+      dirs.add(dir);
+      if (dir === 'examples/packaging') families.add('npm-release-pack');
+      continue;
     }
     if (!/^(?:src|test|tests|migrations)\//.test(relative)
       || !/\.(?:[cm]?[jt]sx?|json|ndjson|sql|sh|go|txt|md)$/.test(relative)) requireMapping(path);

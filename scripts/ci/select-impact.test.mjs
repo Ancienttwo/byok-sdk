@@ -66,6 +66,13 @@ test('a platform family is selected only by a path it owns', () => {
   }
 });
 
+test('owned helper build scripts keep release packaging qualification', () => {
+  for (const path of ['packages/client/scripts/build-agent-memory-helper.mjs', 'packages/client/scripts/check-agent-memory-helper-build.mjs', 'packages/client/scripts/agent-memory-helper-source.mjs']) {
+    const families = selectImpact([path]).families;
+    for (const id of ['npm-release-pack', 'agent-memory-helper', 'agent-memory-helper-linux']) assert.ok(families.includes(id), `${path}: ${id}`);
+  }
+});
+
 // Each test file and script that a family job runs must select that family.
 test('family owners cover every test file and script their CI job runs', () => {
   const workflow = readFileSync(new URL('.github/workflows/ci.yml', root), 'utf8');
