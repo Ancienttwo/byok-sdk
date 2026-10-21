@@ -171,7 +171,7 @@ it('does not recreate a completed routine or reapply its SDK terminal on replay 
     const occurrence = Object.values(host.ledger.snapshot().occurrences)[0]!;
     const intent = host.ledger.snapshot().intents[occurrence.intentId!]!;
     await vi.waitFor(() => expect(host.adapter.sessions.has(intent.taskId)).toBe(true));
-    host.adapter.sessions.get(intent.taskId)!.finish({ text: 'retained by the SDK' });
+    await host.adapter.sessions.get(intent.taskId)!.finish({ text: 'retained by the SDK' });
     await vi.waitFor(async () => { await host.core.drain(); expect(host.core.intent(intent.key)?.conclusion).toBe('succeeded'); });
     await host.core.flushProjections(async () => {});
     expect(await host.server.tasks.deviceTerminal(intent.taskId)).toBeDefined();
