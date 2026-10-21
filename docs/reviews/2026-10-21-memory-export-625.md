@@ -63,3 +63,19 @@ Client `test -- memory`: 213 passed, 56 platform/backend skips (24 files passed,
 3 skipped). After building and reproducibility-checking both macOS helper assets,
 `BYOK_REQUIRE_MEMORY_EXPORT_TESTS=1` export suite passed all 8 tests without skips.
 Validation is local; hosted CI and Linux qualification are not claimed here.
+
+## CI scope integration after #660
+
+Merged main `80a340836fe38abec718e2980d39d91b33964ac4`. Reproduced the
+workflow inventory failure: the Linux export job existed but was absent from
+selection and the required aggregate. #660 recognizes reviewed dependency
+changes; it does not register this export qualification family.
+
+Registered export alongside the Linux helper in known/client families, gated its
+workflow execution on selection, and added it to `ci-required.needs`. Client and
+transitive protocol impact now require its success; docs-only changes skip it;
+explicit release validation includes it. Updated the exact job-list/count
+contracts because the workflow legitimately contains this additional job, with
+all existing strict assertions retained. Added targeted gate regressions for
+failed, cancelled, skipped and missing export results and unexpected docs runs.
+`node --test scripts/ci/*.test.mjs`: 43 passed, zero failures or skips.

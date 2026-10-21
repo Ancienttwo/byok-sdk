@@ -219,6 +219,8 @@ jobs:
         run: node scripts/ci/check-tmpdir-leaks.mjs verify "$RUNNER_TEMP/tmpdir-before.txt"
 
   agent-memory-export-linux:
+    needs: select
+    if: ${{ contains(fromJSON(needs.select.outputs.families), 'agent-memory-export-linux') }}
     name: task-free memory export (Linux native descriptors)
     runs-on: ubuntu-latest
     steps:
@@ -1453,7 +1455,7 @@ jobs:
   ci-required:
     name: CI required
     if: ${{ always() }}
-    needs: ["select", "targeted", "build-test", "agent-memory-helper-linux", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-git-workspace", "packageability-smoke", "npm-release-pack", "release-pack-migrate", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit"]
+    needs: ["select", "targeted", "build-test", "agent-memory-export-linux", "agent-memory-helper-linux", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-git-workspace", "packageability-smoke", "npm-release-pack", "release-pack-migrate", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit"]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
