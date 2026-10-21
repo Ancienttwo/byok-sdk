@@ -202,3 +202,10 @@ test('SQLite packaging root fixtures select both packaging families without admi
   assert.equal(selectImpact(['examples/packaging/SQLITE-VALIDATION.md']).reason, 'docs-only');
   assert.throws(() => selectImpact(['examples/packaging/unreviewed.mjs']));
 });
+
+test('shared goal fixture selects its consumers without broadening unknown root support files', () => {
+  const plan = selectImpact(['examples/basic/goal-btw.test-support.ts']);
+  assert.deepEqual(plan.dirs, ['examples/basic', 'examples/bot-collaboration', 'examples/byok-mcp-server', 'examples/host-execution-core']);
+  assert.deepEqual(plan.families, ['adapter-lifecycle-smoke']);
+  assert.throws(() => selectImpact(['examples/basic/other.test-support.ts']));
+});
