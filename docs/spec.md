@@ -2097,14 +2097,26 @@ The client release carries Darwin arm64 and x64 helpers. The SDK resolves its
 own path and checks the build manifest before each helper open. Arbitrary
 `agentMemoryFilesystem.helperBin` configuration is removed. The ordinary build
 needs no Go. `bun run build:release` builds and verifies native release assets.
+The native reproducibility check rejects release-pin drift. After changing
+native sources, maintainers explicitly regenerate the pin by running
+`node packages/client/scripts/build-agent-memory-helper.mjs` then
+`node packages/client/scripts/check-agent-memory-helper-build.mjs --write-pin`;
+the latter verifies two clean source-path builds before writing the pin.
 Single-file products copy these SDK-owned release assets at build time using
 `copyAgentMemoryHelperAssets({ outDir })` from `@byok-sdk/client`. The destination
 must be new or empty; copying verifies both target binaries and their manifest
 and never overwrites existing files. Ship that directory with the product and
-set `DaemonConfig.agentMemoryHelperAssetRoot` to its absolute installed path.
+set `DaemonConfig.agentMemoryHelperAssetRoot` to its absolute installed path
+only on macOS (Darwin arm64/x64); omit it on Linux and Windows. A configured
+root on other platforms is rejected. Failed copies remove files created by the
+call and preserve any pre-existing empty destination directory.
 An explicit invalid root fails daemon construction even without a configured
 memory projection or intent feed. Resolution and every helper open verify the
-same manifest and content digest; no arbitrary binary path, digest override or
+manifest metadata, source digest and both target digests against the committed
+release identity compiled into the SDK, and the binary against that identity's
+content digest. Assets must come from the same SDK build as the Host bundle.
+Explicit-root missing-file errors direct the Host to deploy the copy API output.
+No arbitrary binary path, digest override or
 PATH search is admitted. The directory is a deployment integrity boundary, not
 a signer authentication mechanism. Omitting the option retains installed SDK
 package resolution. Windows admission is unchanged.
