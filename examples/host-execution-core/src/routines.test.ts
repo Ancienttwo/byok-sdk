@@ -198,18 +198,31 @@ it('reports an initial schedule failure and recovers its durable outbox on start
 });
 
 it.each(['successor-failure:', 'host-scan:'])('rejects the current hook if successor %s scheduling fails, then SDK retry recovers', async prefix => {
+  let release!: () => void;
+  const ready = new Promise<void>(resolve => { release = resolve; });
   let armed = false;
   let failed = false;
   const deliveries: number[] = [];
   host = await openHost({
-    consume: async (wake, _signal, next) => { if (wake.dedupKey.startsWith('successor-failure:')) deliveries.push(wake.delivery); await next(); },
+    consume: async (wake, _signal, next) => {
+      if (wake.dedupKey.startsWith('successor-failure:')) {
+        deliveries.push(wake.delivery);
+        // Initial scheduling may deliver the wake before addRoutine's drain returns.
+        await ready;
+      }
+      await next();
+    },
     wrapServer: server => ({ ...server, wakes: { ...server.wakes, schedule: async input => {
       if (armed && !failed && input.dedupKey.startsWith(prefix)) { failed = true; throw new Error('successor schedule unavailable'); }
       return server.wakes.schedule(input);
     } } }),
   });
-  await host.core.addRoutine(host.routine('successor-failure', { waitMs: 300_000 }));
-  armed = true;
+  try {
+    await host.core.addRoutine(host.routine('successor-failure', { waitMs: 300_000 }));
+    armed = true;
+  } finally {
+    release();
+  }
   await vi.waitFor(async () => expect((await host.server.wakes.pending()).some(wake => wake.lastError?.includes('Wake dispatch failed'))).toBe(true));
   const retry = (await host.server.wakes.pending()).find(wake => wake.lastError?.includes('Wake dispatch failed'))!;
   expect(occurrences()).toHaveLength(1);
