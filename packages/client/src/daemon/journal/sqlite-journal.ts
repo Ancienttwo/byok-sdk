@@ -626,7 +626,7 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
           );
         if (inserted.changes > 0) {
           this.#db
-            .prepare('UPDATE journal_task SET local_state = ?, updated_at = ? WHERE task_id = ?')
+            .prepare('UPDATE journal_task SET local_state = ?, updated_at = ? WHERE task_id = ? AND NOT EXISTS (SELECT 1 FROM journal_terminal WHERE journal_terminal.task_id = journal_task.task_id)')
             .run(record.to, record.occurredAt, record.taskId);
         }
         this.#fault('transition:before-commit');

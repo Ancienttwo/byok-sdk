@@ -60,9 +60,17 @@ export type Outbox =
   | { kind: 'schedule'; input: WakeScheduleInput; lastError?: string }
   | { kind: 'cancel-wake'; key: string; lastError?: string }
   | { kind: 'projection'; id: string; value: Json; lastError?: string };
+export interface IgnoredWakeAudit {
+  at: number;
+  reason: 'unknown_key' | 'missing_routine' | 'inactive_routine' | 'reservation_mismatch';
+  /** SHA-256 of canonical(dedupKey); raw keys, IDs and payloads are not retained. */
+  wakeKeyHash: string;
+}
 export interface LedgerState {
   version: 1; sequence: number; scanSequence: number;
   memory?: MemoryState;
+  /** Bounded diagnostic history; absent until the first ignored delivery. */
+  ignoredWakes?: IgnoredWakeAudit[];
   intents: Record<string, Intent>; executions: Record<string, Execution>;
   routines: Record<string, Routine>; occurrences: Record<string, Occurrence>;
   slots: Record<string, string>; outbox: Record<string, Outbox>;

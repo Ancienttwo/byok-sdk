@@ -49,7 +49,7 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
   }
   beforeEach(async () => {
     root = await mkdtemp(path.join(tmpdir(), 'gb-')); now = 1_000_000; extraStores = [];
-    byok = createByokServer({ productId: 'goal-btw-test' });
+    byok = createByokServer({ productId: 'goal-btw-test', longPollHoldMs: 100 });
     const listening = await new Promise<{ url: string; close: () => Promise<void> }>(resolve => {
       const http = serve({ fetch: byok.hono.fetch, port: 0, hostname: '127.0.0.1' }, info => resolve({
         url: `http://127.0.0.1:${info.port}`, close: () => new Promise<void>(done => { http.close(() => done()); if ('closeAllConnections' in http) http.closeAllConnections(); }),
