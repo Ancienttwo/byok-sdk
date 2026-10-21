@@ -23,8 +23,12 @@ name: CI
 # loopback socket binding and will flake those tests specifically; GitHub-
 # hosted runners have a normal network stack and don't hit this.
 
+# Feature branches are validated by their PR merge-ref run. Keeping a second
+# push run would duplicate the entire matrix; main push remains the release
+# artifact authority used by release.yml. Every PR/path still runs all jobs.
 on:
   push:
+    branches: [main]
   pull_request:
 
 concurrency:
@@ -1345,3 +1349,21 @@ jobs:
           name: credential-isolation-audit
           path: ${{ github.workspace }}/.ci-artifacts/credential-isolation
           if-no-files-found: warn
+
+  ci-required:
+    name: CI required
+    if: ${{ always() }}
+    needs: ["build-test", "agent-memory-helper-linux", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-git-workspace", "packageability-smoke", "npm-release-pack", "release-pack-migrate", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit"]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Setup fixed Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - name: Require every CI job family to succeed
+        env:
+          CI_NEEDS: ${{ toJSON(needs) }}
+          CI_REQUIRED_JOBS: '["build-test", "agent-memory-helper-linux", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-git-workspace", "packageability-smoke", "npm-release-pack", "release-pack-migrate", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit"]'
+        run: node scripts/ci/require-ci-success.mjs
