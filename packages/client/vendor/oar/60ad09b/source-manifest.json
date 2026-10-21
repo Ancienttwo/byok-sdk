@@ -267,7 +267,8 @@
       "path": "runtimes/grok/session.ts",
       "sourcePath": "packages/oar/src/runtimes/grok/session.ts",
       "upstreamSha256": "512658ff46dc3c8895651996236d916f0444eb03faeb6f21dc108a7cd8b71844",
-      "vendoredSha256": "512658ff46dc3c8895651996236d916f0444eb03faeb6f21dc108a7cd8b71844"
+      "vendoredSha256": "8bdc68867884aa7323d1d833861c736f98f7ac93ace99047e6221add4ad8b72d",
+      "delta": "Route appendSystemPrompt as session/new _meta.rules per Grok documentation, preserving built-in prompts and the upstream append-only resume refusal. No folder-trust grants."
     },
     {
       "path": "runtimes/grok/spontaneous-usage.ts",
