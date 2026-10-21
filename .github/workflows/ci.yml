@@ -677,6 +677,14 @@ jobs:
       - name: Build (needed so @byok-sdk/client has a dist/ to bundle)
         run: bun run build
 
+      - name: Cross-build pinned Windows native assets on macOS
+        if: matrix.recipe == 'sea' && matrix.os == 'macos-latest'
+        run: node examples/packaging/native-assets-smoke.mjs --copy-only
+
+      - name: Relocated Windows SEA native process ownership
+        if: matrix.recipe == 'sea' && matrix.os == 'windows-latest'
+        run: node examples/packaging/native-assets-smoke.mjs
+
       - name: Verify loopback ownership and native MCP transport
         if: matrix.recipe == 'bun'
         run: |
