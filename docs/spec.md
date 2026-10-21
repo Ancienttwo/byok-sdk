@@ -3021,6 +3021,19 @@ Apache-2.0 attribution and maintained source inventory remain explicit. Fixture
 qualification does not establish live-provider, desktop or Host-reconnect
 acceptance.
 
+## K8 Host-declared read-only toolsets (#606)
+
+The copy-and-own Bot collaboration example refuses required toolsets by default.
+A Host may declare an immutable `readOnlyToolsets` list of logical IDs, enforced
+across initial/model templates, restored non-archived Bots, creation, update and
+enqueue. The list governs Bot turns only; a Host that calls the K4 core directly
+uses its own authority.
+The daemon still owns concrete tool definitions and ordinary capability admission.
+Only the Host's local tool service can enforce actual read-only behavior; model
+annotations are not authorization. External effects retain owner-confirmed Host
+connector execution. This additive slice does not qualify external-authority
+storage, Windows persona persistence or two-process relay.
+
 ## Hosted mailbox hold (#410)
 
 `ByokCloudOptions` and `CloudRootStores` require `MailboxWake`. Held
@@ -3076,17 +3089,6 @@ For Darwin the copier delegates to the existing memory-helper release copier;
 `agentMemoryHelperAssetRoot` remains the separate memory-helper authority. Windows
 memory remains unavailable. Native target metadata is not platform qualification;
 Windows SEA qualification requires the actual Windows CI process-ownership fixture.
-
-### K8 Host-declared read-only toolsets
-
-The copy-and-own Bot collaboration example refuses required toolsets by default.
-A Host may declare an immutable `readOnlyToolsets` list of logical IDs, enforced
-across initial/model templates, restored Bots, creation, update and enqueue.
-The daemon still owns concrete tool definitions and ordinary capability admission.
-Only the Host's local tool service can enforce actual read-only behavior; model
-annotations are not authorization. External effects retain owner-confirmed Host
-connector execution. This additive slice does not qualify external-authority
-storage, Windows persona persistence or two-process relay.
 
 ### Embedded Agent-home projection completion waiting
 
