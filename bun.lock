@@ -188,6 +188,7 @@
       "devDependencies": {
         "@byok-sdk/server": "workspace:*",
         "@hono/node-server": "^2.0.10",
+        "esbuild": "0.28.1",
         "pi-subagents": "0.60.0",
       },
       "optionalDependencies": {

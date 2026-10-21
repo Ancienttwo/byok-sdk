@@ -44,6 +44,11 @@ if (process.platform === 'darwin') {
     await assert.rejects(open(), /deployment digest mismatch/);
     const daemonConfig = { strictAgentOnly: true, productName: 'Packed helper', productId: 'packed-helper', serverUrl: 'http://localhost:1', storeDir: path.join(scratch, 'store'), agentHome: { hostStorageRoot: scratch }, localAgentRelease: { version: '0.0.0-test' }, agentMemoryIntents: { fetch: async () => { throw new Error('must not fetch'); }, complete: async () => { throw new Error('must not complete'); } } };
     assert.throws(() => sdk.createDaemonWithAdapters(daemonConfig, []), /deployment digest mismatch/);
+    const forgedManifest = structuredClone(manifest);
+    forgedManifest.entries[`darwin-${process.arch}`].digest = agentMemoryHelperDigest(changed, process.arch);
+    writeFileSync(manifestFile, JSON.stringify(forgedManifest));
+    await assert.rejects(open(), /target mismatch/);
+    writeFileSync(manifestFile, originalManifest);
     writeFileSync(bin, original);
     for (const patch of [{ protocol: 1 }, { helperVersion: 'wrong' }, { entries: {} }]) {
       writeFileSync(manifestFile, JSON.stringify({ ...manifest, ...patch }));
