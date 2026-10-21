@@ -12,7 +12,13 @@ let releaseProjection: (() => void) | undefined;
 afterEach(async () => { releaseProjection?.(); releaseProjection = undefined; await fixture?.close(); });
 const host = () => fixture.host;
 async function running(id: string) {
-  await vi.waitFor(async () => { await host().drain(); expect(fixture.adapter.sessions.has(host().core.intent(id)!.taskId)).toBe(true); }, { timeout: 5000 });
+  // Commands and the connected wake consumer already advance the Host. Repeated
+  // reconciliation while observing daemon startup blocks its filesystem work.
+  let drained = false;
+  await vi.waitFor(async () => {
+    if (!drained) { await host().drain(); drained = true; }
+    expect(fixture.adapter.sessions.has(host().core.intent(id)!.taskId)).toBe(true);
+  }, { timeout: 5000 });
   return fixture.adapter.sessions.get(host().core.intent(id)!.taskId)!;
 }
 async function finish(id: string, document: unknown = {}) {
