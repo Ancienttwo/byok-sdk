@@ -7,14 +7,15 @@ composition over Postgres and R2.
 
 ## Release status
 
-The source candidate is **0.28.1** for the eight aligned packages and
-**0.13.1** for keys. It is not published. See the
-[candidate notes](docs/releases/v0.28.1.md) and
+The current stable release is **0.28.1** for the eight aligned packages and
+**0.13.1** for keys. See the
+[release notes](docs/releases/v0.28.1.md) and
 [release process](docs/releases/README.md).
 
-Public npm metadata read on 2026-10-21 reports `latest` **0.28.0** for
-the eight aligned packages and independent keys **0.13.0**. This read confirms
-registry availability, not a new artifact or isolated-install qualification.
+Public npm metadata read on 2026-10-21 at 18:13 UTC reports `latest` **0.28.1**
+for the eight aligned packages and independent keys **0.13.1**. The registry
+lists 0.28.0 / keys 0.13.0 as the earlier published versions (2026-10-20, UTC).
+This read confirms registry availability, not isolated-install qualification.
 
 Historically, all nine **0.27.0** / keys **0.12.0** packages were published from
 `v0.27.0` (`cd977261`), and complete registry readback and isolated installation
@@ -28,8 +29,8 @@ changes server, cloud, client and keys APIs.
 [Release notes](docs/releases/v0.27.0.md) describe the changes since 0.26.1
 and the Host upgrade and migration steps.
 
-Versioned install examples below name the unpublished source candidate.
-Use the observed stable 0.28.0 / keys 0.13.0 until this candidate is published.
+Versioned install examples below name the current stable release,
+0.28.1 / keys 0.13.1.
 The historical `rc` publication is **0.27.0-rc.2** / keys **0.12.0-rc.2**; see its
 [publication record](docs/releases/v0.27.0-rc.2-publication.md).
 
