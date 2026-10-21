@@ -9,6 +9,12 @@ function empty(): LedgerState {
 /** Small single-owner reference. Keep this database separate from the SDK and Agent home. */
 export class HostLedger {
   private readonly db: DatabaseSync;
+  private readonly outboxListeners = new Set<() => void>();
+  /** Post-commit hints for newly inserted projections. The durable outbox is the authority. */
+  onOutbox(listener: () => void): () => void {
+    this.outboxListeners.add(listener);
+    return () => { this.outboxListeners.delete(listener); };
+  }
   constructor(filename: string, readonly tenant: string) {
     if (!filename || !tenant.trim()) throw new Error('Select a Host database and tenant');
     this.db = new DatabaseSync(filename);
@@ -25,14 +31,20 @@ export class HostLedger {
   }
   transaction<T>(apply: (state: LedgerState) => T): T {
     this.db.exec('BEGIN IMMEDIATE');
+    let result: T;
+    let added = false;
     try {
       const state = this.snapshot();
-      const result = apply(state);
+      const prior = new Set(Object.keys(state.outbox));
+      result = apply(state);
       if (result && typeof (result as { then?: unknown }).then === 'function') throw new Error('Host transactions must be synchronous');
       this.db.prepare('UPDATE host_ledger SET body=? WHERE tenant=?').run(JSON.stringify(state), this.tenant);
+      added = Object.entries(state.outbox).some(([key, row]) => row.kind === 'projection' && !prior.has(key));
+      result = structuredClone(result);
       this.db.exec('COMMIT');
-      return structuredClone(result);
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    if (added) for (const listener of [...this.outboxListeners]) { try { listener(); } catch { /* Hints cannot roll back committed state. */ } }
+    return result;
   }
   close(): void { this.db.close(); }
 }

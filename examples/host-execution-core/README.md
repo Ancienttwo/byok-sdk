@@ -1,7 +1,7 @@
 # Host execution core
 
 This is the K4 copy-and-own TypeScript reference for a device-local Host.
-It uses the public embedded server API. It does not change the SDK.
+It uses the public embedded server API.
 Read the [Host guide](../../docs/host-execution-core.md) before integration.
 
 ## Run
@@ -104,11 +104,35 @@ wake, including in previously created version-1 ledgers.
 This audit slice addresses part of #612. Host job handlers and occurrences without
 Agent execution are not implemented; a Host still routes its own jobs separately.
 
-While work is in flight, the core normally creates a new `host-scan` wake every `reconcileMs`
-(default 1,000 ms). Earlier deadlines can cause earlier scans. The SDK retains done wake rows for seven days.
-One scan per second is about 86,400 completed rows per day, or 604,800 over seven days, before bounded cleanup.
-This is a planning estimate, not a measured capacity limit. Other wakes add rows.
-Let the SDK manage its wake retention. Do not delete SDK rows directly.
+For tasks submitted successfully by the current core, `server.events` terminal
+notifications trigger immediate reconciliation. Task readbacks remain authoritative.
+The bounded event feed can drop hints, so a process-local timer still reconciles
+at `reconcileMs` (default 1,000 ms) and at waiting deadlines. This reduces durable
+wake writes, not reconciliation CPU or Host ledger writes. No default interval changes.
+
+Recovered tasks, uncertain submissions and servers without events retain durable
+`host-scan` wakes. A closed or failed event stream also restores that fallback.
+One durable scan per second is about 86,400 completed rows per day, or 604,800
+across the SDK's seven-day retention window, before cleanup. This is a planning
+estimate, not a measured capacity limit. Other wakes add rows. Let the SDK manage
+its wake retention; never delete SDK rows directly. Custom `events.subscribe()`
+iterators must implement `return()` that releases a pending `next()`; otherwise
+omit `events` and use durable reconciliation. The embedded server supports this
+cancellation without closing other subscribers.
+
+`HostOptions.onOutbox(signal)` is a coalesced, serialized post-commit hint that a
+result projection is available, including conclusions produced by internal drains.
+The callback may call `flushProjections`, enqueue new work, or read the committed
+ledger. Durable outbox records remain the authority; use stable projection IDs
+and receiver deduplication. A callback failure retains projections and records
+`lastError`. It does not spin on errors: retry via `recover()` or a later projection
+notification. `recover()` also announces existing unacknowledged projections.
+
+`close()` stops new hints, aborts the callback's signal and waits for a running
+callback before returning to an external caller. Callbacks should honor the signal
+when waiting on I/O. A callback may await `close()` itself; that invocation skips
+waiting for its own callback to avoid a deadlock. A later external `close()` still
+waits for that callback to finish. Close the ledger only after external core close.
 
 When adopting this code, define a retention policy for the Host ledger:
 
@@ -118,8 +142,9 @@ When adopting this code, define a retention policy for the Host ledger:
   Include at least the SDK's seven-day completed-wake replay window. Do not reuse retired identities.
 - Apply archive and tombstone changes atomically. Measure JSON rewrite cost before selecting a storage budget.
 
-Set `HostOptions.reconcileMs`, for example `{ reconcileMs: 10_000 }`, to reduce normal scan frequency.
-The default is unchanged. A larger interval increases terminal observation and FIFO release latency.
+Set `HostOptions.reconcileMs`, for example `{ reconcileMs: 10_000 }`, to reduce fallback scan frequency.
+The default is unchanged. A larger interval increases terminal observation and FIFO release latency
+after a lost notification or restart; delivered terminal hints still reconcile promptly.
 Choose the interval from the product's latency budget and measured write load.
 
 The default calendar supports fixed UTC intervals and UTC quiet hours.
