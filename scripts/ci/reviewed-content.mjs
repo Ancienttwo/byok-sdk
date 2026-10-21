@@ -28,6 +28,13 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
         && manifest.devDependencies?.['@byok-sdk/cloud'] === 'workspace:*') {
         delete current.devDependencies['@byok-sdk/cloud'];
       }
+      // #603 exposes the already resolved bundler to helper asset smoke tests.
+      if (dir === 'packages/client'
+        && record.devDependencies?.esbuild === undefined
+        && current.devDependencies?.esbuild === '0.28.1'
+        && manifest.devDependencies?.esbuild === '0.28.1') {
+        delete current.devDependencies.esbuild;
+      }
       delete record.version; delete current.version;
     }
   } else if (path === 'examples/bot-collaboration/package.json') {
@@ -51,6 +58,11 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     delete before.scripts['test:scripts']; delete after.scripts['test:scripts'];
   } else {
     if (!version(before.version) || !version(after.version)) throw new Error('Invalid package version');
+    if (path === 'packages/client/package.json'
+      && before.devDependencies?.esbuild === undefined
+      && after.devDependencies?.esbuild === '0.28.1') {
+      delete after.devDependencies.esbuild;
+    }
     delete before.version; delete after.version;
   }
   if (!isDeepStrictEqual(before, after)) throw new Error(`Reviewed release validation required: ${path} changes more than the reviewed fields`);

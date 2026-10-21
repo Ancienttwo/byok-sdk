@@ -64,3 +64,21 @@ and passed the final regression run. The remaining observed failure is the
 unchanged `mcp-server-http.test.ts:134` independent-client cancellation assertion,
 with a connection-closed rejection during cleanup. It is outside #603 and was
 not modified or rerun. The whole suite is therefore not claimed green.
+
+## PR #659 reviewed CI scope repair
+
+P1: CI planning, targeted execution, and the required aggregate share
+`selectImpact`; dependency-content validation remains fail closed.
+P2: the failed select job (run 39585030039, job 119171706993) rejected
+`bun.lock` at the new client dev-only `esbuild@0.28.1` edge. After merging
+main 80a34083, that edge and the packed helper/source-check paths still needed
+explicit recognition.
+P3: recognize only the exact additive client bundler pin, preserving deep
+comparison of all remaining manifest and lock content. Map the two exact helper
+paths to client/native/packaging qualification, and execute the source contract
+when its path changes. Unknown siblings and dependency mutations still reject.
+
+Validation: actual PR changed-path selection succeeds; `node --test
+scripts/ci/*.test.mjs` passes 44 tests. New positive/negative regression tests
+were added; no existing assertions, timeouts, or job contracts were weakened.
+Self-review confirms the source contract is executed, not merely classified.

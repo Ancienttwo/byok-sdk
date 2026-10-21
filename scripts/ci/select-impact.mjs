@@ -200,6 +200,10 @@ export function selectImpact(paths, context = {}) {
       }
       continue;
     }
+    if (path === 'packages/client/scripts/packed-agent-memory-helper-smoke.mjs'
+      || path === 'scripts/release/agent-memory-helper-source.test.mjs') {
+      dirs.add('packages/client'); families.add('npm-release-pack'); continue;
+    }
     if (/^scripts\/release\/registry-(?:contract\.test\.mjs|expectations\.json)$/.test(path)) { scripts = true; continue; }
     if (/^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:PROVENANCE\.md|source-manifest\.json|runtimes\/grok\/session\.ts)$/.test(path)) {
       dirs.add('packages/client'); continue;

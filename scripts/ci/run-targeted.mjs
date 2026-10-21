@@ -10,6 +10,7 @@ if (JSON.stringify(verified.dirs) !== JSON.stringify(plan.dirs) || JSON.stringif
   throw new Error('Impact plan does not match changed paths');
 }
 const extraTests = [];
+if (plan.files.includes('scripts/release/agent-memory-helper-source.test.mjs')) extraTests.push('scripts/release/agent-memory-helper-source.test.mjs');
 if (plan.files.some(path => /^scripts\/release\/registry-/.test(path))) extraTests.push('scripts/release/registry-contract.test.mjs', 'scripts/release/registry-npm.test.mjs');
 if (plan.files.some(path => path.startsWith('packages/client/vendor/oar/'))) extraTests.push('scripts/api-surface/check-oar-bridge.test.mjs');
 if (extraTests.length) {
