@@ -16,6 +16,7 @@ export const workspaceGraph = {
     "name": "@byok-sdk/example-bot-collaboration",
     "dependencies": [
       "@byok-sdk/client",
+      "@byok-sdk/cloud",
       "@byok-sdk/core",
       "@byok-sdk/example-host-execution-core",
       "@byok-sdk/protocol",
