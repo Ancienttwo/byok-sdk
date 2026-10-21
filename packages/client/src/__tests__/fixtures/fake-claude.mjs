@@ -209,12 +209,13 @@ async function callConfiguredMcpTool(serverName, toolName, toolArguments) {
 // claude 2.1.302: server `market.feed`, tool `get.quote`).
 async function mcpStatus() {
   const servers = [];
-  for (const name of Object.keys(configuredMcpServers())) {
+  for (const [name, { command, args = [] }] of Object.entries(configuredMcpServers())) {
+    const config = { type: 'stdio', command, args };
     try {
       const listed = await withConfiguredMcpServer(name, async (tools) => tools);
-      servers.push({ name, status: 'connected', scope: 'dynamic', source: 'dynamic', tools: (listed?.tools ?? []).map((tool) => ({ name: tool.name, annotations: {} })) });
+      servers.push({ name, status: 'connected', config, scope: 'dynamic', source: 'dynamic', tools: (listed?.tools ?? []).map((tool) => ({ name: tool.name, annotations: {} })) });
     } catch (error) {
-      servers.push({ name, status: 'failed', scope: 'dynamic', source: 'dynamic', error: String(error) });
+      servers.push({ name, status: 'failed', config, scope: 'dynamic', source: 'dynamic', error: String(error) });
     }
   }
   return { mcpServers: servers };

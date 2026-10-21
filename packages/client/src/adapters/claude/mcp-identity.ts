@@ -1,4 +1,5 @@
 import type { McpEventIdentities, McpEventIdentity } from '../../mcp/event-identity';
+import type { McpStdioServerConfig } from '../../types';
 
 /**
  * Claude's own runtime name part for an MCP server or tool name. Observed in
@@ -12,25 +13,39 @@ function claudeNamePart(name: string): string {
   return name.startsWith('claude.ai ') ? part.replace(/_+/g, '_').replace(/^_|_$/g, '') : part;
 }
 
+/** Whether Claude reports the server with the command and args the SDK wrote for it. */
+function isConfiguredServer(reported: unknown, configured: McpStdioServerConfig | undefined): boolean {
+  const config = reported as { command?: unknown; args?: unknown } | undefined;
+  const args = configured?.args ?? [];
+  return configured !== undefined && config?.command === configured.command && Array.isArray(config.args)
+    && config.args.length === args.length && config.args.every((arg, index) => arg === args[index]);
+}
+
 /**
  * MCP identities from Claude's own `mcp_status` control response: every
  * connected server Claude reports, with the original tool names it read from
  * that server's `tools/list`. Only `toolsetServers` (the task-projected toolset
- * servers the SDK wrote into `--mcp-config`) receive an identity. Every other
- * reported server (the user's own configuration, SDK-reserved helpers) still
- * counts for collisions: a runtime name two reported tools share is ambiguous
- * and gets no identity. A malformed response yields no identities.
+ * servers the SDK wrote into `--mcp-config`) receive an identity, and only when
+ * Claude reports the same command and args: a same-named server from the
+ * user's own configuration is not the task's server. Every other reported
+ * server (the user's own configuration, SDK-reserved helpers) still counts for
+ * collisions: a runtime name two reported tools share is ambiguous and gets no
+ * identity. A malformed response yields no identities.
  */
-export function claudeMcpEventIdentities(response: unknown, toolsetServers: ReadonlySet<string>): McpEventIdentities {
+export function claudeMcpEventIdentities(
+  response: unknown,
+  toolsetServers: ReadonlyMap<string, McpStdioServerConfig>,
+): McpEventIdentities {
   const servers = (response as { mcpServers?: unknown } | undefined)?.mcpServers;
   if (!Array.isArray(servers)) return new Map();
   const byName = new Map<string, McpEventIdentity | null>();
-  for (const server of servers as { name?: unknown; tools?: unknown }[]) {
+  for (const server of servers as { name?: unknown; tools?: unknown; config?: unknown }[]) {
     if (typeof server?.name !== 'string' || server.name.length === 0 || !Array.isArray(server.tools)) continue;
+    const configured = isConfiguredServer(server.config, toolsetServers.get(server.name));
     for (const tool of server.tools as { name?: unknown }[]) {
       if (typeof tool?.name !== 'string' || tool.name.length === 0) continue;
       const name = `mcp__${claudeNamePart(server.name)}__${claudeNamePart(tool.name)}`;
-      byName.set(name, byName.has(name) || !toolsetServers.has(server.name)
+      byName.set(name, byName.has(name) || !configured
         ? null
         : Object.freeze({ server: server.name, tool: tool.name }));
     }

@@ -1454,7 +1454,8 @@ The first protocol slice adds only additive optional observability fields:
   adapter sends Claude's own `mcp_status` control request. The answer lists each
   connected server under its configured name, with the original tool names
   from that server's `tools/list`. Only the task-projected toolset servers get
-  an identity. A runtime name that two reported tools share gets none. A failed
+  an identity, and only when Claude reports the command and args the SDK wrote
+  for that server. A runtime name that two reported tools share gets none. A failed
   or late answer (5 s) leaves the field absent; the task continues. No prefix
   splitting or title guessing is performed. Builtins, SDK helpers and Grok ACP
   titles are not assigned MCP identity. These fields describe events, not tool

@@ -12,6 +12,7 @@ import {
   PolicyUnsupportedError,
   SteerUnsupportedError,
   freezeRuntimeAdapterDescriptor,
+  type McpStdioServerConfig,
   type RuntimeAdapter,
   type RuntimeDetectResult,
   type RuntimeAdapterPrepareInput,
@@ -401,7 +402,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         startInput.scratch,
         manifestModelId,
         native,
-        new Set(Object.keys(taskMcpServers).filter(name => !isReservedMcpServerName(name))),
+        new Map(Object.entries(taskMcpServers).filter(([name]) => !isReservedMcpServerName(name))),
       );
     } catch (cause) {
       return rejectOwnedStartup(cause, client, startInput.scratch, cancellation !== undefined);
@@ -486,7 +487,7 @@ class ClaudeSession implements Session {
     private readonly modelId?: string,
     private readonly native?: ClaudeNativeInteractionBridge,
     /** Task-projected toolset servers in `--mcp-config`; only these receive event MCP identity. */
-    private readonly toolsetServers: ReadonlySet<string> = new Set(),
+    private readonly toolsetServers: ReadonlyMap<string, McpStdioServerConfig> = new Map(),
   ) { this.correlation = createToolUseCorrelation(this.mcpIdentities); if (native !== undefined) this.interactions = native.channel; }
 
   get events(): AsyncIterable<AgentEvent> {

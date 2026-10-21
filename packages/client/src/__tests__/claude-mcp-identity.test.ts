@@ -14,10 +14,13 @@ import { startPreparedOperation } from './fixtures/prepared-operation';
 const CLAUDE_FIXTURE = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 const SALESKO_MCP_FIXTURE = fileURLToPath(new URL('./fixtures/fake-salesko-mcp.mjs', import.meta.url));
 
+const server = (name: string) => ({ command: process.execPath, args: [`/opt/${name}.mjs`] });
+const configured = (...names: string[]) => new Map(names.map(name => [name, server(name)]));
+
 /** The `mcp_status` response shape real claude 2.1.302 returned in a credential-free local run. */
-const status = (...servers: { name: string; tools?: string[]; status?: string }[]) => ({
-  mcpServers: servers.map(({ name, tools, status = 'connected' }) => ({
-    name, status, scope: 'dynamic', source: 'dynamic',
+const status = (...servers: { name: string; tools?: string[]; status?: string; config?: object; scope?: string }[]) => ({
+  mcpServers: servers.map(({ name, tools, status = 'connected', config = { type: 'stdio', ...server(name) }, scope = 'dynamic' }) => ({
+    name, status, config, scope, source: scope,
     ...(tools === undefined ? {} : { tools: tools.map(tool => ({ name: tool, annotations: {} })) }),
   })),
 });
@@ -26,7 +29,7 @@ describe('Claude MCP identity from its own mcp_status answer', () => {
   it('maps Claude runtime names to the configured server and original tool names', () => {
     const identities = claudeMcpEventIdentities(
       status({ name: 'market.feed', tools: ['get.quote', 'get_snapshot'] }),
-      new Set(['market.feed']),
+      configured('market.feed'),
     );
     expect([...identities]).toEqual([
       ['mcp__market_feed__get_quote', { server: 'market.feed', tool: 'get.quote' }],
@@ -35,7 +38,7 @@ describe('Claude MCP identity from its own mcp_status answer', () => {
   });
 
   it('gives no identity to servers outside the task toolsets, but counts them for collisions', () => {
-    const toolset = new Set(['market']);
+    const toolset = configured('market');
     // The user's own `market__feed` server and the task's `market` server both yield `mcp__market__feed__get`.
     expect(claudeMcpEventIdentities(status(
       { name: 'market', tools: ['feed__get', 'quote'] },
@@ -48,9 +51,23 @@ describe('Claude MCP identity from its own mcp_status answer', () => {
     expect(claudeMcpEventIdentities(status(
       { name: 'a', tools: ['b__c'] },
       { name: 'a__b', tools: ['c'] },
-    ), new Set(['a', 'a__b'])).size).toBe(0);
+    ), configured('a', 'a__b')).size).toBe(0);
     // `get.quote` and `get_quote` normalize to one runtime name.
-    expect(claudeMcpEventIdentities(status({ name: 'm', tools: ['get.quote', 'get_quote'] }), new Set(['m'])).size).toBe(0);
+    expect(claudeMcpEventIdentities(status({ name: 'm', tools: ['get.quote', 'get_quote'] }), configured('m')).size).toBe(0);
+  });
+
+  it('gives no identity to a same-named server Claude reports with another command or args', () => {
+    // Claude 2.1.302 keeps the `--mcp-config` entry over a same-named user server; a different merge must not mislabel.
+    for (const config of [
+      { type: 'stdio', command: process.execPath, args: ['/home/user/market.mjs'] },
+      { type: 'stdio', command: 'node', args: ['/opt/market.mjs'] },
+      { type: 'stdio', command: process.execPath },
+      undefined,
+    ]) {
+      const response = status({ name: 'market', tools: ['quote'], scope: 'user' });
+      (response.mcpServers[0] as { config?: object }).config = config;
+      expect(claudeMcpEventIdentities(response, configured('market')).size).toBe(0);
+    }
   });
 
   it.each([
@@ -59,7 +76,7 @@ describe('Claude MCP identity from its own mcp_status answer', () => {
     ['a pending server without tools', status({ name: 'market', status: 'pending' })],
     ['malformed entries', { mcpServers: [null, { name: 'market', tools: [null, { name: '' }, { name: 7 }] }] }],
   ])('yields no identity for %s', (_label, response) => {
-    expect(claudeMcpEventIdentities(response, new Set(['market'])).size).toBe(0);
+    expect(claudeMcpEventIdentities(response, configured('market')).size).toBe(0);
   });
 });
 
@@ -142,7 +159,9 @@ describe('ordinary ClaudeAdapter MCP event identity against fake-claude', () => 
   it('leaves mcp absent when the runtime name is ambiguous across reported servers', async () => {
     const { events } = await runTurn('salesko:find-leads', {
       // `find.leads` and `find_leads` both become `mcp__salesko__find_leads` in Claude.
-      FAKE_CLAUDE_MCP_STATUS: JSON.stringify(status({ name: 'salesko', tools: ['find_leads', 'find.leads'] })),
+      FAKE_CLAUDE_MCP_STATUS: JSON.stringify(status({
+        name: 'salesko', tools: ['find_leads', 'find.leads'], config: { type: 'stdio', command: process.execPath, args: [SALESKO_MCP_FIXTURE] },
+      })),
     });
     expect(toolEvents(events)).toHaveLength(2);
     for (const event of toolEvents(events)) expect(event).not.toHaveProperty('mcp');
