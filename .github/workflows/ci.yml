@@ -426,23 +426,16 @@ jobs:
       - name: Run built adapter lifecycle smoke
         run: bun run --filter @byok-sdk/client smoke:adapters
 
-      # K4 non-memory Host paths use the same built Node substrate on Windows.
-      # Keep the full assertions; device memory and K8 persona qualification
-      # remain separate platform contracts (#605 and #611).
+      # Full K4 discovery preserves the existing Linux-only device-memory skips.
       - name: K4 Windows Host execution qualification
         if: matrix.os == 'windows-latest'
-        run: >-
-          bun run --cwd examples/host-execution-core test --
-          src/core.test.ts
-          src/execution-record.test.ts
-          src/routines.test.ts
-          src/scheduling-recovery.test.ts
-          src/unclaimed-expiry.test.ts
-          src/crash-recovery.test.ts
+        run: bun run --cwd examples/host-execution-core test
 
-      - name: K4 Host retention on Windows
+      # Explicit per-suite exclusions are logged for the documented POSIX-only
+      # persona consumer. All other K8 suites run with unchanged assertions.
+      - name: K8 Windows portable Bot qualification
         if: matrix.os == 'windows-latest'
-        run: bun run --cwd examples/host-execution-core test src/retention.test.ts
+        run: node scripts/ci/run-windows-bot-tests.mjs
 
       # SDK Windows v1 gate for sealed provider provisioning (plan A11): the
       # device sealing key, configure/replace/delete custody, and the
