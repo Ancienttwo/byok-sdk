@@ -192,7 +192,7 @@ export const familyOwners = Object.freeze({
   ],
   'windows-git-workspace': [
     /^packages\/client\/src\/daemon\/(?:git-workspace|git-workspace-store|session-workspace-store|auth-manager|daemon-lifecycle|daemon-owner|daemon-record)\.ts$/,
-    /^packages\/client\/src\/(?:util\/secure-dir\.ts|diagnostics\/|bin\/commands\/)/,
+    /^packages\/client\/src\/(?:util\/(?:secure-dir|atomic-write)\.ts|diagnostics\/|bin\/commands\/)/,
     /^packages\/client\/src\/__tests__\/(?:git-workspace|bin-workspaces|secure-dir|diagnostics|support-bundle|daemon-auth|daemon-stop-shutdown-parity)[^/]*$/,
   ],
   'packageability-smoke': [
@@ -206,11 +206,11 @@ export const familyOwners = Object.freeze({
   ],
   'windows-service-smoke': [
     /^templates\/service\/winsw\//,
-    /^packages\/client\/src\/lifecycle\//,
+    /^packages\/client\/src\/(?:lifecycle\/|util\/secure-dir\.ts$)/,
   ],
   'ipc-smoke': [
     /^packages\/client\/src\/daemon\/(?:control-protocol|control-server|device-credential-provider|device-credential-store)\.ts$/,
-    /^packages\/client\/src\/bin\/control-client\.ts$/,
+    /^packages\/client\/src\/(?:bin\/control-client|util\/atomic-write)\.ts$/,
     /^packages\/client\/src\/__tests__\/device-credential-store[^/]*$/,
     /^packages\/client\/scripts\/(?:ipc-smoke|control-socket-check)\.mjs$/,
   ],

@@ -66,6 +66,11 @@ test('a platform family is selected only by a path it owns', () => {
   }
 });
 
+test('shared Windows filesystem helpers select their real Windows consumers', () => {
+  assert.deepEqual(selectImpact(['packages/client/src/util/secure-dir.ts']).families, ['windows-git-workspace', 'windows-service-smoke']);
+  assert.deepEqual(selectImpact(['packages/client/src/util/atomic-write.ts']).families, ['ipc-smoke', 'windows-git-workspace']);
+});
+
 test('owned helper build scripts keep release packaging qualification', () => {
   for (const path of ['packages/client/scripts/build-agent-memory-helper.mjs', 'packages/client/scripts/check-agent-memory-helper-build.mjs', 'packages/client/scripts/agent-memory-helper-source.mjs']) {
     const families = selectImpact([path]).families;
