@@ -1,5 +1,8 @@
 # Changelog
 
+- Client MCP core: preserve tool title, annotations and output schema, and provide
+  request-scoped progress over stdio and bounded HTTP POST SSE (Refs #631).
+
 ## Unreleased
 
 ## 0.28.1 / @byok-sdk/keys 0.13.1 — source candidate

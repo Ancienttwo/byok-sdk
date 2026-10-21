@@ -8,7 +8,9 @@ Describe the product intent, users, workflows, acceptance scenarios, and constra
 
 The SDK exposes a Host-mounted Streamable HTTP framing through
 `@byok-sdk/client/mcp-server/http`. It reuses the existing tools-only MCP core.
-The stdio entry and SDK-reserved helpers retain their existing contract.
+The stdio and HTTP entries pass caller-owned tool title, annotations and output
+schema through, and expose request-scoped progress without changing result or
+cancellation ownership. SDK-reserved helpers retain their existing tool contracts.
 HTTP session identity is separate from task identity. MCP cancellation aborts
 the waiting call signal; only the Host task API cancels a task.
 The Host authenticates each caller before selecting its separate transport instance.

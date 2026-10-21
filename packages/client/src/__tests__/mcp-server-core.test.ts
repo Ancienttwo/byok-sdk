@@ -773,3 +773,38 @@ describe('§4: error-mapping policy stays with the server', () => {
     harness.handle.close();
   });
 });
+
+
+describe('request-scoped tool progress', () => {
+  it.each([0, '', 'token'])('preserves token %j and retires progress after completion', async token => {
+    let report!: McpServerToolCall['progress'];
+    const h = start({ callTool: async call => { report = call.progress; report(0, 2, 'begin'); report(2); return { content: [] }; } });
+    try {
+      await initialize(h, '2025-11-25');
+      h.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'echo', _meta: { progressToken: token } } });
+      await h.expectLines(4);
+      expect(h.parsed(1)).toEqual({ jsonrpc: '2.0', method: 'notifications/progress', params: { progressToken: token, progress: 0, total: 2, message: 'begin' } });
+      report(3); await h.expectSilence();
+    } finally { h.handle.close(); }
+  });
+  it('does not report without a token or after cancellation', async () => {
+    let call!: McpServerToolCall;
+    let finish!: (value: Record<string, unknown>) => void;
+    const h = start({ callTool: value => { call = value; return new Promise(resolve => { finish = resolve; }); } });
+    try {
+      await initialize(h, '2025-11-25');
+      h.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'echo' } });
+      await waitUntil(() => !!call); call.progress(NaN); await h.expectSilence();
+      finish({}); await h.expectLines(2);
+      h.send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'echo', _meta: { progressToken: 0 } } });
+      await waitUntil(() => !call.signal.aborted);
+      h.send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 3 } });
+      await waitUntil(() => call.signal.aborted); call.progress(1); finish({}); await h.expectSilence();
+    } finally { h.handle.close(); }
+  });
+  it.each([null, true, {}, []])('rejects invalid progress token %j before dispatch', async token => {
+    const dispatch = vi.fn(async () => ({})); const h = start({ callTool: dispatch });
+    try { await initialize(h, '2025-11-25'); h.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'echo', _meta: { progressToken: token } } }); await h.expectLines(2); expect(h.parsed(1)).toMatchObject({ error: { code: -32602 } }); expect(dispatch).not.toHaveBeenCalled(); }
+    finally { h.handle.close(); }
+  });
+});

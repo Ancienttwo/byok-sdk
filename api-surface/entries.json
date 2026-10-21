@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2063277,
+      "budgetBytes": 2064521,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -150,7 +150,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Embedded Agent memory service",
-      "budgetBytes": 68197,
+      "budgetBytes": 69427,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -288,7 +288,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Tools-only MCP Streamable HTTP framing",
-      "budgetBytes": 32768,
+      "budgetBytes": 36482,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -711,7 +711,7 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 96299,
+          "line": 96325,
           "rule": "opaque import()"
         },
         {
