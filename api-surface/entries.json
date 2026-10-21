@@ -711,7 +711,7 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 96325,
+          "line": 96274,
           "rule": "opaque import()"
         },
         {

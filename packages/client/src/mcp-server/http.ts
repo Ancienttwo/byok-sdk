@@ -86,6 +86,8 @@ export function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServe
   let pendingCount = 0;
   let runningTools = 0;
   const textEncoder = new TextEncoder();
+  const sseStrategy = new ByteLengthQueuingStrategy({ highWaterMark: MCP_SERVER_MAX_PENDING_BYTES });
+  const accepted = () => new Response(null, { status: 202 });
   const failure = (status: number, message: string) => new Response(message, { status, headers: { 'cache-control': 'no-store' } });
 
   function finishReply(session: Session, key: string, response: Response): void {
@@ -130,39 +132,50 @@ export function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServe
     return true;
   }
 
+  function enqueueSse(stream: ReadableStreamDefaultController<Uint8Array>, frame: string): boolean {
+    const bytes = textEncoder.encode(`event: message\ndata: ${frame}\n\n`);
+    if ((stream.desiredSize ?? 0) < bytes.byteLength) return false;
+    stream.enqueue(bytes);
+    return true;
+  }
+
+  function cancelCall(session: Session, requestId: string | number | undefined): void {
+    session.input.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId } })}\n`);
+  }
+
+  function responseHeaders(session: Session, contentType: string): Record<string, string> {
+    return { 'content-type': contentType, 'cache-control': 'no-store',
+      ...(stateless ? {} : { 'mcp-session-id': session.id }) };
+  }
+
   function deliver(session: Session, frame: string): void {
     const message = JSON.parse(frame) as Record<string, unknown>;
     if (message.method === 'notifications/progress') {
       const token = (message.params as Record<string, unknown>).progressToken;
       for (const [key, reply] of session.pending) {
         if (reply.stream && reply.token === token) {
-          const bytes = textEncoder.encode(`event: message\ndata: ${JSON.stringify(message)}\n\n`);
-          if ((reply.stream.desiredSize ?? 0) < bytes.byteLength) {
-            session.input.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: reply.requestId } })}\n`);
+          if (!enqueueSse(reply.stream, JSON.stringify(message))) {
+            cancelCall(session, reply.requestId);
             finishReply(session, key, failure(503, 'MCP progress buffer limit'));
-          } else reply.stream.enqueue(bytes);
+          }
           return;
         }
       }
       return;
     }
     if ('method' in message) {
-      if (session.sse) {
-        const bytes = textEncoder.encode(`event: message\ndata: ${JSON.stringify(message)}\n\n`);
-        if ((session.sse.desiredSize ?? 0) < bytes.byteLength) endSse(session);
-        else session.sse.enqueue(bytes);
-      }
+      if (session.sse && !enqueueSse(session.sse, JSON.stringify(message))) endSse(session);
       return;
     }
     const key = isUsableRequestId(message.id) ? SeenRequestIds.key(message.id) : 'invalid';
     const reply = session.pending.get(key);
     if (reply?.stream) {
-      const bytes = textEncoder.encode(`event: message\ndata: ${frame.trimEnd()}\n\n`);
-      if ((reply.stream.desiredSize ?? 0) >= bytes.byteLength) reply.stream.enqueue(bytes);
-      else { reply.stream.error(new Error('MCP response buffer limit')); reply.stream = undefined; }
+      if (!enqueueSse(reply.stream, frame.trimEnd())) {
+        reply.stream.error(new Error('MCP response buffer limit')); reply.stream = undefined;
+      }
     }
     if (reply) finishReply(session, key, new Response(frame.trimEnd(), { status: reply.status,
-      headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...(stateless ? {} : { 'mcp-session-id': session.id }) } }));
+      headers: responseHeaders(session, 'application/json') }));
   }
 
   function createSession(version: string, bootstrap?: string): Session {
@@ -229,10 +242,10 @@ export function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServe
       if (requestOrigin !== null && requestOrigin !== origin) return failure(403, 'Invalid Origin');
       const version = request.headers.get('mcp-protocol-version');
       if (version !== null && !HTTP_VERSIONS.includes(version)) return failure(400, 'Unsupported MCP protocol version');
-      if (!['POST', 'GET', 'DELETE'].includes(request.method)) {
-        return new Response(null, { status: 405, headers: { allow: stateless ? 'POST' : 'POST, GET, DELETE' } });
+      const methods = stateless ? ['POST'] : ['POST', 'GET', 'DELETE'];
+      if (!methods.includes(request.method)) {
+        return new Response(null, { status: 405, headers: { allow: methods.join(', ') } });
       }
-      if (stateless && request.method !== 'POST') return new Response(null, { status: 405, headers: { allow: 'POST' } });
       const sessionId = request.headers.get('mcp-session-id');
       if (stateless && sessionId !== null) return failure(400, 'Stateless MCP does not accept session IDs');
       let session = sessionId === null ? undefined : sessions.get(sessionId);
@@ -250,8 +263,8 @@ export function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServe
         const stream = new ReadableStream<Uint8Array>({
           start(value) { controller = value; current.sse = value; },
           cancel() { if (current.sse === controller) current.sse = undefined; },
-        }, new ByteLengthQueuingStrategy({ highWaterMark: MCP_SERVER_MAX_PENDING_BYTES }));
-        return new Response(stream, { headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store', 'mcp-session-id': session.id } });
+        }, sseStrategy);
+        return new Response(stream, { headers: responseHeaders(session, 'text/event-stream') });
       }
       if (!accepts(request.headers.get('accept'), 'application/json') || !accepts(request.headers.get('accept'), 'text/event-stream')) {
         return failure(406, 'Accept application/json and text/event-stream required');
@@ -270,30 +283,25 @@ export function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServe
       // bound and abort unrelated calls in the same session.
       if (Buffer.byteLength(frame, 'utf8') > maxBodyBytes) return failure(413, 'MCP encoded message limit exceeded');
       const classified = classifyJsonRpcMessage(message);
-      if (stateless) {
+      if (stateless || !session) {
         const initializing = classified.kind === 'request' && classified.method === 'initialize';
-        if (!initializing && version === null) return failure(400, 'MCP protocol version required in stateless mode');
-        if (classified.kind === 'notification') {
-          // There is no cross-request call registry; do not claim cancellation.
-          if (classified.method === 'notifications/cancelled') return failure(400, 'Stateless MCP does not support cross-request cancellation');
-          return new Response(null, { status: 202 });
-        }
+        if (stateless) {
+          if (!initializing && version === null) return failure(400, 'MCP protocol version required in stateless mode');
+          if (classified.kind === 'notification') {
+            // There is no cross-request call registry; do not claim cancellation.
+            if (classified.method === 'notifications/cancelled') return failure(400, 'Stateless MCP does not support cross-request cancellation');
+            return accepted();
+          }
+        } else if (!initializing) return failure(400, 'Initialize an MCP session first');
         if (pendingCount >= maxInFlight) return failure(503, 'Too many MCP requests');
         const offered = classified.kind === 'request' ? classified.params?.protocolVersion : undefined;
         if (initializing && offered === '2024-11-05') return failure(400, 'Legacy stdio protocol is not supported over HTTP');
+        if (!stateless && sessions.size >= maxSessions && !evictOldestIdleSession()) return failure(503, 'MCP session limit reached');
         const selected = initializing ? (typeof offered === 'string' && HTTP_VERSIONS.includes(offered) ? offered : HTTP_VERSIONS[0]!) : version!;
         // Initialize only this request's core. Its private reply is discarded.
         const privateId = classified.id === '__http_initialize' ? '__http_initialize_2' : '__http_initialize';
         const bootstrap = initializing ? undefined : JSON.stringify({ jsonrpc: '2.0', id: privateId, method: 'initialize', params: { protocolVersion: selected } });
         session = createSession(selected, bootstrap);
-      } else if (!session) {
-        if (classified.kind !== 'request' || classified.method !== 'initialize') return failure(400, 'Initialize an MCP session first');
-        if (pendingCount >= maxInFlight) return failure(503, 'Too many MCP requests');
-        const offered = classified.params?.protocolVersion;
-        if (offered === '2024-11-05') return failure(400, 'Legacy stdio protocol is not supported over HTTP');
-        if (sessions.size >= maxSessions && !evictOldestIdleSession()) return failure(503, 'MCP session limit reached');
-        const selected = typeof offered === 'string' && HTTP_VERSIONS.includes(offered) ? offered : HTTP_VERSIONS[0]!;
-        session = createSession(selected);
       } else if (classified.kind === 'request' && classified.method === 'initialize') {
         return failure(400, 'MCP session already initialized');
       }
@@ -305,9 +313,9 @@ export function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServe
           // No JSON-RPC response may follow a cancelled call. End its POST
           // with the transport's accepted/no-content status, which standard
           // clients accept without trying to parse a missing JSON result.
-          finishReply(session, SeenRequestIds.key(classified.params.requestId), new Response(null, { status: 202 }));
+          finishReply(session, SeenRequestIds.key(classified.params.requestId), accepted());
         }
-        return new Response(null, { status: 202 });
+        return accepted();
       }
       const key = classified.id === undefined ? 'invalid' : SeenRequestIds.key(classified.id);
       if (session.pending.has(key)) return failure(400, 'MCP request id already in flight');
@@ -330,11 +338,11 @@ export function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServe
             start(controller) { reply.stream = controller; },
             cancel() {
               reply.stream = undefined;
-              current.input.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: classified.id } })}\n`);
-              finishReply(current, key, new Response(null, { status: 202 }));
+              cancelCall(current, classified.id);
+              finishReply(current, key, accepted());
             },
-          }, new ByteLengthQueuingStrategy({ highWaterMark: MCP_SERVER_MAX_PENDING_BYTES }));
-          resolve(new Response(stream, { headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store', ...(stateless ? {} : { 'mcp-session-id': current.id }) } }));
+          }, sseStrategy);
+          resolve(new Response(stream, { headers: responseHeaders(current, 'text/event-stream') }));
         }
         pendingCount++;
         current.input.write(`${frame}\n`);

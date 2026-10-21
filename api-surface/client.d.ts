@@ -12147,7 +12147,6 @@ export declare function classifyJsonRpcMessage(value: unknown): ClassifiedMessag
  */
 export declare class SeenRequestIds {
     private readonly seen;
-    private readonly order;
     private readonly capacity;
     constructor(capacity: number);
     /** `true` when this id has already been used in this session. */

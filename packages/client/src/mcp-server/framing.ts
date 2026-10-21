@@ -76,23 +76,17 @@ export function createBoundedLineReader(options: BoundedLineReaderOptions): Boun
     let offset = 0;
     for (;;) {
       const newlineAt = buffer.indexOf(NEWLINE_BYTE, offset);
-      if (newlineAt === -1) {
-        const rest = buffer.length - offset;
-        if (pendingBytes + rest > maxLineBytes) {
-          stop();
-          onLimit();
-          return;
-        }
-        if (rest > 0) {
-          segments.push(Buffer.from(buffer.subarray(offset)));
-          pendingBytes += rest;
-        }
-        return;
-      }
-      const sliceLength = newlineAt - offset;
+      const sliceLength = (newlineAt === -1 ? buffer.length : newlineAt) - offset;
       if (pendingBytes + sliceLength > maxLineBytes) {
         stop();
         onLimit();
+        return;
+      }
+      if (newlineAt === -1) {
+        if (sliceLength > 0) {
+          segments.push(Buffer.from(buffer.subarray(offset)));
+          pendingBytes += sliceLength;
+        }
         return;
       }
       segments.push(Buffer.from(buffer.subarray(offset, newlineAt)));
