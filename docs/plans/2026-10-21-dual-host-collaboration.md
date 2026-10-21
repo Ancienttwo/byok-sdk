@@ -104,6 +104,8 @@ H 的一次 turn 按以下顺序处理：
 6. daemon 先保存 terminal，再发送。Host 从持久化记录读取 terminal 和 outcome，并在事务内应用一次。
 7. Host 的事务同时记录后继 turn 或委派 outbox。崩溃后重试相同身份，不再创建一份协作效果。
 
+L/H 共用 [#651](https://github.com/Ancienttwo/byok-sdk/pull/651) 的 exact-accepted 回复恢复不变量与回归向量，不另造状态机：回复 draft 必须先持久化，再执行 admission；只有与该 draft 精确对应的 accepted 证据持久化后，才释放对应的 result-failure。`held`、`refused` 或仅收到回调不能冒充 accepted。崩溃重启后沿同一身份恢复 draft 与处置，不能因别的消息已 accepted 而释放本条失败。
+
 `observer` 只负责唤醒。它可能丢失，抛错不会回滚 SDK 已提交的事实。
 Host 必须在启动、重连和有界补查时扫描自己的未结算 intent，再读取 SDK 记录。
 补查由 Host 调度。不得在 `cloud` 内新增常驻产品调度器。
@@ -137,7 +139,9 @@ Host 必须在启动、重连和有界补查时扫描自己的未结算 intent�
 - 同一设备可以承载不同模式的 Bot。各自的 enrollment、store、task namespace 明确分开，同一 Agent home 不得有两个 writer。
 - 第一版只允许同一协调域内的跨 Bot 委派。L/H 之间、两个独立 L Host 之间的实时委派不纳入首版，不隐式桥接。
 
-切换必须是显式操作。顺序为：冻结新 intent → 排空或取消并确认终态 → 导出必要状态 → 验证目标 → 提交新模式 revision → 停用旧编排入口。
+切换必须是显式操作。顺序为：旧 owner 持久冻结新 intent（durable freeze）并确认 → 排空或取消并确认终态 → 导出必要状态 → 验证目标 → 按预期 revision 条件提交新 owner → 清理旧编排入口。
+旧 L 必须先持久化冻结记录并读回确认；只暂停内存队列或发送停用请求不构成冻结。提交新 owner 前，旧入口已由冻结记录阻止编排；最后的入口清理不是安全屏障。
+Host 的 revision/fencing 必须覆盖 command、routine 和可产生执行的 outbox 提交。重启先读取冻结与 owner revision，再接纳工作；旧 owner 的命令、调度器与 outbox 重放均不能创建新 intent 或写入新 owner 状态。尚未确认的历史结果只按原身份补交证据，不能借此恢复旧编排权。该 Host 屏障不替代 SDK attempt fencing 或设备 home lease。
 冻结期间的新命令返回类型化的「切换中」，不静默丢弃或转投。
 云端显示取消或设备离线，不等于旧 runtime 已停止。没有停止证据时，切换保持阻塞。
 不支持用超时自动把同一未完成任务改派到另一台设备。
@@ -176,7 +180,7 @@ SDK 公共 API 只有在现有接口不能满足验收时才扩展，并在同�
 - 参考实现内定义一个协作提交契约：输入为 scope、command id、预期 revision 与冻结证据；输出为新 revision、处置和 outbox intent。
 - 同一事务保存状态、command 去重与 outbox。重复相同命令返回相同结果；同 id 不同内容拒绝；过期 revision 返回冲突。
 - L adapter 保留本机事务实现。H adapter 在产品云端事务边界上实现同一契约。
-- 不把整个状态序列化成无限增长的一行 JSON。按实体与稳定身份保存；retention 不删除仍参与去重或未结算的证据。
+- 不把整个状态序列化成无限增长的一行 JSON。按实体与稳定身份保存；retention/压缩不得删除仍参与去重或未结算的证据。已永久退役的 intent identity 保留不可复用证据，不能因正文压缩而变回可执行身份。
 - 不允许 constructor 在 H 的设备端创建本地 team。配置和 history 由指定权威读取。
 - D1 验收纯语义与现有 L adapter。D2 再用同一组向量验收真实 H adapter。只有已存在的跨模块共用语义才抽取。
 
@@ -252,17 +256,25 @@ S4c 的凭据整合需验证身份映射，不与 H 协作存储迁移混成一�
 | Host 在产品事务后、SDK 提交前崩溃 | 重启提交原 task identity，无丢 intent |
 | SDK 已接受 offer，但 Host 未收到响应 | readback 与冻结输入一致；不创建第二次执行 |
 | 消息消费者提交后响应丢失 | 同一消息重试返回相同处置；不同 payload 不能复用去重键 |
+| L/H 的 draft 持久化前、admission 后或 exact-accepted 证据持久化前崩溃 | 继承 #651 回归向量；恢复同一 draft 与处置，仅精确 accepted 持久化后释放对应 result-failure；held/refused 及其他消息的 accepted 均不释放 |
 | SDK terminal 已提交，通知丢失 | Host 通过未结算 intent 补查，应用结果一次 |
 | 设备断线、重启、重复 terminal | 本地 outbox 重放；Host 不重启已结算工作 |
 | H 云端不可用 | 本机不创建 L intent；已运行任务按授权处理；恢复后精确重放 |
 | cancel 与 complete 竞态 | 产品取消结果与实际设备 terminal 分别可读；不把 cancel ACK 当停止证据 |
 | 撤销、跨 tenant、错 device、旧 revision | 拒绝新权威写入；旧执行的迟到证据不能修改新 owner 状态 |
 | L/H 切换且旧设备不可达 | 切换阻塞；不启动第二个 owner；不把超时当停止 |
+| 新 owner revision 已提交，旧入口尚未完成清理时崩溃 | 重启后 durable freeze 与 revision/fencing 仍拒绝旧 owner 的 command、routine 和执行 outbox；新 owner 唯一可编排 |
+| history 压缩后换库迁移，再回退并重放旧 command | 去重处置、永久退役 intent identity 与未确认 outbox 完整保留；旧 command 不产生执行，未确认记录仅按原身份恢复 |
 | 记忆恢复中途崩溃 | home 不可执行；可恢复操作继续；完成后 digest 一致 |
 | Worker 实例销毁、重复和丢失通知 | 从 durable state 恢复；无依赖进程内 Map 的正确性 |
 | 隐私负对照 | E2EE 研究输入、provider key、native locator 不出现在协作表、对象或日志中 |
 
-实现 PR 必须运行根目录要求的 `build`、`typecheck`、`test`、`check:api-surface` 和 `check:version-authority`。
+验证按变更范围分层执行，与 [#653](https://github.com/Ancienttwo/byok-sdk/pull/653) 的 CI 分流及 #651 的 release-only 完整 CI 策略衔接：
+
+- 单项修改只运行受影响的测试、构建或类型检查；本次文档增补仅检查文档结构、相对链接与 diff。
+- 实现 PR 运行 scoped CI，并列出受影响范围和所选回归向量；不要求每个 PR 执行根目录全套测试。
+- 发版在精确候选 SHA 上运行完整 `build`、`typecheck`、`test`、`check:api-surface` 和 `check:version-authority`；候选 SHA 改变后旧结果不能充当新候选的放行证据。本计划不扩大 0.28.1 发布范围。
+
 dataplane 验收必须启用真实 Postgres/对象存储 fixture；skip 不能算通过。
 同时修改断言与实现时，附独立的只读审查，解释每项断言变更。
 记录 commit、依赖版本、操作系统、退出码、失败注入位置和持久化 readback。
@@ -273,7 +285,7 @@ dataplane 验收必须启用真实 Postgres/对象存储 fixture；skip 不能�
 - 本次只增加文档，删除文档即可回退，不涉及数据。
 - D1–D4 分开合入，未开放的 H 组合不影响 L。新 API 若需要 breaking change，单独安排版本，不塞入已冻结 patch。
 - 下游切换前保留旧模式记录和备份。提交新 owner 后，不能仅切一个开关回到旧 owner。
-- 已切换 Bot 的回退使用同一排空与恢复流程。不能恢复旧 ledger 后重新执行已完成 intent。
+- 换库、迁移与已切换 Bot 的回退使用同一持久冻结、排空与恢复流程。迁移集除业务 history/memory 外，必须包含 command 去重键及原处置、永久退役 intent identity 的不可复用证据、未确认 outbox 及原身份，并验证目标完整性后才启用新 owner。不得只恢复旧 ledger 或较旧备份而重新执行已完成 intent；缺少上述证据时保持阻塞，不能把缺失记录解释为新任务。
 - 数据库故障时拒绝接纳新的协作命令。设备 outbox 达到已有上限时按现有 typed error 处理，不丢终态。
 - 在 10 倍设备与 Bot 数量下，补查只分页读取未结算 intent。禁止每次请求扫描全部历史或用每 Bot 的常驻 Worker timer。
 - H 增加服务端协调与存储成本。计费与额度仍由产品和现有存储 entitlement 决定，不新增 BYOK 推理计费。
