@@ -429,16 +429,29 @@ jobs:
       - name: Run built adapter lifecycle smoke
         run: bun run --filter @byok-sdk/client smoke:adapters
 
+      # The Host suites run the embedded server, daemon journal and Host ledger
+      # in one process. Each commits to synchronous node:sqlite with fsync, so
+      # every commit blocks the event loop for the length of one fsync. The
+      # default temp root is on the runner OS disk (fsync p50 4 ms, p99 up to
+      # 210 ms). runner.temp is on the local NVMe disk (fsync p50 0.1 ms).
+      # Keep the temp root there. Do not weaken the durability settings.
+      # See docs/notes/2026-10-22-windows-k8-fsync-stalls.md.
       # Full K4 discovery preserves the existing Linux-only device-memory skips.
       - name: K4 Windows Host execution qualification
         if: matrix.os == 'windows-latest'
         run: bun run --cwd examples/host-execution-core test
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
 
       # Explicit per-suite exclusions are logged for the documented POSIX-only
       # persona consumer. All other K8 suites run with unchanged assertions.
       - name: K8 Windows portable Bot qualification
         if: matrix.os == 'windows-latest'
         run: node scripts/ci/run-windows-bot-tests.mjs
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
 
       # SDK Windows v1 gate for sealed provider provisioning (plan A11): the
       # device sealing key, configure/replace/delete custody, and the
