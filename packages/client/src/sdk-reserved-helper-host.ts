@@ -36,6 +36,8 @@ const DIST_SCRIPT_BY_KIND: Readonly<Record<SdkReservedHelperKind, string>> = Obj
   'pi-durable': 'byok-pi-durable.js',
 });
 
+export const sdkReservedHelperKinds: readonly SdkReservedHelperKind[] = Object.freeze(Object.keys(DIST_SCRIPT_BY_KIND) as SdkReservedHelperKind[]);
+
 function assertExecutable(executable: string): void {
   if (!path.isAbsolute(executable) || /[\u0000\r\n]/u.test(executable)) {
     throw new Error('SdkHelperHostConfig.executable must be an absolute executable path');

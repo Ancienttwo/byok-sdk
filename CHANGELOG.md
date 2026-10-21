@@ -1,7 +1,13 @@
 # Changelog
 
+- Client MCP core: preserve tool title, annotations and output schema, and provide
+  request-scoped progress over stdio and bounded HTTP POST SSE (Refs #631).
+
 ## Unreleased
 
+- **Feature (client)** — add a pinned Windows x64 native asset copier, distribution
+  metadata and per-adapter asset roots for relocated runtime process ownership (#627).
+  Darwin copying reuses the existing memory-helper API; Windows memory is unchanged.
 - **Feature (keys)** — add `piModelConfigFromPinnedCatalog` and
   `PI_MODEL_CATALOG_PI_AI_VERSION` on the new `@byok-sdk/keys/pi-catalog`
   export (#636). The table is generated from the

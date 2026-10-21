@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2063277,
+      "budgetBytes": 2064521,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -36,10 +36,12 @@
         "path",
         "url",
         "util",
+        "zlib",
         "zod"
       ],
       "lazyImports": [
         "#byok-acp-runtime",
+        "#byok-hermes-session",
         "#byok-pi-runtime-host",
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
@@ -67,7 +69,8 @@
           "os",
           "path",
           "url",
-          "util"
+          "util",
+          "zlib"
         ],
         "thirdParty": [
           "node:crypto"
@@ -125,6 +128,7 @@
       ],
       "lazyImports": [
         "#byok-acp-runtime",
+        "#byok-hermes-session",
         "koffi"
       ],
       "thirdParty": [],
@@ -150,7 +154,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Embedded Agent memory service",
-      "budgetBytes": 68197,
+      "budgetBytes": 69427,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -288,7 +292,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Tools-only MCP Streamable HTTP framing",
-      "budgetBytes": 32768,
+      "budgetBytes": 36482,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -407,6 +411,42 @@
           "rule": "Function reference"
         }
       ]
+    }
+  },
+  "@byok-sdk/client#byok-hermes-session": {
+    "kind": "imports",
+    "policy": {
+      "purpose": "Private Hermes session runtime; loaded only when starting an execution",
+      "budgetBytes": 12529,
+      "zod": false,
+      "codegen": false,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": false
+      }
+    },
+    "facts": {
+      "target": "packages/client/dist/adapters/hermes/hermes-session-runtime.js",
+      "conditions": [
+        "default"
+      ],
+      "types": [
+        "packages/client/dist/adapters/hermes/hermes-session-runtime.d.ts"
+      ],
+      "bareImports": [
+        "fs"
+      ],
+      "lazyImports": [],
+      "thirdParty": [],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [
+          "fs"
+        ],
+        "thirdParty": []
+      },
+      "codegen": []
     }
   },
   "@byok-sdk/client#byok-pi-runtime-host": {
@@ -712,7 +752,7 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 96299,
+          "line": 96325,
           "rule": "opaque import()"
         },
         {
@@ -1116,7 +1156,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Cloud coordination and HTTP handlers",
-      "budgetBytes": 534412,
+      "budgetBytes": 534547,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1169,7 +1209,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 784284,
+      "budgetBytes": 784419,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1918,7 +1958,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 562672,
+      "budgetBytes": 562807,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

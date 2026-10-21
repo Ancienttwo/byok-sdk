@@ -222,6 +222,7 @@ export function attachOwnedProcessGroupLedger(ledger: OwnedProcessGroupLedger): 
 }
 
 export interface AdoptOwnedProcessTreeOptions {
+  nativeAssetRoot?: string;
   child: ChildProcess;
   label: string;
   /** DI seam — defaults to `process.platform`, mirroring {@link OwnedProcessTreeOptions}. */
@@ -243,9 +244,9 @@ export interface AdoptOwnedProcessTreeOptions {
  * only when its bindings are actually resolved.
  */
 const defaultJobObject = {
-  async assign(pid: number): Promise<{ release(): void }> {
+  async assign(pid: number, nativeAssetRoot?: string): Promise<{ release(): void }> {
     const { assignOwnedProcessToJob } = await import('./win32-job-object');
-    return assignOwnedProcessToJob(pid);
+    return assignOwnedProcessToJob(pid, { nativeAssetRoot });
   },
 };
 
@@ -323,7 +324,7 @@ export async function adoptOwnedProcessTree(options: AdoptOwnedProcessTreeOption
     await recordOwnedGroup(options.child, pid, options.label, options.readProcessTableFn ?? readProcessTable);
     return;
   }
-  const job = await (options.jobObject ?? defaultJobObject).assign(pid);
+  const job = await (options.jobObject ? options.jobObject.assign(pid) : defaultJobObject.assign(pid, options.nativeAssetRoot));
   // A disposal that finished while the assignment was in flight already
   // proved this tree gone, so its job holds nothing that may still live.
   if (provenGone.has(options.child)) job.release();

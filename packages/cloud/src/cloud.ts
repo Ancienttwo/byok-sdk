@@ -1659,12 +1659,14 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       AGENT_HOME_CONTRACT_CAPABILITY,
       AGENT_HOME_PROJECTION_CAPABILITY,
     ]);
-    return recordAgentHomeProjectionCompletion(
+    const readback = await recordAgentHomeProjectionCompletion(
       stores.receipts,
       stores.tenant,
       deviceId,
       receipt,
     );
+    try { options.observer?.onAgentHomeProjectionCompleted?.(readback); } catch { /* Observers cannot change durable completion. */ }
+    return readback;
   }
 
   async function getInputPreparationStatus(
