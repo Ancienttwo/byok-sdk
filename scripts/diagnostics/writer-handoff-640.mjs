@@ -3,7 +3,8 @@ import { resolve } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 const refs = { baseline: '12a11bcfa8c711587c91f830d29457937a8d0ae9', candidate: '21c935b7bfae1d5d7161beb956167b9650b96160' };
 const paths = process.argv.slice(2);
-const check = paths[0] === '--check';
+const checkCRLF = paths[0] === '--check-crlf';
+const check = paths[0] === '--check' || checkCRLF;
 if (check) paths.shift();
 if (paths.length !== 2) throw new Error('Expected baseline and candidate directories');
 const replace = (s, a, b) => {
@@ -59,7 +60,8 @@ for (const [index, [label, sha]] of Object.entries(refs).entries()) {
   if (execFileSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8' }).trim() !== sha) throw new Error('Source SHA mismatch');
   for (const file of ['coalesce-host.test.ts', 'acceptance.test.ts']) {
     const filename = resolve(cwd, 'examples/bot-collaboration/src', file);
-    const before = readFileSync(filename, 'utf8');
+    const raw = readFileSync(filename, 'utf8');
+    const before = (checkCRLF ? raw.replace(/\r?\n/g, '\r\n') : raw).replace(/\r\n/g, '\n');
     let source = before;
     const isCoalesce = file.startsWith('coalesce');
     const signature = isCoalesce ? 'async function finish(id: string, document: unknown = {}) {' : 'async function finish(id: string, outcome: unknown = {}) {';
@@ -126,16 +128,18 @@ async function finish(id: string, document: unknown = {}, stage = 'other-turn') 
     if (result.error || result.status !== 0) throw new Error(`${label} setup failed`);
   }
   // Keep the same observed order for both sides; no test bodies or timeouts change.
-  const orderPath = resolve(cwd, 'examples/bot-collaboration/diagnostic-sequencer.ts');
-  writeFileSync(orderPath, `import { BaseSequencer } from 'vitest/node';
-export default class DiagnosticOrder extends BaseSequencer {
+  const orderPath = resolve(cwd, 'examples/bot-collaboration/diagnostic-vitest.config.ts');
+  writeFileSync(orderPath, `import original from './vitest.config';
+import { BaseSequencer } from 'vitest/node';
+class DiagnosticOrder extends BaseSequencer {
   async sort(tests: Parameters<BaseSequencer['sort']>[0]) {
     return [...tests].sort((a, b) => Number(a.moduleId.includes('acceptance.test')) - Number(b.moduleId.includes('acceptance.test')));
   }
 }
+export default { ...original, test: { ...original.test, sequence: { ...original.test?.sequence, sequencer: DiagnosticOrder } } };
 `);
   const args = ['run', '--cwd', 'examples/bot-collaboration', 'test', '--',
-    'src/coalesce-host.test.ts', 'src/acceptance.test.ts', '--sequence.sequencer=./diagnostic-sequencer.ts'];
+    'src/coalesce-host.test.ts', 'src/acceptance.test.ts', '--config=./diagnostic-vitest.config.ts'];
   const result = spawnSync('bun', args, { cwd, stdio: 'inherit', env: process.env });
   console.log(`BYOK_DIAGNOSTIC_TEST_EXIT ${label} ${result.status ?? 1}`);
   if (result.error || result.status !== 0) process.exitCode = 1;
