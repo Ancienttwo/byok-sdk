@@ -533,8 +533,15 @@ missing or inactive routines, and keys without a matching current reservation.
 The newest 128 observations contain only a timestamp, closed reason code and
 SHA-256 key digest, never the raw key or payload. This history grants no execution
 or deduplication authority; committed occurrence replay and current scan wakes
-keep their existing behavior. This is the audit slice of #612, not Host job
-registration or execution-free occurrences.
+keep their existing behavior. Non-current `host-scan:` keys use `stale_scan`.
+K4 also accepts immutable Host-job routine definitions with registered synchronous
+or asynchronous handlers. Slot admission and pending work commit before the handler;
+its JSON summary and optional Agent intent commit atomically afterward. A summary-only
+result records an occurrence without an Agent execution. Failures retain pending work
+and reject the drain; recovery retries it with the same occurrence identity. External
+Host effects require occurrence-key idempotency across crashes. Pause/completed stop
+new slots, not admitted jobs. This remains Host example code, not an SDK scheduler.
+See the [K4 Host job contract](../examples/host-execution-core/README.md#host-jobs-and-execution-free-occurrences).
 
 ### Embedded wake queue
 
@@ -1418,6 +1425,13 @@ auth or transport contract.
 
 The first protocol slice adds only additive optional observability fields:
 
+- `tool_use.mcp?` and `tool_result.mcp?` carry `{ server, tool }` when
+  authoritative MCP identity is available. Codex projects native `mcpToolCall`
+  fields; ordinary/prepared Pi and Claude resolve exact native tool names against
+  supplied observed toolsets. No prefix splitting or title guessing is performed.
+  Claude discovery/admission is unchanged: without an observation the field is
+  absent. Builtins, unobserved SDK helpers and Grok ACP titles are not assigned
+  MCP identity. These fields describe events, not tool authorization decisions.
 - `tool_use.toolCallId?: string` and `tool_result.toolCallId?: string` identify
   the same native tool call. A generic `id` is forbidden because envelope IDs,
   RPC request IDs, and approval IDs have different authorities.
@@ -2003,6 +2017,48 @@ Busy, containment, hook, fsync, transport, or readback mismatch leaves the
 cursor at its prior value and redelivers after reconnect/restart. No fake task,
 runtime, session, terminal event, or task journal record is created.
 
+Local Host memory export is a separate, explicitly enabled in-process API.
+`DaemonConfig.agentMemoryExport: true` exposes
+`daemon.exportAgentMemory(agentRef, { signal })`; without that opt-in the method
+is absent. It does not add a control socket command, wire capability, upload,
+restore, task, runtime, or projection callback. The daemon need not be started
+or paired. The Host owns authorization, destination, encryption, and retention
+of the returned raw content; it must never pass this result to the redacted
+projection port or log its contents.
+
+Export validates the complete requested AgentRef and holds the existing
+canonical-home writer lease through capture and helper shutdown. A competing
+writer fails with retryable `AgentHomeBusyError`; no partial snapshot is returned.
+If a durable applied profile projection exists, its revision must exactly match
+the request. Otherwise the request remains Host-supplied identity metadata:
+`requestedAgentRef` is not evidence of the globally current profile revision.
+`appliedProfileRevision` is returned only when that local evidence exists. No new
+persistent profile binding is invented for an empty or ordinary task-written home.
+
+Task-free initialization preserves the existing home and creates an empty
+`MEMORY.md` when absent, without invoking Host projection hooks. Capture uses the
+same pinned filesystem and admitted memory-path policy as memory recall/save:
+`MEMORY.md` and safe Markdown paths under `notes/`, not arbitrary home files,
+`.byok` state, credentials, or opaque unsupported note paths. Linux uses native
+pinned descriptors; macOS requires the verified SDK release helper and its
+strict volume barriers. Windows remains unavailable pending its separate proof.
+The protocol exports `AGENT_MEMORY_MAX_SNAPSHOT_FILES` (128, including MEMORY.md)
+and `AGENT_MEMORY_MAX_SNAPSHOT_BYTES` (1 MiB total UTF-8 content). Existing 256 KiB
+per-file and 512 directory-entry bounds still apply. Limit/validation failures
+reject the whole operation, never truncate; aggregate file/byte limits use
+`AgentMemorySnapshotLimitError`. I/O and invalid files fail closed.
+
+A successful export returns immutable `files` with exact `path`, SHA-256
+`revision`, `byteCount`, and UTF-8 `content`, plus `totalBytes` and `snapshotDigest`.
+The digest is `sha256:` plus lowercase hexadecimal SHA-256 of the UTF-8 JSON
+encoding of `["byok-agent-memory-export.v1", [[path, revision, byteCount], ...]]`.
+Paths use ascending ASCII byte order, independent of locale. Content is covered
+by each revision; Agent identity and profile metadata are deliberately excluded
+so identical memory trees have identical digests. Cancellation is checked before
+acquiring, after initialization, between file reads, and before return; it does
+not interrupt an in-flight native filesystem call. Helper and lease cleanup run
+on success, abort, and error. This API alone makes no cross-device restore claim.
+
 Host-approved memory intents are another task-free control. The Host approves
 one exact `replace` or `delete` of one memory file and remains the only approval
 authority; the device-local `MEMORY.md` and `notes/**` remain the only memory
@@ -2048,14 +2104,26 @@ The client release carries Darwin arm64 and x64 helpers. The SDK resolves its
 own path and checks the build manifest before each helper open. Arbitrary
 `agentMemoryFilesystem.helperBin` configuration is removed. The ordinary build
 needs no Go. `bun run build:release` builds and verifies native release assets.
+The native reproducibility check rejects release-pin drift. After changing
+native sources, maintainers explicitly regenerate the pin by running
+`node packages/client/scripts/build-agent-memory-helper.mjs` then
+`node packages/client/scripts/check-agent-memory-helper-build.mjs --write-pin`;
+the latter verifies two clean source-path builds before writing the pin.
 Single-file products copy these SDK-owned release assets at build time using
 `copyAgentMemoryHelperAssets({ outDir })` from `@byok-sdk/client`. The destination
 must be new or empty; copying verifies both target binaries and their manifest
 and never overwrites existing files. Ship that directory with the product and
-set `DaemonConfig.agentMemoryHelperAssetRoot` to its absolute installed path.
+set `DaemonConfig.agentMemoryHelperAssetRoot` to its absolute installed path
+only on macOS (Darwin arm64/x64); omit it on Linux and Windows. A configured
+root on other platforms is rejected. Failed copies remove files created by the
+call and preserve any pre-existing empty destination directory.
 An explicit invalid root fails daemon construction even without a configured
 memory projection or intent feed. Resolution and every helper open verify the
-same manifest and content digest; no arbitrary binary path, digest override or
+manifest metadata, source digest and both target digests against the committed
+release identity compiled into the SDK, and the binary against that identity's
+content digest. Assets must come from the same SDK build as the Host bundle.
+Explicit-root missing-file errors direct the Host to deploy the copy API output.
+No arbitrary binary path, digest override or
 PATH search is admitted. The directory is a deployment integrity boundary, not
 a signer authentication mechanism. Omitting the option retains installed SDK
 package resolution. Windows admission is unchanged.

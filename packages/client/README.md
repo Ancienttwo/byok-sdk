@@ -81,11 +81,18 @@ await copyAgentMemoryHelperAssets({ outDir: 'release/memory-assets' });
 // agentMemoryHelperAssetRoot: '/Applications/MyProduct.app/Contents/Resources/memory-assets'
 ```
 
-The destination must be new or empty. Ship both binaries and `manifest.json`;
+Set `agentMemoryHelperAssetRoot` only on macOS (Darwin arm64/x64); omit it on
+Linux and Windows. An explicit root on those platforms is rejected.
+The destination must be new or empty. Failed copies remove files created by
+that call so the destination can be retried. Ship both binaries and `manifest.json`;
 product code signing may re-sign the selected binary. The SDK verifies target
-metadata and its signature-independent content digest before copying and on
-every helper open. An explicit missing or corrupt root fails closed. This
-checks deployment integrity, not signer identity. No helper path or digest
+metadata, source digest and both target digests against the release identity
+compiled into the running SDK, then checks the selected binary's
+signature-independent content digest before copying and on every helper open.
+Copy assets from the same SDK build used to bundle the Host. An explicit missing
+or corrupt root fails closed. Missing explicit assets report a product deployment
+error directing the Host to `copyAgentMemoryHelperAssets`. This checks deployment
+integrity, not signer identity. No helper path or digest
 override is exposed. Without this option, installed SDK asset resolution stays
 in effect. Windows memory remains unavailable.
 

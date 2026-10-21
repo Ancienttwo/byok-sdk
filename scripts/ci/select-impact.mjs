@@ -148,12 +148,13 @@ export const workspaceGraph = {
 };
 
 export const knownFamilies = Object.freeze([
-  'build-test', 'agent-memory-helper-linux', 'agent-memory-helper',
+  'build-test', 'agent-memory-export-linux', 'agent-memory-helper-linux', 'agent-memory-helper',
   'execution-recovery-native', 'adapter-lifecycle-smoke', 'dataplane',
   'windows-git-workspace', 'packageability-smoke', 'npm-release-pack',
   'release-pack-migrate', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
 ]);
 const clientFamilies = [
+  'agent-memory-export-linux',
   'agent-memory-helper-linux', 'agent-memory-helper', 'execution-recovery-native',
   'adapter-lifecycle-smoke', 'windows-git-workspace', 'packageability-smoke',
   'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
@@ -177,6 +178,10 @@ export function selectImpact(paths, context = {}) {
     if (typeof path !== 'string' || !path || /[\\\x00-\x1f\x7f]/.test(path)
       || path.startsWith('/') || path.split('/').some(part => !part || part === '.' || part === '..')) requireRelease(path);
     files.add(path);
+    if (path === '.gitattributes') {
+      verifyReviewedContent(path, context);
+      dirs.add('packages/client'); families.add('npm-release-pack'); continue;
+    }
     if (path === 'packages/protocol/src/__tests__/golden/v3.releases.json') { leafDirs.add('packages/protocol'); continue; }
     if (path === 'package.json' || path === 'bun.lock' || /^packages\/[^/]+\/package\.json$/.test(path)) {
       verifyReviewedContent(path, context);
@@ -186,6 +191,13 @@ export function selectImpact(paths, context = {}) {
       if (!workspaceGraph[dir]) requireRelease(path);
       families.add('npm-release-pack'); continue;
     }
+    if (path === 'examples/bot-collaboration/package.json') {
+      verifyReviewedContent(path, context);
+      dirs.add('examples/bot-collaboration'); continue;
+    }
+    if (path === 'examples/basic/clarification.test.ts' || path === 'examples/basic/goal-btw.test.ts') {
+      dirs.add('examples/basic'); continue;
+    }
     if (path === 'api-surface/entries.json') {
       for (const dir of changedApiOwners(context)) {
         if (!workspaceGraph[dir]) requireRelease(path);
@@ -193,12 +205,25 @@ export function selectImpact(paths, context = {}) {
       }
       continue;
     }
+    if (path === 'packages/client/scripts/packed-agent-memory-helper-smoke.mjs'
+      || path === 'scripts/release/agent-memory-helper-source.test.mjs') {
+      dirs.add('packages/client'); families.add('npm-release-pack'); continue;
+    }
     if (/^scripts\/release\/registry-(?:contract\.test\.mjs|expectations\.json)$/.test(path)) { scripts = true; continue; }
+    // #652 trims these reviewed files in the pinned OAR snapshot.
+    if (/^packages\/client\/vendor\/oar\/60ad09b\/(?:runtimes\/codex\/(?:app-server-client|rpc-control|session)|shared\/(?:acp\/session|session-kernel))\.ts$/.test(path)) {
+      dirs.add('packages/client'); continue;
+    }
     if (/^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:PROVENANCE\.md|source-manifest\.json|runtimes\/grok\/session\.ts)$/.test(path)) {
       dirs.add('packages/client'); continue;
     }
-    if (path === 'examples/host-execution-core/VALIDATION.md') continue;
+    if (path === 'examples/host-execution-core/VALIDATION.md'
+      || path === 'examples/bot-collaboration/VALIDATION.md'
+      || path === 'examples/host-execution-core/PLAN-612.md') continue;
 
+    if (path === 'scripts/ci/run-windows-bot-tests.mjs') {
+      families.add('adapter-lifecycle-smoke'); continue;
+    }
     if (rootDocs.has(path) || /^(docs|tasks|deploy\/runbooks)\/.+\.md$/.test(path)) continue;
     if (rootCi.has(path) || /^scripts\/ci\/[a-z0-9-]+(?:\.test)?\.mjs$/.test(path)) { scripts = true; continue; }
     const golden = /^api-surface\/([a-z-]+)\.d\.ts$/.exec(path);
@@ -253,7 +278,7 @@ export function selectImpact(paths, context = {}) {
   if (dirs.has('packages/client')) for (const id of clientFamilies) families.add(id);
   if (dirs.has('packages/keys')) for (const id of ['adapter-lifecycle-smoke', 'ipc-smoke', 'credential-isolation-audit']) families.add(id);
   if (dirs.has('packages/cloud-dataplane') || dirs.has('packages/conformance')) families.add('dataplane');
-  if (dirs.has('examples/host-execution-core')) families.add('adapter-lifecycle-smoke');
+  if (dirs.has('examples/host-execution-core') || dirs.has('examples/bot-collaboration')) families.add('adapter-lifecycle-smoke');
   return { dirs: sorted(dirs), files: sorted(files), families: sorted(families),
     reason: dirs.size || families.size ? 'impacted' : scripts ? 'root-ci-scripts' : 'docs-only' };
 }

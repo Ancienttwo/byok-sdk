@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 60ad09b for injected processes, an explicit environment, bounded records and session credential redaction without sealSession (Apache-2.0).
+// BYOK change: Modified from OAR 60ad09b for injected processes, an explicit environment, a record consumer and session credential redaction without sealSession (Apache-2.0).
 /* oxlint-disable import/max-dependencies -- Session assembly wires the environment, process, terminal host, recorder and control machinery. */
 /* oxlint-disable typescript/promise-function-async -- SDK callbacks deliberately return the SDK's native promises. */
 import type { AvailableInstallation } from "../../contracts/installation.js";
@@ -48,13 +48,12 @@ export type { AcpSessionProfile } from "./profile.js";
 // BYOK change: the caller passes the complete filtered environment, so a value is never a null removal.
 export type AcpSessionOptions = Omit<SessionOptions, "env"> & { readonly env: Readonly<Record<string, string>> };
 
-// BYOK change: required record delivery and retention are injected before the kernel exists.
+// BYOK change: the record consumer is registered before any record is appended.
 export interface AcpSessionHooks {
   /** The native session id, before any record is delivered; a throw fails the open. */
   readonly onReady?: (sessionId: string) => void;
+  /** A kernel observer from seq 0. The kernel swallows its errors, so it fails the session itself. */
   readonly onRecord?: (record: RawEvent) => void;
-  readonly maxBytes?: number;
-  readonly onLimit?: () => never;
 }
 
 // BYOK change: the caller owns the agent process, every hosted terminal process and the environment.
@@ -133,10 +132,10 @@ async function openAcpRuntimeSession(
       await release();
       throw withoutCredentials(error);
     });
-    // BYOK change: budget and required projection before any record; the redactor runs before retention and the budget.
-    let kernel: ReturnType<typeof createSessionKernel>;
+    // BYOK change: the record consumer observes from seq 0: it registers before the recorder binds.
+    const kernel = createSessionKernel(opened.sessionId, credentials.redactValue);
+    if (hooks.onRecord !== undefined) kernel.rawEvents(hooks.onRecord);
     try {
-      kernel = createSessionKernel(opened.sessionId, { ...hooks, redact: credentials.redactValue });
       hooks.onReady?.(opened.sessionId);
     } catch (error) {
       await release();

@@ -37,7 +37,7 @@ test('client source/deleted tests select native safety families and reverse depe
     const impact = selectImpact([path]);
     assert.ok(impact.dirs.includes('packages/client'));
     assert.ok(impact.dirs.includes('examples/host-execution-core'));
-    for (const family of ['execution-recovery-native', 'credential-isolation-audit', 'ipc-smoke', 'windows-git-workspace', 'adapter-lifecycle-smoke', 'agent-memory-helper', 'agent-memory-helper-linux', 'packageability-smoke', 'windows-service-smoke']) assert.ok(impact.families.includes(family), family);
+    for (const family of ['execution-recovery-native', 'credential-isolation-audit', 'ipc-smoke', 'windows-git-workspace', 'adapter-lifecycle-smoke', 'agent-memory-helper', 'agent-memory-export-linux', 'agent-memory-helper-linux', 'packageability-smoke', 'windows-service-smoke']) assert.ok(impact.families.includes(family), family);
     assert.ok(!impact.families.includes('build-test'));
     assert.ok(!impact.families.includes('npm-release-pack'));
   }
@@ -79,7 +79,7 @@ test('selection is deterministic, deduplicated, and uses only known family IDs',
   const selection = selectImpact(paths);
   assert.deepEqual(selection, selectImpact([...paths].reverse().concat(paths)));
   assert.ok(selection.families.every(id => knownFamilies.includes(id)));
-  assert.equal(knownFamilies.length, 13);
+  assert.equal(knownFamilies.length, 14);
 });
 
 test('CLI accepts JSON stdin and fails closed without an output selection on bad JSON', () => {

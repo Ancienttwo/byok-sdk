@@ -1,6 +1,6 @@
 import { checkRoutineSchedule, nextRoutineOccurrence, type RoutineSchedule } from '@byok-sdk/core';
 import { hash as hostKey, type ExecutionTemplate, type HostExecutionCore, type Json, type LedgerState, type NextOccurrence,
-  type Routine, type RoutineDefinition } from '@byok-sdk/example-host-execution-core';
+  type Routine, type AgentRoutineDefinition } from '@byok-sdk/example-host-execution-core';
 import type { ByokServer } from '@byok-sdk/server';
 import { RequiredToolsetsSchema, TerminalProjectionSelectionSchema, type TerminalProjectionSelection } from '@byok-sdk/protocol';
 import type { ScopedTool } from './http';
@@ -68,7 +68,12 @@ function routineInput(args: Readonly<Record<string, unknown>> | undefined): Rout
   return { localId, definition: { schedule, task }, terminalProjection: projection.data };
 }
 function iso(at: number | undefined): string | null { return at === undefined ? null : new Date(at).toISOString(); }
-const routineOf = (state: LedgerState, routineId: string): Routine | undefined => state.routines[hostKey(routineId)];
+const routineOf = (state: LedgerState, routineId: string): (Routine & { definition: AgentRoutineDefinition }) | undefined => {
+  const routine = state.routines[hostKey(routineId)];
+  if (!routine) return undefined;
+  if (!routine.definition.execution || routine.definition.hostJob) throw new Error('MCP routine must have an Agent execution');
+  return { ...routine, definition: routine.definition };
+};
 
 /** Completes one routine on K4, then frees its slot. K4 commits before it flushes the wake cancellation. */
 async function complete(ledger: BetaLedger, core: RoutineToolOptions['core'], routineId: string, slotReleased: boolean): Promise<void> {
@@ -99,7 +104,7 @@ export function createRoutineTools(options: RoutineToolOptions): ScopedTool[] {
   ledger.onRevocation(() => { void retireRevokedRoutines(ledger, core).catch(() => undefined); });
   const current = (routineId: string) => routineOf(core.ledger.snapshot(), routineId);
 
-  function definition(caller: Caller, reservation: RoutineReservation, deviceId: string, parsed: RoutineInput): RoutineDefinition {
+  function definition(caller: Caller, reservation: RoutineReservation, deviceId: string, parsed: RoutineInput): AgentRoutineDefinition {
     const key = ledger.authorize(caller, 'routines.write');
     if (!key.agentRef) throw new Error('A routine grant has no AgentRef');
     const { schedule, task } = parsed.definition;
@@ -124,6 +129,7 @@ export function createRoutineTools(options: RoutineToolOptions): ScopedTool[] {
       if (row.routineId === routineId && (!last || row.trigger.plannedAt > last.trigger.plannedAt)) last = row;
     }
     if (!last) return undefined;
+    if (!last.intentId) throw new Error('MCP routine occurrence must have an Agent intent');
     const intent = state.intents[last.intentId]!;
     const envelope = state.executions[intent.taskId]?.terminal?.envelope;
     const document = intent.conclusion === 'succeeded' && envelope?.type === 'task.complete' ? envelope.payload.document : undefined;
