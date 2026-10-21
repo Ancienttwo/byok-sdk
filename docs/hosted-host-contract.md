@@ -44,7 +44,7 @@ Rows F, G, H, I and K are settled. All other rows are unsettled.
 | F | Device completed | `complete` | defined | `task.complete` | `state: 'complete'` | `succeeded` | Apply the outcome. |
 | G | Device failed | `failed` | defined | `task.fail` | `state: 'failed'`, `reason`, `retryable` | `failed` | Retry only when the policy and the terminal permit it. |
 | H | Device declined | `failed` | defined | `task.decline` | `state: 'failed'`, `code` | `failed` | Retry only for a busy `code`. |
-| I | Host cancel before claim | `cancelled`, marker set, no owner | unchanged | `undefined` | `state: 'cancelled'` | `cancelled` or `expired` | Settle now. The offer cannot run. |
+| I | Host cancel before claim | `cancelled`, marker set, no owner | unchanged | `undefined`, or a late terminal | `state: 'cancelled'` | `cancelled` or `expired` | Settle now. The offer cannot run. |
 | J | Host cancel after claim, no device terminal | `cancel_requested`, marker set | unchanged | `undefined` | `state: 'cancelled'` | `running` | Keep it unsettled. Wait for a device terminal. |
 | K | Host cancel after claim, device terminal stored | `cancelled`, marker set | unchanged | any terminal, also `task.complete` | `state: 'cancelled'` | `cancelled` | Settle. Do not apply a success outcome. |
 | L | Device revoked or lost before a terminal | unchanged | unchanged | `undefined` | `undefined`, or `cancelled` after a cancel | `unknown` | **Gap.** The product concludes the intent. |
@@ -73,7 +73,8 @@ Evidence for each row:
   A decline is a terminal. It reads back as `failed` with its `code` (`packages/cloud/src/inbound.ts:775-782`, `packages/cloud/src/terminal-result.ts:164-181`).
   The retry rules and the busy codes are in `docs/host-execution-core.md:152-157`.
 - **I, J and K.** See [cancelTask](#canceltask) below.
-  In row I, a late device terminal is kept as evidence. It does not change the conclusion (`packages/cloud/src/inbound.ts:884-895`).
+  In row I, a late device terminal is kept as evidence. It does not change the conclusion
+  (`packages/cloud/src/inbound.ts:871-874`, `packages/cloud/src/inbound.ts:884-895`).
   The daemon sends `task.cancelled` only in reply to `task.cancel`
   (`packages/client/src/daemon/task-runner.ts:2940-2951`, `packages/client/src/daemon/task-runner.ts:3150-3164`,
   `packages/client/src/daemon/task-runner.ts:4471-4520`, `packages/client/src/daemon/create-daemon.ts:2826-2834`).
@@ -82,8 +83,11 @@ Evidence for each row:
 
 Corrupt evidence throws. `readTaskOffer` throws `coordination_input_invalid` for an unreadable or mismatched offer receipt
 (`packages/cloud/src/cloud.ts:2324-2335`).
-`readDeviceTerminal` and `readTaskResult` throw `terminal_receipt_unreadable` for a body that is not a terminal envelope
-(`packages/cloud/src/terminal-result.ts:22-28`, `packages/cloud/src/terminal-result.ts:111-121`, `packages/cloud/src/terminal-result.ts:195-199`).
+`readTaskResult` throws `terminal_receipt_unreadable` for a body that is not a terminal envelope
+(`packages/cloud/src/terminal-result.ts:111-121`, `packages/cloud/src/terminal-result.ts:195-199`).
+`readDeviceTerminal` throws `terminal_receipt_unreadable` for a wrong taskId or type (`packages/cloud/src/terminal-result.ts:24-28`).
+For bytes that do not decode, it throws the protocol decode error
+(`packages/cloud/src/terminal-result.ts:23`, `packages/protocol/src/codec.ts:46-55`).
 Do not guess a state. Keep the intent unsettled and tell an operator.
 
 ### cancelTask
@@ -98,7 +102,10 @@ Do not guess a state. Keep the intent unsettled and tell an operator.
   (`packages/cloud-dataplane/src/stores/task-cancellations.ts:79-101`).
 - The cancel row is exempt from the mailbox limit. A full mailbox does not block it
   (`packages/cloud-dataplane/src/stores/task-cancellations.ts:81-90`).
-- A repeat call returns the same marker and mailbox row (`packages/cloud-dataplane/src/stores/task-cancellations.ts:57-77`).
+- A repeat call returns the same marker and mailbox row while the mailbox keeps that row
+  (`packages/cloud-dataplane/src/stores/task-cancellations.ts:57-77`).
+  After retention deletes the row, a `cancelled` attempt returns with no row, and a `cancel_requested` attempt throws
+  (`packages/cloud-dataplane/src/stores/task-cancellations.ts:64-73`).
 - The call returns the attempt after the commit (`packages/cloud/src/cloud.ts:2314`, `packages/cloud-dataplane/src/stores/task-cancellations.ts:102-106`).
   Embedded `tasks.cancel` returns void (`docs/host-execution-core.md:144`).
 
@@ -106,7 +113,7 @@ After the marker, no claim can win (`packages/cloud-dataplane/src/stores/task-at
 The events route does not deliver an offer whose attempt has a marker (`packages/cloud/src/handlers/events.ts:162-171`).
 A daemon that runs the task interrupts it and sends `task.cancelled` (`packages/client/src/daemon/task-runner.ts:4497-4520`).
 A device terminal that arrives after the marker is kept as device evidence. The status becomes `cancelled`
-(`packages/cloud/src/inbound.ts:884-895`).
+(`packages/cloud/src/inbound.ts:871-874`, `packages/cloud/src/inbound.ts:884-895`).
 
 ### revokeDevice
 
@@ -127,6 +134,7 @@ So the device cannot send a terminal for its tasks.
 All four reads stay as they are.
 `cancelTask` on a claimed task of that device stays `cancel_requested`, because no device terminal arrives.
 The SDK has no call that ends these attempts.
+The mailbox rows of the device also stay. Under retention, its pending rows become dead letters (section 6).
 Today the product concludes the intent itself, for example as `abandoned`, and records the cause.
 Use a product rule: the waiting deadline, `device_offline` or the revoke action.
 
@@ -134,7 +142,8 @@ Use a product rule: the waiting deadline, `device_offline` or the revoke action.
 
 The SDK sends the Host no reliable notice of a state change:
 
-- `ByokCloudObserver` callbacks are synchronous and return `void`. They run inline on the request path, after the commit.
+- `ByokCloudObserver` callbacks are synchronous and return `void`. They run inline after the outcome is fixed.
+  For inbound envelopes and projection completions, they run on the request path. `onMaintenance` runs inside `runMaintenance`.
   The SDK ignores a throw from them
   (`packages/cloud/src/inbound.ts:174-201`, `packages/cloud/src/inbound.ts:478-500`, `packages/cloud/src/cloud.ts:312-319`,
   `packages/cloud/src/cloud.ts:1668`, `packages/cloud/src/cloud.ts:1972`).
@@ -247,7 +256,8 @@ The product keeps these rules:
    Otherwise return `accepted` or `refused`.
 6. Register the consumer in each deployment that serves `POST /byok/messages`.
    `submitAgentExecution` with `messageEgress` refuses to submit without a consumer (`packages/cloud/src/cloud.ts:1940-1942`).
-   A later deployment without the consumer holds new messages with `consumer_unavailable`.
+   `enqueuePreparedOffer` and `enqueueAgentEgressOffer` do not check for a consumer (`packages/cloud/src/cloud.ts:2021-2047`).
+   Without a consumer, a new message is held with `consumer_unavailable`.
 
 ## 5. Idle cost profile
 
@@ -291,11 +301,12 @@ The budget is at most one light call per 60 s for each idle device (`docs/host-e
 - In setting 3 the polls stay in the budget (59.8 per hour).
   The 2 token calls make the total about 62. That is about 3 % above the budget.
 - Each setting does about 3,650 `readAfter` calls per hour on Postgres.
-  The product decides whether a held poll with up to 61 reads is a light call.
+  The product decides whether a held poll with 51 or 61 reads is a light call.
 
 Presence off also has a cost:
 
-- `listPresence` returns no entry for the device (`packages/cloud/src/cloud.ts:2428-2429`).
+- Without `presence.hints`, the SDK does not mount the presence route (`packages/cloud/src/cloud.ts:995-1006`).
+  So `listPresence` has no entry for the device (`packages/cloud/src/cloud.ts:2428-2429`).
   Presence is the TTL-bounded discovery hint (`packages/cloud/README.md:43-47`).
 - The Host must find `device_offline` from its own data (`docs/host-execution-core.md:383`).
 
@@ -308,11 +319,21 @@ Current behavior:
   No family is `request` class (`packages/cloud/src/receipt-retention.ts:11-13`).
 - `PostgresRequestReceiptStore.collectExpired` returns at once and removes no row, because the request prefix list is empty
   (`packages/cloud-dataplane/src/stores/receipts.ts:45-48`).
-- `runMaintenance` calls it in its `receipts` step (`packages/cloud/src/maintenance.ts:111`).
-  So `requestReceiptRetentionMs` (default 1 day) removes no receipt (`packages/cloud/src/maintenance.ts:18`).
-- `runMaintenance` removes acked mailbox rows after 1 day and unacked rows after 7 days by default
-  (`packages/cloud/src/maintenance.ts:15-17`, `packages/cloud/src/maintenance.ts:104-105`, `packages/cloud/src/maintenance.ts:110`).
-  So the mailbox copy of an offer goes. The receipt copy stays.
+- `runMaintenance` takes a complete retention policy from the caller
+  (`packages/cloud/src/maintenance.ts:52`, `packages/cloud/src/maintenance.ts:93-95`).
+  It calls `collectExpired` in its `receipts` step (`packages/cloud/src/maintenance.ts:111`).
+  So `requestReceiptRetentionMs` removes no receipt.
+- With `DEFAULT_RETENTION_POLICY` (`packages/cloud/src/maintenance.ts:15-20`), the `mailbox` step deletes acked rows after 1 day.
+  It marks pending rows older than 7 days as `expired`. An expired row keeps its body
+  (`packages/cloud/src/maintenance.ts:104-105`, `packages/cloud/src/maintenance.ts:110`,
+  `packages/cloud-dataplane/src/stores/core/mailbox.ts:322-332`).
+- Automatic retention never deletes an expired row (a dead letter).
+  Only the operator call `discardDeadLetter` deletes it (`packages/cloud-dataplane/src/cleanup.ts:250-263`).
+  `PostgresCloudCleanup` ships from the package root, not from `./runtime`
+  (`packages/cloud-dataplane/src/index.ts:56-59`, `packages/cloud-dataplane/README.md:94-97`).
+- So the mailbox copy of an acked offer goes.
+  The mailbox copy of an offer that the device never acked stays as a dead letter.
+  The receipt copy stays in both cases.
 
 What the kept rows hold:
 
@@ -338,17 +359,22 @@ Deletion paths:
 - `revokeDevice` deletes only rows of the device (see [revokeDevice](#revokedevice)).
 - `eraseAgentMemoryProjection(tenant, agentId)` revokes consent and erases the hosted Agent memory projection of one Agent
   (`packages/cloud/src/cloud.ts:1782-1795`).
-- `createPostgresTenantErasure` is the only path that deletes receipts, `task` rows and `agent_message_admission` rows.
+- `discardDeadLetter` deletes one expired mailbox row (see above).
+- `createPostgresTenantErasure` is the only path that deletes task receipts
+  (`task-offer:`, `task-offer-delivered:`, `task:` and `agent-message-offer:`), `task` rows and `agent_message_admission` rows.
   It deletes the whole tenant (`packages/cloud-dataplane/src/tenant-erasure.ts:25-59`).
-- It is Node-only. It imports `node:crypto` (`packages/cloud-dataplane/src/tenant-erasure.ts:9`).
-  It ships from the package root, not from `./runtime`
-  (`packages/cloud-dataplane/src/index.ts:75-81`, `packages/cloud-dataplane/src/runtime.ts:12-19`).
+- The only other receipt delete removes a `pairing-completion:v1:` receipt when a pairing code is issued again
+  (`packages/cloud-dataplane/src/stores/pairing-codes.ts:145-151`).
+- Tenant erasure is Node-only. It imports `node:crypto` (`packages/cloud-dataplane/src/tenant-erasure.ts:9`).
+  It ships from the package root (`packages/cloud-dataplane/src/index.ts:75-81`).
+  The `./runtime` entry does not export it (`packages/cloud-dataplane/src/runtime.ts:28-105`).
 - Run it from a Node process with a direct DSN
   (`packages/cloud-dataplane/README.md:94-97`, `packages/cloud-dataplane/README.md:215-216`).
   The Host must authorize it and stop product writes first (`packages/cloud-dataplane/README.md:223-224`).
 
 **Gap: retention and scoped deletion.** Task receipts and admission rows have no TTL.
 No call deletes them by task, device, Agent or time.
+An offer that the device never acked also stays, as a dead letter, until an operator discards it.
 Today the product must erase the whole tenant from Node to delete the task content of one user.
 This document states current behavior. It does not promise a design or a release.
 
@@ -361,4 +387,4 @@ This document states current behavior. It does not promise a design or a release
 | Wake across invocations | The SDK has no wake across Worker invocations. Each wait ends at the fallback (section 3). | Accept the fallback reads, or build a Durable Object wake. |
 | Held message | No SDK route releases it. The task has no terminal until a cancel (section 4). | Return `held` only with a product release action. |
 | Idle cost | 62 to 194 HTTP calls and about 3,650 reads for each idle device per hour (section 5). | Choose presence, hold and fallback against the budget. |
-| Retention | No receipt TTL and no scoped deletion (section 6). | Tenant erasure from Node is the only delete path. |
+| Retention | No receipt TTL and no scoped deletion. Unacked offers stay as dead letters (section 6). | Tenant erasure from Node is the only delete path for task receipts and admission rows. |
