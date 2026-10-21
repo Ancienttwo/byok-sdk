@@ -1,3 +1,4 @@
+import { mcpEventIdentities, type McpEventIdentities } from '../../mcp/event-identity';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import { startDurablePi } from '../pi-durable/session';
 import { serializePiHostConfig } from './runtime-host-binding';
@@ -579,7 +580,7 @@ export class PiAdapter implements RuntimeAdapter {
               reason: 'pi resumed a different authoritative session than requested',
             });
           }
-          return new PiSession(sessionRef, rpc, manifestSelection, startInput.scratch);
+          return new PiSession(sessionRef, rpc, manifestSelection, startInput.scratch, undefined, mcpEventIdentities(startInput.mcpToolsetTools));
         },
       },
     };
@@ -905,7 +906,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
     throw authorityFailure('pi reported a different session id than the one that admitted the prepared request');
   }
 
-  return new PiSession(sessionRef, rpc, input.manifestSelection, input.scratch, preparation.expected.model.contextWindow);
+  return new PiSession(sessionRef, rpc, input.manifestSelection, input.scratch, preparation.expected.model.contextWindow, mcpEventIdentities(input.mcpToolsetTools));
 }
 
 /**
@@ -1055,6 +1056,7 @@ class PiSession implements Session {
     /** Task-scoped isolated MCP extension configuration, removed in close(). */
     private readonly scratch: ExecutionScratch,
     private readonly hostContextWindow?: number,
+    private readonly identities?: McpEventIdentities,
   ) {}
 
   get events(): AsyncIterable<AgentEvent> {
@@ -1116,7 +1118,7 @@ class PiSession implements Session {
                 if (!abortFailure) session.pendingTurnEnd = true;
                 return { value: mapPiContextUsage(stats?.success === false ? undefined : stats?.data, hostContextWindow), done: false };
               }
-              const mapped = mapPiMessageToAgentEvent(value);
+              const mapped = mapPiMessageToAgentEvent(value, session.identities);
               if (value.type === 'auto_retry_end' && value.success === false) {
                 terminalFailure = new RuntimeExecutionFailure({
                   phase: 'run',

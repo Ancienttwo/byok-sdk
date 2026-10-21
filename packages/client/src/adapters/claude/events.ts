@@ -1,3 +1,4 @@
+import type { McpEventIdentities } from '../../mcp/event-identity';
 import { parseClaudeContextWindow } from './control-channel';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
@@ -36,10 +37,11 @@ export interface ClaudeStreamMessage {
  */
 export interface ToolUseCorrelation {
   readonly toolNameByUseId: Map<string, string>;
+  readonly mcpIdentities?: McpEventIdentities;
 }
 
-export function createToolUseCorrelation(): ToolUseCorrelation {
-  return { toolNameByUseId: new Map() };
+export function createToolUseCorrelation(mcpIdentities?: McpEventIdentities): ToolUseCorrelation {
+  return { toolNameByUseId: new Map(), mcpIdentities };
 }
 
 export interface MapClaudeMessageOptions {
@@ -172,7 +174,8 @@ function mapAssistant(msg: ClaudeStreamMessage, correlation: ToolUseCorrelation)
         }
         if (typeof block.name === 'string') {
           correlation.toolNameByUseId.set(block.id, block.name);
-          events.push({ type: 'tool_use', tool: block.name, input: block.input, toolCallId: block.id });
+          const mcp = correlation.mcpIdentities?.get(block.name);
+          events.push({ type: 'tool_use', ...(mcp === undefined ? {} : { mcp }), tool: block.name, input: block.input, toolCallId: block.id });
         }
         break;
 
@@ -255,6 +258,7 @@ function mapUser(msg: ClaudeStreamMessage, correlation: ToolUseCorrelation, opti
     const isError = typeof block.is_error === 'boolean' ? block.is_error : undefined;
     const event: Extract<AgentEvent, { type: 'tool_result' }> = {
       type: 'tool_result',
+      ...(correlation.mcpIdentities?.get(tool) === undefined ? {} : { mcp: correlation.mcpIdentities.get(tool)! }),
       tool,
       output: { content: block.content },
       toolCallId: block.tool_use_id,
