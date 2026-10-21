@@ -195,6 +195,7 @@ import { preflightAgentMessageMcp } from './agent-message-mcp-preflight';
 import { preflightAgentResultMcp } from './agent-result-mcp-preflight';
 import { assertJournalEnvelopeProtocol, DaemonConfigFieldRemovedError } from './daemon-errors';
 import { resolveAgentMemoryDescribeBin, resolveAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
+import { exportAgentMemoryHome, type AgentMemoryExport, type AgentMemoryExportOptions } from './agent-memory-export';
 import { resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
 import {
   isAgentMemorySecureFilesystemAvailable,
@@ -337,6 +338,8 @@ export interface DaemonConfig {
   agentMemoryMcp?: 'auto' | 'off';
   /** Optional, one-way hosted projection. Without all guards it has zero network activity. */
   agentMemory?: AgentMemoryHostedProjection;
+  /** Explicit raw local Host export opt-in. No control/wire endpoint, upload, or projection callback. Requires agentHome and the admitted Linux/macOS memory backend. */
+  agentMemoryExport?: true;
   /** Absolute directory copied by copyAgentMemoryHelperAssets. Only SDK release assets are admitted; not a helper executable or digest override. */
   agentMemoryHelperAssetRoot?: string;
   /**
@@ -779,6 +782,8 @@ export interface DaemonStatus {
 }
 
 export interface Daemon {
+  /** Present only with agentMemoryExport: true. Holds the home writer lease; AgentHomeBusyError is retryable. Raw contents remain Host-owned. */
+  exportAgentMemory?(agentRef: AgentRef, options?: AgentMemoryExportOptions): Promise<AgentMemoryExport>;
   /** Pairing result is intentionally credential-blind. */
   pair(pairingCode: string): Promise<DeviceEnrollment>;
   /**
@@ -1308,6 +1313,12 @@ export function buildDaemonWithAdapters(
   if (config.agentMemoryMcp !== undefined && config.agentMemoryMcp !== 'auto' && config.agentMemoryMcp !== 'off') {
     throw new Error('DaemonConfig.agentMemoryMcp must be auto or off when present');
   }
+  if (config.agentMemoryExport !== undefined && config.agentMemoryExport !== true) {
+    throw new Error('DaemonConfig.agentMemoryExport must be true when present');
+  }
+  if (config.agentMemoryExport === true && config.agentHome === undefined) {
+    throw new Error('DaemonConfig.agentMemoryExport requires agentHome');
+  }
   const agentMemoryMcpEnabled = config.agentMemoryMcp !== 'off';
   if (config.agentMemory !== undefined && config.agentHome === undefined) {
     throw new Error('DaemonConfig.agentMemory requires DaemonConfig.agentHome for the exact Agent memory authority');
@@ -1326,18 +1337,21 @@ export function buildDaemonWithAdapters(
   // Platform support alone cannot admit memory. Compiled products and ordinary
   // JS builds can have Agent homes without the SDK native release assets.
   let resolveAgentMemoryFilesystemHelperBin: (() => string) | undefined;
-  if (config.agentHome !== undefined && (agentMemoryMcpEnabled || config.agentMemory !== undefined || config.agentMemoryIntents !== undefined)
+  if (config.agentHome !== undefined && (agentMemoryMcpEnabled || config.agentMemory !== undefined || config.agentMemoryIntents !== undefined || config.agentMemoryExport === true)
     && isAgentMemoryFilesystemHelperSupported()) {
     try {
       resolveAgentMemoryFilesystemHelper(config.agentMemoryHelperAssetRoot);
       resolveAgentMemoryFilesystemHelperBin = () => resolveAgentMemoryFilesystemHelper(config.agentMemoryHelperAssetRoot);
     } catch (error) {
-      if (config.agentMemoryHelperAssetRoot !== undefined || config.agentMemory !== undefined || config.agentMemoryIntents !== undefined) throw error;
+      if (config.agentMemoryHelperAssetRoot !== undefined || config.agentMemory !== undefined || config.agentMemoryIntents !== undefined || config.agentMemoryExport === true) throw error;
     }
   }
   const externalAgentMemoryFilesystem = resolveAgentMemoryFilesystemHelperBin !== undefined;
   if (config.agentMemory !== undefined && !isAgentMemorySecureFilesystemAvailable(externalAgentMemoryFilesystem)) {
     throw new Error('DaemonConfig.agentMemory requires a platform with safe descriptor-relative filesystem operations');
+  }
+  if (config.agentMemoryExport === true && !isAgentMemorySecureFilesystemAvailable(externalAgentMemoryFilesystem)) {
+    throw new Error('DaemonConfig.agentMemoryExport requires a secure Linux or macOS memory backend');
   }
   const agentMemoryMcpBin = !agentMemoryMcpEnabled || config.agentHome === undefined
     ? undefined
@@ -4261,6 +4275,13 @@ export function buildDaemonWithAdapters(
     stop,
     status,
     publishReliableAgentEgress,
+    ...(config.agentMemoryExport !== true ? {} : {
+      exportAgentMemory: (agentRef: AgentRef, options?: AgentMemoryExportOptions) => {
+        const bin = resolveAgentMemoryFilesystemHelperBin?.();
+        return exportAgentMemoryHome(agentHomeManager!, agentRef, options,
+          bin === undefined ? undefined : { bin, assetRoot: config.agentMemoryHelperAssetRoot });
+      },
+    }),
     reloadMcpToolsets,
     reportMcpToolsetObservation,
     subscribe,
