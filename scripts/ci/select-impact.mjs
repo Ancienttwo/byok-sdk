@@ -177,6 +177,10 @@ export function selectImpact(paths, context = {}) {
     if (typeof path !== 'string' || !path || /[\\\x00-\x1f\x7f]/.test(path)
       || path.startsWith('/') || path.split('/').some(part => !part || part === '.' || part === '..')) requireRelease(path);
     files.add(path);
+    if (path === '.gitattributes') {
+      verifyReviewedContent(path, context);
+      dirs.add('packages/client'); families.add('npm-release-pack'); continue;
+    }
     if (path === 'packages/protocol/src/__tests__/golden/v3.releases.json') { leafDirs.add('packages/protocol'); continue; }
     if (path === 'package.json' || path === 'bun.lock' || /^packages\/[^/]+\/package\.json$/.test(path)) {
       verifyReviewedContent(path, context);
@@ -205,10 +209,15 @@ export function selectImpact(paths, context = {}) {
       dirs.add('packages/client'); families.add('npm-release-pack'); continue;
     }
     if (/^scripts\/release\/registry-(?:contract\.test\.mjs|expectations\.json)$/.test(path)) { scripts = true; continue; }
+    // #652 trims these reviewed files in the pinned OAR snapshot.
+    if (/^packages\/client\/vendor\/oar\/60ad09b\/(?:runtimes\/codex\/(?:app-server-client|rpc-control|session)|shared\/(?:acp\/session|session-kernel))\.ts$/.test(path)) {
+      dirs.add('packages/client'); continue;
+    }
     if (/^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:PROVENANCE\.md|source-manifest\.json|runtimes\/grok\/session\.ts)$/.test(path)) {
       dirs.add('packages/client'); continue;
     }
-    if (path === 'examples/host-execution-core/VALIDATION.md') continue;
+    if (path === 'examples/host-execution-core/VALIDATION.md'
+      || path === 'examples/host-execution-core/PLAN-612.md') continue;
 
     if (rootDocs.has(path) || /^(docs|tasks|deploy\/runbooks)\/.+\.md$/.test(path)) continue;
     if (rootCi.has(path) || /^scripts\/ci\/[a-z0-9-]+(?:\.test)?\.mjs$/.test(path)) { scripts = true; continue; }

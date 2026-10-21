@@ -82,3 +82,24 @@ Validation: actual PR changed-path selection succeeds; `node --test
 scripts/ci/*.test.mjs` passes 44 tests. New positive/negative regression tests
 were added; no existing assertions, timeouts, or job contracts were weakened.
 Self-review confirms the source contract is executed, not merely classified.
+
+## Windows release-pack checkout correction
+
+PR #659 job 119186513034 (run 39589445165) completed both architecture
+reproducibility checks, then failed at check-agent-memory-helper-build.mjs:37:
+the tracked generated pin had CRLF while the verified manifest projection used
+LF. The assertion diff shows matching field values; this was checkout newline
+conversion, not lowpriv permissions or a native compiler failure. Main lacks
+the PR's new byte-exact pin assertion, explaining the differing build path.
+
+Merged main 41f4a5491. Fixed the pin's checkout representation with a single
+explicit text eol=lf Git attribute, preserving the strict pin assertion and all
+native digest checks. CI selection admits only this exact additive attribute
+change and requires client/native and npm release-pack qualification; unrelated
+attribute edits still fail closed.
+
+Validation: a real Git core.autocrlf=true checkout regression failed before the
+fix and passed after it. CI tests plus agent-memory-helper-source tests: 52 passed,
+zero skipped. Actual helper builds and independent arm64/x64 reproducibility plus
+pin checks passed locally. Windows standard-user end-to-end remains hosted CI
+validation, not a result established on this Mac.

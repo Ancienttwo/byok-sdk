@@ -8,7 +8,7 @@ import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-c
 import { BotStubAdapter, waitForReady } from '../../basic/goal-btw.test-support';
 import { HostExecutionCore, type HostOptions, type ExecutionServer } from './core';
 import { HostLedger } from './ledger';
-import type { ExecutionTemplate, IntentInput, RoutineDefinition } from './model';
+import type { ExecutionTemplate, IntentInput, AgentRoutineDefinition } from './model';
 
 export const policy: AgentEgressPolicy = {
   policyRevision: 'k4-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
@@ -61,7 +61,7 @@ export async function openHost(options: HostOptions & {
     intent(key: string, rest: Partial<IntentInput> = {}): IntentInput {
       return { key, source: 'bot', execution: template(deviceId), waitUntil: Date.now() + 60_000, ...rest };
     },
-    routine(id: string, rest: Partial<RoutineDefinition> = {}): RoutineDefinition {
+    routine(id: string, rest: Partial<AgentRoutineDefinition> = {}): AgentRoutineDefinition {
       return { id, version: 1, timeZone: 'UTC', rule: { anchorMs: Date.now() + 30, everyMs: 86_400_000 },
         execution: template(deviceId), waitMs: 60_000, lateAfterMs: 1000, ...rest };
     },

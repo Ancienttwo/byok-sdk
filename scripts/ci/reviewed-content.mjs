@@ -8,6 +8,17 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
   if (!/^[a-f0-9]{40}$/.test(base ?? '') || /^0+$/.test(base)) throw new Error('Content-sensitive impact requires exact CI_BASE');
   const beforeText = execFileSync('git', ['show', `${base}:${path}`], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   const afterText = readFileSync(resolve(cwd, path), 'utf8');
+  if (path === '.gitattributes') {
+    // #603's generated pin is compared byte-for-byte with an LF projection.
+    // Git attribute syntax is line based; permit only this exact additive rule.
+    const rule = 'packages/client/src/daemon/agent-memory-helper-release-pin.ts text eol=lf\n';
+    const before = beforeText.replace(/\r\n/g, '\n');
+    const after = afterText.replace(/\r\n/g, '\n');
+    if (before.includes(rule) || after !== before + rule) {
+      throw new Error('Reviewed release validation required: only the reviewed helper pin LF attribute may be added');
+    }
+    return;
+  }
   const parse = path === 'bun.lock' ? parseBunLock : JSON.parse;
   const before = parse(beforeText), after = parse(afterText);
   const version = value => typeof value === 'string' && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value);

@@ -533,8 +533,15 @@ missing or inactive routines, and keys without a matching current reservation.
 The newest 128 observations contain only a timestamp, closed reason code and
 SHA-256 key digest, never the raw key or payload. This history grants no execution
 or deduplication authority; committed occurrence replay and current scan wakes
-keep their existing behavior. This is the audit slice of #612, not Host job
-registration or execution-free occurrences.
+keep their existing behavior. Non-current `host-scan:` keys use `stale_scan`.
+K4 also accepts immutable Host-job routine definitions with registered synchronous
+or asynchronous handlers. Slot admission and pending work commit before the handler;
+its JSON summary and optional Agent intent commit atomically afterward. A summary-only
+result records an occurrence without an Agent execution. Failures retain pending work
+and reject the drain; recovery retries it with the same occurrence identity. External
+Host effects require occurrence-key idempotency across crashes. Pause/completed stop
+new slots, not admitted jobs. This remains Host example code, not an SDK scheduler.
+See the [K4 Host job contract](../examples/host-execution-core/README.md#host-jobs-and-execution-free-occurrences).
 
 ### Embedded wake queue
 

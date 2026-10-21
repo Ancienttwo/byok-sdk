@@ -60,11 +60,9 @@ export async function codexSession(
     readonly sandboxMode?: "read-only" | "workspace-write" | "danger-full-access" | "inherit";
   },
   serverRequestTimeoutMs = 1_000,
-  hooks: { // BYOK change: required record delivery and retention are injected before registration/replay.
+  hooks: { // BYOK change: the record consumer is registered before any record is appended.
     readonly onReady?: (threadId: string) => void;
     readonly onRecord?: (record: import("../../contracts/session.js").RawEvent) => void;
-    readonly maxBytes?: number;
-    readonly onLimit?: () => never;
     // BYOK change: caller-owned, bounded native request lifecycle; no permissive fallback.
     readonly onServerRequest?: (id: string | number, method: string, params: JsonRecord, reply: {
       respond(value: JsonRecord): Promise<void>; reject(code: number, message: string): Promise<void>; cancelled(): void;
@@ -107,7 +105,7 @@ async function openCodexSession(
   }
   // Every error the client reports goes through the redactor first: the
   // open's config carries the session's MCP credentials to codex.
-  const client = startAppServerClient(spawnLineProcess, installation.command, options.env, configOverrides, options.cwd, undefined, { redact, ...(options.launchArgs === undefined ? {} : { launchArgs: options.launchArgs }) });
+  const client = startAppServerClient(spawnLineProcess, installation.command, options.env, configOverrides, options.cwd, { redact, ...(options.launchArgs === undefined ? {} : { launchArgs: options.launchArgs }) });
   // BYOK change: Ownership/adoption must settle before the first protocol write.
   try {
     await client.spawned;
@@ -156,8 +154,10 @@ async function openCodexSession(
     throw new Error(readback.refusal);
   }
 
-  // BYOK change: budget/required projection before any frame; the redactor runs before retention and the budget.
-  const kernel = createSessionKernel(threadId, { ...hooks, redact: redactValue });
+  // BYOK change: The record consumer observes from seq 0: it registers before any record is appended.
+  // Observer errors are swallowed by the kernel, so the consumer fails the session itself.
+  const kernel = createSessionKernel(threadId, redactValue);
+  if (hooks.onRecord !== undefined) kernel.rawEvents(hooks.onRecord);
   hooks.onReady?.(threadId);
   const state: CodexSessionState = {
     active: null,
@@ -168,8 +168,7 @@ async function openCodexSession(
     projection: initialCodexProjection(threadId, openMethod),
   };
   const busy = (): boolean => state.active !== null || state.spontaneous;
-  // BYOK change: The fallback timer never throws. A failed settlement already rejected its control.
-  const abortFallback = createAbortFallback(() => { try { client.kill(); } catch { /* surfaced by the rejected control */ } });
+  const abortFallback = createAbortFallback(() => { client.kill(); });
   let disposeRequest: RequestRecord | null = null;
   // A resume's effort update in flight: codex's thread/settings/updated answers it.
   let settingsWaiter: ((params: JsonRecord) => void) | null = null;
@@ -255,7 +254,8 @@ async function openCodexSession(
           })]);
           record(body);
         } catch (error) {
-          try { record({ kind: 'rejected', code: 'error', reason: 'native reply transport failed' }); } finally { client.kill(); }
+          record({ kind: 'rejected', code: 'error', reason: 'native reply transport failed' });
+          client.kill();
           throw error;
         } finally { clearTimeout(timer); }
       };
@@ -274,14 +274,11 @@ async function openCodexSession(
     const finish = (body: import("../../contracts/session.js").ResponseBody): void => {
       if (settled) return;
       settled = true; clearTimeout(timer);
-      try { kernel.respond(request.id, body); } catch { client.kill(); }
+      kernel.respond(request.id, body);
     };
     const timer = setTimeout(() => {
-      // BYOK change: The deadline timer never throws. A failed settlement already rejected its control.
-      try {
-        finish({ kind: "rejected", code: "error", reason: `codex ${method} response deadline exceeded` });
-        client.kill();
-      } catch { /* surfaced by the rejected control */ }
+      finish({ kind: "rejected", code: "error", reason: `codex ${method} response deadline exceeded` });
+      client.kill();
     }, serverRequestTimeoutMs);
     const failed = (error: unknown): void => {
       finish({ kind: "rejected", code: "error", reason: error instanceof Error ? error.message : String(error) });
@@ -337,10 +334,6 @@ async function openCodexSession(
   const via = <Args extends unknown[]>(plan: (...args: Args) => RpcControlPlan) =>
     async (...args: Args): Promise<ControlResult> => {
       const result = await rpcControl(kernel, client, plan(...args));
-      // BYOK change: Typed RPC timeout bypasses the plan error mapper, so release a refused prompt's slot here.
-      if (result.request.body.kind === "prompt" && result.response.body.kind === "rejected" && state.active?.id === result.request.id) {
-        state.active = null;
-      }
       return result;
     };
   const capabilities = { queue: { durable: true }, attribution: "nested", images: true } as const;

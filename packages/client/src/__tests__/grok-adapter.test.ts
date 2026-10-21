@@ -9,6 +9,7 @@ import { SteerUnsupportedError, type Session } from '../types';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
 import * as processTree from '../adapters/process-tree';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
+import { GrokProjection } from '../adapters/grok/projection';
 
 const fixture = fileURLToPath(new URL('./fixtures/fake-acp-agent.mjs', import.meta.url));
 const sessions: Session[] = [];
@@ -199,6 +200,31 @@ describe('GrokAdapter sessions', () => {
     expect(failed).toMatchObject({ phase: 'run', category: 'semantic', retry: 'non-retryable', message: 'model provider failed' });
     const limited = await failureOf(await open(adapter(), { instruction: 'rate-limited' }, await ctx()));
     expect(limited).toMatchObject({ phase: 'run', category: 'semantic', retry: 'retryable' });
+  });
+
+  it('fails the session and ends the agent when retained records exceed the byte budget', async () => {
+    const resources = await ctx();
+    // 'huge' streams 256 KiB of text: the open fits the budget, the turn does not.
+    const failure = await open(adapter({ maxRetainedBytes: 64 * 1024 }), { instruction: 'huge' }, resources)
+      .then(failureOf, (error) => error);
+    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(failure).toMatchObject({ category: 'infrastructure', message: 'grok retained record byte budget exceeded' });
+    await Promise.all(sessions.map(s => s.close()));
+    const [started] = facts(resources.log).filter(fact => fact.kind === 'start');
+    if (process.platform !== 'win32') await vi.waitFor(() => expect(() => process.kill(started!.pid, 0)).toThrow());
+  });
+
+  it('a failing record consumer fails the session although the kernel swallows observer errors', async () => {
+    const resources = await ctx();
+    const s = await open(adapter(), { instruction: 'hold-silent' }, resources);
+    await vi.waitFor(() => expect(facts(resources.log).some(fact => fact.kind === 'prompt')).toBe(true));
+    vi.spyOn(GrokProjection.prototype, 'consume').mockImplementation(() => { throw new Error('projection failed'); });
+    // The cancel request is the next record: the failing consumer sees it.
+    await s.interrupt().catch(() => {});
+    expect(await failureOf(s)).toMatchObject({ category: 'infrastructure', message: 'projection failed' });
+    await s.close();
+    const [started] = facts(resources.log).filter(fact => fact.kind === 'start');
+    if (process.platform !== 'win32') await vi.waitFor(() => expect(() => process.kill(started!.pid, 0)).toThrow());
   });
 
   it('fails as infrastructure when the agent exits on its own', async () => {
