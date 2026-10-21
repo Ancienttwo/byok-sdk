@@ -204,7 +204,8 @@ export function selectImpact(paths, context = {}) {
     if (/^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:PROVENANCE\.md|source-manifest\.json|runtimes\/grok\/session\.ts)$/.test(path)) {
       dirs.add('packages/client'); continue;
     }
-    if (path === 'examples/host-execution-core/VALIDATION.md') continue;
+    if (path === 'examples/host-execution-core/VALIDATION.md'
+      || path === 'examples/host-execution-core/PLAN-612.md') continue;
 
     if (rootDocs.has(path) || /^(docs|tasks|deploy\/runbooks)\/.+\.md$/.test(path)) continue;
     if (rootCi.has(path) || /^scripts\/ci\/[a-z0-9-]+(?:\.test)?\.mjs$/.test(path)) { scripts = true; continue; }
