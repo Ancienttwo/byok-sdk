@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 
-const refs = { baseline: '71e8839ba2b347d0880d204ec230ca321bad4399', candidate: '39826a2334355070193e42dfaa96b80b376e920d' };
+const refs = { candidate: 'c0fae66071f1633874fc89ad961459a360855b60' };
 const [label, directory, mode] = process.argv.slice(2);
 if (!Object.hasOwn(refs, label)) throw new Error('Unknown diagnostic side');
 const cwd = resolve(directory);
@@ -74,8 +74,15 @@ console.log(`BYOK_COALESCE_SOURCE ${label} ${refs[label]}`);
 for (const args of [
   ['ci'],
   ['run', '--filter', './packages/*', '--if-present', 'build'],
+]) {
+  const result = spawnSync('bun', args, { cwd, stdio: 'inherit', env: process.env });
+  if (result.error || result.status !== 0) process.exit(result.status ?? 1);
+}
+for (const args of [
+  ['run', '--cwd', 'examples/bot-collaboration', 'test', '--', 'src/coalesce-fixture.test.ts'],
   ['run', '--cwd', 'examples/bot-collaboration', 'test', '--', 'src/coalesce-host.test.ts', '-t', '^seals the open batch before answer, action_result, routine and continuation Turns, in arrival order \\(S5\\)$'],
 ]) {
   const result = spawnSync('bun', args, { cwd, stdio: 'inherit', env: process.env });
-  if (result.error || result.status !== 0) { process.exitCode = result.status ?? 1; break; }
+  console.log(`BYOK_COALESCE_TEST_EXIT ${args[5]} ${result.status ?? 1}`);
+  if (result.error || result.status !== 0) process.exitCode = result.status ?? 1;
 }

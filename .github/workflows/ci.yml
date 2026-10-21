@@ -5,7 +5,7 @@ permissions:
   contents: read
 jobs:
   diagnose:
-    name: One S5 case per exact source
+    name: Candidate barrier and S5 once
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
@@ -21,29 +21,8 @@ jobs:
           bun-version: '1.4.2'
       - uses: actions/checkout@v7
         with:
-          ref: 71e8839ba2b347d0880d204ec230ca321bad4399
-          path: baseline
-          persist-credentials: false
-      - uses: actions/checkout@v7
-        with:
-          ref: 39826a2334355070193e42dfaa96b80b376e920d
+          ref: c0fae66071f1633874fc89ad961459a360855b60
           path: candidate
           persist-credentials: false
-      - name: Baseline S5 once
-        id: baseline
-        continue-on-error: true
-        run: node diagnostic/scripts/diagnostics/coalesce-667.mjs baseline baseline
-      - name: Candidate S5 once
-        id: candidate
-        if: ${{ !cancelled() }}
-        continue-on-error: true
+      - name: Candidate barrier and S5 once
         run: node diagnostic/scripts/diagnostics/coalesce-667.mjs candidate candidate
-      - name: Preserve diagnostic outcome
-        if: ${{ !cancelled() }}
-        env:
-          BASELINE_OUTCOME: ${{ steps.baseline.outcome }}
-          CANDIDATE_OUTCOME: ${{ steps.candidate.outcome }}
-        run: |
-          "Baseline: $env:BASELINE_OUTCOME; candidate: $env:CANDIDATE_OUTCOME"
-          if ($env:BASELINE_OUTCOME -ne 'success' -or $env:CANDIDATE_OUTCOME -ne 'success') { exit 1 }
-          'Both single-case observations passed; causal result remains inconclusive. No retry.'
