@@ -4117,6 +4117,9 @@ export interface DaemonConfig {
         hostStorageRoot: string;
         projection?: AgentHomeProjection;
     };
+    /** Task memory MCP admission. Absent/auto preserves platform-based admission; off disables both ordinary and prepared memory tools.
+     * This does not disable Agent-home guidance or explicit hosted projection/intent transports, and is not a filesystem sandbox. */
+    agentMemoryMcp?: 'auto' | 'off';
     /** Optional, one-way hosted projection. Without all guards it has zero network activity. */
     agentMemory?: AgentMemoryHostedProjection;
     /**
