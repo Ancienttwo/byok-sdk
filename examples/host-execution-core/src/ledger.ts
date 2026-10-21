@@ -56,6 +56,12 @@ function empty(): LedgerState {
 /** Small single-owner reference. Keep this database separate from the SDK and Agent home. */
 export class HostLedger {
   private readonly db: DatabaseSync;
+  private readonly outboxListeners = new Set<() => void>();
+  /** Post-commit hints for newly inserted projections. The durable outbox is the authority. */
+  onOutbox(listener: () => void): () => void {
+    this.outboxListeners.add(listener);
+    return () => { this.outboxListeners.delete(listener); };
+  }
   private readonly projectionLimits?: Readonly<ProjectionOutboxLimits>;
   constructor(filename: string, readonly tenant: string, options: HostLedgerOptions = {}) {
     if (options.projectionOutboxLimits !== undefined) {
@@ -86,11 +92,14 @@ export class HostLedger {
   projectionOutboxUsage(): ProjectionOutboxUsage { return projectionUsage(this.snapshot()); }
   transaction<T>(apply: (state: LedgerState) => T): T {
     this.db.exec('BEGIN IMMEDIATE');
+    let result: T;
+    let added = false;
     try {
       const state = this.snapshot();
       const existing = new Set(Object.keys(state.intents));
+      const prior = new Set(Object.keys(state.outbox));
       const before = this.projectionLimits && projectionUsage(state);
-      const result = apply(state);
+      result = apply(state);
       if (result && typeof (result as { then?: unknown }).then === 'function') throw new Error('Host transactions must be synchronous');
       // Also covers callers of the exported pure enqueue/recordOccurrence transitions.
       const retired = this.db.prepare("SELECT 1 FROM host_retired_identity WHERE tenant=? AND kind='intent' AND identity=?");
@@ -106,9 +115,12 @@ export class HostLedger {
           : after.count > countLimit || after.bytes > byteLimit) throw new OutboxFullError();
       }
       this.db.prepare('UPDATE host_ledger SET body=? WHERE tenant=?').run(JSON.stringify(state), this.tenant);
+      added = Object.entries(state.outbox).some(([key, row]) => row.kind === 'projection' && !prior.has(key));
+      result = structuredClone(result);
       this.db.exec('COMMIT');
-      return structuredClone(result);
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    if (added) for (const listener of [...this.outboxListeners]) { try { listener(); } catch { /* Hints cannot roll back committed state. */ } }
+    return result;
   }
   /** Replay evidence is time-bounded; retired intent identities are permanent. */
   hasTombstone(kind: TombstoneKind, identity: string, now: number): boolean {
