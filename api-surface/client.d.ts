@@ -12210,15 +12210,18 @@ import { type McpServerOptions } from './index';
 /** Maximum accepted HTTP request body, in UTF-8 bytes. */
 export declare const MCP_HTTP_MAX_BODY_BYTES: number;
 export interface McpHttpServerOptions extends Omit<McpServerOptions, 'input' | 'output' | 'onClose' | 'maxLineBytes'> {
-    /** Stateful by default. Stateless mode retains no sessions and disallows SSE. */
+    /**
+     * Stateful by default. Stateless mode retains no sessions; only a tools/call carrying
+     * `_meta.progressToken` streams that call's progress and result over its own POST SSE response.
+     */
     readonly sessionMode?: 'stateful' | 'stateless';
     /** Trusted public origin, e.g. https://host.example. Never derive it from the request Host header. */
     readonly origin: string;
     /** Positive integer, at most MCP_HTTP_MAX_BODY_BYTES. */
     readonly maxBodyBytes?: number;
-    /** Bounds idle sessions as well as emitter subscriptions. Default 64. */
+    /** Bounds idle sessions as well as emitter subscriptions. Default 64. Applies only in stateful mode. */
     readonly maxSessions?: number;
-    /** Idle lifetime without pending core replies. SSE alone does not keep a session alive. Default 15 minutes. */
+    /** Idle lifetime without pending core replies. SSE alone does not keep a session alive. Default 15 minutes. Applies only in stateful mode. */
     readonly idleTimeoutMs?: number;
 }
 export interface McpHttpServer {
@@ -12932,6 +12935,7 @@ export declare const sdkDistributionManifest: Readonly<{
     version: 1;
     piRuntimePin: string;
     reservedHelperKinds: readonly import("./sdk-reserved-helper-host").SdkReservedHelperKind[];
+    piSubagentHelperKinds: readonly ["pi-subagent-print", "pi-subagent-runner"];
     nativeTargets: Readonly<{
         'win32-x64': Readonly<{
             package: "@koromix/koffi-win32-x64";
@@ -12968,7 +12972,15 @@ export interface ResolvedSdkReservedHelperBin {
     readonly args: readonly string[];
     readonly source: 'dist-script' | 'self-executable';
 }
+/** With `sdkPiSubagentHelperKinds`, the exact kinds that `runSdkReservedHelperCommand` accepts. */
 export declare const sdkReservedHelperKinds: readonly SdkReservedHelperKind[];
+/**
+ * Kinds that only a Pi subagent child re-enters with (`subagents/spawn.ts`).
+ * They carry a tail argv and have no dist script, so `resolveSdkReservedHelperBin`
+ * does not launch them. A product entrypoint still routes them through
+ * {@link runSdkReservedHelperCommand}.
+ */
+export declare const sdkPiSubagentHelperKinds: readonly ["pi-subagent-print", "pi-subagent-runner"];
 /** SDK-owned launcher shape used by every reserved stdio helper. */
 export declare function resolveSdkReservedHelperBin(kind: SdkReservedHelperKind, host?: SdkHelperHostConfig): ResolvedSdkReservedHelperBin;
 /**

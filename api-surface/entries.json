@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2063277,
+      "budgetBytes": 2076751,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -152,7 +152,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Embedded Agent memory service",
-      "budgetBytes": 68197,
+      "budgetBytes": 69515,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -290,7 +290,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Tools-only MCP Streamable HTTP framing",
-      "budgetBytes": 36476,
+      "budgetBytes": 36564,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -713,7 +713,7 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 96325,
+          "line": 96326,
           "rule": "opaque import()"
         },
         {
@@ -1116,7 +1116,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Cloud coordination and HTTP handlers",
-      "budgetBytes": 534412,
+      "budgetBytes": 534547,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1169,7 +1169,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 784284,
+      "budgetBytes": 784419,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1867,7 +1867,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 562672,
+      "budgetBytes": 562807,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
