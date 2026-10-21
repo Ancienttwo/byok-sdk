@@ -89,7 +89,8 @@ export function recordOccurrence(state: LedgerState, tenant: string, wake: DueWa
   const trigger = { kind: now - wake.availableAt > definition.lateAfterMs ? 'catch_up' as const : 'scheduled' as const, plannedAt: wake.availableAt };
   const key = hash([definition.id, definition.version, trigger]);
   let plan: WakePlan;
-  try { plan = nextWake(definition, now, nextTime, now); }
+  // A Host clock behind the scheduler must not reserve the delivered slot again.
+  try { plan = nextWake(definition, Math.max(now, wake.availableAt), nextTime, now); }
   catch (error) {
     auditCalendarError(routine, now, error, wake.dedupKey);
     plan = { next: null, status: 'calendar_error', completed: false };
