@@ -561,6 +561,10 @@ jobs:
           bun run --filter @byok-sdk/server test -- src/__tests__/loopback.test.ts
           bun run --filter @byok-sdk/example-byok-mcp-server test -- src/loopback.test.ts
 
+      - name: SQLite ESM, CJS and relocated SEA smoke
+        if: matrix.recipe == 'sea'
+        run: node examples/packaging/sqlite-smoke.mjs --sea
+
       - name: Run packaging smoke
         run: templates/packaging/${{ matrix.recipe }}/smoke-test.sh
 

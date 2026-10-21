@@ -6768,13 +6768,13 @@ export declare class JournalHandleCleanupError extends Error {
  */
 export declare function isSqliteCapableNodeVersion(nodeVersion: string): boolean;
 /**
- * Synchronously load `node:sqlite` via `createRequire` rather than a dynamic
+ * Synchronously load `node:sqlite` via `process.getBuiltinModule` rather than a dynamic
  * `import()`. `DatabaseSync`'s entire API is synchronous, and the journal is
  * constructed synchronously from `createDaemonWithAdapters` alongside every
  * other daemon-local store (`DeviceStore`, `CursorStore`, ...) — an async
  * factory here would leak into every one of those call sites for nothing.
- * `node:sqlite` is a built-in, so `require` resolves it even from this
- * `"type": "module"` package. Memoized: the throw is re-derived per call from
+ * The built-in lookup needs no file URL, including in CJS bundles and SEA
+ * executables. Memoized: the throw is re-derived per call from
  * the version check rather than cached, which keeps the failure message
  * accurate without keeping a rejected value around.
  */
