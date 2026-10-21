@@ -88,6 +88,70 @@ describe('Streamable HTTP against the standard MCP client over real sockets', ()
     expect(errors).toEqual([]);
   });
 
+  it.each(['2025-11-25', '2025-06-18'])('streams scoped progress and metadata over HTTP %s', async version => {
+    const definition = { ...tool, title: 'Echo', annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }, outputSchema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] } };
+    const server = await host({ tools: [definition], callTool: async call => {
+      call.progress(0, 1, 'starting'); call.progress(1, 1, 'done');
+      return { content: [], structuredContent: { ok: true } };
+    } });
+    const { peer, errors } = await client(server, version);
+    expect((await peer.listTools()).tools).toEqual([definition]);
+    const progress: unknown[] = [];
+    expect(await peer.callTool({ name: 'echo' }, { onprogress: value => { progress.push(value); } })).toEqual({ content: [], structuredContent: { ok: true } });
+    expect(progress).toEqual([{ progress: 0, total: 1, message: 'starting' }, { progress: 1, total: 1, message: 'done' }]);
+    expect(await peer.callTool({ name: 'echo' })).toEqual({ content: [], structuredContent: { ok: true } });
+    expect(progress).toHaveLength(2);
+    expect(errors).toEqual([]);
+  });
+
+  it('keeps progress streams isolated and suppresses cancelled and completed callbacks', async () => {
+    const calls = new Map<string, { report: (value: number) => void; signal: AbortSignal; finish: () => void }>();
+    const server = await host({ callTool: call => new Promise(resolve => {
+      calls.set(String(call.arguments?.label), { report: call.progress, signal: call.signal, finish: () => resolve({ content: [] }) });
+    }) });
+    const { peer, errors } = await client(server);
+    const a: unknown[] = []; const b: unknown[] = []; const abort = new AbortController();
+    const first = peer.callTool({ name: 'echo', arguments: { label: 'a' } }, { signal: abort.signal, onprogress: value => { a.push(value); } }).catch(error => error);
+    const second = peer.callTool({ name: 'echo', arguments: { label: 'b' } }, { onprogress: value => { b.push(value); } });
+    try {
+      await vi.waitFor(() => expect(calls.size).toBe(2));
+      calls.get('a')!.report(1); calls.get('b')!.report(2);
+      await vi.waitFor(() => { expect(a).toEqual([{ progress: 1 }]); expect(b).toEqual([{ progress: 2 }]); });
+      abort.abort(); await first;
+      await vi.waitFor(() => expect(calls.get('a')!.signal.aborted).toBe(true));
+      calls.get('a')!.report(3); calls.get('a')!.finish(); calls.get('b')!.finish();
+      expect(await second).toEqual({ content: [] });
+      calls.get('b')!.report(4); await peer.ping();
+      expect(a).toEqual([{ progress: 1 }]); expect(b).toEqual([{ progress: 2 }]); expect(errors).toEqual([]);
+    } finally { for (const call of calls.values()) call.finish(); await Promise.allSettled([first, second]); }
+  });
+
+  it.each(['overflow', 'close'])('errors an unfinished progress stream on %s', async reason => {
+    let report!: (value: number, total?: number, message?: string) => void;
+    let signal!: AbortSignal; let finish!: () => void;
+    const mcp = createMcpHttpServer({ ...defaults, origin: 'http://localhost', callTool: call => {
+      report = call.progress; signal = call.signal; return new Promise(resolve => { finish = () => resolve({}); });
+    } });
+    const request = (message: unknown, session?: string) => new Request('http://localhost/mcp', { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...(session ? { 'mcp-session-id': session } : {}) }, body: JSON.stringify(message) });
+    try {
+      const initialized = await mcp.fetch(request({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25' } }));
+      const response = await mcp.fetch(request({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'echo', _meta: { progressToken: 0 } } }, initialized.headers.get('mcp-session-id')!));
+      await vi.waitFor(() => expect(report).toBeTypeOf('function'));
+      if (reason === 'close') mcp.close();
+      else for (let i = 0; i < 7; i++) {
+        report(i, undefined, 'x'.repeat(800_000));
+        // Drain core writes while deliberately leaving this POST unread.
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
+      await vi.waitFor(() => expect(signal.aborted).toBe(true));
+      await expect(response.text()).rejects.toThrow(/MCP stream terminated/);
+      if (reason === 'overflow') {
+        const ping = await mcp.fetch(request({ jsonrpc: '2.0', id: 3, method: 'ping' }, initialized.headers.get('mcp-session-id')!));
+        expect(ping.status).toBe(200); expect(await ping.json()).toMatchObject({ id: 3, result: {} });
+      }
+    } finally { finish?.(); mcp.close(); }
+  });
+
   it('keeps isError tool results and typed errors intact', async () => {
     const server = await host({ callTool: async call => {
       if (call.arguments?.throw) throw new McpServerToolError(-32001, 'declined', { retryable: false });
@@ -122,17 +186,17 @@ describe('Streamable HTTP against the standard MCP client over real sockets', ()
   });
 
   it('isolates equal request IDs and cancellation between independent clients', async () => {
-    const calls: AbortSignal[] = [];
+    const calls = new Map<string, AbortSignal>();
     const release = deferred<Record<string, unknown>>();
-    const server = await host({ callTool: async call => { calls.push(call.signal); return release.promise; } });
+    const server = await host({ callTool: async call => { calls.set(String(call.arguments?.client), call.signal); return release.promise; } });
     const a = await client(server); const b = await client(server);
     const abort = new AbortController();
-    const first = a.peer.callTool({ name: 'echo' }, { signal: abort.signal }).catch(error => error);
-    const second = b.peer.callTool({ name: 'echo' });
-    await vi.waitFor(() => expect(calls).toHaveLength(2));
+    const first = a.peer.callTool({ name: 'echo', arguments: { client: 'a' } }, { signal: abort.signal }).catch(error => error);
+    const second = b.peer.callTool({ name: 'echo', arguments: { client: 'b' } });
+    await vi.waitFor(() => expect(calls.size).toBe(2));
     abort.abort(); await first;
-    await vi.waitFor(() => expect(calls[0]!.aborted).toBe(true));
-    expect(calls[1]!.aborted).toBe(false);
+    await vi.waitFor(() => expect(calls.get('a')!.aborted).toBe(true));
+    expect(calls.get('b')!.aborted).toBe(false);
     release.resolve({ content: [{ type: 'text', text: 'done' }] });
     expect(await second).toEqual({ content: [{ type: 'text', text: 'done' }] });
     expect(a.errors).toEqual([]); expect(b.errors).toEqual([]);

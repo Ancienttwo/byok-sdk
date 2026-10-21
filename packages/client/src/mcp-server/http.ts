@@ -26,7 +26,7 @@ export interface McpHttpServer {
   close(): void;
 }
 
-interface PendingReply { resolve(response: Response): void; status: number }
+interface PendingReply { resolve(response: Response): void; status: number; token?: string | number; requestId?: string | number; stream?: ReadableStreamDefaultController<Uint8Array> }
 interface Session {
   id: string;
   version: string;
@@ -89,7 +89,11 @@ export function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServe
     session.pending.delete(key);
     pendingCount--;
     session.touchedAt = Date.now();
-    reply.resolve(response);
+    if (reply.stream) {
+      if (response.status >= 400) reply.stream.error(new Error(`MCP stream terminated (${response.status})`));
+      else reply.stream.close();
+    }
+    else reply.resolve(response);
   }
 
   function endSse(session: Session): void {
@@ -121,6 +125,20 @@ export function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServe
 
   function deliver(session: Session, frame: string): void {
     const message = JSON.parse(frame) as Record<string, unknown>;
+    if (message.method === 'notifications/progress') {
+      const token = (message.params as Record<string, unknown>).progressToken;
+      for (const [key, reply] of session.pending) {
+        if (reply.stream && reply.token === token) {
+          const bytes = textEncoder.encode(`event: message\ndata: ${JSON.stringify(message)}\n\n`);
+          if ((reply.stream.desiredSize ?? 0) < bytes.byteLength) {
+            session.input.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: reply.requestId } })}\n`);
+            finishReply(session, key, failure(503, 'MCP progress buffer limit'));
+          } else reply.stream.enqueue(bytes);
+          return;
+        }
+      }
+      return;
+    }
     if ('method' in message) {
       if (session.sse) {
         const bytes = textEncoder.encode(`event: message\ndata: ${JSON.stringify(message)}\n\n`);
@@ -131,6 +149,11 @@ export function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServe
     }
     const key = isUsableRequestId(message.id) ? SeenRequestIds.key(message.id) : 'invalid';
     const reply = session.pending.get(key);
+    if (reply?.stream) {
+      const bytes = textEncoder.encode(`event: message\ndata: ${frame.trimEnd()}\n\n`);
+      if ((reply.stream.desiredSize ?? 0) >= bytes.byteLength) reply.stream.enqueue(bytes);
+      else { reply.stream.error(new Error('MCP response buffer limit')); reply.stream = undefined; }
+    }
     if (reply) finishReply(session, key, new Response(frame.trimEnd(), { status: reply.status,
       headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'mcp-session-id': session.id } }));
   }
@@ -261,9 +284,30 @@ export function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServe
       const key = classified.id === undefined ? 'invalid' : SeenRequestIds.key(classified.id);
       if (session.pending.has(key)) return failure(400, 'MCP request id already in flight');
       if (pendingCount >= maxInFlight) return failure(503, 'Too many MCP requests');
+      const meta = classified.kind === 'request' && classified.method === 'tools/call' ? classified.params?._meta : undefined;
+      const token = meta !== null && typeof meta === 'object' && !Array.isArray(meta)
+        ? (meta as Record<string, unknown>).progressToken : undefined;
+      const progressToken = typeof token === 'string' || (typeof token === 'number' && Number.isFinite(token)) ? token : undefined;
+      if (progressToken !== undefined && [...session.pending.values()].some(reply => reply.token === progressToken)) {
+        return failure(400, 'MCP progress token already in flight');
+      }
       const current = session;
       return new Promise<Response>(resolve => {
-        current.pending.set(key, { resolve, status: classified.kind === 'invalid' ? 400 : 200 });
+        const reply: PendingReply = { resolve, status: classified.kind === 'invalid' ? 400 : 200 };
+        current.pending.set(key, reply);
+        if (progressToken !== undefined) {
+          reply.token = progressToken;
+          reply.requestId = classified.id;
+          const stream = new ReadableStream<Uint8Array>({
+            start(controller) { reply.stream = controller; },
+            cancel() {
+              reply.stream = undefined;
+              current.input.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: classified.id } })}\n`);
+              finishReply(current, key, new Response(null, { status: 202 }));
+            },
+          }, new ByteLengthQueuingStrategy({ highWaterMark: MCP_SERVER_MAX_PENDING_BYTES }));
+          resolve(new Response(stream, { headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store', 'mcp-session-id': current.id } }));
+        }
         pendingCount++;
         current.input.write(`${frame}\n`);
       });
