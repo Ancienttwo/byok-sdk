@@ -195,7 +195,12 @@ export function selectImpact(paths, context = {}) {
       verifyReviewedContent(path, context);
       dirs.add('examples/bot-collaboration'); continue;
     }
-    if (path === 'examples/basic/clarification.test.ts' || path === 'examples/basic/goal-btw.test.ts') {
+    if (path === 'examples/basic/goal-btw.test-support.ts') {
+      // Shared runtime fixture is imported directly across these example suites.
+      for (const dir of ['examples/basic', 'examples/host-execution-core', 'examples/bot-collaboration']) dirs.add(dir);
+      continue;
+    }
+    if (path === 'examples/basic/clarification.test.ts' || path === 'examples/basic/goal-btw.test.ts' || path === 'examples/basic/goal-btw-spawn.test.ts') {
       dirs.add('examples/basic'); continue;
     }
     if (path === 'api-surface/entries.json') {

@@ -13,7 +13,13 @@ async function submitResult(input: RuntimeOperationStartInput, outcome: unknown)
   const lines = createInterface({ input: child.stdout });
   let nextId = 0;
   const pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>();
-  const ended = new Promise<void>(resolve => child.once('exit', () => resolve()));
+  const ended = new Promise<void>(resolve => {
+    // A failed spawn closes stdio without emitting exit. Keep exit's existing
+    // completion semantics, but also settle once the failed child is closed.
+    const settled = () => { child.off('exit', settled); child.off('close', settled); resolve(); };
+    child.once('exit', settled);
+    child.once('close', settled);
+  });
   child.on('error', error => { for (const request of pending.values()) request.reject(error); pending.clear(); });
   child.on('exit', () => { for (const request of pending.values()) request.reject(new Error('result helper exited before response')); pending.clear(); });
   child.stderr.resume();

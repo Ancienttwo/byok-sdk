@@ -114,8 +114,15 @@ test('reviewed private bot fixture cloud edge is accepted only as an additive wo
 
 
 test('reviewed root-level basic fixtures select their workspace while unknown root files fail closed', () => {
-  for (const path of ['examples/basic/clarification.test.ts', 'examples/basic/goal-btw.test.ts']) {
+  for (const path of ['examples/basic/clarification.test.ts', 'examples/basic/goal-btw.test.ts', 'examples/basic/goal-btw-spawn.test.ts']) {
     assert.ok(selectImpact([path]).dirs.includes('examples/basic'));
   }
   assert.throws(() => selectImpact(['examples/basic/unknown.ts']));
+});
+
+test('shared goal fixture selects its consumers without broadening unknown root support files', () => {
+  const plan = selectImpact(['examples/basic/goal-btw.test-support.ts']);
+  assert.deepEqual(plan.dirs, ['examples/basic', 'examples/bot-collaboration', 'examples/byok-mcp-server', 'examples/host-execution-core']);
+  assert.deepEqual(plan.families, ['adapter-lifecycle-smoke']);
+  assert.throws(() => selectImpact(['examples/basic/other.test-support.ts']));
 });
