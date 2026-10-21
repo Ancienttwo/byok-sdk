@@ -290,7 +290,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Tools-only MCP Streamable HTTP framing",
-      "budgetBytes": 32768,
+      "budgetBytes": 34179,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -713,7 +713,7 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 96299,
+          "line": 96325,
           "rule": "opaque import()"
         },
         {

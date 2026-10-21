@@ -90,16 +90,23 @@ It implements no legacy HTTP+SSE fallback and no 2026-era protocol extensions.
 - Later requests must carry that session ID. Unknown or expired IDs return 404.
 - A supplied `MCP-Protocol-Version` must be supported and match the session.
   If omitted after initialization, the session supplies the negotiated version.
-- Notifications return 202 with no body. Requests return JSON. Invalid envelopes
+- Notifications return 202 with no body. Requests normally return JSON. A `tools/call`
+  with a string or finite-number `_meta.progressToken` returns a bounded POST SSE
+  stream containing that call's progress and final response. Concurrent token reuse
+  within a session is rejected. Invalid envelopes
   retain the core's validation. Malformed JSON and unsupported input return 400.
 - DELETE closes the session and aborts active MCP calls. It returns 204.
 - GET returns 405 by default. Supplying `toolsListChanged` enables one SSE stream
   per session. It sends only the core's notifications. A second open GET returns 409.
-- SSE has no replay log or event IDs. Notifications without an open stream are
+- GET SSE has no replay log or event IDs. List-change notifications without an open stream are
   dropped. A full 4 MiB stream queue closes that stream. Clients can open another.
-- A disconnected HTTP response does not cancel a call. An explicit
+- Cancelling a progress POST response stream aborts its call; exhausting its 4 MiB
+  queue also aborts that call and errors the unfinished stream. Session disposal
+  likewise errors unfinished streams, rather than presenting a successful EOF. Ordinary JSON response
+  disconnection retains its existing behavior. An explicit
   `notifications/cancelled` aborts its call signal and ends the original POST with
-  202. The core suppresses a late result. It does not cancel a byok task.
+  202 (or closes an already-started progress stream). The core suppresses late
+  results and progress. It does not cancel a byok task.
 
 Configure `origin` from trusted Host configuration. It must be one canonical
 HTTPS origin or loopback HTTP origin, without a trailing slash or credentials.
@@ -182,3 +189,27 @@ That condition is now met. No existing test assertion changed.
 One optional Low remains from source review. It was not reproduced: admission
 can evict a session while its POST body is still being read. That POST returns
 503 before MCP tool dispatch. The Host must handle this transport failure.
+
+## Tool metadata and progress
+
+Both stdio and HTTP tool definitions accept optional `title`, `annotations` and
+`outputSchema`. These are caller-owned protocol metadata, passed through without
+inferring permissions or validating handler output. `structuredContent` remains
+part of the verbatim result. Existing input schema, description and `_meta`
+behavior and core-owned capabilities are unchanged.
+
+A handler receives `call.progress(progress, total?, message?)`. When the request
+supplies `_meta.progressToken`, this emits `notifications/progress` with that
+exact string or numeric token (including empty string and zero). Values must be
+finite and strictly increase for that call; supplied total must be finite and
+message must be a string. Invalid handler progress throws `TypeError`. Without a
+token, or after cancellation, completion or server close, it is a no-op. Malformed
+tokens are rejected before handler dispatch. Progress does not extend task
+lifetimes, confer authority, or change cancellation semantics.
+
+The official TypeScript client 2.0.0 defers notification callbacks but retires
+request tokens synchronously when a result arrives. Progress immediately followed
+by the result in the same incoming burst can therefore be emitted correctly yet
+miss that client's callback. The SDK does not delay results to mask this client
+behavior. Interop fixtures acknowledge work stages before completion; separate
+raw-wire tests verify immediate progress bursts and final response ordering.
