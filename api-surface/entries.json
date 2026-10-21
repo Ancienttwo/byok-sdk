@@ -1790,9 +1790,11 @@
         "@byok-sdk/core",
         "@byok-sdk/protocol",
         "@cfworker/json-schema",
+        "@hono/node-server",
         "crypto",
         "fs",
         "hono",
+        "http",
         "module",
         "path",
         "zod"
@@ -1800,6 +1802,7 @@
       "lazyImports": [],
       "thirdParty": [
         "@cfworker/json-schema",
+        "@hono/node-server",
         "hono",
         "zod"
       ],
@@ -1809,10 +1812,15 @@
         "workspace": [
           "crypto",
           "fs",
+          "http",
           "module",
           "path"
         ],
-        "thirdParty": []
+        "thirdParty": [
+          "node:http",
+          "node:http2",
+          "node:stream"
+        ]
       },
       "codegen": [
         {
