@@ -7,7 +7,7 @@ permissions:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -16,16 +16,18 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - name: Build exact release source with failure-only diagnostics
         run: bun ci && bun run build
-      - name: Repeat the real group-chat file without retries or timeout changes
+      - name: Install the same credential substrate as release CI
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends dbus-x11 gnome-keyring libsecret-tools
+      - name: Run the full test chain with failure-state capture
         env:
           BYOK_SESSION_DIAGNOSTICS_DIR: ${{ runner.temp }}/unicode-session-evidence
+          BYOK_REQUIRE_BUN: '1'
         run: |
           mkdir -p "$BYOK_SESSION_DIAGNOSTICS_DIR"
-          cd examples/bot-collaboration
-          for attempt in $(seq 1 20); do
-            echo "Independent diagnostic invocation $attempt"
-            bun run test src/group-chat.test.ts || exit $?
-          done
+          export BYOK_TEST_BUN_BIN="$(command -v bun)"
+          bash scripts/ci/with-secret-service.sh bun run test
       - name: Retain failure state
         if: always()
         uses: actions/upload-artifact@v4
