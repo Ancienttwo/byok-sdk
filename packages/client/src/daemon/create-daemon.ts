@@ -332,6 +332,9 @@ export interface DaemonConfig {
     hostStorageRoot: string;
     projection?: AgentHomeProjection;
   };
+  /** Task memory MCP admission. Absent/auto preserves platform-based admission; off disables both ordinary and prepared memory tools.
+   * This does not disable Agent-home guidance or explicit hosted projection/intent transports, and is not a filesystem sandbox. */
+  agentMemoryMcp?: 'auto' | 'off';
   /** Optional, one-way hosted projection. Without all guards it has zero network activity. */
   agentMemory?: AgentMemoryHostedProjection;
   /**
@@ -1300,6 +1303,10 @@ export function buildDaemonWithAdapters(
       'DaemonConfig.agentHome and DaemonConfig.gitWorkspace are mutually exclusive; Agent home is the only workspace authority for Agent offers',
     );
   }
+  if (config.agentMemoryMcp !== undefined && config.agentMemoryMcp !== 'auto' && config.agentMemoryMcp !== 'off') {
+    throw new Error('DaemonConfig.agentMemoryMcp must be auto or off when present');
+  }
+  const agentMemoryMcpEnabled = config.agentMemoryMcp !== 'off';
   if (config.agentMemory !== undefined && config.agentHome === undefined) {
     throw new Error('DaemonConfig.agentMemory requires DaemonConfig.agentHome for the exact Agent memory authority');
   }
@@ -1312,7 +1319,8 @@ export function buildDaemonWithAdapters(
   // Platform support alone cannot admit memory. Compiled products and ordinary
   // JS builds can have Agent homes without the SDK native release assets.
   let resolveAgentMemoryFilesystemHelperBin: (() => string) | undefined;
-  if (config.agentHome !== undefined && isAgentMemoryFilesystemHelperSupported()) {
+  if (config.agentHome !== undefined && (agentMemoryMcpEnabled || config.agentMemory !== undefined || config.agentMemoryIntents !== undefined)
+    && isAgentMemoryFilesystemHelperSupported()) {
     try {
       resolveAgentMemoryFilesystemHelper();
       resolveAgentMemoryFilesystemHelperBin = resolveAgentMemoryFilesystemHelper;
@@ -1324,10 +1332,10 @@ export function buildDaemonWithAdapters(
   if (config.agentMemory !== undefined && !isAgentMemorySecureFilesystemAvailable(externalAgentMemoryFilesystem)) {
     throw new Error('DaemonConfig.agentMemory requires a platform with safe descriptor-relative filesystem operations');
   }
-  const agentMemoryMcpBin = config.agentHome === undefined
+  const agentMemoryMcpBin = !agentMemoryMcpEnabled || config.agentHome === undefined
     ? undefined
     : resolveAgentMemoryMcpBin(externalAgentMemoryFilesystem, config.sdkHelperHost);
-  const agentMemoryDescribeBin = config.agentHome === undefined
+  const agentMemoryDescribeBin = !agentMemoryMcpEnabled || config.agentHome === undefined
     ? undefined
     : resolveAgentMemoryDescribeBin(externalAgentMemoryFilesystem, config.sdkHelperHost);
   const localAgentRelease = resolveLocalAgentReleaseIdentity(config.localAgentRelease);
@@ -1487,7 +1495,7 @@ export function buildDaemonWithAdapters(
    */
   const preparationRuntimeEnv = () => buildRuntimeEnv({ ambient: process.env });
   const preparedToolSurface = createPreparedToolSurfaceAssembler({
-    memoryAvailable: () => isAgentMemorySecureFilesystemAvailable(resolveAgentMemoryFilesystemHelperBin !== undefined),
+    memoryAvailable: () => agentMemoryMcpEnabled && isAgentMemorySecureFilesystemAvailable(resolveAgentMemoryFilesystemHelperBin !== undefined),
     toolsetRegistry,
     runtimeEnv: preparationRuntimeEnv,
     ...(agentMemoryDescribeBin === undefined ? {} : { agentMemoryDescribe: agentMemoryDescribeBin }),

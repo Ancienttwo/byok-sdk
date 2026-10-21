@@ -2012,6 +2012,17 @@ Each helper open syncs the home directory chain on that volume before a CAS.
 Shared home initialization syncs each new directory's parent on POSIX. A retry
 repeats the parent barrier for existing entries.
 
+Daemon task memory admission has a local `DaemonConfig.agentMemoryMcp` switch.
+Absent or `auto` preserves platform/helper-based admission. `off` omits the SDK
+memory MCP and prepared descriptor bindings: ordinary Agent tasks acquire no SDK
+memory tools, and prepared `read`/`read-write` selections fail closed while `none`
+remains supported. Other required helpers retain their own admission gates.
+Invalid values are construction errors. This switch does not change the wire,
+Agent-home initialization/leases/guidance, runtime filesystem authority, or the
+explicit hosted projection and memory intent transport opt-ins. An off switch
+alone does not resolve native helper assets; configured projection/intents still
+require their existing helper and platform proofs.
+
 The client release carries Darwin arm64 and x64 helpers. The SDK resolves its
 own path and checks the build manifest before each helper open. Arbitrary
 `agentMemoryFilesystem.helperBin` configuration is removed. The ordinary build

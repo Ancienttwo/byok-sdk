@@ -291,6 +291,27 @@ other than the SDK-reserved `.byok` namespace are opaque; there is no
 required `artifacts/` directory and the client does not parse or index their
 contents.
 
+## Daemon task memory admission
+
+`DaemonConfig.agentMemoryMcp` accepts `'auto'` (the default when absent) or
+`'off'`. A Host that owns its own memory tooling can keep `agentHome` while
+setting `agentMemoryMcp: 'off'`. Ordinary Agent tasks then receive no SDK memory
+MCP server and do not require adapter MCP support solely for memory, regardless
+of installed macOS helper assets or Linux native filesystem support.
+
+The switch also disables the prepared memory descriptor: preparing or executing
+`agentMemory: 'read'` / `'read-write'` is refused, never silently changed to
+`'none'`. A preparation selecting `'none'` remains supported. Other selected
+tools, message egress and result-document helpers keep their existing admission
+requirements. Invalid switch values fail construction.
+
+This controls SDK task memory tools, not filesystem permissions. Agent-home
+initialization, leases and instruction guidance remain unchanged; a runtime's
+native filesystem tools can still access files. Explicit `agentMemory` hosted
+projection and `agentMemoryIntents` transports are independent opt-ins with their
+existing platform checks. Omission of the switch preserves current behavior.
+Non-prepared per-task memory selection is not added by this change (see #614).
+
 ## Embedded Agent memory
 
 A product that embeds this SDK rather than running the daemon owns its own

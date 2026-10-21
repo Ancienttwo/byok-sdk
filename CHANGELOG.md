@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Feature (client)** — add `DaemonConfig.agentMemoryMcp: 'auto' | 'off'` to
+  disable SDK task memory tools while retaining Agent homes. The default is
+  unchanged; prepared memory requests fail closed when disabled. This is the
+  daemon opt-out slice of #614; non-prepared per-task selection remains open.
+
 ## 0.28.0 / @byok-sdk/keys 0.13.0 — source candidate
 
 This candidate is not published. See the [release notes](docs/releases/v0.28.0.md).
