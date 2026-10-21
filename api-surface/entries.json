@@ -36,6 +36,7 @@
         "path",
         "url",
         "util",
+        "zlib",
         "zod"
       ],
       "lazyImports": [
@@ -68,7 +69,8 @@
           "os",
           "path",
           "url",
-          "util"
+          "util",
+          "zlib"
         ],
         "thirdParty": [
           "node:crypto"
