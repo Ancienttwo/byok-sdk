@@ -2956,3 +2956,15 @@ Without `storage.scratchRoot`, derive the default from the canonical store ident
 An explicit `storage.scratchRoot` must pass validation; an excessive length fails construction. A failed root never triggers a substitute. External roots persist their store ownership. A standalone root is exclusive to its process and must be provisioned fresh on process restart. No silent runtime or root fallback is provided.
 
 Legacy shared-temp prefixes are an operator-invoked migration: doctor inventories exact production names, and only `doctor --fix --yes` with a stopped daemon deletes matching, same-uid real directories. SDK startup never scans shared OS temp. Remove this one-shot scanner in the next minor release. See `docs/migrations/client-retention-399.md` for removed APIs and Host migration.
+
+
+### K8 Host-declared read-only toolsets
+
+The copy-and-own Bot collaboration example refuses required toolsets by default.
+A Host may declare an immutable `readOnlyToolsets` list of logical IDs, enforced
+across initial/model templates, restored Bots, creation, update and enqueue.
+The daemon still owns concrete tool definitions and ordinary capability admission.
+Only the Host's local tool service can enforce actual read-only behavior; model
+annotations are not authorization. External effects retain owner-confirmed Host
+connector execution. This additive slice does not qualify external-authority
+storage, Windows persona persistence or two-process relay.
