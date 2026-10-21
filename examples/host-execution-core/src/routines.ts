@@ -1,10 +1,17 @@
 import { WAKE_MAX_FUTURE_MS, type DueWake, type WakeScheduleInput } from '@byok-sdk/server';
-import { hash, time, type LedgerState, type Routine, type RoutineDefinition } from './model';
+import { hash, time, type IgnoredWakeAudit, type LedgerState, type Routine, type RoutineDefinition } from './model';
 import { cancelWake, enqueue, settle } from './transitions';
 import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
 
 // Use the public SDK admission limit for every Host horizon precheck.
 export const WAKE_HORIZON_MS = WAKE_MAX_FUTURE_MS;
+/** Retain the newest ignored deliveries without growing the Host JSON ledger indefinitely. */
+export const IGNORED_WAKE_AUDIT_LIMIT = 128;
+function auditIgnoredWake(state: LedgerState, wake: DueWake, now: number, reason: IgnoredWakeAudit['reason']): void {
+  const rows = state.ignoredWakes ??= [];
+  rows.push({ at: now, reason, wakeKeyHash: hash(wake.dedupKey) });
+  if (rows.length > IGNORED_WAKE_AUDIT_LIMIT) rows.splice(0, rows.length - IGNORED_WAKE_AUDIT_LIMIT);
+}
 interface WakePlan { next: WakeScheduleInput | null; status: Routine['status']; completed: boolean }
 
 export function parseRoutineWakeKey(key: string): { id: string; version: number; at: number } | undefined {
@@ -72,9 +79,11 @@ export function recordOccurrence(state: LedgerState, tenant: string, wake: DueWa
     return; // Persisted trigger wins even after a later redelivery.
   }
   const parsed = parseRoutineWakeKey(wake.dedupKey);
-  const routine = parsed ? state.routines[hash(parsed.id)] : undefined;
-  if (!routine || routine.lifecycle !== 'active' || !routine.next) return;
-  if (routine.next.dedupKey !== wake.dedupKey) return;
+  if (!parsed) return auditIgnoredWake(state, wake, now, 'unknown_key');
+  const routine = state.routines[hash(parsed.id)];
+  if (!routine) return auditIgnoredWake(state, wake, now, 'missing_routine');
+  if (routine.lifecycle !== 'active') return auditIgnoredWake(state, wake, now, 'inactive_routine');
+  if (!routine.next || routine.next.dedupKey !== wake.dedupKey) return auditIgnoredWake(state, wake, now, 'reservation_mismatch');
   if (routine.next.availableAt !== wake.availableAt || routine.next.payload !== wake.payload) throw new Error('Wake differs from the routine reservation');
   const definition = routine.definition;
   const trigger = { kind: now - wake.availableAt > definition.lateAfterMs ? 'catch_up' as const : 'scheduled' as const, plannedAt: wake.availableAt };
