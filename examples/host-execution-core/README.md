@@ -164,7 +164,10 @@ Keep handlers short and bounded; they serialize with other jobs and Agent dispat
 The SDK's 60-second hook deadline can expire while a handler is running; redelivery
 shares the drain and cannot start a second concurrent invocation. The handler signal
 is aborted by `close()`, not that hook deadline. `close()` waits for the handler;
-handlers must honor the signal. Do not await core methods that drain from inside a
+handlers must honor the signal. Rejection with its abort reason (including a Node
+`AbortError` wrapping that reason) leaves the job pending for recovery without
+failing shutdown; unrelated handler errors still propagate. A result returned
+after shutdown is not committed. Do not await core methods that drain from inside a
 handler (that would wait on its own drain).
 
 Host-only occurrences can be explicitly acknowledged and compacted:
@@ -225,14 +228,17 @@ One SQLite transaction deletes the selected intent's execution generations, term
 settled occurrence, slot and application markers, and writes replacement tombstones. No outbox row,
 business `application` value, memory, routine or calendar audit is deleted. Custom projections have
 no intent ownership metadata and remain untouched, including any payload copies they contain.
-`core.intent(key)` returns `undefined` after compaction. Enqueuing a retired key throws, even with the
-same input; this applies to the exported `enqueue` transition inside `ledger.transaction` as well.
+`core.intent(key)` returns `undefined` after compaction. Enqueuing a retired key throws the exported
+`RetiredIntentIdentityError` with stable `code: 'retired_intent_identity'`, even with the same input;
+this applies to the exported `enqueue` transition inside `ledger.transaction` as well.
 Use a new identity for new work.
 
 The additive `host_retired_identity` table keeps permanent intent identity hashes outside the hot
 JSON body and expiring task-application and wake-slot evidence. Retention starts at compaction and
 must be at least seven days; choose the maximum of your actual replay, upload retry and restore
-windows. `ledger.hasTombstone(kind, identity, now)` queries that evidence. Retained wake replays do
+windows. `ledger.hasTombstone(kind, identity, now)` queries that evidence. Application tombstones
+are evidence for the Host, queried with `hasTombstone('application', taskId, now)`; the core does not
+consume them or replay removed application results. Retained wake replays do
 not create occurrences or dispatch work. At the exact expiry time slot/application evidence is no
 longer returned; a subsequent explicit compaction removes those rows. Retired intent identities
 never expire. Their indexed table grows with historical intent count, while removed core payloads

@@ -1,6 +1,6 @@
 export { HostExecutionCore } from './core';
 export type { ExecutionServer, HostOptions, OutcomeTransaction } from './core';
-export { HostLedger, OutboxFullError, MIN_TOMBSTONE_RETENTION_MS } from './ledger';
+export { HostLedger, OutboxFullError, MIN_TOMBSTONE_RETENTION_MS, RetiredIntentIdentityError } from './ledger';
 export type { CompactionOptions, CompactionResult, TombstoneKind, HostLedgerOptions, ProjectionOutboxLimits, ProjectionOutboxUsage } from './ledger';
 export { nextIntervalOccurrence } from './schedule';
 export type { NextOccurrence } from './schedule';

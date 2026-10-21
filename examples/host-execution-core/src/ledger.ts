@@ -22,6 +22,14 @@ function projectionUsage(state: LedgerState): ProjectionOutboxUsage {
 
 export const MIN_TOMBSTONE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export type TombstoneKind = 'intent' | 'application' | 'slot';
+/** A permanently retired intent key cannot admit new work, even after replay evidence expires. */
+export class RetiredIntentIdentityError extends Error {
+  readonly code = 'retired_intent_identity' as const;
+  constructor() {
+    super('Retired intent identity cannot be reused');
+    this.name = 'RetiredIntentIdentityError';
+  }
+}
 export interface CompactionOptions {
   /** Explicit acknowledgement that these results may be removed under the Host's retention policy. */
   acknowledgedIntentKeys: readonly string[];
@@ -87,7 +95,7 @@ export class HostLedger {
       // Also covers callers of the exported pure enqueue/recordOccurrence transitions.
       const retired = this.db.prepare("SELECT 1 FROM host_retired_identity WHERE tenant=? AND kind='intent' AND identity=?");
       for (const id of Object.keys(state.intents)) {
-        if (!existing.has(id) && retired.get(this.tenant, id)) throw new Error('Retired intent identity cannot be reused');
+        if (!existing.has(id) && retired.get(this.tenant, id)) throw new RetiredIntentIdentityError();
       }
       if (this.projectionLimits && before) {
         const after = projectionUsage(state);

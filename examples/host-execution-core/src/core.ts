@@ -249,6 +249,11 @@ export class HostExecutionCore {
           delete state.outbox[key];
         });
       } catch (error) {
+        // Shutdown leaves the occurrence pending for recovery, without turning
+        // cooperative cancellation into a dispatch failure. Preserve other errors.
+        const signal = this.jobAbort.signal;
+        if (signal.aborted && (error === signal.reason
+          || error instanceof Error && error.name === 'AbortError' && error.cause === signal.reason)) continue;
         this.error(key, error); failures.push(error);
       }
     }
