@@ -2092,6 +2092,18 @@ export function buildDaemonWithAdapters(
       ? { tenantId: record.tenantId, productId: config.productId, deviceId: record.deviceId }
       : undefined;
     const resultReplyRecoveryTasks = new Map<string, { agentRef: AgentRef; contract: string }>();
+    const recordRecoveryFailure = async (task: import('./journal/journal').RecoverableTask, reason: string, interrupted = false) => {
+      const offer = decodeEnvelope(task.envelopeBytes);
+      const { agentRef } = offer.payload as { agentRef?: AgentRef };
+      const envelope = createEnvelope('task.fail', { reason, retryable: false,
+        ...terminalIdentity(task.claimedRuntime, agentRef),
+        ...(interrupted ? { recovery: { kind: 'daemon_interrupted' as const, offerId: offer.id } } : {}),
+      }, { taskId: task.taskId });
+      const bytes = encodeEnvelope(envelope);
+      await activeJournal!.recordTerminal({ taskId: task.taskId, terminalType: 'failed', bytes, payloadHash: journalHash(bytes),
+        truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString(),
+        recovery: { disposition: interrupted ? 'interrupted' : 'abandoned', reason } });
+    };
     if (activeJournal && journalIdentity) {
       const durableCursor = await cursorStore.load(config.serverUrl, record.deviceId) ?? 0;
       const recoveryTasks = await activeJournal.listRecoveryTasks(journalIdentity);
@@ -2116,18 +2128,7 @@ export function buildDaemonWithAdapters(
           throw new Error('durable result-reply failure does not match its original offer');
         }
         if (resultFailure) { resultReplyRecoveryTasks.set(task.taskId, { agentRef: payload.agentRef!, contract: payload.messageEgress!.contract! }); continue; }
-        const reason = 'daemon_interrupted';
-        const terminal = createEnvelope('task.fail', {
-          reason, retryable: false,
-          ...terminalIdentity(task.claimedRuntime, payload.agentRef),
-          recovery: { kind: 'daemon_interrupted' as const, offerId: offer.id },
-        }, { taskId: task.taskId });
-        const bytes = encodeEnvelope(terminal);
-        await activeJournal.recordTerminal({
-          taskId: task.taskId, terminalType: 'failed', bytes, payloadHash: journalHash(bytes),
-          truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString(),
-          recovery: { disposition: 'interrupted', reason },
-        });
+        await recordRecoveryFailure(task, 'daemon_interrupted', true);
       }
     }
 
@@ -2336,8 +2337,13 @@ export function buildDaemonWithAdapters(
     // Serialize the marker/acceptance handshake across inbound dispositions
     // and turn_end. Acceptance evidence precedes deletion of the exact draft.
     let resultReplyTransitionTail: Promise<void> = Promise.resolve();
+    const withReplyTransition = (write: () => Promise<void>): Promise<void> => {
+      const operation = resultReplyTransitionTail.then(write);
+      resultReplyTransitionTail = operation.catch(() => {});
+      return operation;
+    };
     const recordReplyState = (taskId: string, failure?: import('./result-reply-failure').ResultReplyFailure): Promise<void> => {
-      const operation = resultReplyTransitionTail.then(async () => {
+      return withReplyTransition(async () => {
         if (!activeJournal || !journalIdentity) throw new Error('durable journal unavailable');
         const task = await activeJournal.readTask(taskId, journalIdentity);
         if (!task || task.localState.startsWith('terminal:')) return;
@@ -2348,8 +2354,6 @@ export function buildDaemonWithAdapters(
         await activeJournal.recordTransition({ transitionId: `result-reply:${taskId}:${state}`, taskId,
           to: state, occurredAt: new Date().toISOString() });
       });
-      resultReplyTransitionTail = operation.catch(() => {});
-      return operation;
     };
     const deps: TaskRunnerDeps = {
       adapters,
@@ -2394,15 +2398,13 @@ export function buildDaemonWithAdapters(
       // the awaited outbound settlement, including terminal journal fsync.
       send: sendEnvelope,
       ...(config.durablePi !== true ? {} : { durablePi: true, recordDurableTransition: async (taskId: string, leaseId: string, kind: string, ordinal: number) => {
-        const operation = resultReplyTransitionTail.then(async () => {
+        await withReplyTransition(async () => {
           if (!activeJournal || !journalIdentity) throw new Error('durable journal unavailable');
           const task = await activeJournal.readTask(taskId, journalIdentity);
           const to = task?.localState.startsWith('required-reply-') ? task.localState : 'running';
           await activeJournal.recordTransition({ transitionId: randomUUID(), taskId, to,
             occurredAt: new Date().toISOString(), detail: JSON.stringify({ kind, leaseId, ordinal }) });
         });
-        resultReplyTransitionTail = operation.catch(() => {});
-        await operation;
       } }),
       ...(activeJournal === undefined ? {} : {
         recordResultReplyFailure: (taskId, failure) => recordReplyState(taskId, failure),
@@ -2539,11 +2541,7 @@ export function buildDaemonWithAdapters(
         const offer = decodeEnvelope(task.envelopeBytes);
         const payload = offer.payload as { agentRef?: AgentRef; terminalProjection: { contract: string } };
         const reason = accepted ? resultReplyFailureReason(failure, payload.terminalProjection.contract) : 'required Agent message was refused';
-        const terminal = createEnvelope('task.fail', { reason, retryable: false,
-          ...terminalIdentity(task.claimedRuntime, payload.agentRef) }, { taskId: id });
-        const bytes = encodeEnvelope(terminal);
-        await activeJournal.recordTerminal({ taskId: id, terminalType: 'failed', bytes, payloadHash: journalHash(bytes),
-          truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString(), recovery: { disposition: 'abandoned', reason } });
+        await recordRecoveryFailure(task, reason);
         resultReplyRecoveryTasks.delete(id);
       }
       for (const terminal of await activeJournal.listPendingTerminals(journalIdentity)) {
