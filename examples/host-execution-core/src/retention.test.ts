@@ -9,6 +9,7 @@ import { hash, project, taskId, type IntentInput } from './model';
 import { enqueue, settle } from './transitions';
 import { openHost, template } from './test-support';
 import type { DueWake } from '@byok-sdk/server';
+import { finishWithin } from '../../basic/goal-btw.test-support';
 
 const roots: string[] = [], ledgers: HostLedger[] = [];
 afterEach(() => { for (const ledger of ledgers.splice(0)) ledger.close(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -171,8 +172,9 @@ it('does not recreate a completed routine or reapply its SDK terminal on replay 
     const occurrence = Object.values(host.ledger.snapshot().occurrences)[0]!;
     const intent = host.ledger.snapshot().intents[occurrence.intentId!]!;
     await vi.waitFor(() => expect(host.adapter.sessions.has(intent.taskId)).toBe(true));
-    await host.adapter.sessions.get(intent.taskId)!.finish({ text: 'retained by the SDK' });
-    await vi.waitFor(async () => { await host.core.drain(); expect(host.core.intent(intent.key)?.conclusion).toBe('succeeded'); });
+    await finishWithin(host.adapter.sessions.get(intent.taskId)!, { text: 'retained by the SDK' }, async () => {
+      await host.core.drain(); expect(host.core.intent(intent.key)?.conclusion).toBe('succeeded');
+    }, 1000);
     await host.core.flushProjections(async () => {});
     expect(await host.server.tasks.deviceTerminal(intent.taskId)).toBeDefined();
     host.ledger.compact({ ...policy, now, acknowledgedIntentKeys: [intent.key] });

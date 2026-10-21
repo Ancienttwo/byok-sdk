@@ -99,6 +99,41 @@ export async function waitForReady(daemon: Pick<Daemon, 'status'>, timeoutMs = 5
   }, { timeout: timeoutMs, interval: 25 });
 }
 
+/** Observe one result injection and its semantic outcome within one shared deadline.
+ * The receipt only means RPC/event injection completed, never daemon cleanup. */
+export async function finishWithin(
+  session: Pick<BotStubSession, 'finish'>,
+  document: unknown,
+  observe: () => unknown | Promise<unknown>,
+  timeoutMs = 5000,
+): Promise<void> {
+  const deadline = performance.now() + timeoutMs;
+  let settled = false;
+  let rejected = false;
+  let failure: unknown;
+  // Invoke exactly once outside the retry callback. Both receipt and observation
+  // consume the same window; observation may run while injection is pending.
+  const receipt = session.finish(document);
+  void receipt.then(() => { settled = true; }, error => {
+    failure = error; rejected = true; settled = true;
+  });
+  try {
+    const remaining = deadline - performance.now();
+    if (remaining <= 0) throw new Error('result observation deadline elapsed during injection');
+    await vi.waitFor(async () => {
+      if (rejected) throw failure;
+      if (performance.now() >= deadline) throw new Error('result observation deadline exceeded');
+      await observe();
+      if (rejected) throw failure;
+      if (performance.now() >= deadline) throw new Error('result observation deadline exceeded');
+      expect(settled, 'result injection is still pending').toBe(true);
+    }, { timeout: remaining });
+  } catch (error) {
+    if (rejected) throw failure;
+    throw error;
+  }
+}
+
 /**
  * Single-active-task fixtures must wait for daemon cleanup before reusing the
  * Agent home. Session.close() precedes the memory snapshot and writer-lease

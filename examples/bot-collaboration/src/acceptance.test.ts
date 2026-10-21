@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration, type BotOptions } from './host';
 import { stateOf } from './model';
-import { waitForTaskCleanup } from '../../basic/goal-btw.test-support';
+import { finishWithin } from '../../basic/goal-btw.test-support';
 import type { Json } from '@byok-sdk/example-host-execution-core';
 
 let fixture: TestHost | undefined;
@@ -22,9 +22,9 @@ async function setup(rest: Partial<BotOptions> = {}) {
 async function finish(id: string, outcome: unknown = {}) {
   await vi.waitFor(() => expect(fixture!.adapter.sessions.has(bot!.core.intent(id)!.taskId)).toBe(true), { timeout: 5000 });
   const session = fixture!.adapter.sessions.get(bot!.core.intent(id)!.taskId)!;
-  session.finish(outcome);
-  await vi.waitFor(async () => { await bot!.drain(); expect(bot!.snapshot().turns[id]?.status).toBe('succeeded'); }, { timeout: 5000 });
-  await waitForTaskCleanup(fixture!.daemon, session);
+  await finishWithin(session, outcome, async () => {
+    await bot!.drain(); expect(bot!.snapshot().turns[id]?.status).toBe('succeeded');
+  }, 5000);
 }
 const action = { action: 'send_message', summary: 'Send', draft: { text: 'hello' } };
 
@@ -154,7 +154,7 @@ it('refreshes expiry before freezing the next input without an intervening drain
   await finish(next);
 });
 
-it('finishes daemon cleanup before advancing the card clock and starting the next input', async () => {
+it('observes semantic completion while cleanup is held before advancing the card clock', async () => {
   let now = Date.now();
   await setup({ now: () => now });
   const root = await bot!.input('held-card-cleanup', 'Prepare a draft');
@@ -164,18 +164,15 @@ it('finishes daemon cleanup before advancing the card clock and starting the nex
   const held = new Promise<void>(resolve => { release = resolve; });
   const close = session.close.bind(session);
   vi.spyOn(session, 'close').mockImplementation(async () => { await close(); await held; });
-  let finished = false;
-  const finishing = finish(root, { confirmable_action: [action] }).then(() => { finished = true; });
+  const finishing = finish(root, { confirmable_action: [action] });
   try {
     await vi.waitFor(() => {
       expect(session.closed).toBe(true);
       expect(bot!.snapshot().turns[root]?.status).toBe('succeeded');
     }, { timeout: 5000 });
+    await finishing; // Semantic completion is not a daemon-cleanup receipt.
     expect(fixture!.daemon.status().activeTaskCount).toBe(1);
-    expect(finished).toBe(false);
     release();
-    await finishing;
-    expect(fixture!.daemon.status().activeTaskCount).toBe(0);
     now += 86_400_001;
     await bot!.drain();
     expect(Object.values(bot!.snapshot().cards)[0]!.state).toBe('expired');

@@ -6,7 +6,7 @@ import { BotCollaboration, type BotOptions } from './host';
 import { contextPack } from './schema';
 import { stateOf } from './model';
 import { createRoutine } from './routines';
-import { waitForTaskCleanup } from '../../basic/goal-btw.test-support';
+import { finishWithin } from '../../basic/goal-btw.test-support';
 
 let fixture: TestHost;
 let bot: BotCollaboration;
@@ -30,9 +30,9 @@ async function running(id: string) {
 }
 async function finish(id: string, document: unknown = {}) {
   const session = await running(id);
-  session.finish(document);
-  await vi.waitFor(async () => { await bot.drain(); expect(bot.snapshot().turns[id]?.status).toBe('succeeded'); }, { timeout: 5000 });
-  await waitForTaskCleanup(fixture.daemon, session);
+  await finishWithin(session, document, async () => {
+    await bot.drain(); expect(bot.snapshot().turns[id]?.status).toBe('succeeded');
+  }, 5000);
 }
 
 it('runs submit_result -> self delegation -> confirmation -> connector -> action_result through the real SDK and daemon', async () => {
@@ -396,7 +396,7 @@ it('recovers one self continuation from a durable pre-submit failure with the sa
   expect(Object.values(bot.snapshot().turns).filter(turn => turn.source === 'continuation')).toHaveLength(1);
 });
 
-it('finishes daemon cleanup before observing the next answer task', async () => {
+it('observes semantic completion while cleanup is held before the next answer task', async () => {
   const now = Date.now();
   await setup({ now: () => now });
   const root = await bot.input('held-cleanup', 'Ask me');
@@ -405,19 +405,16 @@ it('finishes daemon cleanup before observing the next answer task', async () => 
   const held = new Promise<void>(resolve => { release = resolve; });
   const close = session.close.bind(session);
   vi.spyOn(session, 'close').mockImplementation(async () => { await close(); await held; });
-  let finished = false;
   const finishing = finish(root, { ask_user: { question: 'Choose', answerKind: 'single_choice',
-    options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] } }).then(() => { finished = true; });
+    options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] } });
   try {
     await vi.waitFor(() => {
       expect(session.closed).toBe(true);
       expect(bot.snapshot().turns[root]?.status).toBe('succeeded');
     }, { timeout: 5000 });
+    await finishing; // Semantic completion is not a daemon-cleanup receipt.
     expect(fixture.daemon.status().activeTaskCount).toBe(1);
-    expect(finished).toBe(false);
     release();
-    await finishing;
-    expect(fixture.daemon.status().activeTaskCount).toBe(0);
     const question = Object.values(bot.snapshot().questions)[0]!;
     await bot.answer(question.id, 'a');
     const answer = Object.values(bot.snapshot().turns).find(t => t.source === 'answer')!;

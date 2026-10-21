@@ -4,6 +4,7 @@ import { openHost, template, type TestHost } from '@byok-sdk/example-host-execut
 import { BotCollaboration, type BotOptions } from './host';
 import { stateOf } from './model';
 import { createRoutine } from './routines';
+import { finishWithin } from '../../basic/goal-btw.test-support';
 
 let fixture: TestHost;
 let bot: BotCollaboration;
@@ -25,8 +26,9 @@ async function running(id: string) {
   return fixture.adapter.sessions.get(bot.core.intent(id)!.taskId)!;
 }
 async function finish(id: string, document: unknown = {}) {
-  await (await running(id)).finish(document);
-  await vi.waitFor(async () => { await bot.drain(); expect(bot.snapshot().turns[id]?.status).toBe('succeeded'); }, { timeout: 5000 });
+  await finishWithin(await running(id), document, async () => {
+    await bot.drain(); expect(bot.snapshot().turns[id]?.status).toBe('succeeded');
+  }, 5000);
 }
 function projection(id: string) {
   return Object.values(fixture.ledger.snapshot().outbox).find(row => row.kind === 'projection' && row.id === id) as { value: Record<string, unknown> } | undefined;
