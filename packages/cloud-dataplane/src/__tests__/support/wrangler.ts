@@ -63,8 +63,14 @@ export interface WranglerDev {
  * Readiness is the fixture's own 404 route list. Miniflare state goes to a
  * scratch `--persist-to` directory, never into the repository. Each `vars`
  * entry is one `--var NAME:value`; wrangler splits on the FIRST colon only.
+ * `env` adds to `wranglerEnv()`, for settings wrangler reads only from its
+ * environment, such as a Hyperdrive local connection string.
  */
-export async function startWranglerDev(cwd: string, vars: readonly string[]): Promise<WranglerDev> {
+export async function startWranglerDev(
+  cwd: string,
+  vars: readonly string[],
+  env: NodeJS.ProcessEnv = {},
+): Promise<WranglerDev> {
   const port = await probeFreePort();
   const base = `http://127.0.0.1:${port}`;
   const persistDir = mkdtempSync(path.join(os.tmpdir(), 'byok-worker-dev-'));
@@ -84,7 +90,7 @@ export async function startWranglerDev(cwd: string, vars: readonly string[]): Pr
       persistDir,
       ...vars.flatMap((entry) => ['--var', entry]),
     ],
-    { cwd, env: wranglerEnv(), detached: true },
+    { cwd, env: { ...wranglerEnv(), ...env }, detached: true },
   );
   child.stdout?.on('data', (chunk: Buffer) => {
     output += chunk.toString('utf8');

@@ -3,13 +3,7 @@
   "main": "index.ts",
   "compatibility_date": "2026-08-01",
   "compatibility_flags": ["nodejs_compat"],
-  "hyperdrive": [
-    {
-      "binding": "BYOK_PG",
-      "id": "byok-h-worker-local",
-      "localConnectionString": "postgres://byok_worker_e2e:byok_worker_e2e@127.0.0.1:5433/byok_test"
-    }
-  ],
+  "hyperdrive": [{ "binding": "BYOK_PG", "id": "byok-h-worker-local" }],
   "durable_objects": {
     "bindings": [{ "name": "PRODUCT_LEDGER", "class_name": "ProductLedger" }]
   },

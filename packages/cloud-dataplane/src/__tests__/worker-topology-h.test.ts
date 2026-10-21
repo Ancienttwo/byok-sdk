@@ -3,10 +3,11 @@
  *
  * `wrangler dev` (local workerd) serves the `fixtures/h-worker/` Worker, which
  * builds `createByokCloud` per invocation over the
- * `@byok-sdk/cloud-dataplane/runtime` stores, a Hyperdrive binding to the
- * substrate Postgres, and the per-invocation in-process mailbox wake the
- * README prescribes for Workers. This process plays the devices over real
- * HTTP and the Host's own trigger through the fixture's probe routes.
+ * `@byok-sdk/cloud-dataplane/runtime` stores, a Hyperdrive binding to this
+ * run's own schema in the substrate Postgres, and the per-invocation
+ * in-process mailbox wake the README prescribes for Workers. This process
+ * plays the devices over real HTTP and the Host's own trigger through the
+ * fixture's probe routes.
  *
  * The cases, in order, on shared state:
  *
@@ -34,10 +35,7 @@
  * would fail loudly.
  */
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ACCESS_TOKEN_TTL_SECONDS, DEFAULT_LONG_POLL_HOLD_MS } from '@byok-sdk/cloud';
 import {
@@ -51,13 +49,13 @@ import {
 } from '@byok-sdk/protocol';
 import { createDeviceSimulator, type DeviceSimulator } from '../../../testkit/src/index';
 import { migrate } from '../migrate';
-import { createByokPool } from '../pool';
 import {
   COMPOSE_COMMAND,
   COMPOSE_POSTGRES_URL,
   POSTGRES_URL,
   POSTGRES_URL_ENV,
-  WORKER_E2E_POSTGRES_URL,
+  createDataplaneScope,
+  type DataplaneScope,
 } from './support/dataplane';
 import { H_WORKER_DIR, startWranglerDev, type WranglerDev } from './support/wrangler';
 
@@ -177,8 +175,8 @@ function sha256(text: string): string {
 describe.skipIf(!RUN)('Topology H on a real workerd: two devices, one hosted Host', () => {
   const tenant = `h-worker-${randomUUID()}`;
   let worker: WranglerDev | undefined;
-  /** The Worker's own role: reads SDK rows the Host API reports only coarsely. */
-  let sql: Pool | undefined;
+  /** This run's role and schema. The Worker connects as the same role. */
+  let scope: DataplaneScope | undefined;
   let deviceA: Device;
   let deviceB: Device;
   const taskA = `h-task-a-${randomUUID()}`;
@@ -339,8 +337,8 @@ describe.skipIf(!RUN)('Topology H on a real workerd: two devices, one hosted Hos
 
   /** The durable admission row: present and terminal-free means pending. */
   async function admission(device: Device, taskId: string) {
-    if (sql === undefined) throw new Error('no SQL pool');
-    const result = await sql.query<{ message_id: string; pending: boolean }>(
+    if (scope === undefined) throw new Error('no dataplane scope');
+    const result = await scope.pool.query<{ message_id: string; pending: boolean }>(
       `SELECT message_id, terminal_body IS NULL AS pending
          FROM agent_message_admission
         WHERE tenant_id = $1 AND device_id = $2 AND task_id = $3`,
@@ -350,30 +348,36 @@ describe.skipIf(!RUN)('Topology H on a real workerd: two devices, one hosted Hos
   }
 
   beforeAll(async () => {
-    // The fixture's Hyperdrive string is the substrate this suite migrates.
-    expect(readFileSync(path.join(H_WORKER_DIR, 'wrangler.json'), 'utf8')).toContain(WORKER_E2E_POSTGRES_URL);
-    expect(POSTGRES_URL, 'the Worker fixture only runs against the disposable compose database').toBe(
-      COMPOSE_POSTGRES_URL,
-    );
-    // Node migrates; the Worker serves. Both use the application role.
-    sql = createByokPool({ connectionString: WORKER_E2E_POSTGRES_URL, max: 2 });
-    await migrate(sql, DEPLOY_SQL);
+    // A schema of its own, not worker-e2e's shared `byok_worker_e2e`:
+    // `createPostgresCloudStores` refuses to compose while any pending mailbox
+    // row in its schema is not protocol v3, and worker-e2e writes such a row
+    // there while vitest runs it in parallel with this file.
+    scope = await createDataplaneScope(2);
+    // Node migrates; the Worker serves. Both use the scope's role.
+    await migrate(scope.pool, DEPLOY_SQL);
 
-    worker = await startWranglerDev(H_WORKER_DIR, [
-      `BYOK_TOKEN_SECRET:${randomBytes(32).toString('hex')}`,
-      // Port 9 (discard) refuses connections: object storage is out of scope.
-      'BYOK_S3_ENDPOINT:http://127.0.0.1:9',
-      'BYOK_S3_BUCKET:byok-h-worker-unused',
-      'BYOK_S3_ACCESS_KEY_ID:unused',
-      'BYOK_S3_SECRET_ACCESS_KEY:unused',
-      'BYOK_S3_REGION:us-east-1',
-    ]);
+    worker = await startWranglerDev(
+      H_WORKER_DIR,
+      [
+        `BYOK_TOKEN_SECRET:${randomBytes(32).toString('hex')}`,
+        // Port 9 (discard) refuses connections: object storage is out of scope.
+        'BYOK_S3_ENDPOINT:http://127.0.0.1:9',
+        'BYOK_S3_BUCKET:byok-h-worker-unused',
+        'BYOK_S3_ACCESS_KEY_ID:unused',
+        'BYOK_S3_SECRET_ACCESS_KEY:unused',
+        'BYOK_S3_REGION:us-east-1',
+      ],
+      // The fixture's config has no `localConnectionString`; wrangler dev
+      // reads the Hyperdrive string for binding BYOK_PG from this variable.
+      { CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_BYOK_PG: scope.connectionString },
+    );
     await probe('/probe/tenant');
   }, 180_000);
 
   afterAll(async () => {
+    // workerd's connections close with it, before the scope drops its role.
     await worker?.stop();
-    await sql?.end();
+    await scope?.dispose();
   }, 30_000);
 
   it('a: routes each fresh execution to its own device, and only there', async () => {
