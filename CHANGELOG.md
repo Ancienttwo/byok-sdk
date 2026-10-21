@@ -3,8 +3,9 @@
 ## Unreleased
 
 - **Feature (keys, client)** — add a separate local provider custody launcher
-  for Hermes. Provider credentials stay in keys custody and do not enter the
-  daemon environment (#608).
+  for Hermes. The Host's keys process reads the selected profile key under the
+  custody lock at each start; the daemon environment carries no provider key.
+  Only OpenAI-compatible bearer profiles map; Windows is not supported (#608).
 - **Feature (client)** — add an opt-in task-free export of Agent memory for
   Host-side device-change backups (#625).
 - **Fixed (server, client, keys)** — load `node:sqlite` without
