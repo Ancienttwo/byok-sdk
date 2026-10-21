@@ -208,7 +208,7 @@ export function selectImpact(paths) {
       || !/\.(?:[cm]?[jt]sx?|json|ndjson|sql|sh|go|txt|md)$/.test(relative)) requireRelease(path);
     dirs.add(dir);
     if (dir === 'examples/packaging') { families.add('packageability-smoke'); families.add('npm-release-pack'); }
-    if (/\.sql$/.test(relative) || /(?:migration|schema)/i.test(relative)) {
+    if (/\.sql$/.test(relative) || /(?:migrat(?:e|ion)|schema)/i.test(relative)) {
       families.add('dataplane'); families.add('release-pack-migrate');
     }
   }

@@ -93,3 +93,16 @@ test('CLI accepts JSON stdin and fails closed without an output selection on bad
     assert.equal(bad.stdout, '');
   }
 });
+
+
+test('actual exported migration runner selects installed-tarball upgrade validation', () => {
+  const path = 'packages/cloud-dataplane/src/migrate.ts';
+  assert.match(readFileSync(new URL(path, root), 'utf8'), /export/);
+  const result = spawnSync(process.execPath, [fileURLToPath(new URL('./select-impact.mjs', import.meta.url))], {
+    input: JSON.stringify([path]), encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const plan = JSON.parse(result.stdout);
+  assert.deepEqual(plan.dirs, ['packages/cloud-dataplane']);
+  assert.deepEqual(plan.families, ['dataplane', 'release-pack-migrate']);
+});
