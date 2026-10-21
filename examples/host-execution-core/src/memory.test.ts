@@ -4,7 +4,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { AgentMemoryIntentCompletion, AgentMemoryProjectionMutation } from '@byok-sdk/protocol';
-import { HostLedger } from './ledger';
+import { HostLedger, MIN_TOMBSTONE_RETENTION_MS } from './ledger';
 import { enqueue } from './transitions';
 import { HostMemoryPage, EMPTY_MEMORY_REVISION, memoryRevision, type MemoryApproval } from './memory';
 import { openHost, type TestHost } from './test-support';
@@ -105,6 +105,69 @@ it.each(['revoke', 'expire', 'move'] as const)('withholds %s before release and 
   expect(response).toMatchObject({ disposition: 'terminal', readback: { disposition: 'host_terminal', completion: { outcome: 'rejected' } } });
   expect(response).not.toHaveProperty('intent.content');
   expect(page.intent(intent.intentId)!.intent).not.toHaveProperty('content');
+});
+
+const retention = { acknowledgedIntentKeys: [], tombstoneRetentionMs: MIN_TOMBSTONE_RETENTION_MS };
+async function settled(input: MemoryApproval) {
+  const { intent } = await page.approve(input);
+  const transport = page.transport('device');
+  await transport.fetch({ intentId: intent.intentId, agentRef, reservation: 'held' });
+  const result = completion(intent.intentId);
+  await transport.complete(result);
+  return { row: page.intent(intent.intentId)!, result };
+}
+
+it('compacts an acknowledged terminal row and replays it from the retired copy inside its window', async () => {
+  const input = approval();
+  const { row, result } = await settled(input);
+  const pending = await page.approve(approval());
+  const live = ledger.snapshot().memory!.intents[pending.intent.intentId];
+  expect(ledger.compact({ ...retention, acknowledgedMemoryIntentIds: [row.intent.intentId], now: clock }))
+    .toMatchObject({ memoryIntents: 1, alreadyCompactedMemoryIntents: 0 });
+  expect(ledger.snapshot().memory!.intents).toEqual({ [pending.intent.intentId]: live });
+  expect(Object.values(ledger.snapshot().memory!.approvals)).toEqual([pending.intent.intentId]);
+  expect(page.intent(row.intent.intentId)).toBeUndefined();
+  expect(JSON.stringify(ledger.retiredMemoryIntent('intent', row.intent.intentId, clock))).not.toContain('new text');
+  ledger.close(); ledger = new HostLedger(path.join(root, 'ledger.sqlite'), 'product:host-core-test'); page = new HostMemoryPage(ledger, options());
+  expect(await page.approve(input)).toEqual(row);
+  await expect(page.approve({ ...input, content: 'changed' })).rejects.toThrow('identity conflict');
+  const transport = page.transport('device');
+  expect(await transport.fetch({ intentId: row.intent.intentId, agentRef, reservation: 'held' }))
+    .toMatchObject({ disposition: 'terminal', readback: { completion: result } });
+  expect(await transport.complete(result)).toMatchObject({ disposition: 'idempotent', completion: result });
+  await expect(page.transport('other-device').complete(result)).rejects.toThrow('identity mismatch');
+  expect(ledger.compact({ ...retention, acknowledgedMemoryIntentIds: [row.intent.intentId], now: clock }).alreadyCompactedMemoryIntents).toBe(1);
+  expect(Object.keys(ledger.snapshot().memory!.intents)).toEqual([pending.intent.intentId]);
+});
+
+it('keeps a retired approval through its window and its own expiry, then admits the reference as new', async () => {
+  const end = clock + MIN_TOMBSTONE_RETENTION_MS;
+  const input = approval({ expiresAt: end + 1000 });
+  const { row } = await settled(input);
+  ledger.compact({ ...retention, acknowledgedMemoryIntentIds: [row.intent.intentId], now: clock });
+  const renewed = { ...input, expiresAt: end + 5000 };
+  clock = end + 500; // The window has ended, but the approval is still valid.
+  expect(await page.approve(input)).toEqual(row);
+  await expect(page.approve(renewed)).rejects.toThrow('identity conflict');
+  clock = end + 1000;
+  await expect(page.approve(input)).rejects.toThrow('expired');
+  const fresh = await page.approve(renewed);
+  expect(fresh.intent.approvalRef).toBe(input.approvalRef);
+  expect(fresh.intent.intentId).not.toBe(row.intent.intentId);
+  expect(ledger.compact({ ...retention, now: clock }).expiredTombstones).toBe(1);
+  await expect(page.transport('device').fetch({ intentId: row.intent.intentId, agentRef, reservation: 'held' })).rejects.toThrow('identity mismatch');
+});
+
+it('refuses pending and unknown memory intents and rolls back the whole batch', async () => {
+  const { row } = await settled(approval());
+  const pending = await page.approve(approval());
+  const before = ledger.snapshot();
+  for (const [id, reason] of [[pending.intent.intentId, 'terminal'], ['missing', 'not found']] as const) {
+    expect(() => ledger.compact({ ...retention, acknowledgedMemoryIntentIds: [row.intent.intentId, id], now: clock })).toThrow(reason);
+    expect(ledger.snapshot()).toEqual(before);
+    expect(ledger.retiredMemoryIntent('intent', row.intent.intentId, clock)).toBeUndefined();
+  }
+  expect(() => ledger.compact({ ...retention, acknowledgedMemoryIntentIds: row.intent.intentId as unknown as string[], now: clock })).toThrow('array');
 });
 
 it('retries an unconfirmed notice after restart with the exact same intent and no mailbox body', async () => {

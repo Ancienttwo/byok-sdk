@@ -17,18 +17,20 @@ function open(tenant = 'test', filename?: string) {
   const ledger = new HostLedger(filename, tenant); ledgers.push(ledger); return { ledger, filename };
 }
 function input(key: string): IntentInput { return { key, source: 'user', execution: template('device'), waitUntil: 1000 }; }
-function seed(ledger: HostLedger, key: string, options: { ack?: boolean; occurrence?: boolean; generation?: number } = {}) {
+function seed(ledger: HostLedger, key: string, options: { ack?: boolean; occurrence?: boolean; routine?: boolean; generation?: number } = {}): string {
+  // A routine seed uses the core-derived identity `occurrence:<occurrence key>`.
+  const intentKey = options.routine ? `occurrence:${hash(['occurrence', key])}` : key;
   ledger.transaction(state => {
-    const intent = enqueue(state, ledger.tenant, input(key));
+    const intent = enqueue(state, ledger.tenant, input(intentKey));
     for (let generation = 0; generation <= (options.generation ?? 0); generation++) {
-      const id = taskId(key, generation);
+      const id = taskId(intentKey, generation);
       state.executions[id] = { input: { ...intent.execution, taskId: id }, started: true, submission: 'delivered',
         terminal: { recordedAt: '2026-01-01T00:00:00Z', envelope: { v: 1, id: '00000000-0000-4000-8000-000000000001',
           ts: '2026-01-01T00:00:00Z', type: 'task.complete', task_id: id, seq: 1,
           payload: { summary: '', sessionRef: 'session', document: { text: 'o'.repeat(1024) } } } } };
       intent.generation = generation; intent.taskId = id;
     }
-    if (options.occurrence) {
+    if (options.occurrence || options.routine) {
       intent.occurrence = hash(['occurrence', key]);
       state.occurrences[intent.occurrence] = { key: intent.occurrence, intentId: intent.id, routineId: 'routine', definitionVersion: 1,
         trigger: { kind: 'scheduled', plannedAt: 1 }, wakeKey: `routine:1:${key}`, recordedAt: 1, nextAt: null, attempts: 1 };
@@ -36,8 +38,9 @@ function seed(ledger: HostLedger, key: string, options: { ack?: boolean; occurre
     }
     state.applied[intent.taskId] = true;
     settle(state, intent, 'succeeded');
-    if (options.ack !== false) delete state.outbox[`projection:${hash(`intent:${key}`)}`];
+    if (options.ack !== false) delete state.outbox[`projection:${hash(`intent:${intentKey}`)}`];
   });
+  return intentKey;
 }
 const policy = { now: 100, tombstoneRetentionMs: MIN_TOMBSTONE_RETENTION_MS };
 
@@ -137,6 +140,40 @@ it('reports retired identity reuse with a stable code and rolls back the whole a
   expect(ledger.snapshot()).toEqual(before);
   expect(ledger.hasTombstone('intent', 'retired', policy.now)).toBe(true);
   expect(ledger.transaction(state => enqueue(state, ledger.tenant, input('fresh'))).key).toBe('fresh');
+});
+
+it('expires routine occurrence identities with their slot while caller identities stay permanent', () => {
+  const { ledger, filename } = open();
+  const routine = seed(ledger, 'tick', { routine: true }); seed(ledger, 'chat');
+  const expires = policy.now + policy.tombstoneRetentionMs;
+  expect(ledger.compact({ ...policy, acknowledgedIntentKeys: [routine, 'chat'] }).compactedIntents).toBe(2);
+  const db = new DatabaseSync(filename);
+  try {
+    const identities = () => db.prepare("SELECT identity, expires_at FROM host_retired_identity WHERE kind='intent' ORDER BY expires_at").all();
+    expect(identities()).toEqual([{ identity: hash('chat'), expires_at: null }, { identity: hash(routine), expires_at: expires }]);
+    expect(ledger.compact({ ...policy, acknowledgedIntentKeys: [routine] }).alreadyCompactedIntents).toBe(1);
+    expect(ledger.hasTombstone('intent', routine, expires - 1)).toBe(true);
+    expect(ledger.hasTombstone('intent', routine, expires)).toBe(false);
+    // Routine slot, application and intent rows expire together; the caller key keeps its permanent row.
+    expect(ledger.compact({ ...policy, now: expires, acknowledgedIntentKeys: [] }).expiredTombstones).toBe(4);
+    expect(identities()).toEqual([{ identity: hash('chat'), expires_at: null }]);
+  } finally { db.close(); }
+  expect(() => ledger.compact({ ...policy, now: expires, acknowledgedIntentKeys: [routine] })).toThrow('not found');
+  const before = ledger.snapshot();
+  expect(() => ledger.transaction(state => enqueue(state, ledger.tenant, { ...input(routine), source: 'routine' }))).toThrow(RetiredIntentIdentityError);
+  expect(ledger.snapshot()).toEqual(before);
+});
+
+it('admits the derived occurrence key shape only together with its occurrence', () => {
+  const { ledger } = open(); const before = ledger.snapshot();
+  for (const key of [`occurrence:${'a'.repeat(64)}`, `occurrence:${hash('never recorded')}`]) {
+    expect(() => ledger.transaction(state => enqueue(state, ledger.tenant, { ...input(key), source: 'routine' }))).toThrow(RetiredIntentIdentityError);
+    expect(() => ledger.transaction(state => { enqueue(state, ledger.tenant, input(key)).occurrence = key.slice('occurrence:'.length); })).toThrow(RetiredIntentIdentityError);
+  }
+  expect(ledger.snapshot()).toEqual(before);
+  expect(ledger.transaction(state => enqueue(state, ledger.tenant, input('occurrence:caller-key'))).key).toBe('occurrence:caller-key');
+  const linked = seed(ledger, 'linked', { routine: true });
+  expect(ledger.snapshot().intents[hash(linked)]?.occurrence).toBe(hash(['occurrence', 'linked']));
 });
 
 it('isolates retirement and expiration by tenant in a shared database', () => {

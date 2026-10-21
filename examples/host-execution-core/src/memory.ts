@@ -133,6 +133,12 @@ export class HostMemoryPage {
         if (previous.requestHash !== requestHash) throw new Error('Memory approval identity conflict');
         return previous;
       }
+      // A compacted row answers replays from its retired copy until that copy expires.
+      const retired = this.ledger.retiredMemoryIntent('approval', approvalKey, this.now());
+      if (retired) {
+        if (retired.requestHash !== requestHash) throw new Error('Memory approval identity conflict');
+        return retired;
+      }
       const row = prepared;
       store.intents[intent.intentId] = row;
       store.approvals[approvalKey] = intent.intentId;
@@ -182,7 +188,7 @@ export class HostMemoryPage {
     return {
       fetch: async request => {
         const answer = this.ledger.transaction(state => {
-        const row = memory(state).intents[request.intentId];
+        const row = memory(state).intents[request.intentId] ?? this.ledger.retiredMemoryIntent('intent', request.intentId, this.now());
         if (!row || row.deviceId !== deviceId || canonical(row.intent.agentRef) !== canonical(request.agentRef)) throw new Error('Memory intent identity mismatch');
         if (row.readback) return { disposition: 'terminal', intent: metadata(row.intent), readback: row.readback };
         if (request.reservation === 'none') return { disposition: 'deferred', intent: metadata(row.intent) };
@@ -202,7 +208,8 @@ export class HostMemoryPage {
       complete: async value => {
         const completion = AgentMemoryIntentCompletionSchema.parse(value);
         const readback = this.ledger.transaction(state => {
-          const row = memory(state).intents[completion.intentId];
+          // A retired copy always holds a readback, so it takes only the terminal branch below.
+          const row = memory(state).intents[completion.intentId] ?? this.ledger.retiredMemoryIntent('intent', completion.intentId, this.now());
           if (!row || row.deviceId !== deviceId || !sameIdentity(row.intent, completion)) throw new Error('Memory completion identity mismatch');
           if (row.readback) return { ...row.readback, disposition: row.readback.disposition === 'host_terminal' ? 'host_terminal'
             : canonical(row.readback.completion) === canonical(completion) ? 'idempotent' : 'conflict' };

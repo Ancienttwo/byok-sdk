@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import type { MemoryIntentRow } from './memory';
 import { hash, taskId, time, type LedgerState, type Occurrence } from './model';
 
 export interface ProjectionOutboxLimits { maxCount?: number; maxBytes?: number }
@@ -22,7 +23,9 @@ function projectionUsage(state: LedgerState): ProjectionOutboxUsage {
 
 export const MIN_TOMBSTONE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export type TombstoneKind = 'intent' | 'application' | 'slot';
-/** A permanently retired intent key cannot admit new work, even after replay evidence expires. */
+/** The core derives each routine occurrence intent key from its occurrence key (a SHA-256 hex digest). */
+const OCCURRENCE_INTENT_KEY = /^occurrence:[0-9a-f]{64}$/;
+/** A retired intent key, or a routine occurrence key outside its occurrence, cannot admit new work. */
 export class RetiredIntentIdentityError extends Error {
   readonly code = 'retired_intent_identity' as const;
   constructor() {
@@ -35,6 +38,8 @@ export interface CompactionOptions {
   acknowledgedIntentKeys: readonly string[];
   /** Settled Host-only occurrences; promoted occurrences are selected through their intent. */
   acknowledgedOccurrenceKeys?: readonly string[];
+  /** Terminal memory intents whose readback the Host has acknowledged. */
+  acknowledgedMemoryIntentIds?: readonly string[];
   now: number;
   tombstoneRetentionMs: number;
 }
@@ -43,6 +48,8 @@ export interface CompactionResult {
   alreadyCompactedIntents: number;
   executions: number;
   occurrences: number;
+  memoryIntents: number;
+  alreadyCompactedMemoryIntents: number;
   expiredTombstones: number;
   beforeBytes: number;
   afterBytes: number;
@@ -79,7 +86,12 @@ export class HostLedger {
       CREATE TABLE IF NOT EXISTS host_retired_identity (
         tenant TEXT NOT NULL, kind TEXT NOT NULL, identity TEXT NOT NULL, expires_at INTEGER,
         PRIMARY KEY (tenant, kind, identity));
-      CREATE INDEX IF NOT EXISTS host_retired_expiry ON host_retired_identity (tenant, expires_at);`);
+      CREATE INDEX IF NOT EXISTS host_retired_expiry ON host_retired_identity (tenant, expires_at);
+      CREATE TABLE IF NOT EXISTS host_retired_memory_intent (
+        tenant TEXT NOT NULL, intent_id TEXT NOT NULL, approval TEXT NOT NULL, body TEXT NOT NULL, expires_at INTEGER NOT NULL,
+        PRIMARY KEY (tenant, intent_id));
+      CREATE INDEX IF NOT EXISTS host_retired_memory_approval ON host_retired_memory_intent (tenant, approval);
+      CREATE INDEX IF NOT EXISTS host_retired_memory_expiry ON host_retired_memory_intent (tenant, expires_at);`);
     this.db.prepare('INSERT OR IGNORE INTO host_ledger VALUES (?, ?)').run(tenant, JSON.stringify(empty()));
   }
   snapshot(): LedgerState {
@@ -103,8 +115,11 @@ export class HostLedger {
       if (result && typeof (result as { then?: unknown }).then === 'function') throw new Error('Host transactions must be synchronous');
       // Also covers callers of the exported pure enqueue/recordOccurrence transitions.
       const retired = this.db.prepare("SELECT 1 FROM host_retired_identity WHERE tenant=? AND kind='intent' AND identity=?");
-      for (const id of Object.keys(state.intents)) {
-        if (!existing.has(id) && retired.get(this.tenant, id)) throw new RetiredIntentIdentityError();
+      for (const [id, intent] of Object.entries(state.intents)) {
+        if (existing.has(id)) continue;
+        // A derived routine key enters only with its own occurrence, so an expired routine row cannot reopen work.
+        if (retired.get(this.tenant, id) || OCCURRENCE_INTENT_KEY.test(intent.key) && (intent.key !== `occurrence:${intent.occurrence}`
+          || state.occurrences[intent.occurrence!]?.intentId !== id)) throw new RetiredIntentIdentityError();
       }
       if (this.projectionLimits && before) {
         const after = projectionUsage(state);
@@ -129,6 +144,13 @@ export class HostLedger {
       WHERE tenant=? AND kind=? AND identity=? AND (expires_at IS NULL OR expires_at>?)`)
       .get(this.tenant, kind, hash(identity), now);
   }
+  /** A compacted terminal memory row answers replays until it expires. `approval` is the key used in `memory.approvals`. */
+  retiredMemoryIntent(by: 'intent' | 'approval', identity: string, now: number): MemoryIntentRow | undefined {
+    time(now);
+    const row = this.db.prepare(`SELECT body FROM host_retired_memory_intent WHERE tenant=? AND ${by === 'intent' ? 'intent_id' : 'approval'}=?
+      AND expires_at>? ORDER BY expires_at DESC LIMIT 1`).get(this.tenant, identity, now);
+    return typeof row?.body === 'string' ? JSON.parse(row.body) as MemoryIntentRow : undefined;
+  }
   /** Explicit, transactional removal of acknowledged settled core history. Never runs automatically. */
   compact(options: CompactionOptions): CompactionResult {
     const now = time(options.now), retention = time(options.tombstoneRetentionMs);
@@ -140,9 +162,12 @@ export class HostLedger {
     if (options.acknowledgedOccurrenceKeys !== undefined && !Array.isArray(options.acknowledgedOccurrenceKeys)) throw new Error('Acknowledged occurrence keys must be an array');
     const occurrenceKeys = [...new Set(options.acknowledgedOccurrenceKeys ?? [])];
     if (occurrenceKeys.some(key => typeof key !== 'string' || !key.trim())) throw new Error('Invalid acknowledged occurrence key');
+    if (options.acknowledgedMemoryIntentIds !== undefined && !Array.isArray(options.acknowledgedMemoryIntentIds)) throw new Error('Acknowledged memory intent IDs must be an array');
+    const memoryIds = [...new Set(options.acknowledgedMemoryIntentIds ?? [])];
+    if (memoryIds.some(id => typeof id !== 'string' || !id.trim())) throw new Error('Invalid acknowledged memory intent ID');
     return this.transaction(state => {
-      const result: CompactionResult = { compactedIntents: 0, alreadyCompactedIntents: 0, executions: 0,
-        occurrences: 0, expiredTombstones: 0, beforeBytes: Buffer.byteLength(JSON.stringify(state)), afterBytes: 0 };
+      const result: CompactionResult = { compactedIntents: 0, alreadyCompactedIntents: 0, executions: 0, occurrences: 0,
+        memoryIntents: 0, alreadyCompactedMemoryIntents: 0, expiredTombstones: 0, beforeBytes: Buffer.byteLength(JSON.stringify(state)), afterBytes: 0 };
       const retire = this.db.prepare(`INSERT INTO host_retired_identity (tenant,kind,identity,expires_at)
         VALUES (?,?,?,?) ON CONFLICT (tenant,kind,identity) DO UPDATE SET
         expires_at=CASE WHEN expires_at IS NULL THEN NULL ELSE max(expires_at,excluded.expires_at) END`);
@@ -208,10 +233,29 @@ export class HostLedger {
           retire.run(this.tenant, 'slot', slot, expiresAt);
           delete state.slots[slot]; delete state.occurrences[occurrence.key]; result.occurrences++;
         }
-        retire.run(this.tenant, 'intent', id, null);
+        // Caller keys retire permanently. A derived routine key expires with its slot: the routine
+        // reservation refuses the old slot, and the transaction guard refuses direct reuse.
+        retire.run(this.tenant, 'intent', id, OCCURRENCE_INTENT_KEY.test(key) && key === `occurrence:${intent.occurrence}` ? expiresAt : null);
         delete state.intents[id]; result.compactedIntents++;
       }
+      const retireMemory = this.db.prepare('INSERT INTO host_retired_memory_intent (tenant,intent_id,approval,body,expires_at) VALUES (?,?,?,?,?)');
+      for (const id of memoryIds) {
+        const store = state.memory, row = store?.intents[id];
+        if (!store || !row) {
+          if (!this.retiredMemoryIntent('intent', id, now)) throw new Error('Acknowledged memory intent not found');
+          result.alreadyCompactedMemoryIntents++; continue;
+        }
+        if (row.intent.intentId !== id || !row.readback) throw new Error('Only terminal memory intents can be compacted');
+        if (Object.values(store.restores ?? {}).some(restore => (restore.status === 'preparing' || restore.status === 'applying')
+          && restore.files.some(file => file.intentId === id))) throw new Error('Memory intent belongs to an active restore');
+        const approval = hash([row.deviceId, row.intent.approvalRef]);
+        if (store.approvals[approval] !== id) throw new Error('Invalid memory approval association');
+        // approve() rejects an expired input before its replay lookup, so the copy also outlives the approval.
+        retireMemory.run(this.tenant, id, approval, JSON.stringify(row), time(Math.max(expiresAt, row.expiresAt)));
+        delete store.intents[id]; delete store.approvals[approval]; result.memoryIntents++;
+      }
       result.expiredTombstones = Number(this.db.prepare('DELETE FROM host_retired_identity WHERE tenant=? AND expires_at<=?')
+        .run(this.tenant, now).changes) + Number(this.db.prepare('DELETE FROM host_retired_memory_intent WHERE tenant=? AND expires_at<=?')
         .run(this.tenant, now).changes);
       result.afterBytes = Buffer.byteLength(JSON.stringify(state));
       return result;

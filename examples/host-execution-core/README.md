@@ -85,8 +85,8 @@ See `unclaimed-expiry.test.ts` and the guide for the exact distinction.
 This example is a single-owner reference for a small ledger.
 Every transaction reads and rewrites the whole JSON ledger. History cleanup is explicit through
 `HostLedger.compact`, described below; it never runs automatically. Uncompacted settled intents,
-executions with terminal documents, occurrences, slot dedup keys, outcome markers and calendar audits
-remain in that JSON body. This is not a large-dataset storage design.
+executions with terminal documents, occurrences, slot dedup keys, outcome markers, terminal memory
+intents and calendar audits remain in that JSON body. This is not a large-dataset storage design.
 
 Ignored routine wakes are visible in `ledger.snapshot().ignoredWakes`. The optional
 array retains the newest `IGNORED_WAKE_AUDIT_LIMIT` (128) observations in delivery
@@ -182,10 +182,12 @@ ledger.compact({
 
 Only settled, intent-less job occurrences qualify. Pending, unknown or promoted keys
 reject the whole batch; compact promoted occurrences through `acknowledgedIntentKeys`.
-The returned `occurrences` count includes both kinds. Unlike retired intent keys, a
+The returned `occurrences` count includes both kinds. Unlike caller intent keys, a
 removed occurrence key is unknown on a second selection. The slot tombstone prevents
 replay through its retention window. After expiry, replay against an advanced active
 routine is audited as `reservation_mismatch` (or inactive/missing if its state changed).
+The same rule bounds the identity rows of Agent routine occurrences; see
+[Agent execution retention](#agent-execution-retention).
 The JSON ledger and failed-job backlog remain small-Host reference storage: at 10x
 volume, whole-document rewrites and serialized handlers are the first bottlenecks.
 
@@ -245,35 +247,55 @@ Selection is an assertion by the caller that these results may be removed. The c
 acknowledgement or product retention from timestamps. The method rejects unsettled intents, pending
 intent/result outbox records, unknown keys, and inconsistent execution/occurrence associations. An
 invalid selection or database failure rolls back the entire batch, including tombstones. Repeating
-an already compacted key is harmless and reports `alreadyCompactedIntents`; duplicate keys count once.
+an already compacted key is harmless and reports `alreadyCompactedIntents` while its identity row
+exists; duplicate keys count once. A routine occurrence key is unknown again after its row expires.
 An empty selection explicitly expires eligible tombstones without selecting additional history.
 
 One SQLite transaction deletes the selected intent's execution generations, terminal documents,
 settled occurrence, slot and application markers, and writes replacement tombstones. No outbox row,
-business `application` value, memory, routine or calendar audit is deleted. Custom projections have
-no intent ownership metadata and remain untouched, including any payload copies they contain.
-`core.intent(key)` returns `undefined` after compaction. Enqueuing a retired key throws the exported
-`RetiredIntentIdentityError` with stable `code: 'retired_intent_identity'`, even with the same input;
-this applies to the exported `enqueue` transition inside `ledger.transaction` as well.
+business `application` value, routine or calendar audit is deleted. Memory rows are deleted only
+when selected through `acknowledgedMemoryIntentIds` (see [memory retention](#memory-retention)).
+Custom projections have no intent ownership metadata and remain untouched, including any payload
+copies they contain. `core.intent(key)` returns `undefined` after compaction. Enqueuing a retired key
+throws the exported `RetiredIntentIdentityError` with stable `code: 'retired_intent_identity'`, even
+with the same input; this applies to the exported `enqueue` transition inside `ledger.transaction` as well.
 Use a new identity for new work.
 
-The additive `host_retired_identity` table keeps permanent intent identity hashes outside the hot
-JSON body and expiring task-application and wake-slot evidence. Retention starts at compaction and
+The core derives each routine occurrence intent key as `occurrence:` followed by the 64 lowercase
+hex characters of its occurrence key. This key shape is reserved. The core admits such a key only
+together with its own occurrence; a direct enqueue throws `RetiredIntentIdentityError`, also after
+the identity row expires. Other keys that start with `occurrence:` are ordinary caller keys.
+
+The additive `host_retired_identity` table keeps intent identity hashes outside the hot JSON body,
+together with expiring task-application and wake-slot evidence. Retention starts at compaction and
 must be at least seven days; choose the maximum of your actual replay, upload retry and restore
 windows. `ledger.hasTombstone(kind, identity, now)` queries that evidence. Application tombstones
 are evidence for the Host, queried with `hasTombstone('application', taskId, now)`; the core does not
 consume them or replay removed application results. Retained wake replays do
 not create occurrences or dispatch work. At the exact expiry time slot/application evidence is no
-longer returned; a subsequent explicit compaction removes those rows. Retired intent identities
-never expire. Their indexed table grows with historical intent count, while removed core payloads
-no longer enlarge each JSON rewrite. Host-owned application data, custom projections, routines and
-audits can still grow independently; compact does not claim a total disk-size bound or run VACUUM.
+longer returned; a subsequent explicit compaction removes those rows.
 
-Opening an existing version-1 ledger adds the table without changing its JSON format. Back up and
-restore the **whole SQLite database atomically**, including the identity table (and SQLite's WAL
-state through a supported backup mechanism). Restoring JSON alone or running an older copy of the
-core loses the retirement guard. Do not downgrade to a pre-compaction version after using this API:
-an older writer ignores the new table and can reuse retired identities. Seven days is a minimum SDK replay horizon, not proof that an old
+Caller intent identities (every key outside the derived routine shape) never expire. That part of
+the table grows with the count of compacted caller intents. A routine occurrence identity expires
+with its slot row. After that, the routine reservation refuses the old slot and the reserved key
+shape refuses direct reuse. Each compacted Agent routine occurrence keeps one intent row, one slot
+row and, after an applied outcome, one application row until a compaction at or after expiry
+deletes them. A Host-only occurrence keeps only its slot row. For example, 200 rules that run every
+5 minutes make 57,600 occurrences per day. A 7-day window then holds about 1.2 million rows and a
+30-day window about 5.2 million rows, plus the rows that wait for the next compaction. These numbers
+are calculated from the row counts, not measured. Rows that an earlier version wrote as permanent
+stay permanent: the table stores only a hash, so the core cannot identify the routine rows among them.
+
+Removed core payloads no longer enlarge each JSON rewrite. Host-owned application data, custom
+projections, routines and audits can still grow independently; compact does not claim a total
+disk-size bound or run VACUUM.
+
+Opening an existing version-1 ledger adds the tables without changing its JSON format. Back up and
+restore the **whole SQLite database atomically**, including the identity and retired memory tables
+(and SQLite's WAL state through a supported backup mechanism). Restoring JSON alone or running an
+older copy of the core loses the retirement guard. Do not downgrade to an earlier version after using
+this API: an older writer ignores the new tables and can reuse retired identities, routine keys and
+memory approval references. Seven days is a minimum SDK replay horizon, not proof that an old
 backup is safe to restore; coordinate restores with your external acknowledgement/replay policy.
 This API performs deletion, not external archival, and must only be invoked under the Host's policy.
 
@@ -399,8 +421,10 @@ downgrade to a core that ignores restore gates while any restore is active.
 
 Pending restore input (including the approved observation) is retained only
 through preparation and purged when intent rows take ownership of pending bodies.
-Terminal rows retain metadata and outcomes. This example adds no backup upload,
-remote restore authorization, retention policy, or Windows memory admission.
+Terminal restore rows retain metadata and outcomes; they are not compacted. Their
+intent rows can be compacted after the restore ends (see [memory retention](#memory-retention)).
+This example adds no backup upload, remote restore authorization, automatic retention
+policy, or Windows memory admission.
 
 The embedder redactor can emit the Host-owned opaque JSON profile
 `{"residentMemory":"policy-approved resident text"}` through the existing projection port.
@@ -447,6 +471,38 @@ The runtime is synthetic. No model provider is called.
 Run `bun run --cwd examples/host-execution-core test src/memory-linux.test.ts` on Linux.
 These Linux tests skip on other platforms. macOS and Windows proof stay in P2.
 
+### Memory retention
+
+Terminal memory intent rows and their approval keys stay in the Host ledger until the Host
+selects them. After the Host acknowledges a readback, pass its intent ID to the same explicit
+compaction call:
+
+```ts
+ledger.compact({
+  acknowledgedIntentKeys: [],
+  acknowledgedMemoryIntentIds: [intentId],
+  now: Date.now(), tombstoneRetentionMs: 30 * 24 * 60 * 60 * 1000,
+});
+```
+
+Only rows with a terminal readback qualify. A pending row, an unknown ID, or a row that a
+preparing or applying restore uses rejects the whole batch. Rows that are not selected do not
+change. The transaction moves each selected row and its approval key from the JSON body to the
+additive `host_retired_memory_intent` table. The row holds metadata and the readback, never memory
+content. The retired copy expires at the later of `now + tombstoneRetentionMs` and the approval's
+own `expiresAt`. The result counts removed rows in `memoryIntents`, a repeated ID inside the window
+in `alreadyCompactedMemoryIntents`, and deleted expired copies in `expiredTombstones`.
+
+Until the copy expires, `approve` with the same request and `approvalRef` returns the original
+row, and a changed request throws the existing identity conflict. Device `fetch` and `complete`
+replays get the stored terminal readback. `page.intent(intentId)` returns `undefined`, and
+`revoke(intentId)` throws because the intent is not found. After expiry, the next compaction
+deletes the copy. The same `approvalRef` is then a new request with a new `intentId`, and a
+device replay of the old intent fails as unknown. Set the retention to at least your approval
+replay and notice redelivery windows. The replay lookup reads `MemoryOptions.now`, which must
+return integer milliseconds, as `Date.now` does.
+A restore with the same `restoreId` still returns its stored result, because restore rows stay.
+
 ### Optional projection outbox capacity
 
 A Host can opt into backpressure without deleting undelivered projections:
@@ -487,6 +543,6 @@ a concurrent wake-dispatch failure is retained alongside the capacity error in
 `AggregateError.errors`. Flush acknowledged projections, then retry `drain()`.
 Outcome callbacks must remain synchronous, transaction-local and safe to retry.
 
-This option does not bound control outbox rows or compact memory approvals. Memory
-readback is not a client acknowledgement, and memory intent/approval retention
-still requires a separate explicit acknowledgement and replay contract (#602).
+This option does not bound control outbox rows or memory rows. Memory readback is
+not a client acknowledgement; [memory retention](#memory-retention) describes the
+explicit compaction of acknowledged memory intents.

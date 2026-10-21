@@ -476,6 +476,13 @@ Late old-task projections cannot clear the refresh marker. The core binds the ne
 submission to that marker before sending it to the SDK. Only its task-close projection
 can clear the marker. A valid pack is frozen with the execution input.
 
+Terminal memory intent rows and their approval keys stay in the Host ledger until the Host
+selects them with `acknowledgedMemoryIntentIds` in an explicit `HostLedger.compact` call.
+Pending rows and rows of an unfinished restore are refused. Compaction moves each row to an
+expiring retired copy outside the JSON body. Until the copy expires, an approval replay returns
+the original row and device replays get the stored readback. After that, the same approval
+reference is a new request. See [memory retention](../examples/host-execution-core/README.md#memory-retention).
+
 The example supplies copy-and-own Host functions. A downstream Host owns authenticated
 user and device routes, grant records, current placement, notice retry scheduling and UI.
 P5a does not add SDK wire fields or an edit-view profile. Synthetic Linux tests cover the
