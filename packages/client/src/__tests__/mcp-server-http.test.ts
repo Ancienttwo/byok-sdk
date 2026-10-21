@@ -499,3 +499,33 @@ it('stateless mode rejects malformed JSON and byte limits before invoking tools'
   expect(response.status).toBe(200);
   expect(callTool).not.toHaveBeenCalled();
 });
+
+it.each(['complete', 'cancel'])('retains a stateless progress core past response headers until %s', async action => {
+  let callSignal!: AbortSignal;
+  let finish!: () => void;
+  const mcp = createMcpHttpServer({ ...defaults, sessionMode: 'stateless', origin: 'http://localhost', callTool: call => {
+    callSignal = call.signal;
+    call.progress(1, 2, 'working');
+    return new Promise(resolve => { finish = () => resolve({ content: [] }); });
+  } });
+  try {
+    const response = await mcp.fetch(new Request('http://localhost/mcp', { method: 'POST', headers: {
+      'content-type': 'application/json', accept: 'application/json, text/event-stream', 'mcp-protocol-version': '2025-11-25',
+    }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'echo', _meta: { progressToken: 'one' } } }) }));
+    expect(response.headers.get('content-type')).toBe('text/event-stream');
+    expect(response.headers.has('mcp-session-id')).toBe(false);
+    // Same request-scoped ownership pattern as the Workers-style docs example.
+    if (response.headers.get('content-type') !== 'text/event-stream') mcp.close();
+    await vi.waitFor(() => expect(callSignal).toBeDefined());
+    expect(callSignal.aborted).toBe(false);
+    if (action === 'cancel') {
+      await response.body!.cancel();
+      expect(callSignal.aborted).toBe(true);
+    } else {
+      finish();
+      const frames = await response.text();
+      expect(frames).toContain('"method":"notifications/progress"');
+      expect(frames).toContain('"id":1,"result":{"content":[]}');
+    }
+  } finally { finish?.(); mcp.close(); }
+});

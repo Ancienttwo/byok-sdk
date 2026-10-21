@@ -34,7 +34,8 @@ Mount only the intended endpoint. Bind local listeners to loopback.
 
 Set `sessionMode: 'stateless'` when each request may reach a different instance.
 The default remains `stateful`. No session ID is issued or retained in stateless
-mode; each POST uses and releases its own tools-only core. For a Workers-style
+mode; each POST uses its own tools-only core. A call with `_meta.progressToken`
+keeps that core until completion, cancellation, queue overflow or Host close. For a Workers-style
 Host, authenticate every request before constructing caller-scoped options:
 
 ```ts
@@ -49,8 +50,11 @@ export default {
       tools: toolsForCaller(caller),
       callTool: call => callToolForCaller(caller, call),
     });
-    try { return await mcp.fetch(request); }
-    finally { mcp.close(); }
+    const response = await mcp.fetch(request);
+    // A progress response resolves at headers; closing here would abort the call.
+    // The transport releases its request-scoped core when the stream finishes.
+    if (response.headers.get('content-type') !== 'text/event-stream') mcp.close();
+    return response;
   },
 };
 ```
@@ -67,11 +71,14 @@ Unsupported versions, malformed JSON/envelopes and invalid Origins remain
 rejected before tool dispatch. Supplying a session ID returns 400. GET and
 DELETE return 405. `toolsListChanged` is rejected at construction. Ordinary
 notifications return 202; cross-request cancellation notifications return 400,
-since no request registry is shared between calls or instances. A disconnected
-HTTP client does not cancel its call. Host shutdown still aborts active calls.
+since no request registry is shared between calls or instances. Disconnecting an
+ordinary JSON response does not cancel its call. A `tools/call` carrying a valid
+`_meta.progressToken` returns progress and its final result on that POST
+`text/event-stream` response. Cancelling this progress stream aborts only its call;
+queue overflow and Host close also abort it. Host shutdown still aborts active calls.
 
 There is no session expiry, DELETE-based invalidation, replay/id deduplication
-across requests, SSE or external session store in this mode. Request IDs may
+across requests, GET SSE or external session store in this mode. Request IDs may
 repeat on separate POSTs. `maxSessions`/`idleTimeoutMs` affect only stateful mode;
 body, pending-call and running-tool bounds remain per instance. A Host creating
 an instance per request must enforce its own aggregate concurrency limits.

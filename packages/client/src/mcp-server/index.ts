@@ -386,8 +386,9 @@ export function serveMcpOverStdio(options: McpServerOptions): McpServerHandle {
 
   function handleToolsList(id: McpServerRequestId): void {
     const tools = options.tools.map(tool => ({
-      name: tool.name, inputSchema: tool.inputSchema,
+      name: tool.name,
       ...(tool.description === undefined ? {} : { description: tool.description }),
+      inputSchema: tool.inputSchema,
       ...(tool.title === undefined ? {} : { title: tool.title }),
       ...(tool.annotations === undefined ? {} : { annotations: tool.annotations }),
       ...(tool.outputSchema === undefined ? {} : { outputSchema: tool.outputSchema }),
