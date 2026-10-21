@@ -5,6 +5,16 @@
 
 ## Unreleased
 
+- **Feature (server, client)** — complete #613 with opt-in CORS for loopback
+  browser MCP clients. `listenLoopback({ allowedOrigins })` admits exact
+  loopback origins, answers their preflight without dispatch and adds
+  `Access-Control-Allow-Origin`, `Vary` and `Expose-Headers: Mcp-Session-Id`.
+  It never allows credentials, and Cookie stays refused.
+  `createMcpHttpServer({ allowedOrigins })` accepts the same origins in its
+  Origin check. Without the options, behavior is unchanged. These are additive
+  public APIs. The pre-1.0 policy puts them in a MINOR release; the owner
+  decides the version for this batch.
+
 - **Feature (client)** — add a pinned Windows x64 native asset copier, distribution
   metadata and per-adapter asset roots for relocated runtime process ownership (#627).
   Darwin copying reuses the existing memory-helper API; Windows memory is unchanged.

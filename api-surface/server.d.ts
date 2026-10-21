@@ -241,6 +241,11 @@ export interface LoopbackListenerOptions {
     };
     /** Maximum actual request bytes, including chunked uploads. Default 2 MiB. */
     maxBodyBytes?: number;
+    /**
+     * Exact loopback browser origins (http or https; localhost, 127.0.0.1 or [::1]) admitted with CORS.
+     * Default none: every Origin is refused. Never grants credentials; Cookie stays refused.
+     */
+    allowedOrigins?: readonly string[];
     signal?: AbortSignal;
 }
 export interface LoopbackListener {
