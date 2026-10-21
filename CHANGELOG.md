@@ -6,6 +6,35 @@
   metadata and per-adapter asset roots for relocated runtime process ownership (#627).
   Darwin copying reuses the existing memory-helper API; Windows memory is unchanged.
 
+## 0.28.1 / @byok-sdk/keys 0.13.1 — source candidate
+
+The owner selected 0.28.1 as a one-release exception to the default pre-1.0
+MINOR policy for additive changes. This candidate is not published. See the
+[release notes](docs/releases/v0.28.1.md) for scope and outstanding qualification.
+The eight aligned manifests and lock records move to 0.28.1; keys moves to
+0.13.1 with an exact packed core edge of 0.28.1.
+
+- **Fixed (client)** — isolate concurrent Hermes root configuration writes
+  (#599); preserve required closing replies when normal completion lacks a
+  usable result outcome, while retaining task failure, no result document and
+  cancellation precedence (#642 candidate).
+- **Fixed (examples)** — retire all affected routines before awaiting wake
+  cancellation (#601). Add explicit transactional compaction of acknowledged
+  settled Host history, retaining unsettled work, unacknowledged outbox entries
+  and retired intent identities (#623 candidate); no automatic deletion or
+  total-database size bound.
+- **Fixed (client)** — route the canonical Agent persona into fresh Grok
+  sessions without expanding folder trust (#643 candidate). Persona-bearing
+  resumes fail before spawn; live Grok qualification remains outstanding.
+- **Feature (server, client)** — expose embedded memory-intent notices (#616),
+  verified relocated memory-helper assets (#617), stateless tools-only MCP HTTP
+  (#621) and an identity-stable native loopback listener (#638). Additive public
+  APIs remain subject to the next-MINOR rule.
+- **Changed (examples, validation)** — add ignored routine-wake audit records
+  (#620), Host-declared read-only Bot toolsets (#622), Windows K4 non-memory CI
+  (#619) and the per-runtime result measurement method (#615). These slices do
+  not complete their remaining issue scope or admit Windows memory operations.
+
 - **Feature (client)** — add `DaemonConfig.agentMemoryMcp: 'auto' | 'off'` to
   disable SDK task memory tools while retaining Agent homes. The default is
   unchanged; prepared memory requests fail closed when disabled. This is the

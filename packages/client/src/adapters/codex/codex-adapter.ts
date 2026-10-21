@@ -38,6 +38,8 @@ import { isQualifiedCodexVersion, QUALIFIED_CODEX_VERSION } from './codex-versio
 
 const execFileAsync = promisify(execFile);
 const DETECT_TIMEOUT_MS = 5000;
+const DEFAULT_RETAINED_BYTES = 16 * 1024 * 1024;
+const DEFAULT_OPERATION_MS = 30_000;
 /** A Codex `sandbox_mode`, or `inherit` to pass no override so the user's `config.toml` applies. */
 export type CodexSandboxSetting = 'read-only' | 'workspace-write' | 'danger-full-access' | 'inherit';
 const CODEX_SANDBOX_SETTINGS: readonly string[] = ['read-only', 'workspace-write', 'danger-full-access', 'inherit'];
@@ -62,6 +64,11 @@ export interface CodexAdapterOptions {
   spawnFn?: typeof nodeSpawn;
   maxRetainedBytes?: number;
   interruptTimeoutMs?: number;
+  /**
+   * Deadline in milliseconds for the session open, each prompt and each steer.
+   * Default 30000. On expiry the session fails and the app-server is killed.
+   */
+  operationTimeoutMs?: number;
   /** Opt-in local Host UI; independent of the remote boolean approval lane. */
   nativeInteractions?: NativeInteractionHostOptions;
 }
@@ -94,8 +101,8 @@ export class CodexAdapter implements RuntimeAdapter {
     if (options.sandbox !== undefined) assertCodexSandboxSetting(options.sandbox, 'CodexAdapterOptions.sandbox');
     this.options = { ...options, ...(options.nativeInteractions === undefined ? {} : { nativeInteractions: snapshotNativeInteractionHostOptions(options.nativeInteractions) }) };
     if (
-      !Number.isSafeInteger(options.maxRetainedBytes ?? 16 * 1024 * 1024) ||
-      (options.maxRetainedBytes ?? 16 * 1024 * 1024) < 1
+      !Number.isSafeInteger(options.maxRetainedBytes ?? DEFAULT_RETAINED_BYTES) ||
+      (options.maxRetainedBytes ?? DEFAULT_RETAINED_BYTES) < 1
     )
       throw new TypeError('invalid Codex retention budget');
     if (
@@ -104,6 +111,12 @@ export class CodexAdapter implements RuntimeAdapter {
       (options.interruptTimeoutMs ?? 1000) > 2_147_483_647
     )
       throw new TypeError('invalid Codex interrupt timeout');
+    if (
+      !Number.isFinite(options.operationTimeoutMs ?? DEFAULT_OPERATION_MS) ||
+      (options.operationTimeoutMs ?? DEFAULT_OPERATION_MS) <= 0 ||
+      (options.operationTimeoutMs ?? DEFAULT_OPERATION_MS) > 2_147_483_647
+    )
+      throw new TypeError('invalid Codex operation timeout');
   }
   async detect(): Promise<RuntimeDetectResult> {
     try {
@@ -196,12 +209,15 @@ export class CodexAdapter implements RuntimeAdapter {
       workspace,
       model,
       this.options.interruptTimeoutMs ?? 1000,
+      this.options.operationTimeoutMs ?? DEFAULT_OPERATION_MS,
+      this.options.maxRetainedBytes ?? DEFAULT_RETAINED_BYTES,
       input.manifest.sessionRef === undefined,
       this.options.nativeInteractions,
       input.manifest.sessionRef,
     );
     try {
-      const raw = await codexSession(
+      // The open deadline covers spawn, initialize, the thread open and its read-back.
+      const raw = await session.within('open', retryable, codexSession(
         (bin, args, options) => {
           const child = spawned(bin, args, options);
           session.own(child);
@@ -209,7 +225,7 @@ export class CodexAdapter implements RuntimeAdapter {
             () => session.exited(),
             (error) => session.fail(error),
           );
-          return child;
+          return session.gate(child);
         },
         { kind: 'available', via: 'executable', command },
         {
@@ -226,19 +242,12 @@ export class CodexAdapter implements RuntimeAdapter {
         },
         1000,
         {
-          maxBytes: this.options.maxRetainedBytes ?? 16 * 1024 * 1024,
           onReady: (id) => session.ready(id),
           ...(this.options.nativeInteractions === undefined ? {} : { onServerRequest: session.serverRequest.bind(session) }),
+          // A kernel observer: the kernel swallows its errors, so record() fails the session itself.
           onRecord: (record) => session.record(record),
-          onLimit: () => {
-            const error = infrastructure(
-              'codex retained record byte budget exceeded',
-            );
-            session.fail(error);
-            throw error;
-          },
         },
-      );
+      ));
       session.bind(raw);
       if (
         input.manifest.sessionRef !== undefined &&
@@ -249,7 +258,7 @@ export class CodexAdapter implements RuntimeAdapter {
         throw infrastructure('codex start was aborted');
       await session.prompt(input.instruction);
       return session;
-    } catch (error) {
+    } catch (thrown) {
       try {
         await session.close();
       } catch (disposal) {
@@ -257,6 +266,8 @@ export class CodexAdapter implements RuntimeAdapter {
           cause: disposal,
         });
       }
+      // A failed record stream is the cause; the open or prompt error is its consequence.
+      const error = session.halted ?? thrown;
       // A resume of a missing thread cannot succeed on retry: fail closed.
       if (error instanceof SessionNotFoundError)
         throw new RuntimeExecutionFailure({
@@ -290,6 +301,14 @@ const infrastructure = (reason: string) =>
     retry: 'non-retryable',
     reason,
   });
+/** An open that timed out may succeed on a fresh app-server, as before the deadline moved here. */
+const retryable = (reason: string) =>
+  new RuntimeExecutionFailure({
+    phase: 'start',
+    category: 'infrastructure',
+    retry: 'retryable',
+    reason,
+  });
 class CodexSession implements Session {
   sessionRef = '';
   private raw?: RawCodexSession;
@@ -302,6 +321,9 @@ class CodexSession implements Session {
   private readonly interruptWaiters = new Set<() => void>();
   private stopping = false;
   private closeAttempt?: Promise<void>;
+  private retainedBytes = 0;
+  /** Set when the record consumer failed: no later line reaches the client, so the kernel retains no more of them. */
+  halted?: RuntimeExecutionFailure;
   private readonly native?: CodexNativeInteractions;
   declare readonly interactions?: NativeInteractionChannel;
   constructor(
@@ -309,6 +331,8 @@ class CodexSession implements Session {
     private readonly workspace: string,
     private readonly model: string | undefined,
     private readonly interruptMs: number,
+    private readonly operationMs: number,
+    private readonly maxRetainedBytes: number,
     private readonly fresh: boolean,
     interactions?: NativeInteractionHostOptions,
     private readonly expectedSessionRef?: string,
@@ -324,6 +348,37 @@ class CodexSession implements Session {
   own(child: { dispose(): Promise<void>; kill(): void }): void {
     this.child = child;
   }
+  /** The app-server's lines stop at the transport once the record stream halted. */
+  gate<T extends { onLine(handler: (line: string) => void): void }>(child: T): T {
+    return {
+      ...child,
+      onLine: (handler: (line: string) => void) => child.onLine((line) => {
+        if (this.halted === undefined) handler(line);
+      }),
+    };
+  }
+  /** Fails the session and kills the app-server when `work` outlives the operation deadline. */
+  async within<T>(
+    operation: string,
+    failure: (reason: string) => RuntimeExecutionFailure,
+    work: Promise<T>,
+  ): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        work,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            const error = failure(`codex ${operation} timed out after ${this.operationMs}ms`);
+            this.fail(error);
+            reject(error);
+          }, this.operationMs);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
   ready(id: string): void {
     if (this.expectedSessionRef !== undefined && id !== this.expectedSessionRef) throw authority('codex resume returned a different thread id');
     this.sessionRef = id;
@@ -333,7 +388,12 @@ class CodexSession implements Session {
     this.raw = raw;
   }
   record(record: CodexRecord): void {
+    if (this.halted !== undefined) return;
     try {
+      // The observer receives the redacted, retained record: measure what the kernel keeps.
+      this.retainedBytes += Buffer.byteLength(JSON.stringify(record), 'utf8');
+      if (this.retainedBytes > this.maxRetainedBytes)
+        throw infrastructure('codex retained record byte budget exceeded');
       const nativeFrame = record.body as { origin?: string; type?: string; native?: Record<string, unknown> };
       if (record.kind === 'frame' && nativeFrame.origin === 'byok-native' && nativeFrame.type && nativeFrame.native) this.native?.notification(nativeFrame.type, nativeFrame.native);
       this.projection?.consume(this.stream, record, (event) =>
@@ -368,6 +428,7 @@ class CodexSession implements Session {
       }
     } catch (error) {
       this.fail(error);
+      this.halted = this.failure;
       throw error;
     }
   }
@@ -403,7 +464,7 @@ class CodexSession implements Session {
     this.active = true;
     this.native?.beginTurn();
     try {
-      const result = await this.raw.prompt(input);
+      const result = await this.within('prompt', infrastructure, this.raw.prompt(input));
       if (result.response.body.kind !== 'accepted') throw infrastructure(result.response.body.reason ?? 'codex prompt refused');
     } catch (error) {
       this.active = false;
@@ -422,7 +483,7 @@ class CodexSession implements Session {
     await this.prompt(task.instruction);
   }
   async steer(text: string): Promise<void> {
-    const result = await this.raw?.steer(text);
+    const result = this.raw === undefined ? undefined : await this.within('steer', infrastructure, this.raw.steer(text));
     if (result?.response.body.kind !== 'accepted')
       throw infrastructure(
         result?.response.body.reason ?? 'codex steer refused',

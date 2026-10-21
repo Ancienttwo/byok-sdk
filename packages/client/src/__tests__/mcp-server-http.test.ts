@@ -353,3 +353,85 @@ describe('HTTP admission, bounds and cleanup', () => {
     expect((await pending).status).toBe(503); expect(cancelled).toBe(true);
   });
 });
+
+
+describe('HTTP request-scoped tools mode', () => {
+  it('keeps default sessions local to their owning instance', async () => {
+    const a = await host(); const b = await host();
+    const session = await initialize(a);
+    expect((await post(b, { jsonrpc: '2.0', id: 1, method: 'tools/list' }, session)).status).toBe(404);
+  });
+
+  it('initializes on A and lists/calls on B without session affinity', async () => {
+    const mode = { sessionMode: 'stateless' } as const;
+    const a = await host(mode); const b = await host(mode);
+    const initial = await post(a, { jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2025-11-25' } });
+    expect(initial.status).toBe(200);
+    expect(initial.headers.get('mcp-session-id')).toBeNull();
+    const headers = { 'mcp-protocol-version': '2025-11-25' };
+    const listed = await post(b, { jsonrpc: '2.0', id: 1, method: 'tools/list' }, undefined, headers);
+    expect(listed.status).toBe(200);
+    expect(await listed.json()).toMatchObject({ result: { tools: [tool] } });
+    const call = await post(b, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'echo', arguments: { fresh: true } } }, undefined, headers);
+    expect(call.status).toBe(200);
+    expect(call.headers.get('mcp-session-id')).toBeNull();
+    expect(await call.json()).toMatchObject({ result: { content: [{ text: '{"fresh":true}' }] } });
+  });
+});
+
+describe('stateless HTTP validation and lifecycle', () => {
+  it.each(['2025-11-25', '2025-06-18'])('works with the standard client using %s', async version => {
+    const server = await host({ sessionMode: 'stateless' });
+    const { peer, transport, errors } = await client(server, version);
+    expect(transport.sessionId).toBeUndefined();
+    expect((await peer.listTools()).tools).toEqual([tool]);
+    expect(await peer.callTool({ name: 'echo' })).toEqual({ content: [{ type: 'text', text: '{}' }] });
+    expect(errors).toEqual([]);
+  });
+
+  it('requires validated protocol/origin/envelopes and rejects session-only features', async () => {
+    const callTool = vi.fn(defaults.callTool);
+    const server = await host({ sessionMode: 'stateless', callTool });
+    const message = { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'echo' } };
+    const headers = { 'mcp-protocol-version': '2025-11-25' };
+    expect((await post(server, message)).status).toBe(400);
+    expect((await post(server, message, undefined, { 'mcp-protocol-version': '2025-03-26' })).status).toBe(400);
+    expect((await post(server, message, undefined, { ...headers, origin: 'https://evil.example' })).status).toBe(403);
+    expect((await post(server, message, 'untrusted', headers)).status).toBe(400);
+    expect((await post(server, [message], undefined, headers)).status).toBe(400);
+    expect((await post(server, { jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 1 } }, undefined, headers)).status).toBe(400);
+    for (const method of ['GET', 'DELETE', 'PUT']) {
+      const rejected = await fetch(server.url, { method });
+      expect(rejected.status).toBe(405);
+      expect(rejected.headers.get('allow')).toBe('POST');
+    }
+    expect(callTool).not.toHaveBeenCalled();
+    expect(() => createMcpHttpServer({ ...defaults, origin: server.origin, sessionMode: 'stateless', toolsListChanged: { onToolsListChanged: () => () => {} } })).toThrow('toolsListChanged');
+  });
+
+  it('does not retain request ids, respects bounds and aborts active calls on close', async () => {
+    const entered = deferred<AbortSignal>(); const release = deferred<Record<string, unknown>>();
+    const server = await host({ sessionMode: 'stateless', maxInFlight: 1,
+      callTool: async call => { entered.resolve(call.signal); return release.promise; } });
+    const headers = { 'mcp-protocol-version': '2025-11-25' };
+    const pending = post(server, { jsonrpc: '2.0', id: '__http_initialize', method: 'tools/call', params: { name: 'echo' } }, undefined, headers);
+    const signal = await entered.promise;
+    expect((await post(server, { jsonrpc: '2.0', id: 2, method: 'tools/list' }, undefined, headers)).status).toBe(503);
+    server.mcp.close();
+    expect((await pending).status).toBe(503);
+    expect(signal.aborted).toBe(true);
+    release.resolve({});
+  });
+});
+
+it('stateless mode rejects malformed JSON and byte limits before invoking tools', async () => {
+  const callTool = vi.fn(defaults.callTool);
+  const server = await host({ sessionMode: 'stateless', maxBodyBytes: 128, callTool });
+  const headers = { accept: 'application/json, text/event-stream', 'content-type': 'application/json', 'mcp-protocol-version': '2025-11-25' };
+  expect((await fetch(server.url, { method: 'POST', headers, body: '{' })).status).toBe(400);
+  expect((await fetch(server.url, { method: 'POST', headers, body: ' '.repeat(129) })).status).toBe(413);
+  // Trusted internal negotiation must not prevent a valid small external frame.
+  const response = await post(server, { jsonrpc: '2.0', id: '__http_initialize_2', method: 'tools/list' }, undefined, headers);
+  expect(response.status).toBe(200);
+  expect(callTool).not.toHaveBeenCalled();
+});

@@ -325,8 +325,10 @@ describe('submit_result with a required Agent message (R10)', () => {
     expect(done.payload).toMatchObject({ document: { verdict: 'pass', score: 8 } });
   });
 
-  it('a message-required task without a staged result still fails result_not_submitted', async () => {
+  it('a message-required task without a staged result accepts its reply before failing result_not_submitted', async () => {
+    const recordFailure = vi.fn<NonNullable<TaskRunnerDeps['recordResultReplyFailure']>>(async () => {});
     const { adapter, runner, sent } = await harness({
+      recordResultReplyFailure: recordFailure,
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
       agentMessageMcpPreflight: async () => {},
@@ -339,7 +341,20 @@ describe('submit_result with a required Agent message (R10)', () => {
     }, { taskId, seq: 1 }));
     adapter.sessions[0]!.emit({ type: 'progress', text: 'reply text' });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(sent.some(e => e.type === 'agent.message.publish')).toBe(true));
+    expect(recordFailure).toHaveBeenCalledWith(taskId, 'required-reply-result-missing');
+    expect(terminal(sent, taskId)).toBeUndefined();
+    const message = sent.find(e => e.type === 'agent.message.publish');
+    if (message?.type !== 'agent.message.publish') throw new Error('missing message publish');
+    expect(message.payload.body).toBe('reply text');
+    await runner.handleEnvelope(createEnvelope('agent.message.disposition', {
+      agentRef: AGENT_REF, sessionRef: message.payload.sessionRef, contract: message.payload.contract,
+      messageId: message.payload.messageId, cursor: message.payload.cursor, contentHash: message.payload.contentHash,
+      outcome: 'accepted', receiptId: '10000000-0000-4000-8000-000000000010',
+    }, { taskId, seq: 2 }));
     const failure = await waitForTerminal(sent, taskId);
     expect(failure).toMatchObject({ type: 'task.fail', payload: { retryable: false, reason: expect.stringContaining(RESULT_NOT_SUBMITTED_REASON_PREFIX) } });
+    expect(failure.payload).not.toHaveProperty('document');
+    expect(sent.filter(e => e.type === 'agent.message.publish')).toHaveLength(1);
   });
 });

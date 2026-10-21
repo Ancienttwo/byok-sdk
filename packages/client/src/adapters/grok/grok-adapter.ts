@@ -24,6 +24,7 @@ import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process';
 import type { AcpRecord, RawAcpSession } from '../../runtime/acp-session-runtime';
 import { AsyncQueue } from '../../util/async-queue';
 import type { ResolvedBin } from '../codex/resolve-bin';
+import { grokAgentPersona } from './agent-persona';
 import { GrokProjection, type GrokTurnOutcome } from './projection';
 import { resolveGrokBin } from './resolve-bin';
 import { isQualifiedGrokVersion, QUALIFIED_GROK_VERSION } from './grok-version';
@@ -125,51 +126,56 @@ export class GrokAdapter implements RuntimeAdapter {
       throw authority('prepared grok operation received a manifest with a dispatch selection');
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('grok manifest has no sealed cwd');
+    const persona = await grokAgentPersona(input.manifest);
     // As OAR: the servers go in the ACP mcpServers of session/new or session/resume.
     const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
     const spawnAgent = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'grok agent' });
     const spawnTerminal = createOwnedTerminalSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn });
     // The ACP stack and its protocol SDK load only when a Grok session starts.
     const acp = await import('#byok-acp-runtime');
-    const session = new GrokSession(input.scratch, this.options.model, this.options.interruptTimeoutMs ?? DEFAULT_INTERRUPT_MS, input.manifest.sessionRef);
+    const session = new GrokSession(
+      input.scratch,
+      this.options.model,
+      this.options.interruptTimeoutMs ?? DEFAULT_INTERRUPT_MS,
+      this.options.maxRetainedBytes ?? DEFAULT_RETAINED_BYTES,
+      input.manifest.sessionRef,
+    );
     try {
       const raw = await acp.grokSession(
         (bin, args, options) => {
           const child = spawnAgent(bin, args, options);
           session.own(child);
           void child.exited.then(() => session.exited(), (error) => session.fail(error));
-          return child;
+          return session.gate(child);
         },
         spawnTerminal,
         { kind: 'available', via: 'executable', command },
         {
           cwd,
+          ...(persona === undefined ? {} : { appendSystemPrompt: persona }),
           env: { ...input.env, ...input.scratch.env } as Record<string, string>,
           ...(this.options.model === undefined ? {} : { model: this.options.model }),
           ...(mcpServers.length === 0 ? {} : { mcpServers }),
           ...(input.manifest.sessionRef === undefined ? {} : { resume: input.manifest.sessionRef }),
         },
         {
-          maxBytes: this.options.maxRetainedBytes ?? DEFAULT_RETAINED_BYTES,
           onReady: (id) => session.ready(id),
+          // A kernel observer: the kernel swallows its errors, so record() fails the session itself.
           onRecord: (record) => session.record(record),
-          onLimit: () => {
-            const error = infrastructure('grok retained record byte budget exceeded');
-            session.fail(error);
-            throw error;
-          },
         },
       );
       session.bind(raw);
       if (input.signal?.aborted) throw infrastructure('grok start was aborted');
       await session.prompt(input.instruction);
       return session;
-    } catch (error) {
+    } catch (thrown) {
       try {
         await session.close();
       } catch (disposal) {
         throw new RuntimeStartupDisposalFailure(() => session.close(), { cause: disposal });
       }
+      // A failed record stream is the cause; the open or prompt error is its consequence.
+      const error = session.halted ?? thrown;
       // A missing session, a refused login or a refused model cannot succeed on retry: fail closed.
       if (error instanceof acp.SessionNotFoundError || error instanceof acp.RuntimeFailureError)
         throw new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason: error.message });
@@ -206,16 +212,29 @@ class GrokSession implements Session {
   private readonly interruptWaiters = new Set<() => void>();
   private stopping = false;
   private closeAttempt?: Promise<void>;
+  private retainedBytes = 0;
+  /** Set when the record consumer failed: no later line reaches the ACP stream, so the kernel retains no more of them. */
+  halted?: RuntimeExecutionFailure;
 
   constructor(
     private readonly scratch: ExecutionScratch,
     private readonly model: string | undefined,
     private readonly interruptMs: number,
+    private readonly maxRetainedBytes: number,
     private readonly expectedSessionRef?: string,
   ) {}
 
   own(child: { dispose(): Promise<void>; kill(): void }): void {
     this.child = child;
+  }
+  /** The agent's lines stop at the transport once the record stream halted. */
+  gate<T extends { onLine(handler: (line: string) => void): void }>(child: T): T {
+    return {
+      ...child,
+      onLine: (handler: (line: string) => void) => child.onLine((line) => {
+        if (this.halted === undefined) handler(line);
+      }),
+    };
   }
   ready(id: string): void {
     if (this.expectedSessionRef !== undefined && id !== this.expectedSessionRef) throw authority('grok resume returned a different session id');
@@ -226,10 +245,16 @@ class GrokSession implements Session {
     this.raw = raw;
   }
   record(record: AcpRecord): void {
+    if (this.halted !== undefined) return;
     try {
+      // The observer receives the redacted, retained record: measure what the kernel keeps.
+      this.retainedBytes += Buffer.byteLength(JSON.stringify(record), 'utf8');
+      if (this.retainedBytes > this.maxRetainedBytes)
+        throw infrastructure('grok retained record byte budget exceeded');
       this.projection?.consume(record, (event) => this.queue.push(event), (turn) => this.turnEnded(turn));
     } catch (error) {
       this.fail(error);
+      this.halted = this.failure;
       throw error;
     }
   }

@@ -20,6 +20,8 @@ A retry can create another execution for the same occurrence, after eligible ter
 
 Topology L has an embedded server and daemon on the device. Use SQLite for durable wakes.
 Memory storage loses its wakes at exit. The daemon runs with the user's local credentials.
+Use the server package's [identity-stable loopback listener](../packages/server/README.md#identity-stable-loopback-listener)
+with an immutable Host-owned port assignment to preserve the daemon's cursor URL across restarts.
 Topology H has no device-local Host. Its service schedules calls to the Cloud fresh-execution API.
 The embedded wake queue is not a hosted scheduler.
 Neither topology runs BYOK work in the cloud or keeps the user's model keys there.
@@ -53,7 +55,10 @@ await core.recover();
 ```
 
 `enqueue` takes a stable intent key, source, complete execution template, waiting deadline and retry policy.
-`addRoutine` takes an immutable definition mirror.
+`addRoutine` takes an immutable definition mirror. It can select `hostJob` instead of
+`execution` for deterministic Host work. Registered handlers return a persisted summary
+and may explicitly request an Agent intent. See [Host job registration, failure and replay
+semantics](../examples/host-execution-core/README.md#host-jobs-and-execution-free-occurrences).
 An execution has an explicit runtime, AgentRef, egress policy and terminal projection.
 Freeze all input context, including any selected server-held message context.
 The core assigns taskId. It never adds SessionRef or changes execution mode.
