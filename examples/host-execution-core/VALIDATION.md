@@ -1115,3 +1115,43 @@ Host execution: 65 passed, 6 Linux-only tests skipped. No test failure required
 repair. Optional substrate and platform tests remain skipped. Logs and results
 stay in ignored local state under `_ops/wo11/wo12-merge-*`.
 The PR stays draft. The coordinator owns readiness, CI acceptance and merge.
+
+## Issue #630: terminal hints and committed outbox notifications
+
+Baseline: `b86f8ec1b6bb61bb07a4cd7890efbb115379ac99`.
+The new terminal-notification regression fails on that exact source (30-second
+test timeout) with `reconcileMs: 60_000`. With the repair, real embedded SQLite
+server/daemon fixtures commit a terminal conclusion and call the Host outbox
+callback within 100 ms, with no pending `host-scan` wake. Fixtures use the fake
+runtime and make no model-provider calls.
+
+`event-wake-count.test.ts` measures 1,000 submitted, unsettled intents per mode
+against the real embedded SDK wake store: event-disabled durable reconciliation
+creates **1,000** initial scan wake records; current-process event reconciliation
+creates **0**. Each intent has its own small Host ledger/core; the daemon remains
+offline. This isolates initial scan scheduling, not completion throughput,
+whole-lifetime wake counts, fsync counts, or production capacity. Local polling
+still runs at the unchanged reconciliation interval to recover dropped hints.
+Recovered/uncertain tasks retain durable scans.
+
+Coverage includes post-COMMIT visibility, rollback and duplicate suppression,
+reentrant enqueue/flush, callback failure retention and recovery, lost event hints,
+restart fallback, cancellable idle subscriptions, shutdown suppression, external
+close joining an aborted callback, and callback-initiated close without deadlock.
+An initial implementation reacted to running-state hints and changed a deadline
+claim race. Restricting hints to terminal states restored the existing assertion;
+no existing test assertion was weakened.
+
+Final local checks: `bun run build`, `bun run typecheck`,
+`bun run check:api-surface`, `bun run check:version-authority` and
+`git diff --check` passed. The affected Host files (`events`, `core`,
+`crash-recovery`, `scheduling-recovery`, `event-wake-count`) passed 36/36 tests;
+the server event-queue suite passed 4/4. An earlier combined run passed 35 tests
+and failed waiting five seconds for the first fake daemon session, before the
+terminal timing assertion. The isolated event suite passed 9/9, and the unchanged
+combined rerun passed 36/36. This is an observed intermittent readiness failure;
+resource contention has not been established as its cause. No timeout or
+assertion was relaxed. Full monorepo test execution and cross-platform CI remain
+the coordinator's gates;
+local checks use macOS Node 24.18.0 / Bun 1.4.3. No retention interval or public
+version authority is changed.

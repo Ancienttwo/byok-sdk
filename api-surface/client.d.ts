@@ -458,6 +458,8 @@ export declare class GrokAdapter implements RuntimeAdapter {
     private start;
 }
 // ==== @byok-sdk/client dist/adapters/hermes/hermes-adapter.d.ts ====
+import { type HermesByokLauncher } from './hermes-custody';
+export type { HermesByokLauncher } from './hermes-custody';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult } from '../../types';
 import type { ResolvedBin } from '../codex/resolve-bin';
@@ -484,6 +486,8 @@ export interface HermesAdapterOptions {
     home: string;
     /** Provider and model for every execution. Absent: Hermes picks a provider from the credentials in the environment. */
     model?: HermesModelSelection;
+    /** Optional separate-process credential custody. Mutually exclusive with model; local Host profile selection never enters dispatchSelection. */
+    byokLauncher?: HermesByokLauncher;
     resolveBin?: () => ResolvedBin;
     spawnFn?: typeof nodeSpawn;
     /** Deadline of the `detect()` ACP probe. Covers a first environment build in a new root. Default 180 s. */
@@ -524,6 +528,33 @@ export declare class HermesAdapter implements RuntimeAdapter {
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
 }
+// ==== @byok-sdk/client dist/adapters/hermes/hermes-custody.d.ts ====
+import type { ProviderProfileBinding } from '@byok-sdk/protocol';
+import type { RuntimeAdapterPrepareInput } from '../../types';
+import type { HermesModelSelection } from './hermes-adapter';
+type SelectedProfile = Omit<ProviderProfileBinding, 'requiredCapabilities'> & {
+    readonly requiredCapabilities: readonly ProviderProfileBinding['requiredCapabilities'][number][];
+};
+export interface HermesByokLauncher {
+    /** Dedicated Host executable running keys.runHermesProviderLauncher; not the Hermes executable. */
+    readonly command: string;
+    readonly args?: readonly string[];
+    readonly profileDbPath: string;
+    /** Host local authority, called before claim. Returns exact non-secret binding, never a credential. */
+    readonly selectProfile: (offer: RuntimeAdapterPrepareInput['offer']) => SelectedProfile | Promise<SelectedProfile>;
+}
+export interface PreparedHermesCustody {
+    binding: ProviderProfileBinding;
+    model: HermesModelSelection;
+}
+export declare function ownHermesLauncher(value: HermesByokLauncher): HermesByokLauncher;
+export declare function hermesCustodyArgs(launcher: HermesByokLauncher, binding: ProviderProfileBinding, launch?: {
+    hermesBin: string;
+    home: string;
+    role: 'gateway' | 'viewer';
+}): string[];
+export declare function prepareHermesCustody(launcher: HermesByokLauncher, offer: RuntimeAdapterPrepareInput['offer']): Promise<PreparedHermesCustody>;
+export {};
 // ==== @byok-sdk/client dist/adapters/index.d.ts ====
 export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, } from '../types';
 export { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
@@ -538,7 +569,7 @@ export type { CodexAdapterOptions, CodexSandboxSetting } from './codex/codex-ada
 export { GrokAdapter } from './grok/grok-adapter';
 export type { GrokAdapterOptions } from './grok/grok-adapter';
 export { HermesAdapter } from './hermes/hermes-adapter';
-export type { HermesAdapterOptions, HermesModelSelection } from './hermes/hermes-adapter';
+export type { HermesAdapterOptions, HermesModelSelection, HermesByokLauncher } from './hermes/hermes-adapter';
 export { NativeInteractionController, NativeInteractionError } from '../native-interactions';
 export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from '../native-interactions';
 export { buildRuntimeEnv } from '../daemon/environment';
@@ -6804,13 +6835,13 @@ export declare class JournalHandleCleanupError extends Error {
  */
 export declare function isSqliteCapableNodeVersion(nodeVersion: string): boolean;
 /**
- * Synchronously load `node:sqlite` via `createRequire` rather than a dynamic
+ * Synchronously load `node:sqlite` via `process.getBuiltinModule` rather than a dynamic
  * `import()`. `DatabaseSync`'s entire API is synchronous, and the journal is
  * constructed synchronously from `createDaemonWithAdapters` alongside every
  * other daemon-local store (`DeviceStore`, `CursorStore`, ...) — an async
  * factory here would leak into every one of those call sites for nothing.
- * `node:sqlite` is a built-in, so `require` resolves it even from this
- * `"type": "module"` package. Memoized: the throw is re-derived per call from
+ * The built-in lookup needs no file URL, including in CJS bundles and SEA
+ * executables. Memoized: the throw is re-derived per call from
  * the version check rather than cached, which keeps the failure message
  * accurate without keeping a rejected value around.
  */
@@ -10467,7 +10498,7 @@ export { ClaudeAdapter } from './adapters/claude/claude-adapter';
 export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter';
 export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from './adapters/codex/codex-adapter';
 export { GrokAdapter, type GrokAdapterOptions } from './adapters/grok/grok-adapter';
-export { HermesAdapter, type HermesAdapterOptions, type HermesModelSelection } from './adapters/hermes/hermes-adapter';
+export { HermesAdapter, type HermesAdapterOptions, type HermesModelSelection, type HermesByokLauncher } from './adapters/hermes/hermes-adapter';
 export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError } from './diagnostics/device-doctor';
 export type { DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus, RepairDeviceEnrollmentMetadataInput, DeviceMetadataRepairResult, DeviceMetadataRepairErrorCode, } from './diagnostics/device-doctor';
 export { quarantineDeviceOperationalHealth, exportDeviceSupportBundle, archiveAgentTerminalMessages, DeviceOperatorError } from './diagnostics/operator-actions';
@@ -12215,9 +12246,9 @@ export interface McpHttpServerOptions extends Omit<McpServerOptions, 'input' | '
     readonly origin: string;
     /** Positive integer, at most MCP_HTTP_MAX_BODY_BYTES. */
     readonly maxBodyBytes?: number;
-    /** Bounds idle sessions as well as emitter subscriptions. Default 64. */
+    /** Bounds idle sessions as well as emitter subscriptions. Default 64. Applies only in stateful mode. */
     readonly maxSessions?: number;
-    /** Idle lifetime without pending core replies. SSE alone does not keep a session alive. Default 15 minutes. */
+    /** Idle lifetime without pending core replies. SSE alone does not keep a session alive. Default 15 minutes. Applies only in stateful mode. */
     readonly idleTimeoutMs?: number;
 }
 export interface McpHttpServer {
@@ -12931,6 +12962,7 @@ export declare const sdkDistributionManifest: Readonly<{
     version: 1;
     piRuntimePin: string;
     reservedHelperKinds: readonly import("./sdk-reserved-helper-host").SdkReservedHelperKind[];
+    piSubagentHelperKinds: readonly ["pi-subagent-print", "pi-subagent-runner"];
     nativeTargets: Readonly<{
         'win32-x64': Readonly<{
             package: "@koromix/koffi-win32-x64";
@@ -12967,7 +12999,15 @@ export interface ResolvedSdkReservedHelperBin {
     readonly args: readonly string[];
     readonly source: 'dist-script' | 'self-executable';
 }
+/** With `sdkPiSubagentHelperKinds`, the exact kinds that `runSdkReservedHelperCommand` accepts. */
 export declare const sdkReservedHelperKinds: readonly SdkReservedHelperKind[];
+/**
+ * Kinds that only a Pi subagent child re-enters with (`subagents/spawn.ts`).
+ * They carry a tail argv and have no dist script, so `resolveSdkReservedHelperBin`
+ * does not launch them. A product entrypoint still routes them through
+ * {@link runSdkReservedHelperCommand}.
+ */
+export declare const sdkPiSubagentHelperKinds: readonly ["pi-subagent-print", "pi-subagent-runner"];
 /** SDK-owned launcher shape used by every reserved stdio helper. */
 export declare function resolveSdkReservedHelperBin(kind: SdkReservedHelperKind, host?: SdkHelperHostConfig): ResolvedSdkReservedHelperBin;
 /**

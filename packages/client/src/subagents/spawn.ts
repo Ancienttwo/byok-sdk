@@ -9,7 +9,8 @@ import { realpathSync, statSync } from 'node:fs';
  * or runner payload. Depth and running limits stay with the vendored subagents
  * extension (`PI_SUBAGENT_MAX_DEPTH` and its concurrency cap), as in OAR.
  */
-export type PiSubagentChild = 'pi-subagent-print' | 'pi-subagent-runner';
+export const piSubagentChildren = Object.freeze(['pi-subagent-print', 'pi-subagent-runner'] as const);
+export type PiSubagentChild = (typeof piSubagentChildren)[number];
 
 /** The same literal as `BYOK_SDK_HELPER_SUBCOMMAND`; this leaf module imports nothing from the helper host. */
 const HELPER_SUBCOMMAND = '__byok_sdk_helper';

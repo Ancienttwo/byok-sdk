@@ -12,9 +12,10 @@ Every PR path (including documentation, unknown paths, native helpers, schema,
 security and packaging) still runs the complete existing matrix. There is no
 impact selector or path-based skip in this change.
 
-The existing 13 job families and their commands/matrices remain unchanged.
-The new `CI required` aggregate runs with `always()` and succeeds only when all
-13 exact family results are `success`. Missing, unexpected, skipped, cancelled,
+The existing job families and their commands/matrices remain unchanged. The
+baseline had 13 families. The merged workflow has 14: those 13 plus
+`agent-memory-export-linux` (#625). The new `CI required` aggregate runs with
+`always()` and succeeds only when all 14 exact family results are `success`. Missing, unexpected, skipped, cancelled,
 failed or malformed results fail the aggregate. Matrix families retain their
 existing fail-fast settings and platform checks, including Windows SEA, native
 memory checks and credential isolation.
@@ -27,7 +28,7 @@ or claim merge enforcement. Read-only inspection returned no main protection
 and no repository rulesets at review time.
 
 Validation: nine Node contract tests pass without skips; YAML parses with the
-13 original families plus aggregate; git diff --check passes. The contract test
+14 families (13 original plus `agent-memory-export-linux`) plus aggregate; git diff --check passes. The contract test
 is included in test:scripts. No full workspace tests were repeated locally for
 this workflow-only change. Hosted validation will run with the parent's combined
 candidate, avoiding an extra full matrix for this branch.

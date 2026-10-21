@@ -1,7 +1,9 @@
 import { spawnSync } from 'node:child_process';
 import * as rpcHost from '#byok-pi-runtime-host';
 import * as preparedHost from '#byok-pi-runtime-host';
+import * as runners from '../bin/sdk-reserved-helper-runners';
 import { runSdkReservedHelper } from '../bin/sdk-reserved-helper-runners';
+import { sdkDistributionManifest } from '../sdk-native-assets';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -311,4 +313,29 @@ it('routes pi-subagent-print to the runtime-host print child with its tail argv 
   await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-subagent-print', ...tail])).resolves.toBe(true);
   expect(print).toHaveBeenCalledWith(tail);
   await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-subagent-print', ...tail])).rejects.toThrow('pi-subagent-print exited 2');
+});
+
+// The published manifest is the dispatcher's contract: every listed kind is
+// routed, and every other second argument is refused before any helper runs.
+it('accepts exactly the manifest helper kinds and rejects every other kind', async () => {
+  const runner = vi.spyOn(runners, 'runSdkReservedHelper').mockResolvedValue();
+  const subagentRunner = vi.spyOn(rpcHost, 'runSubagentRunner').mockResolvedValue();
+  const subagentPrint = vi.spyOn(rpcHost, 'runSubagentPrint').mockResolvedValue(0);
+  const { reservedHelperKinds, piSubagentHelperKinds } = sdkDistributionManifest;
+  expect(reservedHelperKinds.filter(kind => (piSubagentHelperKinds as readonly string[]).includes(kind))).toEqual([]);
+  for (const kind of reservedHelperKinds) {
+    await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, kind])).resolves.toBe(true);
+  }
+  expect(runner.mock.calls.map(([kind]) => kind)).toEqual([...reservedHelperKinds]);
+  for (const kind of piSubagentHelperKinds) {
+    await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, kind, '/tmp/run.json'])).resolves.toBe(true);
+  }
+  expect(subagentRunner).toHaveBeenCalledTimes(1);
+  expect(subagentPrint).toHaveBeenCalledTimes(1);
+  for (const kind of [undefined, '', 'unknown', '__proto__', 'constructor', 'toString', 'hasOwnProperty',
+    'agent-memory', 'pi-subagent', 'Agent-message-mcp', 'agent-message-mcp ', 'pi-rpc\n']) {
+    await expect(runSdkReservedHelperCommand(kind === undefined ? [BYOK_SDK_HELPER_SUBCOMMAND] : [BYOK_SDK_HELPER_SUBCOMMAND, kind]))
+      .rejects.toThrow('invalid SDK-reserved helper command');
+  }
+  expect(runner).toHaveBeenCalledTimes(reservedHelperKinds.length);
 });

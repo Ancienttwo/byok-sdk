@@ -1,4 +1,5 @@
-import type { ByokServer, DueWake } from '@byok-sdk/server';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import type { ByokServer, ByokServerEvent, CreateByokServerOptions, DueWake } from '@byok-sdk/server';
 import { MemoryBlockedError, type HostMemoryPage, type MemoryBinding } from './memory';
 import { HostLedger, OutboxFullError } from './ledger';
 import { canonical, hash, project, taskId, time, validateInput, validateJson, validateRetry, type HostJobHandler, type Attempt, type Intent, type IntentInput,
@@ -11,11 +12,21 @@ export type ExecutionServer = {
   executions: Pick<ByokServer['executions'], 'submit'>;
   tasks: Pick<ByokServer['tasks'], 'offer' | 'deviceTerminal' | 'attempt' | 'cancel'>;
   wakes: ByokServer['wakes'];
+  /** Embedded process-local hints; reads from tasks remain authoritative. */
+  events?: ByokServer['events'];
 };
 export interface OutcomeTransaction {
   readonly intent: Readonly<Intent>;
   readonly terminal: Terminal;
   /** Business state participates in the same SQLite commit. Do not do external I/O here. */
+  application: Record<string, Json>;
+  publish(id: string, value: Json): void;
+}
+export type AgentMessageInput = Parameters<NonNullable<CreateByokServerOptions['agentMessage']>['consume']>[0];
+export type MessageDecision = { outcome: 'accepted' | 'refused'; reasonCode?: string };
+export interface MessageTransaction {
+  readonly intent: Readonly<Intent>;
+  /** Synchronous business updates share the receipt/projection commit. No external I/O. */
   application: Record<string, Json>;
   publish(id: string, value: Json): void;
 }
@@ -25,6 +36,9 @@ export interface HostOptions {
   now?: () => number;
   reconcileMs?: number;
   nextOccurrence?: NextOccurrence;
+  /** Coalesced post-commit hint. May enqueue/flush reentrantly; failures retain projections. */
+  onOutbox?: (signal: AbortSignal) => void | Promise<void>;
+  applyMessage?: (input: AgentMessageInput, transaction: MessageTransaction) => MessageDecision;
   applyOutcome?: (document: unknown, transaction: OutcomeTransaction) => void;
 }
 
@@ -37,7 +51,18 @@ export class HostExecutionCore {
   private again = false;
   private stopped = false;
   private stopMemoryUpdates?: () => void;
+  private stopMemoryLedgerBinding?: () => void;
   private memoryWaking: Promise<void> = Promise.resolve();
+  private eventIterator?: AsyncIterator<ByokServerEvent>;
+  private eventPump?: Promise<void>;
+  private eventsActive = false;
+  private readonly liveTasks = new Set<string>();
+  private liveScanTimer?: ReturnType<typeof setTimeout>;
+  private stopOutboxUpdates?: () => void;
+  private outboxQueued = false;
+  private outboxNotifying?: Promise<void>;
+  private readonly outboxAbort = new AbortController();
+  private readonly outboxContext = new AsyncLocalStorage<boolean>();
   private scheduleRetryTimer?: ReturnType<typeof setTimeout>;
   private readonly hostJobs: Map<string, HostJobHandler>;
   private readonly jobAbort = new AbortController();
@@ -48,6 +73,14 @@ export class HostExecutionCore {
     this.nextTime = options.nextOccurrence ?? nextIntervalOccurrence;
     this.reconcileMs = time(options.reconcileMs ?? 1000);
     if (this.reconcileMs < 1) throw new Error('Reconciliation interval must be positive');
+    this.stopMemoryLedgerBinding = options.memory?.bindExecutionLedger(ledger);
+    this.stopOutboxUpdates = ledger.onOutbox(() => this.notifyOutbox());
+    if (server.events) {
+      this.eventIterator = server.events.subscribe()[Symbol.asyncIterator]();
+      if (!this.eventIterator.return) { this.stopOutboxUpdates(); this.stopMemoryLedgerBinding?.(); throw new Error('Host event subscription must support return()'); }
+      this.eventsActive = true;
+      this.eventPump = this.watchEvents();
+    }
     this.stopMemoryUpdates = options.memory?.onChange(binding => {
       const wake = this.memoryWaking.then(async () => {
         if (this.stopped) return;
@@ -72,6 +105,45 @@ export class HostExecutionCore {
     });
   }
   intent(key: string): Intent | undefined { return this.ledger.snapshot().intents[hash(key)]; }
+  /** Install directly as agentMessage.consume; SDK owns payload/schema admission. */
+  readonly consumeMessage = async (input: AgentMessageInput): Promise<MessageDecision> => {
+    this.assertOpen();
+    return this.ledger.transaction(state => {
+      const refuse = (reasonCode: string): MessageDecision => ({ outcome: 'refused', reasonCode });
+      const execution = state.executions[input.taskId];
+      if (!execution) return refuse('unknown_task');
+      const frozen = execution.input;
+      if (input.tenant !== this.ledger.tenant || input.deviceId !== frozen.deviceId
+        || canonical(input.payload.agentRef) !== canonical(frozen.payload.agentRef)
+        || canonical(input.context) !== canonical(frozen.agentMessageContext)) return refuse('binding_mismatch');
+      const receipt = execution.messageReceipt;
+      if (receipt) return receipt.messageId === input.payload.messageId && receipt.contentHash === input.payload.contentHash
+        ? { outcome: 'accepted' } : refuse('message_conflict');
+      const intent = Object.values(state.intents).find(row => row.taskId === input.taskId);
+      if (!intent) return refuse('stale_generation');
+      if (!this.options.applyMessage) return refuse('message_handler_unconfigured');
+      let open = true;
+      let decision: MessageDecision;
+      try {
+        decision = this.options.applyMessage(structuredClone(input), {
+          intent: structuredClone(intent), application: state.application,
+          publish: (id, value) => {
+            if (!open) throw new Error('Message transaction is closed');
+            project(state, id, value);
+          },
+        });
+        if (decision && typeof (decision as unknown as { then?: unknown }).then === 'function') {
+          void Promise.resolve(decision).catch(() => {});
+          throw new Error('Message hook must return a synchronous decision');
+        }
+        if (!decision || !['accepted', 'refused'].includes(decision.outcome)) throw new Error('Message hook must return a synchronous decision');
+      } finally { open = false; }
+      if (decision.outcome === 'accepted') execution.messageReceipt = {
+        messageId: input.payload.messageId, contentHash: input.payload.contentHash,
+      };
+      return decision;
+    });
+  };
   async enqueue(input: IntentInput): Promise<Intent> {
     this.assertOpen();
     this.ledger.transaction(state => enqueue(state, this.ledger.tenant, input));
@@ -151,6 +223,7 @@ export class HostExecutionCore {
       }
     });
     this.resumeMemory();
+    this.notifyOutbox();
     await this.drain();
   }
   drain(): Promise<void> {
@@ -162,14 +235,67 @@ export class HostExecutionCore {
     })().finally(() => {
       this.draining = undefined;
       this.armScheduleRetry();
+      this.armLiveScan();
       if (this.again && !this.stopped) return this.drain();
     });
     return this.draining;
   }
   async close(): Promise<void> {
-    this.stopped = true; this.stopMemoryUpdates?.(); clearTimeout(this.scheduleRetryTimer);
-    this.jobAbort.abort();
-    await Promise.all([this.draining, this.memoryWaking]);
+    this.stopped = true; this.stopMemoryUpdates?.(); this.stopMemoryLedgerBinding?.(); this.stopOutboxUpdates?.();
+    clearTimeout(this.scheduleRetryTimer); clearTimeout(this.liveScanTimer);
+    this.outboxAbort.abort(); this.jobAbort.abort();
+    await this.eventIterator?.return?.();
+    await Promise.all([this.draining, this.memoryWaking, this.eventPump,
+      ...(this.outboxContext.getStore() ? [] : [this.outboxNotifying])]);
+  }
+  private notifyOutbox(): void {
+    if (this.stopped || !this.options.onOutbox ||
+        !Object.values(this.ledger.snapshot().outbox).some(row => row.kind === 'projection')) return;
+    this.outboxQueued = true;
+    if (this.outboxNotifying) return;
+    this.outboxNotifying = Promise.resolve().then(() => this.outboxContext.run(true, async () => {
+      while (this.outboxQueued && !this.stopped) {
+        this.outboxQueued = false;
+        await this.options.onOutbox!(this.outboxAbort.signal);
+      }
+    })).catch(error => {
+      if (this.stopped) return;
+      for (const [key, row] of Object.entries(this.ledger.snapshot().outbox)) if (row.kind === 'projection') this.error(key, error);
+    }).finally(() => {
+      this.outboxNotifying = undefined;
+      if (this.outboxQueued && !this.stopped) this.notifyOutbox();
+    });
+  }
+  private async watchEvents(): Promise<void> {
+    try {
+      while (!this.stopped) {
+        const next = await this.eventIterator!.next();
+        if (next.done || this.stopped) break;
+        if (next.value.kind !== 'task.state' || !['Complete', 'Failed', 'Cancelled'].includes(next.value.state)) continue;
+        const taskId = next.value.taskId;
+        if (Object.values(this.ledger.snapshot().intents).some(intent => !intent.conclusion && intent.taskId === taskId)) {
+          void this.drain().catch(() => {});
+        }
+      }
+    } catch { /* A failed hint stream falls back to durable scans below. */ }
+    finally {
+      this.eventsActive = false;
+      this.liveTasks.clear();
+      if (!this.stopped) void this.drain().catch(() => {});
+    }
+  }
+  private armLiveScan(): void {
+    clearTimeout(this.liveScanTimer);
+    if (this.stopped || !this.eventsActive) return;
+    const state = this.ledger.snapshot();
+    const current = new Map(Object.values(state.intents).filter(intent => !intent.conclusion && intent.phase === 'inflight').map(intent => [intent.taskId, intent]));
+    for (const taskId of this.liveTasks) if (!current.has(taskId)) this.liveTasks.delete(taskId);
+    if (!this.liveTasks.size) return;
+    const due = Math.min(...[...this.liveTasks].map(taskId => state.executions[taskId]!.started ? Infinity : current.get(taskId)!.waitUntil));
+    // The notification feed is bounded, not lossless. Reconcile locally as a safety net;
+    // recovered/uncertain tasks keep durable scans instead of trusting old relay state.
+    this.liveScanTimer = setTimeout(() => { if (!this.stopped) void this.drain().catch(() => {}); }, Math.max(1, Math.min(this.reconcileMs, due - this.now(), 2_147_483_647)));
+    this.liveScanTimer.unref?.();
   }
   private assertOpen(): void { if (this.stopped) throw new Error('Host core is closed'); }
 
@@ -322,8 +448,13 @@ export class HostExecutionCore {
         if (intent.phase === 'memory_blocked') return Math.min(intent.waitUntil, intent.retryUntil ?? Infinity);
         if (intent.phase === 'backoff') return Math.min(intent.notBefore, intent.waitUntil, intent.retryUntil ?? Infinity);
         if (intent.phase === 'queued') return open.some(other => other.agent === intent.agent && other.sequence < intent.sequence) ? intent.waitUntil : Math.min(intent.waitUntil, intent.retryUntil ?? Infinity, readyAt);
+        if (this.eventsActive && this.liveTasks.has(intent.taskId)) return Infinity;
         return Math.min(now + this.reconcileMs, state.executions[intent.taskId]!.started ? Infinity : intent.waitUntil);
       })));
+      if (!Number.isFinite(due)) {
+        if (state.scanWake) cancelWake(state, state.scanWake.dedupKey);
+        state.scanWake = null; return;
+      }
       if (state.scanWake && state.scanWake.availableAt > now && state.scanWake.availableAt >= notBefore && state.scanWake.availableAt <= due) return;
       if (state.scanWake) cancelWake(state, state.scanWake.dedupKey);
       const input = { dedupKey: `host-scan:${hash(this.ledger.tenant)}:${++state.scanSequence}`, availableAt: due };
@@ -353,7 +484,10 @@ export class HostExecutionCore {
       }
       const input = this.ledger.snapshot().executions[intent.taskId]!.input;
       this.options.memory?.refreshExecution({ deviceId: input.deviceId, agentRef: input.payload.agentRef }, input.taskId);
-      try { await this.server.executions.submit(input); }
+      try {
+        await this.server.executions.submit(input);
+        if (this.eventsActive) this.liveTasks.add(intent.taskId);
+      }
       catch (error) { if (!await this.delivered(intent)) throw error; }
     }
     this.ledger.transaction(state => { state.executions[intent.taskId]!.submission = 'delivered'; });
