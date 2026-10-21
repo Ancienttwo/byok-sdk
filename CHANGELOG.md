@@ -8,6 +8,13 @@
 - **Feature (client)** — add a pinned Windows x64 native asset copier, distribution
   metadata and per-adapter asset roots for relocated runtime process ownership (#627).
   Darwin copying reuses the existing memory-helper API; Windows memory is unchanged.
+- **Behavior (client)** — Agent memory admission follow-ups (#614). With
+  `DaemonConfig.agentMemoryMcp: 'off'`, Agent task instructions get no memory
+  guidance; a `memory-reader` instruction keeps only the final-reply line. A
+  `memory-reader` Attempt now gets a `read` memory MCP that lists only
+  `memory_recall`. New `Daemon.status().agentMemoryMcp` reports `admitted`, `off`
+  or `unavailable`. The spec now states that an explicit
+  `agentMemoryHelperAssetRoot` is always validated at construction.
 
 ## 0.28.1 / @byok-sdk/keys 0.13.1 — source candidate
 
