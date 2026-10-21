@@ -164,7 +164,10 @@ Keep handlers short and bounded; they serialize with other jobs and Agent dispat
 The SDK's 60-second hook deadline can expire while a handler is running; redelivery
 shares the drain and cannot start a second concurrent invocation. The handler signal
 is aborted by `close()`, not that hook deadline. `close()` waits for the handler;
-handlers must honor the signal. Do not await core methods that drain from inside a
+handlers must honor the signal. Rejection with its abort reason (including a Node
+`AbortError` wrapping that reason) leaves the job pending for recovery without
+failing shutdown; unrelated handler errors still propagate. A result returned
+after shutdown is not committed. Do not await core methods that drain from inside a
 handler (that would wait on its own drain).
 
 Host-only occurrences can be explicitly acknowledged and compacted:
