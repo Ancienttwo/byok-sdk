@@ -1,0 +1,107 @@
+name: Diagnose group chat on Node 24
+
+# Temporary two-ref diagnostic only. Never adds a PR or release gate.
+on:
+  push:
+    branches: [diagnose/unicode-node24-20261021]
+permissions:
+  contents: read
+concurrency:
+  group: diagnose-unicode-node24-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - label: baseline
+            ref: 95357bb07ba7b1b45a75ba463a170a75af435bd1
+          - label: candidate
+            ref: 394ce94add9e9e5b91d67f522aa297b942112e12
+    env:
+      BYOK_REQUIRE_BUN: '1'
+    defaults:
+      run:
+        shell: bash
+        working-directory: subject
+    steps:
+      - name: Preserve reviewed diagnostic harness
+        uses: actions/checkout@v7
+        with:
+          path: diagnostic
+          persist-credentials: false
+      - name: Checkout immutable subject
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ matrix.ref }}
+          path: subject
+          persist-credentials: false
+      - name: Setup baseline Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24.21.0'
+      - name: Setup baseline Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - name: Bind exact source and identical diagnostic patch
+        env:
+          EXPECTED_REF: ${{ matrix.ref }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/unicode-raw" "$RUNNER_TEMP/unicode-summary"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_REF"
+          test "$(node --version)" = 'v24.21.0'
+          test "$(bun --version)" = '1.4.2'
+          test "$(node -p "require('./package.json').packageManager")" = 'bun@1.4.2'
+          BUN_PATH="$(command -v bun)"
+          test -n "$BUN_PATH"
+          echo "BYOK_TEST_BUN_BIN=$BUN_PATH" >> "$GITHUB_ENV"
+          git apply --check ../diagnostic/scripts/diagnostics/unicode-failure-state.patch
+          git apply ../diagnostic/scripts/diagnostics/unicode-failure-state.patch
+          {
+            git rev-parse HEAD
+            node --version
+            bun --version
+            bun --revision
+            sha256sum ../diagnostic/scripts/diagnostics/unicode-failure-state.patch "$BUN_PATH" | cut -d' ' -f1
+          } > "$RUNNER_TEMP/unicode-summary/identity.txt"
+      - name: Install frozen dependencies
+        run: |
+          set +e
+          bun ci > "$RUNNER_TEMP/unicode-raw/install.log" 2>&1
+          code=$?
+          echo "install=$code" >> "$RUNNER_TEMP/unicode-summary/status.txt"
+          exit "$code"
+      - name: Build required workspace exports
+        run: |
+          set +e
+          bun run build > "$RUNNER_TEMP/unicode-raw/build.log" 2>&1
+          code=$?
+          echo "build=$code" >> "$RUNNER_TEMP/unicode-summary/status.txt"
+          exit "$code"
+      - name: Run only the 14 group-chat tests
+        run: |
+          set +e
+          bun run --cwd examples/bot-collaboration test src/group-chat.test.ts > "$RUNNER_TEMP/unicode-raw/group-chat.log" 2>&1
+          code=$?
+          echo "group-chat=$code" >> "$RUNNER_TEMP/unicode-summary/status.txt"
+          exit "$code"
+      - name: Extract closed-schema diagnostics and counts
+        if: always()
+        working-directory: diagnostic
+        run: |
+          mkdir -p "$RUNNER_TEMP/unicode-raw" "$RUNNER_TEMP/unicode-summary"
+          node scripts/diagnostics/unicode-log-summary.mjs "$RUNNER_TEMP/unicode-raw" "$RUNNER_TEMP/unicode-summary/diagnostics.log"
+          cat "$RUNNER_TEMP/unicode-summary/diagnostics.log"
+      - name: Upload only sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: unicode-node24-${{ matrix.label }}
+          path: ${{ runner.temp }}/unicode-summary/
+          if-no-files-found: error
+          retention-days: 7

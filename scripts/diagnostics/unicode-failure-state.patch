@@ -1,0 +1,53 @@
+--- a/examples/bot-collaboration/src/group-chat.test.ts
++++ b/examples/bot-collaboration/src/group-chat.test.ts
+@@ -12,7 +12,49 @@
+ afterEach(async () => { releaseProjection?.(); releaseProjection = undefined; await fixture?.close(); });
+ const host = () => fixture.host;
+ async function running(id: string) {
+-  await vi.waitFor(async () => { await host().drain(); expect(fixture.adapter.sessions.has(host().core.intent(id)!.taskId)).toBe(true); }, { timeout: 5000 });
++  try {
++    await vi.waitFor(async () => { await host().drain(); expect(fixture.adapter.sessions.has(host().core.intent(id)!.taskId)).toBe(true); }, { timeout: 5000 });
++  } catch (originalError) {
++    // Diagnostic-only: closed enums/counts/booleans, never content, identifiers or errors.
++    try {
++      const pick = (value: unknown, allowed: readonly string[]) => typeof value === 'string' && allowed.includes(value) ? value : 'unknown';
++      const count = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
++      const intent = host().core.intent(id);
++      const status = fixture.daemon.status();
++      const lifecycle = status.lifecycle;
++      const hostState = host().snapshot();
++      const turn = hostState.turns[id];
++      const profile = turn ? hostState.team.bots[turn.botId] : undefined;
++      let timer: ReturnType<typeof setTimeout> | undefined;
++      let task;
++      try {
++        task = intent ? await Promise.race([
++          fixture.server.tasks.get(intent.taskId),
++          new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), 250); }),
++        ]) : undefined;
++      } finally { clearTimeout(timer); }
++      console.error('BYOK_UNICODE_DIAGNOSTIC', JSON.stringify({
++        lifecycle: {
++          phase: pick(lifecycle.phase, ['stopped', 'awaiting-enrollment', 'running', 'halted', 'crashed']),
++          connection: pick('connection' in lifecycle ? lifecycle.connection : undefined, ['open', 'connecting']),
++          reasonCode: pick('reason' in lifecycle ? lifecycle.reason : undefined, ['unpaired', 're_pair_required', 'store_owned', 'device_revoked', 'handshake_rejected', 'replay_cursor_too_old', 'config_invalid']),
++        },
++        activeTaskCount: count(status.activeTaskCount),
++        pendingTerminalCommits: count(status.pendingTerminalCommits),
++        profileProjectionReady: profile !== undefined && profile.readyRevision === profile.revision,
++        taskState: pick(task?.state, ['Offered', 'Claimed', 'Running', 'AwaitApproval', 'Complete', 'Failed', 'Cancelled']),
++        intentPresent: intent !== undefined,
++        intentPhase: pick(intent?.phase, ['queued', 'inflight', 'backoff', 'memory_blocked', 'settled']),
++        intentConclusion: pick(intent?.conclusion, ['succeeded', 'failed', 'declined', 'cancelled', 'expired', 'superseded']),
++        intentAttempts: count(intent?.attempts),
++        adapterStarts: count(fixture.adapter.starts.length),
++        adapterSessions: count(fixture.adapter.sessions.size),
++        matchingAdapterStarts: intent ? count(fixture.adapter.starts.filter(start => start.manifest.taskId === intent.taskId).length) : null,
++        adapterSessionPresent: intent ? fixture.adapter.sessions.has(intent.taskId) : false,
++      }));
++    } catch { console.error('BYOK_UNICODE_DIAGNOSTIC', '{"collectionFailed":true}'); }
++    throw originalError;
++  }
+   return fixture.adapter.sessions.get(host().core.intent(id)!.taskId)!;
+ }
+ async function finish(id: string, document: unknown = {}) {
