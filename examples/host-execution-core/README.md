@@ -210,6 +210,63 @@ If the file is absent or empty, the first write can apply. A second approval is 
 The Host never puts the observed revision on an old draft by itself.
 Redacted text is read-only. P5b owns edit-view and `contentComplete`.
 
+### Explicit tree restore
+
+`HostMemoryPage.restore` coordinates an approved complete memory tree through the
+existing per-file intents. Configure `MemoryOptions.exportMemory(binding)` as a
+trusted device-bound call to the explicitly enabled daemon's
+`exportAgentMemory(binding.agentRef)`. This is raw local export, never the
+redacted projection. A restore-enabled page and `HostExecutionCore` must share
+the **same HostLedger instance**, not merely a tenant or filename. This allows
+restore admission and execution admission to inspect one transactional state.
+Projection-only compositions retain their existing behavior.
+
+A restore request has `{deviceId, agentRef, restoreId, files, mode, observed?,
+expiresAt}`. `files` is a complete exported-format target tree including
+`MEMORY.md`, with validated content/revisions/byte counts, at most 128 files and
+1 MiB. Paths use the existing memory policy. In `initial` mode a fresh local
+export must contain only empty `MEMORY.md`; otherwise every target is reported
+as a preflight conflict and **no write intent is created**. In `overwrite` mode,
+`observed` must be the exact export whose revisions the user approved replacing.
+The coordinator recomputes its digest, rejects a changed current tree without
+writes, freezes those approved bases, and deletes observed notes absent from the
+target. It never silently refreshes overwrite authority. Unchanged files return
+`unchanged` without a write. The empty-backup target is one empty `MEMORY.md`;
+that file cannot be deleted.
+
+Before export or notification, the ledger commits a `preparing` restore and a
+durable gate for that device/Agent home. A matching in-flight K4 execution,
+independent pending memory intent, or another restore refuses admission. During
+restore, ordinary approvals are blocked and `contextPack` uses the existing
+`MemoryBlockedError` / `memory_blocked` queue mechanism. Other Agents continue.
+No running task is cancelled. The gate covers K4 submissions only, not external
+filesystem writers or other execution systems.
+
+After preflight, all deterministic per-path approval identities and their new
+intent rows commit together. Call `flushNotices()` to deliver them through the
+existing embedded/cloud notification adapter. `restoreResult(binding, restoreId)`
+returns per-file and aggregate progress. The gate remains until every committed
+intent has a durable terminal readback. Mixed applied/conflict/rejected/uncertain
+results are preserved; aggregate priority is uncertain, conflict, rejected, then
+applied. A terminal uncertain result permits the queue to resume only after all
+files are terminal; it does not establish the resulting tree or claim rollback.
+This is **not an atomic filesystem tree transaction**. Concurrent external edits
+can cause partial CAS results. Conflict never automatically mints a new intent.
+
+At Host startup, call `await page.recoverRestores()`, then `await core.recover()`
+and `await page.flushNotices()`. A preparing export failure retains the gate and
+durable request; same-id/same-payload retry resumes it. Changed reuse is rejected.
+`cancelRestore(binding, restoreId)` can explicitly cancel only a preparing row;
+a late export result cannot commit after cancellation. Once intents commit,
+cancellation cannot promise rollback and is refused. Expiry does not silently
+release an applying gate: device terminal readbacks are still required. Do not
+downgrade to a core that ignores restore gates while any restore is active.
+
+Pending restore input (including the approved observation) is retained only
+through preparation and purged when intent rows take ownership of pending bodies.
+Terminal rows retain metadata and outcomes. This example adds no backup upload,
+remote restore authorization, retention policy, or Windows memory admission.
+
 The embedder redactor can emit the Host-owned opaque JSON profile
 `{"residentMemory":"policy-approved resident text"}` through the existing projection port.
 Use `null` when the snapshot has no `MEMORY.md`. Send no paths or raw source revisions.

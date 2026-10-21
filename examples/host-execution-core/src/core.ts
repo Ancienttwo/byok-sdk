@@ -41,6 +41,7 @@ export class HostExecutionCore {
   private again = false;
   private stopped = false;
   private stopMemoryUpdates?: () => void;
+  private stopMemoryLedgerBinding?: () => void;
   private memoryWaking: Promise<void> = Promise.resolve();
   private eventIterator?: AsyncIterator<ByokServerEvent>;
   private eventPump?: Promise<void>;
@@ -59,10 +60,11 @@ export class HostExecutionCore {
     this.nextTime = options.nextOccurrence ?? nextIntervalOccurrence;
     this.reconcileMs = time(options.reconcileMs ?? 1000);
     if (this.reconcileMs < 1) throw new Error('Reconciliation interval must be positive');
+    this.stopMemoryLedgerBinding = options.memory?.bindExecutionLedger(ledger);
     this.stopOutboxUpdates = ledger.onOutbox(() => this.notifyOutbox());
     if (server.events) {
       this.eventIterator = server.events.subscribe()[Symbol.asyncIterator]();
-      if (!this.eventIterator.return) { this.stopOutboxUpdates(); throw new Error('Host event subscription must support return()'); }
+      if (!this.eventIterator.return) { this.stopOutboxUpdates(); this.stopMemoryLedgerBinding?.(); throw new Error('Host event subscription must support return()'); }
       this.eventsActive = true;
       this.eventPump = this.watchEvents();
     }
@@ -175,7 +177,7 @@ export class HostExecutionCore {
     return this.draining;
   }
   async close(): Promise<void> {
-    this.stopped = true; this.stopMemoryUpdates?.(); this.stopOutboxUpdates?.();
+    this.stopped = true; this.stopMemoryUpdates?.(); this.stopMemoryLedgerBinding?.(); this.stopOutboxUpdates?.();
     clearTimeout(this.scheduleRetryTimer); clearTimeout(this.liveScanTimer);
     this.outboxAbort.abort();
     await this.eventIterator?.return?.();

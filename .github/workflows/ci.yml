@@ -149,6 +149,11 @@ jobs:
         env:
           BYOK_REQUIRE_MEMORY_EXPORT_TESTS: '1'
         run: bun run --filter @byok-sdk/client test -- src/__tests__/agent-memory-export.test.ts
+      - name: Qualify synthetic restore through embedded notifications
+        env:
+          BYOK_REQUIRE_MEMORY_RESTORE_LINUX: '1'
+        run: bun run --filter @byok-sdk/example-host-execution-core test -- src/memory-restore.test.ts src/memory-linux.test.ts
+
 
   agent-memory-helper-linux:
     name: agent memory helper non-Darwin volume checks (Linux, fixed Go)
