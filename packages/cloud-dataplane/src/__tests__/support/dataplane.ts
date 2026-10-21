@@ -103,6 +103,11 @@ export interface DataplaneScope {
   /** Database-scoped role that owns `schema` and supplies its search path. */
   readonly role: string;
   /**
+   * The role's connection string, for a process that opens its own
+   * connections to `schema` (a Worker under `wrangler dev`).
+   */
+  readonly connectionString: string;
+  /**
    * `application_name` on every connection this pool opens, equal to the
    * schema. Server-wide catalogs (`pg_locks`, `pg_stat_activity`) are NOT
    * schema-isolated, so an assertion about them has to filter to this scope's
@@ -179,6 +184,7 @@ export async function createDataplaneScope(poolSize = 8): Promise<DataplaneScope
     pool,
     schema,
     role,
+    connectionString: applicationUrl(url, role),
     applicationName: schema,
     openRestartPool(restartPoolSize = 8) {
       return createByokPool({
