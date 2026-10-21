@@ -18,8 +18,25 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       if (!current || !version(record.version) || !version(current.version)) throw new Error('Invalid workspace lock version');
       const manifest = JSON.parse(readFileSync(resolve(cwd, dir, 'package.json'), 'utf8'));
       if (current.version !== manifest.version) throw new Error('Lock version differs from workspace manifest');
+      // #658 adds this existing workspace solely to the private mailbox fixture.
+      // Normalize only that reviewed additive edge; all other lock bytes remain
+      // subject to the deep comparison below (including resolved packages).
+      if (dir === 'examples/bot-collaboration'
+        && record.devDependencies?.['@byok-sdk/cloud'] === undefined
+        && current.devDependencies?.['@byok-sdk/cloud'] === 'workspace:*'
+        && manifest.private === true
+        && manifest.devDependencies?.['@byok-sdk/cloud'] === 'workspace:*') {
+        delete current.devDependencies['@byok-sdk/cloud'];
+      }
       delete record.version; delete current.version;
     }
+  } else if (path === 'examples/bot-collaboration/package.json') {
+    if (before.private !== true || after.private !== true
+      || before.devDependencies?.['@byok-sdk/cloud'] !== undefined
+      || after.devDependencies?.['@byok-sdk/cloud'] !== 'workspace:*') {
+      throw new Error('Only the reviewed private fixture cloud edge may be added');
+    }
+    delete after.devDependencies['@byok-sdk/cloud'];
   } else if (path === 'package.json') {
     const oldCommand = before.scripts?.['test:scripts'], newCommand = after.scripts?.['test:scripts'];
     const prefix = 'node --test --test-concurrency=1 ';
