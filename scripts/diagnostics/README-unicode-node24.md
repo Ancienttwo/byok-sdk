@@ -1,7 +1,7 @@
 # Temporary Node 24 group-chat comparison
 
 This branch-only workflow compares exact main `95357bb07ba7b1b45a75ba463a170a75af435bd1`
-and candidate `394ce94add9e9e5b91d67f522aa297b942112e12` on Ubuntu with Node24.21.0
+and candidate `e2e71d3eb7f4ab952627e788009c1746688c9453` on Ubuntu with Node24.21.0
 and Bun1.4.2. It is not a release gate or a full-suite replacement. No PR is opened.
 The existing CI workflow still runs only on main pushes or pull requests; this
 workflow triggers only on `diagnose/unicode-node24-20261021` pushes.
@@ -9,8 +9,9 @@ workflow triggers only on `diagnose/unicode-node24-20261021` pushes.
 Two jobs, max parallel2, fail-fast false, each bounded25minutes. Each independently
 preserves this diagnostic checkout, checks out its exact target into `subject`,
 applies the same patch, runs frozen install/workspace build, then only
-`examples/bot-collaboration/src/group-chat.test.ts` (14 tests). No predecessor
-suite is added without evidence that it is necessary.
+the bot-collaboration package (257 tests). The exact release main failed its
+Unicode group-chat test in this package context while Node26 passed. This
+comparison includes same-package predecessors; no other package tests run.
 
 Linux baseline build-test supplies BYOK_REQUIRE_BUN=1 and the resolved absolute
 BYOK_TEST_BUN_BIN; no API/native-helper admission flags are set there. These

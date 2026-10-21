@@ -21,7 +21,7 @@ jobs:
           - label: baseline
             ref: 95357bb07ba7b1b45a75ba463a170a75af435bd1
           - label: candidate
-            ref: 394ce94add9e9e5b91d67f522aa297b942112e12
+            ref: e2e71d3eb7f4ab952627e788009c1746688c9453
     env:
       BYOK_REQUIRE_BUN: '1'
     defaults:
@@ -83,10 +83,10 @@ jobs:
           code=$?
           echo "build=$code" >> "$RUNNER_TEMP/unicode-summary/status.txt"
           exit "$code"
-      - name: Run only the 14 group-chat tests
+      - name: Run only bot-collaboration including preceding package tests
         run: |
           set +e
-          bun run --cwd examples/bot-collaboration test src/group-chat.test.ts > "$RUNNER_TEMP/unicode-raw/group-chat.log" 2>&1
+          bun run --cwd examples/bot-collaboration test > "$RUNNER_TEMP/unicode-raw/group-chat.log" 2>&1
           code=$?
           echo "group-chat=$code" >> "$RUNNER_TEMP/unicode-summary/status.txt"
           exit "$code"
