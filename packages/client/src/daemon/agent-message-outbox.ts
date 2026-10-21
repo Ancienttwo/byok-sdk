@@ -31,6 +31,8 @@ export interface AgentMessageOutboxRecord {
   readonly byteCount: number;
   readonly createdAt: string;
   readonly sessionRef?: string;
+  /** Inert binding: only a matching durable result-failure intent authorizes activation. */
+  readonly recoverySessionRef?: string;
 }
 
 type OutboxEntry =
@@ -137,6 +139,13 @@ export class AgentMessageOutbox {
     return this.pendingByTask.get(taskId);
   }
 
+  recoveryState(taskId: string): 'pending' | 'held' | 'refused' | 'missing' {
+    if (!this.pendingByTask.has(taskId)) return 'missing';
+    if (this.revokedTasks.has(taskId)) return 'refused';
+    const outcome = this.dispositionByTask.get(taskId)?.outcome;
+    return outcome === 'held' || outcome === 'refused' ? outcome : 'pending';
+  }
+
   async appendDraft(input: {
     readonly taskId: string;
     readonly tenantId: string;
@@ -145,6 +154,7 @@ export class AgentMessageOutbox {
     readonly contentType: AgentMessageContentType;
     readonly body: string;
     readonly sessionRef?: string;
+    readonly recoverySessionRef?: string;
     readonly maxPendingEvents: number;
     readonly maxPendingBytes: number;
   }): Promise<AgentMessageOutboxRecord> {
@@ -177,6 +187,7 @@ export class AgentMessageOutbox {
         byteCount,
         createdAt: new Date().toISOString(),
         ...(input.sessionRef === undefined ? {} : { sessionRef: input.sessionRef }),
+        ...(input.recoverySessionRef === undefined ? {} : { recoverySessionRef: input.recoverySessionRef }),
       });
       await this.appendEntry({ schema: 1, kind: 'append', record });
       this.pendingByTask.set(record.taskId, record);
@@ -234,12 +245,13 @@ export class AgentMessageOutbox {
     });
   }
 
-  async applyDisposition(taskId: string, input: unknown): Promise<'accepted' | 'held' | 'refused' | 'mismatch' | 'unknown'> {
+  async applyDisposition(taskId: string, input: unknown, beforeAccept?: () => Promise<void>): Promise<'accepted' | 'held' | 'refused' | 'mismatch' | 'unknown'> {
     return this.exclusive(async () => {
       const disposition = AgentMessageDispositionPayloadSchema.parse(input);
       const record = this.pendingByTask.get(taskId);
       if (record === undefined) return 'unknown';
       if (!exactDisposition(record, disposition)) return 'mismatch';
+      if (disposition.outcome === 'accepted') await beforeAccept?.();
       await this.appendEntry({ schema: 1, kind: 'disposition', taskId, disposition });
       if (disposition.outcome === 'accepted') {
         this.pendingByTask.delete(taskId);

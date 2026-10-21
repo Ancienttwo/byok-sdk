@@ -9,9 +9,18 @@ const { createDaemonWithAdapters } = await import(input.clientEntry);
 const credentials = new InMemoryDeviceCredentialStore();
 await credentials.replace(input.credentials);
 const journal = new SqliteLocalTaskJournal({ storeDir: input.config.storeDir });
+const originalTransition = journal.recordTransition.bind(journal);
+journal.recordTransition = async record => {
+  await originalTransition(record);
+  if (input.checkpointMode === 'marker-before-draft-activation' && record.to === 'required-reply-result-missing') {
+    writeFileSync(input.checkpoint, 'marker-before-draft-activation');
+    process.kill(process.pid, 'SIGKILL');
+    await new Promise(() => {});
+  }
+};
 const original = journal.recordTerminal.bind(journal);
 journal.recordTerminal = async record => {
-  if (JSON.parse(record.bytes).payload?.reason?.startsWith('result_not_submitted:')) {
+  if (input.checkpointMode !== 'marker-before-draft-activation' && JSON.parse(record.bytes).payload?.reason?.startsWith('result_not_submitted:')) {
     writeFileSync(input.checkpoint, 'accepted-before-terminal');
     process.kill(process.pid, 'SIGKILL');
     await new Promise(() => {});
