@@ -46,7 +46,7 @@ test('a platform family is selected only by a path it owns', () => {
     'agent-memory-export-linux': 'packages/client/src/daemon/agent-memory-export.ts',
     'agent-memory-helper-linux': 'packages/client/native/agent-memory-fs/main.go',
     'agent-memory-helper': 'packages/client/src/daemon/agent-memory-intent.ts',
-    'execution-recovery-native': 'packages/client/src/daemon/sqlite-journal.ts',
+    'execution-recovery-native': 'packages/client/src/daemon/journal/sqlite-journal.ts',
     'adapter-lifecycle-smoke': 'packages/client/src/adapters/codex/codex-adapter.ts',
     'windows-git-workspace': 'packages/client/src/daemon/git-workspace.ts',
     'packageability-smoke': 'packages/client/src/sdk-native-assets.ts',
@@ -55,6 +55,11 @@ test('a platform family is selected only by a path it owns', () => {
     'credential-isolation-audit': 'packages/keys/src/index.ts',
   };
   assert.deepEqual(Object.keys(owned).sort(), Object.keys(familyOwners).sort());
+  const tracked = new Set(spawnSync('git', ['ls-files'], { cwd: fileURLToPath(root), encoding: 'utf8' }).stdout.split('\n').filter(Boolean));
+  for (const path of Object.values(owned)) assert.ok(tracked.has(path), `example path is not tracked: ${path}`);
+  for (const [family, owners] of Object.entries(familyOwners)) {
+    for (const owner of owners) assert.ok([...tracked].some(path => owner.test(path)), `${family} owner ${owner} matches no tracked file`);
+  }
   for (const [family, path] of Object.entries(owned)) assert.ok(selectImpact([path]).families.includes(family), `${family}: ${path}`);
   for (const path of ['packages/client/src/daemon/task-runner.ts', 'packages/protocol/src/task.ts', 'packages/core/src/index.ts', 'packages/server/src/index.ts']) {
     assert.deepEqual(selectImpact([path]).families.filter(id => id in familyOwners), [], path);
@@ -84,8 +89,10 @@ test('family owners cover every test file and script their CI job runs', () => {
       }
     }
     for (const match of block.matchAll(/(?:node|bun) ((?:packages|examples|templates|scripts)\/[\w./-]+\.mjs)/g)) paths.push(match[1]);
+    for (const match of block.matchAll(/working-directory: (\S+)\s+run: [^\n]*\bgo test\b/g)) paths.push(`${match[1]}/suite-probe.go`);
+    assert.ok(paths.length > 0, `${family}: no job input checked`);
     for (const path of paths) {
-      assert.ok(familyOwners[family].some(owner => owner.test(path)), `${family} runs ${path} but does not own it`);
+      assert.ok(selectImpact([path]).families.includes(family), `${family} runs ${path} but a change to it does not select ${family}`);
       checked++;
     }
   }

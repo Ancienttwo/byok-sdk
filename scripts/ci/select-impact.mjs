@@ -177,7 +177,7 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/__tests__\/(?:agent-memory|agent-home-directory-barrier|daemon-conn-hello-capabilities)[^/]*$/,
   ],
   'execution-recovery-native': [
-    /^packages\/client\/src\/daemon\/(?:journal|sqlite-journal|sqlite-support)\.ts$/,
+    /^packages\/client\/src\/daemon\/journal\//,
     /^packages\/client\/src\/__tests__\/(?:execution-recovery|journal-sqlite)[^/]*$/,
     /^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:runtimes|shared)\//,
   ],
@@ -188,10 +188,10 @@ export const familyOwners = Object.freeze({
     /^examples\/(?:host-execution-core|bot-collaboration)\//,
     /^examples\/basic\/goal-btw\.test-support\.ts$/,
     /^scripts\/ci\/run-windows-bot-tests\.mjs$/,
-    /^packages\/keys\/src\/windows-credential-custody[^/]*$/,
+    /^packages\/keys\/src\/(?:windows-credential-custody[^/]*|(?:windows-credential-manager|device-sealing-key|sealed-provisioning|pi-provider-launcher-core|provider-profile|secret-store|sqlite-profile-store|command-runner)\.ts)$/,
   ],
   'windows-git-workspace': [
-    /^packages\/client\/src\/daemon\/(?:git-workspace|git-workspace-store|session-workspace-store|auth-manager)\.ts$/,
+    /^packages\/client\/src\/daemon\/(?:git-workspace|git-workspace-store|session-workspace-store|auth-manager|daemon-lifecycle|daemon-owner|daemon-record)\.ts$/,
     /^packages\/client\/src\/(?:util\/secure-dir\.ts|diagnostics\/|bin\/commands\/)/,
     /^packages\/client\/src\/__tests__\/(?:git-workspace|bin-workspaces|secure-dir|diagnostics|support-bundle|daemon-auth|daemon-stop-shutdown-parity)[^/]*$/,
   ],
@@ -242,8 +242,11 @@ export function selectImpact(paths, context = {}) {
     if (typeof path !== 'string' || !path || /[\\\x00-\x1f\x7f]/.test(path)
       || path.startsWith('/') || path.split('/').some(part => !part || part === '.' || part === '..')) requireMapping(path);
     files.add(path);
+    let owned = false;
     if (!path.endsWith('.md')) {
-      for (const [id, owners] of Object.entries(familyOwners)) if (owners.some(owner => owner.test(path))) families.add(id);
+      for (const [id, owners] of Object.entries(familyOwners)) {
+        if (owners.some(owner => owner.test(path))) { families.add(id); owned = true; }
+      }
     }
     if (path === '.gitattributes') {
       verifyReviewedContent(path, context);
@@ -328,6 +331,8 @@ export function selectImpact(paths, context = {}) {
     const relative = match[3];
     if (!workspaceGraph[dir]) requireMapping(path);
     if (/^(?:README|AGENTS|CLAUDE)\.md$/.test(relative)) continue;
+    // A workspace smoke script is accepted only when a platform family owns it.
+    if (owned && /^scripts\/[a-z0-9-]+\.mjs$/.test(relative)) { dirs.add(dir); continue; }
     if (/^(?:tsconfig(?:\.[a-z-]+)?\.json|vitest\.config\.[cm]?ts)$/.test(relative)) { dirs.add(dir); continue; }
     if (dir === 'packages/client' && /^native\/agent-memory-fs\/.+\.(?:go|mod|sum)$/.test(relative)) {
       dirs.add(dir); families.add('npm-release-pack'); continue;

@@ -16,11 +16,12 @@ Policy #653 kept the `build-test` complete suite out of routine plans. Two paths
 - `planCi` refuses a targeted plan that contains `build-test`.
 - Release mode accepts only `workflow_dispatch` on `refs/heads/main` or `refs/heads/release/<name>`, with `release_sha` equal to the checked-out SHA. The planner and the `CI required` aggregate both check the ref.
 - An unmapped path fails the plan with "Reviewed CI mapping required". The fix is a reviewed mapping, not release validation.
-- A contract test reads each family job in `ci.yml`. Each test file and script that the job runs must match an owner of that family.
+- A contract test reads each family job in `ci.yml`. A change to each test file, script or Go suite that the job runs must select that family, and each family must have at least one checked input. Each owner pattern must match a tracked file.
+- A workspace `scripts/*.mjs` file is accepted only when a platform family owns it. Other scripts still fail closed.
 
 ## Evidence
 
-Replay against the changed files of 14 recent PRs (content-sensitive manifest paths removed from both sides): old selector 206 platform jobs, new selector 51. Examples: #646 went from 22 jobs to 1, #664 from 21 to 6, #641 from 24 to 13.
+Replay against the changed files of 14 recent PRs (content-sensitive manifest paths removed from both sides; 2 PRs have an unmapped path under both selectors): old selector 204 platform jobs, new selector 49. Examples: #646 went from 22 jobs to 1, #664 from 21 to 6, #641 from 24 to 13.
 
 ## Limits
 
