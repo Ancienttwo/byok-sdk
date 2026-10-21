@@ -1,5 +1,8 @@
 # Changelog
 
+- Client MCP core: preserve tool title, annotations and output schema, and provide
+  request-scoped progress over stdio and bounded HTTP POST SSE (Refs #631).
+
 ## Unreleased
 
 - **Feature (client)** — add a pinned Windows x64 native asset copier, distribution

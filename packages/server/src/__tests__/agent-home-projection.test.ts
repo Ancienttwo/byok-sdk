@@ -74,7 +74,7 @@ describe('reference task-free Agent-home projection', () => {
     expect((await started.byok.tasks.list()).tasks).toHaveLength(0);
   });
 
-  it('delivers one exact non-task control, records an exact authenticated completion, and rejects changed terminal facts', async () => {
+  it.each(['applied', 'idempotent', 'stale', 'conflict'] as const)('awaits durable %s completion and rejects changed terminal facts', async outcome => {
     const started = await start();
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
       productId: PRODUCT_ID,
@@ -105,8 +105,9 @@ describe('reference task-free Agent-home projection', () => {
       requestId: REQUEST_ID,
       agentRef: desired().agentRef,
       projectionHash: HASH,
-      outcome: 'applied',
+      outcome,
     } as const;
+    const waiting = started.byok.awaitAgentHomeProjection(daemon.deviceId, desired().agentRef, REQUEST_ID);
     const response = await fetch(`${started.baseUrl}${byokAgentHomeProjectionCompletionPath(REQUEST_ID)}`, {
       method: 'PUT',
       headers: {
@@ -117,10 +118,12 @@ describe('reference task-free Agent-home projection', () => {
     });
     expect(response.status).toBe(200);
     const readback = await response.json();
+    expect(await waiting).toEqual(readback);
+    expect(await started.byok.awaitAgentHomeProjection(daemon.deviceId, desired().agentRef, REQUEST_ID)).toEqual(readback);
     expect(readback).toMatchObject({
       deviceId: daemon.deviceId,
       requestId: REQUEST_ID,
-      status: 'applied',
+      status: outcome,
       completedAt: expect.any(String),
     });
     expect(await started.byok.readAgentHomeProjection(daemon.deviceId, desired().agentRef, REQUEST_ID)).toEqual(readback);
@@ -139,10 +142,29 @@ describe('reference task-free Agent-home projection', () => {
         authorization: `Bearer ${daemon.accessToken}`,
         'content-type': 'application/json',
       },
-      body: JSON.stringify({ ...completion, outcome: 'conflict' }),
+      body: JSON.stringify({ ...completion, outcome: outcome === 'conflict' ? 'applied' : 'conflict' }),
     });
     expect(changed.status).toBe(409);
     expect(await started.byok.readAgentHomeProjection(daemon.deviceId, desired().agentRef, REQUEST_ID)).toEqual(readback);
+  });
+
+  it('cancels offline waits and rejects pending and future waits on close', async () => {
+    const started = await start();
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
+      productId: PRODUCT_ID, capabilities: ['agent-home-contract', AGENT_HOME_PROJECTION_CAPABILITY],
+    });
+    await started.byok.enqueueAgentHomeProjection({ deviceId: daemon.deviceId, payload: desired() });
+    expect(await started.byok.awaitAgentHomeProjection('other-device', desired().agentRef, REQUEST_ID)).toBeUndefined();
+    const abort = new AbortController();
+    const cancelled = started.byok.awaitAgentHomeProjection(daemon.deviceId, desired().agentRef, REQUEST_ID, { signal: abort.signal });
+    const cancellation = expect(cancelled).rejects.toThrow('offline cancelled');
+    abort.abort(new Error('offline cancelled'));
+    await cancellation;
+    const pending = started.byok.awaitAgentHomeProjection(daemon.deviceId, desired().agentRef, REQUEST_ID);
+    const closed = expect(pending).rejects.toThrow('ByokServer closed');
+    await started.byok.close();
+    await closed;
+    await expect(started.byok.awaitAgentHomeProjection(daemon.deviceId, desired().agentRef, REQUEST_ID)).rejects.toThrow('ByokServer closed');
   });
 
   it('does not allow another authenticated device to complete the exact target request', async () => {

@@ -15,7 +15,7 @@ import {
 const call = (name: string, args: Record<string, unknown> | undefined) => ({
   name,
   arguments: args,
-  signal: new AbortController().signal,
+  progress: () => {}, signal: new AbortController().signal,
 });
 
 describe('team MCP server', () => {

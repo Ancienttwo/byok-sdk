@@ -199,6 +199,11 @@ export function selectImpact(paths, context = {}) {
     if (path === 'examples/packaging/native-assets-fixture.ts' || path === 'examples/packaging/native-assets-smoke.mjs') {
       dirs.add('examples/packaging'); families.add('packageability-smoke'); continue;
     }
+    if (path === 'examples/basic/goal-btw.test-support.ts') {
+      // Shared runtime fixture is imported directly across these example suites.
+      for (const dir of ['examples/basic', 'examples/host-execution-core', 'examples/bot-collaboration']) dirs.add(dir);
+      continue;
+    }
     if (path === 'examples/basic/clarification.test.ts' || path === 'examples/basic/goal-btw.test.ts') {
       dirs.add('examples/basic'); continue;
     }

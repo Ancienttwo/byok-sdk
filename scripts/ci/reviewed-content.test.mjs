@@ -119,3 +119,10 @@ test('reviewed root-level basic fixtures select their workspace while unknown ro
   }
   assert.throws(() => selectImpact(['examples/basic/unknown.ts']));
 });
+
+test('shared goal fixture selects its consumers without broadening unknown root support files', () => {
+  const plan = selectImpact(['examples/basic/goal-btw.test-support.ts']);
+  assert.deepEqual(plan.dirs, ['examples/basic', 'examples/bot-collaboration', 'examples/byok-mcp-server', 'examples/host-execution-core']);
+  assert.deepEqual(plan.families, ['adapter-lifecycle-smoke']);
+  assert.throws(() => selectImpact(['examples/basic/other.test-support.ts']));
+});

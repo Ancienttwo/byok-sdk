@@ -1,6 +1,6 @@
 import type { ByokServer, DueWake } from '@byok-sdk/server';
 import { MemoryBlockedError, type HostMemoryPage, type MemoryBinding } from './memory';
-import { HostLedger } from './ledger';
+import { HostLedger, OutboxFullError } from './ledger';
 import { canonical, hash, project, taskId, time, validateInput, validateJson, validateRetry, type HostJobHandler, type Attempt, type Intent, type IntentInput,
   type Json, type LedgerState, type Routine, type RoutineDefinition, type Terminal } from './model';
 import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
@@ -181,34 +181,45 @@ export class HostExecutionCore {
     });
     const first = await this.flushWakes();
     const jobFailures = await this.runHostJobs();
-    for (let pass = 0; pass < 100 && !this.stopped; pass++) {
-      this.ledger.transaction(state => {
-        for (const intent of Object.values(state.intents)) {
-          if ((intent.phase === 'queued' || intent.phase === 'memory_blocked') && (intent.cancelReason || this.now() >= intent.waitUntil || this.now() >= (intent.retryUntil ?? Infinity))) {
-            settle(state, intent, intent.cancelReason === 'cancelled' ? 'cancelled' : this.now() >= intent.waitUntil ? 'expired' : 'superseded');
-          } else if (intent.phase === 'backoff' && (intent.cancelReason || this.now() >= Math.min(intent.waitUntil, intent.retryUntil ?? Infinity))) {
-            settle(state, intent, intent.cancelReason === 'cancelled' ? 'cancelled' : this.now() >= intent.waitUntil ? 'expired' : 'superseded');
+    let capacityFailure: OutboxFullError | undefined;
+    try {
+      for (let pass = 0; pass < 100 && !this.stopped; pass++) {
+        this.ledger.transaction(state => {
+          for (const intent of Object.values(state.intents)) {
+            if ((intent.phase === 'queued' || intent.phase === 'memory_blocked') && (intent.cancelReason || this.now() >= intent.waitUntil || this.now() >= (intent.retryUntil ?? Infinity))) {
+              settle(state, intent, intent.cancelReason === 'cancelled' ? 'cancelled' : this.now() >= intent.waitUntil ? 'expired' : 'superseded');
+            } else if (intent.phase === 'backoff' && (intent.cancelReason || this.now() >= Math.min(intent.waitUntil, intent.retryUntil ?? Infinity))) {
+              settle(state, intent, intent.cancelReason === 'cancelled' ? 'cancelled' : this.now() >= intent.waitUntil ? 'expired' : 'superseded');
+            }
           }
+        });
+        const state = this.ledger.snapshot();
+        const heads = new Map<string, Intent>();
+        for (const row of Object.values(state.outbox)) {
+          if (row.kind !== 'intent') continue;
+          const intent = state.intents[row.intentId]!;
+          if (!heads.has(intent.agent) || heads.get(intent.agent)!.sequence > intent.sequence) heads.set(intent.agent, intent);
         }
-      });
-      const state = this.ledger.snapshot();
-      const heads = new Map<string, Intent>();
-      for (const row of Object.values(state.outbox)) {
-        if (row.kind !== 'intent') continue;
-        const intent = state.intents[row.intentId]!;
-        if (!heads.has(intent.agent) || heads.get(intent.agent)!.sequence > intent.sequence) heads.set(intent.agent, intent);
+        let changed = false;
+        for (const intent of heads.values()) {
+          try { changed = await this.reconcile(intent) || changed; }
+          catch (error) { if (error instanceof OutboxFullError) throw error; this.error(`intent:${intent.id}`, error); }
+        }
+        if (!changed) break;
       }
-      let changed = false;
-      for (const intent of heads.values()) {
-        try { changed = await this.reconcile(intent) || changed; }
-        catch (error) { this.error(`intent:${intent.id}`, error); }
-      }
-      if (!changed) break;
+    } catch (error) {
+      if (!(error instanceof OutboxFullError)) throw error;
+      capacityFailure = error;
     }
-    this.armScan();
+    // A rejected settlement must still restore the durable scan consumed by this hook.
+    this.armScan(undefined, capacityFailure ? this.now() + this.reconcileMs : 0);
     const last = await this.flushWakes(first.failedKeys);
     const failures = [...first.failures, ...jobFailures, ...last.failures];
-    // All Agent queues were scanned. Reject only now, so the SDK retains the hook retry.
+    if (capacityFailure) {
+      if (!failures.length) throw capacityFailure;
+      failures.unshift(capacityFailure);
+    }
+    // Reject after scheduling cleanup, so the SDK retains the hook retry.
     if (failures.length) throw new AggregateError(failures, 'Wake dispatch failed; durable outbox retained');
   }
   private async runHostJobs(): Promise<unknown[]> {
@@ -299,7 +310,7 @@ export class HostExecutionCore {
     }
     return { failures, failedKeys };
   }
-  private armScan(readyAt = this.now() + 1): void {
+  private armScan(readyAt = this.now() + 1, notBefore = 0): void {
     this.ledger.transaction(state => {
       const open = Object.values(state.intents).filter(intent => !intent.conclusion);
       if (!open.length) {
@@ -307,13 +318,13 @@ export class HostExecutionCore {
         state.scanWake = null; return;
       }
       const now = this.now();
-      const due = Math.max(now + 1, Math.min(...open.map(intent => {
+      const due = Math.max(now + 1, notBefore, Math.min(...open.map(intent => {
         if (intent.phase === 'memory_blocked') return Math.min(intent.waitUntil, intent.retryUntil ?? Infinity);
         if (intent.phase === 'backoff') return Math.min(intent.notBefore, intent.waitUntil, intent.retryUntil ?? Infinity);
         if (intent.phase === 'queued') return open.some(other => other.agent === intent.agent && other.sequence < intent.sequence) ? intent.waitUntil : Math.min(intent.waitUntil, intent.retryUntil ?? Infinity, readyAt);
         return Math.min(now + this.reconcileMs, state.executions[intent.taskId]!.started ? Infinity : intent.waitUntil);
       })));
-      if (state.scanWake && state.scanWake.availableAt > now && state.scanWake.availableAt <= due) return;
+      if (state.scanWake && state.scanWake.availableAt > now && state.scanWake.availableAt >= notBefore && state.scanWake.availableAt <= due) return;
       if (state.scanWake) cancelWake(state, state.scanWake.dedupKey);
       const input = { dedupKey: `host-scan:${hash(this.ledger.tenant)}:${++state.scanSequence}`, availableAt: due };
       state.scanWake = input;
