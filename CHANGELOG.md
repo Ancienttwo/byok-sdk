@@ -8,6 +8,15 @@
 - **Feature (client)** — add a pinned Windows x64 native asset copier, distribution
   metadata and per-adapter asset roots for relocated runtime process ownership (#627).
   Darwin copying reuses the existing memory-helper API; Windows memory is unchanged.
+- **Fixed (core, cloud-dataplane, conformance, server)** — a presence publication
+  with `minimumIntervalMs: 0` no longer fails with `hint_rate_limited` when the
+  clock moved backwards. The embedded server renews the lease on each accepted
+  envelope and each poll, so after a wall-clock rollback `POST /byok/messages`
+  and `GET /byok/events` returned HTTP 500 until the clock caught up. Memory and
+  SQLite storage were both affected. The lease is now `now + TTL` on the store
+  clock. Heartbeats with a non-zero minimum interval keep their throttle. The
+  conformance suite now covers the rollback case, and `advanceTime` accepts a
+  negative value (#674).
 
 ## 0.28.1 / @byok-sdk/keys 0.13.1 — source candidate
 

@@ -633,7 +633,11 @@ joining device and presence lists.
 The reference server uses this same presence store as its sole observation
 rule. Its TTL is `longPollHoldMs + 15_000` by default (65 seconds), and must
 outlast one held poll. Authenticated hello, accepted envelopes, poll starts
-and heartbeat publications renew the same lease. `machines.list()` projects
+and heartbeat publications renew the same lease. A transport renewal publishes
+with `minimumIntervalMs: 0`, which disables throttling in every presence store.
+The lease is then `now + TTL` on the store clock, also when that clock moved
+backwards, so a wall-clock rollback cannot fail an accepted envelope or a poll.
+`machines.list()` projects
 `connected` and live discovery facts plus durable identity and harness discovery. All dispatches
 require an explicit `deviceId`; registered offline targets receive queued work,
 while unknown/revoked legacy targets fail with `device_not_found`. Presence
