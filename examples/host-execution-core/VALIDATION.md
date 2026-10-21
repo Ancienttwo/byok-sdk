@@ -82,32 +82,40 @@ Date: 2026-10-18. Baseline: `8e8839a3`.
 Branch: `codex/bot-k4-host-execution-core`.
 Environment: macOS, Node `v24.21.0`, Bun `1.4.3`.
 
-## Windows non-memory qualification gate (#611)
+## Windows qualification gate (#611)
 
-Added on 2026-10-21 against baseline
-`ad0d2d2591d8b5eb6ebb4c7f47cfc5463ca5f779`. Windows execution evidence is
-**PENDING** until the new `K4 Windows Host execution qualification` step passes
-on the exact PR HEAD in `built adapter lifecycle smoke (windows-latest)`.
-This addition alone is not a Windows product acceptance claim.
+PR #619 established the six-file non-memory gate. Its Windows run
+[39532145463 / job 119000298075](https://github.com/Ancienttwo/byok-sdk/actions/runs/39532145463/job/119000298075)
+passed 6 files / 39 tests with no skips. Retention evidence is recorded above.
 
-The step uses the existing Windows job's pinned Node version, dependency install
-and package build. Bun invokes the package test script; Vitest executes on Node.
-It runs the unchanged `core`, `execution-record`, `routines`,
-`scheduling-recovery`, `unclaimed-expiry` and `crash-recovery` test files.
-These qualify SQLite Host ledger/FIFO behavior, outcome application, routines,
-expiry, recovery and child-process termination/restart with a stub runtime and
-real local server/daemon. Credentials are injected in memory. No model is called.
-No assertion, timeout or platform skip is changed for this gate.
+The follow-up on main base `80a34083` replaces both partial K4 commands with
+`bun run --cwd examples/host-execution-core test` in the existing Windows
+built-adapter job. It discovers every K4 suite, including Host-side memory
+model, retention, ignored wakes and mailbox fixtures. Node is pinned by the
+job; Bun launches Vitest on Node, not a separate Bun-runtime matrix.
 
-The selection is deliberately non-memory: it does not run `memory.test.ts`
-(Host-side memory model) or `memory-linux.test.ts` (Linux device-memory integration),
-and does not assert Windows recall/save, projection or intent support. Windows
-Agent memory remains fail-closed under #605. K8 persona and live model/platform
-qualification are not covered; #611 remains open for that remaining scope and
-for recorded successful Windows CI evidence. Local macOS execution cannot
-substitute for this Windows gate. The exact six-file command passed on macOS
-against the unchanged baseline: 6 files, 39 tests, no skips. The workflow YAML
-parsed successfully and `git diff --check` passed; no full local suite was run.
+Local macOS arm64, Node 24.18.0 / Bun 1.4.3: the exact full-suite command passed
+10 files / 89 tests, with one file / 12 existing Linux-only cases skipped.
+No assertion, timeout or skip condition changed. Follow-up Windows execution
+and main-green evidence remain pending; this local result is not Windows proof.
+
+### Windows skip inventory
+
+Only `src/memory-linux.test.ts` has a platform condition. Its six cases each
+run for both `cloud` and `embedded` on Linux, hence 12 skipped cases on Windows:
+
+- replace/delete memory, purge bodies, survive restart;
+- EMPTY-base conflict and explicit approval;
+- redacted task-close text and oversized replacement;
+- initial Agent task-close projection;
+- missing MEMORY.md and profile revision change;
+- refresh after a verified small replacement, including restart.
+
+These exercise the real Linux device-memory helper, home lease and CAS.
+Windows Agent memory remains fail closed under #605. Host-side memory model
+tests are included. See the K8 VALIDATION Windows section for its separate
+POSIX persona suite exclusions. Synthetic runtime fixtures establish neither
+live-model performance nor downstream Windows product acceptance.
 
 ## Coalescing observation repair on 260570ae
 
