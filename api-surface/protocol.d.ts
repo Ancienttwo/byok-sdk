@@ -231,6 +231,10 @@ export declare const AgentEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"tool_use">;
     tool: z.ZodString;
+    mcp: z.ZodOptional<z.ZodObject<{
+        server: z.ZodString;
+        tool: z.ZodString;
+    }, z.core.$strict>>;
     input: z.ZodOptional<z.ZodUnknown>;
     toolCallId: z.ZodOptional<z.ZodString>;
     spill: z.ZodOptional<z.ZodObject<{
@@ -253,6 +257,10 @@ export declare const AgentEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"tool_result">;
     tool: z.ZodString;
+    mcp: z.ZodOptional<z.ZodObject<{
+        server: z.ZodString;
+        tool: z.ZodString;
+    }, z.core.$strict>>;
     output: z.ZodOptional<z.ZodUnknown>;
     toolCallId: z.ZodOptional<z.ZodString>;
     isError: z.ZodOptional<z.ZodBoolean>;
@@ -365,6 +373,10 @@ export declare const AgentEventOrUnknownSchema: z.ZodUnion<readonly [z.ZodDiscri
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"tool_use">;
     tool: z.ZodString;
+    mcp: z.ZodOptional<z.ZodObject<{
+        server: z.ZodString;
+        tool: z.ZodString;
+    }, z.core.$strict>>;
     input: z.ZodOptional<z.ZodUnknown>;
     toolCallId: z.ZodOptional<z.ZodString>;
     spill: z.ZodOptional<z.ZodObject<{
@@ -387,6 +399,10 @@ export declare const AgentEventOrUnknownSchema: z.ZodUnion<readonly [z.ZodDiscri
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"tool_result">;
     tool: z.ZodString;
+    mcp: z.ZodOptional<z.ZodObject<{
+        server: z.ZodString;
+        tool: z.ZodString;
+    }, z.core.$strict>>;
     output: z.ZodOptional<z.ZodUnknown>;
     toolCallId: z.ZodOptional<z.ZodString>;
     isError: z.ZodOptional<z.ZodBoolean>;
@@ -1819,6 +1835,10 @@ export {};
 export * from './version';
 export * from './task-state';
 export * from './capability-constants';
+/** Maximum raw UTF-8 content bytes in one local Host Agent-memory export; no truncation. */
+export declare const AGENT_MEMORY_MAX_SNAPSHOT_BYTES: number;
+/** Maximum memory files in one local Host export, including MEMORY.md. */
+export declare const AGENT_MEMORY_MAX_SNAPSHOT_FILES = 128;
 // ==== @byok-sdk/protocol dist/envelope.d.ts ====
 import { z } from 'zod';
 import { type MessageType } from './messages';
@@ -2771,6 +2791,10 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         }, z.core.$strip>, z.ZodObject<{
             type: z.ZodLiteral<"tool_use">;
             tool: z.ZodString;
+            mcp: z.ZodOptional<z.ZodObject<{
+                server: z.ZodString;
+                tool: z.ZodString;
+            }, z.core.$strict>>;
             input: z.ZodOptional<z.ZodUnknown>;
             toolCallId: z.ZodOptional<z.ZodString>;
             spill: z.ZodOptional<z.ZodObject<{
@@ -2793,6 +2817,10 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         }, z.core.$strip>, z.ZodObject<{
             type: z.ZodLiteral<"tool_result">;
             tool: z.ZodString;
+            mcp: z.ZodOptional<z.ZodObject<{
+                server: z.ZodString;
+                tool: z.ZodString;
+            }, z.core.$strict>>;
             output: z.ZodOptional<z.ZodUnknown>;
             toolCallId: z.ZodOptional<z.ZodString>;
             isError: z.ZodOptional<z.ZodBoolean>;
@@ -4347,6 +4375,10 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
             }, z.core.$strip>, z.ZodObject<{
                 type: z.ZodLiteral<"tool_use">;
                 tool: z.ZodString;
+                mcp: z.ZodOptional<z.ZodObject<{
+                    server: z.ZodString;
+                    tool: z.ZodString;
+                }, z.core.$strict>>;
                 input: z.ZodOptional<z.ZodUnknown>;
                 toolCallId: z.ZodOptional<z.ZodString>;
                 spill: z.ZodOptional<z.ZodObject<{
@@ -4369,6 +4401,10 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
             }, z.core.$strip>, z.ZodObject<{
                 type: z.ZodLiteral<"tool_result">;
                 tool: z.ZodString;
+                mcp: z.ZodOptional<z.ZodObject<{
+                    server: z.ZodString;
+                    tool: z.ZodString;
+                }, z.core.$strict>>;
                 output: z.ZodOptional<z.ZodUnknown>;
                 toolCallId: z.ZodOptional<z.ZodString>;
                 isError: z.ZodOptional<z.ZodBoolean>;
@@ -7540,6 +7576,10 @@ export declare const TaskProgressPayloadSchema: z.ZodObject<{
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"tool_use">;
         tool: z.ZodString;
+        mcp: z.ZodOptional<z.ZodObject<{
+            server: z.ZodString;
+            tool: z.ZodString;
+        }, z.core.$strict>>;
         input: z.ZodOptional<z.ZodUnknown>;
         toolCallId: z.ZodOptional<z.ZodString>;
         spill: z.ZodOptional<z.ZodObject<{
@@ -7562,6 +7602,10 @@ export declare const TaskProgressPayloadSchema: z.ZodObject<{
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"tool_result">;
         tool: z.ZodString;
+        mcp: z.ZodOptional<z.ZodObject<{
+            server: z.ZodString;
+            tool: z.ZodString;
+        }, z.core.$strict>>;
         output: z.ZodOptional<z.ZodUnknown>;
         toolCallId: z.ZodOptional<z.ZodString>;
         isError: z.ZodOptional<z.ZodBoolean>;
@@ -9415,6 +9459,10 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
         }, z.core.$strip>, z.ZodObject<{
             type: z.ZodLiteral<"tool_use">;
             tool: z.ZodString;
+            mcp: z.ZodOptional<z.ZodObject<{
+                server: z.ZodString;
+                tool: z.ZodString;
+            }, z.core.$strict>>;
             input: z.ZodOptional<z.ZodUnknown>;
             toolCallId: z.ZodOptional<z.ZodString>;
             spill: z.ZodOptional<z.ZodObject<{
@@ -9437,6 +9485,10 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
         }, z.core.$strip>, z.ZodObject<{
             type: z.ZodLiteral<"tool_result">;
             tool: z.ZodString;
+            mcp: z.ZodOptional<z.ZodObject<{
+                server: z.ZodString;
+                tool: z.ZodString;
+            }, z.core.$strict>>;
             output: z.ZodOptional<z.ZodUnknown>;
             toolCallId: z.ZodOptional<z.ZodString>;
             isError: z.ZodOptional<z.ZodBoolean>;

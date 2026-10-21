@@ -94,6 +94,8 @@ describe('the embedded agent-memory entry module graph', () => {
     // `agent-home-readers.ts` joined that inert tail with #317: `agent-home.ts`
     // imports the reader run-directory name check and retention from it. It
     // adds no external import, and nothing on this entry calls it.
+    // #603 adds a data-only release pin: embedded helper verification must bind
+    // copied assets to the same SDK build without importing daemon composition.
     expect(GRAPH.modules).toEqual([
       'agent-home-readers.ts',
       'agent-home.ts',
@@ -102,6 +104,7 @@ describe('the embedded agent-memory entry module graph', () => {
       'daemon/agent-memory-filesystem.ts',
       'daemon/agent-memory-fs-helper.ts',
       'daemon/agent-memory-helper-digest.ts',
+      'daemon/agent-memory-helper-release-pin.ts',
       'daemon/agent-memory-helper-release.ts',
       'daemon/agent-memory.ts',
       'daemon/memory-guidance.ts',

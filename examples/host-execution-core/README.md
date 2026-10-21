@@ -83,26 +83,113 @@ See `unclaimed-expiry.test.ts` and the guide for the exact distinction.
 ## Integration limits
 
 This example is a single-owner reference for a small ledger.
-Every transaction reads and rewrites the whole JSON ledger. The example does not clean up history rows.
-That includes settled intents, executions with terminal documents, occurrences, slot dedup keys,
-outcome markers and calendar audits. They are not a large-dataset storage design.
+Every transaction reads and rewrites the whole JSON ledger. History cleanup is explicit through
+`HostLedger.compact`, described below; it never runs automatically. Uncompacted settled intents,
+executions with terminal documents, occurrences, slot dedup keys, outcome markers and calendar audits
+remain in that JSON body. This is not a large-dataset storage design.
 
 Ignored routine wakes are visible in `ledger.snapshot().ignoredWakes`. The optional
 array retains the newest `IGNORED_WAKE_AUDIT_LIMIT` (128) observations in delivery
 order, discarding the oldest. Each record contains `at`, `reason`, and `wakeKeyHash`
 (SHA-256 of `canonical(dedupKey)`, computable with the exported `hash` helper).
-It stores no raw wake key, ID, or payload. Reasons are `unknown_key`,
+It stores no raw wake key, ID, or payload. The digest is unsalted: guessable keys
+can be dictionary-matched; this is not anonymization. Reasons are `unknown_key`,
+`stale_scan` (a non-current key in the reserved `host-scan:` namespace),
 `missing_routine`, `inactive_routine`, and `reservation_mismatch` (no current
 reservation or a different key). Repeated ignored deliveries each leave an
 observation; this bounded history is diagnostic, never replay/dedup authority.
 Already committed slots still increment their occurrence's replay count, and
 current scan wakes are not ignored. A matching reservation with altered time or
 payload still throws and rolls back; it is not treated as an ignored delivery.
-These records persist with the Host ledger and are absent before the first ignored
+Stale scan observations share the same 128-entry ring and can evict older diagnostics.
+`compact` does not delete `ignoredWakes`. These records persist with the Host ledger and are absent before the first ignored
 wake, including in previously created version-1 ledgers.
 
-This audit slice addresses part of #612. Host job handlers and occurrences without
-Agent execution are not implemented; a Host still routes its own jobs separately.
+## Host jobs and execution-free occurrences
+
+Register trusted Host handlers when constructing the core, before `recover()`:
+
+```ts
+const core = new HostExecutionCore(server, ledger, {
+  hostJobs: {
+    watchlist: async ({ input, occurrenceKey, signal }) => {
+      // Host-owned I/O; deduplicate external effects by occurrenceKey.
+      const summary = await checkWatchlist(input, { idempotencyKey: occurrenceKey, signal });
+      return { summary }; // No Agent intent or execution.
+      // To request Agent analysis, return { summary, execution: completeTemplate }.
+    },
+  },
+});
+await core.recover();
+await core.addRoutine({
+  id: 'watchlist:abc', version: 1, timeZone: 'UTC',
+  rule: { anchorMs: Date.now() + 1000, everyMs: 60_000 },
+  hostJob: { type: 'watchlist', input: { list: 'abc' } },
+  waitMs: 60_000, lateAfterMs: 1000,
+});
+```
+
+A definition supplies exactly one of `execution` or `hostJob`. The registry is copied
+at construction; register every persisted job type on each startup. Missing handlers,
+non-JSON inputs/results and invalid execution templates fail explicitly. Arbitrary
+unreserved wake keys are still audited; use `addRoutine` to obtain scheduling,
+reservation validation, replay deduplication, catch-up and recovery. `host-scan:` is
+reserved and cannot begin a routine ID.
+
+The occurrence and pending `host-job` outbox row commit before invoking the handler.
+The handler runs outside SQLite transactions, synchronously or asynchronously, inside
+the serialized drain. Its arguments include `occurrenceKey`, `routineId`,
+`definitionVersion`, `trigger`, `type`, `input`, `attempt` and a core-lifetime `signal`.
+The required JSON `summary` is stored as `occurrence.job.summary`; keep it small and
+exclude secrets. Inputs and summaries are plaintext in the Host ledger.
+
+Returning only a summary settles the occurrence as `succeeded` with no `intentId`,
+no SDK execution and zero Agent attempts. Returning `execution` atomically stores
+the summary and creates the existing FIFO intent. Its waiting deadline is measured
+from occurrence admission (`recordedAt + waitMs`), not handler completion. A newer
+committed slot supersedes a late escalation; pause removes the cancelled successor
+cutoff. Normal Agent validation, retry and terminal settlement then apply.
+
+Committed results are never rerun on wake replay or `recover()`. On handler failure
+or invalid output, the pending outbox retains `lastError`, `job.attempts` increases,
+and the drain rejects after processing other work. SDK wake redelivery, `recover()`
+or another drain retries pending work. Every admitted Host job remains pending until
+it succeeds; later slots do not silently discard failed Host work. Pause/completed
+stop new slots, while already admitted jobs can finish. `recover()` also restores
+missing successor wakes. Host job attempts are separate from Agent attempt counts.
+
+External effects are **at least once**: a crash after the effect but before the result
+commit can repeat the handler. Use the stable occurrence key for external idempotency.
+Keep handlers short and bounded; they serialize with other jobs and Agent dispatch.
+The SDK's 60-second hook deadline can expire while a handler is running; redelivery
+shares the drain and cannot start a second concurrent invocation. The handler signal
+is aborted by `close()`, not that hook deadline. `close()` waits for the handler;
+handlers must honor the signal. Rejection with its abort reason (including a Node
+`AbortError` wrapping that reason) leaves the job pending for recovery without
+failing shutdown; unrelated handler errors still propagate. A result returned
+after shutdown is not committed. Do not await core methods that drain from inside a
+handler (that would wait on its own drain).
+
+Host-only occurrences can be explicitly acknowledged and compacted:
+
+```ts
+ledger.compact({
+  acknowledgedIntentKeys: [],
+  acknowledgedOccurrenceKeys: [occurrenceKey],
+  now: Date.now(), tombstoneRetentionMs: 30 * 24 * 60 * 60 * 1000,
+});
+```
+
+Only settled, intent-less job occurrences qualify. Pending, unknown or promoted keys
+reject the whole batch; compact promoted occurrences through `acknowledgedIntentKeys`.
+The returned `occurrences` count includes both kinds. Unlike retired intent keys, a
+removed occurrence key is unknown on a second selection. The slot tombstone prevents
+replay through its retention window. After expiry, replay against an advanced active
+routine is audited as `reservation_mismatch` (or inactive/missing if its state changed).
+The JSON ledger and failed-job backlog remain small-Host reference storage: at 10x
+volume, whole-document rewrites and serialized handlers are the first bottlenecks.
+
+## Agent execution retention
 
 While work is in flight, the core normally creates a new `host-scan` wake every `reconcileMs`
 (default 1,000 ms). Earlier deadlines can cause earlier scans. The SDK retains done wake rows for seven days.
@@ -117,6 +204,54 @@ When adopting this code, define a retention policy for the Host ledger:
 - Keep task application and slot dedup tombstones through the maximum replay, upload retry and backup-restore window.
   Include at least the SDK's seven-day completed-wake replay window. Do not reuse retired identities.
 - Apply archive and tombstone changes atomically. Measure JSON rewrite cost before selecting a storage budget.
+
+After acknowledging results, completing any required external archive, and satisfying your product's
+retention period, explicitly select the intent keys to delete:
+
+```ts
+const result = ledger.compact({
+  acknowledgedIntentKeys: ['chat-turn-42'],
+  now: Date.now(),
+  tombstoneRetentionMs: 30 * 24 * 60 * 60 * 1000, // Choose your actual replay/restore window.
+});
+console.log(result.beforeBytes, result.afterBytes);
+```
+
+Selection is an assertion by the caller that these results may be removed. The core does not infer
+acknowledgement or product retention from timestamps. The method rejects unsettled intents, pending
+intent/result outbox records, unknown keys, and inconsistent execution/occurrence associations. An
+invalid selection or database failure rolls back the entire batch, including tombstones. Repeating
+an already compacted key is harmless and reports `alreadyCompactedIntents`; duplicate keys count once.
+An empty selection explicitly expires eligible tombstones without selecting additional history.
+
+One SQLite transaction deletes the selected intent's execution generations, terminal documents,
+settled occurrence, slot and application markers, and writes replacement tombstones. No outbox row,
+business `application` value, memory, routine or calendar audit is deleted. Custom projections have
+no intent ownership metadata and remain untouched, including any payload copies they contain.
+`core.intent(key)` returns `undefined` after compaction. Enqueuing a retired key throws the exported
+`RetiredIntentIdentityError` with stable `code: 'retired_intent_identity'`, even with the same input;
+this applies to the exported `enqueue` transition inside `ledger.transaction` as well.
+Use a new identity for new work.
+
+The additive `host_retired_identity` table keeps permanent intent identity hashes outside the hot
+JSON body and expiring task-application and wake-slot evidence. Retention starts at compaction and
+must be at least seven days; choose the maximum of your actual replay, upload retry and restore
+windows. `ledger.hasTombstone(kind, identity, now)` queries that evidence. Application tombstones
+are evidence for the Host, queried with `hasTombstone('application', taskId, now)`; the core does not
+consume them or replay removed application results. Retained wake replays do
+not create occurrences or dispatch work. At the exact expiry time slot/application evidence is no
+longer returned; a subsequent explicit compaction removes those rows. Retired intent identities
+never expire. Their indexed table grows with historical intent count, while removed core payloads
+no longer enlarge each JSON rewrite. Host-owned application data, custom projections, routines and
+audits can still grow independently; compact does not claim a total disk-size bound or run VACUUM.
+
+Opening an existing version-1 ledger adds the table without changing its JSON format. Back up and
+restore the **whole SQLite database atomically**, including the identity table (and SQLite's WAL
+state through a supported backup mechanism). Restoring JSON alone or running an older copy of the
+core loses the retirement guard. Do not downgrade to a pre-compaction version after using this API:
+an older writer ignores the new table and can reuse retired identities. Seven days is a minimum SDK replay horizon, not proof that an old
+backup is safe to restore; coordinate restores with your external acknowledgement/replay policy.
+This API performs deletion, not external archival, and must only be invoked under the Host's policy.
 
 Set `HostOptions.reconcileMs`, for example `{ reconcileMs: 10_000 }`, to reduce normal scan frequency.
 The default is unchanged. A larger interval increases terminal observation and FIFO release latency.

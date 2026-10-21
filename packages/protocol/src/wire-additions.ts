@@ -99,6 +99,8 @@ export const WIRE_ADDITIONS: readonly WireAddition[] = Object.freeze([
   { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'runtimes[].capabilities.messageDraft' },
   { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'harnesses[].capabilities.messageDraft' },
   { kind: 'envelope', rule: 'strip-safe', surface: 'task.claim', field: 'capabilities.messageDraft' },
+  // Optional MCP event identity is observability only; older receivers may omit it.
+  { kind: 'envelope', rule: 'strip-safe', surface: 'task.progress', field: 'events[].mcp' },
   // Daemon to server.
   { kind: 'envelope', rule: 'gated', surface: 'agent.message.draft', capability: 'agent-message-draft', advertisedBy: 'server' },
   { kind: 'envelope', rule: 'gated', surface: 'task.approval_resolved', capability: 'approval_resolved', advertisedBy: 'server' },

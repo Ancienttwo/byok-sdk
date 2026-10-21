@@ -75,6 +75,8 @@ export const AgentEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('tool_use'),
     tool: z.string(),
+    /** Authoritative MCP identity, absent when the adapter cannot resolve it. */
+    mcp: z.object({ server: z.string().min(1), tool: z.string().min(1) }).strict().optional(),
     input: z.unknown().optional(),
     toolCallId: z.string().regex(/\S/, 'toolCallId must contain a non-whitespace character').optional(),
     /** Present only when `input` is a preview of a spilled value — see {@link AgentEventSpillSchema}. */
@@ -83,6 +85,8 @@ export const AgentEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('tool_result'),
     tool: z.string(),
+    /** Authoritative MCP identity, absent when the adapter cannot resolve it. */
+    mcp: z.object({ server: z.string().min(1), tool: z.string().min(1) }).strict().optional(),
     output: z.unknown().optional(),
     toolCallId: z.string().regex(/\S/, 'toolCallId must contain a non-whitespace character').optional(),
     isError: z.boolean().optional(),

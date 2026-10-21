@@ -153,7 +153,7 @@ describe('result-document recovery from the journal', () => {
     type: 'object', additionalProperties: false, required: ['verdict'], properties: { verdict: { type: 'string' } },
   } } as const;
 
-  async function pairedAgentStore() {
+  async function pairedAgentStore(requiredReply = false) {
     const server = await TestServer.start(); cleanup.push(() => server.close());
     const root = await tmpDir('byok-result-recovery-');
     const config: DaemonConfig = { ...(await baseConfig(server.url)), hostedJournal: { mode: 'sqlite' },
@@ -163,6 +163,7 @@ describe('result-document recovery from the journal', () => {
     const identity = { tenantId: device.tenantId, productId: config.productId, deviceId: device.deviceId };
     const offerBytes = (taskId: string) => encodeEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
       instruction: 'submit one result', runtime: 'pi', agentRef, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: selection,
+      ...(requiredReply ? { messageEgress: { mode: 'required', contract: 'reply.v1', contentType: 'text/plain', maxBytes: 1024 } } : {}),
     }, { taskId, seq: 1 }));
     const home = path.join(config.agentHome!.hostStorageRoot, 'agents', agentRef.agentId);
     return { server, config, identity, offerBytes, home };
@@ -174,6 +175,39 @@ describe('result-document recovery from the journal', () => {
     await daemon.start();
     return daemon;
   }
+
+  it('refuses a result-reply marker that does not match the original required-reply offer', async () => {
+    const { config, identity, offerBytes } = await pairedAgentStore(false);
+    const journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
+    cleanup.push(() => journal.close());
+    const taskId = 'invalid-result-reply-marker';
+    const bytes = offerBytes(taskId);
+    await journal.appendEnvelope({ identity, taskId, envelopeId: JSON.parse(bytes).id, seq: 1, bytes, bytesHash: journalHash(bytes), opensTask: true, receivedAt: new Date().toISOString() });
+    await journal.recordAdmission({ taskId, admitted: true, claimedRuntime: 'pi', decidedAt: new Date().toISOString() });
+    await journal.recordTransition({ transitionId: `result-reply:${taskId}`, taskId, to: 'required-reply-result-missing', occurredAt: new Date().toISOString() });
+    const daemon = createDaemonWithAdapters(config, [new StubRuntimeAdapter()], { hostedJournal: { journal } });
+    cleanup.push(() => daemon.stop().catch(() => {}));
+    await expect(daemon.start()).rejects.toThrow('does not match its original offer');
+    expect(await journal.listPendingTerminals(identity)).toEqual([]);
+  });
+
+  it('retains an existing cancellation terminal over a pending result-reply decision', async () => {
+    const { server, config, identity, offerBytes } = await pairedAgentStore(true);
+    let journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
+    const taskId = 'cancelled-result-reply-marker';
+    const bytes = offerBytes(taskId);
+    await journal.appendEnvelope({ identity, taskId, envelopeId: JSON.parse(bytes).id, seq: 1, bytes, bytesHash: journalHash(bytes), opensTask: true, receivedAt: new Date().toISOString() });
+    await journal.recordAdmission({ taskId, admitted: true, claimedRuntime: 'pi', decidedAt: new Date().toISOString() });
+    await journal.recordTransition({ transitionId: `result-reply:${taskId}`, taskId, to: 'required-reply-result-missing', occurredAt: new Date().toISOString() });
+    const cancelled = encodeEnvelope(createEnvelope('task.cancelled', { reason: 'cancel wins', agentRef }, { taskId }));
+    await journal.recordTerminal({ taskId, terminalType: 'cancelled', bytes: cancelled, payloadHash: journalHash(cancelled), truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });
+    await journal.close();
+    journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
+    await startWith(config, journal);
+    const terminal = await server.waitFor(e => e.task_id === taskId && e.type === 'task.cancelled', 5000);
+    expect(encodeEnvelope(terminal)).toBe(cancelled);
+    expect(server.received.filter(e => e.task_id === taskId && e.type === 'task.fail')).toHaveLength(0);
+  });
 
   it('an interrupted task with a staged outcome recovers as daemon_interrupted with no document; the staged record stays as audit', async () => {
     const { server, config, identity, offerBytes, home } = await pairedAgentStore();

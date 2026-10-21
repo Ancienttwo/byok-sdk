@@ -77,12 +77,12 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 
 ## Version selection
 
-The next source candidate is 0.28.0 / keys 0.13.0. It is not published.
-See the [preparation handoff](../../docs/releases/v0.28.0-handoff.md).
-The published `latest` baseline remains 0.27.0 / keys 0.12.0.
+The next source candidate is 0.28.1 / keys 0.13.1. It is not published.
+See the [preparation handoff](../../docs/releases/v0.28.1.md).
+The public registry read on 2026-10-21 reports `latest` 0.28.0 / keys 0.13.0.
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
-The previous stable source manifests name train 0.27.0 and
+Historical 0.27.0 preparation named train 0.27.0 and
 independent keys 0.12.0. Both are MINOR lines. That train moved the wire to
 protocol major 3 (#468), adds `executions.submit` (#470), typed home-busy
 decline codes (#471) and the Agent message draft lane (#500), and has pre-1.0 breaking cuts in protocol, client,
@@ -93,7 +93,7 @@ dependencies consistent.
 
 The candidate set contains eight aligned packages plus keys: nine packages.
 `@byok-sdk/implementation-identity` remains retired. Every public package targets
-the dist-tag `latest`, now 0.27.0 / keys 0.12.0. The pre-publication
+the dist-tag `latest`, observed at 0.28.0 / keys 0.13.0 on 2026-10-21. The pre-publication
 [reviewed registry baseline](../../scripts/release/registry-expectations.json)
 records that prior `latest` for all nine packages. This train has no first
 publication.
@@ -103,7 +103,7 @@ readback and the declared absent `latest` after an RC. Missing tags/versions or
 failed registry reads do not establish package absence.
 
 Source preparation and npm execution need separate authorization. The owner
-provided both for 0.27.0. The 0.28.0 candidate has source-preparation
+provided both for 0.27.0. The historical 0.28.0 candidate has source-preparation
 authorization only. Live qualification and production rollout
 remain separate operations.
 The [publication record](../../docs/releases/v0.27.0-publication.md) confirms
@@ -143,7 +143,9 @@ separate evidence and authorization; see the
    [npm trusted publishing](../../docs/releases/oidc-trusted-publishing.md).
    The publisher logic and recovery rules are the same for both routes.
 
-   1. Confirm the CI run for the exact release commit is green, including its `npm-release-pack` job. Use the `push` run for the commit (`gh run list --branch main --workflow CI --event push --limit 1`), not a `pull_request` run: on pull-request events `github.sha` is the merge ref, so that run's artifact is named after a commit that is not `HEAD` and the dry run refuses it.
+   Ordinary pull requests and main pushes use impact-scoped checks. Full validation is a release acceptance action only: after the routing policy is adopted, dispatch `gh workflow run ci.yml --ref main -f release_sha=<full-approved-main-sha>`. The workflow rejects a mismatched SHA; its `CI required` gate must succeed before consuming the release artifact. Do not substitute ordinary main-push success or an earlier candidate's checks for this exact-SHA release evidence. While policy PR #653 is unmerged, this is the proposed acceptance path, not a claim that main already implements it.
+
+   1. Confirm the CI run for the exact release commit is green, including its `npm-release-pack` job. Explicitly dispatch `ci.yml` on the approved main commit with `release_sha` equal to that full SHA, then use its successful `workflow_dispatch` run (`gh run list --branch main --workflow CI --event workflow_dispatch --commit <sha> --limit 1`), not a routine push or `pull_request` run: on pull-request events `github.sha` is the merge ref, so that run's artifact is named after a commit that is not `HEAD` and the dry run refuses it.
    2. Download that run's accepted tarballs: `gh run download <run-id> -n release-pack-<sha> -D <dir>`, where `<sha>` is the full 40-character commit id (`git rev-parse HEAD`).
    3. After approving the exact package/version/channel plan, dry run `node scripts/release/publish.mjs --artifacts <dir>` for stable; append `--tag rc` for an approved RC. It refuses unless the frozen schema-3 `release-manifest.json` names the release version, exact complete package set and reviewed registry baseline, and was packed from the current `HEAD`. Every tarball the publish set needs must be present and match its recorded SHA-256, SHA-512, package identity and runtime dependency maps. Older manifests are not defaulted or upgraded in place. It queries registry version availability and, for an RC, the explicit prior-publication baseline, then prints the ordered plan. It does not publish, perform post-publication readback or tag. Only the appropriate clean not-found response can establish version/package absence; authentication, transport, malformed-output and other read errors block. `--artifacts` avoids rebuilding/repacking; a bare dry run builds and packs.
    4. Obtain separate publication authorization for that exact destination, public package/version set, channel and provenance method. For stable, release with `node scripts/release/publish.mjs --artifacts <dir> --execute`; append `--tag rc` only for an approved RC. Run interactively in Terminal.app for npm write 2FA. It refuses if the tag already exists, if `npm whoami` reports no account, or if `npm profile get --json` does not report `tfa.mode` `auth-and-writes` — there is no override. Immediately before the first RC write, it rechecks exact-version absence and the entire baseline; this narrows the race window but npm publication remains nontransactional. It then publishes each tarball in dependency order (`--provenance` only under GitHub Actions OIDC; a local release logs that no attestation is attached), reads the registry back, and only then creates the annotated `v<version>` tag carrying the source commit.

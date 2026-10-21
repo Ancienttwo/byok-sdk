@@ -1,35 +1,180 @@
 # WO-05 validation
 
+## Host jobs / issue #612
+
+Date: 2026-10-21. Baseline: `7f34c4576d654550ad0e3cfd828313088210e9c2`.
+Environment: macOS arm64, Node `v24.18.0`, Bun `1.4.3`.
+
+Final affected K4 suite: **102 passed, 12 skipped**, 11 passing files and one
+platform-skipped file, 57.15 seconds. The existing skip conditions were unchanged.
+The 13 new Host-job cases use the real SQLite ledger and embedded SDK; Agent
+promotion uses the repository's existing synthetic runtime, not a model/provider.
+Coverage includes scheduled delivery, sync/async handlers, summary-only completion,
+replay and concurrent delivery, lifecycle and rescheduling, failed-handler recovery
+across ledger reopen, missing registration, malformed contracts with atomic rollback,
+explicit Agent promotion, Host-only compaction/rollback/tombstones, stale-scan audit,
+and the durable escalation cutoff after newer occurrence compaction.
+
+The cutoff regression first reproduced as `expired` instead of `superseded` after
+compaction removed the newer occurrence. Persisting `job.executionSuperseded` at
+new-slot admission fixes that loss of evidence. An initial regression fixture consumed
+a future slot without advancing the clock; correcting its injected clock exposed the
+actual failure. One promotion test failed waiting for Agent startup during concurrent
+checks, then passed unchanged in isolation and in the final complete K4 run. Its
+cause is unclassified; no deadlines, assertions or skip conditions were changed.
+
+Commands and evidence:
+
+- `bun run build`: passed (SDK source unchanged by this slice).
+- `bun run typecheck`: passed after the required MCP consumer type narrowing.
+- `bun run check:api-surface`: passed, nine package goldens match.
+- `bun run check:version-authority`: passed.
+- `bun run --cwd examples/host-execution-core typecheck`: passed.
+- `bun run --cwd examples/host-execution-core test`: passed as above.
+- `bun run --cwd examples/byok-mcp-server typecheck`: passed.
+- `bun run --cwd examples/byok-mcp-server test src/routines.test.ts`: six passed.
+- `git diff --check`: passed; self-review covered source, docs and type-only test edits.
+
+The required `bun run test` attempt exited 1 after 248.66 seconds in the first
+(client) package: 4229 passed, 70 skipped, one failed, plus one unhandled rejection.
+The failure is `packages/client/src/__tests__/mcp-server-http.test.ts:134`,
+`isolates equal request IDs and cancellation between independent clients`: the
+first client's cancellation flag remained false. The same file reported an unhandled
+`SdkError: Connection closed` (`CONNECTION_CLOSED`) during peer cleanup. This slice
+changes no client source or client tests. No baseline reproduction or cause is claimed;
+the failure was recorded without repair or a workspace rerun. The sequential command
+never reached later packages, so no full-workspace test pass is claimed.
+
+Local logs: `/tmp/byok612-root-test.log`, `/tmp/byok612-k4-final.log`,
+`/tmp/byok612-mcp.log`, `/tmp/byok612-typecheck-final.log`, `/tmp/byok612-build.log`,
+`/tmp/byok612-api.log`, `/tmp/byok612-version.log`. These paths are local execution
+artifacts; the counts and failure above are the durable record.
+
+External Host effects are at least once across crashes, requiring occurrence-key
+idempotency. Long handlers block the serialized drain; shutdown waits for handlers to
+honor cancellation. No Windows/Linux run, provider acceptance or downstream production
+acceptance is claimed by these local macOS results.
+
+## Explicit retention / issue #602
+
+Date: 2026-10-21. Baseline: `ad0d2d2591d8b5eb6ebb4c7f47cfc5463ca5f779`.
+Environment: macOS arm64, Node `v24.18.0`, Bun `1.4.3`. Branch: `fix/602-host-retention`.
+Only synthetic temporary databases were compacted. No user database was opened or cleaned up.
+
+`src/fixtures/retention-benchmark.ts` creates settled, acknowledged records through the real
+`enqueue`/`settle` transitions and measures the real SQLite ledger. It removes its temporary
+databases on completion. The baseline ledger module is extracted without editing either checkout:
+
+```sh
+git show ad0d2d2591d8b5eb6ebb4c7f47cfc5463ca5f779:examples/host-execution-core/src/ledger.ts > /tmp/byok602-baseline-ledger.ts
+cd examples/host-execution-core
+node --import tsx src/fixtures/retention-benchmark.ts file:///tmp/byok602-baseline-ledger.ts
+node --import tsx src/fixtures/retention-benchmark.ts
+```
+
+The benchmark inserts each fixture in one transaction, then times three counter-only transactions
+that rewrite the unchanged history. It measures JSON bytes, not filesystem/WAL writes or end-to-end
+Agent throughput. The 1k/10k cases deliberately use reduced payloads to avoid a gigabyte allocation.
+All benchmark records are ordinary user intents; this is not a routine-calendar load measurement.
+The ten-record case uses the downstream 48 KiB instruction / 64 KiB JSON document sizes; instruction
+is stored in both intent and execution. These runs are observations on one machine, not capacity
+limits or statistically established latency targets.
+
+| Turns | Instruction / document bytes | Baseline JSON bytes | Baseline rewrite ms (three runs) | Compacted JSON bytes | Compaction ms | Post-compaction rewrite ms |
+| --- | --- | --- | --- | --- | --- | --- |
+| 10 | 49152 / 65536 | 1660311 | 2.328, 2.206, 3.130 | 173 | 2.603 | 0.090, 0.099, 0.094 |
+| 1000 | 128 / 256 | 2689955 | 10.149, 11.197, 11.686 | 175 | 18.490 | 0.108, 0.110, 0.105 |
+| 10000 | 128 / 256 | 26917957 | 122.354, 105.838, 104.612 | 176 | 195.367 | 0.093, 0.054, 0.052 |
+
+The patched ledger before compaction had identical JSON byte counts; corresponding rewrite times
+were 2.156/2.983/5.105, 15.078/9.532/9.663, and 117.997/111.011/108.529 ms. The compacted hot body
+contains empty history maps plus monotonic counters; counter digit lengths explain the small size
+differences. Permanent intent hashes remain in an indexed table that grows with historical count.
+Application values, routines/audits and all outbox data have independent growth; no total database
+size bound or disk space reclamation is claimed. Earlier issue-comment measurements used a simpler
+synthetic JSON shape; the table here uses the committed reproducible transition fixture.
+
+Focused coverage: acknowledged selection and repeated selection; all retry generations; preservation
+of unsettled/unacknowledged evidence, custom outbox and business values; whole-batch rollback on
+invalid selection and injected SQL failure; reopening and tenant isolation; exact seven-day boundary;
+permanent identity rejection after expiry, including the pure transition path; invalid time/overflow
+and non-array arguments; bounded hot body; actual SDK/daemon routine replay before and after expiry
+without reapplying the retained SDK terminal. The real-SDK test uses the repository's runtime stub,
+not a model/provider call. One initial sandboxed real-SDK run timed out; with localhost/subprocess
+access the test executed and exposed a fixture clock mismatch. Aligning the injected Host clock
+with the delivered SDK slot fixed the fixture; no assertions or timeout budgets were weakened.
+
+Root build, root typecheck, API surface and version authority passed. The final affected K4 suite
+passed: 79 tests, 8 files, 44.27 seconds, including all 13 retention tests and the version-1 additive
+migration/exclusive occurrence ownership regressions. Six existing Linux-only tests were skipped
+by their existing platform condition on macOS (one file); no skip condition was changed. The final
+affected package typecheck and `git diff --check` also passed.
+
+The single required `bun run test` attempt exited 1 after 247.27 seconds in the first (client)
+package: 4185 passed, 67 skipped, one failed. The failing case was
+`agent-home-single-writer.test.ts > keeps the home busy when disposal fails, and says so in status`,
+with `timed out waiting for envelope` from `fixtures/test-server.ts:302`. Because the root command
+is sequential, subsequent packages did not run. An independent reviewer ran that exact focused
+case on baseline `ad0d2d2591d8b5eb6ebb4c7f47cfc5463ca5f779` and this patch under comparable Node/Bun
+and local-socket permissions: both passed (431 ms and 416 ms). That does not establish a baseline
+bug or resource-contention cause; the broader-run failure remains unclassified. No test deadline,
+assertion, CI configuration or skip was changed to conceal it. No full-workspace pass is claimed.
+
+Logs: `/tmp/byok-602-root-test.log`, `/tmp/byok-602-disposal-baseline.log`,
+`/tmp/byok-602-disposal-patched.log`, and other `/tmp/byok-602-*` files. Independent source, test,
+README and measurement review found no actionable issue. The local full workspace
+failure described above remains uncharacterized, and this record does not count the isolated passes
+as a passing local full gate. CI on PR head `f9a3e699` passed all 54 checks (push run
+`39534023952`, pull_request run `39534047488`). In the push run both Linux `build, typecheck, test`
+lanes (jobs `119006349881` and `119006349906`) ran `src/retention.test.ts`, and its 13 tests passed.
+The existing built-adapter Windows job now also runs the new retention suite after its normal
+install/build. This adds platform qualification without changing any assertions, skips or existing
+gates. The retention suite passed 13/13 on `windows-latest` with no skips (run `39534023952`, job
+`119006349932`; run `39534047488`, job `119006426984`); Windows was not run on this Mac. PR #619
+separately adds other K4 Windows suites, and both workflow steps were kept when main was merged.
+
 Date: 2026-10-18. Baseline: `8e8839a3`.
 Branch: `codex/bot-k4-host-execution-core`.
 Environment: macOS, Node `v24.21.0`, Bun `1.4.3`.
 
-## Windows non-memory qualification gate (#611)
+## Windows qualification gate (#611)
 
-Added on 2026-10-21 against baseline
-`ad0d2d2591d8b5eb6ebb4c7f47cfc5463ca5f779`. Windows execution evidence is
-**PENDING** until the new `K4 Windows Host execution qualification` step passes
-on the exact PR HEAD in `built adapter lifecycle smoke (windows-latest)`.
-This addition alone is not a Windows product acceptance claim.
+PR #619 established the six-file non-memory gate. Its Windows run
+[39532145463 / job 119000298075](https://github.com/Ancienttwo/byok-sdk/actions/runs/39532145463/job/119000298075)
+passed 6 files / 39 tests with no skips. The descendant main push at merge SHA
+`95357bb07ba7b1b45a75ba463a170a75af435bd1` also passed the same 6 files / 39 tests:
+[main run 39542244558 / Windows job 119032782832](https://github.com/Ancienttwo/byok-sdk/actions/runs/39542244558/job/119032782832).
+The push directly on #619's merge was cancelled; this descendant is the completed
+main evidence. Retention evidence is recorded above.
 
-The step uses the existing Windows job's pinned Node version, dependency install
-and package build. Bun invokes the package test script; Vitest executes on Node.
-It runs the unchanged `core`, `execution-record`, `routines`,
-`scheduling-recovery`, `unclaimed-expiry` and `crash-recovery` test files.
-These qualify SQLite Host ledger/FIFO behavior, outcome application, routines,
-expiry, recovery and child-process termination/restart with a stub runtime and
-real local server/daemon. Credentials are injected in memory. No model is called.
-No assertion, timeout or platform skip is changed for this gate.
+The follow-up on main base `80a34083` replaces both partial K4 commands with
+`bun run --cwd examples/host-execution-core test` in the existing Windows
+built-adapter job. It discovers every K4 suite, including Host-side memory
+model, retention, ignored wakes and mailbox fixtures. Node is pinned by the
+job; Bun launches Vitest on Node, not a separate Bun-runtime matrix.
 
-The selection is deliberately non-memory: it does not run `memory.test.ts`
-(Host-side memory model) or `memory-linux.test.ts` (Linux device-memory integration),
-and does not assert Windows recall/save, projection or intent support. Windows
-Agent memory remains fail-closed under #605. K8 persona and live model/platform
-qualification are not covered; #611 remains open for that remaining scope and
-for recorded successful Windows CI evidence. Local macOS execution cannot
-substitute for this Windows gate. The exact six-file command passed on macOS
-against the unchanged baseline: 6 files, 39 tests, no skips. The workflow YAML
-parsed successfully and `git diff --check` passed; no full local suite was run.
+Local macOS arm64, Node 24.18.0 / Bun 1.4.3: the exact full-suite command passed
+10 files / 89 tests, with one file / 12 existing Linux-only cases skipped.
+No assertion, timeout or skip condition changed. Follow-up Windows execution
+and main-green evidence remain pending; this local result is not Windows proof.
+
+### Windows skip inventory
+
+Only `src/memory-linux.test.ts` has a platform condition. Its six cases each
+run for both `cloud` and `embedded` on Linux, hence 12 skipped cases on Windows:
+
+- replace/delete memory, purge bodies, survive restart;
+- EMPTY-base conflict and explicit approval;
+- redacted task-close text and oversized replacement;
+- initial Agent task-close projection;
+- missing MEMORY.md and profile revision change;
+- refresh after a verified small replacement, including restart.
+
+These exercise the real Linux device-memory helper, home lease and CAS.
+Windows Agent memory remains fail closed under #605. Host-side memory model
+tests are included. See the K8 VALIDATION Windows section for its separate
+POSIX persona suite exclusions. Synthetic runtime fixtures establish neither
+live-model performance nor downstream Windows product acceptance.
 
 ## Coalescing observation repair on 260570ae
 

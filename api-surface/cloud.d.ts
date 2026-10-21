@@ -14,6 +14,10 @@ export declare const ActivityAppendRequestSchema: z.ZodObject<{
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"tool_use">;
         tool: z.ZodString;
+        mcp: z.ZodOptional<z.ZodObject<{
+            server: z.ZodString;
+            tool: z.ZodString;
+        }, z.core.$strict>>;
         input: z.ZodOptional<z.ZodUnknown>;
         toolCallId: z.ZodOptional<z.ZodString>;
         spill: z.ZodOptional<z.ZodObject<{
@@ -36,6 +40,10 @@ export declare const ActivityAppendRequestSchema: z.ZodObject<{
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"tool_result">;
         tool: z.ZodString;
+        mcp: z.ZodOptional<z.ZodObject<{
+            server: z.ZodString;
+            tool: z.ZodString;
+        }, z.core.$strict>>;
         output: z.ZodOptional<z.ZodUnknown>;
         toolCallId: z.ZodOptional<z.ZodString>;
         isError: z.ZodOptional<z.ZodBoolean>;
@@ -99,6 +107,10 @@ export declare const TimelineEventSchema: z.ZodObject<{
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"tool_use">;
         tool: z.ZodString;
+        mcp: z.ZodOptional<z.ZodObject<{
+            server: z.ZodString;
+            tool: z.ZodString;
+        }, z.core.$strict>>;
         input: z.ZodOptional<z.ZodUnknown>;
         toolCallId: z.ZodOptional<z.ZodString>;
         spill: z.ZodOptional<z.ZodObject<{
@@ -121,6 +133,10 @@ export declare const TimelineEventSchema: z.ZodObject<{
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"tool_result">;
         tool: z.ZodString;
+        mcp: z.ZodOptional<z.ZodObject<{
+            server: z.ZodString;
+            tool: z.ZodString;
+        }, z.core.$strict>>;
         output: z.ZodOptional<z.ZodUnknown>;
         toolCallId: z.ZodOptional<z.ZodString>;
         isError: z.ZodOptional<z.ZodBoolean>;

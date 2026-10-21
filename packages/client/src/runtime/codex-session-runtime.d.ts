@@ -42,8 +42,6 @@ export declare function codexSession(
   hooks?: {
     onReady?: (threadId: string) => void;
     onRecord?: (record: CodexRecord) => void;
-    maxBytes?: number;
-    onLimit?: () => never;
     onServerRequest?: (id: string | number, method: string, params: Record<string, unknown>, reply: {
       respond(value: Record<string, unknown>): Promise<void>; reject(code: number, message: string): Promise<void>; cancelled(): void;
     }) => void;
