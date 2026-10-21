@@ -30,6 +30,8 @@ export interface PreparedOperationResources {
   approvalChannel?: ApprovalChannel;
   /** Seals a `memory-reader` Agent manifest whose run directory is `workspaceDir`. */
   reader?: { canonicalHome: string };
+  /** Seals a canonical writer Agent manifest. */
+  agentHome?: string;
 }
 
 /** Exercise the public descriptor → prepare → sealed-manifest → operation path in adapter unit tests. */
@@ -54,6 +56,11 @@ export async function startPreparedOperation(
     requiredToolsetIds: [],
     ...(offer.dispatchSelection === undefined ? {} : { dispatchSelection: offer.dispatchSelection }),
     ...(offer.sessionRef === undefined ? {} : { sessionRef: offer.sessionRef }),
+    ...(resources.agentHome === undefined ? {} : {
+      agentRef: { agentId: 'adapter-unit-agent', profileRevision: 'r1' },
+      cwd: resources.workspaceDir,
+      lease: { leaseId: 'adapter-unit-lease', canonicalHome: resources.agentHome },
+    }),
     ...(resources.reader === undefined ? {} : {
       agentRef: { agentId: 'adapter-unit-agent', profileRevision: 'r1' },
       cwd: resources.workspaceDir,

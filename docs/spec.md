@@ -16,6 +16,11 @@ the waiting call signal; only the Host task API cancels a task.
 The Host authenticates each caller before selecting its separate transport instance.
 The transport validates Origin against trusted configuration and bounds bodies,
 sessions, active calls and optional SSE queues. It owns no key or task ledger.
+The default stateful mode retains caller sessions. Explicit `sessionMode: 'stateless'`
+uses a request-scoped tools-only core without session IDs or affinity. The Host
+authenticates and authorizes every request; Origin, protocol and body validation
+remain enforced. Stateless mode has no SSE, session expiry/DELETE invalidation
+or cross-request cancellation. It does not add an external session store.
 See [the HTTP contract](mcp-server-http.md) for lifecycle and resource limits.
 
 The [B2 Host reference](../examples/byok-mcp-server/README.md) supplies a separate
@@ -195,18 +200,25 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.28.0`; publication requires separate release
+aligned dispatch release is `0.28.1`; publication requires separate release
 authorization and registry readback. The current independent keys release is
-`0.13.0`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.28.0`, proven from an isolated standard npm install rather
+`0.13.1`; its packed and published `@byok-sdk/core` edge must be the exact current
+dispatch release, `0.28.1`, proven from an isolated standard npm install rather
 than the workspace graph.
 
-0.28.0 / keys 0.13.0 is an unpublished source candidate. Both are MINOR
-releases. The train adds public adapters, Bot outcome fragments, schedules
-and an MCP HTTP transport. keys adds Pi API and catalog fields.
-The memory helper configuration has a pre-1.0 breaking cut.
-See the [candidate notes](releases/v0.28.0.md). Publication requires the
-accepted final-commit CI artifact and separate owner authorization.
+For this release only, the owner's 2026-10-21 instruction to continue the
+0.28.1 release selects PATCH despite the included additive APIs and persistence
+changes. This explicit exception does not change the general policy above or
+waive validation, publication authorization, or registry readback. keys 0.13.1
+updates its exact packed core dependency; keys remains independently versioned.
+See the [0.28.1 candidate notes](releases/v0.28.1.md).
+
+Public registry metadata read on 2026-10-21 reports all eight aligned packages
+at latest 0.28.0 and keys at latest 0.13.0. The older 0.28.0 source-candidate
+notes describe preparation history, not current registry availability. The
+0.28.1 / keys 0.13.1 versions were absent at that read; recheck before publishing.
+Publication requires the accepted final-commit CI artifact and separate owner
+authorization.
 
 0.27.0 / keys 0.12.0 is published on `latest` from `v0.27.0` (`cd977261`).
 Complete registry readback and isolated installation passed on 2026-10-17.
@@ -516,6 +528,22 @@ offers time zones as an enum of canonical names, and the instant that the
 device Host computes is the one it schedules. A successor outside the wake
 limit stays in the Host outbox and is retried; a null successor is a visible
 stopped state, not a silent stop.
+
+The copy-and-own K4 Host execution example keeps a bounded diagnostic history of
+ignored routine wake deliveries in `LedgerState.ignoredWakes`: unknown keys,
+missing or inactive routines, and keys without a matching current reservation.
+The newest 128 observations contain only a timestamp, closed reason code and
+SHA-256 key digest, never the raw key or payload. This history grants no execution
+or deduplication authority; committed occurrence replay and current scan wakes
+keep their existing behavior. Non-current `host-scan:` keys use `stale_scan`.
+K4 also accepts immutable Host-job routine definitions with registered synchronous
+or asynchronous handlers. Slot admission and pending work commit before the handler;
+its JSON summary and optional Agent intent commit atomically afterward. A summary-only
+result records an occurrence without an Agent execution. Failures retain pending work
+and reject the drain; recovery retries it with the same occurrence identity. External
+Host effects require occurrence-key idempotency across crashes. Pause/completed stop
+new slots, not admitted jobs. This remains Host example code, not an SDK scheduler.
+See the [K4 Host job contract](../examples/host-execution-core/README.md#host-jobs-and-execution-free-occurrences).
 
 ### Embedded wake queue
 
@@ -1984,6 +2012,48 @@ Busy, containment, hook, fsync, transport, or readback mismatch leaves the
 cursor at its prior value and redelivers after reconnect/restart. No fake task,
 runtime, session, terminal event, or task journal record is created.
 
+Local Host memory export is a separate, explicitly enabled in-process API.
+`DaemonConfig.agentMemoryExport: true` exposes
+`daemon.exportAgentMemory(agentRef, { signal })`; without that opt-in the method
+is absent. It does not add a control socket command, wire capability, upload,
+restore, task, runtime, or projection callback. The daemon need not be started
+or paired. The Host owns authorization, destination, encryption, and retention
+of the returned raw content; it must never pass this result to the redacted
+projection port or log its contents.
+
+Export validates the complete requested AgentRef and holds the existing
+canonical-home writer lease through capture and helper shutdown. A competing
+writer fails with retryable `AgentHomeBusyError`; no partial snapshot is returned.
+If a durable applied profile projection exists, its revision must exactly match
+the request. Otherwise the request remains Host-supplied identity metadata:
+`requestedAgentRef` is not evidence of the globally current profile revision.
+`appliedProfileRevision` is returned only when that local evidence exists. No new
+persistent profile binding is invented for an empty or ordinary task-written home.
+
+Task-free initialization preserves the existing home and creates an empty
+`MEMORY.md` when absent, without invoking Host projection hooks. Capture uses the
+same pinned filesystem and admitted memory-path policy as memory recall/save:
+`MEMORY.md` and safe Markdown paths under `notes/`, not arbitrary home files,
+`.byok` state, credentials, or opaque unsupported note paths. Linux uses native
+pinned descriptors; macOS requires the verified SDK release helper and its
+strict volume barriers. Windows remains unavailable pending its separate proof.
+The protocol exports `AGENT_MEMORY_MAX_SNAPSHOT_FILES` (128, including MEMORY.md)
+and `AGENT_MEMORY_MAX_SNAPSHOT_BYTES` (1 MiB total UTF-8 content). Existing 256 KiB
+per-file and 512 directory-entry bounds still apply. Limit/validation failures
+reject the whole operation, never truncate; aggregate file/byte limits use
+`AgentMemorySnapshotLimitError`. I/O and invalid files fail closed.
+
+A successful export returns immutable `files` with exact `path`, SHA-256
+`revision`, `byteCount`, and UTF-8 `content`, plus `totalBytes` and `snapshotDigest`.
+The digest is `sha256:` plus lowercase hexadecimal SHA-256 of the UTF-8 JSON
+encoding of `["byok-agent-memory-export.v1", [[path, revision, byteCount], ...]]`.
+Paths use ascending ASCII byte order, independent of locale. Content is covered
+by each revision; Agent identity and profile metadata are deliberately excluded
+so identical memory trees have identical digests. Cancellation is checked before
+acquiring, after initialization, between file reads, and before return; it does
+not interrupt an in-flight native filesystem call. Helper and lease cleanup run
+on success, abort, and error. This API alone makes no cross-device restore claim.
+
 Host-approved memory intents are another task-free control. The Host approves
 one exact `replace` or `delete` of one memory file and remains the only approval
 authority; the device-local `MEMORY.md` and `notes/**` remain the only memory
@@ -2029,14 +2099,26 @@ The client release carries Darwin arm64 and x64 helpers. The SDK resolves its
 own path and checks the build manifest before each helper open. Arbitrary
 `agentMemoryFilesystem.helperBin` configuration is removed. The ordinary build
 needs no Go. `bun run build:release` builds and verifies native release assets.
+The native reproducibility check rejects release-pin drift. After changing
+native sources, maintainers explicitly regenerate the pin by running
+`node packages/client/scripts/build-agent-memory-helper.mjs` then
+`node packages/client/scripts/check-agent-memory-helper-build.mjs --write-pin`;
+the latter verifies two clean source-path builds before writing the pin.
 Single-file products copy these SDK-owned release assets at build time using
 `copyAgentMemoryHelperAssets({ outDir })` from `@byok-sdk/client`. The destination
 must be new or empty; copying verifies both target binaries and their manifest
 and never overwrites existing files. Ship that directory with the product and
-set `DaemonConfig.agentMemoryHelperAssetRoot` to its absolute installed path.
+set `DaemonConfig.agentMemoryHelperAssetRoot` to its absolute installed path
+only on macOS (Darwin arm64/x64); omit it on Linux and Windows. A configured
+root on other platforms is rejected. Failed copies remove files created by the
+call and preserve any pre-existing empty destination directory.
 An explicit invalid root fails daemon construction even without a configured
 memory projection or intent feed. Resolution and every helper open verify the
-same manifest and content digest; no arbitrary binary path, digest override or
+manifest metadata, source digest and both target digests against the committed
+release identity compiled into the SDK, and the binary against that identity's
+content digest. Assets must come from the same SDK build as the Host bundle.
+Explicit-root missing-file errors direct the Host to deploy the copy API output.
+No arbitrary binary path, digest override or
 PATH search is admitted. The directory is a deployment integrity boundary, not
 a signer authentication mechanism. Omitting the option retains installed SDK
 package resolution. Windows admission is unchanged.
@@ -2612,6 +2694,24 @@ Only successful runtime completion with a staged outcome produces `task.complete
 
 On the prepared lane, the preparation request carries the same `terminalProjection` as the offer. Its exact schema and contract are retained in the durable binding, covered by the request digest, and represented by a schema-bound executor identity in `toolManifestDigest`. Admission compares the selection before pinning or claiming. A SummaryJob with `requiredToolsets: []` and `agentMemory:'none'` now counts and launches exactly one tool, `submit_result`; it omits `requiredToolsets` on the offer and needs no user `messageEgress`. The worker verifies the task-bound result helper's schema before constructing the model. The durable record version is 11; no version-10 record is read forward. Records and wire v3 share one drain-then-upgrade cut. Other preparations that select no result still support zero tools.
 
+When `messageEgress.mode: required` and `terminalProjection.mode: result-document`
+are combined, a normal runtime `turn_end` with a missing or unreadable staged
+result still delivers its existing or daemon-authored closing reply through the
+usual immutable outbox and exact accepted-disposition gate. The terminal then
+fails non-retryably as `result_not_submitted` or `result_unreadable`, without a
+document; Hosts must not apply outcome actions. Empty reply text is not invented.
+Runtime failure and cancellation retain their existing revocation rules.
+
+Before handing off that reply, the daemon persists the typed result-failure
+intent as an execution transition in the existing local journal. This is not a
+wire terminal and does not prevent cancellation from winning. On restart, an
+existing terminal always wins; otherwise recovery validates the original offer's
+required-message/result contract and converts that intent into the ordinary
+immutable failure terminal. Pending recovered messages still gate terminal
+publication. The intent survives accepted-disposition deletion of the outbox
+draft, so a crash after reply acceptance does not rewrite the diagnosis to
+`daemon_interrupted`, rerun the runtime, or apply an outcome.
+
 This is an execution/result primitive. Host owns semantic outcome acceptance, SummaryJob coverage/version CAS, budgets and scheduling. See [the K7 migration and release note](releases/k7-wire-v3.md) for the coordinated server/client upgrade and pending-v2 startup fences.
 
 ### Fresh Agent execution Host composition requirements
@@ -2949,3 +3049,15 @@ Without `storage.scratchRoot`, derive the default from the canonical store ident
 An explicit `storage.scratchRoot` must pass validation; an excessive length fails construction. A failed root never triggers a substitute. External roots persist their store ownership. A standalone root is exclusive to its process and must be provisioned fresh on process restart. No silent runtime or root fallback is provided.
 
 Legacy shared-temp prefixes are an operator-invoked migration: doctor inventories exact production names, and only `doctor --fix --yes` with a stopped daemon deletes matching, same-uid real directories. SDK startup never scans shared OS temp. Remove this one-shot scanner in the next minor release. See `docs/migrations/client-retention-399.md` for removed APIs and Host migration.
+
+
+### K8 Host-declared read-only toolsets
+
+The copy-and-own Bot collaboration example refuses required toolsets by default.
+A Host may declare an immutable `readOnlyToolsets` list of logical IDs, enforced
+across initial/model templates, restored Bots, creation, update and enqueue.
+The daemon still owns concrete tool definitions and ordinary capability admission.
+Only the Host's local tool service can enforce actual read-only behavior; model
+annotations are not authorization. External effects retain owner-confirmed Host
+connector execution. This additive slice does not qualify external-authority
+storage, Windows persona persistence or two-process relay.

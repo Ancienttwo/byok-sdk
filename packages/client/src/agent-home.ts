@@ -1258,7 +1258,7 @@ export class AgentHomeManager {
    * ordering record. Read it while the execution lease is held: `project()`
    * needs the same lease, so the record cannot change during the Attempt.
    */
-  async readAppliedProjection(binding: AgentHomeExecutionBinding): Promise<TerminalAgentHomeProjection | undefined> {
+  async readAppliedProjection(binding: AgentHomeBinding): Promise<TerminalAgentHomeProjection | undefined> {
     const state = await readProjectionState(binding.resolution);
     return state === undefined
       ? undefined

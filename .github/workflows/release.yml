@@ -8,14 +8,18 @@ name: Release
 # runner cannot mint the OIDC identity npm trusts, so this job must stay on
 # ubuntu-latest; scripts/release/publish.mjs refuses any other runner.
 #
-# The job publishes the exact tarballs that CI accepted for this commit: it finds
-# the successful ci.yml push run for github.sha (a pull_request run names its
+# The default route publishes exact tarballs CI accepted for this commit: it finds
+# the successful explicit ci.yml release-validation run for github.sha (a pull_request run names its
 # artifact after the merge ref, not this commit), downloads its
 # release-pack-<sha> artifact, and hands it to publish.mjs --artifacts, which
 # re-hashes every tarball against the frozen release-manifest.json. Nothing is
 # built or packed here.
 #
-# The `sha` input pins the approved commit: a dispatch whose main tip has moved
+# The optional source-sha route is restricted to the owner-approved 0.28.1
+# source/run/artifact/manifest pins in scripts/ci/accepted-release.mjs. It verifies
+# original bytes and ancestry before checking out that source; nothing is rebuilt.
+#
+# The `sha` input pins the approved workflow commit: a dispatch whose main tip has moved
 # refuses to run, so a plan is never released from code nobody reviewed.
 #
 # Re-running the original run (`gh run rerun <id>`) is the recovery path. publish.mjs
@@ -30,6 +34,10 @@ on:
         description: Full 40-character commit on main to release. The run refuses any other commit.
         type: string
         required: true
+      source-sha:
+        description: Optional owner-approved original 0.28.1 source; consumes its pinned accepted artifact without rebuilding.
+        type: string
+        default: ''
       execute:
         description: Publish for real. Leave unchecked to print the full release plan only.
         type: boolean
@@ -79,19 +87,43 @@ jobs:
           node-version-file: .node-version
           package-manager-cache: false
 
+      - name: Verify the owner-approved original release artifact
+        if: inputs.source-sha != ''
+        id: accepted
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SOURCE_SHA: ${{ inputs.source-sha }}
+        run: node scripts/ci/accepted-release.mjs
+
+      - name: Preserve original build and release workflow identities
+        if: inputs.source-sha != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: accepted-release-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/accepted-release-evidence.json
+          if-no-files-found: error
+
+      - name: Checkout the verified original source for manifest checks and release tag
+        if: inputs.source-sha != ''
+        env:
+          SOURCE_SHA: ${{ steps.accepted.outputs.source-sha }}
+        run: git checkout --detach "$SOURCE_SHA"
+
       - name: Find the successful CI run for this commit
+        if: inputs.source-sha == ''
         id: ci
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --event push --branch main --commit "$GITHUB_SHA" --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --event workflow_dispatch --branch main --commit "$GITHUB_SHA" --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
           if [ -z "$run_id" ]; then
-            echo "::error::no successful ci.yml push run for $GITHUB_SHA on main; wait for CI to pass on this commit"
+            echo "::error::no successful explicit ci.yml release-validation run for $GITHUB_SHA on main; wait for CI to pass on this commit"
             exit 1
           fi
           echo "run-id=$run_id" >> "$GITHUB_OUTPUT"
 
       - name: Download the accepted release tarballs
+        if: inputs.source-sha == ''
         uses: actions/download-artifact@v4
         with:
           name: release-pack-${{ github.sha }}
@@ -99,6 +131,9 @@ jobs:
           run-id: ${{ steps.ci.outputs.run-id }}
           github-token: ${{ github.token }}
 
+      # npm's provenance describes this release workflow SHA, not the earlier
+      # build. The separately uploaded evidence preserves original source/run/hash.
+      # Never override GITHUB_SHA or rebuild the accepted package bytes.
       - name: Release plan or publish
         env:
           EXECUTE: ${{ inputs.execute }}

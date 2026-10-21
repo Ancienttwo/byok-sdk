@@ -375,6 +375,11 @@ export interface CodexAdapterOptions {
     spawnFn?: typeof nodeSpawn;
     maxRetainedBytes?: number;
     interruptTimeoutMs?: number;
+    /**
+     * Deadline in milliseconds for the session open, each prompt and each steer.
+     * Default 30000. On expiry the session fails and the app-server is killed.
+     */
+    operationTimeoutMs?: number;
     /** Opt-in local Host UI; independent of the remote boolean approval lane. */
     nativeInteractions?: NativeInteractionHostOptions;
 }
@@ -1290,7 +1295,7 @@ export declare class AgentHomeManager {
      * ordering record. Read it while the execution lease is held: `project()`
      * needs the same lease, so the record cannot change during the Attempt.
      */
-    readAppliedProjection(binding: AgentHomeExecutionBinding): Promise<TerminalAgentHomeProjection | undefined>;
+    readAppliedProjection(binding: AgentHomeBinding): Promise<TerminalAgentHomeProjection | undefined>;
     mutateExecution<T>(binding: AgentHomeExecutionBinding, operation: () => Promise<T>): Promise<T>;
     private initializeResolved;
     supportsTaskFreeProjection(): boolean;
@@ -2022,6 +2027,26 @@ export declare class AgentLatestValueState {
     get pendingBytes(): number;
 }
 export {};
+// ==== @byok-sdk/client dist/daemon/agent-memory-export.d.ts ====
+import type { AgentHomeManager, AgentRef } from '../agent-home';
+import { type AgentMemorySnapshot } from './agent-memory';
+/** Raw local-only Host result. Never send this through the redacted projection port. */
+export interface AgentMemoryExport extends AgentMemorySnapshot {
+    /** Validated Host request, not proof of a globally current profile revision. */
+    readonly requestedAgentRef: AgentRef;
+    /** Present only when the home has a durable applied profile projection. */
+    readonly appliedProfileRevision?: string;
+    /** sha256 of UTF-8 JSON ["byok-agent-memory-export.v1", [[path, revision, byteCount], ...]]. */
+    readonly snapshotDigest: string;
+}
+export interface AgentMemoryExportOptions {
+    readonly signal?: AbortSignal;
+}
+/** Internal composition: only the daemon's explicit opt-in exposes this operation. */
+export declare function exportAgentMemoryHome(homes: AgentHomeManager, agentRef: AgentRef, options?: AgentMemoryExportOptions, helper?: {
+    readonly bin: string;
+    readonly assetRoot?: string;
+}): Promise<AgentMemoryExport>;
 // ==== @byok-sdk/client dist/daemon/agent-memory-filesystem.d.ts ====
 /**
  * Root-bound filesystem authority used by Agent memory. Implementations must
@@ -2279,6 +2304,10 @@ export declare class AgentMemoryError extends Error {
 export declare class AgentMemoryValidationError extends AgentMemoryError {
     constructor(message: string);
 }
+/** A complete snapshot cannot fit the bounded export contract. No partial result is returned. */
+export declare class AgentMemorySnapshotLimitError extends AgentMemoryValidationError {
+    constructor(message: string);
+}
 /**
  * Filesystem I/O failure: an open, read, write, fsync, rename or unlink did not
  * complete, or a file changed under a read. A retry may succeed, and a failure
@@ -2495,6 +2524,8 @@ export declare class AgentMemoryService {
         readonly content?: unknown;
     }): Promise<Readonly<AgentMemorySaveResult>>;
 }
+/** Internal bounded capture; the caller must hold the exclusive home lease throughout. */
+export declare function captureAgentMemoryHomeSnapshot(input: AgentMemoryHomeBinding, signal?: AbortSignal): Promise<AgentMemorySnapshot>;
 /** Bounded stable snapshot, called after Session.close() while the Agent lease still exists. */
 export declare function captureAgentMemorySnapshot(input: AgentMemoryTaskContext): Promise<AgentMemorySnapshot>;
 export declare class AgentMemoryRedactedOutbox {
@@ -4043,6 +4074,7 @@ import { type ProgressBatcherOptions } from './progress-batcher';
 import { type AgentEgressReliableAppendResult } from './agent-egress-controller';
 import { type AgentEgressStatus } from './agent-egress-policy';
 import { type ProviderProvisioningHandler } from './provider-provisioning';
+import { type AgentMemoryExport, type AgentMemoryExportOptions } from './agent-memory-export';
 import { type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
 import { type AgentMemoryHostedProjection } from './agent-memory';
 import { type AgentMemoryIntentTransport } from './agent-memory-intent';
@@ -4137,6 +4169,8 @@ export interface DaemonConfig {
     agentMemoryMcp?: 'auto' | 'off';
     /** Optional, one-way hosted projection. Without all guards it has zero network activity. */
     agentMemory?: AgentMemoryHostedProjection;
+    /** Explicit raw local Host export opt-in. No control/wire endpoint, upload, or projection callback. Requires agentHome and the admitted Linux/macOS memory backend. */
+    agentMemoryExport?: true;
     /** Absolute directory copied by copyAgentMemoryHelperAssets. Only SDK release assets are admitted; not a helper executable or digest override. */
     agentMemoryHelperAssetRoot?: string;
     /**
@@ -4575,6 +4609,8 @@ export interface DaemonStatus {
     agentHomeExecution: AgentHomeExecutionStatus;
 }
 export interface Daemon {
+    /** Present only with agentMemoryExport: true. Holds the home writer lease; AgentHomeBusyError is retryable. Raw contents remain Host-owned. */
+    exportAgentMemory?(agentRef: AgentRef, options?: AgentMemoryExportOptions): Promise<AgentMemoryExport>;
     /** Pairing result is intentionally credential-blind. */
     pair(pairingCode: string): Promise<DeviceEnrollment>;
     /**
@@ -7676,6 +7712,13 @@ export interface ResolvedAgentMessageMcpBin {
 }
 /** Resolve the SDK-owned stdio MCP helper shipped beside the client bundle. */
 export declare function resolveAgentMessageMcpBin(host?: SdkHelperHostConfig): ResolvedAgentMessageMcpBin;
+// ==== @byok-sdk/client dist/daemon/result-reply-failure.d.ts ====
+/** Journal execution states, not wire terminals: cancellation may still win. */
+export type ResultReplyFailure = 'required-reply-result-missing' | 'required-reply-result-unreadable';
+export declare function isResultReplyFailure(value: string): value is ResultReplyFailure;
+/** Stable across restart; do not persist filesystem/backend exception text. */
+export declare function resultReplyFailureReason(kind: ResultReplyFailure, contract: string): string;
+export declare function resultReplyFailureFromState(value: string): ResultReplyFailure | undefined;
 // ==== @byok-sdk/client dist/daemon/retention/config.d.ts ====
 import { type ExpiringClassId } from './registry';
 export declare class LocalStorageConfigError extends Error {
@@ -8273,6 +8316,7 @@ export declare function readDeviceEnrollmentStatus(options: DeviceEnrollmentStat
  */
 export declare function readDeviceEnrollmentIdentity(options: DeviceEnrollmentStatusOptions): Promise<DeviceEnrollmentIdentityStatus>;
 // ==== @byok-sdk/client dist/daemon/task-runner.d.ts ====
+import { type ResultReplyFailure } from './result-reply-failure';
 import type { ActivityIngress } from '@byok-sdk/protocol';
 import type { ScratchRoot } from './retention/scratch';
 import { type AgentMessageContentType, type AgentEgressPolicy, type Envelope, type RuntimeId, type TaskOfferPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferPreparedPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
@@ -8722,6 +8766,9 @@ export interface TaskRunnerDeps {
      * runner without it declines such offers.
      */
     terminalJournal?: boolean;
+    /** Durable normal-turn result failure intent, before handing off a required reply. */
+    recordResultReplyFailure?(taskId: string, failure: ResultReplyFailure): Promise<void>;
+    recordAgentMessageAccepted?(taskId: string): Promise<void>;
     durablePi?: boolean;
     recordDurableTransition?(taskId: string, leaseId: string, kind: string, ordinal: number): Promise<void>;
     /** SDK-owned, task-scoped MCP helper. Required only for offers declaring messageEgress. */
@@ -8850,6 +8897,7 @@ export declare class TaskRunner {
     /** Per-task index over {@link hostToolsetContextByToken}, so one cancel revokes every server's nonce at once. */
     private readonly hostToolsetContextTokensByTask;
     private readonly recoveredMessageOutboxes;
+    private readonly cancelledRecoveredMessages;
     private readonly recoveredMessageRetryTimers;
     /**
      * Finding F4 (cancel lost during the offer-processing window): a
@@ -9042,10 +9090,15 @@ export declare class TaskRunner {
         deleted: boolean;
     }>;
     /** Restore activated, unaccepted message drafts before transport admission on daemon restart. */
-    recoverAgentMessageOutboxes(agentsRoot: string): Promise<void>;
+    recoverAgentMessageOutboxes(agentsRoot: string, resultFailureTasks?: ReadonlyMap<string, {
+        agentRef: AgentRef;
+        contract: string;
+    }>, isCancelled?: (taskId: string) => Promise<boolean>): Promise<void>;
     private agentMessageOutbox;
     /** A recovery terminal must not close first-message admission before this durable draft has a disposition. */
     hasPendingRecoveredAgentMessage(taskId: string): boolean;
+    cancelRecoveredAgentMessage(taskId: string, persist: () => Promise<void>): Promise<void>;
+    recoveredAgentMessageState(taskId: string): 'pending' | 'held' | 'refused' | 'missing';
     /** Retry stable recovered records after a transport handshake/re-handshake. */
     retryRecoveredAgentMessages(): void;
     private canPublishAgentMessage;
@@ -9575,8 +9628,9 @@ export declare class TaskRunner {
      * Wire v3 result channel, at `turn_end`: the one place a staged
      * `submit_result` outcome becomes `task.complete.document`.
      *
-     * `{deliver: true}` means "go on and send `task.complete`", with the staged
-     * canonical outcome when the offer is `mode: 'result-document'`.
+     * `{deliver: true}` permits the reply lane, with either the staged outcome
+     * or a typed result failure to persist before handing off a required reply.
+     * A failure never becomes a completion document.
      * `{deliver: false}` means this method has ALREADY reported `task.fail`
      * (or the task was finished meanwhile by someone else); the caller returns.
      *
@@ -10249,7 +10303,7 @@ export { ProviderProvisioningNoticeError, PROVIDER_PROVISIONING_NOTICE_FAILURE_R
 export type { ProviderProvisioningHandler, ProviderProvisioningNotice, ProviderProvisioningNoticeFailureReason, } from './daemon/provider-provisioning';
 export { AgentMemoryIntentNoticeError, AGENT_MEMORY_INTENT_NOTICE_FAILURE_REASONS, } from './daemon/agent-memory-intent';
 export type { AgentMemoryIntentTransport, AgentMemoryIntentFetchInput, AgentMemoryIntentNoticeFailureReason, } from './daemon/agent-memory-intent';
-export { AgentMemoryError, AgentMemoryRevisionConflictError, isAgentMemorySecureFilesystemAvailable, AGENT_MEMORY_AUDIT_FILENAME, AGENT_MEMORY_OUTBOX_FILENAME, } from './daemon/agent-memory';
+export { AgentMemoryError, AgentMemoryValidationError, AgentMemorySnapshotLimitError, AgentMemoryRevisionConflictError, isAgentMemorySecureFilesystemAvailable, AGENT_MEMORY_AUDIT_FILENAME, AGENT_MEMORY_OUTBOX_FILENAME, } from './daemon/agent-memory';
 export type { AgentMemoryFile, AgentMemorySnapshot, AgentMemoryRedactor, AgentMemoryProjectionGrant, AgentMemoryProjectionPort, AgentMemoryHostedProjection, } from './daemon/agent-memory';
 export type { AgentEgressDropReceipt, AgentEgressLaneStatus, AgentEgressStatus, } from './daemon/agent-egress-policy';
 export { AGENT_CONTENT_READ_CAPABILITIES, AGENT_CONTENT_READ_CAPABILITY_WORKSPACE, AGENT_CONTENT_READ_CAPABILITY_TRANSCRIPT, AGENT_CONTENT_READ_CAPABILITY_ARTIFACT, } from './daemon/agent-content-read';
@@ -10378,6 +10432,7 @@ export type { OutboundStatus, OutboundRejection } from './daemon/outbound-settle
 export { createExecutionScratch, ScratchRootPathError } from './daemon/retention/scratch';
 export type { ExecutionScratch } from './daemon/retention/scratch';
 export { copyAgentMemoryHelperAssets, type CopyAgentMemoryHelperAssetsOptions } from './daemon/agent-memory-helper-release';
+export type { AgentMemoryExport, AgentMemoryExportOptions } from './daemon/agent-memory-export';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====
 import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
 import type { PreparedAgentMemoryMode, TerminalProjectionSelection } from '@byok-sdk/protocol';
@@ -12107,6 +12162,8 @@ import { type McpServerOptions } from './index';
 /** Maximum accepted HTTP request body, in UTF-8 bytes. */
 export declare const MCP_HTTP_MAX_BODY_BYTES: number;
 export interface McpHttpServerOptions extends Omit<McpServerOptions, 'input' | 'output' | 'onClose' | 'maxLineBytes'> {
+    /** Stateful by default. Stateless mode retains no sessions and disallows SSE. */
+    readonly sessionMode?: 'stateful' | 'stateless';
     /** Trusted public origin, e.g. https://host.example. Never derive it from the request Host header. */
     readonly origin: string;
     /** Positive integer, at most MCP_HTTP_MAX_BODY_BYTES. */

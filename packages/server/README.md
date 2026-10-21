@@ -29,6 +29,78 @@ Omit `storage` for process-local memory. Explicit SQLite storage fails closed
 if the file cannot be opened; it does not fall back to memory. The Host closes
 its HTTP listener separately.
 
+## Identity-stable loopback listener
+
+`listenLoopback` is an opt-in Node HTTP listener for a device-local Host. Pass
+an identity-scoped durable `LoopbackPortStore`: `read()` returns the immutable
+assigned port or null for a genuinely new identity; `claim(candidate)` must
+atomically insert only if absent, commit durably, and return the winning port.
+Use a database transaction or equivalent interprocess compare-and-set. Never
+implement claim as an unlocked read followed by a write. Missing/corrupt port
+state for an existing paired identity must throw, not return null.
+
+```ts
+import { listenLoopback, type LoopbackPortStore } from '@byok-sdk/server';
+
+// Supplied by your Host's durable identity store, not by the SDK.
+declare const portStore: LoopbackPortStore;
+const listener = await listenLoopback({
+  portStore,
+  createHandler: () => request => server.hono.fetch(request),
+});
+// Persist this exact URL with the daemon configuration. The cursor identity
+// includes serverUrl, so do not substitute localhost or change the port.
+const serverUrl = listener.serverUrl;
+
+// Stop the daemon before closing its listener; close the SDK separately.
+await listener.close();
+await server.close();
+```
+
+New identities draw at most 16 distinct ports from `[24000, 32768)`, retrying
+only `EADDRINUSE`/`EACCES`. `portRange: { min, maxExclusive }` can override this
+range for the Host's network policy; OS ephemeral ranges can be reconfigured.
+An existing assigned port is attempted exactly once and fails closed if busy.
+The helper binds exclusively to `127.0.0.1` before claiming the port. Requests
+receive 503 until claim/readback and handler construction finish. A losing
+claim closes its candidate and tries the durable winner once; it never adopts
+another process's listener. Persistence errors, changed readback, handler
+construction failures and abort release the owned socket. A failed or aborted
+claim may already have committed: the helper never clears durable assignments.
+The caller must keep claims immutable for the identity's entire lifetime.
+
+`close()` is idempotent, closes active connections, and leaves the assignment
+and SDK resources alone. An optional `signal` aborts startup and closes the
+listener afterward; it cannot cancel or roll back caller-owned persistence.
+
+The listener requires one exact `Host: 127.0.0.1:<bound port>`, rejects Origin,
+Cookie, absolute-form targets and browser fetch metadata. A single
+`Sec-Fetch-Mode: cors` is allowed because Node's native fetch sends it. It
+rejects upgrades and CONNECT. This is a native-client transport, not browser
+CORS support and not authentication: Host-facing routes still need Host auth.
+
+Bodies are completely buffered before application dispatch and limited to
+2 MiB of actual bytes, including chunked uploads. Oversized bodies return 413;
+GET/HEAD body framing is refused. `maxBodyBytes` configures this transport cap
+for all routes, including blobs; the embedded SDK's separate blob cap does not
+raise it. Keep the cap appropriate for your Host's memory and upload needs.
+
+To mount an authenticated MCP endpoint, use the factory's trusted bound URL:
+
+```ts
+const listener = await listenLoopback({
+  portStore,
+  createHandler: serverUrl => {
+    // Construct your Host-authenticated MCP router with origin: serverUrl.
+    // Each authenticated caller must keep its own createMcpHttpServer instance.
+    return makeAuthenticatedMcpRouter({ origin: serverUrl }).fetch;
+  },
+});
+```
+
+The helper does not remove/rewrite Origin or bypass MCP's own Origin check.
+Browser origin allowlists and CORS preflight remain outside this API.
+
 ## HTTP long-poll delivery
 
 Devices send envelopes to `POST /byok/messages` and receive them through

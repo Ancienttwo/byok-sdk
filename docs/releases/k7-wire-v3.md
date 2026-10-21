@@ -66,3 +66,21 @@ runtime dependency. The interpreted validator adds no code-generation evidence
 or Node builtin dependency; the protocol root retains its existing Zod policy.
 Byte/depth caps bound admitted input size, not worst-case validation time. Nested
 `oneOf` validation and fsync latency remain resource pressure points.
+
+
+## Required replies when the result is missing (#624)
+
+A normal `turn_end` with required message egress and a result-document contract
+keeps the reply deliverable even when `submit_result` was omitted or its staged
+record cannot be read/validated. The daemon authors a missing draft from the
+closing runtime text, waits for exact acceptance, then reports a non-retryable
+`result_not_submitted` / `result_unreadable` failure without a document. A visible
+reply is not a successful outcome; K4/K8 Hosts must not apply actions from it.
+No empty reply is fabricated. Cancellation still revokes publication.
+
+The existing journal persists a typed failure intent before reply handoff.
+Recovery validates it against the original offer and preserves it even after
+acceptance deleted the outbox draft, while an already recorded cancellation or
+other terminal takes precedence. The existing outbox identity/disposition gate
+prevents duplicate consumption; the terminal journal remains the wire authority.
+This adds no wire version or database table.

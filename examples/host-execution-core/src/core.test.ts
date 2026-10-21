@@ -20,7 +20,7 @@ it('runs a routine through wake, daemon, submit_result, terminal and the atomic 
   await host.core.addRoutine(host.routine('daily'));
   await vi.waitFor(() => expect(Object.values(host.ledger.snapshot().occurrences)).toHaveLength(1));
   const occurrence = Object.values(host.ledger.snapshot().occurrences)[0]!;
-  const intent = host.ledger.snapshot().intents[occurrence.intentId]!;
+  const intent = host.ledger.snapshot().intents[occurrence.intentId!]!;
   (await running(intent.key)).finish({ text: 'routine result' });
   await settled(intent.key);
   expect(host.ledger.snapshot().application.result).toEqual({ text: 'routine result' });
@@ -317,4 +317,27 @@ it('resubmits the same frozen input after a failure before SDK admission', async
   expect(inputs[1]).toEqual(inputs[0]);
   expect(host.core.intent(intent.key)).toMatchObject({ generation: 0, attempts: 1, taskId: intent.taskId });
   expect(host.adapter.starts).toHaveLength(1);
+});
+
+
+it('shows the required Bot reply without applying an absent outcome', async () => {
+  const received: string[] = [];
+  const applyOutcome = vi.fn();
+  host = await openHost({ agentMessage: { consume: async ({ payload }) => { received.push(payload.body); return { outcome: 'accepted' }; } }, applyOutcome });
+  const execution = template(host.deviceId);
+  const intent = await host.core.enqueue(host.intent('missing-chat-outcome', { execution: {
+    ...execution, payload: { ...execution.payload,
+      messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },
+    }, agentMessageContext: { destinationBinding: 'conversation' },
+  } }));
+  const reply = { text: 'Visible reply; no action was requested.' };
+  (await running(intent.key)).finish(reply, false);
+  await settled(intent.key, 'failed');
+  expect(received).toEqual([JSON.stringify(reply)]);
+  expect(applyOutcome).not.toHaveBeenCalled();
+  expect(await host.server.tasks.deviceTerminal(intent.taskId)).toMatchObject({ envelope: {
+    type: 'task.fail', payload: { retryable: false, reason: expect.stringMatching(/^result_not_submitted:/) },
+  } });
+  expect((await host.server.tasks.deviceTerminal(intent.taskId))!.envelope.payload).not.toHaveProperty('document');
+  expect(await host.server.tasks.agentMessage(intent.taskId, host.deviceId, execution.payload.agentRef)).toMatchObject({ disposition: { outcome: 'accepted' } });
 });

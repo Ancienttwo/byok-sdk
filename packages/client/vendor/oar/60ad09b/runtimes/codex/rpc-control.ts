@@ -1,4 +1,3 @@
-// BYOK change: Modified from OAR 60ad09b to bound control RPCs and record timeout rejection (Apache-2.0).
 import { SessionNotFoundError } from "../../contracts/session-not-found-error.js";
 import { SessionUnavailableError, type SessionUnavailableReason } from "../../contracts/session-unavailable-error.js";
 import { emptyInputRefusal } from "../../shared/control-input.js";
@@ -11,14 +10,13 @@ import type {
 } from "../../contracts/session.js";
 import { asRecord, type JsonRecord } from "../../shared/json.js";
 import type { SessionKernel } from "../../shared/session-kernel.js";
-import { RpcTimeoutError, type AppServerClient } from "./app-server-client.js";
+import type { AppServerClient } from "./app-server-client.js";
 
 export interface RpcControlPlan {
   readonly body: RequestBody;
   /** Runtime-specific refusal before sending (busy, nothing active); null means proceed. May reserve adapter state. Reachability is not its job. */
   readonly gate: (request: RequestRecord) => ResponseBody | null;
   readonly method: string;
-  readonly timeoutMs?: number; // BYOK change: per-control deadline, default 30s.
   readonly params: () => JsonRecord;
   readonly onReply: (reply: JsonRecord) => ResponseBody;
   readonly onError: (message: string) => ResponseBody;
@@ -48,38 +46,35 @@ export async function rpcControl(
   if (refused !== null) {
     return { request, response: kernel.respond(request.id, refused) };
   }
-  // BYOK change: The client promise already owns waiting; record failure propagates without a stranded second promise.
-  let response: ResponseRecord | undefined;
+  const { promise, resolve } = Promise.withResolvers<ResponseRecord>();
+  let recorded = false;
   const record = (decided: ResponseBody): void => {
-    if (response === undefined) response = kernel.respond(request.id, decided);
+    if (!recorded) {
+      recorded = true;
+      resolve(kernel.respond(request.id, decided));
+    }
   };
-  // BYOK change: Timeout is always a rejected control response, independent of runtime error mapping.
-  const onError = (error: unknown): ResponseBody => error instanceof RpcTimeoutError
-    ? { kind: "rejected", code: "error", reason: error.message }
-    : plan.onError(error instanceof Error ? error.message : String(error));
-  // BYOK change: The takeover runs in the fallback timer. A failed record rejects this control and never escapes the timer.
-  let takeoverFailure: unknown;
-  plan.onPending?.(() => {
-    try { record({ kind: "accepted" }); } catch (error) { takeoverFailure ??= error; }
-  });
+  plan.onPending?.(() => { record({ kind: "accepted" }); });
   // A fallback answers independently of transport settlement. Keep observing
   // the RPC: a late native reply remains a frame, never a second response.
-  try {
-    await client.request(plan.method, plan.params(), (outcome) => {
-      if (response !== undefined) {
-        const native = outcome.kind === "result" ? outcome.result : (outcome.kind === "error" ? outcome.native : undefined);
-        if (native !== undefined) { kernel.frame({ type: plan.method, native, events: [] }); }
-      } else if (outcome.kind === "exited") {
-        record({ kind: "rejected", code: "runtime_exited", reason: outcome.error.message });
-      } else {
-        record(outcome.kind === "result" ? plan.onReply(outcome.result) : onError(outcome.error));
-      }
-    }, plan.timeoutMs ?? 30_000); // BYOK change: no indefinitely suspended control.
-  } catch (error) {
-    if (response === undefined) { record(onError(error)); }
-  }
-  if (response === undefined) throw takeoverFailure ?? new Error("app-server control settled without a response record"); // BYOK change
-  return { request, response };
+  const send = async (): Promise<void> => {
+    try {
+      await client.request(plan.method, plan.params(), (outcome) => {
+        if (recorded) {
+          const native = outcome.kind === "result" ? outcome.result : (outcome.kind === "error" ? outcome.native : undefined);
+          if (native !== undefined) { kernel.frame({ type: plan.method, native, events: [] }); }
+        } else if (outcome.kind === "exited") {
+          record({ kind: "rejected", code: "runtime_exited", reason: outcome.error.message });
+        } else {
+          record(outcome.kind === "result" ? plan.onReply(outcome.result) : plan.onError(outcome.error.message));
+        }
+      });
+    } catch (error) {
+      if (!recorded) { record(plan.onError(error instanceof Error ? error.message : String(error))); }
+    }
+  };
+  void send();
+  return { request, response: await promise };
 }
 
 /**
