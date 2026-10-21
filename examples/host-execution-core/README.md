@@ -496,12 +496,12 @@ in `alreadyCompactedMemoryIntents`, and deleted expired copies in `expiredTombst
 Until the copy expires, `approve` with the same request and `approvalRef` returns the original
 row, and a changed request throws the existing identity conflict. Device `fetch` and `complete`
 replays get the stored terminal readback. `page.intent(intentId)` returns `undefined`, and
-`revoke(intentId)` throws because the intent is not found. After expiry, the next compaction
-deletes the copy. The same `approvalRef` is then a new request with a new `intentId`, and a
-device replay of the old intent fails as unknown. Set the retention to at least your approval
-replay and notice redelivery windows. The replay lookup reads `MemoryOptions.now`, which must
-return integer milliseconds, as `Date.now` does.
-A restore with the same `restoreId` still returns its stored result, because restore rows stay.
+`revoke(intentId)` throws because the intent is not found. At the expiry time the lookup stops
+returning the copy, and the next compaction deletes it. The same `approvalRef` is then a new
+request with a new `intentId`, and a device replay of the old intent fails as unknown. Set the
+retention to at least your approval replay and notice redelivery windows. The replay lookup reads
+`MemoryOptions.now`, which must return integer milliseconds, as `Date.now` does. A restore with
+the same `restoreId` still returns its stored result, because restore rows stay.
 
 ### Optional projection outbox capacity
 
