@@ -137,3 +137,20 @@ this CI routing repair. New hosted CI still qualifies the pushed merge separatel
 Logs: `/tmp/pr640-scope-{failed,before,tests,build,typecheck,api,version}.log`.
 
 Refs #626 #660.
+
+## Conflict resolution after #645 (2026-10-21)
+
+Fresh worktree normal-merges main `1e980bd2e2e7ff8e42d12554cc5fa25e695a9ed3`
+into PR head `b61dc803be059a2a697c5fadde6b4f3b20f92bb2`. Conflicts were limited
+to the client closure budget in `api-surface/entries.json` and its generated
+README table. The measured combined closure is 2,063,347 bytes: main's
+2,063,277 plus the existing 70-byte SQLite delta. The standard API update command
+regenerated the README. Both the SQLite loader changes and #645's authoritative
+MCP event identity changes remain intact; no tests or timeout values were edited.
+
+Fresh build, typecheck, API surface and version authority passed. Affected tests:
+server SQLite 259; client journal and MCP/Codex/Claude/Pi events 176; keys SQLite
+21; protocol compatibility 690; CI contracts 57. All passed without skips. SQLite
+ESM and CJS smoke each produced their success marker. The requested affected-test
+scope was used; no full suite or local SEA rerun is claimed. Logs are
+`/tmp/byok-640-conflict-*.log`. Refs #626 #645.

@@ -230,8 +230,12 @@ export function selectImpact(paths, context = {}) {
       dirs.add('packages/client'); continue;
     }
     if (path === 'examples/host-execution-core/VALIDATION.md'
+      || path === 'examples/bot-collaboration/VALIDATION.md'
       || path === 'examples/host-execution-core/PLAN-612.md') continue;
 
+    if (path === 'scripts/ci/run-windows-bot-tests.mjs') {
+      families.add('adapter-lifecycle-smoke'); continue;
+    }
     if (rootDocs.has(path) || /^(docs|tasks|deploy\/runbooks)\/.+\.md$/.test(path)) continue;
     if (rootCi.has(path) || /^scripts\/ci\/[a-z0-9-]+(?:\.test)?\.mjs$/.test(path)) { scripts = true; continue; }
     const golden = /^api-surface\/([a-z-]+)\.d\.ts$/.exec(path);
@@ -286,7 +290,7 @@ export function selectImpact(paths, context = {}) {
   if (dirs.has('packages/client')) for (const id of clientFamilies) families.add(id);
   if (dirs.has('packages/keys')) for (const id of ['adapter-lifecycle-smoke', 'ipc-smoke', 'credential-isolation-audit']) families.add(id);
   if (dirs.has('packages/cloud-dataplane') || dirs.has('packages/conformance')) families.add('dataplane');
-  if (dirs.has('examples/host-execution-core')) families.add('adapter-lifecycle-smoke');
+  if (dirs.has('examples/host-execution-core') || dirs.has('examples/bot-collaboration')) families.add('adapter-lifecycle-smoke');
   return { dirs: sorted(dirs), files: sorted(files), families: sorted(families),
     reason: dirs.size || families.size ? 'impacted' : scripts ? 'root-ci-scripts' : 'docs-only' };
 }
