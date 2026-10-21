@@ -328,7 +328,8 @@ Current behavior:
   (`packages/cloud/src/maintenance.ts:104-105`, `packages/cloud/src/maintenance.ts:110`,
   `packages/cloud-dataplane/src/stores/core/mailbox.ts:322-332`).
 - Automatic retention never deletes an expired row (a dead letter).
-  Only the operator call `discardDeadLetter` deletes it (`packages/cloud-dataplane/src/cleanup.ts:250-263`).
+  Only the operator call `discardDeadLetter` or tenant erasure deletes it
+  (`packages/cloud-dataplane/src/cleanup.ts:250-263`, `packages/cloud-dataplane/src/tenant-erasure.ts:42`).
   `PostgresCloudCleanup` ships from the package root, not from `./runtime`
   (`packages/cloud-dataplane/src/index.ts:56-59`, `packages/cloud-dataplane/README.md:94-97`).
 - So the mailbox copy of an acked offer goes.
@@ -374,7 +375,7 @@ Deletion paths:
 
 **Gap: retention and scoped deletion.** Task receipts and admission rows have no TTL.
 No call deletes them by task, device, Agent or time.
-An offer that the device never acked also stays, as a dead letter, until an operator discards it.
+An offer that the device never acked also stays, as a dead letter, until an operator discards it or erases the tenant.
 Today the product must erase the whole tenant from Node to delete the task content of one user.
 This document states current behavior. It does not promise a design or a release.
 
