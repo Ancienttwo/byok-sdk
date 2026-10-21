@@ -35,6 +35,8 @@ export async function openHost(options: HostOptions & {
   let ledger = new HostLedger(ledgerPath, `product:${productId}`);
   let core!: HostExecutionCore;
   const server = createByokServer({ productId, storage: { kind: 'sqlite', path: path.join(root, 'server.sqlite') },
+    // Leave time for HTTP delivery and admission within the five-second fixture waits.
+    longPollHoldMs: 100,
     agentMessage: options.agentMessage,
     wake: { consume: (wake, signal) => options.consume ? options.consume(wake, signal, () => core.consume(wake, signal)) : core.consume(wake, signal) },
   });
