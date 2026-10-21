@@ -4,7 +4,7 @@ import {
   type AgentRef,
   type AgentHomeProjectionValue,
 } from '@byok-sdk/protocol';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { agentHomeProjectionRequestKey } from '../agent-home-projections';
 import { TENANT_A, createHarness } from './support/harness';
 
@@ -161,7 +161,8 @@ describe('task-free Agent-home projection', () => {
   });
 
   it('requires exact authenticated device, AgentRef, hash, and first terminal outcome', async () => {
-    const harness = createHarness();
+    const observed = vi.fn((_readback: unknown) => { throw new Error('observer is not authority'); });
+    const harness = createHarness({ observer: { onInboundCommitted() {}, onAgentHomeProjectionCompleted: observed } });
     const target = await harness.pairDevice(TENANT_A);
     const wrongDevice = await harness.pairDevice(TENANT_A);
     await admitProjection(harness, target.deviceId);
@@ -188,6 +189,7 @@ describe('task-free Agent-home projection', () => {
       }),
     ).resolves.toMatchObject({ status: 'pending' });
 
+    expect(observed).not.toHaveBeenCalled();
     const accepted = await request(target.authorization, completion());
     expect(accepted.status).toBe(200);
     expect(await accepted.json()).toMatchObject({
@@ -199,5 +201,12 @@ describe('task-free Agent-home projection', () => {
       status: 'applied',
     });
     await expect(request(target.authorization, { ...completion(), outcome: 'stale' })).resolves.toMatchObject({ status: 409 });
+    expect(observed).toHaveBeenCalledTimes(1);
+    const durable = await harness.cloud.getAgentHomeProjectionStatus(TENANT_A, target.deviceId, {
+      requestId: REQUEST_A, agentRef: AGENT_A, projectionHash: HASH_A,
+    });
+    expect(observed.mock.calls[0]?.[0]).toEqual(durable);
+    await expect(request(target.authorization, completion())).resolves.toMatchObject({ status: 200 });
+    expect(observed).toHaveBeenCalledTimes(2);
   });
 });

@@ -3069,3 +3069,28 @@ For Darwin the copier delegates to the existing memory-helper release copier;
 `agentMemoryHelperAssetRoot` remains the separate memory-helper authority. Windows
 memory remains unavailable. Native target metadata is not platform qualification;
 Windows SEA qualification requires the actual Windows CI process-ownership fixture.
+
+### Embedded Agent-home projection completion waiting
+
+`ByokServer.awaitAgentHomeProjection(deviceId, agentRef, requestId, { signal })`
+returns the same durable readback as `readAgentHomeProjection`, once its status
+is `applied`, `idempotent`, `stale`, or `conflict`. Unknown requests return
+`undefined`; enqueue must precede waiting. It never treats enqueue as completion
+and does not poll. The waiter subscribes before its initial read and reads again
+on exact tenant/device/AgentRef/request completion hints, closing the
+read-to-wait race. Concurrent waiters are independent.
+
+The cloud completion observer runs only after the durable receipt is recorded,
+including exact replay. Authentication, capability admission, exact receipt
+matching, and first-terminal-wins rules remain authoritative. Observer exceptions
+cannot change the recorded result or HTTP response. Hints carry no additional
+permission and are never substituted for durable readback.
+
+Abort rejects with the signal reason and removes the subscription, including
+while a store read is in flight. Server close rejects pending and future waits,
+removes subscriptions, and drains already-started reads before closing storage.
+The caller chooses an offline deadline with its AbortSignal. There is no default
+timeout or timer. Notification scope is the same embedded ByokServer instance:
+a completion (or exact replay) must reach that instance to wake a pending wait.
+Writes by another process to a shared store do not provide distributed wakeups.
+Already-completed durable records remain readable immediately after restart.
