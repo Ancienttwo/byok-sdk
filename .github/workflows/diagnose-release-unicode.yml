@@ -16,6 +16,14 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - name: Build exact release source with failure-only diagnostics
         run: bun ci && bun run build
+      - name: Match every baseline pre-test gate
+        run: |
+          bun run check:api-surface
+          bun run check:version-authority
+          bun run test:scripts
+          node --test scripts/ci/*.test.mjs
+          bun run typecheck
+          node scripts/ci/check-tmpdir-leaks.mjs snapshot "$RUNNER_TEMP/tmpdir-before.txt"
       - name: Install the same credential substrate as release CI
         run: |
           sudo apt-get update
@@ -28,6 +36,9 @@ jobs:
           mkdir -p "$BYOK_SESSION_DIAGNOSTICS_DIR"
           export BYOK_TEST_BUN_BIN="$(command -v bun)"
           bash scripts/ci/with-secret-service.sh bun run test
+      - name: Verify the original baseline scratch-directory invariant
+        if: always()
+        run: node scripts/ci/check-tmpdir-leaks.mjs verify "$RUNNER_TEMP/tmpdir-before.txt"
       - name: Retain failure state
         if: always()
         uses: actions/upload-artifact@v4
