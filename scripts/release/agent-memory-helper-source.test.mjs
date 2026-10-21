@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -49,4 +50,9 @@ test('both release builders run verified native builds before packing', () => {
     const text = readFileSync(new URL(name, import.meta.url), 'utf8');
     assert.match(text, /\['run', 'build:release'\]/);
   }
+});
+
+test('committed helper identity matches the current native sources without a Go build', async () => {
+  const { AGENT_MEMORY_HELPER_RELEASE } = await import('../../packages/client/src/daemon/agent-memory-helper-release-pin.ts');
+  verifyAgentMemoryHelperSourceDigest(fileURLToPath(new URL('../../packages/client/native/agent-memory-fs/', import.meta.url)), AGENT_MEMORY_HELPER_RELEASE);
 });

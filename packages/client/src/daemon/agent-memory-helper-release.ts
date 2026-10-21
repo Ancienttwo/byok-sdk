@@ -1,6 +1,7 @@
-import { copyFileSync, constants, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { copyFileSync, constants, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmdirSync, unlinkSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { AGENT_MEMORY_HELPER_RELEASE } from './agent-memory-helper-release-pin';
 import { agentMemoryHelperDigest } from './agent-memory-helper-digest';
 
 function installedReleaseDirectory(): string {
@@ -18,20 +19,20 @@ function assetDirectory(assetRoot?: string): string {
 
 function verifiedRelease(directory: string, arch: 'arm64' | 'x64'): string {
   const manifest = JSON.parse(readFileSync(path.join(directory, 'manifest.json'), 'utf8'));
-  const key = `darwin-${arch}`;
-  if (manifest.version !== 1 || manifest.helperVersion !== '2' || manifest.protocol !== 2
-    || manifest.go !== 'go1.26.5' || manifest.digestAlgorithm !== 'mach-o-content-v1'
-    || manifest.signingPolicy !== 'product-resigning-allowed'
-    || JSON.stringify(manifest.flags) !== JSON.stringify(['-buildvcs=false', '-trimpath'])
-    || !/^[a-f0-9]{64}$/u.test(manifest.sourceDigest ?? '')) {
+  const key = `darwin-${arch}` as const;
+  const { entries, ...metadata } = AGENT_MEMORY_HELPER_RELEASE;
+  if (manifest === null || Object.entries(metadata).some(([field, value]) =>
+    JSON.stringify(manifest[field]) !== JSON.stringify(value))) {
     throw new Error('SDK Agent memory helper release manifest mismatch');
   }
-  const entry = manifest.entries?.[key];
-  if (entry?.file !== key || !/^[a-f0-9]{64}$/u.test(entry.digest ?? '')) {
-    throw new Error('SDK Agent memory helper release target mismatch');
+  for (const target of ['darwin-arm64', 'darwin-x64'] as const) {
+    const entry = manifest.entries?.[target];
+    if (entry?.file !== entries[target].file || entry.digest !== entries[target].digest) {
+      throw new Error('SDK Agent memory helper release target mismatch');
+    }
   }
   const bin = path.join(directory, key);
-  if (agentMemoryHelperDigest(readFileSync(bin), arch) !== entry.digest) {
+  if (agentMemoryHelperDigest(readFileSync(bin), arch) !== entries[key].digest) {
     throw new Error('SDK Agent memory helper deployment digest mismatch');
   }
   return realpathSync(bin);
@@ -47,7 +48,9 @@ export function resolveAgentMemoryFilesystemHelper(assetRoot?: string): string {
   } catch (cause) {
     const code = (cause as NodeJS.ErrnoException | undefined)?.code;
     if (code === 'ENOENT' || code === 'MODULE_NOT_FOUND' || code === 'ERR_MODULE_NOT_FOUND') {
-      throw new Error('SDK Agent memory helper release assets missing; build with `bun run build:release`', { cause });
+      throw new Error(assetRoot === undefined
+        ? 'SDK Agent memory helper release assets missing; build with `bun run build:release`'
+        : 'SDK Agent memory helper assets missing from explicit root; deploy copyAgentMemoryHelperAssets output from the same SDK release', { cause });
     }
     throw cause;
   }
@@ -79,15 +82,29 @@ export async function copyAgentMemoryHelperAssets(options: CopyAgentMemoryHelper
   verifiedRelease(directory, 'arm64');
   verifiedRelease(directory, 'x64');
   const outDir = path.resolve(options.outDir);
+  let createdDirectory = false;
   try {
     if (!lstatSync(outDir).isDirectory() || readdirSync(outDir).length !== 0) throw new Error('copyAgentMemoryHelperAssets: destination must be a new or empty directory');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     mkdirSync(outDir, { recursive: true });
+    createdDirectory = true;
   }
-  for (const file of files) copyFileSync(path.join(directory, file), path.join(outDir, file), constants.COPYFILE_EXCL);
-  // Recheck copied bytes, including after a source mutation during the copy.
-  verifiedRelease(outDir, 'arm64');
-  verifiedRelease(outDir, 'x64');
-  return files;
+  const copied: string[] = [];
+  try {
+    for (const file of files) {
+      const target = path.join(outDir, file);
+      copyFileSync(path.join(directory, file), target, constants.COPYFILE_EXCL);
+      copied.push(target);
+    }
+    // Recheck copied bytes, including after a source mutation during the copy.
+    verifiedRelease(outDir, 'arm64');
+    verifiedRelease(outDir, 'x64');
+    return files;
+  } catch (error) {
+    // Remove only files this call created, preserving a pre-existing directory.
+    for (const file of copied) unlinkSync(file);
+    if (createdDirectory) rmdirSync(outDir);
+    throw error;
+  }
 }
