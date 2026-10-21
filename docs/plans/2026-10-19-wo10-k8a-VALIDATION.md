@@ -11,7 +11,7 @@ acceptance for cross-Bot delegation is deferred to K8b.
 This work implements self continuations and single Bot actions. Delegation to
 other Bots, as specified in platform PRD sections 9.4 and 14.2, is deferred.
 This report does not claim full K8a first-row coverage. Paid Pi submit_result
-success-rate measurement remains separate WO-10b work. The PRD is unchanged.
+success-rate measurement remains separate WO-10b work. The [measurement method](../submit-result-measurement.md) defines comparable per-runtime cells; authorized real-runtime data is still missing. The PRD is unchanged.
 
 Environment: macOS, Node `v24.21.0`, Bun `1.4.3`.
 
