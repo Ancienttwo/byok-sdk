@@ -97,5 +97,23 @@ export function runPresenceConformance(factory: CoreCompositionFactory): void {
         ).toBe('working');
       });
     });
+
+    it('renews a zero-interval lease after the clock moves backwards', async () => {
+      await withComposition(factory, async (handle) => {
+        const lease = { deviceId: 'device-rollback', level: 'online', ttlMs: 60_000, minimumIntervalMs: 0 } as const;
+        await handle.stores.presence.publish(TENANT_A, lease);
+        await handle.advanceTime(-1_000);
+        const now = handle.now();
+
+        const renewed = await handle.stores.presence.publish(TENANT_A, { ...lease, level: 'working' });
+
+        expect(renewed.observedAt).toBe(now);
+        expect(renewed.expiresAt).toBe(new Date(Date.parse(now) + 60_000).toISOString());
+        expect(await handle.stores.presence.read(TENANT_A, 'device-rollback')).toMatchObject({
+          level: 'working',
+          expiresAt: renewed.expiresAt,
+        });
+      });
+    });
   });
 }

@@ -124,7 +124,9 @@ export class PostgresPresenceStore implements PresenceStore {
     assertMinimumInterval(input.minimumIntervalMs);
     const now = this.#clock.now();
     const observedAt = now.toISOString();
-    const allowedBefore = new Date(now.getTime() - input.minimumIntervalMs).toISOString();
+    // `0` disables throttling, so a clock that moved backwards cannot block a renewal.
+    const allowedBefore =
+      input.minimumIntervalMs === 0 ? null : new Date(now.getTime() - input.minimumIntervalMs).toISOString();
     const result = await this.#pool.query<PresenceRow>(
       `INSERT INTO device_presence (${PRESENCE_COLUMNS})
        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8::jsonb, $9, $10)
@@ -138,6 +140,7 @@ export class PostgresPresenceStore implements PresenceStore {
               observed_at = EXCLUDED.observed_at,
               expires_at  = EXCLUDED.expires_at
         WHERE device_presence.expires_at <= EXCLUDED.observed_at
+           OR $11::text IS NULL
            OR device_presence.observed_at <= $11
        RETURNING ${PRESENCE_COLUMNS}`,
       [

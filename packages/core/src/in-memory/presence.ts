@@ -49,6 +49,7 @@ export class InMemoryPresenceStore implements PresenceStore {
     const key = tenantKey(tenant, input.deviceId);
     const existing = this.#hints.get(key);
     if (
+      input.minimumIntervalMs > 0 &&
       existing !== undefined &&
       now.toISOString() < existing.expiresAt &&
       now.getTime() - Date.parse(existing.observedAt) < input.minimumIntervalMs

@@ -1,8 +1,13 @@
+import { mkdtempSync, rmSync } from 'node:fs';
 import type { Server as HttpServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { InMemoryPresenceStore } from '@byok-sdk/core';
+import { createEnvelope, PROTOCOL_VERSION } from '@byok-sdk/protocol';
 import { composeFacadeStores, serverTenantId } from '../stores';
 import { createByokServer, type ByokServer } from '../index';
+import { isSqliteAvailable } from '../sqlite-support';
 import { connectFakeDaemonLongPoll, nextEnvelope, startServer, stopServer, waitFor } from './test-support';
 
 const PRODUCT_ID = 'single-presence-lease';
@@ -161,5 +166,55 @@ describe('concurrent lease observations', () => {
       spy.mockRestore();
       await composition.close();
     }
+  });
+});
+
+describe.each([
+  { name: 'memory', sqlite: false },
+  { name: 'sqlite', sqlite: true },
+])('wall-clock rollback with $name storage', ({ sqlite }) => {
+  const directories: string[] = [];
+  let byok: ByokServer | undefined;
+  let server: HttpServer | undefined;
+  afterEach(async () => {
+    vi.useRealTimers();
+    await byok?.close();
+    if (server) await stopServer(server);
+    byok = undefined;
+    server = undefined;
+    for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+  });
+
+  async function connectThenRollBack() {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(T0);
+    const directory = sqlite ? mkdtempSync(join(tmpdir(), 'byok-server-rollback-')) : undefined;
+    if (directory !== undefined) directories.push(directory);
+    byok = createByokServer({
+      productId: PRODUCT_ID, longPollHoldMs: 10,
+      storage: directory === undefined ? { kind: 'memory' } : { kind: 'sqlite', path: join(directory, 'server.sqlite') },
+    });
+    const started = await startServer(byok);
+    server = started.server;
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, byok, { productId: PRODUCT_ID });
+    vi.setSystemTime(T0 - 1_000);
+    return { byok, daemon };
+  }
+
+  it.skipIf(sqlite && !isSqliteAvailable())('accepts a new envelope after the clock moves backwards', async () => {
+    const h = await connectThenRollBack();
+    const sent = await h.daemon.send(createEnvelope('conn.hello', {
+      protocolVersions: [PROTOCOL_VERSION], capabilities: [], deviceId: h.daemon.deviceId, productId: PRODUCT_ID,
+    }));
+    expect(sent.status).toBe(200);
+    expect(await sent.json()).toMatchObject({ accepted: 1 });
+    expect((await h.byok.machines.list())[0]).toMatchObject({ connected: true, lastSeen: new Date(T0 - 1_000).toISOString() });
+  });
+
+  it.skipIf(sqlite && !isSqliteAvailable())('answers a poll after the clock moves backwards', async () => {
+    const h = await connectThenRollBack();
+    const polled = await h.daemon.replay(h.daemon.cursor());
+    expect(polled.status).toBe(200);
+    expect((await h.byok.machines.list())[0]).toMatchObject({ connected: true, lastSeen: new Date(T0 - 1_000).toISOString() });
   });
 });
