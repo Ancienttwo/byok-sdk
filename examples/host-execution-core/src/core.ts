@@ -137,10 +137,13 @@ export class HostExecutionCore {
   }
   readonly consume = async (wake: DueWake, signal: AbortSignal): Promise<void> => {
     this.assertOpen(); signal.throwIfAborted();
-    this.ledger.transaction(state => {
+    const replay = this.ledger.transaction(state => {
+      if (this.ledger.hasTombstone('slot', wake.dedupKey, this.now())) return true;
       if (state.scanWake?.dedupKey === wake.dedupKey) state.scanWake = null;
       else recordOccurrence(state, this.ledger.tenant, wake, this.now(), this.nextTime);
+      return false;
     });
+    if (replay) return;
     signal.throwIfAborted();
     // Does not wait for execution completion. All unsettled work stays in the outbox.
     await this.drain();
