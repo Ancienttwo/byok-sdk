@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { sdkReservedHelperKinds } from './sdk-reserved-helper-host';
+import { sdkPiSubagentHelperKinds, sdkReservedHelperKinds } from './sdk-reserved-helper-host';
 import { byok } from '../package.json';
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -87,4 +87,5 @@ export async function copySdkNativeAssets(options: CopySdkNativeAssetsOptions): 
 export { loadSdkKoffiAsset } from './sdk-native-assets-runtime';
 
 /** Machine-readable build inputs. Target presence is not runtime/platform qualification. */
-export const sdkDistributionManifest = Object.freeze({ version: 1, piRuntimePin: byok.piRuntimePin, reservedHelperKinds: sdkReservedHelperKinds, nativeTargets: sdkNativeAssetTargets });
+export const sdkDistributionManifest = Object.freeze({ version: 1, piRuntimePin: byok.piRuntimePin, reservedHelperKinds: sdkReservedHelperKinds,
+  piSubagentHelperKinds: sdkPiSubagentHelperKinds, nativeTargets: sdkNativeAssetTargets });

@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { serve } from '@hono/node-server';
 import { createInMemoryByokCloud } from '@byok-sdk/cloud';
 import { tenantId } from '@byok-sdk/core';
-import { createDaemonWithAdapters, AgentHomeManager } from '@byok-sdk/client';
+import { createDaemonWithAdapters, AgentHomeManager, type AgentMemoryExport } from '@byok-sdk/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
 import { BotStubAdapter, waitForReady, waitForTaskCleanup } from '../../basic/goal-btw.test-support';
@@ -34,6 +34,7 @@ async function openMemoryHost(mode: 'cloud' | 'embedded') {
   let ledger = new HostLedger(path.join(root, 'host.sqlite'), tenant);
   let deviceId = '';
   const options = {
+    exportMemory: async (binding: { agentRef: typeof agentRef }): Promise<AgentMemoryExport> => daemon.exportAgentMemory!(binding.agentRef),
     isCurrent: (binding: { deviceId: string; agentRef: typeof agentRef }) => binding.deviceId === deviceId && JSON.stringify(binding.agentRef) === JSON.stringify(agentRef),
     notify: (device: string, notice: { intentId: string; agentRef: typeof agentRef }) => embedded
       ? embedded.enqueueAgentMemoryIntentNotice(device, notice) : cloud!.enqueueAgentMemoryIntentNotice(tenant, device, notice),
@@ -57,6 +58,7 @@ async function openMemoryHost(mode: 'cloud' | 'embedded') {
   const daemon = createDaemonWithAdapters({ productId, productName: 'Memory page', localAgentRelease: { version: '0.0.0-test' },
     serverUrl: `http://127.0.0.1:${address.port}`, workspaceRoot: path.join(root, 'workspace'), storeDir: path.join(root, 'sdk'),
     agentHome: { hostStorageRoot: agentRoot }, agentEgress: { policy }, hostedJournal: { mode: 'sqlite' },
+    agentMemoryExport: true,
     agentMemoryIntents: {
       fetch: request => page.transport(deviceId).fetch(request),
       complete: completion => page.transport(deviceId).complete(completion),
@@ -81,7 +83,7 @@ async function openMemoryHost(mode: 'cloud' | 'embedded') {
     async restartLedger() {
       await core.close(); ledger.close(); ledger = new HostLedger(path.join(root, 'host.sqlite'), tenant);
       page = new HostMemoryPage(ledger, options); core = new HostExecutionCore(executionServer, ledger, { memory: page, reconcileMs: 100 });
-      await core.recover();
+      await page.recoverRestores(); await core.recover();
     },
     input(key: string = randomUUID()) {
       const execution = template(deviceId);
@@ -213,5 +215,52 @@ describe.skipIf(process.platform !== 'linux').each(['cloud', 'embedded'] as cons
     await host.core.drain();
     await vi.waitFor(() => expect(host.page.contextPack({ deviceId: host.deviceId, agentRef: host.agentRef }).residentMemory?.text).toBe('small [redacted]\n'));
     expect(host.core.intent(input.key)).toMatchObject({ conclusion: 'succeeded', attempts: 1 });
+  });
+});
+
+if (process.env.BYOK_REQUIRE_MEMORY_RESTORE_LINUX === '1' && process.platform !== 'linux') throw new Error('Linux restore qualification requires native Linux');
+describe.skipIf(process.platform !== 'linux')('tree restore with real Linux embedded notification and export', () => {
+  let host: Awaited<ReturnType<typeof openMemoryHost>>;
+  beforeEach(async () => { host = await openMemoryHost('embedded'); });
+  afterEach(async () => { await host?.close(); });
+  function files() {
+    return Object.entries({ 'MEMORY.md': 'restored root', 'notes/a.md': 'A', 'notes/b.md': 'B' }).map(([path, content]) => ({ path, content, revision: memoryRevision(content), byteCount: Buffer.byteLength(content) }));
+  }
+  it('restores an empty tree and excludes queued executions until every terminal, including duplicate notices', async () => {
+    await writeFile(path.join(host.home, 'MEMORY.md'), ''); await unlink(path.join(host.home, 'notes/x.md'));
+    const binding = { deviceId: host.deviceId, agentRef: host.agentRef };
+    const restore = await host.page.restore({ ...binding, restoreId: 'linux-initial', files: files(), mode: 'initial', expiresAt: Date.now() + 60_000 });
+    const queued = await host.core.enqueue(host.input('during-restore'));
+    expect(queued.phase).toBe('memory_blocked'); expect(await host.offer(queued.taskId)).toBeUndefined();
+    // Send exactly one file, then reopen the Host ledger before delivering the remaining files.
+    const first = restore.files[0]!;
+    await host.notify(host.deviceId, { intentId: first.intentId!, agentRef: host.agentRef });
+    await vi.waitFor(() => expect(host.page.intent(first.intentId!)?.readback?.completion.outcome).toBe('applied'), { timeout: 10_000 });
+    expect(await host.offer(queued.taskId)).toBeUndefined();
+    await host.restartLedger();
+    expect(host.page.restoreResult(binding, 'linux-initial')!.status).toBe('applying');
+    await host.page.flushNotices();
+    await vi.waitFor(() => expect(host.page.restoreResult(binding, 'linux-initial')!.status).toBe('applied'), { timeout: 10_000 });
+    await host.core.drain();
+    await vi.waitFor(() => expect(host.adapter.sessions.has(queued.taskId)).toBe(true), { timeout: 10_000 });
+    const session = host.adapter.sessions.get(queued.taskId)!; session.finish({ text: 'done' });
+    await waitForTaskCleanup(host.daemon, session);
+    const exported = await host.daemon.exportAgentMemory!(host.agentRef);
+    expect(exported.files).toEqual(files());
+    await host.notify(host.deviceId, { intentId: first.intentId!, agentRef: host.agentRef });
+    await vi.waitFor(async () => expect((await host.daemon.exportAgentMemory!(host.agentRef)).snapshotDigest).toBe(exported.snapshotDigest), { timeout: 10_000 });
+  });
+  it('initial rejects a nonempty home without writes; approved overwrite deletes extra notes and matches the target export', async () => {
+    const binding = { deviceId: host.deviceId, agentRef: host.agentRef };
+    const original = await host.daemon.exportAgentMemory!(host.agentRef);
+    const rejected = await host.page.restore({ ...binding, restoreId: 'initial-nonempty', files: files(), mode: 'initial', expiresAt: Date.now() + 60_000 });
+    expect(rejected.status).toBe('conflict'); expect(host.ledger.snapshot().memory!.intents).toEqual({});
+    expect((await host.daemon.exportAgentMemory!(host.agentRef)).snapshotDigest).toBe(original.snapshotDigest);
+    await host.page.restore({ ...binding, restoreId: 'approved-overwrite', files: files(), mode: 'overwrite', observed: original, expiresAt: Date.now() + 60_000 });
+    await host.page.flushNotices();
+    await vi.waitFor(() => expect(host.page.restoreResult(binding, 'approved-overwrite')!.status).toBe('applied'), { timeout: 10_000 });
+    // Host readback precedes the device's final lease release; retry only the read.
+    await vi.waitFor(async () => expect((await host.daemon.exportAgentMemory!(host.agentRef)).files).toEqual(files()), { timeout: 10_000 });
+    await expect(stat(path.join(host.home, 'notes/x.md'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });

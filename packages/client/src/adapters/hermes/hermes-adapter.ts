@@ -1,3 +1,5 @@
+import { ownHermesLauncher, prepareHermesCustody, hermesCustodyArgs, type HermesByokLauncher, type PreparedHermesCustody } from './hermes-custody';
+export type { HermesByokLauncher } from './hermes-custody';
 import { randomBytes } from 'node:crypto';
 import { promises as fs, realpathSync } from 'node:fs';
 import os from 'node:os';
@@ -17,7 +19,7 @@ import {
 } from '../../types';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
-import { buildRuntimeEnv } from '../../daemon/environment';
+import { buildAllowlistedEnv, buildRuntimeEnv } from '../../daemon/environment';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import { classifyDetectError } from '../detect-outcome';
 import type { ResolvedBin } from '../codex/resolve-bin';
@@ -64,6 +66,8 @@ export interface HermesAdapterOptions {
   home: string;
   /** Provider and model for every execution. Absent: Hermes picks a provider from the credentials in the environment. */
   model?: HermesModelSelection;
+  /** Optional separate-process credential custody. Mutually exclusive with model; local Host profile selection never enters dispatchSelection. */
+  byokLauncher?: HermesByokLauncher;
   resolveBin?: () => ResolvedBin;
   spawnFn?: typeof nodeSpawn;
   /** Deadline of the `detect()` ACP probe. Covers a first environment build in a new root. Default 180 s. */
@@ -199,12 +203,13 @@ export class HermesAdapter implements RuntimeAdapter {
     const candidate = canonicalPath(root);
     const userHome = canonicalPath(path.join(os.homedir(), '.hermes'));
     if (candidate === userHome || candidate.startsWith(`${userHome}${path.sep}`)) throw new TypeError('HermesAdapterOptions.home must not be the user\'s ~/.hermes');
+    if (options.byokLauncher !== undefined && options.model !== undefined) throw new TypeError('Hermes model and byokLauncher are mutually exclusive');
     if (options.model !== undefined) assertHermesModelSelection(options.model, 'HermesAdapterOptions.model');
     assertDeadline(options.probeTimeoutMs, 'Hermes probe timeout');
     assertDeadline(options.gatewayReadyTimeoutMs, 'Hermes gateway ready timeout');
     assertDeadline(options.interruptTimeoutMs, 'Hermes interrupt timeout');
     this.root = root;
-    this.options = { ...options, ...(options.model === undefined ? {} : { model: Object.freeze({ ...options.model }) }) };
+    this.options = { ...options, ...(options.byokLauncher === undefined ? {} : { byokLauncher: ownHermesLauncher(options.byokLauncher) }), ...(options.model === undefined ? {} : { model: Object.freeze({ ...options.model }) }) };
   }
 
   private command(): string {
@@ -212,7 +217,7 @@ export class HermesAdapter implements RuntimeAdapter {
   }
 
   private rootEnvironment(): Record<string, string> {
-    return hermesEnvironment(buildRuntimeEnv({ ambient: process.env }), this.root);
+    return hermesEnvironment(this.options.byokLauncher ? buildAllowlistedEnv({ ambient: process.env }) : buildRuntimeEnv({ ambient: process.env }), this.root);
   }
 
   /**
@@ -246,7 +251,7 @@ export class HermesAdapter implements RuntimeAdapter {
   private async probeAcp(command: string, signal: AbortSignal | undefined): Promise<{ kind: 'available'; authPresent: boolean } | ProbeFailure> {
     const home = await createHermesProfile(this.root, `detect-${randomBytes(6).toString('hex')}`, this.options.model);
     const child = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn })(command, ['acp'], {
-      cwd: home, env: hermesEnvironment(buildRuntimeEnv({ ambient: process.env }), home),
+      cwd: home, env: hermesEnvironment(this.options.byokLauncher ? buildAllowlistedEnv({ ambient: process.env }) : buildRuntimeEnv({ ambient: process.env }), home),
     });
     let timedOut = false;
     try {
@@ -285,10 +290,16 @@ export class HermesAdapter implements RuntimeAdapter {
     if (version.kind !== 'available') {
       return { kind: 'reject', reason: `hermes installation refused: ${version.kind === 'refused' ? version.reason : version.kind}`, retryable: false };
     }
-    return { kind: 'prepared', operation: { start: (start) => this.start(start, command) } };
+    let custody: PreparedHermesCustody | undefined;
+    if (this.options.byokLauncher) {
+      if (!path.isAbsolute(command)) return { kind: 'reject', reason: 'Hermes custody requires an absolute Hermes executable', retryable: false };
+      try { custody = await prepareHermesCustody(this.options.byokLauncher, input.offer); }
+      catch { return { kind: 'reject', reason: 'Hermes custody admission failed', retryable: false }; }
+    }
+    return { kind: 'prepared', operation: { start: (start) => this.start(start, command, custody) } };
   }
 
-  private async start(input: RuntimeOperationStartInput, command: string): Promise<Session> {
+  private async start(input: RuntimeOperationStartInput, command: string, custody?: PreparedHermesCustody): Promise<Session> {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string') throw authority('hermes requires a resolved instruction');
     if (input.manifest.sessionRef !== undefined) throw authority('hermes does not resume native sessions');
     const cwd = input.manifest.cwd;
@@ -301,15 +312,21 @@ export class HermesAdapter implements RuntimeAdapter {
       identifyHermesGateway, removeHermesProfile,
     });
     try {
-      const home = await createHermesProfile(this.root, input.scratch.token, this.options.model);
+      const home = await createHermesProfile(this.root, input.scratch.token, custody?.model ?? this.options.model);
       session.ownHome(home);
-      const env = hermesEnvironment({ ...input.env, ...input.scratch.env }, home);
+      const ambient = { ...input.env, ...input.scratch.env };
+      const env = hermesEnvironment(custody ? buildAllowlistedEnv({ ambient }) : ambient, home);
+      const launch = (role: 'gateway' | 'viewer', args: string[]) => custody ? {
+        command: this.options.byokLauncher!.command,
+        args: hermesCustodyArgs(this.options.byokLauncher!, custody.binding, { hermesBin: command, home, role }),
+      } : { command, args };
       let gatewayChild: ChildProcess | undefined;
       const spawnGateway = createOwnedLineProcessSpawn({
         nativeAssetRoot: this.options.nativeAssetRoot,
         spawnFn: (bin, args, options) => (gatewayChild = (this.options.spawnFn ?? nodeSpawn)(bin, [...args], options)),
       });
-      const gateway = spawnGateway(command, ['gateway', 'run', '--quiet', '--external-supervisor', '--force'], { cwd: home, env });
+      const gatewayLaunch = launch('gateway', ['gateway', 'run', '--quiet', '--external-supervisor', '--force']);
+      const gateway = spawnGateway(gatewayLaunch.command, gatewayLaunch.args, { cwd: home, env });
       session.ownGateway(gateway);
       await withDeadline(gateway.spawned, OPEN_REQUEST_TIMEOUT_MS, input.signal, () => infrastructure('start', 'hermes gateway did not spawn', 'retryable'));
       const gatewayPid = gatewayChild?.pid;
@@ -317,7 +334,8 @@ export class HermesAdapter implements RuntimeAdapter {
       await session.awaitGatewayReady(home, gatewayPid, this.options.gatewayReadyTimeoutMs ?? 20_000, input.signal);
       // A gateway that exited after ready already closed the session; a viewer started now would start its own.
       session.assertOpen();
-      const viewer = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn })(command, ['--yolo', 'acp'], { cwd: workspace, env });
+      const viewerLaunch = launch('viewer', ['--yolo', 'acp']);
+      const viewer = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn })(viewerLaunch.command, viewerLaunch.args, { cwd: workspace, env });
       const connection = session.ownViewer(viewer);
       const open = <T>(method: string, params: Record<string, unknown>) => withDeadline(
         connection.request(method, params) as Promise<T>, OPEN_REQUEST_TIMEOUT_MS, input.signal,

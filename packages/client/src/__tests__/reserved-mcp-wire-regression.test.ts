@@ -20,6 +20,10 @@
  *
  * Regenerate (only against the recorded base) with:
  *   BYOK_UPDATE_RESERVED_MCP_WIRE_BASELINE=1 bunx vitest run src/__tests__/reserved-mcp-wire-regression.test.ts
+ *
+ * `byok-agent-result-mcp` did not exist at that base, so it has no frozen
+ * baseline. Its `tools/list` line is asserted byte-exactly by the last case
+ * instead, which pins the same field order as the frozen helpers.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { PassThrough } from 'node:stream';
@@ -31,7 +35,8 @@ import {
   AGENT_MEMORY_RECALL_TOOL_NAME,
 } from '../bin/agent-memory-mcp-server';
 import { serveTeamMcpOverStdio, TEAM_POST_TOOL_NAME } from '../bin/team-mcp-server';
-import { AGENT_MESSAGE_TOOL_NAME } from '../sdk-reserved-mcp';
+import { serveAgentResultMcpOverStdio } from '../bin/agent-result-mcp-server';
+import { AGENT_MESSAGE_TOOL_NAME, AGENT_RESULT_TOOL_NAME } from '../sdk-reserved-mcp';
 
 /** The commit the frozen bytes below were captured from: `codex/c07-g4b-merge`, not `main`. */
 const BASELINE_CAPTURE_SHA = '5fd5e503';
@@ -197,7 +202,7 @@ async function captureAll(): Promise<WireBaseline> {
   return {
     capturedAt: BASELINE_CAPTURE_SHA,
     note:
-      'Emitted wire bytes of the four SDK-reserved MCP stdio helpers, captured from ' +
+      'Emitted wire bytes of the three retained SDK-reserved MCP stdio helpers, captured from ' +
       `${BASELINE_CAPTURE_SHA} on codex/c07-g4b-merge (the migration base, NOT main) before the ` +
       'shared MCP server core landed. Regenerate only against that base.',
     servers,
@@ -206,7 +211,7 @@ async function captureAll(): Promise<WireBaseline> {
 
 /**
  * The COMPLETE set of intentional wire changes the shared-core migration
- * introduces for these four servers, one entry per affected step.
+ * introduces for these three servers, one entry per affected step.
  *
  * Every step NOT listed here must be byte-identical to the frozen baseline.
  * Each entry asserts both halves explicitly — what the frozen line was, and
@@ -268,7 +273,7 @@ const MIGRATION_DELTAS: Readonly<Record<string, (frozen: string) => { readonly b
   },
 };
 
-describe('the four SDK-reserved MCP helpers on the wire', () => {
+describe('the three retained SDK-reserved MCP helpers on the wire', () => {
   it(`still emits the bytes frozen at ${BASELINE_CAPTURE_SHA}, except the declared migration deltas`, async () => {
     if (UPDATING) {
       writeFileSync(BASELINE_FILE, `${JSON.stringify(await captureAll(), null, 2)}\n`);
@@ -296,5 +301,31 @@ describe('the four SDK-reserved MCP helpers on the wire', () => {
 
       expect(emitted, `${server.name} drifted from the frozen wire bytes`).toEqual(expected);
     }
+  });
+});
+
+describe('byok-agent-result-mcp on the wire', () => {
+  it('emits tools/list with name, description, then inputSchema, byte for byte', async () => {
+    const server: ServerCase = {
+      name: 'byok-agent-result-mcp',
+      serve: (stdin, stdout) => void serveAgentResultMcpOverStdio({
+        deps: {
+          describe: async () => ({
+            name: AGENT_RESULT_TOOL_NAME,
+            description: 'Submit the result.',
+            inputSchema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] },
+          }),
+          submit: async () => ({ state: 'staged', receiptId: 'receipt-1' }),
+        },
+        stdin,
+        stdout,
+      }),
+      steps: scriptFor({ name: AGENT_RESULT_TOOL_NAME, arguments: { ok: true } }, { name: 'some_other_tool', arguments: {} }),
+    };
+    const emitted = await driveScript(server);
+    expect(emitted[server.steps.findIndex(step => step.label === 'tools/list')]).toBe(
+      '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"submit_result","description":"Submit the result.",'
+      + '"inputSchema":{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"]}}]}}',
+    );
   });
 });

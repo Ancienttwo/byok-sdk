@@ -10,7 +10,7 @@ let bot: BotCollaboration;
 afterEach(async () => { await bot?.close(); await fixture?.close(); });
 /** Real embedded server, HTTP, daemon and submit_result helper, with input coalescing on by default. */
 async function setup(rest: Partial<BotOptions> = {}) {
-  const host = fixture = await openHost({ consume: (wake, signal) => bot.consume(wake, signal), agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+  const host = fixture = await openHost({ externalCore: true, consume: (wake, signal) => bot.consume(wake, signal), agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
   const base = template(host.deviceId);
   bot = new BotCollaboration(host.server, host.ledger, { botId: 'main', execution: { ...base,
     agentMessageContext: { destinationBinding: 'owner', freshnessCursor: 'coalesce' }, payload: { ...base.payload,

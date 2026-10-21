@@ -33,7 +33,7 @@ export class AsyncEventQueue<T> {
   private readonly buffer: Array<{ readonly sequence: number; readonly value: T }> = [];
   private nextSequence = 0;
   private closed = false;
-  private waiters: Array<() => void> = [];
+  private waiters = new Set<() => void>();
   private readonly maxBuffered: number | undefined;
   private readonly truncationMarker: T | undefined;
   private truncationNoted = false;
@@ -83,12 +83,8 @@ export class AsyncEventQueue<T> {
 
   private wake(): void {
     const waiters = this.waiters;
-    this.waiters = [];
+    this.waiters = new Set();
     for (const resolve of waiters) resolve();
-  }
-
-  private waitForMore(): Promise<void> {
-    return new Promise((resolve) => this.waiters.push(resolve));
   }
 
   /** Async-iterate the buffer from index 0, waiting for new pushes until closed. */
@@ -98,9 +94,12 @@ export class AsyncEventQueue<T> {
       [Symbol.asyncIterator](): AsyncIterator<T> {
         let sequence = queue.buffer[0]?.sequence ?? queue.nextSequence;
         let truncationDelivered = false;
+        let stopped = false;
+        const localWaiters = new Set<() => void>();
         return {
           async next(): Promise<IteratorResult<T>> {
             for (;;) {
+              if (stopped) return { value: undefined, done: true };
               if (queue.truncationNoted && !truncationDelivered && queue.truncationMarker !== undefined) {
                 truncationDelivered = true;
                 return { value: queue.truncationMarker, done: false };
@@ -119,8 +118,16 @@ export class AsyncEventQueue<T> {
               if (queue.closed) {
                 return { value: undefined, done: true };
               }
-              await queue.waitForMore();
+              await new Promise<void>(resolve => {
+                const wake = () => { queue.waiters.delete(wake); localWaiters.delete(wake); resolve(); };
+                localWaiters.add(wake); queue.waiters.add(wake);
+              });
             }
+          },
+          async return(): Promise<IteratorResult<T>> {
+            stopped = true;
+            for (const wake of localWaiters) wake();
+            return { value: undefined, done: true };
           },
         };
       },
