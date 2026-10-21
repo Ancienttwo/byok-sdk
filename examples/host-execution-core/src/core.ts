@@ -1,10 +1,10 @@
 import type { ByokServer, DueWake } from '@byok-sdk/server';
 import { MemoryBlockedError, type HostMemoryPage, type MemoryBinding } from './memory';
 import { HostLedger } from './ledger';
-import { canonical, hash, project, taskId, time, validateInput, type Attempt, type Intent, type IntentInput,
+import { canonical, hash, project, taskId, time, validateInput, validateJson, validateRetry, type HostJobHandler, type Attempt, type Intent, type IntentInput,
   type Json, type LedgerState, type Routine, type RoutineDefinition, type Terminal } from './model';
 import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
-import { applyPlan, auditCalendarError, deferSchedule, nextWake, recordOccurrence, scheduleNext, setLifecycle, WAKE_HORIZON_MS } from './routines';
+import { applyPlan, auditCalendarError, auditIgnoredWake, deferSchedule, nextWake, promoteOccurrence, recordOccurrence, scheduleNext, setLifecycle, WAKE_HORIZON_MS } from './routines';
 import { cancelWake, enqueue, settle } from './transitions';
 
 export type ExecutionServer = {
@@ -20,6 +20,7 @@ export interface OutcomeTransaction {
   publish(id: string, value: Json): void;
 }
 export interface HostOptions {
+  hostJobs?: Readonly<Record<string, HostJobHandler>>;
   memory?: HostMemoryPage;
   now?: () => number;
   reconcileMs?: number;
@@ -38,7 +39,10 @@ export class HostExecutionCore {
   private stopMemoryUpdates?: () => void;
   private memoryWaking: Promise<void> = Promise.resolve();
   private scheduleRetryTimer?: ReturnType<typeof setTimeout>;
+  private readonly hostJobs: Map<string, HostJobHandler>;
+  private readonly jobAbort = new AbortController();
   constructor(readonly server: ExecutionServer, readonly ledger: HostLedger, private readonly options: HostOptions = {}) {
+    this.hostJobs = new Map(Object.entries(options.hostJobs ?? {}));
     if (options.memory && options.memory.ledger.tenant !== ledger.tenant) throw new Error('Memory tenant must match execution tenant');
     this.now = () => time((options.now ?? Date.now)());
     this.nextTime = options.nextOccurrence ?? nextIntervalOccurrence;
@@ -76,11 +80,19 @@ export class HostExecutionCore {
   }
   async addRoutine(definition: RoutineDefinition): Promise<void> {
     this.assertOpen();
-    if (!definition.id.trim() || !Number.isSafeInteger(definition.version) || definition.version < 1
+    if (!definition.id.trim() || definition.id.startsWith('host-scan:') || !Number.isSafeInteger(definition.version) || definition.version < 1
       || definition.waitMs < 1) throw new Error('Invalid routine definition');
     time(definition.waitMs); time(definition.lateAfterMs);
+    time(this.now() + definition.waitMs);
+    if (definition.retry !== undefined) validateRetry(definition.retry);
     if (definition.endAt !== undefined) time(definition.endAt);
-    validateInput({ key: definition.id, source: 'routine', execution: definition.execution, waitUntil: this.now() + definition.waitMs, retry: definition.retry });
+    if ((definition.execution !== undefined) === (definition.hostJob !== undefined)) throw new Error('Supply exactly one of execution or hostJob');
+    if (definition.hostJob) {
+      if (!definition.hostJob.type?.trim() || typeof this.hostJobs.get(definition.hostJob.type) !== 'function') throw new Error('Host job handler not registered');
+      validateJson(definition.hostJob.input);
+    } else {
+      validateInput({ key: definition.id, source: 'routine', execution: definition.execution!, waitUntil: this.now() + definition.waitMs, retry: definition.retry });
+    }
     const now = this.now();
     const plan = nextWake(definition, now - 1, this.nextTime, now);
     this.ledger.transaction(state => {
@@ -116,6 +128,7 @@ export class HostExecutionCore {
     const replay = this.ledger.transaction(state => {
       if (this.ledger.hasTombstone('slot', wake.dedupKey, this.now())) return true;
       if (state.scanWake?.dedupKey === wake.dedupKey) state.scanWake = null;
+      else if (wake.dedupKey.startsWith('host-scan:')) auditIgnoredWake(state, wake, this.now(), 'stale_scan');
       else recordOccurrence(state, this.ledger.tenant, wake, this.now(), this.nextTime);
       return false;
     });
@@ -155,6 +168,7 @@ export class HostExecutionCore {
   }
   async close(): Promise<void> {
     this.stopped = true; this.stopMemoryUpdates?.(); clearTimeout(this.scheduleRetryTimer);
+    this.jobAbort.abort();
     await Promise.all([this.draining, this.memoryWaking]);
   }
   private assertOpen(): void { if (this.stopped) throw new Error('Host core is closed'); }
@@ -166,6 +180,7 @@ export class HostExecutionCore {
       }
     });
     const first = await this.flushWakes();
+    const jobFailures = await this.runHostJobs();
     for (let pass = 0; pass < 100 && !this.stopped; pass++) {
       this.ledger.transaction(state => {
         for (const intent of Object.values(state.intents)) {
@@ -192,9 +207,41 @@ export class HostExecutionCore {
     }
     this.armScan();
     const last = await this.flushWakes(first.failedKeys);
-    const failures = [...first.failures, ...last.failures];
+    const failures = [...first.failures, ...jobFailures, ...last.failures];
     // All Agent queues were scanned. Reject only now, so the SDK retains the hook retry.
     if (failures.length) throw new AggregateError(failures, 'Wake dispatch failed; durable outbox retained');
+  }
+  private async runHostJobs(): Promise<unknown[]> {
+    const failures: unknown[] = [];
+    for (const [key, row] of Object.entries(this.ledger.snapshot().outbox)) {
+      if (this.stopped) break;
+      if (row.kind !== 'host-job') continue;
+      try {
+        const run = this.ledger.transaction(state => {
+          const occurrence = state.occurrences[row.occurrenceKey]!;
+          const definition = state.routines[hash(occurrence.routineId)]!.definition;
+          if (!definition.hostJob || !occurrence.job || occurrence.intentId || occurrence.conclusion) throw new Error('Invalid pending Host job');
+          return { ...definition.hostJob, occurrenceKey: occurrence.key, routineId: occurrence.routineId,
+            definitionVersion: occurrence.definitionVersion, trigger: occurrence.trigger, attempt: ++occurrence.job.attempts };
+        });
+        const handler = this.hostJobs.get(run.type);
+        if (typeof handler !== 'function') throw new Error('Host job handler not registered');
+        const result = await handler({ ...run, signal: this.jobAbort.signal });
+        this.jobAbort.signal.throwIfAborted();
+        if (!result || !Object.hasOwn(result, 'summary')) throw new Error('Host job result requires a summary');
+        validateJson(result.summary);
+        this.ledger.transaction(state => {
+          const occurrence = state.occurrences[row.occurrenceKey]!;
+          occurrence.job!.summary = structuredClone(result.summary);
+          if (result.execution !== undefined) promoteOccurrence(state, this.ledger.tenant, occurrence, result.execution);
+          else occurrence.conclusion = 'succeeded';
+          delete state.outbox[key];
+        });
+      } catch (error) {
+        this.error(key, error); failures.push(error);
+      }
+    }
+    return failures;
   }
   private armScheduleRetry(): void {
     clearTimeout(this.scheduleRetryTimer);

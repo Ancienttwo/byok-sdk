@@ -103,3 +103,37 @@ substrate/platform tests. Focused server SQLite/loopback (268), client journal
 all passed. ESM and CJS each emitted `BYOK_SQLITE_BUNDLE_OK`. Local SEA was not
 repeated because the documented Homebrew fuse limitation is unchanged. Fresh
 hosted CI on the merge commit remains separate evidence. Logs: `/tmp/pr640b-*.log`.
+
+## Reviewed CI scope repair (2026-10-21)
+
+P1: API inventory is generated from package entries; CI maps changed records to
+owning workspaces and their dependents. The keys manifest already declares
+`byok-pi-provider-launcher`; this PR does not add that executable or import an
+unrelated branch's executable. P2: its bin imports `pi-provider-launcher-core`,
+which constructs `SqliteProviderProfileStore`, which loads `sqlite-support`.
+Removing `node:module` therefore changes this existing bin's closure facts.
+`changedApiOwners` recognized only `@byok-sdk/...` keys and rejected the valid
+`bin:` delta before any qualification jobs could run. Run 39591467335, selection
+job 119193199801, records the exact failure against base `80a340836fe38abec718e2980d39d91b33964ac4`.
+
+P3: add a reviewed bin-owner projection with a manifest drift check, retaining
+refusal for unknown bins. #660 was already included in that failing base; it
+handles mailbox fixture changes, not bin ownership. Apply the same narrow
+content-check pattern to this PR's two private packaging workspace dependencies,
+update their reviewed graph edges, and explicitly route the SQLite fixture/smoke
+to both packaging families. Scripts, other dependency changes, resolved-package
+changes and unknown root fixtures still fail closed. Existing tests were not
+weakened; four regression/authority checks were added.
+
+Normal merge now includes main `9f3414c9672c764149e999611c0fb7670b5637f9`.
+Its client budget plus the existing SQLite delta is 2,060,740 + 70 = 2,060,810
+bytes, confirmed by fresh build and API check; the README projection agrees.
+`node --test scripts/ci/*.test.mjs`: 49 passed, zero failed/skipped. Before the
+repair, the existing graph test also reproduced the missing packaging edges.
+Build, typecheck, API surface and version authority pass. The full real PR diff
+against pinned main selects 11 workspaces and 11 job families; release mode is
+not used to bypass the selector. The full workspace suite was not repeated for
+this CI routing repair. New hosted CI still qualifies the pushed merge separately.
+Logs: `/tmp/pr640-scope-{failed,before,tests,build,typecheck,api,version}.log`.
+
+Refs #626 #660.

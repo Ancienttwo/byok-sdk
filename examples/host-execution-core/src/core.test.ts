@@ -20,7 +20,7 @@ it('runs a routine through wake, daemon, submit_result, terminal and the atomic 
   await host.core.addRoutine(host.routine('daily'));
   await vi.waitFor(() => expect(Object.values(host.ledger.snapshot().occurrences)).toHaveLength(1));
   const occurrence = Object.values(host.ledger.snapshot().occurrences)[0]!;
-  const intent = host.ledger.snapshot().intents[occurrence.intentId]!;
+  const intent = host.ledger.snapshot().intents[occurrence.intentId!]!;
   (await running(intent.key)).finish({ text: 'routine result' });
   await settled(intent.key);
   expect(host.ledger.snapshot().application.result).toEqual({ text: 'routine result' });

@@ -52,8 +52,6 @@ export type StartAcpSession = (
   hooks?: {
     onReady?: (sessionId: string) => void;
     onRecord?: (record: AcpRecord) => void;
-    maxBytes?: number;
-    onLimit?: () => never;
   },
 ) => Promise<RawAcpSession>;
 /** OAR's Grok Build profile: `grok agent --always-approve --no-leader stdio`. */

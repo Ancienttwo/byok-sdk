@@ -180,6 +180,8 @@ export type {
 } from './daemon/agent-memory-intent';
 export {
   AgentMemoryError,
+  AgentMemoryValidationError,
+  AgentMemorySnapshotLimitError,
   AgentMemoryRevisionConflictError,
   isAgentMemorySecureFilesystemAvailable,
   AGENT_MEMORY_AUDIT_FILENAME,
@@ -561,3 +563,5 @@ export { createExecutionScratch, ScratchRootPathError } from './daemon/retention
 export type { ExecutionScratch } from './daemon/retention/scratch';
 
 export { copyAgentMemoryHelperAssets, type CopyAgentMemoryHelperAssetsOptions } from './daemon/agent-memory-helper-release';
+
+export type { AgentMemoryExport, AgentMemoryExportOptions } from './daemon/agent-memory-export';

@@ -4,6 +4,31 @@ import { resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { parseBunLock } from '../release/pi-runtime-identity.mjs';
 
+// Reviewed projection of public package bin ownership; CI tests compare manifests.
+export const reviewedBinOwners = Object.freeze({
+  'bin:byok-agent': 'packages/client',
+  'bin:byok-agent-message-mcp': 'packages/client',
+  'bin:byok-agent-result-mcp': 'packages/client',
+  'bin:byok-agent-memory-mcp': 'packages/client',
+  'bin:byok-agent-team-mcp': 'packages/client',
+  'bin:byok-pi-durable': 'packages/client',
+  'bin:byok-pi-prepared': 'packages/client',
+  'bin:byok-pi-rpc': 'packages/client',
+  'bin:byok-pi-provider-launcher': 'packages/keys',
+});
+
+// #626's private packaging fixture imports these two existing workspaces.
+function removeReviewedPackagingEdges(before, after, manifest) {
+  if (manifest.private !== true) throw new Error('Reviewed packaging fixture must remain private');
+  for (const name of ['@byok-sdk/keys', '@byok-sdk/server']) {
+    if (before.dependencies?.[name] !== undefined || after.dependencies?.[name] !== 'workspace:*'
+      || manifest.dependencies?.[name] !== 'workspace:*') {
+      throw new Error('Only the reviewed additive packaging workspace dependencies may be added');
+    }
+    delete after.dependencies[name];
+  }
+}
+
 export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) {
   if (!/^[a-f0-9]{40}$/.test(base ?? '') || /^0+$/.test(base)) throw new Error('Content-sensitive impact requires exact CI_BASE');
   const beforeText = execFileSync('git', ['show', `${base}:${path}`], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -28,6 +53,12 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
         && manifest.devDependencies?.['@byok-sdk/cloud'] === 'workspace:*') {
         delete current.devDependencies['@byok-sdk/cloud'];
       }
+      if (dir === 'examples/packaging'
+        && record.dependencies?.['@byok-sdk/keys'] === undefined
+        && record.dependencies?.['@byok-sdk/server'] === undefined
+        && (current.dependencies?.['@byok-sdk/keys'] !== undefined || current.dependencies?.['@byok-sdk/server'] !== undefined)) {
+        removeReviewedPackagingEdges(record, current, manifest);
+      }
       delete record.version; delete current.version;
     }
   } else if (path === 'examples/bot-collaboration/package.json') {
@@ -37,6 +68,9 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       throw new Error('Only the reviewed private fixture cloud edge may be added');
     }
     delete after.devDependencies['@byok-sdk/cloud'];
+  } else if (path === 'examples/packaging/package.json') {
+    if (before.private !== true) throw new Error('Reviewed packaging fixture must remain private');
+    removeReviewedPackagingEdges(before, after, { ...after, dependencies: { ...after.dependencies } });
   } else if (path === 'package.json') {
     const oldCommand = before.scripts?.['test:scripts'], newCommand = after.scripts?.['test:scripts'];
     const prefix = 'node --test --test-concurrency=1 ';
@@ -63,6 +97,7 @@ export function changedApiOwners({ base, cwd = process.cwd() } = {}) {
   const owners = new Set();
   for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
     if (isDeepStrictEqual(before[key], after[key])) continue;
+    if (Object.hasOwn(reviewedBinOwners, key)) { owners.add(reviewedBinOwners[key]); continue; }
     const match = /^@byok-sdk\/([a-z-]+)(?:[/#]|$)/.exec(key);
     if (!match) throw new Error(`Reviewed release validation required: unmapped API entry ${key}`);
     owners.add(`packages/${match[1]}`);
