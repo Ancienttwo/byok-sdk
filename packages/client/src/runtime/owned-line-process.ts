@@ -7,6 +7,7 @@ const MAX_LINE_BYTES = 1024 * 1024;
 const MAX_BUFFERED_BYTES = 4 * 1024 * 1024;
 
 interface SpawnDependencies {
+  nativeAssetRoot?: string;
   spawnFn?: (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
   platform?: NodeJS.Platform;
   jobObject?: { assign(pid: number): Promise<{ release(): void }> };
@@ -106,7 +107,7 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
     child.stderr.on('error', fail);
     child.once('error', fail);
     child.once('spawn', () => {
-      void adoptOwnedProcessTree({ child, label, platform: deps.platform, jobObject: deps.jobObject }).then(() => {
+      void adoptOwnedProcessTree({ child, label, platform: deps.platform, jobObject: deps.jobObject, nativeAssetRoot: deps.nativeAssetRoot }).then(() => {
         adopted = true;
         resolveSpawn();
         flush();

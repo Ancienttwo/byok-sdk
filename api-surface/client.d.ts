@@ -4,6 +4,8 @@ import { type ResolvedBin } from './resolve-bin';
 import { type NativeInteractionHostOptions } from '../../native-interactions';
 import { type SpawnFn } from './process-client';
 export interface ClaudeAdapterOptions {
+    /** Absolute product native asset directory; scoped to this adapter. */
+    nativeAssetRoot?: string;
     /** Override bin resolution — tests substitute the fake-claude fixture script. */
     resolveBin?: () => ResolvedBin;
     /** Override process spawning — tests substitute a fake spawn. */
@@ -172,6 +174,7 @@ import { spawn } from 'node:child_process';
 import type { ClaudeStreamMessage } from './events';
 export type SpawnFn = typeof spawn;
 export interface ClaudeProcessClientOptions {
+    nativeAssetRoot?: string;
     command: string;
     args: string[];
     cwd: string;
@@ -365,6 +368,8 @@ export type CodexSandboxSetting = 'read-only' | 'workspace-write' | 'danger-full
 /** Throws a TypeError unless `value` is a {@link CodexSandboxSetting}. */
 export declare function assertCodexSandboxSetting(value: unknown, label: string): asserts value is CodexSandboxSetting;
 export interface CodexAdapterOptions {
+    /** Absolute product native asset directory; scoped to this adapter. */
+    nativeAssetRoot?: string;
     /**
      * Codex sandbox for every session, as OAR's `OAR_CODEX_SANDBOX`. Default
      * `danger-full-access`: no human answers an approval prompt, so a sandbox
@@ -417,6 +422,8 @@ import { type spawn as nodeSpawn } from 'node:child_process';
 import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult } from '../../types';
 import type { ResolvedBin } from '../codex/resolve-bin';
 export interface GrokAdapterOptions {
+    /** Absolute product native asset directory; scoped to this adapter. */
+    nativeAssetRoot?: string;
     /** Grok model id for every session (`session/set_model`). Absent: the user's Grok default. */
     model?: string;
     resolveBin?: () => ResolvedBin;
@@ -460,6 +467,8 @@ export interface HermesModelSelection {
     readonly keyEnv?: string;
 }
 export interface HermesAdapterOptions {
+    /** Absolute product native asset directory; scoped to this adapter. */
+    nativeAssetRoot?: string;
     /**
      * Absolute path of the Hermes root that this SDK owns, for example under the
      * Host's store directory. Each execution runs in a fresh profile home below
@@ -567,6 +576,8 @@ import { type ResolvedBin } from './resolve-bin';
 import { type SpawnFn } from './rpc-client';
 /** Pi launch options; execution scratch and replica authority come from start input. */
 export interface PiAdapterOptions {
+    /** Absolute product native asset directory; scoped to this adapter. */
+    nativeAssetRoot?: string;
     /** Opt-in ordinary, lease-bound durable worker. */
     durablePi?: boolean;
     /** Override bin resolution — tests substitute the fake-pi fixture script. */
@@ -686,6 +697,7 @@ export interface PiRpcMessage {
     [key: string]: unknown;
 }
 export interface PiRpcClientOptions {
+    nativeAssetRoot?: string;
     command: string;
     args: string[];
     cwd: string;
@@ -4127,6 +4139,8 @@ export interface HostedJournalConfig {
     maxRecordBytes?: number;
 }
 export interface DaemonConfig {
+    /** Absolute native asset root for SDK-created runtime adapters. Custom adapters own their option. */
+    nativeAssetRoot?: string;
     /** Select an explicit macOS keychain for device enrollment custody. */
     deviceCredentials?: import('./device-credential-store').DeviceCredentialConfig;
     storage?: StorageConfig;
@@ -10409,6 +10423,7 @@ export type { OutboundStatus, OutboundRejection } from './daemon/outbound-settle
 export { createExecutionScratch, ScratchRootPathError } from './daemon/retention/scratch';
 export type { ExecutionScratch } from './daemon/retention/scratch';
 export { copyAgentMemoryHelperAssets, type CopyAgentMemoryHelperAssetsOptions } from './daemon/agent-memory-helper-release';
+export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, type CopySdkNativeAssetsOptions } from './sdk-native-assets';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====
 import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
 import type { PreparedAgentMemoryMode, TerminalProjectionSelection } from '@byok-sdk/protocol';
@@ -12808,6 +12823,54 @@ export declare class RuntimeStartupDisposalFailure extends Error {
     constructor(retryDisposal: () => Promise<void>, options?: ErrorOptions);
 }
 export declare function isRuntimeStartupDisposalFailure(value: unknown): value is RuntimeStartupDisposalFailure;
+// ==== @byok-sdk/client dist/sdk-native-assets-runtime.d.ts ====
+/** Runtime loader: explicit absolute root only, no download or package-search fallback. */
+export declare function loadSdkKoffiAsset(root: string): unknown;
+// ==== @byok-sdk/client dist/sdk-native-assets.d.ts ====
+export declare const sdkNativeAssetTargets: Readonly<{
+    'win32-x64': Readonly<{
+        package: "@koromix/koffi-win32-x64";
+        version: "3.2.0";
+        sha256: "c2345e8178dc3cac051e1066c7082028d3096959050bcf3e6d46a0e839e64b3f";
+        url: "https://registry.npmjs.org/@koromix/koffi-win32-x64/-/koffi-win32-x64-3.2.0.tgz";
+        integrity: "sha512-09p81HVKDsLXkyMRrLQzsFtCjdcFgbRW765roAu5iChHj4gfWVrGDdvtBldc1BulIEgH1/gRwa2E4vEtW3/hlw==";
+        files: readonly string[];
+        signingPolicy: "unmodified-official-addon";
+    }>;
+    darwin: Readonly<{
+        files: readonly string[];
+        signingPolicy: "product-resigning-allowed";
+    }>;
+}>;
+export interface CopySdkNativeAssetsOptions {
+    readonly outDir: string;
+    readonly platform: 'win32' | 'darwin';
+    readonly arch: 'x64' | 'arm64';
+}
+/** Build-time only. Fetches the integrity-pinned official Windows archive on any build host; never executes it. Darwin delegates to the existing release-helper copier. */
+export declare function copySdkNativeAssets(options: CopySdkNativeAssetsOptions): Promise<readonly string[]>;
+export { loadSdkKoffiAsset } from './sdk-native-assets-runtime';
+/** Machine-readable build inputs. Target presence is not runtime/platform qualification. */
+export declare const sdkDistributionManifest: Readonly<{
+    version: 1;
+    piRuntimePin: string;
+    reservedHelperKinds: readonly import("./sdk-reserved-helper-host").SdkReservedHelperKind[];
+    nativeTargets: Readonly<{
+        'win32-x64': Readonly<{
+            package: "@koromix/koffi-win32-x64";
+            version: "3.2.0";
+            sha256: "c2345e8178dc3cac051e1066c7082028d3096959050bcf3e6d46a0e839e64b3f";
+            url: "https://registry.npmjs.org/@koromix/koffi-win32-x64/-/koffi-win32-x64-3.2.0.tgz";
+            integrity: "sha512-09p81HVKDsLXkyMRrLQzsFtCjdcFgbRW765roAu5iChHj4gfWVrGDdvtBldc1BulIEgH1/gRwa2E4vEtW3/hlw==";
+            files: readonly string[];
+            signingPolicy: "unmodified-official-addon";
+        }>;
+        darwin: Readonly<{
+            files: readonly string[];
+            signingPolicy: "product-resigning-allowed";
+        }>;
+    }>;
+}>;
 // ==== @byok-sdk/client dist/sdk-reserved-helper-host.d.ts ====
 export declare const BYOK_SDK_HELPER_SUBCOMMAND = "__byok_sdk_helper";
 export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-result-mcp' | 'agent-memory-mcp' | 'agent-memory-describe' | 'agent-team-mcp' | 'pi-rpc' | 'pi-prepared' | 'pi-durable';
@@ -12828,6 +12891,7 @@ export interface ResolvedSdkReservedHelperBin {
     readonly args: readonly string[];
     readonly source: 'dist-script' | 'self-executable';
 }
+export declare const sdkReservedHelperKinds: readonly SdkReservedHelperKind[];
 /** SDK-owned launcher shape used by every reserved stdio helper. */
 export declare function resolveSdkReservedHelperBin(kind: SdkReservedHelperKind, host?: SdkHelperHostConfig): ResolvedSdkReservedHelperBin;
 /**

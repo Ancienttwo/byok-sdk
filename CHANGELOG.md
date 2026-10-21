@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Feature (client)** — add a pinned Windows x64 native asset copier, distribution
+  metadata and per-adapter asset roots for relocated runtime process ownership (#627).
+  Darwin copying reuses the existing memory-helper API; Windows memory is unchanged.
+
 - **Feature (client)** — add `DaemonConfig.agentMemoryMcp: 'auto' | 'off'` to
   disable SDK task memory tools while retaining Agent homes. The default is
   unchanged; prepared memory requests fail closed when disabled. This is the

@@ -56,6 +56,8 @@ export interface HermesModelSelection {
 }
 
 export interface HermesAdapterOptions {
+  /** Absolute product native asset directory; scoped to this adapter. */
+  nativeAssetRoot?: string;
   /**
    * Absolute path of the Hermes root that this SDK owns, for example under the
    * Host's store directory. Each execution runs in a fresh profile home below
@@ -250,7 +252,7 @@ export class HermesAdapter implements RuntimeAdapter {
 
   private async probeAcp(command: string, signal: AbortSignal | undefined): Promise<{ kind: 'available'; authPresent: boolean } | ProbeFailure> {
     const home = await createHermesProfile(this.root, `detect-${randomBytes(6).toString('hex')}`, this.options.model);
-    const child = createOwnedLineProcessSpawn({ spawnFn: this.options.spawnFn })(command, ['acp'], {
+    const child = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn })(command, ['acp'], {
       cwd: home, env: hermesEnvironment(this.options.byokLauncher ? buildAllowlistedEnv({ ambient: process.env }) : buildRuntimeEnv({ ambient: process.env }), home),
     });
     let timedOut = false;
@@ -317,6 +319,7 @@ export class HermesAdapter implements RuntimeAdapter {
       } : { command, args };
       let gatewayChild: ChildProcess | undefined;
       const spawnGateway = createOwnedLineProcessSpawn({
+        nativeAssetRoot: this.options.nativeAssetRoot,
         spawnFn: (bin, args, options) => (gatewayChild = (this.options.spawnFn ?? nodeSpawn)(bin, [...args], options)),
       });
       const gatewayLaunch = launch('gateway', ['gateway', 'run', '--quiet', '--external-supervisor', '--force']);
@@ -329,7 +332,7 @@ export class HermesAdapter implements RuntimeAdapter {
       // A gateway that exited after ready already closed the session; a viewer started now would start its own.
       session.assertOpen();
       const viewerLaunch = launch('viewer', ['--yolo', 'acp']);
-      const viewer = createOwnedLineProcessSpawn({ spawnFn: this.options.spawnFn })(viewerLaunch.command, viewerLaunch.args, { cwd: workspace, env });
+      const viewer = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn })(viewerLaunch.command, viewerLaunch.args, { cwd: workspace, env });
       const connection = session.ownViewer(viewer);
       const open = <T>(method: string, params: Record<string, unknown>) => withDeadline(
         connection.request(method, params) as Promise<T>, OPEN_REQUEST_TIMEOUT_MS, input.signal,

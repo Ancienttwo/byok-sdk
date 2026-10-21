@@ -2988,3 +2988,17 @@ Only the Host's local tool service can enforce actual read-only behavior; model
 annotations are not authorization. External effects retain owner-confirmed Host
 connector execution. This additive slice does not qualify external-authority
 storage, Windows persona persistence or two-process relay.
+
+### Product native asset deployment
+
+`copySdkNativeAssets` is a build-time API. For Windows x64 it copies the pinned
+and integrity-verified official Koffi addon; it never downloads in a runtime.
+`sdkDistributionManifest` describes Pi pin, reserved helper kinds and native target
+files. A product passes an absolute `nativeAssetRoot` to SDK-created adapters via
+`DaemonConfig`, or to each custom adapter constructor. An explicit root is scoped
+to that adapter's owned process trees and fails closed on missing or modified
+bytes without searching installed dependencies. Omission keeps installed behavior.
+For Darwin the copier delegates to the existing memory-helper release copier;
+`agentMemoryHelperAssetRoot` remains the separate memory-helper authority. Windows
+memory remains unavailable. Native target metadata is not platform qualification;
+Windows SEA qualification requires the actual Windows CI process-ownership fixture.

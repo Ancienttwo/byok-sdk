@@ -7,6 +7,7 @@ import { adoptOwnedProcessTree, disposeOwnedProcessTree, requestOwnedProcessTree
 export type SpawnFn = typeof spawn;
 
 export interface ClaudeProcessClientOptions {
+  nativeAssetRoot?: string;
   command: string;
   args: string[];
   cwd: string;
@@ -301,6 +302,7 @@ export class ClaudeProcessClient {
         label: 'claude',
         platform: options.platform,
         jobObject: options.jobObject,
+        nativeAssetRoot: options.nativeAssetRoot,
       });
     } catch (cause) {
       const failure = cause instanceof Error ? cause : new Error(String(cause));
