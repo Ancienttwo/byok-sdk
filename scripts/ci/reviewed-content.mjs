@@ -78,6 +78,13 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       && after.devDependencies?.esbuild === '0.28.1') {
       delete after.devDependencies.esbuild;
     }
+    if (path === 'packages/client/package.json') {
+      const key = '#byok-hermes-session';
+      const entry = { types: './dist/adapters/hermes/hermes-session-runtime.d.ts', default: './dist/adapters/hermes/hermes-session-runtime.js' };
+      if (before.imports?.[key] === undefined && isDeepStrictEqual(after.imports?.[key], entry)) delete after.imports[key];
+      const smoke = ' && node scripts/check-hermes-session-entry.mjs';
+      if (typeof before.scripts?.build === 'string' && after.scripts?.build === before.scripts.build + smoke) after.scripts.build = before.scripts.build;
+    }
     delete before.version; delete after.version;
   }
   if (!isDeepStrictEqual(before, after)) throw new Error(`Reviewed release validation required: ${path} changes more than the reviewed fields`);

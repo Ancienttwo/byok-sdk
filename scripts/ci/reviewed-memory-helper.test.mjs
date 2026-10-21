@@ -39,3 +39,39 @@ test('helper smoke and source contract select client and packaging without accep
   assert.throws(() => selectImpact(['packages/client/scripts/packed-other-smoke.mjs']));
   assert.throws(() => selectImpact(['scripts/release/unreviewed.test.mjs']));
 });
+
+
+test('Hermes private session mapping and smoke admit exact additions only', t => {
+  const cwd = mkdtempSync(join(tmpdir(), 'ci-hermes-entry-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  mkdirSync(join(cwd, 'packages/client'), { recursive: true });
+  const file = join(cwd, 'packages/client/package.json');
+  const baseline = { name: '@byok-sdk/client', version: '0.28.1', imports: { '#existing': './dist/existing.js' }, scripts: { build: 'tsup' } };
+  writeFileSync(file, JSON.stringify(baseline));
+  const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  git('init'); git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'baseline');
+  const context = { cwd, base: git('rev-parse', 'HEAD').trim() };
+  const candidate = structuredClone(baseline);
+  candidate.imports['#byok-hermes-session'] = { types: './dist/adapters/hermes/hermes-session-runtime.d.ts', default: './dist/adapters/hermes/hermes-session-runtime.js' };
+  candidate.scripts.build += ' && node scripts/check-hermes-session-entry.mjs';
+  const write = value => writeFileSync(file, JSON.stringify(value));
+  write(candidate);
+  assert.ok(selectImpact(['packages/client/package.json'], context).families.includes('npm-release-pack'));
+  for (const mutate of [
+    m => { m.imports['#byok-hermes-session'].default = './dist/other.js'; },
+    m => { m.imports['#existing'] = './dist/replaced.js'; },
+    m => { m.scripts.build = 'echo skipped'; },
+    m => { m.dependencies = { unreviewed: '1.0.0' }; },
+    m => { m.exports = { './new': './dist/new.js' }; },
+  ]) {
+    const invalid = structuredClone(candidate); mutate(invalid); write(invalid);
+    assert.throws(() => selectImpact(['packages/client/package.json'], context), /more than/);
+  }
+  for (const path of ['packages/client/scripts/check-hermes-session-entry.mjs', 'packages/client/tsup.config.ts']) {
+    const impact = selectImpact([path]);
+    assert.ok(impact.dirs.includes('packages/client'));
+    assert.ok(impact.families.includes('npm-release-pack'));
+    assert.ok(!impact.families.includes('build-test'));
+  }
+  assert.throws(() => selectImpact(['packages/client/scripts/check-other-entry.mjs']));
+});

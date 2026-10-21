@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 const manifest = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version?: unknown };
@@ -9,6 +10,7 @@ if (typeof manifest.version !== 'string') throw new Error('packages/client/packa
 // shared resources. Individual concurrency tests still exercise their own races;
 // their assertions and deadlines are unchanged.
 export default defineConfig({
+  resolve: { alias: { '#byok-hermes-session': fileURLToPath(new URL('./src/adapters/hermes/hermes-session-runtime.ts', import.meta.url)) } },
   define: {
     __BYOK_CLIENT_PACKAGE_VERSION__: JSON.stringify(manifest.version),
   },

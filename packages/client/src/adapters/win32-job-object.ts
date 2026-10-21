@@ -1,3 +1,4 @@
+import { loadSdkKoffiAsset } from '../sdk-native-assets-runtime';
 /**
  * Windows kill-on-close Job Object ownership for owned runtime process trees.
  *
@@ -140,7 +141,8 @@ function isNullHandle(value: Win32Handle): boolean {
   return value === null || value === undefined || value === 0n || value === 0;
 }
 
-let cachedBindings: JobObjectBindings | undefined;
+const installedBindings = Symbol('installed');
+const cachedBindings = new Map<string | symbol, JobObjectBindings>();
 
 /**
  * Resolve the kernel32 binding table, importing `koffi` on first use only.
@@ -149,17 +151,21 @@ let cachedBindings: JobObjectBindings | undefined;
  * `process-tree.ts` — which every adapter does, on every platform — never
  * pulls a native addon into the process.
  */
-export async function loadBindings(): Promise<JobObjectBindings> {
-  if (cachedBindings !== undefined) return cachedBindings;
+export async function loadBindings(nativeAssetRoot?: string): Promise<JobObjectBindings> {
+  const key = nativeAssetRoot === undefined ? installedBindings : nativeAssetRoot;
+  const cached = cachedBindings.get(key);
+  if (cached !== undefined) return cached;
 
   let koffi: KoffiModule;
   try {
-    const imported = (await import('koffi')) as unknown as { default?: KoffiModule };
+    const imported = nativeAssetRoot === undefined
+      ? (await import('koffi')) as unknown as { default?: KoffiModule }
+      : loadSdkKoffiAsset(nativeAssetRoot) as { default?: KoffiModule };
     koffi = (imported.default ?? imported) as KoffiModule;
   } catch (cause) {
     throw new Win32JobObjectFailure({
       step: 'loadKoffi',
-      reason: 'win32 runtime process ownership requires the koffi optional dependency, which could not be loaded',
+      reason: nativeAssetRoot === undefined ? 'win32 runtime process ownership requires the koffi optional dependency, which could not be loaded' : 'win32 runtime process ownership requires valid SDK native assets at the configured root',
     }, { cause });
   }
 
@@ -168,7 +174,7 @@ export async function loadBindings(): Promise<JobObjectBindings> {
   const bind = (name: string, result: unknown, args: unknown[]): never =>
     kernel32.func('__stdcall', name, result, args) as never;
 
-  cachedBindings = {
+  const bindings: JobObjectBindings = {
     createJobObjectW: bind('CreateJobObjectW', PVOID, [PVOID, 'str16']),
     setInformationJobObject: bind('SetInformationJobObject', 'int', [PVOID, 'int', PVOID, 'uint32']),
     openProcess: bind('OpenProcess', PVOID, ['uint32', 'int', 'uint32']),
@@ -176,7 +182,8 @@ export async function loadBindings(): Promise<JobObjectBindings> {
     closeHandle: bind('CloseHandle', 'int', [PVOID]),
     getLastError: bind('GetLastError', 'uint32', []),
   };
-  return cachedBindings;
+  cachedBindings.set(key, bindings);
+  return bindings;
 }
 
 /** Build the extended-limit payload that makes the job kill-on-close. */
@@ -224,6 +231,7 @@ export interface OwnedTreeJob {
 }
 
 export interface AssignOwnedProcessToJobOptions {
+  nativeAssetRoot?: string;
   /** DI seam — defaults to the lazily loaded real kernel32 table. */
   bindings?: JobObjectBindings;
 }
@@ -238,7 +246,7 @@ export interface AssignOwnedProcessToJobOptions {
  * holds the process afterwards, not this handle.
  */
 export async function assignOwnedProcessToJob(pid: number, options?: AssignOwnedProcessToJobOptions): Promise<OwnedTreeJob> {
-  const bindings = options?.bindings ?? (await loadBindings());
+  const bindings = options?.bindings ?? (await loadBindings(options?.nativeAssetRoot));
   const job = createTreeJob(bindings);
 
   const processHandle = bindings.openProcess(OWNED_PROCESS_ACCESS, 0, pid);

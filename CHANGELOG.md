@@ -5,6 +5,10 @@
 
 ## Unreleased
 
+- **Feature (client)** — add a pinned Windows x64 native asset copier, distribution
+  metadata and per-adapter asset roots for relocated runtime process ownership (#627).
+  Darwin copying reuses the existing memory-helper API; Windows memory is unchanged.
+
 ## 0.28.1 / @byok-sdk/keys 0.13.1 — source candidate
 
 The owner selected 0.28.1 as a one-release exception to the default pre-1.0
