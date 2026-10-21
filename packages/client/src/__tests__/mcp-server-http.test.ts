@@ -215,9 +215,18 @@ describe('HTTP admission, bounds and cleanup', () => {
     expect((await post(server, { jsonrpc: '2.0', id: 1, method: 'ping' }, session, { origin: server.origin })).status).toBe(200);
   });
 
+  it('accepts only exact configured allowedOrigins in addition to origin', async () => {
+    const browser = 'http://localhost:5173';
+    const server = await host({ allowedOrigins: [browser] }); const session = await initialize(server);
+    const ping = { jsonrpc: '2.0', id: 1, method: 'ping' };
+    for (const origin of [browser, server.origin]) expect((await post(server, ping, session, { origin })).status).toBe(200);
+    for (const origin of [`${browser}/`, 'http://localhost:5174', 'null']) expect((await post(server, ping, session, { origin })).status).toBe(403);
+  });
+
   it('rejects remote cleartext and invalid resource bounds at construction', () => {
     for (const origin of ['http://remote.example', 'https://user:secret@example.test', 'https://example.test/path', 'null']) {
       expect(() => createMcpHttpServer({ ...defaults, origin })).toThrow();
+      expect(() => createMcpHttpServer({ ...defaults, origin: 'https://example.test', allowedOrigins: [origin] })).toThrow();
     }
     for (const limits of [{ maxBodyBytes: 0 }, { maxBodyBytes: MCP_HTTP_MAX_BODY_BYTES + 1 }, { maxSessions: Infinity }, { idleTimeoutMs: -1 }, { maxInFlight: 0 }]) {
       expect(() => createMcpHttpServer({ ...defaults, origin: 'https://example.test', ...limits })).toThrow();

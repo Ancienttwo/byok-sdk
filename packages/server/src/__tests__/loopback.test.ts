@@ -18,10 +18,10 @@ function store(initial: number | null = null): LoopbackPortStore {
   let value = initial;
   return { read: vi.fn(async () => value), claim: vi.fn(async candidate => value ??= candidate) };
 }
-async function start(handler = vi.fn(async (request: Request) => new Response(await request.text())), maxBodyBytes = 16) {
+async function start(handler = vi.fn(async (request: Request) => new Response(await request.text())), maxBodyBytes = 16, allowedOrigins?: string[]) {
   const selected = await availablePort();
   const portStore = store();
-  const listener = await listenLoopback({ portStore, portRange: { min: selected, maxExclusive: selected + 1 }, maxBodyBytes,
+  const listener = await listenLoopback({ portStore, portRange: { min: selected, maxExclusive: selected + 1 }, maxBodyBytes, allowedOrigins,
     createHandler: () => handler });
   cleanups.push(listener.close);
   return { listener, handler, selected, portStore };
@@ -65,6 +65,63 @@ it('rejects unsafe raw headers, targets and protocol upgrades before dispatch', 
   ];
   for (const message of cases) expect(await raw(selected, `${message}Connection: close\r\n\r\n`)).toMatch(/^HTTP\/1.1 403/);
   expect(handler).not.toHaveBeenCalled();
+});
+
+it('admits only listed loopback origins with CORS, answering preflight without dispatch', async () => {
+  const browser = 'http://localhost:5173';
+  const { selected, handler } = await start(undefined, 16, [browser]);
+  const host = `Host: 127.0.0.1:${selected}\r\n`;
+  const page = `Origin: ${browser}\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\nSec-Fetch-Dest: empty\r\n`;
+  const close = 'Connection: close\r\n\r\n';
+  const preflight = await raw(selected, `OPTIONS /mcp HTTP/1.1\r\n${host}${page}Access-Control-Request-Method: POST\r\nAccess-Control-Request-Headers: authorization\r\n${close}`);
+  expect(preflight).toMatch(/^HTTP\/1.1 204/);
+  expect(preflight).toMatch(new RegExp(`\r\nAccess-Control-Allow-Origin: ${browser}\r\n`));
+  expect(preflight).toMatch(/\r\nAccess-Control-Allow-Headers: [^\r]*\bauthorization\b/);
+  expect(preflight).not.toMatch(/Access-Control-Allow-Credentials/i);
+  expect(handler).not.toHaveBeenCalled();
+  const actual = await raw(selected, `POST /mcp HTTP/1.1\r\n${host}${page}Content-Length: 2\r\n${close}hi`);
+  expect(actual).toMatch(/^HTTP\/1.1 200/);
+  expect(actual).toMatch(new RegExp(`\r\nAccess-Control-Allow-Origin: ${browser}\r\n`));
+  expect(actual).toMatch(/\r\nVary: Origin\r\n/);
+  expect(actual).toMatch(/\r\nAccess-Control-Expose-Headers: Mcp-Session-Id\r\n/);
+  expect(handler).toHaveBeenCalledTimes(1);
+  expect(handler.mock.calls[0]![0].headers.get('origin')).toBe(browser);
+  // Body cap still applies, and the allowed page can read the refusal.
+  const oversized = await raw(selected, `POST /mcp HTTP/1.1\r\n${host}${page}Content-Length: 17\r\n${close}`);
+  expect(oversized).toMatch(new RegExp(`^HTTP/1.1 413[^]*\r\nAccess-Control-Allow-Origin: ${browser}\r\n`));
+  // A plain OPTIONS without a preflight request method is an ordinary request.
+  expect(await raw(selected, `OPTIONS /mcp HTTP/1.1\r\n${host}${page}${close}`)).toMatch(/^HTTP\/1.1 200/);
+  expect(handler).toHaveBeenCalledTimes(2);
+  const refused = [
+    `Origin: http://localhost:5174\r\nSec-Fetch-Mode: cors\r\n`,
+    `Origin: ${browser}\r\nOrigin: ${browser}\r\n`,
+    `Origin: ${browser}/\r\n`,
+    `${page}Cookie: a=b\r\n`,
+    `Origin: ${browser}\r\nSec-Fetch-Mode: navigate\r\n`,
+    `Origin: ${browser}\r\nSec-Fetch-Mode: no-cors\r\n`,
+    `Origin: ${browser}\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Dest: document\r\n`,
+    `${page}Sec-Fetch-User: ?1\r\n`,
+    `${page}Sec-Fetch-Site: same-origin\r\n`,
+    // Without Origin, browser metadata other than native fetch's mode stays refused.
+    `Sec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
+  ];
+  for (const headers of refused) {
+    const response = await raw(selected, `OPTIONS /mcp HTTP/1.1\r\n${host}${headers}Access-Control-Request-Method: POST\r\n${close}`);
+    expect(response).toMatch(/^HTTP\/1.1 403/);
+    expect(response).not.toMatch(/Access-Control-Allow-Origin/i);
+  }
+  const native = await fetch(`http://127.0.0.1:${selected}`, { method: 'POST', body: 'ok' });
+  expect(native.status).toBe(200);
+  expect(native.headers.get('access-control-allow-origin')).toBeNull();
+  expect(handler).toHaveBeenCalledTimes(3);
+});
+
+it('rejects non-loopback or non-canonical allowed origins before reading the port store', async () => {
+  for (const origin of ['http://example.com', 'null', '*', 'http://localhost:5173/', 'http://user@localhost:5173', 'file:///tmp', 'http://127.0.0.2:5173', 'ws://localhost:5173']) {
+    const portStore = store();
+    await expect(listenLoopback({ portStore, allowedOrigins: [origin], createHandler: () => () => new Response() })).rejects.toThrow(TypeError);
+    expect(portStore.read).not.toHaveBeenCalled();
+  }
 });
 
 it('refuses GET body and oversized Expect upload without continuing or dispatching', async () => {

@@ -18,6 +18,11 @@ export interface LoopbackListenerOptions {
   portRange?: { min: number; maxExclusive: number };
   /** Maximum actual request bytes, including chunked uploads. Default 2 MiB. */
   maxBodyBytes?: number;
+  /**
+   * Exact loopback browser origins (http or https; localhost, 127.0.0.1 or [::1]) admitted with CORS.
+   * Default none: every Origin is refused. Never grants credentials; Cookie stays refused.
+   */
+  allowedOrigins?: readonly string[];
   signal?: AbortSignal;
 }
 export interface LoopbackListener {
@@ -30,23 +35,49 @@ function port(value: number): number {
   if (!Number.isInteger(value) || value < 1 || value > 65535) throw new RangeError('Invalid persisted loopback port');
   return value;
 }
+function loopbackOrigin(value: string): string {
+  let url: URL | undefined;
+  try { url = new URL(value); } catch { /* reported below */ }
+  if (!url || url.origin !== value || (url.protocol !== 'http:' && url.protocol !== 'https:') ||
+      !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) {
+    throw new TypeError('Allowed origins must be canonical loopback http(s) origins');
+  }
+  return value;
+}
+const CORS_METHODS = 'GET, POST, DELETE';
+const CORS_HEADERS = 'authorization, content-type, accept, last-event-id, mcp-session-id, mcp-protocol-version';
 function refuse(response: ServerResponse, status: number): void {
   response.writeHead(status, { Connection: 'close', 'Content-Length': '0' });
   response.end();
 }
-function acceptable(request: IncomingMessage, expectedHost: string): boolean {
+/** Returns the admitted CORS origin, null for a request without Origin, or false to refuse. */
+function admit(request: IncomingMessage, expectedHost: string, allowedOrigins: ReadonlySet<string>): string | null | false {
   if (!request.url?.startsWith('/') || request.url.startsWith('//') || request.url.includes('\\')) return false;
   let hosts = 0;
-  let modes = 0;
+  let origin: string | null = null;
+  const metadata = new Map<string, string>();
   for (let i = 0; i < request.rawHeaders.length; i += 2) {
     const name = request.rawHeaders[i]!.toLowerCase();
     const value = request.rawHeaders[i + 1]!;
     if (name === 'host' && (++hosts !== 1 || value !== expectedHost)) return false;
-    if (name === 'origin' || name === 'cookie') return false;
-    // Node/undici native fetch emits mode:cors without other browser metadata.
-    if (name.startsWith('sec-fetch-') && (name !== 'sec-fetch-mode' || value !== 'cors' || ++modes !== 1)) return false;
+    if (name === 'cookie') return false;
+    if (name === 'origin') {
+      if (origin !== null || !allowedOrigins.has(value)) return false;
+      origin = value;
+    }
+    if (name.startsWith('sec-fetch-')) {
+      if (metadata.has(name)) return false;
+      metadata.set(name, value);
+    }
   }
-  return hosts === 1;
+  for (const [name, value] of metadata) {
+    // Node/undici native fetch emits mode:cors without other browser metadata.
+    if (name === 'sec-fetch-mode' && value === 'cors') continue;
+    // An allowed page is cross-site to 127.0.0.1 (localhost differs), so the origin list decides, not the site value.
+    if (origin !== null && (name === 'sec-fetch-site' || (name === 'sec-fetch-dest' && value === 'empty'))) continue;
+    return false;
+  }
+  return hosts === 1 ? origin : false;
 }
 
 /** Own a loopback socket before committing an identity's immutable URL. Never adopts another process's listener. */
@@ -57,6 +88,7 @@ export async function listenLoopback(options: LoopbackListenerOptions): Promise<
   }
   const maxBodyBytes = options.maxBodyBytes ?? 2 * 1024 * 1024;
   if (!Number.isSafeInteger(maxBodyBytes) || maxBodyBytes < 0) throw new RangeError('Invalid loopback body limit');
+  const allowedOrigins = new Set((options.allowedOrigins ?? []).map(loopbackOrigin));
   const { portStore, createHandler, signal } = options;
   signal?.throwIfAborted();
   const startup = async <T>(operation: Promise<T>): Promise<T> => {
@@ -117,8 +149,22 @@ export async function listenLoopback(options: LoopbackListenerOptions): Promise<
     return active(bounded);
   }, { overrideGlobalObjects: false });
   const receive = (request: IncomingMessage, response: ServerResponse) => {
-    if (!acceptable(request, expectedHost)) { refuse(response, 403); return; }
+    const origin = admit(request, expectedHost, allowedOrigins);
+    if (origin === false) { refuse(response, 403); return; }
+    if (origin !== null) {
+      // Merged into every later writeHead, so 503/413/400 stay readable by the allowed page.
+      response.setHeader('Access-Control-Allow-Origin', origin);
+      response.setHeader('Vary', 'Origin');
+    }
     if (!handler) { refuse(response, 503); return; }
+    if (origin !== null && request.method === 'OPTIONS' && request.headers['access-control-request-method'] !== undefined) {
+      // Preflight is answered here and never reaches the handler.
+      response.writeHead(204, { 'Access-Control-Allow-Methods': CORS_METHODS, 'Access-Control-Allow-Headers': CORS_HEADERS,
+        'Access-Control-Max-Age': '600', 'Content-Length': '0' });
+      response.end();
+      return;
+    }
+    if (origin !== null) response.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id');
     const length = request.headers['content-length'];
     if (length !== undefined && Number(length) > maxBodyBytes) { refuse(response, 413); return; }
     // Fetch has no GET/HEAD body, so refuse framing that its adapter would otherwise omit.
