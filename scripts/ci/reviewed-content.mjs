@@ -84,6 +84,9 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       if (before.imports?.[key] === undefined && isDeepStrictEqual(after.imports?.[key], entry)) delete after.imports[key];
       const smoke = ' && node scripts/check-hermes-session-entry.mjs';
       if (typeof before.scripts?.build === 'string' && after.scripts?.build === before.scripts.build + smoke) after.scripts.build = before.scripts.build;
+      // #635 adds the public transport-free test-double entry; its bundle is checked by check-adapters-entry.mjs.
+      const testing = { types: './dist/testing/index.d.ts', import: './dist/testing/index.js' };
+      if (before.exports?.['./testing'] === undefined && isDeepStrictEqual(after.exports?.['./testing'], testing)) delete after.exports['./testing'];
     }
     delete before.version; delete after.version;
   }
