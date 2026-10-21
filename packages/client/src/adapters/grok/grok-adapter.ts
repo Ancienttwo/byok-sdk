@@ -35,6 +35,8 @@ const DEFAULT_RETAINED_BYTES = 16 * 1024 * 1024;
 const DEFAULT_INTERRUPT_MS = 1000;
 
 export interface GrokAdapterOptions {
+  /** Absolute product native asset directory; scoped to this adapter. */
+  nativeAssetRoot?: string;
   /** Grok model id for every session (`session/set_model`). Absent: the user's Grok default. */
   model?: string;
   resolveBin?: () => ResolvedBin;
@@ -129,8 +131,8 @@ export class GrokAdapter implements RuntimeAdapter {
     const persona = await grokAgentPersona(input.manifest);
     // As OAR: the servers go in the ACP mcpServers of session/new or session/resume.
     const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
-    const spawnAgent = createOwnedLineProcessSpawn({ spawnFn: this.options.spawnFn, label: 'grok agent' });
-    const spawnTerminal = createOwnedTerminalSpawn({ spawnFn: this.options.spawnFn });
+    const spawnAgent = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'grok agent' });
+    const spawnTerminal = createOwnedTerminalSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn });
     // The ACP stack and its protocol SDK load only when a Grok session starts.
     const acp = await import('#byok-acp-runtime');
     const session = new GrokSession(

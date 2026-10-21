@@ -22,7 +22,7 @@
  * and a two-entry list whose first member the core does not implement is the
  * "unsupported offer" case.
  */
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -140,6 +140,20 @@ describe('the MCP server core against the official client', () => {
       }
     });
   }
+
+  it.each(['2025-11-25', '2025-06-18'])('preserves metadata and progress over stdio %s', async version => {
+    const ack = path.join(scratch(), 'progress-ack'); writeFileSync(ack, '');
+    const session = await connect({ supportedProtocolVersions: [version], env: { MCP_FIXTURE_PROGRESS_ACK: ack } });
+    try {
+      const tools = await session.client.listTools();
+      expect(tools.tools[0]).toMatchObject({ title: 'Echo', annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }, outputSchema: { type: 'object', required: ['message'] } });
+      const progress: unknown[] = [];
+      const result = await session.client.callTool({ name: 'echo', arguments: { message: 'hello' } }, { onprogress: value => { progress.push(value); writeFileSync(ack, String(value.progress)); } });
+      expect(progress).toEqual([{ progress: 0, total: 1, message: 'starting' }, { progress: 1, total: 1, message: 'done' }]);
+      expect(result.structuredContent).toEqual({ message: 'hello' });
+      expect(session.clientErrors).toEqual([]);
+    } finally { await session.close(); }
+  });
 
   it('answers an unsupported offered version with a supported one, and the client continues', async () => {
     // The client offers the first legacy entry — `2025-03-26`, which this core

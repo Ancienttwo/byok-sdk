@@ -74,6 +74,8 @@ async function rejectOwnedStartup(cause: unknown, client: ClaudeProcessClient | 
 }
 
 export interface ClaudeAdapterOptions {
+  /** Absolute product native asset directory; scoped to this adapter. */
+  nativeAssetRoot?: string;
   /** Override bin resolution — tests substitute the fake-claude fixture script. */
   resolveBin?: () => ResolvedBin;
   /** Override process spawning — tests substitute a fake spawn. */
@@ -302,7 +304,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
           args,
           cwd: manifestCwd,
           env: { ...startInput.env, ...startInput.scratch.env },
-          spawnFn: this.options.spawnFn,
+          nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn,
           control: native === undefined ? control : {
             bind: write => { control.bind(write); native.bind(write); },
             receive: message => { control.receive(message); native.receive(message); },

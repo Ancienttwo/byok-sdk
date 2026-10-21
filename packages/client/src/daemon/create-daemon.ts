@@ -298,6 +298,8 @@ export interface HostedJournalConfig {
 }
 
 export interface DaemonConfig {
+  /** Absolute native asset root for SDK-created runtime adapters. Custom adapters own their option. */
+  nativeAssetRoot?: string;
   /** Select an explicit macOS keychain for device enrollment custody. */
   deviceCredentials?: import('./device-credential-store').DeviceCredentialConfig;
   storage?: StorageConfig;
@@ -1170,11 +1172,11 @@ const ALL_RUNTIME_IDS: readonly RuntimeId[] = ['pi', 'claude', 'codex'];
 function buildAdapter(id: RuntimeId, config: DaemonConfig): RuntimeAdapter {
   switch (id) {
     case 'pi':
-      return new PiAdapter({ byokLauncher: config.piByokLauncher, ...(config.sdkHelperHost === undefined ? {} : { sdkHelperHost: config.sdkHelperHost }), ...(config.durablePi === true ? { durablePi: true } : {}) });
+      return new PiAdapter({ nativeAssetRoot: config.nativeAssetRoot, byokLauncher: config.piByokLauncher, ...(config.sdkHelperHost === undefined ? {} : { sdkHelperHost: config.sdkHelperHost }), ...(config.durablePi === true ? { durablePi: true } : {}) });
     case 'claude':
-      return new ClaudeAdapter();
+      return new ClaudeAdapter({ nativeAssetRoot: config.nativeAssetRoot });
     case 'codex':
-      return new CodexAdapter(config.codexSandbox === undefined ? {} : { sandbox: config.codexSandbox });
+      return new CodexAdapter({ nativeAssetRoot: config.nativeAssetRoot, ...(config.codexSandbox === undefined ? {} : { sandbox: config.codexSandbox }) });
   }
 }
 

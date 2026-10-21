@@ -8,7 +8,9 @@ Describe the product intent, users, workflows, acceptance scenarios, and constra
 
 The SDK exposes a Host-mounted Streamable HTTP framing through
 `@byok-sdk/client/mcp-server/http`. It reuses the existing tools-only MCP core.
-The stdio entry and SDK-reserved helpers retain their existing contract.
+The stdio and HTTP entries pass caller-owned tool title, annotations and output
+schema through, and expose request-scoped progress without changing result or
+cancellation ownership. SDK-reserved helpers retain their existing tool contracts.
 HTTP session identity is separate from task identity. MCP cancellation aborts
 the waiting call signal; only the Host task API cancels a task.
 The Host authenticates each caller before selecting its separate transport instance.
@@ -3059,6 +3061,20 @@ An explicit `storage.scratchRoot` must pass validation; an excessive length fail
 Legacy shared-temp prefixes are an operator-invoked migration: doctor inventories exact production names, and only `doctor --fix --yes` with a stopped daemon deletes matching, same-uid real directories. SDK startup never scans shared OS temp. Remove this one-shot scanner in the next minor release. See `docs/migrations/client-retention-399.md` for removed APIs and Host migration.
 
 
+### Product native asset deployment
+
+`copySdkNativeAssets` is a build-time API. For Windows x64 it copies the pinned
+and integrity-verified official Koffi addon; it never downloads in a runtime.
+`sdkDistributionManifest` describes Pi pin, reserved helper kinds and native target
+files. A product passes an absolute `nativeAssetRoot` to SDK-created adapters via
+`DaemonConfig`, or to each custom adapter constructor. An explicit root is scoped
+to that adapter's owned process trees and fails closed on missing or modified
+bytes without searching installed dependencies. Omission keeps installed behavior.
+For Darwin the copier delegates to the existing memory-helper release copier;
+`agentMemoryHelperAssetRoot` remains the separate memory-helper authority. Windows
+memory remains unavailable. Native target metadata is not platform qualification;
+Windows SEA qualification requires the actual Windows CI process-ownership fixture.
+
 ### K8 Host-declared read-only toolsets
 
 The copy-and-own Bot collaboration example refuses required toolsets by default.
@@ -3069,3 +3085,28 @@ Only the Host's local tool service can enforce actual read-only behavior; model
 annotations are not authorization. External effects retain owner-confirmed Host
 connector execution. This additive slice does not qualify external-authority
 storage, Windows persona persistence or two-process relay.
+
+### Embedded Agent-home projection completion waiting
+
+`ByokServer.awaitAgentHomeProjection(deviceId, agentRef, requestId, { signal })`
+returns the same durable readback as `readAgentHomeProjection`, once its status
+is `applied`, `idempotent`, `stale`, or `conflict`. Unknown requests return
+`undefined`; enqueue must precede waiting. It never treats enqueue as completion
+and does not poll. The waiter subscribes before its initial read and reads again
+on exact tenant/device/AgentRef/request completion hints, closing the
+read-to-wait race. Concurrent waiters are independent.
+
+The cloud completion observer runs only after the durable receipt is recorded,
+including exact replay. Authentication, capability admission, exact receipt
+matching, and first-terminal-wins rules remain authoritative. Observer exceptions
+cannot change the recorded result or HTTP response. Hints carry no additional
+permission and are never substituted for durable readback.
+
+Abort rejects with the signal reason and removes the subscription, including
+while a store read is in flight. Server close rejects pending and future waits,
+removes subscriptions, and drains already-started reads before closing storage.
+The caller chooses an offline deadline with its AbortSignal. There is no default
+timeout or timer. Notification scope is the same embedded ByokServer instance:
+a completion (or exact replay) must reach that instance to wake a pending wait.
+Writes by another process to a shared store do not provide distributed wakeups.
+Already-completed durable records remain readable immediately after restart.

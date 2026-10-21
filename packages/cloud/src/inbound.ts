@@ -185,6 +185,8 @@ export interface InboundCommitted {
  * Synchronous and cheap by contract — it runs inline on the request path.
  */
 export interface ByokCloudObserver {
+  /** Post-commit wake hint, including exact replays; durable receipts remain authoritative. */
+  onAgentHomeProjectionCompleted?(readback: import('@byok-sdk/protocol').AgentHomeProjectionReadback): void;
   onMaintenance?(report: import('./maintenance').MaintenanceReport): void;
   onInboundCommitted(input: InboundCommitted): void;
   /**

@@ -1,7 +1,13 @@
 # Changelog
 
+- Client MCP core: preserve tool title, annotations and output schema, and provide
+  request-scoped progress over stdio and bounded HTTP POST SSE (Refs #631).
+
 ## Unreleased
 
+- **Feature (client)** — add a pinned Windows x64 native asset copier, distribution
+  metadata and per-adapter asset roots for relocated runtime process ownership (#627).
+  Darwin copying reuses the existing memory-helper API; Windows memory is unchanged.
 - **Feature (client, protocol)** — adapter metadata for Hosts (#635). Each
   built-in descriptor declares `platforms`. Runtime detection refuses another
   platform with `platform_unsupported` before any probe; Grok and Hermes

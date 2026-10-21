@@ -110,13 +110,13 @@ describe('Agent memory MCP local authority', () => {
     expect(advertised).not.toContain('tenantId');
     await expect(
       handleAgentMemoryToolCall(
-        { name: 'memory_save', arguments: { op: 'delete', path: 'notes/a.md', expectedRevision: sha256(''), content: 'forbidden' }, signal: new AbortController().signal },
+        { name: 'memory_save', arguments: { op: 'delete', path: 'notes/a.md', expectedRevision: sha256(''), content: 'forbidden' }, progress: () => {}, signal: new AbortController().signal },
         deps,
         'read-write',
       ),
     ).rejects.toMatchObject({ code: -32602 });
     await handleAgentMemoryToolCall(
-      { name: 'memory_recall', arguments: { path: 'MEMORY.md' }, signal: new AbortController().signal },
+      { name: 'memory_recall', arguments: { path: 'MEMORY.md' }, progress: () => {}, signal: new AbortController().signal },
       deps,
       'read-write',
     );
@@ -130,7 +130,7 @@ describe('Agent memory MCP local authority', () => {
       save: async () => { saves += 1; return { path: 'MEMORY.md', deleted: false }; },
     };
     await expect(handleAgentMemoryToolCall(
-      { name: 'memory_save', arguments: { op: 'replace', path: 'MEMORY.md', expectedRevision: sha256(''), content: 'blocked' }, signal: new AbortController().signal },
+      { name: 'memory_save', arguments: { op: 'replace', path: 'MEMORY.md', expectedRevision: sha256(''), content: 'blocked' }, progress: () => {}, signal: new AbortController().signal },
       deps,
       'read',
     )).rejects.toMatchObject({ code: -32000, message: 'agent_memory_operation_denied' });
