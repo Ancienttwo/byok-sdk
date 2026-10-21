@@ -41,6 +41,7 @@
       ],
       "lazyImports": [
         "#byok-acp-runtime",
+        "#byok-hermes-session",
         "#byok-pi-runtime-host",
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
@@ -127,6 +128,7 @@
       ],
       "lazyImports": [
         "#byok-acp-runtime",
+        "#byok-hermes-session",
         "koffi"
       ],
       "thirdParty": [],
@@ -409,6 +411,42 @@
           "rule": "Function reference"
         }
       ]
+    }
+  },
+  "@byok-sdk/client#byok-hermes-session": {
+    "kind": "imports",
+    "policy": {
+      "purpose": "Private Hermes session runtime; loaded only when starting an execution",
+      "budgetBytes": 12529,
+      "zod": false,
+      "codegen": false,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": false
+      }
+    },
+    "facts": {
+      "target": "packages/client/dist/adapters/hermes/hermes-session-runtime.js",
+      "conditions": [
+        "default"
+      ],
+      "types": [
+        "packages/client/dist/adapters/hermes/hermes-session-runtime.d.ts"
+      ],
+      "bareImports": [
+        "fs"
+      ],
+      "lazyImports": [],
+      "thirdParty": [],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [
+          "fs"
+        ],
+        "thirdParty": []
+      },
+      "codegen": []
     }
   },
   "@byok-sdk/client#byok-pi-runtime-host": {
