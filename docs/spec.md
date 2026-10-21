@@ -14,6 +14,11 @@ the waiting call signal; only the Host task API cancels a task.
 The Host authenticates each caller before selecting its separate transport instance.
 The transport validates Origin against trusted configuration and bounds bodies,
 sessions, active calls and optional SSE queues. It owns no key or task ledger.
+The default stateful mode retains caller sessions. Explicit `sessionMode: 'stateless'`
+uses a request-scoped tools-only core without session IDs or affinity. The Host
+authenticates and authorizes every request; Origin, protocol and body validation
+remain enforced. Stateless mode has no SSE, session expiry/DELETE invalidation
+or cross-request cancellation. It does not add an external session store.
 See [the HTTP contract](mcp-server-http.md) for lifecycle and resource limits.
 
 The [B2 Host reference](../examples/byok-mcp-server/README.md) supplies a separate
