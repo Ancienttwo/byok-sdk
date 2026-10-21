@@ -25,8 +25,23 @@ async function running(id: string) {
   return fixture.adapter.sessions.get(bot.core.intent(id)!.taskId)!;
 }
 async function finish(id: string, document: unknown = {}) {
-  await (await running(id)).finish(document);
-  await vi.waitFor(async () => { await bot.drain(); expect(bot.snapshot().turns[id]?.status).toBe('succeeded'); }, { timeout: 5000 });
+  const session = await running(id);
+  const current = fixture.adapter.starts.find(start => start.manifest.taskId === bot.core.intent(id)!.taskId)!.manifest;
+  expect(current.homeAccess).toBeUndefined();
+  expect(current.lease).toBeDefined();
+  const existing = new Set(fixture.adapter.starts.map(start => start.manifest.taskId));
+  await session.finish(document);
+  await vi.waitFor(async () => {
+    await bot.drain();
+    expect(bot.snapshot().turns[id]?.status).toBe('succeeded');
+    expect(session.closed).toBe(true);
+    // Same-home writers are exclusive. A new task with a different lease proves
+    // this writer released ownership, even if the queued handoff hides idle.
+    expect(fixture.daemon.status().activeTaskCount === 0 || fixture.adapter.starts.some(({ manifest }) =>
+      !existing.has(manifest.taskId) && manifest.homeAccess === undefined
+      && manifest.lease?.canonicalHome === current.lease!.canonicalHome
+      && manifest.lease.leaseId !== current.lease!.leaseId)).toBe(true);
+  }, { timeout: 5000 });
 }
 function projection(id: string) {
   return Object.values(fixture.ledger.snapshot().outbox).find(row => row.kind === 'projection' && row.id === id) as { value: Record<string, unknown> } | undefined;
@@ -145,4 +160,38 @@ it('cancels a whole batch through a member id, before and after the batch reache
   expect(bot.core.intent(c)?.conclusion).toBe('cancelled');
   await finish(first);
   expect(host.adapter.starts).toHaveLength(1);
+});
+
+it('finishes writer cleanup or a new queued handoff before observing the next batch', async () => {
+  const host = await setup();
+  const first = await bot.input('held-busy', 'Long task');
+  const session = await running(first);
+  const batch = await bot.input('held-one', 'one');
+  expect(await bot.input('held-two', 'two')).toBe(batch);
+  expect(await bot.input('held-three', 'three')).toBe(batch);
+  expect(bot.snapshot().turns[batch]).toBeUndefined();
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const close = session.close.bind(session);
+  vi.spyOn(session, 'close').mockImplementation(async () => { await close(); await held; });
+  let readyAtFinish = false;
+  const finishing = finish(first).then(() => {
+    readyAtFinish = session.closed && (host.daemon.status().activeTaskCount === 0
+      || host.adapter.sessions.has(bot.core.intent(batch)?.taskId ?? ''));
+  });
+  try {
+    await vi.waitFor(async () => {
+      await bot.drain();
+      expect(session.closed).toBe(true);
+      expect(bot.core.intent(batch)).toBeDefined();
+    }, { timeout: 5000 });
+    expect(host.daemon.status().activeTaskCount).toBe(1);
+    expect(host.adapter.sessions.has(bot.core.intent(batch)!.taskId)).toBe(false);
+    release();
+    await finishing;
+    expect(readyAtFinish).toBe(true);
+    const next = await running(batch);
+    expect(next).not.toBe(session);
+    await finish(batch);
+  } finally { release(); await finishing; }
 });
