@@ -191,6 +191,10 @@ export function selectImpact(paths, context = {}) {
       verifyReviewedContent(path, context);
       dirs.add('examples/bot-collaboration'); continue;
     }
+    // These root-level fixtures are executed by the relocated native SEA smoke.
+    if (path === 'examples/packaging/native-assets-fixture.ts' || path === 'examples/packaging/native-assets-smoke.mjs') {
+      dirs.add('examples/packaging'); families.add('packageability-smoke'); continue;
+    }
     if (path === 'examples/basic/clarification.test.ts' || path === 'examples/basic/goal-btw.test.ts') {
       dirs.add('examples/basic'); continue;
     }
