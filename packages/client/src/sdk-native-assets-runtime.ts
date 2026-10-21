@@ -19,4 +19,3 @@ export function loadSdkKoffiAsset(root: string): unknown {
   if (native.version !== KOFFI.version) throw new Error('SDK native addon version mismatch');
   return native;
 }
-

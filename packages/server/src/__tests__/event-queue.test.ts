@@ -44,3 +44,17 @@ describe('AsyncEventQueue bounds', () => {
     expect(observed).toEqual(['TRUNCATED', 'three', 'four']);
   });
 });
+
+it('return releases a pending subscriber without closing other subscribers', async () => {
+  const queue = new AsyncEventQueue<number>();
+  const first = queue.subscribe()[Symbol.asyncIterator]();
+  const other = queue.subscribe()[Symbol.asyncIterator]();
+  const pending = first.next();
+  expect(first.return).toBeTypeOf('function');
+  await first.return!();
+  expect(await pending).toEqual({ value: undefined, done: true });
+  queue.push(7);
+  expect(await other.next()).toEqual({ value: 7, done: false });
+  expect(await first.next()).toEqual({ value: undefined, done: true });
+  queue.close();
+});

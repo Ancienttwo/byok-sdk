@@ -197,7 +197,12 @@ it('reports an initial schedule failure and recovers its durable outbox on start
   await vi.waitFor(() => expect(host.adapter.starts).toHaveLength(1));
 });
 
-it.each(['successor-failure:', 'host-scan:'])('rejects the current hook if successor %s scheduling fails, then SDK retry recovers', async prefix => {
+// While a task is live, event mode deliberately arms no host-scan: wake (#630).
+// The host-scan: case therefore runs without server.events, in durable-scan mode.
+it.each([
+  { prefix: 'successor-failure:', mode: 'event' },
+  { prefix: 'host-scan:', mode: 'durable scan' },
+])('rejects the current hook if successor $prefix scheduling fails, then SDK retry recovers ($mode)', async ({ prefix }) => {
   let release!: () => void;
   const ready = new Promise<void>(resolve => { release = resolve; });
   let armed = false;
@@ -212,10 +217,14 @@ it.each(['successor-failure:', 'host-scan:'])('rejects the current hook if succe
       }
       await next();
     },
-    wrapServer: server => ({ ...server, wakes: { ...server.wakes, schedule: async input => {
-      if (armed && !failed && input.dedupKey.startsWith(prefix)) { failed = true; throw new Error('successor schedule unavailable'); }
-      return server.wakes.schedule(input);
-    } } }),
+    wrapServer: server => ({
+      ...server,
+      ...(prefix === 'host-scan:' ? { events: undefined } : {}),
+      wakes: { ...server.wakes, schedule: async input => {
+        if (armed && !failed && input.dedupKey.startsWith(prefix)) { failed = true; throw new Error('successor schedule unavailable'); }
+        return server.wakes.schedule(input);
+      } },
+    }),
   });
   try {
     await host.core.addRoutine(host.routine('successor-failure', { waitMs: 300_000 }));
@@ -223,7 +232,8 @@ it.each(['successor-failure:', 'host-scan:'])('rejects the current hook if succe
   } finally {
     release();
   }
-  await vi.waitFor(async () => expect((await host.server.wakes.pending()).some(wake => wake.lastError?.includes('Wake dispatch failed'))).toBe(true));
+  await vi.waitFor(async () => expect((await host.server.wakes.pending()).some(wake => wake.lastError?.includes('Wake dispatch failed'))).toBe(true), { timeout: 5000 });
+  expect(failed).toBe(true);
   const retry = (await host.server.wakes.pending()).find(wake => wake.lastError?.includes('Wake dispatch failed'))!;
   expect(occurrences()).toHaveLength(1);
   vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(retry.retryAt! + 1);
