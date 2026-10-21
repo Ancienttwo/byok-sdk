@@ -50,3 +50,9 @@ and the kill test explicitly skips Windows. Other fake-runtime/recovery tests
 remain enabled there. No live provider or real credential store was used. Broad
 workspace testing is left to CI rather than duplicated locally; retain Draft
 until CI and required platform gates finish. No merge or publishing performed.
+
+## CI fixture corrections
+
+The original PR HEAD e69a819cd07bf0468a1c437b00db99d475c2f6b4 failed the existing `terminal-projection-selection` required-message/no-result test in three CI jobs. This was an introduced fixture omission: the direct TaskRunner fixture omitted the new journal marker callback and still waited for a terminal before accepting the required reply. The exact case passed on baseline 742295a4a97a8c1de5b2ab55c827ac2f73cb07cc and failed locally on the original PR HEAD. The updated test supplies the marker callback, verifies one reply and no premature terminal, accepts its disposition, then retains the nonretryable missing-result assertion and adds no-document evidence.
+
+A second failure in Node 26 was an introduced crash-test readiness race: the child printed ready after `daemon.start()`, which intentionally does not wait for `conn.hello`. Submission could precede the server's capability registration. The child now awaits the existing `waitForDaemonOpen` barrier before printing ready. No assertion or timeout was relaxed, and no production code changed. The original CI logs remain in external review evidence; these are corrections, not transient retries. Local verification uses macOS Node 24; Linux/Node 26 verification remains CI-owned.
