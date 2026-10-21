@@ -31,7 +31,7 @@ export function createBot(state: CollaborationState, taskId: string, action: Cre
   if (!NEW_BOTS.includes(action.localId as typeof NEW_BOTS[number])) throw new Error('Unknown local Bot slot');
   if (Object.values(state.team.bots).filter(b => !b.archived).length >= 24) throw new Error('Team Bot limit is 24');
   const base = models[action.model];
-  if (!base) throw new Error('Unavailable model or connector toolset');
+  if (!base) throw new Error('Unavailable model');
   admitBotToolsets(base, readOnlyToolsets);
   const id = hash([taskId, action.localId]);
   if (state.team.bots[id]) throw new Error('Duplicate local Bot slot');
@@ -47,7 +47,7 @@ export function updateBot(state: CollaborationState, action: UpdateBotAction, mo
   const bot = activeBot(state.team, action.botId);
   if (!['name', 'role', 'persona', 'model'].some(k => k in action)) throw new Error('An update must change a Bot field');
   const model = action.model ?? bot.model, base = models[model];
-  if (!base) throw new Error('Unavailable model or connector toolset');
+  if (!base) throw new Error('Unavailable model');
   admitBotToolsets(base, readOnlyToolsets);
   const revision = (BigInt(bot.revision) + 1n).toString();
   if (BigInt(revision) > 9223372036854775807n) throw new Error('Profile revision limit');
