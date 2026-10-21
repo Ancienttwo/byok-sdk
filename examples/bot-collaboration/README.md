@@ -37,15 +37,23 @@ tool has no effects. The Host connector stays outside the Agent. This example do
 provide a runtime sandbox. The deployment owns that boundary.
 
 The constructor owns copies of execution/model templates and the allowlist;
-mutating the caller's configuration later cannot widen admission. Every model, restored Bot execution and outstanding frozen intent/execution
+mutating the caller's configuration later cannot widen admission. Every model, restored non-archived Bot execution and outstanding frozen intent/execution
 must satisfy the policy, as must Bot creation,
 updates and turn enqueue. A restart with a narrower policy fails closed when
-persisted Bot templates or pending execution inputs require removed IDs. Settled
-historical execution records remain readable. Change those templates through an
-authorized Host migration before reopening; this slice adds no migration API.
+persisted Bot templates or pending execution inputs require removed IDs. The
+check covers the current Bot template, so it skips archived Bots. An archived
+Bot never runs a new Turn. Its outstanding frozen work still must satisfy the
+policy. Settled historical execution records remain readable. Change those
+templates through an authorized Host migration before reopening; this slice adds
+no migration API.
 Effectful actions still use `confirmable_action` and owner confirmation.
 This is the same-device read-only toolset slice of #606; external-authority
 storage, Windows persona persistence and two-process relay remain separate.
+
+The allowlist governs Bot turns only. `bot.core` is public. The rule to avoid
+direct K4 mutation calls still holds. If a Host calls `bot.core.enqueue` itself,
+that call uses the Host's own authority. It bypasses Bot policy and this
+allowlist. Never route Bot output to that call.
 
 ## Actions and context
 

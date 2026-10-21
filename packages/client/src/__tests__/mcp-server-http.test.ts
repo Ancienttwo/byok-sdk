@@ -505,3 +505,12 @@ it('stateless mode rejects malformed JSON and byte limits before invoking tools'
   expect(response.status).toBe(200);
   expect(callTool).not.toHaveBeenCalled();
 });
+
+it('stateless tools/list works when maxBodyBytes is smaller than the internal initialize frame', async () => {
+  // The private bootstrap initialize frame is about 106 bytes; the client frame below is 46.
+  const server = await host({ sessionMode: 'stateless', maxBodyBytes: 64 });
+  const headers = { 'mcp-protocol-version': '2025-11-25' };
+  const response = await post(server, { jsonrpc: '2.0', id: 2, method: 'tools/list' }, undefined, headers);
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ jsonrpc: '2.0', id: 2, result: { tools: [tool] } });
+});

@@ -118,6 +118,8 @@
       "version": "0.0.1",
       "dependencies": {
         "@byok-sdk/client": "workspace:*",
+        "@byok-sdk/keys": "workspace:*",
+        "@byok-sdk/server": "workspace:*",
       },
       "devDependencies": {
         "@types/node": "^24",
