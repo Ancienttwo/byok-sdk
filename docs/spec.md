@@ -3103,7 +3103,8 @@ storage, Windows persona persistence or two-process relay.
 `copySdkNativeAssets` is a build-time API. For Windows x64 it copies the pinned
 and integrity-verified official Koffi addon; it never downloads in a runtime.
 `sdkDistributionManifest` describes Pi pin, reserved helper kinds and native target
-files. A product passes an absolute `nativeAssetRoot` to SDK-created adapters via
+files. `reservedHelperKinds` plus `piSubagentHelperKinds` is exactly the set that
+`runSdkReservedHelperCommand` accepts. A product passes an absolute `nativeAssetRoot` to SDK-created adapters via
 `DaemonConfig`, or to each custom adapter constructor. An explicit root is scoped
 to that adapter's owned process trees and fails closed on missing or modified
 bytes without searching installed dependencies. Omission keeps installed behavior.

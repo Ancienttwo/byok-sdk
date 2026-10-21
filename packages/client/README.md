@@ -817,8 +817,11 @@ own process-spawn configuration. No process-global setter or runtime download is
 An explicit root fails closed if missing or modified; it never falls back to the
 installed optional dependency. Omission retains package-installed behavior.
 
-`sdkDistributionManifest` exposes the Pi pin, actual reserved helper routing kinds
-(including `agent-memory-describe`) and native target files/signing policies. For
+`sdkDistributionManifest` exposes the Pi pin, the reserved helper routing kinds and
+native target files/signing policies. `reservedHelperKinds` (including
+`agent-memory-describe`) and `piSubagentHelperKinds` together are exactly the kinds
+that `runSdkReservedHelperCommand` accepts. Only Pi subagent children re-enter with
+`piSubagentHelperKinds`; they carry a tail argv and have no `dist/bin` script. For
 Darwin, the copier delegates to `copyAgentMemoryHelperAssets`; use its returned
 `agent-memory-fs` subdirectory as the existing `agentMemoryHelperAssetRoot`. This
 preserves the established memory-helper configuration API. Windows memory is still
