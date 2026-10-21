@@ -1,3 +1,4 @@
+import { AgentResultStore } from '../daemon/agent-result-store';
 import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -52,6 +53,77 @@ async function cancellationFixture() {
 }
 
 describe('required Agent message completion gate', () => {
+  it.each(['missing', 'unreadable'] as const)('delivers the closing required reply before a %s result failure', async kind => {
+    const { runner, adapter, sent, deps } = await cancellationFixture();
+    deps.terminalJournal = true;
+    deps.agentResultMcpBin = { command: process.execPath, args: ['/sdk/byok-agent-result-mcp.js'] };
+    deps.agentResultMcpPreflight = async () => {};
+    if (kind === 'unreadable') vi.spyOn(AgentResultStore.prototype, 'get').mockRejectedValue(new Error('fake read failure'));
+    const marker = vi.fn(async () => {});
+    deps.recordResultReplyFailure = marker;
+    const taskId = 'missing-result-with-reply';
+    const agentRef = { agentId: 'missing-result-agent', profileRevision: '1' };
+    try {
+      await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+        instruction: 'reply', runtime: 'pi', agentRef, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+        messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
+        terminalProjection: { mode: 'result-document', contract: 'outcome.v1', schema: { type: 'object' } },
+      }, { taskId, seq: 1 }));
+      expect(adapter.sessions).toHaveLength(1);
+      adapter.sessions[0]!.emit({ type: 'progress', text: 'Visible reply without actions.' });
+      adapter.sessions[0]!.emit({ type: 'turn_end' });
+      await vi.waitFor(() => expect(sent.some(e => e.type === 'agent.message.publish' || e.type === 'task.fail')).toBe(true));
+      const message = sent.find(e => e.type === 'agent.message.publish');
+      expect(message).toMatchObject({ payload: { body: 'Visible reply without actions.' } });
+      expect(marker).toHaveBeenCalledWith(taskId, kind === 'missing' ? 'required-reply-result-missing' : 'required-reply-result-unreadable');
+      if (message?.type !== 'agent.message.publish') throw Error('missing reply');
+      const { sessionRef, contract, messageId, cursor, contentHash } = message.payload;
+      await runner.handleEnvelope(createEnvelope('agent.message.disposition', {
+        agentRef, sessionRef, contract, messageId, cursor, contentHash,
+        outcome: 'accepted', receiptId: '10000000-0000-4000-8000-000000000002',
+      }, { taskId, seq: 2 }));
+      await vi.waitFor(() => expect(sent.some(e => e.type === 'task.fail')).toBe(true));
+      expect(sent.filter(e => e.type === 'agent.message.publish')).toHaveLength(1);
+      expect(sent.filter(e => e.type === 'task.fail')).toHaveLength(1);
+      expect(sent.find(e => e.type === 'task.fail')).toMatchObject({ payload: { reason: expect.stringMatching(kind === 'missing' ? /^result_not_submitted:/ : /^result_unreadable:/), retryable: false } });
+      expect(sent.find(e => e.type === 'task.fail')!.payload).not.toHaveProperty('document');
+      expect(sent.some(e => e.type === 'task.complete')).toBe(false);
+    } finally { await runner.shutdownActiveTasks("test cleanup"); }
+  });
+
+  it.each(['empty', 'persist-failure', 'cancel-during-persist'] as const)('does not fabricate or release a required reply on %s', async mode => {
+    const { runner, adapter, sent, deps } = await cancellationFixture();
+    deps.terminalJournal = true;
+    deps.agentResultMcpBin = { command: process.execPath, args: ['/sdk/byok-agent-result-mcp.js'] };
+    deps.agentResultMcpPreflight = async () => {};
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const reached = new Promise<void>(resolve => { entered = resolve; });
+    deps.recordResultReplyFailure = async () => {
+      if (mode === 'persist-failure') throw new Error('fake intent fsync failure');
+      if (mode === 'cancel-during-persist') { entered(); await gate; }
+    };
+    const taskId = `missing-result-${mode}`;
+    try {
+      await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+        instruction: 'reply', runtime: 'pi', agentRef: { agentId: 'missing-result-agent', profileRevision: '1' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+        messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
+        terminalProjection: { mode: 'result-document', contract: 'outcome.v1', schema: { type: 'object' } },
+      }, { taskId, seq: 1 }));
+      if (mode !== 'empty') adapter.sessions[0]!.emit({ type: 'progress', text: 'Do not publish this reply.' });
+      adapter.sessions[0]!.emit({ type: 'turn_end' });
+      if (mode === 'cancel-during-persist') {
+        await reached;
+        await runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'cancel wins' }, { taskId, seq: 2 }));
+        release();
+      }
+      await vi.waitFor(() => expect(sent.some(e => e.type === 'task.fail' || e.type === 'task.cancelled')).toBe(true));
+      expect(sent.some(e => e.type === 'agent.message.publish')).toBe(false);
+      if (mode === 'cancel-during-persist') expect(sent.filter(e => e.type === 'task.cancelled')).toHaveLength(1);
+    } finally { release(); await runner.shutdownActiveTasks('test cleanup'); }
+  });
+
   it.each(['append-before', 'activate-before', 'activate-after'] as const)('fences a tool publish across cancellation: %s', async (phase) => {
     const { runner, adapter, sent, deps } = await cancellationFixture();
     const taskId = 'cancel-publish-task';

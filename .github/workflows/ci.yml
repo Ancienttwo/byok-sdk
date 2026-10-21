@@ -23,16 +23,104 @@ name: CI
 # loopback socket binding and will flake those tests specifically; GitHub-
 # hosted runners have a normal network stack and don't hit this.
 
+# Routine PR/main changes run only the reviewed impact plan. A full matrix
+# requires an explicit release-validation dispatch pinned to this exact SHA.
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Exact 40-character commit approved for complete release validation
+        type: string
+        required: true
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
+  select:
+    name: Select reviewed CI scope
+    runs-on: ubuntu-latest
+    outputs:
+      plan: ${{ steps.plan.outputs.plan }}
+      families: ${{ steps.plan.outputs.families }}
+      release: ${{ steps.plan.outputs.release }}
+      build: ${{ steps.plan.outputs.build }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - name: Select impact or exact-SHA release validation
+        id: plan
+        env:
+          CI_EVENT: ${{ github.event_name }}
+          CI_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CI_RELEASE_SHA: ${{ inputs.release_sha }}
+        run: node scripts/ci/plan-ci.mjs
+
+  targeted:
+    name: Affected workspace checks
+    needs: select
+    if: needs.select.outputs.release != 'true'
+    runs-on: ubuntu-latest
+    env:
+      BYOK_REQUIRE_BUN: '1'
+      CI_PLAN: ${{ needs.select.outputs.plan }}
+      CI_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - uses: oven-sh/setup-bun@v2
+      - name: Workflow and selector contracts
+        run: node --test scripts/ci/*.test.mjs
+      - name: Version authority
+        run: node scripts/api-surface/check-version-authority.mjs
+      - name: Install dependencies
+        if: needs.select.outputs.build == 'true'
+        run: bun ci
+      - name: Build dependency artifacts
+        if: needs.select.outputs.build == 'true'
+        run: bun run build
+      - name: Check API and version contracts
+        if: needs.select.outputs.build == 'true'
+        run: bun run check:api-surface && bun run check:version-authority && bun run check:release-graph
+      - name: Install isolated credential-provider test dependencies
+        if: needs.select.outputs.build == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends dbus-x11 gnome-keyring libsecret-tools
+          test "$(bun --version)" = "$(node -p "require('./package.json').packageManager.slice(4)")"
+          bun --revision
+          sha256sum "$(command -v bun)"
+          echo "BYOK_TEST_BUN_BIN=$(command -v bun)" >> "$GITHUB_ENV"
+      - name: Snapshot scoped test scratch directories
+        if: needs.select.outputs.build == 'true'
+        id: tmpdir-snapshot
+        run: node scripts/ci/check-tmpdir-leaks.mjs snapshot "$RUNNER_TEMP/tmpdir-before.txt"
+      - name: Run selected workspace and registry contracts
+        run: |
+          if [ '${{ needs.select.outputs.build }}' = 'true' ]; then
+            bash scripts/ci/with-secret-service.sh node scripts/ci/run-targeted.mjs
+          else
+            node scripts/ci/run-targeted.mjs
+          fi
+      - name: Check scoped tests cleaned their scratch directories
+        if: ${{ always() && steps.tmpdir-snapshot.outcome == 'success' }}
+        run: node scripts/ci/check-tmpdir-leaks.mjs verify "$RUNNER_TEMP/tmpdir-before.txt"
+
   build-test:
+    needs: select
+    if: ${{ contains(fromJSON(needs.select.outputs.families), 'build-test') }}
     name: build, typecheck, test (${{ matrix.node }})
     runs-on: ubuntu-latest
     strategy:
@@ -105,7 +193,7 @@ jobs:
         run: bun run check:version-authority
 
       - name: Test root scripts
-        run: bun run test:scripts
+        run: bun run test:scripts && node --test scripts/ci/*.test.mjs
 
       - name: Typecheck
         run: bun run typecheck
@@ -131,6 +219,8 @@ jobs:
         run: node scripts/ci/check-tmpdir-leaks.mjs verify "$RUNNER_TEMP/tmpdir-before.txt"
 
   agent-memory-helper-linux:
+    needs: select
+    if: ${{ contains(fromJSON(needs.select.outputs.families), 'agent-memory-helper-linux') }}
     name: agent memory helper non-Darwin volume checks (Linux, fixed Go)
     runs-on: ubuntu-latest
     steps:
@@ -150,6 +240,8 @@ jobs:
   # TypeScript-to-Go integration test in one independent job so the admission
   # path cannot be hidden behind the Linux full-suite skips.
   agent-memory-helper:
+    needs: select
+    if: ${{ contains(fromJSON(needs.select.outputs.families), 'agent-memory-helper') }}
     name: agent memory filesystem helper (${{ matrix.os }}, fixed Node/Bun/Go)
     runs-on: ${{ matrix.os }}
     strategy:
@@ -218,6 +310,8 @@ jobs:
         run: bun run check:release-pack -- --out-dir .ci-artifacts/mac-helper-pack
 
   execution-recovery-native:
+    needs: select
+    if: ${{ contains(fromJSON(needs.select.outputs.families), 'execution-recovery-native') }}
     name: compiled execution recovery (${{ matrix.platform }}, Node 24, Bun 1.4.2)
     runs-on: ${{ matrix.os }}
     strategy:
@@ -280,6 +374,8 @@ jobs:
           if-no-files-found: error
 
   adapter-lifecycle-smoke:
+    needs: select
+    if: ${{ contains(fromJSON(needs.select.outputs.families), 'adapter-lifecycle-smoke') }}
     name: built adapter lifecycle smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -321,6 +417,10 @@ jobs:
           src/unclaimed-expiry.test.ts
           src/crash-recovery.test.ts
 
+      - name: K4 Host retention on Windows
+        if: matrix.os == 'windows-latest'
+        run: bun run --cwd examples/host-execution-core test src/retention.test.ts
+
       # SDK Windows v1 gate for sealed provider provisioning (plan A11): the
       # device sealing key, configure/replace/delete custody, and the
       # launcher's custody snapshot against the REAL Windows Credential
@@ -358,6 +458,8 @@ jobs:
   # Deliberately independent of build-test (no `needs:`): its own install +
   # build, so a docker flake here cannot mask unit coverage there.
   dataplane:
+    needs: select
+    if: ${{ contains(fromJSON(needs.select.outputs.families), 'dataplane') }}
     name: dataplane suites against real Postgres (fixed Node)
     runs-on: ubuntu-latest
     env:
@@ -453,6 +555,8 @@ jobs:
   # are redirected to a path containing spaces and non-ASCII characters so the
   # real init/status and ledger file operations cross that boundary on Windows.
   windows-git-workspace:
+    needs: select
+    if: ${{ contains(fromJSON(needs.select.outputs.families), 'windows-git-workspace') }}
     name: Windows Git workspace, store, and security tests (fixed Node)
     runs-on: windows-latest
     defaults:
@@ -527,6 +631,8 @@ jobs:
   # Windows box available). If a windows-latest leg goes red, that is
   # exactly this job's purpose: catch it here, not in a product downstream.
   packageability-smoke:
+    needs: select
+    if: ${{ contains(fromJSON(needs.select.outputs.families), 'packageability-smoke') }}
     name: packageability smoke (${{ matrix.recipe }}, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     defaults:
@@ -572,6 +678,8 @@ jobs:
   # those prove the host can bundle the daemon; this proves registry consumers
   # can install the library graph itself.
   npm-release-pack:
+    needs: select
+    if: ${{ contains(fromJSON(needs.select.outputs.families), 'npm-release-pack') }}
     name: npm release pack/install (${{ matrix.os }}, fixed Node)
     runs-on: ${{ matrix.os }}
     strategy:
@@ -1042,7 +1150,7 @@ jobs:
       # accepted, so one leg has to hand them out. Ubuntu only: three legs would be
       # three name collisions, and one accepted set is the point.
       - name: Retain the accepted release tarballs for the publish driver
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && needs.select.outputs.release == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: release-pack-${{ github.sha }}
@@ -1068,6 +1176,8 @@ jobs:
   # assertion "every shipped migration was applied" mean something, and the
   # second run pins idempotence plus the runner's checksum verification.
   release-pack-migrate:
+    needs: select
+    if: ${{ contains(fromJSON(needs.select.outputs.families), 'release-pack-migrate') }}
     name: migrate empty and v0.4.2 Postgres fixtures from packed tarballs (fixed Node)
     runs-on: ubuntu-latest
     services:
@@ -1141,6 +1251,8 @@ jobs:
   # immutable release version and SHA256-verified before it is executed, so
   # an upstream release cannot silently change what CI installs and runs.
   windows-service-smoke:
+    needs: select
+    if: ${{ contains(fromJSON(needs.select.outputs.families), 'windows-service-smoke') }}
     name: Windows service install smoke (WinSW)
     runs-on: windows-latest
     defaults:
@@ -1201,6 +1313,8 @@ jobs:
   # windows-service-smoke above (no `needs:`): its own install + build, so
   # it can be extended/reordered later without perturbing any of those.
   ipc-smoke:
+    needs: select
+    if: ${{ contains(fromJSON(needs.select.outputs.families), 'ipc-smoke') }}
     name: IPC control socket smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     defaults:
@@ -1270,6 +1384,8 @@ jobs:
       # kernel-level evidence that macOS cannot provide without root/SIP workarounds.
       # It is intentionally separate from the existing jobs and emits no secrets.
   credential-isolation-audit:
+    needs: select
+    if: ${{ contains(fromJSON(needs.select.outputs.families), 'credential-isolation-audit') }}
     name: credential isolation audit (Ubuntu, strace)
     runs-on: ubuntu-latest
     env:
@@ -1312,3 +1428,25 @@ jobs:
           name: credential-isolation-audit
           path: ${{ github.workspace }}/.ci-artifacts/credential-isolation
           if-no-files-found: warn
+
+  ci-required:
+    name: CI required
+    if: ${{ always() }}
+    needs: ["select", "targeted", "build-test", "agent-memory-helper-linux", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-git-workspace", "packageability-smoke", "npm-release-pack", "release-pack-migrate", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit"]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Setup fixed Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - name: Require the selected scope, with the complete inventory on release
+        env:
+          CI_NEEDS: ${{ toJSON(needs) }}
+          CI_PLAN: ${{ needs.select.outputs.plan }}
+          CI_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CI_EVENT: ${{ github.event_name }}
+        run: node scripts/ci/require-ci-plan.mjs

@@ -24,6 +24,7 @@ import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process';
 import type { AcpRecord, RawAcpSession } from '../../runtime/acp-session-runtime';
 import { AsyncQueue } from '../../util/async-queue';
 import type { ResolvedBin } from '../codex/resolve-bin';
+import { grokAgentPersona } from './agent-persona';
 import { GrokProjection, type GrokTurnOutcome } from './projection';
 import { resolveGrokBin } from './resolve-bin';
 import { isQualifiedGrokVersion, QUALIFIED_GROK_VERSION } from './grok-version';
@@ -123,6 +124,7 @@ export class GrokAdapter implements RuntimeAdapter {
       throw authority('prepared grok operation received a manifest with a dispatch selection');
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('grok manifest has no sealed cwd');
+    const persona = await grokAgentPersona(input.manifest);
     // As OAR: the servers go in the ACP mcpServers of session/new or session/resume.
     const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
     const spawnAgent = createOwnedLineProcessSpawn({ spawnFn: this.options.spawnFn, label: 'grok agent' });
@@ -148,6 +150,7 @@ export class GrokAdapter implements RuntimeAdapter {
         { kind: 'available', via: 'executable', command },
         {
           cwd,
+          ...(persona === undefined ? {} : { appendSystemPrompt: persona }),
           env: { ...input.env, ...input.scratch.env } as Record<string, string>,
           ...(this.options.model === undefined ? {} : { model: this.options.model }),
           ...(mcpServers.length === 0 ? {} : { mcpServers }),

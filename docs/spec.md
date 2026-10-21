@@ -198,18 +198,25 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.28.0`; publication requires separate release
+aligned dispatch release is `0.28.1`; publication requires separate release
 authorization and registry readback. The current independent keys release is
-`0.13.0`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.28.0`, proven from an isolated standard npm install rather
+`0.13.1`; its packed and published `@byok-sdk/core` edge must be the exact current
+dispatch release, `0.28.1`, proven from an isolated standard npm install rather
 than the workspace graph.
 
-0.28.0 / keys 0.13.0 is an unpublished source candidate. Both are MINOR
-releases. The train adds public adapters, Bot outcome fragments, schedules
-and an MCP HTTP transport. keys adds Pi API and catalog fields.
-The memory helper configuration has a pre-1.0 breaking cut.
-See the [candidate notes](releases/v0.28.0.md). Publication requires the
-accepted final-commit CI artifact and separate owner authorization.
+For this release only, the owner's 2026-10-21 instruction to continue the
+0.28.1 release selects PATCH despite the included additive APIs and persistence
+changes. This explicit exception does not change the general policy above or
+waive validation, publication authorization, or registry readback. keys 0.13.1
+updates its exact packed core dependency; keys remains independently versioned.
+See the [0.28.1 candidate notes](releases/v0.28.1.md).
+
+Public registry metadata read on 2026-10-21 reports all eight aligned packages
+at latest 0.28.0 and keys at latest 0.13.0. The older 0.28.0 source-candidate
+notes describe preparation history, not current registry availability. The
+0.28.1 / keys 0.13.1 versions were absent at that read; recheck before publishing.
+Publication requires the accepted final-commit CI artifact and separate owner
+authorization.
 
 0.27.0 / keys 0.12.0 is published on `latest` from `v0.27.0` (`cd977261`).
 Complete registry readback and isolated installation passed on 2026-10-17.
@@ -2623,6 +2630,24 @@ The SDK-reserved `byokagentresult` MCP server advertises exactly one `submit_res
 Only successful runtime completion with a staged outcome produces `task.complete.document`. The terminal is journaled before publication and recovery replays only those durable terminal bytes. Successful completion without `submit_result` fails non-retryably as `result_not_submitted`. Failure, cancellation and interruption carry no document; staged outcomes remain local audit records under the same protection as the task's other Agent-home evidence. Durable Pi uses the same tool and daemon validator; it no longer creates `{text}` documents. `DaemonConfig.resultDocument`, `ResultDocumentExtractor` and `Session.resultDocument()` are removed; supplying the old config field throws `DaemonConfigFieldRemovedError`. Result-document offers require an enrolled Agent home, the reserved helper, an eligible runtime and a durable terminal journal. There is no `result-document` capability negotiation in v3.
 
 On the prepared lane, the preparation request carries the same `terminalProjection` as the offer. Its exact schema and contract are retained in the durable binding, covered by the request digest, and represented by a schema-bound executor identity in `toolManifestDigest`. Admission compares the selection before pinning or claiming. A SummaryJob with `requiredToolsets: []` and `agentMemory:'none'` now counts and launches exactly one tool, `submit_result`; it omits `requiredToolsets` on the offer and needs no user `messageEgress`. The worker verifies the task-bound result helper's schema before constructing the model. The durable record version is 11; no version-10 record is read forward. Records and wire v3 share one drain-then-upgrade cut. Other preparations that select no result still support zero tools.
+
+When `messageEgress.mode: required` and `terminalProjection.mode: result-document`
+are combined, a normal runtime `turn_end` with a missing or unreadable staged
+result still delivers its existing or daemon-authored closing reply through the
+usual immutable outbox and exact accepted-disposition gate. The terminal then
+fails non-retryably as `result_not_submitted` or `result_unreadable`, without a
+document; Hosts must not apply outcome actions. Empty reply text is not invented.
+Runtime failure and cancellation retain their existing revocation rules.
+
+Before handing off that reply, the daemon persists the typed result-failure
+intent as an execution transition in the existing local journal. This is not a
+wire terminal and does not prevent cancellation from winning. On restart, an
+existing terminal always wins; otherwise recovery validates the original offer's
+required-message/result contract and converts that intent into the ordinary
+immutable failure terminal. Pending recovered messages still gate terminal
+publication. The intent survives accepted-disposition deletion of the outbox
+draft, so a crash after reply acceptance does not rewrite the diagnosis to
+`daemon_interrupted`, rerun the runtime, or apply an outcome.
 
 This is an execution/result primitive. Host owns semantic outcome acceptance, SummaryJob coverage/version CAS, budgets and scheduling. See [the K7 migration and release note](releases/k7-wire-v3.md) for the coordinated server/client upgrade and pending-v2 startup fences.
 

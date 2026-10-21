@@ -1,3 +1,4 @@
+import { resultReplyFailureReason, type ResultReplyFailure } from './result-reply-failure';
 import type { ActivityIngress } from '@byok-sdk/protocol';
 import { AgentMessageDraftPublisher } from './agent-message-draft';
 import type { ScratchRoot, ExecutionScratch } from './retention/scratch';
@@ -653,6 +654,9 @@ export interface TaskRunnerDeps {
    * runner without it declines such offers.
    */
   terminalJournal?: boolean;
+  /** Durable normal-turn result failure intent, before handing off a required reply. */
+  recordResultReplyFailure?(taskId: string, failure: ResultReplyFailure): Promise<void>;
+  recordAgentMessageAccepted?(taskId: string): Promise<void>;
   durablePi?: boolean;
   recordDurableTransition?(taskId: string, leaseId: string, kind: string, ordinal: number): Promise<void>;
   /** SDK-owned, task-scoped MCP helper. Required only for offers declaring messageEgress. */
@@ -843,7 +847,8 @@ interface ActiveTask {
   /** A send attempt may already have entered transport; failure must preserve its admission recovery. */
   messageSendAttempted?: boolean;
   messageAccepted?: boolean;
-  pendingMessageCompletion?: { readonly finalOutput: string; readonly document?: unknown };
+  resultReplyFailure?: ResultReplyFailure;
+  pendingMessageCompletion?: { readonly finalOutput: string; readonly document?: unknown; readonly failureReason?: string };
   messageRetryTimer?: ReturnType<typeof setTimeout>;
 }
 
@@ -1423,6 +1428,7 @@ export class TaskRunner {
   /** Per-task index over {@link hostToolsetContextByToken}, so one cancel revokes every server's nonce at once. */
   private readonly hostToolsetContextTokensByTask = new Map<string, Set<string>>();
   private readonly recoveredMessageOutboxes = new Map<string, AgentMessageOutbox>();
+  private readonly cancelledRecoveredMessages = new Set<string>();
   private readonly recoveredMessageRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /**
    * Finding F4 (cancel lost during the offer-processing window): a
@@ -1738,12 +1744,21 @@ export class TaskRunner {
   }
 
   /** Restore activated, unaccepted message drafts before transport admission on daemon restart. */
-  async recoverAgentMessageOutboxes(agentsRoot: string): Promise<void> {
+  async recoverAgentMessageOutboxes(agentsRoot: string, resultFailureTasks: ReadonlyMap<string, { agentRef: AgentRef; contract: string }> = new Map(), isCancelled?: (taskId: string) => Promise<boolean>): Promise<void> {
     if (this.deps.tenantId === undefined) throw new Error('Agent message recovery requires authenticated tenant enrollment');
     for (const outbox of await AgentMessageOutbox.recover(agentsRoot, this.deps.tenantId)) {
       this.messageOutboxesByHome.set(outbox.homeDir, Promise.resolve(outbox));
-      for (const record of outbox.retryableRecords()) {
-        if (record.sessionRef === undefined) continue;
+      for (let record of outbox.records()) {
+        if (await isCancelled?.(record.taskId)) { await outbox.revoke(record.taskId); continue; }
+        const binding = resultFailureTasks.get(record.taskId);
+        if (binding !== undefined && (record.agentRef.agentId !== binding.agentRef.agentId
+          || record.agentRef.profileRevision !== binding.agentRef.profileRevision || record.contract !== binding.contract)) {
+          throw new Error('recovered required reply does not match its durable offer');
+        }
+        if (record.sessionRef === undefined && record.recoverySessionRef !== undefined && resultFailureTasks.has(record.taskId)) {
+          record = await outbox.activate(record.taskId, record.recoverySessionRef) ?? record;
+        }
+        if (record.sessionRef === undefined && !resultFailureTasks.has(record.taskId)) continue;
         const existing = this.recoveredMessageOutboxes.get(record.taskId);
         if (existing !== undefined && existing !== outbox) throw new Error(`multiple Agent message outboxes claim task ${record.taskId}`);
         this.recoveredMessageOutboxes.set(record.taskId, outbox);
@@ -1764,8 +1779,23 @@ export class TaskRunner {
 
   /** A recovery terminal must not close first-message admission before this durable draft has a disposition. */
   hasPendingRecoveredAgentMessage(taskId: string): boolean {
+    if (this.cancelledRecoveredMessages.has(taskId)) return false;
     return this.recoveredMessageOutboxes.get(taskId)?.retryableRecords()
       .some((record) => record.taskId === taskId && record.sessionRef !== undefined) === true;
+  }
+
+  async cancelRecoveredAgentMessage(taskId: string, persist: () => Promise<void>): Promise<void> {
+    this.cancelledRecoveredMessages.add(taskId);
+    const timer = this.recoveredMessageRetryTimers.get(taskId);
+    if (timer !== undefined) clearTimeout(timer);
+    this.recoveredMessageRetryTimers.delete(taskId);
+    await persist();
+    await this.recoveredMessageOutboxes.get(taskId)?.revoke(taskId);
+    this.recoveredMessageOutboxes.delete(taskId);
+  }
+
+  recoveredAgentMessageState(taskId: string): 'pending' | 'held' | 'refused' | 'missing' {
+    return this.recoveredMessageOutboxes.get(taskId)?.recoveryState(taskId) ?? 'missing';
   }
 
   /** Retry stable recovered records after a transport handshake/re-handshake. */
@@ -1797,7 +1827,7 @@ export class TaskRunner {
   private sendAgentMessageRecord(outbox: AgentMessageOutbox, record: AgentMessageOutboxRecord): void {
     const active = this.tasks.get(record.taskId);
     const authorized = active === undefined
-      ? this.recoveredMessageOutboxes.get(record.taskId) === outbox
+      ? !this.cancelledRecoveredMessages.has(record.taskId) && this.recoveredMessageOutboxes.get(record.taskId) === outbox
       : active.messageOutbox === outbox && this.canPublishAgentMessage(active);
     if (!authorized || record.sessionRef === undefined
       || !outbox.retryableRecords().some(pending => pending.messageId === record.messageId)) return;
@@ -1840,7 +1870,7 @@ export class TaskRunner {
     const active = this.tasks.get(taskId);
     const outbox = active?.messageOutbox ?? this.recoveredMessageOutboxes.get(taskId);
     if (outbox === undefined) return;
-    const outcome = await outbox.applyDisposition(taskId, disposition);
+    const outcome = await outbox.applyDisposition(taskId, disposition, () => this.deps.recordAgentMessageAccepted?.(taskId) ?? Promise.resolve());
     if (active === undefined) {
       if (outcome === 'accepted' || outcome === 'held' || outcome === 'refused') {
         const timer = this.recoveredMessageRetryTimers.get(taskId);
@@ -1876,7 +1906,8 @@ export class TaskRunner {
     if (active.pendingMessageCompletion !== undefined) {
       const completion = active.pendingMessageCompletion;
       active.pendingMessageCompletion = undefined;
-      await this.publishSuccessfulCompletion(active, completion.finalOutput, completion.document);
+      if (completion.failureReason !== undefined) await this.fail(taskId, completion.failureReason, false);
+      else await this.publishSuccessfulCompletion(active, completion.finalOutput, completion.document);
     }
   }
 
@@ -2847,7 +2878,11 @@ export class TaskRunner {
             ownsLease: () => durableBinding !== undefined && !blobAbort.signal.aborted && !this.pendingCancelled.has(taskId),
             record: async (kind: 'tool-intent' | 'tool-committed' | 'respawn-intent', ordinal: number) => {
               if (!durableBinding || !this.deps.recordDurableTransition || !this.deps.tenantId) throw new Error('durable parent authority unavailable');
-              await this.deps.agentHome!.executionLeaseManager.mutate(durableBinding, () => this.deps.recordDurableTransition!(taskId, durableBinding.lease.leaseId, kind, ordinal));
+              await this.deps.agentHome!.executionLeaseManager.mutate(durableBinding, () => {
+                // Do not overwrite a persisted normal-turn failure intent.
+                if (this.tasks.get(taskId)?.resultReplyFailure !== undefined) return Promise.resolve();
+                return this.deps.recordDurableTransition!(taskId, durableBinding.lease.leaseId, kind, ordinal);
+              });
             },
           },
         } }),
@@ -4210,99 +4245,76 @@ export class TaskRunner {
           active.batcher.push(event);
           active.batcher.flush();
           const finalOutput = active.summaryParts.join('');
-          // Resolved BEFORE the 'completed' git observation below, so a task
+          // Resolve the result decision before Git observation and reply handoff.
+          // Missing/unreadable results can still deliver a required reply; a task
           // that cannot deliver its required result takes the salvage path
           // `fail()` already applies to every other failure — rather than
           // being observed as completed and only then failed.
           const outcome = await this.resolveStagedResult(active);
           if (!outcome.deliver) return; // already reported task.fail and finished
-          await this.observeGit(active, 'completed');
-          if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
-          if (active.messageRequirement !== undefined && active.messageAccepted !== true) {
-            // A `messageEgress.mode:'required'` task completes only after an
-            // exact `accepted` disposition, so the completion is parked here
-            // and replayed by `handleAgentMessageDisposition`.
-            //
-            // Delivering the message is the DAEMON's obligation, not the
-            // model's. When the runtime called the injected
-            // `send_agent_message` MCP tool, that tool-authored draft is
-            // already the task's one immutable message and is sent
-            // unchanged. When it never called the tool there is no record,
-            // and waiting for one that can no longer arrive (the turn has
-            // ended) used to hang the task until `maxDurationMs`. Instead the
-            // daemon authors the message itself from the runtime's own final
-            // reply text — the assistant text emitted after the last tool
-            // interaction (`active.finalTextParts`), falling back to the whole
-            // run's text (`finalOutput`, which is also what `summary` carries)
-            // when the run ends on a tool call with no closing text — through
-            // the exact same outbox path `publishAgentMessage` uses, so the wire
-            // contract (immutable draft, session binding, byte cap, replay)
-            // is identical regardless of who authored it.
-            //
-            // Fail closed, never hang: an empty final output or a rejected
-            // draft (byte cap, quota, session mismatch) fails the task with a
-            // stated reason rather than silently waiting.
-            active.pendingMessageCompletion = { finalOutput, ...(outcome.document === undefined ? {} : { document: outcome.document }) };
+          const failureReason = outcome.failure === undefined ? undefined
+            : resultReplyFailureReason(outcome.failure, active.terminalProjection!.mode === 'result-document' ? active.terminalProjection!.contract : '');
+          if (outcome.failure !== undefined) active.resultReplyFailure = outcome.failure;
+          else await this.observeGit(active, 'completed');
+          if (!this.canPublishAgentMessage(active)) return;
+          const recordFailure = async () => {
+            if (outcome.failure === undefined) return;
+            if (this.deps.recordResultReplyFailure === undefined) throw new Error('required reply result failure has no durable intent writer');
+            await this.deps.recordResultReplyFailure(active.taskId, outcome.failure);
+          };
+          if (active.messageRequirement !== undefined && !active.messageAccepted) {
+            // Tool-authored and daemon-authored replies share one immutable
+            // draft and one append → failure intent → activation boundary.
+            // A recovery binding stays inert until the journal intent exists.
             const outbox = active.messageOutbox;
-            const record = outbox?.get(active.taskId);
-            if (record !== undefined) {
-              this.sendAgentMessageRecord(outbox!, record);
-              return;
-            }
-            const body = (closingReply(active) ?? finalOutput).trim();
-            if (outbox === undefined || active.agentRef === undefined) {
-              // Invariant violation, not a runtime shortfall: a
-              // `messageEgress.mode:'required'` task cannot be admitted
-              // without both an outbox and a bound agent ref, so reaching
-              // here means the lane was torn down or never wired.
-              active.pendingMessageCompletion = undefined;
-              await this.fail(active.taskId, 'required Agent message lane is unavailable for this task', false);
-              return;
-            }
-            if (body === '') {
-              active.pendingMessageCompletion = undefined;
-              await this.fail(active.taskId, 'runtime produced no reply text for the required Agent message', false);
-              return;
-            }
+            let refusalReason: string | undefined;
             try {
-              await outbox.appendDraft({
-                taskId: active.taskId,
-                tenantId: this.deps.tenantId!,
-                agentRef: active.agentRef,
-                requirement: active.messageRequirement,
-                contentType: active.messageRequirement.contentType,
-                body,
-                maxPendingEvents: 64,
-                maxPendingBytes: 4 * 1024 * 1024,
-              });
-              // A cancel/teardown landing during `appendDraft` must not be
-              // followed by an `activate`: an activated record is what
-              // restart recovery republishes, so the draft is left inert
-              // instead.
-              if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
-              const activated = await this.activateAgentMessage(outbox, active.taskId, active.session.sessionRef,
-                () => this.canPublishAgentMessage(active), () => active.messageSendAttempted === true);
-              if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
-              if (activated === undefined) throw new Error('Agent message draft disappeared before activation');
-              this.sendAgentMessageRecord(outbox, activated);
-            } catch (err) {
-              if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
-              // A concurrent tool-authored `publishAgentMessage` can win the
-              // outbox lock while the daemon-authored draft is in flight —
-              // the append then rejects because the task already has its one
-              // immutable message. That is the contract working, not a
-              // delivery failure: send the record that won.
-              const raced = outbox.get(active.taskId);
-              if (raced !== undefined && raced.sessionRef !== undefined) {
-                this.sendAgentMessageRecord(outbox, raced);
+              if (outbox === undefined || active.agentRef === undefined) {
+                refusalReason = 'required Agent message lane is unavailable for this task';
+                throw new Error(refusalReason);
+              }
+              if (outbox.get(active.taskId) === undefined) {
+                const body = (closingReply(active) ?? finalOutput).trim();
+                if (body === '') {
+                  refusalReason = 'runtime produced no reply text for the required Agent message';
+                  throw new Error(refusalReason);
+                }
+                try {
+                  await outbox.appendDraft({ taskId: active.taskId, tenantId: this.deps.tenantId!,
+                    agentRef: active.agentRef, requirement: active.messageRequirement,
+                    contentType: active.messageRequirement.contentType, body,
+                    ...(outcome.failure === undefined ? {} : { recoverySessionRef: active.session.sessionRef }),
+                    maxPendingEvents: 64, maxPendingBytes: 4 * 1024 * 1024 });
+                } catch (error) {
+                  // An in-flight tool author may win the immutable draft.
+                  if (!active.messageAccepted && outbox.get(active.taskId) === undefined) throw error;
+                }
+              }
+              if (!this.canPublishAgentMessage(active)) return;
+              await recordFailure();
+              if (!this.canPublishAgentMessage(active)) return;
+              if (!active.messageAccepted) {
+                active.pendingMessageCompletion = { finalOutput, ...(failureReason === undefined ? {} : { failureReason }), ...(outcome.document === undefined ? {} : { document: outcome.document }) };
+                const activated = await this.activateAgentMessage(outbox, active.taskId, active.session.sessionRef,
+                  () => this.canPublishAgentMessage(active), () => active.messageSendAttempted === true);
+                if (!this.canPublishAgentMessage(active)) return;
+                if (activated === undefined) throw new Error('Agent message draft disappeared before activation');
+                this.sendAgentMessageRecord(outbox, activated);
                 return;
               }
+            } catch (err) {
+              if (outcome.failure !== undefined) throw err; // preserve the runtime-boundary failure projection
+              if (!this.canPublishAgentMessage(active)) return;
               active.pendingMessageCompletion = undefined;
-              await this.fail(active.taskId, `failed to deliver the required Agent message: ${errorMessage(err)}`, false);
+              await this.fail(active.taskId, refusalReason ?? `failed to deliver the required Agent message: ${errorMessage(err)}`, false);
+              return;
             }
-            return;
+          } else {
+            await recordFailure();
+            if (!this.canPublishAgentMessage(active)) return;
           }
-          await this.publishSuccessfulCompletion(active, finalOutput, outcome.document);
+          if (failureReason !== undefined) await this.fail(active.taskId, failureReason, false);
+          else await this.publishSuccessfulCompletion(active, finalOutput, outcome.document);
           return;
         }
         if (event.type === 'progress') {
@@ -5186,8 +5198,9 @@ export class TaskRunner {
    * Wire v3 result channel, at `turn_end`: the one place a staged
    * `submit_result` outcome becomes `task.complete.document`.
    *
-   * `{deliver: true}` means "go on and send `task.complete`", with the staged
-   * canonical outcome when the offer is `mode: 'result-document'`.
+   * `{deliver: true}` permits the reply lane, with either the staged outcome
+   * or a typed result failure to persist before handing off a required reply.
+   * A failure never becomes a completion document.
    * `{deliver: false}` means this method has ALREADY reported `task.fail`
    * (or the task was finished meanwhile by someone else); the caller returns.
    *
@@ -5199,7 +5212,7 @@ export class TaskRunner {
    */
   private async resolveStagedResult(
     active: ActiveTask,
-  ): Promise<{ deliver: true; document?: unknown } | { deliver: false }> {
+  ): Promise<{ deliver: true; document?: unknown; failure?: ResultReplyFailure } | { deliver: false }> {
     const selection = active.terminalProjection;
     if (selection?.mode !== 'result-document') return { deliver: true };
     this.revokeAgentResultContext(active.taskId);
@@ -5209,11 +5222,13 @@ export class TaskRunner {
       record = await active.resultStore.get(active.taskId);
     } catch (err) {
       if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return { deliver: false };
+      if (active.messageRequirement !== undefined) return { deliver: true, failure: 'required-reply-result-unreadable' };
       await this.fail(active.taskId, `${RESULT_UNREADABLE_REASON_PREFIX}: the staged result for contract ${selection.contract} could not be read: ${errorMessage(err)}`, false);
       return { deliver: false };
     }
     if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return { deliver: false };
     if (record === undefined) {
+      if (active.messageRequirement !== undefined) return { deliver: true, failure: 'required-reply-result-missing' };
       await this.fail(
         active.taskId,
         `${RESULT_NOT_SUBMITTED_REASON_PREFIX}: the offer requires result contract ${selection.contract}, but the runtime ended its turn without a staged ${AGENT_RESULT_TOOL_NAME} outcome`,
@@ -5224,6 +5239,7 @@ export class TaskRunner {
     if (record.contract !== selection.contract || record.tenantId !== this.deps.tenantId
       || active.agentRef === undefined || record.agentRef.agentId !== active.agentRef.agentId
       || record.agentRef.profileRevision !== active.agentRef.profileRevision) {
+      if (active.messageRequirement !== undefined) return { deliver: true, failure: 'required-reply-result-unreadable' };
       await this.fail(active.taskId, `${RESULT_UNREADABLE_REASON_PREFIX}: the staged result does not belong to this task's contract and Agent`, false);
       return { deliver: false };
     }
