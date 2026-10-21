@@ -12,13 +12,26 @@ assert.equal(manifest.exports['./hermes-session'], undefined);
 const runtime = require.resolve('#byok-hermes-session');
 assert.equal(runtime, realpathSync(path.join(root, 'dist/adapters/hermes/hermes-session-runtime.js')));
 const { createHermesSession } = await import(pathToFileURL(runtime).href);
+// Both private boundaries must resolve inside the installed tarball.
+assert.equal(manifest.exports['./hermes-async'], undefined);
+const asyncRuntime = require.resolve('#byok-hermes-async');
+assert.equal(asyncRuntime, realpathSync(path.join(root, 'dist/adapters/hermes/hermes-async-runtime.js')));
+const { createHermesAsyncRuntime } = await import(pathToFileURL(asyncRuntime).href);
+const probes = createHermesAsyncRuntime({ classifyDetectError: () => ({ kind: 'probe-failed' }) });
+const version = await probes.probeHermesVersion(process.execPath, process.env);
+assert.equal(version.kind, 'available');
+assert.equal(version.line, process.version);
+
 for (const entry of ['dist/index.js', 'dist/adapters/index.js']) {
   const text = readFileSync(path.join(root, entry), 'utf8');
   assert.match(text, /import\(["']#byok-hermes-session["']\)/);
+  assert.match(text, /import\(["']#byok-hermes-async["']\)/);
+  assert.doesNotMatch(text, /function prepareHermesCustody|function probeHermesVersion/);
   assert.doesNotMatch(text, /class HermesSession|HermesSession = class/);
   const api = await import(pathToFileURL(path.join(root, entry)).href);
   // Public constructor validation remains synchronous before any session loads.
   assert.throws(() => new api.HermesAdapter({ home: 'relative' }), /absolute/);
+  assert.throws(() => new api.HermesAdapter({ home: path.join(root, 'synthetic-home'), byokLauncher: { command: 'relative', profileDbPath: '/synthetic', selectProfile() {} } }), /custody launcher/);
   let released = 0;
   let refuseCleanup = true;
   const homes = new Set();

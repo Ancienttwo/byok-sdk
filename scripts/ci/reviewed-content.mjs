@@ -82,6 +82,9 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       const key = '#byok-hermes-session';
       const entry = { types: './dist/adapters/hermes/hermes-session-runtime.d.ts', default: './dist/adapters/hermes/hermes-session-runtime.js' };
       if (before.imports?.[key] === undefined && isDeepStrictEqual(after.imports?.[key], entry)) delete after.imports[key];
+      const asyncKey = '#byok-hermes-async';
+      const asyncEntry = { types: './dist/adapters/hermes/hermes-async-runtime.d.ts', default: './dist/adapters/hermes/hermes-async-runtime.js' };
+      if (before.imports?.[asyncKey] === undefined && isDeepStrictEqual(after.imports?.[asyncKey], asyncEntry)) delete after.imports[asyncKey];
       const smoke = ' && node scripts/check-hermes-session-entry.mjs';
       if (typeof before.scripts?.build === 'string' && after.scripts?.build === before.scripts.build + smoke) after.scripts.build = before.scripts.build;
     }

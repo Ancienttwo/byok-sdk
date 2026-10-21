@@ -41,6 +41,7 @@
       ],
       "lazyImports": [
         "#byok-acp-runtime",
+        "#byok-hermes-async",
         "#byok-hermes-session",
         "#byok-pi-runtime-host",
         "@earendil-works/pi-ai",
@@ -128,6 +129,7 @@
       ],
       "lazyImports": [
         "#byok-acp-runtime",
+        "#byok-hermes-async",
         "#byok-hermes-session",
         "koffi"
       ],
@@ -2383,6 +2385,44 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [],
+        "thirdParty": []
+      },
+      "codegen": []
+    }
+  },
+  "@byok-sdk/client#byok-hermes-async": {
+    "kind": "imports",
+    "policy": {
+      "purpose": "Private Hermes async admission and runtime probes; caller-owned dependencies preserve error identity",
+      "budgetBytes": 5027,
+      "zod": false,
+      "codegen": false,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": false
+      }
+    },
+    "facts": {
+      "target": "packages/client/dist/adapters/hermes/hermes-async-runtime.js",
+      "conditions": [
+        "default"
+      ],
+      "types": [
+        "packages/client/dist/adapters/hermes/hermes-async-runtime.d.ts"
+      ],
+      "bareImports": [
+        "child_process",
+        "crypto"
+      ],
+      "lazyImports": [],
+      "thirdParty": [],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [
+          "child_process",
+          "crypto"
+        ],
         "thirdParty": []
       },
       "codegen": []

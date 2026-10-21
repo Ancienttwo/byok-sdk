@@ -126,3 +126,20 @@ test('shared goal fixture selects its consumers without broadening unknown root 
   assert.deepEqual(plan.families, ['adapter-lifecycle-smoke']);
   assert.throws(() => selectImpact(['examples/basic/other.test-support.ts']));
 });
+
+ test('only the exact private Hermes async import is reviewed', t => {
+  const f = fixture(t);
+  const imports = { '#existing': './dist/existing.js' };
+  f.write('packages/client/package.json', { ...f.manifest, imports });
+  execFileSync('git', ['add', '.'], { cwd: f.cwd });
+  execFileSync('git', ['-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'existing imports'], { cwd: f.cwd });
+  f.base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: f.cwd, encoding: 'utf8' }).trim();
+  const entry = { types: './dist/adapters/hermes/hermes-async-runtime.d.ts', default: './dist/adapters/hermes/hermes-async-runtime.js' };
+  const write = value => f.write('packages/client/package.json', { ...f.manifest, imports: { ...imports, ...value } });
+  write({ '#byok-hermes-async': entry });
+  assert.ok(selectImpact(['packages/client/package.json'], f).families.includes('npm-release-pack'));
+  write({ '#byok-hermes-async': { ...entry, default: './dist/other.js' } });
+  assert.throws(() => selectImpact(['packages/client/package.json'], f), /more than/);
+  write({ '#byok-hermes-other': entry });
+  assert.throws(() => selectImpact(['packages/client/package.json'], f), /more than/);
+});

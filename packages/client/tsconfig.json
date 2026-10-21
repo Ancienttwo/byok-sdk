@@ -2,7 +2,7 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "lib": ["ES2024"],
-    "paths": { "#byok-hermes-session": ["./src/adapters/hermes/hermes-session-runtime.ts"] }
+    "paths": { "#byok-hermes-async": ["./src/adapters/hermes/hermes-async-runtime.ts"], "#byok-hermes-session": ["./src/adapters/hermes/hermes-session-runtime.ts"] }
   },
   "include": ["src"]
 }

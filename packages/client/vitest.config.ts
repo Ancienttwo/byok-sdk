@@ -10,7 +10,7 @@ if (typeof manifest.version !== 'string') throw new Error('packages/client/packa
 // shared resources. Individual concurrency tests still exercise their own races;
 // their assertions and deadlines are unchanged.
 export default defineConfig({
-  resolve: { alias: { '#byok-hermes-session': fileURLToPath(new URL('./src/adapters/hermes/hermes-session-runtime.ts', import.meta.url)) } },
+  resolve: { alias: { '#byok-hermes-async': fileURLToPath(new URL('./src/adapters/hermes/hermes-async-runtime.ts', import.meta.url)), '#byok-hermes-session': fileURLToPath(new URL('./src/adapters/hermes/hermes-session-runtime.ts', import.meta.url)) } },
   define: {
     __BYOK_CLIENT_PACKAGE_VERSION__: JSON.stringify(manifest.version),
   },

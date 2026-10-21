@@ -1,10 +1,9 @@
-import { ownHermesLauncher, prepareHermesCustody, hermesCustodyArgs, type HermesByokLauncher, type PreparedHermesCustody } from './hermes-custody';
+import { ownHermesLauncher, hermesCustodyArgs, type HermesByokLauncher, type PreparedHermesCustody } from './hermes-custody';
 export type { HermesByokLauncher } from './hermes-custody';
-import { randomBytes } from 'node:crypto';
 import { promises as fs, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFile, spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
+import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
 import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import {
   freezeRuntimeAdapterDescriptor,
@@ -28,12 +27,10 @@ import { identifyHermesGateway, type HermesGatewayIdentity } from './gateway-ide
 import {
   assertHermesModelSelection, createHermesProfile, ensureHermesRoot, removeHermesProfile, sweepStaleHermesProfiles,
 } from './hermes-home';
-import { hermesVersionLine, isQualifiedHermesVersion, QUALIFIED_HERMES_VERSION } from './hermes-version';
+import { isQualifiedHermesVersion, QUALIFIED_HERMES_VERSION } from './hermes-version';
 import { resolveHermesBin } from './resolve-bin';
 
-const VERSION_TIMEOUT_MS = 5_000;
 const OPEN_REQUEST_TIMEOUT_MS = 60_000;
-const GATEWAY_POLL_MS = 100;
 /** No fs or terminal methods: Hermes runs every tool inside its own gateway. No elicitation: clarify falls back to a permission request. */
 const INITIALIZE_PARAMS = Object.freeze({
   protocolVersion: 1,
@@ -109,28 +106,6 @@ function withDeadline<T>(promise: Promise<T>, ms: number, signal: AbortSignal | 
   });
 }
 
-type ProbeFailure = Exclude<RuntimeDetectResult, { kind: 'available' }>;
-
-/**
- * `hermes --version` with the SDK root as `HERMES_HOME`. The shared probe
- * would use the ambient home: Hermes then reads the user's `~/.hermes` config
- * and writes its update-check cache there.
- */
-function probeHermesVersion(command: string, env: Record<string, string>): Promise<{ kind: 'available'; line: string } | ProbeFailure> {
-  return new Promise((resolve) => {
-    try {
-      execFile(command, ['--version'], { encoding: 'utf8', env, timeout: VERSION_TIMEOUT_MS, killSignal: 'SIGKILL', maxBuffer: 64 * 1024 }, (error, stdout, stderr) => {
-        if (error === null) resolve({ kind: 'available', line: hermesVersionLine(stdout) || hermesVersionLine(stderr) });
-        else if ((error as { code?: unknown }).code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') resolve({ kind: 'probe-failed' });
-        else if (error.killed === true && error.signal === 'SIGKILL') resolve({ kind: 'timeout' });
-        else resolve(classifyDetectError(error));
-      });
-    } catch (error) {
-      resolve(classifyDetectError(error));
-    }
-  });
-}
-
 /**
  * Real path of the nearest existing ancestor plus the rest, so a symlink or a
  * case variant cannot hide `~/.hermes`, even below a directory not yet created.
@@ -153,21 +128,9 @@ function canonicalPath(value: string): string {
   return process.platform === 'darwin' || process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 
-/** A busy gateway can miss one `identify` deadline; ask a few times before treating it as gone. */
-async function identifyAfterAttach(home: string): Promise<HermesGatewayIdentity | undefined> {
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const identity = await identifyHermesGateway(home);
-    if (identity !== undefined) return identity;
-    await new Promise((resolve) => setTimeout(resolve, GATEWAY_POLL_MS));
-  }
-  return undefined;
-}
-
-/** SIGKILL to a detached Hermes gateway's own process group (it starts in a new session), else to the pid. */
-function stopProcessGroup(pid: number): void {
-  try { process.kill(-pid, 'SIGKILL'); } catch {
-    try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
-  }
+async function loadHermesAsyncRuntime() {
+  const { createHermesAsyncRuntime } = await import('#byok-hermes-async');
+  return createHermesAsyncRuntime({ createHermesProfile, removeHermesProfile, createOwnedLineProcessSpawn, hermesEnvironment, buildAllowlistedEnv, buildRuntimeEnv, AcpConnection, AcpMethodNotFound, withDeadline, INITIALIZE_PARAMS, classifyDetectError, assertHermesModelSelection, hermesCustodyArgs, identifyHermesGateway });
 }
 
 const infrastructure = (phase: 'start' | 'run', reason: string, retry: 'retryable' | 'non-retryable' = 'non-retryable') =>
@@ -233,7 +196,8 @@ export class HermesAdapter implements RuntimeAdapter {
       const command = this.command();
       await ensureHermesRoot(this.root);
       await sweepStaleHermesProfiles(this.root, this.liveHomes);
-      const version = await probeHermesVersion(command, this.rootEnvironment());
+      const runtime = await loadHermesAsyncRuntime();
+      const version = await runtime.probeHermesVersion(command, this.rootEnvironment());
       if (version.kind !== 'available') return version;
       const probe = await this.probeAcp(command, signal);
       if (probe.kind !== 'available') return probe;
@@ -248,34 +212,8 @@ export class HermesAdapter implements RuntimeAdapter {
     }
   }
 
-  private async probeAcp(command: string, signal: AbortSignal | undefined): Promise<{ kind: 'available'; authPresent: boolean } | ProbeFailure> {
-    const home = await createHermesProfile(this.root, `detect-${randomBytes(6).toString('hex')}`, this.options.model);
-    const child = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn })(command, ['acp'], {
-      cwd: home, env: hermesEnvironment(this.options.byokLauncher ? buildAllowlistedEnv({ ambient: process.env }) : buildRuntimeEnv({ ambient: process.env }), home),
-    });
-    let timedOut = false;
-    try {
-      await child.spawned;
-      const connection = new AcpConnection(child, {
-        notification: () => {},
-        request: (method) => { throw new AcpMethodNotFound(method); },
-      });
-      child.onExit(() => connection.close(new Error('hermes acp exited during the probe')));
-      const result = await withDeadline(
-        connection.request('initialize', INITIALIZE_PARAMS),
-        this.options.probeTimeoutMs ?? 180_000,
-        signal,
-        () => { timedOut = true; return new Error('timeout'); },
-      ) as { protocolVersion?: unknown; authMethods?: unknown } | null;
-      if (result?.protocolVersion !== 1) return { kind: 'probe-failed' };
-      const methods = Array.isArray(result.authMethods) ? result.authMethods as Array<{ id?: unknown; type?: unknown }> : [];
-      return { kind: 'available', authPresent: methods.some((method) => method.type === undefined && typeof method.id === 'string' && method.id !== 'hermes-setup') };
-    } catch {
-      return timedOut ? { kind: 'timeout' } : { kind: 'probe-failed' };
-    } finally {
-      await child.dispose().catch(() => {});
-      await removeHermesProfile(this.root, home).catch(() => {});
-    }
+  private async probeAcp(command: string, signal: AbortSignal | undefined): Promise<{ kind: 'available'; authPresent: boolean } | Exclude<RuntimeDetectResult, { kind: 'available' }>> {
+    return (await loadHermesAsyncRuntime()).probeAcp(this.root, this.options, command, signal);
   }
 
   /** Cheap admission, as Codex: the version probe only. The ACP probe and root build belong to `detect()`. */
@@ -286,14 +224,15 @@ export class HermesAdapter implements RuntimeAdapter {
     if (input.offer.sessionRef !== undefined) return { kind: 'reject', reason: 'hermes does not resume native sessions', retryable: false };
     const command = this.command();
     await ensureHermesRoot(this.root);
-    const version = await probeHermesVersion(command, this.rootEnvironment());
+    const runtime = await loadHermesAsyncRuntime();
+    const version = await runtime.probeHermesVersion(command, this.rootEnvironment());
     if (version.kind !== 'available') {
       return { kind: 'reject', reason: `hermes installation refused: ${version.kind === 'refused' ? version.reason : version.kind}`, retryable: false };
     }
     let custody: PreparedHermesCustody | undefined;
     if (this.options.byokLauncher) {
       if (!path.isAbsolute(command)) return { kind: 'reject', reason: 'Hermes custody requires an absolute Hermes executable', retryable: false };
-      try { custody = await prepareHermesCustody(this.options.byokLauncher, input.offer); }
+      try { custody = await runtime.prepareHermesCustody(this.options.byokLauncher, input.offer); }
       catch { return { kind: 'reject', reason: 'Hermes custody admission failed', retryable: false }; }
     }
     return { kind: 'prepared', operation: { start: (start) => this.start(start, command, custody) } };
@@ -306,6 +245,7 @@ export class HermesAdapter implements RuntimeAdapter {
     if (!cwd) throw authority('hermes manifest has no sealed cwd');
     const workspace = await fs.realpath(cwd);
     const { createHermesSession } = await import('#byok-hermes-session');
+    const { identifyAfterAttach, stopProcessGroup } = await loadHermesAsyncRuntime();
     const session = createHermesSession(input.scratch, this.root, this.liveHomes, this.options.interruptTimeoutMs ?? 1_000, {
       AcpConnection, AcpMethodNotFound, AcpRpcError, RuntimeExecutionFailure, RuntimeDisposalFailure,
       PolicyUnsupportedError, SteerUnsupportedError, isRuntimeExecutionFailure, infrastructure,

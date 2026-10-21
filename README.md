@@ -429,5 +429,6 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `bin:byok-pi-prepared` | Pi prepared launcher; host loads lazily | — | forbidden | 554 B |
 | `bin:byok-pi-provider-launcher` | Provider credential custody launcher | `zod` | allowed | 215928 B |
 | `bin:byok-pi-rpc` | Pi RPC launcher; host loads lazily | — | forbidden | 526 B |
+| `@byok-sdk/client#byok-hermes-async` | Private Hermes async admission and runtime probes; caller-owned dependencies preserve error identity | — | forbidden | 5027 B |
 
 <!-- END generated: api-surface/entries.json -->
