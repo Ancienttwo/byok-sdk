@@ -9,7 +9,7 @@ name: Release
 # ubuntu-latest; scripts/release/publish.mjs refuses any other runner.
 #
 # The job publishes the exact tarballs that CI accepted for this commit: it finds
-# the successful ci.yml push run for github.sha (a pull_request run names its
+# the successful explicit ci.yml release-validation run for github.sha (a pull_request run names its
 # artifact after the merge ref, not this commit), downloads its
 # release-pack-<sha> artifact, and hands it to publish.mjs --artifacts, which
 # re-hashes every tarball against the frozen release-manifest.json. Nothing is
@@ -84,9 +84,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --event push --branch main --commit "$GITHUB_SHA" --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --event workflow_dispatch --branch main --commit "$GITHUB_SHA" --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
           if [ -z "$run_id" ]; then
-            echo "::error::no successful ci.yml push run for $GITHUB_SHA on main; wait for CI to pass on this commit"
+            echo "::error::no successful explicit ci.yml release-validation run for $GITHUB_SHA on main; wait for CI to pass on this commit"
             exit 1
           fi
           echo "run-id=$run_id" >> "$GITHUB_OUTPUT"

@@ -1,3 +1,4 @@
+import { admitBotToolsets, ownReadOnlyToolsets } from './toolset-policy';
 import type { BotTurnOutcome, ResultSchema, UpdateRoutineAction } from '@byok-sdk/protocol';
 import { BOT_TURN_OUTCOME_CONTRACT, BotTurnOutcomeSchemaError, validateResultOutcome } from '@byok-sdk/protocol';
 import type { ByokServer, CreateByokServerOptions, DueWake } from '@byok-sdk/server';
@@ -31,6 +32,8 @@ export interface BotOptions {
   channel?: ChannelOptions;
   /** Host-owned model templates. New Bots stay on the selected template's device. */
   models?: Record<string, ExecutionTemplate>;
+  /** Host-owned read-only toolset IDs. Default empty. The Host's local tool server must enforce read-only behavior. */
+  readOnlyToolsets?: readonly string[];
   /** Must deduplicate by id. A committed confirmation can be replayed after a crash. */
   connector: (id: string, action: string, draft: Json, signal: AbortSignal) => Promise<Json>;
   /** The Host also enforces this limit when a connector ignores cancellation. */
@@ -72,7 +75,21 @@ export class BotCollaboration {
   private readonly owner: Principal;
   constructor(readonly server: ExecutionServer & HomeServer & MessageServer & Partial<Pick<ByokServer, 'machines'>>, readonly ledger: HostLedger, private readonly options: BotOptions) {
     if (!options.botId || options.execution.payload.agentRef.agentId !== options.botId) throw new Error('Select this Bot Agent');
-    if (options.execution.payload.requiredToolsets?.length) throw new Error('Bot executions cannot have connector toolsets');
+    options = this.options = { ...options, execution: structuredClone(options.execution),
+      ...(options.models === undefined ? {} : { models: structuredClone(options.models) }),
+      readOnlyToolsets: ownReadOnlyToolsets(options.readOnlyToolsets) };
+    admitBotToolsets(options.execution, options.readOnlyToolsets);
+    for (const model of Object.values(this.models())) admitBotToolsets(model, options.readOnlyToolsets);
+    const persisted = ledger.snapshot();
+    for (const bot of Object.values(stateOf(persisted.application).team.bots)) admitBotToolsets(bot.execution, options.readOnlyToolsets);
+    // Recovery can resubmit a frozen older generation after the Bot changes models.
+    // Historical settled executions remain readable; only outstanding work must be admitted.
+    for (const intent of Object.values(persisted.intents)) {
+      if (intent.conclusion) continue;
+      admitBotToolsets(intent.execution, options.readOnlyToolsets);
+      const execution = persisted.executions[intent.taskId];
+      if (execution) admitBotToolsets(execution.input, options.readOnlyToolsets);
+    }
     this.owner = { id: options.owner ?? 'owner', kind: 'human' };
     if (!verified(this.owner)) throw new Error('Invalid owner principal');
     this.now = () => time((options.now ?? Date.now)());
@@ -248,7 +265,7 @@ export class BotCollaboration {
       if (turn.authority !== 'owner') throw new Error('Management needs owner authority');
       work();
     });
-    applyManagement(state, turn.botId, tx.intent.taskId, outcome, this.models(), managed);
+    applyManagement(state, turn.botId, tx.intent.taskId, outcome, this.models(), managed, this.options.readOnlyToolsets);
     // Main Bot cancel (§8.8): after management, before the routine actions, in the same arbitration as cancelDelegation.
     // Only this Turn's intent changes in the terminal transaction, so the committed intents are current for the target.
     outcome.cancel_delegation?.forEach(action => managed('cancel_delegation', () => {
@@ -370,7 +387,7 @@ export class BotCollaboration {
         const failed = state.team.homeOperations.find(op => op.botId === botId
           && op.request.payload.agentRef.profileRevision === bot.revision && op.status === 'failed');
         if (!failed) throw new Error('No failed persona delivery for the current revision');
-        updateBot(state, { botId, persona: bot.persona }, this.models());
+        updateBot(state, { botId, persona: bot.persona }, this.models(), this.options.readOnlyToolsets);
         for (const turn of Object.values(state.turns)) {
           if (turn.botId === botId && !s.intents[hash(turn.id)]) delete turn.profileFailure;
         }
@@ -571,6 +588,7 @@ export class BotCollaboration {
         }
         state.schemas[turn.id] = schema;
         const base = bot.execution;
+        admitBotToolsets(base, this.options.readOnlyToolsets);
         const { messageEgress: egress, ...roomPayload } = base.payload;
         // A delegated reply is capped at BOT_REPLY_MAX_BYTES, and its cursor is B's Turn.
         const chain = turn.delegationId && egress ? {

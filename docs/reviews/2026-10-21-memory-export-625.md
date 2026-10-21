@@ -48,3 +48,18 @@ private downstream repository access was performed.
 Independent review: review_604 approved source, tests, documentation, native CI
 and exact closure-budget changes with no actionable findings. The parent approved
 commit/push as Draft; hosted platform qualification remains pending.
+
+## PR 644 main integration
+
+Normal merge of `7f34c4576d654550ad0e3cfd828313088210e9c2` into
+`7f5c9c32c1ce03eb1769571f4e6708612c6f6d44`; no conflicts or source fixes.
+The merged client root closure measures 2,060,740 bytes, 3,730 above the
+main budget. Updated only that exact budget and its generated README table;
+dependency permissions and test assertions are unchanged.
+
+Workspace build, typecheck, API surface and version authority passed. `bun ci`
+refreshed the new main workspace dependency link before the successful typecheck.
+Client `test -- memory`: 213 passed, 56 platform/backend skips (24 files passed,
+3 skipped). After building and reproducibility-checking both macOS helper assets,
+`BYOK_REQUIRE_MEMORY_EXPORT_TESTS=1` export suite passed all 8 tests without skips.
+Validation is local; hosted CI and Linux qualification are not claimed here.
