@@ -1,5 +1,60 @@
 # WO-05 validation
 
+## Host jobs / issue #612
+
+Date: 2026-10-21. Baseline: `7f34c4576d654550ad0e3cfd828313088210e9c2`.
+Environment: macOS arm64, Node `v24.18.0`, Bun `1.4.3`.
+
+Final affected K4 suite: **102 passed, 12 skipped**, 11 passing files and one
+platform-skipped file, 57.15 seconds. The existing skip conditions were unchanged.
+The 13 new Host-job cases use the real SQLite ledger and embedded SDK; Agent
+promotion uses the repository's existing synthetic runtime, not a model/provider.
+Coverage includes scheduled delivery, sync/async handlers, summary-only completion,
+replay and concurrent delivery, lifecycle and rescheduling, failed-handler recovery
+across ledger reopen, missing registration, malformed contracts with atomic rollback,
+explicit Agent promotion, Host-only compaction/rollback/tombstones, stale-scan audit,
+and the durable escalation cutoff after newer occurrence compaction.
+
+The cutoff regression first reproduced as `expired` instead of `superseded` after
+compaction removed the newer occurrence. Persisting `job.executionSuperseded` at
+new-slot admission fixes that loss of evidence. An initial regression fixture consumed
+a future slot without advancing the clock; correcting its injected clock exposed the
+actual failure. One promotion test failed waiting for Agent startup during concurrent
+checks, then passed unchanged in isolation and in the final complete K4 run. Its
+cause is unclassified; no deadlines, assertions or skip conditions were changed.
+
+Commands and evidence:
+
+- `bun run build`: passed (SDK source unchanged by this slice).
+- `bun run typecheck`: passed after the required MCP consumer type narrowing.
+- `bun run check:api-surface`: passed, nine package goldens match.
+- `bun run check:version-authority`: passed.
+- `bun run --cwd examples/host-execution-core typecheck`: passed.
+- `bun run --cwd examples/host-execution-core test`: passed as above.
+- `bun run --cwd examples/byok-mcp-server typecheck`: passed.
+- `bun run --cwd examples/byok-mcp-server test src/routines.test.ts`: six passed.
+- `git diff --check`: passed; self-review covered source, docs and type-only test edits.
+
+The required `bun run test` attempt exited 1 after 248.66 seconds in the first
+(client) package: 4229 passed, 70 skipped, one failed, plus one unhandled rejection.
+The failure is `packages/client/src/__tests__/mcp-server-http.test.ts:134`,
+`isolates equal request IDs and cancellation between independent clients`: the
+first client's cancellation flag remained false. The same file reported an unhandled
+`SdkError: Connection closed` (`CONNECTION_CLOSED`) during peer cleanup. This slice
+changes no client source or client tests. No baseline reproduction or cause is claimed;
+the failure was recorded without repair or a workspace rerun. The sequential command
+never reached later packages, so no full-workspace test pass is claimed.
+
+Local logs: `/tmp/byok612-root-test.log`, `/tmp/byok612-k4-final.log`,
+`/tmp/byok612-mcp.log`, `/tmp/byok612-typecheck-final.log`, `/tmp/byok612-build.log`,
+`/tmp/byok612-api.log`, `/tmp/byok612-version.log`. These paths are local execution
+artifacts; the counts and failure above are the durable record.
+
+External Host effects are at least once across crashes, requiring occurrence-key
+idempotency. Long handlers block the serialized drain; shutdown waits for handlers to
+honor cancellation. No Windows/Linux run, provider acceptance or downstream production
+acceptance is claimed by these local macOS results.
+
 ## Explicit retention / issue #602
 
 Date: 2026-10-21. Baseline: `ad0d2d2591d8b5eb6ebb4c7f47cfc5463ca5f779`.

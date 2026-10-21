@@ -1,4 +1,3 @@
-// BYOK change: Modified from OAR 60ad09b for a required consumer and fatal retained-record byte budget (Apache-2.0).
 import { emptyInputRefusal } from "./control-input.js";
 import { withSessionRecord } from "../observe/graph.js";
 import type {
@@ -109,19 +108,11 @@ function deliver(observer: RawEventObserver, record: RawEvent): void {
 }
 
 /** An optional session credential redactor runs before retention and observer delivery; native command inputs remain unchanged. */
-// BYOK change: The required consumer runs outside best-effort observer swallowing; facts are appended before delivery.
-// BYOK change: `redact` is a hooks member, not a second positional parameter; the byte budget measures the redacted record.
-export function createSessionKernel(sessionId: string = globalThis.crypto.randomUUID(), hooks: {
-  readonly maxBytes?: number;
-  readonly onRecord?: (record: RawEvent) => void;
-  readonly onLimit?: () => never;
-  readonly redact?: <T extends RawEvent>(record: T) => T;
-} = {}): SessionKernel {
+export function createSessionKernel(sessionId: string = globalThis.crypto.randomUUID(), redact?: <T extends RawEvent>(record: T) => T): SessionKernel {
   const observers = new Set<RawEventObserver>();
   const log: RawEvent[] = [];
   const nodeIds = new Set([sessionId]);
   let graph: SessionGraph = { nodes: [{ id: sessionId }], edges: [] };
-  let retainedBytes = 0; // BYOK change: conservative serialized envelope+payload accounting.
   let seq = 0;
   let exited = false;
   let disposing = false;
@@ -141,15 +132,8 @@ export function createSessionKernel(sessionId: string = globalThis.crypto.random
       seq,
       receivedAt: Date.now(),
     });
-    const retained = hooks.redact === undefined ? record : hooks.redact(record);
-    // BYOK change: Fail before retaining any bytes beyond the caller's budget; never silently trim.
-    const bytes = Buffer.byteLength(JSON.stringify(retained), "utf8");
-    if (retainedBytes + bytes > (hooks.maxBytes ?? Infinity)) {
-      hooks.onLimit?.();
-      throw new Error("session record byte budget exceeded");
-    }
-    retainedBytes += bytes;
     seq += 1;
+    const retained = redact === undefined ? record : redact(record);
     log.push(retained);
     graph = withSessionRecord(graph, retained, nodeIds);
     if (record.kind === "response" && record.body.kind === "exited") {
@@ -158,7 +142,6 @@ export function createSessionKernel(sessionId: string = globalThis.crypto.random
     if (record.kind === "request" && record.direction === "toRuntime" && record.body.kind === "dispose") {
       disposing = true;
     }
-    hooks.onRecord?.(retained); // BYOK change: required projection failure is not swallowed.
     for (const observer of observers) {
       deliver(observer, retained);
     }

@@ -218,6 +218,24 @@ jobs:
         if: ${{ always() && steps.tmpdir-snapshot.outcome == 'success' }}
         run: node scripts/ci/check-tmpdir-leaks.mjs verify "$RUNNER_TEMP/tmpdir-before.txt"
 
+  agent-memory-export-linux:
+    needs: select
+    if: ${{ contains(fromJSON(needs.select.outputs.families), 'agent-memory-export-linux') }}
+    name: task-free memory export (Linux native descriptors)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - uses: oven-sh/setup-bun@v2
+      - run: bun ci
+      - run: bun run build
+      - name: Qualify native export without platform skips
+        env:
+          BYOK_REQUIRE_MEMORY_EXPORT_TESTS: '1'
+        run: bun run --filter @byok-sdk/client test -- src/__tests__/agent-memory-export.test.ts
+
   agent-memory-helper-linux:
     needs: select
     if: ${{ contains(fromJSON(needs.select.outputs.families), 'agent-memory-helper-linux') }}
@@ -300,6 +318,11 @@ jobs:
       - name: Run SDK helper, intent and capability contracts
         run: |
           bun run --filter @byok-sdk/client test -- src/__tests__/agent-memory-fs-helper.test.ts src/__tests__/agent-memory-helper-release.test.ts src/__tests__/agent-memory-helper-assets.test.ts src/__tests__/agent-memory-helper-release-errors.test.ts src/__tests__/agent-memory-helper-admission.test.ts src/__tests__/agent-memory-helper-crash.test.ts src/__tests__/agent-memory-intent.test.ts src/__tests__/daemon-conn-hello-capabilities.test.ts src/__tests__/agent-home-directory-barrier.test.ts
+
+      - name: Qualify task-free export against the release helper
+        env:
+          BYOK_REQUIRE_MEMORY_EXPORT_TESTS: '1'
+        run: bun run --filter @byok-sdk/client test -- src/__tests__/agent-memory-export.test.ts
 
       - name: Prove real Node and Bun helper identity
         run: |
@@ -1425,7 +1448,7 @@ jobs:
   ci-required:
     name: CI required
     if: ${{ always() }}
-    needs: ["select", "targeted", "build-test", "agent-memory-helper-linux", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-git-workspace", "packageability-smoke", "npm-release-pack", "release-pack-migrate", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit"]
+    needs: ["select", "targeted", "build-test", "agent-memory-export-linux", "agent-memory-helper-linux", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-git-workspace", "packageability-smoke", "npm-release-pack", "release-pack-migrate", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit"]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

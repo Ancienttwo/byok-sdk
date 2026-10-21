@@ -148,12 +148,13 @@ export const workspaceGraph = {
 };
 
 export const knownFamilies = Object.freeze([
-  'build-test', 'agent-memory-helper-linux', 'agent-memory-helper',
+  'build-test', 'agent-memory-export-linux', 'agent-memory-helper-linux', 'agent-memory-helper',
   'execution-recovery-native', 'adapter-lifecycle-smoke', 'dataplane',
   'windows-git-workspace', 'packageability-smoke', 'npm-release-pack',
   'release-pack-migrate', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
 ]);
 const clientFamilies = [
+  'agent-memory-export-linux',
   'agent-memory-helper-linux', 'agent-memory-helper', 'execution-recovery-native',
   'adapter-lifecycle-smoke', 'windows-git-workspace', 'packageability-smoke',
   'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
@@ -201,11 +202,16 @@ export function selectImpact(paths, context = {}) {
       continue;
     }
     if (/^scripts\/release\/registry-(?:contract\.test\.mjs|expectations\.json)$/.test(path)) { scripts = true; continue; }
+    // #652 trims these reviewed files in the pinned OAR snapshot.
+    if (/^packages\/client\/vendor\/oar\/60ad09b\/(?:runtimes\/codex\/(?:app-server-client|rpc-control|session)|shared\/(?:acp\/session|session-kernel))\.ts$/.test(path)) {
+      dirs.add('packages/client'); continue;
+    }
     if (/^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:PROVENANCE\.md|source-manifest\.json|runtimes\/grok\/session\.ts)$/.test(path)) {
       dirs.add('packages/client'); continue;
     }
     if (path === 'examples/host-execution-core/VALIDATION.md'
-      || path === 'examples/bot-collaboration/VALIDATION.md') continue;
+      || path === 'examples/bot-collaboration/VALIDATION.md'
+      || path === 'examples/host-execution-core/PLAN-612.md') continue;
 
     if (path === 'scripts/ci/run-windows-bot-tests.mjs') {
       families.add('adapter-lifecycle-smoke'); continue;
