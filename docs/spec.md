@@ -2027,6 +2027,18 @@ The client release carries Darwin arm64 and x64 helpers. The SDK resolves its
 own path and checks the build manifest before each helper open. Arbitrary
 `agentMemoryFilesystem.helperBin` configuration is removed. The ordinary build
 needs no Go. `bun run build:release` builds and verifies native release assets.
+Single-file products copy these SDK-owned release assets at build time using
+`copyAgentMemoryHelperAssets({ outDir })` from `@byok-sdk/client`. The destination
+must be new or empty; copying verifies both target binaries and their manifest
+and never overwrites existing files. Ship that directory with the product and
+set `DaemonConfig.agentMemoryHelperAssetRoot` to its absolute installed path.
+An explicit invalid root fails daemon construction even without a configured
+memory projection or intent feed. Resolution and every helper open verify the
+same manifest and content digest; no arbitrary binary path, digest override or
+PATH search is admitted. The directory is a deployment integrity boundary, not
+a signer authentication mechanism. Omitting the option retains installed SDK
+package resolution. Windows admission is unchanged.
+
 Helper builds use Go
 1.26.5, `CGO_ENABLED=0`, `-buildvcs=false` and `-trimpath`. Product re-signing is
 allowed. The `mach-o-content-v1` digest covers the Mach-O header, load commands
