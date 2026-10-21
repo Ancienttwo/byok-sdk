@@ -86,7 +86,11 @@ Environment: macOS, Node `v24.21.0`, Bun `1.4.3`.
 
 PR #619 established the six-file non-memory gate. Its Windows run
 [39532145463 / job 119000298075](https://github.com/Ancienttwo/byok-sdk/actions/runs/39532145463/job/119000298075)
-passed 6 files / 39 tests with no skips. Retention evidence is recorded above.
+passed 6 files / 39 tests with no skips. The descendant main push at merge SHA
+`95357bb07ba7b1b45a75ba463a170a75af435bd1` also passed the same 6 files / 39 tests:
+[main run 39542244558 / Windows job 119032782832](https://github.com/Ancienttwo/byok-sdk/actions/runs/39542244558/job/119032782832).
+The push directly on #619's merge was cancelled; this descendant is the completed
+main evidence. Retention evidence is recorded above.
 
 The follow-up on main base `80a34083` replaces both partial K4 commands with
 `bun run --cwd examples/host-execution-core test` in the existing Windows
