@@ -5,7 +5,7 @@
 日期：2026-10-22（Asia/Taipei）。
 SDK 基线：`473cc4c495e244e3a9433794ffd9bd73d8455ece`。
 下游源码核对基线：AiphaBee `5b5fc4ce`，只读核对。未核对下游线上部署。
-关联：[issue 654](https://github.com/Ancienttwo/byok-sdk/issues/654)。发版台账 [issue 649](https://github.com/Ancienttwo/byok-sdk/issues/649) 把它排在 0.28.2 之后。设备身份对应见 [issue 655](https://github.com/Ancienttwo/byok-sdk/issues/655)。H 路径见[双车道 Host 方案](2026-10-21-dual-host-collaboration.md)。
+关联：[issue 654](https://github.com/Ancienttwo/byok-sdk/issues/654)。发版台账 [issue 649](https://github.com/Ancienttwo/byok-sdk/issues/649) 把它排在 0.28.2 之后。设备身份对应见 [issue 655](https://github.com/Ancienttwo/byok-sdk/issues/655)。H 路径见[双车道 Host 方案](2026-10-21-dual-host-collaboration.md)。托管 Host 的现行契约见 [PR #682](https://github.com/Ancienttwo/byok-sdk/pull/682)（Draft，hosted Host contract）。
 
 ## 1. 目标、范围与建议
 
@@ -395,12 +395,13 @@ MAC 只依赖 scope、epoch、类别、消息族、身份和明文，与 salt �
 
 ### 10.1 现状
 
-`consume` 在写入前调用，决定 `accepted`、`held` 或 `refused`（`cloud.ts:303-311`；`inbound.ts:212-302`）。它收到含 `body` 的完整 payload，以及 offer 时冻结的 Host 上下文 `{ destinationBinding, freshnessCursor? }`。投递至少一次，产品按消息身份和 payload 去重。
+`consume` 在写入前调用，决定 `accepted`、`held` 或 `refused`（`cloud.ts:303-311`；`inbound.ts:212-302`）。它收到含 `body` 的完整 payload，以及 offer 时冻结的 Host 上下文 `{ destinationBinding, freshnessCursor? }`。投递至少一次，产品按消息身份和 payload 去重。`consume` 抛错时 reservation 保持 pending，SDK 会对同一 reservation 再次调用 `consume`（`inbound.ts:269-287`）。
 
 ### 10.2 加密后的输入
 
 - 开启 C2 的 task，`consume` 收到另一种输入。它没有 `body`，带 `sealed`、`contentMac`、`paddedLength`、`contentType`、`contract`、`messageId`、`cursor`、`agentRef`、`sessionRef` 和冻结上下文。类型上与明文输入分开，产品代码不能把密文当正文用。
-- 产品要显式声明能处理加密消息。没有声明时，`submitAgentExecution` 拒绝带 `messageEgress` 且开启 C2 的 offer。今天缺少 `consume` 时它已经这样拒绝（`cloud.ts:1940-1942`）。
+- 产品要显式声明能处理加密消息。三条写 Agent 消息 offer 的路径都检查这个声明：`submitAgentExecution`、`enqueuePreparedOffer` 和 `enqueueAgentEgressOffer`。没有声明时，它们拒绝开启 C2 的 offer。今天只有 `submitAgentExecution` 检查有没有 `consume`（`cloud.ts:1940-1942`），另外两条不检查（`cloud.ts:2021-2047`）。
+- inbound 再检查一次，因为 offer 和 `POST /byok/messages` 可以在不同的部署上运行。加密消息到达时，如果没有能处理加密输入的 consumer，Host 走今天的无 consumer 路径：新 reservation 记 `held`，原因代码是 `consumer_unavailable`（`inbound.ts:278-282`）。明文 consumer 收不到密文输入。
 - 产品的去重键改为 `(tenant, device, task, agentRef, messageId, contentMac)`。
 
 ### 10.3 产品后端仍能做的事
@@ -469,6 +470,8 @@ identity receipt 是防重放的 fence，同时保存了正文，而且永不过
 
 两条路都提供。加密类别先用 crypto-shredding 删除内容，再用 scoped row-delete 回收空间。明文类别（例如 Bot 对话）只能用 scoped row-delete。Workers 上的整 tenant erasure 另开 issue。
 
+[PR #682](https://github.com/Ancienttwo/byok-sdk/pull/682) 的 hosted Host contract 第 6 节把一项现状记为 Gap：task receipt 和 admission 行没有 TTL，也不能按 task、设备、Agent 或时间删除。scoped row-delete 补的就是这个 Gap。明文行的 scoped row-delete 不依赖加密，可以在 E1 之前单独交付（§13 E5）。
+
 明文类别也能用 Host 持有的 per-scope 静态加密密钥做 crypto-shredding。它需要 KMS，也挡不住 Host 本身，所以 v1 不建议（§14 D6）。
 
 ## 12. 迁移、Topology L 与性能（任务 8）
@@ -515,7 +518,7 @@ identity receipt 是防重放的 fence，同时保存了正文，而且永不过
 - E2 成员与密钥：daemon 的成员密钥托管和配对验证秘密；客户端参考库；成员链校验；key package 通知。
 - E3 wire 与存储：划分表、两个能力门、Host 的比较投影和长度上限。memory、SQLite 和 Postgres 三种 store 一起修改。
 - E4 读写接口：`consume` 的加密输入；读接口返回密文；对加密任务拒绝草稿；拒绝把加密任务交给 `cloud-do`。
-- E5 删除：crypto-shredding 流程；Workers 上的 scoped row-delete。
+- E5 删除：crypto-shredding 流程；Workers 上的 scoped row-delete。明文行的 scoped row-delete 不依赖 E1 到 E4，可以先交付；加密行的部分随 E3 一起做。
 - E6 conformance 与文档：canary 测试；在 `docs/security.md` 写托管 surface 的威胁模型（#654 需求 6）；同步 spec 和 protocol。
 
 每个切片单独合入。不带 `sealing` 的 task 行为不变。
@@ -558,7 +561,7 @@ identity receipt 是防重放的 fence，同时保存了正文，而且永不过
 | D3 | AiphaBee 首批类别与作者规则 | 研究 scope 开 C1、C3，按需开 C2；Bot 对话与记忆保持明文 | 采用。同时确认 Host 组装的 ContextPack 不属于端到端加密 |
 | D4 | 成员链、key package 和设备路由由谁实现 | SDK 提供存储与设备路由；Host 自己实现（provider provisioning 的先例） | SDK 实现。canary 和 conformance 才能覆盖它 |
 | D5 | key package 保留方式 | 长期保留，shred 后成员轮换 KEM 密钥；只在投递窗口内保留 | 长期保留。它支持多设备和重装后恢复 |
-| D6 | 删除 | crypto-shredding 加 Workers 上的 scoped row-delete；明文类别也用 Host 持有的密钥做 shredding | 前者。Workers 上的整 tenant erasure 另开 issue |
+| D6 | 删除 | crypto-shredding 加 Workers 上的 scoped row-delete；明文类别也用 Host 持有的密钥做 shredding | 前者。明文行的 row-delete 可以先于 E1 交付。Workers 上的整 tenant erasure 另开 issue |
 | D7 | wire 版本 | v3 内的双向 gated addition；升到 v4 | v3 内的 gated addition |
 | D8 | 长度填充 | 256 字节对齐加 2 的幂桶；固定桶；不填充 | 256 字节对齐加 2 的幂桶 |
 | D9 | 加密任务的草稿 | v1 拒绝；加密帧追加日志 | v1 拒绝 |
