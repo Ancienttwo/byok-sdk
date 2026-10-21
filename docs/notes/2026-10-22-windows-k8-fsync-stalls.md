@@ -45,12 +45,24 @@ Both changes remove the stalls. Only the temp root keeps the durability
 contract of the journal. The fix sets `TEMP` and `TMP` to `runner.temp` for the
 two Windows Host steps. Production code, timeouts and assertions do not change.
 
+Full suites, paired runs with the exact `ci.yml` commands (CI run 39665840137,
+throw-away branch):
+
+| Temp root | K4 (121 pass, 12 skip) | K8 (186 tests) |
+| --- | --- | --- |
+| `runner.temp` on `D:` | 3 of 3 pass (51 to 64 s) | 3 of 3 pass (68 to 103 s) |
+| Default on `C:` | 3 of 3 pass (86 to 124 s) | 3 of 3 fail (200 to 296 s) |
+
 Limits:
 
-- The measurements cover the two Host suites that failed. They do not cover the
-  other 18 K8 files. The CI run of the fix covers them.
+- Three runs per arm is small. The result is paired evidence, not a failure rate.
+- The routine PR run of the fix does not select the Windows lifecycle job
+  (the impact plan maps workflow and `scripts/ci` edits to no family). The
+  paired runs above are the verification.
 - The cause is the runner OS disk. A change of the runner image can change the
   numbers. If the stalls return, look at the probe first: slow `COMMIT` calls and
   event-loop lag inside the wait window.
+- Temp and the checkout now share the `D:` volume for these two steps. K4 passed
+  3 of 3 with it. Watch any K4 test that checks volumes or relocates local state.
 - The macOS `group-chat.test.ts` flake is a different case. That suite is
   excluded on Windows.
