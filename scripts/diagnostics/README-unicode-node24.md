@@ -55,3 +55,9 @@ Bounded distribution capture: maximum5sequential singlecase samples, fail-fast o
 first failure (set-e), no failedsample retries. SameSHA/diagnostics, preserve
 sample1..5index only. Motivated by observed4956ms versus286ms startup variation;
 need slow-sample ledger/ELU snapshot, not green-gate recovery.
+
+Same-runner observer-effect comparison: up to3original samples, stop baseline
+at firstfailure and record exit; then exactly3single-drain samples, stop first
+failure. One initialdrain stays INSIDE original5000ms wait callback; subsequent
+polls only observe originalsession assertion. No product changes. Original
+failure remains recorded even if variant succeeds; diagnostic is not releaseCI.
