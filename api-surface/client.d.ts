@@ -7676,6 +7676,13 @@ export interface ResolvedAgentMessageMcpBin {
 }
 /** Resolve the SDK-owned stdio MCP helper shipped beside the client bundle. */
 export declare function resolveAgentMessageMcpBin(host?: SdkHelperHostConfig): ResolvedAgentMessageMcpBin;
+// ==== @byok-sdk/client dist/daemon/result-reply-failure.d.ts ====
+/** Journal execution states, not wire terminals: cancellation may still win. */
+export type ResultReplyFailure = 'required-reply-result-missing' | 'required-reply-result-unreadable';
+export declare function isResultReplyFailure(value: string): value is ResultReplyFailure;
+/** Stable across restart; do not persist filesystem/backend exception text. */
+export declare function resultReplyFailureReason(kind: ResultReplyFailure, contract: string): string;
+export declare function resultReplyFailureFromState(value: string): ResultReplyFailure | undefined;
 // ==== @byok-sdk/client dist/daemon/retention/config.d.ts ====
 import { type ExpiringClassId } from './registry';
 export declare class LocalStorageConfigError extends Error {
@@ -8273,6 +8280,7 @@ export declare function readDeviceEnrollmentStatus(options: DeviceEnrollmentStat
  */
 export declare function readDeviceEnrollmentIdentity(options: DeviceEnrollmentStatusOptions): Promise<DeviceEnrollmentIdentityStatus>;
 // ==== @byok-sdk/client dist/daemon/task-runner.d.ts ====
+import { type ResultReplyFailure } from './result-reply-failure';
 import type { ActivityIngress } from '@byok-sdk/protocol';
 import type { ScratchRoot } from './retention/scratch';
 import { type AgentMessageContentType, type AgentEgressPolicy, type Envelope, type RuntimeId, type TaskOfferPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferPreparedPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
@@ -8722,6 +8730,9 @@ export interface TaskRunnerDeps {
      * runner without it declines such offers.
      */
     terminalJournal?: boolean;
+    /** Durable normal-turn result failure intent, before handing off a required reply. */
+    recordResultReplyFailure?(taskId: string, failure: ResultReplyFailure): Promise<void>;
+    recordAgentMessageAccepted?(taskId: string): Promise<void>;
     durablePi?: boolean;
     recordDurableTransition?(taskId: string, leaseId: string, kind: string, ordinal: number): Promise<void>;
     /** SDK-owned, task-scoped MCP helper. Required only for offers declaring messageEgress. */
@@ -8850,6 +8861,7 @@ export declare class TaskRunner {
     /** Per-task index over {@link hostToolsetContextByToken}, so one cancel revokes every server's nonce at once. */
     private readonly hostToolsetContextTokensByTask;
     private readonly recoveredMessageOutboxes;
+    private readonly cancelledRecoveredMessages;
     private readonly recoveredMessageRetryTimers;
     /**
      * Finding F4 (cancel lost during the offer-processing window): a
@@ -9042,10 +9054,15 @@ export declare class TaskRunner {
         deleted: boolean;
     }>;
     /** Restore activated, unaccepted message drafts before transport admission on daemon restart. */
-    recoverAgentMessageOutboxes(agentsRoot: string): Promise<void>;
+    recoverAgentMessageOutboxes(agentsRoot: string, resultFailureTasks?: ReadonlyMap<string, {
+        agentRef: AgentRef;
+        contract: string;
+    }>, isCancelled?: (taskId: string) => Promise<boolean>): Promise<void>;
     private agentMessageOutbox;
     /** A recovery terminal must not close first-message admission before this durable draft has a disposition. */
     hasPendingRecoveredAgentMessage(taskId: string): boolean;
+    cancelRecoveredAgentMessage(taskId: string, persist: () => Promise<void>): Promise<void>;
+    recoveredAgentMessageState(taskId: string): 'pending' | 'held' | 'refused' | 'missing';
     /** Retry stable recovered records after a transport handshake/re-handshake. */
     retryRecoveredAgentMessages(): void;
     private canPublishAgentMessage;
@@ -9575,8 +9592,9 @@ export declare class TaskRunner {
      * Wire v3 result channel, at `turn_end`: the one place a staged
      * `submit_result` outcome becomes `task.complete.document`.
      *
-     * `{deliver: true}` means "go on and send `task.complete`", with the staged
-     * canonical outcome when the offer is `mode: 'result-document'`.
+     * `{deliver: true}` permits the reply lane, with either the staged outcome
+     * or a typed result failure to persist before handing off a required reply.
+     * A failure never becomes a completion document.
      * `{deliver: false}` means this method has ALREADY reported `task.fail`
      * (or the task was finished meanwhile by someone else); the caller returns.
      *
