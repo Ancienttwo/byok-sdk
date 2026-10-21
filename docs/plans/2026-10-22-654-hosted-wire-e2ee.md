@@ -29,12 +29,14 @@ SDK 基线：`473cc4c495e244e3a9433794ffd9bd73d8455ece`。
 建议（细节见各节，决定见 §14）：
 
 - 加密策略按 task 冻结。Host 在 offer 里写明 scope 和加密类别。类别是固定的字段组：任务输入、Agent 消息、结果与过程、记忆投影。
-- 只有不由 Host 生成的内容才能对 Host 加密。产品云端用可读 history 组装的 ContextPack 保持明文。
+- 只有不由 Host 生成的内容才能对 Host 加密。产品云端用可读 history 组装的 ContextPack 保持明文。一个 offer 可以同时带两种作者的内容，只有成员写的部分进 C1。
 - 密钥分三层：每个 tenant 一条只含公钥的成员链；每个 scope 一组按 epoch 轮换的对称 scope key；每个设备和客户端各有签名密钥与 KEM 密钥。
 - 信任锚由用户携带：客户端生成配对验证秘密，经配对码交给设备，不发给 Host。只信 Host 目录的方式与今天的 provider secret 同级，不满足 #654 需求 1。
 - wire 在 v3 内做双向 gated addition。设备与 Host 都必须声明 `sealed-payload-v1`。
 - 幂等改为比较「明文元数据 + keyed content MAC」，不比较密文字节。
 - 删除提供两条路：加密类别用 crypto-shredding；全部类别都可用能在 Workers 上运行的 scoped row-delete。
+- Host 按 routine 发起的任务复用成员封装的 routine 模板。模板身份是 `routineId` 加 `definitionVersion`，由设备校验。
+- 浏览器成员丢失密钥（例如 Safari ITP 删除 IndexedDB）时，由持有 scope key 的设备重新批准。只有全部成员都丢失密钥时才丢数据。
 
 ## 2. P1：现状与真实边界
 
@@ -94,6 +96,7 @@ task receipt、task 行、`agent_message_admission` 行和 `agent_egress_event` 
 
 - 浏览器为每个任务生成 P-256 临时密钥。设备持有 relay 私钥。双方做 ECDH，经 HKDF 派生 AES-256-GCM frame key（AiphaBee `packages/local-execution-protocol/src/index.ts:2276-2330`）。
 - 浏览器从产品 Worker 返回的 `LocalDeviceSummary.device_public_jwk` 取得设备公钥（AiphaBee `apps/web/src/lib/api/localExecution.ts:1304`、`:1337`）。
+- 浏览器另有一个 loopback 身份检查（AiphaBee `apps/web/src/lib/localAgentIdentity.ts:224`）。它只经 `127.0.0.1` 或 `localhost` 访问 Local Agent，所以只在浏览器和 Local Agent 位于同一台电脑时才能发现公钥被换。AiphaBee 的复核确认它不挡研究任务的加密路径。
 - relay 只转发密文，不落库。设备公钥来自 Worker，所以 Worker 可以替换它。这条 relay 不满足 #654 需求 1。
 
 ## 3. P2：一条研究任务路径上的明文落点
@@ -163,6 +166,7 @@ task receipt、task 行、`agent_message_admission` 行和 `agent_egress_event` 
 - Host 下发的前端代码。浏览器客户端的代码来自 Host。恶意前端可以在输入时取走明文，也可以跳过检查。这与 `docs/spec.md:86-92` 对 sealed provider secret 的说明一致。只有代码来源固定的客户端（原生应用、签名发布的 `ui-runtime` 宿主）能防这一项。
 - 主动 Host 可以扣留成员链的 `remove` 条目，让某个发送方继续用旧 epoch。§7.6 能检测这种情况，但不能阻止。
 - 撤销不能收回已导出的明文，也不能清除离线设备上的密钥。
+- 浏览器成员会丢失密钥。Safari ITP 会删除 7 天没有用户交互的站点的 IndexedDB（按 Safari 的使用天数计）。用户清除站点数据也会删除密钥。这时由仍持有 scope key 的设备重新批准浏览器（§7.8），代价是一次重新批准。只有全部设备和客户端都丢失密钥时，才会丢数据（§14 D13）。
 - Host 仍能下发任意任务，让设备读取本机数据后以明文回传。加密保护内容的存储与转发，不缩小执行权限。
 
 ## 6. 数据类别与 wire 字段（任务 2）
@@ -183,12 +187,26 @@ v1 保持明文的 Host 内容：`agent.home.projection` 的 persona 值、`agen
 ### 6.2 开启粒度与作者规则
 
 - 作者规则：一个类别要对 Host 加密，它的作者必须是成员端点。研究任务的输入由浏览器写出，C1 可以加密。产品后端用可读 history 组装的 ContextPack 由 Host 写出，加密后只得到存储层保护，得不到端到端保护。
+- 一个 offer 可以同时带两种作者的内容。成员写的部分进 C1。Host 组装的部分放进一个明文字段，只有存储层保护。设备按固定规则把两部分拼成交给 Agent 的 instruction。例如 AiphaBee 聊天里触发的研究：用户输入的问题进 C1；对话来自 `BotConversationDO`，由 Host 组装（AiphaBee `apps/local-agent/src/local-bot-chat-research.ts:63`）。划分表为这个明文字段单列一项（§8.3）。
 - 读者规则：产品后端要读的内容不能加密。Bot 对话的回复要写进产品的对话存储，所以 Bot 对话的 C2 保持明文。
 - 策略按 task 冻结。offer 带一个明文字段 `sealing`：`{ scopeId, epoch, categories }`。task 创建后它不再变化。这个 task 的每个 envelope 都按它处理。
 - 降级保护：C1 密文的 AAD 包含 `categories`（§8.2）。Host 不能保留用户的 C1 密文，同时把 C3 改成明文。offer 的策略与 AAD 不一致时，设备以 `sealing_policy_mismatch` 做非重试 decline。
 - 每个 scope 有一条成员签名的 `scope-policy`（§7.4）。设备拒绝策略低于它的 task。
 - `cloud-do` 托管执行器必须读明文。Host 不能把带 `sealing` 的 task 交给它。
 - AiphaBee 的建议配置：研究 scope 开启 C1 和 C3；研究任务发 Agent 消息时再开 C2；Bot 对话和 Bot 记忆保持明文。由 owner 确认（§14 D1、D3）。
+
+### 6.3 Host 发起的 routine 任务
+
+- K4 的 routine 由 Host 调度。每个 occurrence 的每次执行都是新的 SDK task，taskId 由 K4 core 分配（`docs/host-execution-core.md:13-19`、`:64`）。在 H 里，调度在 Host 服务上运行（`docs/host-execution-core.md:25`）。occurrence 发生时不一定有成员在线。AAD 和 MAC 都绑定 taskId（§8.2、§9.1），所以成员事先封装的 C1 不能在下一个 occurrence 上复用。
+- 决定：成员封装一份 routine 模板（§14 D15）。模板只含成员写的 routine 输入，例如 AiphaBee 复核提到的 S10 watchlist routine。
+- 模板身份是 `routineId` 加 `definitionVersion`，与 K4 occurrence key 用同一对值（`docs/host-execution-core.md:176`）。消息族为 `routine.template`。模板的 AAD 和 MAC 用这个身份代替 taskId，不带目标 `deviceId`。AAD 另外绑定 `agentRef`、成员设定的到期时间 `notAfter`，以及成员为这个 routine 选的类别 `categories`。
+- Host 把模板密文与 routine 定义存在一起。每次执行的 offer 原样带上模板，再加一个明文的 `routineRef: { routineId, definitionVersion }`。Host 组装的内容按 §6.2 放在明文字段里。
+- 设备校验：消息族是 `routine.template`；AAD 身份等于 `routineRef`；`agentRef` 相同；offer 的 `sealing.categories` 等于模板的 `categories`，否则返回 `sealing_policy_mismatch`（与 §6.2 的降级保护相同）；没有过 `notAfter`；解密后 MAC 相符。任何一项不符，设备做非重试 decline。
+- 幂等不变：offer 仍以 taskId 为身份。比较投影带 `routineRef` 和模板的 `contentMac`。同一 taskId 换了模板，返回 `coordination_input_invalid`。
+- 成员修改 routine 时封装新版本的模板。用户在线时，成员客户端在 `notAfter` 之前续封。续封按当前 epoch 重新封装。
+- 模板的 epoch 或链头比设备看到的旧时，设备在 `notAfter` 之前照常接受。§7.3 的「发送方视图过期」标记对模板只作提示。§7.8 的恢复和成员移除都会推进链头和 epoch，所以这种情况常见。
+- Host 仍决定执行的时间和次数，也能在 `notAfter` 之前继续用已被替换的旧版本。它不能改模板内容，也不能把模板用到另一个 routine、Agent 或 scope。Host 本来就能下发任意任务（§5.4），所以多执行几次不增加它能读到的内容。
+- 模板交付之前，routine 任务只封装 C3，输入对 Host 可读。
 
 ## 7. 密钥层级与托管（任务 3）
 
@@ -273,6 +291,17 @@ Host 没有 `pv`，所以不能替换任何一方的公钥。128 位秘密不能
 - 浏览器私钥是 IndexedDB 里不可导出的 `CryptoKey`。设备把私钥 JWK 存进 OS credential store，使用时以不可导出方式导入，与 `device-sealing-key.ts` 相同。
 - Workers 上不做解密，也不做 HPKE。CPU 开销只有哈希。
 
+### 7.8 客户端丢失密钥
+
+- 浏览器客户端的成员密钥在 IndexedDB 里。Safari ITP 和用户清除站点数据都会删除它（§5.4）。在 Safari 上这会经常发生。
+- 恢复流程与 §7.2 中批准新加入客户端的流程相同：
+  1. 浏览器生成新的成员密钥，并显示指纹。
+  2. 用户在设备上用本机命令，或在另一个仍有密钥的客户端上，比对指纹并批准。批准方签署 `add(新客户端)` 和 `remove(旧客户端)`。
+  3. 批准方为浏览器需要的每个 epoch 生成新的 key package。设备能做这一步：它保留自己的 key package（§14 D5），能解出旧 epoch 的 scope key。
+  4. `remove` 让每个相关 scope 在下一次封装前轮换 epoch（§7.5）。旧密钥可能被备份过，所以按移除处理。
+- 代价是一次重新批准，并且要有一个持有 scope key 的成员在线。浏览器里还没确认的待提交密文也会丢失。产品用新的 taskId 重新提交（§9.2）。
+- 全部设备和客户端都丢失密钥时，数据无法恢复（§14 D13）。
+
 ## 8. Wire 格式、版本与路由（任务 4）
 
 ### 8.1 封装对象
@@ -301,9 +330,9 @@ Host 没有 `pv`，所以不能替换任何一方的公钥。128 位秘密不能
 
 ### 8.2 AAD
 
-AAD 是下列字段的 canonical JSON：`v`、`suite`、`category`、`tenantId`、`scopeId`、`epoch`、`keyId`、`chainHead`、`sender`、消息族（例如 `task.offer_for_agent`）、方向、身份（`taskId`，或 `requestId`、`messageId`、`mutationId`）、目标 `deviceId`、`agentRef`、task 的 `sealing.categories`、`paddedLength` 和 `contentMac`。
+AAD 是下列字段的 canonical JSON：`v`、`suite`、`category`、`tenantId`、`scopeId`、`epoch`、`keyId`、`chainHead`、`sender`、消息族（例如 `task.offer_for_agent`）、方向、身份（`taskId`，或 `requestId`、`messageId`、`mutationId`，或 routine 模板的 `routineId` 与 `definitionVersion`）、目标 `deviceId`、`agentRef`、task 的 `sealing.categories`、`paddedLength` 和 `contentMac`。
 
-AAD 不含 envelope 的 `id`、`seq` 和 `ts`。dead-letter 重放会用新 `seq` 重新编码 envelope（`cleanup.ts:533-563`）。AAD 绑定了身份字段，所以 Host 不能把密文搬到另一个 task、设备、Agent 或 scope。
+AAD 不含 envelope 的 `id`、`seq` 和 `ts`。dead-letter 重放会用新 `seq` 重新编码 envelope（`cleanup.ts:533-563`）。AAD 绑定了身份字段，所以 Host 不能把密文搬到另一个 task、设备、Agent 或 scope。唯一的例外是 routine 模板：按设计，它在同一 routine 的多次执行上复用（§6.3）。
 
 ### 8.3 字段划分与接收端校验
 
@@ -361,7 +390,7 @@ contentMac      = "hmac-sha256:" + hex(HMAC-SHA-256(K_mac,
                     || identity || "\n" || canonicalJson(plaintext)))
 ```
 
-`identity` 是这次写入的身份：offer 用 taskId，Agent 消息用 messageId，输入准备用 requestId，记忆投影用 mutationId。
+`identity` 是这次写入的身份：offer 用 taskId，Agent 消息用 messageId，输入准备用 requestId，记忆投影用 mutationId，routine 模板用 `routineId` 加 `definitionVersion`（§6.3）。
 
 MAC 只依赖 scope、epoch、类别、消息族、身份和明文，与 salt 和 nonce 无关。同一内容重新加密后 MAC 不变。身份进入 MAC 后，两个不同 task 的相同内容得到不同的 MAC。Host 只能比较同一身份的两次提交。
 
@@ -515,8 +544,8 @@ identity receipt 是防重放的 fence，同时保存了正文，而且永不过
 以下是建议的交付物。它们都还没有实现。
 
 - E1 字节规则：`@byok-sdk/core` 的封装对象、AAD、MAC、成员链条目、key package 和测试向量。同一组向量在 Chromium、WebKit、Gecko、Node 和 Bun 上运行。
-- E2 成员与密钥：daemon 的成员密钥托管和配对验证秘密；客户端参考库；成员链校验；key package 通知。
-- E3 wire 与存储：划分表、两个能力门、Host 的比较投影和长度上限。memory、SQLite 和 Postgres 三种 store 一起修改。
+- E2 成员与密钥：daemon 的成员密钥托管和配对验证秘密；客户端参考库；成员链校验；key package 通知；客户端丢失密钥后的重新批准（§7.8）。
+- E3 wire 与存储：划分表、两个能力门、Host 的比较投影和长度上限。memory、SQLite 和 Postgres 三种 store 一起修改。routine 模板的 `routineRef`、比较投影和设备校验也在这一片（§6.3）。
 - E4 读写接口：`consume` 的加密输入；读接口返回密文；对加密任务拒绝草稿；拒绝把加密任务交给 `cloud-do`。
 - E5 删除：crypto-shredding 流程；Workers 上的 scoped row-delete。明文行的 scoped row-delete 不依赖 E1 到 E4，可以先交付；加密行的部分随 E3 一起做。
 - E6 conformance 与文档：canary 测试；在 `docs/security.md` 写托管 surface 的威胁模型（#654 需求 6）；同步 spec 和 protocol。
@@ -530,6 +559,8 @@ identity receipt 是防重放的 fence，同时保存了正文，而且永不过
 - fail closed：缺 key package、epoch 错误、MAC 不符、未知版本、旧 Host、旧设备、Host 把加密 offer 改成明文、Host 把密文搬到另一个 task。每一项都必须被拒绝，且不留明文。
 - 幂等：同一 taskId、同一内容重新加密后重试，结果为重复；同一 taskId、不同内容，返回 `coordination_input_invalid`；重复投递被去重。
 - 撤销：移除成员后，新 epoch 的内容对它不可读。Host 扣留 `remove` 时，签署方能检测到。
+- routine 模板：同一份模板用于同一 routine 的多次执行。换 routine、换 Agent、关掉 C3 或过了 `notAfter` 时，设备拒绝。
+- 客户端丢失密钥：浏览器清除站点数据后，经设备重新批准，能读到旧 epoch 的内容。旧客户端被移除。
 - 未开启的类别：现有测试套件全部通过，行为不变。
 
 本 PR 没有运行这些测试。
@@ -568,5 +599,6 @@ identity receipt 是防重放的 fence，同时保存了正文，而且永不过
 | D10 | 多用户 tenant 与发送方认证 | v1 只支持单用户 scope；每条内容加发送方签名 | v1 只支持单用户 scope |
 | D11 | `consume` 的形状 | 独立的加密输入加显式声明；同一函数加判别字段 | 独立输入加显式声明 |
 | D12 | 设备 KEM 密钥 | 新的 credential 条目；复用 provider sealing key | 新条目。两者的用途和轮换周期不同 |
-| D13 | 全部成员丢失密钥 | 接受数据丢失；增加恢复密钥 | 先接受数据丢失。恢复密钥另行设计 |
+| D13 | 成员丢失密钥 | 设备或其他客户端重新批准，并重发 key package；增加恢复密钥；接受数据丢失 | 单个浏览器丢失密钥（Safari ITP、清除站点数据）时靠设备恢复（§7.8），代价是一次重新批准。这依赖 D5 的长期保留。全部设备和客户端都丢失密钥时，先接受数据丢失。恢复密钥另行设计 |
 | D14 | 发版位置 | 0.28.2 之后的功能版本；与 #655 的先后 | 0.28.2 之后单独一班。先定 #655 的身份对应，再删 AiphaBee 的自研 relay |
+| D15 | Host 发起的 routine 任务的 C1 | 成员封装的 routine 模板，身份为 `routineId` 加 `definitionVersion`，由设备校验；routine 任务只封装 C3 | 模板（§6.3）。模板交付之前，routine 任务只封装 C3 |
