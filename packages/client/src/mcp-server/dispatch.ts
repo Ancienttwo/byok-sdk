@@ -79,7 +79,6 @@ export function classifyJsonRpcMessage(value: unknown): ClassifiedMessage {
  */
 export class SeenRequestIds {
   private readonly seen = new Set<string>();
-  private readonly order: string[] = [];
   private readonly capacity: number;
 
   constructor(capacity: number) {
@@ -96,11 +95,8 @@ export class SeenRequestIds {
     const key = SeenRequestIds.key(id);
     if (this.seen.has(key)) return;
     this.seen.add(key);
-    this.order.push(key);
-    while (this.order.length > this.capacity) {
-      const evicted = this.order.shift();
-      if (evicted !== undefined) this.seen.delete(evicted);
-    }
+    // Set preserves insertion order; duplicate ids do not refresh their age.
+    while (this.seen.size > this.capacity) this.seen.delete(this.seen.values().next().value!);
   }
 
   /** `"7"` and `7` are different JSON-RPC ids and must not collide. */

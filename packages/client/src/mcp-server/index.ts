@@ -293,7 +293,8 @@ export function serveMcpOverStdio(options: McpServerOptions): McpServerHandle {
   function send(message: Record<string, unknown>, requestId?: McpServerRequestId): void {
     if (closed) return;
     const oversize = writer.write(`${JSON.stringify(message)}\n`);
-    if (oversize === 'pending-limit') closeOutboundBufferLimit();
+    if (oversize === 'pending-limit') close({ kind: 'outbound-buffer-limit',
+      limitBytes: MCP_SERVER_MAX_PENDING_BYTES, limitFrames: MCP_SERVER_MAX_PENDING_FRAMES });
     else if (oversize !== undefined) closeOutboundLimit(oversize, requestId);
   }
 
@@ -303,17 +304,16 @@ export function serveMcpOverStdio(options: McpServerOptions): McpServerHandle {
    * `2025-11-25`) or nulled (under the two older revisions, which is the one
    * place `id: null` is correct per JSON-RPC 2.0).
    */
-  function sendError(id: McpServerRequestId | undefined, code: number, message: string): void {
-    if (id !== undefined) {
-      send({ jsonrpc: '2.0', id, error: { code, message } }, id);
-      return;
-    }
+  function sendError(id: McpServerRequestId | undefined, code: number, message: string, data?: unknown): void {
     const version = negotiatedVersion ?? DEFAULT_PROTOCOL_VERSION;
-    if (version === OMITS_UNREADABLE_ID) {
-      send({ jsonrpc: '2.0', error: { code, message } });
-      return;
-    }
-    send({ jsonrpc: '2.0', id: null, error: { code, message } });
+    send({ jsonrpc: '2.0',
+      id: id ?? (version === OMITS_UNREADABLE_ID ? undefined : null),
+      error: { code, message, data },
+    }, id);
+  }
+
+  function sendResult(id: McpServerRequestId, result: unknown): void {
+    send({ jsonrpc: '2.0', id, result }, id);
   }
 
   function abortEverything(): void {
@@ -321,39 +321,24 @@ export function serveMcpOverStdio(options: McpServerOptions): McpServerHandle {
     activeCalls.clear();
   }
 
-  function closeOutboundBufferLimit(): void {
-    if (closed) return;
-    closed = true;
+  function stopTransport(): void {
     writer.stop();
     reader?.stop();
     unsubscribeListChanged?.();
+  }
+
+  function close(reason?: McpServerCloseReason): void {
+    if (closed) return;
+    closed = true;
+    stopTransport();
     abortEverything();
-    options.onClose?.({
-      kind: 'outbound-buffer-limit',
-      limitBytes: MCP_SERVER_MAX_PENDING_BYTES,
-      limitFrames: MCP_SERVER_MAX_PENDING_FRAMES,
-    });
+    if (reason !== undefined) options.onClose?.(reason);
   }
 
   function closeOutboundLimit(bytes: number, requestId: McpServerRequestId | undefined): void {
     if (closed) return;
-    closed = true;
-    const error = new McpServerFrameTooLargeError(requestId, bytes, maxOutboundFrameBytes);
-    writer.stop();
-    reader?.stop();
-    unsubscribeListChanged?.();
-    abortEverything();
-    options.onClose?.({ kind: 'outbound-frame-limit', limitBytes: maxOutboundFrameBytes, bytes, error });
-  }
-
-  function closeFrameLimit(): void {
-    if (closed) return;
-    closed = true;
-    writer.stop();
-    reader?.stop();
-    unsubscribeListChanged?.();
-    abortEverything();
-    options.onClose?.({ kind: 'frame-limit', limitBytes: maxLineBytes });
+    close({ kind: 'outbound-frame-limit', limitBytes: maxOutboundFrameBytes, bytes,
+      error: new McpServerFrameTooLargeError(requestId, bytes, maxOutboundFrameBytes) });
   }
 
   async function closeEof(): Promise<void> {
@@ -361,9 +346,7 @@ export function serveMcpOverStdio(options: McpServerOptions): McpServerHandle {
     closed = true;
     options.onClose?.({ kind: 'eof' });
     abortEverything();
-    writer.stop();
-    reader?.stop();
-    unsubscribeListChanged?.();
+    stopTransport();
     await Promise.allSettled([...outstanding]);
   }
 
@@ -374,26 +357,16 @@ export function serveMcpOverStdio(options: McpServerOptions): McpServerHandle {
         ? requested
         : DEFAULT_PROTOCOL_VERSION;
     negotiatedVersion = selected;
-    send(
-      {
-        jsonrpc: '2.0',
-        id,
-        result: { protocolVersion: selected, capabilities, serverInfo: options.serverInfo },
-      },
-      id,
-    );
+    sendResult(id, { protocolVersion: selected, capabilities, serverInfo: options.serverInfo });
   }
 
   function handleToolsList(id: McpServerRequestId): void {
+    // JSON omits undefined optional values; keep the frozen field order.
     const tools = options.tools.map(tool => ({
-      name: tool.name, inputSchema: tool.inputSchema,
-      ...(tool.description === undefined ? {} : { description: tool.description }),
-      ...(tool.title === undefined ? {} : { title: tool.title }),
-      ...(tool.annotations === undefined ? {} : { annotations: tool.annotations }),
-      ...(tool.outputSchema === undefined ? {} : { outputSchema: tool.outputSchema }),
-      ...(tool._meta === undefined ? {} : { _meta: tool._meta }),
+      name: tool.name, description: tool.description, inputSchema: tool.inputSchema,
+      title: tool.title, annotations: tool.annotations, outputSchema: tool.outputSchema, _meta: tool._meta,
     }));
-    send({ jsonrpc: '2.0', id, result: { tools } }, id);
+    sendResult(id, { tools });
   }
 
   function handleToolsCall(id: McpServerRequestId, params: Record<string, unknown> | undefined): void {
@@ -460,32 +433,15 @@ export function serveMcpOverStdio(options: McpServerOptions): McpServerHandle {
         const result = await options.callTool({ name, arguments: callArguments, signal: controller.signal, progress });
         if (!stillOurs()) return;
         activeCalls.delete(key);
-        send({ jsonrpc: '2.0', id, result }, id);
+        sendResult(id, result);
       } catch (error) {
         if (!stillOurs()) return;
         activeCalls.delete(key);
         if (error instanceof McpServerToolError) {
-          send(
-            {
-              jsonrpc: '2.0',
-              id,
-              error:
-                error.data === undefined
-                  ? { code: error.code, message: error.message }
-                  : { code: error.code, message: error.message, data: error.data },
-            },
-            id,
-          );
-          return;
+          sendError(id, error.code, error.message, error.data);
+        } else {
+          sendError(id, INTERNAL_ERROR, error instanceof Error ? error.message : String(error));
         }
-        send(
-          {
-            jsonrpc: '2.0',
-            id,
-            error: { code: INTERNAL_ERROR, message: error instanceof Error ? error.message : String(error) },
-          },
-          id,
-        );
       }
     })();
     outstanding.add(task);
@@ -545,7 +501,7 @@ export function serveMcpOverStdio(options: McpServerOptions): McpServerHandle {
         handleInitialize(classified.id, classified.params);
         return;
       case 'ping':
-        send({ jsonrpc: '2.0', id: classified.id, result: {} }, classified.id);
+        sendResult(classified.id, {});
         return;
       case 'tools/list':
         handleToolsList(classified.id);
@@ -562,7 +518,7 @@ export function serveMcpOverStdio(options: McpServerOptions): McpServerHandle {
     input,
     maxLineBytes,
     onLine: handleLine,
-    onLimit: closeFrameLimit,
+    onLimit: () => close({ kind: 'frame-limit', limitBytes: maxLineBytes }),
     onEnd: () => {
       void closeEof();
     },
@@ -574,14 +530,5 @@ export function serveMcpOverStdio(options: McpServerOptions): McpServerHandle {
   // Subscription itself may synchronously emit enough notifications to close.
   if (closed) unsubscribeListChanged?.();
 
-  return {
-    close(): void {
-      if (closed) return;
-      closed = true;
-      writer.stop();
-      reader?.stop();
-      unsubscribeListChanged?.();
-      abortEverything();
-    },
-  };
+  return { close: () => close() };
 }

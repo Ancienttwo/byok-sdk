@@ -9,6 +9,7 @@
  * bounds a hostile or broken peer would breach, and the responses that must
  * never appear.
  */
+import { SeenRequestIds } from '../mcp-server/dispatch';
 import { PassThrough, Writable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -806,5 +807,37 @@ describe('request-scoped tool progress', () => {
     const dispatch = vi.fn(async () => ({})); const h = start({ callTool: dispatch });
     try { await initialize(h, '2025-11-25'); h.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'echo', _meta: { progressToken: token } } }); await h.expectLines(2); expect(h.parsed(1)).toMatchObject({ error: { code: -32602 } }); expect(dispatch).not.toHaveBeenCalled(); }
     finally { h.handle.close(); }
+  });
+});
+
+
+describe('SeenRequestIds insertion-order retention', () => {
+  it('evicts FIFO without refreshing duplicate ids and distinguishes strings from numbers', () => {
+    const ids = new SeenRequestIds(2);
+    ids.add(7);
+    ids.add('7');
+    ids.add(7);
+    expect(ids.has(7)).toBe(true);
+    expect(ids.has('7')).toBe(true);
+    ids.add(8);
+    expect(ids.has(7)).toBe(false);
+    expect(ids.has('7')).toBe(true);
+    expect(ids.has(8)).toBe(true);
+    ids.add(7);
+    expect(ids.has('7')).toBe(false);
+    expect(ids.has(8)).toBe(true);
+    expect(ids.has(7)).toBe(true);
+  });
+  it('retains no ids at zero capacity and only the latest distinct id at one', () => {
+    const zero = new SeenRequestIds(0);
+    zero.add(0);
+    expect(zero.has(0)).toBe(false);
+    const one = new SeenRequestIds(1);
+    one.add(0);
+    one.add(0);
+    expect(one.has(0)).toBe(true);
+    one.add('0');
+    expect(one.has(0)).toBe(false);
+    expect(one.has('0')).toBe(true);
   });
 });

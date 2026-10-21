@@ -12147,7 +12147,6 @@ export declare function classifyJsonRpcMessage(value: unknown): ClassifiedMessag
  */
 export declare class SeenRequestIds {
     private readonly seen;
-    private readonly order;
     private readonly capacity;
     constructor(capacity: number);
     /** `true` when this id has already been used in this session. */
@@ -12162,7 +12161,7 @@ import { type McpServerOptions } from './index';
 /** Maximum accepted HTTP request body, in UTF-8 bytes. */
 export declare const MCP_HTTP_MAX_BODY_BYTES: number;
 export interface McpHttpServerOptions extends Omit<McpServerOptions, 'input' | 'output' | 'onClose' | 'maxLineBytes'> {
-    /** Stateful by default. Stateless mode retains no sessions and disallows SSE. */
+    /** Stateful by default. Stateless mode retains no sessions; only tools/call with _meta.progressToken streams progress and result over its own POST SSE response. */
     readonly sessionMode?: 'stateful' | 'stateless';
     /** Trusted public origin, e.g. https://host.example. Never derive it from the request Host header. */
     readonly origin: string;

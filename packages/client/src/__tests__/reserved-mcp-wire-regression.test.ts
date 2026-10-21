@@ -1,8 +1,8 @@
 /**
- * T1: the three retained SDK-reserved MCP helpers' EMITTED WIRE BYTES, frozen.
+ * T1: the four retained SDK-reserved MCP helpers' EMITTED WIRE BYTES, frozen.
  *
- * `byok-agent-message-mcp`, `byok-agent-memory-mcp` and
- * `byok-agent-team-mcp` are spawned as child processes by runtimes this SDK
+ * `byok-agent-message-mcp`, `byok-agent-memory-mcp`,
+ * `byok-agent-team-mcp` and `byok-agent-result-mcp` are spawned as child processes by runtimes this SDK
  * does not own (pi's and codex's MCP
  * config). Their contract with those runtimes is bytes on a pipe, not a
  * TypeScript signature, so the only regression that matters is a byte one.
@@ -10,7 +10,9 @@
  * Each server is driven over in-memory streams with one fixed request script
  * (`initialize`, `notifications/initialized`, `tools/list`, `ping`, a happy
  * `tools/call`, a faulting `tools/call`, an unknown method) and every emitted
- * line is compared with `fixtures/reserved-mcp-wire-baseline.json`.
+ * line is compared with `fixtures/reserved-mcp-wire-baseline.json` for the
+ * three migration-era helpers. The later result helper has a separate literal
+ * tools/list byte assertion below; the historical fixture remains unchanged.
  *
  * THE BASELINE IS CAPTURED FROM THE MIGRATION BASE, NOT FROM `main`.
  * `capturedAt` below records the exact commit whose behaviour these bytes
@@ -31,6 +33,7 @@ import {
   AGENT_MEMORY_RECALL_TOOL_NAME,
 } from '../bin/agent-memory-mcp-server';
 import { serveTeamMcpOverStdio, TEAM_POST_TOOL_NAME } from '../bin/team-mcp-server';
+import { serveAgentResultMcpOverStdio } from '../bin/agent-result-mcp-server';
 import { AGENT_MESSAGE_TOOL_NAME } from '../sdk-reserved-mcp';
 
 /** The commit the frozen bytes below were captured from: `codex/c07-g4b-merge`, not `main`. */
@@ -297,4 +300,18 @@ describe('the four SDK-reserved MCP helpers on the wire', () => {
       expect(emitted, `${server.name} drifted from the frozen wire bytes`).toEqual(expected);
     }
   });
+});
+
+// Result helper was introduced after the historical migration fixture. Pin its
+// tools/list ordering directly rather than rewriting that fixture's provenance.
+it('keeps the result helper tools/list wire bytes stable', async () => {
+  const emitted = await driveScript({
+    name: 'byok-agent-result-mcp',
+    serve: (stdin, stdout) => { void serveAgentResultMcpOverStdio({ stdin, stdout, deps: {
+      describe: async () => ({ name: 'submit_result', description: 'Submit the frozen result.', inputSchema: { type: 'object' } }),
+      submit: async () => ({ state: 'staged', receiptId: 'receipt-1' }),
+    } }); },
+    steps: scriptFor({ name: 'submit_result', arguments: {} }, { name: 'unknown', arguments: {} }),
+  });
+  expect(emitted[2]).toBe('{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"submit_result","description":"Submit the frozen result.","inputSchema":{"type":"object"}}]}}');
 });
