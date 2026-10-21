@@ -706,6 +706,45 @@ default 180 s). A turn start takes about 20 s, so a Host may raise
 `startupTimeoutMs`. Qualified build and limits:
 [S0 note](../../docs/notes/2026-10-20-519-hermes-acp-s0.md).
 
+### Hermes with a separate credential-custody launcher
+
+A Host may configure `HermesAdapter.byokLauncher` instead of `model`:
+
+```ts
+const hermes = new HermesAdapter({
+  home: '/var/lib/example-host/hermes',
+  resolveBin: () => ({ command: '/opt/hermes/bin/hermes', source: 'path' }),
+  byokLauncher: {
+    command: '/opt/node/bin/node',
+    args: ['/opt/example-host/hermes-custody.mjs'],
+    profileDbPath: '/var/lib/example-host/providers.sqlite',
+    selectProfile: (offer) => selectExactLocalBinding(offer),
+  },
+});
+```
+
+`selectProfile` is Host-owned local authority and returns an exact non-secret
+profile binding. The dedicated executable uses the keys package's
+`parseHermesProviderLauncherRequest` and `runHermesProviderLauncher` with the
+Host's account-scoped `SecretStore`; see [keys](../keys/README.md#hermes-custody-launcher).
+Admission returns only model metadata. Each gateway/viewer launch revalidates
+the binding and pending-custody state before reading the selected credential.
+The daemon never receives that credential; the launcher replaces itself with
+Hermes, preserving the PID required by the gateway identity check.
+
+This initial mapping accepts enabled OpenAI-compatible bearer profiles without
+`pi_model` overrides and maps them to Hermes `custom`. Other authentication,
+Anthropic, Responses/compat overrides and Windows remain unsupported. Use a
+POSIX Node runtime supporting `process.execve` (the SDK's Node >=24.15 floor)
+and an absolute Hermes executable; no PATH lookup or child-process proxy is
+used for launch. A Bun-only executable without `process.execve` is rejected.
+Custody mode filters inherited environment variables and injects only
+`SDK_HERMES_PROVIDER_KEY`; unlike direct mode it does not forward arbitrary
+provider or loader variables. The Host must still trust its launcher and Hermes
+executable. This adds no Hermes `dispatchSelection` wire authority: that contract
+remains Pi-only. Fake-runtime tests qualify custody/lifecycle behavior, not live
+provider compatibility or a bundled product's complete distribution.
+
 ### Direct adapter environments
 
 Hosts that use `@byok-sdk/client/adapters` can import `buildRuntimeEnv` from that

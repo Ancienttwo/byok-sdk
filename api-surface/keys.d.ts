@@ -448,6 +448,52 @@ export declare function requiredProviderSecret(profile: ProviderAuthProfile, sec
  * - `none` adds nothing.
  */
 export declare function providerHeaders(profile: ProviderAuthProfile, secret: string | undefined): Record<string, string>;
+// ==== @byok-sdk/keys dist/hermes-provider-launcher.d.ts ====
+import { z } from 'zod';
+import { type ModelProviderProfile, type ExactProviderProfileBinding } from './provider-profile';
+import { type SecretStore } from './secret-store';
+declare const RequestSchema: z.ZodObject<{
+    profileDbPath: z.ZodString;
+    binding: z.ZodObject<{
+        profileRef: z.ZodString;
+        profileRevision: z.ZodString;
+        profileHash: z.ZodString;
+        modelId: z.ZodString;
+        requiredCapabilities: z.ZodArray<z.ZodEnum<{
+            "image-input": "image-input";
+        }>>;
+    }, z.core.$strict>;
+    launch: z.ZodOptional<z.ZodObject<{
+        hermesBin: z.ZodString;
+        home: z.ZodString;
+        role: z.ZodEnum<{
+            gateway: "gateway";
+            viewer: "viewer";
+        }>;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
+export type HermesProviderLauncherRequest = Omit<z.infer<typeof RequestSchema>, 'binding'> & {
+    binding: ExactProviderProfileBinding;
+};
+export declare const HERMES_PROVIDER_KEY_ENV = "SDK_HERMES_PROVIDER_KEY";
+/** Non-secret Hermes custom-provider projection. Other provider/auth semantics remain unqualified. */
+export declare function hermesProviderModel(profile: ModelProviderProfile): {
+    provider: string;
+    model: string;
+    baseUrl: string;
+    keyEnv: string;
+};
+/** Parse only the SDK launcher grammar; no caller-supplied Hermes arguments or environment. */
+export declare function parseHermesProviderLauncherRequest(args: readonly string[]): HermesProviderLauncherRequest;
+/**
+ * Run only in a dedicated Host launcher process. Validation returns non-secret
+ * model metadata; launch replaces this process, preserving Hermes gateway PID.
+ * The Host supplies its account-scoped store here, never in the daemon.
+ */
+export declare function runHermesProviderLauncher(request: HermesProviderLauncherRequest, host: {
+    createSecretStore(): SecretStore;
+}): Promise<void>;
+export {};
 // ==== @byok-sdk/keys dist/http.d.ts ====
 /** Injectable `fetch`. Defaults to `globalThis.fetch` at every call site. */
 export type ProviderFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -552,6 +598,8 @@ export type { ModelProviderClient, ProviderConfiguration, ProviderRegistryOption
 export { PI_AUTH_NONE_API_KEY, PI_PROJECTED_KEY_ENV, buildPiProviderProjection, } from './pi-provider-projection';
 export { parsePiProviderLauncherOptions, runPiProviderLauncher, } from './pi-provider-launcher-core';
 export type { PiProviderLauncherHost, PiProviderLauncherOptions, } from './pi-provider-launcher-core';
+export { HERMES_PROVIDER_KEY_ENV, hermesProviderModel, parseHermesProviderLauncherRequest, runHermesProviderLauncher } from './hermes-provider-launcher';
+export type { HermesProviderLauncherRequest } from './hermes-provider-launcher';
 // ==== @byok-sdk/keys dist/macos-keychain.d.ts ====
 import { type CommandRunner } from './command-runner';
 import { type SecretStore } from './secret-store';
