@@ -1,3 +1,4 @@
+import { hostFailureSnapshot, withFailureSnapshot } from './failure-diagnostics';
 import { afterEach, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -170,7 +171,7 @@ it('does not recreate a completed routine or reapply its SDK terminal on replay 
     await vi.waitFor(() => expect(Object.values(host.ledger.snapshot().occurrences)).toHaveLength(1));
     const occurrence = Object.values(host.ledger.snapshot().occurrences)[0]!;
     const intent = host.ledger.snapshot().intents[occurrence.intentId!]!;
-    await vi.waitFor(() => expect(host.adapter.sessions.has(intent.taskId)).toBe(true));
+    await withFailureSnapshot(vi.waitFor(() => expect(host.adapter.sessions.has(intent.taskId)).toBe(true)), () => hostFailureSnapshot(host, intent.key));
     await host.adapter.sessions.get(intent.taskId)!.finish({ text: 'retained by the SDK' });
     await vi.waitFor(async () => { await host.core.drain(); expect(host.core.intent(intent.key)?.conclusion).toBe('succeeded'); });
     await host.core.flushProjections(async () => {});

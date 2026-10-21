@@ -1,3 +1,4 @@
+import { hostFailureSnapshot, withFailureSnapshot } from './failure-diagnostics';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -254,7 +255,7 @@ it.each(['queued', 'memory_blocked'] as const)('starts profile rev2 behind a sta
     const next = host.intent(`current-profile-${initial}`);
     next.execution.payload.agentRef.profileRevision = revision;
     const accepted = await host.core.enqueue(next);
-    await vi.waitFor(() => expect(host.adapter.sessions.has(accepted.taskId)).toBe(true), { timeout: 5000 });
+    await withFailureSnapshot(vi.waitFor(() => expect(host.adapter.sessions.has(accepted.taskId)).toBe(true), { timeout: 5000 }), () => hostFailureSnapshot(host, next.key));
     expect(host.core.intent(old.key)).toMatchObject({ phase: 'settled', conclusion: 'failed', attempts: 0 });
     expect(host.core.intent(next.key)).toMatchObject({ phase: 'inflight', attempts: 1 });
     expect(await host.server.tasks.offer(host.core.intent(old.key)!.taskId)).toBeUndefined();

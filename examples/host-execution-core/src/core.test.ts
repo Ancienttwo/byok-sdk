@@ -1,3 +1,4 @@
+import { hostFailureSnapshot, withFailureSnapshot } from './failure-diagnostics';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { RuntimeExecutionFailure } from '@byok-sdk/client';
@@ -224,7 +225,7 @@ it('retries a retryable device failure only with an explicit source policy', asy
     throw new RuntimeExecutionFailure({ phase: 'start', category: 'infrastructure', retry: 'retryable', reason: 'fixture launch unavailable' });
   } } });
   const intent = await host.core.enqueue(host.intent('retry-failure', { retry: { maxAttempts: 2, delaysMs: [20], retryFailures: true } }));
-  await vi.waitFor(() => expect(host.core.intent('retry-failure')?.generation).toBe(1), { timeout: 5000 });
+  await withFailureSnapshot(vi.waitFor(() => expect(host.core.intent('retry-failure')?.generation).toBe(1), { timeout: 5000 }), () => hostFailureSnapshot(host, 'retry-failure'));
   expect(await host.server.tasks.deviceTerminal(intent.taskId)).toMatchObject({ envelope: { type: 'task.fail', payload: { retryable: true } } });
   (await running('retry-failure')).finish({ text: 'recovered' });
   await settled('retry-failure');

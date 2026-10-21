@@ -1,3 +1,4 @@
+import { hostFailureSnapshot, withFailureSnapshot } from './failure-diagnostics';
 import { afterEach, expect, it, vi } from 'vitest';
 import { hash, taskId } from './model';
 import { nextIntervalOccurrence } from './schedule';
@@ -68,7 +69,7 @@ it('keeps one running occurrence and only the latest queued slot, then pause sto
   }, { timeout: 5000 });
   const running = intents().find(row => row.phase === 'inflight')!;
   host.adapter.sessions.get(running.taskId)!.finish({ text: 'current completes' });
-  await vi.waitFor(async () => { await host.core.drain(); expect(host.core.intent(running.key)?.conclusion).toBe('succeeded'); });
+  await withFailureSnapshot(vi.waitFor(async () => { await host.core.drain(); expect(host.core.intent(running.key)?.conclusion).toBe('succeeded'); }), () => hostFailureSnapshot(host, running.key));
   expect(occurrences()).toHaveLength(count);
   expect(host.ledger.snapshot().routines[hash('coalesce')]?.lifecycle).toBe('paused');
   await host.core.lifecycle('coalesce', 'completed');

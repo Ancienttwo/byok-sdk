@@ -1,3 +1,4 @@
+import { hostFailureSnapshot, withFailureSnapshot } from './failure-diagnostics';
 import { afterEach, expect, it, vi } from 'vitest';
 import { HostExecutionCore } from './core';
 import { MIN_TOMBSTONE_RETENTION_MS } from './ledger';
@@ -112,7 +113,7 @@ it('lets admitted Host work finish after pause and promotes only on the Host dec
   expect(intent.retryUntil).toBeUndefined();
   await vi.waitFor(() => expect(host.adapter.sessions.has(intent.taskId)).toBe(true));
   host.adapter.sessions.get(intent.taskId)!.finish({ text: 'Host requested analysis' });
-  await vi.waitFor(async () => { await host.core.drain(); expect(rows()[0]?.conclusion).toBe('succeeded'); });
+  await withFailureSnapshot(vi.waitFor(async () => { await host.core.drain(); expect(rows()[0]?.conclusion).toBe('succeeded'); }), () => hostFailureSnapshot(host, intent.key));
   expect(host.adapter.starts).toHaveLength(1);
 });
 
