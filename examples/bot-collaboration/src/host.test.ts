@@ -12,7 +12,7 @@ let bot: BotCollaboration;
 let extra: HostLedger | undefined;
 afterEach(async () => { await bot?.close(); extra?.close(); extra = undefined; await fixture?.close(); vi.useRealTimers(); vi.restoreAllMocks(); });
 async function setup(rest: Partial<BotOptions> = {}, wrap?: (server: ExecutionServer) => ExecutionServer) {
-  fixture = await openHost({
+  fixture = await openHost({ externalCore: true,
     consume: (wake, signal) => bot.consume(wake, signal),
     agentMessage: { consume: async () => ({ outcome: 'accepted' }) },
   });
