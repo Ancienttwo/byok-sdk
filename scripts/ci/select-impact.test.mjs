@@ -118,3 +118,16 @@ test('native asset packaging fixtures select their real platform smoke without b
     assert.throws(() => selectImpact([path]), /reviewed release validation required/i);
   }
 });
+
+
+test('SQLite packaging fixtures select only their reviewed packaging owner', () => {
+  for (const path of ['examples/packaging/sqlite-fixture.ts', 'examples/packaging/sqlite-smoke.mjs']) {
+    assert.deepEqual(selectImpact([path]), {
+      dirs: ['examples/packaging'], files: [path], families: ['packageability-smoke'], reason: 'impacted',
+    });
+  }
+  for (const path of ['examples/packaging/sqlite-unknown.ts', 'examples/packaging/sqlite-smoke-extra.mjs',
+    'examples/packaging/nested/sqlite-fixture.ts']) {
+    assert.throws(() => selectImpact([path]), /reviewed release validation required/i);
+  }
+});
