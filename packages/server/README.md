@@ -124,16 +124,21 @@ For a listed origin, the listener:
 
 - Accepts `Sec-Fetch-Mode: cors`, `Sec-Fetch-Dest: empty` and any
   `Sec-Fetch-Site`. A page on `localhost` is cross-site to `127.0.0.1`, so the
-  origin list is the check. It refuses navigation, `no-cors`, `Sec-Fetch-User`
-  and other fetch metadata.
+  origin list is the check. When the browser sends fetch metadata, the
+  listener refuses navigation, `no-cors`, `Sec-Fetch-User` and other values.
+  A request from a listed origin without fetch metadata is accepted, as for
+  older browsers.
 - Answers a preflight (`OPTIONS` with `Access-Control-Request-Method`) with 204
-  and does not dispatch it. The response allows `GET, POST, DELETE` and the
-  headers `authorization, content-type, accept, last-event-id, mcp-session-id,
-  mcp-protocol-version`. It caches for 600 seconds.
+  and does not dispatch it. A preflight with body framing gets 400. The
+  response allows `GET, POST, DELETE` and the headers `authorization,
+  content-type, accept, last-event-id, mcp-session-id, mcp-protocol-version`.
+  These lists are fixed: a Host that authenticates with another header cannot
+  serve it to a browser. The preflight caches for 600 seconds.
 - Adds `Access-Control-Allow-Origin: <origin>`, `Vary: Origin` and
-  `Access-Control-Expose-Headers: Mcp-Session-Id` to every other response,
-  including 503, 413 and 400 refusals. A handler header with the same name
-  replaces the listener value.
+  `Access-Control-Expose-Headers: Mcp-Session-Id` to every response, including
+  503, 413 and 400 refusals. A handler header with the same name replaces the
+  listener value. `WWW-Authenticate` is not exposed, so a browser client cannot
+  read it for OAuth discovery.
 
 The listener never sends `Access-Control-Allow-Credentials`, and it still
 refuses Cookie. The Host Header check is unchanged, so the browser client

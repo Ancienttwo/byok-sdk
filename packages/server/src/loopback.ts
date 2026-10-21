@@ -155,17 +155,18 @@ export async function listenLoopback(options: LoopbackListenerOptions): Promise<
       // Merged into every later writeHead, so 503/413/400 stay readable by the allowed page.
       response.setHeader('Access-Control-Allow-Origin', origin);
       response.setHeader('Vary', 'Origin');
+      response.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id');
     }
     if (!handler) { refuse(response, 503); return; }
+    const length = request.headers['content-length'];
     if (origin !== null && request.method === 'OPTIONS' && request.headers['access-control-request-method'] !== undefined) {
-      // Preflight is answered here and never reaches the handler.
+      // Preflight is answered here and never reaches the handler. Browsers send it without a body.
+      if (request.headers['transfer-encoding'] !== undefined || (length !== undefined && Number(length) !== 0)) { refuse(response, 400); return; }
       response.writeHead(204, { 'Access-Control-Allow-Methods': CORS_METHODS, 'Access-Control-Allow-Headers': CORS_HEADERS,
         'Access-Control-Max-Age': '600', 'Content-Length': '0' });
       response.end();
       return;
     }
-    if (origin !== null) response.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id');
-    const length = request.headers['content-length'];
     if (length !== undefined && Number(length) > maxBodyBytes) { refuse(response, 413); return; }
     // Fetch has no GET/HEAD body, so refuse framing that its adapter would otherwise omit.
     if ((request.method === 'GET' || request.method === 'HEAD') &&

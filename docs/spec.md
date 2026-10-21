@@ -49,14 +49,14 @@ metadata other than native fetch's `Sec-Fetch-Mode: cors`. It refuses every
 Origin by default. Bodies are buffered and capped before dispatch (2 MiB
 default). The listener is not authentication.
 
-`allowedOrigins` is an opt-in list of exact loopback browser origins. A listed
-origin passes with CORS mode metadata only. The listener answers its preflight
+`allowedOrigins` is an opt-in list of exact loopback browser origins. When a
+listed origin sends fetch metadata, only CORS mode passes. The listener answers its preflight
 without dispatch and adds `Access-Control-Allow-Origin`, `Vary: Origin` and
 `Access-Control-Expose-Headers: Mcp-Session-Id` to its responses. It never
 allows credentials, and Cookie stays refused. It does not rewrite Origin. An
 MCP handler must list the same origins in `createMcpHttpServer`'s
 `allowedOrigins`, or its own Origin check refuses them. See the
-[server README](../packages/server/README.md#identity-stable-loopback-listener).
+[server README](../packages/server/README.md#browser-clients-from-loopback-origins).
 
 ## Canonical Terms
 

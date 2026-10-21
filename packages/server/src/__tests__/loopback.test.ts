@@ -89,6 +89,12 @@ it('admits only listed loopback origins with CORS, answering preflight without d
   // Body cap still applies, and the allowed page can read the refusal.
   const oversized = await raw(selected, `POST /mcp HTTP/1.1\r\n${host}${page}Content-Length: 17\r\n${close}`);
   expect(oversized).toMatch(new RegExp(`^HTTP/1.1 413[^]*\r\nAccess-Control-Allow-Origin: ${browser}\r\n`));
+  const framed = await raw(selected, `GET /mcp HTTP/1.1\r\n${host}${page}Content-Length: 1\r\n${close}x`);
+  expect(framed).toMatch(new RegExp(`^HTTP/1.1 400[^]*\r\nAccess-Control-Allow-Origin: ${browser}\r\n`));
+  // A preflight never carries a body; refuse body framing instead of discarding it.
+  for (const body of ['Content-Length: 1\r\n', 'Transfer-Encoding: chunked\r\n']) {
+    expect(await raw(selected, `OPTIONS /mcp HTTP/1.1\r\n${host}${page}Access-Control-Request-Method: POST\r\n${body}${close}`)).toMatch(/^HTTP\/1.1 400/);
+  }
   // A plain OPTIONS without a preflight request method is an ordinary request.
   expect(await raw(selected, `OPTIONS /mcp HTTP/1.1\r\n${host}${page}${close}`)).toMatch(/^HTTP\/1.1 200/);
   expect(handler).toHaveBeenCalledTimes(2);
@@ -101,6 +107,7 @@ it('admits only listed loopback origins with CORS, answering preflight without d
     `Origin: ${browser}\r\nSec-Fetch-Mode: no-cors\r\n`,
     `Origin: ${browser}\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Dest: document\r\n`,
     `${page}Sec-Fetch-User: ?1\r\n`,
+    // Duplicate fetch metadata.
     `${page}Sec-Fetch-Site: same-origin\r\n`,
     // Without Origin, browser metadata other than native fetch's mode stays refused.
     `Sec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
