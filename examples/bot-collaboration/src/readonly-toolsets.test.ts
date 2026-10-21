@@ -85,5 +85,36 @@ it('refuses recovery of outstanding frozen toolsets after the Bot changes models
   fixture.ledger.transaction(s => { Object.values(s.intents).find(i => i.key === id)!.conclusion = 'cancelled'; });
   bot = new BotCollaboration(fixture.server, fixture.ledger, options);
   expect(bot.snapshot().team.bots.main!.execution.payload.requiredToolsets).toBeUndefined();
+  // The settled execution record stays readable and keeps its original toolset.
+  expect(bot.core.intent(id)?.conclusion).toBe('cancelled');
+  expect(fixture.ledger.snapshot().executions[taskId]?.input.payload.requiredToolsets).toEqual(['market.read']);
   submit.mockRestore();
+});
+
+it('refuses an initial template with required toolsets when the Host declares no allowlist', async () => {
+  fixture = await openHost();
+  const execution = template(fixture.deviceId);
+  execution.payload.requiredToolsets = ['market.read'];
+  expect(() => new BotCollaboration(fixture!.server, fixture!.ledger, { botId: 'main', execution, connector: async () => ({}) }))
+    .toThrow('not declared read-only');
+  expect(() => new BotCollaboration(fixture!.server, fixture!.ledger, { botId: 'main', execution, readOnlyToolsets: [], connector: async () => ({}) }))
+    .toThrow('not declared read-only');
+});
+
+it('checks only non-archived Bot templates on reopen', async () => {
+  fixture = await openHost();
+  const options = { botId: 'main', execution: template(fixture.deviceId), connector: async () => ({}), readOnlyToolsets: ['market.read'] };
+  bot = new BotCollaboration(fixture.server, fixture.ledger, options);
+  const main = bot.snapshot().team.bots.main!;
+  await bot.close(); bot = undefined;
+  const retired = structuredClone(main);
+  retired.id = 'retired'; retired.mainBot = false; retired.archived = true;
+  retired.execution.payload.agentRef = { agentId: 'retired', profileRevision: retired.revision };
+  retired.execution.payload.requiredToolsets = ['market.trade'];
+  fixture.ledger.transaction(s => { stateOf(s.application).team.bots.retired = retired; });
+  bot = new BotCollaboration(fixture.server, fixture.ledger, options);
+  expect(bot.snapshot().team.bots.retired!.archived).toBe(true);
+  await bot.close(); bot = undefined;
+  fixture.ledger.transaction(s => { stateOf(s.application).team.bots.retired!.archived = false; });
+  expect(() => new BotCollaboration(fixture!.server, fixture!.ledger, options)).toThrow('not declared read-only');
 });

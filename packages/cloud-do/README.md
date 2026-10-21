@@ -4,15 +4,21 @@ This package hosts a pi-durable session in a Cloudflare Durable Object.
 It provides native SQLite storage, inline tools, wake and inbox processing,
 usage limits, settlement hooks, and transcript reads.
 
-The current stable release is 0.27.0, in the nine-package release set with
-keys 0.12.0, published on npm `latest`. Complete registry readback and isolated
-installation passed. See the
+The current stable release is 0.28.1, in the nine-package release set with
+keys 0.13.1, published on npm `latest`. The npm registry read on 2026-10-21 at
+18:13 UTC lists these versions as `latest`. See the
+[release notes](../../docs/releases/v0.28.1.md).
+The earlier stable release was 0.28.0 / keys 0.13.0 (published 2026-10-20, UTC);
+see its [release notes](../../docs/releases/v0.28.0.md).
+
+The stable release before them was 0.27.0, with keys 0.12.0. Complete registry
+readback and isolated installation passed. See the
 [publication record](../../docs/releases/v0.27.0-publication.md).
 The `rc` channel remains 0.27.0-rc.2 / keys 0.12.0-rc.2.
 See the [release notes](../../docs/releases/v0.27.0.md) for the Host upgrade
 steps. Host acceptance (#195) remains separate and open.
 
-The previous `latest` release was 0.26.1, in the nine-package release set with
+The `latest` release before 0.27.0 was 0.26.1, in the nine-package release set with
 keys 0.11.1. Registry readback and isolated installation passed on 2026-10-12.
 See the [publication record](../../docs/releases/v0.26.1-publication.md).
 The earlier stable release was 0.26.0 / keys 0.11.0; its
@@ -26,8 +32,7 @@ The package needs Node 24.15.0 or later for build tooling.
 
 ## Install and subclass
 
-The following install example names the unpublished 0.28.1 source candidate.
-Use 0.27.0 until publication is confirmed.
+The following install example names the current stable release, 0.28.1.
 Use an installed package to verify the consumer path.
 
 ~~~sh

@@ -81,7 +81,8 @@ export class BotCollaboration {
     admitBotToolsets(options.execution, options.readOnlyToolsets);
     for (const model of Object.values(this.models())) admitBotToolsets(model, options.readOnlyToolsets);
     const persisted = ledger.snapshot();
-    for (const bot of Object.values(stateOf(persisted.application).team.bots)) admitBotToolsets(bot.execution, options.readOnlyToolsets);
+    // An archived Bot never runs a new Turn, so its stored template is not "current".
+    for (const bot of Object.values(stateOf(persisted.application).team.bots)) if (!bot.archived) admitBotToolsets(bot.execution, options.readOnlyToolsets);
     // Recovery can resubmit a frozen older generation after the Bot changes models.
     // Historical settled executions remain readable; only outstanding work must be admitted.
     for (const intent of Object.values(persisted.intents)) {
