@@ -541,6 +541,12 @@ jobs:
       - name: Build (needed so @byok-sdk/client has a dist/ to bundle)
         run: bun run build
 
+      - name: Verify loopback ownership and native MCP transport
+        if: matrix.recipe == 'bun'
+        run: |
+          bun run --filter @byok-sdk/server test -- src/__tests__/loopback.test.ts
+          bun run --filter @byok-sdk/example-byok-mcp-server test -- src/loopback.test.ts
+
       - name: Run packaging smoke
         run: templates/packaging/${{ matrix.recipe }}/smoke-test.sh
 

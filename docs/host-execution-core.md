@@ -20,6 +20,8 @@ A retry can create another execution for the same occurrence, after eligible ter
 
 Topology L has an embedded server and daemon on the device. Use SQLite for durable wakes.
 Memory storage loses its wakes at exit. The daemon runs with the user's local credentials.
+Use the server package's [identity-stable loopback listener](../packages/server/README.md#identity-stable-loopback-listener)
+with an immutable Host-owned port assignment to preserve the daemon's cursor URL across restarts.
 Topology H has no device-local Host. Its service schedules calls to the Cloud fresh-execution API.
 The embedded wake queue is not a hosted scheduler.
 Neither topology runs BYOK work in the cloud or keeps the user's model keys there.

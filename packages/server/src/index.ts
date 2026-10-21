@@ -1,3 +1,5 @@
+export { listenLoopback } from './loopback';
+export type { LoopbackPortStore, LoopbackHandler, LoopbackListenerOptions, LoopbackListener } from './loopback';
 import type { AgentMessageDraftEvent } from './types';
 export type { AgentMessageDraftEvent } from './types';
 import { WakeScheduler } from './wakes/scheduler';
