@@ -15,6 +15,7 @@ for (const name of readdirSync(source).filter(name => /^(install|build|group-cha
   result.push(`phase=${name.slice(0, -4)}`);
   for (const raw of readFileSync(join(source, name), 'utf8').split('\n')) {
     const line = raw.replace(/\x1b\[[0-9;]*m/g, '');
+    if (/^BYOK_UNICODE_SAMPLE [1-5]$/.test(line)) result.push(line);
     const ledgerMarker = line.indexOf('BYOK_UNICODE_LEDGER ');
     if (ledgerMarker >= 0) {
       try {

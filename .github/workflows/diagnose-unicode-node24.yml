@@ -99,7 +99,10 @@ jobs:
           }
           snapshot > "$RUNNER_TEMP/unicode-summary/processes-before.txt"
           sha256sum packages/client/dist/index.js > "$RUNNER_TEMP/unicode-summary/dist-before.txt"
-          bun run --cwd examples/bot-collaboration test src/group-chat.test.ts -t 'counts a large in-limit Unicode Request'
+          for sample in 1 2 3 4 5; do
+            echo "BYOK_UNICODE_SAMPLE $sample"
+            bun run --cwd examples/bot-collaboration test src/group-chat.test.ts -t 'counts a large in-limit Unicode Request'
+          done
           SEQUENCE
           bash scripts/ci/with-secret-service.sh bash "$RUNNER_TEMP/unicode-sequence.sh" > "$RUNNER_TEMP/unicode-raw/group-chat.log" 2>&1
           code=$?

@@ -50,3 +50,8 @@ Following near-boundary4956ms trace, singlecase adds test-only ledger transactio
 count/synchronousduration plus eventloopactive/idle measurements around original
 running() wait. Spy delegates originalthis/return/throw and restores in finally.
 Only four finite nonnegative numbers exported. No assertion/timeout change.
+
+Bounded distribution capture: maximum5sequential singlecase samples, fail-fast on
+first failure (set-e), no failedsample retries. SameSHA/diagnostics, preserve
+sample1..5index only. Motivated by observed4956ms versus286ms startup variation;
+need slow-sample ledger/ELU snapshot, not green-gate recovery.
