@@ -12,7 +12,7 @@ export interface CodexRecord {
 }
 interface StreamState {
   readonly seen: Map<number, readonly AgentEvent[]>;
-  readonly active: Map<string, { tool: string; toolCallId: string }>;
+  readonly active: Map<string, { tool: string; toolCallId: string; mcp?: { server: string; tool: string } }>;
   readonly delivered: Set<string>;
   lastUsage?: Extract<AgentEvent, { type: 'usage' }>;
   activeTurnId?: string;
@@ -279,9 +279,12 @@ export class CodexProjection {
                 arguments: item.arguments,
               }
             : { query: item.query };
+    const mcp = item.type === 'mcpToolCall' && typeof item.server === 'string' && item.server.length > 0
+      && typeof item.tool === 'string' && item.tool.length > 0 ? { server: item.server, tool: item.tool } : undefined;
+    const identity = mcp === undefined ? {} : { mcp };
     if (started) {
-      state.active.set(activeKey, { tool, toolCallId });
-      return [{ type: 'tool_use', tool, toolCallId, input: inputValue }];
+      state.active.set(activeKey, { tool, toolCallId, ...identity });
+      return [{ type: 'tool_use', tool, toolCallId, input: inputValue, ...identity }];
     }
     state.active.delete(activeKey);
     const output =
@@ -298,7 +301,7 @@ export class CodexProjection {
             ? { result: item.result, error: item.error, status: item.status }
             : { query: item.query, status: item.status };
     const events: AgentEvent[] = [
-      { type: 'tool_result', tool, toolCallId, output },
+      { type: 'tool_result', tool, toolCallId, output, ...identity },
     ];
     if (item.type === 'fileChange')
       for (const change of changes) {

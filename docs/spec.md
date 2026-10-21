@@ -1411,6 +1411,13 @@ auth or transport contract.
 
 The first protocol slice adds only additive optional observability fields:
 
+- `tool_use.mcp?` and `tool_result.mcp?` carry `{ server, tool }` when
+  authoritative MCP identity is available. Codex projects native `mcpToolCall`
+  fields; ordinary/prepared Pi and Claude resolve exact native tool names against
+  supplied observed toolsets. No prefix splitting or title guessing is performed.
+  Claude discovery/admission is unchanged: without an observation the field is
+  absent. Builtins, unobserved SDK helpers and Grok ACP titles are not assigned
+  MCP identity. These fields describe events, not tool authorization decisions.
 - `tool_use.toolCallId?: string` and `tool_result.toolCallId?: string` identify
   the same native tool call. A generic `id` is forbidden because envelope IDs,
   RPC request IDs, and approval IDs have different authorities.

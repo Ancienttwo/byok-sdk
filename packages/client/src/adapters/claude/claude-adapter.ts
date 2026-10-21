@@ -1,3 +1,4 @@
+import { mcpEventIdentities, type McpEventIdentities } from '../../mcp/event-identity';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { execFile } from 'node:child_process';
@@ -398,6 +399,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         startInput.scratch,
         manifestModelId,
         native,
+        mcpEventIdentities(startInput.mcpToolsetTools),
       );
     } catch (cause) {
       return rejectOwnedStartup(cause, client, startInput.scratch, cancellation !== undefined);
@@ -456,7 +458,7 @@ function subscriptionModel(
 
 class ClaudeSession implements Session {
   declare readonly interactions?: NativeInteractionChannel;
-  private readonly correlation: ToolUseCorrelation = createToolUseCorrelation();
+  private readonly correlation: ToolUseCorrelation;
   private readonly assistantMessages = new AssistantMessageTracker();
   private closeAttempt: Promise<void> | undefined;
 
@@ -469,7 +471,8 @@ class ClaudeSession implements Session {
     private readonly scratch: ExecutionScratch,
     private readonly modelId?: string,
     private readonly native?: ClaudeNativeInteractionBridge,
-  ) { if (native !== undefined) this.interactions = native.channel; }
+    identities?: McpEventIdentities,
+  ) { this.correlation = createToolUseCorrelation(identities); if (native !== undefined) this.interactions = native.channel; }
 
   get events(): AsyncIterable<AgentEvent> {
     const client = this.client;

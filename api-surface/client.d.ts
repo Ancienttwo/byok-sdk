@@ -59,6 +59,7 @@ export declare class ClaudeAdapter implements RuntimeAdapter {
     private resolveBin;
 }
 // ==== @byok-sdk/client dist/adapters/claude/events.d.ts ====
+import type { McpEventIdentities } from '../../mcp/event-identity';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { RuntimeExecutionFailure } from '../../runtime-failure';
 /**
@@ -92,8 +93,9 @@ export interface ClaudeStreamMessage {
  */
 export interface ToolUseCorrelation {
     readonly toolNameByUseId: Map<string, string>;
+    readonly mcpIdentities?: McpEventIdentities;
 }
-export declare function createToolUseCorrelation(): ToolUseCorrelation;
+export declare function createToolUseCorrelation(mcpIdentities?: McpEventIdentities): ToolUseCorrelation;
 export interface MapClaudeMessageOptions {
     /** `ctx.workspaceDir` for the task — used only to compute a workspace-relative `name` for a possible `artifact` AgentEvent (see `tryBuildArtifactEvent`'s doc comment). */
     workspaceDir: string;
@@ -12522,6 +12524,15 @@ export declare class McpStdioClient {
      */
     private classify;
 }
+// ==== @byok-sdk/client dist/mcp/event-identity.d.ts ====
+import type { AgentEvent } from '@byok-sdk/protocol';
+import type { McpToolsetToolObservation } from '../types';
+export type McpEventIdentity = NonNullable<Extract<AgentEvent, {
+    type: 'tool_use';
+}>['mcp']>;
+export type McpEventIdentities = ReadonlyMap<string, McpEventIdentity>;
+/** Exact admitted names, never split an arbitrary runtime label (names may contain __). */
+export declare function mcpEventIdentities(observation?: McpToolsetToolObservation): McpEventIdentities;
 // ==== @byok-sdk/client dist/mcp/observation.d.ts ====
 import { type McpStdioClientOptions, type McpStdioServerSpec } from './client';
 /**
