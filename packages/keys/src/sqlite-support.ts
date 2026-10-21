@@ -1,5 +1,4 @@
 import { chmodSync, existsSync, mkdirSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { dirname } from 'node:path';
 import type { DatabaseSync, DatabaseSyncOptions } from 'node:sqlite';
 
@@ -57,7 +56,10 @@ interface SqliteModule {
  */
 export function loadSqliteModule(): SqliteModule {
   try {
-    return createRequire(import.meta.url)('node:sqlite') as SqliteModule;
+    // A built-in needs no file URL, including in CJS bundles and SEA executables.
+    const loaded = process.getBuiltinModule('node:sqlite');
+    if (!loaded) throw new Error('node:sqlite is not available in this runtime');
+    return loaded;
   } catch (error) {
     throw new ByokKeysError(
       'PROVIDER_STORE_UNAVAILABLE',
@@ -74,11 +76,9 @@ export function loadSqliteModule(): SqliteModule {
  * Whether `node:sqlite` can ACTUALLY be loaded right now.
  *
  * Same predicate as `@byok-sdk/server`'s `sqlite-support.ts`, and it exists for the
- * same reason: this package's `engines.node` is `>=20` and CI runs the matrix
- * on 20 and 22, but `node:sqlite` shipped in 22.5 and stayed behind
- * `--experimental-sqlite` for part of the 22.x line. A version-number
- * comparison would therefore be wrong in both directions, so this attempts the
- * real require via {@link loadSqliteModule} and reports whether it succeeded.
+ * same reason: a version-number comparison does not prove built-in availability.
+ * This attempts the real built-in lookup via {@link loadSqliteModule} and reports
+ * whether it succeeded. The supported runtime baseline is Node 24.15+.
  *
  * Callers use it to skip a SQLite-backed path rather than fail it — the
  * package's own SQLite-backed suites gate on it — and anything else should call

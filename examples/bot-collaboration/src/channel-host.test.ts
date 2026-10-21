@@ -9,7 +9,7 @@ let bot: BotCollaboration;
 afterEach(async () => { await bot?.close(); await fixture?.close(); });
 /** Real embedded server, HTTP, daemon and submit_result helper. */
 async function setup(rest: Partial<BotOptions> = {}): Promise<BotOptions> {
-  fixture = await openHost({ consume: (wake, signal) => bot.consume(wake, signal), agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+  fixture = await openHost({ externalCore: true, consume: (wake, signal) => bot.consume(wake, signal), agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
   const base = template(fixture.deviceId);
   const options: BotOptions = { botId: 'main', execution: { ...base,
     agentMessageContext: { destinationBinding: 'owner', freshnessCursor: 'channel' }, payload: { ...base.payload,

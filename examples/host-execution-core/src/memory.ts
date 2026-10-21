@@ -6,8 +6,9 @@ import {
   type AgentMemoryIntentCompletion, type AgentMemoryIntentReadback, type AgentMemoryIntentV1,
   type AgentMemoryProjectionMutation,
 } from '@byok-sdk/protocol';
-import type { AgentMemoryIntentTransport, AgentMemoryProjectionPort } from '@byok-sdk/client';
+import type { AgentMemoryExport, AgentMemoryIntentTransport, AgentMemoryProjectionPort } from '@byok-sdk/client';
 import { HostLedger } from './ledger';
+import { MemoryRestoreCoordinator, memoryRestoreBlocked, recordRestoreTerminal, type MemoryRestoreInput, type MemoryRestoreResult, type MemoryRestoreRow } from './memory-restore';
 import { canonical, hash } from './model';
 import type { LedgerState } from './model';
 
@@ -31,6 +32,7 @@ export interface MemoryIntentRow {
   deviceId: string; requestHash: string; intent: AgentMemoryIntentV1;
   expiresAt: number; noticePending: boolean; releasedAt?: string; revoked?: true;
   readback?: AgentMemoryIntentReadback;
+  restoreId?: string;
 }
 export interface ResidentProjection {
   mutation: AgentMemoryProjectionMutation;
@@ -41,6 +43,7 @@ export interface ResidentProjection {
   refreshTaskIds?: string[];
 }
 export interface MemoryState {
+  restores?: Record<string, MemoryRestoreRow>;
   intents: Record<string, MemoryIntentRow>;
   approvals: Record<string, string>;
   projections: Record<string, ResidentProjection>;
@@ -49,6 +52,8 @@ export interface MemoryContextPack {
   residentMemory?: { text: string; projectedAt: string; mutationId: string; policyRevision: string };
 }
 export interface MemoryOptions {
+  /** Trusted device-bound local export. Required only for explicit tree restore; never a redacted projection. */
+  exportMemory?(binding: MemoryBinding): Promise<AgentMemoryExport>;
   now?: () => number;
   /** Resolve current placement and profile from trusted Host state on each call. */
   isCurrent(binding: MemoryBinding): boolean;
@@ -80,7 +85,32 @@ export class HostMemoryPage {
   private async changed(binding: MemoryBinding): Promise<void> {
     for (const listener of this.listeners) await listener(binding);
   }
-  constructor(readonly ledger: HostLedger, private readonly options: MemoryOptions) {}
+  private readonly restores: MemoryRestoreCoordinator;
+  private readonly executionLedgers = new Set<HostLedger>();
+  /** Core composition guard: restore must inspect the very same transactional execution state. */
+  bindExecutionLedger(ledger: HostLedger): () => void {
+    if (this.options.exportMemory && ledger !== this.ledger) throw new Error('Memory restore requires the same HostLedger instance as execution');
+    this.executionLedgers.add(ledger);
+    return () => { this.executionLedgers.delete(ledger); };
+  }
+  private assertRestoreLedger(): void {
+    if ([...this.executionLedgers].some(ledger => ledger !== this.ledger)) throw new Error('Memory restore requires the same HostLedger instance as execution');
+  }
+  constructor(readonly ledger: HostLedger, private readonly options: MemoryOptions) {
+    this.restores = new MemoryRestoreCoordinator(ledger, options, input => this.prepare(input));
+  }
+  async restore(input: MemoryRestoreInput): Promise<MemoryRestoreResult> {
+    this.assertRestoreLedger();
+    const result = await this.restores.restore(input);
+    await this.changed(input);
+    return result;
+  }
+  restoreResult(binding: MemoryBinding, restoreId: string): MemoryRestoreResult | undefined { return this.restores.read(binding, restoreId); }
+  async cancelRestore(binding: MemoryBinding, restoreId: string): Promise<MemoryRestoreResult> {
+    const result = this.restores.cancel(binding, restoreId); await this.changed(binding); return result;
+  }
+  /** Call before core.recover at Host startup, then flushNotices; same restore identity resumes safely. */
+  async recoverRestores(): Promise<void> { this.assertRestoreLedger(); await this.restores.recover(); }
   private now(): number { return (this.options.now ?? Date.now)(); }
   intent(intentId: string): MemoryIntentRow | undefined { return this.ledger.snapshot().memory?.intents[intentId]; }
 
@@ -90,17 +120,12 @@ export class HostMemoryPage {
     if (!this.options.isCurrent(input)) throw new Error('Memory placement or profile changed');
     if (!Number.isSafeInteger(input.expiresAt) || input.expiresAt <= this.now()) throw new Error('Memory approval expired');
     if (input.operation === 'replace' && input.content === undefined || input.operation === 'delete' && input.content !== undefined) throw new Error('Invalid memory operation body');
-    const requestHash = hash(input);
+    const prepared = await this.prepare(input);
+    const { requestHash, intent } = prepared;
     const approvalKey = hash([input.deviceId, input.approvalRef]);
-    const candidate = { intentId: randomUUID(), agentRef: input.agentRef, path: input.path, operation: input.operation,
-      baseRevision: input.baseRevision ?? EMPTY_MEMORY_REVISION,
-      targetRevision: input.operation === 'replace' ? memoryRevision(input.content!) : null,
-      ...(input.content === undefined ? {} : { content: input.content }), approvalRef: input.approvalRef };
-    const intent = AgentMemoryIntentV1Schema.parse({ ...candidate,
-      operationDigest: await agentMemoryIntentOperationDigest({ ...candidate, tenantId: this.ledger.tenant, deviceId: input.deviceId }),
-    });
     return this.ledger.transaction(state => {
       if (!this.options.isCurrent(input) || input.expiresAt <= this.now()) throw new Error('Memory approval no longer current');
+      if (memoryRestoreBlocked(state, input)) throw new MemoryBlockedError('Memory restore in progress');
       const store = memory(state);
       const previousId = store.approvals[approvalKey];
       if (previousId) {
@@ -108,11 +133,22 @@ export class HostMemoryPage {
         if (previous.requestHash !== requestHash) throw new Error('Memory approval identity conflict');
         return previous;
       }
-      const row: MemoryIntentRow = { deviceId: input.deviceId, requestHash, intent, expiresAt: input.expiresAt, noticePending: true };
+      const row = prepared;
       store.intents[intent.intentId] = row;
       store.approvals[approvalKey] = intent.intentId;
       return row;
     });
+  }
+  private async prepare(input: MemoryApproval): Promise<MemoryIntentRow> {
+    const requestHash = hash(input);
+    const candidate = { intentId: randomUUID(), agentRef: input.agentRef, path: input.path, operation: input.operation,
+      baseRevision: input.baseRevision ?? EMPTY_MEMORY_REVISION,
+      targetRevision: input.operation === 'replace' ? memoryRevision(input.content!) : null,
+      ...(input.content === undefined ? {} : { content: input.content }), approvalRef: input.approvalRef };
+    const intent = AgentMemoryIntentV1Schema.parse({ ...candidate,
+      operationDigest: await agentMemoryIntentOperationDigest({ ...candidate, tenantId: this.ledger.tenant, deviceId: input.deviceId }),
+    });
+    return { deviceId: input.deviceId, requestHash, intent, expiresAt: input.expiresAt, noticePending: true };
   }
   revoke(intentId: string): void {
     this.ledger.transaction(state => {
@@ -144,7 +180,8 @@ export class HostMemoryPage {
   /** Bind this adapter to the authenticated device. Do not take identity from a request body. */
   transport(deviceId: string): AgentMemoryIntentTransport {
     return {
-      fetch: async request => this.ledger.transaction(state => {
+      fetch: async request => {
+        const answer = this.ledger.transaction(state => {
         const row = memory(state).intents[request.intentId];
         if (!row || row.deviceId !== deviceId || canonical(row.intent.agentRef) !== canonical(request.agentRef)) throw new Error('Memory intent identity mismatch');
         if (row.readback) return { disposition: 'terminal', intent: metadata(row.intent), readback: row.readback };
@@ -158,7 +195,10 @@ export class HostMemoryPage {
         }
         row.releasedAt ??= new Date(this.now()).toISOString();
         return { disposition: 'release', intent: row.intent };
-      }),
+        });
+        if (this.intent(request.intentId)?.restoreId && answer.disposition === 'terminal') await this.changed({ deviceId, agentRef: answer.intent.agentRef });
+        return answer;
+      },
       complete: async value => {
         const completion = AgentMemoryIntentCompletionSchema.parse(value);
         const readback = this.ledger.transaction(state => {
@@ -173,7 +213,7 @@ export class HostMemoryPage {
           this.record(state, row, completion, 'recorded');
           return row.readback!;
         });
-        if (readback.completion.outcome === 'applied' && readback.completion.path === 'MEMORY.md') {
+        if (this.intent(readback.intentId)?.restoreId || readback.completion.outcome === 'applied' && readback.completion.path === 'MEMORY.md') {
           await this.changed({ deviceId, agentRef: readback.completion.agentRef });
         }
         return readback;
@@ -194,6 +234,7 @@ export class HostMemoryPage {
     }
     row.intent = metadata(row.intent); // Purge pending content in the terminal commit.
     row.noticePending = false;
+    recordRestoreTerminal(state, row);
   }
 
   /** Host-owned opaque profile: {residentMemory: policyApprovedText | null}. It conveys no edit proof. */
@@ -232,7 +273,9 @@ export class HostMemoryPage {
   }
   contextPack(binding: MemoryBinding): MemoryContextPack {
     if (!this.options.isCurrent(binding)) throw new Error('Memory placement or profile changed');
-    const projection = this.ledger.snapshot().memory?.projections[bindingKey(binding)];
+    const state = this.ledger.snapshot();
+    if (memoryRestoreBlocked(state, binding)) throw new MemoryBlockedError('Memory restore in progress');
+    const projection = state.memory?.projections[bindingKey(binding)];
     if (!projection || projection.text === null || projection.invalidatedByIntent) return {};
     if (!this.options.authorizeProjection(binding.deviceId, projection.mutation)) throw new MemoryBlockedError('Memory projection no longer authorized');
     if (Buffer.byteLength(projection.text, 'utf8') > RESIDENT_MEMORY_MAX_BYTES) throw new MemoryBlockedError('Memory blocked: MEMORY.md exceeds 8 KiB. Reduce its size.');

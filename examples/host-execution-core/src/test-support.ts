@@ -28,19 +28,28 @@ export async function openHost(options: HostOptions & {
   consume?: (wake: DueWake, signal: AbortSignal, next: () => Promise<void>) => Promise<void>;
   wrapServer?: (server: ExecutionServer) => ExecutionServer;
   adapter?: BotStubAdapter;
+  /**
+   * The caller drives its own core on this ledger (K8). The fixture then creates none: a second
+   * live core would take server.events hints and conclude intents without the caller's hooks.
+   */
+  externalCore?: true;
 } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'hc-'));
   const productId = 'host-core-test';
   const ledgerPath = path.join(root, 'host.sqlite');
   let ledger = new HostLedger(ledgerPath, `product:${productId}`);
-  let core!: HostExecutionCore;
+  let core: HostExecutionCore | undefined;
+  const fixtureCore = () => {
+    if (!core) throw new Error('openHost({ externalCore }) creates no fixture core');
+    return core;
+  };
   const server = createByokServer({ productId, storage: { kind: 'sqlite', path: path.join(root, 'server.sqlite') },
     // Leave time for HTTP delivery and admission within the five-second fixture waits.
     longPollHoldMs: 100,
     agentMessage: options.agentMessage,
-    wake: { consume: (wake, signal) => options.consume ? options.consume(wake, signal, () => core.consume(wake, signal)) : core.consume(wake, signal) },
+    wake: { consume: (wake, signal) => options.consume ? options.consume(wake, signal, () => fixtureCore().consume(wake, signal)) : fixtureCore().consume(wake, signal) },
   });
-  core = new HostExecutionCore(options.wrapServer?.(server) ?? server, ledger, options);
+  if (!options.externalCore) core = new HostExecutionCore(options.wrapServer?.(server) ?? server, ledger, options);
   const http = serve({ fetch: server.hono.fetch, port: 0, hostname: '127.0.0.1' });
   if (!http.listening) await new Promise<void>(resolve => http.once('listening', resolve));
   const address = http.address();
@@ -57,7 +66,7 @@ export async function openHost(options: HostOptions & {
   await daemon.start(); await waitForReady(daemon);
   let closed = false;
   return {
-    root, server, adapter, deviceId, get core() { return core; }, get ledger() { return ledger; }, get daemon() { return daemon; },
+    root, server, adapter, deviceId, get core() { return fixtureCore(); }, get ledger() { return ledger; }, get daemon() { return daemon; },
     intent(key: string, rest: Partial<IntentInput> = {}): IntentInput {
       return { key, source: 'bot', execution: template(deviceId), waitUntil: Date.now() + 60_000, ...rest };
     },
@@ -66,7 +75,7 @@ export async function openHost(options: HostOptions & {
         execution: template(deviceId), waitMs: 60_000, lateAfterMs: 1000, ...rest };
     },
     async restartCore() {
-      await core.close(); ledger.close(); ledger = new HostLedger(ledgerPath, `product:${productId}`);
+      await fixtureCore().close(); ledger.close(); ledger = new HostLedger(ledgerPath, `product:${productId}`);
       core = new HostExecutionCore(options.wrapServer?.(server) ?? server, ledger, options); await core.recover();
     },
     async offline() { await daemon.stop(); },
@@ -74,7 +83,7 @@ export async function openHost(options: HostOptions & {
     async close() {
       if (closed) return;
       closed = true;
-      await core.close(); await daemon.stop(); await server.close(); ledger.close();
+      await core?.close(); await daemon.stop(); await server.close(); ledger.close();
       await new Promise<void>((resolve, reject) => {
         http.close(error => error ? reject(error) : resolve()); if ('closeAllConnections' in http) http.closeAllConnections();
       });
