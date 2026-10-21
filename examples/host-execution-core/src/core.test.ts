@@ -164,7 +164,9 @@ it('rolls back a throwing outcome handler and commits application plus marker on
 
 it('expires an offline offer without waiting for a device terminal and releases the FIFO', async () => {
   host = await openHost(); await host.offline();
-  const expired = await host.core.enqueue(host.intent('offline', { waitUntil: Date.now() + 100 }));
+  // The offer must be submitted before it can expire. If the deadline passes before
+  // submit, the core does not submit (see `submit` in core.ts) and no attempt exists.
+  const expired = await host.core.enqueue(host.intent('offline', { waitUntil: Date.now() + 1_000 }));
   await settled('offline', 'expired');
   expect(await host.server.tasks.attempt(expired.taskId)).toMatchObject({ status: 'cancelled' });
   expect((await host.server.tasks.attempt(expired.taskId))?.claimedRuntime).toBeUndefined();
