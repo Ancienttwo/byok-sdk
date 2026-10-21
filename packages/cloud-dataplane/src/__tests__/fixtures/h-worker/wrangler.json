@@ -1,0 +1,11 @@
+{
+  "name": "byok-h-worker",
+  "main": "index.ts",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "hyperdrive": [{ "binding": "BYOK_PG", "id": "byok-h-worker-local" }],
+  "durable_objects": {
+    "bindings": [{ "name": "PRODUCT_LEDGER", "class_name": "ProductLedger" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ProductLedger"] }]
+}
