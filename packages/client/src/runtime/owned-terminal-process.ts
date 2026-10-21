@@ -6,6 +6,7 @@ import {
 const LABEL = 'acp terminal';
 
 interface SpawnDependencies {
+  nativeAssetRoot?: string;
   spawnFn?: (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
   platform?: NodeJS.Platform;
   jobObject?: { assign(pid: number): Promise<{ release(): void }> };
@@ -38,7 +39,7 @@ export function createOwnedTerminalSpawn(deps: SpawnDependencies = {}) {
       child.once('error', reject);
       child.once('spawn', () => {
         // Fail closed: a tree nothing owns is ended before the agent hears of it.
-        adoptOwnedProcessTree({ child, label: LABEL, platform: deps.platform, jobObject: deps.jobObject })
+        adoptOwnedProcessTree({ child, label: LABEL, platform: deps.platform, jobObject: deps.jobObject, nativeAssetRoot: deps.nativeAssetRoot })
           .then(resolve, (error: unknown) => { void dispose().catch(() => {}); reject(error); });
       });
     });

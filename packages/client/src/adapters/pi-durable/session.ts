@@ -13,6 +13,7 @@ import { admitReplica, resetReplica } from './replica';
 import { DurableRecovery } from './recovery';
 
 export interface DurableStart {
+  nativeAssetRoot?: string;
   input: RuntimeOperationInstructionStartInput;
   runtimeLaunch: PiRuntimeLaunchResources;
   replicaRoot: string;
@@ -59,7 +60,7 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
     const launch = piLaunchCommand(runtimeLaunch, 'pi-durable', serialized.digest, ['--config', configPath],
       { command: launcher.command, args: launcher.args ?? [], profileArgs: options.launcherArgs });
     const child = new PiRpcClient({ command: launch.command, args: launch.args,
-      cwd: runtimeLaunch.cwd, env: { ...runtimeLaunch.env }, spawnFn: options.spawnFn });
+      cwd: runtimeLaunch.cwd, env: { ...runtimeLaunch.env }, spawnFn: options.spawnFn, nativeAssetRoot: options.nativeAssetRoot });
     rpc = child;
     const receipt = await child.send({ type: 'start', resume, ...(resume ? { projectionDigest } : {}) });
     if (receipt.success !== true || typeof receipt.projectionDigest !== 'string' || !/^[0-9a-f]{64}$/u.test(receipt.projectionDigest) || (resume && receipt.projectionDigest !== projectionDigest)) throw new Error('durable worker refused start or changed provider projection');
