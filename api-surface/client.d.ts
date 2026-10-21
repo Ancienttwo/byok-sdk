@@ -375,6 +375,11 @@ export interface CodexAdapterOptions {
     spawnFn?: typeof nodeSpawn;
     maxRetainedBytes?: number;
     interruptTimeoutMs?: number;
+    /**
+     * Deadline in milliseconds for the session open, each prompt and each steer.
+     * Default 30000. On expiry the session fails and the app-server is killed.
+     */
+    operationTimeoutMs?: number;
     /** Opt-in local Host UI; independent of the remote boolean approval lane. */
     nativeInteractions?: NativeInteractionHostOptions;
 }

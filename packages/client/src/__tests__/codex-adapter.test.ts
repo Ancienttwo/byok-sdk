@@ -18,6 +18,7 @@ import {
 } from './fixtures/prepared-operation';
 import * as processTree from '../adapters/process-tree';
 import { observationOf } from './fixtures/mcp-observation';
+import { CodexProjection } from '../adapters/codex/projection';
 const fixture = fileURLToPath(
   new URL('./fixtures/fake-codex.mjs', import.meta.url),
 );
@@ -56,6 +57,19 @@ async function open(
   );
   sessions.push(session);
   return session;
+}
+/** Records the pid of each app-server the adapter spawns. */
+function tracked() {
+  const pids: number[] = [];
+  const spawnFn = ((cmd: string, args: string[], options: Parameters<typeof spawn>[2]) => {
+    const child = spawn(cmd, args, options);
+    if (child.pid !== undefined) pids.push(child.pid);
+    return child;
+  }) as typeof spawn;
+  return { pids, spawnFn };
+}
+function gone(pid: number): boolean {
+  try { process.kill(pid, 0); return false; } catch { return true; }
 }
 async function turn(s: Session) {
   const out: AgentEvent[] = [];
@@ -440,9 +454,53 @@ describe('Codex persistent app-server adapter', () => {
     });
   });
   it('retention overflow is explicit typed failure and termination', async () => {
-    await expect(open(adapter({ maxRetainedBytes: 1 }))).rejects.toThrow(
-      'record byte budget',
-    );
+    const { pids, spawnFn } = tracked();
+    const error = await open(adapter({ maxRetainedBytes: 1, spawnFn })).catch((caught) => caught);
+    expect(error).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(error).toMatchObject({ category: 'infrastructure', message: 'codex retained record byte budget exceeded' });
+    expect(pids).toHaveLength(1);
+    await vi.waitFor(() => expect(gone(pids[0]!)).toBe(true));
+  });
+  it('a failing record consumer fails the session although the kernel swallows observer errors', async () => {
+    const { pids, spawnFn } = tracked();
+    const s = await open(adapter({ spawnFn }), task, await ctx({ FAKE_CODEX_HANG: '1' }));
+    vi.spyOn(CodexProjection.prototype, 'consume').mockImplementation(() => { throw new Error('projection failed'); });
+    // The fixture keeps writing the hanging turn; any later record reaches the failing consumer.
+    await s.steer('next').catch(() => {});
+    const failure = await turn(s).then(() => undefined, (error) => error);
+    expect(failure).toMatchObject({ category: 'infrastructure', message: 'projection failed' });
+    await s.close();
+    await vi.waitFor(() => expect(gone(pids[0]!)).toBe(true));
+  });
+  it('rejects an invalid operation timeout', () => {
+    for (const operationTimeoutMs of [0, -1, Infinity, Number.NaN, 2_147_483_648])
+      expect(() => adapter({ operationTimeoutMs })).toThrow('invalid Codex operation timeout');
+  });
+  it.each([
+    ['open', { FAKE_CODEX_HANG_BEFORE_THREAD: '1' }, 300],
+    ['prompt', { FAKE_CODEX_HANG_TURN_START: '1' }, 3000],
+  ] as const)('fails the start and kills the app-server when the %s gets no reply within the deadline', async (operation, env, operationTimeoutMs) => {
+    const { pids, spawnFn } = tracked();
+    const started = Date.now();
+    const error = await open(adapter({ operationTimeoutMs, spawnFn }), task, await ctx(env)).catch((caught) => caught);
+    expect(error).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(error).toMatchObject({
+      phase: 'start',
+      category: 'infrastructure',
+      retry: operation === 'open' ? 'retryable' : 'non-retryable',
+      message: `codex ${operation} timed out after ${operationTimeoutMs}ms`,
+    });
+    expect(Date.now() - started).toBeLessThan(operationTimeoutMs + 10_000);
+    expect(pids).toHaveLength(1);
+    await vi.waitFor(() => expect(gone(pids[0]!)).toBe(true));
+  });
+  it('fails the session and kills the app-server when a steer gets no reply within the deadline', async () => {
+    const { pids, spawnFn } = tracked();
+    const s = await open(adapter({ operationTimeoutMs: 3000, spawnFn }), task, await ctx({ FAKE_CODEX_HANG: '1', FAKE_CODEX_HANG_STEER: '1' }));
+    await expect(s.steer('redirect')).rejects.toThrow('codex steer timed out after 3000ms');
+    await expect(turn(s)).rejects.toMatchObject({ category: 'infrastructure', message: 'codex steer timed out after 3000ms' });
+    await s.close();
+    await vi.waitFor(() => expect(gone(pids[0]!)).toBe(true));
   });
   it('close joins a pending persistent followUp and rejects its RPC instead of leaving it hanging', async () => {
     const s = await open(
