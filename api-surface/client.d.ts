@@ -444,6 +444,8 @@ export declare class GrokAdapter implements RuntimeAdapter {
     private start;
 }
 // ==== @byok-sdk/client dist/adapters/hermes/hermes-adapter.d.ts ====
+import { type HermesByokLauncher } from './hermes-custody';
+export type { HermesByokLauncher } from './hermes-custody';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult } from '../../types';
 import type { ResolvedBin } from '../codex/resolve-bin';
@@ -468,6 +470,8 @@ export interface HermesAdapterOptions {
     home: string;
     /** Provider and model for every execution. Absent: Hermes picks a provider from the credentials in the environment. */
     model?: HermesModelSelection;
+    /** Optional separate-process credential custody. Mutually exclusive with model; local Host profile selection never enters dispatchSelection. */
+    byokLauncher?: HermesByokLauncher;
     resolveBin?: () => ResolvedBin;
     spawnFn?: typeof nodeSpawn;
     /** Deadline of the `detect()` ACP probe. Covers a first environment build in a new root. Default 180 s. */
@@ -508,6 +512,33 @@ export declare class HermesAdapter implements RuntimeAdapter {
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
 }
+// ==== @byok-sdk/client dist/adapters/hermes/hermes-custody.d.ts ====
+import type { ProviderProfileBinding } from '@byok-sdk/protocol';
+import type { RuntimeAdapterPrepareInput } from '../../types';
+import type { HermesModelSelection } from './hermes-adapter';
+type SelectedProfile = Omit<ProviderProfileBinding, 'requiredCapabilities'> & {
+    readonly requiredCapabilities: readonly ProviderProfileBinding['requiredCapabilities'][number][];
+};
+export interface HermesByokLauncher {
+    /** Dedicated Host executable running keys.runHermesProviderLauncher; not the Hermes executable. */
+    readonly command: string;
+    readonly args?: readonly string[];
+    readonly profileDbPath: string;
+    /** Host local authority, called before claim. Returns exact non-secret binding, never a credential. */
+    readonly selectProfile: (offer: RuntimeAdapterPrepareInput['offer']) => SelectedProfile | Promise<SelectedProfile>;
+}
+export interface PreparedHermesCustody {
+    binding: ProviderProfileBinding;
+    model: HermesModelSelection;
+}
+export declare function ownHermesLauncher(value: HermesByokLauncher): HermesByokLauncher;
+export declare function hermesCustodyArgs(launcher: HermesByokLauncher, binding: ProviderProfileBinding, launch?: {
+    hermesBin: string;
+    home: string;
+    role: 'gateway' | 'viewer';
+}): string[];
+export declare function prepareHermesCustody(launcher: HermesByokLauncher, offer: RuntimeAdapterPrepareInput['offer']): Promise<PreparedHermesCustody>;
+export {};
 // ==== @byok-sdk/client dist/adapters/index.d.ts ====
 export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, } from '../types';
 export { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
@@ -522,7 +553,7 @@ export type { CodexAdapterOptions, CodexSandboxSetting } from './codex/codex-ada
 export { GrokAdapter } from './grok/grok-adapter';
 export type { GrokAdapterOptions } from './grok/grok-adapter';
 export { HermesAdapter } from './hermes/hermes-adapter';
-export type { HermesAdapterOptions, HermesModelSelection } from './hermes/hermes-adapter';
+export type { HermesAdapterOptions, HermesModelSelection, HermesByokLauncher } from './hermes/hermes-adapter';
 export { NativeInteractionController, NativeInteractionError } from '../native-interactions';
 export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from '../native-interactions';
 export { buildRuntimeEnv } from '../daemon/environment';
@@ -10367,7 +10398,7 @@ export { ClaudeAdapter } from './adapters/claude/claude-adapter';
 export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter';
 export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from './adapters/codex/codex-adapter';
 export { GrokAdapter, type GrokAdapterOptions } from './adapters/grok/grok-adapter';
-export { HermesAdapter, type HermesAdapterOptions, type HermesModelSelection } from './adapters/hermes/hermes-adapter';
+export { HermesAdapter, type HermesAdapterOptions, type HermesModelSelection, type HermesByokLauncher } from './adapters/hermes/hermes-adapter';
 export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError } from './diagnostics/device-doctor';
 export type { DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus, RepairDeviceEnrollmentMetadataInput, DeviceMetadataRepairResult, DeviceMetadataRepairErrorCode, } from './diagnostics/device-doctor';
 export { quarantineDeviceOperationalHealth, exportDeviceSupportBundle, archiveAgentTerminalMessages, DeviceOperatorError } from './diagnostics/operator-actions';
