@@ -198,18 +198,25 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.28.0`; publication requires separate release
+aligned dispatch release is `0.28.1`; publication requires separate release
 authorization and registry readback. The current independent keys release is
-`0.13.0`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.28.0`, proven from an isolated standard npm install rather
+`0.13.1`; its packed and published `@byok-sdk/core` edge must be the exact current
+dispatch release, `0.28.1`, proven from an isolated standard npm install rather
 than the workspace graph.
 
-0.28.0 / keys 0.13.0 is an unpublished source candidate. Both are MINOR
-releases. The train adds public adapters, Bot outcome fragments, schedules
-and an MCP HTTP transport. keys adds Pi API and catalog fields.
-The memory helper configuration has a pre-1.0 breaking cut.
-See the [candidate notes](releases/v0.28.0.md). Publication requires the
-accepted final-commit CI artifact and separate owner authorization.
+For this release only, the owner's 2026-10-21 instruction to continue the
+0.28.1 release selects PATCH despite the included additive APIs and persistence
+changes. This explicit exception does not change the general policy above or
+waive validation, publication authorization, or registry readback. keys 0.13.1
+updates its exact packed core dependency; keys remains independently versioned.
+See the [0.28.1 candidate notes](releases/v0.28.1.md).
+
+Public registry metadata read on 2026-10-21 reports all eight aligned packages
+at latest 0.28.0 and keys at latest 0.13.0. The older 0.28.0 source-candidate
+notes describe preparation history, not current registry availability. The
+0.28.1 / keys 0.13.1 versions were absent at that read; recheck before publishing.
+Publication requires the accepted final-commit CI artifact and separate owner
+authorization.
 
 0.27.0 / keys 0.12.0 is published on `latest` from `v0.27.0` (`cd977261`).
 Complete registry readback and isolated installation passed on 2026-10-17.
@@ -526,8 +533,15 @@ missing or inactive routines, and keys without a matching current reservation.
 The newest 128 observations contain only a timestamp, closed reason code and
 SHA-256 key digest, never the raw key or payload. This history grants no execution
 or deduplication authority; committed occurrence replay and current scan wakes
-keep their existing behavior. This is the audit slice of #612, not Host job
-registration or execution-free occurrences.
+keep their existing behavior. Non-current `host-scan:` keys use `stale_scan`.
+K4 also accepts immutable Host-job routine definitions with registered synchronous
+or asynchronous handlers. Slot admission and pending work commit before the handler;
+its JSON summary and optional Agent intent commit atomically afterward. A summary-only
+result records an occurrence without an Agent execution. Failures retain pending work
+and reject the drain; recovery retries it with the same occurrence identity. External
+Host effects require occurrence-key idempotency across crashes. Pause/completed stop
+new slots, not admitted jobs. This remains Host example code, not an SDK scheduler.
+See the [K4 Host job contract](../examples/host-execution-core/README.md#host-jobs-and-execution-free-occurrences).
 
 ### Embedded wake queue
 
@@ -1996,6 +2010,48 @@ Busy, containment, hook, fsync, transport, or readback mismatch leaves the
 cursor at its prior value and redelivers after reconnect/restart. No fake task,
 runtime, session, terminal event, or task journal record is created.
 
+Local Host memory export is a separate, explicitly enabled in-process API.
+`DaemonConfig.agentMemoryExport: true` exposes
+`daemon.exportAgentMemory(agentRef, { signal })`; without that opt-in the method
+is absent. It does not add a control socket command, wire capability, upload,
+restore, task, runtime, or projection callback. The daemon need not be started
+or paired. The Host owns authorization, destination, encryption, and retention
+of the returned raw content; it must never pass this result to the redacted
+projection port or log its contents.
+
+Export validates the complete requested AgentRef and holds the existing
+canonical-home writer lease through capture and helper shutdown. A competing
+writer fails with retryable `AgentHomeBusyError`; no partial snapshot is returned.
+If a durable applied profile projection exists, its revision must exactly match
+the request. Otherwise the request remains Host-supplied identity metadata:
+`requestedAgentRef` is not evidence of the globally current profile revision.
+`appliedProfileRevision` is returned only when that local evidence exists. No new
+persistent profile binding is invented for an empty or ordinary task-written home.
+
+Task-free initialization preserves the existing home and creates an empty
+`MEMORY.md` when absent, without invoking Host projection hooks. Capture uses the
+same pinned filesystem and admitted memory-path policy as memory recall/save:
+`MEMORY.md` and safe Markdown paths under `notes/`, not arbitrary home files,
+`.byok` state, credentials, or opaque unsupported note paths. Linux uses native
+pinned descriptors; macOS requires the verified SDK release helper and its
+strict volume barriers. Windows remains unavailable pending its separate proof.
+The protocol exports `AGENT_MEMORY_MAX_SNAPSHOT_FILES` (128, including MEMORY.md)
+and `AGENT_MEMORY_MAX_SNAPSHOT_BYTES` (1 MiB total UTF-8 content). Existing 256 KiB
+per-file and 512 directory-entry bounds still apply. Limit/validation failures
+reject the whole operation, never truncate; aggregate file/byte limits use
+`AgentMemorySnapshotLimitError`. I/O and invalid files fail closed.
+
+A successful export returns immutable `files` with exact `path`, SHA-256
+`revision`, `byteCount`, and UTF-8 `content`, plus `totalBytes` and `snapshotDigest`.
+The digest is `sha256:` plus lowercase hexadecimal SHA-256 of the UTF-8 JSON
+encoding of `["byok-agent-memory-export.v1", [[path, revision, byteCount], ...]]`.
+Paths use ascending ASCII byte order, independent of locale. Content is covered
+by each revision; Agent identity and profile metadata are deliberately excluded
+so identical memory trees have identical digests. Cancellation is checked before
+acquiring, after initialization, between file reads, and before return; it does
+not interrupt an in-flight native filesystem call. Helper and lease cleanup run
+on success, abort, and error. This API alone makes no cross-device restore claim.
+
 Host-approved memory intents are another task-free control. The Host approves
 one exact `replace` or `delete` of one memory file and remains the only approval
 authority; the device-local `MEMORY.md` and `notes/**` remain the only memory
@@ -2623,6 +2679,24 @@ The SDK-reserved `byokagentresult` MCP server advertises exactly one `submit_res
 Only successful runtime completion with a staged outcome produces `task.complete.document`. The terminal is journaled before publication and recovery replays only those durable terminal bytes. Successful completion without `submit_result` fails non-retryably as `result_not_submitted`. Failure, cancellation and interruption carry no document; staged outcomes remain local audit records under the same protection as the task's other Agent-home evidence. Durable Pi uses the same tool and daemon validator; it no longer creates `{text}` documents. `DaemonConfig.resultDocument`, `ResultDocumentExtractor` and `Session.resultDocument()` are removed; supplying the old config field throws `DaemonConfigFieldRemovedError`. Result-document offers require an enrolled Agent home, the reserved helper, an eligible runtime and a durable terminal journal. There is no `result-document` capability negotiation in v3.
 
 On the prepared lane, the preparation request carries the same `terminalProjection` as the offer. Its exact schema and contract are retained in the durable binding, covered by the request digest, and represented by a schema-bound executor identity in `toolManifestDigest`. Admission compares the selection before pinning or claiming. A SummaryJob with `requiredToolsets: []` and `agentMemory:'none'` now counts and launches exactly one tool, `submit_result`; it omits `requiredToolsets` on the offer and needs no user `messageEgress`. The worker verifies the task-bound result helper's schema before constructing the model. The durable record version is 11; no version-10 record is read forward. Records and wire v3 share one drain-then-upgrade cut. Other preparations that select no result still support zero tools.
+
+When `messageEgress.mode: required` and `terminalProjection.mode: result-document`
+are combined, a normal runtime `turn_end` with a missing or unreadable staged
+result still delivers its existing or daemon-authored closing reply through the
+usual immutable outbox and exact accepted-disposition gate. The terminal then
+fails non-retryably as `result_not_submitted` or `result_unreadable`, without a
+document; Hosts must not apply outcome actions. Empty reply text is not invented.
+Runtime failure and cancellation retain their existing revocation rules.
+
+Before handing off that reply, the daemon persists the typed result-failure
+intent as an execution transition in the existing local journal. This is not a
+wire terminal and does not prevent cancellation from winning. On restart, an
+existing terminal always wins; otherwise recovery validates the original offer's
+required-message/result contract and converts that intent into the ordinary
+immutable failure terminal. Pending recovered messages still gate terminal
+publication. The intent survives accepted-disposition deletion of the outbox
+draft, so a crash after reply acceptance does not rewrite the diagnosis to
+`daemon_interrupted`, rerun the runtime, or apply an outcome.
 
 This is an execution/result primitive. Host owns semantic outcome acceptance, SummaryJob coverage/version CAS, budgets and scheduling. See [the K7 migration and release note](releases/k7-wire-v3.md) for the coordinated server/client upgrade and pending-v2 startup fences.
 

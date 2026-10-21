@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2053644,
+      "budgetBytes": 2060740,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -150,7 +150,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Embedded Agent memory service",
-      "budgetBytes": 67063,
+      "budgetBytes": 67427,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -167,6 +167,7 @@
         "packages/client/dist/agent-memory/index.d.ts"
       ],
       "bareImports": [
+        "@byok-sdk/protocol/constants",
         "child_process",
         "crypto",
         "fs",
@@ -353,7 +354,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private ACP runtime stack (Grok)",
-      "budgetBytes": 83640,
+      "budgetBytes": 83751,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1113,7 +1114,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Cloud coordination and HTTP handlers",
-      "budgetBytes": 533699,
+      "budgetBytes": 533880,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1166,7 +1167,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 783571,
+      "budgetBytes": 783752,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1660,7 +1661,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Wire schemas and codecs; codegen negative control",
-      "budgetBytes": 127391,
+      "budgetBytes": 127572,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1790,9 +1791,11 @@
         "@byok-sdk/core",
         "@byok-sdk/protocol",
         "@cfworker/json-schema",
+        "@hono/node-server",
         "crypto",
         "fs",
         "hono",
+        "http",
         "module",
         "path",
         "zod"
@@ -1800,6 +1803,7 @@
       "lazyImports": [],
       "thirdParty": [
         "@cfworker/json-schema",
+        "@hono/node-server",
         "hono",
         "zod"
       ],
@@ -1809,10 +1813,15 @@
         "workspace": [
           "crypto",
           "fs",
+          "http",
           "module",
           "path"
         ],
-        "thirdParty": []
+        "thirdParty": [
+          "node:http",
+          "node:http2",
+          "node:stream"
+        ]
       },
       "codegen": [
         {
@@ -1860,7 +1869,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 561959,
+      "budgetBytes": 562140,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

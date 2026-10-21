@@ -52,7 +52,7 @@ it('keeps one running occurrence and only the latest queued slot, then pause sto
   expect(intents().filter(row => row.phase === 'queued')).toHaveLength(1);
   expect(occurrences().some(row => row.conclusion === 'superseded')).toBe(true);
   const latest = occurrences().find(row => row.trigger.plannedAt === now + 200)!;
-  expect(host.ledger.snapshot().intents[latest.intentId]?.phase).toBe('queued');
+  expect(host.ledger.snapshot().intents[latest.intentId!]?.phase).toBe('queued');
   await host.core.lifecycle('coalesce', 'paused');
   const count = occurrences().length;
   // Cross later slots and observe a real SDK completion while the routine is paused.
@@ -102,13 +102,13 @@ it('does not retry an old occurrence beyond the next routine slot', async () => 
   const first = occurrences()[0]!;
   await vi.waitFor(async () => {
     await host.core.drain();
-    expect(host.ledger.snapshot().intents[first.intentId]).toMatchObject({ attempts: 2, conclusion: 'declined' });
+    expect(host.ledger.snapshot().intents[first.intentId!]).toMatchObject({ attempts: 2, conclusion: 'declined' });
   }, { timeout: 5000 });
   vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(first.nextAt! + 1);
   await host.server.wakes.schedule({ dedupKey: 'retry-slot-clock-check', availableAt: Date.now() });
   await vi.waitFor(() => expect(occurrences().length).toBeGreaterThanOrEqual(2), { timeout: 5000 });
   await host.core.drain();
-  const old = host.ledger.snapshot().intents[first.intentId]!;
+  const old = host.ledger.snapshot().intents[first.intentId!]!;
   expect(old.attempts).toBe(2);
   expect(old.conclusion).toBe('declined');
   expect(old.generation).toBe(1);
@@ -122,12 +122,12 @@ it('lets an admitted queued occurrence finish after pause cancels its successor 
   await host.core.addRoutine(host.routine('paused-queue', { rule: { anchorMs: Date.now() + 30, everyMs: 1000 }, waitMs: 60_000 }));
   await vi.waitFor(() => expect(occurrences()).toHaveLength(1));
   const occurrence = occurrences()[0]!;
-  const before = host.ledger.snapshot().intents[occurrence.intentId]!;
+  const before = host.ledger.snapshot().intents[occurrence.intentId!]!;
   expect(before).toMatchObject({ phase: 'queued', retryUntil: occurrence.nextAt });
   await host.core.lifecycle('paused-queue', 'paused');
   vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(occurrence.nextAt! + 1);
   await host.core.drain();
-  const queued = host.ledger.snapshot().intents[occurrence.intentId]!;
+  const queued = host.ledger.snapshot().intents[occurrence.intentId!]!;
   expect(queued.phase).toBe('queued');
   expect(queued.conclusion).toBeUndefined();
   expect(queued.retryUntil).toBeUndefined();

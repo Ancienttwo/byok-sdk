@@ -174,9 +174,22 @@ dependency.
   never read and no session opens.
 - Agent memory: the daemon puts the memory guidance, including the
   memory-reader read-only rule, into the prompt text, so Grok receives it with
-  each instruction. Grok loads `AGENTS.md` from the git root down to `cwd`, so
-  a memory-reader run directory may not load the persona in the Agent home.
-  That case has no live evidence.
+  each instruction. Grok's native project instruction discovery requires folder
+  trust; canonical Agent-home cwd alone does not establish that trust. For a
+  fresh strict-Agent session, the adapter reads only `AGENTS.md` from the sealed
+  lease's canonical home and appends it through `session/new._meta.rules`.
+  The file must be a stable regular UTF-8 file, at most 64 KiB; symlinks and
+  unsafe reads fail with a non-retryable authority error. Missing/empty files
+  add no rules. Reader sessions keep their sealed run cwd; ancestor and run
+  directory instruction files are not scanned by this SDK injection.
+  Persona-bearing Agent resume is refused with `grok Agent persona resume is
+  not qualified`: append-only rules cannot safely be reapplied on resume.
+  Ordinary non-Agent resume and Agent resume with no persona are unchanged.
+  The adapter does not grant folder trust, change trust configuration, load
+  hooks/skills, or replace Grok's built-in prompt. Synthetic ACP fixtures verify
+  routing and unchanged launch policy, not model adherence or runtime trust
+  semantics. Live persona and unchanged MCP/hooks trust acceptance remain
+  pending (#628); no new Grok version is qualified by this change.
 - Platforms: macOS and Linux. Windows uses the shared process-tree path but has
   no Grok evidence.
 

@@ -61,6 +61,47 @@ describe('AgentMessageOutbox', () => {
     expect(heldRestart.get('task-1')).toBeUndefined();
   });
 
+  test('keeps an accepted draft retryable until beforeAccept succeeds durably', async () => {
+    const { root, outbox } = await open();
+    const record = await outbox.appendDraft({
+      taskId: 'task-barrier', tenantId: 'tenant-one', agentRef, requirement,
+      contentType: 'text/markdown', body: 'retain until terminal commits', sessionRef: 'session-1',
+      maxPendingEvents: 4, maxPendingBytes: 200_000,
+    });
+    const disposition = {
+      agentRef, sessionRef: record.sessionRef, contract: record.contract,
+      messageId: record.messageId, cursor: record.cursor, contentHash: record.contentHash,
+      outcome: 'accepted', receiptId: '11111111-1111-4111-8111-111111111111',
+    };
+    const before = await readFile(outbox.outboxPath, 'utf8');
+    await expect(outbox.applyDisposition(record.taskId, disposition, async () => {
+      // Inspect after an await too: the barrier must finish before the append.
+      expect(await readFile(outbox.outboxPath, 'utf8')).toBe(before);
+      throw new Error('terminal commit failed');
+    })).rejects.toThrow('terminal commit failed');
+    expect(await readFile(outbox.outboxPath, 'utf8')).toBe(before);
+    expect(outbox.get(record.taskId)).toEqual(record);
+    expect(outbox.retryableRecords()).toEqual([record]);
+
+    const reopened = await AgentMessageOutbox.open(root);
+    expect(reopened.get(record.taskId)).toEqual(record);
+    expect(reopened.retryableRecords()).toEqual([record]);
+    let callbackCompleted = false;
+    expect(await reopened.applyDisposition(record.taskId, disposition, async () => {
+      expect(await readFile(reopened.outboxPath, 'utf8')).toBe(before);
+      expect(reopened.get(record.taskId)).toEqual(record);
+      callbackCompleted = true;
+    })).toBe('accepted');
+    expect(callbackCompleted).toBe(true);
+    const appended = (await readFile(reopened.outboxPath, 'utf8')).slice(before.length);
+    expect(JSON.parse(appended)).toMatchObject({ kind: 'disposition', taskId: record.taskId, disposition });
+    expect(reopened.get(record.taskId)).toBeUndefined();
+    expect(reopened.retryableRecords()).toEqual([]);
+    const acceptedRestart = await AgentMessageOutbox.open(root);
+    expect(acceptedRestart.get(record.taskId)).toBeUndefined();
+    expect(acceptedRestart.retryableRecords()).toEqual([]);
+  });
+
   test('same task/body is idempotent while conflicts and wrong session fail closed', async () => {
     const { outbox } = await open();
     const input = { taskId: 'task-1', tenantId: 'tenant-one', agentRef, requirement, contentType: 'text/markdown' as const, body: 'hello', maxPendingEvents: 4, maxPendingBytes: 200_000 };

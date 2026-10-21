@@ -23,7 +23,8 @@ describe('Agent memory filesystem helper CI P1 regression', () => {
     expect(helperJob).toContain('runs-on: ${{ matrix.os }}');
     expect(helperJob).toContain('os: macos-latest');
     expect(helperJob).toContain('os: macos-15-intel');
-    expect(helperJob).not.toContain('needs:');
+    expect(helperJob.match(/^    needs:.*$/gm)).toEqual(['    needs: select']);
+    expect(helperJob).toContain("if: ${{ contains(fromJSON(needs.select.outputs.families), 'agent-memory-helper') }}");
     expect(helperJob).toContain('uses: actions/checkout@v7');
     expect(helperJob).toContain('uses: actions/setup-node@v7');
     expect(helperJob).toContain('node-version-file: .node-version');

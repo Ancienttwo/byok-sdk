@@ -29,7 +29,8 @@ export async function openTeam(options: { now?: () => number; holdProjection?: (
   let host!: BotCollaboration;
   const received: AgentMessageInput[] = [];
   const server = createByokServer({ productId, storage: { kind: 'sqlite', path: join(root, 'server.sqlite') },
-    ...(options.secondDevice ? { longPollHoldMs: 100, presenceTtlMs: 1000 } : {}),
+    // Keep empty polls below session waits even when every lossy wake hint is lost.
+    longPollHoldMs: 100, ...(options.secondDevice ? { presenceTtlMs: 1000 } : {}),
     agentMessage: { consume: async input => {
       received.push(input);
       if (!options.routeMessages) return { outcome: 'accepted' };

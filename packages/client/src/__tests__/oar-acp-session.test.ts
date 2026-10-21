@@ -132,12 +132,15 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
     if (process.platform !== 'win32') expect(() => process.kill(-children[0]!, 0)).toThrow();
   });
 
-  it('fails the session through onLimit when retained records exceed the byte budget', async () => {
+  it('delivers every record from seq 0 to the record consumer and swallows its errors', async () => {
     const { dir } = workspace();
-    const onLimit = vi.fn((): never => { throw new Error('acp retained record byte budget exceeded'); });
-    const session = await open({ PATH: process.env.PATH ?? '' }, dir, { maxBytes: 64 * 1024, onLimit });
+    const seen: RawEvent[] = [];
+    const session = await open({ PATH: process.env.PATH ?? '' }, dir, {
+      onRecord: record => { seen.push(record); throw new Error('consumer failed'); },
+    });
     expect((await session.prompt('huge')).response.body.kind).toBe('accepted');
-    await vi.waitFor(() => expect(onLimit).toHaveBeenCalled());
+    expect(seen[0]!.seq).toBe(0);
+    expect(seen).toEqual(session.records());
   });
 
   it('releases the agent when onReady refuses the opened session', async () => {

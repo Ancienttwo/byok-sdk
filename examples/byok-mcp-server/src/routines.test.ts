@@ -158,7 +158,7 @@ it('keeps a routine that K4 never committed reserved, schedules it on retry, and
   expect(await routinesNow(client)).toBe(1);
   const retried = (await call(client, 'byok_routine_create', args('retry'))).value;
   expect(retried).toMatchObject({ lifecycle: 'active', nextAt: expect.any(String), deduplicated: true });
-  expect(core.ledger.snapshot().routines[hostKey(retried.routineId)]?.definition.execution.payload.terminalProjection).toEqual({ mode: 'none' });
+  expect(core.ledger.snapshot().routines[hostKey(retried.routineId)]?.definition.execution!.payload.terminalProjection).toEqual({ mode: 'none' });
 
   vi.spyOn(core, 'addRoutine').mockRejectedValueOnce(new Error('calendar unavailable'));
   const failed = await call(client, 'byok_routine_create', args('retire'));
