@@ -1,34 +1,49 @@
-import { readFileSync, realpathSync } from 'node:fs';
+import { copyFileSync, constants, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { agentMemoryHelperDigest } from './agent-memory-helper-digest';
 
-/** Resolve only SDK-owned release assets. Never search PATH or accept a host digest. */
-export function resolveAgentMemoryFilesystemHelper(): string {
+function installedReleaseDirectory(): string {
+  const root = path.dirname(createRequire(import.meta.url).resolve('@byok-sdk/client/package.json'));
+  return path.join(root, 'dist/native/agent-memory-fs');
+}
+
+function assetDirectory(assetRoot?: string): string {
+  if (assetRoot === undefined) return installedReleaseDirectory();
+  if (typeof assetRoot !== 'string' || !path.isAbsolute(assetRoot) || assetRoot.includes('\0')) {
+    throw new Error('Agent memory helper asset root must be an absolute directory');
+  }
+  return assetRoot;
+}
+
+function verifiedRelease(directory: string, arch: 'arm64' | 'x64'): string {
+  const manifest = JSON.parse(readFileSync(path.join(directory, 'manifest.json'), 'utf8'));
+  const key = `darwin-${arch}`;
+  if (manifest.version !== 1 || manifest.helperVersion !== '2' || manifest.protocol !== 2
+    || manifest.go !== 'go1.26.5' || manifest.digestAlgorithm !== 'mach-o-content-v1'
+    || manifest.signingPolicy !== 'product-resigning-allowed'
+    || JSON.stringify(manifest.flags) !== JSON.stringify(['-buildvcs=false', '-trimpath'])
+    || !/^[a-f0-9]{64}$/u.test(manifest.sourceDigest ?? '')) {
+    throw new Error('SDK Agent memory helper release manifest mismatch');
+  }
+  const entry = manifest.entries?.[key];
+  if (entry?.file !== key || !/^[a-f0-9]{64}$/u.test(entry.digest ?? '')) {
+    throw new Error('SDK Agent memory helper release target mismatch');
+  }
+  const bin = path.join(directory, key);
+  if (agentMemoryHelperDigest(readFileSync(bin), arch) !== entry.digest) {
+    throw new Error('SDK Agent memory helper deployment digest mismatch');
+  }
+  return realpathSync(bin);
+}
+
+/** Resolve SDK release assets only: package-installed by default, or a complete SDK-copied product directory. No PATH or caller digest. */
+export function resolveAgentMemoryFilesystemHelper(assetRoot?: string): string {
   if (process.platform !== 'darwin' || !['arm64', 'x64'].includes(process.arch)) {
     throw new Error('SDK Agent memory helper is not admitted on this platform');
   }
   try {
-    const root = path.dirname(createRequire(import.meta.url).resolve('@byok-sdk/client/package.json'));
-    const directory = path.join(root, 'dist/native/agent-memory-fs');
-    const manifest = JSON.parse(readFileSync(path.join(directory, 'manifest.json'), 'utf8'));
-    const key = `darwin-${process.arch}`;
-    if (manifest.version !== 1 || manifest.helperVersion !== '2' || manifest.protocol !== 2
-      || manifest.go !== 'go1.26.5' || manifest.digestAlgorithm !== 'mach-o-content-v1'
-      || manifest.signingPolicy !== 'product-resigning-allowed'
-      || JSON.stringify(manifest.flags) !== JSON.stringify(['-buildvcs=false', '-trimpath'])
-      || !/^[a-f0-9]{64}$/u.test(manifest.sourceDigest ?? '')) {
-      throw new Error('SDK Agent memory helper release manifest mismatch');
-    }
-    const entry = manifest.entries?.[key];
-    if (entry?.file !== key || !/^[a-f0-9]{64}$/u.test(entry.digest ?? '')) {
-      throw new Error('SDK Agent memory helper release target mismatch');
-    }
-    const bin = path.join(directory, key);
-    if (agentMemoryHelperDigest(readFileSync(bin), process.arch) !== entry.digest) {
-      throw new Error('SDK Agent memory helper deployment digest mismatch');
-    }
-    return realpathSync(bin);
+    return verifiedRelease(assetDirectory(assetRoot), process.arch as 'arm64' | 'x64');
   } catch (cause) {
     const code = (cause as NodeJS.ErrnoException | undefined)?.code;
     if (code === 'ENOENT' || code === 'MODULE_NOT_FOUND' || code === 'ERR_MODULE_NOT_FOUND') {
@@ -38,8 +53,41 @@ export function resolveAgentMemoryFilesystemHelper(): string {
   }
 }
 
-export function verifyAgentMemoryFilesystemHelper(helperBin: string): string {
-  const expected = resolveAgentMemoryFilesystemHelper();
+export function verifyAgentMemoryFilesystemHelper(helperBin: string, assetRoot?: string): string {
+  const expected = resolveAgentMemoryFilesystemHelper(assetRoot);
   if (realpathSync(helperBin) !== expected) throw new Error('Agent memory helper must use the SDK release artifact');
   return expected;
+}
+
+/** Build-time copy of the SDK release manifest and both Darwin targets into a new or empty product asset directory. */
+export interface CopyAgentMemoryHelperAssetsOptions {
+  readonly outDir: string;
+}
+
+/**
+ * Run against an installed SDK release, then ship these files with the product.
+ * The manifest and Mach-O digest detect deployment errors, not signer trust.
+ * Product re-signing remains supported. Returns sorted paths relative to outDir.
+ */
+export async function copyAgentMemoryHelperAssets(options: CopyAgentMemoryHelperAssetsOptions): Promise<readonly string[]> {
+  const directory = installedReleaseDirectory();
+  const files = ['darwin-arm64', 'darwin-x64', 'manifest.json'];
+  // Validate the whole source before creating or writing the destination.
+  for (const file of files) if (!lstatSync(path.join(directory, file)).isFile()) {
+    throw new Error('SDK Agent memory helper release assets must be regular files');
+  }
+  verifiedRelease(directory, 'arm64');
+  verifiedRelease(directory, 'x64');
+  const outDir = path.resolve(options.outDir);
+  try {
+    if (!lstatSync(outDir).isDirectory() || readdirSync(outDir).length !== 0) throw new Error('copyAgentMemoryHelperAssets: destination must be a new or empty directory');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    mkdirSync(outDir, { recursive: true });
+  }
+  for (const file of files) copyFileSync(path.join(directory, file), path.join(outDir, file), constants.COPYFILE_EXCL);
+  // Recheck copied bytes, including after a source mutation during the copy.
+  verifiedRelease(outDir, 'arm64');
+  verifiedRelease(outDir, 'x64');
+  return files;
 }

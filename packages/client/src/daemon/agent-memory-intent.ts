@@ -182,11 +182,12 @@ export const NATIVE_AGENT_MEMORY_INTENT_BACKEND: AgentMemoryIntentBackend = Obje
 });
 
 /** SDK release helper: verified Mach-O code, strict barriers, pre-rename CAS. */
-export function helperAgentMemoryIntentBackend(helperBin: string): AgentMemoryIntentBackend {
-  const verifiedBin = verifyAgentMemoryFilesystemHelper(helperBin);
+export function helperAgentMemoryIntentBackend(helperBin: string, assetRoot?: string): AgentMemoryIntentBackend {
+  const verifiedBin = verifyAgentMemoryFilesystemHelper(helperBin, assetRoot);
   return Object.freeze({
     openFilesystem: (lease: AgentHomeLease) => openAgentMemoryFilesystemHelper({
       helperBin: verifiedBin,
+      assetRoot,
       canonicalHome: lease.canonicalHome,
       homeIdentity: lease.homeIdentity,
     }),

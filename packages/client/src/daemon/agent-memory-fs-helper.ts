@@ -156,9 +156,9 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
     });
   }
 
-  static async open(input: Readonly<{ helperBin: string; canonicalHome: string; homeIdentity: AgentHomeLease['homeIdentity'] }>): Promise<AgentMemoryFilesystemHelperClient> {
+  static async open(input: Readonly<{ helperBin: string; assetRoot?: string | undefined; canonicalHome: string; homeIdentity: AgentHomeLease['homeIdentity'] }>): Promise<AgentMemoryFilesystemHelperClient> {
     if (!helperPlatformSupported()) throw new AgentMemoryError('Agent memory filesystem helper is not admitted on this platform');
-    const helperBin = verifyAgentMemoryFilesystemHelper(safeHelperPath(input.helperBin));
+    const helperBin = verifyAgentMemoryFilesystemHelper(safeHelperPath(input.helperBin), input.assetRoot);
     const expected = agentMemoryHelperIdentity(input.homeIdentity, process.platform);
     const child = spawn(helperBin, ['serve'], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -327,6 +327,6 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
   }
 }
 
-export async function openAgentMemoryFilesystemHelper(input: Readonly<{ helperBin: string; canonicalHome: string; homeIdentity: AgentHomeLease['homeIdentity'] }>): Promise<AgentMemoryFilesystem> {
+export async function openAgentMemoryFilesystemHelper(input: Readonly<{ helperBin: string; assetRoot?: string | undefined; canonicalHome: string; homeIdentity: AgentHomeLease['homeIdentity'] }>): Promise<AgentMemoryFilesystem> {
   return AgentMemoryFilesystemHelperClient.open(input);
 }

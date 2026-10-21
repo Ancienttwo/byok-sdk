@@ -2063,9 +2063,24 @@ export declare function agentMemoryHelperIdentity(home: AgentHomeLease['homeIden
 export declare function agentMemoryHelperIdentityMatches(value: unknown, expected: AgentMemoryHelperIdentity): boolean;
 export declare function openAgentMemoryFilesystemHelper(input: Readonly<{
     helperBin: string;
+    assetRoot?: string | undefined;
     canonicalHome: string;
     homeIdentity: AgentHomeLease['homeIdentity'];
 }>): Promise<AgentMemoryFilesystem>;
+// ==== @byok-sdk/client dist/daemon/agent-memory-helper-release.d.ts ====
+/** Resolve SDK release assets only: package-installed by default, or a complete SDK-copied product directory. No PATH or caller digest. */
+export declare function resolveAgentMemoryFilesystemHelper(assetRoot?: string): string;
+export declare function verifyAgentMemoryFilesystemHelper(helperBin: string, assetRoot?: string): string;
+/** Build-time copy of the SDK release manifest and both Darwin targets into a new or empty product asset directory. */
+export interface CopyAgentMemoryHelperAssetsOptions {
+    readonly outDir: string;
+}
+/**
+ * Run against an installed SDK release, then ship these files with the product.
+ * The manifest and Mach-O digest detect deployment errors, not signer trust.
+ * Product re-signing remains supported. Returns sorted paths relative to outDir.
+ */
+export declare function copyAgentMemoryHelperAssets(options: CopyAgentMemoryHelperAssetsOptions): Promise<readonly string[]>;
 // ==== @byok-sdk/client dist/daemon/agent-memory-intent.d.ts ====
 import { type AgentMemoryIntentAvailablePayload, type AgentMemoryIntentCompletion, type AgentMemoryIntentFileObservation, type AgentMemoryIntentOperation, type AgentMemoryIntentReadback, type AgentMemoryIntentRejectionCode, type AgentMemoryIntentReservation, type AgentRef } from '@byok-sdk/protocol';
 import { type AgentHomeLease, type AgentHomeManager } from '../agent-home';
@@ -2166,7 +2181,7 @@ export interface AgentMemoryIntentBackend {
  */
 export declare const NATIVE_AGENT_MEMORY_INTENT_BACKEND: AgentMemoryIntentBackend;
 /** SDK release helper: verified Mach-O code, strict barriers, pre-rename CAS. */
-export declare function helperAgentMemoryIntentBackend(helperBin: string): AgentMemoryIntentBackend;
+export declare function helperAgentMemoryIntentBackend(helperBin: string, assetRoot?: string): AgentMemoryIntentBackend;
 export interface AgentMemoryIntentProcessorOptions {
     readonly tenantId: string;
     readonly deviceId: string;
@@ -4119,6 +4134,8 @@ export interface DaemonConfig {
     };
     /** Optional, one-way hosted projection. Without all guards it has zero network activity. */
     agentMemory?: AgentMemoryHostedProjection;
+    /** Absolute directory copied by copyAgentMemoryHelperAssets. Only SDK release assets are admitted; not a helper executable or digest override. */
+    agentMemoryHelperAssetRoot?: string;
     /**
      * Explicit composition for SDK-reserved MCP helpers when this daemon is
      * embedded in a single-file/SEA product executable. The product entrypoint
@@ -8732,6 +8749,7 @@ export interface TaskRunnerDeps {
     agentMemoryDescribeBin?: Readonly<ResolvedAgentMemoryMcpBin>;
     /** Resolve the verified SDK helper only when memory needs filesystem authority. */
     resolveAgentMemoryFilesystemHelperBin?: () => string;
+    agentMemoryHelperAssetRoot?: string;
     /** Optional local-to-hosted redacted projection port. Omission is zero-network. */
     agentMemoryHostedProjection?: AgentMemoryHostedProjection;
 }
@@ -10356,6 +10374,7 @@ export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInter
 export type { OutboundStatus, OutboundRejection } from './daemon/outbound-settlement';
 export { createExecutionScratch, ScratchRootPathError } from './daemon/retention/scratch';
 export type { ExecutionScratch } from './daemon/retention/scratch';
+export { copyAgentMemoryHelperAssets, type CopyAgentMemoryHelperAssetsOptions } from './daemon/agent-memory-helper-release';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====
 import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
 import type { PreparedAgentMemoryMode, TerminalProjectionSelection } from '@byok-sdk/protocol';
