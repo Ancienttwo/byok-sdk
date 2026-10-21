@@ -19,6 +19,7 @@ export interface PiRpcMessage {
 }
 
 export interface PiRpcClientOptions {
+  nativeAssetRoot?: string;
   command: string;
   args: string[];
   cwd: string;
@@ -250,6 +251,7 @@ export class PiRpcClient {
         label: 'pi',
         platform: options.platform,
         jobObject: options.jobObject,
+        nativeAssetRoot: options.nativeAssetRoot,
       });
     } catch (cause) {
       const failure = cause instanceof Error ? cause : new Error(String(cause));

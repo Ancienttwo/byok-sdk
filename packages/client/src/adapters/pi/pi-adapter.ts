@@ -75,6 +75,8 @@ function errorMessage(err: unknown): string {
 
 /** Pi launch options; execution scratch and replica authority come from start input. */
 export interface PiAdapterOptions {
+  /** Absolute product native asset directory; scoped to this adapter. */
+  nativeAssetRoot?: string;
   /** Opt-in ordinary, lease-bound durable worker. */
   durablePi?: boolean;
   /** Override bin resolution — tests substitute the fake-pi fixture script. */
@@ -441,7 +443,7 @@ export class PiAdapter implements RuntimeAdapter {
             if (startInput.kind !== 'instruction' || launcherArgs === undefined || this.options.byokLauncher === undefined) throw authorityFailure('durable Pi requires ordinary custody launch');
             if (startInput.durableContext === undefined) throw authorityFailure('durable Pi requires replica and journal context');
             return await startDurablePi({ input: startInput, runtimeLaunch, replicaRoot: startInput.durableContext.replicaRoot,
-              launcher: this.options.byokLauncher, launcherArgs, spawnFn: this.options.spawnFn });
+              launcher: this.options.byokLauncher, launcherArgs, nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn });
           }
           if (startInput.kind === 'prepared') {
             return await startPreparedPiOperation({
@@ -466,6 +468,7 @@ export class PiAdapter implements RuntimeAdapter {
               }),
               ...(startInput.mcpServers === undefined ? {} : { mcpServers: startInput.mcpServers }),
               ...(startInput.mcpToolsetTools === undefined ? {} : { mcpToolsetTools: startInput.mcpToolsetTools }),
+              nativeAssetRoot: this.options.nativeAssetRoot,
               ...(this.options.spawnFn === undefined ? {} : { spawnFn: this.options.spawnFn }),
             });
           }
@@ -536,7 +539,7 @@ export class PiAdapter implements RuntimeAdapter {
               args: launch.args,
               cwd: runtimeLaunch.cwd,
               env: runtimeEnv,
-              spawnFn: this.options.spawnFn,
+              nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn,
             });
           } catch (cause) {
             await disposePiStartup(undefined, startInput.scratch, cause);
@@ -626,6 +629,7 @@ function piMcpToolNames(
  * checks have already passed.
  */
 interface PreparedPiLaunchInput {
+  nativeAssetRoot?: string;
   readonly scratch: ExecutionScratch;
   readonly mcpEnv: Readonly<Record<string, string>>;
   readonly runtimeLaunch: PiRuntimeLaunchResources;
@@ -841,6 +845,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
       args: launch.args,
       cwd: input.runtimeLaunch.cwd,
       env: input.runtimeLaunch.env,
+      nativeAssetRoot: input.nativeAssetRoot,
       ...(input.spawnFn === undefined ? {} : { spawnFn: input.spawnFn }),
     });
   } catch (cause) {

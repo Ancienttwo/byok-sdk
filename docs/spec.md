@@ -2947,3 +2947,18 @@ Without `storage.scratchRoot`, derive the default from the canonical store ident
 An explicit `storage.scratchRoot` must pass validation; an excessive length fails construction. A failed root never triggers a substitute. External roots persist their store ownership. A standalone root is exclusive to its process and must be provisioned fresh on process restart. No silent runtime or root fallback is provided.
 
 Legacy shared-temp prefixes are an operator-invoked migration: doctor inventories exact production names, and only `doctor --fix --yes` with a stopped daemon deletes matching, same-uid real directories. SDK startup never scans shared OS temp. Remove this one-shot scanner in the next minor release. See `docs/migrations/client-retention-399.md` for removed APIs and Host migration.
+
+
+### Product native asset deployment
+
+`copySdkNativeAssets` is a build-time API. For Windows x64 it copies the pinned
+and integrity-verified official Koffi addon; it never downloads in a runtime.
+`sdkDistributionManifest` describes Pi pin, reserved helper kinds and native target
+files. A product passes an absolute `nativeAssetRoot` to SDK-created adapters via
+`DaemonConfig`, or to each custom adapter constructor. An explicit root is scoped
+to that adapter's owned process trees and fails closed on missing or modified
+bytes without searching installed dependencies. Omission keeps installed behavior.
+For Darwin the copier delegates to the existing memory-helper release copier;
+`agentMemoryHelperAssetRoot` remains the separate memory-helper authority. Windows
+memory remains unavailable. Native target metadata is not platform qualification;
+Windows SEA qualification requires the actual Windows CI process-ownership fixture.

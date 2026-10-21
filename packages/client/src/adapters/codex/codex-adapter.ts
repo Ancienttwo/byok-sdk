@@ -50,6 +50,8 @@ export function assertCodexSandboxSetting(value: unknown, label: string): assert
 }
 
 export interface CodexAdapterOptions {
+  /** Absolute product native asset directory; scoped to this adapter. */
+  nativeAssetRoot?: string;
   /**
    * Codex sandbox for every session, as OAR's `OAR_CODEX_SANDBOX`. Default
    * `danger-full-access`: no human answers an approval prompt, so a sandbox
@@ -187,7 +189,7 @@ export class CodexAdapter implements RuntimeAdapter {
     // As OAR: the servers go in the thread/start or thread/resume config.
     const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
     const spawned = createOwnedLineProcessSpawn({
-      spawnFn: this.options.spawnFn,
+      nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn,
     });
     const session = new CodexSession(
       input.scratch,

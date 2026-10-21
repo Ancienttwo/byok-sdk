@@ -757,3 +757,29 @@ uses case-insensitive names on Windows.
 `codexSandbox` belongs to `createDaemon`, which builds the default adapters.
 `createDaemonWithAdapters` rejects that key. Set `sandbox` on the injected
 `CodexAdapter` instead.
+
+### Native assets in a product bundle
+
+At build time, `copySdkNativeAssets({ outDir: absoluteDirectory, platform: 'win32', arch: 'x64' })`
+fetches the exact official Koffi archive pinned by the SDK and verifies its lockfile
+integrity and addon digest. The build requires the installed matching Koffi package
+for its MIT notice; it resolves files without loading the current-platform addon.
+This works on a macOS build host. Ship the returned files
+beside the product and pass the absolute directory as `nativeAssetRoot` to
+`createDaemon` or each explicitly constructed adapter. Custom adapters own their
+own process-spawn configuration. No process-global setter or runtime download is used.
+An explicit root fails closed if missing or modified; it never falls back to the
+installed optional dependency. Omission retains package-installed behavior.
+
+`sdkDistributionManifest` exposes the Pi pin, actual reserved helper routing kinds
+(including `agent-memory-describe`) and native target files/signing policies. For
+Darwin, the copier delegates to `copyAgentMemoryHelperAssets`; use its returned
+`agent-memory-fs` subdirectory as the existing `agentMemoryHelperAssetRoot`. This
+preserves the established memory-helper configuration API. Windows memory is still
+unavailable. Windows native asset qualification currently targets x64 only.
+
+The Windows addon must retain the official pinned bytes. The enclosing executable
+and installer may be product-signed, but changing/signing the addon itself changes
+its digest and is refused. Darwin memory helpers retain their separate product
+re-signing policy. Copying assets proves packaging, not platform execution: the
+relocated Windows SEA CI fixture must pass before Windows qualification is claimed.
