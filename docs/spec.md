@@ -198,18 +198,25 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.28.0`; publication requires separate release
+aligned dispatch release is `0.28.1`; publication requires separate release
 authorization and registry readback. The current independent keys release is
-`0.13.0`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.28.0`, proven from an isolated standard npm install rather
+`0.13.1`; its packed and published `@byok-sdk/core` edge must be the exact current
+dispatch release, `0.28.1`, proven from an isolated standard npm install rather
 than the workspace graph.
 
-0.28.0 / keys 0.13.0 is an unpublished source candidate. Both are MINOR
-releases. The train adds public adapters, Bot outcome fragments, schedules
-and an MCP HTTP transport. keys adds Pi API and catalog fields.
-The memory helper configuration has a pre-1.0 breaking cut.
-See the [candidate notes](releases/v0.28.0.md). Publication requires the
-accepted final-commit CI artifact and separate owner authorization.
+For this release only, the owner's 2026-10-21 instruction to continue the
+0.28.1 release selects PATCH despite the included additive APIs and persistence
+changes. This explicit exception does not change the general policy above or
+waive validation, publication authorization, or registry readback. keys 0.13.1
+updates its exact packed core dependency; keys remains independently versioned.
+See the [0.28.1 candidate notes](releases/v0.28.1.md).
+
+Public registry metadata read on 2026-10-21 reports all eight aligned packages
+at latest 0.28.0 and keys at latest 0.13.0. The older 0.28.0 source-candidate
+notes describe preparation history, not current registry availability. The
+0.28.1 / keys 0.13.1 versions were absent at that read; recheck before publishing.
+Publication requires the accepted final-commit CI artifact and separate owner
+authorization.
 
 0.27.0 / keys 0.12.0 is published on `latest` from `v0.27.0` (`cd977261`).
 Complete registry readback and isolated installation passed on 2026-10-17.

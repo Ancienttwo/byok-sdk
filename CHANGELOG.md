@@ -2,10 +2,13 @@
 
 ## Unreleased
 
-Release preparation uses **0.28.1 as a tentative working label**, pending the
-owner's version decision under the existing pre-1.0 policy. No package versions
-are changed here. See the [candidate notes](docs/releases/v0.28.1.md) for scope
-and outstanding qualification; this is not a publication record.
+## 0.28.1 / @byok-sdk/keys 0.13.1 — source candidate
+
+The owner selected 0.28.1 as a one-release exception to the default pre-1.0
+MINOR policy for additive changes. This candidate is not published. See the
+[release notes](docs/releases/v0.28.1.md) for scope and outstanding qualification.
+The eight aligned manifests and lock records move to 0.28.1; keys moves to
+0.13.1 with an exact packed core edge of 0.28.1.
 
 - **Fixed (client)** — isolate concurrent Hermes root configuration writes
   (#599); preserve required closing replies when normal completion lacks a

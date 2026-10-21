@@ -77,12 +77,12 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 
 ## Version selection
 
-The next source candidate is 0.28.0 / keys 0.13.0. It is not published.
-See the [preparation handoff](../../docs/releases/v0.28.0-handoff.md).
-The published `latest` baseline remains 0.27.0 / keys 0.12.0.
+The next source candidate is 0.28.1 / keys 0.13.1. It is not published.
+See the [preparation handoff](../../docs/releases/v0.28.1.md).
+The public registry read on 2026-10-21 reports `latest` 0.28.0 / keys 0.13.0.
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
-The previous stable source manifests name train 0.27.0 and
+Historical 0.27.0 preparation named train 0.27.0 and
 independent keys 0.12.0. Both are MINOR lines. That train moved the wire to
 protocol major 3 (#468), adds `executions.submit` (#470), typed home-busy
 decline codes (#471) and the Agent message draft lane (#500), and has pre-1.0 breaking cuts in protocol, client,
@@ -93,7 +93,7 @@ dependencies consistent.
 
 The candidate set contains eight aligned packages plus keys: nine packages.
 `@byok-sdk/implementation-identity` remains retired. Every public package targets
-the dist-tag `latest`, now 0.27.0 / keys 0.12.0. The pre-publication
+the dist-tag `latest`, observed at 0.28.0 / keys 0.13.0 on 2026-10-21. The pre-publication
 [reviewed registry baseline](../../scripts/release/registry-expectations.json)
 records that prior `latest` for all nine packages. This train has no first
 publication.
@@ -103,7 +103,7 @@ readback and the declared absent `latest` after an RC. Missing tags/versions or
 failed registry reads do not establish package absence.
 
 Source preparation and npm execution need separate authorization. The owner
-provided both for 0.27.0. The 0.28.0 candidate has source-preparation
+provided both for 0.27.0. The historical 0.28.0 candidate has source-preparation
 authorization only. Live qualification and production rollout
 remain separate operations.
 The [publication record](../../docs/releases/v0.27.0-publication.md) confirms
