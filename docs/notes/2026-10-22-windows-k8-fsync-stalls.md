@@ -3,10 +3,11 @@
 ## P1: boundary
 
 The failing step is "K8 Windows portable Bot qualification" in the
-`built adapter lifecycle smoke (windows-latest)` job. The K4 step failed once
-with a `vi.waitFor` timeout (CI run 39604312643). The K8 failures are
-`vi.waitFor` timeouts of 5 s in the shared `running()` and `finish()` helpers.
-The failing test changes from run to run.
+`built adapter lifecycle smoke (windows-latest)` job. The K4 step fails the
+same way from time to time (`vi.waitFor` timeouts in
+`examples/host-execution-core`). The K8 failures are `vi.waitFor` timeouts of
+5 s in the shared `running()` and `finish()` helpers. K4 failures include waits
+that use the default 1 s timeout. The failing test changes from run to run.
 
 The fixtures run the embedded server, the daemon and the Host ledger in the
 test process. Each owns a `node:sqlite` database. `DatabaseSync` is
@@ -53,6 +54,29 @@ throw-away branch):
 | `runner.temp` on `D:` | 3 of 3 pass (51 to 64 s) | 3 of 3 pass (68 to 103 s) |
 | Default on `C:` | 3 of 3 pass (86 to 124 s) | 3 of 3 fail (200 to 296 s) |
 
+K4 full suite, 4 rounds in one job (CI run 39667622888, throw-away branch).
+The two temp roots alternate in order. Both use the exact `ci.yml` command.
+
+| Temp root | Suite time | Failed tests | Synchronous SQLite time (probe, all workers) |
+| --- | --- | --- | --- |
+| Default on `C:` | 99 s, 148 s, 140 s, 164 s | 0, 0, 2, 1 | 27 s, 50 s, 39 s, 55 s |
+| `runner.temp` on `D:` | 64 s, 64 s, 63 s, 64 s | 0, 0, 0, 0 | 2.1 s, 2.0 s, 2.0 s, 2.2 s |
+
+The three failed K4 tests, all in the `C:` arm:
+
+- `core.test.ts`, "retries a retryable device failure only with an explicit
+  source policy". A 5 s wait expired (6.5 s).
+- `routines.test.ts`, "keeps one running occurrence and only the latest queued
+  slot...". The message fits the first wait, which has the default 1 s timeout.
+- `retention.test.ts`, "does not recreate a completed routine...". The 1 s wait
+  at the `adapter.sessions.has(...)` check expired (2.6 s).
+
+The K4 failures named in earlier CI runs (`core.test.ts:276` with a 1 s wait,
+`retention.test.ts`) have the same shape. The K8 failure in CI job
+119424649472 (`host.test.ts`, 67.5 s for 16 tests, 217.7 s for the K8 step) also
+matches the `C:` timings. One cause explains the K4 and K8 failures. The wait
+length does not matter: a blocked event loop expires a 1 s wait and a 5 s wait.
+
 Limits:
 
 - Three runs per arm is small. The result is paired evidence, not a failure rate.
@@ -66,3 +90,11 @@ Limits:
   3 of 3 with it. Watch any K4 test that checks volumes or relocates local state.
 - The macOS `group-chat.test.ts` flake is a different case. That suite is
   excluded on Windows.
+- Waits with the default 1 s timeout stay in the tests. A count of `vi.waitFor`
+  calls without a `timeout` option: 55 of 86 in `examples/host-execution-core`
+  (`routines.test.ts` 21, `core.test.ts` 12, `scheduling-recovery.test.ts` 10,
+  `host-jobs.test.ts` 5, `retention.test.ts` 3) and 5 of 76 in
+  `examples/bot-collaboration`. I timed one of them, the `deviceTerminal` wait
+  in `core.test.ts`: 0.10 to 0.12 s on `D:` and 0.11 to 0.23 s on `C:` in the
+  runs that passed. I did not change any of them. A short wait only shows the
+  stall. It does not cause it.
