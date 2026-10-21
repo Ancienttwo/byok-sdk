@@ -1,11 +1,13 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { verifyPrPlan } from './plan-ci.mjs';
 import { selectImpact } from './select-impact.mjs';
 
 const plan = JSON.parse(process.env.CI_PLAN ?? '');
 if (plan.mode !== 'targeted') throw new Error('Targeted runner refuses a release or missing plan');
-if (plan.base !== process.env.CI_BASE) throw new Error('CI comparison base mismatch');
-const verified = selectImpact(plan.files, { base: process.env.CI_BASE });
+const base = verifyPrPlan(plan);
+if (plan.base !== base) throw new Error('CI comparison base mismatch');
+const verified = selectImpact(plan.files, { base });
 if (JSON.stringify(verified.dirs) !== JSON.stringify(plan.dirs) || JSON.stringify(verified.families) !== JSON.stringify(plan.families)) {
   throw new Error('Impact plan does not match changed paths');
 }

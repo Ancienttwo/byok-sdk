@@ -364,3 +364,47 @@ Linux tests use a real cloud mailbox, daemon, home lease, native CAS and device 
 The runtime is synthetic. No model provider is called.
 Run `bun run --cwd examples/host-execution-core test src/memory-linux.test.ts` on Linux.
 These Linux tests skip on other platforms. macOS and Windows proof stay in P2.
+
+### Optional projection outbox capacity
+
+A Host can opt into backpressure without deleting undelivered projections:
+
+```ts
+const ledger = new HostLedger(filename, tenant, {
+  projectionOutboxLimits: { maxCount: 1000, maxBytes: 8 * 1024 * 1024 },
+});
+const { count, bytes } = ledger.projectionOutboxUsage();
+```
+
+These numbers are illustrative Host choices, not defaults. Omitted limits are
+unlimited; supplied limits must be nonnegative safe integers (zero disallows growth).
+The constructor copies the configuration. Limits apply to this ledger owner and
+must be supplied again when reopening it. They do not change the database schema.
+
+`count` counts projection rows only. `bytes` sums the UTF-8 byte length of
+`JSON.stringify([outboxKey, { kind, id, value }])` for each projection row. It includes
+its stored identity and value, but excludes retry diagnostic `lastError`, other
+outbox kinds, and all other ledger state. This is not a total disk or ledger-size
+limit. Failed delivery can still record its bounded diagnostic and retry safely.
+
+Exceeding capacity throws the exported `OutboxFullError` (`code: 'outbox_full'`)
+without including identities or payloads. The complete ledger transaction rolls
+back, including application writes, applied markers and terminal settlement.
+Replaying an identical projection does not consume additional capacity. If an
+existing database already exceeds either configured limit, transactions may keep
+or decrease both current count and bytes, but may increase neither until within
+limits. Control transactions and projection delivery/removal therefore remain
+available; nothing is evicted to satisfy a newly configured limit.
+
+Capacity is checked at commit, not reserved by `enqueue`: future result sizes and
+custom outcome publications are unknown. A result requiring more than the entire
+configured capacity cannot settle until the Host increases its limit. On capacity
+refusal, the core restores scan scheduling no earlier than the existing `reconcileMs`
+interval before rejecting the drain or wake hook;
+a concurrent wake-dispatch failure is retained alongside the capacity error in
+`AggregateError.errors`. Flush acknowledged projections, then retry `drain()`.
+Outcome callbacks must remain synchronous, transaction-local and safe to retry.
+
+This option does not bound control outbox rows or compact memory approvals. Memory
+readback is not a client acknowledgement, and memory intent/approval retention
+still requires a separate explicit acknowledgement and replay contract (#602).

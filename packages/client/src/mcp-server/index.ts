@@ -124,6 +124,9 @@ const OMITS_UNREADABLE_ID = '2025-11-25';
 export interface McpServerToolDefinition {
   readonly name: string;
   readonly description?: string;
+  readonly title?: string;
+  readonly annotations?: Readonly<{ title?: string; readOnlyHint?: boolean; destructiveHint?: boolean; idempotentHint?: boolean; openWorldHint?: boolean }>;
+  readonly outputSchema?: Readonly<Record<string, unknown>>;
   /** Caller-supplied, passed through verbatim. The core never authors, validates against, or rewrites it. */
   readonly inputSchema: Readonly<Record<string, unknown>>;
   /** Caller-owned MCP metadata, passed through verbatim with the tool definition. */
@@ -140,6 +143,8 @@ export interface McpServerToolCall {
   readonly arguments: Readonly<Record<string, unknown>> | undefined;
   /** Aborted when the peer sends `notifications/cancelled` for this request id. */
   readonly signal: AbortSignal;
+  /** Report increasing finite progress. No-op without a token or after cancellation/completion. */
+  readonly progress: (progress: number, total?: number, message?: string) => void;
 }
 
 /**
@@ -380,11 +385,15 @@ export function serveMcpOverStdio(options: McpServerOptions): McpServerHandle {
   }
 
   function handleToolsList(id: McpServerRequestId): void {
-    const tools = options.tools.map((tool) =>
-      tool.description === undefined
-        ? { name: tool.name, inputSchema: tool.inputSchema, ...(tool._meta === undefined ? {} : { _meta: tool._meta }) }
-        : { name: tool.name, description: tool.description, inputSchema: tool.inputSchema, ...(tool._meta === undefined ? {} : { _meta: tool._meta }) },
-    );
+    const tools = options.tools.map(tool => ({
+      name: tool.name,
+      ...(tool.description === undefined ? {} : { description: tool.description }),
+      inputSchema: tool.inputSchema,
+      ...(tool.title === undefined ? {} : { title: tool.title }),
+      ...(tool.annotations === undefined ? {} : { annotations: tool.annotations }),
+      ...(tool.outputSchema === undefined ? {} : { outputSchema: tool.outputSchema }),
+      ...(tool._meta === undefined ? {} : { _meta: tool._meta }),
+    }));
     send({ jsonrpc: '2.0', id, result: { tools } }, id);
   }
 
@@ -418,6 +427,13 @@ export function serveMcpOverStdio(options: McpServerOptions): McpServerHandle {
       callArguments = argumentsValue as Record<string, unknown>;
     }
 
+    const meta = params._meta;
+    const token = meta !== null && typeof meta === 'object' && !Array.isArray(meta)
+      ? (meta as Record<string, unknown>).progressToken : undefined;
+    if (token !== undefined && typeof token !== 'string' && !(typeof token === 'number' && Number.isFinite(token))) {
+      sendError(id, INVALID_PARAMS, 'progressToken must be a string or finite number');
+      return;
+    }
     const key = SeenRequestIds.key(id);
     const controller = new AbortController();
     activeCalls.set(key, controller);
@@ -425,9 +441,24 @@ export function serveMcpOverStdio(options: McpServerOptions): McpServerHandle {
     /** `true` only while this call is still the one allowed to answer: a cancel retires the id at abort time. */
     const stillOurs = (): boolean => activeCalls.get(key) === controller;
 
+    let previousProgress = -Infinity;
+    const progress: McpServerToolCall['progress'] = (value, total, message) => {
+      if (token === undefined || !stillOurs() || closed) return;
+      if (!Number.isFinite(value) || value <= previousProgress
+        || (total !== undefined && !Number.isFinite(total))
+        || (message !== undefined && typeof message !== 'string')) {
+        throw new TypeError('progress must be finite and increasing, with finite total and string message');
+      }
+      previousProgress = value;
+      send({ jsonrpc: '2.0', method: 'notifications/progress', params: {
+        progressToken: token, progress: value,
+        ...(total === undefined ? {} : { total }), ...(message === undefined ? {} : { message }),
+      } });
+    };
+
     const task = (async (): Promise<void> => {
       try {
-        const result = await options.callTool({ name, arguments: callArguments, signal: controller.signal });
+        const result = await options.callTool({ name, arguments: callArguments, signal: controller.signal, progress });
         if (!stillOurs()) return;
         activeCalls.delete(key);
         send({ jsonrpc: '2.0', id, result }, id);
