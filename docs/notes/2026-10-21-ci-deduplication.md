@@ -1,4 +1,6 @@
-# CI trigger deduplication
+# CI trigger deduplication — historical first step
+
+Superseded by the user-approved release-only full-validation policy in #653, integrated into the current candidate. The description below records the earlier implementation and its evidence; it is not the current trigger contract. Ordinary PR/main changes now use reviewed impact-scoped checks. Only explicit exact-SHA release validation runs the complete matrix and supplies publishable artifacts.
 
 Baseline: `d0350c6bf6c36dafd303179e3f1e5cef71b20ef9`.
 
