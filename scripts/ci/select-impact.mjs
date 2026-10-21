@@ -148,12 +148,13 @@ export const workspaceGraph = {
 };
 
 export const knownFamilies = Object.freeze([
-  'build-test', 'agent-memory-helper-linux', 'agent-memory-helper',
+  'build-test', 'agent-memory-export-linux', 'agent-memory-helper-linux', 'agent-memory-helper',
   'execution-recovery-native', 'adapter-lifecycle-smoke', 'dataplane',
   'windows-git-workspace', 'packageability-smoke', 'npm-release-pack',
   'release-pack-migrate', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
 ]);
 const clientFamilies = [
+  'agent-memory-export-linux',
   'agent-memory-helper-linux', 'agent-memory-helper', 'execution-recovery-native',
   'adapter-lifecycle-smoke', 'windows-git-workspace', 'packageability-smoke',
   'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
@@ -186,6 +187,13 @@ export function selectImpact(paths, context = {}) {
       if (!workspaceGraph[dir]) requireRelease(path);
       families.add('npm-release-pack'); continue;
     }
+    if (path === 'examples/bot-collaboration/package.json') {
+      verifyReviewedContent(path, context);
+      dirs.add('examples/bot-collaboration'); continue;
+    }
+    if (path === 'examples/basic/clarification.test.ts' || path === 'examples/basic/goal-btw.test.ts') {
+      dirs.add('examples/basic'); continue;
+    }
     if (path === 'api-surface/entries.json') {
       for (const dir of changedApiOwners(context)) {
         if (!workspaceGraph[dir]) requireRelease(path);
@@ -194,10 +202,15 @@ export function selectImpact(paths, context = {}) {
       continue;
     }
     if (/^scripts\/release\/registry-(?:contract\.test\.mjs|expectations\.json)$/.test(path)) { scripts = true; continue; }
+    // #652 trims these reviewed files in the pinned OAR snapshot.
+    if (/^packages\/client\/vendor\/oar\/60ad09b\/(?:runtimes\/codex\/(?:app-server-client|rpc-control|session)|shared\/(?:acp\/session|session-kernel))\.ts$/.test(path)) {
+      dirs.add('packages/client'); continue;
+    }
     if (/^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:PROVENANCE\.md|source-manifest\.json|runtimes\/grok\/session\.ts)$/.test(path)) {
       dirs.add('packages/client'); continue;
     }
-    if (path === 'examples/host-execution-core/VALIDATION.md') continue;
+    if (path === 'examples/host-execution-core/VALIDATION.md'
+      || path === 'examples/host-execution-core/PLAN-612.md') continue;
 
     if (rootDocs.has(path) || /^(docs|tasks|deploy\/runbooks)\/.+\.md$/.test(path)) continue;
     if (rootCi.has(path) || /^scripts\/ci\/[a-z0-9-]+(?:\.test)?\.mjs$/.test(path)) { scripts = true; continue; }

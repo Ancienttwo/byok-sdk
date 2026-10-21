@@ -6,6 +6,8 @@ export type TombstoneKind = 'intent' | 'application' | 'slot';
 export interface CompactionOptions {
   /** Explicit acknowledgement that these results may be removed under the Host's retention policy. */
   acknowledgedIntentKeys: readonly string[];
+  /** Settled Host-only occurrences; promoted occurrences are selected through their intent. */
+  acknowledgedOccurrenceKeys?: readonly string[];
   now: number;
   tombstoneRetentionMs: number;
 }
@@ -77,6 +79,9 @@ export class HostLedger {
     if (!Array.isArray(options.acknowledgedIntentKeys)) throw new Error('Acknowledged intent keys must be an array');
     const keys = [...new Set(options.acknowledgedIntentKeys)];
     if (keys.some(key => typeof key !== 'string' || !key.trim())) throw new Error('Invalid acknowledged intent key');
+    if (options.acknowledgedOccurrenceKeys !== undefined && !Array.isArray(options.acknowledgedOccurrenceKeys)) throw new Error('Acknowledged occurrence keys must be an array');
+    const occurrenceKeys = [...new Set(options.acknowledgedOccurrenceKeys ?? [])];
+    if (occurrenceKeys.some(key => typeof key !== 'string' || !key.trim())) throw new Error('Invalid acknowledged occurrence key');
     return this.transaction(state => {
       const result: CompactionResult = { compactedIntents: 0, alreadyCompactedIntents: 0, executions: 0,
         occurrences: 0, expiredTombstones: 0, beforeBytes: Buffer.byteLength(JSON.stringify(state)), afterBytes: 0 };
@@ -96,12 +101,23 @@ export class HostLedger {
         owners.push(intent.id); occurrenceOwners.set(intent.occurrence, owners);
       }
       for (const occurrence of Object.values(state.occurrences)) {
+        if (!occurrence.intentId) continue;
         const rows = byIntent.get(occurrence.intentId) ?? [];
         rows.push(occurrence); byIntent.set(occurrence.intentId, rows);
       }
       for (const [slot, occurrence] of Object.entries(state.slots)) {
         const slots = byOccurrence.get(occurrence) ?? [];
         slots.push(slot); byOccurrence.set(occurrence, slots);
+      }
+      for (const key of occurrenceKeys) {
+        const occurrence = state.occurrences[key];
+        if (!occurrence || occurrence.key !== key || !occurrence.job || occurrence.intentId || !occurrence.conclusion
+          || Object.values(state.outbox).some(row => row.kind === 'host-job' && row.occurrenceKey === key)
+          || occurrenceOwners.has(key)) throw new Error('Only settled Host-only occurrences can be compacted');
+        const slot = hash(occurrence.wakeKey);
+        if (state.slots[slot] !== key || byOccurrence.get(key)?.length !== 1) throw new Error('Invalid occurrence slot association');
+        retire.run(this.tenant, 'slot', slot, expiresAt);
+        delete state.slots[slot]; delete state.occurrences[key]; result.occurrences++;
       }
       for (const key of keys) {
         const id = hash(key), intent = state.intents[id];

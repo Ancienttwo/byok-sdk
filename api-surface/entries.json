@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2057010,
+      "budgetBytes": 2060740,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -150,7 +150,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Embedded Agent memory service",
-      "budgetBytes": 67063,
+      "budgetBytes": 67427,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -167,6 +167,7 @@
         "packages/client/dist/agent-memory/index.d.ts"
       ],
       "bareImports": [
+        "@byok-sdk/protocol/constants",
         "child_process",
         "crypto",
         "fs",
