@@ -362,12 +362,17 @@ describe('compat v3: corpus coverage and WIRE_ADDITIONS', () => {
     expect(requiredReceiverCapabilities('agent.content.read', { surface: 'transcript' })).toContain('agent-content-transcript-read');
     expect(requiredReceiverCapabilities('agent.content.read', { surface: 'transcript' })).not.toContain('agent-content-workspace-read');
     expect(requiredReceiverCapabilities('task.progress', {})).toEqual([]);
+    expect(requiredReceiverCapabilities('task.progress', { events: [
+      { type: 'tool_use', tool: 'mcp__server__tool', mcp: { server: 'server', tool: 'tool' } },
+      { type: 'tool_result', tool: 'mcp__server__tool', mcp: { server: 'server', tool: 'tool' } },
+    ] })).toEqual([]);
     expect(requiredReceiverCapabilities('task.complete', { document: {}, finalMessage: 'x' })).toEqual([]);
     expect(requiredReceiverCapabilities('task.decline', { code: 'agent_home_writer_busy' })).toEqual([]);
-    expect(WIRE_ADDITIONS.filter((entry) => entry.rule === 'strip-safe'), 'only the new runtime field is registered; v2 rows remain baseline').toEqual([
+    expect(WIRE_ADDITIONS.filter((entry) => entry.rule === 'strip-safe'), 'only declared optional observability fields are registered; v2 rows remain baseline').toEqual([
       { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'runtimes[].capabilities.messageDraft' },
       { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'harnesses[].capabilities.messageDraft' },
       { kind: 'envelope', rule: 'strip-safe', surface: 'task.claim', field: 'capabilities.messageDraft' },
+      { kind: 'envelope', rule: 'strip-safe', surface: 'task.progress', field: 'events[].mcp' },
     ]);
   });
 });

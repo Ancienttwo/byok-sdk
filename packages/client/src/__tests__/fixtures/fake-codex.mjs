@@ -336,12 +336,14 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   if (method === 'turn/start') {
     active = `turn-${++turn}`;
     if (turn > 1 && process.env.FAKE_CODEX_HANG_FOLLOWUP === '1') return;
+    if (process.env.FAKE_CODEX_HANG_TURN_START === '1') return;
     send({ id, result: { turn: { id: active } } });
     const current = active;
     setTimeout(() => void runTurn(current, params.input ?? []), 5);
     return;
   }
   if (method === 'turn/steer') {
+    if (process.env.FAKE_CODEX_HANG_STEER === '1') return;
     if (params.expectedTurnId !== active) {
       send({ id, error: { code: -32000, message: 'expected turn mismatch' } });
       return;

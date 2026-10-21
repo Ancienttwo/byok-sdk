@@ -383,6 +383,34 @@ describe.skipIf(!isSqliteAvailable())('SqliteLocalTaskJournal', () => {
       expect((await journal.listRecoverable())[0]?.localState).toBe('Running');
     });
 
+    it.each(['complete', 'failed'] as const)('preserves committed %s task state when a new transition arrives late', async (terminalType) => {
+      const storeDir = await tmpStore();
+      const journal = build(storeDir);
+      await journal.appendEnvelope(envelopeRecord());
+      const recordedAt = '2026-08-07T00:00:05.000Z';
+      await journal.recordTerminal({
+        taskId: 'task-1', terminalType, bytes: 'committed-terminal',
+        payloadHash: journalHash('committed-terminal'), truthState: 'pending',
+        attempt: 1, recordedAt,
+      });
+      const terminalBefore = readRows(storeDir, 'SELECT * FROM journal_terminal');
+
+      // A distinct transition id exercises a late first write, not duplicate replay.
+      await journal.recordTransition({
+        transitionId: 'tr-late', taskId: 'task-1', from: 'Claimed', to: 'Running',
+        occurredAt: '2026-08-07T00:00:06.000Z',
+      });
+
+      expect(readRows(storeDir, 'SELECT local_state, updated_at FROM journal_task')).toEqual([
+        { local_state: `terminal:${terminalType}`, updated_at: recordedAt },
+      ]);
+      expect(readRows(storeDir, 'SELECT transition_id, task_id, to_state FROM journal_transition')).toEqual([
+        { transition_id: 'tr-late', task_id: 'task-1', to_state: 'Running' },
+      ]);
+      expect(readRows(storeDir, 'SELECT * FROM journal_terminal')).toEqual(terminalBefore);
+      expect(await journal.listRecoverable()).toEqual([]);
+    });
+
     it('keeps the FIRST terminal and folds a same-hash retry into retry state only', async () => {
       const storeDir = await tmpStore();
       const journal = build(storeDir);

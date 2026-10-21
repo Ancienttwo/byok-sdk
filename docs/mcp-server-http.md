@@ -30,7 +30,57 @@ between callers or select it from an MCP session header. A session ID is not an
 authentication credential. Per-Bot keys, scopes and quotas belong to beta B2.
 Mount only the intended endpoint. Bind local listeners to loopback.
 
-## HTTP contract
+## Stateless tools on runtimes without instance affinity
+
+Set `sessionMode: 'stateless'` when each request may reach a different instance.
+The default remains `stateful`. No session ID is issued or retained in stateless
+mode; each POST uses and releases its own tools-only core. For a Workers-style
+Host, authenticate every request before constructing caller-scoped options:
+
+```ts
+export default {
+  async fetch(request: Request) {
+    const caller = await authenticateCaller(request); // Host implementation
+    if (!caller) return new Response('Unauthorized', { status: 401 });
+    const mcp = createMcpHttpServer({
+      origin: 'https://host.example',
+      sessionMode: 'stateless',
+      serverInfo: { name: 'host-tools', version: '1' },
+      tools: toolsForCaller(caller),
+      callTool: call => callToolForCaller(caller, call),
+    });
+    try { return await mcp.fetch(request); }
+    finally { mcp.close(); }
+  },
+};
+```
+
+Authentication and authorization above are Host-owned functions, not SDK exports.
+Never choose caller identity from an MCP header. This entry uses Node streams,
+crypto and Buffer; Workers deployments need Node compatibility support and must
+qualify their bundle/runtime. Tests simulate independent isolates using two
+instances and the standard MCP client; no deployed Workers qualification is claimed.
+
+After initialize, send `MCP-Protocol-Version` on every POST. Missing headers
+return 400 because the HTTP fallback revision `2025-03-26` is not implemented.
+Unsupported versions, malformed JSON/envelopes and invalid Origins remain
+rejected before tool dispatch. Supplying a session ID returns 400. GET and
+DELETE return 405. `toolsListChanged` is rejected at construction. Ordinary
+tool calls requesting progress streams via `_meta.progressToken` return 400
+before dispatch because stateless mode does not support SSE. Ordinary
+notifications return 202; cross-request cancellation notifications return 400,
+since no request registry is shared between calls or instances. A disconnected
+HTTP client does not cancel its call. Host shutdown still aborts active calls.
+
+There is no session expiry, DELETE-based invalidation, replay/id deduplication
+across requests, SSE or external session store in this mode. Request IDs may
+repeat on separate POSTs. `maxSessions`/`idleTimeoutMs` affect only stateful mode;
+body, pending-call and running-tool bounds remain per instance. A Host creating
+an instance per request must enforce its own aggregate concurrency limits.
+The DELETE/expiry acceptance in #607 applies to stored sessions, not this
+stateless alternative; it is not claimed as completed here.
+
+## Default stateful HTTP contract
 
 The transport follows the [MCP 2025-11-25 Streamable HTTP transport](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports).
 It supports protocol revisions `2025-11-25` and `2025-06-18`.

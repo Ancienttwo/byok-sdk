@@ -278,10 +278,13 @@ describe('required Codex native projection', () => {
     expect(s.output[1]).not.toHaveProperty('output.exitCode');
     expect(s.output.at(-1)?.type).toBe('turn_end');
   });
-  it('required projection failure escapes the kernel consumer; the native fact remains retained', () => {
+  it('a projection failure stays inside the kernel observer; the native fact remains retained', () => {
+    // The kernel swallows observer errors, so the adapter's record consumer fails the session itself.
     const projection = new CodexProjection('/workspace', 'root');
-    const kernel = createSessionKernel('root', {
-      onRecord: (r) => projection.consume(kernel, r, () => {}),
+    const kernel = createSessionKernel('root');
+    const failures: unknown[] = [];
+    kernel.rawEvents((r) => {
+      try { projection.consume(kernel, r, () => {}); } catch (error) { failures.push(error); throw error; }
     });
     const body = {
       type: 'item/started',
@@ -289,7 +292,33 @@ describe('required Codex native projection', () => {
       events: [],
       origin: 'byok-native',
     };
-    expect(() => kernel.frame(body)).toThrow(RuntimeExecutionFailure);
+    expect(() => kernel.frame(body)).not.toThrow();
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toBeInstanceOf(RuntimeExecutionFailure);
     expect(kernel.records()).toHaveLength(1);
   });
+});
+
+it('retains native MCP identity on start, completion and interrupted closure without inferring builtins', () => {
+  const s = setup();
+  const item = { type: 'mcpToolCall', id: 'mcp1', server: 'market__feed', tool: 'get__quote', arguments: {} };
+  s.feed('item/started', { item });
+  s.feed('item/completed', { item: { ...item, result: {}, status: 'completed' } });
+  s.feed('item/started', { item: { ...item, id: 'mcp2' } });
+  s.feed('turn/completed', { turn: { status: 'interrupted' } });
+  const tools = s.output.filter(e => e.type === 'tool_use' || e.type === 'tool_result');
+  expect(tools).toHaveLength(4);
+  for (const event of tools) expect(event).toHaveProperty('mcp', { server: 'market__feed', tool: 'get__quote' });
+  const native = setup();
+  native.feed('item/started', { item: { type: 'commandExecution', id: 'shell', command: 'mcp__market__feed__get__quote' } });
+  expect(native.output[0]).not.toHaveProperty('mcp');
+});
+
+it('uses native MCP completion metadata even without a matching start', () => {
+  const s = setup();
+  s.feed('item/completed', { item: { type: 'mcpToolCall', id: 'only-result', server: 'quotes', tool: 'get', result: {}, status: 'completed' } });
+  expect(s.output).toMatchObject([{ type: 'tool_result', mcp: { server: 'quotes', tool: 'get' } }]);
+  const unknown = setup();
+  unknown.feed('item/started', { item: { type: 'mcpToolCall', id: 'missing', arguments: { server: 'untrusted', tool: 'guess' } } });
+  expect(unknown.output[0]).not.toHaveProperty('mcp');
 });

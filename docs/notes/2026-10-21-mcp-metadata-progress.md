@@ -35,3 +35,27 @@ Local evidence is retained outside Git under the task workspace as
 An initial sandbox test run was interrupted while stalled; its cause was not
 established. Final socket tests ran with local socket permissions. No full-suite
 pass or other-platform qualification is claimed here.
+
+## PR #647 main integration
+
+- P1: the shared tools-only core owns `tools/list` projection and bounded NDJSON
+  serialization; HTTP wraps that core, while reserved helpers supply tool data.
+  The main merge includes #645 event identity and the stateless HTTP transport.
+- P2: `tools/list` reaches `handleToolsList`, projects caller tool fields, then
+  `send` uses `JSON.stringify` and the bounded writer. Both failed jobs in
+  run 39541351120 changed `name, description, inputSchema` to
+  `name, inputSchema, description`. The unchanged reserved-helper byte regression
+  reproduced locally before the fix.
+- P3: restore the established field order in the single projection; preserve all
+  added metadata without a second serializer or test normalization. At larger
+  loads the existing frame/in-flight bounds remain the limiting controls.
+  Resolve HTTP integration by preserving stateful progress and stateless core
+  disposal; stateless progress requests fail before dispatch, matching its no-SSE
+  contract. Added rejection assertions cover string and numeric-zero tokens.
+- The combined main/feature build measures entry closures at 2064521 bytes
+  (client), 69427 (agent-memory), and 36482 (HTTP MCP). These three explicit
+  budgets now match measured combined code; no dependency policy or test limit
+  was relaxed. Public declaration goldens merged without further changes.
+- Local affected suites: 126 passed, five existing platform skips. Workspace
+  build and typecheck passed. Full workspace tests and hosted checks are tracked
+  separately; the original frozen bytes and assertions remain unchanged.

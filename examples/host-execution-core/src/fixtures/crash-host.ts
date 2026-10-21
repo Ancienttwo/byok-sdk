@@ -21,7 +21,7 @@ const server = createByokServer({ productId, storage: { kind: 'sqlite', path: pa
     if (occurrenceKey) {
       const after = ledger.snapshot();
       const occurrence = after.occurrences[occurrenceKey]!;
-      const taskId = after.intents[occurrence.intentId]!.taskId;
+      const taskId = after.intents[occurrence.intentId!]!.taskId;
       process.send?.({ kind: 'replayed', taskId, dedupKey: wake.dedupKey, delivery: wake.delivery,
         beforeReplayCount: before.occurrences[occurrenceKey]!.slotReplayCount ?? 0,
         slotReplayCount: occurrence.slotReplayCount,

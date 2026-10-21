@@ -124,7 +124,7 @@ it('audits a successor calendar exception and resolves the real hook without red
   expect(routine('domain-error').calendarErrors).toEqual([{ at: occurrence.recordedAt, wakeKey: occurrence.wakeKey, message: 'calendar domain exceeded' }]);
   expect(routine('domain-error')).toMatchObject({ lifecycle: 'active', next: null });
   await vi.waitFor(async () => expect((await host.server.wakes.pending()).some(wake => wake.dedupKey === occurrence.wakeKey)).toBe(false));
-  const intent = host.ledger.snapshot().intents[occurrence.intentId]!;
+  const intent = host.ledger.snapshot().intents[occurrence.intentId!]!;
   await vi.waitFor(() => expect(host.adapter.sessions.has(intent.taskId)).toBe(true));
   host.adapter.sessions.get(intent.taskId)!.finish({ text: 'current occurrence is independent of the next calendar calculation' });
   await vi.waitFor(async () => { await host.core.drain(); expect(host.core.intent(intent.key)?.conclusion).toBe('succeeded'); });

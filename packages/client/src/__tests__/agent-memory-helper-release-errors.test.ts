@@ -6,6 +6,7 @@ vi.mock('node:fs', async importOriginal => ({
   ...await importOriginal<typeof import('node:fs')>(),
   readFileSync: assets.read,
 }));
+import { AGENT_MEMORY_HELPER_RELEASE } from '../daemon/agent-memory-helper-release-pin';
 import { resolveAgentMemoryFilesystemHelper } from '../daemon/agent-memory-helper-release';
 
 afterEach(() => { vi.resetAllMocks(); });
@@ -35,12 +36,7 @@ describe.skipIf(process.platform !== 'darwin')('SDK helper missing release asset
     assets.resolve.mockReturnValue('/sdk/package.json');
     const cause = Object.assign(new Error(`ENOENT: ${missing}`), { code: 'ENOENT' });
     if (missing === 'binary') {
-      assets.read.mockReturnValueOnce(JSON.stringify({
-        version: 1, helperVersion: '2', protocol: 2, go: 'go1.26.5',
-        digestAlgorithm: 'mach-o-content-v1', signingPolicy: 'product-resigning-allowed',
-        flags: ['-buildvcs=false', '-trimpath'], sourceDigest: 'a'.repeat(64),
-        entries: { [`darwin-${process.arch}`]: { file: `darwin-${process.arch}`, digest: 'b'.repeat(64) } },
-      }));
+      assets.read.mockReturnValueOnce(JSON.stringify(AGENT_MEMORY_HELPER_RELEASE));
     }
     assets.read.mockImplementation(() => { throw cause; });
     const error = resolutionError();
@@ -50,6 +46,17 @@ describe.skipIf(process.platform !== 'darwin')('SDK helper missing release asset
       missing === 'manifest' ? '/sdk/dist/native/agent-memory-fs/manifest.json' : `/sdk/dist/native/agent-memory-fs/darwin-${process.arch}`,
       ...(missing === 'manifest' ? ['utf8'] : []),
     );
+  });
+
+  it('reports missing explicit assets as a product deployment error and preserves the cause', () => {
+    const cause = Object.assign(new Error('missing product manifest'), { code: 'ENOENT' });
+    assets.read.mockImplementation(() => { throw cause; });
+    expect(() => resolveAgentMemoryFilesystemHelper('/product/memory-assets')).toThrow(
+      'deploy copyAgentMemoryHelperAssets output from the same SDK release',
+    );
+    try { resolveAgentMemoryFilesystemHelper('/product/memory-assets'); }
+    catch (error) { expect((error as Error).cause).toBe(cause); }
+    expect(assets.resolve).not.toHaveBeenCalled();
   });
 
   it('keeps access errors unchanged', () => {
