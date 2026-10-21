@@ -211,16 +211,21 @@ For this release only, the owner's 2026-10-21 instruction to continue the
 changes. This explicit exception does not change the general policy above or
 waive validation, publication authorization, or registry readback. keys 0.13.1
 updates its exact packed core dependency; keys remains independently versioned.
-See the [0.28.1 candidate notes](releases/v0.28.1.md).
+See the [0.28.1 release notes](releases/v0.28.1.md).
 
-Public registry metadata read on 2026-10-21 reports all eight aligned packages
-at latest 0.28.0 and keys at latest 0.13.0. The older 0.28.0 source-candidate
-notes describe preparation history, not current registry availability. The
-0.28.1 / keys 0.13.1 versions were absent at that read; recheck before publishing.
-Publication requires the accepted final-commit CI artifact and separate owner
+Public registry metadata read on 2026-10-21 at 18:13 UTC reports `latest`
+0.28.1 for all eight aligned packages and `latest` 0.13.1 for keys. The same
+read lists 0.28.0 / keys 0.13.0 as the earlier published versions. The registry
+publication times are 2026-10-20 (UTC) for 0.28.0 / keys 0.13.0 and
+2026-10-21 (UTC) for 0.28.1 / keys 0.13.1. The keys 0.13.1 package depends on
+exactly `@byok-sdk/core` 0.28.1. The 0.28.0 and 0.28.1 source-candidate notes
+are preparation history. They are not publication records. This read confirms
+registry availability. It does not establish isolated-install qualification.
+A later release needs the accepted final-commit CI artifact and separate owner
 authorization.
 
-0.27.0 / keys 0.12.0 is published on `latest` from `v0.27.0` (`cd977261`).
+0.27.0 / keys 0.12.0 was published on `latest` from `v0.27.0` (`cd977261`). It
+was `latest` until 0.28.0.
 Complete registry readback and isolated installation passed on 2026-10-17.
 The owner directed publication while fixed-artifact Host acceptance (#195)
 remained open. Publication does not establish that acceptance.
@@ -544,6 +549,20 @@ and reject the drain; recovery retries it with the same occurrence identity. Ext
 Host effects require occurrence-key idempotency across crashes. Pause/completed stop
 new slots, not admitted jobs. This remains Host example code, not an SDK scheduler.
 See the [K4 Host job contract](../examples/host-execution-core/README.md#host-jobs-and-execution-free-occurrences).
+
+### K4 Host reply transaction
+
+The copy-and-own Host execution core exposes `consumeMessage` for the server's
+Agent message consumer. Admission checks the exact frozen tenant/device/Agent/
+context binding, then commits a synchronous Host `applyMessage` hook and a single
+execution-owned message-id/content-hash receipt with its projections. Exceptions
+and asynchronous hooks roll back. Accepted replay does not invoke the hook or
+recreate projections, including after generation advance; a first delivery for
+an old generation is refused. Explicit acknowledged-history compaction removes
+these receipts with executions; a retired task is then unknown. K8 uses this
+common admission while preserving its business reply arbitration and channel
+outbox. See [Host reply ingestion](host-execution-core.md#required-reply-ingestion)
+for legacy receipt validation and the external delivery idempotency boundary.
 
 ### Embedded wake queue
 
@@ -2760,6 +2779,21 @@ The ordinary `byok-pi-rpc` host launched under `credentialSource: keys-profile` 
 
 The durable Pi lane runs in a separate `byok-pi-durable` executable launched through the same credential launcher contract as `byok-pi-prepared`. The credential launcher transfers the provider key over a private, one-shot JSON IPC channel bound to the launch config digest; it MUST NEVER place the key in the durable child's environment, argv, stdio RPC or replica files. The worker consumes it into model/provider memory and disconnects IPC before constructing tools or MCP children. Deleting process.env is not an isolation mechanism. Tool exec MUST force `inheritEnv: false` and an explicit allowlist. Conformance tests require no key in both inherited tool env and the worker's OS-introspectable initial environment (`ps eww` / `/proc/<pid>/environ`). The daemon communicates with it over stdio RPC, does not depend on `@byok-sdk/keys`, and never reads, proxies or forwards credentials. Its environment is rebuilt by the same EnvironmentBuilder allowlist with the `BYOK_*` deny. One child exclusively owns one durable storage; because upstream pi-durable provides no cross-process lock, the child MUST acquire an OS exclusive lock (flock or sidecar lockfile) bound to the current leaseId before opening storage, and MUST fail closed if it cannot. The child exists only while its daemon holds the home's single-writer lease; lease release requires the child's disposal receipt or confirmed process-tree death (wait after KILL).
 
+
+### Hermes local credential custody (#608 bounded slice)
+
+A Host may opt Hermes into a dedicated keys launcher with a local exact
+non-secret profile selector. Default direct-environment mode is unchanged.
+The launcher validates the binding and pending-custody state at admission and
+again under the configuration lock before each credential read. Credentials
+stay in the launcher/Hermes process boundary and never return to the daemon.
+POSIX process replacement preserves gateway PID identity; unsupported runtimes
+and Windows are rejected. This initial custom-provider mapping admits enabled
+OpenAI-compatible bearer profiles without Pi-specific model overrides. It does
+not widen the Pi-only wire dispatch-selection contract, qualify live providers,
+or complete Windows/bundled-product support requested in #608.
+
+
 ### Durable Pi lane (experimental, flag-gated)
 
 The durable Pi lane is disabled by default and advertised only as an adapter capability; protocol intersection remains the execution gate. The first slice runs one harness with one root conversation per execution (per-execution replica required). The lane runs YOLO, as every lane does since ADR-037; there is no SDK permission policy to compute. Tool permission follows the owner's YOLO ruling: the `beforeTool` hook admits calls without Host approval and emits no `needs_approval`; a throwing hook blocks the call. The structured file tools may reach any path except the durable replica store; there is no workspace containment. Bash is best-effort only (reject explicit `BYOK_*` assignments) and is not workspace-bound under YOLO—boundary is env isolation (`inheritEnv: false`) plus process/replica lock. YOLO does not relax replay: slice 1 declares no replay-safe tools; any future read-only allowlist requires a separate reviewed slice, and the environment allowlist still applies. Slice 1 is an unprepared ordinary path: harness `compaction.enabled` is false and `retry.maxRetries` is 0. This disables auto-retry, not checkpoint model-request resends; permitted same-execution recovery reports ordinary observed usage. Prepared-lane guarantees (first-request byte identity with counted artifact, at-most-once scoped fetch, prepared charge-once binding) do not apply. Harness events map onto existing AgentEvent variants using Pi 1.0 names: `run_end`→`turn_end`, `tool_execution_*`→`tool_use`/`tool_result`, `usage_changed`/`message_end`→`usage`, `task_failed`→`error`, result-doc writes→`artifact`; `snapshot` must not be replayed as live progress; needs_approval is unused; unmapped events follow the existing unknown-event rule. The final answer is written to a result document and delivered only through an explicitly selected `terminalProjection: result-document`. Background subagents, wake tasks, memory documents, fork, multi-client steering and remote execution environments are not part of this slice. Recurring schedules remain Host-driven; no SDK runtime component interprets them (see Bot turn outcome fragments and routine time points).
@@ -3020,6 +3054,19 @@ Apache-2.0 attribution and maintained source inventory remain explicit. Fixture
 qualification does not establish live-provider, desktop or Host-reconnect
 acceptance.
 
+## K8 Host-declared read-only toolsets (#606)
+
+The copy-and-own Bot collaboration example refuses required toolsets by default.
+A Host may declare an immutable `readOnlyToolsets` list of logical IDs, enforced
+across initial/model templates, restored non-archived Bots, creation, update and
+enqueue. The list governs Bot turns only; a Host that calls the K4 core directly
+uses its own authority.
+The daemon still owns concrete tool definitions and ordinary capability admission.
+Only the Host's local tool service can enforce actual read-only behavior; model
+annotations are not authorization. External effects retain owner-confirmed Host
+connector execution. This additive slice does not qualify external-authority
+storage, Windows persona persistence or two-process relay.
+
 ## Hosted mailbox hold (#410)
 
 `ByokCloudOptions` and `CloudRootStores` require `MailboxWake`. Held
@@ -3067,7 +3114,8 @@ Legacy shared-temp prefixes are an operator-invoked migration: doctor inventorie
 `copySdkNativeAssets` is a build-time API. For Windows x64 it copies the pinned
 and integrity-verified official Koffi addon; it never downloads in a runtime.
 `sdkDistributionManifest` describes Pi pin, reserved helper kinds and native target
-files. A product passes an absolute `nativeAssetRoot` to SDK-created adapters via
+files. `reservedHelperKinds` plus `piSubagentHelperKinds` is exactly the set that
+`runSdkReservedHelperCommand` accepts. A product passes an absolute `nativeAssetRoot` to SDK-created adapters via
 `DaemonConfig`, or to each custom adapter constructor. An explicit root is scoped
 to that adapter's owned process trees and fails closed on missing or modified
 bytes without searching installed dependencies. Omission keeps installed behavior.
@@ -3075,17 +3123,6 @@ For Darwin the copier delegates to the existing memory-helper release copier;
 `agentMemoryHelperAssetRoot` remains the separate memory-helper authority. Windows
 memory remains unavailable. Native target metadata is not platform qualification;
 Windows SEA qualification requires the actual Windows CI process-ownership fixture.
-
-### K8 Host-declared read-only toolsets
-
-The copy-and-own Bot collaboration example refuses required toolsets by default.
-A Host may declare an immutable `readOnlyToolsets` list of logical IDs, enforced
-across initial/model templates, restored Bots, creation, update and enqueue.
-The daemon still owns concrete tool definitions and ordinary capability admission.
-Only the Host's local tool service can enforce actual read-only behavior; model
-annotations are not authorization. External effects retain owner-confirmed Host
-connector execution. This additive slice does not qualify external-authority
-storage, Windows persona persistence or two-process relay.
 
 ### Embedded Agent-home projection completion waiting
 

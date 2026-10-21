@@ -1,13 +1,45 @@
 # Changelog
 
-- Client MCP core: preserve tool title, annotations and output schema, and provide
-  request-scoped progress over stdio and bounded HTTP POST SSE (Refs #631).
-
 ## Unreleased
 
-- **Feature (client)** — add a pinned Windows x64 native asset copier, distribution
-  metadata and per-adapter asset roots for relocated runtime process ownership (#627).
-  Darwin copying reuses the existing memory-helper API; Windows memory is unchanged.
+- **Feature (keys, client)** — add a separate local provider custody launcher
+  for Hermes. The Host's keys process reads the selected profile key under the
+  custody lock at each start; the daemon environment carries no provider key.
+  Only OpenAI-compatible bearer profiles map; Windows is not supported (#608).
+- **Feature (client)** — add an opt-in task-free export of Agent memory for
+  Host-side device-change backups (#625).
+- **Fixed (server, client, keys)** — load `node:sqlite` without
+  `createRequire(import.meta.url)`, so CJS and relocated SEA single-file hosts
+  can open the server store, the client journal and keys (#626).
+- **Feature (client)** — add a pinned Windows x64 native asset copier,
+  distribution metadata and per-adapter asset roots for relocated runtime
+  process ownership (#627). Darwin copying reuses the existing memory-helper
+  API; Windows memory is unchanged.
+- **Feature (examples)** — K4 Host ingests required replies and their
+  projection in the same ledger transaction as the intent conclusion (#629).
+- **Feature (examples, server)** — K4 Host drains on `server.events` terminal
+  hints and notifies the Host after a committed outbox write. Durable scans
+  stay as the fallback when the event stream is not available (#630).
+- **Feature (client)** — MCP server core keeps tool `title`, `annotations`,
+  `outputSchema` and `_meta`, and streams request-scoped progress over stdio and
+  bounded stateful HTTP POST SSE. Stateless HTTP rejects progress requests with
+  400 (#631).
+- **Feature (examples)** — K4 memory page adds a bounded whole-tree restore
+  with a queue gate and a per-file result summary (#632). Each file is a CAS
+  write; the restore is not an atomic tree rollback.
+- **Feature (protocol, client)** — `tool_use` and `tool_result` events carry
+  the authoritative MCP `server` and `tool` identity (#633).
+- **Docs (client)** — document which user-level runtime configuration each
+  adapter loads and the available isolation boundaries (#634).
+- **Feature (server, cloud)** — Hosts can await the durable terminal state of an
+  Agent-home projection instead of polling (#637).
+- **Fixed (examples)** — the Bot collaboration Host now checks only
+  non-archived Bot templates against the read-only toolset allowlist when it
+  reopens. The stored template of an archived Bot no longer blocks reopening.
+  Outstanding frozen work of any Bot is still checked. A missing Bot model has
+  its own error text. The README states that the allowlist governs Bot turns only.
+  The Host's direct `bot.core.enqueue` call bypasses it. This completes the five
+  low-severity follow-ups of #622; #606 stays open.
 - **Fixed (core, cloud-dataplane, conformance, server)** — a presence publication
   with `minimumIntervalMs: 0` no longer fails with `hint_rate_limited` when the
   clock moved backwards. The embedded server renews the lease on each accepted
@@ -18,30 +50,36 @@
   conformance suite now covers the rollback case, and `advanceTime` accepts a
   negative value (#674).
 
-## 0.28.1 / @byok-sdk/keys 0.13.1 — source candidate
+## 0.28.1 / @byok-sdk/keys 0.13.1 — 2026-10-21 (published)
 
 The owner selected 0.28.1 as a one-release exception to the default pre-1.0
-MINOR policy for additive changes. This candidate is not published. See the
-[release notes](docs/releases/v0.28.1.md) for scope and outstanding qualification.
+MINOR policy for additive changes. The npm registry lists all eight aligned
+packages at 0.28.1 and keys at 0.13.1. Both are `latest`. The registry
+publication times fall on 2026-10-21 (UTC). The registry read was on
+2026-10-21 at 18:13 UTC. See the [release notes](docs/releases/v0.28.1.md)
+for scope and the qualification limits that were recorded at preparation.
 The eight aligned manifests and lock records move to 0.28.1; keys moves to
 0.13.1 with an exact packed core edge of 0.28.1.
 
 - **Fixed (client)** — isolate concurrent Hermes root configuration writes
   (#599); preserve required closing replies when normal completion lacks a
   usable result outcome, while retaining task failure, no result document and
-  cancellation precedence (#642 candidate).
+  cancellation precedence (#642). The new reply-failure helpers
+  (`ResultReplyFailure`, `isResultReplyFailure`, `resultReplyFailureReason`)
+  are internal to the client daemon. The package root does not export them.
 - **Fixed (examples)** — retire all affected routines before awaiting wake
   cancellation (#601). Add explicit transactional compaction of acknowledged
   settled Host history, retaining unsettled work, unacknowledged outbox entries
-  and retired intent identities (#623 candidate); no automatic deletion or
+  and retired intent identities (#623); no automatic deletion or
   total-database size bound.
 - **Fixed (client)** — route the canonical Agent persona into fresh Grok
-  sessions without expanding folder trust (#643 candidate). Persona-bearing
+  sessions without expanding folder trust (#643). Persona-bearing
   resumes fail before spawn; live Grok qualification remains outstanding.
 - **Feature (server, client)** — expose embedded memory-intent notices (#616),
   verified relocated memory-helper assets (#617), stateless tools-only MCP HTTP
-  (#621) and an identity-stable native loopback listener (#638). Additive public
-  APIs remain subject to the next-MINOR rule.
+  (#621) and an identity-stable native loopback listener (#638). These additive
+  public APIs ship in this PATCH under the one-release exception above. The
+  default MINOR rule applies again to later additive public APIs.
 - **Changed (examples, validation)** — add ignored routine-wake audit records
   (#620), Host-declared read-only Bot toolsets (#622), Windows K4 non-memory CI
   (#619) and the per-runtime result measurement method (#615). These slices do
@@ -52,9 +90,12 @@ The eight aligned manifests and lock records move to 0.28.1; keys moves to
   unchanged; prepared memory requests fail closed when disabled. This is the
   daemon opt-out slice of #614; non-prepared per-task selection remains open.
 
-## 0.28.0 / @byok-sdk/keys 0.13.0 — source candidate
+## 0.28.0 / @byok-sdk/keys 0.13.0 — 2026-10-20 (published; superseded by 0.28.1)
 
-This candidate is not published. See the [release notes](docs/releases/v0.28.0.md).
+The npm registry lists all eight aligned packages at 0.28.0 and keys at 0.13.0.
+The registry publication times fall on 2026-10-20 (UTC). The registry read was
+on 2026-10-21 at 18:13 UTC. 0.28.1 is now `latest`. See the
+[release notes](docs/releases/v0.28.0.md).
 
 - **Feature (client)** — add `GrokAdapter` and `HermesAdapter` over ACP.
 - **Feature (client)** — add the MCP Streamable HTTP transport at `./mcp-server/http`.

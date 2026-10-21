@@ -18,7 +18,6 @@
  *   only looks durable), so the typed error it raises is the journal's own —
  *   see `JournalUnavailableError` in `journal.ts`.
  */
-import { createRequire } from 'node:module';
 import { chmodSync, existsSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 
@@ -79,13 +78,13 @@ export function isSqliteCapableNodeVersion(nodeVersion: string): boolean {
 let sqliteModule: typeof import('node:sqlite') | undefined;
 
 /**
- * Synchronously load `node:sqlite` via `createRequire` rather than a dynamic
+ * Synchronously load `node:sqlite` via `process.getBuiltinModule` rather than a dynamic
  * `import()`. `DatabaseSync`'s entire API is synchronous, and the journal is
  * constructed synchronously from `createDaemonWithAdapters` alongside every
  * other daemon-local store (`DeviceStore`, `CursorStore`, ...) — an async
  * factory here would leak into every one of those call sites for nothing.
- * `node:sqlite` is a built-in, so `require` resolves it even from this
- * `"type": "module"` package. Memoized: the throw is re-derived per call from
+ * The built-in lookup needs no file URL, including in CJS bundles and SEA
+ * executables. Memoized: the throw is re-derived per call from
  * the version check rather than cached, which keeps the failure message
  * accurate without keeping a rejected value around.
  */
@@ -96,8 +95,9 @@ export function loadSqliteModule(): typeof import('node:sqlite') {
       `node:sqlite requires Node.js ${MIN_NODE_MAJOR}.${MIN_NODE_MINOR}+; detected ${process.versions.node}`,
     );
   }
-  const require = createRequire(import.meta.url);
-  sqliteModule = require('node:sqlite') as typeof import('node:sqlite');
+  const loaded = process.getBuiltinModule('node:sqlite');
+  if (!loaded) throw new Error('node:sqlite is not available in this runtime');
+  sqliteModule = loaded;
   return sqliteModule;
 }
 
