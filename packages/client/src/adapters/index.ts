@@ -38,7 +38,7 @@ export type { CodexAdapterOptions, CodexSandboxSetting } from './codex/codex-ada
 export { GrokAdapter } from './grok/grok-adapter';
 export type { GrokAdapterOptions } from './grok/grok-adapter';
 export { HermesAdapter } from './hermes/hermes-adapter';
-export type { HermesAdapterOptions, HermesModelSelection } from './hermes/hermes-adapter';
+export type { HermesAdapterOptions, HermesModelSelection, HermesByokLauncher } from './hermes/hermes-adapter';
 
 export { NativeInteractionController, NativeInteractionError } from '../native-interactions';
 export type {

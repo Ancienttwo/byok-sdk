@@ -1,5 +1,4 @@
 import { chmodSync, existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { dirname } from 'node:path';
 import type { DatabaseSync, DatabaseSyncOptions } from 'node:sqlite';
 
@@ -158,18 +157,18 @@ export function isSqliteCapableNodeVersion(nodeVersion: string): boolean {
 let sqliteModule: typeof import('node:sqlite') | undefined;
 
 /**
- * Synchronously load `node:sqlite` via `createRequire` rather than a dynamic
+ * Synchronously load `node:sqlite` via `process.getBuiltinModule` rather than a dynamic
  * `import()`. Every reference store in this package (`InMemoryTaskStore`,
  * `LocalDiskBlobStore`) constructs synchronously via `new`, and
  * `node:sqlite`'s own API (`DatabaseSync`) is itself fully synchronous — an
  * async factory here would be the odd one out and would leak into every
  * caller (`createByokServer`, the example, tests). `node:sqlite` is a
- * built-in, so `require('node:sqlite')` resolves it even from this
- * `"type": "module"` package. Throws {@link SqliteUnavailableError} (not a
+ * built-in, so loading it needs no file URL or module-resolution anchor,
+ * including in CJS bundles and SEA executables. Throws {@link SqliteUnavailableError} (not a
  * raw `MODULE_NOT_FOUND`/version-mismatch trace) when it can't be loaded —
  * checking the Node version first (see {@link isSqliteCapableNodeVersion})
  * gives the common "Node too old" case a specific, actionable message
- * before even attempting the `require`.
+ * before even attempting the built-in lookup.
  */
 function loadSqliteModule(): typeof import('node:sqlite') {
   if (sqliteModule) return sqliteModule;
@@ -181,8 +180,9 @@ function loadSqliteModule(): typeof import('node:sqlite') {
     );
   }
   try {
-    const require = createRequire(import.meta.url);
-    sqliteModule = require('node:sqlite') as typeof import('node:sqlite');
+    const loaded = process.getBuiltinModule('node:sqlite');
+    if (!loaded) throw new Error('node:sqlite is not available in this runtime');
+    sqliteModule = loaded;
     return sqliteModule;
   } catch (err) {
     throw new SqliteUnavailableError(err);
@@ -196,7 +196,7 @@ function loadSqliteModule(): typeof import('node:sqlite') {
  * to decide whether to skip the SQLite-backed reference-store tests (rather
  * than fail them), and what anything else should call before assuming a
  * `SqliteTaskStore`/`SqliteBlobStore` can be constructed: it attempts the
- * real `require('node:sqlite')` (via {@link loadSqliteModule}, memoized) and
+ * real built-in lookup (via {@link loadSqliteModule}, memoized) and
  * reports whether that succeeded, so it agrees with reality regardless of
  * whether the current runtime is old, too-new-but-flagged, or fully capable.
  */

@@ -50,7 +50,7 @@ async function openDeliveryHost(port: ChannelPort, rest: Partial<BotOptions> = {
   const received: AgentMessageInput[] = [];
   let now = Date.now();
   const adapter = new DraftAdapter();
-  const fixture: TestHost = await openHost({ adapter, consume: (wake, signal) => bot.consume(wake, signal),
+  const fixture: TestHost = await openHost({ externalCore: true, adapter, consume: (wake, signal) => bot.consume(wake, signal),
     agentMessage: { consume: async input => { received.push(input); return bot.consumeMessage(input); } } });
   const base = template(fixture.deviceId);
   const options: BotOptions = { botId: 'main', execution: { ...base,

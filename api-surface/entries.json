@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2065256,
+      "budgetBytes": 2068580,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -358,7 +358,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 362881,
+      "budgetBytes": 366091,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1690,7 +1690,6 @@
         "child_process",
         "crypto",
         "fs",
-        "module",
         "path",
         "zod"
       ],
@@ -1705,7 +1704,6 @@
           "child_process",
           "crypto",
           "fs",
-          "module",
           "path"
         ],
         "thirdParty": []
@@ -1891,7 +1889,6 @@
         "fs",
         "hono",
         "http",
-        "module",
         "path",
         "zod"
       ],
@@ -1909,7 +1906,6 @@
           "crypto",
           "fs",
           "http",
-          "module",
           "path"
         ],
         "thirdParty": [
@@ -2379,7 +2375,6 @@
         "child_process",
         "crypto",
         "fs",
-        "module",
         "path",
         "zod"
       ],
@@ -2394,7 +2389,6 @@
           "child_process",
           "crypto",
           "fs",
-          "module",
           "path"
         ],
         "thirdParty": []

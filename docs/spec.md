@@ -550,6 +550,20 @@ Host effects require occurrence-key idempotency across crashes. Pause/completed 
 new slots, not admitted jobs. This remains Host example code, not an SDK scheduler.
 See the [K4 Host job contract](../examples/host-execution-core/README.md#host-jobs-and-execution-free-occurrences).
 
+### K4 Host reply transaction
+
+The copy-and-own Host execution core exposes `consumeMessage` for the server's
+Agent message consumer. Admission checks the exact frozen tenant/device/Agent/
+context binding, then commits a synchronous Host `applyMessage` hook and a single
+execution-owned message-id/content-hash receipt with its projections. Exceptions
+and asynchronous hooks roll back. Accepted replay does not invoke the hook or
+recreate projections, including after generation advance; a first delivery for
+an old generation is refused. Explicit acknowledged-history compaction removes
+these receipts with executions; a retired task is then unknown. K8 uses this
+common admission while preserving its business reply arbitration and channel
+outbox. See [Host reply ingestion](host-execution-core.md#required-reply-ingestion)
+for legacy receipt validation and the external delivery idempotency boundary.
+
 ### Embedded wake queue
 
 Only `@byok-sdk/server` provides `wake: { consume(wake, signal) }` and
@@ -2764,6 +2778,21 @@ The ordinary `byok-pi-rpc` host launched under `credentialSource: keys-profile` 
 
 The durable Pi lane runs in a separate `byok-pi-durable` executable launched through the same credential launcher contract as `byok-pi-prepared`. The credential launcher transfers the provider key over a private, one-shot JSON IPC channel bound to the launch config digest; it MUST NEVER place the key in the durable child's environment, argv, stdio RPC or replica files. The worker consumes it into model/provider memory and disconnects IPC before constructing tools or MCP children. Deleting process.env is not an isolation mechanism. Tool exec MUST force `inheritEnv: false` and an explicit allowlist. Conformance tests require no key in both inherited tool env and the worker's OS-introspectable initial environment (`ps eww` / `/proc/<pid>/environ`). The daemon communicates with it over stdio RPC, does not depend on `@byok-sdk/keys`, and never reads, proxies or forwards credentials. Its environment is rebuilt by the same EnvironmentBuilder allowlist with the `BYOK_*` deny. One child exclusively owns one durable storage; because upstream pi-durable provides no cross-process lock, the child MUST acquire an OS exclusive lock (flock or sidecar lockfile) bound to the current leaseId before opening storage, and MUST fail closed if it cannot. The child exists only while its daemon holds the home's single-writer lease; lease release requires the child's disposal receipt or confirmed process-tree death (wait after KILL).
 
+
+### Hermes local credential custody (#608 bounded slice)
+
+A Host may opt Hermes into a dedicated keys launcher with a local exact
+non-secret profile selector. Default direct-environment mode is unchanged.
+The launcher validates the binding and pending-custody state at admission and
+again under the configuration lock before each credential read. Credentials
+stay in the launcher/Hermes process boundary and never return to the daemon.
+POSIX process replacement preserves gateway PID identity; unsupported runtimes
+and Windows are rejected. This initial custom-provider mapping admits enabled
+OpenAI-compatible bearer profiles without Pi-specific model overrides. It does
+not widen the Pi-only wire dispatch-selection contract, qualify live providers,
+or complete Windows/bundled-product support requested in #608.
+
+
 ### Durable Pi lane (experimental, flag-gated)
 
 The durable Pi lane is disabled by default and advertised only as an adapter capability; protocol intersection remains the execution gate. The first slice runs one harness with one root conversation per execution (per-execution replica required). The lane runs YOLO, as every lane does since ADR-037; there is no SDK permission policy to compute. Tool permission follows the owner's YOLO ruling: the `beforeTool` hook admits calls without Host approval and emits no `needs_approval`; a throwing hook blocks the call. The structured file tools may reach any path except the durable replica store; there is no workspace containment. Bash is best-effort only (reject explicit `BYOK_*` assignments) and is not workspace-bound under YOLO—boundary is env isolation (`inheritEnv: false`) plus process/replica lock. YOLO does not relax replay: slice 1 declares no replay-safe tools; any future read-only allowlist requires a separate reviewed slice, and the environment allowlist still applies. Slice 1 is an unprepared ordinary path: harness `compaction.enabled` is false and `retry.maxRetries` is 0. This disables auto-retry, not checkpoint model-request resends; permitted same-execution recovery reports ordinary observed usage. Prepared-lane guarantees (first-request byte identity with counted artifact, at-most-once scoped fetch, prepared charge-once binding) do not apply. Harness events map onto existing AgentEvent variants using Pi 1.0 names: `run_end`→`turn_end`, `tool_execution_*`→`tool_use`/`tool_result`, `usage_changed`/`message_end`→`usage`, `task_failed`→`error`, result-doc writes→`artifact`; `snapshot` must not be replayed as live progress; needs_approval is unused; unmapped events follow the existing unknown-event rule. The final answer is written to a result document and delivered only through an explicitly selected `terminalProjection: result-document`. Background subagents, wake tasks, memory documents, fork, multi-client steering and remote execution environments are not part of this slice. Recurring schedules remain Host-driven; no SDK runtime component interprets them (see Bot turn outcome fragments and routine time points).
@@ -3084,7 +3113,8 @@ Legacy shared-temp prefixes are an operator-invoked migration: doctor inventorie
 `copySdkNativeAssets` is a build-time API. For Windows x64 it copies the pinned
 and integrity-verified official Koffi addon; it never downloads in a runtime.
 `sdkDistributionManifest` describes Pi pin, reserved helper kinds and native target
-files. A product passes an absolute `nativeAssetRoot` to SDK-created adapters via
+files. `reservedHelperKinds` plus `piSubagentHelperKinds` is exactly the set that
+`runSdkReservedHelperCommand` accepts. A product passes an absolute `nativeAssetRoot` to SDK-created adapters via
 `DaemonConfig`, or to each custom adapter constructor. An explicit root is scoped
 to that adapter's owned process trees and fails closed on missing or modified
 bytes without searching installed dependencies. Omission keeps installed behavior.
