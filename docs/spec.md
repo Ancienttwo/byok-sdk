@@ -211,16 +211,21 @@ For this release only, the owner's 2026-10-21 instruction to continue the
 changes. This explicit exception does not change the general policy above or
 waive validation, publication authorization, or registry readback. keys 0.13.1
 updates its exact packed core dependency; keys remains independently versioned.
-See the [0.28.1 candidate notes](releases/v0.28.1.md).
+See the [0.28.1 release notes](releases/v0.28.1.md).
 
-Public registry metadata read on 2026-10-21 reports all eight aligned packages
-at latest 0.28.0 and keys at latest 0.13.0. The older 0.28.0 source-candidate
-notes describe preparation history, not current registry availability. The
-0.28.1 / keys 0.13.1 versions were absent at that read; recheck before publishing.
-Publication requires the accepted final-commit CI artifact and separate owner
+Public registry metadata read on 2026-10-21 at 18:13 UTC reports `latest`
+0.28.1 for all eight aligned packages and `latest` 0.13.1 for keys. The same
+read lists 0.28.0 / keys 0.13.0 as the earlier published versions. The registry
+publication times are 2026-10-20 (UTC) for 0.28.0 / keys 0.13.0 and
+2026-10-21 (UTC) for 0.28.1 / keys 0.13.1. The keys 0.13.1 package depends on
+exactly `@byok-sdk/core` 0.28.1. The 0.28.0 and 0.28.1 source-candidate notes
+are preparation history. They are not publication records. This read confirms
+registry availability. It does not establish isolated-install qualification.
+A later release needs the accepted final-commit CI artifact and separate owner
 authorization.
 
-0.27.0 / keys 0.12.0 is published on `latest` from `v0.27.0` (`cd977261`).
+0.27.0 / keys 0.12.0 was published on `latest` from `v0.27.0` (`cd977261`). It
+was `latest` until 0.28.0.
 Complete registry readback and isolated installation passed on 2026-10-17.
 The owner directed publication while fixed-artifact Host acceptance (#195)
 remained open. Publication does not establish that acceptance.
