@@ -60,7 +60,9 @@ export const workspaceGraph = {
   "examples/packaging": {
     "name": "@byok-sdk/example-packaging",
     "dependencies": [
-      "@byok-sdk/client"
+      "@byok-sdk/client",
+      "@byok-sdk/keys",
+      "@byok-sdk/server"
     ]
   },
   "examples/salesko-connector-broker": {

@@ -58,7 +58,8 @@ it('accepts one Bot chat turn through messageEgress and settles it through the r
   let accept!: () => void;
   const decision = new Promise<void>(resolve => { accept = resolve; });
   host = await openHost({
-    agentMessage: { consume: async input => { received.push(input); await decision; return { outcome: 'accepted' }; } },
+    agentMessage: { consume: async input => { received.push(input); await decision; return host.core.consumeMessage(input); } },
+    applyMessage: (input, tx) => { tx.publish(`reply:${input.taskId}`, input.payload.body); return { outcome: 'accepted' }; },
     applyOutcome: (document, tx) => {
       tx.application[tx.intent.taskId] = { source: tx.intent.source, document: document as { text: string },
         terminal: tx.terminal.envelope.type };
@@ -113,6 +114,8 @@ it('accepts one Bot chat turn through messageEgress and settles it through the r
       [chat.taskId]: { source: 'bot', document: reply, terminal: 'task.complete' },
     });
     expect(state.applied).toEqual({ [routine.taskId]: true, [chat.taskId]: true });
+    expect(Object.values(state.outbox)).toContainEqual({ kind: 'projection', id: `reply:${chat.taskId}`, value: body });
+    expect(await host.core.consumeMessage(message)).toEqual({ outcome: 'accepted' });
     for (const intent of [routine, chat]) {
       expect(host.core.intent(intent.key)?.conclusion).toBe('succeeded');
       expect(Object.values(state.outbox)).toContainEqual({ kind: 'projection', id: `outcome:${intent.taskId}`, value: { source: intent.source } });

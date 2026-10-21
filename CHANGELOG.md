@@ -1,13 +1,38 @@
 # Changelog
 
-- Client MCP core: preserve tool title, annotations and output schema, and provide
-  request-scoped progress over stdio and bounded HTTP POST SSE (Refs #631).
-
 ## Unreleased
 
-- **Feature (client)** — add a pinned Windows x64 native asset copier, distribution
-  metadata and per-adapter asset roots for relocated runtime process ownership (#627).
-  Darwin copying reuses the existing memory-helper API; Windows memory is unchanged.
+- **Feature (keys, client)** — add a separate local provider custody launcher
+  for Hermes. The Host's keys process reads the selected profile key under the
+  custody lock at each start; the daemon environment carries no provider key.
+  Only OpenAI-compatible bearer profiles map; Windows is not supported (#608).
+- **Feature (client)** — add an opt-in task-free export of Agent memory for
+  Host-side device-change backups (#625).
+- **Fixed (server, client, keys)** — load `node:sqlite` without
+  `createRequire(import.meta.url)`, so CJS and relocated SEA single-file hosts
+  can open the server store, the client journal and keys (#626).
+- **Feature (client)** — add a pinned Windows x64 native asset copier,
+  distribution metadata and per-adapter asset roots for relocated runtime
+  process ownership (#627). Darwin copying reuses the existing memory-helper
+  API; Windows memory is unchanged.
+- **Feature (examples)** — K4 Host ingests required replies and their
+  projection in the same ledger transaction as the intent conclusion (#629).
+- **Feature (examples, server)** — K4 Host drains on `server.events` terminal
+  hints and notifies the Host after a committed outbox write. Durable scans
+  stay as the fallback when the event stream is not available (#630).
+- **Feature (client)** — MCP server core keeps tool `title`, `annotations`,
+  `outputSchema` and `_meta`, and streams request-scoped progress over stdio and
+  bounded stateful HTTP POST SSE. Stateless HTTP rejects progress requests with
+  400 (#631).
+- **Feature (examples)** — K4 memory page adds a bounded whole-tree restore
+  with a queue gate and a per-file result summary (#632). Each file is a CAS
+  write; the restore is not an atomic tree rollback.
+- **Feature (protocol, client)** — `tool_use` and `tool_result` events carry
+  the authoritative MCP `server` and `tool` identity (#633).
+- **Docs (client)** — document which user-level runtime configuration each
+  adapter loads and the available isolation boundaries (#634).
+- **Feature (server, cloud)** — Hosts can await the durable terminal state of an
+  Agent-home projection instead of polling (#637).
 - **Feature (keys)** — add `piModelConfigFromPinnedCatalog` and
   `PI_MODEL_CATALOG_PI_AI_VERSION` on the new `@byok-sdk/keys/pi-catalog`
   export (#636). The table is generated from the
