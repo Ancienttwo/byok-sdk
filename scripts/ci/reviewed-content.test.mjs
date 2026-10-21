@@ -75,3 +75,47 @@ test('published release registration fixture tests protocol without propagating 
   assert.deepEqual(plan.families, []);
   assert.ok(selectImpact(['packages/protocol/src/task.ts']).dirs.includes('packages/client'));
 });
+
+
+test('reviewed private bot fixture cloud edge is accepted only as an additive workspace dev dependency', t => {
+  const f = fixture(t);
+  const dir = 'examples/bot-collaboration';
+  const manifest = { name: '@byok-sdk/example-bot-collaboration', private: true, version: '0.0.0', devDependencies: {} };
+  f.write(`${dir}/package.json`, manifest);
+  f.lock.workspaces[dir] = { name: manifest.name, version: manifest.version, devDependencies: {} };
+  f.write('bun.lock', f.lock);
+  const git = (...args) => execFileSync('git', args, { cwd: f.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'private fixture');
+  f.base = git('rev-parse', 'HEAD').trim();
+  manifest.devDependencies['@byok-sdk/cloud'] = 'workspace:*';
+  f.write(`${dir}/package.json`, manifest);
+  f.lock.workspaces[dir].devDependencies['@byok-sdk/cloud'] = 'workspace:*';
+  f.write('bun.lock', f.lock);
+  const plan = selectImpact(['bun.lock', `${dir}/package.json`], f);
+  assert.ok(plan.dirs.includes(dir));
+  assert.ok(plan.families.includes('npm-release-pack'));
+  f.write(`${dir}/package.json`, { ...manifest, scripts: { test: 'echo bypass' } });
+  assert.throws(() => selectImpact([`${dir}/package.json`], f), /more than/);
+  f.write(`${dir}/package.json`, { ...manifest, devDependencies: {}, dependencies: manifest.devDependencies });
+  assert.throws(() => selectImpact([`${dir}/package.json`], f));
+  f.write(`${dir}/package.json`, manifest);
+  for (const value of ['^0.28.1', 'workspace:^']) {
+    f.lock.workspaces[dir].devDependencies['@byok-sdk/cloud'] = value;
+    f.write('bun.lock', f.lock);
+    assert.throws(() => selectImpact(['bun.lock'], f));
+  }
+  f.lock.workspaces[dir].devDependencies['@byok-sdk/cloud'] = 'workspace:*';
+  f.lock.packages.x = ['x@2.0.0']; f.write('bun.lock', f.lock);
+  assert.throws(() => selectImpact(['bun.lock'], f), /more than/);
+  f.lock.packages.x = ['x@1.0.0']; f.write('bun.lock', f.lock);
+  manifest.private = false; f.write(`${dir}/package.json`, manifest);
+  assert.throws(() => selectImpact(['bun.lock'], f));
+});
+
+
+test('reviewed root-level basic fixtures select their workspace while unknown root files fail closed', () => {
+  for (const path of ['examples/basic/clarification.test.ts', 'examples/basic/goal-btw.test.ts']) {
+    assert.ok(selectImpact([path]).dirs.includes('examples/basic'));
+  }
+  assert.throws(() => selectImpact(['examples/basic/unknown.ts']));
+});

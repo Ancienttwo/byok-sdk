@@ -16,6 +16,7 @@ export const workspaceGraph = {
     "name": "@byok-sdk/example-bot-collaboration",
     "dependencies": [
       "@byok-sdk/client",
+      "@byok-sdk/cloud",
       "@byok-sdk/core",
       "@byok-sdk/example-host-execution-core",
       "@byok-sdk/protocol",
@@ -184,6 +185,13 @@ export function selectImpact(paths, context = {}) {
       const dir = path.slice(0, -'/package.json'.length);
       if (!workspaceGraph[dir]) requireRelease(path);
       families.add('npm-release-pack'); continue;
+    }
+    if (path === 'examples/bot-collaboration/package.json') {
+      verifyReviewedContent(path, context);
+      dirs.add('examples/bot-collaboration'); continue;
+    }
+    if (path === 'examples/basic/clarification.test.ts' || path === 'examples/basic/goal-btw.test.ts') {
+      dirs.add('examples/basic'); continue;
     }
     if (path === 'api-surface/entries.json') {
       for (const dir of changedApiOwners(context)) {
