@@ -1,8 +1,35 @@
 import { DatabaseSync } from 'node:sqlite';
 import { hash, taskId, time, type LedgerState, type Occurrence } from './model';
 
+export interface ProjectionOutboxLimits { maxCount?: number; maxBytes?: number }
+export interface HostLedgerOptions { projectionOutboxLimits?: ProjectionOutboxLimits }
+export interface ProjectionOutboxUsage { count: number; bytes: number }
+/** Capacity refusal contains no projection identity or payload. */
+export class OutboxFullError extends Error {
+  readonly code = 'outbox_full' as const;
+  constructor() { super('Projection outbox capacity exceeded'); this.name = 'OutboxFullError'; }
+}
+function projectionUsage(state: LedgerState): ProjectionOutboxUsage {
+  let count = 0, bytes = 0;
+  for (const [key, row] of Object.entries(state.outbox)) {
+    if (row.kind !== 'projection') continue;
+    count++;
+    // Stable persisted payload only: retry diagnostics must not block delivery recovery.
+    bytes += Buffer.byteLength(JSON.stringify([key, { kind: row.kind, id: row.id, value: row.value }]), 'utf8');
+  }
+  return { count, bytes };
+}
+
 export const MIN_TOMBSTONE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export type TombstoneKind = 'intent' | 'application' | 'slot';
+/** A permanently retired intent key cannot admit new work, even after replay evidence expires. */
+export class RetiredIntentIdentityError extends Error {
+  readonly code = 'retired_intent_identity' as const;
+  constructor() {
+    super('Retired intent identity cannot be reused');
+    this.name = 'RetiredIntentIdentityError';
+  }
+}
 export interface CompactionOptions {
   /** Explicit acknowledgement that these results may be removed under the Host's retention policy. */
   acknowledgedIntentKeys: readonly string[];
@@ -29,7 +56,16 @@ function empty(): LedgerState {
 /** Small single-owner reference. Keep this database separate from the SDK and Agent home. */
 export class HostLedger {
   private readonly db: DatabaseSync;
-  constructor(filename: string, readonly tenant: string) {
+  private readonly projectionLimits?: Readonly<ProjectionOutboxLimits>;
+  constructor(filename: string, readonly tenant: string, options: HostLedgerOptions = {}) {
+    if (options.projectionOutboxLimits !== undefined) {
+      const { maxCount, maxBytes } = options.projectionOutboxLimits;
+      if (maxCount === undefined && maxBytes === undefined) throw new Error('Supply a projection outbox limit');
+      for (const value of [maxCount, maxBytes]) {
+        if (value !== undefined && (!Number.isSafeInteger(value) || value < 0)) throw new Error('Projection outbox limits must be nonnegative safe integers');
+      }
+      this.projectionLimits = Object.freeze({ maxCount, maxBytes });
+    }
     if (!filename || !tenant.trim()) throw new Error('Select a Host database and tenant');
     this.db = new DatabaseSync(filename);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;
@@ -47,17 +83,27 @@ export class HostLedger {
     if (state.version !== 1) throw new Error('Unsupported Host ledger version');
     return state;
   }
+  projectionOutboxUsage(): ProjectionOutboxUsage { return projectionUsage(this.snapshot()); }
   transaction<T>(apply: (state: LedgerState) => T): T {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const state = this.snapshot();
       const existing = new Set(Object.keys(state.intents));
+      const before = this.projectionLimits && projectionUsage(state);
       const result = apply(state);
       if (result && typeof (result as { then?: unknown }).then === 'function') throw new Error('Host transactions must be synchronous');
       // Also covers callers of the exported pure enqueue/recordOccurrence transitions.
       const retired = this.db.prepare("SELECT 1 FROM host_retired_identity WHERE tenant=? AND kind='intent' AND identity=?");
       for (const id of Object.keys(state.intents)) {
-        if (!existing.has(id) && retired.get(this.tenant, id)) throw new Error('Retired intent identity cannot be reused');
+        if (!existing.has(id) && retired.get(this.tenant, id)) throw new RetiredIntentIdentityError();
+      }
+      if (this.projectionLimits && before) {
+        const after = projectionUsage(state);
+        const countLimit = this.projectionLimits.maxCount ?? Infinity;
+        const byteLimit = this.projectionLimits.maxBytes ?? Infinity;
+        const recovering = before.count > countLimit || before.bytes > byteLimit;
+        if (recovering ? after.count > before.count || after.bytes > before.bytes
+          : after.count > countLimit || after.bytes > byteLimit) throw new OutboxFullError();
       }
       this.db.prepare('UPDATE host_ledger SET body=? WHERE tenant=?').run(JSON.stringify(state), this.tenant);
       this.db.exec('COMMIT');

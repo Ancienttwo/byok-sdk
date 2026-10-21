@@ -164,7 +164,10 @@ Keep handlers short and bounded; they serialize with other jobs and Agent dispat
 The SDK's 60-second hook deadline can expire while a handler is running; redelivery
 shares the drain and cannot start a second concurrent invocation. The handler signal
 is aborted by `close()`, not that hook deadline. `close()` waits for the handler;
-handlers must honor the signal. Do not await core methods that drain from inside a
+handlers must honor the signal. Rejection with its abort reason (including a Node
+`AbortError` wrapping that reason) leaves the job pending for recovery without
+failing shutdown; unrelated handler errors still propagate. A result returned
+after shutdown is not committed. Do not await core methods that drain from inside a
 handler (that would wait on its own drain).
 
 Host-only occurrences can be explicitly acknowledged and compacted:
@@ -225,14 +228,17 @@ One SQLite transaction deletes the selected intent's execution generations, term
 settled occurrence, slot and application markers, and writes replacement tombstones. No outbox row,
 business `application` value, memory, routine or calendar audit is deleted. Custom projections have
 no intent ownership metadata and remain untouched, including any payload copies they contain.
-`core.intent(key)` returns `undefined` after compaction. Enqueuing a retired key throws, even with the
-same input; this applies to the exported `enqueue` transition inside `ledger.transaction` as well.
+`core.intent(key)` returns `undefined` after compaction. Enqueuing a retired key throws the exported
+`RetiredIntentIdentityError` with stable `code: 'retired_intent_identity'`, even with the same input;
+this applies to the exported `enqueue` transition inside `ledger.transaction` as well.
 Use a new identity for new work.
 
 The additive `host_retired_identity` table keeps permanent intent identity hashes outside the hot
 JSON body and expiring task-application and wake-slot evidence. Retention starts at compaction and
 must be at least seven days; choose the maximum of your actual replay, upload retry and restore
-windows. `ledger.hasTombstone(kind, identity, now)` queries that evidence. Retained wake replays do
+windows. `ledger.hasTombstone(kind, identity, now)` queries that evidence. Application tombstones
+are evidence for the Host, queried with `hasTombstone('application', taskId, now)`; the core does not
+consume them or replay removed application results. Retained wake replays do
 not create occurrences or dispatch work. At the exact expiry time slot/application evidence is no
 longer returned; a subsequent explicit compaction removes those rows. Retired intent identities
 never expire. Their indexed table grows with historical intent count, while removed core payloads
@@ -358,3 +364,47 @@ Linux tests use a real cloud mailbox, daemon, home lease, native CAS and device 
 The runtime is synthetic. No model provider is called.
 Run `bun run --cwd examples/host-execution-core test src/memory-linux.test.ts` on Linux.
 These Linux tests skip on other platforms. macOS and Windows proof stay in P2.
+
+### Optional projection outbox capacity
+
+A Host can opt into backpressure without deleting undelivered projections:
+
+```ts
+const ledger = new HostLedger(filename, tenant, {
+  projectionOutboxLimits: { maxCount: 1000, maxBytes: 8 * 1024 * 1024 },
+});
+const { count, bytes } = ledger.projectionOutboxUsage();
+```
+
+These numbers are illustrative Host choices, not defaults. Omitted limits are
+unlimited; supplied limits must be nonnegative safe integers (zero disallows growth).
+The constructor copies the configuration. Limits apply to this ledger owner and
+must be supplied again when reopening it. They do not change the database schema.
+
+`count` counts projection rows only. `bytes` sums the UTF-8 byte length of
+`JSON.stringify([outboxKey, { kind, id, value }])` for each projection row. It includes
+its stored identity and value, but excludes retry diagnostic `lastError`, other
+outbox kinds, and all other ledger state. This is not a total disk or ledger-size
+limit. Failed delivery can still record its bounded diagnostic and retry safely.
+
+Exceeding capacity throws the exported `OutboxFullError` (`code: 'outbox_full'`)
+without including identities or payloads. The complete ledger transaction rolls
+back, including application writes, applied markers and terminal settlement.
+Replaying an identical projection does not consume additional capacity. If an
+existing database already exceeds either configured limit, transactions may keep
+or decrease both current count and bytes, but may increase neither until within
+limits. Control transactions and projection delivery/removal therefore remain
+available; nothing is evicted to satisfy a newly configured limit.
+
+Capacity is checked at commit, not reserved by `enqueue`: future result sizes and
+custom outcome publications are unknown. A result requiring more than the entire
+configured capacity cannot settle until the Host increases its limit. On capacity
+refusal, the core restores scan scheduling no earlier than the existing `reconcileMs`
+interval before rejecting the drain or wake hook;
+a concurrent wake-dispatch failure is retained alongside the capacity error in
+`AggregateError.errors`. Flush acknowledged projections, then retry `drain()`.
+Outcome callbacks must remain synchronous, transaction-local and safe to retry.
+
+This option does not bound control outbox rows or compact memory approvals. Memory
+readback is not a client acknowledgement, and memory intent/approval retention
+still requires a separate explicit acknowledgement and replay contract (#602).

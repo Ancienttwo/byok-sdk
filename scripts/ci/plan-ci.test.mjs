@@ -86,3 +86,45 @@ test('native memory export is required for client and protocol impact and skippe
   }
   assert.ok(planCi({ event: 'workflow_dispatch', sha, approvedSha: sha }).families.includes(id));
 });
+
+test('PR CLI pairs the tested merge with its actual main parent and rejects inconsistent evidence', () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), 'ci-merge-base-'));
+  const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const commit = message => { git('add', '.'); git('-c', 'user.name=CI fixture', '-c', 'user.email=ci@example.invalid', 'commit', '-m', message); return git('rev-parse', 'HEAD'); };
+  try {
+    git('init', '-b', 'main');
+    writeFileSync(path.join(cwd, 'README.md'), 'base\n');
+    const eventBase = commit('event base');
+    git('checkout', '-b', 'topic');
+    writeFileSync(path.join(cwd, 'README.md'), 'PR documentation\n');
+    mkdirSync(path.join(cwd, 'docs'), { recursive: true });
+    writeFileSync(path.join(cwd, 'docs/notes.md'), 'PR notes\n');
+    const prHead = commit('PR');
+    git('checkout', 'main');
+    mkdirSync(path.join(cwd, 'packages/client/src'), { recursive: true });
+    writeFileSync(path.join(cwd, 'packages/client/src/intervening.ts'), 'export const unrelated = 1;\n');
+    const actualBase = commit('intervening main production change');
+    git('-c', 'user.name=CI fixture', '-c', 'user.email=ci@example.invalid', 'merge', '--no-ff', 'topic', '-m', 'tested merge');
+    const merge = git('rev-parse', 'HEAD');
+    const invoke = (script, overrides = {}) => execFileSync(process.execPath, [new URL(script, import.meta.url).pathname], {
+      cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, CI_EVENT: 'pull_request', CI_BASE: eventBase, CI_PR_HEAD: prHead, GITHUB_SHA: merge, GITHUB_OUTPUT: path.join(cwd, 'output'), ...overrides },
+    });
+    const plan = JSON.parse(invoke('./plan-ci.mjs'));
+    assert.deepEqual(plan.files, ['README.md', 'docs/notes.md']);
+    assert.equal(plan.base, actualBase);
+    assert.deepEqual(plan.families, []);
+    const evidence = { CI_PLAN: JSON.stringify(plan), CI_NEEDS: JSON.stringify(results(plan)) };
+    assert.doesNotThrow(() => invoke('./run-targeted.mjs', evidence));
+    assert.doesNotThrow(() => invoke('./require-ci-plan.mjs', evidence));
+    for (const script of ['./plan-ci.mjs', './run-targeted.mjs', './require-ci-plan.mjs']) {
+      assert.throws(() => invoke(script, { ...evidence, GITHUB_SHA: prHead }));
+      assert.throws(() => invoke(script, { ...evidence, CI_PR_HEAD: eventBase }));
+      assert.throws(() => invoke(script, { ...evidence, CI_BASE: prHead }));
+    }
+    const omitted = { ...plan, files: [] };
+    for (const script of ['./run-targeted.mjs', './require-ci-plan.mjs']) assert.throws(() => invoke(script, { ...evidence, CI_PLAN: JSON.stringify(omitted) }));
+    git('checkout', 'topic');
+    assert.throws(() => invoke('./plan-ci.mjs', { GITHUB_SHA: prHead }));
+  } finally { rmSync(cwd, { recursive: true, force: true }); }
+});

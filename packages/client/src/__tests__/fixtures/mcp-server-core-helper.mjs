@@ -11,7 +11,7 @@
 // Env knobs (all optional):
 //   MCP_FIXTURE_SLOW_MS   how long the `slow` tool waits before resolving
 //   MCP_FIXTURE_LOG       append one JSON line per observed lifecycle event
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 
 import { McpServerToolError, serveMcpOverStdio } from '../../mcp-server/index.ts';
 
@@ -26,6 +26,8 @@ const TOOLS = [
   {
     name: 'echo',
     description: 'Echo the message back.',
+    title: 'Echo', annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    outputSchema: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'] },
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -48,7 +50,20 @@ const TOOLS = [
 async function callTool(call) {
   if (call.name === 'echo') {
     const message = call.arguments?.message;
-    return { content: [{ type: 'text', text: `echo: ${typeof message === 'string' ? message : ''}` }] };
+    for (const [progress, message] of [[0, 'starting'], [1, 'done']]) {
+      call.progress(progress, 1, message);
+      // The official client's deferred notification callbacks can race its
+      // synchronous result retirement. The test acknowledges each stage so
+      // the fixture models work that remains active while progress is read.
+      if (process.env.MCP_FIXTURE_PROGRESS_ACK) {
+        const deadline = Date.now() + 5000;
+        while (readFileSync(process.env.MCP_FIXTURE_PROGRESS_ACK, 'utf8') !== String(progress)) {
+          if (Date.now() >= deadline) throw new Error('progress acknowledgement missing');
+          await new Promise(resolve => setTimeout(resolve, 1));
+        }
+      }
+    }
+    return { content: [{ type: 'text', text: `echo: ${typeof message === 'string' ? message : ''}` }], structuredContent: { message: typeof message === 'string' ? message : '' } };
   }
   if (call.name === 'slow') {
     await new Promise((resolve) => {

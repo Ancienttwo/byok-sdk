@@ -12206,6 +12206,15 @@ export declare const MCP_SERVER_MAX_SEEN_IDS = 4096;
 export interface McpServerToolDefinition {
     readonly name: string;
     readonly description?: string;
+    readonly title?: string;
+    readonly annotations?: Readonly<{
+        title?: string;
+        readOnlyHint?: boolean;
+        destructiveHint?: boolean;
+        idempotentHint?: boolean;
+        openWorldHint?: boolean;
+    }>;
+    readonly outputSchema?: Readonly<Record<string, unknown>>;
     /** Caller-supplied, passed through verbatim. The core never authors, validates against, or rewrites it. */
     readonly inputSchema: Readonly<Record<string, unknown>>;
     /** Caller-owned MCP metadata, passed through verbatim with the tool definition. */
@@ -12221,6 +12230,8 @@ export interface McpServerToolCall {
     readonly arguments: Readonly<Record<string, unknown>> | undefined;
     /** Aborted when the peer sends `notifications/cancelled` for this request id. */
     readonly signal: AbortSignal;
+    /** Report increasing finite progress. No-op without a token or after cancellation/completion. */
+    readonly progress: (progress: number, total?: number, message?: string) => void;
 }
 /**
  * The handler's return value is written as the JSON-RPC `result` VERBATIM, and

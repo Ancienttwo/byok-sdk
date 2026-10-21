@@ -1,3 +1,4 @@
+import { verifyPrPlan } from './plan-ci.mjs';
 import { pathToFileURL } from 'node:url';
 import { knownFamilies, selectImpact } from './select-impact.mjs';
 import { requireCiSuccess } from './require-ci-success.mjs';
@@ -18,6 +19,8 @@ export function requireCiPlan(needs, plan, event, sha, base, cwd) {
   requireCiSuccess(Object.fromEntries(required.map(id => [id, needs[id]])), required);
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  requireCiPlan(JSON.parse(process.env.CI_NEEDS ?? ''), JSON.parse(process.env.CI_PLAN ?? ''), process.env.CI_EVENT, process.env.GITHUB_SHA, process.env.CI_BASE);
+  const plan = JSON.parse(process.env.CI_PLAN ?? '');
+  const base = verifyPrPlan(plan);
+  requireCiPlan(JSON.parse(process.env.CI_NEEDS ?? ''), plan, process.env.CI_EVENT, process.env.GITHUB_SHA, base);
   console.log('Selected CI scope succeeded; only explicit release mode qualifies the complete matrix');
 }

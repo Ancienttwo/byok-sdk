@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { HostLedger, MIN_TOMBSTONE_RETENTION_MS } from './ledger';
+import { HostLedger, MIN_TOMBSTONE_RETENTION_MS, RetiredIntentIdentityError } from './index';
 import { HostExecutionCore, type ExecutionServer } from './core';
 import { hash, project, taskId, type IntentInput } from './model';
 import { enqueue, settle } from './transitions';
@@ -115,8 +115,28 @@ it('keeps replay tombstones to the exact boundary and permanently rejects reuse 
   expect(ledger.compact({ ...policy, now: expires, acknowledgedIntentKeys: [] }).expiredTombstones).toBe(2);
   expect(ledger.hasTombstone('application', taskId('1', 0), expires)).toBe(false);
   expect(ledger.hasTombstone('intent', '1', expires)).toBe(true);
-  expect(() => ledger.transaction(state => enqueue(state, ledger.tenant, input('1')))).toThrow('Retired intent');
+  expect(() => ledger.transaction(state => enqueue(state, ledger.tenant, input('1')))).toThrow(RetiredIntentIdentityError);
   expect(ledger.snapshot()).toEqual(before);
+});
+
+it('reports retired identity reuse with a stable code and rolls back the whole attempted transaction', () => {
+  const { ledger } = open(); seed(ledger, 'retired');
+  ledger.compact({ ...policy, acknowledgedIntentKeys: ['retired'] });
+  const before = ledger.snapshot();
+  let rejection: unknown;
+  try {
+    ledger.transaction(state => {
+      state.application.changed = true;
+      enqueue(state, ledger.tenant, input('fresh'));
+      enqueue(state, ledger.tenant, input('retired'));
+    });
+  } catch (error) { rejection = error; }
+  expect(rejection).toBeInstanceOf(Error);
+  expect(rejection).toBeInstanceOf(RetiredIntentIdentityError);
+  expect(rejection).toMatchObject({ name: 'RetiredIntentIdentityError', code: 'retired_intent_identity' });
+  expect(ledger.snapshot()).toEqual(before);
+  expect(ledger.hasTombstone('intent', 'retired', policy.now)).toBe(true);
+  expect(ledger.transaction(state => enqueue(state, ledger.tenant, input('fresh'))).key).toBe('fresh');
 });
 
 it('isolates retirement and expiration by tenant in a shared database', () => {
@@ -151,7 +171,7 @@ it('does not recreate a completed routine or reapply its SDK terminal on replay 
     const occurrence = Object.values(host.ledger.snapshot().occurrences)[0]!;
     const intent = host.ledger.snapshot().intents[occurrence.intentId!]!;
     await vi.waitFor(() => expect(host.adapter.sessions.has(intent.taskId)).toBe(true));
-    host.adapter.sessions.get(intent.taskId)!.finish({ text: 'retained by the SDK' });
+    await host.adapter.sessions.get(intent.taskId)!.finish({ text: 'retained by the SDK' });
     await vi.waitFor(async () => { await host.core.drain(); expect(host.core.intent(intent.key)?.conclusion).toBe('succeeded'); });
     await host.core.flushProjections(async () => {});
     expect(await host.server.tasks.deviceTerminal(intent.taskId)).toBeDefined();
@@ -165,7 +185,7 @@ it('does not recreate a completed routine or reapply its SDK terminal on replay 
     expect(read).not.toHaveBeenCalled(); expect(applyOutcome).toHaveBeenCalledTimes(1);
     expect(host.ledger.snapshot().application.count).toBe(1);
     expect(host.ledger.snapshot().occurrences).toEqual({}); expect(host.adapter.starts).toHaveLength(submitted);
-    await expect(host.core.enqueue({ ...input(intent.key), source: intent.source, execution: intent.execution, waitUntil: intent.waitUntil, retry: intent.retry })).rejects.toThrow('Retired intent');
+    await expect(host.core.enqueue({ ...input(intent.key), source: intent.source, execution: intent.execution, waitUntil: intent.waitUntil, retry: intent.retry })).rejects.toMatchObject({ name: 'RetiredIntentIdentityError', code: 'retired_intent_identity' });
   } finally { await host.close(); }
 });
 
