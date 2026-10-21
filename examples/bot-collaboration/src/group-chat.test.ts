@@ -1,5 +1,4 @@
 import { readFile, stat } from 'node:fs/promises';
-import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { openTeam, type TestTeam } from './team.test-support';
@@ -8,15 +7,25 @@ import { stateOf } from './model';
 import { HISTORY_MAX_BYTES } from './history';
 import type { BotProfile } from './team-model';
 
+// Hints are an optimization. The real mailbox and HTTP poll remain authoritative.
+const wakeFault = vi.hoisted(() => ({ dropHints: false, dropped: 0 }));
+vi.mock('@byok-sdk/cloud', async importOriginal => {
+  const actual = await importOriginal<typeof import('@byok-sdk/cloud')>();
+  return { ...actual, createInProcessMailboxWake: (...args: Parameters<typeof actual.createInProcessMailboxWake>) => {
+    const wake = actual.createInProcessMailboxWake(...args);
+    return { ...wake, appended(...input: Parameters<typeof wake.appended>) {
+      if (wakeFault.dropHints) wakeFault.dropped++;
+      else wake.appended(...input);
+    } };
+  } };
+});
+
 let fixture: TestTeam;
 let releaseProjection: (() => void) | undefined;
-afterEach(async () => { releaseProjection?.(); releaseProjection = undefined; await fixture?.close(); });
+afterEach(async () => { wakeFault.dropHints = false; wakeFault.dropped = 0; releaseProjection?.(); releaseProjection = undefined; await fixture?.close(); });
 const host = () => fixture.host;
 async function running(id: string) {
-  await vi.waitFor(async () => { await host().drain(); expect(fixture.adapter.sessions.has(host().core.intent(id)!.taskId)).toBe(true); }, { timeout: 5000 }).catch(async error => {
-    const intent = host().core.intent(id);
-    writeFileSync(join(process.env.BYOK_SESSION_DIAGNOSTICS_DIR!, `session-${Date.now()}.json`), JSON.stringify({ id, root: fixture.root, daemon: fixture.daemon.status(), tasks: fixture.daemon.tasks(), intent, task: intent && await fixture.server.tasks.get(intent.taskId), attempt: intent && await fixture.server.tasks.attempt(intent.taskId), ledger: fixture.ledger.snapshot() })); throw error;
-  });
+  await vi.waitFor(async () => { await host().drain(); expect(fixture.adapter.sessions.has(host().core.intent(id)!.taskId)).toBe(true); }, { timeout: 5000 });
   return fixture.adapter.sessions.get(host().core.intent(id)!.taskId)!;
 }
 async function finish(id: string, document: unknown = {}) {
@@ -276,7 +285,8 @@ it('blocks an over-limit current Unicode Request with a measured reason and no S
   }));
 });
 
-it('counts a large in-limit Unicode Request in the budget and still posts through the real SDK', async () => {
+it.each([false, true])('counts a large in-limit Unicode Request in the budget and still posts through the real SDK (lost wake hints: %s)', async dropHints => {
+  wakeFault.dropHints = dropHints;
   fixture = await openTeam();
   const { profiles, room } = await createTeam(); await ready(profiles);
   await host().roomInput('large-background', room.id, 'Old '.repeat(20000), []);
@@ -297,6 +307,7 @@ it('counts a large in-limit Unicode Request in the budget and still posts throug
   await running(seat.id);
   await finish(seat.id, { speech: { kind: 'post', text: 'The complete current request was available.' } });
   expect(seats(round)[0]!.status).toBe('post');
+  if (dropHints) expect(wakeFault.dropped).toBeGreaterThan(0);
 });
 
 it('trims byte-heavy history and still posts for a normal current request', async () => {
