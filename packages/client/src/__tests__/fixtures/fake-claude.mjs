@@ -133,6 +133,11 @@
 //                                          between, as reported downstream
 //                                          in #501. `result.result` carries
 //                                          the text once.
+//   FAKE_CLAUDE_MCP_STATUS=<json>       -> the `mcp_status` control response
+//                                          body, instead of listing each
+//                                          `--mcp-config` server's tools.
+//   FAKE_CLAUDE_MCP_STATUS_NO_ACK=1     -> never answer `mcp_status`.
+//   FAKE_CLAUDE_MCP_STATUS_RECEIPT=<path> -> append each `mcp_status` request.
 //   FAKE_CLAUDE_RESULT_MALFORMED=1      -> cross-model re-review (P1
 //                                          regression): the turn's `result`
 //                                          frame is sent with `is_error`
@@ -153,7 +158,7 @@
 //                                          whole point of this toggle.
 
 import { spawn } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { spawnProcessTreeDescendant } from './process-tree-receipt.mjs';
@@ -178,16 +183,45 @@ function isMcpToolGranted() {
   return argv.includes('--dangerously-skip-permissions');
 }
 
-async function callConfiguredMcpTool(serverName, toolName, toolArguments) {
+function configuredMcpServers() {
   const configIndex = argv.indexOf('--mcp-config');
   if (configIndex === -1 || !argv[configIndex + 1]) {
     throw new Error('fake claude was asked to call MCP without --mcp-config');
   }
+  return JSON.parse(readFileSync(argv[configIndex + 1], 'utf8')).mcpServers ?? {};
+}
+
+async function callConfiguredMcpTool(serverName, toolName, toolArguments) {
   if (!isMcpToolGranted()) {
     throw new Error(`Claude requested permissions to use mcp__${serverName}__${toolName}, but you haven't granted it yet.`);
   }
-  const config = JSON.parse(readFileSync(argv[configIndex + 1], 'utf8'));
-  const server = config.mcpServers?.[serverName];
+  return withConfiguredMcpServer(serverName, async (listed, request) => {
+    if (!listed?.tools?.some((tool) => tool.name === toolName)) {
+      throw new Error(`MCP server ${serverName} did not list tool ${toolName}`);
+    }
+    return request('tools/call', { name: toolName, arguments: toolArguments });
+  });
+}
+
+// Real claude answers the `mcp_status` control request with every configured
+// server and the tools its own `tools/list` returned, under the CONFIGURED
+// server name and the server's ORIGINAL tool names (confirmed live against
+// claude 2.1.302: server `market.feed`, tool `get.quote`).
+async function mcpStatus() {
+  const servers = [];
+  for (const name of Object.keys(configuredMcpServers())) {
+    try {
+      const listed = await withConfiguredMcpServer(name, async (tools) => tools);
+      servers.push({ name, status: 'connected', scope: 'dynamic', source: 'dynamic', tools: (listed?.tools ?? []).map((tool) => ({ name: tool.name, annotations: {} })) });
+    } catch (error) {
+      servers.push({ name, status: 'failed', scope: 'dynamic', source: 'dynamic', error: String(error) });
+    }
+  }
+  return { mcpServers: servers };
+}
+
+async function withConfiguredMcpServer(serverName, use) {
+  const server = configuredMcpServers()[serverName];
   if (!server || typeof server.command !== 'string') {
     throw new Error(`fake claude could not find MCP server ${serverName}`);
   }
@@ -246,11 +280,7 @@ async function callConfiguredMcpTool(serverName, toolName, toolArguments) {
       clientInfo: { name: 'fake-claude', version: '1.0.0' },
     });
     child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} })}\n`);
-    const listed = await request('tools/list');
-    if (!listed?.tools?.some((tool) => tool.name === toolName)) {
-      throw new Error(`MCP server ${serverName} did not list tool ${toolName}`);
-    }
-    return await request('tools/call', { name: toolName, arguments: toolArguments });
+    return await use(await request('tools/list'), request);
   } finally {
     childLines.close();
     child.kill('SIGTERM');
@@ -409,6 +439,15 @@ function runProbeOrTurnFlow() {
         ? {type:'result',subtype:'success',is_error:false,session_id:reportedSessionId,usage:{},result:'late completion'}
         : {type:'result',subtype:'error_during_execution',terminal_reason:process.env.FAKE_CLAUDE_INTERRUPT_TERMINAL_REASON ?? 'aborted_streaming',is_error:true,session_id:reportedSessionId,usage:{}};
       setTimeout(()=>send(result), Number(process.env.FAKE_CLAUDE_INTERRUPT_RESULT_DELAY_MS ?? '0'));
+      return;
+    }
+    if (msg.type === 'control_request' && msg.request?.subtype === 'mcp_status') {
+      if (process.env.FAKE_CLAUDE_MCP_STATUS_RECEIPT) appendFileSync(process.env.FAKE_CLAUDE_MCP_STATUS_RECEIPT, `${JSON.stringify(msg)}\n`);
+      if (process.env.FAKE_CLAUDE_MCP_STATUS_NO_ACK === '1') return;
+      void (process.env.FAKE_CLAUDE_MCP_STATUS ? Promise.resolve(JSON.parse(process.env.FAKE_CLAUDE_MCP_STATUS)) : mcpStatus()).then(
+        (response) => send({ type: 'control_response', response: { subtype: 'success', request_id: msg.request_id, response } }),
+        (error) => send({ type: 'control_response', response: { subtype: 'error', request_id: msg.request_id, error: String(error) } }),
+      );
       return;
     }
     if (msg.type !== 'user') return; // only real input shape this fixture accepts, per --input-format stream-json
