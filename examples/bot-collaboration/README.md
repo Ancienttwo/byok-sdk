@@ -118,7 +118,7 @@ The collaboration state has version 1. The Host rejects unsupported or
 unversioned stored state. It does not reset or migrate that state.
 
 This example has one team and one owner per ledger. Paid Pi success-rate
-measurement belongs to WO-10b. Application history,
+measurement belongs to [WO-10b](../../docs/submit-result-measurement.md); the method defines per-runtime/model/platform cells and does not supply live data. Application history,
 versions and audit rows have no retention policy in this small example.
 
 

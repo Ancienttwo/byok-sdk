@@ -106,7 +106,7 @@ Small follow-up fixes have local evidence and no third independent verdict.
 | Hosted `submitAgentExecution` cross-device path | OPEN | Downstream hosted Host adapter and execution evidence |
 | Two Topology L Host processes | OPEN | Implemented service relay and durable request/verdict recovery tests |
 | Two physical computers | OPEN | A run on separate machines; synthetic machine identity does not prove this |
-| Real Pi and `submit_result` success rate | OPEN | Separately authorized paid runtime run and measured success rate |
+| Real runtime `submit_result` success rates (Pi / Claude / Codex / Grok, per model/platform) | OPEN | [WO-10b measurement method](../../docs/submit-result-measurement.md); separately authorized real-runtime datasets remain missing |
 | Downstream deployment, macOS/Windows product acceptance | OPEN | Fixed downstream build and device acceptance |
 
 The two-process relay document defines `delegation.request` and
