@@ -3,7 +3,7 @@ import type { OutboundStatus } from './outbound-settlement';
 import { terminalIdentity } from './terminal-identity';
 import { HarnessIdSchema, type HarnessInfo } from '@byok-sdk/protocol';
 import { TerminalCommitQueue } from './terminal-commit-queue';
-import { observeRuntimeDetection, projectRuntimeObservation, type RuntimeObservation } from '../runtime-detection';
+import { isWireRuntimeId, observeRuntimeDetection, projectRuntimeObservation, type RuntimeObservation } from '../runtime-detection';
 import { serviceEnvironmentStatus, type ServiceEnvironmentStatus } from '../lifecycle/service-environment';
 import {
   DEVICE_ASSERTION_AUDIENCE_MAX_BYTES,
@@ -966,10 +966,6 @@ function toJournalEnvelopeRecord(envelope: Envelope, identity: JournalIdentity):
   };
 }
 
-function isRuntimeId(id: string): id is RuntimeId {
-  return id === 'pi' || id === 'claude' || id === 'codex';
-}
-
 /** Runtimes actually detected as present on this device, typed per protocol §10 gap #4 (`ConnHelloPayload.runtimes`). Computed once at `start()` — re-probing on every reconnect would mean re-spawning each runtime's `--version` check for no real benefit within one daemon lifetime. */
 async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{ runtimes: RuntimeInfo[]; harnesses: HarnessInfo[]; observations: RuntimeObservation[] }> {
   const detections = await Promise.all(adapters.map(async (adapter) => ({ adapter, detected: await observeRuntimeDetection(adapter) })));
@@ -982,7 +978,7 @@ async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{ runtimes: R
     if (detected.advisory !== undefined) {
       console.warn(`[byok/client] ${adapter.descriptor.id} ${detected.version ?? '(unknown version)'} is not the qualified ${detected.advisory.qualifiedVersion}; continuing`);
     }
-    if (!isRuntimeId(adapter.descriptor.id)) {
+    if (!isWireRuntimeId(adapter.descriptor.id)) {
       harnesses.push({ id: HarnessIdSchema.parse(adapter.descriptor.id),
         ...(detected.version === undefined ? {} : { version: detected.version }),
         capabilities: toRuntimeInfoCapabilities(adapter.descriptor.capabilities) });

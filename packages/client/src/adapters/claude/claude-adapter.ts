@@ -116,6 +116,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       // answer in a later model call with no tool between (#501) then
       // publishes it once.
       progressEventsAreMessages: true,
+      platforms: ['darwin', 'linux', 'win32'],
       capabilities: {
         steer: false,
         resume: true,

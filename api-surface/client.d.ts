@@ -516,7 +516,9 @@ export declare class HermesAdapter implements RuntimeAdapter {
     private start;
 }
 // ==== @byok-sdk/client dist/adapters/index.d.ts ====
-export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, } from '../types';
+export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, } from '../types';
+export { isWireRuntimeId, observeRuntimeDetection, projectRuntimeObservation, taskRuntimeTarget, validateRuntimeDetectResult } from '../runtime-detection';
+export type { RuntimeObservation } from '../runtime-detection';
 export { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
 export type { RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeExecutionFailureInput, RuntimeFailureCategory, RuntimeFailurePhase, RuntimeRetryDisposition, } from '../runtime-failure';
 export { PiAdapter } from './pi/pi-adapter';
@@ -12751,6 +12753,7 @@ export declare const LOCAL_AGENT_RELEASE_BUILD_ID_MAX_LENGTH = 128;
  */
 export declare function resolveLocalAgentReleaseIdentity(input: LocalAgentReleaseIdentity | undefined): Readonly<LocalAgentReleaseIdentity>;
 // ==== @byok-sdk/client dist/runtime-detection.d.ts ====
+import type { RuntimeId } from '@byok-sdk/protocol';
 import { type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectResult, type RuntimeDetectionRefusalReason } from './types';
 /** Content-free observation of one configured adapter, including unavailable outcomes. */
 export interface RuntimeObservation {
@@ -12770,8 +12773,19 @@ export declare function projectRuntimeObservation(descriptor: RuntimeAdapterDesc
 export declare function parseRuntimeObservations(value: unknown): RuntimeObservation[] | undefined;
 /** Reject legacy/mixed authoring shapes; copy only validated, known facts. */
 export declare function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult;
-/** Single routing author for daemon, selection and local diagnostics. */
+/**
+ * Single routing author for daemon, selection and local diagnostics. A host
+ * platform outside `descriptor.platforms` is refused before `detect()` runs.
+ */
 export declare function observeRuntimeDetection(adapter: RuntimeAdapter, signal?: AbortSignal): Promise<RuntimeDetectResult>;
+/** Whether `id` is a frozen wire runtime id. Every other adapter id is selected by `harnessId`. */
+export declare function isWireRuntimeId(id: string): id is RuntimeId;
+/** The task selection that reaches this adapter: `runtime` for a wire runtime id, else `harnessId`. Never both. */
+export declare function taskRuntimeTarget(descriptor: Pick<RuntimeAdapterDescriptor, 'id'>): {
+    readonly runtime: RuntimeId;
+} | {
+    readonly harnessId: string;
+};
 // ==== @byok-sdk/client dist/runtime-failure.d.ts ====
 /** Closed lifecycle phases for failures after an offer has been admitted. */
 export type RuntimeFailurePhase = 'start' | 'run';
@@ -12871,6 +12885,23 @@ export declare function resolveSdkReservedHelperBin(kind: SdkReservedHelperKind,
  * stdio EOF before this resolves `true`.
  */
 export declare function runSdkReservedHelperCommand(argv?: readonly string[]): Promise<boolean>;
+// ==== @byok-sdk/client dist/testing/index.d.ts ====
+import type { RuntimeAdapter, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeDetectResult } from '../types';
+/** The built-in adapters a fake can stand in for. */
+export type FakeRuntimeAdapterId = 'claude' | 'codex' | 'grok' | 'hermes' | 'pi';
+/** What the fake does. It never spawns a process. */
+export interface FakeRuntimeAdapterBehavior {
+    /** Default: `{ kind: 'available' }`. A function is called on every probe. */
+    readonly detect?: RuntimeDetectResult | ((signal?: AbortSignal) => Promise<RuntimeDetectResult>);
+    /** Default: a non-retryable reject, so a fake starts nothing the test did not supply. */
+    readonly prepare?: (input: RuntimeAdapterPrepareInput) => Promise<RuntimeAdapterPrepareResult>;
+}
+/**
+ * A runtime adapter double whose descriptor is the real adapter's default
+ * descriptor, so its capabilities, selection target and platforms follow the
+ * SDK. Only `detect` and `prepare` are the test's.
+ */
+export declare function fakeRuntimeAdapter(id: FakeRuntimeAdapterId, behavior?: FakeRuntimeAdapterBehavior): RuntimeAdapter;
 // ==== @byok-sdk/client dist/types.d.ts ====
 import type { ExecutionScratch } from './daemon/retention/scratch';
 import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions';
@@ -12917,8 +12948,11 @@ export interface RuntimeDetectionAdvisory {
     readonly reason: 'runtime_version_unqualified';
     readonly qualifiedVersion: string;
 }
-/** `app_server_unavailable`: Codex has no `app-server`. `acp_unavailable`: an ACP runtime has no stdio ACP mode. */
-export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unavailable';
+/**
+ * `app_server_unavailable`: Codex has no `app-server`. `acp_unavailable`: an ACP runtime has no stdio ACP mode.
+ * `platform_unsupported`: the host platform is not in {@link RuntimeAdapterDescriptor.platforms}; no probe ran.
+ */
+export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unavailable' | 'platform_unsupported';
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
     /** Supports display-only Agent message drafts. Omission means unsupported. */
@@ -13119,6 +13153,12 @@ export interface RuntimeAdapterDescriptor {
      * completed. Absent: every record of this adapter is `unknown`.
      */
     readonly trajectoryEvidence?: 'event-stream';
+    /**
+     * The `process.platform` values this adapter supports. Runtime detection
+     * refuses every other platform with `platform_unsupported` before it runs a
+     * probe. Absent: no platform restriction (a custom adapter's default).
+     */
+    readonly platforms?: readonly NodeJS.Platform[];
 }
 /** The pure input to one adapter admission decision. It contains no credential values or workspace resources. */
 export interface RuntimeAdapterPrepareInput {

@@ -57,6 +57,8 @@ export class GrokAdapter implements RuntimeAdapter {
   get descriptor() { return freezeRuntimeAdapterDescriptor({
     id: 'grok',
     supportsDispatchSelection: false,
+    // Windows has no Grok evidence (`docs/adapter-capabilities.md`).
+    platforms: ['darwin', 'linux'],
     capabilities: {
       steer: false,
       resume: true,

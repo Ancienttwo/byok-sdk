@@ -7,3 +7,6 @@ export * from './capability-constants';
 export const AGENT_MEMORY_MAX_SNAPSHOT_BYTES = 1024 * 1024;
 /** Maximum memory files in one local Host export, including MEMORY.md. */
 export const AGENT_MEMORY_MAX_SNAPSHOT_FILES = 128;
+
+/** The frozen wire runtime ids. Any other adapter id is a custom harness (`harnessId`). */
+export const RUNTIME_IDS = Object.freeze(['pi', 'claude', 'codex'] as const);

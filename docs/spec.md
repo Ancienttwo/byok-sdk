@@ -688,10 +688,13 @@ this shape; old `present` shapes, mixed authorities, unknown kinds, and malforme
 metadata are rejected. There is no compatibility translation.
 
 `refused` requires exactly `kind` and `reason`. Its reasons are
-`app_server_unavailable` (Codex has no `app-server`) and `acp_unavailable`
-(an ACP runtime such as Grok has no stdio ACP mode). No other arm accepts `reason`; arbitrary error text
+`app_server_unavailable` (Codex has no `app-server`), `acp_unavailable`
+(an ACP runtime such as Grok has no stdio ACP mode) and `platform_unsupported`
+(the host `process.platform` is not in the descriptor's `platforms`). No other arm accepts `reason`; arbitrary error text
 is never parsed into a reason. Daemon registration, task selection and explicit local
-`runtimes`/offline doctor call `detect(signal?)` on the actual adapter. Detection never
+`runtimes`/offline doctor call `observeRuntimeDetection`, which refuses an
+unsupported platform before it calls `detect(signal?)` on the actual adapter.
+A descriptor without `platforms` has no platform restriction (#635). Detection never
 chooses the task lane; `resources.kind` retains that authority. The SDK does
 not measure the installed runtime.
 

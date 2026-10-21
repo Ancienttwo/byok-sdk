@@ -189,6 +189,8 @@ export class HermesAdapter implements RuntimeAdapter {
     return freezeRuntimeAdapterDescriptor({
       id: 'hermes',
       supportsDispatchSelection: false,
+      // The gateway control channel is a named pipe on Windows. It has no evidence yet.
+      platforms: ['darwin', 'linux'],
       capabilities: { steer: false, resume: false, approvalInteractive: false, mcpToolsets: true },
     });
   }
@@ -275,8 +277,6 @@ export class HermesAdapter implements RuntimeAdapter {
 
   /** Cheap admission, as Codex: the version probe only. The ACP probe and root build belong to `detect()`. */
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
-    // The gateway control channel is a named pipe on Windows. It has no evidence yet.
-    if (process.platform === 'win32') return { kind: 'reject', reason: 'hermes adapter is not qualified on Windows', retryable: false };
     if (input.offer.dispatchSelection !== undefined) return { kind: 'reject', reason: 'hermes does not accept a dispatch selection; the Host configures its model', retryable: false };
     if (input.offer.sessionRef !== undefined) return { kind: 'reject', reason: 'hermes does not resume native sessions', retryable: false };
     const command = this.command();
