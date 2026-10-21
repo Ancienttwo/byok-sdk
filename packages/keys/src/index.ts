@@ -1,7 +1,14 @@
 export { ByokKeysError, BYOK_KEYS_ERROR_CODES } from './errors';
 export type { ByokKeysErrorCode } from './errors';
-export { PiModelConfigSchema, PI_THINKING_LEVELS, PI_OPENAI_COMPATIBLE_APIS, PI_COMPAT_KEYS_BY_API } from './pi-model-config';
-export type { PiModelConfig, PiOpenAICompatibleApi } from './pi-model-config';
+export {
+  PiModelConfigSchema,
+  PI_THINKING_LEVELS,
+  PI_OPENAI_COMPATIBLE_APIS,
+  PI_MODEL_APIS,
+  PI_COMPAT_KEYS_BY_API,
+} from './pi-model-config';
+export type { PiCompatKey, PiModelApi, PiModelConfig, PiOpenAICompatibleApi, PiThinkingLevel } from './pi-model-config';
+
 
 export {
   MODEL_PROVIDER_ADAPTERS,
@@ -182,6 +189,7 @@ export type {
 export {
   PI_AUTH_NONE_API_KEY,
   PI_PROJECTED_KEY_ENV,
+  assertPiLaunchArgs,
   buildPiProviderProjection,
 } from './pi-provider-projection';
 

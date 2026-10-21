@@ -37,26 +37,79 @@ The projection writes `api` on the Pi provider. It never infers `api` from
 the base URL or the model name. An `anthropic` profile always projects
 `'anthropic-messages'` and must not set `api`.
 
-To make a `pi_model` from a pi-ai catalog entry:
+### `pi_model` from the pinned pi-ai catalog
 
-- Copy `api`, `contextWindow`, `maxTokens`, `reasoning`, `thinkingLevelMap`
-  and `inputLimits`. Add your own `thinkingLevel`.
-- Remove `id`, `name`, `provider`, `baseUrl`, `headers`, `cost`, `input` and
-  `type`. The profile declares identity, endpoint, credential and
-  capabilities.
-- Copy only the `compat` keys in `PI_COMPAT_KEYS_BY_API[api]`.
-  `'openai-completions'` accepts `supportsStore`, `supportsDeveloperRole`,
-  `supportsReasoningEffort`, `supportsUsageInStreaming`, `maxTokensField`,
-  `thinkingFormat`, `zaiToolStream` and `supportsLongCacheRetention`.
-  `'openai-responses'` accepts `supportsDeveloperRole` and
-  `supportsLongCacheRetention`.
-- If the entry needs another `compat` key, do not make a preset. The schema
-  refuses unknown keys. Request the key in an issue.
+`piModelConfigFromPinnedCatalog({ provider, api, model, thinkingLevel })`, from
+`@byok-sdk/keys/pi-catalog`, returns the `pi_model` for one entry of the pi-ai catalog that
+`@byok-sdk/client` pins. `PI_MODEL_CATALOG_PI_AI_VERSION` names that pi-ai
+version. The table is a checked-in generated file. When the client pin of
+pi-ai changes, run `bun run generate:pi-model-catalog`; a client test fails
+until the file matches the pinned pi-ai. This package does not read pi-ai at
+run time.
+
+```ts
+import { piModelConfigFromPinnedCatalog } from '@byok-sdk/keys/pi-catalog';
+
+const result = piModelConfigFromPinnedCatalog({
+  provider: 'zai', api: 'openai-completions', model: 'glm-5.3', thinkingLevel: 'high',
+});
+if (result.ok) {
+  // result.config is a PiModelConfig. result.input lists 'text' and 'image';
+  // declare 'image-input' in the profile capabilities when it has 'image'.
+}
+```
+
+The result is one of these:
+
+- `{ ok: true, config, input }`: the entry, expressed exactly.
+- `{ ok: false, reason: 'unrepresentable', fields }`: `PiModelConfig` cannot
+  express the entry. `fields` lists each blocking field path.
+- `{ ok: false, reason: 'thinking_level_unsupported', supported }`: the entry
+  does not support the requested level.
+- `{ ok: false, reason: 'not_in_catalog' }`: no such entry. The table has the
+  vendors in `MODEL_PROVIDER_VENDORS` and the apis in `PI_MODEL_APIS` only.
+
+The mapping from a pi-ai catalog entry to `pi_model`:
+
+- `contextWindow`, `maxTokens`, `reasoning` and `inputLimits` are copied.
+- `thinkingLevelMap` is copied. It must declare all seven levels. Pi reads an
+  absent level differently from `null` and from the level name, so the
+  mapping does not fill one in. An entry with a partial map, or with no map,
+  is refused with `thinkingLevelMap`.
+- `api` is copied for `'openai-responses'`. It is omitted for
+  `'openai-completions'`, the default, and for `'anthropic-messages'`, which
+  the `anthropic` adapter decides. An entry whose `api` is not the vendor's
+  adapter is refused with `api`.
+- `compat` keys are copied only when they are in `PI_COMPAT_KEYS_BY_API[api]`.
+  Other keys are refused as `compat.<key>`.
+- `id`, `name`, `provider`, `baseUrl` and `type` come from the profile, and
+  `cost` is not projected. They never cause a refusal.
+- Any other field, for example `headers` or `promptCache`, is refused by name.
+  A field that a later pi-ai adds is refused until this package carries it.
+
+`PI_COMPAT_KEYS_BY_API` has these keys. Pi receives each one verbatim.
+
+| Pi api | Compat keys |
+| --- | --- |
+| `openai-completions` | `supportsStore`, `supportsDeveloperRole`, `supportsReasoningEffort`, `supportsUsageInStreaming`, `maxTokensField`, `thinkingFormat`, `zaiToolStream`, `supportsLongCacheRetention`, `supportsStrictMode`, `requiresReasoningContentOnAssistantMessages` |
+| `openai-responses` | `supportsDeveloperRole`, `supportsLongCacheRetention`, `supportsStrictMode` |
+| `anthropic-messages` | `supportsLongCacheRetention`, `forceAdaptiveThinking` |
+
+An `anthropic` profile also accepts the `openai-completions` keys, as it did
+before. Pi's Anthropic compat schema does not read them.
+
+`PI_THINKING_LEVELS` is generated from the same pinned pi-ai
+(`MODEL_THINKING_LEVELS`). The `@byok-sdk/client` Pi hosts import that pi-ai
+list directly. Call `assertPiLaunchArgs(profile)` on a parsed profile before
+you save it: it throws when the Pi rpc host would refuse the `--provider`,
+`--model` or `--thinking` value that the launcher appends. The launcher makes
+the same check before admission and before spawn.
 
 The prepared runtime entry compiles `'openai-completions'` only. It refuses a
 profile that declares `'openai-responses'` or `inputLimits`. It also refuses
-`compat.supportsLongCacheRetention`, because the frozen prepared wire does not
-carry it.
+`compat.supportsLongCacheRetention`, `compat.supportsStrictMode` and
+`compat.requiresReasoningContentOnAssistantMessages`, because the frozen
+prepared wire does not carry them.
 
 The SQLite profile schema changes in this candidate. Existing stores are
 rejected and preserved: explicitly provision a separate current-schema store

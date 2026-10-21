@@ -439,6 +439,7 @@
         "@earendil-works/pi-ai/api/openai-completions",
         "@earendil-works/pi-ai/compat",
         "@earendil-works/pi-ai/models",
+        "@earendil-works/pi-ai/providers/model-schema",
         "@earendil-works/pi-coding-agent",
         "@earendil-works/pi-durable",
         "@earendil-works/pi-durable/env",
@@ -701,12 +702,12 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 18048,
+          "line": 18049,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 88113,
+          "line": 88114,
           "rule": "opaque import()"
         },
         {
@@ -772,6 +773,7 @@
         "@earendil-works/pi-ai/api/openai-completions",
         "@earendil-works/pi-ai/compat",
         "@earendil-works/pi-ai/models",
+        "@earendil-works/pi-ai/providers/model-schema",
         "@earendil-works/pi-coding-agent",
         "@earendil-works/pi-durable",
         "@earendil-works/pi-durable/env",
@@ -1032,7 +1034,7 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host-sealed.js",
-          "line": 88038,
+          "line": 88039,
           "rule": "opaque import()"
         },
         {
@@ -1655,6 +1657,53 @@
         "thirdParty": []
       },
       "codegen": []
+    }
+  },
+  "@byok-sdk/keys/pi-catalog": {
+    "kind": "exports",
+    "policy": {
+      "purpose": "Pinned pi-ai catalog lookup for pi_model",
+      "budgetBytes": 160200,
+      "zod": true,
+      "codegen": true,
+      "nodeBuiltins": {
+        "workspace": false,
+        "thirdParty": false
+      }
+    },
+    "facts": {
+      "target": "packages/keys/dist/pi-catalog.js",
+      "conditions": [
+        "import"
+      ],
+      "types": [
+        "packages/keys/dist/pi-catalog.d.ts"
+      ],
+      "bareImports": [
+        "zod"
+      ],
+      "lazyImports": [],
+      "thirdParty": [
+        "zod"
+      ],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [],
+        "thirdParty": []
+      },
+      "codegen": [
+        {
+          "file": "zod/v4/core/doc.js",
+          "line": 28,
+          "rule": "Function reference"
+        },
+        {
+          "file": "zod/v4/core/util.js",
+          "line": 156,
+          "rule": "Function reference"
+        }
+      ]
     }
   },
   "@byok-sdk/protocol": {

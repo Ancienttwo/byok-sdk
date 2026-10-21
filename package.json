@@ -23,6 +23,7 @@
     "check:deploy-sql": "repo-harness run check-deploy-sql-order",
     "check:architecture-sync": "repo-harness run check-architecture-sync",
     "check:api-surface": "node scripts/api-surface/check-api-surface.mjs",
+    "generate:pi-model-catalog": "bun scripts/keys/generate-pi-model-catalog.ts",
     "check:version-authority": "node scripts/api-surface/check-version-authority.mjs",
     "check:release-graph": "node scripts/release/check-package-graph.mjs",
     "check:release-pack": "node scripts/release/pack-and-smoke.mjs",

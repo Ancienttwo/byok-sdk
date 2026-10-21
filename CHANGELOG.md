@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Feature (keys)** — add `piModelConfigFromPinnedCatalog` and
+  `PI_MODEL_CATALOG_PI_AI_VERSION` on the new `@byok-sdk/keys/pi-catalog`
+  export (#636). The table is generated from the
+  pinned `@earendil-works/pi-ai` with `bun run generate:pi-model-catalog`, and
+  a client test fails on drift. An entry is returned exactly or refused with its
+  blocking fields; an entry without a complete `thinkingLevelMap` is refused.
+  `PiModelConfigSchema.compat` accepts `supportsStrictMode`,
+  `requiresReasoningContentOnAssistantMessages` (`openai-completions`) and
+  `forceAdaptiveThinking` (`anthropic` profiles); the prepared entry still
+  refuses keys outside its wire. Add `assertPiLaunchArgs`; the launcher now
+  refuses a model id that starts with `--` before admission.
+- **Changed (keys, client)** — `PI_THINKING_LEVELS` is generated from pi-ai
+  `MODEL_THINKING_LEVELS`, and the Pi rpc and prepared hosts import that list
+  (#636). `PI_COMPAT_KEYS_BY_API` gains an `anthropic-messages` row.
+
 ## 0.28.1 / @byok-sdk/keys 0.13.1 — source candidate
 
 The owner selected 0.28.1 as a one-release exception to the default pre-1.0
