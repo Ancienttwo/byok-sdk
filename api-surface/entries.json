@@ -1594,7 +1594,6 @@
         "child_process",
         "crypto",
         "fs",
-        "module",
         "path",
         "zod"
       ],
@@ -1609,7 +1608,6 @@
           "child_process",
           "crypto",
           "fs",
-          "module",
           "path"
         ],
         "thirdParty": []
@@ -1793,7 +1791,6 @@
         "crypto",
         "fs",
         "hono",
-        "module",
         "path",
         "zod"
       ],
@@ -1809,7 +1806,6 @@
         "workspace": [
           "crypto",
           "fs",
-          "module",
           "path"
         ],
         "thirdParty": []
@@ -2275,7 +2271,6 @@
         "child_process",
         "crypto",
         "fs",
-        "module",
         "path",
         "zod"
       ],
@@ -2290,7 +2285,6 @@
           "child_process",
           "crypto",
           "fs",
-          "module",
           "path"
         ],
         "thirdParty": []

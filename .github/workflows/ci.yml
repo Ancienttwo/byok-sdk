@@ -541,6 +541,10 @@ jobs:
       - name: Build (needed so @byok-sdk/client has a dist/ to bundle)
         run: bun run build
 
+      - name: SQLite ESM, CJS and relocated SEA smoke
+        if: matrix.recipe == 'sea'
+        run: node examples/packaging/sqlite-smoke.mjs --sea
+
       - name: Run packaging smoke
         run: templates/packaging/${{ matrix.recipe }}/smoke-test.sh
 

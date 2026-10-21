@@ -25,3 +25,11 @@ Both recipes' READMEs (`templates/packaging/{bun,sea}/README.md`) are the
 copy-paste reference for a product that wants to compile its own launcher
 into one binary. Decision-6 boundary: the SDK ships only the npm library —
 neither this example nor the recipes produce, sign, or distribute anything.
+
+## SQLite in bundled hosts
+
+`node examples/packaging/sqlite-smoke.mjs` (from the repository root after install/build)
+checks embedded server, hosted daemon journal and provider-profile persistence in ESM and CJS.
+Add `--sea` to build and run the same fixture as a relocated Node SEA executable using the
+existing recipe. See [SQLITE-VALIDATION.md](./SQLITE-VALIDATION.md) for the exact scope, commands,
+baseline reproduction and platform evidence; this fixture does not qualify native credential assets.
