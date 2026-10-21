@@ -1,0 +1,569 @@
+# 托管 wire 按数据类别端到端加密（#654 设计草案）
+
+状态：设计草案，等待 owner 决定。本文不改变现行 SDK API、wire、schema、存储或部署。
+
+日期：2026-10-22（Asia/Taipei）。
+SDK 基线：`473cc4c495e244e3a9433794ffd9bd73d8455ece`。
+下游源码核对基线：AiphaBee `5b5fc4ce`，只读核对。未核对下游线上部署。
+关联：[issue 654](https://github.com/Ancienttwo/byok-sdk/issues/654)。发版台账 [issue 649](https://github.com/Ancienttwo/byok-sdk/issues/649) 把它排在 0.28.2 之后。设备身份对应见 [issue 655](https://github.com/Ancienttwo/byok-sdk/issues/655)。H 路径见[双车道 Host 方案](2026-10-21-dual-host-collaboration.md)。
+
+## 1. 目标、范围与建议
+
+目标：
+
+- 开启加密的数据类别，在 Host 的云端、数据库、对象存储、日志和备份里只有密文。
+- Host 只凭明文元数据完成路由、去重、幂等和配额。
+- 缺密钥、解密失败或版本不符时一律拒绝，不回退明文。
+- 撤销设备或客户端之后，被撤销的一方读不到之后的内容。
+- 用户可以按 scope 删除内容。防重放的 identity receipt 继续有效。
+
+不在范围：
+
+- provider secret 的密封。它已经存在（`packages/core/src/sealed-provider-secret.ts`）。
+- 本机 control socket 与 IPC。
+- 隐藏元数据：谁在何时与哪台设备通信、内容大致多长。
+- 防御 Host 下发的恶意前端代码。见 §5.4。
+- 在云端执行的任务（`cloud-do` 托管执行器）。它必须读明文，所以不能使用加密类别。
+- 0.28.1 与 0.28.2。
+
+建议（细节见各节，决定见 §14）：
+
+- 加密策略按 task 冻结。Host 在 offer 里写明 scope 和加密类别。类别是固定的字段组：任务输入、Agent 消息、结果与过程、记忆投影。
+- 只有不由 Host 生成的内容才能对 Host 加密。产品云端用可读 history 组装的 ContextPack 保持明文。
+- 密钥分三层：每个 tenant 一条只含公钥的成员链；每个 scope 一组按 epoch 轮换的对称 scope key；每个设备和客户端各有签名密钥与 KEM 密钥。
+- 信任锚由用户携带：客户端生成配对验证秘密，经配对码交给设备，不发给 Host。只信 Host 目录的方式与今天的 provider secret 同级，不满足 #654 需求 1。
+- wire 在 v3 内做双向 gated addition。设备与 Host 都必须声明 `sealed-payload-v1`。
+- 幂等改为比较「明文元数据 + keyed content MAC」，不比较密文字节。
+- 删除提供两条路：加密类别用 crypto-shredding；全部类别都可用能在 Workers 上运行的 scoped row-delete。
+
+## 2. P1：现状与真实边界
+
+### 2.1 已有的加密与身份
+
+| 事实 | 位置 | 对本设计的意义 |
+| --- | --- | --- |
+| 唯一的密封是 provider secret。套件固定为 HPKE base mode `DHKEM(P-256, HKDF-SHA256) / HKDF-SHA256 / AES-128-GCM`，只用 WebCrypto | `packages/core/src/hpke.ts`；`packages/core/src/sealed-provider-secret.ts:39-42` | 复用这套 HPKE 包装 scope key。info 换成新常量 |
+| 设备的 P-256 sealing key 存在 OS credential store，绑定 enrollment，有 epoch | `packages/keys/src/device-sealing-key.ts` | 设备 KEM 密钥沿用同一托管方式 |
+| sealing key 用 device proof 登记，operation 为 `provider-secret-sealing-key.register` | `packages/protocol/src/provider-provisioning.ts:37` | 成员密钥用同样方式绑定设备行 |
+| 设备身份是 Ed25519，签 nonce、device proof 和 device assertion。proof key epoch 固定为 0，没有轮换 | `packages/client/src/daemon/device-keys.ts`；`packages/cloud/src/auth/plane.ts:32` | 本设计不依赖轮换 Ed25519 身份。重新配对即新成员 |
+| Host 用 WebCrypto 验证 device proof | `packages/cloud/src/auth/device-proof.ts:78`；`packages/cloud/src/crypto/web-crypto.ts:87` | Workers 侧已有 Ed25519 验签 |
+| SDK 只有 `device` 与 `control-plane` 两种 principal，没有用户客户端。浏览器经 Host BFF 访问 | `packages/core/src/principals.ts` | 客户端身份要新增，由 Host BFF 转交 |
+| 配对码由 SaaS 签发，单次使用，约 10 分钟有效 | [protocol §6.1](../protocol.md)；[security](../security.md) | Host 知道配对码，所以配对码本身不能当信任锚 |
+| sealed provider secret 的残余信任：Host 的前端代码和它的首个设备公钥目录 | `docs/spec.md:86-92` | 本设计要处理目录被改写的情况 |
+
+### 2.2 托管侧保存内容的位置
+
+| 存储 | 内容 | 哈希 | 删除方式 |
+| --- | --- | --- | --- |
+| `device_request_receipts` 的 `task-offer:` | 完整 offer payload，含 `instruction` 和其中的 ContextPack（`packages/cloud/src/cloud.ts:1187-1195`） | 无 | 永不过期 |
+| `device_request_receipts` 的 `task:<id>:terminal` | 完整终态 envelope：`summary`、`finalMessage`、`document`（`packages/cloud/src/inbound.ts:866-874`） | 无 | 永不过期 |
+| `device_request_receipts` 的 `agent-input-preparation-request:` 与 `agent-home-projection-request:` | 准备上下文（inline 最多 64 KiB）；home projection 值 | 无 | 永不过期 |
+| `outbox.body`（`deploy/sql/0002_core_domain.sql:100`） | 每个下发的 envelope | `body_hash` 是明文 envelope 的 SHA-256 | 已 ack 的 24 小时后删。未 ack 的 7 天后标 `expired`，正文保留到运维调用 `discardDeadLetter`（`packages/cloud-dataplane/src/cleanup.ts:251-255`）或 tenant erasure |
+| `agent_message_admission.payload_body`、`terminal_body`（`deploy/sql/0017_agent_message_admission.sql`） | Agent 消息正文，两列各存一次 | JSON 内的 `contentHash` 是正文的明文 SHA-256（`packages/client/src/daemon/agent-message-outbox.ts:58`） | 只随 tenant erasure 删除 |
+| `agent_message_draft.text` | 流式草稿。服务端按 UTF-8 偏移拼接（`packages/cloud-dataplane/src/stores/agent-message-draft.ts:26`） | 无 | 终态时删除；TTL 10 分钟 |
+| `agent_egress_event.payload_json` | 可靠 egress 项，每项最多 256 KiB | 明文 JSON 的 SHA-256（`packages/client/src/daemon/agent-egress-spool.ts:94-107`） | 只随 tenant erasure 删除 |
+| `activity_tail.entries`；`approval_timeline_tail.entries` | 工具输入输出、进度文本；审批摘要 | 无 | activity TTL 10 分钟；审批由维护步骤删除 |
+| `attested_record.body_inline` | truth 记录：`task.terminal`、`profile`、`memory` | `content_hash` 是明文 SHA-256，服务端复算 | 只随 tenant erasure 删除 |
+| `agent_memory_projection_head.redacted_snapshot` | 脱敏记忆快照，最多 512 KiB | `redacted_hash` 是明文 SHA-256，服务端复算 | 按 Agent 擦除，留下无正文的 epoch fence |
+| R2 `tenants/<tenant>/objects/sha256/<hex>`（`packages/core/src/blob.ts:110`） | 大 instruction、artifact、大准备上下文 | key 就是明文 SHA-256，由设备计算（`packages/client/src/daemon/blob-client.ts:100`）。租户内去重 | 无引用的对象在维护中删除 |
+| `task.terminal_cause`；`task.cancel_reason` | 从 `reason` 复制的自由文本；Host 写的取消原因 | 无 | 只随 tenant erasure 删除 |
+
+表中的定时删除都要 Host 调用 `runMaintenance` 才会发生。
+
+`packages/cloud/src/receipt-retention.ts:4-21` 把全部 11 个 receipt 前缀归为 identity。`REQUEST_RECEIPT_PREFIXES` 因此为空。`collectExpired` 在第 48 行直接返回，不删任何行（`packages/cloud-dataplane/src/stores/receipts.ts:45-61`）。
+
+task receipt、task 行、`agent_message_admission` 行和 `agent_egress_event` 行只有 tenant erasure 能删除。admission 行随 task 行级联删除（`deploy/sql/0017_agent_message_admission.sql:20-22`）。tenant erasure 只能在 Node 上运行：`packages/cloud-dataplane/src/tenant-erasure.ts:9` 引入 `node:crypto`，`runtime.ts` 不导出它。它也不处理 Durable Object 存储。
+
+其他删除路径都很窄：
+
+- `revokeDevice` 删除设备行和 presence、nonce、inbound dedup、assertion replay 状态。它有意不删 task、`agent_egress_event`、outbox 和 `device_stream`（`packages/cloud-dataplane/src/stores/devices.ts:71-99`）。
+- `discardDeadLetter` 由运维调用，一次删除一条 `expired` outbox 行。它只从包根导出，`runtime.ts` 不导出它。
+- `eraseAgentMemoryProjection` 擦除一个 Agent 的记忆投影（`packages/cloud/src/cloud.ts:1782`）。
+- 重新签发配对码时，旧的配对完成 receipt 被删除（`packages/cloud-dataplane/src/stores/pairing-codes.ts:145-152`）。
+
+### 2.3 依赖内容的云端逻辑
+
+- `decodeEnvelope` 按类型做完整 payload 校验。投递、终态读取和 dead-letter 重放都调用它（`packages/cloud-dataplane/src/cleanup.ts:533-563`）。
+- 幂等比较是 `JSON.stringify` 之后的字符串相等。主要位置：offer receipt（`cloud.ts:1187-1201`）；投递后复核（`cloud.ts:1233`）；Agent 消息 admission（`inbound.ts:262-301`）；终态 disposition（`inbound.ts:337-357`）；egress（`inbound.ts:368-382`）；activity 与审批的重复批次；输入准备请求。
+- 大小上限按明文计：inline instruction 64 KiB；Agent 消息 256 KiB；result document 1 MiB；egress 256 KiB；记忆快照 512 KiB；activity 批次 64 KiB；审批摘要 16 KiB；`POST /byok/messages` 2 MiB（`packages/cloud/src/handlers/messages.ts:87`）。
+- `agentMessage.consume` 收到含 `body` 的完整 payload（`cloud.ts:303-311`；`inbound.ts:287`）。
+- observer 的 `onInboundCommitted` 收到完整 envelope（`inbound.ts:167-172`）。
+- `readTaskOffer`、`readTaskResult`、`readDeviceTerminal`、`readTaskAgentMessage`、`readActivity` 等读接口返回明文内容。
+
+### 2.4 AiphaBee 现在的研究任务路径
+
+- 浏览器为每个任务生成 P-256 临时密钥。设备持有 relay 私钥。双方做 ECDH，经 HKDF 派生 AES-256-GCM frame key（AiphaBee `packages/local-execution-protocol/src/index.ts:2276-2330`）。
+- 浏览器从产品 Worker 返回的 `LocalDeviceSummary.device_public_jwk` 取得设备公钥（AiphaBee `apps/web/src/lib/api/localExecution.ts:1304`、`:1337`）。
+- relay 只转发密文，不落库。设备公钥来自 Worker，所以 Worker 可以替换它。这条 relay 不满足 #654 需求 1。
+
+## 3. P2：一条研究任务路径上的明文落点
+
+以 H 拓扑下的一个研究任务为例。顺序与双车道方案 §3 相同。
+
+| 步骤 | 今天的明文落点 | 加密后 |
+| --- | --- | --- |
+| 1. 浏览器把任务交给产品后端 | 产品后端与它的日志 | 产品后端先给出稳定 taskId、目标设备、agentRef、scope 和策略。浏览器之后只交密文 |
+| 2. 产品后端调用 `submitAgentExecution` | `task-offer:` receipt；`outbox.body`；大 instruction 进 R2 | 两处存同一份密文。Host 原样保存，不重新封装 |
+| 3. 设备 long-poll 收到 offer | 设备本机 journal | 设备取 key package，解密，校验 MAC 与内层 schema，再 claim |
+| 4. 设备上报进度与审批 | `activity_tail`；`approval_timeline_tail` | 每个批次一份密文 |
+| 5. 设备上报终态 | `task:<id>:terminal` receipt；`task.terminal_cause`；truth `task.terminal` | 终态正文是密文。`reason` 只留封闭代码 |
+| 6. 产品后端读取结果 | `readTaskResult` 返回明文 | 返回状态和密文。浏览器解密 |
+
+`enqueueTaskEnvelope` 在 `cloud.ts:1135`、`:1214` 和 `:1233` 三次调用 `buildEnvelope`，并比较结果。所以封装必须在调用 SDK 之前完成，密文作为输入数据原样传入。若在这条路径里生成 nonce，每次重试都会冲突。
+
+## 4. P3：必须保留的不变量
+
+1. identity receipt 继续是防重放的 fence。同一 taskId 的不同内容仍返回 `coordination_input_invalid`。
+2. 第一份事实不被覆写。重复投递仍按元数据去重。
+3. Host 不持有任何私钥或 scope key。Host 不封装，也不解密。
+4. 一套字节规则。封装格式、AAD、MAC 和签名输入都在 `@byok-sdk/core`，只用 WebCrypto。浏览器和 daemon 用同一份代码。
+5. SDK 不新增 Conversation 或 Room 存储（[ADR-038](../architecture/adr-2026-10-13-bot-platform.md) 决策 8）。scope 是 Host 给的不透明标签。
+6. 一项事实一个权威（[ADR-027/028](../architecture/adr-2026-09-03-domain-model-and-authority.md)）。成员链是成员公钥的唯一来源。设备行仍是 SDK 认证的权威。
+7. 旧接收方不能悄悄丢掉加密内容。每项新增都走 freeze rule 的 gated 路径。
+8. 设备仍是执行权威。加密不改变 Host 能下发什么任务（[security](../security.md) 线路表的「Malicious or compromised SaaS」一行）。
+
+## 5. 参与方与威胁模型（任务 1）
+
+### 5.1 参与方
+
+| 参与方 | 包含 | 持有的密钥 |
+| --- | --- | --- |
+| 设备 | daemon、本机 runtime、OS credential store | Ed25519 设备身份；成员签名密钥；成员 KEM 密钥；所属 scope 的 scope key |
+| 用户客户端 | 浏览器页面；嵌入 `ui-runtime` 的宿主应用；移动应用 | 成员签名密钥；成员 KEM 密钥；所属 scope 的 scope key |
+| Host 云端 | `createByokCloud`、`cloud-dataplane`、Postgres（含 Hyperdrive）、R2、Durable Object、日志、备份、运维人员 | 没有内容密钥。持有 JWT 签名密钥、公钥目录和密文 |
+| 产品后端 | 调用 SDK 的产品代码；`agentMessage.consume`；产品自己的数据库（例如 `BotConversationDO`） | 没有内容密钥。AiphaBee 的产品后端与 Host 云端是同一运营方、同一个 Worker |
+| 用户的其他客户端 | 同一用户的其他浏览器和设备 | 被成员链接纳并收到 key package 之后才有密钥 |
+
+### 5.2 攻击者能力
+
+| 位置 | 能 | 不能 |
+| --- | --- | --- |
+| 被动 Host：读库、读备份、读日志 | 看到元数据、长度区间、keyed MAC 和时间 | 读加密类别的内容；用猜测确认内容（MAC 带密钥） |
+| 主动 Host：改库、改目录、重放、扣留 | 下发任意新任务；扣留或重排消息；扣留成员链的新条目；登记假设备行 | 伪造成员链签名；替换已固定的成员公钥；让假设备拿到 scope key；把密文搬到另一个 scope 或 task；把含用户 C1 密文的 task 降为明文 |
+| Host 下发恶意前端代码 | 在用户输入时取走明文和配对验证秘密 | 本设计不防这一项（§5.4） |
+| 被撤销的设备或客户端 | 继续读它已有的明文和旧 epoch 的密文 | 读撤销后新 epoch 的内容 |
+| 被攻破的设备 | 读它所在 scope 的全部内容 | 本设计不防这一项 |
+
+### 5.3 谁能解密每一类
+
+| 类别 | scope 内的设备 | scope 内的客户端 | Host 云端 | 产品后端 |
+| --- | --- | --- | --- | --- |
+| C1 任务输入（开启） | 能 | 能 | 不能 | 不能 |
+| C2 Agent 消息（开启） | 能 | 能 | 不能 | 不能 |
+| C3 结果与过程（开启） | 能 | 能 | 不能 | 不能 |
+| C4 记忆投影（开启） | 能 | 能 | 不能 | 不能 |
+| 未开启的类别 | 能 | 经产品后端能 | 能 | 能 |
+| 明文路由元数据（§8.5） | 能 | 能 | 能 | 能 |
+
+同一 scope 的成员共享 scope key，所以都能解密。AAD 绑定目标设备（§8.2）。别的成员设备能读一份 offer，但会拒绝执行它。
+
+### 5.4 接受的泄露与残余风险
+
+- 元数据：tenant、设备、scope、Agent、task、消息 id、时间、频率、填充后的长度、token 用量和 keyed MAC。MAC 只让 Host 看出同一身份（例如同一 taskId）的两次提交是否相同（§9.1）。
+- Host 下发的前端代码。浏览器客户端的代码来自 Host。恶意前端可以在输入时取走明文，也可以跳过检查。这与 `docs/spec.md:86-92` 对 sealed provider secret 的说明一致。只有代码来源固定的客户端（原生应用、签名发布的 `ui-runtime` 宿主）能防这一项。
+- 主动 Host 可以扣留成员链的 `remove` 条目，让某个发送方继续用旧 epoch。§7.6 能检测这种情况，但不能阻止。
+- 撤销不能收回已导出的明文，也不能清除离线设备上的密钥。
+- Host 仍能下发任意任务，让设备读取本机数据后以明文回传。加密保护内容的存储与转发，不缩小执行权限。
+
+## 6. 数据类别与 wire 字段（任务 2）
+
+### 6.1 类别
+
+| 类别 | 被加密的 wire 字段 | 今天落在 |
+| --- | --- | --- |
+| C1 `task-input` 任务输入 | `task.offer*` 的 `instruction`（字符串，或 `instruction.blobRef` 指向的 blob 字节），包括其中的 ContextPack（K8 用 `ContextPack:` 分节，`examples/bot-collaboration/src/delegation.ts:36-38`）；`agent.input.preparation` 的 `context`；`task.steer` 的 `text` | `task-offer:` 与 `agent-input-preparation-request:` receipt；`outbox.body`；R2 |
+| C2 `agent-message` Agent 消息 | `agent.message.publish` 的 `body`；`agent.egress.reliable` 的 `payload` | `agent_message_admission`；`agent_egress_event` |
+| C3 `task-output` 结果与过程 | `task.complete` 的 `summary`、`finalMessage`、`document` 和 artifact blob；`task.artifact` 的 `inline` 和 blob；`task.progress` 的 `events`；`task.await_approval` 的 `summary`；`task.fail`、`task.decline`、`task.cancelled` 的自由文本原因；truth `task.terminal` 正文 | `task:<id>:terminal` receipt；`activity_tail`；`approval_timeline_tail`；`attested_record`；`task.terminal_cause`；R2 |
+| C4 `memory-projection` 记忆投影 | 记忆投影的 `snapshot.redactedBytes`；truth `memory` 正文 | `agent_memory_projection_head`；`attested_record` |
+
+v1 保持明文的 Host 内容：`agent.home.projection` 的 persona 值、`agent.content.read` 的路径、skill pack、board 标题、`cancel_reason` 和记忆 intent 通知。这些内容由产品写出，对 Host 加密没有作用。
+
+`agent.message.draft` 不属于 C2。加密任务在 v1 不允许草稿（§10.4）。
+
+### 6.2 开启粒度与作者规则
+
+- 作者规则：一个类别要对 Host 加密，它的作者必须是成员端点。研究任务的输入由浏览器写出，C1 可以加密。产品后端用可读 history 组装的 ContextPack 由 Host 写出，加密后只得到存储层保护，得不到端到端保护。
+- 读者规则：产品后端要读的内容不能加密。Bot 对话的回复要写进产品的对话存储，所以 Bot 对话的 C2 保持明文。
+- 策略按 task 冻结。offer 带一个明文字段 `sealing`：`{ scopeId, epoch, categories }`。task 创建后它不再变化。这个 task 的每个 envelope 都按它处理。
+- 降级保护：C1 密文的 AAD 包含 `categories`（§8.2）。Host 不能保留用户的 C1 密文，同时把 C3 改成明文。offer 的策略与 AAD 不一致时，设备以 `sealing_policy_mismatch` 做非重试 decline。
+- 每个 scope 有一条成员签名的 `scope-policy`（§7.4）。设备拒绝策略低于它的 task。
+- `cloud-do` 托管执行器必须读明文。Host 不能把带 `sealing` 的 task 交给它。
+- AiphaBee 的建议配置：研究 scope 开启 C1 和 C3；研究任务发 Agent 消息时再开 C2；Bot 对话和 Bot 记忆保持明文。由 owner 确认（§14 D1、D3）。
+
+## 7. 密钥层级与托管（任务 3）
+
+### 7.1 层级
+
+| 层级 | 密钥 | 算法 | 生成方 | 保存位置 |
+| --- | --- | --- | --- | --- |
+| tenant | 成员链：成员公钥和撤销记录的签名日志。没有 tenant 级对称密钥 | ECDSA P-256 签名；SHA-256 链接 | 成员 | Host 保存，成员各自验证 |
+| scope | scope key `SK(scope, e)`：32 字节随机数，按 epoch `e` 轮换 | 用 HKDF-SHA-256 派生内容密钥和 MAC 密钥 | 一个成员 | 成员本地缓存。Host 只存包装后的 key package |
+| 设备 | Ed25519 设备身份（已有）；成员签名密钥；成员 KEM 密钥 | Ed25519；ECDSA P-256；P-256 ECDH | 设备 | OS credential store。KEM 密钥和 provider sealing key 分开存 |
+| 客户端 | 成员签名密钥；成员 KEM 密钥 | ECDSA P-256；P-256 ECDH | 客户端 | 浏览器 IndexedDB 里不可导出的 `CryptoKey`，或平台密钥库 |
+| 单条内容 | 内容密钥 | HKDF(SK, salt)，再用 AES-256-GCM | 发送方 | 不保存 |
+
+不设 tenant 级对称密钥。原因：那样任何成员都能读全部 scope；撤销一个成员就要为全部 scope 换钥。scope key 把影响限制在一个 scope 内。
+
+### 7.2 信任锚：配对验证秘密
+
+配对码由 Host 签发，Host 知道它。device proof 在 Host 上验证，挡不住 Host 在 enrollment 时换钥。所以信任锚必须是 Host 不知道的值：
+
+1. 客户端显示配对码时，同时生成 128 位随机数 `pv`。显示内容为 `<配对码>.<pv 的 base32>`，或一个二维码。`pv` 不发给 Host。
+2. 用户把整串内容交给设备。daemon 只把配对码发给 `/byok/pair`，自己保留 `pv`。
+3. 设备登记自己的成员公钥包，并经 Host 转交 `HMAC(pv, 设备成员包 || tenantId || deviceId)`。
+4. 客户端验证这个 MAC，签署成员链条目 `add(设备)`，再经 Host 转交 `HMAC(pv, 客户端成员包 || 链头)`。
+5. 设备验证 MAC，固定这个客户端的签名公钥。双方删除 `pv`。
+
+Host 没有 `pv`，所以不能替换任何一方的公钥。128 位秘密不能离线穷举。缺点是字符串长，需要二维码或复制粘贴。备选方案是双方各显示 6 位短码，由用户比对（§14 D2）。
+
+之后加入的客户端由已有成员批准。用户在已有客户端上比对新客户端显示的指纹，已有成员签署 `add(客户端)`。设备也可以用本机命令批准新客户端。
+
+设备成员包同时用 device proof 登记（新 operation，例如 `e2ee-member-key.register`）。Host 用 `authenticateDeviceProof` 把成员包绑定到设备行。#654 需求 1 的「公钥由 device proof 绑定」由这一层满足。「客户端一侧也要有签名」由成员链签名满足。
+
+### 7.3 成员链
+
+- 条目：`{ v: 1, tenantId, seq, prev, op, subject, signer, sig }`。`op` 取 `add`、`remove`、`rotate`、`scope-policy` 或 `shred`。
+- 签名输入是前缀 `byok-member-chain-v1\n` 加 core 的 canonical JSON。条目哈希是签名输入的 SHA-256。
+- Host 按 `(tenantId, seq)` 先写者胜保存条目。同一 seq 的不同条目被拒绝。
+- 成员从自己固定的锚点开始验证整条链。签名错误、`prev` 断开或签名者已被移除的条目无效。
+- 加密内容的 AAD 带发送方看到的链头（§8.2）。接收方知道更新的链头时，把这份内容标为「发送方视图过期」。
+
+### 7.4 scope key 与 key package
+
+- scope 由 Host 命名，例如对话 id、Bot id 或研究工作区。SDK 不解释它。
+- 新建 scope：一个成员生成 `SK(scope, 1)`，签署 `scope-policy` 条目（scopeId、类别、成员列表），再为每个成员生成一个 key package。
+- key package：`{ v: 1, tenantId, scopeId, epoch, keyId, recipient, sender, enc, ciphertext, sig }`。用 core 现有的 HPKE 套件封装到接收方的 KEM 公钥。info 为 `byok-sdk.scope-key.v1`。AAD 为其余字段的 canonical JSON。HPKE base mode 不认证发送方，所以再加发送方签名。
+- `keyId` 是 `HMAC(SK, "byok-scope-key-id-v1")` 的截断值。它承诺了密钥，但 Host 不能由它推出密钥。
+- 设备按 notice-and-fetch 取 key package。mailbox 只放 `{ scopeId, epoch }`，正文从设备认证的路由取。原因与 [protocol §2.3](../protocol.md) 相同：mailbox 行和 journal 行会长期保留。
+- 设备只在内存里缓存解开的 scope key。重启后重新取 key package，用 KEM 私钥解开。
+- 客户端经 Host BFF 读取成员链和 key package。Host BFF 调用 SDK 的 control-plane 接口。
+
+### 7.5 轮换
+
+- scope epoch 在以下情况前进：成员被移除；scope 成员减少；达到 owner 定的周期或条数上限；怀疑泄露。
+- 由下一个发送方轮换。成员在封装前检查链。当前 epoch 包含已移除成员时，它先建 `e+1`，只为剩余成员生成 key package，然后封装。没有成员在线时，没有新内容产生。
+- 成员 KEM 密钥轮换：成员登记新公钥（`rotate` 条目），把自己持有的 scope key 重新包装到新公钥，再删除旧私钥。旧 key package 随之打不开。
+- Ed25519 设备身份不轮换（`plane.ts:32` 固定 epoch 0）。重新配对得到新 deviceId，在链上是新成员。旧成员要显式 `remove`。
+
+### 7.6 撤销设备与客户端
+
+撤销设备的顺序：
+
+1. 产品调用 `revokeDevice`。设备行被删除，之后的认证请求返回 401（[protocol §6.3](../protocol.md)）。
+2. 一个成员签署 `remove(设备)`，通常是用户的客户端。
+3. 该设备所在的每个 scope，在下一次封装前轮换到新 epoch。
+4. Host 删除该设备的 key package。这一步只做清理。安全依靠第 3 步的轮换。
+
+效果：
+
+- 被撤销的设备读不到新 epoch 的内容。
+- 它仍能读已有的明文和旧 epoch 的密文。它离线时，没有办法清除它的密钥。
+- 主动 Host 可以扣留 `remove` 条目，让一个发送方继续用旧 epoch，再把密文交给被撤销的设备。签署 `remove` 的成员能从后续内容 AAD 里的链头和 epoch 看出这种情况，并提示用户。
+
+撤销客户端走同一流程。
+
+带 `machineId` 的重新配对会让 Host 删除旧设备行（[protocol §6.1](../protocol.md)）。Host 不能代签 `remove`，所以产品要提示一个成员补签。
+
+### 7.7 Workers 与只有 WebCrypto 的限制
+
+- Host 侧代码不持有密钥。它只保存密文、比较元数据与 MAC、对密文做 SHA-256。Ed25519 device proof 验证已经走 WebCrypto（`web-crypto.ts:87`）。
+- 端点加密代码放在 `@byok-sdk/core`。core 禁止 `node:` 导入（`packages/core/src/__tests__/constraints.test.ts`）。浏览器、Workers、Node 和 Bun 因此共用一份字节规则。
+- 只用 WebCrypto 普遍支持的原语：P-256 ECDH、P-256 ECDSA、HKDF-SHA-256、HMAC-SHA-256、AES-GCM、SHA-256 和 `getRandomValues`。客户端不用 Ed25519 和 X25519。spec 写明浏览器上 Ed25519 的端到端矩阵尚未覆盖（`docs/spec.md:110`）。
+- 设备另有 ECDSA 成员签名密钥。客户端因此不需要验证设备的 Ed25519 签名。Ed25519 只在 Host 上用于 device proof。
+- 浏览器私钥是 IndexedDB 里不可导出的 `CryptoKey`。设备把私钥 JWK 存进 OS credential store，使用时以不可导出方式导入，与 `device-sealing-key.ts` 相同。
+- Workers 上不做解密，也不做 HPKE。CPU 开销只有哈希。
+
+## 8. Wire 格式、版本与路由（任务 4）
+
+### 8.1 封装对象
+
+被加密的字段从 payload 里移走，换成一个 `sealed` 成员：
+
+```json
+{
+  "v": 1,
+  "suite": "byok-sealed-v1.hkdf-sha256.aes-256-gcm",
+  "category": "task-input",
+  "scope": { "id": "<Host 给的 scopeId>", "epoch": 3, "keyId": "<22 字符>" },
+  "chainHead": { "seq": 17, "hash": "sha256:<64 hex>" },
+  "sender": "<memberId>",
+  "salt": "<32 字节 base64url>",
+  "nonce": "<12 字节 base64url>",
+  "paddedLength": 4096,
+  "contentMac": "hmac-sha256:<64 hex>",
+  "ciphertext": "<base64url>"
+}
+```
+
+- 明文是移走字段组成的对象的 canonical JSON，例如 `{ "instruction": "..." }`。
+- 内容密钥为 `HKDF-SHA-256(SK, salt, "byok-sdk.sealed.v1.enc")`。每条内容用新 salt，所以每个内容密钥只用一次。
+- blob 里的内容先按同一规则封装字节，再上传。`BlobRef` 放进加密的内层对象。
+
+### 8.2 AAD
+
+AAD 是下列字段的 canonical JSON：`v`、`suite`、`category`、`tenantId`、`scopeId`、`epoch`、`keyId`、`chainHead`、`sender`、消息族（例如 `task.offer_for_agent`）、方向、身份（`taskId`，或 `requestId`、`messageId`、`mutationId`）、目标 `deviceId`、`agentRef`、task 的 `sealing.categories`、`paddedLength` 和 `contentMac`。
+
+AAD 不含 envelope 的 `id`、`seq` 和 `ts`。dead-letter 重放会用新 `seq` 重新编码 envelope（`cleanup.ts:533-563`）。AAD 绑定了身份字段，所以 Host 不能把密文搬到另一个 task、设备、Agent 或 scope。
+
+### 8.3 字段划分与接收端校验
+
+- `packages/protocol` 新增一张划分表，列出每个消息类型在每个类别下移走哪些字段。它和 `WIRE_ADDITIONS` 一样是唯一权威。
+- Host 只校验 `sealed` 的外形：字段、编码、长度，以及 `paddedLength` 与密文长度是否一致。
+- 接收端解密后，把明文字段并回 payload（键集合必须不相交），再用现有 schema 校验。#654 需求 3 的「内容校验挪到接收端」由此完成。
+- 接收端失败时一律拒绝，不回退明文：
+  - 缺 key package：`sealed_key_unavailable`。
+  - AEAD 失败：`sealed_open_failed`。
+  - MAC 不符：`sealed_content_mac_mismatch`。
+  - 策略不符：`sealing_policy_mismatch`。
+  - 未知 `v` 或 `suite`：在 schema 层拒绝。
+- 设备侧用非重试的 decline 或 fail 上报这些错误。
+
+### 8.4 版本与能力门
+
+按 freeze rule 的路径 2（gated addition），两个方向都要声明：
+
+- server → daemon：offer、steer、输入准备、key package 通知，以及回显 `contentMac` 的 Agent 消息 disposition。门是设备能力 `sealed-payload-v1`。Host 在建 task、写 receipt 和写 mailbox 之前检查它。
+- daemon → server：终态、进度、artifact、审批、Agent 消息、egress 和记忆投影。门是 Host 能力 `sealed-payload-v1`，`advertisedBy: 'server'`（`packages/protocol/src/wire-additions.ts:47` 已支持）。这些 payload 会丢弃未知字段。旧 Host 会悄悄丢掉 `sealed`，所以设备必须先看到 Host 的声明。
+
+设备拿到带 `sealing` 的 task 而 Host 没有声明能力时，设备在 claim 前 decline，不发送明文。
+
+`PROTOCOL_VERSION` 保持 3。升到 v4 整体切换是 §14 D7 的备选。
+
+`v` 和 `suite` 是字面量，没有协商。新套件是新常量和新能力，不增加解析分支。provider secret 用的是同一规则（`sealed-provider-secret.ts:41-42`）。
+
+### 8.5 Host 仍能读取并据以路由的字段
+
+- 身份与传输：tenant（来自认证）、`deviceId`、`taskId`、envelope 的 `type`、`id`、`seq`、`ts`，以及 `messageId`、`requestId`、`mutationId`。
+- 执行选择：`agentRef`、`sessionRef`、`runtime`、`harnessId`、`dispatchSelection`、`requiredToolsets`、`limits`。
+- 策略：`egressPolicy`、`messageEgress`、`terminalProjection`、`sealing`。
+- 其他：`approvalId`、`decision`、`usage`、封闭的原因代码、`sealed` 的外层字段和时间。
+
+Host 用这些字段运行现有的 claim、所有权、能力、去重、取消和配额逻辑。`inbound.ts` 的分支结构不变。
+
+这份清单比 #654 需求 2 列出的范围多。多出的执行选择和策略字段由 Host 自己写出，Host 本来就知道。`sessionRef` 是设备生成的不透明 id。`usage` 是设备上报的 token 计数，属于遥测，会透露工作量的大小（§5.4）。
+
+### 8.6 长度上限与填充
+
+- 发送方先按今天的上限检查明文。
+- 明文填充到桶长后再加密。建议 16 KiB 以内按 256 字节对齐，更大时取 2 的幂。
+- Host 的上限改为对密文计算：`base64url(paddedLength + 16)` 加外层字段的上限。
+- Agent 消息的 `byteCount` 不再明文出现。Host 用 `paddedLength` 检查 `maxBytes` 的桶上限，精确检查由接收方做。
+- 加密后的 1 MiB result document 约 1.4 MiB，只能单独占一个 `POST /byok/messages` 批次（上限 2 MiB）。更大的内容走 blob。
+
+## 9. 密文上的幂等（任务 5）
+
+### 9.1 keyed content MAC
+
+```text
+K_mac(scope, e) = HKDF-SHA-256(SK(scope, e), salt = empty, info = "byok-sdk.sealed.v1.mac")
+contentMac      = "hmac-sha256:" + hex(HMAC-SHA-256(K_mac,
+                    "byok-content-mac-v1\n" || category || "\n" || family || "\n"
+                    || identity || "\n" || canonicalJson(plaintext)))
+```
+
+`identity` 是这次写入的身份：offer 用 taskId，Agent 消息用 messageId，输入准备用 requestId，记忆投影用 mutationId。
+
+MAC 只依赖 scope、epoch、类别、消息族、身份和明文，与 salt 和 nonce 无关。同一内容重新加密后 MAC 不变。身份进入 MAC 后，两个不同 task 的相同内容得到不同的 MAC。Host 只能比较同一身份的两次提交。
+
+### 9.2 比较规则
+
+- Host 比较「比较投影」：payload 的明文字段，加上 `sealed` 的 `v`、`suite`、`category`、`scope`、`paddedLength` 和 `contentMac`。salt、nonce、密文和 `sender` 不参与比较。
+- 投影相同时按重复处理，保留第一份密文。Host 用 receipt 里的第一份密文物化 mailbox 行，所以 `readTaskOffer` 和设备收到同一份字节。
+- 投影不同时，同一 taskId 返回 `coordination_input_invalid`，错误代码不变。其他位置沿用各自现有的冲突代码。
+- 重复投递的去重只看元数据，不受影响：mailbox 的 `message_id` 由 tenant、taskId、deviceId 和 agentRef 推出（`packages/cloud/src/offer-identity.ts:13-16`）；inbound 去重按 envelope id；admission 按 `(tenant, device, message_id)` 唯一。
+- 只封装一次。发送方在第一次发送前，把封装好的字节写进自己的持久 outbox，重试时发送同一份字节。daemon 已经先持久化终态再发送（双车道方案 §3 第 6 步）。浏览器要把待提交的密文存进 IndexedDB。
+- 跨 epoch 的重试得到不同的 MAC，被判为冲突。这是 fail closed。重试必须用第一次的 epoch 和字节。
+- 接收端解密后重新计算 MAC，与 AAD 绑定的值比较。不符时非重试拒绝。所以对每个接收方，「MAC 相同」就意味着「内容相同」。有缺陷的成员也不能给一份密文配上另一份内容的 MAC。
+
+需要改成比较投影的位置：offer（`cloud.ts:1187-1201` 与 `:1233`）；admission（`inbound.ts:262-301` 与 `task-attempts` 的 SQL 等值条件）；disposition（`inbound.ts:337-357`）；egress（`inbound.ts:368-382`）；activity 与审批的重复批次；输入准备的 `canonicalRequestBody`。in-memory 与 SQLite store 有同样的比较，要一起修改。
+
+### 9.3 明文哈希字段
+
+加密类别里，如果下列字段继续保存明文 SHA-256，Host 就能用猜测确认短内容，例如「是」「否」或一个股票代码。
+
+| 字段 | 今天 | 加密类别中的规则 |
+| --- | --- | --- |
+| `outbox.body_hash` | 明文 envelope 的 SHA-256 | 代码不变。envelope 里已是密文 |
+| Agent 消息与 egress 的 `contentHash` | 设备算的明文 SHA-256 | 不再明文出现。disposition 回显 `contentMac` |
+| `redactedHash` | 明文快照的 SHA-256，服务端复算 | 改为密文的 SHA-256。服务端照常复算 |
+| `BlobRef.contentHash`、R2 key、`object_manifest.hash` | 明文 blob 的 SHA-256 | 改为密文字节的 SHA-256。租户内去重随之失效 |
+| truth `content_hash` | 明文正文的 SHA-256，服务端复算 | 改为密文的 SHA-256 |
+| `task.terminal_cause` | 复制自由文本 `reason` | 只存封闭代码。自由文本进密文 |
+| 审批 `summary` | 明文 | 进密文。`approvalId` 和 `decision` 保留明文 |
+
+## 10. `agentMessage.consume`（任务 6）
+
+### 10.1 现状
+
+`consume` 在写入前调用，决定 `accepted`、`held` 或 `refused`（`cloud.ts:303-311`；`inbound.ts:212-302`）。它收到含 `body` 的完整 payload，以及 offer 时冻结的 Host 上下文 `{ destinationBinding, freshnessCursor? }`。投递至少一次，产品按消息身份和 payload 去重。
+
+### 10.2 加密后的输入
+
+- 开启 C2 的 task，`consume` 收到另一种输入。它没有 `body`，带 `sealed`、`contentMac`、`paddedLength`、`contentType`、`contract`、`messageId`、`cursor`、`agentRef`、`sessionRef` 和冻结上下文。类型上与明文输入分开，产品代码不能把密文当正文用。
+- 产品要显式声明能处理加密消息。没有声明时，`submitAgentExecution` 拒绝带 `messageEgress` 且开启 C2 的 offer。今天缺少 `consume` 时它已经这样拒绝（`cloud.ts:1940-1942`）。
+- 产品的去重键改为 `(tenant, device, task, agentRef, messageId, contentMac)`。
+
+### 10.3 产品后端仍能做的事
+
+- 用身份和冻结上下文授权：目标对话是否存在、是否已关闭、`freshnessCursor` 是否过期。
+- 检查 `contract` 和 `contentType`，并按 `paddedLength` 检查长度的桶上限。
+- 按条数和长度做配额与限流。
+- 把密文原样存进产品自己的存储，交给 scope 成员的客户端解密。
+- 通知客户端「有新消息」。通知不带内容。
+- 返回 `held` 或 `refused`，原因代码保持封闭。
+
+### 10.4 产品后端不能再做的事
+
+- 内容审核、凭据扫描、关键词路由、摘要、搜索和索引。
+- 带内容的推送预览和服务端渲染。
+- 跨 Bot 中继时读正文。要读正文的一方必须是同一 scope 的成员设备，否则这个 scope 保持明文。
+- 草稿流。`agent_message_draft` 在服务端按 UTF-8 偏移拼接，密文上做不到。v1 对加密任务拒绝 `agent.message.draft`。以后可以改成加密帧的追加日志（§14 D9）。
+
+AiphaBee 现在在 Worker 里扫描记忆快照中的凭据。开启 C4 后，这一步要移到设备上，在封装之前做。
+
+## 11. 删除：crypto-shredding 与 scoped row-delete（任务 7）
+
+### 11.1 identity receipt 不能直接删
+
+identity receipt 是防重放的 fence，同时保存了正文，而且永不过期。
+
+- `task-offer-delivered:` 存在后，同一 taskId 不能再次投递（`cloud.ts:1174-1181`）。
+- `task-offer:` 防止投递前换正文。
+- 终态 receipt 保证第一份事实不被覆写。
+
+删掉这些行，复用的 taskId 就能再执行一次。
+
+### 11.2 crypto-shredding（加密类别）
+
+- 一个成员签署 `shred(scopeId)` 链条目。各成员删除本地缓存的全部 epoch scope key。Host 删除这个 scope 的全部 key package。这个 scopeId 之后不能再建新 epoch。
+- 数据库行、R2 对象、副本、备份和日志里的密文都无法再解开。行本身不动。
+- fence 照常工作。比较投影只用元数据和 MAC，不需要密钥，Host 本来也没有密钥。同一 taskId 的新内容仍返回 `coordination_input_invalid`。
+- MAC 密钥一起销毁。留下的 MAC 不能再用来确认猜测。
+- 备份缺口：备份里可能还有 key package。只要某个成员的 KEM 私钥还在，就能打开它们。处理方法是 shred 之后每个成员轮换 KEM 密钥，并删除旧私钥（§7.5）。另一个选项是 key package 只在投递窗口内保留，代价是成员丢失本地密钥后无法恢复（§14 D5）。
+- 不覆盖：明文类别；已导出或截图的明文；元数据。
+
+### 11.3 scoped row-delete（脱敏删除）
+
+- 新增 control-plane 操作，例如 `redactTasks(tenant, { taskIds })` 和 `redactScope(tenant, { scopeId })`。
+- 操作把正文列换成无正文的 tombstone，保留 key、摘要、长度、时间、状态和 disposition。它删除只被这些行引用的 R2 对象，并写一条审计 receipt。
+- 摘要：加密行保留 `contentMac`。明文行保留正文的 SHA-256；Host 本来就能读明文行，所以 SHA-256 不增加泄露。同一 taskId 的新内容仍能与摘要比较，返回 `coordination_input_invalid`。
+- 覆盖范围：§2.2 表中存 task 正文的列，即 receipt、admission、egress、attested record、task 自由文本和 R2 对象。outbox 行属于 core mailbox。操作不直接改写它们，理由与 `revokeDevice` 不删 outbox 相同（`packages/cloud-dataplane/src/stores/devices.ts:71-99`）：`acked` 行按保留期删除；`expired` 行调用 `discardDeadLetter`；task 还有 `pending` 行时，操作返回可重试的拒绝，这些行最迟 7 天后变成 `expired`。记忆投影继续用 `eraseAgentMemoryProjection`。草稿和 activity 行等 TTL 到期删除。
+- 选择行：加密行带明文 `scopeId`，可以按 scope 选。明文行由 Host 提供 taskId 或 agentId。SDK 不保存对话与 task 的对应关系（ADR-038 决策 8）。
+- 运行环境：必须能在 `cloud-dataplane/runtime` 上运行。它按批次执行，可以续跑，每个请求管理自己的连接池。它不能像 tenant erasure 那样只支持 Node。
+- 先例：`AgentMemoryProjectionStore.erase` 已经删除正文并保留 epoch fence（`packages/cloud-dataplane/src/stores/agent-memory-projection.ts:237-238`）。新操作沿用这个模式。
+- 不覆盖：备份、副本和已经写出的日志。它们要等各自的保留期结束。
+
+### 11.4 对比
+
+| 方面 | crypto-shredding | scoped row-delete |
+| --- | --- | --- |
+| 适用类别 | 只适用加密类别 | 全部类别，包括明文 |
+| 备份与副本 | 立即不可读（要同时处理 key package，见 §11.2） | 等保留期结束 |
+| fence | 行不变，fence 不变 | 保留摘要，fence 不变 |
+| 存储空间 | 不释放 | 释放正文和对象 |
+| 依赖 | 至少一个成员在线签署；成员删除本地密钥 | 只需要 Host |
+| 证据 | Host 从未持有密钥；销毁有签名记录 | 审计 receipt。不能证明备份已删 |
+| 运行位置 | 成员端点；Host 只删 key package | Workers 和 Node |
+
+### 11.5 建议
+
+两条路都提供。加密类别先用 crypto-shredding 删除内容，再用 scoped row-delete 回收空间。明文类别（例如 Bot 对话）只能用 scoped row-delete。Workers 上的整 tenant erasure 另开 issue。
+
+明文类别也能用 Host 持有的 per-scope 静态加密密钥做 crypto-shredding。它需要 KMS，也挡不住 Host 本身，所以 v1 不建议（§14 D6）。
+
+## 12. 迁移、Topology L 与性能（任务 8）
+
+### 12.1 从明文迁移
+
+- 已有明文行不做事后加密。Host 若持有密钥来加密，就违反 §4 第 3 条；那些明文也已经暴露过。旧数据按 §11.3 删除。
+- 按 scope 切换。成员建立 scope key 和 `scope-policy`，之后提交的 task 带 `sealing`。之前的 task 保持明文直到结束。一个 task 不在运行中改变策略。
+- 上线顺序：
+  1. 数据库迁移只做加法：成员链、key package、`scopeId` 索引列。
+  2. Host 部署并声明 `sealed-payload-v1`。
+  3. daemon 升级并声明同名设备能力。
+  4. 产品为 scope 打开策略。
+- 设备没有声明能力时，Host 在提交时拒绝加密 offer，不降级。
+- AiphaBee 研究任务：relay 保留到托管路径有 Workers 和两台设备的验收证据为止（双车道方案 D3）。relay 的概念可以一一对应：浏览器临时密钥对应客户端 KEM 密钥；设备 relay 密钥对应设备 KEM 密钥；route id 对应 scopeId；frame 元数据对应 AAD。能否删除自研的配对、grant 和 relay，由 [issue 655](https://github.com/Ancienttwo/byok-sdk/issues/655) 决定。
+
+### 12.2 Topology L
+
+- L 里 Host 和 daemon 都在设备上。SDK 存储是本机 SQLite，没有要隐藏内容的云端。L 不需要 SDK 存储加密。
+- L 里远端客户端经产品 relay 访问设备时（AiphaBee 的现状），产品 relay 可以直接用同一套封装格式和成员链。
+- embedded server（`packages/server`）应接受同样的 `sealed` 字段和能力门。一个 Bot 在 L 和 H 之间切换时，加密契约不变。
+- 成员链和 scope key 属于成员，不属于 L 或 H 的 Host。切换车道（双车道方案 §4.1）不换钥，也不能关闭已开启的类别。
+
+### 12.3 性能
+
+| 项 | 成本 |
+| --- | --- |
+| 发送方封装一条内容 | 一次 HKDF、一次 HMAC、一次 AES-GCM。64 KiB 以内不到 1 ms |
+| 新 epoch | 每个成员一次 HPKE 封装，即一次 P-256 ECDH，约 1 ms |
+| 设备首次处理某个 epoch | 多一次取 key package 的往返。之后在内存命中 |
+| Host 与 Workers | 只对密文做 SHA-256。没有解密，没有 HPKE |
+| 体积 | base64url 增加约 33%；大内容的填充最多翻倍；外层字段约 400 字节 |
+| 存储 | 密文和今天的明文一样存两份（receipt 与 outbox）；租户内 blob 去重失效；新增 key package 行，数量为成员数 × scope 数 × epoch 数，每行约 400 字节 |
+| 配额 | mailbox 字节上限按密文计。同样数量的任务更早触顶 |
+| 产品体验 | 服务端不能生成预览、搜索或摘要。客户端负责解密和渲染 |
+
+## 13. 实施切片、验收与回退
+
+### 13.1 切片
+
+以下是建议的交付物。它们都还没有实现。
+
+- E1 字节规则：`@byok-sdk/core` 的封装对象、AAD、MAC、成员链条目、key package 和测试向量。同一组向量在 Chromium、WebKit、Gecko、Node 和 Bun 上运行。
+- E2 成员与密钥：daemon 的成员密钥托管和配对验证秘密；客户端参考库；成员链校验；key package 通知。
+- E3 wire 与存储：划分表、两个能力门、Host 的比较投影和长度上限。memory、SQLite 和 Postgres 三种 store 一起修改。
+- E4 读写接口：`consume` 的加密输入；读接口返回密文；对加密任务拒绝草稿；拒绝把加密任务交给 `cloud-do`。
+- E5 删除：crypto-shredding 流程；Workers 上的 scoped row-delete。
+- E6 conformance 与文档：canary 测试；在 `docs/security.md` 写托管 surface 的威胁模型（#654 需求 6）；同步 spec 和 protocol。
+
+每个切片单独合入。不带 `sealing` 的 task 行为不变。
+
+### 13.2 验收
+
+- canary：在 C1–C4 中各放一段 canary。用 `createByokCloud` 加 `cloud-dataplane`（Postgres 与 R2）跑通配对、任务下发、结果回传、Agent 消息和记忆投影。然后扫描每个表、每个列和每个对象，查找 canary 的 UTF-8、JSON 转义、base64、base64url 和 hex 形式。命中数必须为零。表清单以 `TENANT_ERASURE_TABLES` 及其 schema drift 检查为准。
+- 同一组 canary 在 `cloud-dataplane/runtime` 的 Workers 加 Hyperdrive 组合上再跑一次。
+- fail closed：缺 key package、epoch 错误、MAC 不符、未知版本、旧 Host、旧设备、Host 把加密 offer 改成明文、Host 把密文搬到另一个 task。每一项都必须被拒绝，且不留明文。
+- 幂等：同一 taskId、同一内容重新加密后重试，结果为重复；同一 taskId、不同内容，返回 `coordination_input_invalid`；重复投递被去重。
+- 撤销：移除成员后，新 epoch 的内容对它不可读。Host 扣留 `remove` 时，签署方能检测到。
+- 未开启的类别：现有测试套件全部通过，行为不变。
+
+本 PR 没有运行这些测试。
+
+### 13.3 与 issue 654 的对应
+
+| #654 条目 | 本文位置 |
+| --- | --- |
+| 需求 1 密钥 | §7 |
+| 需求 2 明文只留元数据 | §6、§8.5、§9.3 |
+| 需求 3 云端逻辑只看元数据 | §8.3、§9、§10 |
+| 需求 4 fail closed | §8.3、§8.4 |
+| 需求 5 conformance | §13.2 |
+| 需求 6 文档 | §5 先给出威胁模型。E6 在实现时写进 `docs/security.md` |
+| 验收 | §13.2 |
+
+### 13.4 回退
+
+- 本 PR 只增加一份文档。删除文档即可回退，不涉及数据。
+- 实现切片都在能力门之后。不声明 `sealed-payload-v1` 的部署行为不变。
+- Host 没有密钥，不能把已加密数据转回明文。关闭加密只影响新 task：成员更新 `scope-policy` 后，新 task 才回到明文。已加密的数据仍只对成员可读。
+
+## 14. 待 owner 决定的事项（任务 9）
+
+| 编号 | 决定 | 选项 | 建议 |
+| --- | --- | --- | --- |
+| D1 | 开启粒度（#654 交给维护者） | 按 task 冻结，由 scope 策略决定；按 envelope 类型；按 Agent | 按 task 冻结，由 scope 策略决定。类别为 C1–C4 |
+| D2 | 信任锚 | 配对验证秘密（128 位，随配对码携带）；6 位短码比对（需要先承诺、再揭示的交换）；只信 Host 目录 | 配对验证秘密。只信 Host 目录不满足 #654 需求 1 |
+| D3 | AiphaBee 首批类别与作者规则 | 研究 scope 开 C1、C3，按需开 C2；Bot 对话与记忆保持明文 | 采用。同时确认 Host 组装的 ContextPack 不属于端到端加密 |
+| D4 | 成员链、key package 和设备路由由谁实现 | SDK 提供存储与设备路由；Host 自己实现（provider provisioning 的先例） | SDK 实现。canary 和 conformance 才能覆盖它 |
+| D5 | key package 保留方式 | 长期保留，shred 后成员轮换 KEM 密钥；只在投递窗口内保留 | 长期保留。它支持多设备和重装后恢复 |
+| D6 | 删除 | crypto-shredding 加 Workers 上的 scoped row-delete；明文类别也用 Host 持有的密钥做 shredding | 前者。Workers 上的整 tenant erasure 另开 issue |
+| D7 | wire 版本 | v3 内的双向 gated addition；升到 v4 | v3 内的 gated addition |
+| D8 | 长度填充 | 256 字节对齐加 2 的幂桶；固定桶；不填充 | 256 字节对齐加 2 的幂桶 |
+| D9 | 加密任务的草稿 | v1 拒绝；加密帧追加日志 | v1 拒绝 |
+| D10 | 多用户 tenant 与发送方认证 | v1 只支持单用户 scope；每条内容加发送方签名 | v1 只支持单用户 scope |
+| D11 | `consume` 的形状 | 独立的加密输入加显式声明；同一函数加判别字段 | 独立输入加显式声明 |
+| D12 | 设备 KEM 密钥 | 新的 credential 条目；复用 provider sealing key | 新条目。两者的用途和轮换周期不同 |
+| D13 | 全部成员丢失密钥 | 接受数据丢失；增加恢复密钥 | 先接受数据丢失。恢复密钥另行设计 |
+| D14 | 发版位置 | 0.28.2 之后的功能版本；与 #655 的先后 | 0.28.2 之后单独一班。先定 #655 的身份对应，再删 AiphaBee 的自研 relay |
