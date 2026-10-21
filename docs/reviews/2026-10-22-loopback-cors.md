@@ -1,6 +1,6 @@
 # Issue 613: loopback browser origins and CORS
 
-Baseline: `fb34cb7915fbc6ac2d2d3ec5a9d4a0d1f8f07a9e`.
+Baseline: `fb34cb794699f9cbded2bf74a07879d9f32caa18`.
 Scope: the remaining optional slice of #613, from the AiphaBee follow-up
 comment. The native slice shipped in #638; see
 [the native listener review](2026-10-21-loopback-listener.md).
