@@ -9,6 +9,7 @@ import {
   AgentMemoryProjectionMutationSchema,
   type AgentMemoryProjectionMutation,
 } from '@byok-sdk/protocol';
+import { AGENT_MEMORY_MAX_SNAPSHOT_BYTES as PROTOCOL_MEMORY_MAX_SNAPSHOT_BYTES, AGENT_MEMORY_MAX_SNAPSHOT_FILES as PROTOCOL_MEMORY_MAX_SNAPSHOT_FILES } from '@byok-sdk/protocol/constants';
 import { AGENT_HOME_INTERNAL_DIRECTORY, type AgentHomeLease, type AgentRef } from '../agent-home';
 import type { AgentMemoryFilesystem, AgentMemoryFilesystemFileState } from './agent-memory-filesystem';
 
@@ -16,8 +17,8 @@ export const AGENT_MEMORY_AUDIT_FILENAME = 'agent-memory-audit-v1.jsonl';
 /** v2 is one atomically replaced state file, never an append-only log. */
 export const AGENT_MEMORY_OUTBOX_FILENAME = 'agent-memory-redacted-outbox-v2.json';
 export const AGENT_MEMORY_MAX_FILE_BYTES = 256 * 1024;
-export const AGENT_MEMORY_MAX_SNAPSHOT_BYTES = 1024 * 1024;
-export const AGENT_MEMORY_MAX_SNAPSHOT_FILES = 128;
+export const AGENT_MEMORY_MAX_SNAPSHOT_BYTES = PROTOCOL_MEMORY_MAX_SNAPSHOT_BYTES;
+export const AGENT_MEMORY_MAX_SNAPSHOT_FILES = PROTOCOL_MEMORY_MAX_SNAPSHOT_FILES;
 export const AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES = 512;
 /** One atomically replaced audit/outbox state must fit the cross-platform helper contract. */
 export const AGENT_MEMORY_MAX_LOCAL_LOG_BYTES = AGENT_MEMORY_MAX_SNAPSHOT_BYTES;
@@ -38,6 +39,10 @@ export class AgentMemoryError extends Error {
  */
 export class AgentMemoryValidationError extends AgentMemoryError {
   constructor(message: string) { super(message); this.name = 'AgentMemoryValidationError'; }
+}
+/** A complete snapshot cannot fit the bounded export contract. No partial result is returned. */
+export class AgentMemorySnapshotLimitError extends AgentMemoryValidationError {
+  constructor(message: string) { super(message); this.name = 'AgentMemorySnapshotLimitError'; }
 }
 /**
  * Filesystem I/O failure: an open, read, write, fsync, rename or unlink did not
@@ -713,7 +718,7 @@ export class AgentMemoryService {
   }
 }
 
-async function memoryNotePaths(context: AgentMemoryTaskContext): Promise<readonly string[]> {
+async function memoryNotePaths(context: AgentMemoryHomeBinding): Promise<readonly string[]> {
   if (context.filesystem !== undefined) {
     const paths = await context.filesystem.walk('notes', AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES);
     const candidates: string[] = [];
@@ -728,7 +733,7 @@ async function memoryNotePaths(context: AgentMemoryTaskContext): Promise<readonl
     const entries = await fs.readdir(descriptorPath(directory), { withFileTypes: true });
     for (const entry of entries) {
       entriesSeen += 1;
-      if (entriesSeen > AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES) throw new AgentMemoryError('memory snapshot exceeds bounded directory entries');
+      if (entriesSeen > AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES) throw new AgentMemorySnapshotLimitError('memory snapshot exceeds bounded directory entries');
       const candidate = `${relativeDirectory}/${entry.name}`;
       if (entry.isSymbolicLink()) throw new AgentMemoryError('memory notes contains a symlink');
       if (entry.isDirectory()) {
@@ -748,21 +753,33 @@ async function memoryNotePaths(context: AgentMemoryTaskContext): Promise<readonl
   return Object.freeze(candidates);
 }
 
-/** Bounded stable snapshot, called after Session.close() while the Agent lease still exists. */
-export async function captureAgentMemorySnapshot(input: AgentMemoryTaskContext): Promise<AgentMemorySnapshot> {
-  const context = taskContext(input); const candidates = ['MEMORY.md', ...await memoryNotePaths(context)];
-  const paths = [...new Set(candidates)].sort((a, b) => a.localeCompare(b));
-  if (paths.length > AGENT_MEMORY_MAX_SNAPSHOT_FILES) throw new AgentMemoryError('memory snapshot exceeds bounded file count');
+/** Internal bounded capture; the caller must hold the exclusive home lease throughout. */
+export async function captureAgentMemoryHomeSnapshot(input: AgentMemoryHomeBinding, signal?: AbortSignal): Promise<AgentMemorySnapshot> {
+  signal?.throwIfAborted();
+  const context = agentMemoryHomeBinding(input);
+  const candidates = ['MEMORY.md', ...await memoryNotePaths(context)];
+  // Validated paths are ASCII. Code-unit order is byte order, independent of locale.
+  const paths = [...new Set(candidates)].sort();
+  if (paths.length > AGENT_MEMORY_MAX_SNAPSHOT_FILES) throw new AgentMemorySnapshotLimitError('memory snapshot exceeds bounded file count');
   const files: AgentMemoryFile[] = []; let totalBytes = 0;
   for (const relativePath of paths) {
+    signal?.throwIfAborted();
     const current = await readFile(context, relativePath);
     if (!current.exists) { if (relativePath === 'MEMORY.md') throw new AgentMemoryError('MEMORY.md disappeared before snapshot'); continue; }
-    totalBytes += current.byteCount; if (totalBytes > AGENT_MEMORY_MAX_SNAPSHOT_BYTES) throw new AgentMemoryError('memory snapshot exceeds bounded total size');
+    totalBytes += current.byteCount;
+    if (totalBytes > AGENT_MEMORY_MAX_SNAPSHOT_BYTES) throw new AgentMemorySnapshotLimitError('memory snapshot exceeds bounded total size');
     files.push(Object.freeze({ path: relativePath, revision: current.revision, byteCount: current.byteCount, content: current.content }));
   }
-  const snapshot = Object.freeze({ files: Object.freeze(files), totalBytes });
+  signal?.throwIfAborted();
+  return Object.freeze({ files: Object.freeze(files), totalBytes });
+}
+
+/** Bounded stable snapshot, called after Session.close() while the Agent lease still exists. */
+export async function captureAgentMemorySnapshot(input: AgentMemoryTaskContext): Promise<AgentMemorySnapshot> {
+  const context = taskContext(input);
+  const snapshot = await captureAgentMemoryHomeSnapshot(context);
   await exclusiveAgentMemoryHome(context.canonicalHome, () => audit(context, 'snapshot', {
-    files: files.map((file) => ({ path: file.path, revision: file.revision, byteCount: file.byteCount })),
+    files: snapshot.files.map((file) => ({ path: file.path, revision: file.revision, byteCount: file.byteCount })),
   }));
   return snapshot;
 }
