@@ -6,6 +6,7 @@ import { BotCollaboration, type BotOptions } from './host';
 import { contextPack } from './schema';
 import { stateOf } from './model';
 import { createRoutine } from './routines';
+import { waitForTaskCleanup } from '../../basic/goal-btw.test-support';
 
 let fixture: TestHost;
 let bot: BotCollaboration;
@@ -28,8 +29,10 @@ async function running(id: string) {
   return fixture.adapter.sessions.get(bot.core.intent(id)!.taskId)!;
 }
 async function finish(id: string, document: unknown = {}) {
-  (await running(id)).finish(document);
+  const session = await running(id);
+  session.finish(document);
   await vi.waitFor(async () => { await bot.drain(); expect(bot.snapshot().turns[id]?.status).toBe('succeeded'); }, { timeout: 5000 });
+  await waitForTaskCleanup(fixture.daemon, session);
 }
 
 it('runs submit_result -> self delegation -> confirmation -> connector -> action_result through the real SDK and daemon', async () => {
@@ -391,4 +394,33 @@ it('recovers one self continuation from a durable pre-submit failure with the sa
   expect(fixture.adapter.starts.filter(start => start.manifest.taskId === intent.taskId)).toHaveLength(1);
   expect(submit.mock.calls.filter(([input]) => input.taskId === intent.taskId)).toHaveLength(1);
   expect(Object.values(bot.snapshot().turns).filter(turn => turn.source === 'continuation')).toHaveLength(1);
+});
+
+it('finishes daemon cleanup before observing the next answer task', async () => {
+  const now = Date.now();
+  await setup({ now: () => now });
+  const root = await bot.input('held-cleanup', 'Ask me');
+  const session = await running(root);
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const close = session.close.bind(session);
+  vi.spyOn(session, 'close').mockImplementation(async () => { await close(); await held; });
+  let finished = false;
+  const finishing = finish(root, { ask_user: { question: 'Choose', answerKind: 'single_choice',
+    options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] } }).then(() => { finished = true; });
+  try {
+    await vi.waitFor(() => {
+      expect(session.closed).toBe(true);
+      expect(bot.snapshot().turns[root]?.status).toBe('succeeded');
+    }, { timeout: 5000 });
+    expect(fixture.daemon.status().activeTaskCount).toBe(1);
+    expect(finished).toBe(false);
+    release();
+    await finishing;
+    expect(fixture.daemon.status().activeTaskCount).toBe(0);
+    const question = Object.values(bot.snapshot().questions)[0]!;
+    await bot.answer(question.id, 'a');
+    const answer = Object.values(bot.snapshot().turns).find(t => t.source === 'answer')!;
+    await running(answer.id);
+  } finally { release(); await finishing; }
 });
