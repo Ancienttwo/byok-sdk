@@ -4,9 +4,13 @@
 
 - **Feature (examples)** — K4 `HostLedger.compact` also removes acknowledged
   terminal memory intents and their approval keys. Inside the retention window,
-  approval and device replays get the original row. Routine occurrence
-  identities now expire with their slot, and the derived `occurrence:` key
-  shape is reserved for routine occurrences (#602).
+  approval and device replays get the original row. `MemoryOptions.now` must
+  return integer milliseconds from the same clock as the compaction `now`.
+  Routine occurrence identities now expire with their slot, and the derived
+  `occurrence:` key shape is reserved for routine occurrences (#602).
+- **Fix (examples)** — a K4 routine wake that arrives before the Host clock
+  reaches its slot now reserves the next slot. Before, the routine reserved the
+  delivered slot again (#602).
 - **Feature (keys, client)** — add a separate local provider custody launcher
   for Hermes. The Host's keys process reads the selected profile key under the
   custody lock at each start; the daemon environment carries no provider key.

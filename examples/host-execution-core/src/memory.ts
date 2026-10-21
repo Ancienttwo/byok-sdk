@@ -54,6 +54,7 @@ export interface MemoryContextPack {
 export interface MemoryOptions {
   /** Trusted device-bound local export. Required only for explicit tree restore; never a redacted projection. */
   exportMemory?(binding: MemoryBinding): Promise<AgentMemoryExport>;
+  /** Integer milliseconds, as `Date.now` returns. Pass `HostLedger.compact` the same clock. */
   now?: () => number;
   /** Resolve current placement and profile from trusted Host state on each call. */
   isCurrent(binding: MemoryBinding): boolean;
@@ -169,7 +170,8 @@ export class HostMemoryPage {
       if (!row.noticePending || row.readback) continue;
       try {
         await this.options.notify(row.deviceId, { intentId: row.intent.intentId, agentRef: row.intent.agentRef });
-        this.ledger.transaction(state => { memory(state).intents[row.intent.intentId]!.noticePending = false; });
+        // Compaction can remove a row that settled while its notice was in flight.
+        this.ledger.transaction(state => { const live = memory(state).intents[row.intent.intentId]; if (live) live.noticePending = false; });
       } catch (error) { failures.push(error); }
     }
     if (failures.length) throw new AggregateError(failures, 'Memory notice delivery failed; pending intents retained');

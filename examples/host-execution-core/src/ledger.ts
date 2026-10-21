@@ -137,7 +137,7 @@ export class HostLedger {
     if (added) for (const listener of [...this.outboxListeners]) { try { listener(); } catch { /* Hints cannot roll back committed state. */ } }
     return result;
   }
-  /** Replay evidence is time-bounded; retired intent identities are permanent. */
+  /** Replay evidence is time-bounded. Caller intent identities are permanent; routine occurrence identities expire with their slot. */
   hasTombstone(kind: TombstoneKind, identity: string, now: number): boolean {
     time(now);
     return !!this.db.prepare(`SELECT 1 FROM host_retired_identity

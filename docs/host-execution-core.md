@@ -176,7 +176,7 @@ Read paths and display text are in section 7 of the [downstream diagnostics guid
 Use `SHA-256([routineId, definitionVersion, { kind, plannedAt }])` as the occurrence key.
 Trigger kind is `scheduled` or `catch_up`. Preserve the original planned time.
 Commit the occurrence, its intent and the next time together.
-Compute the next time from the current wall clock. Skip intervening missed slots.
+Compute the next time from the later of the current wall clock and the delivered slot. Skip intervening missed slots.
 One overdue wake creates at most one catch-up after sleep.
 A repeated wake uses the committed trigger and next time. It cannot reclassify the same slot later.
 

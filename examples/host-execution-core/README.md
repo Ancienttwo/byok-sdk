@@ -277,10 +277,11 @@ longer returned; a subsequent explicit compaction removes those rows.
 
 Caller intent identities (every key outside the derived routine shape) never expire. That part of
 the table grows with the count of compacted caller intents. A routine occurrence identity expires
-with its slot row. After that, the routine reservation refuses the old slot and the reserved key
-shape refuses direct reuse. Each compacted Agent routine occurrence keeps one intent row, one slot
-row and, after an applied outcome, one application row until a compaction at or after expiry
-deletes them. A Host-only occurrence keeps only its slot row. For example, 200 rules that run every
+with its slot row. The next reservation is always later than the delivered slot, also when the Host
+clock is behind the SDK scheduler. So after expiry, the routine reservation refuses the old slot and
+the reserved key shape refuses direct reuse. Each compacted Agent routine occurrence keeps one
+intent row, one slot row and, after an applied outcome, one application row until a compaction at
+or after expiry deletes them. A Host-only occurrence keeps only its slot row. For example, 200 rules that run every
 5 minutes make 57,600 occurrences per day. A 7-day window then holds about 1.2 million rows and a
 30-day window about 5.2 million rows, plus the rows that wait for the next compaction. These numbers
 are calculated from the row counts, not measured. Rows that an earlier version wrote as permanent
@@ -500,8 +501,10 @@ replays get the stored terminal readback. `page.intent(intentId)` returns `undef
 returning the copy, and the next compaction deletes it. The same `approvalRef` is then a new
 request with a new `intentId`, and a device replay of the old intent fails as unknown. Set the
 retention to at least your approval replay and notice redelivery windows. The replay lookup reads
-`MemoryOptions.now`, which must return integer milliseconds, as `Date.now` does. A restore with
-the same `restoreId` still returns its stored result, because restore rows stay.
+`MemoryOptions.now`, which must return integer milliseconds, as `Date.now` does. Pass `compact` the
+same clock. A compaction `now` ahead of `MemoryOptions.now` can delete a copy while `approve` still
+accepts its approval. A restore with the same `restoreId` still returns its stored result, because
+restore rows stay.
 
 ### Optional projection outbox capacity
 

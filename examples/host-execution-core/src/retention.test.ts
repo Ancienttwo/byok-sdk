@@ -7,6 +7,8 @@ import { HostLedger, MIN_TOMBSTONE_RETENTION_MS, RetiredIntentIdentityError } fr
 import { HostExecutionCore, type ExecutionServer } from './core';
 import { hash, project, taskId, type IntentInput } from './model';
 import { enqueue, settle } from './transitions';
+import { recordOccurrence } from './routines';
+import { nextIntervalOccurrence } from './schedule';
 import { openHost, template } from './test-support';
 import type { DueWake } from '@byok-sdk/server';
 
@@ -174,6 +176,27 @@ it('admits the derived occurrence key shape only together with its occurrence', 
   expect(ledger.transaction(state => enqueue(state, ledger.tenant, input('occurrence:caller-key'))).key).toBe('occurrence:caller-key');
   const linked = seed(ledger, 'linked', { routine: true });
   expect(ledger.snapshot().intents[hash(linked)]?.occurrence).toBe(hash(['occurrence', 'linked']));
+});
+
+it.each([['scheduled', 60 * 86_400_000], ['catch_up', 1000]] as const)(
+  'reserves past a slot delivered before the Host clock reaches it, so a late %s redelivery stays closed', (_kind, lateAfterMs) => {
+  const { ledger } = open(); const slot = 3_000_000, everyMs = 300_000;
+  const wake = { wakeId: 'wake', dedupKey: `tick:1:${slot}`, availableAt: slot, deliveredAt: slot, delivery: 1 };
+  ledger.transaction(state => {
+    state.routines[hash('tick')] = { definition: { id: 'tick', version: 1, timeZone: 'UTC', rule: { anchorMs: 0, everyMs },
+      execution: template('device'), waitMs: 1000, lateAfterMs }, lifecycle: 'active', status: 'ok', next: { dedupKey: wake.dedupKey, availableAt: slot } };
+    recordOccurrence(state, ledger.tenant, wake, slot - 1, nextIntervalOccurrence); // The SDK scheduler clock leads by 1 ms.
+  });
+  expect(ledger.snapshot().routines[hash('tick')]!.next).toEqual({ dedupKey: `tick:1:${slot + everyMs}`, availableAt: slot + everyMs });
+  const recorded = Object.values(ledger.snapshot().intents)[0]!;
+  ledger.transaction(state => { settle(state, state.intents[recorded.id]!, 'succeeded'); delete state.outbox[`projection:${hash(`intent:${recorded.key}`)}`]; });
+  const expiry = slot + policy.tombstoneRetentionMs;
+  ledger.compact({ ...policy, now: slot, acknowledgedIntentKeys: [recorded.key] });
+  ledger.compact({ ...policy, now: expiry, acknowledgedIntentKeys: [] });
+  // A redelivery after expiry (for example after the SDK collects its delivered row) must not open the slot again.
+  ledger.transaction(state => recordOccurrence(state, ledger.tenant, wake, expiry + 1, nextIntervalOccurrence));
+  expect(ledger.snapshot().intents).toEqual({});
+  expect(ledger.snapshot().ignoredWakes).toEqual([{ at: expiry + 1, reason: 'reservation_mismatch', wakeKeyHash: hash(wake.dedupKey) }]);
 });
 
 it('isolates retirement and expiration by tenant in a shared database', () => {

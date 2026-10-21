@@ -191,6 +191,21 @@ it('delivers later notices when an earlier transport fails and retains only the 
   expect(notify.mock.calls).toHaveLength(3);
 });
 
+it('finishes a notice whose row settled and was compacted while the notice was in flight', async () => {
+  const { intent } = await page.approve(approval());
+  notify.mockImplementationOnce(async () => {
+    const transport = page.transport('device');
+    await transport.fetch({ intentId: intent.intentId, agentRef, reservation: 'held' });
+    await transport.complete(completion(intent.intentId));
+    ledger.compact({ ...retention, acknowledgedMemoryIntentIds: [intent.intentId], now: clock });
+  });
+  await page.flushNotices();
+  expect(ledger.snapshot().memory!.intents).toEqual({});
+  expect(ledger.retiredMemoryIntent('intent', intent.intentId, clock)?.readback).toBeDefined();
+  await page.flushNotices();
+  expect(notify).toHaveBeenCalledTimes(1);
+});
+
 it('checks projection hash, grant, exact profile, ordering and immutable mutation identity', async () => {
   const port = page.projectionPort('device');
   const first = projection('redacted resident');
