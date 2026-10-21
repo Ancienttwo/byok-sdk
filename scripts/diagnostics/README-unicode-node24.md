@@ -29,3 +29,14 @@ the ephemeral runner temp directory and is never uploaded.
 
 No changes to CI-required, release workflows, assertions, timeouts or platform
 skips. Root review is required before the diagnostic branch is pushed.
+
+Follow-up experiment: only current release main, same isolated Secret Service
+wrapper as formal CI, basic package (4 files) then group-chat (14 tests).
+No repeat of the full257-test package comparison. Record counts of allowlisted
+process executable names before and after basic; never arguments or environment.
+Services exist only on the ephemeral GitHub runner, not a user machine.
+
+Stage patch is applied only to ephemeral subject before build. It matches the
+4096-emoji CURRENT-END fixture and logs fixed admission-stage enums with rounded
+performance.now elapsed milliseconds. The exporter reconstructs only these two
+fields; no content or identity is exported. Existing failure snapshot remains.

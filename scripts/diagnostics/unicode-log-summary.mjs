@@ -15,6 +15,16 @@ for (const name of readdirSync(source).filter(name => /^(install|build|group-cha
   result.push(`phase=${name.slice(0, -4)}`);
   for (const raw of readFileSync(join(source, name), 'utf8').split('\n')) {
     const line = raw.replace(/\x1b\[[0-9;]*m/g, '');
+    const stageMarker = line.indexOf('BYOK_UNICODE_STAGE ');
+    if (stageMarker >= 0) {
+      try {
+        const value = JSON.parse(line.slice(stageMarker + 'BYOK_UNICODE_STAGE '.length));
+        const stages = ['offer-enter', 'message-preflight-before', 'message-preflight-after', 'result-preflight-before', 'result-preflight-after', 'adapter-prepare-before', 'adapter-prepare-after', 'start-before', 'start-after'];
+        if (stages.includes(value.stage) && Number.isSafeInteger(value.elapsedMs) && value.elapsedMs >= 0) {
+          result.push('BYOK_UNICODE_STAGE ' + JSON.stringify({ stage: value.stage, elapsedMs: value.elapsedMs }));
+        }
+      } catch { /* Reject malformed diagnostic input without echoing it. */ }
+    }
     const marker = line.indexOf('BYOK_UNICODE_DIAGNOSTIC ');
     if (marker >= 0) {
       try { result.push(`BYOK_UNICODE_DIAGNOSTIC ${JSON.stringify(safe(JSON.parse(line.slice(marker + 24))))}`); }

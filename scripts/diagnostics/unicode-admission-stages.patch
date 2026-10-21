@@ -1,0 +1,84 @@
+--- a/packages/client/src/daemon/task-runner.ts
++++ b/packages/client/src/daemon/task-runner.ts
+@@ -1052,6 +1052,26 @@
+  * prepared run that resolved a separate instruction would have two answers to
+  * what it is about to send.
+  */
++// Temporary fixture-only admission diagnostic; never logs identity or request bytes.
++type UnicodeAdmissionStage = 'offer-enter' | 'message-preflight-before' | 'message-preflight-after'
++  | 'result-preflight-before' | 'result-preflight-after' | 'adapter-prepare-before'
++  | 'adapter-prepare-after' | 'start-before' | 'start-after';
++const unicodeAdmissionStarts = new WeakMap<object, number>();
++function traceUnicodeAdmission(payload: AcceptedOfferPayload, stage: UnicodeAdmissionStage): void {
++  try {
++    let began = unicodeAdmissionStarts.get(payload);
++    if (began === undefined) {
++      const instruction = offeredInstruction(payload);
++      if (typeof instruction !== 'string' || !instruction.includes('😀'.repeat(4096) + ' CURRENT-END')
++        || instruction.split('😀').length !== 4097) return;
++      began = performance.now();
++      unicodeAdmissionStarts.set(payload, began);
++    }
++    const elapsedMs = Math.max(0, Math.round(performance.now() - began));
++    console.log('BYOK_UNICODE_STAGE ' + JSON.stringify({ stage, elapsedMs }));
++  } catch { /* Diagnostic failures must not change admission behavior. */ }
++}
++
+ function offeredInstruction(payload: AcceptedOfferPayload): TaskOfferPayload['instruction'] | undefined {
+   return 'instruction' in payload ? payload.instruction : undefined;
+ }
+@@ -2185,6 +2205,7 @@
+     payload: AcceptedOfferPayload,
+     strictAgentOffer: boolean,
+   ): Promise<void> {
++    traceUnicodeAdmission(payload, 'offer-enter');
+     // Finding P2, Fix 2c (redelivered offer for an already-active/finished
+     // task): checked first, ahead of everything below — a redelivered
+     // `task.offer` for a taskId this device already claimed/started, or
+@@ -2933,8 +2954,10 @@
+       };
+       let session: Session;
+       try {
++        traceUnicodeAdmission(payload, 'start-before');
+         session = await startOwnedRuntime(input => prepared.operation.start(input), startInput, blobAbort.signal,
+           Math.max(0, startupDeadline - Date.now()));
++        traceUnicodeAdmission(payload, 'start-after');
+       } catch (err) {
+         const disposalFailure = isRuntimeStartupDisposalFailure(err);
+         const cancelled = this.pendingCancelled.has(taskId);
+@@ -3534,7 +3557,9 @@
+       && pick.descriptor.requiresMcpToolsetToolObservation === true;
+     if (preparation === undefined && messageRequirement !== undefined && this.deps.agentMessageMcpPreflight !== undefined) {
+       try {
++        traceUnicodeAdmission(payload, 'message-preflight-before');
+         await this.deps.agentMessageMcpPreflight(taskMcpServers![AGENT_MESSAGE_MCP_SERVER_NAME]!, mcpEnv);
++        traceUnicodeAdmission(payload, 'message-preflight-after');
+       } catch (error) {
+         decline(`required Agent message helper preflight failed: ${outboundErrorMessage(error)}`, false);
+         return undefined;
+@@ -3542,7 +3567,9 @@
+     }
+     if (preparation === undefined && terminalProjection?.mode === 'result-document' && this.deps.agentResultMcpPreflight !== undefined) {
+       try {
++        traceUnicodeAdmission(payload, 'result-preflight-before');
+         await this.deps.agentResultMcpPreflight(taskMcpServers![AGENT_RESULT_MCP_SERVER_NAME]!, mcpEnv);
++        traceUnicodeAdmission(payload, 'result-preflight-after');
+       } catch (error) {
+         decline(`required Agent result helper preflight failed: ${outboundErrorMessage(error)}`, false);
+         return undefined;
+@@ -3616,6 +3643,7 @@
+     }
+     let prepared: Awaited<ReturnType<RuntimeAdapter['prepare']>>;
+     try {
++      traceUnicodeAdmission(payload, 'adapter-prepare-before');
+       prepared = await awaitAdmission(() => pick.adapter.prepare({
+         signal: blobAbort.signal,
+         offer: offered,
+@@ -3624,6 +3652,7 @@
+         ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
+         ...(mcpToolsetTools === undefined ? {} : { mcpToolsetTools }),
+       }), blobAbort.signal);
++      traceUnicodeAdmission(payload, 'adapter-prepare-after');
+     } catch (error) {
+       if (!admissionWithdrawn()) decline(`runtime preparation failed: ${outboundErrorMessage(error)}`, true);
+       return undefined;

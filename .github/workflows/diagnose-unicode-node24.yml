@@ -18,8 +18,6 @@ jobs:
       max-parallel: 2
       matrix:
         include:
-          - label: baseline
-            ref: 95357bb07ba7b1b45a75ba463a170a75af435bd1
           - label: candidate
             ref: e2e71d3eb7f4ab952627e788009c1746688c9453
     env:
@@ -62,12 +60,14 @@ jobs:
           echo "BYOK_TEST_BUN_BIN=$BUN_PATH" >> "$GITHUB_ENV"
           git apply --check ../diagnostic/scripts/diagnostics/unicode-failure-state.patch
           git apply ../diagnostic/scripts/diagnostics/unicode-failure-state.patch
+          git apply --check ../diagnostic/scripts/diagnostics/unicode-admission-stages.patch
+          git apply ../diagnostic/scripts/diagnostics/unicode-admission-stages.patch
           {
             git rev-parse HEAD
             node --version
             bun --version
             bun --revision
-            sha256sum ../diagnostic/scripts/diagnostics/unicode-failure-state.patch "$BUN_PATH" | cut -d' ' -f1
+            sha256sum ../diagnostic/scripts/diagnostics/unicode-failure-state.patch ../diagnostic/scripts/diagnostics/unicode-admission-stages.patch "$BUN_PATH" | cut -d' ' -f1
           } > "$RUNNER_TEMP/unicode-summary/identity.txt"
       - name: Install frozen dependencies
         run: |
@@ -83,10 +83,31 @@ jobs:
           code=$?
           echo "build=$code" >> "$RUNNER_TEMP/unicode-summary/status.txt"
           exit "$code"
-      - name: Run only bot-collaboration including preceding package tests
+      - name: Install formal isolated credential-provider dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends dbus-x11 gnome-keyring libsecret-tools
+      - name: Run basic then group-chat in formal isolated session
         run: |
           set +e
-          bun run --cwd examples/bot-collaboration test > "$RUNNER_TEMP/unicode-raw/group-chat.log" 2>&1
+          cat > "$RUNNER_TEMP/unicode-sequence.sh" <<'SEQUENCE'
+          set -euo pipefail
+          snapshot() {
+            ps -eo comm= | awk '{ n=$0; sub(/^.*\//,"",n); if(n ~ /^(node|bun|workerd|gnome-keyring-d|dbus-daemon)$/) count[n]++ } END { for(n in count) print n "=" count[n] }' | sort
+          }
+          snapshot > "$RUNNER_TEMP/unicode-summary/processes-before.txt"
+          sha256sum packages/client/dist/index.js > "$RUNNER_TEMP/unicode-summary/dist-before.txt"
+          set +e
+          bun run --cwd examples/basic test
+          basic_code=$?
+          echo "basic=$basic_code" >> "$RUNNER_TEMP/unicode-summary/status.txt"
+          set -e
+          test "$basic_code" = 0
+          snapshot > "$RUNNER_TEMP/unicode-summary/processes-after-basic.txt"
+          sha256sum packages/client/dist/index.js > "$RUNNER_TEMP/unicode-summary/dist-after-basic.txt"
+          bun run --cwd examples/bot-collaboration test src/group-chat.test.ts
+          SEQUENCE
+          bash scripts/ci/with-secret-service.sh bash "$RUNNER_TEMP/unicode-sequence.sh" > "$RUNNER_TEMP/unicode-raw/group-chat.log" 2>&1
           code=$?
           echo "group-chat=$code" >> "$RUNNER_TEMP/unicode-summary/status.txt"
           exit "$code"
