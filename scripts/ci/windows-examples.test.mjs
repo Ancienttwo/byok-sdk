@@ -25,3 +25,12 @@ test('K4, K8 and Windows runner changes require the Windows-containing family', 
   assert.match(job, /name: K4 Windows Host execution qualification\n        if: matrix.os == 'windows-latest'\n        run: bun run --cwd examples\/host-execution-core test\n/);
   assert.match(job, /name: K8 Windows portable Bot qualification\n        if: matrix.os == 'windows-latest'\n        run: node scripts\/ci\/run-windows-bot-tests.mjs/);
 });
+
+test('Windows Host steps keep their SQLite temp roots on the runner local disk', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const job = workflow.split('  adapter-lifecycle-smoke:')[1].split('\n  dataplane:')[0];
+  for (const name of ['K4 Windows Host execution qualification', 'K8 Windows portable Bot qualification']) {
+    const step = job.split(`      - name: ${name}\n`)[1].split('\n      - name:')[0].split('\n      #')[0];
+    assert.match(step, /\n        env:\n          TEMP: \$\{\{ runner\.temp \}\}\n          TMP: \$\{\{ runner\.temp \}\}(\n|$)/, name);
+  }
+});
