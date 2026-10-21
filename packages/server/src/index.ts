@@ -1,8 +1,6 @@
 import { ProjectionWaiters } from './projection-waiters';
 export { listenLoopback } from './loopback';
 export type { LoopbackPortStore, LoopbackHandler, LoopbackListenerOptions, LoopbackListener } from './loopback';
-
-import { ProjectionWaiters } from './projection-waiters';
 import type { AgentMessageDraftEvent } from './types';
 export type { AgentMessageDraftEvent } from './types';
 import { WakeScheduler } from './wakes/scheduler';
