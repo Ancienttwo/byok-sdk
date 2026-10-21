@@ -19,7 +19,7 @@ for (const name of readdirSync(source).filter(name => /^(install|build|group-cha
     if (stageMarker >= 0) {
       try {
         const value = JSON.parse(line.slice(stageMarker + 'BYOK_UNICODE_STAGE '.length));
-        const stages = ['offer-enter', 'message-preflight-before', 'message-preflight-after', 'result-preflight-before', 'result-preflight-after', 'adapter-prepare-before', 'adapter-prepare-after', 'start-before', 'start-after'];
+        const stages = ['offer-enter', 'message-preflight-before', 'message-preflight-after', 'result-preflight-before', 'result-preflight-after', 'adapter-prepare-before', 'adapter-prepare-after', 'start-before', 'start-after', 'home-acquire-before', 'home-acquire-after', 'home-initialize-before', 'home-initialize-after', 'result-store-before', 'result-store-after', 'manifest-before', 'manifest-after', 'claim-before', 'instruction-after'];
         if (stages.includes(value.stage) && Number.isSafeInteger(value.elapsedMs) && value.elapsedMs >= 0) {
           result.push('BYOK_UNICODE_STAGE ' + JSON.stringify({ stage: value.stage, elapsedMs: value.elapsedMs }));
         }

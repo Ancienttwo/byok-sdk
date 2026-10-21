@@ -40,3 +40,8 @@ Stage patch is applied only to ephemeral subject before build. It matches the
 4096-emoji CURRENT-END fixture and logs fixed admission-stage enums with rounded
 performance.now elapsed milliseconds. The exporter reconstructs only these two
 fields; no content or identity is exported. Existing failure snapshot remains.
+
+After39573901588: basic94/group14passed, no residual allowlistedprocess or dist
+change; measured gap adapterprepare464ms→start3223ms. Next experiment runs only
+the singleUnicodecase, adding home-acquire/initialize/resultstore/manifest/claim
+stages to locate that2759ms gap. No repeat basic/package/fullmatrix.

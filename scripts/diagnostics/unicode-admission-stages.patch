@@ -1,13 +1,16 @@
 --- a/packages/client/src/daemon/task-runner.ts
 +++ b/packages/client/src/daemon/task-runner.ts
-@@ -1052,6 +1052,26 @@
+@@ -1052,6 +1052,29 @@
   * prepared run that resolved a separate instruction would have two answers to
   * what it is about to send.
   */
 +// Temporary fixture-only admission diagnostic; never logs identity or request bytes.
 +type UnicodeAdmissionStage = 'offer-enter' | 'message-preflight-before' | 'message-preflight-after'
 +  | 'result-preflight-before' | 'result-preflight-after' | 'adapter-prepare-before'
-+  | 'adapter-prepare-after' | 'start-before' | 'start-after';
++  | 'adapter-prepare-after' | 'start-before' | 'start-after'
++  | 'home-acquire-before' | 'home-acquire-after' | 'home-initialize-before' | 'home-initialize-after'
++  | 'result-store-before' | 'result-store-after' | 'manifest-before' | 'manifest-after'
++  | 'claim-before' | 'instruction-after';
 +const unicodeAdmissionStarts = new WeakMap<object, number>();
 +function traceUnicodeAdmission(payload: AcceptedOfferPayload, stage: UnicodeAdmissionStage): void {
 +  try {
@@ -27,7 +30,7 @@
  function offeredInstruction(payload: AcceptedOfferPayload): TaskOfferPayload['instruction'] | undefined {
    return 'instruction' in payload ? payload.instruction : undefined;
  }
-@@ -2185,6 +2205,7 @@
+@@ -2185,6 +2208,7 @@
      payload: AcceptedOfferPayload,
      strictAgentOffer: boolean,
    ): Promise<void> {
@@ -35,7 +38,74 @@
      // Finding P2, Fix 2c (redelivered offer for an already-active/finished
      // task): checked first, ahead of everything below — a redelivered
      // `task.offer` for a taskId this device already claimed/started, or
-@@ -2933,8 +2954,10 @@
+@@ -2382,12 +2406,14 @@
+           }
+         }
+         try {
++          traceUnicodeAdmission(payload, 'home-acquire-before');
+           agentBinding = await this.deps.agentHome!.acquireExecution(agentRef, {
+             taskId,
+             sessionRef,
+             homeAccess,
+             ...(readerRunDirectory === undefined ? {} : { runDirectory: readerRunDirectory }),
+           });
++          traceUnicodeAdmission(payload, 'home-acquire-after');
+           releaseReservation();
+         } catch (error) {
+           decline(
+@@ -2444,7 +2470,9 @@
+           }
+         }
+         try {
++          traceUnicodeAdmission(payload, 'home-initialize-before');
+           await this.deps.agentHome!.initializeExecution(agentBinding);
++          traceUnicodeAdmission(payload, 'home-initialize-after');
+         } catch (error) {
+           await agentBinding.lease.release().catch(() => {});
+           agentBinding = undefined;
+@@ -2481,7 +2509,9 @@
+         }
+         if (terminalProjection?.mode === 'result-document') {
+           try {
++            traceUnicodeAdmission(payload, 'result-store-before');
+             const store = await this.agentResultStore(agentBinding.resolution.canonicalHome);
++            traceUnicodeAdmission(payload, 'result-store-after');
+             const context = this.resultContextByTask.get(taskId);
+             if (context === undefined) throw new Error('the task result context was revoked before its Agent home was bound');
+             context.store = store;
+@@ -2555,6 +2585,7 @@
+       // `env` was built before admission (see its declaration above) so the
+       // MCP probes and the runtime child are guaranteed to share one
+       // allowlist decision rather than two computations that could drift.
++      traceUnicodeAdmission(payload, 'manifest-before');
+       const manifest = sealRuntimeOperationManifest({
+         ...(preparation === undefined ? {} : {agentMemory}),
+         taskId,
+@@ -2582,6 +2613,7 @@
+         },
+         forwardedEnvironmentNames: Object.freeze(Object.keys(env).sort()),
+       });
++      traceUnicodeAdmission(payload, 'manifest-after');
+ 
+       // The prepared lane's whole admission, in the one order it is allowed to
+       // happen: COMPARE the sealed Execution against the record item by item,
+@@ -2722,6 +2754,7 @@
+       // Claim is the first externally visible commitment; instruction bytes,
+       // workspace preparation, and process creation remain after it.
+       if (admissionWithdrawn()) { gitLease?.release(); return; }
++      traceUnicodeAdmission(payload, 'claim-before');
+       await this.deps.beforeClaim?.(taskId, manifest.descriptor.id);
+       if (admissionWithdrawn()) { gitLease?.release(); return; }
+       if (!isKnownRuntimeId(manifest.descriptor.id)) this.claimedHarnesses.set(taskId, manifest.descriptor.id);
+@@ -2774,6 +2807,7 @@
+         resolvedInstruction = offeredInstructionValue === undefined
+           ? ''
+           : await this.resolveInstruction(offeredInstructionValue, blobAbort.signal);
++        traceUnicodeAdmission(payload, 'instruction-after');
+         if (plainWorkspaceNeedsResolve) workspaceDir = await this.resolveWorkspaceDir(taskId, known?.workspaceDir);
+       } catch (err) {
+         gitLease?.release();
+@@ -2933,8 +2967,10 @@
        };
        let session: Session;
        try {
@@ -46,7 +116,7 @@
        } catch (err) {
          const disposalFailure = isRuntimeStartupDisposalFailure(err);
          const cancelled = this.pendingCancelled.has(taskId);
-@@ -3534,7 +3557,9 @@
+@@ -3534,7 +3570,9 @@
        && pick.descriptor.requiresMcpToolsetToolObservation === true;
      if (preparation === undefined && messageRequirement !== undefined && this.deps.agentMessageMcpPreflight !== undefined) {
        try {
@@ -56,7 +126,7 @@
        } catch (error) {
          decline(`required Agent message helper preflight failed: ${outboundErrorMessage(error)}`, false);
          return undefined;
-@@ -3542,7 +3567,9 @@
+@@ -3542,7 +3580,9 @@
      }
      if (preparation === undefined && terminalProjection?.mode === 'result-document' && this.deps.agentResultMcpPreflight !== undefined) {
        try {
@@ -66,7 +136,7 @@
        } catch (error) {
          decline(`required Agent result helper preflight failed: ${outboundErrorMessage(error)}`, false);
          return undefined;
-@@ -3616,6 +3643,7 @@
+@@ -3616,6 +3656,7 @@
      }
      let prepared: Awaited<ReturnType<RuntimeAdapter['prepare']>>;
      try {
@@ -74,7 +144,7 @@
        prepared = await awaitAdmission(() => pick.adapter.prepare({
          signal: blobAbort.signal,
          offer: offered,
-@@ -3624,6 +3652,7 @@
+@@ -3624,6 +3665,7 @@
          ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
          ...(mcpToolsetTools === undefined ? {} : { mcpToolsetTools }),
        }), blobAbort.signal);

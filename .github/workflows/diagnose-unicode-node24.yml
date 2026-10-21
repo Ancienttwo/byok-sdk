@@ -87,7 +87,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends dbus-x11 gnome-keyring libsecret-tools
-      - name: Run basic then group-chat in formal isolated session
+      - name: Trace only the Unicode case through home initialization
         run: |
           set +e
           cat > "$RUNNER_TEMP/unicode-sequence.sh" <<'SEQUENCE'
@@ -97,15 +97,7 @@ jobs:
           }
           snapshot > "$RUNNER_TEMP/unicode-summary/processes-before.txt"
           sha256sum packages/client/dist/index.js > "$RUNNER_TEMP/unicode-summary/dist-before.txt"
-          set +e
-          bun run --cwd examples/basic test
-          basic_code=$?
-          echo "basic=$basic_code" >> "$RUNNER_TEMP/unicode-summary/status.txt"
-          set -e
-          test "$basic_code" = 0
-          snapshot > "$RUNNER_TEMP/unicode-summary/processes-after-basic.txt"
-          sha256sum packages/client/dist/index.js > "$RUNNER_TEMP/unicode-summary/dist-after-basic.txt"
-          bun run --cwd examples/bot-collaboration test src/group-chat.test.ts
+          bun run --cwd examples/bot-collaboration test src/group-chat.test.ts -t 'counts a large in-limit Unicode Request'
           SEQUENCE
           bash scripts/ci/with-secret-service.sh bash "$RUNNER_TEMP/unicode-sequence.sh" > "$RUNNER_TEMP/unicode-raw/group-chat.log" 2>&1
           code=$?
