@@ -20,6 +20,8 @@ import {
   pendingApproval,
   type ByokCloud,
   type AgentExecutionInput,
+  type AgentMemoryIntentNoticeInput,
+  type EnqueuedAgentControl,
   type EnqueuedOffer,
   type InboundRefusalReason,
   type PairingCodeInfo,
@@ -196,6 +198,8 @@ export interface ByokServer {
   requestAgentContentRead(input: AgentContentReadRequest): Promise<void>;
   /** Enqueue one task-free, exact-device Agent-home projection. */
   enqueueAgentHomeProjection(input: AgentHomeProjectionRequest): Promise<AgentHomeProjectionStatusReadback>;
+  /** Enqueue a content-free, capability-gated memory intent notice for this server's tenant. Approval and completion remain Host-owned. */
+  enqueueAgentMemoryIntentNotice(deviceId: string, input: AgentMemoryIntentNoticeInput): Promise<EnqueuedAgentControl>;
   /** Durable desired-state and terminal-outcome readback for one exact device-and-Agent request. */
   readAgentHomeProjection(
     deviceId: string,
@@ -722,6 +726,10 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     ): Promise<AgentHomeProjectionStatusReadback> {
       const payload = AgentHomeProjectionPayloadSchema.parse(input.payload);
       return (await cloud.enqueueAgentHomeProjection(tenant, input.deviceId, payload)).status;
+    },
+
+    enqueueAgentMemoryIntentNotice(deviceId, input) {
+      return cloud.enqueueAgentMemoryIntentNotice(tenant, deviceId, input);
     },
 
     async readAgentHomeProjection(

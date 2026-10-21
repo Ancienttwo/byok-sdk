@@ -143,9 +143,12 @@ one exact operation. Supply the current device and Agent profile from Host state
 Bind `transport(deviceId)` to the authenticated device, then inject it as
 `DaemonConfig.agentMemoryIntents`. Do not take the device ID from a request body.
 Call `flushNotices` after approval and at Host startup. Retry it after a transport error.
-Its callback calls the public cloud `enqueueAgentMemoryIntentNotice` API.
-The embedded server facade has no memory-notice method. The callback must use the
-owning cloud composition. Never insert a mailbox row by hand.
+For an embedded server, inject `notify: (deviceId, notice) =>
+server.enqueueAgentMemoryIntentNotice(deviceId, notice)`. The server binds its own
+tenant and preserves the cloud capability, revocation and exact-notice checks.
+A hosted composition uses `cloud.enqueueAgentMemoryIntentNotice(tenant, deviceId, notice)`.
+Both APIs send only `{ intentId, agentRef }`; intent fetch, approval and terminal
+readback remain on the authenticated Host transport. Never insert a mailbox row by hand.
 
 P5a supports explicit whole-file replacement and note deletion. It has no normal editor.
 A user can authorize an initial write with `baseRevision` omitted. This uses sha256 of
