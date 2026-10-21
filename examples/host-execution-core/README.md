@@ -83,9 +83,10 @@ See `unclaimed-expiry.test.ts` and the guide for the exact distinction.
 ## Integration limits
 
 This example is a single-owner reference for a small ledger.
-Every transaction reads and rewrites the whole JSON ledger. The example does not clean up history rows.
-That includes settled intents, executions with terminal documents, occurrences, slot dedup keys,
-outcome markers and calendar audits. They are not a large-dataset storage design.
+Every transaction reads and rewrites the whole JSON ledger. History cleanup is explicit through
+`HostLedger.compact`, described below; it never runs automatically. Uncompacted settled intents,
+executions with terminal documents, occurrences, slot dedup keys, outcome markers and calendar audits
+remain in that JSON body. This is not a large-dataset storage design.
 
 While work is in flight, the core normally creates a new `host-scan` wake every `reconcileMs`
 (default 1,000 ms). Earlier deadlines can cause earlier scans. The SDK retains done wake rows for seven days.
@@ -100,6 +101,51 @@ When adopting this code, define a retention policy for the Host ledger:
 - Keep task application and slot dedup tombstones through the maximum replay, upload retry and backup-restore window.
   Include at least the SDK's seven-day completed-wake replay window. Do not reuse retired identities.
 - Apply archive and tombstone changes atomically. Measure JSON rewrite cost before selecting a storage budget.
+
+After acknowledging results, completing any required external archive, and satisfying your product's
+retention period, explicitly select the intent keys to delete:
+
+```ts
+const result = ledger.compact({
+  acknowledgedIntentKeys: ['chat-turn-42'],
+  now: Date.now(),
+  tombstoneRetentionMs: 30 * 24 * 60 * 60 * 1000, // Choose your actual replay/restore window.
+});
+console.log(result.beforeBytes, result.afterBytes);
+```
+
+Selection is an assertion by the caller that these results may be removed. The core does not infer
+acknowledgement or product retention from timestamps. The method rejects unsettled intents, pending
+intent/result outbox records, unknown keys, and inconsistent execution/occurrence associations. An
+invalid selection or database failure rolls back the entire batch, including tombstones. Repeating
+an already compacted key is harmless and reports `alreadyCompactedIntents`; duplicate keys count once.
+An empty selection explicitly expires eligible tombstones without selecting additional history.
+
+One SQLite transaction deletes the selected intent's execution generations, terminal documents,
+settled occurrence, slot and application markers, and writes replacement tombstones. No outbox row,
+business `application` value, memory, routine or calendar audit is deleted. Custom projections have
+no intent ownership metadata and remain untouched, including any payload copies they contain.
+`core.intent(key)` returns `undefined` after compaction. Enqueuing a retired key throws, even with the
+same input; this applies to the exported `enqueue` transition inside `ledger.transaction` as well.
+Use a new identity for new work.
+
+The additive `host_retired_identity` table keeps permanent intent identity hashes outside the hot
+JSON body and expiring task-application and wake-slot evidence. Retention starts at compaction and
+must be at least seven days; choose the maximum of your actual replay, upload retry and restore
+windows. `ledger.hasTombstone(kind, identity, now)` queries that evidence. Retained wake replays do
+not create occurrences or dispatch work. At the exact expiry time slot/application evidence is no
+longer returned; a subsequent explicit compaction removes those rows. Retired intent identities
+never expire. Their indexed table grows with historical intent count, while removed core payloads
+no longer enlarge each JSON rewrite. Host-owned application data, custom projections, routines and
+audits can still grow independently; compact does not claim a total disk-size bound or run VACUUM.
+
+Opening an existing version-1 ledger adds the table without changing its JSON format. Back up and
+restore the **whole SQLite database atomically**, including the identity table (and SQLite's WAL
+state through a supported backup mechanism). Restoring JSON alone or running an older copy of the
+core loses the retirement guard. Do not downgrade to a pre-compaction version after using this API:
+an older writer ignores the new table and can reuse retired identities. Seven days is a minimum SDK replay horizon, not proof that an old
+backup is safe to restore; coordinate restores with your external acknowledgement/replay policy.
+This API performs deletion, not external archival, and must only be invoked under the Host's policy.
 
 Set `HostOptions.reconcileMs`, for example `{ reconcileMs: 10_000 }`, to reduce normal scan frequency.
 The default is unchanged. A larger interval increases terminal observation and FIFO release latency.
