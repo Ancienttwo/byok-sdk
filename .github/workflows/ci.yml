@@ -1,11 +1,11 @@
-name: Bounded Windows acceptance diagnosis
+name: Bounded Windows scheduling diagnosis
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   diagnose:
-    name: Exact baseline and candidate, two sequential acceptance cases each
+    name: Exact baseline and candidate, one scheduling case each
     runs-on: windows-latest
     timeout-minutes: 35
     steps:
@@ -26,10 +26,10 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v7
         with:
-          ref: d53a0c3f32cf552316f14e49df91322f0b185a33
+          ref: 64e102f4f9693c487afb71f9472dc4816faeee17
           path: candidate
           persist-credentials: false
       - name: Validate pinned sources and CRLF anchors without mutation
-        run: node diagnostic/scripts/diagnostics/acceptance-639.mjs --check baseline candidate
-      - name: Run paired acceptance sequence once per source
-        run: node diagnostic/scripts/diagnostics/acceptance-639.mjs baseline candidate
+        run: node diagnostic/scripts/diagnostics/scheduling-669.mjs --check baseline candidate
+      - name: Run scheduling case once per source
+        run: node diagnostic/scripts/diagnostics/scheduling-669.mjs baseline candidate
