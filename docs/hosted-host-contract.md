@@ -26,7 +26,7 @@ Then read the task with these calls:
   `task.complete`, `task.fail`, `task.decline` or `task.cancelled`.
   A Host cancellation never creates it (`packages/cloud/src/cloud.ts:758-759`, `packages/cloud/src/cloud.ts:2356-2359`, `packages/cloud/src/terminal-result.ts:16-30`).
 - `readTaskResult(tenant, taskId)` returns a typed result.
-  The Host cancellation marker outranks the device receipt.
+  The Host cancellation marker has priority over the device receipt.
   So the result is `cancelled` as soon as `cancelTask` commits, also while the device still runs (`packages/cloud/src/cloud.ts:2377-2398`).
 
 Read `readTaskAttempt` first. Its status selects the row. The other reads add evidence.
@@ -42,7 +42,7 @@ Rows F, G, H, I and K are settled. All other rows are unsettled.
 | D | Offer in the mailbox, not claimed | `offered` | `delivered: true` | `undefined` | `undefined` | `delivered` | Wait. At the waiting deadline, cancel. |
 | E | Claimed or started | `claimed` or `running`, owner set | defined | `undefined` | `undefined` | `running` | Wait for a device terminal. |
 | F | Device completed | `complete` | defined | `task.complete` | `state: 'complete'` | `succeeded` | Apply the outcome. |
-| G | Device failed | `failed` | defined | `task.fail` | `state: 'failed'`, `reason`, `retryable` | `failed` | Retry only when the policy permits it. |
+| G | Device failed | `failed` | defined | `task.fail` | `state: 'failed'`, `reason`, `retryable` | `failed` | Retry only when the policy and the terminal permit it. |
 | H | Device declined | `failed` | defined | `task.decline` | `state: 'failed'`, `code` | `failed` | Retry only for a busy `code`. |
 | I | Host cancel before claim | `cancelled`, marker set, no owner | unchanged | `undefined` | `state: 'cancelled'` | `cancelled` or `expired` | Settle now. The offer cannot run. |
 | J | Host cancel after claim, no device terminal | `cancel_requested`, marker set | unchanged | `undefined` | `state: 'cancelled'` | `running` | Keep it unsettled. Wait for a device terminal. |
@@ -57,7 +57,8 @@ Evidence for each row:
 - **B and C.** Submit opens the attempt first (`packages/cloud/src/cloud.ts:1148-1154`).
   Then it records the offer receipt (`packages/cloud/src/cloud.ts:1187-1201`) and appends to the mailbox (`packages/cloud/src/cloud.ts:1206-1225`).
   It writes the delivered marker last (`packages/cloud/src/cloud.ts:1239`).
-  A retry with the same input converges on one offer (`packages/cloud/src/cloud.ts:1144-1147`, `packages/cloud/src/cloud.ts:1170-1173`).
+  A retry with the same input finds the same offer. It does not make a second offer
+  (`packages/cloud/src/cloud.ts:1144-1147`, `packages/cloud/src/cloud.ts:1170-1173`).
   `delivered: false` does not prove that the append did not happen (`packages/cloud/src/cloud.ts:499`).
   If the status is `claimed` or `running`, use row E.
 - **Resubmit errors.** A different offer body fails with `coordination_input_invalid` (`packages/cloud/src/cloud.ts:1196-1201`).
@@ -216,8 +217,8 @@ A product that builds one must keep the port rules:
 
 ## 4. Consume return contract
 
-`createByokCloud({ agentMessage: { consume } })` gets the first Agent message of each task with `messageEgress`
-(`packages/cloud/src/cloud.ts:293-311`).
+The Host gives `createByokCloud` a consumer in `agentMessage.consume` (`packages/cloud/src/cloud.ts:293-311`).
+The consumer gets the first Agent message of each task that has `messageEgress`.
 The SDK calls `consume` before it writes the disposition (`packages/cloud/src/inbound.ts:262-296`).
 
 | Consumer result | Stored disposition | Daemon behavior | Task terminal |
@@ -260,7 +261,7 @@ Defaults and settings:
 | Presence heartbeat | 30 s | Daemon `config.presence.intervalMs`. It must stay above the minimum interval and below the TTL. | `packages/client/src/daemon/presence-publisher.ts:45-52`, `packages/client/src/daemon/create-daemon.ts:1454-1459` |
 | Presence TTL | 90 s | Host `presenceTtlMs`. The daemon `config.presence.ttlMs` only checks the cadence. | `packages/cloud/src/coordination.ts:15`, `packages/cloud/src/cloud.ts:1000`, `packages/client/src/daemon/presence-publisher.ts:87-88` |
 | Presence on or off | On when the Host `capabilities` declaration has `presence.hints` | Host declaration | `packages/cloud/src/cloud.ts:995-1006`, `packages/client/src/daemon/create-daemon.ts:3078-3079` |
-| Access token | 1 h. The daemon renews it 60 s early with 2 calls. | Host `accessTokenTtlSeconds` | `packages/cloud/src/auth/tokens.ts:25`, `packages/client/src/daemon/auth-manager.ts:83`, `packages/client/src/daemon/auth-manager.ts:310-332`, `packages/client/src/daemon/auth-manager.ts:366-375` |
+| Access token | 1 h. The daemon renews it 60 s early with 2 calls. | Host `accessTokenTtlSeconds` | `packages/cloud/src/auth/tokens.ts:25`, `packages/cloud/src/cloud.ts:340`, `packages/client/src/daemon/auth-manager.ts:83`, `packages/client/src/daemon/auth-manager.ts:310-332`, `packages/client/src/daemon/auth-manager.ts:366-375` |
 
 Calls per hour for one idle device.
 These numbers are computed from the defaults. They are not measured.
@@ -279,7 +280,8 @@ How the numbers are computed:
 - Token calls per hour = 2 × 3,600 / (3,600 − 60).
 - `readAfter` calls per hour = polls per hour × (1 + hold / fallback), with a 1 s fallback.
   The hold changes the HTTP count. The fallback interval sets the database reads.
-- Each request also reads the device row for bearer authentication (`packages/cloud/src/auth/bearer.ts:62`).
+- Each poll and each presence call also reads the device row for bearer authentication
+  (`packages/cloud/src/handlers/events.ts:101`, `packages/cloud/src/handlers/presence.ts:23`, `packages/cloud/src/auth/bearer.ts:62`).
   Each poll also reads the mailbox cursor (`packages/cloud/src/handlers/events.ts:120`).
 
 Compare these numbers with the downstream budget.
