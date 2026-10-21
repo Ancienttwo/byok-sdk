@@ -28,14 +28,21 @@ export async function hostFailureSnapshot(host: TestHost, key: string): Promise<
   };
   const [offer, attempt, deviceTerminal] = taskId ? await Promise.all([
     exists(() => host.server.tasks.offer(taskId)),
-    exists(() => host.server.tasks.attempt(taskId)),
+    (async () => {
+      try {
+        const value = await host.server.tasks.attempt(taskId);
+        return { exists: value !== undefined, status: value?.status ?? null, ownerPresent: value?.ownerDeviceId !== undefined };
+      } catch { return { exists: 'unavailable', status: null, ownerPresent: 'unavailable' }; }
+    })(),
     exists(() => host.server.tasks.deviceTerminal(taskId)),
-  ]) : ['unavailable', 'unavailable', 'unavailable'];
+  ]) : ['unavailable', { exists: 'unavailable', status: null, ownerPresent: 'unavailable' }, 'unavailable'] as const;
+  const localTask = host.daemon.tasks().find(task => task.taskId === taskId);
   return {
     intent: intent ? { key: intent.key, phase: intent.phase, generation: intent.generation,
       taskId, attempts: intent.attempts, conclusion: intent.conclusion ?? null } : { key, unavailable: true },
-    server: { offer, attempt, deviceTerminal },
+    server: { offer, attempt: attempt.exists, attemptStatus: attempt.status, ownerPresent: attempt.ownerPresent, deviceTerminal },
     daemon: { phase: status.lifecycle.phase, connection: 'connection' in status.lifecycle ? status.lifecycle.connection : 'unavailable', activeTaskCount: status.activeTaskCount },
+    localTask: localTask ? { state: localTask.state, declined: localTask.declined ?? false, delivery: localTask.delivery ?? null } : null,
     sessionPresent: taskId ? host.adapter.sessions.has(taskId) : 'unavailable',
   };
 }
