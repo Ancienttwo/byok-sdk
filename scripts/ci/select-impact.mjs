@@ -201,6 +201,10 @@ export function selectImpact(paths, context = {}) {
     if (path === 'examples/packaging/native-assets-fixture.ts' || path === 'examples/packaging/native-assets-smoke.mjs') {
       dirs.add('examples/packaging'); families.add('packageability-smoke'); continue;
     }
+    if (['memory.ts', 'memory-restore.ts', 'memory-restore.test.ts', 'memory-linux.test.ts']
+      .some(name => path === `examples/host-execution-core/src/${name}`)) {
+      dirs.add('examples/host-execution-core'); families.add('agent-memory-export-linux'); continue;
+    }
     if (path === 'examples/basic/goal-btw.test-support.ts') {
       // Shared runtime fixture is imported directly across these example suites.
       for (const dir of ['examples/basic', 'examples/host-execution-core', 'examples/bot-collaboration']) dirs.add(dir);
