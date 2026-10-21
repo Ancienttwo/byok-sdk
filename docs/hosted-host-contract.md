@@ -9,7 +9,7 @@ This contract adds the hosted rules: readback, rescan, wake, message consume, id
 
 This document states current behavior. It does not promise a release.
 **Gap** marks a known open item. Section 7 lists all gaps.
-Code citations use `path:line` at commit `473cc4c4`.
+Code citations use `path:line` at commit `f0455787`.
 
 ## 1. Readback decision table
 
@@ -348,7 +348,7 @@ What the kept rows hold:
 | `task` row | Status, owner, claim snapshot and cancel marker | `packages/cloud-dataplane/src/stores/task-attempts.ts:53` |
 
 - The SDK has no ContextPack field. The K4 example adds its ContextPack to the inline instruction
-  (`examples/host-execution-core/src/core.ts:364-366`).
+  (`examples/host-execution-core/src/core.ts:498-500`).
   So the cloud keeps that ContextPack, with its resident memory text, as long as it keeps the offer receipt.
 - An `agent_message_admission` row goes only when its `task` row goes (`deploy/sql/0017_agent_message_admission.sql:20-22`).
 - The receipt store writes each body as it gets it (`packages/cloud-dataplane/src/stores/receipts.ts:63-73`).
