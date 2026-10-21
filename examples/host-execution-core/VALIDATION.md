@@ -4,6 +4,33 @@ Date: 2026-10-18. Baseline: `8e8839a3`.
 Branch: `codex/bot-k4-host-execution-core`.
 Environment: macOS, Node `v24.21.0`, Bun `1.4.3`.
 
+## Windows non-memory qualification gate (#611)
+
+Added on 2026-10-21 against baseline
+`ad0d2d2591d8b5eb6ebb4c7f47cfc5463ca5f779`. Windows execution evidence is
+**PENDING** until the new `K4 Windows Host execution qualification` step passes
+on the exact PR HEAD in `built adapter lifecycle smoke (windows-latest)`.
+This addition alone is not a Windows product acceptance claim.
+
+The step uses the existing Windows job's pinned Node version, dependency install
+and package build. Bun invokes the package test script; Vitest executes on Node.
+It runs the unchanged `core`, `execution-record`, `routines`,
+`scheduling-recovery`, `unclaimed-expiry` and `crash-recovery` test files.
+These qualify SQLite Host ledger/FIFO behavior, outcome application, routines,
+expiry, recovery and child-process termination/restart with a stub runtime and
+real local server/daemon. Credentials are injected in memory. No model is called.
+No assertion, timeout or platform skip is changed for this gate.
+
+The selection is deliberately non-memory: it does not run `memory.test.ts`
+(Host-side memory model) or `memory-linux.test.ts` (Linux device-memory integration),
+and does not assert Windows recall/save, projection or intent support. Windows
+Agent memory remains fail-closed under #605. K8 persona and live model/platform
+qualification are not covered; #611 remains open for that remaining scope and
+for recorded successful Windows CI evidence. Local macOS execution cannot
+substitute for this Windows gate. The exact six-file command passed on macOS
+against the unchanged baseline: 6 files, 39 tests, no skips. The workflow YAML
+parsed successfully and `git diff --check` passed; no full local suite was run.
+
 ## Coalescing observation repair on 260570ae
 
 Date: 2026-10-19. Baseline: `260570ae`, including the owner's ordinary merge of `origin/main@2e06fa91`.
