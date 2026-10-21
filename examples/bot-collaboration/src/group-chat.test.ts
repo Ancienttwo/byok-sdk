@@ -1,4 +1,5 @@
 import { readFile, stat } from 'node:fs/promises';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { openTeam, type TestTeam } from './team.test-support';
@@ -12,7 +13,10 @@ let releaseProjection: (() => void) | undefined;
 afterEach(async () => { releaseProjection?.(); releaseProjection = undefined; await fixture?.close(); });
 const host = () => fixture.host;
 async function running(id: string) {
-  await vi.waitFor(async () => { await host().drain(); expect(fixture.adapter.sessions.has(host().core.intent(id)!.taskId)).toBe(true); }, { timeout: 5000 });
+  await vi.waitFor(async () => { await host().drain(); expect(fixture.adapter.sessions.has(host().core.intent(id)!.taskId)).toBe(true); }, { timeout: 5000 }).catch(async error => {
+    const intent = host().core.intent(id);
+    writeFileSync(join(process.env.BYOK_SESSION_DIAGNOSTICS_DIR!, `session-${Date.now()}.json`), JSON.stringify({ id, root: fixture.root, daemon: fixture.daemon.status(), tasks: fixture.daemon.tasks(), intent, task: intent && await fixture.server.tasks.get(intent.taskId), attempt: intent && await fixture.server.tasks.attempt(intent.taskId), ledger: fixture.ledger.snapshot() })); throw error;
+  });
   return fixture.adapter.sessions.get(host().core.intent(id)!.taskId)!;
 }
 async function finish(id: string, document: unknown = {}) {

@@ -1,0 +1,35 @@
+name: Diagnose release Unicode session
+on:
+  push:
+    branches: [codex/fix-release-unicode-session]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - uses: oven-sh/setup-bun@v2
+      - name: Build exact release source with failure-only diagnostics
+        run: bun ci && bun run build
+      - name: Repeat the real group-chat file without retries or timeout changes
+        env:
+          BYOK_SESSION_DIAGNOSTICS_DIR: ${{ runner.temp }}/unicode-session-evidence
+        run: |
+          mkdir -p "$BYOK_SESSION_DIAGNOSTICS_DIR"
+          cd examples/bot-collaboration
+          for attempt in $(seq 1 20); do
+            echo "Independent diagnostic invocation $attempt"
+            bun run test src/group-chat.test.ts || exit $?
+          done
+      - name: Retain failure state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unicode-session-evidence-${{ github.sha }}
+          path: ${{ runner.temp }}/unicode-session-evidence
+          if-no-files-found: ignore
