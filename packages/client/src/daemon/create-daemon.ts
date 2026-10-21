@@ -1,3 +1,4 @@
+import { resultReplyFailureFromState, resultReplyFailureReason } from './result-reply-failure';
 import type { OutboundStatus } from './outbound-settlement';
 import { terminalIdentity } from './terminal-identity';
 import { HarnessIdSchema, type HarnessInfo } from '@byok-sdk/protocol';
@@ -332,8 +333,13 @@ export interface DaemonConfig {
     hostStorageRoot: string;
     projection?: AgentHomeProjection;
   };
+  /** Task memory MCP admission. Absent/auto preserves platform-based admission; off disables both ordinary and prepared memory tools.
+   * This does not disable Agent-home guidance or explicit hosted projection/intent transports, and is not a filesystem sandbox. */
+  agentMemoryMcp?: 'auto' | 'off';
   /** Optional, one-way hosted projection. Without all guards it has zero network activity. */
   agentMemory?: AgentMemoryHostedProjection;
+  /** Absolute directory copied by copyAgentMemoryHelperAssets. Only SDK release assets are admitted; not a helper executable or digest override. */
+  agentMemoryHelperAssetRoot?: string;
   /**
    * Explicit composition for SDK-reserved MCP helpers when this daemon is
    * embedded in a single-file/SEA product executable. The product entrypoint
@@ -1300,8 +1306,17 @@ export function buildDaemonWithAdapters(
       'DaemonConfig.agentHome and DaemonConfig.gitWorkspace are mutually exclusive; Agent home is the only workspace authority for Agent offers',
     );
   }
+  if (config.agentMemoryMcp !== undefined && config.agentMemoryMcp !== 'auto' && config.agentMemoryMcp !== 'off') {
+    throw new Error('DaemonConfig.agentMemoryMcp must be auto or off when present');
+  }
+  const agentMemoryMcpEnabled = config.agentMemoryMcp !== 'off';
   if (config.agentMemory !== undefined && config.agentHome === undefined) {
     throw new Error('DaemonConfig.agentMemory requires DaemonConfig.agentHome for the exact Agent memory authority');
+  }
+  if (config.agentMemoryHelperAssetRoot !== undefined) {
+    if (config.agentHome === undefined) throw new Error('DaemonConfig.agentMemoryHelperAssetRoot requires agentHome');
+    // Explicit configuration must fail closed even without projection or intent transport.
+    resolveAgentMemoryFilesystemHelper(config.agentMemoryHelperAssetRoot);
   }
   if (Object.hasOwn(config, 'agentMemoryFilesystem')) {
     throw new Error('DaemonConfig.agentMemoryFilesystem is removed; an arbitrary helper is not admitted on this platform. Use the SDK release artifact.');
@@ -1312,22 +1327,23 @@ export function buildDaemonWithAdapters(
   // Platform support alone cannot admit memory. Compiled products and ordinary
   // JS builds can have Agent homes without the SDK native release assets.
   let resolveAgentMemoryFilesystemHelperBin: (() => string) | undefined;
-  if (config.agentHome !== undefined && isAgentMemoryFilesystemHelperSupported()) {
+  if (config.agentHome !== undefined && (agentMemoryMcpEnabled || config.agentMemory !== undefined || config.agentMemoryIntents !== undefined)
+    && isAgentMemoryFilesystemHelperSupported()) {
     try {
-      resolveAgentMemoryFilesystemHelper();
-      resolveAgentMemoryFilesystemHelperBin = resolveAgentMemoryFilesystemHelper;
+      resolveAgentMemoryFilesystemHelper(config.agentMemoryHelperAssetRoot);
+      resolveAgentMemoryFilesystemHelperBin = () => resolveAgentMemoryFilesystemHelper(config.agentMemoryHelperAssetRoot);
     } catch (error) {
-      if (config.agentMemory !== undefined || config.agentMemoryIntents !== undefined) throw error;
+      if (config.agentMemoryHelperAssetRoot !== undefined || config.agentMemory !== undefined || config.agentMemoryIntents !== undefined) throw error;
     }
   }
   const externalAgentMemoryFilesystem = resolveAgentMemoryFilesystemHelperBin !== undefined;
   if (config.agentMemory !== undefined && !isAgentMemorySecureFilesystemAvailable(externalAgentMemoryFilesystem)) {
     throw new Error('DaemonConfig.agentMemory requires a platform with safe descriptor-relative filesystem operations');
   }
-  const agentMemoryMcpBin = config.agentHome === undefined
+  const agentMemoryMcpBin = !agentMemoryMcpEnabled || config.agentHome === undefined
     ? undefined
     : resolveAgentMemoryMcpBin(externalAgentMemoryFilesystem, config.sdkHelperHost);
-  const agentMemoryDescribeBin = config.agentHome === undefined
+  const agentMemoryDescribeBin = !agentMemoryMcpEnabled || config.agentHome === undefined
     ? undefined
     : resolveAgentMemoryDescribeBin(externalAgentMemoryFilesystem, config.sdkHelperHost);
   const localAgentRelease = resolveLocalAgentReleaseIdentity(config.localAgentRelease);
@@ -1487,7 +1503,7 @@ export function buildDaemonWithAdapters(
    */
   const preparationRuntimeEnv = () => buildRuntimeEnv({ ambient: process.env });
   const preparedToolSurface = createPreparedToolSurfaceAssembler({
-    memoryAvailable: () => isAgentMemorySecureFilesystemAvailable(resolveAgentMemoryFilesystemHelperBin !== undefined),
+    memoryAvailable: () => agentMemoryMcpEnabled && isAgentMemorySecureFilesystemAvailable(resolveAgentMemoryFilesystemHelperBin !== undefined),
     toolsetRegistry,
     runtimeEnv: preparationRuntimeEnv,
     ...(agentMemoryDescribeBin === undefined ? {} : { agentMemoryDescribe: agentMemoryDescribeBin }),
@@ -2075,6 +2091,19 @@ export function buildDaemonWithAdapters(
     const journalIdentity: JournalIdentity | undefined = activeJournal
       ? { tenantId: record.tenantId, productId: config.productId, deviceId: record.deviceId }
       : undefined;
+    const resultReplyRecoveryTasks = new Map<string, { agentRef: AgentRef; contract: string }>();
+    const recordRecoveryFailure = async (task: import('./journal/journal').RecoverableTask, reason: string, interrupted = false) => {
+      const offer = decodeEnvelope(task.envelopeBytes);
+      const { agentRef } = offer.payload as { agentRef?: AgentRef };
+      const envelope = createEnvelope('task.fail', { reason, retryable: false,
+        ...terminalIdentity(task.claimedRuntime, agentRef),
+        ...(interrupted ? { recovery: { kind: 'daemon_interrupted' as const, offerId: offer.id } } : {}),
+      }, { taskId: task.taskId });
+      const bytes = encodeEnvelope(envelope);
+      await activeJournal!.recordTerminal({ taskId: task.taskId, terminalType: 'failed', bytes, payloadHash: journalHash(bytes),
+        truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString(),
+        recovery: { disposition: interrupted ? 'interrupted' : 'abandoned', reason } });
+    };
     if (activeJournal && journalIdentity) {
       const durableCursor = await cursorStore.load(config.serverUrl, record.deviceId) ?? 0;
       const recoveryTasks = await activeJournal.listRecoveryTasks(journalIdentity);
@@ -2092,18 +2121,14 @@ export function buildDaemonWithAdapters(
         if (task.localState === 'received' && task.seq > durableCursor) continue;
         const offer = decodeEnvelope(task.envelopeBytes);
         if (!isTaskOfferType(offer.type) || offer.task_id !== task.taskId) throw new Error('invalid durable recovery offer binding');
-        const payload = offer.payload as { agentRef?: AgentRef };
-        const terminal = createEnvelope('task.fail', {
-          reason: 'daemon_interrupted', retryable: false,
-          ...terminalIdentity(task.claimedRuntime, payload.agentRef),
-          recovery: { kind: 'daemon_interrupted', offerId: offer.id },
-        }, { taskId: task.taskId });
-        const bytes = encodeEnvelope(terminal);
-        await activeJournal.recordTerminal({
-          taskId: task.taskId, terminalType: 'failed', bytes, payloadHash: journalHash(bytes),
-          truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString(),
-          recovery: { disposition: 'interrupted', reason: 'daemon_interrupted' },
-        });
+        const payload = offer.payload as { agentRef?: AgentRef; messageEgress?: { mode: string; contract?: string }; terminalProjection?: { mode: string; contract?: string } };
+        const resultFailure = resultReplyFailureFromState(task.localState);
+        if (resultFailure && (payload.agentRef === undefined || payload.messageEgress?.mode !== 'required' || typeof payload.messageEgress.contract !== 'string'
+          || payload.terminalProjection?.mode !== 'result-document' || typeof payload.terminalProjection.contract !== 'string')) {
+          throw new Error('durable result-reply failure does not match its original offer');
+        }
+        if (resultFailure) { resultReplyRecoveryTasks.set(task.taskId, { agentRef: payload.agentRef!, contract: payload.messageEgress!.contract! }); continue; }
+        await recordRecoveryFailure(task, 'daemon_interrupted', true);
       }
     }
 
@@ -2309,6 +2334,27 @@ export function buildDaemonWithAdapters(
       });
     };
 
+    // Serialize the marker/acceptance handshake across inbound dispositions
+    // and turn_end. Acceptance evidence precedes deletion of the exact draft.
+    let resultReplyTransitionTail: Promise<void> = Promise.resolve();
+    const withReplyTransition = (write: () => Promise<void>): Promise<void> => {
+      const operation = resultReplyTransitionTail.then(write);
+      resultReplyTransitionTail = operation.catch(() => {});
+      return operation;
+    };
+    const recordReplyState = (taskId: string, failure?: import('./result-reply-failure').ResultReplyFailure): Promise<void> => {
+      return withReplyTransition(async () => {
+        if (!activeJournal || !journalIdentity) throw new Error('durable journal unavailable');
+        const task = await activeJournal.readTask(taskId, journalIdentity);
+        if (!task || task.localState.startsWith('terminal:')) return;
+        const priorFailure = resultReplyFailureFromState(task.localState);
+        const accepted = failure === undefined || task.localState === 'required-reply-accepted' || task.localState.endsWith('-accepted');
+        const kind = failure ?? priorFailure;
+        const state = kind === undefined ? 'required-reply-accepted' : `${kind}${accepted ? '-accepted' : ''}`;
+        await activeJournal.recordTransition({ transitionId: `result-reply:${taskId}:${state}`, taskId,
+          to: state, occurredAt: new Date().toISOString() });
+      });
+    };
     const deps: TaskRunnerDeps = {
       adapters,
       runtimeAllowlist: config.runtimeAllowlist,
@@ -2352,10 +2398,17 @@ export function buildDaemonWithAdapters(
       // the awaited outbound settlement, including terminal journal fsync.
       send: sendEnvelope,
       ...(config.durablePi !== true ? {} : { durablePi: true, recordDurableTransition: async (taskId: string, leaseId: string, kind: string, ordinal: number) => {
-        if (!activeJournal) throw new Error('durable journal unavailable');
-        await activeJournal.recordTransition({ transitionId: randomUUID(), taskId, to: 'running', occurredAt: new Date().toISOString(), detail: JSON.stringify({ kind, leaseId, ordinal }) });
+        await withReplyTransition(async () => {
+          if (!activeJournal || !journalIdentity) throw new Error('durable journal unavailable');
+          const task = await activeJournal.readTask(taskId, journalIdentity);
+          const to = task?.localState.startsWith('required-reply-') ? task.localState : 'running';
+          await activeJournal.recordTransition({ transitionId: randomUUID(), taskId, to,
+            occurredAt: new Date().toISOString(), detail: JSON.stringify({ kind, leaseId, ordinal }) });
+        });
       } }),
       ...(activeJournal === undefined ? {} : {
+        recordResultReplyFailure: (taskId, failure) => recordReplyState(taskId, failure),
+        recordAgentMessageAccepted: taskId => recordReplyState(taskId),
         beforeClaim: async (taskId: string, runtime: string) => {
           await activeJournal.recordAdmission({ taskId, admitted: true, claimedRuntime: runtime, decidedAt: new Date().toISOString() });
         },
@@ -2418,6 +2471,7 @@ export function buildDaemonWithAdapters(
       ...(agentMemoryMcpBin === undefined ? {} : { agentMemoryMcpBin }),
       ...(agentMemoryDescribeBin === undefined ? {} : { agentMemoryDescribeBin }),
       ...(resolveAgentMemoryFilesystemHelperBin === undefined ? {} : { resolveAgentMemoryFilesystemHelperBin }),
+      ...(config.agentMemoryHelperAssetRoot === undefined ? {} : { agentMemoryHelperAssetRoot: config.agentMemoryHelperAssetRoot }),
       ...(config.agentHome !== undefined && config.agentEgress !== undefined ? {
         agentMessageMcpBin: resolveAgentMessageMcpBin(config.sdkHelperHost),
         agentMessageMcpPreflight: preflightAgentMessageMcp,
@@ -2466,7 +2520,9 @@ export function buildDaemonWithAdapters(
     };
     runner = new TaskRunner(deps);
     if (config.agentHome !== undefined && config.agentEgress !== undefined) {
-      await runner.recoverAgentMessageOutboxes(path.join(config.agentHome.hostStorageRoot, 'agents'));
+      await runner.recoverAgentMessageOutboxes(path.join(config.agentHome.hostStorageRoot, 'agents'), resultReplyRecoveryTasks,
+        async taskId => activeJournal !== undefined && journalIdentity !== undefined
+          && (await activeJournal.readTask(taskId, journalIdentity))?.localState === 'terminal:cancelled');
     }
     // Both prerequisites survive process death in their existing authorities:
     // immutable terminal bytes in the journal and exact disposition in the outbox.
@@ -2474,6 +2530,20 @@ export function buildDaemonWithAdapters(
     // terminal close cloud admission while its message is still pending.
     const replayRecoveryTerminals = async (taskId?: string): Promise<void> => {
       if (!activeJournal || !journalIdentity) return;
+      for (const id of resultReplyRecoveryTasks.keys()) {
+        if (taskId !== undefined && taskId !== id) continue;
+        const task = await activeJournal.readTask(id, journalIdentity);
+        const failure = task && resultReplyFailureFromState(task.localState);
+        if (!task || !failure) { resultReplyRecoveryTasks.delete(id); continue; }
+        const state = runner?.recoveredAgentMessageState(id);
+        const accepted = task.localState.endsWith('-accepted');
+        if (!accepted && state !== 'refused') continue;
+        const offer = decodeEnvelope(task.envelopeBytes);
+        const payload = offer.payload as { agentRef?: AgentRef; terminalProjection: { contract: string } };
+        const reason = accepted ? resultReplyFailureReason(failure, payload.terminalProjection.contract) : 'required Agent message was refused';
+        await recordRecoveryFailure(task, reason);
+        resultReplyRecoveryTasks.delete(id);
+      }
       for (const terminal of await activeJournal.listPendingTerminals(journalIdentity)) {
         if (terminal.truthState !== 'pending' || (taskId !== undefined && terminal.taskId !== taskId)) continue;
         if (runner?.hasPendingRecoveredAgentMessage(terminal.taskId)) continue;
@@ -2737,7 +2807,17 @@ export function buildDaemonWithAdapters(
                   return;
                 }
               }
-              await runner?.handleEnvelope(envelope);
+              if (envelope.type === 'task.cancel' && envelope.task_id !== undefined && resultReplyRecoveryTasks.has(envelope.task_id)) {
+                const taskId = envelope.task_id;
+                const binding = resultReplyRecoveryTasks.get(taskId)!;
+                await runner!.cancelRecoveredAgentMessage(taskId, async () => {
+                  const task = await activeJournal.readTask(taskId, journalIdentity);
+                  sendEnvelope(createEnvelope('task.cancelled', { reason: envelope.payload.reason,
+                    ...terminalIdentity(task?.claimedRuntime, binding.agentRef) }, { taskId }));
+                  await terminalCommits.receipt(taskId);
+                });
+                resultReplyRecoveryTasks.delete(taskId);
+              } else await runner?.handleEnvelope(envelope);
               if (envelope.type === 'agent.message.disposition') {
                 // handleEnvelope fsyncs only an exact disposition before this
                 // gate opens. A crash before sending leaves the journal pending.
@@ -4160,7 +4240,7 @@ export function buildDaemonWithAdapters(
     if (!isAgentMemorySecureFilesystemAvailable(helperBin !== undefined)) return undefined;
     const backend = helperBin === undefined
       ? NATIVE_AGENT_MEMORY_INTENT_BACKEND
-      : helperAgentMemoryIntentBackend(helperBin);
+      : helperAgentMemoryIntentBackend(helperBin, config.agentMemoryHelperAssetRoot);
     if (!backend.strictLedgerBarrier) return undefined;
     if (helperBin !== undefined) {
       // Probe the actual branded volume before advertising. The helper open
@@ -4168,7 +4248,7 @@ export function buildDaemonWithAdapters(
       try {
         const canonicalHome = await fs.realpath(config.agentHome.hostStorageRoot);
         const stat = await fs.stat(canonicalHome, { bigint: true });
-        const probe = await openAgentMemoryFilesystemHelper({ helperBin, canonicalHome, homeIdentity: { dev: stat.dev, ino: stat.ino } });
+        const probe = await openAgentMemoryFilesystemHelper({ helperBin, assetRoot: config.agentMemoryHelperAssetRoot, canonicalHome, homeIdentity: { dev: stat.dev, ino: stat.ino } });
         await probe.close();
       } catch {
         return undefined;

@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2053644,
+      "budgetBytes": 2057010,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -353,7 +353,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private ACP runtime stack (Grok)",
-      "budgetBytes": 83640,
+      "budgetBytes": 83751,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1790,9 +1790,11 @@
         "@byok-sdk/core",
         "@byok-sdk/protocol",
         "@cfworker/json-schema",
+        "@hono/node-server",
         "crypto",
         "fs",
         "hono",
+        "http",
         "module",
         "path",
         "zod"
@@ -1800,6 +1802,7 @@
       "lazyImports": [],
       "thirdParty": [
         "@cfworker/json-schema",
+        "@hono/node-server",
         "hono",
         "zod"
       ],
@@ -1809,10 +1812,15 @@
         "workspace": [
           "crypto",
           "fs",
+          "http",
           "module",
           "path"
         ],
-        "thirdParty": []
+        "thirdParty": [
+          "node:http",
+          "node:http2",
+          "node:stream"
+        ]
       },
       "codegen": [
         {

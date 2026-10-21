@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { HermesModelSelection } from './hermes-adapter';
@@ -75,9 +76,9 @@ export async function ensureHermesRoot(root: string): Promise<void> {
   const file = path.join(root, 'config.yaml');
   if (await fs.readFile(file, 'utf8').catch(() => undefined) === ROOT_CONFIG) return;
   // Write then rename: a concurrent `hermes --version` never reads a truncated config with the update check on.
-  const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
+  const temporary = `${file}.${randomUUID()}.tmp`;
   try {
-    await fs.writeFile(temporary, ROOT_CONFIG, { mode: 0o600 });
+    await fs.writeFile(temporary, ROOT_CONFIG, { mode: 0o600, flag: 'wx' });
     await fs.rename(temporary, file);
   } catch (error) {
     await fs.rm(temporary, { force: true });

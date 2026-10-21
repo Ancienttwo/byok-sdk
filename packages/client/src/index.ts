@@ -559,3 +559,5 @@ export type {
 export type { OutboundStatus, OutboundRejection } from './daemon/outbound-settlement';
 export { createExecutionScratch, ScratchRootPathError } from './daemon/retention/scratch';
 export type { ExecutionScratch } from './daemon/retention/scratch';
+
+export { copyAgentMemoryHelperAssets, type CopyAgentMemoryHelperAssetsOptions } from './daemon/agent-memory-helper-release';

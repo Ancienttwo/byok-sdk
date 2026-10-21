@@ -52,6 +52,12 @@ describe.skipIf(process.platform !== 'darwin')('macOS native deployment admissio
     expect(await capture.surface!.resolveBinding({ requiredToolsets: [], agentMemory: 'none' })).toMatchObject({ ok: true });
   });
 
+  it('fails closed for an explicit asset root without projection or intent configuration', async () => {
+    capture.helper.mockImplementation(() => { throw new Error('SDK deployment digest mismatch'); });
+    expect(() => createDaemonWithAdapters({ ...config('/tmp/byok-explicit-assets'), agentMemoryHelperAssetRoot: '/tmp/product/assets' }, [])).toThrow('SDK deployment digest mismatch');
+    expect(capture.helper).toHaveBeenCalledWith('/tmp/product/assets');
+  });
+
   it('retains the explicit intent deployment refusal before advertising', async () => {
     capture.helper.mockImplementation(() => { throw new Error('SDK deployment digest mismatch'); });
     expect(() => createDaemonWithAdapters({ ...config('/tmp/byok-intent-admission'), agentMemoryIntents: {

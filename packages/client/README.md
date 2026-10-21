@@ -71,6 +71,24 @@ const daemon = createDaemon({
 });
 ```
 
+For macOS memory in a single-file product, copy the SDK release's native assets
+on the build machine (after `bun run build:release` when building the SDK itself):
+
+```ts
+import { copyAgentMemoryHelperAssets } from '@byok-sdk/client';
+await copyAgentMemoryHelperAssets({ outDir: 'release/memory-assets' });
+// At runtime, pass the absolute installed directory to createDaemon:
+// agentMemoryHelperAssetRoot: '/Applications/MyProduct.app/Contents/Resources/memory-assets'
+```
+
+The destination must be new or empty. Ship both binaries and `manifest.json`;
+product code signing may re-sign the selected binary. The SDK verifies target
+metadata and its signature-independent content digest before copying and on
+every helper open. An explicit missing or corrupt root fails closed. This
+checks deployment integrity, not signer identity. No helper path or digest
+override is exposed. Without this option, installed SDK asset resolution stays
+in effect. Windows memory remains unavailable.
+
 Pi uses the same re-entry: each Pi launch starts
 `<executable> [<entry>] __byok_sdk_helper <pi-rpc|pi-prepared|pi-durable>`.
 This is the supported way to ship official pi in a host download. The product
@@ -290,6 +308,27 @@ multiplexing is not provided. Agent files
 other than the SDK-reserved `.byok` namespace are opaque; there is no
 required `artifacts/` directory and the client does not parse or index their
 contents.
+
+## Daemon task memory admission
+
+`DaemonConfig.agentMemoryMcp` accepts `'auto'` (the default when absent) or
+`'off'`. A Host that owns its own memory tooling can keep `agentHome` while
+setting `agentMemoryMcp: 'off'`. Ordinary Agent tasks then receive no SDK memory
+MCP server and do not require adapter MCP support solely for memory, regardless
+of installed macOS helper assets or Linux native filesystem support.
+
+The switch also disables the prepared memory descriptor: preparing or executing
+`agentMemory: 'read'` / `'read-write'` is refused, never silently changed to
+`'none'`. A preparation selecting `'none'` remains supported. Other selected
+tools, message egress and result-document helpers keep their existing admission
+requirements. Invalid switch values fail construction.
+
+This controls SDK task memory tools, not filesystem permissions. Agent-home
+initialization, leases and instruction guidance remain unchanged; a runtime's
+native filesystem tools can still access files. Explicit `agentMemory` hosted
+projection and `agentMemoryIntents` transports are independent opt-ins with their
+existing platform checks. Omission of the switch preserves current behavior.
+Non-prepared per-task memory selection is not added by this change (see #614).
 
 ## Embedded Agent memory
 

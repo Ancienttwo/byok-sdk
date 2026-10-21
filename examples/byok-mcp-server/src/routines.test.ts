@@ -234,3 +234,40 @@ it('reads the RoutineSchedule rule in its own time zone and refuses any other ru
   expect(() => routineScheduleCalendar({ ...definition, timeZone: 'UTC' }, after)).toThrow('RoutineSchedule');
   expect(() => routineScheduleCalendar({ ...definition, rule: { anchorMs: 0, everyMs: 1 } }, after)).toThrow('RoutineSchedule');
 });
+
+it('retires every revoked-key routine before awaiting a slow wake cancellation', async () => {
+  const { host, core, ledger, spec, url } = await openRoutineHost();
+  const key = ledger.issueKey(spec());
+  const client = await connect({ url }, key.token);
+  const create = async (localId: string) => (await call(client, 'byok_routine_create',
+    { localId, schedule, task: { runtime: 'pi', instruction: 'Rotate the logs.' } })).value.routineId as string;
+  await create('first');
+  const secondId = await create('second');
+  const next = core.ledger.snapshot().routines[hostKey(secondId)]!.next!;
+  let release!: () => void;
+  let cancelling!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const entered = new Promise<void>(resolve => { cancelling = resolve; });
+  const cancel = host.server.wakes.cancel.bind(host.server.wakes);
+  vi.spyOn(host.server.wakes, 'cancel').mockImplementationOnce(async key => {
+    cancelling();
+    await gate;
+    return cancel(key);
+  });
+  let consuming: Promise<void> | undefined;
+  try {
+    ledger.revokeKey(key.key.keyId);
+    await entered;
+    // Model a due wake delivered while the first routine's external cancellation stalls.
+    // The real core records the occurrence synchronously, before waiting for its drain.
+    vi.setSystemTime(next.availableAt);
+    consuming = core.consume({ ...next, wakeId: 'revocation-race', deliveredAt: next.availableAt, delivery: 1 }, new AbortController().signal);
+    expect(Object.values(core.ledger.snapshot().occurrences).filter(row => row.routineId === secondId)).toEqual([]);
+    expect(core.ledger.snapshot().routines[hostKey(secondId)]?.lifecycle).toBe('completed');
+  } finally {
+    vi.useRealTimers();
+    release();
+    await consuming;
+    await vi.waitFor(() => expect(ledger.revokedRoutines()).toEqual([]));
+  }
+});
