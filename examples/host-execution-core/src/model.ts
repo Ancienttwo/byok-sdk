@@ -32,11 +32,21 @@ export interface Execution {
   attempt?: Attempt;
   terminal?: Terminal;
 }
-export interface RoutineDefinition {
+interface RoutineSchedule {
   id: string; version: number; timeZone: string; rule: Json;
-  execution: ExecutionTemplate; waitMs: number; lateAfterMs: number; retry?: RetryPolicy;
+  waitMs: number; lateAfterMs: number; retry?: RetryPolicy;
   endAt?: number;
 }
+export interface HostJobSpec { type: string; input: Json }
+export type AgentRoutineDefinition = RoutineSchedule & { execution: ExecutionTemplate; hostJob?: never };
+export type HostJobRoutineDefinition = RoutineSchedule & { hostJob: HostJobSpec; execution?: never };
+export type RoutineDefinition = AgentRoutineDefinition | HostJobRoutineDefinition;
+export interface HostJobRun {
+  type: string; input: Json; occurrenceKey: string; routineId: string; definitionVersion: number;
+  trigger: Occurrence['trigger']; attempt: number; signal: AbortSignal;
+}
+export interface HostJobResult { summary: Json; execution?: ExecutionTemplate }
+export type HostJobHandler = (run: HostJobRun) => HostJobResult | Promise<HostJobResult>;
 export interface Routine {
   definition: RoutineDefinition;
   lifecycle: 'active' | 'paused' | 'completed';
@@ -51,18 +61,20 @@ export interface Routine {
 export interface Occurrence {
   key: string; routineId: string; definitionVersion: number;
   trigger: { kind: 'scheduled' | 'catch_up'; plannedAt: number };
-  wakeKey: string; recordedAt: number; nextAt: number | null; intentId: string;
+  wakeKey: string; recordedAt: number; nextAt: number | null; intentId?: string;
+  job?: { attempts: number; summary?: Json; executionSuperseded?: true };
   attempts: number; conclusion?: Conclusion;
   slotReplayCount?: number;
 }
 export type Outbox =
+  | { kind: 'host-job'; occurrenceKey: string; lastError?: string }
   | { kind: 'intent'; intentId: string; lastError?: string }
   | { kind: 'schedule'; input: WakeScheduleInput; lastError?: string }
   | { kind: 'cancel-wake'; key: string; lastError?: string }
   | { kind: 'projection'; id: string; value: Json; lastError?: string };
 export interface IgnoredWakeAudit {
   at: number;
-  reason: 'unknown_key' | 'missing_routine' | 'inactive_routine' | 'reservation_mismatch';
+  reason: 'unknown_key' | 'stale_scan' | 'missing_routine' | 'inactive_routine' | 'reservation_mismatch';
   /** SHA-256 of canonical(dedupKey); raw keys, IDs and payloads are not retained. */
   wakeKeyHash: string;
 }
@@ -89,6 +101,24 @@ export function time(value: number): number {
   if (!Number.isSafeInteger(value) || value < 0) throw new Error('Time must be a nonnegative safe integer');
   return value;
 }
+/** Reject values that would change meaning when the ledger serializes them. */
+export function validateJson(value: unknown, ancestors = new Set<object>()): asserts value is Json {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean'
+    || typeof value === 'number' && Number.isFinite(value)) return;
+  if (typeof value !== 'object' || ancestors.has(value)
+    || !Array.isArray(value) && Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) {
+    throw new Error('Host job input and summary must be JSON');
+  }
+  ancestors.add(value);
+  if (Array.isArray(value)) {
+    if (Reflect.ownKeys(value).length !== value.length + 1) throw new Error('Host job input and summary must be JSON');
+    for (let i = 0; i < value.length; i++) validateJson(value[i], ancestors);
+  } else {
+    if (Reflect.ownKeys(value).length !== Object.keys(value).length) throw new Error('Host job input and summary must be JSON');
+    for (const item of Object.values(value)) validateJson(item, ancestors);
+  }
+  ancestors.delete(value);
+}
 export function validateInput(input: IntentInput): void {
   if (!input.key.trim() || !['user', 'bot', 'routine'].includes(input.source)) throw new Error('Invalid intent identity');
   time(input.waitUntil);
@@ -96,7 +126,9 @@ export function validateInput(input: IntentInput): void {
   if (!execution.deviceId || !execution.payload.agentRef?.agentId || !execution.payload.agentRef.profileRevision
     || !execution.payload.runtime || !execution.payload.egressPolicy || !execution.payload.terminalProjection
     || 'sessionRef' in execution.payload || 'taskId' in execution) throw new Error('Supply a complete fresh execution template');
-  const retry = input.retry ?? DEFAULT_RETRY;
+  validateRetry(input.retry ?? DEFAULT_RETRY);
+}
+export function validateRetry(retry: RetryPolicy): void {
   if (!Number.isSafeInteger(retry.maxAttempts) || retry.maxAttempts < 1 || retry.maxAttempts > 100
     || retry.delaysMs.length < retry.maxAttempts - 1 || typeof retry.retryFailures !== 'boolean') throw new Error('Invalid retry policy');
   retry.delaysMs.forEach(time);
