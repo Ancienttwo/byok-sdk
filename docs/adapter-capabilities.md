@@ -38,6 +38,104 @@ runtime name or using a custom harness does not inherit another adapter's pass.
 The trajectory evidence row has its own Pi evidence; see
 [Trajectory evidence](#trajectory-evidence).
 
+## User-level configuration and session isolation
+
+An Agent home sets the execution's working directory and projected persona; it
+is not a promise that the runtime reads only that directory. The standard
+[environment builder](../packages/client/src/daemon/environment.ts) inherits the
+Host process environment except `CLAUDECODE` and `BYOK_*`. Paths such as `HOME`,
+`XDG_*`, `GROK_HOME` and `CODEX_HOME` are not reset by that builder. Task-scoped
+MCP configuration, a fresh native session, folder trust and filesystem permission
+modes address different concerns; none alone establishes persona isolation.
+
+### Claude: user-level configuration
+
+The [Claude adapter](../packages/client/src/adapters/claude/claude-adapter.ts)
+adds task MCP servers with `--mcp-config`; it intentionally retains user settings,
+deny rules and hooks. It does not supply `--setting-sources` or isolate the user
+configuration directory. Upstream documents user instructions at
+`~/.claude/CLAUDE.md`, user rules under `~/.claude/rules/`, and user settings in
+`~/.claude/settings.json`, alongside project and managed configuration. See
+[Claude memory](https://code.claude.com/docs/en/memory) and
+[settings precedence](https://code.claude.com/docs/en/settings).
+These are upstream loading rules, not a new SDK live qualification. Restricting
+settings sources must not be advertised as proof that all instruction files or
+managed policies are excluded. The adapter exposes no qualified per-session
+“Agent home only” option.
+
+### Codex: user-level configuration
+
+The [Codex adapter](../packages/client/src/adapters/codex/codex-adapter.ts)
+starts the user's app server with the supplied environment. Native config remains
+in effect except for explicit adapter overrides such as sandbox and approval
+policy; `sandboxMode: 'inherit'` leaves even that sandbox choice to native config.
+Upstream documents user `config.toml` and global `AGENTS.override.md` / `AGENTS.md`
+under `CODEX_HOME` (normally `~/.codex`), with project instruction discovery added
+for the working directory. See [configuration](https://developers.openai.com/codex/config-basic)
+and [instruction discovery](https://developers.openai.com/codex/guides/agents-md).
+A per-thread MCP override is not an exclusion of those instruction sources. No
+SDK per-session user-rules exclusion has been qualified.
+
+### Grok: user-level configuration
+
+The [vendored launch profile](../packages/client/vendor/oar/60ad09b/runtimes/grok/session.ts)
+uses `agent --always-approve --no-leader stdio`; the adapter forwards the task
+environment. It does not disable home rules or compatibility scanning.
+Grok's [Project rules guide](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/12-project-rules.md)
+describes `$GROK_HOME/rules/` (normally `~/.grok/rules/`), enabled Claude and Cursor
+home rules, and `[paths] extra_rule_dirs`. These home sources apply across
+projects; extra directories are independent of folder trust. The
+[configuration guide](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/05-configuration.md)
+distinguishes `compat.claude.rules` from `compat.claude.agents`: disabling one is
+not a complete exclusion of the other or of generic top-level instruction names.
+The local extracted guide snapshot was checked for this documentation; it is
+upstream documentation evidence, not a live SDK prompt-contamination test.
+No new SDK trust, home relocation or rule-isolation option is provided here.
+
+### Pi: user-level configuration
+
+The ordinary [Pi RPC host](../packages/client/src/bin/pi-rpc-host.ts) deliberately
+loads the user's extensions and skills beside SDK extensions. Its task MCP launch
+file does not disable the normal resource loader or all ambient context sources.
+Credential custody and environment filtering also do not establish prompt
+isolation: the allowlisted environment retains home/config discovery paths.
+
+The [prepared Pi session](../packages/client/src/adapters/pi/prepared-session.ts)
+is different: it uses in-memory settings and disables discovered extensions,
+skills, prompt templates, themes and context files, supplying the sealed system
+prompt and SDK extension explicitly. This is an existing prepared-execution
+contract, not a toggle on ordinary Pi. The Host must put the intended Agent-home
+persona into the prepared input; the disabled context loader does not load
+`AGENTS.md` on the Host's behalf. Provider/auth/model resources and the durable Pi
+lane have separate contracts; this does not certify an OS-level sandbox.
+
+### Hermes: user-level configuration
+
+The [Hermes adapter](../packages/client/src/adapters/hermes/hermes-adapter.ts)
+removes ambient `HERMES_*` variables and supplies a fresh execution-specific
+`HERMES_HOME`. Its [profile builder](../packages/client/src/adapters/hermes/hermes-home.ts)
+writes SDK-owned configuration with Hermes memory and user-profile loading
+disabled, carrying only designated model metadata caches. This isolates that
+Hermes profile from the normal user home. It does not promise that arbitrary
+runtime tools, project files or the rest of the process environment are isolated.
+
+### Evidence and remaining qualification
+
+Existing offline evidence includes `environment.test.ts` (environment inheritance),
+`claude-adapter.test.ts` (additive MCP launch), `pi-rpc-host.test.ts`
+(user resources beside SDK extensions), `pi-prepared-tools.test.ts`
+(frozen tool surface), and
+`hermes-home.test.ts` (profile contents). These fixtures do not prove an installed
+CLI's entire prompt contains no user rules. This documentation change runs no
+provider, edits no global configuration and supplies no new isolation toggle.
+
+For a future “Agent home only” option, qualify the exact runtime version with
+synthetic user-rule and Agent-home markers, show user markers absent while the
+persona remains present, and cover resume behavior and credential discovery.
+Until then Hosts requiring that guarantee must treat the unsupported lanes as
+unqualified. [Issue #634](https://github.com/Ancienttwo/byok-sdk/issues/634)
+tracks that remaining work; adding persona text alone does not establish isolation.
+
 ## Grok
 
 `GrokAdapter` runs Grok Build over ACP: `grok agent --always-approve
