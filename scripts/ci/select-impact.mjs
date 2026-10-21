@@ -148,12 +148,13 @@ export const workspaceGraph = {
 };
 
 export const knownFamilies = Object.freeze([
-  'build-test', 'agent-memory-helper-linux', 'agent-memory-helper',
+  'build-test', 'agent-memory-export-linux', 'agent-memory-helper-linux', 'agent-memory-helper',
   'execution-recovery-native', 'adapter-lifecycle-smoke', 'dataplane',
   'windows-git-workspace', 'packageability-smoke', 'npm-release-pack',
   'release-pack-migrate', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
 ]);
 const clientFamilies = [
+  'agent-memory-export-linux',
   'agent-memory-helper-linux', 'agent-memory-helper', 'execution-recovery-native',
   'adapter-lifecycle-smoke', 'windows-git-workspace', 'packageability-smoke',
   'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
