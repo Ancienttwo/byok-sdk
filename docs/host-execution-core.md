@@ -530,3 +530,48 @@ defines the unimplemented two-process relay. The
 embedded SDK evidence from synthetic runtime and downstream gaps. Hosted
 `submitAgentExecution`, two Topology L Host processes and paid Pi acceptance
 remain open. Product PRD Q19 does not waive the cross-device §14.2 rows.
+
+## Required reply ingestion
+
+Install the core's bound `consumeMessage` callback as `agentMessage.consume` and
+provide a synchronous `applyMessage(input, tx)` option. For example:
+
+```ts
+const core = new HostExecutionCore(server, ledger, {
+  applyMessage(input, tx) {
+    tx.publish(`reply:${input.taskId}`, { body: input.payload.body });
+    return { outcome: 'accepted' };
+  },
+});
+// The server consumer can forward to core.consumeMessage after construction.
+```
+
+K4 checks tenant, device, Agent reference and message context against the frozen
+execution before invoking the hook. The SDK still validates message payloads,
+contracts and wire admission. Unknown tasks return `unknown_task`; a new message
+for an older execution generation returns `stale_generation`. Binding mismatches
+return `binding_mismatch`, and a different message id or content hash after first
+acceptance returns `message_conflict`. An absent hook returns
+`message_handler_unconfigured`.
+
+The hook's application changes, projections and accepted receipt share one SQLite
+transaction. Throwing or returning a Promise rolls the transaction back. Do not
+perform external I/O; use `tx.publish` and `flushProjections`. The hook receives a
+copy of the intent and cannot retain usable publish authority after returning.
+A refusal can persist business refusal/audit state but must not publish a reply.
+
+A committed exact accepted replay returns `accepted` without calling the hook,
+even after the intent advances to another generation. It cannot recreate an
+already uploaded projection. This handles interruption after the Host commit but
+before the SDK stores its disposition. External projection delivery is still
+at-least-once; the receiving service must deduplicate the projection id.
+
+Receipts live on execution records, at most one per execution, and are removed
+with acknowledged history by explicit ledger compaction. Replay after removal is
+`unknown_task`. K8 reuses this admission method while keeping its business reply
+and delivery records. During reopen it promotes existing K8 receipts only when
+the retained turn/execution relationship is valid; conflicting or unexplained
+orphan records fail closed. Proven retired intents may retain business receipts
+without recreating execution acceptance. Legacy receipts did not store a second
+copy of device/Agent/context, so promotion does not reconstruct those values;
+incoming replay is checked against the retained frozen execution.

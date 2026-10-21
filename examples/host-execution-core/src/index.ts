@@ -1,5 +1,5 @@
 export { HostExecutionCore } from './core';
-export type { ExecutionServer, HostOptions, OutcomeTransaction } from './core';
+export type { ExecutionServer, HostOptions, OutcomeTransaction, AgentMessageInput, MessageDecision, MessageTransaction } from './core';
 export { HostLedger, MIN_TOMBSTONE_RETENTION_MS } from './ledger';
 export type { CompactionOptions, CompactionResult, TombstoneKind } from './ledger';
 export { nextIntervalOccurrence } from './schedule';

@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { ByokServer, ByokServerEvent, DueWake } from '@byok-sdk/server';
+import type { ByokServer, ByokServerEvent, CreateByokServerOptions, DueWake } from '@byok-sdk/server';
 import { MemoryBlockedError, type HostMemoryPage, type MemoryBinding } from './memory';
 import { HostLedger } from './ledger';
 import { canonical, hash, project, taskId, time, validateInput, type Attempt, type Intent, type IntentInput,
@@ -22,6 +22,14 @@ export interface OutcomeTransaction {
   application: Record<string, Json>;
   publish(id: string, value: Json): void;
 }
+export type AgentMessageInput = Parameters<NonNullable<CreateByokServerOptions['agentMessage']>['consume']>[0];
+export type MessageDecision = { outcome: 'accepted' | 'refused'; reasonCode?: string };
+export interface MessageTransaction {
+  readonly intent: Readonly<Intent>;
+  /** Synchronous business updates share the receipt/projection commit. No external I/O. */
+  application: Record<string, Json>;
+  publish(id: string, value: Json): void;
+}
 export interface HostOptions {
   memory?: HostMemoryPage;
   now?: () => number;
@@ -29,6 +37,7 @@ export interface HostOptions {
   nextOccurrence?: NextOccurrence;
   /** Coalesced post-commit hint. May enqueue/flush reentrantly; failures retain projections. */
   onOutbox?: (signal: AbortSignal) => void | Promise<void>;
+  applyMessage?: (input: AgentMessageInput, transaction: MessageTransaction) => MessageDecision;
   applyOutcome?: (document: unknown, transaction: OutcomeTransaction) => void;
 }
 
@@ -92,6 +101,45 @@ export class HostExecutionCore {
     });
   }
   intent(key: string): Intent | undefined { return this.ledger.snapshot().intents[hash(key)]; }
+  /** Install directly as agentMessage.consume; SDK owns payload/schema admission. */
+  readonly consumeMessage = async (input: AgentMessageInput): Promise<MessageDecision> => {
+    this.assertOpen();
+    return this.ledger.transaction(state => {
+      const refuse = (reasonCode: string): MessageDecision => ({ outcome: 'refused', reasonCode });
+      const execution = state.executions[input.taskId];
+      if (!execution) return refuse('unknown_task');
+      const frozen = execution.input;
+      if (input.tenant !== this.ledger.tenant || input.deviceId !== frozen.deviceId
+        || canonical(input.payload.agentRef) !== canonical(frozen.payload.agentRef)
+        || canonical(input.context) !== canonical(frozen.agentMessageContext)) return refuse('binding_mismatch');
+      const receipt = execution.messageReceipt;
+      if (receipt) return receipt.messageId === input.payload.messageId && receipt.contentHash === input.payload.contentHash
+        ? { outcome: 'accepted' } : refuse('message_conflict');
+      const intent = Object.values(state.intents).find(row => row.taskId === input.taskId);
+      if (!intent) return refuse('stale_generation');
+      if (!this.options.applyMessage) return refuse('message_handler_unconfigured');
+      let open = true;
+      let decision: MessageDecision;
+      try {
+        decision = this.options.applyMessage(structuredClone(input), {
+          intent: structuredClone(intent), application: state.application,
+          publish: (id, value) => {
+            if (!open) throw new Error('Message transaction is closed');
+            project(state, id, value);
+          },
+        });
+        if (decision && typeof (decision as unknown as { then?: unknown }).then === 'function') {
+          void Promise.resolve(decision).catch(() => {});
+          throw new Error('Message hook must return a synchronous decision');
+        }
+        if (!decision || !['accepted', 'refused'].includes(decision.outcome)) throw new Error('Message hook must return a synchronous decision');
+      } finally { open = false; }
+      if (decision.outcome === 'accepted') execution.messageReceipt = {
+        messageId: input.payload.messageId, contentHash: input.payload.contentHash,
+      };
+      return decision;
+    });
+  };
   async enqueue(input: IntentInput): Promise<Intent> {
     this.assertOpen();
     this.ledger.transaction(state => enqueue(state, this.ledger.tenant, input));

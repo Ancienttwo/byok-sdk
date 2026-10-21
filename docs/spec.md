@@ -531,6 +531,20 @@ or deduplication authority; committed occurrence replay and current scan wakes
 keep their existing behavior. This is the audit slice of #612, not Host job
 registration or execution-free occurrences.
 
+### K4 Host reply transaction
+
+The copy-and-own Host execution core exposes `consumeMessage` for the server's
+Agent message consumer. Admission checks the exact frozen tenant/device/Agent/
+context binding, then commits a synchronous Host `applyMessage` hook and a single
+execution-owned message-id/content-hash receipt with its projections. Exceptions
+and asynchronous hooks roll back. Accepted replay does not invoke the hook or
+recreate projections, including after generation advance; a first delivery for
+an old generation is refused. Explicit acknowledged-history compaction removes
+these receipts with executions; a retired task is then unknown. K8 uses this
+common admission while preserving its business reply arbitration and channel
+outbox. See [Host reply ingestion](host-execution-core.md#required-reply-ingestion)
+for legacy receipt validation and the external delivery idempotency boundary.
+
 ### Embedded wake queue
 
 Only `@byok-sdk/server` provides `wake: { consume(wake, signal) }` and

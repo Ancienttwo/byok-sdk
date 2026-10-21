@@ -1,8 +1,9 @@
 import { admitBotToolsets, ownReadOnlyToolsets } from './toolset-policy';
+import { promoteReplyReceipts } from './reply-receipts';
 import type { BotTurnOutcome, ResultSchema, UpdateRoutineAction } from '@byok-sdk/protocol';
 import { BOT_TURN_OUTCOME_CONTRACT, BotTurnOutcomeSchemaError, validateResultOutcome } from '@byok-sdk/protocol';
 import type { ByokServer, CreateByokServerOptions, DueWake } from '@byok-sdk/server';
-import { HostExecutionCore, type ExecutionServer, type OutcomeTransaction } from '@byok-sdk/example-host-execution-core';
+import { HostExecutionCore, type ExecutionServer, type OutcomeTransaction, type MessageTransaction } from '@byok-sdk/example-host-execution-core';
 import { HostLedger } from '@byok-sdk/example-host-execution-core';
 import { hash, project, time, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
 import { enqueue } from '@byok-sdk/example-host-execution-core';
@@ -14,7 +15,7 @@ import { abandonDelegation, applyDelegate, arbitrateCancel, BOT_REPLY_MAX_BYTES,
   settleDelegations, type DelegationTimers } from './delegation';
 import { arm, consumeRoutine, createRoutine, lifecycle, operation, owned, switchVersion, updateRoutine } from './routines';
 
-import { activeBot, applyManagement, requireMain, roomFields, same, updateBot, roomVisibility } from './team';
+import { activeBot, applyManagement, requireMain, roomFields, updateBot, roomVisibility } from './team';
 import { advanceRooms, applySpeech, memberPresent, roomInput, type Mentions } from './rooms';
 import type { RoomFields } from '@byok-sdk/protocol';
 
@@ -107,9 +108,11 @@ export class BotCollaboration {
     this.timers = { cancelGraceMs: time(options.cancelGraceMs ?? DEFAULT_CANCEL_GRACE_MS), uncertainAfterMs: time(options.uncertainAfterMs ?? REPLY_UNCERTAIN_AFTER_MS) };
     if (this.timers.cancelGraceMs < 1 || this.timers.uncertainAfterMs < 1) throw new Error('Invalid delegation timers');
     this.core = new HostExecutionCore(server, ledger, { now: this.now, reconcileMs: 100,
+      applyMessage: (input, tx) => this.applyMessage(input, tx),
       applyOutcome: (document, tx) => this.applyOutcome(document, tx) });
     ledger.transaction(s => {
       const state = stateOf(s.application);
+      promoteReplyReceipts(ledger, s, state, this.now());
       state.team.bots[options.botId] ??= { id: options.botId, name: 'Main Bot', role: 'Team owner', persona: '',
         model: Object.keys(this.models())[0]!, mainBot: true, archived: false,
         revision: options.execution.payload.agentRef.profileRevision, readyRevision: options.execution.payload.agentRef.profileRevision,
@@ -311,35 +314,30 @@ export class BotCollaboration {
    */
   async consumeMessage(input: AgentMessageInput): Promise<{ outcome: 'accepted' | 'refused'; reasonCode?: string }> {
     if (this.closed) throw new Error('Bot Host is closed');
-    let queued = false;
-    const result = this.ledger.transaction(s => {
-      const state = stateOf(s.application);
-      const refuse = (reasonCode: string) => ({ outcome: 'refused' as const, reasonCode });
-      const prior = state.replies[input.taskId];
-      if (prior) return prior.messageId === input.payload.messageId && prior.contentHash === input.payload.contentHash ? { outcome: 'accepted' as const } : refuse('message_conflict');
-      const intent = Object.values(s.intents).find(row => row.taskId === input.taskId);
-      if (!intent) return refuse(s.executions[input.taskId] ? 'stale_generation' : 'unknown_task');
-      const frozen = s.executions[input.taskId]!.input, turn = state.turns[intent.key];
-      if (!turn || input.tenant !== this.ledger.tenant || input.deviceId !== frozen.deviceId
-        || !same(input.payload.agentRef, frozen.payload.agentRef) || !same(input.context, frozen.agentMessageContext)) return refuse('binding_mismatch');
-      const delegation = turn.delegationId ? state.delegations[turn.delegationId] : undefined;
-      if (delegation?.verdict) {
-        state.audit.push(`Delegation message after verdict: ${delegation.id} ${input.taskId}`);
-        return refuse('delegation_resolved');
-      }
-      // Cancel and first acceptance meet in this transaction boundary (§8.8).
-      if (delegation?.cancel?.targetTurnId === turn.id) {
-        state.audit.push(`Delegation message after cancel: ${delegation.id} ${input.taskId}`);
-        return refuse('delegation_cancelled');
-      }
-      if (delegation && Buffer.byteLength(input.payload.body, 'utf8') > BOT_REPLY_MAX_BYTES) return refuse('reply_too_large');
-      state.replies[input.taskId] = { turnId: turn.id, messageId: input.payload.messageId, contentHash: input.payload.contentHash,
-        contentType: input.payload.contentType, acceptedAt: this.now(), ...(delegation ? { body: input.payload.body } : {}) };
-      if (this.options.channel) queued = !!queueDelivery(s, state, turn, input.taskId, input.payload.messageId, input.payload.body, this.now());
-      return { outcome: 'accepted' as const };
-    });
-    if (queued) queueMicrotask(() => { if (!this.closed) void this.drain().catch(() => {}); });
+    const result = await this.core.consumeMessage(input);
+    if (result.outcome === 'accepted') queueMicrotask(() => { if (!this.closed) void this.drain().catch(() => {}); });
     return result;
+  }
+  private applyMessage(input: AgentMessageInput, tx: MessageTransaction): { outcome: 'accepted' | 'refused'; reasonCode?: string } {
+    const state = stateOf(tx.application);
+    const refuse = (reasonCode: string) => ({ outcome: 'refused' as const, reasonCode });
+    const turn = state.turns[tx.intent.key];
+    if (!turn) return refuse('binding_mismatch');
+    const delegation = turn.delegationId ? state.delegations[turn.delegationId] : undefined;
+    if (delegation?.verdict) {
+      state.audit.push(`Delegation message after verdict: ${delegation.id} ${input.taskId}`);
+      return refuse('delegation_resolved');
+    }
+    // Cancel and first acceptance meet in this transaction boundary (§8.8).
+    if (delegation?.cancel?.targetTurnId === turn.id) {
+      state.audit.push(`Delegation message after cancel: ${delegation.id} ${input.taskId}`);
+      return refuse('delegation_cancelled');
+    }
+    if (delegation && Buffer.byteLength(input.payload.body, 'utf8') > BOT_REPLY_MAX_BYTES) return refuse('reply_too_large');
+    state.replies[input.taskId] = { turnId: turn.id, messageId: input.payload.messageId, contentHash: input.payload.contentHash,
+      contentType: input.payload.contentType, acceptedAt: this.now(), ...(delegation ? { body: input.payload.body } : {}) };
+    if (this.options.channel) queueDelivery(this.ledger.snapshot(), state, turn, input.taskId, input.payload.messageId, input.payload.body, this.now());
+    return { outcome: 'accepted' as const };
   }
   /**
    * Owner API ("Cancel", §8.8), from A's delegation chip or from B's `bot_request` Turn.
