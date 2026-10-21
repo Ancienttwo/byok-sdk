@@ -278,10 +278,13 @@ describe('required Codex native projection', () => {
     expect(s.output[1]).not.toHaveProperty('output.exitCode');
     expect(s.output.at(-1)?.type).toBe('turn_end');
   });
-  it('required projection failure escapes the kernel consumer; the native fact remains retained', () => {
+  it('a projection failure stays inside the kernel observer; the native fact remains retained', () => {
+    // The kernel swallows observer errors, so the adapter's record consumer fails the session itself.
     const projection = new CodexProjection('/workspace', 'root');
-    const kernel = createSessionKernel('root', {
-      onRecord: (r) => projection.consume(kernel, r, () => {}),
+    const kernel = createSessionKernel('root');
+    const failures: unknown[] = [];
+    kernel.rawEvents((r) => {
+      try { projection.consume(kernel, r, () => {}); } catch (error) { failures.push(error); throw error; }
     });
     const body = {
       type: 'item/started',
@@ -289,7 +292,9 @@ describe('required Codex native projection', () => {
       events: [],
       origin: 'byok-native',
     };
-    expect(() => kernel.frame(body)).toThrow(RuntimeExecutionFailure);
+    expect(() => kernel.frame(body)).not.toThrow();
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toBeInstanceOf(RuntimeExecutionFailure);
     expect(kernel.records()).toHaveLength(1);
   });
 });

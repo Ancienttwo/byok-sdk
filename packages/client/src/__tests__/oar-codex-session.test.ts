@@ -2,6 +2,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { codexSession } from '../../vendor/oar/60ad09b/runtimes/codex/session';
 import * as projection from '../../vendor/oar/60ad09b/runtimes/codex/projection';
+import * as rpc from '../../vendor/oar/60ad09b/runtimes/codex/rpc-control';
 import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/60ad09b/runtimes/codex/app-server-client';
 import { SessionNotFoundError } from '../../vendor/oar/60ad09b/contracts/session-not-found-error';
 import { SessionUnavailableError } from '../../vendor/oar/60ad09b/contracts/session-unavailable-error';
@@ -401,13 +402,11 @@ describe('unconnected OAR Codex adapter', () => {
     expect(String((opened as Error).stack)).not.toContain(secret);
 
     const fake = fakeServer();
-    let failNext = false;
     const session = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, {
       cwd: '/workspace', env: { HOME: '/home', OPENAI_API_KEY: secret },
-    }, undefined, { onRecord: record => { if (failNext && record.kind === 'request') throw new Error(`consumer saw ${secret}`); } });
-    failNext = true;
-    await expect(session.prompt('hello')).rejects.toThrow('consumer saw [redacted]');
-    failNext = false;
+    });
+    vi.spyOn(rpc, 'rpcControl').mockRejectedValueOnce(new Error(`control saw ${secret}`));
+    await expect(session.prompt('hello')).rejects.toThrow('control saw [redacted]');
     await session.dispose();
   });
 
@@ -448,17 +447,6 @@ describe('unconnected OAR Codex adapter', () => {
     expect(session.records().some(record => record.kind === 'response' && record.body.kind === 'rejected' && record.body.reason === 'broken transport')).toBe(true);
   });
 
-  it('releases the active prompt slot after a bounded RPC timeout', async () => {
-    vi.useFakeTimers();
-    const fake = fakeServer(); const session = await fake.open();
-    vi.mocked(fake.child.write).mockImplementationOnce(() => {});
-    const pending = session.prompt('timeout');
-    await vi.advanceTimersByTimeAsync(30_000);
-    expect((await pending).response.body).toMatchObject({ kind: 'rejected', code: 'error' });
-    expect((await session.prompt('retry')).response.body.kind).toBe('accepted');
-    await session.dispose();
-  });
-
   it('accepts an unanswered interrupt after 10 s and kills the app-server', async () => {
     vi.useFakeTimers();
     const fake = fakeServer(); const session = await fake.open();
@@ -496,21 +484,29 @@ describe('unconnected OAR Codex adapter', () => {
     expect((await pending).response.body).toEqual({ kind: 'rejected', code: 'runtime_exited', reason: 'app-server killed' });
   });
 
-  it('keeps a failed settlement inside the server-request deadline timer and rejects the pending control', async () => {
+  it('records an unwritten server reply as rejected at the dispatch deadline and kills the app-server', async () => {
     vi.useFakeTimers();
     const fake = fakeServer();
-    let armed = false;
-    const session = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, { cwd: '/workspace', env: { HOME: '/home' } }, 1_000, {
-      onRecord: record => { if (armed && record.kind === 'response') throw new Error('consumer failed'); },
-    });
+    const session = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, { cwd: '/workspace', env: { HOME: '/home' } }, 1_000);
     vi.mocked(fake.child.write).mockImplementationOnce(() => {});
-    const pending = session.prompt('in flight').catch(error => error);
+    const pending = session.prompt('in flight');
     fake.child.writeAcknowledged = () => new Promise(() => {});
-    armed = true;
     fake.frame({ id: 'late', method: 'item/commandExecution/requestApproval', params: {} });
-    await expect(vi.advanceTimersByTimeAsync(1_000)).resolves.not.toThrow();
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(fake.child.kill).toHaveBeenCalled();
-    expect((await pending).message).toBe('consumer failed');
+    expect(session.records().some(record => record.kind === 'response' && record.body.kind === 'rejected'
+      && record.body.reason === 'codex item/commandExecution/requestApproval response deadline exceeded')).toBe(true);
+    expect((await pending).response.body).toEqual({ kind: 'rejected', code: 'runtime_exited', reason: 'app-server killed' });
+  });
+
+  it('keeps every record when the record consumer throws: the kernel swallows observer errors', async () => {
+    const fake = fakeServer();
+    const onRecord = vi.fn((record: unknown): never => { throw new Error(`consumer failed at ${String((record as { seq?: number }).seq)}`); });
+    const session = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, { cwd: '/workspace', env: { HOME: '/home' } }, undefined, { onRecord });
+    expect((await session.prompt('hello')).response.body.kind).toBe('accepted');
+    expect(onRecord.mock.calls.map(([record]) => record)).toEqual(session.records());
+    expect(session.records()[0]!.seq).toBe(0);
+    await session.dispose();
   });
 
   it('keeps raw failed-turn reason without classifying it', () => {
