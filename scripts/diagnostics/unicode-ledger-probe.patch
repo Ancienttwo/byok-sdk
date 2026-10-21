@@ -1,0 +1,42 @@
+--- a/examples/bot-collaboration/src/group-chat.test.ts
++++ b/examples/bot-collaboration/src/group-chat.test.ts
+@@ -1,4 +1,5 @@
+ import { readFile, stat } from 'node:fs/promises';
++import { performance } from 'node:perf_hooks';
+ import { join } from 'node:path';
+ import { afterEach, expect, it, vi } from 'vitest';
+ import { openTeam, type TestTeam } from './team.test-support';
+@@ -290,7 +291,32 @@
+   expect(context.historyWindow.omittedMessages).toBe(2);
+   expect(context.historyWindow.currentRequestBytes).toBe(Buffer.byteLength(turn.request, 'utf8'));
+   expect(Buffer.byteLength(contextSection!, 'utf8') + context.historyWindow.currentRequestBytes).toBeLessThanOrEqual(HISTORY_MAX_BYTES);
+-  await running(seat.id);
++  const ledger = fixture.ledger;
++  const originalTransaction = ledger.transaction;
++  type TransactionState = Parameters<Parameters<typeof originalTransaction>[0]>[0];
++  let transactionCount = 0;
++  let transactionMs = 0;
++  const transactionSpy = vi.spyOn(ledger, 'transaction').mockImplementation(function<T>(
++    this: typeof ledger, apply: (state: TransactionState) => T,
++  ): T {
++    const began = performance.now();
++    transactionCount++;
++    try { return originalTransaction.call(this, apply) as T; }
++    finally { transactionMs += performance.now() - began; }
++  });
++  const loopBefore = performance.eventLoopUtilization();
++  try {
++    await running(seat.id);
++  } finally {
++    transactionSpy.mockRestore();
++    const loop = performance.eventLoopUtilization(loopBefore);
++    console.log('BYOK_UNICODE_LEDGER ' + JSON.stringify({
++      transactionCount,
++      transactionMs: Math.max(0, transactionMs),
++      eventLoopActiveMs: Math.max(0, loop.active),
++      eventLoopIdleMs: Math.max(0, loop.idle),
++    }));
++  }
+   await finish(seat.id, { speech: { kind: 'post', text: 'The complete current request was available.' } });
+   expect(seats(round)[0]!.status).toBe('post');
+ });

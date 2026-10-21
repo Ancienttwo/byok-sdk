@@ -45,3 +45,8 @@ After39573901588: basic94/group14passed, no residual allowlistedprocess or dist
 change; measured gap adapterprepare464ms→start3223ms. Next experiment runs only
 the singleUnicodecase, adding home-acquire/initialize/resultstore/manifest/claim
 stages to locate that2759ms gap. No repeat basic/package/fullmatrix.
+
+Following near-boundary4956ms trace, singlecase adds test-only ledger transaction
+count/synchronousduration plus eventloopactive/idle measurements around original
+running() wait. Spy delegates originalthis/return/throw and restores in finally.
+Only four finite nonnegative numbers exported. No assertion/timeout change.

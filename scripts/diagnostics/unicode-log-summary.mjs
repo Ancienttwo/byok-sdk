@@ -15,6 +15,16 @@ for (const name of readdirSync(source).filter(name => /^(install|build|group-cha
   result.push(`phase=${name.slice(0, -4)}`);
   for (const raw of readFileSync(join(source, name), 'utf8').split('\n')) {
     const line = raw.replace(/\x1b\[[0-9;]*m/g, '');
+    const ledgerMarker = line.indexOf('BYOK_UNICODE_LEDGER ');
+    if (ledgerMarker >= 0) {
+      try {
+        const value = JSON.parse(line.slice(ledgerMarker + 'BYOK_UNICODE_LEDGER '.length));
+        const fields = ['transactionCount', 'transactionMs', 'eventLoopActiveMs', 'eventLoopIdleMs'];
+        if (fields.every(key => typeof value[key] === 'number' && Number.isFinite(value[key]) && value[key] >= 0)) {
+          result.push('BYOK_UNICODE_LEDGER ' + JSON.stringify(Object.fromEntries(fields.map(key => [key, value[key]]))));
+        }
+      } catch { /* Reject malformed probe data. */ }
+    }
     const stageMarker = line.indexOf('BYOK_UNICODE_STAGE ');
     if (stageMarker >= 0) {
       try {

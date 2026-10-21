@@ -62,12 +62,14 @@ jobs:
           git apply ../diagnostic/scripts/diagnostics/unicode-failure-state.patch
           git apply --check ../diagnostic/scripts/diagnostics/unicode-admission-stages.patch
           git apply ../diagnostic/scripts/diagnostics/unicode-admission-stages.patch
+          git apply --check ../diagnostic/scripts/diagnostics/unicode-ledger-probe.patch
+          git apply ../diagnostic/scripts/diagnostics/unicode-ledger-probe.patch
           {
             git rev-parse HEAD
             node --version
             bun --version
             bun --revision
-            sha256sum ../diagnostic/scripts/diagnostics/unicode-failure-state.patch ../diagnostic/scripts/diagnostics/unicode-admission-stages.patch "$BUN_PATH" | cut -d' ' -f1
+            sha256sum ../diagnostic/scripts/diagnostics/unicode-failure-state.patch ../diagnostic/scripts/diagnostics/unicode-admission-stages.patch ../diagnostic/scripts/diagnostics/unicode-ledger-probe.patch "$BUN_PATH" | cut -d' ' -f1
           } > "$RUNNER_TEMP/unicode-summary/identity.txt"
       - name: Install frozen dependencies
         run: |
