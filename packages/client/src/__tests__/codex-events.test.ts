@@ -298,3 +298,27 @@ describe('required Codex native projection', () => {
     expect(kernel.records()).toHaveLength(1);
   });
 });
+
+it('retains native MCP identity on start, completion and interrupted closure without inferring builtins', () => {
+  const s = setup();
+  const item = { type: 'mcpToolCall', id: 'mcp1', server: 'market__feed', tool: 'get__quote', arguments: {} };
+  s.feed('item/started', { item });
+  s.feed('item/completed', { item: { ...item, result: {}, status: 'completed' } });
+  s.feed('item/started', { item: { ...item, id: 'mcp2' } });
+  s.feed('turn/completed', { turn: { status: 'interrupted' } });
+  const tools = s.output.filter(e => e.type === 'tool_use' || e.type === 'tool_result');
+  expect(tools).toHaveLength(4);
+  for (const event of tools) expect(event).toHaveProperty('mcp', { server: 'market__feed', tool: 'get__quote' });
+  const native = setup();
+  native.feed('item/started', { item: { type: 'commandExecution', id: 'shell', command: 'mcp__market__feed__get__quote' } });
+  expect(native.output[0]).not.toHaveProperty('mcp');
+});
+
+it('uses native MCP completion metadata even without a matching start', () => {
+  const s = setup();
+  s.feed('item/completed', { item: { type: 'mcpToolCall', id: 'only-result', server: 'quotes', tool: 'get', result: {}, status: 'completed' } });
+  expect(s.output).toMatchObject([{ type: 'tool_result', mcp: { server: 'quotes', tool: 'get' } }]);
+  const unknown = setup();
+  unknown.feed('item/started', { item: { type: 'mcpToolCall', id: 'missing', arguments: { server: 'untrusted', tool: 'guess' } } });
+  expect(unknown.output[0]).not.toHaveProperty('mcp');
+});

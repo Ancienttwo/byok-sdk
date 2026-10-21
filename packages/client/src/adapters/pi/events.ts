@@ -1,3 +1,4 @@
+import type { McpEventIdentities } from '../../mcp/event-identity';
 import { PREPARED_GATE_REFUSAL_CODES } from './prepared-prompt-frame';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { RuntimeExecutionFailure } from '../../runtime-failure';
@@ -95,7 +96,7 @@ function mapPiAssistantUsage(msg: PiRpcMessage): Extract<AgentEvent, { type: 'us
  * host (`bin/pi-prepared-host.ts`, which runs the same `runRpcMode` loop) both
  * reach this one mapper through `PiSession`.
  */
-export function mapPiMessageToAgentEvent(msg: PiRpcMessage): AgentEvent | undefined {
+export function mapPiMessageToAgentEvent(msg: PiRpcMessage, identities?: McpEventIdentities): AgentEvent | undefined {
   switch (msg.type) {
     case 'prepared_run_refused': {
       const valid = typeof msg.code === 'string'
@@ -121,7 +122,8 @@ export function mapPiMessageToAgentEvent(msg: PiRpcMessage): AgentEvent | undefi
     case 'tool_execution_start': {
       const toolCallId = requireToolCallId(msg);
       if (typeof msg.toolName !== 'string') return undefined;
-      return { type: 'tool_use', tool: msg.toolName, input: msg.args, toolCallId };
+      const mcp = identities?.get(msg.toolName);
+      return { type: 'tool_use', ...(mcp === undefined ? {} : { mcp }), tool: msg.toolName, input: msg.args, toolCallId };
     }
 
     case 'tool_execution_end': {
@@ -130,6 +132,7 @@ export function mapPiMessageToAgentEvent(msg: PiRpcMessage): AgentEvent | undefi
       if (typeof msg.toolName !== 'string') return undefined;
       const event: Extract<AgentEvent, { type: 'tool_result' }> = {
         type: 'tool_result',
+        ...(identities?.get(msg.toolName) === undefined ? {} : { mcp: identities.get(msg.toolName)! }),
         tool: msg.toolName,
         output: { result: msg.result },
         toolCallId,
