@@ -28,7 +28,8 @@ describe('keys Pi model catalog against the pinned pi-ai', () => {
   it('is generated from the pi-ai the client pins, with no drift', async () => {
     expect(PI_MODEL_CATALOG_PI_AI_VERSION).toBe(clientManifest.byok.piRuntimePin);
     expect(PI_MODEL_CATALOG_PI_AI_VERSION).toBe(clientManifest.dependencies['@earendil-works/pi-ai']);
-    expect(readFileSync(PI_MODEL_CATALOG_FILE, 'utf8')).toBe(await renderPiModelCatalog());
+    // A Windows checkout may convert the file to CRLF; only the content is compared.
+    expect(readFileSync(PI_MODEL_CATALOG_FILE, 'utf8').replaceAll('\r\n', '\n')).toBe(await renderPiModelCatalog());
   });
 
   it("mirrors Pi's thinking levels", () => {

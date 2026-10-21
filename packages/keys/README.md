@@ -43,8 +43,8 @@ the base URL or the model name. An `anthropic` profile always projects
 `@byok-sdk/keys/pi-catalog`, returns the `pi_model` for one entry of the pi-ai catalog that
 `@byok-sdk/client` pins. `PI_MODEL_CATALOG_PI_AI_VERSION` names that pi-ai
 version. The table is a checked-in generated file. When the client pin of
-pi-ai changes, run `bun run generate:pi-model-catalog`; a client test fails
-until the file matches the pinned pi-ai. This package does not read pi-ai at
+pi-ai changes, run `bun scripts/keys/generate-pi-model-catalog.ts`; a client
+test fails until the file matches the pinned pi-ai. This package does not read pi-ai at
 run time.
 
 ```ts

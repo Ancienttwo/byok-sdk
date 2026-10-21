@@ -11,7 +11,7 @@
 - **Feature (keys)** — add `piModelConfigFromPinnedCatalog` and
   `PI_MODEL_CATALOG_PI_AI_VERSION` on the new `@byok-sdk/keys/pi-catalog`
   export (#636). The table is generated from the
-  pinned `@earendil-works/pi-ai` with `bun run generate:pi-model-catalog`, and
+  pinned `@earendil-works/pi-ai` with `bun scripts/keys/generate-pi-model-catalog.ts`, and
   a client test fails on drift. An entry is returned exactly or refused with its
   blocking fields; an entry without a complete `thinkingLevelMap` is refused.
   `PiModelConfigSchema.compat` accepts `supportsStrictMode`,
