@@ -56,8 +56,8 @@ verbatim with no re-validation:
 ```ts
 const result = await cloud.readTaskResult(tenantId, taskId);
 if (result === undefined) {
-  // No terminal fact yet. A declined task records none — read the attempt
-  // status with `readTaskAttempt(tenant, taskId)` for that case.
+  // No terminal fact and no Host cancellation yet. A decline is a terminal:
+  // it reads back as `failed` with its `code`.
 } else if (result.state === 'failed' && result.retryable) {
   // re-offer
 }
@@ -97,5 +97,12 @@ or the Node/Postgres listener from `@byok-sdk/cloud-dataplane`. The default
 fallback is `DEFAULT_MAILBOX_WAKE_FALLBACK_MS` (5 seconds). There is no interval
 option or alternate polling hold. Append and cancellation hints are emitted
 only after their store commits; direct writes to naked stores rely on fallback.
+
+## Hosted Host contract
+
+A Topology H Host on Cloudflare Workers follows the
+[hosted Host contract](../../docs/hosted-host-contract.md). It maps each task
+state to a Host action. It also gives the rescan, wake, message consume, idle
+cost and retention rules.
 
 Runtime dependencies and size budgets: [entry dependency contract](../../README.md#entry-dependencies).

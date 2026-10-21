@@ -23,7 +23,7 @@ Memory storage loses its wakes at exit. The daemon runs with the user's local cr
 Use the server package's [identity-stable loopback listener](../packages/server/README.md#identity-stable-loopback-listener)
 with an immutable Host-owned port assignment to preserve the daemon's cursor URL across restarts.
 Topology H has no device-local Host. Its service schedules calls to the Cloud fresh-execution API.
-The embedded wake queue is not a hosted scheduler.
+The embedded wake queue is not a hosted scheduler. A Topology H Host on Cloudflare Workers also follows the [hosted Host contract](hosted-host-contract.md).
 Neither topology runs BYOK work in the cloud or keeps the user's model keys there.
 
 An IM channel is a Host adapter. See the [Host IM adapter guide](host-im-adapter.md).
