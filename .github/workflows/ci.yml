@@ -1362,7 +1362,7 @@ jobs:
   ci-required:
     name: CI required
     if: ${{ always() }}
-    needs: ["build-test", "agent-memory-helper-linux", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-git-workspace", "packageability-smoke", "npm-release-pack", "release-pack-migrate", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit"]
+    needs: ["build-test", "agent-memory-export-linux", "agent-memory-helper-linux", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-git-workspace", "packageability-smoke", "npm-release-pack", "release-pack-migrate", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit"]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -1374,5 +1374,5 @@ jobs:
       - name: Require every CI job family to succeed
         env:
           CI_NEEDS: ${{ toJSON(needs) }}
-          CI_REQUIRED_JOBS: '["build-test", "agent-memory-helper-linux", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-git-workspace", "packageability-smoke", "npm-release-pack", "release-pack-migrate", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit"]'
+          CI_REQUIRED_JOBS: '["build-test", "agent-memory-export-linux", "agent-memory-helper-linux", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-git-workspace", "packageability-smoke", "npm-release-pack", "release-pack-migrate", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit"]'
         run: node scripts/ci/require-ci-success.mjs

@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2053644,
+      "budgetBytes": 2069201,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -152,7 +152,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Embedded Agent memory service",
-      "budgetBytes": 67427,
+      "budgetBytes": 68657,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -290,7 +290,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Tools-only MCP Streamable HTTP framing",
-      "budgetBytes": 34179,
+      "budgetBytes": 36476,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1116,7 +1116,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Cloud coordination and HTTP handlers",
-      "budgetBytes": 533880,
+      "budgetBytes": 534369,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1169,7 +1169,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 783752,
+      "budgetBytes": 784241,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1661,7 +1661,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Wire schemas and codecs; codegen negative control",
-      "budgetBytes": 127572,
+      "budgetBytes": 127926,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1813,7 +1813,7 @@
           "crypto",
           "fs",
           "http",
-            "path"
+          "path"
         ],
         "thirdParty": [
           "node:http",
@@ -1867,7 +1867,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 562140,
+      "budgetBytes": 562629,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

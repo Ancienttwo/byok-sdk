@@ -499,3 +499,40 @@ it('stateless mode rejects malformed JSON and byte limits before invoking tools'
   expect(response.status).toBe(200);
   expect(callTool).not.toHaveBeenCalled();
 });
+
+
+describe('combined stateless HTTP progress lifecycle', () => {
+  it.each(['complete', 'cancel', 'close', 'overflow'])('retains the request core until stream %s', async ending => {
+    let signal!: AbortSignal; let report!: (value: number, total?: number, message?: string) => void; let finish!: () => void;
+    const mcp = createMcpHttpServer({ ...defaults, origin: 'http://localhost', sessionMode: 'stateless', maxInFlight: 1,
+      callTool: call => { signal = call.signal; report = call.progress; return new Promise(resolve => { finish = () => resolve({ content: [] }); }); } });
+    const request = (id: number, method: string, params?: unknown) => new Request('http://localhost/mcp', { method: 'POST', headers: {
+      'content-type': 'application/json', accept: 'application/json, text/event-stream', 'mcp-protocol-version': '2025-11-25',
+    }, body: JSON.stringify({ jsonrpc: '2.0', id, method, params }) });
+    try {
+      const response = await mcp.fetch(request(1, 'tools/call', { name: 'echo', _meta: { progressToken: 0 } }));
+      expect(response.headers.get('mcp-session-id')).toBeNull();
+      expect(response.headers.get('content-type')).toBe('text/event-stream');
+      await vi.waitFor(() => expect(report).toBeTypeOf('function'));
+      expect(signal.aborted).toBe(false);
+      const reader = response.body!.getReader();
+      report(1);
+      expect(new TextDecoder().decode((await reader.read()).value)).toContain('"progressToken":0,"progress":1');
+      expect((await mcp.fetch(request(2, 'ping'))).status).toBe(503);
+      if (ending === 'complete') {
+        finish();
+        expect(new TextDecoder().decode((await reader.read()).value)).toContain('"result":{"content":[]}');
+        expect((await reader.read()).done).toBe(true);
+        expect((await mcp.fetch(request(3, 'ping'))).status).toBe(200);
+      } else if (ending === 'cancel') {
+        await reader.cancel(); expect(signal.aborted).toBe(true); finish();
+      } else {
+        if (ending === 'close') mcp.close();
+        else for (let i = 2; i < 9; i++) { report(i, undefined, 'x'.repeat(800_000)); await new Promise<void>(resolve => setImmediate(resolve)); }
+        expect(signal.aborted).toBe(true);
+        await expect(reader.read()).rejects.toThrow(/MCP stream terminated/); finish();
+      }
+      expect(() => report(2)).not.toThrow();
+    } finally { finish?.(); mcp.close(); }
+  });
+});
