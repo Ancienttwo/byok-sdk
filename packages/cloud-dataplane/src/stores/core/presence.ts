@@ -186,10 +186,6 @@ export class PostgresPresenceStore implements PresenceStore {
     return result.rows.map(toHint);
   }
 
-  #expiry(ttlMs: number): string {
-    return new Date(this.#clock.now().getTime() + ttlMs).toISOString();
-  }
-
   #now(): string {
     return this.#clock.now().toISOString();
   }
