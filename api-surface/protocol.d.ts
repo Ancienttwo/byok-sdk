@@ -1819,6 +1819,10 @@ export {};
 export * from './version';
 export * from './task-state';
 export * from './capability-constants';
+/** Maximum raw UTF-8 content bytes in one local Host Agent-memory export; no truncation. */
+export declare const AGENT_MEMORY_MAX_SNAPSHOT_BYTES: number;
+/** Maximum memory files in one local Host export, including MEMORY.md. */
+export declare const AGENT_MEMORY_MAX_SNAPSHOT_FILES = 128;
 // ==== @byok-sdk/protocol dist/envelope.d.ts ====
 import { z } from 'zod';
 import { type MessageType } from './messages';

@@ -9,13 +9,17 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
   const beforeText = execFileSync('git', ['show', `${base}:${path}`], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   const afterText = readFileSync(resolve(cwd, path), 'utf8');
   if (path === '.gitattributes') {
-    // #603's generated pin is compared byte-for-byte with an LF projection.
-    // Git attribute syntax is line based; permit only this exact additive rule.
+    // #603 pins both generated metadata and native build input bytes.
+    // Admit only the reviewed additive LF rules, never unrelated attributes.
     const rule = 'packages/client/src/daemon/agent-memory-helper-release-pin.ts text eol=lf\n';
     const before = beforeText.replace(/\r\n/g, '\n');
     const after = afterText.replace(/\r\n/g, '\n');
-    if (before.includes(rule) || after !== before + rule) {
-      throw new Error('Reviewed release validation required: only the reviewed helper pin LF attribute may be added');
+    const nativeRules = 'packages/client/native/agent-memory-fs/*.go text eol=lf\n'
+      + 'packages/client/native/agent-memory-fs/go.mod text eol=lf\n';
+    const additions = [rule, nativeRules, rule + nativeRules];
+    if (!additions.some(addition => after === before + addition
+      && addition.trimEnd().split('\n').every(line => !before.split('\n').includes(line)))) {
+      throw new Error('Reviewed release validation required: only the reviewed helper LF attributes may be added');
     }
     return;
   }

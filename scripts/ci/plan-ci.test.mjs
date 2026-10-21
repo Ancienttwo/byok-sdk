@@ -65,3 +65,24 @@ test('CI policy and runbook changes take the contract-only lane', () => {
   assert.deepEqual(plan.dirs, []); assert.deepEqual(plan.families, []);
   assert.equal(plan.reason, 'root-ci-scripts');
 });
+
+
+test('native memory export is required for client and protocol impact and skipped for docs', () => {
+  const id = 'agent-memory-export-linux';
+  for (const event of ['pull_request', 'push']) {
+    for (const file of ['packages/client/src/daemon/agent-memory-export.ts', 'packages/protocol/src/constants.ts']) {
+      const plan = planCi({ event, sha, paths: [file] });
+      assert.ok(plan.families.includes(id));
+      assert.doesNotThrow(() => requireCiPlan(results(plan), plan, event, sha));
+      for (const result of ['failure', 'cancelled', 'skipped', undefined]) {
+        assert.throws(() => requireCiPlan({ ...results(plan), [id]: { result } }, plan, event, sha), /did not succeed/);
+      }
+      const missing = results(plan); delete missing[id];
+      assert.throws(() => requireCiPlan(missing, plan, event, sha), /inventory mismatch/);
+    }
+    const docs = planCi({ event, sha, paths: ['README.md'] });
+    assert.equal(results(docs)[id].result, 'skipped');
+    assert.throws(() => requireCiPlan({ ...results(docs), [id]: { result: 'success' } }, docs, event, sha), /Unselected CI job/);
+  }
+  assert.ok(planCi({ event: 'workflow_dispatch', sha, approvedSha: sha }).families.includes(id));
+});

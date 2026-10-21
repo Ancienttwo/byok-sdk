@@ -103,3 +103,28 @@ fix and passed after it. CI tests plus agent-memory-helper-source tests: 52 pass
 zero skipped. Actual helper builds and independent arm64/x64 reproducibility plus
 pin checks passed locally. Windows standard-user end-to-end remains hosted CI
 validation, not a result established on this Mac.
+
+## Windows native input correction (job 119194933944)
+
+The follow-up job at 87e9f9ec passed the pin's LF representation check but
+revealed a second checkout input mismatch: native Go files and go.mod still
+received CRLF. The child-stderr section shows sourceDigest 66d328868316f087cf31a6b1fdaca1b7dc53816c6ece07ac62d970e4df0a95c3
+against pinned e39988d883a3925d884e387cf92b5e7585d612ec07b7cc9dce607656a55e8ce2,
+and different arm64/x64 binary digests. Native reproducibility within that
+checkout passed; it did not establish agreement with the canonical source pin.
+
+A real core.autocrlf=true checkout reproduced that exact source digest locally.
+Added LF attributes for the helper's .go files and go.mod, preserving raw-byte
+source hashing, binary digest checks and the exact generated pin assertion.
+Extended the content-sensitive CI rule solely for those reviewed attributes.
+Existing tests are unchanged; new regressions check real native input checkout
+and refusal of unrelated attribute edits.
+
+Merged main 9f3414c9672c764149e999611c0fb7670b5637f9, including #644. Resolved
+closure budget conflicts using measured merged output: client 2,061,452 bytes,
+agent-memory 68,197 bytes, with generated README projection synchronized.
+
+Local validation: 55 CI/source tests and 16 helper tests passed without skips;
+full build:release (after real autocrlf checkout of native inputs), independent
+arm64/x64 rebuilds, strict pin check, workspace typecheck, API surface and version
+authority passed. Windows lowpriv end-to-end execution remains hosted evidence.

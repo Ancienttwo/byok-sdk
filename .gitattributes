@@ -11,3 +11,5 @@ api-surface/*.d.ts text eol=lf
 /README.md text eol=lf
 packages/*/package.json text eol=lf
 packages/client/src/daemon/agent-memory-helper-release-pin.ts text eol=lf
+packages/client/native/agent-memory-fs/*.go text eol=lf
+packages/client/native/agent-memory-fs/go.mod text eol=lf

@@ -2010,6 +2010,48 @@ Busy, containment, hook, fsync, transport, or readback mismatch leaves the
 cursor at its prior value and redelivers after reconnect/restart. No fake task,
 runtime, session, terminal event, or task journal record is created.
 
+Local Host memory export is a separate, explicitly enabled in-process API.
+`DaemonConfig.agentMemoryExport: true` exposes
+`daemon.exportAgentMemory(agentRef, { signal })`; without that opt-in the method
+is absent. It does not add a control socket command, wire capability, upload,
+restore, task, runtime, or projection callback. The daemon need not be started
+or paired. The Host owns authorization, destination, encryption, and retention
+of the returned raw content; it must never pass this result to the redacted
+projection port or log its contents.
+
+Export validates the complete requested AgentRef and holds the existing
+canonical-home writer lease through capture and helper shutdown. A competing
+writer fails with retryable `AgentHomeBusyError`; no partial snapshot is returned.
+If a durable applied profile projection exists, its revision must exactly match
+the request. Otherwise the request remains Host-supplied identity metadata:
+`requestedAgentRef` is not evidence of the globally current profile revision.
+`appliedProfileRevision` is returned only when that local evidence exists. No new
+persistent profile binding is invented for an empty or ordinary task-written home.
+
+Task-free initialization preserves the existing home and creates an empty
+`MEMORY.md` when absent, without invoking Host projection hooks. Capture uses the
+same pinned filesystem and admitted memory-path policy as memory recall/save:
+`MEMORY.md` and safe Markdown paths under `notes/`, not arbitrary home files,
+`.byok` state, credentials, or opaque unsupported note paths. Linux uses native
+pinned descriptors; macOS requires the verified SDK release helper and its
+strict volume barriers. Windows remains unavailable pending its separate proof.
+The protocol exports `AGENT_MEMORY_MAX_SNAPSHOT_FILES` (128, including MEMORY.md)
+and `AGENT_MEMORY_MAX_SNAPSHOT_BYTES` (1 MiB total UTF-8 content). Existing 256 KiB
+per-file and 512 directory-entry bounds still apply. Limit/validation failures
+reject the whole operation, never truncate; aggregate file/byte limits use
+`AgentMemorySnapshotLimitError`. I/O and invalid files fail closed.
+
+A successful export returns immutable `files` with exact `path`, SHA-256
+`revision`, `byteCount`, and UTF-8 `content`, plus `totalBytes` and `snapshotDigest`.
+The digest is `sha256:` plus lowercase hexadecimal SHA-256 of the UTF-8 JSON
+encoding of `["byok-agent-memory-export.v1", [[path, revision, byteCount], ...]]`.
+Paths use ascending ASCII byte order, independent of locale. Content is covered
+by each revision; Agent identity and profile metadata are deliberately excluded
+so identical memory trees have identical digests. Cancellation is checked before
+acquiring, after initialization, between file reads, and before return; it does
+not interrupt an in-flight native filesystem call. Helper and lease cleanup run
+on success, abort, and error. This API alone makes no cross-device restore claim.
+
 Host-approved memory intents are another task-free control. The Host approves
 one exact `replace` or `delete` of one memory file and remains the only approval
 authority; the device-local `MEMORY.md` and `notes/**` remain the only memory
