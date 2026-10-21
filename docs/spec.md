@@ -3056,11 +3056,13 @@ An explicit `storage.scratchRoot` must pass validation; an excessive length fail
 Legacy shared-temp prefixes are an operator-invoked migration: doctor inventories exact production names, and only `doctor --fix --yes` with a stopped daemon deletes matching, same-uid real directories. SDK startup never scans shared OS temp. Remove this one-shot scanner in the next minor release. See `docs/migrations/client-retention-399.md` for removed APIs and Host migration.
 
 
-### K8 Host-declared read-only toolsets
+## K8 Host-declared read-only toolsets (#606)
 
 The copy-and-own Bot collaboration example refuses required toolsets by default.
 A Host may declare an immutable `readOnlyToolsets` list of logical IDs, enforced
-across initial/model templates, restored Bots, creation, update and enqueue.
+across initial/model templates, restored non-archived Bots, creation, update and
+enqueue. The list governs Bot turns only; a Host that calls the K4 core directly
+uses its own authority.
 The daemon still owns concrete tool definitions and ordinary capability admission.
 Only the Host's local tool service can enforce actual read-only behavior; model
 annotations are not authorization. External effects retain owner-confirmed Host

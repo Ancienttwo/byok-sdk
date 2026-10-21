@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Fixed (examples)** — the Bot collaboration Host now checks only
+  non-archived Bot templates against the read-only toolset allowlist when it
+  reopens. The stored template of an archived Bot no longer blocks reopening.
+  Outstanding frozen work of any Bot is still checked. A missing Bot model has
+  its own error text. The README states that the allowlist governs Bot turns only.
+  The Host's direct `bot.core.enqueue` call bypasses it. This completes the five
+  low-severity follow-ups of #622; #606 stays open.
+
 ## 0.28.1 / @byok-sdk/keys 0.13.1 — source candidate
 
 The owner selected 0.28.1 as a one-release exception to the default pre-1.0
