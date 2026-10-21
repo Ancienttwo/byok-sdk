@@ -1,3 +1,4 @@
+import { admitBotToolsets } from './toolset-policy';
 import type { BotTurnOutcome, CreateBotAction, RoomFields, UpdateBotAction } from '@byok-sdk/protocol';
 import { hash, canonical, type ExecutionTemplate } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState } from './model';
@@ -26,11 +27,12 @@ function projection(state: CollaborationState, bot: BotProfile): void {
       agentRef: { agentId: bot.id, profileRevision: bot.revision }, projectionHash: `sha256:${hash(value)}`, projection: value },
   } });
 }
-export function createBot(state: CollaborationState, taskId: string, action: CreateBotAction, models: Record<string, ExecutionTemplate>): BotProfile {
+export function createBot(state: CollaborationState, taskId: string, action: CreateBotAction, models: Record<string, ExecutionTemplate>, readOnlyToolsets: readonly string[] = []): BotProfile {
   if (!NEW_BOTS.includes(action.localId as typeof NEW_BOTS[number])) throw new Error('Unknown local Bot slot');
   if (Object.values(state.team.bots).filter(b => !b.archived).length >= 24) throw new Error('Team Bot limit is 24');
   const base = models[action.model];
-  if (!base || base.payload.requiredToolsets?.length) throw new Error('Unavailable model or connector toolset');
+  if (!base) throw new Error('Unavailable model or connector toolset');
+  admitBotToolsets(base, readOnlyToolsets);
   const id = hash([taskId, action.localId]);
   if (state.team.bots[id]) throw new Error('Duplicate local Bot slot');
   const execution = structuredClone(base);
@@ -41,11 +43,12 @@ export function createBot(state: CollaborationState, taskId: string, action: Cre
   projection(state, bot);
   return bot;
 }
-export function updateBot(state: CollaborationState, action: UpdateBotAction, models: Record<string, ExecutionTemplate>): void {
+export function updateBot(state: CollaborationState, action: UpdateBotAction, models: Record<string, ExecutionTemplate>, readOnlyToolsets: readonly string[] = []): void {
   const bot = activeBot(state.team, action.botId);
   if (!['name', 'role', 'persona', 'model'].some(k => k in action)) throw new Error('An update must change a Bot field');
   const model = action.model ?? bot.model, base = models[model];
-  if (!base || base.payload.requiredToolsets?.length) throw new Error('Unavailable model or connector toolset');
+  if (!base) throw new Error('Unavailable model or connector toolset');
+  admitBotToolsets(base, readOnlyToolsets);
   const revision = (BigInt(bot.revision) + 1n).toString();
   if (BigInt(revision) > 9223372036854775807n) throw new Error('Profile revision limit');
   const execution = structuredClone(base);
@@ -71,11 +74,11 @@ export function roomVisibility(room: Room, members: readonly string[]): Record<s
   ]));
 }
 export function applyManagement(state: CollaborationState, actor: string, taskId: string, outcome: BotTurnOutcome,
-  models: Record<string, ExecutionTemplate>, accept: (action: string, work: () => void) => void): void {
+  models: Record<string, ExecutionTemplate>, accept: (action: string, work: () => void) => void, readOnlyToolsets: readonly string[] = []): void {
   const team = state.team, local: Record<string, string> = {};
   const managed = (kind: string, work: () => void) => accept(kind, () => { requireMain(team, actor); work(); });
-  outcome.create_bot?.forEach(action => managed('create_bot', () => { local[action.localId] = createBot(state, taskId, action, models).id; }));
-  outcome.update_bot?.forEach(action => managed('update_bot', () => updateBot(state, action, models)));
+  outcome.create_bot?.forEach(action => managed('create_bot', () => { local[action.localId] = createBot(state, taskId, action, models, readOnlyToolsets).id; }));
+  outcome.update_bot?.forEach(action => managed('update_bot', () => updateBot(state, action, models, readOnlyToolsets)));
   outcome.delete_bot?.forEach(action => managed('delete_bot', () => {
     activeBot(team, action.botId).archived = true;
     for (const room of Object.values(team.rooms)) {

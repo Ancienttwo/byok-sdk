@@ -72,3 +72,34 @@ tests, build/type/API/version gates and new integration fixture are the local va
 Logs from this session: `/tmp/byok-626-public-baseline.log`, `/tmp/byok-626-public-patched.log`,
 `/tmp/byok-626-sea.log`, `/tmp/byok-626-{server,client,keys}-tests.log`, and the corresponding build,
 typecheck, API and version logs. No user databases, credentials or installed Node binary were modified.
+
+## Main integration qualification (2026-10-21)
+
+Fresh `lane/pr640b` integrates main `80a340836fe38abec718e2980d39d91b33964ac4`
+into PR head `2aef5b4a7ad76f1078355e8243ce78186d39d08d` by normal merge.
+The prior worktree was not used. Main still uses the three old SQLite loaders;
+#651 explicitly excludes #640 and #662 only changes release artifact handling.
+This change is not superseded.
+
+The workflow conflict preserves both the SQLite SEA smoke and main's Bun
+loopback/MCP tests. The entry inventory retains main's `http` dependency and
+removes the obsolete SQLite `module` dependency. The merged client closure is
+2,057,080 bytes, exactly 70 bytes above main's budget. With explicit owner
+approval, only that budget was raised to the measured value; the standard
+`bun run check:api-surface -- --update` regenerated the README table. Dependency
+prohibitions and all other budgets remain unchanged.
+
+Historical push run 39538980190 has one group-chat Unicode assertion failure
+and three cancelled macOS jobs (the inspected SEA job has no steps or log).
+PR run 39539031353 succeeded on the same original head. Main brings the existing
+startup-observation and mailbox-fixture repairs; this integration changes no
+tests relative to main and does not claim proof of the old CI failure's trigger.
+
+Fresh Node 24.18.0 / Bun 1.4.3 verification: build, typecheck, API surface and
+version authority passed. Full `bun run test` exited zero; Vitest summaries total
+10,092 passed and 252 existing conditional skips, including optional dataplane
+substrate/platform tests. Focused server SQLite/loopback (268), client journal
+(86), keys SQLite (21), group-chat including lost hints (15), and MCP loopback (1)
+all passed. ESM and CJS each emitted `BYOK_SQLITE_BUNDLE_OK`. Local SEA was not
+repeated because the documented Homebrew fuse limitation is unchanged. Fresh
+hosted CI on the merge commit remains separate evidence. Logs: `/tmp/pr640b-*.log`.

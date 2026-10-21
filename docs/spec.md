@@ -14,6 +14,11 @@ the waiting call signal; only the Host task API cancels a task.
 The Host authenticates each caller before selecting its separate transport instance.
 The transport validates Origin against trusted configuration and bounds bodies,
 sessions, active calls and optional SSE queues. It owns no key or task ledger.
+The default stateful mode retains caller sessions. Explicit `sessionMode: 'stateless'`
+uses a request-scoped tools-only core without session IDs or affinity. The Host
+authenticates and authorizes every request; Origin, protocol and body validation
+remain enforced. Stateless mode has no SSE, session expiry/DELETE invalidation
+or cross-request cancellation. It does not add an external session store.
 See [the HTTP contract](mcp-server-http.md) for lifecycle and resource limits.
 
 The [B2 Host reference](../examples/byok-mcp-server/README.md) supplies a separate
@@ -193,18 +198,25 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.28.0`; publication requires separate release
+aligned dispatch release is `0.28.1`; publication requires separate release
 authorization and registry readback. The current independent keys release is
-`0.13.0`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.28.0`, proven from an isolated standard npm install rather
+`0.13.1`; its packed and published `@byok-sdk/core` edge must be the exact current
+dispatch release, `0.28.1`, proven from an isolated standard npm install rather
 than the workspace graph.
 
-0.28.0 / keys 0.13.0 is an unpublished source candidate. Both are MINOR
-releases. The train adds public adapters, Bot outcome fragments, schedules
-and an MCP HTTP transport. keys adds Pi API and catalog fields.
-The memory helper configuration has a pre-1.0 breaking cut.
-See the [candidate notes](releases/v0.28.0.md). Publication requires the
-accepted final-commit CI artifact and separate owner authorization.
+For this release only, the owner's 2026-10-21 instruction to continue the
+0.28.1 release selects PATCH despite the included additive APIs and persistence
+changes. This explicit exception does not change the general policy above or
+waive validation, publication authorization, or registry readback. keys 0.13.1
+updates its exact packed core dependency; keys remains independently versioned.
+See the [0.28.1 candidate notes](releases/v0.28.1.md).
+
+Public registry metadata read on 2026-10-21 reports all eight aligned packages
+at latest 0.28.0 and keys at latest 0.13.0. The older 0.28.0 source-candidate
+notes describe preparation history, not current registry availability. The
+0.28.1 / keys 0.13.1 versions were absent at that read; recheck before publishing.
+Publication requires the accepted final-commit CI artifact and separate owner
+authorization.
 
 0.27.0 / keys 0.12.0 is published on `latest` from `v0.27.0` (`cd977261`).
 Complete registry readback and isolated installation passed on 2026-10-17.
@@ -514,6 +526,15 @@ offers time zones as an enum of canonical names, and the instant that the
 device Host computes is the one it schedules. A successor outside the wake
 limit stays in the Host outbox and is retried; a null successor is a visible
 stopped state, not a silent stop.
+
+The copy-and-own K4 Host execution example keeps a bounded diagnostic history of
+ignored routine wake deliveries in `LedgerState.ignoredWakes`: unknown keys,
+missing or inactive routines, and keys without a matching current reservation.
+The newest 128 observations contain only a timestamp, closed reason code and
+SHA-256 key digest, never the raw key or payload. This history grants no execution
+or deduplication authority; committed occurrence replay and current scan wakes
+keep their existing behavior. This is the audit slice of #612, not Host job
+registration or execution-free occurrences.
 
 ### Embedded wake queue
 
@@ -2610,6 +2631,24 @@ Only successful runtime completion with a staged outcome produces `task.complete
 
 On the prepared lane, the preparation request carries the same `terminalProjection` as the offer. Its exact schema and contract are retained in the durable binding, covered by the request digest, and represented by a schema-bound executor identity in `toolManifestDigest`. Admission compares the selection before pinning or claiming. A SummaryJob with `requiredToolsets: []` and `agentMemory:'none'` now counts and launches exactly one tool, `submit_result`; it omits `requiredToolsets` on the offer and needs no user `messageEgress`. The worker verifies the task-bound result helper's schema before constructing the model. The durable record version is 11; no version-10 record is read forward. Records and wire v3 share one drain-then-upgrade cut. Other preparations that select no result still support zero tools.
 
+When `messageEgress.mode: required` and `terminalProjection.mode: result-document`
+are combined, a normal runtime `turn_end` with a missing or unreadable staged
+result still delivers its existing or daemon-authored closing reply through the
+usual immutable outbox and exact accepted-disposition gate. The terminal then
+fails non-retryably as `result_not_submitted` or `result_unreadable`, without a
+document; Hosts must not apply outcome actions. Empty reply text is not invented.
+Runtime failure and cancellation retain their existing revocation rules.
+
+Before handing off that reply, the daemon persists the typed result-failure
+intent as an execution transition in the existing local journal. This is not a
+wire terminal and does not prevent cancellation from winning. On restart, an
+existing terminal always wins; otherwise recovery validates the original offer's
+required-message/result contract and converts that intent into the ordinary
+immutable failure terminal. Pending recovered messages still gate terminal
+publication. The intent survives accepted-disposition deletion of the outbox
+draft, so a crash after reply acceptance does not rewrite the diagnosis to
+`daemon_interrupted`, rerun the runtime, or apply an outcome.
+
 This is an execution/result primitive. Host owns semantic outcome acceptance, SummaryJob coverage/version CAS, budgets and scheduling. See [the K7 migration and release note](releases/k7-wire-v3.md) for the coordinated server/client upgrade and pending-v2 startup fences.
 
 ### Fresh Agent execution Host composition requirements
@@ -2947,3 +2986,15 @@ Without `storage.scratchRoot`, derive the default from the canonical store ident
 An explicit `storage.scratchRoot` must pass validation; an excessive length fails construction. A failed root never triggers a substitute. External roots persist their store ownership. A standalone root is exclusive to its process and must be provisioned fresh on process restart. No silent runtime or root fallback is provided.
 
 Legacy shared-temp prefixes are an operator-invoked migration: doctor inventories exact production names, and only `doctor --fix --yes` with a stopped daemon deletes matching, same-uid real directories. SDK startup never scans shared OS temp. Remove this one-shot scanner in the next minor release. See `docs/migrations/client-retention-399.md` for removed APIs and Host migration.
+
+
+### K8 Host-declared read-only toolsets
+
+The copy-and-own Bot collaboration example refuses required toolsets by default.
+A Host may declare an immutable `readOnlyToolsets` list of logical IDs, enforced
+across initial/model templates, restored Bots, creation, update and enqueue.
+The daemon still owns concrete tool definitions and ordinary capability admission.
+Only the Host's local tool service can enforce actual read-only behavior; model
+annotations are not authorization. External effects retain owner-confirmed Host
+connector execution. This additive slice does not qualify external-authority
+storage, Windows persona persistence or two-process relay.

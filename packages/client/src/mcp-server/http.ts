@@ -9,6 +9,8 @@ export const MCP_HTTP_MAX_BODY_BYTES = 4 * 1_048_576;
 const HTTP_VERSIONS = MCP_SERVER_SUPPORTED_PROTOCOL_VERSIONS.filter(version => version !== '2024-11-05');
 
 export interface McpHttpServerOptions extends Omit<McpServerOptions, 'input' | 'output' | 'onClose' | 'maxLineBytes'> {
+  /** Stateful by default. Stateless mode retains no sessions and disallows SSE. */
+  readonly sessionMode?: 'stateful' | 'stateless';
   /** Trusted public origin, e.g. https://host.example. Never derive it from the request Host header. */
   readonly origin: string;
   /** Positive integer, at most MCP_HTTP_MAX_BODY_BYTES. */
@@ -67,6 +69,9 @@ function accepts(header: string | null, mediaType: string): boolean {
  */
 export function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServer {
   const origin = trustedOrigin(options.origin);
+  if (options.sessionMode !== undefined && !['stateful', 'stateless'].includes(options.sessionMode)) throw new TypeError('invalid sessionMode');
+  const stateless = options.sessionMode === 'stateless';
+  if (stateless && options.toolsListChanged) throw new TypeError('stateless HTTP MCP does not support toolsListChanged');
   const maxBodyBytes = positiveInteger(options.maxBodyBytes ?? MCP_HTTP_MAX_BODY_BYTES, 'maxBodyBytes', MCP_HTTP_MAX_BODY_BYTES);
   const maxSessions = positiveInteger(options.maxSessions ?? 64, 'maxSessions');
   const idleTimeoutMs = positiveInteger(options.idleTimeoutMs ?? 15 * 60_000, 'idleTimeoutMs');
@@ -132,15 +137,15 @@ export function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServe
     const key = isUsableRequestId(message.id) ? SeenRequestIds.key(message.id) : 'invalid';
     const reply = session.pending.get(key);
     if (reply) finishReply(session, key, new Response(frame.trimEnd(), { status: reply.status,
-      headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'mcp-session-id': session.id } }));
+      headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...(stateless ? {} : { 'mcp-session-id': session.id }) } }));
   }
 
-  function createSession(version: string): Session {
+  function createSession(version: string, bootstrap?: string): Session {
     const session: Session = { id: randomUUID(), version, touchedAt: Date.now(), input: new PassThrough(),
       output: new Writable({ write(chunk, _encoding, callback) { deliver(session, chunk.toString()); callback(); } }),
       pending: new Map(), closed: false };
     session.core = serveMcpOverStdio({ ...options, input: session.input, output: session.output,
-      maxLineBytes: maxBodyBytes, maxInFlight, onClose: () => dispose(session),
+      maxLineBytes: Math.max(maxBodyBytes, bootstrap === undefined ? 0 : Buffer.byteLength(bootstrap)), maxInFlight, onClose: () => dispose(session),
       callTool: async call => {
         // Keep cancelled, uncooperative handlers counted until they settle,
         // even after their HTTP response or session has closed.
@@ -149,7 +154,10 @@ export function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServe
         try { return await options.callTool(call); }
         finally { runningTools--; }
       } });
-    if (!session.closed) sessions.set(session.id, session);
+    if (!session.closed) {
+      sessions.set(session.id, session);
+      if (bootstrap !== undefined) session.input.write(`${bootstrap}\n`);
+    }
     return session;
   }
 
@@ -181,13 +189,13 @@ export function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServe
     finally { readers.delete(reader); reader.releaseLock(); }
   }
 
-  const sweep = setInterval(() => {
+  const sweep = stateless ? undefined : setInterval(() => {
     const now = Date.now();
     for (const session of sessions.values()) {
       if (session.pending.size === 0 && now - session.touchedAt >= idleTimeoutMs) dispose(session);
     }
   }, Math.min(idleTimeoutMs, 60_000));
-  sweep.unref();
+  sweep?.unref();
 
   return {
     async fetch(request) {
@@ -197,9 +205,11 @@ export function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServe
       const version = request.headers.get('mcp-protocol-version');
       if (version !== null && !HTTP_VERSIONS.includes(version)) return failure(400, 'Unsupported MCP protocol version');
       if (!['POST', 'GET', 'DELETE'].includes(request.method)) {
-        return new Response(null, { status: 405, headers: { allow: 'POST, GET, DELETE' } });
+        return new Response(null, { status: 405, headers: { allow: stateless ? 'POST' : 'POST, GET, DELETE' } });
       }
+      if (stateless && request.method !== 'POST') return new Response(null, { status: 405, headers: { allow: 'POST' } });
       const sessionId = request.headers.get('mcp-session-id');
+      if (stateless && sessionId !== null) return failure(400, 'Stateless MCP does not accept session IDs');
       let session = sessionId === null ? undefined : sessions.get(sessionId);
       if (sessionId !== null && !session) return failure(404, 'Unknown MCP session');
       if (session && version !== null && version !== session.version) return failure(400, 'MCP protocol version mismatch');
@@ -235,7 +245,23 @@ export function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServe
       // bound and abort unrelated calls in the same session.
       if (Buffer.byteLength(frame, 'utf8') > maxBodyBytes) return failure(413, 'MCP encoded message limit exceeded');
       const classified = classifyJsonRpcMessage(message);
-      if (!session) {
+      if (stateless) {
+        const initializing = classified.kind === 'request' && classified.method === 'initialize';
+        if (!initializing && version === null) return failure(400, 'MCP protocol version required in stateless mode');
+        if (classified.kind === 'notification') {
+          // There is no cross-request call registry; do not claim cancellation.
+          if (classified.method === 'notifications/cancelled') return failure(400, 'Stateless MCP does not support cross-request cancellation');
+          return new Response(null, { status: 202 });
+        }
+        if (pendingCount >= maxInFlight) return failure(503, 'Too many MCP requests');
+        const offered = classified.kind === 'request' ? classified.params?.protocolVersion : undefined;
+        if (initializing && offered === '2024-11-05') return failure(400, 'Legacy stdio protocol is not supported over HTTP');
+        const selected = initializing ? (typeof offered === 'string' && HTTP_VERSIONS.includes(offered) ? offered : HTTP_VERSIONS[0]!) : version!;
+        // Initialize only this request's core. Its private reply is discarded.
+        const privateId = classified.id === '__http_initialize' ? '__http_initialize_2' : '__http_initialize';
+        const bootstrap = initializing ? undefined : JSON.stringify({ jsonrpc: '2.0', id: privateId, method: 'initialize', params: { protocolVersion: selected } });
+        session = createSession(selected, bootstrap);
+      } else if (!session) {
         if (classified.kind !== 'request' || classified.method !== 'initialize') return failure(400, 'Initialize an MCP session first');
         if (pendingCount >= maxInFlight) return failure(503, 'Too many MCP requests');
         const offered = classified.params?.protocolVersion;
@@ -262,16 +288,17 @@ export function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServe
       if (session.pending.has(key)) return failure(400, 'MCP request id already in flight');
       if (pendingCount >= maxInFlight) return failure(503, 'Too many MCP requests');
       const current = session;
-      return new Promise<Response>(resolve => {
+      const response = new Promise<Response>(resolve => {
         current.pending.set(key, { resolve, status: classified.kind === 'invalid' ? 400 : 200 });
         pendingCount++;
         current.input.write(`${frame}\n`);
       });
+      return stateless ? response.finally(() => dispose(current)) : response;
     },
     close() {
       if (closed) return;
       closed = true;
-      clearInterval(sweep);
+      if (sweep !== undefined) clearInterval(sweep);
       for (const reader of readers) void reader.cancel().catch(() => {});
       for (const session of sessions.values()) dispose(session);
     },

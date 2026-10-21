@@ -1,4 +1,6 @@
 // ==== @byok-sdk/server dist/index.d.ts ====
+export { listenLoopback } from './loopback';
+export type { LoopbackPortStore, LoopbackHandler, LoopbackListenerOptions, LoopbackListener } from './loopback';
 import type { AgentMessageDraftEvent } from './types';
 export type { AgentMessageDraftEvent } from './types';
 import type { WakeRecord, WakeScheduleInput, WakeScheduleResult } from './wakes/types';
@@ -215,6 +217,35 @@ export interface ByokServer {
  * ports remain process-local.
  */
 export declare function createByokServer(opts: CreateByokServerOptions): ByokServer;
+// ==== @byok-sdk/server dist/loopback.d.ts ====
+/** Durable, identity-scoped, immutable port assignment. Implement claim atomically. */
+export interface LoopbackPortStore {
+    /** null means a genuinely new identity; corrupt or missing existing state must throw. */
+    read(): Promise<number | null>;
+    /** Insert candidate only if absent, then return the durable winning port. Never overwrite. */
+    claim(candidate: number): Promise<number>;
+}
+export type LoopbackHandler = (request: Request) => Response | Promise<Response>;
+export interface LoopbackListenerOptions {
+    portStore: LoopbackPortStore;
+    /** Called after binding and durable readback. URL is trusted configuration, never request input. */
+    createHandler(serverUrl: string): LoopbackHandler | Promise<LoopbackHandler>;
+    /** Defaults to [24000, 32768). Applies only to new identities. */
+    portRange?: {
+        min: number;
+        maxExclusive: number;
+    };
+    /** Maximum actual request bytes, including chunked uploads. Default 2 MiB. */
+    maxBodyBytes?: number;
+    signal?: AbortSignal;
+}
+export interface LoopbackListener {
+    readonly serverUrl: string;
+    /** Closes only this listener and its connections, not the SDK or persisted assignment. */
+    close(): Promise<void>;
+}
+/** Own a loopback socket before committing an identity's immutable URL. Never adopts another process's listener. */
+export declare function listenLoopback(options: LoopbackListenerOptions): Promise<LoopbackListener>;
 // ==== @byok-sdk/server dist/rate-limiter.d.ts ====
 /**
  * M4 Phase 4 (part A): per-key token bucket, used by `ConnectionHub`
