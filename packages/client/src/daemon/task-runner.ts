@@ -1,3 +1,4 @@
+import { resultReplyFailureReason, type ResultReplyFailure } from './result-reply-failure';
 import type { ActivityIngress } from '@byok-sdk/protocol';
 import { AgentMessageDraftPublisher } from './agent-message-draft';
 import type { ScratchRoot, ExecutionScratch } from './retention/scratch';
@@ -653,6 +654,8 @@ export interface TaskRunnerDeps {
    * runner without it declines such offers.
    */
   terminalJournal?: boolean;
+  /** Durable normal-turn result failure intent, before handing off a required reply. */
+  recordResultReplyFailure?(taskId: string, failure: ResultReplyFailure): Promise<void>;
   durablePi?: boolean;
   recordDurableTransition?(taskId: string, leaseId: string, kind: string, ordinal: number): Promise<void>;
   /** SDK-owned, task-scoped MCP helper. Required only for offers declaring messageEgress. */
@@ -843,7 +846,8 @@ interface ActiveTask {
   /** A send attempt may already have entered transport; failure must preserve its admission recovery. */
   messageSendAttempted?: boolean;
   messageAccepted?: boolean;
-  pendingMessageCompletion?: { readonly finalOutput: string; readonly document?: unknown };
+  resultReplyFailure?: ResultReplyFailure;
+  pendingMessageCompletion?: { readonly finalOutput: string; readonly document?: unknown; readonly failureReason?: string };
   messageRetryTimer?: ReturnType<typeof setTimeout>;
 }
 
@@ -1876,7 +1880,8 @@ export class TaskRunner {
     if (active.pendingMessageCompletion !== undefined) {
       const completion = active.pendingMessageCompletion;
       active.pendingMessageCompletion = undefined;
-      await this.publishSuccessfulCompletion(active, completion.finalOutput, completion.document);
+      if (completion.failureReason !== undefined) await this.fail(taskId, completion.failureReason, false);
+      else await this.publishSuccessfulCompletion(active, completion.finalOutput, completion.document);
     }
   }
 
@@ -2847,7 +2852,11 @@ export class TaskRunner {
             ownsLease: () => durableBinding !== undefined && !blobAbort.signal.aborted && !this.pendingCancelled.has(taskId),
             record: async (kind: 'tool-intent' | 'tool-committed' | 'respawn-intent', ordinal: number) => {
               if (!durableBinding || !this.deps.recordDurableTransition || !this.deps.tenantId) throw new Error('durable parent authority unavailable');
-              await this.deps.agentHome!.executionLeaseManager.mutate(durableBinding, () => this.deps.recordDurableTransition!(taskId, durableBinding.lease.leaseId, kind, ordinal));
+              await this.deps.agentHome!.executionLeaseManager.mutate(durableBinding, () => {
+                // Do not overwrite a persisted normal-turn failure intent.
+                if (this.tasks.get(taskId)?.resultReplyFailure !== undefined) return Promise.resolve();
+                return this.deps.recordDurableTransition!(taskId, durableBinding.lease.leaseId, kind, ordinal);
+              });
             },
           },
         } }),
@@ -4210,13 +4219,20 @@ export class TaskRunner {
           active.batcher.push(event);
           active.batcher.flush();
           const finalOutput = active.summaryParts.join('');
-          // Resolved BEFORE the 'completed' git observation below, so a task
+          // Resolve the result decision before Git observation and reply handoff.
+          // Missing/unreadable results can still deliver a required reply; a task
           // that cannot deliver its required result takes the salvage path
           // `fail()` already applies to every other failure — rather than
           // being observed as completed and only then failed.
           const outcome = await this.resolveStagedResult(active);
           if (!outcome.deliver) return; // already reported task.fail and finished
-          await this.observeGit(active, 'completed');
+          const failureReason = outcome.failure === undefined ? undefined
+            : resultReplyFailureReason(outcome.failure, active.terminalProjection!.mode === 'result-document' ? active.terminalProjection!.contract : '');
+          if (outcome.failure !== undefined) {
+            active.resultReplyFailure = outcome.failure;
+            if (this.deps.recordResultReplyFailure === undefined) throw new Error('required reply result failure has no durable intent writer');
+            await this.deps.recordResultReplyFailure(active.taskId, outcome.failure);
+          } else await this.observeGit(active, 'completed');
           if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
           if (active.messageRequirement !== undefined && active.messageAccepted !== true) {
             // A `messageEgress.mode:'required'` task completes only after an
@@ -4242,7 +4258,7 @@ export class TaskRunner {
             // Fail closed, never hang: an empty final output or a rejected
             // draft (byte cap, quota, session mismatch) fails the task with a
             // stated reason rather than silently waiting.
-            active.pendingMessageCompletion = { finalOutput, ...(outcome.document === undefined ? {} : { document: outcome.document }) };
+            active.pendingMessageCompletion = { finalOutput, ...(failureReason === undefined ? {} : { failureReason }), ...(outcome.document === undefined ? {} : { document: outcome.document }) };
             const outbox = active.messageOutbox;
             const record = outbox?.get(active.taskId);
             if (record !== undefined) {
@@ -4302,7 +4318,8 @@ export class TaskRunner {
             }
             return;
           }
-          await this.publishSuccessfulCompletion(active, finalOutput, outcome.document);
+          if (failureReason !== undefined) await this.fail(active.taskId, failureReason, false);
+          else await this.publishSuccessfulCompletion(active, finalOutput, outcome.document);
           return;
         }
         if (event.type === 'progress') {
@@ -5186,8 +5203,9 @@ export class TaskRunner {
    * Wire v3 result channel, at `turn_end`: the one place a staged
    * `submit_result` outcome becomes `task.complete.document`.
    *
-   * `{deliver: true}` means "go on and send `task.complete`", with the staged
-   * canonical outcome when the offer is `mode: 'result-document'`.
+   * `{deliver: true}` permits the reply lane, with either the staged outcome
+   * or a typed result failure to persist before handing off a required reply.
+   * A failure never becomes a completion document.
    * `{deliver: false}` means this method has ALREADY reported `task.fail`
    * (or the task was finished meanwhile by someone else); the caller returns.
    *
@@ -5199,7 +5217,7 @@ export class TaskRunner {
    */
   private async resolveStagedResult(
     active: ActiveTask,
-  ): Promise<{ deliver: true; document?: unknown } | { deliver: false }> {
+  ): Promise<{ deliver: true; document?: unknown; failure?: ResultReplyFailure } | { deliver: false }> {
     const selection = active.terminalProjection;
     if (selection?.mode !== 'result-document') return { deliver: true };
     this.revokeAgentResultContext(active.taskId);
@@ -5209,11 +5227,13 @@ export class TaskRunner {
       record = await active.resultStore.get(active.taskId);
     } catch (err) {
       if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return { deliver: false };
+      if (active.messageRequirement !== undefined) return { deliver: true, failure: 'required-reply-result-unreadable' };
       await this.fail(active.taskId, `${RESULT_UNREADABLE_REASON_PREFIX}: the staged result for contract ${selection.contract} could not be read: ${errorMessage(err)}`, false);
       return { deliver: false };
     }
     if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return { deliver: false };
     if (record === undefined) {
+      if (active.messageRequirement !== undefined) return { deliver: true, failure: 'required-reply-result-missing' };
       await this.fail(
         active.taskId,
         `${RESULT_NOT_SUBMITTED_REASON_PREFIX}: the offer requires result contract ${selection.contract}, but the runtime ended its turn without a staged ${AGENT_RESULT_TOOL_NAME} outcome`,
@@ -5224,6 +5244,7 @@ export class TaskRunner {
     if (record.contract !== selection.contract || record.tenantId !== this.deps.tenantId
       || active.agentRef === undefined || record.agentRef.agentId !== active.agentRef.agentId
       || record.agentRef.profileRevision !== active.agentRef.profileRevision) {
+      if (active.messageRequirement !== undefined) return { deliver: true, failure: 'required-reply-result-unreadable' };
       await this.fail(active.taskId, `${RESULT_UNREADABLE_REASON_PREFIX}: the staged result does not belong to this task's contract and Agent`, false);
       return { deliver: false };
     }
