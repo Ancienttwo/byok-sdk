@@ -19,7 +19,6 @@ import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
 import { buildRuntimeEnv } from '../../daemon/environment';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
-import { AsyncQueue } from '../../util/async-queue';
 import { classifyDetectError } from '../detect-outcome';
 import type { ResolvedBin } from '../codex/resolve-bin';
 import { AcpConnection, AcpMethodNotFound, AcpRpcError } from './acp-connection';
@@ -28,7 +27,6 @@ import {
   assertHermesModelSelection, createHermesProfile, ensureHermesRoot, removeHermesProfile, sweepStaleHermesProfiles,
 } from './hermes-home';
 import { hermesVersionLine, isQualifiedHermesVersion, QUALIFIED_HERMES_VERSION } from './hermes-version';
-import { HermesProjection } from './projection';
 import { resolveHermesBin } from './resolve-bin';
 
 const VERSION_TIMEOUT_MS = 5_000;
@@ -54,6 +52,8 @@ export interface HermesModelSelection {
 }
 
 export interface HermesAdapterOptions {
+  /** Absolute product native asset directory; scoped to this adapter. */
+  nativeAssetRoot?: string;
   /**
    * Absolute path of the Hermes root that this SDK owns, for example under the
    * Host's store directory. Each execution runs in a fresh profile home below
@@ -245,7 +245,7 @@ export class HermesAdapter implements RuntimeAdapter {
 
   private async probeAcp(command: string, signal: AbortSignal | undefined): Promise<{ kind: 'available'; authPresent: boolean } | ProbeFailure> {
     const home = await createHermesProfile(this.root, `detect-${randomBytes(6).toString('hex')}`, this.options.model);
-    const child = createOwnedLineProcessSpawn({ spawnFn: this.options.spawnFn })(command, ['acp'], {
+    const child = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn })(command, ['acp'], {
       cwd: home, env: hermesEnvironment(buildRuntimeEnv({ ambient: process.env }), home),
     });
     let timedOut = false;
@@ -294,13 +294,19 @@ export class HermesAdapter implements RuntimeAdapter {
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('hermes manifest has no sealed cwd');
     const workspace = await fs.realpath(cwd);
-    const session = new HermesSession(input.scratch, this.root, this.liveHomes, this.options.interruptTimeoutMs ?? 1_000);
+    const { createHermesSession } = await import('#byok-hermes-session');
+    const session = createHermesSession(input.scratch, this.root, this.liveHomes, this.options.interruptTimeoutMs ?? 1_000, {
+      AcpConnection, AcpMethodNotFound, AcpRpcError, RuntimeExecutionFailure, RuntimeDisposalFailure,
+      PolicyUnsupportedError, SteerUnsupportedError, isRuntimeExecutionFailure, infrastructure,
+      identifyHermesGateway, removeHermesProfile,
+    });
     try {
       const home = await createHermesProfile(this.root, input.scratch.token, this.options.model);
       session.ownHome(home);
       const env = hermesEnvironment({ ...input.env, ...input.scratch.env }, home);
       let gatewayChild: ChildProcess | undefined;
       const spawnGateway = createOwnedLineProcessSpawn({
+        nativeAssetRoot: this.options.nativeAssetRoot,
         spawnFn: (bin, args, options) => (gatewayChild = (this.options.spawnFn ?? nodeSpawn)(bin, [...args], options)),
       });
       const gateway = spawnGateway(command, ['gateway', 'run', '--quiet', '--external-supervisor', '--force'], { cwd: home, env });
@@ -311,7 +317,7 @@ export class HermesAdapter implements RuntimeAdapter {
       await session.awaitGatewayReady(home, gatewayPid, this.options.gatewayReadyTimeoutMs ?? 20_000, input.signal);
       // A gateway that exited after ready already closed the session; a viewer started now would start its own.
       session.assertOpen();
-      const viewer = createOwnedLineProcessSpawn({ spawnFn: this.options.spawnFn })(command, ['--yolo', 'acp'], { cwd: workspace, env });
+      const viewer = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn })(command, ['--yolo', 'acp'], { cwd: workspace, env });
       const connection = session.ownViewer(viewer);
       const open = <T>(method: string, params: Record<string, unknown>) => withDeadline(
         connection.request(method, params) as Promise<T>, OPEN_REQUEST_TIMEOUT_MS, input.signal,
@@ -356,202 +362,5 @@ export class HermesAdapter implements RuntimeAdapter {
         reason: error instanceof Error ? error.message : 'hermes open failed',
       });
     }
-  }
-}
-
-type OwnedLineProcess = ReturnType<ReturnType<typeof createOwnedLineProcessSpawn>>;
-
-class HermesSession implements Session {
-  sessionRef = '';
-  private home?: string;
-  private gateway?: OwnedLineProcess;
-  private viewer?: OwnedLineProcess;
-  private connection?: AcpConnection;
-  private readonly projection = new HermesProjection();
-  private readonly queue = new AsyncQueue<AgentEvent>();
-  private failure?: RuntimeExecutionFailure;
-  private turn?: Promise<void>;
-  private stopping = false;
-  private closeAttempt?: Promise<void>;
-
-  constructor(
-    private readonly scratch: ExecutionScratch,
-    private readonly root: string,
-    private readonly liveHomes: Set<string>,
-    private readonly interruptMs: number,
-  ) {}
-
-  ownHome(home: string): void {
-    this.home = home;
-    this.liveHomes.add(home);
-  }
-
-  assertOpen(): void {
-    if (this.stopping) throw this.failure ?? infrastructure('start', 'hermes session closed during start');
-  }
-
-  ownGateway(gateway: OwnedLineProcess): void {
-    this.gateway = gateway;
-    // The gateway's stdout is a banner, not a protocol. Drain it.
-    gateway.onLine(() => {});
-    void gateway.exited.then(() => this.exited('gateway'), (error) => this.fail(error));
-  }
-
-  ownViewer(viewer: OwnedLineProcess): AcpConnection {
-    this.viewer = viewer;
-    this.connection = new AcpConnection(viewer, {
-      notification: (method, params) => {
-        if (method !== 'session/update' || params.sessionId !== this.sessionRef) return;
-        const update = params.update;
-        if (update !== null && typeof update === 'object' && !Array.isArray(update)) {
-          this.projection.update(update as Record<string, unknown>, (event) => this.queue.push(event));
-        }
-      },
-      request: (method) => {
-        // Edits run in `dont_ask` mode and commands under `--yolo`. What still
-        // asks is Hermes's own guard (sensitive paths). No human can answer,
-        // so the guard stands: the request is cancelled, never allowed.
-        if (method === 'session/request_permission') return { outcome: { outcome: 'cancelled' } };
-        throw new AcpMethodNotFound(method);
-      },
-    });
-    void viewer.exited.then(() => this.exited('acp viewer'), (error) => this.fail(error));
-    return this.connection;
-  }
-
-  /** Waits until the gateway serving `home` is the owned process and reports ready. */
-  async awaitGatewayReady(home: string, pid: number, timeoutMs: number, signal: AbortSignal | undefined): Promise<void> {
-    const served = await fs.realpath(home);
-    const deadline = Date.now() + timeoutMs;
-    for (;;) {
-      if (this.failure) throw this.failure;
-      if (signal?.aborted) throw infrastructure('start', 'hermes start was aborted', 'retryable');
-      const identity = await identifyHermesGateway(home);
-      if (identity !== undefined) {
-        if (identity.pid !== pid) throw infrastructure('start', 'another Hermes gateway serves the execution profile');
-        if (identity.state === 'ready' && identity.servedHomes.includes(served)) return;
-      }
-      if (Date.now() >= deadline) throw infrastructure('start', 'hermes gateway did not report ready in time', 'retryable');
-      await new Promise((resolve) => setTimeout(resolve, GATEWAY_POLL_MS));
-    }
-  }
-
-  ready(sessionId: string): void {
-    this.sessionRef = sessionId;
-  }
-
-  /** Sends one `session/prompt`. Its answer, not the send, ends the turn. */
-  prompt(text: string): void {
-    if (!this.connection || !this.sessionRef) throw infrastructure('run', 'hermes session is not open');
-    if (this.turn) throw infrastructure('run', 'hermes turn is already active');
-    const turn = this.connection.request('session/prompt', { sessionId: this.sessionRef, prompt: [{ type: 'text', text }] }).then(
-      (result) => this.projection.turnEnded(result, (event) => this.queue.push(event)),
-      (error) => {
-        // close() rejects the pending prompt on purpose; that is not a turn failure.
-        if (this.stopping) return;
-        this.fail(error instanceof AcpRpcError && error.details === 'admitted_turn_failed'
-          ? new RuntimeExecutionFailure({ phase: 'run', category: 'semantic', retry: 'non-retryable', reason: 'hermes turn failed' })
-          : error);
-      },
-    ).finally(() => {
-      if (this.turn === turn) this.turn = undefined;
-    });
-    this.turn = turn;
-  }
-
-  get events(): AsyncIterable<AgentEvent> {
-    const self = this;
-    return (async function* () {
-      try {
-        for await (const event of self.queue) yield event;
-      } catch (error) {
-        self.fail(error);
-        throw self.failure;
-      }
-      if (self.failure) throw self.failure;
-    })();
-  }
-
-  async followUp(task: TaskOfferPayload): Promise<void> {
-    if (typeof task.instruction !== 'string') throw new PolicyUnsupportedError('hermes requires a string instruction');
-    if (task.dispatchSelection !== undefined) throw new PolicyUnsupportedError('hermes does not accept a dispatch selection');
-    this.prompt(task.instruction);
-  }
-
-  async steer(): Promise<void> {
-    throw new SteerUnsupportedError('hermes', 'hermes adapter does not support mid-turn steering');
-  }
-
-  async interrupt(): Promise<void> {
-    const turn = this.turn;
-    if (!this.connection || !turn) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      this.connection.notify('session/cancel', { sessionId: this.sessionRef });
-      await Promise.race([
-        turn,
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(infrastructure('run', 'hermes cancel timed out')), this.interruptMs);
-        }),
-      ]);
-    } catch (error) {
-      this.fail(error);
-      throw error;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  async resolveApproval(): Promise<void> {
-    throw new PolicyUnsupportedError('Hermes has no interactive approval product lane');
-  }
-
-  fail(error: unknown): void {
-    this.failure ??= isRuntimeExecutionFailure(error)
-      ? error
-      : infrastructure('run', error instanceof Error ? error.message : 'hermes runtime failed');
-    this.queue.end();
-    void this.close().catch(() => {});
-  }
-
-  private exited(which: string): void {
-    if (!this.stopping) this.fail(infrastructure('run', `hermes ${which} exited`));
-  }
-
-  async close(): Promise<void> {
-    this.stopping = true;
-    if (!this.closeAttempt) {
-      const attempt = (async () => {
-        try {
-          this.connection?.close(infrastructure('run', 'hermes session closed'));
-          try {
-            try {
-              await this.viewer?.dispose();
-            } finally {
-              await this.gateway?.dispose();
-            }
-          } finally {
-            if (this.home !== undefined) {
-              await removeHermesProfile(this.root, this.home).catch((cause: unknown) => {
-                throw new RuntimeDisposalFailure({ stage: 'cleanup', reason: 'hermes execution profile removal did not complete' }, { cause });
-              });
-              this.liveHomes.delete(this.home);
-            }
-            await this.scratch.release();
-          }
-        } finally {
-          this.queue.end();
-        }
-        this.connection = undefined;
-        this.viewer = undefined;
-        this.gateway = undefined;
-        this.home = undefined;
-      })();
-      this.closeAttempt = attempt.catch((error) => {
-        this.closeAttempt = undefined;
-        throw error;
-      });
-    }
-    await this.closeAttempt;
   }
 }

@@ -1,7 +1,13 @@
 # Changelog
 
+- Client MCP core: preserve tool title, annotations and output schema, and provide
+  request-scoped progress over stdio and bounded HTTP POST SSE (Refs #631).
+
 ## Unreleased
 
+- **Feature (client)** — add a pinned Windows x64 native asset copier, distribution
+  metadata and per-adapter asset roots for relocated runtime process ownership (#627).
+  Darwin copying reuses the existing memory-helper API; Windows memory is unchanged.
 - **Fixed (examples)** — the Bot collaboration Host now checks only
   non-archived Bot templates against the read-only toolset allowlist when it
   reopens. The stored template of an archived Bot no longer blocks reopening.

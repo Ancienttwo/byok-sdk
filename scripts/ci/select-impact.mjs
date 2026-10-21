@@ -195,6 +195,15 @@ export function selectImpact(paths, context = {}) {
       verifyReviewedContent(path, context);
       dirs.add('examples/bot-collaboration'); continue;
     }
+    // These root-level fixtures are executed by the relocated native SEA smoke.
+    if (path === 'examples/packaging/native-assets-fixture.ts' || path === 'examples/packaging/native-assets-smoke.mjs') {
+      dirs.add('examples/packaging'); families.add('packageability-smoke'); continue;
+    }
+    if (path === 'examples/basic/goal-btw.test-support.ts') {
+      // Shared runtime fixture is imported directly across these example suites.
+      for (const dir of ['examples/basic', 'examples/host-execution-core', 'examples/bot-collaboration']) dirs.add(dir);
+      continue;
+    }
     if (path === 'examples/basic/clarification.test.ts' || path === 'examples/basic/goal-btw.test.ts') {
       dirs.add('examples/basic'); continue;
     }
@@ -204,6 +213,9 @@ export function selectImpact(paths, context = {}) {
         dirs.add(dir);
       }
       continue;
+    }
+    if (path === 'packages/client/scripts/check-hermes-session-entry.mjs' || path === 'packages/client/tsup.config.ts') {
+      dirs.add('packages/client'); families.add('npm-release-pack'); continue;
     }
     if (path === 'packages/client/scripts/packed-agent-memory-helper-smoke.mjs'
       || path === 'scripts/release/agent-memory-helper-source.test.mjs') {

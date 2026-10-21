@@ -18,13 +18,37 @@ export function changedPaths(base, cwd = process.cwd()) {
   return execFileSync('git', ['diff', '--no-renames', '--name-only', '-z', base, 'HEAD'], { cwd, encoding: 'utf8' }).split('\0').filter(Boolean);
 }
 
+// GitHub's event base can lag the main parent of the tested synthetic merge.
+// Resolve the comparison from that exact merge, never from a moving branch ref.
+export function resolveCiBase(env = process.env, cwd = process.cwd()) {
+  if (env.CI_EVENT !== 'pull_request') return env.CI_BASE;
+  const exact = value => /^[a-f0-9]{40}$/.test(value ?? '') && !/^0+$/.test(value);
+  if (![env.GITHUB_SHA, env.CI_PR_HEAD, env.CI_BASE].every(exact)) throw new Error('Missing exact PR comparison evidence');
+  const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  if (git('rev-parse', 'HEAD') !== env.GITHUB_SHA) throw new Error('PR checkout does not match tested SHA');
+  const parents = git('show', '-s', '--format=%P', env.GITHUB_SHA).split(' ');
+  if (parents.length !== 2 || parents[1] !== env.CI_PR_HEAD) throw new Error('PR merge parents do not match event head');
+  git('merge-base', '--is-ancestor', env.CI_BASE, parents[0]);
+  return parents[0];
+}
+
+export function verifyPrPlan(plan, env = process.env, cwd = process.cwd()) {
+  const base = resolveCiBase(env, cwd);
+  if (env.CI_EVENT === 'pull_request' && (plan.sha !== env.GITHUB_SHA || plan.base !== base ||
+      JSON.stringify(plan.files) !== JSON.stringify(changedPaths(base, cwd).sort()))) {
+    throw new Error('PR plan does not match tested merge changes');
+  }
+  return base;
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const event = process.env.CI_EVENT;
+  const base = resolveCiBase();
   let paths;
   if (event !== 'workflow_dispatch') {
-    paths = changedPaths(process.env.CI_BASE);
+    paths = changedPaths(base);
   }
-  const plan = planCi({ event, sha: process.env.GITHUB_SHA, approvedSha: process.env.CI_RELEASE_SHA, paths, base: process.env.CI_BASE });
+  const plan = planCi({ event, sha: process.env.GITHUB_SHA, approvedSha: process.env.CI_RELEASE_SHA, paths, base });
   console.log(JSON.stringify(plan, null, 2));
   appendFileSync(process.env.GITHUB_OUTPUT, `plan=${JSON.stringify(plan)}\nfamilies=${JSON.stringify(plan.families)}\nrelease=${plan.mode === 'release'}\nbuild=${plan.dirs.length > 0 || plan.files.some(path => path === 'bun.lock' || /^packages\/[^/]+\/package\.json$/.test(path))}\n`);
 }

@@ -54,8 +54,9 @@ export class BotStubSession implements Session {
     }.bind(this),
   };
   emit(event: Event): void { this.pending.push(event); this.wake?.(); this.wake = undefined; }
-  finish(document: unknown, submit = true): void {
-    void (async () => {
+  /** Resolves after fixture result submission and event injection; failures still travel through events. */
+  finish(document: unknown, submit = true): Promise<void> {
+    return (async () => {
       if (submit && this.input.mcpServers?.byokagentresult) await submitResult(this.input, document);
       this.emit({ type: 'progress', text: JSON.stringify(document) }); this.emit({ type: 'turn_end' });
     })().catch(error => { this.failure = error; this.wake?.(); this.wake = undefined; });
