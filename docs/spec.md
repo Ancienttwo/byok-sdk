@@ -2610,6 +2610,24 @@ Only successful runtime completion with a staged outcome produces `task.complete
 
 On the prepared lane, the preparation request carries the same `terminalProjection` as the offer. Its exact schema and contract are retained in the durable binding, covered by the request digest, and represented by a schema-bound executor identity in `toolManifestDigest`. Admission compares the selection before pinning or claiming. A SummaryJob with `requiredToolsets: []` and `agentMemory:'none'` now counts and launches exactly one tool, `submit_result`; it omits `requiredToolsets` on the offer and needs no user `messageEgress`. The worker verifies the task-bound result helper's schema before constructing the model. The durable record version is 11; no version-10 record is read forward. Records and wire v3 share one drain-then-upgrade cut. Other preparations that select no result still support zero tools.
 
+When `messageEgress.mode: required` and `terminalProjection.mode: result-document`
+are combined, a normal runtime `turn_end` with a missing or unreadable staged
+result still delivers its existing or daemon-authored closing reply through the
+usual immutable outbox and exact accepted-disposition gate. The terminal then
+fails non-retryably as `result_not_submitted` or `result_unreadable`, without a
+document; Hosts must not apply outcome actions. Empty reply text is not invented.
+Runtime failure and cancellation retain their existing revocation rules.
+
+Before handing off that reply, the daemon persists the typed result-failure
+intent as an execution transition in the existing local journal. This is not a
+wire terminal and does not prevent cancellation from winning. On restart, an
+existing terminal always wins; otherwise recovery validates the original offer's
+required-message/result contract and converts that intent into the ordinary
+immutable failure terminal. Pending recovered messages still gate terminal
+publication. The intent survives accepted-disposition deletion of the outbox
+draft, so a crash after reply acceptance does not rewrite the diagnosis to
+`daemon_interrupted`, rerun the runtime, or apply an outcome.
+
 This is an execution/result primitive. Host owns semantic outcome acceptance, SummaryJob coverage/version CAS, budgets and scheduling. See [the K7 migration and release note](releases/k7-wire-v3.md) for the coordinated server/client upgrade and pending-v2 startup fences.
 
 ### Fresh Agent execution Host composition requirements

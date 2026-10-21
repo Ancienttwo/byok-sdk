@@ -1,3 +1,4 @@
+import { isResultReplyFailure, resultReplyFailureReason } from './result-reply-failure';
 import type { OutboundStatus } from './outbound-settlement';
 import { terminalIdentity } from './terminal-identity';
 import { HarnessIdSchema, type HarnessInfo } from '@byok-sdk/protocol';
@@ -2107,17 +2108,23 @@ export function buildDaemonWithAdapters(
         if (task.localState === 'received' && task.seq > durableCursor) continue;
         const offer = decodeEnvelope(task.envelopeBytes);
         if (!isTaskOfferType(offer.type) || offer.task_id !== task.taskId) throw new Error('invalid durable recovery offer binding');
-        const payload = offer.payload as { agentRef?: AgentRef };
+        const payload = offer.payload as { agentRef?: AgentRef; messageEgress?: { mode: string }; terminalProjection?: { mode: string; contract?: string } };
+        const resultFailure = isResultReplyFailure(task.localState);
+        if (resultFailure && (payload.agentRef === undefined || payload.messageEgress?.mode !== 'required'
+          || payload.terminalProjection?.mode !== 'result-document' || typeof payload.terminalProjection.contract !== 'string')) {
+          throw new Error('durable result-reply failure does not match its original offer');
+        }
+        const reason = resultFailure ? resultReplyFailureReason(task.localState, payload.terminalProjection!.contract!) : 'daemon_interrupted';
         const terminal = createEnvelope('task.fail', {
-          reason: 'daemon_interrupted', retryable: false,
+          reason, retryable: false,
           ...terminalIdentity(task.claimedRuntime, payload.agentRef),
-          recovery: { kind: 'daemon_interrupted', offerId: offer.id },
+          ...(resultFailure ? {} : { recovery: { kind: 'daemon_interrupted' as const, offerId: offer.id } }),
         }, { taskId: task.taskId });
         const bytes = encodeEnvelope(terminal);
         await activeJournal.recordTerminal({
           taskId: task.taskId, terminalType: 'failed', bytes, payloadHash: journalHash(bytes),
           truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString(),
-          recovery: { disposition: 'interrupted', reason: 'daemon_interrupted' },
+          recovery: { disposition: resultFailure ? 'abandoned' : 'interrupted', reason },
         });
       }
     }
@@ -2371,6 +2378,10 @@ export function buildDaemonWithAdapters(
         await activeJournal.recordTransition({ transitionId: randomUUID(), taskId, to: 'running', occurredAt: new Date().toISOString(), detail: JSON.stringify({ kind, leaseId, ordinal }) });
       } }),
       ...(activeJournal === undefined ? {} : {
+        recordResultReplyFailure: async (taskId, failure) => {
+          await activeJournal.recordTransition({ transitionId: `result-reply:${taskId}`, taskId,
+            to: failure, occurredAt: new Date().toISOString() });
+        },
         beforeClaim: async (taskId: string, runtime: string) => {
           await activeJournal.recordAdmission({ taskId, admitted: true, claimedRuntime: runtime, decidedAt: new Date().toISOString() });
         },
