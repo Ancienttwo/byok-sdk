@@ -139,6 +139,7 @@ export class PostgresPresenceStore implements PresenceStore {
               expires_at  = EXCLUDED.expires_at
         WHERE device_presence.expires_at <= EXCLUDED.observed_at
            OR device_presence.observed_at <= $11
+           OR $12::boolean
        RETURNING ${PRESENCE_COLUMNS}`,
       [
         tenant,
@@ -152,6 +153,7 @@ export class PostgresPresenceStore implements PresenceStore {
         observedAt,
         new Date(now.getTime() + input.ttlMs).toISOString(),
         allowedBefore,
+        input.minimumIntervalMs === 0,
       ],
     );
     const row = result.rows[0];
