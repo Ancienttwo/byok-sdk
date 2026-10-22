@@ -219,7 +219,8 @@ describe('TaskRunner prompt Claude startup disposal', () => {
   it.each(['cancel', 'shutdown', 'deadline'] as const)('reaps on %s without releasing native init', async action => {
     const c = await setup('claude', 'startup', action === 'deadline' ? { startupTimeoutMs: 1000 } : {});
     const offered = c.offer();
-    await vi.waitFor(async () => expect(await c.trace()).toContain('startup'));
+    await c.timing.waitFor(event => event.event === 'startup.ready');
+    expect(await c.trace()).toContain('startup');
     if (action === 'cancel') await c.cancel();
     else if (action === 'shutdown') {
       c.runner.stopAcceptingOffers();
@@ -263,7 +264,8 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
 
   it('cancels gated native startup and reaps the late-returning owner once', async () => {
     const c = await setup(runtime, 'startup'); const offered = c.offer();
-    await vi.waitFor(async () => expect(await c.trace()).toContain('startup'));
+    await c.timing.waitFor(event => event.event === 'startup.ready');
+    expect(await c.trace()).toContain('startup');
     expect(c.runner.activeTaskCount).toBe(0);
     await c.cancel(); await offered; await fs.writeFile(c.gate, 'release'); await c.startSettled.promise;
     await new Promise<void>(resolve => setImmediate(resolve)); // publish the wrapper's cleanup receipt
@@ -275,7 +277,8 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
 
   it('shutdown exposes a gated startup owner and reaps it on retry without a second terminal', async () => {
     const c = await setup(runtime, 'startup', { holdStartupReceipt: true }); const offered = c.offer();
-    await vi.waitFor(async () => expect(await c.trace()).toContain('startup'));
+    await c.timing.waitFor(event => event.event === 'startup.ready');
+    expect(await c.trace()).toContain('startup');
     c.runner.stopAcceptingOffers();
     await expect(c.runner.shutdownActiveTasks('operator')).rejects.toMatchObject({ name: 'RuntimeDisposalFailure' });
     await offered;
@@ -296,7 +299,8 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
 
   it('startup deadline publishes one failure and retains the late owner until its disposal receipt', async () => {
     const c = await setup(runtime, 'startup', { startupTimeoutMs: 1000, holdStartupReceipt: true }); const offered = c.offer();
-    await vi.waitFor(async () => expect(await c.trace()).toContain('startup'));
+    await c.timing.waitFor(event => event.event === 'startup.ready');
+    expect(await c.trace()).toContain('startup');
     await vi.waitFor(() => expect(c.terminals()).toHaveLength(1)); await offered;
     expect(c.terminals()[0]).toMatchObject({ type: 'task.fail', payload: { retryable: false } });
     expect(c.sent.some(event => event.type === 'task.started')).toBe(false);
