@@ -216,11 +216,36 @@ permission request that still arrives (Hermes's sensitive-path guard) is
 answered `cancelled`. The adapter owns the Hermes gateway process tree and
 checks the gateway identity before and after the viewer attaches.
 
-Evidence: `hermes-adapter.test.ts` (synthetic `fake-hermes.mjs`, offline) and
-the [S0 note](notes/2026-10-20-519-hermes-acp-s0.md), which records one real
-Hermes `0.22.2+2364.g0b10b9f` turn with a fake model endpoint on macOS. No
-live-provider run, Linux run or Windows run is part of this evidence.
-`prepare()` refuses on Windows.
+Platform notes:
+
+- POSIX: the adapter asks the gateway `identify` over the Unix socket
+  `<profile>/gateway.sock` (or the path in `gateway.sock.path`). The gateway
+  pid must be the pid the adapter spawned.
+- Windows: the adapter uses the named pipe
+  `\\.\pipe\hermes-gateway-<hash>` that Hermes derives from the profile
+  home (`windows_pipe_name` in Hermes `gateway/control_socket.py`). A
+  console-script `hermes.exe` and the custody launcher start Hermes's Python as
+  a child. So a gateway pid at most four parent links below the spawned pid is
+  owned. The adapter reads the process table once per start with PowerShell
+  CIM (about 0.4 s warm, 3.5 s cold on `windows-latest`). Hermes gives the pipe
+  a DACL for the current user only. The Node client cannot check the pipe
+  server's owner, so on Windows the adapter stops a foreign gateway only when
+  it runs below the viewer the adapter started.
+- Windows custody: the launcher cannot replace itself, so it starts Hermes as
+  a child and stays alive until Hermes exits (see the client README).
+- Windows executable: give `resolveBin` the venv `hermes.exe`. Node does not
+  start a `hermes.cmd` shim without a shell.
+
+Evidence: `hermes-adapter.test.ts` and `hermes-custody.test.ts` (synthetic
+`fake-hermes.mjs`, offline), `hermes-gateway-control.test.ts` (pipe name
+against Hermes's own hash, ownership walk), and the
+[S0 note](notes/2026-10-20-519-hermes-acp-s0.md), which records one real Hermes
+`0.22.2+2364.g0b10b9f` turn with a fake model endpoint on macOS. On Windows
+the fake suites run behind a compiled `hermes.exe` that starts Node as a child,
+the same process shape as a venv console script; the
+[Windows note](notes/2026-10-22-608-hermes-windows.md) records the runs. No
+live-provider run, Linux run or real Hermes run on Windows is part of this
+evidence.
 
 ## What the qualification suite proves
 

@@ -14,7 +14,16 @@
 - **Feature (keys, client)** — add a separate local provider custody launcher
   for Hermes. The Host's keys process reads the selected profile key under the
   custody lock at each start; the daemon environment carries no provider key.
-  Only OpenAI-compatible bearer profiles map; Windows is not supported (#608).
+  Only OpenAI-compatible bearer profiles map (#608).
+- **Feature (client, keys)** — `HermesAdapter.prepare()` runs on Windows. The
+  adapter asks the gateway `identify` over the named pipe that Hermes derives
+  from the profile home. A gateway at most four parent links below the spawned
+  process counts as owned, after one process-table read per start. On Windows
+  the custody launcher starts Hermes as a child with the key in the child
+  environment only, and the adapter stops a foreign gateway only when it runs
+  below the owned viewer. Concurrent Hermes root initialization retries the
+  `config.yaml` rename that Windows refuses (EPERM). Real-provider and real
+  Windows Hermes runs are still open (#608).
 - **Feature (client)** — add an opt-in task-free export of Agent memory for
   Host-side device-change backups (#625).
 - **Fixed (server, client, keys)** — load `node:sqlite` without

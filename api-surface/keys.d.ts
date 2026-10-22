@@ -487,7 +487,11 @@ export declare function hermesProviderModel(profile: ModelProviderProfile): {
 export declare function parseHermesProviderLauncherRequest(args: readonly string[]): HermesProviderLauncherRequest;
 /**
  * Run only in a dedicated Host launcher process. Validation returns non-secret
- * model metadata; launch replaces this process, preserving Hermes gateway PID.
+ * model metadata. On POSIX, launch replaces this process, preserving the
+ * Hermes gateway PID. Windows has no process replacement: launch starts Hermes
+ * as a child with the credential in the child's environment only, resolves
+ * when Hermes exits and sets `process.exitCode` to its exit code. The adapter
+ * accepts a gateway below the launcher PID on Windows.
  * The Host supplies its account-scoped store here, never in the daemon.
  */
 export declare function runHermesProviderLauncher(request: HermesProviderLauncherRequest, host: {
