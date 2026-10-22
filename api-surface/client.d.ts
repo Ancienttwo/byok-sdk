@@ -681,10 +681,9 @@ export declare function resolvePiRuntimeIdentity(): PiRuntimeIdentity;
  * Deliberately does NOT use `createRequire(...).resolve()`: this package is
  * pure ESM with no `require` export condition (`exports["."]` only offers
  * `import`), so CJS-style resolution fails with
- * `ERR_PACKAGE_PATH_NOT_EXPORTED`. It also does NOT resolve the
- * `./package.json` subpath directly (also not exported); instead it resolves
- * the package's main entry via `import.meta.resolve` and walks upward to the
- * enclosing package root.
+ * `ERR_PACKAGE_PATH_NOT_EXPORTED`. It does not use `import.meta.resolve`
+ * either, which a CommonJS bundle does not have. It locates the package
+ * directory itself; the root is the same one ESM resolution reaches.
  */
 export declare function resolvePinnedPiPackage(remedy: string): {
     readonly dir: string;
