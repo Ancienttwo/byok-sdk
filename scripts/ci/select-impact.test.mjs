@@ -179,7 +179,7 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
     const start = workflow.indexOf(`\n  ${family}:\n`);
     assert.ok(start >= 0, family);
     const next = workflow.slice(start + 1).search(/\n  [a-z0-9-]+:\n/);
-    return /bun run check:release-pack |node scripts\/release\/pack-and-smoke\.mjs /.test(workflow.slice(start, next < 0 ? undefined : start + 1 + next));
+    return /(?:bun run check:release-pack|node scripts\/release\/pack-and-smoke\.mjs)(?:\s|$)/.test(workflow.slice(start, next < 0 ? undefined : start + 1 + next));
   });
   assert.deepEqual(selectImpact(['scripts/release/pack-and-smoke.mjs']).families, sorted(runners));
   assert.ok(runners.includes('npm-release-pack'));
