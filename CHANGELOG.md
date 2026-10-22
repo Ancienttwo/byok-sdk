@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.28.2 — source candidate
+
+The owner selected 0.28.2 as a second one-release exception to the default
+pre-1.0 MINOR policy for additive changes. This candidate is not published.
+See the [release notes](docs/releases/v0.28.2.md) for scope and outstanding
+qualification. All nine public manifests and their lock records move to
+0.28.2; keys leaves its own version line to join the release train.
+
 - **Security (client)** — update the `undici` pin from 8.11.2 to 8.12.3 (#700).
   8.11.2 is in the range of eight advisories from 2026-10-15. Four are high
   (GHSA-qrxm-fqhp-jwvm, GHSA-2m5v-pch6-74hx, GHSA-4w7w-5xrc-9h26,
@@ -11,15 +19,34 @@
   `@earendil-works/pi-coding-agent` 1.3.0 still carries its own unpatched
   undici: an exact 8.10.2 dependency and a copy in its CLI bundle. This change
   does not update them.
+- **Security, compatibility (runtime, CI, release)** — CI and the release job
+  now use Node 24.22.1, and the 9 public packages declare `engines.node`
+  `>=24.22.1`. Before, `.node-version` pinned 24.21.0 and `engines.node` was
+  `>=24.15.0`. Node 24.22.1 is the 24.x fix in the
+  [Node.js October 2026 security releases](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases).
+  It fixes four High CVEs: CVE-2026-111497 (Brotli decoder out-of-bounds
+  write), CVE-2026-105483 and CVE-2026-106069 (TLS hostname check bypass) and
+  CVE-2026-105482 (`dns.resolve` truncates a name at a NUL character). It also
+  updates undici. The new floor is a compatibility change. On a Node older
+  than 24.22.1, npm and pnpm print an engine warning at install. Yarn 1 fails
+  the install, and so do npm and pnpm with `engine-strict` on. Nothing refuses
+  an older Node at run time. The existing `node:sqlite` check (Node 22.5 or
+  newer) is the only check of the Node version.
+- **Changed (keys, release)** — keys uses the release train version. From
+  0.28.2, all nine public packages share one version, so keys moves from 0.13.1
+  to 0.28.2. This is a version alignment, not a breaking change, and the keys
+  dependency rules do not change. `check:release-graph` now requires keys at
+  the train version, `check:version-authority` reads one version, and
+  `publish.mjs` and `pack-and-smoke.mjs` treat keys as part of the train. A
+  Host with a keys range such as `^0.13.1` must change it to match 0.28.2.
 - **Feature (server, client)** — complete #613 with opt-in CORS for loopback
   browser MCP clients. `listenLoopback({ allowedOrigins })` admits exact
   loopback origins, answers their preflight without dispatch and adds
   `Access-Control-Allow-Origin`, `Vary` and `Expose-Headers: Mcp-Session-Id`.
   It never allows credentials, and Cookie stays refused.
   `createMcpHttpServer({ allowedOrigins })` accepts the same origins in its
-  Origin check. Without the options, behavior is unchanged. These are additive
-  public APIs. The pre-1.0 policy puts them in a MINOR release; the owner
-  decides the version for this batch.
+  Origin check. Without the options, behavior is unchanged. These additive
+  public APIs ship in this PATCH under the one-release exception above.
 - **Feature (examples)** — K4 `HostLedger.compact` also removes acknowledged
   terminal memory intents and their approval keys. Inside the retention window,
   approval and device replays get the original row. `MemoryOptions.now` must
@@ -102,6 +129,36 @@
   clock. Heartbeats with a non-zero minimum interval keep their throttle. The
   conformance suite now covers the rollback case, and `advanceTime` accepts a
   negative value (#674).
+- **Changed (client)** — the new `CodexAdapterOptions.operationTimeoutMs`
+  (default 30000) bounds the session open, each prompt and each steer. On
+  expiry the session fails and the app-server is killed. Before, each RPC had
+  its own 30 s deadline, and a prompt or steer timeout rejected only that
+  control. The open now has one budget for initialize, `thread/start` and the
+  read-back. The Codex and Grok adapters own the retained-record byte budget,
+  so the vendored OAR fork has fewer BYOK deltas (#652).
+- **Fixed (client)** — relocated memory-helper assets are checked against the
+  helper identity compiled into the SDK release. Before, a relocated directory
+  was checked only against its own manifest, so changed helper bytes with a
+  recomputed manifest digest were accepted. Copy the assets from the same SDK
+  build that bundles the Host. A failed copy removes the files it created.
+  Public declarations are unchanged (#603).
+- **Feature (examples)** — K4 routine definitions can register Host job
+  handlers. A wake records its occurrence and pending work before the handler
+  runs. The result commits a JSON summary, with no Agent execution or with an
+  explicitly requested Agent intent. Failed work stays visible and can be
+  retried. External Host effects are at least once across crashes, so handlers
+  must deduplicate by `occurrenceKey` (#612). When `close()` aborts an active
+  Host job, shutdown now succeeds and keeps the pending occurrence for
+  recovery (#665).
+- **Feature (examples)** — reuse of a compacted K4 intent key throws the
+  exported `RetiredIntentIdentityError` with `code: 'retired_intent_identity'`.
+  The message, the rejection point and the transaction rollback are unchanged
+  (#602).
+- **Feature (examples)** — the K4 projection outbox accepts optional count and
+  UTF-8 byte limits. A write over a limit throws `OutboxFullError`
+  (`outbox_full`) and rolls back the whole ledger transaction. The defaults
+  stay unlimited, and nothing is removed automatically. Other #602 bounds stay
+  open (#602).
 - **Feature (client, protocol)** — adapter metadata for Hosts (#635). Each
   built-in descriptor declares `platforms`. Runtime detection refuses another
   platform with `platform_unsupported` before any probe; Grok and Hermes
@@ -125,19 +182,6 @@
   `outbound.duplicate` counter and to the server `dedupDrops` counter. Before,
   it added 1 to `accepted`. `observer.onInboundCommitted` now fires only once
   for each message (#693).
-- **Security, compatibility (runtime, CI, release)** — CI and the release job
-  now use Node 24.22.1, and the 9 public packages declare `engines.node`
-  `>=24.22.1`. Before, `.node-version` pinned 24.21.0 and `engines.node` was
-  `>=24.15.0`. Node 24.22.1 is the 24.x fix in the
-  [Node.js October 2026 security releases](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases).
-  It fixes four High CVEs: CVE-2026-111497 (Brotli decoder out-of-bounds
-  write), CVE-2026-105483 and CVE-2026-106069 (TLS hostname check bypass) and
-  CVE-2026-105482 (`dns.resolve` truncates a name at a NUL character). It also
-  updates undici. The new floor is a compatibility change. On a Node older
-  than 24.22.1, npm and pnpm print an engine warning at install. Yarn 1 fails
-  the install, and so do npm and pnpm with `engine-strict` on. Nothing refuses
-  an older Node at run time. The existing `node:sqlite` check (Node 22.5 or
-  newer) is the only check of the Node version.
 
 ## 0.28.1 / @byok-sdk/keys 0.13.1 — 2026-10-21 (published)
 

@@ -3,8 +3,9 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
-import { familyOwners, knownFamilies, selectImpact, workspaceGraph } from './select-impact.mjs';
+import { familyOwners, knownFamilies, reviewedScripts, selectImpact, workspaceGraph } from './select-impact.mjs';
 const root = new URL('../../', import.meta.url);
+const sorted = values => [...values].sort();
 
 test('reviewed graph covers every workspace and all local dependency edges', () => {
   const actual = {};
@@ -144,11 +145,52 @@ test('schema, native memory and SEA changes retain relevant qualification', () =
 });
 
 test('unknown, broad policy/dependency inputs and malformed paths fail closed', () => {
-  for (const path of ['bun.lock', 'package.json', 'packages/client/package.json', 'api-surface/entries.json', '.github/workflows/unreviewed.yml', 'packages/new/src/index.ts', 'packages/client/vendor/new.js', 'scripts/release/publish.mjs', 'other/a.md', '../README.md', './README.md', '/README.md', 'docs//a.md', 'docs/../README.md', 'docs/a\nb.md', 'docs\\a.md', '', null]) {
+  for (const path of ['bun.lock', 'package.json', 'packages/client/package.json', 'api-surface/entries.json', '.github/workflows/unreviewed.yml', 'packages/new/src/index.ts', 'packages/client/vendor/new.js', 'scripts/release/pg-migrate-smoke.mjs', 'other/a.md', '../README.md', './README.md', '/README.md', 'docs//a.md', 'docs/../README.md', 'docs/a\nb.md', 'docs\\a.md', '', null]) {
     assert.throws(() => selectImpact([path]), /reviewed CI mapping required|requires exact CI_BASE/i, String(path));
   }
   for (const paths of [[], null, {}, 'README.md']) assert.throws(() => selectImpact(paths), /reviewed CI mapping required|requires exact CI_BASE/i);
   assert.throws(() => selectImpact(['README.md', 'unknown']), /reviewed CI mapping required|requires exact CI_BASE/i);
+});
+
+// #649: the owner reviewed exactly these release script paths for 0.28.2.
+test('reviewed release scripts select the tests and the jobs that run them', () => {
+  const tracked = new Set(spawnSync('git', ['ls-files'], { cwd: fileURLToPath(root), encoding: 'utf8' }).stdout.split('\n').filter(Boolean));
+  const scripts = JSON.parse(readFileSync(new URL('package.json', root), 'utf8')).scripts;
+  assert.deepEqual(Object.keys(reviewedScripts).sort(), [
+    'scripts/api-surface/check-version-authority.mjs', 'scripts/api-surface/check-version-authority.test.mjs',
+    'scripts/release/beta-release.test.mjs', 'scripts/release/check-package-graph.mjs', 'scripts/release/pack-and-smoke.mjs',
+    'scripts/release/pack-and-smoke.test.mjs',
+    'scripts/release/publish.mjs', 'scripts/release/registry-readback.mjs',
+  ]);
+  for (const [path, { tests, families = [] }] of Object.entries(reviewedScripts)) {
+    assert.ok(tracked.has(path), `reviewed path is not tracked: ${path}`);
+    assert.deepEqual(selectImpact([path]), {
+      dirs: [], files: [path], families: sorted(families), reason: families.length ? 'impacted' : 'root-ci-scripts',
+    });
+    if (path.endsWith('.test.mjs')) assert.ok(tests.includes(path), `${path} must run itself`);
+    for (const file of tests) {
+      assert.ok(tracked.has(file) && scripts['test:scripts'].includes(file), `${path}: ${file} must be a tracked test:scripts file`);
+      if (file !== path) assert.ok(readFileSync(new URL(file, root), 'utf8').includes(path.split('/').pop()), `${file} does not run ${path}`);
+    }
+  }
+  // pack-and-smoke.mjs selects exactly the family jobs that run it.
+  assert.equal(scripts['check:release-pack'], 'node scripts/release/pack-and-smoke.mjs');
+  const workflow = readFileSync(new URL('.github/workflows/ci.yml', root), 'utf8');
+  const runners = knownFamilies.filter(family => {
+    const start = workflow.indexOf(`\n  ${family}:\n`);
+    assert.ok(start >= 0, family);
+    const next = workflow.slice(start + 1).search(/\n  [a-z0-9-]+:\n/);
+    return /(?:bun run check:release-pack|node scripts\/release\/pack-and-smoke\.mjs)(?:\s|$)/.test(workflow.slice(start, next < 0 ? undefined : start + 1 + next));
+  });
+  assert.deepEqual(selectImpact(['scripts/release/pack-and-smoke.mjs']).families, sorted(runners));
+  assert.ok(runners.includes('npm-release-pack'));
+});
+
+test('release script siblings outside the reviewed list still fail closed', () => {
+  for (const path of ['scripts/release/publish.test.mjs', 'scripts/release/pg-migrate-smoke.mjs', 'scripts/release/registry-contract.mjs',
+    'scripts/release/nested/publish.mjs', 'scripts/api-surface/check-api-surface.mjs', 'scripts/api-surface/check-version-authority.js']) {
+    assert.throws(() => selectImpact([path]), /reviewed CI mapping required/i, path);
+  }
 });
 
 test('selection is deterministic, deduplicated, and uses only known family IDs', () => {
