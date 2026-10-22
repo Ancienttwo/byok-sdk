@@ -178,7 +178,7 @@ for (const [directory, expectedName] of publicPackages) {
   if (manifest.version !== expectedVersion) errors.push(`${manifestPath}: expected version ${expectedVersion}, got ${manifest.version}`);
   if (manifest.license !== 'MIT') errors.push(`${manifestPath}: license must be MIT`);
   if (manifest.publishConfig?.access !== 'public') errors.push(`${manifestPath}: publishConfig.access must be public`);
-  const expectedEngine = '>=24.15.0';
+  const expectedEngine = '>=24.22.1';
   if (manifest.engines?.node !== expectedEngine) errors.push(`${manifestPath}: engines.node must be ${expectedEngine}`);
   if (manifest.repository?.url !== 'git+https://github.com/Ancienttwo/byok-sdk.git') {
     errors.push(`${manifestPath}: repository URL is not canonical`);

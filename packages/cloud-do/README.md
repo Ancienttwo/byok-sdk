@@ -28,7 +28,7 @@ The earlier published 0.26.0-rc.4 (see the
 is superseded by 0.27.0-rc.2; 0.26.0-rc.1 to rc.3 are superseded. See the
 [release notes](../../docs/releases/v0.26.1.md#version-set-and-channel).
 Live Host acceptance remains separate.
-The package needs Node 24.15.0 or later for build tooling.
+The package needs Node 24.22.1 or later for build tooling.
 
 ## Install and subclass
 

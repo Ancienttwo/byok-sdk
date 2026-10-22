@@ -13,8 +13,8 @@ name: CI
 # The freeze-guard test (packages/protocol/src/__tests__/freeze-guard.test.ts)
 # runs as an ordinary part of `bun run test` — no separate step for it.
 #
-# Node runtime: `.node-version` pins Node 24.21.0 for the baseline jobs.
-# The Node 26 forward-compatibility leg is explicit; engines.node is >=24.15.0.
+# Node runtime: `.node-version` pins Node 24.22.1 for the baseline jobs.
+# The Node 26 forward-compatibility leg is explicit; public engines.node is >=24.22.1.
 #
 # Note for anyone debugging a LOCAL sandbox run of this same test suite (not
 # a concern for these hosted runners): a couple of integration tests
