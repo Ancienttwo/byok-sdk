@@ -72,6 +72,22 @@ test('shared Windows filesystem helpers select their real Windows consumers', ()
   assert.deepEqual(selectImpact(['packages/client/src/util/atomic-write.ts']).families, ['ipc-smoke', 'windows-git-workspace']);
 });
 
+test('Hermes adapter, fake and custody launcher paths select the Windows Hermes suites', () => {
+  for (const path of [
+    'packages/client/src/adapters/hermes/gateway-pipe-win32.ts',
+    'packages/client/src/adapters/hermes/hermes-session-runtime.ts',
+    'packages/client/src/__tests__/hermes-custody.test.ts',
+    'packages/client/src/__tests__/fixtures/fake-hermes.mjs',
+    'packages/client/src/__tests__/fixtures/fake-hermes-command.ts',
+    'packages/keys/src/hermes-provider-launcher.ts',
+    'packages/keys/src/__tests__/hermes-provider-launcher.test.ts',
+  ]) assert.ok(selectImpact([path]).families.includes('windows-git-workspace'), path);
+  // The job does not run these, so a change to them does not select it.
+  for (const path of ['packages/client/src/adapters/codex/codex-adapter.ts', 'packages/keys/src/pi-provider-launcher.ts', 'packages/client/src/__tests__/hermes-pipe-open-errors.test.ts']) {
+    assert.ok(!selectImpact([path]).families.includes('windows-git-workspace'), path);
+  }
+});
+
 test('owned helper build scripts keep release packaging qualification', () => {
   for (const path of ['packages/client/scripts/build-agent-memory-helper.mjs', 'packages/client/scripts/check-agent-memory-helper-build.mjs', 'packages/client/scripts/agent-memory-helper-source.mjs']) {
     const families = selectImpact([path]).families;
