@@ -722,7 +722,7 @@ retry. Budget exhaustion drains accepted Pi work for up to 120 seconds; explicit
 stop or stdin EOF terminates it. Neither pause nor a new dialog recalls already
 admitted work. Runtime/grants remain separate from the native Codex session.
 
-MIT licensed. Node.js 24.15.0 or newer.
+MIT licensed. Node.js 24.22.1 or newer.
 
 ### Hermes Agent adapter
 
@@ -781,7 +781,7 @@ Hermes, preserving the PID required by the gateway identity check.
 This initial mapping accepts enabled OpenAI-compatible bearer profiles without
 `pi_model` overrides and maps them to Hermes `custom`. Other authentication,
 Anthropic, Responses/compat overrides and Windows remain unsupported. Use a
-POSIX Node runtime supporting `process.execve` (the SDK's Node >=24.15 floor)
+POSIX Node runtime supporting `process.execve` (the SDK's Node >=24.22.1 floor)
 and an absolute Hermes executable; no PATH lookup or child-process proxy is
 used for launch. A Bun-only executable without `process.execve` is rejected.
 Custody mode filters inherited environment variables and injects only

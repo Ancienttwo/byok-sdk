@@ -17,7 +17,7 @@
   },
   "homepage": "https://github.com/Ancienttwo/byok-sdk#readme",
   "engines": {
-    "node": ">=24.15.0"
+    "node": ">=24.22.1"
   },
   "sideEffects": false,
   "main": "./dist/index.js",

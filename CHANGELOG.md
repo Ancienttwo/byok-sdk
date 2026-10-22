@@ -86,13 +86,19 @@
   clock. Heartbeats with a non-zero minimum interval keep their throttle. The
   conformance suite now covers the rollback case, and `advanceTime` accepts a
   negative value (#674).
-- **Security (CI, release)** — CI and the release job now use Node 24.22.1.
-  Before, `.node-version` pinned 24.21.0. Node 24.22.1 is the 24.x fix in the
+- **Security, compatibility (runtime, CI, release)** — CI and the release job
+  now use Node 24.22.1, and the 9 public packages declare `engines.node`
+  `>=24.22.1`. Before, `.node-version` pinned 24.21.0 and `engines.node` was
+  `>=24.15.0`. Node 24.22.1 is the 24.x fix in the
   [Node.js October 2026 security releases](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases).
   It fixes four High CVEs: CVE-2026-111497 (Brotli decoder out-of-bounds
   write), CVE-2026-105483 and CVE-2026-106069 (TLS hostname check bypass) and
   CVE-2026-105482 (`dns.resolve` truncates a name at a NUL character). It also
-  updates undici. `engines.node` stays `>=24.15.0`.
+  updates undici. The new floor is a compatibility change. On a Node older
+  than 24.22.1, npm and pnpm print an engine warning at install. Yarn 1 fails
+  the install, and so do npm and pnpm with `engine-strict` on. Nothing refuses
+  an older Node at run time. The existing `node:sqlite` check (Node 22.5 or
+  newer) is the only check of the Node version.
 
 ## 0.28.1 / @byok-sdk/keys 0.13.1 — 2026-10-21 (published)
 

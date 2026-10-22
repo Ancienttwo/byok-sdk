@@ -727,7 +727,7 @@ describe('B-P2 native composition: call-time purity, measured in an isolated chi
 describe('B-P2 native composition: the purity gate is falsifiable', () => {
   // Each control rewrites pi-ai's `dist/utils/text.js` in memory through a
   // `module.registerHooks` load hook — available on the pinned Node (>= 22.15;
-  // `.node-version` is 24.22.1 and `engines.node` is >= 24.15.0), synchronous,
+  // `.node-version` is 24.22.1 and `engines.node` is >= 24.22.1), synchronous,
   // and touching nothing on disk. The file is on the real compile path because
   // the official serializer (`dist/api/openai-completions.js`) renders the
   // leading system message with `getSystemMessageText`, and the control firing

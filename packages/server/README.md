@@ -6,7 +6,7 @@ dispatch, approvals, cancellation and device discovery over protocol v3.
 Use `@byok-sdk/cloud` with `@byok-sdk/cloud-dataplane` for a multi-instance
 hosted deployment.
 
-Requires Node.js 24.15.0 or newer. MIT licensed.
+Requires Node.js 24.22.1 or newer. MIT licensed.
 
 ## Embed the server
 

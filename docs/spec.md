@@ -1440,14 +1440,15 @@ so a future extension calling registerApiProvider on one copy cannot make that
 registration visible to another copy. This boundary is deferred in tasks/todos.md
 and must be addressed before such an extension is admitted.
 
-Dispatch and private conformance execution require Node.js >=24.15.0. Keys remains
+Dispatch requires Node.js >=24.22.1. Private conformance execution requires
+Node.js >=24.15.0. Keys remains
 outside the dispatch dependency graph and delivers credentials through its existing
 separately installed launcher boundary.
 
 The package manager is not the runtime authority. This repository uses Bun
 1.4.2 with its isolated workspace linker and one committed `bun.lock`.
 Downstreams install the standard npm registry artifacts with their chosen npm
-client; published library/CLI execution requires Node.js 24.15.0 or newer.
+client; published library/CLI execution requires Node.js 24.22.1 or newer.
 The device daemon may also be shipped as a Bun-compiled single-file launcher;
 this repository verifies that optional recipe and Bun custody/crash paths.
 Those focused guarantees do not claim general Bun runtime compatibility for
