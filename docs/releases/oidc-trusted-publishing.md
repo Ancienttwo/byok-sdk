@@ -46,8 +46,9 @@ The npm documentation gives these constraints. They were read on 2026-10-19
   3. A self-hosted runner still cannot use OIDC. The only other path is the
      local OTP path (see [Local fallback](#local-fallback)).
 - **npm and Node versions.** Trusted publishing needs npm 11.5.1 or later
-  and Node 22.14.0 or later. `.node-version` pins Node 24.21.0, which ships
-  npm 11.19.0 (verified: `node --version`, `npm --version`). The driver
+  and Node 22.14.0 or later. `.node-version` pins Node 24.22.1, which ships
+  npm 11.19.1 (verified: the `npm` field of `v24.22.1` in the
+  [Node.js release index](https://nodejs.org/dist/index.json)). The driver
   refuses an older npm.
 - **Token permission.** The job needs `permissions: id-token: write`. The
   driver refuses a job without an OIDC token endpoint. It also refuses a job

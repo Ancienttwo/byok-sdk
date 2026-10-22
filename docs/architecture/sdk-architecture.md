@@ -201,7 +201,7 @@ find "$SDK_SRC" -type f \( -name '*.test.ts' -o -name '*.spec.ts' -o -path '*/__
 | `templates/packaging/sea` | Node SEA + esbuild/postject recipe | 已实现；含跨平台边界说明与 smoke |
 | `templates/service` | launchd/systemd/WinSW reference recipes | 已实现；真正执行逻辑在 `packages/client/src/lifecycle/*` |
 | `deploy/` | env/runbook/scripts/sql production composition surface | 已实现 Postgres migrations、R2 dataplane env（测试基底为 SeaweedFS）、迁移与 hosted/self-hosted/release-responsibility runbook；host deployment 仍由集成方负责 |
-| `.github/workflows/ci.yml` | Node 24.21.0 基线 + Node 26 forward-compatibility build/typecheck/test；专项 smoke/audit | tarball pack/install 与 packageability job 使用 `.node-version` 基线；Linux/macOS/Windows 由各 job 的 OS matrix 决定 |
+| `.github/workflows/ci.yml` | Node 24.22.1 基线 + Node 26 forward-compatibility build/typecheck/test；专项 smoke/audit | tarball pack/install 与 packageability job 使用 `.node-version` 基线；Linux/macOS/Windows 由各 job 的 OS matrix 决定 |
 
 ## 2. `@byok-sdk/protocol`：唯一 wire 契约
 
@@ -1017,7 +1017,7 @@ SDK 只交付 npm library 与 reference recipes。host product 拥有 binary sig
 
 CI 验证层次：
 
-1. Node 24.21.0 基线与 Node 26 forward-compatibility leg：build → typecheck → test；build 必须先跑，因为 workspace exports 指向 `dist`。
+1. Node 24.22.1 基线与 Node 26 forward-compatibility leg：build → typecheck → test；build 必须先跑，因为 workspace exports 指向 `dist`。
 2. Windows Git workspace/store/security tests，含特殊字符路径。
 3. Bun/SEA packageability smoke。
 4. WinSW real service install/start/stop/uninstall smoke。
