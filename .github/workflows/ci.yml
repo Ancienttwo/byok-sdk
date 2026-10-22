@@ -449,15 +449,6 @@ jobs:
       - name: Run built adapter lifecycle smoke
         run: bun run --filter @byok-sdk/client smoke:adapters
 
-      # #609: Windows detection still refuses Grok (platform_unsupported).
-      # This runs the Grok fixture contract (the fake ACP agent behind a
-      # compiled launcher) through the shared Windows process-tree path. It
-      # is not a live Grok run; docs/adapter-capabilities.md lists what still
-      # needs one.
-      - name: Grok fixture contract on Windows
-        if: matrix.os == 'windows-latest'
-        run: bun run --filter @byok-sdk/client test -- src/adapters/grok/__tests__/grok-windows-contract.test.ts
-
       # The Host suites run the embedded server, daemon journal and Host ledger
       # in one process. Each commits to synchronous node:sqlite with fsync, so
       # every commit blocks the event loop for the length of one fsync. The
@@ -492,6 +483,15 @@ jobs:
         env:
           BYOK_TEST_WINDOWS_CREDENTIAL_MANAGER: '1'
         run: bun run --filter @byok-sdk/keys test -- src/windows-credential-custody.integration.test.ts
+
+      # #609: Windows detection still refuses Grok (platform_unsupported).
+      # This runs the Grok fixture contract (the fake ACP agent behind a
+      # compiled launcher) through the shared Windows process-tree path. It
+      # is not a live Grok run; docs/adapter-capabilities.md lists what still
+      # needs one.
+      - name: Grok fixture contract on Windows
+        if: matrix.os == 'windows-latest'
+        run: bun run --filter @byok-sdk/client test -- src/adapters/grok/__tests__/grok-windows-contract.test.ts
 
   # S4A dataplane guarantee: runs the suites that need a REAL Postgres, against
   # the same `docker-compose.test.yml` a developer starts locally. This job is

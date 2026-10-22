@@ -21,6 +21,8 @@ import { resolveBunBin } from '../../../__tests__/support/test-bun-bin';
 
 const FAKE_AGENT = fileURLToPath(new URL('../../../__tests__/fixtures/fake-acp-agent.mjs', import.meta.url));
 const usage = { type: 'usage', inputTokens: 100, cachedInputTokens: 64, outputTokens: 7, contextTokens: 1001, contextSource: 'provider' } as const;
+// Windows process start and job assignment are slower than vi.waitFor's 1 s default.
+const WAIT = { timeout: 10_000 } as const;
 const sessions: Session[] = [];
 const dirs: string[] = [];
 let launcherDir: string;
@@ -109,7 +111,7 @@ describe('GrokAdapter fixture contract on the host platform', { timeout: 30_000 
     expect(started!.argv).toEqual(['agent', '--always-approve', '--no-leader', 'stdio']);
     expect(await fs.realpath(started!.cwd)).toBe(resources.workspaceDir);
     await s.close();
-    await vi.waitFor(() => expect(alive(started!.pid)).toBe(false));
+    await vi.waitFor(() => expect(alive(started!.pid)).toBe(false), WAIT);
   });
 
   it('runs a hosted terminal command with the task environment', async () => {
@@ -121,7 +123,7 @@ describe('GrokAdapter fixture contract on the host platform', { timeout: 30_000 
   it('interrupts through session/cancel', async () => {
     const resources = await ctx();
     const s = await open(adapter(), { instruction: 'hold' }, resources);
-    await vi.waitFor(() => expect(facts(resources.log).some(fact => fact.kind === 'prompt')).toBe(true));
+    await vi.waitFor(() => expect(facts(resources.log).some(fact => fact.kind === 'prompt')).toBe(true), WAIT);
     await s.interrupt();
     expect(facts(resources.log).some(fact => fact.kind === 'cancel')).toBe(true);
     expect(await turn(s)).toEqual([usage, { type: 'turn_end' }]);
@@ -136,11 +138,11 @@ describe('GrokAdapter fixture contract on the host platform', { timeout: 30_000 
     }) as typeof spawn;
     const resources = await ctx();
     const s = await open(adapter({ spawnFn }), { instruction: 'terminal-hang' }, resources);
-    await vi.waitFor(() => expect(facts(resources.log).some(fact => fact.kind === 'terminal')).toBe(true));
+    await vi.waitFor(() => expect(facts(resources.log).some(fact => fact.kind === 'terminal')).toBe(true), WAIT);
     await s.close();
     expect(terminals).toHaveLength(1);
     expect(terminals[0]!.exitCode ?? terminals[0]!.signalCode).not.toBeNull();
     const [started] = facts(resources.log).filter(fact => fact.kind === 'start');
-    await vi.waitFor(() => expect(alive(started!.pid)).toBe(false));
+    await vi.waitFor(() => expect(alive(started!.pid)).toBe(false), WAIT);
   });
 });
