@@ -62,6 +62,7 @@ async function harness() {
       return sent.find((envelope) => envelope.task_id === taskId && ['task.complete', 'task.fail', 'task.decline'].includes(envelope.type))!;
     },
     opened: async () => (await fs.readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line)).filter(fact => fact.kind === 'open'),
+    started: async () => (await fs.readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line)).filter(fact => fact.kind === 'start'),
   };
 }
 
@@ -99,4 +100,6 @@ it('refuses a persona-bearing memory-reader resume as unqualified, without openi
   expect(refused).toMatchObject({ type: 'task.fail', payload: { retryable: false } });
   expect(String((refused.payload as { reason?: unknown }).reason)).toContain('persona resume is not qualified');
   expect(await h.opened()).toHaveLength(1);
+  // Refused before spawning: only the first Attempt started an agent process.
+  expect(await h.started()).toHaveLength(1);
 });

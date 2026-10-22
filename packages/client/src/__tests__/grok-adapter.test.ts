@@ -149,9 +149,11 @@ describe('GrokAdapter sessions', () => {
 
   it('sets the four compatibility variables on the agent process only when asked, and on no hosted terminal command (#634)', async () => {
     expect(() => adapter({ compatInstructions: 'off' as never })).toThrow(TypeError);
-    const plain = await ctx();
-    await turn(await open(adapter(), { instruction: 'hello' }, plain));
-    expect(Object.keys(facts(plain.log).find(fact => fact.kind === 'start')!.env).filter(name => name.startsWith('GROK_'))).toEqual([]);
+    for (const options of [{}, { compatInstructions: 'inherit' as const }]) {
+      const plain = await ctx();
+      await turn(await open(adapter(options), { instruction: 'hello' }, plain));
+      expect(Object.keys(facts(plain.log).find(fact => fact.kind === 'start')!.env).filter(name => name.startsWith('GROK_'))).toEqual([]);
+    }
     const resources = await ctx();
     const s = await open(adapter({ compatInstructions: 'disabled' }), { instruction: 'terminal-compat' }, resources);
     // The hosted terminal command keeps the task env: none of the four variables reaches it.
