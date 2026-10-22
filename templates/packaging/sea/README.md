@@ -91,8 +91,8 @@ required regardless of format.
 
 The first ESM pass performs standard tree-shaking; the second pass converts
 the surviving launcher to CJS. It does not remove capabilities from the
-independently built Pi host. The SDK graph, the Pi host included, has no
-top-level await, so a single-pass CJS bundle also builds (#701). Required
+independently built Pi host. The client root graph, either Pi host flavor
+included, has no top-level await, so a single-pass CJS bundle also builds (#701). Required
 top-level await in product code still fails: this recipe does not wrap the
 entry in an async function, externalize dependencies or insert stubs.
 
