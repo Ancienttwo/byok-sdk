@@ -252,6 +252,11 @@ export const reviewedScripts = Object.freeze({
 });
 const rootDocs = new Set(['README.md', 'CHANGELOG.md', 'AGENTS.md', 'CLAUDE.md', 'LICENSE', 'SECURITY.md', 'CONTRIBUTING.md']);
 const rootCi = new Set(['.github/workflows/ci.yml', '.github/workflows/release.yml']);
+// Reviewed release scripts and the families whose jobs run them. The npm
+// release pack job runs pack-and-smoke.mjs, which runs the package graph check.
+export const reviewedReleaseScripts = Object.freeze({
+  'scripts/release/check-package-graph.mjs': Object.freeze(['npm-release-pack']),
+});
 const sorted = values => [...values].sort();
 // An unmapped path is a selector gap. Fix it with a reviewed mapping; a
 // feature PR never falls back to the complete release matrix.
@@ -281,6 +286,14 @@ export function selectImpact(paths, context = {}) {
       verifyReviewedContent(path, context);
       dirs.add('packages/client');
       for (const id of ['npm-release-pack', 'agent-memory-helper', 'agent-memory-helper-linux']) families.add(id);
+      continue;
+    }
+    // #702: the Node pin is the runtime of every platform job, so a reviewed
+    // exact version selects every routine family. The complete test suite
+    // stays release-validation only.
+    if (path === '.node-version') {
+      verifyReviewedContent(path, context);
+      for (const id of knownFamilies) if (id !== 'build-test') families.add(id);
       continue;
     }
     if (path === 'packages/protocol/src/__tests__/golden/v3.releases.json') { leafDirs.add('packages/protocol'); continue; }
@@ -336,6 +349,10 @@ export function selectImpact(paths, context = {}) {
     if (Object.hasOwn(reviewedScripts, path)) {
       scripts = true;
       for (const id of reviewedScripts[path].families ?? []) families.add(id);
+      continue;
+    }
+    if (Object.hasOwn(reviewedReleaseScripts, path)) {
+      for (const id of reviewedReleaseScripts[path]) families.add(id);
       continue;
     }
     // #652 trims these reviewed files in the pinned OAR snapshot.

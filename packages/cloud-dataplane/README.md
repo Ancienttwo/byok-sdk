@@ -388,7 +388,7 @@ test rather than a step someone remembers. What runs:
 
 ## License
 
-MIT. Node.js 24.15.0 or newer.
+MIT. Node.js 24.22.1 or newer.
 
 ## Wake-driven long-poll migration (#410)
 
