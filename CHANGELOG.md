@@ -37,7 +37,10 @@
   awaits. The `PI_SUBAGENT_CHILD` skip is unchanged. The source manifest
   records this delta. A CJS bundle that runs Pi must also define
   `import.meta.url` from `__filename`, because Pi reads it when it evaluates.
-  The client README and the SEA recipe README give the esbuild options.
+  The client README and the SEA recipe README give the esbuild options. They
+  also warn that, inside a SEA, this define makes a "run main when
+  `import.meta.url` matches `argv[1]`" check true, so the check needs an
+  `isSea()` guard (`node:sea`).
   A new fixture in `pi-single-file-bundle.test.ts` runs a real Pi print session
   from a single-pass CJS bundle. It covers the ordinary host, the sealed-host
   redirect and a subagent child.
