@@ -1,5 +1,6 @@
 import { WAKE_MAX_FUTURE_MS, type DueWake, type WakeScheduleInput } from '@byok-sdk/server';
-import { canonical, hash, time, type ExecutionTemplate, type IgnoredWakeAudit, type LedgerState, type Occurrence, type Routine, type RoutineDefinition } from './model';
+import { canonical, hash, time, type Conclusion, type ExecutionTemplate, type IgnoredWakeAudit, type Intent, type LedgerState, type Occurrence,
+  type Routine, type RoutineDefinition } from './model';
 import { cancelWake, enqueue, settle } from './transitions';
 import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
 
@@ -70,6 +71,20 @@ export function applyPlan(state: LedgerState, routine: Routine, plan: WakePlan, 
   scheduleNext(state, routine, now);
 }
 
+/** Creates a validated routine. The same definition is idempotent; another definition for the ID throws before any change. */
+export function createRoutine(state: LedgerState, definition: RoutineDefinition, now: number, nextTime: NextOccurrence): void {
+  const plan = nextWake(definition, now - 1, nextTime, now);
+  const id = hash(definition.id), routine = state.routines[id];
+  if (routine) {
+    if (canonical(routine.definition) !== canonical(definition)) throw new Error('Routine definition is immutable in addRoutine; use updateRoutine for the next version');
+    // A staged version owns the next reservation; the old chain gets no refill.
+    if (routine.lifecycle === 'active' && routine.status === 'no_occurrence_within_horizon' && !routine.pending) applyPlan(state, routine, plan, now);
+    return;
+  }
+  state.routines[id] = { definition: structuredClone(definition), lifecycle: 'active', status: 'ok', next: null };
+  applyPlan(state, state.routines[id]!, plan, now);
+}
+
 /** A staged version replaces the definition only when no older work can still use it. Pure: it reads no ledger. */
 export function versionSwitchDue(routine: Readonly<Routine>, occurrences: Iterable<Readonly<Occurrence>>, now: number): boolean {
   if (routine.lifecycle !== 'active' || !routine.pending) return false;
@@ -85,7 +100,8 @@ export function switchVersion(state: LedgerState, routine: Routine, now: number,
   try { applyPlan(state, routine, nextWake(routine.definition, now, nextTime, now), now); }
   catch (error) { auditCalendarError(routine, now, error); }
 }
-const destination = (definition: RoutineDefinition): string => definition.hostJob ? `host-job:${definition.hostJob.type}` : 'execution';
+const destination = (definition: RoutineDefinition): string => definition.hostJob ? `host-job:${definition.hostJob.type}`
+  : definition.hostOccurrence ? `host-occurrence:${definition.hostOccurrence.type}` : 'execution';
 /** Stages the next version of a validated definition. The Host service assigns versions and keeps their history. */
 export function stageVersion(state: LedgerState, definition: RoutineDefinition, now: number, nextTime: NextOccurrence): void {
   const routine = state.routines[hash(definition.id)];
@@ -96,13 +112,16 @@ export function stageVersion(state: LedgerState, definition: RoutineDefinition, 
   if (definition.version !== Math.max(routine.definition.version, routine.pending?.version ?? 0) + 1) {
     throw new Error('Routine version conflict; supply max(current, pending) + 1');
   }
-  if (destination(definition) !== destination(routine.definition)) throw new Error('A routine version cannot change its destination or Host job type');
+  if (destination(definition) !== destination(routine.definition)) throw new Error('A routine version cannot change its destination, Host job type or occurrence hook type');
   routine.pending = structuredClone(definition);
   if (versionSwitchDue(routine, Object.values(state.occurrences), now)) switchVersion(state, routine, now, nextTime);
 }
 
-/** Called inside the same transaction that creates the occurrence and its work. */
-export function recordOccurrence(state: LedgerState, tenant: string, wake: DueWake, now: number, nextTime: NextOccurrence): void {
+/**
+ * Called inside the same transaction that creates the occurrence and its work.
+ * Returns the new occurrence; a replay or an ignored wake returns undefined.
+ */
+export function recordOccurrence(state: LedgerState, tenant: string, wake: DueWake, now: number, nextTime: NextOccurrence): Occurrence | undefined {
   const existing = state.slots[hash(wake.dedupKey)];
   if (existing) {
     const occurrence = state.occurrences[existing]!;
@@ -110,11 +129,11 @@ export function recordOccurrence(state: LedgerState, tenant: string, wake: DueWa
     return; // Persisted trigger wins even after a later redelivery.
   }
   const parsed = parseRoutineWakeKey(wake.dedupKey);
-  if (!parsed) return auditIgnoredWake(state, wake, now, 'unknown_key');
+  if (!parsed) return void auditIgnoredWake(state, wake, now, 'unknown_key');
   const routine = state.routines[hash(parsed.id)];
-  if (!routine) return auditIgnoredWake(state, wake, now, 'missing_routine');
-  if (routine.lifecycle !== 'active') return auditIgnoredWake(state, wake, now, 'inactive_routine');
-  if (!routine.next || routine.next.dedupKey !== wake.dedupKey) return auditIgnoredWake(state, wake, now, 'reservation_mismatch');
+  if (!routine) return void auditIgnoredWake(state, wake, now, 'missing_routine');
+  if (routine.lifecycle !== 'active') return void auditIgnoredWake(state, wake, now, 'inactive_routine');
+  if (!routine.next || routine.next.dedupKey !== wake.dedupKey) return void auditIgnoredWake(state, wake, now, 'reservation_mismatch');
   if (routine.next.availableAt !== wake.availableAt || routine.next.payload !== wake.payload) throw new Error('Wake differs from the routine reservation');
   const definition = routine.definition;
   const trigger = { kind: now - wake.availableAt > definition.lateAfterMs ? 'catch_up' as const : 'scheduled' as const, plannedAt: wake.availableAt };
@@ -133,7 +152,9 @@ export function recordOccurrence(state: LedgerState, tenant: string, wake: DueWa
 
   for (const prior of Object.values(state.occurrences).filter(row => row.routineId === definition.id && !row.conclusion)) {
     if (!prior.intentId) {
-      if (prior.job) prior.job.executionSuperseded = true;
+      // A later promotion of this Host job or Host occurrence settles as superseded.
+      const pending = prior.job ?? prior.hook;
+      if (pending) pending.executionSuperseded = true;
       continue;
     }
     const intent = state.intents[prior.intentId]!;
@@ -147,6 +168,8 @@ export function recordOccurrence(state: LedgerState, tenant: string, wake: DueWa
   if (definition.hostJob) {
     occurrence.job = { attempts: 0 };
     state.outbox[`host-job:${key}`] = { kind: 'host-job', occurrenceKey: key };
+  } else if (definition.hostOccurrence) {
+    occurrence.hook = {}; // The core runs the hook in this transaction.
   } else {
     const intent = enqueue(state, tenant, { key: `occurrence:${key}`, source: 'routine', execution: definition.execution,
       waitUntil: time(now + definition.waitMs), retry: definition.retry });
@@ -156,17 +179,39 @@ export function recordOccurrence(state: LedgerState, tenant: string, wake: DueWa
   }
   state.slots[hash(wake.dedupKey)] = key;
   applyPlan(state, routine, plan, now);
+  return occurrence;
 }
 
-/** A Host decision joins the existing FIFO atomically with its result summary. */
-export function promoteOccurrence(state: LedgerState, tenant: string, occurrence: Occurrence, execution: ExecutionTemplate): void {
+/** A Host decision joins the existing FIFO atomically. The deadline counts from occurrence admission. */
+export function promote(state: LedgerState, tenant: string, occurrence: Occurrence, execution: ExecutionTemplate): Intent {
   const routine = state.routines[hash(occurrence.routineId)]!;
   const intent = enqueue(state, tenant, { key: `occurrence:${occurrence.key}`, source: 'routine', execution,
     waitUntil: time(occurrence.recordedAt + routine.definition.waitMs), retry: routine.definition.retry });
   intent.occurrence = occurrence.key;
   occurrence.intentId = intent.id;
-  if (occurrence.job?.executionSuperseded) settle(state, intent, 'superseded');
+  if (occurrence.job?.executionSuperseded || occurrence.hook?.executionSuperseded) settle(state, intent, 'superseded');
   else if (routine.lifecycle === 'active' && occurrence.nextAt !== null) intent.retryUntil = occurrence.nextAt;
+  return intent;
+}
+function openHostOccurrence(state: LedgerState, occurrenceKey: string): Occurrence {
+  const occurrence = Object.hasOwn(state.occurrences, occurrenceKey) ? state.occurrences[occurrenceKey]! : undefined;
+  // A Host job occurrence is promoted or settled only by its handler result.
+  if (!occurrence?.hook) throw new Error('Host occurrence not found');
+  if (occurrence.intentId || occurrence.conclusion) throw new Error('Host occurrence is already promoted or concluded');
+  return occurrence;
+}
+/**
+ * Promotes an open `hostOccurrence` occurrence into the FIFO as intent `occurrence:<key>`.
+ * Call it inside `ledger.transaction`, then `drain()`. A newer slot makes the intent settle as superseded at once.
+ */
+export function promoteOccurrence(state: LedgerState, tenant: string, occurrenceKey: string, execution: ExecutionTemplate): Intent {
+  return promote(state, tenant, openHostOccurrence(state, occurrenceKey), execution);
+}
+const CONCLUSIONS: readonly Conclusion[] = ['succeeded', 'failed', 'declined', 'cancelled', 'expired', 'superseded'];
+/** Settles an open `hostOccurrence` occurrence that needs no execution. Call it inside `ledger.transaction`, then `drain()`. */
+export function concludeOccurrence(state: LedgerState, occurrenceKey: string, conclusion: Conclusion): void {
+  if (!CONCLUSIONS.includes(conclusion)) throw new Error('Invalid occurrence conclusion');
+  openHostOccurrence(state, occurrenceKey).conclusion = conclusion;
 }
 
 export function setLifecycle(state: LedgerState, id: string, lifecycle: Routine['lifecycle'], now: number, nextTime: NextOccurrence): void {
@@ -175,6 +220,9 @@ export function setLifecycle(state: LedgerState, id: string, lifecycle: Routine[
   if (!['active', 'paused', 'completed'].includes(lifecycle)) throw new Error('Invalid routine lifecycle');
   if (routine.lifecycle === 'completed' && lifecycle !== 'completed') throw new Error('A completed routine cannot resume');
   if (routine.lifecycle === lifecycle) return;
+  // Resume plans before any change, so a calendar error leaves the routine as it was.
+  const switching = lifecycle === 'active' && versionSwitchDue({ ...routine, lifecycle, next: null }, Object.values(state.occurrences), now);
+  const plan = lifecycle === 'active' && !switching ? nextWake(routine.definition, now, nextTime, now) : undefined;
   if (lifecycle === 'paused' && routine.next) {
     const cancelledSlot = routine.next.availableAt;
     for (const occurrence of Object.values(state.occurrences)) {
@@ -191,8 +239,6 @@ export function setLifecycle(state: LedgerState, id: string, lifecycle: Routine[
   delete routine.scheduleRetryAt; delete routine.scheduleRetryCount;
   if (lifecycle === 'completed') delete routine.pending;
   // Pause keeps a staged version. Resume switches to it when due; otherwise the current version continues.
-  if (lifecycle === 'active') {
-    if (versionSwitchDue(routine, Object.values(state.occurrences), now)) switchVersion(state, routine, now, nextTime);
-    else applyPlan(state, routine, nextWake(routine.definition, now, nextTime, now), now);
-  }
+  if (switching) switchVersion(state, routine, now, nextTime);
+  else if (plan) applyPlan(state, routine, plan, now);
 }

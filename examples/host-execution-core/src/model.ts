@@ -40,15 +40,18 @@ interface RoutineSchedule {
   endAt?: number;
 }
 export interface HostJobSpec { type: string; input: Json }
-export type AgentRoutineDefinition = RoutineSchedule & { execution: ExecutionTemplate; hostJob?: never };
-export type HostJobRoutineDefinition = RoutineSchedule & { hostJob: HostJobSpec; execution?: never };
-export type RoutineDefinition = AgentRoutineDefinition | HostJobRoutineDefinition;
+export type AgentRoutineDefinition = RoutineSchedule & { execution: ExecutionTemplate; hostJob?: never; hostOccurrence?: never };
+export type HostJobRoutineDefinition = RoutineSchedule & { hostJob: HostJobSpec; execution?: never; hostOccurrence?: never };
+/** The registered occurrence hook `type` runs in the occurrence commit. The Host later promotes or concludes the occurrence. */
+export type HostOccurrenceRoutineDefinition = RoutineSchedule & { hostOccurrence: { type: string; input: Json }; execution?: never; hostJob?: never };
+export type RoutineDefinition = AgentRoutineDefinition | HostJobRoutineDefinition | HostOccurrenceRoutineDefinition;
 export interface HostJobRun {
   type: string; input: Json; occurrenceKey: string; routineId: string; definitionVersion: number;
   trigger: Occurrence['trigger']; attempt: number; signal: AbortSignal;
 }
 export interface HostJobResult { summary: Json; execution?: ExecutionTemplate }
 export type HostJobHandler = (run: HostJobRun) => HostJobResult | Promise<HostJobResult>;
+export type HostOccurrenceRun = Omit<HostJobRun, 'attempt' | 'signal'>;
 export interface Routine {
   definition: RoutineDefinition;
   /** The next version from `updateRoutine`. It replaces `definition` when `versionSwitchDue` is true. */
@@ -67,6 +70,8 @@ export interface Occurrence {
   trigger: { kind: 'scheduled' | 'catch_up'; plannedAt: number };
   wakeKey: string; recordedAt: number; nextAt: number | null; intentId?: string;
   job?: { attempts: number; summary?: Json; executionSuperseded?: true };
+  /** A `hostOccurrence` occurrence. It stays unsettled until the Host promotes or concludes it. */
+  hook?: { executionSuperseded?: true };
   attempts: number; conclusion?: Conclusion;
   slotReplayCount?: number;
 }
@@ -111,14 +116,14 @@ export function validateJson(value: unknown, ancestors = new Set<object>()): ass
     || typeof value === 'number' && Number.isFinite(value)) return;
   if (typeof value !== 'object' || ancestors.has(value)
     || !Array.isArray(value) && Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) {
-    throw new Error('Host job input and summary must be JSON');
+    throw new Error('Routine input and Host job summary must be JSON');
   }
   ancestors.add(value);
   if (Array.isArray(value)) {
-    if (Reflect.ownKeys(value).length !== value.length + 1) throw new Error('Host job input and summary must be JSON');
+    if (Reflect.ownKeys(value).length !== value.length + 1) throw new Error('Routine input and Host job summary must be JSON');
     for (let i = 0; i < value.length; i++) validateJson(value[i], ancestors);
   } else {
-    if (Reflect.ownKeys(value).length !== Object.keys(value).length) throw new Error('Host job input and summary must be JSON');
+    if (Reflect.ownKeys(value).length !== Object.keys(value).length) throw new Error('Routine input and Host job summary must be JSON');
     for (const item of Object.values(value)) validateJson(item, ancestors);
   }
   ancestors.delete(value);
