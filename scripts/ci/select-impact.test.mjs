@@ -33,6 +33,15 @@ test('docs and known CI contracts select light checks, not release families', ()
   }
 });
 
+test('docs/security.md selects the dataplane job that checks its plaintext inventory (#654)', () => {
+  const inventory = 'packages/cloud-dataplane/src/__tests__/hosted-plaintext-inventory.test.ts';
+  assert.match(readFileSync(new URL(inventory, root), 'utf8'), /docs\/security\.md/);
+  assert.deepEqual(selectImpact(['docs/security.md']), {
+    dirs: [], files: ['docs/security.md'], families: ['dataplane'], reason: 'impacted',
+  });
+  assert.deepEqual(selectImpact(['docs/hosted-host-contract.md']).families, []);
+});
+
 test('client source/deleted tests select reverse dependents but no platform family', () => {
   for (const path of ['packages/client/src/daemon/task-runner.ts', 'packages/client/src/__tests__/deleted.test.ts', 'api-surface/client.d.ts']) {
     const impact = selectImpact([path]);
