@@ -433,6 +433,18 @@ export interface GrokAdapterOptions {
     nativeAssetRoot?: string;
     /** Grok model id for every session (`session/set_model`). Absent: the user's Grok default. */
     model?: string;
+    /**
+     * `disabled` sets Grok's four Claude and Cursor `agents` and `rules`
+     * variables to `0` on the Grok agent process. That turns off its scanning of
+     * the named instruction files and rules directories under `~/.claude/` and
+     * `~/.cursor/`, and the project `.claude/CLAUDE*.md`, `.claude/rules/` and
+     * `.cursor/rules/`. Client-hosted terminal commands do not get the variables;
+     * children that Grok starts itself, such as stdio MCP servers and hooks, may
+     * inherit them. `$GROK_HOME/AGENTS.md`, `$GROK_HOME/rules/` and
+     * `[paths] extra_rule_dirs` still load; Grok has no per-process switch for
+     * them. Default `inherit`: the user's Grok settings apply.
+     */
+    compatInstructions?: 'inherit' | 'disabled';
     resolveBin?: () => ResolvedBin;
     spawnFn?: typeof nodeSpawn;
     maxRetainedBytes?: number;
@@ -669,10 +681,9 @@ export declare function resolvePiRuntimeIdentity(): PiRuntimeIdentity;
  * Deliberately does NOT use `createRequire(...).resolve()`: this package is
  * pure ESM with no `require` export condition (`exports["."]` only offers
  * `import`), so CJS-style resolution fails with
- * `ERR_PACKAGE_PATH_NOT_EXPORTED`. It also does NOT resolve the
- * `./package.json` subpath directly (also not exported); instead it resolves
- * the package's main entry via `import.meta.resolve` and walks upward to the
- * enclosing package root.
+ * `ERR_PACKAGE_PATH_NOT_EXPORTED`. It does not use `import.meta.resolve`
+ * either, which a CommonJS bundle does not have. It locates the package
+ * directory itself; the root is the same one ESM resolution reaches.
  */
 export declare function resolvePinnedPiPackage(remedy: string): {
     readonly dir: string;

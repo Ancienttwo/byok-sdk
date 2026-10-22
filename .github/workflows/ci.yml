@@ -484,6 +484,15 @@ jobs:
           BYOK_TEST_WINDOWS_CREDENTIAL_MANAGER: '1'
         run: bun run --filter @byok-sdk/keys test -- src/windows-credential-custody.integration.test.ts
 
+      # #609: Windows detection still refuses Grok (platform_unsupported).
+      # This runs the Grok fixture contract (the fake ACP agent behind a
+      # compiled launcher) through the shared Windows process-tree path. It
+      # is not a live Grok run; docs/adapter-capabilities.md lists what still
+      # needs one.
+      - name: Grok fixture contract on Windows
+        if: matrix.os == 'windows-latest'
+        run: bun run --filter @byok-sdk/client test -- src/adapters/grok/__tests__/grok-windows-contract.test.ts
+
   # S4A dataplane guarantee: runs the suites that need a REAL Postgres, against
   # the same `docker-compose.test.yml` a developer starts locally. This job is
   # the only authority for the dataplane assertions -- `build-test` above also
@@ -654,6 +663,19 @@ jobs:
             src/__tests__/support-bundle.test.ts `
             src/__tests__/daemon-auth.test.ts `
             src/__tests__/daemon-stop-shutdown-parity.test.ts
+
+      # #712: the Hermes gateway control pipe, ownership walk and custody launcher on Windows.
+      # Two steps: the pwsh step fails only on the exit code of its last command.
+      - name: Run Hermes adapter, custody and gateway control tests on Windows
+        run: |
+          bun run --filter @byok-sdk/client test -- `
+            src/__tests__/hermes-adapter.test.ts `
+            src/__tests__/hermes-custody.test.ts `
+            src/__tests__/hermes-gateway-control.test.ts `
+            src/__tests__/hermes-home.test.ts
+
+      - name: Run the Hermes custody launcher tests on Windows
+        run: bun run --filter @byok-sdk/keys test -- src/__tests__/hermes-provider-launcher.test.ts
 
   # M3-K packageability guarantee smoke: proves the daemon CAN be compiled
   # into a single-file executable (bun build --compile / Node SEA) while

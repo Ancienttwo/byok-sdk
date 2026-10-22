@@ -141,8 +141,59 @@ Inside a SEA, this define makes `import.meta.url` the executable's URL, and
 main when `import.meta.url` matches `argv[1]`" check is true there. If the
 product also has a separate SEA entry, main then runs twice. Guard such a check
 with `!require('node:sea').isSea()`, or remove it from the SEA entry.
+`import.meta.url` is the only `import.meta` property that SDK code needs. The
+SDK resolves installed packages from it, so a CJS bundle beside `node_modules`
+finds them as ESM does (#724). Three bundled third-party modules keep an empty
+`import.meta`:
+- koffi's loader reads `import.meta.dirname`. On Windows the SDK loads koffi
+  for process ownership and for the Hermes gateway pipe. A CJS or SEA product
+  must pass `nativeAssetRoot` (see `copySdkNativeAssets` below) to
+  `createDaemon` or to each adapter it constructs. The SDK then loads the addon
+  itself and never runs koffi's loader. Without it, koffi's loader runs with an
+  empty `import.meta.dirname`. That is not supported. A koffi load failure
+  makes process ownership fail closed and the Hermes gateway identification
+  reject.
+- Pi's extension loader reads `import.meta.resolve` only without
+  `PI_BUNDLED_NODE`, which `runSdkReservedHelperCommand()` sets.
+- unpdf, used by the Pi web extension, reads `import.meta.resolve` inside
+  try/catch. In a CJS bundle, PDF reads do not get its standard font and CMap
+  defaults.
 Every other import of an extension resolves from the extension's own
 directory. An extension that does not load still fails the pi task.
+
+Pi 1.3.0, the version this client pins, depends on the exact npm package
+`undici` 8.10.2. That version is in the range of the undici advisories of
+2026-10-15 (fixed in 8.12.2). An undici copy claims the process-wide `fetch`
+dispatcher when it first evaluates, and that copy then serves every `fetch` in
+the process. In an ESM graph, a static `node:http` import makes Node's own
+undici evaluate first, so Node's copy keeps the dispatcher. In a CommonJS
+bundle nothing makes it evaluate first, so Pi's copy would claim the
+dispatcher. `runSdkReservedHelperCommand()` therefore reads the `Headers`
+global before it imports the Pi host, for every Pi helper. Node loads its own
+undici when it first reads a web global such as `Headers`, so Node's copy keeps
+the dispatcher, as in ESM. A product that imports pi itself must make the read
+run before pi evaluates, for example from a module that its entry imports
+first. Use a call, `Reflect.get(globalThis, 'Headers')`. A bundler can drop a
+bare `globalThis.Headers` statement as pure.
+
+Node's own undici is part of the Node build (`process.versions.undici`). Some
+builds that `engines.node` admits carry a copy in the advisory range, for
+example v26.10.0 with undici 8.10.2. That is a Node runtime matter. Run a Node
+build with a patched undici.
+
+A Host can also replace Pi's npm copy. This is optional. In npm, an `overrides`
+entry sets the `undici` of `@earendil-works/pi-coding-agent` to the version that
+`@byok-sdk/client` pins:
+
+```json
+{ "overrides": { "@earendil-works/pi-coding-agent": { "undici": "8.12.3" } } }
+```
+
+Only npm was checked. The only test was one print session with Pi 1.3.0 and
+undici 8.12.3. The override does not reach the copy of undici that Pi inlines
+in its own bundle. The `pi` bin and the
+`@earendil-works/pi-coding-agent/rpc-entry` export use that copy. A Host that
+runs either of them still uses 8.10.2 for all `fetch` traffic of that process.
 
 Normal Node/Bun source hosts omit `sdkHelperHost` and continue to use the
 package's installed helper scripts. A required-message offer performs an exact
@@ -342,11 +393,74 @@ tools, message egress and result-document helpers keep their existing admission
 requirements. Invalid switch values fail construction.
 
 This controls SDK task memory tools, not filesystem permissions. Agent-home
-initialization, leases and instruction guidance remain unchanged; a runtime's
-native filesystem tools can still access files. Explicit `agentMemory` hosted
-projection and `agentMemoryIntents` transports are independent opt-ins with their
-existing platform checks. Omission of the switch preserves current behavior.
-Non-prepared per-task memory selection is not added by this change (see #614).
+initialization and leases remain unchanged; a runtime's native filesystem tools
+can still access files. `off` also removes the Agent memory guidance from Agent
+task instructions: a writer gets no memory lines, and a `memory-reader` Attempt
+keeps only the line that puts its result in the final reply. Explicit
+`agentMemory` hosted projection and `agentMemoryIntents` transports are
+independent opt-ins with their existing platform checks. Omission of the switch
+preserves current behavior. Non-prepared per-task memory selection is not added
+by this change (see #614).
+
+### When `auto` does not admit the memory MCP
+
+`Daemon.status().agentMemoryMcp` reports the effective admission: `admitted`,
+`off` or `unavailable`. `unavailable` means that the switch is `auto`, but this
+daemon cannot admit the SDK memory MCP. The value is fixed at construction. It
+is in-process only: the hello capabilities, `DaemonEvent` and the control status
+do not carry it. Read it from `status()`; do not infer it from the
+configuration.
+
+With an Agent home and `unavailable`, the Host sees this:
+
+- Ordinary Agent tasks start without the SDK memory MCP server, so the model has
+  no `memory_recall` or `memory_save`. Memory alone does not require adapter MCP
+  toolset support.
+- The instruction still starts with the Agent memory guidance. This guidance is
+  the file-based memory from before the memory MCP. It tells a writer to read
+  `MEMORY.md` and, when task permissions allow, to update `notes/` and
+  `MEMORY.md`. The model uses its runtime's own file tools for this, so these
+  writes do not go through the SDK memory tools. A `memory-reader` Attempt gets
+  the read-only reader guidance.
+- Preparing or executing `agentMemory: 'read'` or `'read-write'` is refused with
+  `agent_memory_unavailable`. `'none'` works.
+
+The daemon reports `unavailable` for one of these reasons:
+
+- `DaemonConfig.agentHome` is not set.
+- Windows: the SDK has no Agent memory backend on Windows yet (#605).
+- macOS: the SDK release helper is missing or does not verify. Without
+  `agentMemoryHelperAssetRoot`, the daemon looks for the helper in the installed
+  `@byok-sdk/client` package (`dist/native/agent-memory-fs`). A single-file
+  bundle or SEA that ships without `node_modules` cannot resolve that package. A
+  source build without `bun run build:release` has no helper. A missing helper
+  is not a construction error, unless the Host also sets `agentMemory`,
+  `agentMemoryIntents` or `agentMemoryExport`.
+- Linux: the native backend needs `/proc/self/fd`. A sandbox or container
+  without it cannot admit memory.
+
+What the Host can do:
+
+- If the Host has its own memory writer, set `agentMemoryMcp: 'off'`. With
+  `auto` and `unavailable`, the guidance stays. The model can then change
+  `MEMORY.md` and `notes/` with its file tools and become a second memory writer.
+- If file-based memory is acceptable, keep `auto`.
+- To admit the memory MCP in a macOS single-file product, call
+  `copyAgentMemoryHelperAssets({ outDir })` at build time, or use the
+  `agent-memory-fs` subdirectory that `copySdkNativeAssets` returns. Ship that
+  directory and set `agentMemoryHelperAssetRoot` to its absolute installed path.
+  Set the root only on macOS: a root on Linux or Windows fails construction.
+  With an explicit root, a missing or changed helper fails construction; it does
+  not become a silent `unavailable`.
+- On Linux, run the daemon where `/proc/self/fd` exists. On Windows, the memory
+  MCP cannot be admitted in this release.
+- After the memory MCP is admitted, each ordinary Agent task needs an adapter
+  with MCP toolset support. Without it, the daemon declines the task with
+  `runtime "<id>" cannot project required MCP toolsets`.
+- For prepared input, select `agentMemory: 'none'` when the state is not
+  `admitted`.
+- In a packaging test, assert the `status().agentMemoryMcp` value that the
+  product build must have.
 
 ## Embedded Agent memory
 

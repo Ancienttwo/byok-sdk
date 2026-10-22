@@ -12,6 +12,7 @@
 // The viewer refuses session/new unless a ready gateway serves its
 // HERMES_HOME, as the real viewer cannot run a turn without one. Every
 // observable input is appended to FAKE_HERMES_RECEIPT as one JSON line.
+// On Windows, ci.yml's windows-git-workspace job runs it under hermes-adapter.test.ts and hermes-custody.test.ts (#712).
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';

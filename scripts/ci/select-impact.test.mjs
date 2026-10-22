@@ -33,6 +33,15 @@ test('docs and known CI contracts select light checks, not release families', ()
   }
 });
 
+test('docs/security.md selects the dataplane job that checks its plaintext inventory (#654)', () => {
+  const inventory = 'packages/cloud-dataplane/src/__tests__/hosted-plaintext-inventory.test.ts';
+  assert.match(readFileSync(new URL(inventory, root), 'utf8'), /docs\/security\.md/);
+  assert.deepEqual(selectImpact(['docs/security.md']), {
+    dirs: [], files: ['docs/security.md'], families: ['dataplane'], reason: 'impacted',
+  });
+  assert.deepEqual(selectImpact(['docs/hosted-host-contract.md']).families, []);
+});
+
 test('client source/deleted tests select reverse dependents but no platform family', () => {
   for (const path of ['packages/client/src/daemon/task-runner.ts', 'packages/client/src/__tests__/deleted.test.ts', 'api-surface/client.d.ts']) {
     const impact = selectImpact([path]);
@@ -70,6 +79,22 @@ test('a platform family is selected only by a path it owns', () => {
 test('shared Windows filesystem helpers select their real Windows consumers', () => {
   assert.deepEqual(selectImpact(['packages/client/src/util/secure-dir.ts']).families, ['windows-git-workspace', 'windows-service-smoke']);
   assert.deepEqual(selectImpact(['packages/client/src/util/atomic-write.ts']).families, ['ipc-smoke', 'windows-git-workspace']);
+});
+
+test('Hermes adapter, fake and custody launcher paths select the Windows Hermes suites', () => {
+  for (const path of [
+    'packages/client/src/adapters/hermes/gateway-pipe-win32.ts',
+    'packages/client/src/adapters/hermes/hermes-session-runtime.ts',
+    'packages/client/src/__tests__/hermes-custody.test.ts',
+    'packages/client/src/__tests__/fixtures/fake-hermes.mjs',
+    'packages/client/src/__tests__/fixtures/fake-hermes-command.ts',
+    'packages/keys/src/hermes-provider-launcher.ts',
+    'packages/keys/src/__tests__/hermes-provider-launcher.test.ts',
+  ]) assert.ok(selectImpact([path]).families.includes('windows-git-workspace'), path);
+  // The job does not run these, so a change to them does not select it.
+  for (const path of ['packages/client/src/adapters/codex/codex-adapter.ts', 'packages/keys/src/pi-provider-launcher.ts', 'packages/client/src/__tests__/hermes-pipe-open-errors.test.ts']) {
+    assert.ok(!selectImpact([path]).families.includes('windows-git-workspace'), path);
+  }
 });
 
 test('owned helper build scripts keep release packaging qualification', () => {

@@ -2,6 +2,99 @@
 
 ## Unreleased
 
+## 0.28.3 — source candidate
+
+The owner selected 0.28.3 as one more one-release exception to the default
+pre-1.0 MINOR policy, after the 0.28.1 and 0.28.2 exceptions. The candidate
+adds public API and behavior: the Grok `compatInstructions` option, the `mcp`
+field on durable Pi tool events and `HermesAdapter.prepare()` on Windows. The
+0.29.0 schedule does not change. This candidate is not published. See the
+[release notes](docs/releases/v0.28.3.md) for scope and outstanding
+qualification. All nine public manifests and their lock records move to
+0.28.3.
+
+- **Docs (cloud-dataplane)** — `docs/security.md` has a new "Hosted surface
+  threat model" section (#654). For each data category (C1 to C4 and routing
+  metadata), it states what the Host operator, Postgres, R2, logs and backups
+  can read, and how the category is deleted. It also records two facts about
+  the current code. `task.complete` writes no `object_reference` row for its
+  artifact, so the artifact has `ref_count` 0, and maintenance deletes it
+  about 1 day after upload unless the product adds a reference. `revokeDevice`
+  deletes the `device` row, but the `pairing-completion:v1:` receipt keeps the
+  device name until tenant erasure. No wire, API, dependency or SQL changes.
+- **Tests (cloud-dataplane)** — the new `hosted-plaintext-inventory.test.ts`
+  sends one canary through the hosted wire on real Postgres and S3 (#654). It
+  then reads every column of every tenant table (the table list comes from
+  `pg_class`), every object in the bucket and the console output. It looks
+  for the canary as UTF-8, JSON-escaped, hex, base64 and base64url text. The
+  set of places that hold it must equal the table in `docs/security.md`. A
+  change to `docs/security.md` also runs the test in CI (#741). Some content
+  locations are outside the canary run. The doc lists them.
+- **Docs (client)** — the client README explains what a Host sees when
+  `agentMemoryMcp: 'auto'` does not admit the memory MCP, why the daemon then
+  reports `status().agentMemoryMcp` as `unavailable`, and what the Host can do
+  (#614). Under `auto` the file-based memory guidance stays, so a Host with its
+  own memory writer sets `off`. The README no longer says that `off` keeps the
+  instruction guidance.
+- **Security (client)** — a CommonJS bundle of the Pi host no longer lets Pi's
+  nested undici own the process-wide `fetch` dispatcher (#700). Pi depends on
+  the exact npm undici 8.10.2. That version is in the range of the undici
+  advisories of 2026-10-15 (fixed in 8.12.2). An undici copy claims the
+  dispatcher when it first evaluates. In an ESM graph, a static `node:http`
+  import makes Node's own undici evaluate first. In a CJS bundle (single pass,
+  or ESM then CJS) nothing did, so Pi's copy served every `fetch` in the
+  process, including Pi's provider requests. The SDK's own Pi host was not
+  affected when it ran as ESM. `runSdkReservedHelperCommand()` and the
+  `byok-pi-rpc`, `byok-pi-prepared` and `byok-pi-durable` entries now read the
+  `Headers` global before they import the Pi host. `byok-agent` makes the same
+  read only on its team operator path. Node then loads its own undici, and its
+  copy keeps the dispatcher, as in ESM. A product that imports pi itself must
+  make the same read. The client README says how. It also documents an optional
+  nested `overrides` of Pi's undici (npm) and the limit of that override. New
+  fixtures in `pi-single-file-bundle.test.ts` check, for every Pi helper kind in
+  a CJS bundle, that no npm undici claims the dispatcher. They read no version
+  string.
+  Still open: Pi's own copies (the nested 8.10.2 and the copy inlined in its
+  CLI bundle) until a Pi release moves them. Node's own undici on the Node
+  builds that `engines.node` admits (v26.10.0 carries 8.10.2) is a Node runtime
+  matter, and no Node floor change is decided. openai 7.19.0, which Pi's
+  pi-ai 1.3.0 uses, declares undici as an optional peer dependency. So on
+  openai's node x509 path, the Host's own tree decides which undici copy
+  loads. A copy older than 7.30.1 (or, on the 8 line, older than 8.12.2) has
+  the advisories. #700 is closed with these items open. The Pi and Node
+  items are in `docs/notes/2026-10-22-700-undici-copies.md` (#725). The
+  openai item is in a #700 comment.
+- **Feature (client)** — an opt-in Grok option for user-level instructions
+  (#634). `GrokAdapterOptions.compatInstructions: 'disabled'` sets Grok's four
+  Claude and Cursor `agents` and `rules` compatibility variables to `0` on the
+  Grok agent process. Client-hosted terminal commands do not get them;
+  children that Grok starts itself may inherit them. It applies to every
+  session of the adapter, and the default is unchanged. It is not an
+  isolation guarantee: Grok still loads `$GROK_HOME/AGENTS.md`,
+  `$GROK_HOME/rules/` and `extra_rule_dirs`, and the Claude and Cursor
+  skills, hooks and MCP servers. Claude gets no option. For an
+  Agent home under `$HOME`, Claude's `--setting-sources` without `user` still
+  loads the user instruction files, as project files, and drops the user's
+  deny rules and hooks. Codex 0.160.0 and Pi 1.3.0 have no such switch, and
+  Hermes needs none. `docs/adapter-capabilities.md` lists the user-level
+  sources of each pinned runtime, and
+  `docs/notes/2026-10-22-634-runtime-user-config.md` gives the evidence.
+- **Fixed (client)** — a resumed Grok memory reader no longer fails before it
+  starts (#609). A resumed reader runs in the run directory that its handoff
+  recorded, which has the name of the earlier task. The persona check wanted
+  the name of the new task, so every resumed reader failed with "grok Agent
+  persona cwd does not match its sealed lease". The check now accepts a direct
+  child of `<home>/.byok/runs/` for a resumed reader. A resumed reader with a
+  persona now gets "persona resume is not qualified", as a writer does. A new
+  test runs fresh and resumed readers through the real `TaskRunner`.
+- **Tests (client)** — the Grok fixture contract now runs on Windows in routine
+  CI (#609). The `adapter-lifecycle-smoke` Windows leg runs the new
+  `grok-windows-contract.test.ts`. It drives the adapter against the fake ACP
+  agent behind a compiled launcher: one turn, a hosted terminal command,
+  `session/cancel`, and the end of the agent tree and of a hung terminal tree
+  on close. Windows detection still refuses Grok, and the descriptor still
+  declares only macOS and Linux. No live Grok run is part of CI.
+  `docs/adapter-capabilities.md` lists what a live Windows run must still show.
 - **Tests (client)** — the Windows memory helper tests now run in routine CI
   (#605). The `agent-memory-helper-linux` job has a `windows-latest` leg. It
   runs for pull requests that change the Go helper. New Windows tests inject
@@ -9,6 +102,35 @@
   or a symlink after the home is pinned. Windows admission stays closed, and B
   stays false. The plan and the owner decisions are in
   `docs/plans/2026-10-22-605-windows-memory.md`.
+- **Tests (client, keys)** — the Hermes suites now run on Windows in routine
+  CI (#712). The `windows-git-workspace` job runs the client suites
+  `hermes-adapter`, `hermes-custody`, `hermes-gateway-control` and
+  `hermes-home`, and the keys suite `hermes-provider-launcher`. The keys suite
+  has a step of its own, so that a keys pass cannot hide a client failure. The
+  job runs for pull requests that change the Hermes adapter, these suites,
+  their fakes or the keys launcher. The tests that mock Windows still run in
+  the Linux targeted job. CI runs the fake Hermes only. No real Hermes or
+  provider run is part of CI.
+- **Fixed (client)** — SDK code in a CommonJS bundle no longer reads
+  `import.meta.resolve` (#724). esbuild leaves `import.meta` empty in CJS
+  output, so the calls threw when they ran. `PiAdapter.detect()` without
+  `sdkHelperHost` reached one of them. The client manifest lookup now uses
+  `createRequire(import.meta.url)` and refuses a manifest that is not this
+  client's name and version, because that resolver also searches `NODE_PATH`
+  and the global folders. The root and `testing` closure budgets rise by 78 B
+  and 110 B for this check (owner-approved). The pinned Pi package lookup now finds the
+  first `node_modules` package directory in the module's ancestor chain, as
+  ESM resolution does. So does the vendored pi-subagents
+  `resolveInstalledPiPackageRoot`, recorded as a maintained delta. ESM results
+  are unchanged. With the #709 `import.meta.url` define, a CJS bundle beside
+  `node_modules` now finds the installed Pi. `import.meta.url` is the only
+  property a CJS Host must define. The client README and the SEA recipe README
+  list the three third-party modules that keep an empty `import.meta`. On
+  Windows, a CJS or SEA Host must pass `nativeAssetRoot` so that koffi's loader
+  does not run. koffi serves Windows process ownership and the Hermes gateway
+  pipe; `WindowsCredentialManagerSecretStore` does not use it. The
+  CJS fixture in `pi-single-file-bundle.test.ts` now fails on any other empty
+  `import.meta` in the bundle.
 - **Fixed (client, keys)** — close the Hermes on Windows follow-ups from the
   #695 review (#712). The custody launcher now starts Hermes only after the
   adapter writes one byte to the launcher's stdin, and reads the key only after
@@ -22,12 +144,24 @@
   The stale-profile sweep keeps a profile when the Windows pipe client fails.
   The Windows process-table read now ends at the ready deadline or on start
   abort, and the foreign-gateway check ends at 10 s or on start abort.
+- **Fixed (client)** — on Windows, the stale-profile sweep no longer deletes a
+  live Hermes profile whose gateway pipe exists but cannot be opened (#712).
+  Before, the pipe client took every `CreateFileW` failure as "no gateway". It
+  did the same when `GetNamedPipeServerProcessId` failed. Now it reads
+  `GetLastError`. Only `ERROR_FILE_NOT_FOUND` means that no pipe has the
+  name. A busy pipe (`ERROR_PIPE_BUSY`), a pipe that denies access
+  (`ERROR_ACCESS_DENIED`), any other open failure and an unknown server pid
+  now reject. The sweep then keeps the profile, and the ready wait and the
+  post-attach check retry, as before. The `#byok-hermes-session` closure
+  budget rises by 332 B for this check (owner-approved). The new
+  `hermes-pipe-open-errors.test.ts` fakes `win32` and sets each open error
+  through a kernel32 stand-in, so it needs no Windows host. No test opens a
+  real busy or access-denied pipe on Windows.
 - **Changed (client)** — update the private OAR source to 0.70.0
   (`44d7d61`). Keep the eight BYOK-maintained files. Update the source
   manifest and bridge paths. The only selected upstream change is the optional
   `LoginOptions.openBrowser` contract field; no vendored runtime calls login.
   No public API or npm dependency changes.
-
 - **Feature (client, keys)** — `HermesAdapter.prepare()` runs on Windows. The
   adapter asks the gateway `identify` over the named pipe that Hermes derives
   from the profile home. A gateway at most four parent links below the spawned
@@ -95,13 +229,17 @@
   older device answers sealed provisioning of such a `pi_model` with
   `pi_model_invalid`.
 
-## 0.28.2 — source candidate
+## 0.28.2 — 2026-10-22 (published)
 
 The owner selected 0.28.2 as a second one-release exception to the default
-pre-1.0 MINOR policy for additive changes. This candidate is not published.
-See the [release notes](docs/releases/v0.28.2.md) for scope and outstanding
-qualification. All nine public manifests and their lock records move to
-0.28.2; keys leaves its own version line to join the release train.
+pre-1.0 MINOR policy for additive changes. The npm registry lists all nine
+public packages at 0.28.2, keys included. The registry publication times fall
+on 2026-10-22 (UTC). The registry read on 2026-10-22 at 15:58 UTC reports
+0.28.2 as `latest` for all nine. See the
+[release notes](docs/releases/v0.28.2.md) for scope and the qualification
+limits that were recorded at preparation. All nine public manifests and their
+lock records move to 0.28.2; keys leaves its own version line to join the
+release train.
 
 - **Security (client)** — update the `undici` pin from 8.11.2 to 8.12.3 (#700).
   8.11.2 is in the range of eight advisories from 2026-10-15. Four are high
@@ -276,13 +414,14 @@ qualification. All nine public manifests and their lock records move to
   it added 1 to `accepted`. `observer.onInboundCommitted` now fires only once
   for each message (#693).
 
-## 0.28.1 / @byok-sdk/keys 0.13.1 — 2026-10-21 (published)
+## 0.28.1 / @byok-sdk/keys 0.13.1 — 2026-10-21 (published; superseded by 0.28.2)
 
 The owner selected 0.28.1 as a one-release exception to the default pre-1.0
 MINOR policy for additive changes. The npm registry lists all eight aligned
-packages at 0.28.1 and keys at 0.13.1. Both are `latest`. The registry
-publication times fall on 2026-10-21 (UTC). The registry read was on
-2026-10-21 at 18:13 UTC. See the [release notes](docs/releases/v0.28.1.md)
+packages at 0.28.1 and keys at 0.13.1. The registry publication times fall on
+2026-10-21 (UTC). The registry read on 2026-10-21 at 18:13 UTC reported both
+as `latest`. The read on 2026-10-22 at 15:58 UTC reports 0.28.2 as `latest`.
+See the [release notes](docs/releases/v0.28.1.md)
 for scope and the qualification limits that were recorded at preparation.
 The eight aligned manifests and lock records move to 0.28.1; keys moves to
 0.13.1 with an exact packed core edge of 0.28.1.
@@ -320,7 +459,7 @@ The eight aligned manifests and lock records move to 0.28.1; keys moves to
 
 The npm registry lists all eight aligned packages at 0.28.0 and keys at 0.13.0.
 The registry publication times fall on 2026-10-20 (UTC). The registry read was
-on 2026-10-21 at 18:13 UTC. 0.28.1 is now `latest`. See the
+on 2026-10-21 at 18:13 UTC. That read reported 0.28.1 as `latest`. See the
 [release notes](docs/releases/v0.28.0.md).
 
 - **Feature (client)** — add `GrokAdapter` and `HermesAdapter` over ACP.

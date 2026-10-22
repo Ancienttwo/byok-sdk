@@ -33,12 +33,29 @@ const execFileAsync = promisify(execFile);
 const DETECT_TIMEOUT_MS = 5000;
 const DEFAULT_RETAINED_BYTES = 16 * 1024 * 1024;
 const DEFAULT_INTERRUPT_MS = 1000;
+/** Grok's per-process switches for the Claude and Cursor `agents` and `rules` compatibility cells. */
+const COMPAT_INSTRUCTIONS_OFF = Object.freeze({
+  GROK_CLAUDE_AGENTS_ENABLED: '0', GROK_CLAUDE_RULES_ENABLED: '0',
+  GROK_CURSOR_AGENTS_ENABLED: '0', GROK_CURSOR_RULES_ENABLED: '0',
+});
 
 export interface GrokAdapterOptions {
   /** Absolute product native asset directory; scoped to this adapter. */
   nativeAssetRoot?: string;
   /** Grok model id for every session (`session/set_model`). Absent: the user's Grok default. */
   model?: string;
+  /**
+   * `disabled` sets Grok's four Claude and Cursor `agents` and `rules`
+   * variables to `0` on the Grok agent process. That turns off its scanning of
+   * the named instruction files and rules directories under `~/.claude/` and
+   * `~/.cursor/`, and the project `.claude/CLAUDE*.md`, `.claude/rules/` and
+   * `.cursor/rules/`. Client-hosted terminal commands do not get the variables;
+   * children that Grok starts itself, such as stdio MCP servers and hooks, may
+   * inherit them. `$GROK_HOME/AGENTS.md`, `$GROK_HOME/rules/` and
+   * `[paths] extra_rule_dirs` still load; Grok has no per-process switch for
+   * them. Default `inherit`: the user's Grok settings apply.
+   */
+  compatInstructions?: 'inherit' | 'disabled';
   resolveBin?: () => ResolvedBin;
   spawnFn?: typeof nodeSpawn;
   maxRetainedBytes?: number;
@@ -75,6 +92,8 @@ export class GrokAdapter implements RuntimeAdapter {
     const interrupt = options.interruptTimeoutMs ?? DEFAULT_INTERRUPT_MS;
     if (!Number.isFinite(interrupt) || interrupt <= 0 || interrupt > 2_147_483_647) throw new TypeError('invalid Grok interrupt timeout');
     if (options.model !== undefined && options.model.trim() === '') throw new TypeError('GrokAdapterOptions.model must not be blank');
+    if (options.compatInstructions !== undefined && options.compatInstructions !== 'inherit' && options.compatInstructions !== 'disabled')
+      throw new TypeError('GrokAdapterOptions.compatInstructions must be inherit or disabled');
     this.options = { ...options };
   }
 
@@ -129,6 +148,8 @@ export class GrokAdapter implements RuntimeAdapter {
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('grok manifest has no sealed cwd');
     const persona = await grokAgentPersona(input.manifest);
+    // Set on the agent; its own children may inherit them. Hosted terminal commands keep the task env.
+    const compat = this.options.compatInstructions === 'disabled' ? COMPAT_INSTRUCTIONS_OFF : undefined;
     // As OAR: the servers go in the ACP mcpServers of session/new or session/resume.
     const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
     const spawnAgent = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'grok agent' });
@@ -145,7 +166,7 @@ export class GrokAdapter implements RuntimeAdapter {
     try {
       const raw = await acp.grokSession(
         (bin, args, options) => {
-          const child = spawnAgent(bin, args, options);
+          const child = spawnAgent(bin, args, compat === undefined ? options : { ...options, env: { ...options.env, ...compat } });
           session.own(child);
           void child.exited.then(() => session.exited(), (error) => session.fail(error));
           return session.gate(child);

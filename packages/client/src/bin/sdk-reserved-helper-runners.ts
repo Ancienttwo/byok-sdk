@@ -124,6 +124,10 @@ async function runAgentTeamMcp(): Promise<void> {
   await waitForInputClose();
 }
 
+/**
+ * The Pi kinds import the Pi runtime host here. The caller must load Node's
+ * undici first (#700); `runSdkReservedHelperCommand` does.
+ */
 export async function runSdkReservedHelper(kind: SdkReservedHelperKind, argv: readonly string[] = []): Promise<void> {
   if (kind !== 'pi-rpc' && kind !== 'pi-prepared' && kind !== 'pi-durable' && argv.length !== 0) {
     throw new Error('SDK-reserved MCP helpers do not accept arguments');

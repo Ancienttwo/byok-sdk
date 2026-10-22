@@ -409,14 +409,76 @@ await response.arrayBuffer();
  * lazily, so the provider request carries the subagent tools, except in a
  * subagent child. CommonJS output has no `import.meta`; Pi reads
  * `import.meta.url` when it evaluates, so the Host defines it from `__filename`.
+ *
+ * #724: `import.meta.url` is the only property the Host defines. The bundle
+ * (root, the adapters subpath and the selected host) must keep no other SDK
+ * `import.meta` use: esbuild reports none, and every empty `import.meta` object
+ * left in the output belongs to the reviewed third-party allowlist below.
  */
 const CJS_ENTRY_SOURCE = `
+import * as adapters from ${JSON.stringify(fileURLToPath(new URL('../../dist/adapters/index.js', import.meta.url)))};
 import { runSdkReservedHelperCommand } from ${JSON.stringify(CLIENT_DIST)};
+globalThis.__byokCjsAdapters = adapters;
 runSdkReservedHelperCommand(process.argv.slice(2)).then(handled => {
   if (!handled) throw new Error('not an SDK helper invocation');
 }).catch(error => { console.error(error); process.exitCode = 1; });
 `;
 const SEALED_HOST = fileURLToPath(new URL('../../dist/bin/pi-runtime-host-sealed.js', import.meta.url));
+/**
+ * Third-party modules whose `import.meta` stays empty in a CommonJS bundle.
+ * koffi's loader reads `import.meta.dirname`; a CJS Host passes
+ * `nativeAssetRoot`, so the SDK loads the addon itself and never evaluates it.
+ * Pi's extension loader resolves aliases only without `PI_BUNDLED_NODE`, which
+ * the SDK-reserved helper sets. unpdf reads PDF font defaults inside try/catch.
+ */
+const CJS_EMPTY_IMPORT_META_ALLOWLIST = [
+  /\/koffi\/src\/koffi\/index\.js$/u,
+  /\/@earendil-works\/pi-coding-agent\/dist\/core\/extensions\/loader\.js$/u,
+  /\/unpdf\/dist\/index\.mjs$/u,
+];
+
+/** The source module of each empty `import.meta` object esbuild left in a bundle. */
+function emptyImportMetaModules(bundle: string): string[] {
+  const lines = bundle.split('\n');
+  const modules = new Set<string>();
+  lines.forEach((line, index) => {
+    if (!/\bimport_meta\d* = \{\};/u.test(line)) return;
+    let header = index;
+    while (header >= 0 && !/^\/\/ \S+\.[cm]?[jt]s$/u.test(lines[header]!)) header--;
+    modules.add(header < 0 ? '<unknown>' : lines[header]!.slice(3));
+  });
+  return [...modules].sort();
+}
+
+/**
+ * #700: records which undici claims the two process-wide fetch dispatcher slots.
+ * Pi depends on an exact npm undici. When that copy evaluates first, as it does
+ * in a CommonJS bundle, it claims the slots and every global `fetch` then runs
+ * through it. The host loads Node's built-in undici first so that Node's copy
+ * keeps them, as it does in ESM. The preload runs before the bundle and notes the
+ * frame that wrote each slot. A frame inside `node:internal/deps/undici` is Node's
+ * copy. Any other frame is an npm copy. It reads no version string, because Node
+ * v26.10.0 and Pi's pin are both undici 8.10.2.
+ */
+const SLOT_OWNER_PRELOAD = `
+const fs = require('node:fs');
+const slots = new Map([[Symbol.for('undici.globalDispatcher.1'), 'slot 1'], [Symbol.for('undici.globalDispatcher.2'), 'slot 2']]);
+const writes = [];
+const define = Object.defineProperty;
+Object.defineProperty = function (object, key, descriptor) {
+  if (object === globalThis && slots.has(key)) writes.push({ slot: slots.get(key), writer: new Error().stack.split('\\n')[2].trim() });
+  return define.call(this, object, key, descriptor);
+};
+process.on('exit', () => fs.writeFileSync(process.env.BYOK_TEST_SLOT_REPORT, JSON.stringify(writes)));
+`;
+
+async function expectNodeUndiciOwnsDispatcher(slotReport: string): Promise<void> {
+  // Bun has no built-in undici, so the check applies to Node only.
+  if (typeof process.versions.undici !== 'string') return;
+  const writes = JSON.parse(await fs.readFile(slotReport, 'utf8')) as { slot: string; writer: string }[];
+  expect([...new Set(writes.map(write => write.slot))].sort(), 'no undici claimed the dispatcher slots').toEqual(['slot 1', 'slot 2']);
+  for (const write of writes) expect(write.writer, `${write.slot} was claimed by an npm undici`).toContain('node:internal/deps/undici');
+}
 
 describe('Pi host — single-pass CommonJS product bundle (#701)', () => {
   it.each([
@@ -450,6 +512,10 @@ describe('Pi host — single-pass CommonJS product bundle (#701)', () => {
         } }],
       });
       expect(result.errors).toEqual([]);
+      expect(result.warnings.filter(warning => warning.id === 'empty-import-meta').map(warning => warning.location?.file)).toEqual([]);
+      const emptyImportMeta = emptyImportMetaModules(await fs.readFile(path.join(release, 'entry.cjs'), 'utf8'));
+      expect(emptyImportMeta.filter(module => !CJS_EMPTY_IMPORT_META_ALLOWLIST.some(allowed => allowed.test(module)))).toEqual([]);
+      for (const allowed of CJS_EMPTY_IMPORT_META_ALLOWLIST) expect(emptyImportMeta.filter(module => allowed.test(module)), String(allowed)).toHaveLength(1);
       expect(redirects).toBe(redirect === undefined ? 0 : 1);
       const hosts = Object.keys(result.metafile.inputs).map(input => path.basename(input)).filter(name => name.startsWith('pi-runtime-host'));
       expect(hosts).toEqual([redirect === undefined ? 'pi-runtime-host.js' : 'pi-runtime-host-sealed.js']);
@@ -468,18 +534,67 @@ describe('Pi host — single-pass CommonJS product bundle (#701)', () => {
       await fs.writeFile(path.join(agentDir, 'settings.json'), JSON.stringify({
         defaultProvider: 'zai', defaultModel: 'glm-4.6', retry: { enabled: false } }));
 
+      const slotPreload = path.join(release, 'slot-owner.cjs');
+      const slotReport = path.join(release, 'slot-owner.json');
+      await fs.writeFile(slotPreload, SLOT_OWNER_PRELOAD);
       const env = { ...childEnv, PATH: process.env.PATH ?? '', HOME: release, TMPDIR: release,
-        PI_CODING_AGENT_DIR: agentDir, PI_PACKAGE_DIR: assetRoot };
+        PI_CODING_AGENT_DIR: agentDir, PI_PACKAGE_DIR: assetRoot, BYOK_TEST_SLOT_REPORT: slotReport };
       await execFileAsync(process.execPath,
-        [path.join(release, 'entry.cjs'), '__byok_sdk_helper', 'pi-subagent-print', '--mode', 'json', 'Say hi'],
+        ['-r', slotPreload, path.join(release, 'entry.cjs'), '__byok_sdk_helper', 'pi-subagent-print', '--mode', 'json', 'Say hi'],
         { cwd: release, env, timeout: 30_000 });
       expect(toolNames.length).toBeGreaterThan(0);
       for (const names of toolNames) {
         expect(names).toContain('read');
         expect(names.includes('subagent')).toBe(subagentTools);
       }
+
+      // #700: the request above ran through Node's built-in undici, not through Pi's npm copy.
+      await expectNodeUndiciOwnsDispatcher(slotReport);
     } finally {
       await new Promise<void>(resolve => provider.close(() => resolve()));
+      await fs.rm(release, { recursive: true, force: true });
+    }
+  }, 60_000);
+});
+
+/**
+ * #700: the other Pi helper kinds import the host at their own sites. Each runs the
+ * ordinary-host bundle with no launch config: the host loads and evaluates Pi, then the
+ * kind refuses before any provider request. The refusal text shows that Pi's module graph
+ * ran, so a slot report that holds only Node's undici is not a skipped load.
+ */
+describe('Pi host — CommonJS product bundle loads Node undici for every Pi helper kind (#700)', () => {
+  it.each([
+    ['pi-rpc', [], /byok-pi-rpc: exactly one --config-digest=<sha256> is required/],
+    ['pi-prepared', [], /byok-pi-prepared: exactly one --config-digest=<sha256> is required/],
+    ['pi-durable', [], /byok-pi-durable: exactly one --config-digest=<sha256> is required/],
+    ['pi-subagent-runner', ['/nonexistent/runner-config.json'], /Subagent runner error: .*ENOENT/],
+  ] as const)('%s', async (kind, tail, refusal) => {
+    const { build } = await import('esbuild');
+    const release = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-cjs-kind-')));
+    try {
+      await fs.writeFile(path.join(release, 'entry.mjs'), CJS_ENTRY_SOURCE);
+      const result = await build({
+        entryPoints: [path.join(release, 'entry.mjs')], outfile: path.join(release, 'entry.cjs'),
+        bundle: true, platform: 'node', format: 'cjs', logLevel: 'silent',
+        define: { 'import.meta.url': '__product_import_meta_url' },
+        banner: { js: "const __product_import_meta_url = require('node:url').pathToFileURL(__filename).href;" },
+      });
+      expect(result.errors).toEqual([]);
+
+      const agentDir = path.join(release, 'agent');
+      await fs.mkdir(agentDir);
+      const slotPreload = path.join(release, 'slot-owner.cjs');
+      const slotReport = path.join(release, 'slot-owner.json');
+      await fs.writeFile(slotPreload, SLOT_OWNER_PRELOAD);
+      const env = { PATH: process.env.PATH ?? '', HOME: release, TMPDIR: release,
+        PI_CODING_AGENT_DIR: agentDir, PI_PACKAGE_DIR: release, BYOK_TEST_SLOT_REPORT: slotReport };
+      const refused = await execFileAsync(process.execPath,
+        ['-r', slotPreload, path.join(release, 'entry.cjs'), '__byok_sdk_helper', kind, ...tail],
+        { cwd: release, env, timeout: 30_000 }).then(() => undefined, (error: { stderr: string }) => error);
+      expect(refused?.stderr, `${kind} must reach its refusal`).toMatch(refusal);
+      await expectNodeUndiciOwnsDispatcher(slotReport);
+    } finally {
       await fs.rm(release, { recursive: true, force: true });
     }
   }, 60_000);

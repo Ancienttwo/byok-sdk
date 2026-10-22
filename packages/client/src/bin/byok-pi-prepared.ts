@@ -5,6 +5,10 @@
 // so the reserved-helper command is handled before this bin's own parser. The
 // dispatch rides the same external `#byok-pi-runtime-host` seam as the host
 // call below. Normal product argv falls through untouched.
+
+// #700: Node's own undici loads before Pi's npm copy (see `loadNodeUndici` in
+// `sdk-reserved-helper-host.ts`).
+Reflect.get(globalThis, 'Headers');
 import('#byok-pi-runtime-host')
   .then(async (host) => {
     const argv = process.argv.slice(2);

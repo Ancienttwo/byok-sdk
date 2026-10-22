@@ -21,10 +21,15 @@ export function findPiPackageRootFromEntry(
 	return undefined;
 }
 
+// SDK delta: find the first node_modules package directory in this module's
+// ancestor chain, skipping a non-directory, as ESM resolution does. CommonJS bundles have no
+// import.meta.resolve (#724).
 export function resolveInstalledPiPackageRoot(): string | undefined {
-	return findPiPackageRootFromEntry(
-		fileURLToPath(import.meta.resolve(PI_CODING_AGENT_PACKAGE)),
-	);
+	for (let dir = path.dirname(fileURLToPath(import.meta.url)); ; dir = path.dirname(dir)) {
+		const candidate = path.join(dir, "node_modules", PI_CODING_AGENT_PACKAGE);
+		if (fs.statSync(candidate, { throwIfNoEntry: false })?.isDirectory()) return findPiPackageRootFromEntry(path.join(fs.realpathSync(candidate), "package.json"));
+		if (path.dirname(dir) === dir) throw new Error(`Cannot find package '${PI_CODING_AGENT_PACKAGE}'`);
+	}
 }
 
 export function resolvePiPackageRoot(): string | undefined {
