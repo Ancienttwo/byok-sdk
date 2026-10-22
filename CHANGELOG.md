@@ -96,6 +96,15 @@ qualification. All nine public manifests and their lock records move to
   or a symlink after the home is pinned. Windows admission stays closed, and B
   stays false. The plan and the owner decisions are in
   `docs/plans/2026-10-22-605-windows-memory.md`.
+- **Tests (client, keys)** — the Hermes suites now run on Windows in routine
+  CI (#712). The `windows-git-workspace` job runs the client suites
+  `hermes-adapter`, `hermes-custody`, `hermes-gateway-control` and
+  `hermes-home`, and the keys suite `hermes-provider-launcher`. The keys suite
+  has a step of its own, so that a keys pass cannot hide a client failure. The
+  job runs for pull requests that change the Hermes adapter, these suites,
+  their fakes or the keys launcher. The tests that mock Windows still run in
+  the Linux targeted job. CI runs the fake Hermes only. No real Hermes or
+  provider run is part of CI.
 - **Fixed (client)** — SDK code in a CommonJS bundle no longer reads
   `import.meta.resolve` (#724). esbuild leaves `import.meta` empty in CJS
   output, so the calls threw when they ran. `PiAdapter.detect()` without
