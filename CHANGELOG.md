@@ -114,6 +114,17 @@
   `@byok-sdk/protocol/constants` exports `RUNTIME_IDS`, the one source of
   `RuntimeIdSchema`. No wire change: a cloud submit for a harness the device
   does not advertise still fails before an offer reaches the daemon.
+- **Fixed (client)** — during a route outage, the daemon outbox keeps one copy
+  of a pending `agent.message.publish`. Before, each retry added a new copy
+  with a new envelope id: one per second for a live task, and one per
+  reconnect for a recovered task. Each retry of a message now resends the same
+  envelope, and the connection manager does not queue an envelope id that is
+  already queued or in flight. Retries continue after the outage ends. A retry
+  that arrives after the cloud committed the message now settles as
+  `duplicate`, not `accepted`. Each such retry now adds 1 to the client
+  `outbound.duplicate` counter and to the server `dedupDrops` counter. Before,
+  it added 1 to `accepted`. `observer.onInboundCommitted` now fires only once
+  for each message (#693).
 
 ## 0.28.1 / @byok-sdk/keys 0.13.1 — 2026-10-21 (published)
 
