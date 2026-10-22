@@ -489,6 +489,8 @@ with or without `egressPolicy`, resumes an exact session and requires
 `executions.submit` and `dispatch({ agentRef })` take an optional `agentMemory`
 (`'none'`, `'read'` or `'read-write'`) for that one task. The device must
 advertise `agent-memory-selection`; the client README describes the semantics.
+Both refuse `'read-write'` with `homeAccess: 'memory-reader'` before the task
+exists.
 A caller taskId requires an explicit device; the façade never reselects a
 missing device for that identity. Initial dispatch requires a registered
 device. Concurrent calls for one caller identity in one façade are rejected

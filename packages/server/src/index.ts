@@ -536,6 +536,9 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     if (agentMemory !== undefined && agentRef === undefined) {
       throw new Error('agentMemory requires an explicit AgentRef; legacy task dispatch has no Agent memory');
     }
+    if (agentMemory === 'read-write' && homeAccess === 'memory-reader') {
+      throw new Error('agentMemory read-write requires a writer; a memory-reader Attempt reads memory only');
+    }
     const agentMessageContext =
       messageEgress === undefined ? undefined : AgentMessageServerContextSchema.parse(input.agentMessageContext);
     const dispatchSelection =
@@ -784,6 +787,9 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     executions: {
       async submit(input) {
         const submission = AgentExecutionInputSchema.parse(input);
+        if (submission.payload.agentMemory === 'read-write' && submission.payload.homeAccess === 'memory-reader') {
+          throw new Error('agentMemory read-write requires a writer; a memory-reader Attempt reads memory only');
+        }
         const { taskId } = submission;
         if (dispatching.has(taskId)) throw new Error('submission for this taskId is already in progress; retain the original binding');
         dispatching.add(taskId);

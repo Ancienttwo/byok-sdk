@@ -416,11 +416,15 @@ field, the daemon admission decides, as above.
 | `'read-write'` | sealed `read-write`: `memory_recall` and `memory_save` | the writer guidance |
 
 - A `memory-reader` Attempt with `'read-write'` is declined with
-  `agent_memory_selection_invalid`.
+  `agent_memory_selection_invalid`. `ByokServer.dispatch` and
+  `executions.submit` refuse it before the task exists.
 - `'read'` or `'read-write'` when `status().agentMemoryMcp` is not `admitted`
   is declined with `agent_memory_unavailable`. The daemon does not change the
   selection to `'none'`.
 - Both declines are non-retryable.
+
+A Host that wants memory only when the daemon admits it sends no
+`agentMemory`.
 
 The offers are strict, so the field is a gated wire addition. A daemon with an
 Agent home advertises `agent-memory-selection`, whatever its memory admission.

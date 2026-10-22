@@ -867,8 +867,9 @@ interface DispatchInputBase {
     /**
      * The Agent memory of this one task: `none`, `read` or `read-write`.
      * Requires `agentRef` and a device that advertises `agent-memory-selection`;
-     * the kernel refuses it otherwise, before the task exists. Absent keeps the
-     * daemon admission.
+     * the kernel refuses it otherwise, before the task exists. `read-write` with
+     * `homeAccess: 'memory-reader'` is refused before the task exists. Absent
+     * keeps the daemon admission.
      */
     agentMemory?: PreparedAgentMemoryMode;
     /** Host-only product destination/freshness authority; never serialized to the daemon. */

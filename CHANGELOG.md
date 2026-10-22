@@ -9,13 +9,15 @@
   MCP and adds no memory guidance, so memory alone needs no adapter MCP support.
   `read` binds only `memory_recall`. A `memory-reader` that selects
   `read-write` is declined. `read` or `read-write` is declined when the daemon
-  does not admit the memory MCP; the daemon does not change it to `none`. The
-  offers are strict, so this is a gated wire addition. Every daemon with an
-  Agent home advertises the new device capability `agent-memory-selection`
-  (`AGENT_MEMORY_SELECTION_CAPABILITY`). Server and hosted cloud refuse the
-  field to a device without it, before the task exists.
-  `ByokServer.dispatch` takes `agentMemory` only with an explicit `agentRef`;
-  `executions.submit` takes it in its payload.
+  does not admit the memory MCP; the daemon does not change it to `none`. A
+  Host that wants memory only when the daemon admits it sends no
+  `agentMemory`. The offers are strict, so this is a gated wire addition.
+  Every daemon with an Agent home advertises the new device capability
+  `agent-memory-selection` (`AGENT_MEMORY_SELECTION_CAPABILITY`). Server and
+  hosted cloud refuse the field to a device without it, before the task
+  exists. `ByokServer.dispatch` takes `agentMemory` only with an explicit
+  `agentRef`; `executions.submit` takes it in its payload. Both refuse
+  `read-write` for a `memory-reader` before the task exists.
 - **Feature (client)** — `@byok-sdk/client` exports
   `AGENT_MEMORY_MCP_SERVER_NAME`, the reserved name of the SDK memory MCP
   server (#614). Host tests and diagnostics can use it instead of the literal

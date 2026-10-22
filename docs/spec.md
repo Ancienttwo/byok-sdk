@@ -2225,11 +2225,13 @@ writer default. A `memory-reader` Attempt that selects `read-write` is declined
 without retry (`agent_memory_selection_invalid`). `read` or `read-write` on a
 daemon whose admission is `off` or `unavailable` is declined without retry
 (`agent_memory_unavailable`), as on the prepared lane; the daemon never changes
-a selection to `none`. The offers are strict, so the field is a gated wire
+a selection to `none`, so a Host that wants memory only when it is admitted
+sends no `agentMemory`. The offers are strict, so the field is a gated wire
 addition: a daemon with an Agent home advertises `agent-memory-selection`
 whatever its admission, and server and cloud refuse the field to a device
 without it before task creation or mailbox append. The reference server takes
-it on `executions.submit` and on `dispatch` with an explicit `agentRef`.
+it on `executions.submit` and on `dispatch` with an explicit `agentRef`, and
+both refuse `read-write` for a `memory-reader` before the task exists.
 `AGENT_MEMORY_MCP_SERVER_NAME` from `@byok-sdk/client` is the reserved name of
 the SDK memory MCP server, so Host tests and diagnostics need no literal name.
 

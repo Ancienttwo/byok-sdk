@@ -1,10 +1,21 @@
 import type { Server as HttpServer } from 'node:http';
+import type { AgentEgressPolicy } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createByokServer, type ByokServer } from '../index';
 import { connectFakeDaemonLongPoll, nextEnvelope, startServer, stopServer } from './test-support';
 
 const PRODUCT_ID = 'acme';
 const AGENT_REF = { agentId: 'memory-agent', profileRevision: 'profile-r1' } as const;
+const POLICY: AgentEgressPolicy = {
+  policyRevision: 'policy-r1',
+  activity: { delivery: 'latest-value' as const, maxCoalesceMs: 250, maxEventBytes: 262144 },
+  reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
+  transfers: { workspace: 'disabled' as const, transcript: 'disabled' as const, artifact: 'disabled' as const },
+};
+const ALL_CAPABILITIES = [
+  'agent-home-contract', 'agent-home-readers', 'agent-memory-selection', 'agent-egress-policy',
+  'agent-egress-reliable-ack', 'agent-egress-fresh-session', 'terminal-projection-selection',
+];
 
 /** #614: reference-server dispatch threads `agentMemory` and the kernel gates it on `agent-memory-selection`. */
 describe('reference-server per-task Agent memory dispatch (#614)', () => {
@@ -72,5 +83,41 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
     const offered = await nextEnvelope(daemon);
     expect(offered.type).toBe('task.offer_for_agent');
     expect(offered.payload).toMatchObject({ agentRef: AGENT_REF, agentMemory: 'read' });
+  });
+
+  it('refuses a memory-reader dispatch that selects read-write before creating the task', async () => {
+    const started = await start();
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
+      productId: PRODUCT_ID,
+      capabilities: ALL_CAPABILITIES,
+    });
+    await expect(started.byok.dispatch({
+      deviceId: daemon.deviceId,
+      taskId: 'reader-read-write',
+      instruction: 'read memory',
+      agentRef: AGENT_REF,
+      sessionRef: 'memory-session',
+      homeAccess: 'memory-reader',
+      agentMemory: 'read-write',
+    })).rejects.toThrow(/agentMemory read-write requires a writer/);
+    expect(await started.byok.tasks.attempt('reader-read-write')).toBeUndefined();
+  });
+
+  it('refuses a memory-reader execution that selects read-write before any row is written', async () => {
+    const started = await start();
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
+      productId: PRODUCT_ID,
+      capabilities: ALL_CAPABILITIES,
+    });
+    await expect(started.byok.executions.submit({
+      taskId: 'fresh-reader-read-write',
+      deviceId: daemon.deviceId,
+      payload: {
+        instruction: 'read memory', runtime: 'codex', terminalProjection: { mode: 'none' }, agentRef: AGENT_REF,
+        egressPolicy: POLICY, homeAccess: 'memory-reader', agentMemory: 'read-write',
+      },
+    })).rejects.toThrow(/agentMemory read-write requires a writer/);
+    expect(await started.byok.tasks.attempt('fresh-reader-read-write')).toBeUndefined();
+    expect(await started.byok.tasks.offer('fresh-reader-read-write')).toBeUndefined();
   });
 });

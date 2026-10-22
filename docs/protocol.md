@@ -755,8 +755,9 @@ and adds no memory guidance, so memory alone requires no adapter MCP support;
 a reader keeps only the line that puts its result in the final reply. `read`
 binds the memory MCP sealed `read`, so the model has only `memory_recall`.
 `read-write` is the writer default. A `memory-reader` offer that selects
-`read-write` gets a non-retryable decline (`agent_memory_selection_invalid`).
-`read` or `read-write` on a daemon that does not admit the memory MCP gets a
+`read-write` gets a non-retryable decline (`agent_memory_selection_invalid`);
+the reference server refuses that dispatch before the task exists. `read` or
+`read-write` on a daemon that does not admit the memory MCP gets a
 non-retryable decline (`agent_memory_unavailable`); the daemon never changes
 the selection to `none`. A daemon advertises `agent-memory-selection` whenever
 it has an Agent home, whatever its memory admission.
