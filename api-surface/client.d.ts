@@ -2157,13 +2157,15 @@ export declare function openAgentMemoryFilesystemHelper(input: Readonly<{
 /** Resolve SDK release assets only: package-installed by default, or a complete SDK-copied product directory. No PATH or caller digest. */
 export declare function resolveAgentMemoryFilesystemHelper(assetRoot?: string): string;
 export declare function verifyAgentMemoryFilesystemHelper(helperBin: string, assetRoot?: string): string;
-/** Build-time copy of the SDK release manifest and both Darwin targets into a new or empty product asset directory. */
+/** Build-time copy of the SDK release manifest and the targets of one platform into a new or empty product asset directory. */
 export interface CopyAgentMemoryHelperAssetsOptions {
     readonly outDir: string;
+    /** `darwin` (default) copies both Darwin targets; `win32` copies the Windows x64 target. */
+    readonly platform?: 'darwin' | 'win32';
 }
 /**
  * Run against an installed SDK release, then ship these files with the product.
- * The manifest and Mach-O digest detect deployment errors, not signer trust.
+ * The manifest and the Mach-O or PE digest detect deployment errors, not signer trust.
  * Product re-signing remains supported. Returns sorted paths relative to outDir.
  */
 export declare function copyAgentMemoryHelperAssets(options: CopyAgentMemoryHelperAssetsOptions): Promise<readonly string[]>;

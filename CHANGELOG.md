@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Added (client)** — the SDK release now has a Windows x64 Agent memory
+  helper, `dist/native/agent-memory-fs/win32-x64.exe` (#605). Its
+  `pe-content-v1` digest ignores what Authenticode signing writes, so a product
+  can sign the exe. `copyAgentMemoryHelperAssets` takes `platform: 'win32'` to
+  copy it. The helper manifest is now version 2 and records the digest
+  algorithm of each entry. Product assets copied from an older release fail
+  with a manifest mismatch; copy them again. The SDK still does not admit Agent
+  memory on Windows.
+
 - **Feature (protocol, server, cloud, client)** — an ordinary Agent offer can
   select the Agent memory of its one task with the optional
   `agentMemory: 'none' | 'read' | 'read-write'` (#614). The values are those of

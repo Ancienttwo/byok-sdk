@@ -2291,7 +2291,18 @@ normalizes the header command counts and `__LINKEDIT` file and VM sizes. It
 accounts for the zero-filled command slot in unsigned Go x64 output. The
 signature must end at EOF. Wrong architecture, format, code or manifest fails
 closed. This check detects deployment errors. It does not verify signer trust.
-Windows PE digest support belongs to its separate platform slice.
+
+The release also has a Windows x64 helper, `win32-x64.exe`. Its
+`pe-content-v1` digest covers the PE32+ file except the optional-header
+CheckSum, the certificate table directory entry and the certificate table, which
+Authenticode signing writes. A certificate table must start on an 8-byte
+boundary after the headers and the raw data of every section, and must end the
+file. Each certificate must fit in the table. The content is padded with zeros
+to 8 bytes, as a signer pads it. The release manifest (version 2) records the
+digest algorithm of each entry. The compiled pin, not the manifest, selects the
+algorithm for a target. `copyAgentMemoryHelperAssets({ outDir, platform:
+'win32' })` copies the Windows target and the manifest. Runtime admission on
+Windows is unchanged: the helper is not resolved there.
 
 For Windows, the accepted fault model S covers process crash, OS crash and
 power loss. Its proposed support domain is local NTFS on an explicit OS

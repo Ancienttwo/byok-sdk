@@ -31,6 +31,16 @@ describe.skipIf(!hasAgentMemoryHelperBuild())('SDK memory helper product assets'
     expect(await fs.readFile(path.join(assetRoot, 'manifest.json'), 'utf8')).toBe(manifest);
   });
 
+  it('copies only the Windows x64 target for platform win32', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-relocated-memory-win32-')); roots.push(root);
+    const outDir = path.join(root, 'assets');
+    const files = await copyAgentMemoryHelperAssets({ outDir, platform: 'win32' });
+    expect(files).toEqual(['manifest.json', 'win32-x64.exe']);
+    expect((await fs.readdir(outDir)).sort()).toEqual(files);
+    await expect(copyAgentMemoryHelperAssets({ outDir: path.join(root, 'other'), platform: 'linux' as 'win32' })).rejects.toThrow('unsupported platform');
+    await expect(fs.stat(path.join(root, 'other'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it.each([false, true])('cleans a failed copy and allows retry (existing directory: %s)', async existing => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-copy-failure-')); roots.push(root);
     const outDir = path.join(root, 'assets');
