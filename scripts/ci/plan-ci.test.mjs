@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { planCi, changedPaths } from './plan-ci.mjs';
+import { planCi, changedPaths, isReleaseRef } from './plan-ci.mjs';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, renameSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -8,15 +8,16 @@ import path from 'node:path';
 import { requireCiPlan } from './require-ci-plan.mjs';
 import { knownFamilies } from './select-impact.mjs';
 const sha = 'a'.repeat(40);
+const ref = 'refs/heads/main';
 const results = plan => Object.fromEntries(['select', 'targeted', ...knownFamilies].map(id => [id, {
   result: id === 'select' || (id === 'targeted' && plan.mode === 'targeted') || plan.families.includes(id) ? 'success' : 'skipped',
 }]));
 test('only exact approved dispatch selects the complete release matrix', () => {
-  const plan = planCi({ event: 'workflow_dispatch', sha, approvedSha: sha });
+  const plan = planCi({ event: 'workflow_dispatch', sha, approvedSha: sha, ref });
   assert.deepEqual(plan.families, knownFamilies);
   assert.doesNotThrow(() => requireCiPlan(results(plan), plan, 'workflow_dispatch', sha));
-  assert.throws(() => planCi({ event: 'workflow_dispatch', sha, approvedSha: 'b'.repeat(40) }));
-  assert.throws(() => planCi({ event: 'workflow_dispatch', sha }));
+  assert.throws(() => planCi({ event: 'workflow_dispatch', sha, approvedSha: 'b'.repeat(40), ref }));
+  assert.throws(() => planCi({ event: 'workflow_dispatch', sha, ref }));
 });
 test('routine docs select no matrix, but mandatory scope checks must succeed', () => {
   for (const event of ['push', 'pull_request']) {
@@ -31,7 +32,7 @@ test('routine docs select no matrix, but mandatory scope checks must succeed', (
   }
 });
 test('release gate rejects every incomplete family and never accepts routine evidence', () => {
-  const plan = planCi({ event: 'workflow_dispatch', sha, approvedSha: sha });
+  const plan = planCi({ event: 'workflow_dispatch', sha, approvedSha: sha, ref });
   for (const id of knownFamilies) for (const result of ['failure', 'skipped', 'cancelled', undefined]) {
     assert.throws(() => requireCiPlan({ ...results(plan), [id]: { result } }, plan, 'workflow_dispatch', sha));
   }
@@ -67,10 +68,13 @@ test('CI policy and runbook changes take the contract-only lane', () => {
 });
 
 
-test('native memory export is required for client and protocol impact and skipped for docs', () => {
+test('native memory export is required for its owned paths and skipped for other routine changes', () => {
   const id = 'agent-memory-export-linux';
   for (const event of ['pull_request', 'push']) {
-    for (const file of ['packages/client/src/daemon/agent-memory-export.ts', 'packages/protocol/src/constants.ts']) {
+    for (const file of ['packages/protocol/src/constants.ts', 'packages/client/src/daemon/task-runner.ts']) {
+      assert.ok(!planCi({ event, sha, paths: [file] }).families.includes(id), file);
+    }
+    for (const file of ['packages/client/src/daemon/agent-memory-export.ts', 'packages/client/src/__tests__/agent-memory-export.test.ts']) {
       const plan = planCi({ event, sha, paths: [file] });
       assert.ok(plan.families.includes(id));
       assert.doesNotThrow(() => requireCiPlan(results(plan), plan, event, sha));
@@ -84,7 +88,7 @@ test('native memory export is required for client and protocol impact and skippe
     assert.equal(results(docs)[id].result, 'skipped');
     assert.throws(() => requireCiPlan({ ...results(docs), [id]: { result: 'success' } }, docs, event, sha), /Unselected CI job/);
   }
-  assert.ok(planCi({ event: 'workflow_dispatch', sha, approvedSha: sha }).families.includes(id));
+  assert.ok(planCi({ event: 'workflow_dispatch', sha, approvedSha: sha, ref }).families.includes(id));
 });
 
 test('PR CLI pairs the tested merge with its actual main parent and rejects inconsistent evidence', () => {
@@ -127,4 +131,25 @@ test('PR CLI pairs the tested merge with its actual main parent and rejects inco
     git('checkout', 'topic');
     assert.throws(() => invoke('./plan-ci.mjs', { GITHUB_SHA: prHead }));
   } finally { rmSync(cwd, { recursive: true, force: true }); }
+});
+
+test('the complete matrix runs only from an exact dispatch on main or release/*', () => {
+  for (const good of ['refs/heads/main', 'refs/heads/release/0.28.2', 'refs/heads/release/0.28.2-rc.1']) {
+    assert.ok(isReleaseRef(good), good);
+    assert.deepEqual(planCi({ event: 'workflow_dispatch', sha, approvedSha: sha, ref: good }).families, knownFamilies);
+  }
+  for (const bad of ['refs/heads/fix/612-unknown-wake-audit', 'refs/heads/diagnose/640-writer-handoff', 'refs/heads/codex/release-0.28.1-frozen',
+    'refs/heads/integration/byok-batch-20261021', 'refs/heads/release/', 'refs/heads/release/a/b', 'refs/tags/v0.28.1', 'refs/heads/mainline', '', undefined]) {
+    assert.ok(!isReleaseRef(bad), String(bad));
+    assert.throws(() => planCi({ event: 'workflow_dispatch', sha, approvedSha: sha, ref: bad }), /only on main or release/, String(bad));
+  }
+});
+
+test('a routine plan never contains the complete test suite', () => {
+  for (const event of ['pull_request', 'push']) {
+    const plan = planCi({ event, sha, paths: ['packages/protocol/src/task.ts', 'packages/client/src/daemon/task-runner.ts', 'packages/client/src/adapters/codex/codex-adapter.ts'] });
+    assert.equal(plan.mode, 'targeted');
+    assert.ok(!plan.families.includes('build-test'));
+    assert.throws(() => requireCiPlan(results(plan), { ...plan, families: [...knownFamilies] }, event, sha));
+  }
 });

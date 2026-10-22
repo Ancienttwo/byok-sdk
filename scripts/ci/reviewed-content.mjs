@@ -19,7 +19,7 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     const additions = [rule, nativeRules, rule + nativeRules];
     if (!additions.some(addition => after === before + addition
       && addition.trimEnd().split('\n').every(line => !before.split('\n').includes(line)))) {
-      throw new Error('Reviewed release validation required: only the reviewed helper LF attributes may be added');
+      throw new Error('Reviewed CI mapping required: only the reviewed helper LF attributes may be added');
     }
     return;
   }
@@ -85,9 +85,15 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       const smoke = ' && node scripts/check-hermes-session-entry.mjs';
       if (typeof before.scripts?.build === 'string' && after.scripts?.build === before.scripts.build + smoke) after.scripts.build = before.scripts.build;
     }
+    if (path === 'packages/keys/package.json') {
+      // #636 adds one subpath for the generated pinned pi-ai catalog lookup.
+      const key = './pi-catalog';
+      const entry = { types: './dist/pi-catalog.d.ts', import: './dist/pi-catalog.js' };
+      if (before.exports?.[key] === undefined && isDeepStrictEqual(after.exports?.[key], entry)) delete after.exports[key];
+    }
     delete before.version; delete after.version;
   }
-  if (!isDeepStrictEqual(before, after)) throw new Error(`Reviewed release validation required: ${path} changes more than the reviewed fields`);
+  if (!isDeepStrictEqual(before, after)) throw new Error(`Reviewed CI mapping required: ${path} changes more than the reviewed fields`);
 }
 
 /** A `bin:<name>` entry belongs to the one workspace package whose manifest declares that bin. */
@@ -96,7 +102,7 @@ function binOwner(name, cwd) {
     const manifest = resolve(cwd, 'packages', dir, 'package.json');
     return existsSync(manifest) && Object.hasOwn(JSON.parse(readFileSync(manifest, 'utf8')).bin ?? {}, name);
   });
-  if (owners.length !== 1) throw new Error(`Reviewed release validation required: unmapped API entry bin:${name}`);
+  if (owners.length !== 1) throw new Error(`Reviewed CI mapping required: unmapped API entry bin:${name}`);
   return `packages/${owners[0]}`;
 }
 
@@ -110,7 +116,7 @@ export function changedApiOwners({ base, cwd = process.cwd() } = {}) {
     const bin = /^bin:([a-z0-9-]+)$/.exec(key);
     if (bin) { owners.add(binOwner(bin[1], cwd)); continue; }
     const match = /^@byok-sdk\/([a-z-]+)(?:[/#]|$)/.exec(key);
-    if (!match) throw new Error(`Reviewed release validation required: unmapped API entry ${key}`);
+    if (!match) throw new Error(`Reviewed CI mapping required: unmapped API entry ${key}`);
     owners.add(`packages/${match[1]}`);
   }
   return [...owners];

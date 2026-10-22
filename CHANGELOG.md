@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **Feature (server, client)** — complete #613 with opt-in CORS for loopback
+  browser MCP clients. `listenLoopback({ allowedOrigins })` admits exact
+  loopback origins, answers their preflight without dispatch and adds
+  `Access-Control-Allow-Origin`, `Vary` and `Expose-Headers: Mcp-Session-Id`.
+  It never allows credentials, and Cookie stays refused.
+  `createMcpHttpServer({ allowedOrigins })` accepts the same origins in its
+  Origin check. Without the options, behavior is unchanged. These are additive
+  public APIs. The pre-1.0 policy puts them in a MINOR release; the owner
+  decides the version for this batch.
+- **Feature (examples)** — K4 `HostLedger.compact` also removes acknowledged
+  terminal memory intents and their approval keys. Inside the retention window,
+  approval and device replays get the original row. `MemoryOptions.now` must
+  return integer milliseconds from the same clock as the compaction `now`.
+  Routine occurrence identities now expire with their slot, and the derived
+  `occurrence:` key shape is reserved for routine occurrences (#602).
+- **Fix (examples)** — a K4 routine wake that arrives before the Host clock
+  reaches its slot now reserves the next slot. Before, the routine reserved the
+  delivered slot again (#602).
 - **Feature (keys, client)** — add a separate local provider custody launcher
   for Hermes. The Host's keys process reads the selected profile key under the
   custody lock at each start; the daemon environment carries no provider key.
@@ -29,10 +47,29 @@
   write; the restore is not an atomic tree rollback.
 - **Feature (protocol, client)** — `tool_use` and `tool_result` events carry
   the authoritative MCP `server` and `tool` identity (#633).
+- **Feature (client)** — ordinary Claude daemon execution sets `mcp` on
+  `tool_use` and `tool_result` for host toolset MCP tools. The identity comes
+  from Claude's own `mcp_status` answer at the first MCP call, so admission
+  does not probe. Built-in tools, SDK helpers and ambiguous names stay without
+  `mcp`. Grok is unchanged until live ACP evidence exists (#633).
 - **Docs (client)** — document which user-level runtime configuration each
   adapter loads and the available isolation boundaries (#634).
 - **Feature (server, cloud)** — Hosts can await the durable terminal state of an
   Agent-home projection instead of polling (#637).
+- **Feature (keys)** — add `piModelConfigFromPinnedCatalog` and
+  `PI_MODEL_CATALOG_PI_AI_VERSION` on the new `@byok-sdk/keys/pi-catalog`
+  export (#636). The table is generated from the
+  pinned `@earendil-works/pi-ai` with `bun scripts/keys/generate-pi-model-catalog.ts`, and
+  a client test fails on drift. An entry is returned exactly or refused with its
+  blocking fields; an entry without a complete `thinkingLevelMap` is refused.
+  `PiModelConfigSchema.compat` accepts `supportsStrictMode`,
+  `requiresReasoningContentOnAssistantMessages` (`openai-completions`) and
+  `forceAdaptiveThinking` (`anthropic` profiles); the prepared entry still
+  refuses keys outside its wire. Add `assertPiLaunchArgs`; the launcher now
+  refuses a model id that starts with `--` before admission.
+- **Changed (keys, client)** — `PI_THINKING_LEVELS` is generated from pi-ai
+  `MODEL_THINKING_LEVELS`, and the Pi rpc and prepared hosts import that list
+  (#636). `PI_COMPAT_KEYS_BY_API` gains an `anthropic-messages` row.
 - **Behavior (client)** — Agent memory admission follow-ups (#614). With
   `DaemonConfig.agentMemoryMcp: 'off'`, Agent task instructions get no memory
   guidance; a `memory-reader` instruction keeps only the final-reply line. A
@@ -47,6 +84,15 @@
   its own error text. The README states that the allowlist governs Bot turns only.
   The Host's direct `bot.core.enqueue` call bypasses it. This completes the five
   low-severity follow-ups of #622; #606 stays open.
+- **Fixed (core, cloud-dataplane, conformance, server)** — a presence publication
+  with `minimumIntervalMs: 0` no longer fails with `hint_rate_limited` when the
+  clock moved backwards. The embedded server renews the lease on each accepted
+  envelope and each poll, so after a wall-clock rollback `POST /byok/messages`
+  and `GET /byok/events` returned HTTP 500 until the clock caught up. Memory and
+  SQLite storage were both affected. The lease is now `now + TTL` on the store
+  clock. Heartbeats with a non-zero minimum interval keep their throttle. The
+  conformance suite now covers the rollback case, and `advanceTime` accepts a
+  negative value (#674).
 
 ## 0.28.1 / @byok-sdk/keys 0.13.1 — 2026-10-21 (published)
 

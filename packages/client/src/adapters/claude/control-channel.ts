@@ -27,6 +27,9 @@ export function parseClaudeContextWindow(
   return windows.size === 1 ? [...windows][0]! : null;
 }
 
+/** Claude answers `mcp_status` from memory; a slow answer only leaves `mcp` absent. */
+const MCP_STATUS_TIMEOUT_MS = 5_000;
+
 /** One correlated control request at a time; separate from the user/result event queue. */
 export function createClaudeControlChannel(timeoutMs: number) {
   let write: ((frame: Record<string, unknown>) => Promise<void>) | undefined;
@@ -63,6 +66,24 @@ export function createClaudeControlChannel(timeoutMs: number) {
     }).catch(() => settle(false));
     return promise;
   };
+  // A descriptive lookup: its own slot, so it never makes an interrupt wait or fail.
+  let status: { id: string; settle: (response: unknown) => void } | undefined;
+  const requestMcpStatus = (deadline: number): Promise<unknown> => {
+    if (ended || !write || status) return Promise.resolve(undefined);
+    const id = randomUUID();
+    return new Promise<unknown>((resolve) => {
+      const timer = setTimeout(() => settle(undefined), deadline);
+      const settle = (response: unknown) => {
+        if (status?.id !== id) return;
+        clearTimeout(timer);
+        status = undefined;
+        resolve(response);
+      };
+      status = { id, settle };
+      void write!({ type: 'control_request', request_id: id, request: { subtype: 'mcp_status' } })
+        .catch(() => settle(undefined));
+    });
+  };
   return {
     get contextWindow() {
       return contextWindow;
@@ -91,18 +112,24 @@ export function createClaudeControlChannel(timeoutMs: number) {
       const response = message.response as {
         request_id?: unknown;
         subtype?: unknown;
+        response?: unknown;
       };
       if (response.request_id === pending?.id)
         pending?.settle(response.subtype === 'success');
+      if (response.request_id === status?.id)
+        status?.settle(response.subtype === 'success' ? response.response : undefined);
     },
     closed() {
       ended = true;
       pending?.settle(false);
+      status?.settle(undefined);
       for (const resolve of resultWaiters) resolve(false);
     },
     /** Complete the SDK stdio handshake before the first user frame. */
     initialize(): Promise<boolean> { return requestControl('initialize', 60_000); },
     interrupt(): Promise<boolean> { return requestControl('interrupt', timeoutMs); },
+    /** Claude's own `mcp_status` answer, or undefined on failure, timeout or close. */
+    mcpStatus(): Promise<unknown> { return requestMcpStatus(MCP_STATUS_TIMEOUT_MS); },
     /** ACK and final result share the existing interrupt deadline. */
     async interruptAndSettle(): Promise<boolean> {
       const revision = resultRevision;

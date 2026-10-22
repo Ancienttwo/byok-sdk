@@ -1,4 +1,4 @@
-import { verifyPrPlan } from './plan-ci.mjs';
+import { isReleaseRef, verifyPrPlan } from './plan-ci.mjs';
 import { pathToFileURL } from 'node:url';
 import { knownFamilies, selectImpact } from './select-impact.mjs';
 import { requireCiSuccess } from './require-ci-success.mjs';
@@ -20,6 +20,7 @@ export function requireCiPlan(needs, plan, event, sha, base, cwd) {
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const plan = JSON.parse(process.env.CI_PLAN ?? '');
+  if (process.env.CI_EVENT === 'workflow_dispatch' && !isReleaseRef(process.env.CI_REF)) throw new Error('Release validation runs only on main or release/* refs');
   const base = verifyPrPlan(plan);
   requireCiPlan(JSON.parse(process.env.CI_NEEDS ?? ''), plan, process.env.CI_EVENT, process.env.GITHUB_SHA, base);
   console.log('Selected CI scope succeeded; only explicit release mode qualifies the complete matrix');

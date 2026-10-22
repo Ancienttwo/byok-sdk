@@ -28,6 +28,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./pi-catalog": {
+      "types": "./dist/pi-catalog.d.ts",
+      "import": "./dist/pi-catalog.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
