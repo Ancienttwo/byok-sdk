@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Security (client)** — update the `undici` pin from 8.11.2 to 8.12.3 (#700).
+  8.11.2 is in the range of eight advisories from 2026-10-15. Four are high
+  (GHSA-qrxm-fqhp-jwvm, GHSA-2m5v-pch6-74hx, GHSA-4w7w-5xrc-9h26,
+  GHSA-xjj6-f33q-929c) and four are medium (GHSA-55wc-3pg8-jfw6,
+  GHSA-f72v-6w45-q472, GHSA-4qv8-2p9j-2685, GHSA-9fm3-97px-rjf6). 8.12.2 fixes
+  all of them. The cloud-dataplane test dependency moves to the same version.
+  `@earendil-works/pi-coding-agent` 1.3.0 still carries its own unpatched
+  undici: an exact 8.10.2 dependency and a copy in its CLI bundle. This change
+  does not update them.
 - **Feature (server, client)** — complete #613 with opt-in CORS for loopback
   browser MCP clients. `listenLoopback({ allowedOrigins })` admits exact
   loopback origins, answers their preflight without dispatch and adds
