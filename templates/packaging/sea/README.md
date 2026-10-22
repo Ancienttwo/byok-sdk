@@ -89,12 +89,27 @@ single, fully self-contained file (module loading does not read from the
 filesystem at SEA runtime — only Node builtins resolve), so bundling is
 required regardless of format.
 
-Direct CJS bundling rejects top-level await in an SDK helper graph before
-unused launcher branches are removed. The first ESM pass performs standard
-tree-shaking; the second pass converts the surviving launcher to CJS.
-It does not remove capabilities from the independently built Pi host.
-Required top-level await still fails: this recipe does not wrap the entry
-in an async function, externalize dependencies or insert stubs.
+The first ESM pass performs standard tree-shaking; the second pass converts
+the surviving launcher to CJS. It does not remove capabilities from the
+independently built Pi host. The SDK graph, the Pi host included, has no
+top-level await, so a single-pass CJS bundle also builds (#701). Required
+top-level await in product code still fails: this recipe does not wrap the
+entry in an async function, externalize dependencies or insert stubs.
+
+This recipe does not run the Pi host. The smoke launcher calls only
+`createDaemon().status()` and `PiAdapter.detect()`, so the host is bundled but
+never evaluated. Pi reads `import.meta.url` when it evaluates, and CJS output
+has no `import.meta`. A product whose CJS bundle runs Pi through
+`runSdkReservedHelperCommand()` defines it from `__filename`, in either recipe:
+
+```js
+define: { 'import.meta.url': '__product_import_meta_url' },
+banner: { js: "const __product_import_meta_url = require('node:url').pathToFileURL(__filename).href;" },
+```
+
+`pi-single-file-bundle.test.ts` proves this for a single-pass CJS bundle run by
+Node, with the ordinary host and with the sealed-host redirect. It does not run
+that bundle inside a SEA binary.
 
 Unused-export elimination relies on dependency `sideEffects` declarations
 and ordinary esbuild semantics. A version or side-effect declaration change

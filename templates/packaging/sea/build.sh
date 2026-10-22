@@ -19,9 +19,10 @@ set -euo pipefail
 #
 # First bundle as ESM so standard tree-shaking can remove helper branches
 # unused by this launcher before imposing CommonJS parse restrictions.
-# A direct CJS bundle rejects their top-level await even when unused.
 # Then bundle that single intermediate as CJS for the existing SEA loader.
 # Required top-level await still fails; there is no async wrapper or fallback.
+# This launcher never evaluates the Pi host; see the README before running Pi
+# from a CJS bundle (it needs an import.meta.url define).
 # See the README for the measured Node/OS limits and sideEffects trust boundary.
 
 ENTRY="${1:?usage: build.sh <entry.ts> <output-dir>}"

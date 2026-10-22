@@ -7,8 +7,10 @@
     {
       "path": "index.ts",
       "upstreamSha256": "a2f11dbe8e200bd8c590441316a9c6ab222318d2aa738670dedcf0e72592dde3",
-      "vendoredSha256": "a2f11dbe8e200bd8c590441316a9c6ab222318d2aa738670dedcf0e72592dde3",
-      "delta": []
+      "vendoredSha256": "4e2e6e0ecc50b8b064916422fdca42923be001dc1ac8b34760185532827e5f14",
+      "delta": [
+        "SDK moves the parent-extension lazy import from module top-level await into the async factory, so CommonJS single-file bundles accept the host; the PI_SUBAGENT_CHILD skip is unchanged."
+      ]
     },
     {
       "path": "src/agents/agent-management.ts",
