@@ -1,5 +1,3 @@
-import { loadSdkKoffiAsset } from '../../sdk-native-assets-runtime';
-
 /**
  * Windows client for the Hermes gateway control pipe, through kernel32.
  *
@@ -12,8 +10,8 @@ import { loadSdkKoffiAsset } from '../../sdk-native-assets-runtime';
  * reads the server pid from the kernel, and it writes only to a server the
  * caller owns: a server that never reads cannot block this synchronous handle.
  *
- * It loads with the lazy `#byok-hermes-session` entry; `koffi` is imported
- * only on first use, which happens only on Windows.
+ * It loads with the lazy `#byok-hermes-session` entry. The root entry loads
+ * `koffi` (only on Windows) and passes the module in.
  */
 
 const GENERIC_READ_WRITE = 0xC0000000;
@@ -43,13 +41,18 @@ interface KoffiModule {
   pointer(type: string): unknown;
 }
 
-const cached = new Map<string, Promise<PipeBindings>>();
+const cached = new WeakMap<object, PipeBindings>();
 
-async function loadPipeBindings(nativeAssetRoot: string | undefined): Promise<PipeBindings> {
-  const imported = nativeAssetRoot === undefined
-    ? (await import('koffi')) as unknown as { default?: KoffiModule }
-    : loadSdkKoffiAsset(nativeAssetRoot) as { default?: KoffiModule };
-  const koffi = (imported.default ?? imported) as KoffiModule;
+function bindings(koffi: KoffiModule): PipeBindings {
+  let api = cached.get(koffi);
+  if (api === undefined) {
+    api = loadPipeBindings(koffi);
+    cached.set(koffi, api);
+  }
+  return api;
+}
+
+function loadPipeBindings(koffi: KoffiModule): PipeBindings {
   const kernel32 = koffi.load('kernel32.dll');
   const dword = koffi.out(koffi.pointer('uint32_t'));
   const bind = (name: string, result: unknown, args: unknown[]): never => kernel32.func('__stdcall', name, result, args) as never;
@@ -65,17 +68,6 @@ async function loadPipeBindings(nativeAssetRoot: string | undefined): Promise<Pi
   };
 }
 
-function bindings(nativeAssetRoot: string | undefined): Promise<PipeBindings> {
-  const key = nativeAssetRoot ?? '';
-  let loading = cached.get(key);
-  if (loading === undefined) {
-    loading = loadPipeBindings(nativeAssetRoot);
-    loading.catch(() => cached.delete(key));
-    cached.set(key, loading);
-  }
-  return loading;
-}
-
 export interface HermesPipeAnswer {
   /** The pid of the process that serves the pipe, from the kernel. */
   readonly serverPid: number;
@@ -87,16 +79,17 @@ export interface HermesPipeAnswer {
  * One request/answer exchange on the pipe `name`. Undefined: no pipe has that
  * name. Rejects for any other open failure (for example a busy pipe or access
  * denied), because a server exists. The request is written only when
- * `owned(serverPid)` is true.
+ * `owned(serverPid)` is true. `koffi` is the module from the root entry's
+ * loader (`loadKoffi` in `win32-job-object.ts`).
  */
 export async function exchangeHermesPipe(
   name: string,
   request: string,
   owned: (serverPid: number) => boolean,
   deadline: number,
-  nativeAssetRoot?: string,
+  koffi: unknown,
 ): Promise<HermesPipeAnswer | undefined> {
-  const api = await bindings(nativeAssetRoot);
+  const api = bindings(koffi as KoffiModule);
   const pipe = api.createFile(name, GENERIC_READ_WRITE, 0, null, OPEN_EXISTING, SQOS_IDENTIFICATION, null);
   if (pipe === INVALID_HANDLE || pipe === 0) {
     if (api.lastError() === ERROR_FILE_NOT_FOUND) return undefined;

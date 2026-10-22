@@ -29,7 +29,7 @@ The crash test sends SIGKILL to a child Host during wake delivery.
 | `src/core.ts` | FIFO dispatch, exact recovery, cancellation, retry, outcome application and outbox scans. |
 | `src/ledger.ts` | A separate Host SQLite ledger with synchronous transactions. |
 | `src/model.ts`, `src/transitions.ts` | Durable records, stable identities and atomic state changes. |
-| `src/routines.ts` | Occurrence deduplication, next-slot commit, coalescing and lifecycle. |
+| `src/routines.ts` | Occurrence deduplication, next-slot commit, coalescing, lifecycle and version switches. |
 | `src/schedule.ts` | The default UTC interval calendar and the shared calendar callback type. |
 | `src/index.ts` | The example's copy-and-own entrypoint. This is not a published SDK package. |
 | `src/*.test.ts` | Contract probes and real server/daemon smoke tests. |
@@ -191,6 +191,46 @@ The same rule bounds the identity rows of Agent routine occurrences; see
 The JSON ledger and failed-job backlog remain small-Host reference storage: at 10x
 volume, whole-document rewrites and serialized handlers are the first bottlenecks.
 
+## Routine versions
+
+`addRoutine` creates a routine. It is idempotent for the same definition and refuses a
+different definition for the same ID. `updateRoutine` changes the version of an existing ID:
+
+```ts
+await core.updateRoutine({ ...current, version: current.version + 1, rule: newRule });
+```
+
+- The version must be `max(current, pending) + 1`. The Host service assigns it and keeps the
+  version history and command receipts. The ledger keeps only the current definition and at
+  most one staged `pending` definition.
+- An exact replay of the current or the pending definition does nothing.
+- A lower or skipped version, or the same version with other content, throws.
+- The destination cannot change: an Agent routine stays an Agent routine, and a Host job keeps
+  its `type`. An unknown or completed routine throws.
+- The new definition gets the `addRoutine` validation. Its calendar runs once before the update commits.
+
+The pending version replaces the current one when the exported pure function
+`versionSwitchDue(routine, occurrences, now)` is true: the routine is active, no occurrence of
+the routine is unsettled, and no reserved old slot is due (`next` is null or later than `now`).
+The switch cancels the old wake and reserves the first new slot after `now`. Admitted work
+finishes with the version that admitted it.
+
+- While a version is pending, a reserved old slot still records its occurrence, but the core
+  reserves no later old slot. `recover()` and a same-definition `addRoutine()` do not refill the
+  old chain either.
+- The core checks the switch in the update commit, in `lifecycle()`, after each scan and after a
+  memory change. No wake has to follow the last settlement.
+- Pause keeps the pending version. Resume switches when the switch is due; otherwise the current
+  version reserves its next slot. `completed` drops the pending version. This includes a resume
+  that completes the current version because its `endAt` has passed.
+- An old wake that arrives after the switch is audited as `reservation_mismatch`.
+- A Host job occurrence stays unsettled until its handler succeeds. A handler that keeps failing on
+  the current input therefore also blocks the switch to a version that changes the input. The
+  admitted occurrence runs with the `type` and `input` of the current definition.
+
+A core without `updateRoutine` ignores `pending`: it keeps the current version and refills its
+chain. Let pending versions switch, or restore a backup, before you roll back to such a core.
+
 ## Agent execution retention
 
 For tasks submitted successfully by the current core, `server.events` terminal
@@ -313,18 +353,19 @@ The Host's `WAKE_HORIZON_MS` uses the public `WAKE_MAX_FUTURE_MS` export from `@
 Candidates beyond that horizon use `schedule_retrying` backoff without blocking other work.
 
 The Host service owns definition versions, CAS commands, sync, authentication,
-result upload policy, visibility, retention and deletion. This example mirrors an
-immutable definition. The Host service must retain its version history and command receipts.
-The example does not implement the service's version-change workflow, command API or UI.
+result upload policy, visibility, retention and deletion. This example mirrors the
+current definition and at most one pending version; see [Routine versions](#routine-versions).
+The Host service must retain its version history and command receipts.
+The example does not implement the service's command API or UI.
 
 The Aimpact scope ruling of 2026-10-18 assigns the service rows in platform PRD section 14.1
 to the downstream Host service after K2 and A2, as specified in that PRD.
 These rows cover routine sync with the browser closed, `sync_failed`, 409, `device_offline`,
 `missed`, security and cost. This reference covers the device-local Topology L execution rows.
 
-The same ruling assigns same-routine-ID version changes to K8a with `update_routine`.
-This includes current/pending versions, scheduling generation and the in-flight limit.
-This reference keeps each routine ID's definition immutable. Use a new ID to change a definition.
+The owner decisions of 2026-10-22 for #606 (O1, O2 and O8) move same-routine-ID version changes
+into K4 `updateRoutine`. K4 keeps its overlap rule: a new slot settles queued older work and keeps
+the running one. K8 keeps its own routine model until #737 moves it onto K4.
 
 K8 actions and group chat remain in their own work orders.
 P5a adds Host memory commands and Linux synthetic memory tests below.

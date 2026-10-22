@@ -5,7 +5,8 @@ import { HostLedger, OutboxFullError } from './ledger';
 import { canonical, hash, project, taskId, time, validateInput, validateJson, validateRetry, type HostJobHandler, type Attempt, type Intent, type IntentInput,
   type Json, type LedgerState, type Routine, type RoutineDefinition, type Terminal } from './model';
 import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
-import { applyPlan, auditCalendarError, auditIgnoredWake, deferSchedule, nextWake, promoteOccurrence, recordOccurrence, scheduleNext, setLifecycle, WAKE_HORIZON_MS } from './routines';
+import { applyPlan, auditCalendarError, auditIgnoredWake, deferSchedule, nextWake, promoteOccurrence, recordOccurrence, scheduleNext, setLifecycle,
+  stageVersion, switchVersion, versionSwitchDue, WAKE_HORIZON_MS } from './routines';
 import { cancelWake, enqueue, settle } from './transitions';
 
 export type ExecutionServer = {
@@ -85,6 +86,7 @@ export class HostExecutionCore {
       const wake = this.memoryWaking.then(async () => {
         if (this.stopped) return;
         this.resumeMemory(binding);
+        this.switchVersions();
         this.armScan(this.now() + this.reconcileMs);
         const result = await this.flushWakes();
         if (result.failures.length) {
@@ -152,6 +154,36 @@ export class HostExecutionCore {
   }
   async addRoutine(definition: RoutineDefinition): Promise<void> {
     this.assertOpen();
+    this.validateDefinition(definition);
+    const now = this.now();
+    const plan = nextWake(definition, now - 1, this.nextTime, now);
+    this.ledger.transaction(state => {
+      const id = hash(definition.id);
+      if (state.routines[id]) {
+        if (canonical(state.routines[id]!.definition) !== canonical(definition)) throw new Error('Routine definition is immutable in addRoutine; use updateRoutine for the next version');
+        // A staged version owns the next reservation; the old chain gets no refill.
+        if (state.routines[id]!.lifecycle === 'active' && state.routines[id]!.status === 'no_occurrence_within_horizon' && !state.routines[id]!.pending) {
+          applyPlan(state, state.routines[id]!, plan, now);
+        }
+        return;
+      }
+      state.routines[id] = { definition: structuredClone(definition), lifecycle: 'active', status: 'ok', next: null };
+      applyPlan(state, state.routines[id]!, plan, now);
+    });
+    await this.drain();
+  }
+  /**
+   * Stages version `max(current, pending) + 1` with the same destination. An exact replay does nothing.
+   * The new version replaces the current one when no occurrence of the routine is unsettled and no old slot is due.
+   */
+  async updateRoutine(definition: RoutineDefinition): Promise<void> {
+    this.assertOpen();
+    this.validateDefinition(definition);
+    nextWake(definition, this.now(), this.nextTime, this.now()); // Refuse a calendar error before staging.
+    this.ledger.transaction(state => stageVersion(state, definition, this.now(), this.nextTime));
+    await this.drain();
+  }
+  private validateDefinition(definition: RoutineDefinition): void {
     if (!definition.id.trim() || definition.id.startsWith('host-scan:') || !Number.isSafeInteger(definition.version) || definition.version < 1
       || definition.waitMs < 1) throw new Error('Invalid routine definition');
     time(definition.waitMs); time(definition.lateAfterMs);
@@ -165,21 +197,6 @@ export class HostExecutionCore {
     } else {
       validateInput({ key: definition.id, source: 'routine', execution: definition.execution!, waitUntil: this.now() + definition.waitMs, retry: definition.retry });
     }
-    const now = this.now();
-    const plan = nextWake(definition, now - 1, this.nextTime, now);
-    this.ledger.transaction(state => {
-      const id = hash(definition.id);
-      if (state.routines[id]) {
-        if (canonical(state.routines[id]!.definition) !== canonical(definition)) throw new Error('Routine definition is immutable; use a new routine id after current work settles');
-        if (state.routines[id]!.lifecycle === 'active' && state.routines[id]!.status === 'no_occurrence_within_horizon') {
-          applyPlan(state, state.routines[id]!, plan, now);
-        }
-        return;
-      }
-      state.routines[id] = { definition: structuredClone(definition), lifecycle: 'active', status: 'ok', next: null };
-      applyPlan(state, state.routines[id]!, plan, now);
-    });
-    await this.drain();
   }
   async lifecycle(id: string, lifecycle: Routine['lifecycle']): Promise<void> {
     this.assertOpen();
@@ -216,7 +233,7 @@ export class HostExecutionCore {
       if (state.scanWake) cancelWake(state, state.scanWake.dedupKey);
       state.scanWake = null;
       for (const routine of Object.values(state.routines)) {
-        if (routine.lifecycle === 'active' && routine.status === 'no_occurrence_within_horizon') {
+        if (routine.lifecycle === 'active' && routine.status === 'no_occurrence_within_horizon' && !routine.pending) {
           try { applyPlan(state, routine, nextWake(routine.definition, this.now(), this.nextTime, this.now()), this.now()); }
           catch (error) { auditCalendarError(routine, this.now(), error); }
         } else if (routine.next && !pending.has(routine.next.dedupKey)) scheduleNext(state, routine, this.now());
@@ -337,6 +354,7 @@ export class HostExecutionCore {
       if (!(error instanceof OutboxFullError)) throw error;
       capacityFailure = error;
     }
+    this.switchVersions();
     // A rejected settlement must still restore the durable scan consumed by this hook.
     this.armScan(undefined, capacityFailure ? this.now() + this.reconcileMs : 0);
     const last = await this.flushWakes(first.failedKeys);
@@ -384,6 +402,16 @@ export class HostExecutionCore {
       }
     }
     return failures;
+  }
+  /**
+   * A settlement can make a staged version due. Check after each settlement path: no wake
+   * may follow the last settlement, because the old chain gets no refill while a version waits.
+   */
+  private switchVersions(): void {
+    const due = (state: LedgerState) => Object.values(state.routines)
+      .filter(routine => versionSwitchDue(routine, Object.values(state.occurrences), this.now()));
+    if (!due(this.ledger.snapshot()).length) return;
+    this.ledger.transaction(state => { for (const routine of due(state)) switchVersion(state, routine, this.now(), this.nextTime); });
   }
   private armScheduleRetry(): void {
     clearTimeout(this.scheduleRetryTimer);
