@@ -1,6 +1,6 @@
-# OAR 60ad09b private runtime fork
+# OAR 44d7d61 private runtime fork
 
-Source: https://github.com/botiverse/oar, version 0.68.2, fixed commit `60ad09b9b97bdd005360504fda2de0d59826f08c`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
+Source: https://github.com/botiverse/oar, version 0.70.0, fixed commit `44d7d61c558eef8ac3e61ecc54a8d4962eacadbd`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
 
 `source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 81 source files plus LICENSE. Seventy-three source files keep upstream bytes. Eight source files contain BYOK changes. The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, plus the shared ACP session stack (`shared/acp/`) and the Grok Build session (`runtimes/grok/session.ts`) with their import closure. No Cursor, CLI, arena, executable manager, other runtime or branded resources are included. The Grok install, update, inventory, model-list and account-usage modules are not included.
 
@@ -376,3 +376,18 @@ Where each threshold now lives:
 - Count budgets: removed. The BYOK owned transport bounds line bytes.
 
 Accepted trade-offs: the record that crosses the budget is retained before the session fails. Records the same line produces, and the exit and dispose records, can follow it. Deadlines are per adapter operation, not per RPC. A control RPC that the adapter does not bound (`abort` has its own race; `queue` is not in the bridge) has no deadline of its own; it settles as `exited` when the session is closed.
+
+### 0.68.2 → 0.70.0 re-vendor
+
+The base is tag v0.70.0, commit `44d7d61c558eef8ac3e61ecc54a8d4962eacadbd`.
+One selected file changed upstream: `contracts/login.ts` (0.69.0) adds the
+optional `LoginOptions.openBrowser` flag with its JSDoc. It is not a
+maintained file and keeps the upstream bytes. No selected runtime calls login.
+All other selected files keep the same upstream bytes. The maintained deltas
+are unchanged; only their change notices name the new base.
+
+The other upstream changes affect modules outside this fork: Claude login
+browser handling (0.69.0), and `@cursor/sdk` 1.0.38 → 1.0.40 with Cursor
+runtime strings (0.70.0). The source inventory and npm dependencies stay the
+same. Build assets copy this source provenance to
+`dist/assets/provenance/oar/44d7d61/`.

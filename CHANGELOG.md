@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Changed (client)** — update the private OAR source to 0.70.0
+  (`44d7d61`). Keep the eight BYOK-maintained files. Update the source
+  manifest and bridge paths. The only selected upstream change is the optional
+  `LoginOptions.openBrowser` contract field; no vendored runtime calls login.
+  No public API or npm dependency changes.
+
 - **Feature (client, keys)** — `HermesAdapter.prepare()` runs on Windows. The
   adapter asks the gateway `identify` over the named pipe that Hermes derives
   from the profile home. A gateway at most four parent links below the spawned

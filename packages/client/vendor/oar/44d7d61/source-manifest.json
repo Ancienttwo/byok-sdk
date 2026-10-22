@@ -2,9 +2,9 @@
   "format": "byok.vendor-source",
   "version": 1,
   "package": "@botiverse/oar",
-  "packageVersion": "0.68.2",
+  "packageVersion": "0.70.0",
   "repository": "https://github.com/botiverse/oar",
-  "commit": "60ad09b9b97bdd005360504fda2de0d59826f08c",
+  "commit": "44d7d61c558eef8ac3e61ecc54a8d4962eacadbd",
   "license": "Apache-2.0",
   "files": [
     {
@@ -88,8 +88,8 @@
     {
       "path": "contracts/login.ts",
       "sourcePath": "packages/oar/src/contracts/login.ts",
-      "upstreamSha256": "23d6434984c6e8cf8a98f48d8c4edbe5ac3702949a5c3ad92de836adf4539a6f",
-      "vendoredSha256": "23d6434984c6e8cf8a98f48d8c4edbe5ac3702949a5c3ad92de836adf4539a6f"
+      "upstreamSha256": "0323789d1849b28fb8376c464e633649dad96a095a596d1a3450aa1afd7cdb14",
+      "vendoredSha256": "0323789d1849b28fb8376c464e633649dad96a095a596d1a3450aa1afd7cdb14"
     },
     {
       "path": "contracts/provider-auth.ts",
@@ -179,7 +179,7 @@
       "path": "runtimes/codex/app-server-client.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/app-server-client.ts",
       "upstreamSha256": "6cfb2582a9beb597e5621e299a0463cdb234c808fab03f6874a509852dd62956",
-      "vendoredSha256": "c10277c1867762aac7a164e01dde7b77086d60f5f2257ddb88cf72f56962da3d",
+      "vendoredSha256": "3c5cc6e2f16df900abafe50fa6eb8d76126a88dfb5c516f87b12d0727746781f",
       "delta": "Caller-owned process: the injected LineProcess spawn receives exactly the explicit filtered env, cwd and launch arguments; no ambient env merge, home-initialization queue, executable manager, resources reader or killTree option. Server requests: numeric and string ids preserved; result and error replies go through the acknowledged stdin write. Terminal state: an exit or a kill sets one sticky terminal error, with the bounded, redacted exitError of the BYOK transport on exit; it settles every pending request as exited at once, rejects later requests and writes, and ignores later lines. No per-request deadline and no count budget: operation deadlines live in the SDK Codex adapter, and the BYOK transport bounds line bytes."
     },
     {
@@ -204,7 +204,7 @@
       "path": "runtimes/codex/open.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/open.ts",
       "upstreamSha256": "353974f7722640a45a5f790b8a78cc2a630b3342e198c301a64eba5443023ac9",
-      "vendoredSha256": "7c646bd6ce026ca28d3de277944580e848b65adfe1793272f9b21ccf2f62cba5",
+      "vendoredSha256": "8c51036b7d942aea97e239f23a8723de787320ce6a744f6fa531a909bcf0caac",
       "delta": "Caller-owned interaction opt-in: codexThreadOpen accepts approvalPolicy \"never\" | \"on-request\" and sends it on thread/start and thread/resume; the default stays \"never\"."
     },
     {
@@ -229,7 +229,7 @@
       "path": "runtimes/codex/session.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/session.ts",
       "upstreamSha256": "b07c31ed744abe598c6121c3ad471f830014a7a08471a14941da7c327ff875a0",
-      "vendoredSha256": "af645d60b5439595749583e06905baab8859ca26a134f8bdc3e88315c57bdf39",
+      "vendoredSha256": "790e14584d63fc1e4cb9f2b8107adb8cfab0a58ec073121c4e1dda5cba03d310",
       "delta": "Raw adapter for the SDK: injected spawn and a required explicit filtered env; caller-selected sandboxMode (danger-full-access default, inherit passes no override) instead of ambient OAR_CODEX_SANDBOX; returns AdapterSession without sealSession/withSessionCredentials/observe, building one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control. The upstream kernel is created with that redactor, and the onRecord hook is registered as a kernel observer before any record is appended. Native-first recording: each notification is retained as a body.origin=\"byok-native\" frame before the fold; a fold failure kills the process visibly. Server requests: caller-owned bounded native interaction lifecycle when configured, else synchronous decline/-32601 rejection under a 1000ms dispatch deadline; on-request approval policy is verified in the open reply. Owned process lifetime: spawn/adoption settles before the first write, failed initialization kills. Codex steer is a required member."
     },
     {
@@ -291,7 +291,7 @@
       "path": "shared/acp/client-app.ts",
       "sourcePath": "packages/oar/src/shared/acp/client-app.ts",
       "upstreamSha256": "4a821105abe5278e6405ca55aeeababab61e760a32fae3792350a472844e3a31",
-      "vendoredSha256": "6f48cbc30b3c8d32297ddd4001629f2d8618ad420ea94527d00dc39dfa43d25d",
+      "vendoredSha256": "ed3c639959bf49c1e5abd8d2715487aff10202b672120a7a86969e4f7701b3fa",
       "delta": "No permissive fallback: every session/request_permission is answered cancelled (cancelPermission) instead of the broadest allow on offer. The request and the answer stay recorded."
     },
     {
@@ -340,7 +340,7 @@
       "path": "shared/acp/process.ts",
       "sourcePath": "packages/oar/src/shared/acp/process.ts",
       "upstreamSha256": "1e3dbe88a17395ecdd9c7c80a256a980c49da34ef0834ea6343c96ae62c21b8d",
-      "vendoredSha256": "a6aceca28cbe550af73766996c440b74f50bb589462ef415224c47c0e2fd2e10",
+      "vendoredSha256": "3c7128bdef3471947dffbbcbd09e435fd371d1eb4588565cae9374a2bff6a04c",
       "delta": "Caller-owned process: startAcpProcess takes an injected SpawnAcpLineProcess and passes exactly the explicit filtered env and cwd; no executable manager, killTree option or resources reader. The owned process splits stdout into bounded lines; each line goes back to the official ndJsonStream with its newline, and each written message goes through the acknowledged stdin write, so the SDK keeps its own framing, parse-error answers and write order."
     },
     {
@@ -371,14 +371,14 @@
       "path": "shared/acp/session.ts",
       "sourcePath": "packages/oar/src/shared/acp/session.ts",
       "upstreamSha256": "46ed3c3e73c29df0273672ab09d907d128ace09f0824c4fc46e93590d7d04921",
-      "vendoredSha256": "8785fbadd30ec5c05ae922862affebe043dcaf90e2d26adf4e4149ca79bad7d5",
+      "vendoredSha256": "60c47a0fb2c369931857f69fc6a4d6ccf63178c4ccc798a2d35bd41976bae6a0",
       "delta": "Raw adapter for the SDK: acpSession(profile) returns a start function that takes the injected agent-process spawn, the injected terminal spawn and a required explicit filtered env (no sessionEnvironment ambient merge). It returns AdapterSession without sealSession/withSessionCredentials, builds one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control, and takes onReady and onRecord hooks; onRecord is registered as a kernel observer before the recorder binds. A throwing onReady releases the process and the terminal host. The exit observer's terminal disposal is the same one dispose awaits, and a repeated dispose retries a failed terminal reap. No resources reader."
     },
     {
       "path": "shared/acp/terminal.ts",
       "sourcePath": "packages/oar/src/shared/acp/terminal.ts",
       "upstreamSha256": "cd943c545a0b00eb90107434416e9a9c78bc6af2fb3fb11b410244288740faac",
-      "vendoredSha256": "c015d1363cbe3b3545a5c0b4b425740095b29e1cffa094e418a96f7771471f27",
+      "vendoredSha256": "b17f25c9469a4210a11e2a5f1b228b917835e1bc8dafff37ae85cb2b7eca5022",
       "delta": "Caller-owned terminal processes: createAcpTerminalHost takes an injected SpawnAcpTerminal that spawns, adopts and reaps each hosted command in the SDK process-tree authority with the session's explicit env plus the request's env entries. terminal/kill asks that tree to stop; release and dispose end the tree and wait for it. A released or disposed terminal stays tracked until its tree is gone. One disposal serves concurrent callers; a failed reap rejects and a later dispose retries every tree still alive. A terminal/create after disposal began is refused. No cross-spawn and no executable manager."
     },
     {
