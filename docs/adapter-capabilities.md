@@ -191,9 +191,19 @@ dependency.
   routing and unchanged launch policy, not model adherence or runtime trust
   semantics. Live persona and unchanged MCP/hooks trust acceptance remain
   pending (#628); no new Grok version is qualified by this change.
-- Platforms: macOS and Linux. Windows uses the shared process-tree path but has
-  no Grok evidence. The descriptor declares `platforms: ['darwin', 'linux']`, so
-  detection on Windows is refused with `platform_unsupported` and runs no probe.
+- Platforms: macOS and Linux. The descriptor declares
+  `platforms: ['darwin', 'linux']`, so detection on Windows is refused with
+  `platform_unsupported` and runs no probe, and a daemon dispatches no Grok
+  task there. Windows has fixture evidence only. The `adapter-lifecycle-smoke`
+  Windows leg runs `grok-windows-contract.test.ts`, which drives the adapter
+  directly against the fake ACP agent behind a compiled launcher: one turn, a
+  hosted terminal command with the task environment, `session/cancel`, and the
+  end of the agent tree and of a hung terminal tree on close. Before Windows
+  can join the descriptor, a live Windows run must show detection and the
+  login signal with the real `grok.exe`; an ACP session with model selection,
+  `_meta.rules` and resume; the shell lines that the real Grok sends, which run
+  under `cmd.exe` (the fixture sends only a Node command line); and the end of
+  the real agent's own child processes.
 
 The fixture suite proves the adapter contract against a fake ACP agent. It is
 not live certification. No live Grok run is part of CI.
