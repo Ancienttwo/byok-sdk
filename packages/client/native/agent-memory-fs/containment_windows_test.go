@@ -74,28 +74,6 @@ func requireOutsideUnchanged(t *testing.T, dir, sentinel, content string) {
 	}
 }
 
-// pinnedOperation runs one helper operation. Replace and delete carry the
-// outside sentinel's revision, so a followed link would pass the CAS.
-func pinnedOperation(active *session, operation, path, revision string) *protocolError {
-	var failure *protocolError
-	switch operation {
-	case "read":
-		_, failure = active.read(readRequest{ID: "read", Protocol: protocolVersion, Op: "read", Path: path, MaxBytes: maxFileBytes})
-	case "replace":
-		_, failure = active.replace(replaceRequest{ID: "replace", Protocol: protocolVersion, Op: "replace", Path: path, ExpectedRevision: revision,
-			ContentBase64: base64.RawStdEncoding.EncodeToString([]byte("must-not-write-outside")), MaxBytes: maxFileBytes})
-	case "delete":
-		_, failure = active.delete(deleteRequest{ID: "delete", Protocol: protocolVersion, Op: "delete", Path: path, ExpectedRevision: revision})
-	case "append":
-		_, failure = active.append(appendRequest{ID: "append", Protocol: protocolVersion, Op: "append", Path: path, Content: "must-not-write-outside", MaxBytes: maxFileBytes})
-	case "walk":
-		_, failure = active.walk(walkRequest{ID: "walk", Protocol: protocolVersion, Op: "walk", Path: path, MaxEntries: 8})
-	default:
-		panic("unknown operation " + operation)
-	}
-	return failure
-}
-
 func TestWindowsReparseParentSwapCannotTouchOutsideSentinel(t *testing.T) {
 	for _, kind := range []string{"junction", "directory-symlink"} {
 		t.Run(kind, func(t *testing.T) {

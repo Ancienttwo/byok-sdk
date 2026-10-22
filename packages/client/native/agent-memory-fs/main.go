@@ -496,7 +496,7 @@ func (s *session) append(req appendRequest) (fileState, *protocolError) {
 	}
 	defer parent.Close()
 
-	file, info, exists, err := parent.openExisting(leaf, os.O_RDWR|os.O_APPEND)
+	file, info, exists, err := parent.openSingleLink(leaf, os.O_RDWR|os.O_APPEND)
 	if err != nil {
 		return fileState{}, err
 	}
@@ -572,6 +572,10 @@ func walkPinned(directory *os.Root, prefix string, maximum int, entriesSeen *int
 		return failure("io_failure", "filesystem operation failed")
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	folded := make(map[string]int, len(entries))
+	for _, entry := range entries {
+		folded[asciiLower(entry.Name())]++
+	}
 	for _, entry := range entries {
 		name := entry.Name()
 		if !validSegment(name) {
@@ -580,6 +584,15 @@ func walkPinned(directory *os.Root, prefix string, maximum int, entriesSeen *int
 		*entriesSeen++
 		if *entriesSeen > maximum {
 			return failure("entry_limit", "walk exceeds the requested entry limit")
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return failure("unsafe_path", "path is unsafe")
+		}
+		// Direct operations refuse these names, so walk leaves them out. The
+		// name check comes before Lstat: on Windows, os.Root refuses a device
+		// name and drops a trailing dot, so Lstat could fail or see another file.
+		if !portableSegment(name) || folded[asciiLower(name)] > 1 {
+			continue
 		}
 		info, err := directory.Lstat(name)
 		if err != nil {
@@ -611,7 +624,14 @@ func walkPinned(directory *os.Root, prefix string, maximum int, entriesSeen *int
 			}
 			return failure("unsafe_path", "path is unsafe")
 		}
+		links, linkErr := linkCount(leaf, after)
 		_ = leaf.Close()
+		if linkErr != nil {
+			return failure("io_failure", "filesystem operation failed")
+		}
+		if links > 1 {
+			continue
+		}
 		*paths = append(*paths, prefix+"/"+name)
 	}
 	return nil
@@ -622,20 +642,60 @@ func (s *session) openParent(relative string) (*pinnedDirectory, string, *protoc
 	if len(parts) == 0 {
 		return nil, "", failure("invalid_path", "path is invalid")
 	}
-	current := s.root
-	closers := make([]*os.Root, 0, len(parts)-1)
-	for _, part := range parts[:len(parts)-1] {
-		child, err := openVerifiedChild(current, part)
-		if err != nil {
-			for index := len(closers) - 1; index >= 0; index-- {
-				_ = closers[index].Close()
+	parent := &pinnedDirectory{root: s.root, closers: make([]*os.Root, 0, len(parts)-1)}
+	for index, part := range parts {
+		// The first segment is a fixed name in the home root, such as notes or
+		// .byok. Each later segment must be the only one of its case-folded form.
+		if index > 0 {
+			if err := requireUniqueName(parent.root, part); err != nil {
+				parent.Close()
+				return nil, "", err
 			}
+		}
+		if index == len(parts)-1 {
+			break
+		}
+		child, err := openVerifiedChild(parent.root, part)
+		if err != nil {
+			parent.Close()
 			return nil, "", err
 		}
-		closers = append(closers, child)
-		current = child
+		parent.closers = append(parent.closers, child)
+		parent.root = child
 	}
-	return &pinnedDirectory{root: current, closers: closers}, parts[len(parts)-1], nil
+	return parent, parts[len(parts)-1], nil
+}
+
+// requireUniqueName refuses a name when another entry in the same directory
+// differs from it only in ASCII letter case. darwin and Windows volumes
+// usually open either name as the other one. A rename between this listing
+// and the open is not detected; the name rule is not a containment check.
+func requireUniqueName(directory *os.Root, name string) *protocolError {
+	file, err := directory.Open(".")
+	if err != nil {
+		return failure("io_failure", "filesystem operation failed")
+	}
+	names, readErr := file.Readdirnames(-1)
+	_ = file.Close()
+	if readErr != nil {
+		return failure("io_failure", "filesystem operation failed")
+	}
+	folded := asciiLower(name)
+	for _, other := range names {
+		if other != name && asciiLower(other) == folded {
+			return failure("unsafe_path", "path is unsafe")
+		}
+	}
+	return nil
+}
+
+func asciiLower(value string) string {
+	return strings.Map(func(r rune) rune {
+		if 'A' <= r && r <= 'Z' {
+			return r + ('a' - 'A')
+		}
+		return r
+	}, value)
 }
 
 func (p *pinnedDirectory) openPinnedChild(name string) (*pinnedDirectory, *protocolError) {
@@ -682,7 +742,7 @@ func openVerifiedChild(parent *os.Root, name string) (*os.Root, *protocolError) 
 }
 
 func (p *pinnedDirectory) readState(name string, maximum int) (fileState, *protocolError) {
-	file, info, exists, err := p.openExisting(name, os.O_RDONLY)
+	file, info, exists, err := p.openSingleLink(name, os.O_RDONLY)
 	if err != nil {
 		return fileState{}, err
 	}
@@ -724,6 +784,22 @@ func (p *pinnedDirectory) openExisting(name string, flags int) (*os.File, fs.Fil
 	}
 	keepFile = true
 	return file, after, true, nil
+}
+
+// openSingleLink is openExisting for read, replace, delete and append. Another
+// hard link can name a file outside the home, and read and append act on the
+// file itself, so these operations refuse a file with more than one link.
+// walk leaves such a file out instead.
+func (p *pinnedDirectory) openSingleLink(name string, flags int) (*os.File, fs.FileInfo, bool, *protocolError) {
+	file, info, exists, err := p.openExisting(name, flags)
+	if err != nil || !exists {
+		return file, info, exists, err
+	}
+	if links, linkErr := linkCount(file, info); linkErr != nil || links > 1 {
+		_ = file.Close()
+		return nil, nil, false, failure("unsafe_path", "path is unsafe")
+	}
+	return file, info, true, nil
 }
 
 func fileStateFromOpenFile(file *os.File, before fs.FileInfo, maximum int) (fileState, *protocolError) {
@@ -815,7 +891,30 @@ func validRelativePath(value string) bool {
 		return false
 	}
 	for _, part := range strings.Split(value, "/") {
-		if !validSegment(part) {
+		if !validSegment(part) || !portableSegment(part) {
+			return false
+		}
+	}
+	return true
+}
+
+// portableSegment refuses a name that Windows maps to another name: a device
+// name, with or without an extension, or a name that ends in a dot or a
+// space. The rule applies on every platform, so a home has the same names
+// everywhere.
+func portableSegment(value string) bool {
+	if strings.HasSuffix(value, ".") || strings.HasSuffix(value, " ") {
+		return false
+	}
+	base, _, _ := strings.Cut(value, ".")
+	base = strings.ToUpper(strings.TrimRight(base, " "))
+	switch base {
+	case "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$":
+		return false
+	}
+	if strings.HasPrefix(base, "COM") || strings.HasPrefix(base, "LPT") {
+		switch base[3:] {
+		case "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "\u00b9", "\u00b2", "\u00b3":
 			return false
 		}
 	}

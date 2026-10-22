@@ -25,6 +25,9 @@ export const AGENT_MEMORY_MAX_LOCAL_LOG_BYTES = AGENT_MEMORY_MAX_SNAPSHOT_BYTES;
 
 const REVISION = /^sha256:[a-f0-9]{64}$/u;
 const SAFE_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
+// Windows maps a device name, with or without an extension, and a name that
+// ends in a dot to another name. Every platform refuses them.
+const WINDOWS_ALIAS = /^(?:con|prn|aux|nul|com\d|lpt\d)(?:\.|$)|\.$/iu;
 const SECRET_LIKE = /(?:^|[-_.])(secret|token|credential|password|passwd|api[-_]?key|private[-_]?key|cookie)(?:$|[-_.])/iu;
 const encoder = new TextEncoder();
 const AGENT_MEMORY_PROJECTION_PUBLISH_TIMEOUT_MS = 10_000;
@@ -144,6 +147,8 @@ function digestBytes(content: Uint8Array): string { return `sha256:${createHash(
 function digest(content: string): string { return digestBytes(encoder.encode(content)); }
 function nonEmpty(value: unknown): value is string { return typeof value === 'string' && value.length > 0 && !/[\u0000\r\n]/u.test(value); }
 function revision(value: unknown): value is string { return typeof value === 'string' && REVISION.test(value); }
+function safeSegment(value: string): boolean { return SAFE_SEGMENT.test(value) && !WINDOWS_ALIAS.test(value); }
+const asciiLower = (value: string): string => value.replace(/[A-Z]/gu, (letter) => letter.toLowerCase());
 function taskContext(value: AgentMemoryTaskContext): AgentMemoryTaskContext {
   if (!value || !nonEmpty(value.taskId) || !nonEmpty(value.tenantId) || !nonEmpty(value.deviceId) || !nonEmpty(value.sessionRef) || !nonEmpty(value.runtimeId) || !nonEmpty(value.leaseId) || !value.agentRef || !nonEmpty(value.agentRef.agentId) || !nonEmpty(value.agentRef.profileRevision) || !path.isAbsolute(value.canonicalHome) || typeof value.homeIdentity?.dev !== 'bigint' || typeof value.homeIdentity.ino !== 'bigint') {
     throw new AgentMemoryValidationError('Agent memory requires an exact active Agent task context');
@@ -157,7 +162,7 @@ export function validateAgentMemoryPath(value: unknown): string {
   if (value === 'MEMORY.md') return value;
   if (path.posix.isAbsolute(value) || /[*?\[{]/u.test(value)) throw new AgentMemoryValidationError('memory path must name exactly one file');
   const parts = value.split('/');
-  if (parts.length < 2 || parts[0] !== 'notes' || !value.endsWith('.md') || parts.some((part) => part === '' || part === '.' || part === '..' || part === '.byok' || !SAFE_SEGMENT.test(part) || SECRET_LIKE.test(part))) {
+  if (parts.length < 2 || parts[0] !== 'notes' || !value.endsWith('.md') || parts.some((part) => part === '' || part === '.' || part === '..' || part === '.byok' || !safeSegment(part) || SECRET_LIKE.test(part))) {
     throw new AgentMemoryValidationError('memory path must be MEMORY.md or notes/<safe-relative>.md');
   }
   return value;
@@ -220,12 +225,13 @@ async function openPinnedDirectory(target: string, expectedIdentity?: AgentMemor
   }
 }
 
-async function withPinnedDirectory<T>(home: string, parts: readonly string[], operation: (directory: Awaited<ReturnType<typeof fs.open>>) => Promise<T>, expectedHomeIdentity?: AgentMemoryHomeBinding['homeIdentity']): Promise<T> {
+async function withPinnedDirectory<T>(home: string, parts: readonly string[], operation: (directory: Awaited<ReturnType<typeof fs.open>>) => Promise<T>, expectedHomeIdentity?: AgentMemoryHomeBinding['homeIdentity'], uniqueNames = false): Promise<T> {
   const handles: Array<Awaited<ReturnType<typeof fs.open>>> = [];
   try {
     let directory = await openPinnedDirectory(home, expectedHomeIdentity);
     handles.push(directory);
-    for (const part of parts) {
+    for (const [index, part] of parts.entries()) {
+      if (uniqueNames && index > 0) await requireUniqueName(directory, part);
       directory = await openPinnedDirectory(`${descriptorPath(directory)}/${part}`);
       handles.push(directory);
     }
@@ -235,11 +241,24 @@ async function withPinnedDirectory<T>(home: string, parts: readonly string[], op
   }
 }
 
+/**
+ * Below notes, two names in one directory may not differ only in ASCII letter
+ * case: a case-insensitive volume opens either name as the other one. This is
+ * a name rule, not containment; a rename after the listing is not detected.
+ */
+async function requireUniqueName(directory: Awaited<ReturnType<typeof fs.open>>, name: string): Promise<void> {
+  const folded = asciiLower(name);
+  if ((await fs.readdir(descriptorPath(directory))).some((entry) => entry !== name && asciiLower(entry) === folded)) throw new AgentMemoryValidationError('memory path differs only in letter case from another name');
+}
+
 async function withMemoryParent<T>(context: AgentMemoryHomeBinding, relativePath: string, operation: (directory: Awaited<ReturnType<typeof fs.open>>, fileName: string) => Promise<T>): Promise<T> {
   const parts = relativePath.split('/');
   const fileName = parts.pop();
-  if (fileName === undefined || parts.some((part) => !SAFE_SEGMENT.test(part) && part !== '.byok')) throw new AgentMemoryValidationError('memory path is invalid');
-  return withPinnedDirectory(context.canonicalHome, parts, (directory) => operation(directory, fileName), context.homeIdentity);
+  if (fileName === undefined || parts.some((part) => !safeSegment(part) && part !== '.byok')) throw new AgentMemoryValidationError('memory path is invalid');
+  return withPinnedDirectory(context.canonicalHome, parts, async (directory) => {
+    if (parts.length > 0) await requireUniqueName(directory, fileName);
+    return operation(directory, fileName);
+  }, context.homeIdentity, true);
 }
 
 type FileState = AgentMemoryFilesystemFileState;
@@ -258,7 +277,8 @@ async function readPinnedFile(directory: Awaited<ReturnType<typeof fs.open>>, fi
   }
   try {
     const before = await handle.stat({ bigint: true });
-    if (!before.isFile() || before.isSymbolicLink() || before.size > BigInt(maxBytes)) throw new AgentMemoryValidationError('memory file is not a bounded regular file');
+    // Another hard link can name a file outside the home.
+    if (!before.isFile() || before.isSymbolicLink() || before.nlink > 1n || before.size > BigInt(maxBytes)) throw new AgentMemoryValidationError('memory file is not a bounded regular file with one link');
     const bytes = Buffer.alloc(Number(before.size));
     let offset = 0;
     while (offset < bytes.length) { const read = await handle.read(bytes, offset, bytes.length - offset, offset); if (read.bytesRead === 0) break; offset += read.bytesRead; }
@@ -511,9 +531,11 @@ const OBSERVATION_CHUNK_BYTES = 64 * 1024;
  *
  * Still unobservable (thrown): a home whose pinned identity no longer matches
  * or that is gone; a symlink, non-directory or unopenable parent component; a
- * symlink or non-regular leaf; any other open/read/stat I/O error; and a file
- * that changed while it was hashed (transient). With an external `filesystem`
- * backend the observation is that backend's bounded UTF-8 `read`.
+ * symlink or non-regular leaf, or a leaf with more than one hard link; a
+ * name below notes that differs only in letter case from another; any other
+ * open/read/stat I/O error; and a file that changed while it was hashed
+ * (transient). With an external `filesystem` backend the observation is that
+ * backend's bounded UTF-8 `read`.
  */
 export async function observeAgentMemoryHomeFile(binding: AgentMemoryHomeBinding, relativePath: string): Promise<AgentMemoryFileObservation> {
   const home = agentMemoryHomeBinding(binding);
@@ -528,7 +550,8 @@ export async function observeAgentMemoryHomeFile(binding: AgentMemoryHomeBinding
   try {
     let directory = await openPinnedDirectory(home.canonicalHome, home.homeIdentity);
     handles.push(directory);
-    for (const part of parts) {
+    for (const [index, part] of parts.entries()) {
+      if (index > 0) await requireUniqueName(directory, part);
       let next: Awaited<ReturnType<typeof fs.open>>;
       try {
         next = await fs.open(`${descriptorPath(directory)}/${part}`, noFollowFlags(fsConstants.O_RDONLY | fsConstants.O_DIRECTORY));
@@ -541,6 +564,7 @@ export async function observeAgentMemoryHomeFile(binding: AgentMemoryHomeBinding
       if (!stat.isDirectory()) throw new AgentMemoryValidationError('memory directory is not a real directory');
       directory = next;
     }
+    if (parts.length > 0) await requireUniqueName(directory, fileName);
     return await observePinnedFileBytes(directory, fileName);
   } finally {
     await Promise.all(handles.reverse().map((handle) => handle.close().catch(() => {})));
@@ -557,7 +581,7 @@ async function observePinnedFileBytes(directory: Awaited<ReturnType<typeof fs.op
   }
   try {
     const before = await handle.stat({ bigint: true });
-    if (!before.isFile()) throw new AgentMemoryValidationError('memory file is not a regular file');
+    if (!before.isFile() || before.nlink > 1n) throw new AgentMemoryValidationError('memory file is not a regular file with one link');
     const hash = createHash('sha256');
     const chunk = Buffer.alloc(OBSERVATION_CHUNK_BYTES);
     let total = 0n;
@@ -731,21 +755,24 @@ async function memoryNotePaths(context: AgentMemoryHomeBinding): Promise<readonl
   let entriesSeen = 0;
   async function walk(directory: Awaited<ReturnType<typeof fs.open>>, relativeDirectory: string): Promise<void> {
     const entries = await fs.readdir(descriptorPath(directory), { withFileTypes: true });
+    const folded = entries.map((entry) => asciiLower(entry.name));
     for (const entry of entries) {
       entriesSeen += 1;
       if (entriesSeen > AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES) throw new AgentMemorySnapshotLimitError('memory snapshot exceeds bounded directory entries');
       const candidate = `${relativeDirectory}/${entry.name}`;
       if (entry.isSymbolicLink()) throw new AgentMemoryError('memory notes contains a symlink');
+      // Direct operations refuse both names of a case pair, so walk leaves them out.
+      if (folded.indexOf(asciiLower(entry.name)) !== folded.lastIndexOf(asciiLower(entry.name))) continue;
       if (entry.isDirectory()) {
         // A directory component has the same safe-name policy as a leaf. An
         // unsafe directory is opaque local state and is never traversed.
-        if (SAFE_SEGMENT.test(entry.name) && !SECRET_LIKE.test(entry.name) && entry.name !== '.byok') {
+        if (safeSegment(entry.name) && !SECRET_LIKE.test(entry.name) && entry.name !== '.byok') {
           const nested = await openPinnedDirectory(`${descriptorPath(directory)}/${entry.name}`);
           try { await walk(nested, candidate); } finally { await nested.close().catch(() => {}); }
         }
         continue;
       }
-      if (!entry.isFile()) continue;
+      if (!entry.isFile() || (await fs.lstat(`${descriptorPath(directory)}/${entry.name}`, { bigint: true })).nlink > 1n) continue;
       try { candidates.push(validateAgentMemoryPath(candidate)); } catch { /* opaque non-memory file */ }
     }
   }

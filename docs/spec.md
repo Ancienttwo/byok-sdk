@@ -2142,6 +2142,17 @@ per-file and 512 directory-entry bounds still apply. Limit/validation failures
 reject the whole operation, never truncate; aggregate file/byte limits use
 `AgentMemorySnapshotLimitError`. I/O and invalid files fail closed.
 
+Memory names are the same on every platform. A path segment may not be a
+Windows device name (`CON`, `PRN`, `AUX`, `NUL`, `COM0`–`COM9`, `LPT0`–`LPT9`),
+with or without an extension, and may not end in `.`. Below `notes`, two names
+in one directory may not differ only in ASCII letter case; an existing name
+with upper case stays usable while it has no such pair. Recall, save, intents
+and observation refuse such a path and a file with more than one hard link.
+When two such names already exist, both are refused. Capture leaves all of
+these entries out, and they still count toward the 512-entry bound. Capture
+always reads `MEMORY.md`, so a `MEMORY.md` with more than one hard link makes
+capture fail.
+
 A successful export returns immutable `files` with exact `path`, SHA-256
 `revision`, `byteCount`, and UTF-8 `content`, plus `totalBytes` and `snapshotDigest`.
 The digest is `sha256:` plus lowercase hexadecimal SHA-256 of the UTF-8 JSON

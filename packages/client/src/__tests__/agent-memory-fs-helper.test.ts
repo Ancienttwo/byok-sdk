@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { builtAgentMemoryFilesystemHelperBin } from './fixtures/agent-memory-helper-build';
+import { expectAgentMemoryNameRules } from './fixtures/agent-memory-name-rules';
 import { AgentHomeManager } from '../agent-home';
 import { AgentMemoryService, captureAgentMemorySnapshot, type AgentMemoryTaskContext } from '../daemon/agent-memory';
 import {
@@ -80,6 +81,22 @@ describe('Agent memory external filesystem helper', () => {
       await fs.symlink(path.join(outside, 'sentinel.md'), path.join(binding.resolution.canonicalHome, 'notes', 'linked.md'));
       await expect(service.recall({ path: 'notes/linked.md' })).rejects.toThrow('unsafe_path');
       expect(await fs.readFile(path.join(outside, 'sentinel.md'), 'utf8')).toBe('outside sentinel');
+    } finally {
+      await filesystem.close();
+      await binding.lease.release();
+    }
+  });
+
+  itWithHelper('refuses case aliases and hard links, and the snapshot leaves them out', async () => {
+    const hostStorageRoot = await temporaryRoot('byok-agent-memory-helper-names-');
+    const outside = await temporaryRoot('byok-agent-memory-helper-names-outside-');
+    const binding = await new AgentHomeManager({ hostStorageRoot }).prepare({ agentId: 'names-agent', profileRevision: 'p1' });
+    const filesystem = await openAgentMemoryFilesystemHelper({ helperBin: helperBin!, canonicalHome: binding.resolution.canonicalHome, homeIdentity: binding.lease.homeIdentity });
+    try {
+      await expectAgentMemoryNameRules({
+        taskId: 'names-task', tenantId: 'names-tenant', deviceId: 'names-device', agentRef: binding.resolution.agentRef, sessionRef: 'names-session', runtimeId: 'codex',
+        canonicalHome: binding.resolution.canonicalHome, leaseId: binding.lease.leaseId, homeIdentity: binding.lease.homeIdentity, filesystem,
+      }, outside, { caseAlias: 'unsafe_path', hardLink: 'unsafe_path' });
     } finally {
       await filesystem.close();
       await binding.lease.release();
