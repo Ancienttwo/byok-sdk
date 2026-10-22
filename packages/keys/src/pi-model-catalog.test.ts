@@ -46,9 +46,54 @@ describe('piModelConfigFromPinnedCatalog', () => {
     expect(() => assertPiPreparedProviderProfile(profile)).toThrow(/declares Pi compat\.supportsStrictMode; the prepared model wire/);
   });
 
-  it('refuses an entry whose catalog thinkingLevelMap is not complete, naming the field', () => {
-    expect(piModelConfigFromPinnedCatalog({ provider: 'minimax', api: 'anthropic-messages', model: 'MiniMax-M2.7', thinkingLevel: 'high' }))
-      .toEqual({ ok: false, reason: 'unrepresentable', fields: ['thinkingLevelMap'] });
+  it('refuses an entry whose catalog thinkingLevelMap is partial, naming each missing level', () => {
+    // pi-ai 1.3.0 deepseek-flash maps five levels and leaves off and xhigh out.
+    expect(piModelConfigFromPinnedCatalog({ provider: 'deepseek', api: 'openai-completions', model: 'deepseek-flash', thinkingLevel: 'high' }))
+      .toEqual({ ok: false, reason: 'unrepresentable', fields: ['thinkingLevelMap.off', 'thinkingLevelMap.xhigh'] });
+  });
+
+  it('returns an entry that has no thinkingLevelMap without one', () => {
+    const result = piModelConfigFromPinnedCatalog({ provider: 'minimax', api: 'anthropic-messages', model: 'MiniMax-M2.7', thinkingLevel: 'medium' });
+    expect(result).toEqual({
+      ok: true,
+      config: { contextWindow: 204_800, maxTokens: 131_072, reasoning: true, thinkingLevel: 'medium', compat: {} },
+      input: ['text'],
+    });
+    expect(result.ok && Object.hasOwn(result.config, 'thinkingLevelMap')).toBe(false);
+  });
+
+  it.each([
+    ['cerebras', 'openai-completions', 'gpt-oss-120b'],
+    ['minimax', 'anthropic-messages', 'MiniMax-M2.7'],
+    ['minimax', 'anthropic-messages', 'MiniMax-M3'],
+    ['minimax-cn', 'anthropic-messages', 'MiniMax-M2.7'],
+    ['zai', 'openai-completions', 'glm-4.7'],
+    ['zai', 'openai-completions', 'glm-5-turbo'],
+    ['zai', 'openai-completions', 'glm-5.3'],
+    ['zai-coding-cn', 'openai-completions', 'glm-4.6v'],
+  ] as const)('derives the Cerebras, MiniMax and GLM entry %s/%s/%s', (provider, api, model) => {
+    expect(piModelConfigFromPinnedCatalog({ provider, api, model, thinkingLevel: 'high' })).toMatchObject({ ok: true });
+  });
+
+  it.each(['xhigh', 'max'] as const)('refuses %s for an entry without a map, as Pi does', (thinkingLevel) => {
+    expect(piModelConfigFromPinnedCatalog({ provider: 'minimax-cn', api: 'anthropic-messages', model: 'MiniMax-M2.7', thinkingLevel }))
+      .toEqual({ ok: false, reason: 'thinking_level_unsupported', supported: ['off', 'minimal', 'low', 'medium', 'high'] });
+  });
+
+  it('builds an anthropic profile from an entry without a map, and the projection declares no map', () => {
+    const result = piModelConfigFromPinnedCatalog({ provider: 'minimax', api: 'anthropic-messages', model: 'MiniMax-M2.7', thinkingLevel: 'high' });
+    if (!result.ok) throw new Error(result.reason);
+    const profile = parseModelProviderProfile({
+      adapter: 'anthropic', auth_mode: 'x_api_key', base_url: 'https://api.minimax.io/anthropic/v1', capabilities: [],
+      created_at: '2026-10-21T00:00:00.000Z', updated_at: '2026-10-21T00:00:00.000Z', display_name: 'MiniMax', enabled: true,
+      kind: 'model', model: 'MiniMax-M2.7', profile_ref: 'minimax-m27', provider_kind: 'minimax', pi_model: result.config,
+    });
+    const provider = (buildPiProviderProjection(profile, 'pi-rpc') as any).providers['byok-sdk-minimax-m27'];
+    expect([provider.api, provider.baseUrl]).toEqual(['anthropic-messages', 'https://api.minimax.io/anthropic']);
+    expect(provider.models[0]).toEqual({
+      id: 'MiniMax-M2.7', name: 'MiniMax', input: ['text'], contextWindow: 204_800, maxTokens: 131_072, reasoning: true, compat: {},
+    });
+    expect(Object.hasOwn(provider.models[0], 'thinkingLevelMap')).toBe(false);
   });
 
   it('refuses a thinking level the entry does not support and lists the supported ones', () => {
@@ -102,6 +147,13 @@ describe('classifyPiCatalogModel', () => {
       .toMatchObject({ config: { api: 'openai-responses', compat: { supportsStrictMode: false } } });
     expect(classifyPiCatalogModel({ ...responses, compat: { requiresReasoningContentOnAssistantMessages: true } }, 'openai_compatible'))
       .toEqual({ unrepresentable: ['compat.requiresReasoningContentOnAssistantMessages'] });
+  });
+
+  it('keeps an absent thinkingLevelMap absent', () => {
+    const { thinkingLevelMap: _, ...withoutMap } = completions;
+    const entry = classifyPiCatalogModel(withoutMap, 'openai_compatible');
+    expect(entry).toMatchObject({ config: { reasoning: true, compat: {} } });
+    expect('config' in entry && Object.hasOwn(entry.config, 'thinkingLevelMap')).toBe(false);
   });
 
   it('refuses a reasoning entry with no selectable level as its thinkingLevelMap', () => {

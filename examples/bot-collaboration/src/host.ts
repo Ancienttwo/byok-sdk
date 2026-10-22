@@ -15,8 +15,8 @@ import { abandonDelegation, applyDelegate, arbitrateCancel, BOT_REPLY_MAX_BYTES,
   settleDelegations, type DelegationTimers } from './delegation';
 import { arm, consumeRoutine, createRoutine, lifecycle, operation, owned, switchVersion, updateRoutine } from './routines';
 
-import { activeBot, applyManagement, requireMain, roomFields, updateBot, roomVisibility } from './team';
-import { advanceRooms, applySpeech, memberPresent, roomInput, type Mentions } from './rooms';
+import { activeBot, applyManagement, requireMain, roomFields, updateBot } from './team';
+import { advanceRooms, applySpeech, memberPresent, roomInput, roomVisibility, type Mentions } from './rooms';
 import type { RoomFields } from '@byok-sdk/protocol';
 
 import { CurrentRequestTooLargeError, HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS } from './history';
