@@ -139,8 +139,10 @@ results are owner turns with source `routine`.
 
 K4 rejects a wake that differs from its reservation, and the SDK delivers it
 again. K4 records an unknown, inactive or superseded wake in `ignoredWakes`.
-A failed SDK wake call rejects the drain. The K4 outbox keeps the row, and a
-later drain sends it. `compact` removes settled routine rows: a promoted
+A failed SDK wake call rejects the K4 drain, so the Host call that started it
+rejects after its commit, and the rest of that process pass does not run. The
+K4 outbox keeps the row with `lastError`. The next drain, wake delivery or
+`recover()` sends it again; no timer retries it. `compact` removes settled routine rows: a promoted
 occurrence through its intent key, and a concluded occurrence through its
 occurrence key. `botRoutines` reads the Bot routine views from the K4 rows.
 Other K4 routines of the Host, for example Host jobs from `BotOptions.hostJobs`,

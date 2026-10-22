@@ -73,10 +73,13 @@
   occurrences and the `capacity` decision are gone; a routine Turn id is
   `occurrence:<occurrence key>`; its five-minute wait counts from the
   occurrence record, not from the enqueue; K4 rejects a wake that differs
-  from its reservation; a failed SDK wake call rejects the drain instead of a
-  K8 retry after 60 seconds; K4 keeps no old routine versions.
-  `BotOptions.hostJobs` runs Host job routines on the same core, and
-  `botRoutines` reads the Bot routine views.
+  from its reservation; a failed SDK wake call rejects the drain and the Host
+  call, and the next drain, wake delivery or `recover()` sends it again,
+  instead of a K8 retry timer after 60 seconds; K4 keeps no old routine
+  versions. The K8 index no longer exports `Definition`, `Occurrence` and
+  `Routine`, and `snapshot()` has no routines. Read the Bot routine views
+  with `botRoutines(Object.values(ledger.snapshot().routines))`.
+  `BotOptions.hostJobs` runs Host job routines on the same core.
 
 ## 0.28.3 — source candidate
 
