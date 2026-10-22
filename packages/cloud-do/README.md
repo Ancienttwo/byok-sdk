@@ -5,8 +5,8 @@ It provides native SQLite storage, inline tools, wake and inbox processing,
 usage limits, settlement hooks, and transcript reads.
 
 The current stable release is 0.28.1, in the nine-package release set with
-keys 0.13.1, published on npm `latest`. The npm registry read on 2026-10-21 at
-18:13 UTC lists these versions as `latest`. See the
+keys 0.13.1, published on npm `latest`. The npm registry read on 2026-10-22 at
+03:41 UTC lists these versions as `latest`. See the
 [release notes](../../docs/releases/v0.28.1.md).
 The earlier stable release was 0.28.0 / keys 0.13.0 (published 2026-10-20, UTC);
 see its [release notes](../../docs/releases/v0.28.0.md).
@@ -28,15 +28,16 @@ The earlier published 0.26.0-rc.4 (see the
 is superseded by 0.27.0-rc.2; 0.26.0-rc.1 to rc.3 are superseded. See the
 [release notes](../../docs/releases/v0.26.1.md#version-set-and-channel).
 Live Host acceptance remains separate.
-The package needs Node 24.15.0 or later for build tooling.
+The package needs Node 24.22.1 or later for build tooling.
 
 ## Install and subclass
 
-The following install example names the current stable release, 0.28.1.
+The following install example names the unpublished 0.28.2 source candidate.
+Use 0.28.1 until publication is confirmed.
 Use an installed package to verify the consumer path.
 
 ~~~sh
-npm install @byok-sdk/cloud-do@0.28.1
+npm install @byok-sdk/cloud-do@0.28.2
 npm install --save-dev @cloudflare/workers-types
 ~~~
 

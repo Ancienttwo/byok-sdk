@@ -1,6 +1,6 @@
 {
   "name": "@byok-sdk/keys",
-  "version": "0.13.1",
+  "version": "0.28.2",
   "description": "BYOK SDK key management: provider profiles, credential-backed auth headers, and direct provider transports",
   "type": "module",
   "license": "MIT",
@@ -14,7 +14,7 @@
   },
   "homepage": "https://github.com/Ancienttwo/byok-sdk#readme",
   "engines": {
-    "node": ">=24.15.0"
+    "node": ">=24.22.1"
   },
   "sideEffects": false,
   "main": "./dist/index.js",

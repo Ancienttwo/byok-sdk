@@ -14,20 +14,17 @@ import {
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 
 // Version authority: the manifests, never a constant here. The release train
-// version is whatever packages/core ships, keys versions independently, and
-// the pi pin comes from packages/client, parsed by the one shared Pi runtime
-// identity reader. Every assertion below compares against these derived values.
+// version is whatever packages/core ships, every packed package (keys included)
+// carries it, and the pi pin comes from packages/client, parsed by the one
+// shared Pi runtime identity reader. Every assertion below compares against
+// these derived values.
 const exactReleaseVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const releaseVersion = JSON.parse(readFileSync(path.join(repoRoot, 'packages/core/package.json'), 'utf8')).version;
-const keysVersion = JSON.parse(readFileSync(path.join(repoRoot, 'packages/keys/package.json'), 'utf8')).version;
 const piRuntime = parsePiRuntimeIdentity(
   JSON.parse(readFileSync(path.join(repoRoot, 'packages/client/package.json'), 'utf8')),
 );
 if (typeof releaseVersion !== 'string' || !exactReleaseVersion.test(releaseVersion)) {
   throw new Error('packages/core/package.json: version must be an exact SemVer release train version');
-}
-if (typeof keysVersion !== 'string' || !exactReleaseVersion.test(keysVersion)) {
-  throw new Error('packages/keys/package.json: version must be an exact SemVer independent version');
 }
 const packages = [
   { name: '@byok-sdk/core', directory: 'packages/core' },
@@ -42,7 +39,7 @@ const packages = [
 ];
 const registryExpectations = readRegistryExpectations(repoRoot, packages.map(({ name }) => name));
 const expectedPackageVersions = Object.fromEntries(
-  packages.map(({ name }) => [name, name === '@byok-sdk/keys' ? keysVersion : releaseVersion]),
+  packages.map(({ name }) => [name, releaseVersion]),
 );
 const nodeBin = process.execPath;
 const bunBin = process.platform === 'win32' ? 'bun.exe' : 'bun';
@@ -348,7 +345,7 @@ try {
     if (created.length !== 1) throw new Error(`${packageName}: expected one tarball, created ${created.length}`);
     const file = created[0];
     const tarballPath = path.join(outDir, file);
-    const expectedPackageVersion = packageName === '@byok-sdk/keys' ? keysVersion : releaseVersion;
+    const expectedPackageVersion = expectedPackageVersions[packageName];
     assertTarballInternalEdges(tarballPath, packageName, expectedPackageVersion);
     if (packageName === '@byok-sdk/cloud-dataplane') {
       migrationFiles = assertTarballCarriesMigrations(tarballPath);
@@ -468,7 +465,7 @@ try {
         `  rmSync(piAssets, { recursive: true, force: true });\n` +
         `}\n` +
         `console.log('[release-pack] installed copyPiRuntimeAssets builds a Pi asset root');\n` +
-        `for (const [name, version] of [['@byok-sdk/core','${releaseVersion}'],['@byok-sdk/protocol','${releaseVersion}'],['@byok-sdk/client','${releaseVersion}'],['@byok-sdk/server','${releaseVersion}'],['@byok-sdk/cloud','${releaseVersion}'],['@byok-sdk/cloud-dataplane','${releaseVersion}'],['@byok-sdk/cloud-do','${releaseVersion}'],['@byok-sdk/ui-runtime','${releaseVersion}'],['@byok-sdk/keys','${keysVersion}']]) {\n` +
+        `for (const [name, version] of [['@byok-sdk/core','${releaseVersion}'],['@byok-sdk/protocol','${releaseVersion}'],['@byok-sdk/client','${releaseVersion}'],['@byok-sdk/server','${releaseVersion}'],['@byok-sdk/cloud','${releaseVersion}'],['@byok-sdk/cloud-dataplane','${releaseVersion}'],['@byok-sdk/cloud-do','${releaseVersion}'],['@byok-sdk/ui-runtime','${releaseVersion}'],['@byok-sdk/keys','${releaseVersion}']]) {\n` +
         `  const manifest = require(name + '/package.json');\n` +
         `  assert.equal(manifest.version, version, name);\n` +
         `}\n` +

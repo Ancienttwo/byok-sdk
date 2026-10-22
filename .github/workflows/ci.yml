@@ -13,8 +13,8 @@ name: CI
 # The freeze-guard test (packages/protocol/src/__tests__/freeze-guard.test.ts)
 # runs as an ordinary part of `bun run test` — no separate step for it.
 #
-# Node runtime: `.node-version` pins Node 24.21.0 for the baseline jobs.
-# The Node 26 forward-compatibility leg is explicit; engines.node is >=24.15.0.
+# Node runtime: `.node-version` pins Node 24.22.1 for the baseline jobs.
+# The Node 26 forward-compatibility leg is explicit; public engines.node is >=24.22.1.
 #
 # Note for anyone debugging a LOCAL sandbox run of this same test suite (not
 # a concern for these hosted runners): a couple of integration tests
@@ -328,7 +328,7 @@ jobs:
 
       - name: Run SDK helper, intent and capability contracts
         run: |
-          bun run --filter @byok-sdk/client test -- src/__tests__/agent-memory-fs-helper.test.ts src/__tests__/agent-memory-helper-release.test.ts src/__tests__/agent-memory-helper-assets.test.ts src/__tests__/agent-memory-helper-asset-root-daemon.test.ts src/__tests__/agent-memory-helper-release-errors.test.ts src/__tests__/agent-memory-helper-admission.test.ts src/__tests__/agent-memory-helper-crash.test.ts src/__tests__/agent-memory-intent.test.ts src/__tests__/daemon-conn-hello-capabilities.test.ts src/__tests__/agent-home-directory-barrier.test.ts
+          bun run --filter @byok-sdk/client test -- src/__tests__/agent-memory-fs-helper.test.ts src/__tests__/agent-memory-helper-release.test.ts src/__tests__/agent-memory-helper-assets.test.ts src/__tests__/agent-memory-helper-asset-root-daemon.test.ts src/__tests__/agent-memory-helper-release-errors.test.ts src/__tests__/agent-memory-helper-admission.test.ts src/__tests__/agent-memory-mcp-admission.test.ts src/__tests__/agent-memory-helper-crash.test.ts src/__tests__/agent-memory-intent.test.ts src/__tests__/daemon-conn-hello-capabilities.test.ts src/__tests__/agent-home-directory-barrier.test.ts
 
       - name: Qualify task-free export against the release helper
         env:
@@ -723,7 +723,7 @@ jobs:
         run: templates/packaging/${{ matrix.recipe }}/smoke-test.sh
 
   # S7-c public npm guarantee: pack every published package (the aligned
-  # train plus the independently versioned keys; no umbrella since 0.21.0),
+  # train plus keys, all on one version; no umbrella since 0.21.0),
   # install the exact tarballs into a clean npm project, import every direct
   # package entry, and prove the installed graph closes to exactly that set.
   # This is distinct from the SEA/bun binary recipes above:

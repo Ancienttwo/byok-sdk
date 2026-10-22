@@ -202,6 +202,7 @@ export class PiAdapter implements RuntimeAdapter {
     // pairs `tool_execution_start`/`_end` by `toolCallId` over RPC, and
     // `PiSession` turns only a non-aborted `agent_settled` into `turn_end`.
     trajectoryEvidence: 'event-stream',
+    platforms: ['darwin', 'linux', 'win32'],
     capabilities: {
       steer: true,
       resume: true,
@@ -215,7 +216,8 @@ export class PiAdapter implements RuntimeAdapter {
     if (options.durablePi !== undefined && typeof options.durablePi !== 'boolean') throw new Error('PiAdapterOptions.durablePi must be boolean; pass replicaRoot through durableContext');
     // T0 verified the RPC lanes only. The durable worker's own frames and
     // respawn path are unverified, so it declares no trajectory evidence.
-    if (options.durablePi === true) this.descriptor = freezeRuntimeAdapterDescriptor({ ...this.descriptor, trajectoryEvidence: undefined, capabilities: { ...this.descriptor.capabilities, durablePi: true, steer: false, resume: false } });
+    // Windows waits for validated parent-death Job Object recovery.
+    if (options.durablePi === true) this.descriptor = freezeRuntimeAdapterDescriptor({ ...this.descriptor, trajectoryEvidence: undefined, platforms: ['darwin', 'linux'], capabilities: { ...this.descriptor.capabilities, durablePi: true, steer: false, resume: false } });
     validatePiByokLauncherConfig(options.byokLauncher);
     if (options.sdkHelperHost !== undefined) resolveSdkReservedHelperBin('pi-rpc', options.sdkHelperHost);
   }

@@ -141,7 +141,7 @@ import {
   type McpToolsetServerObservation,
 } from '../mcp/observation';
 import type { ResolvedAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
-import { prependAgentMemoryGuidance, prependAgentMemoryReaderGuidance } from './memory-guidance';
+import { prependAgentMemoryGuidance, prependAgentMemoryReaderGuidance, prependAgentReaderResultGuidance } from './memory-guidance';
 import type { ResolvedAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
 import {
   AgentMemoryService,
@@ -693,6 +693,12 @@ export interface TaskRunnerDeps {
   ) => Promise<McpServerObservation>;
   /** SDK-owned MCP helper injected only into strict Agent tasks. */
   agentMemoryMcpBin?: Readonly<ResolvedAgentMemoryMcpBin>;
+  /**
+   * `DaemonConfig.agentMemoryMcp`. `off` also drops the Agent memory guidance
+   * from the instruction, so the model gets no request to change `MEMORY.md`
+   * or `notes/`. Absent is `auto`.
+   */
+  agentMemoryMcp?: 'auto' | 'off';
   /** SDK-owned task-free Agent-memory descriptor helper a preparation observes. */
   agentMemoryDescribeBin?: Readonly<ResolvedAgentMemoryMcpBin>;
   /** Resolve the verified SDK helper only when memory needs filesystem authority. */
@@ -1430,6 +1436,8 @@ export class TaskRunner {
   private readonly recoveredMessageOutboxes = new Map<string, AgentMessageOutbox>();
   private readonly cancelledRecoveredMessages = new Set<string>();
   private readonly recoveredMessageRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Retries resend one envelope id per record (#693); the cloud replays the disposition per arrival. */
+  private readonly agentMessageEnvelopes = new WeakMap<AgentMessageOutboxRecord, Envelope>();
   /**
    * Finding F4 (cancel lost during the offer-processing window): a
    * `task.cancel` for a taskId that hasn't finished `handleOffer` yet (still
@@ -1836,10 +1844,12 @@ export class TaskRunner {
       active.messageDraft?.stop();
       active.messageSendAttempted = true;
     }
-    this.deps.send(createEnvelope('agent.message.publish', outbox.publishPayload(record), {
+    const envelope = this.agentMessageEnvelopes.get(record) ?? createEnvelope('agent.message.publish', outbox.publishPayload(record), {
       taskId: record.taskId,
       sessionRef: record.sessionRef,
-    }));
+    });
+    this.agentMessageEnvelopes.set(record, envelope);
+    this.deps.send(envelope);
     if (active?.messageOutbox === outbox) {
       if (active.messageRetryTimer !== undefined) clearTimeout(active.messageRetryTimer);
       active.messageRetryTimer = setTimeout(() => {
@@ -2854,7 +2864,7 @@ export class TaskRunner {
         try {
           const helper = this.deps.agentMemoryMcpBin;
           if (preparedLaunch.memory === null || agentRef === undefined || helper === undefined) throw new Error('prepared Agent memory execution state missing');
-          taskMcpServers = this.withAgentMemoryMcp(taskMcpServers, taskId, agentRef, preparedLaunch.agentMemory, helper);
+          taskMcpServers = this.withAgentMemoryMcp(taskMcpServers, taskId, agentRef, preparedLaunch.agentMemory, helper, 'complete');
         } catch {
           const reason = 'agent_memory_unavailable: the sealed Agent memory helper could not be bound for launch';
           await this.updateGitPhaseBestEffort(gitWorkspaceId, 'failed');
@@ -2900,9 +2910,11 @@ export class TaskRunner {
             kind: 'instruction' as const,
             instruction: agentBinding === undefined
               ? (gitWorkspaceId ? prependGitWorkspaceGuidance(resolvedInstruction) : resolvedInstruction)
-              : readerAttempt
-                ? prependAgentMemoryReaderGuidance(resolvedInstruction)
-                : prependAgentMemoryGuidance(resolvedInstruction),
+              : this.deps.agentMemoryMcp === 'off'
+                ? (readerAttempt ? prependAgentReaderResultGuidance(resolvedInstruction) : resolvedInstruction)
+                : readerAttempt
+                  ? prependAgentMemoryReaderGuidance(resolvedInstruction)
+                  : prependAgentMemoryGuidance(resolvedInstruction),
           }
           : { kind: 'prepared' as const, preparation: preparedLaunch }),
         manifest,
@@ -3550,7 +3562,8 @@ export class TaskRunner {
     }
     if (requiresAgentMemoryMcp && agentRef !== undefined) {
       try {
-        taskMcpServers = this.withAgentMemoryMcp(taskMcpServers, taskId, agentRef, 'read-write', this.deps.agentMemoryMcpBin!);
+        // A reader is sealed `read` and its helper lists only `memory_recall`.
+        taskMcpServers = this.withAgentMemoryMcp(taskMcpServers, taskId, agentRef, readerAttempt ? 'read' : 'read-write', this.deps.agentMemoryMcpBin!, 'granted');
       } catch (error) {
         decline(`Agent memory MCP configuration failed: ${errorMessage(error)}`, false);
         return undefined;
@@ -3710,13 +3723,18 @@ export class TaskRunner {
     this.messageContextByTask.delete(taskId);
   }
 
-  /** Injected only after strict Agent admission; a host registry may never replace this reserved name. */
+  /**
+   * Injected only after strict Agent admission; a host registry may never replace this reserved name.
+   * `toolList` `granted` makes the helper list only the tools `mode` grants. The prepared lane needs
+   * `complete`: its launch compares the helper's listing with the complete sealed descriptor.
+   */
   private withAgentMemoryMcp(
     existing: Readonly<Record<string, McpStdioServerConfig>> | undefined,
     taskId: string,
     agentRef: AgentRef,
     mode: 'read' | 'read-write',
     bin: {command: string; args: readonly string[]},
+    toolList: 'granted' | 'complete',
   ): Readonly<Record<string, McpStdioServerConfig>> {
     if (existing !== undefined && Object.prototype.hasOwnProperty.call(existing, AGENT_MEMORY_MCP_SERVER_NAME)) {
       throw new Error(`MCP server name "${AGENT_MEMORY_MCP_SERVER_NAME}" is reserved by the daemon`);
@@ -3735,6 +3753,7 @@ export class TaskRunner {
           BYOK_PRODUCT_ID: this.deps.productId,
           BYOK_AGENT_MEMORY_CONTEXT: contextToken,
           BYOK_PREPARED_AGENT_MEMORY_MODE: mode,
+          ...(toolList === 'granted' ? { BYOK_AGENT_MEMORY_TOOL_LIST: 'granted' } : {}),
         }),
       }),
     });
@@ -5687,6 +5706,10 @@ export class TaskRunner {
         };
       }
       const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, signal), signal);
+      // Another device may support this platform, as it may have the runtime installed.
+      if (detected.kind === 'refused' && detected.reason === 'platform_unsupported') {
+        return { ok: false, reason: `platform_unsupported: runtime "${requestedRuntime}" does not support ${process.platform}`, retryable: true };
+      }
       if (detected.kind !== 'available') {
         return {
           ok: false,

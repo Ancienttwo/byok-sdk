@@ -3,7 +3,7 @@ import type { OutboundStatus } from './outbound-settlement';
 import { terminalIdentity } from './terminal-identity';
 import { HarnessIdSchema, type HarnessInfo } from '@byok-sdk/protocol';
 import { TerminalCommitQueue } from './terminal-commit-queue';
-import { observeRuntimeDetection, projectRuntimeObservation, type RuntimeObservation } from '../runtime-detection';
+import { isWireRuntimeId, observeRuntimeDetection, projectRuntimeObservation, type RuntimeObservation } from '../runtime-detection';
 import { serviceEnvironmentStatus, type ServiceEnvironmentStatus } from '../lifecycle/service-environment';
 import {
   DEVICE_ASSERTION_AUDIENCE_MAX_BYTES,
@@ -336,8 +336,9 @@ export interface DaemonConfig {
     hostStorageRoot: string;
     projection?: AgentHomeProjection;
   };
-  /** Task memory MCP admission. Absent/auto preserves platform-based admission; off disables both ordinary and prepared memory tools.
-   * This does not disable Agent-home guidance or explicit hosted projection/intent transports, and is not a filesystem sandbox. */
+  /** Task memory MCP admission. Absent/auto preserves platform-based admission; off disables both ordinary and prepared memory tools,
+   * and drops the Agent memory guidance from Agent task instructions. `status().agentMemoryMcp` reports the effective admission.
+   * This does not disable explicit hosted projection/intent transports, and is not a filesystem sandbox. */
   agentMemoryMcp?: 'auto' | 'off';
   /** Optional, one-way hosted projection. Without all guards it has zero network activity. */
   agentMemory?: AgentMemoryHostedProjection;
@@ -782,6 +783,17 @@ export interface DaemonStatus {
   outbound: OutboundStatus;
   /** WP0: per-canonical-Agent-home execution serialization — see {@link AgentHomeExecutionStatus}. */
   agentHomeExecution: AgentHomeExecutionStatus;
+  /**
+   * Effective daemon-level SDK memory MCP admission for ordinary Agent tasks.
+   * `admitted`: Agent tasks get the SDK memory MCP; a writer gets
+   * `memory_recall` and `memory_save`, a `memory-reader` Attempt only
+   * `memory_recall`. The selected adapter must still support MCP toolsets for
+   * each task. `off`: `DaemonConfig.agentMemoryMcp` is `off`; no Agent task
+   * gets the memory MCP or the memory guidance. `unavailable`: `auto`, but
+   * this daemon has no Agent home or no secure memory filesystem (for example
+   * macOS without the SDK release helper, or Windows).
+   */
+  agentMemoryMcp: 'admitted' | 'off' | 'unavailable';
 }
 
 export interface Daemon {
@@ -968,10 +980,6 @@ function toJournalEnvelopeRecord(envelope: Envelope, identity: JournalIdentity):
   };
 }
 
-function isRuntimeId(id: string): id is RuntimeId {
-  return id === 'pi' || id === 'claude' || id === 'codex';
-}
-
 /** Runtimes actually detected as present on this device, typed per protocol §10 gap #4 (`ConnHelloPayload.runtimes`). Computed once at `start()` — re-probing on every reconnect would mean re-spawning each runtime's `--version` check for no real benefit within one daemon lifetime. */
 async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{ runtimes: RuntimeInfo[]; harnesses: HarnessInfo[]; observations: RuntimeObservation[] }> {
   const detections = await Promise.all(adapters.map(async (adapter) => ({ adapter, detected: await observeRuntimeDetection(adapter) })));
@@ -984,7 +992,7 @@ async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{ runtimes: R
     if (detected.advisory !== undefined) {
       console.warn(`[byok/client] ${adapter.descriptor.id} ${detected.version ?? '(unknown version)'} is not the qualified ${detected.advisory.qualifiedVersion}; continuing`);
     }
-    if (!isRuntimeId(adapter.descriptor.id)) {
+    if (!isWireRuntimeId(adapter.descriptor.id)) {
       harnesses.push({ id: HarnessIdSchema.parse(adapter.descriptor.id),
         ...(detected.version === undefined ? {} : { version: detected.version }),
         capabilities: toRuntimeInfoCapabilities(adapter.descriptor.capabilities) });
@@ -1362,6 +1370,12 @@ export function buildDaemonWithAdapters(
   const agentMemoryDescribeBin = !agentMemoryMcpEnabled || config.agentHome === undefined
     ? undefined
     : resolveAgentMemoryDescribeBin(externalAgentMemoryFilesystem, config.sdkHelperHost);
+  // The same daemon-level facts the task runner checks before it binds the memory MCP.
+  const agentMemoryMcpAdmission: DaemonStatus['agentMemoryMcp'] = !agentMemoryMcpEnabled
+    ? 'off'
+    : agentMemoryMcpBin !== undefined && isAgentMemorySecureFilesystemAvailable(externalAgentMemoryFilesystem)
+      ? 'admitted'
+      : 'unavailable';
   const localAgentRelease = resolveLocalAgentReleaseIdentity(config.localAgentRelease);
   if (Object.hasOwn(config.hostedJournal ?? {}, 'storagePolicy')) throw new LocalStorageConfigError('config', 'rejects removed hostedJournal.storagePolicy; use storage.budget and storage.retention');
   if (Object.hasOwn(overrides.hostedJournal ?? {}, 'pressureEngine')) throw new LocalStorageConfigError('config', 'rejects removed hostedJournal.pressureEngine; maintenance belongs to the daemon');
@@ -2485,6 +2499,7 @@ export function buildDaemonWithAdapters(
         agentResultMcpPreflight: preflightAgentResultMcp,
       }),
       ...(agentMemoryMcpBin === undefined ? {} : { agentMemoryMcpBin }),
+      ...(config.agentMemoryMcp === undefined ? {} : { agentMemoryMcp: config.agentMemoryMcp }),
       ...(agentMemoryDescribeBin === undefined ? {} : { agentMemoryDescribeBin }),
       ...(resolveAgentMemoryFilesystemHelperBin === undefined ? {} : { resolveAgentMemoryFilesystemHelperBin }),
       ...(config.agentMemoryHelperAssetRoot === undefined ? {} : { agentMemoryHelperAssetRoot: config.agentMemoryHelperAssetRoot }),
@@ -4315,6 +4330,7 @@ export function buildDaemonWithAdapters(
       toolsets: toolsetRegistry.status(),
       egress: agentEgress.status(),
       agentHomeExecution: agentHomeExecutionStatus(),
+      agentMemoryMcp: agentMemoryMcpAdmission,
     };
   }
 

@@ -556,7 +556,9 @@ export declare function hermesCustodyArgs(launcher: HermesByokLauncher, binding:
 export declare function prepareHermesCustody(launcher: HermesByokLauncher, offer: RuntimeAdapterPrepareInput['offer']): Promise<PreparedHermesCustody>;
 export {};
 // ==== @byok-sdk/client dist/adapters/index.d.ts ====
-export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, } from '../types';
+export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, } from '../types';
+export { isWireRuntimeId, observeRuntimeDetection, projectRuntimeObservation, taskRuntimeTarget, validateRuntimeDetectResult } from '../runtime-detection';
+export type { RuntimeObservation } from '../runtime-detection';
 export { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
 export type { RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeExecutionFailureInput, RuntimeFailureCategory, RuntimeFailurePhase, RuntimeRetryDisposition, } from '../runtime-failure';
 export { PiAdapter } from './pi/pi-adapter';
@@ -1599,12 +1601,15 @@ export declare const AGENT_MEMORY_MCP_SERVER_INFO: Readonly<{
  * envelope, framing and protocol faults belong to `../mcp-server`.
  */
 export declare function handleAgentMemoryToolCall(call: McpServerToolCall, deps: AgentMemoryMcpDeps, mode: 'read' | 'read-write'): Promise<Record<string, unknown>>;
+/** Lists the complete tool set; the prepared lane compares it with its sealed descriptor. */
 export declare function serveAgentMemoryMcpOverStdio(input: {
     deps: AgentMemoryMcpDeps;
     mode: 'read' | 'read-write';
     stdin?: NodeJS.ReadableStream;
     stdout?: NodeJS.WritableStream;
 }): void;
+/** Lists only the tools `mode` grants: a `read` helper lists `memory_recall` and no write tool. */
+export declare function serveGrantedAgentMemoryMcpOverStdio(input: Parameters<typeof serveAgentMemoryMcpOverStdio>[0]): void;
 /** A task-free descriptor has the same tools/list identity, but never an execution handler. */
 export declare function serveAgentMemoryDescriptorOverStdio(input: {
     stdin?: NodeJS.ReadableStream;
@@ -3238,13 +3243,13 @@ export declare class ConnectionManager {
      */
     private ingressBudget;
     /**
-     * Finding F5(b): how many envelopes `drainOutbox` has
+     * Finding F5(b): the envelopes `drainOutbox` has
      * currently spliced OUT of `this.outbox` for an in-flight (not yet
-     * confirmed delivered) `postBatch` call — 0 the rest of the time. See
+     * confirmed delivered) `postBatch` call — empty the rest of the time. See
      * `outboxLength`'s own doc comment for why this needs to be tracked
-     * separately from `this.outbox.length` at all.
+     * separately from `this.outbox` at all.
      */
-    private inFlightBatchSize;
+    private inFlightBatch;
     private draining;
     private stopped;
     private haltReason;
@@ -3304,6 +3309,8 @@ export declare class ConnectionManager {
      * Design B (finding N4): push onto the single shared outbox and try to
      * drain it now. Never routes directly to either transport itself — see
      * `drainOutbox`.
+     * An id still queued or in flight is not queued again, so a timer retry
+     * during an outage keeps one copy in its original place (#693).
      */
     send(envelope: Envelope): void;
     /** Publish a fresh local configuration snapshot while this daemon is running. */
@@ -3390,7 +3397,7 @@ export declare class ConnectionManager {
      * `performControlShutdown`, which surfaces this on the `shutdown-complete`
      * audit event rather than silently claiming everything was delivered.
      *
-     * Deliberately `this.outbox.length + this.inFlightBatchSize`, NOT just
+     * Deliberately `this.outbox.length + this.inFlightBatch.length`, NOT just
      * `this.outbox.length` alone: `drainOutbox`'s long-poll branch SPLICES a
      * batch out of `this.outbox` before awaiting `postBatch` (so a concurrent
      * `send()` sees an accurate, non-double-counted queue) — while that POST
@@ -4211,8 +4218,9 @@ export interface DaemonConfig {
         hostStorageRoot: string;
         projection?: AgentHomeProjection;
     };
-    /** Task memory MCP admission. Absent/auto preserves platform-based admission; off disables both ordinary and prepared memory tools.
-     * This does not disable Agent-home guidance or explicit hosted projection/intent transports, and is not a filesystem sandbox. */
+    /** Task memory MCP admission. Absent/auto preserves platform-based admission; off disables both ordinary and prepared memory tools,
+     * and drops the Agent memory guidance from Agent task instructions. `status().agentMemoryMcp` reports the effective admission.
+     * This does not disable explicit hosted projection/intent transports, and is not a filesystem sandbox. */
     agentMemoryMcp?: 'auto' | 'off';
     /** Optional, one-way hosted projection. Without all guards it has zero network activity. */
     agentMemory?: AgentMemoryHostedProjection;
@@ -4654,6 +4662,17 @@ export interface DaemonStatus {
     outbound: OutboundStatus;
     /** WP0: per-canonical-Agent-home execution serialization — see {@link AgentHomeExecutionStatus}. */
     agentHomeExecution: AgentHomeExecutionStatus;
+    /**
+     * Effective daemon-level SDK memory MCP admission for ordinary Agent tasks.
+     * `admitted`: Agent tasks get the SDK memory MCP; a writer gets
+     * `memory_recall` and `memory_save`, a `memory-reader` Attempt only
+     * `memory_recall`. The selected adapter must still support MCP toolsets for
+     * each task. `off`: `DaemonConfig.agentMemoryMcp` is `off`; no Agent task
+     * gets the memory MCP or the memory guidance. `unavailable`: `auto`, but
+     * this daemon has no Agent home or no secure memory filesystem (for example
+     * macOS without the SDK release helper, or Windows).
+     */
+    agentMemoryMcp: 'admitted' | 'off' | 'unavailable';
 }
 export interface Daemon {
     /** Present only with agentMemoryExport: true. Holds the home writer lease; AgentHomeBusyError is retryable. Raw contents remain Host-owned. */
@@ -6971,6 +6990,11 @@ export declare const AGENT_MEMORY_GUIDANCE: string;
 export declare const AGENT_MEMORY_READER_GUIDANCE: string;
 export declare function prependAgentMemoryGuidance(instruction: string): string;
 export declare function prependAgentMemoryReaderGuidance(instruction: string): string;
+/**
+ * A `memory-reader` Attempt on a daemon with `agentMemoryMcp: 'off'`: no memory
+ * lines, only the run-directory result guidance.
+ */
+export declare function prependAgentReaderResultGuidance(instruction: string): string;
 // ==== @byok-sdk/client dist/daemon/observer.d.ts ====
 import type { RetentionClassId, RetentionTrigger, SweepReport } from './retention/registry';
 import { type AgentEvent, type BlobRef, type Envelope, type TaskState } from '@byok-sdk/protocol';
@@ -8842,6 +8866,12 @@ export interface TaskRunnerDeps {
     mcpToolsetToolsProbe?: (serverName: string, server: Readonly<McpStdioServerConfig>, options: McpToolsProbeOptions) => Promise<McpServerObservation>;
     /** SDK-owned MCP helper injected only into strict Agent tasks. */
     agentMemoryMcpBin?: Readonly<ResolvedAgentMemoryMcpBin>;
+    /**
+     * `DaemonConfig.agentMemoryMcp`. `off` also drops the Agent memory guidance
+     * from the instruction, so the model gets no request to change `MEMORY.md`
+     * or `notes/`. Absent is `auto`.
+     */
+    agentMemoryMcp?: 'auto' | 'off';
     /** SDK-owned task-free Agent-memory descriptor helper a preparation observes. */
     agentMemoryDescribeBin?: Readonly<ResolvedAgentMemoryMcpBin>;
     /** Resolve the verified SDK helper only when memory needs filesystem authority. */
@@ -8946,6 +8976,8 @@ export declare class TaskRunner {
     private readonly recoveredMessageOutboxes;
     private readonly cancelledRecoveredMessages;
     private readonly recoveredMessageRetryTimers;
+    /** Retries resend one envelope id per record (#693); the cloud replays the disposition per arrival. */
+    private readonly agentMessageEnvelopes;
     /**
      * Finding F4 (cancel lost during the offer-processing window): a
      * `task.cancel` for a taskId that hasn't finished `handleOffer` yet (still
@@ -9270,7 +9302,11 @@ export declare class TaskRunner {
     private revokeAgentResultContext;
     private agentResultStore;
     private revokeAgentMessageContext;
-    /** Injected only after strict Agent admission; a host registry may never replace this reserved name. */
+    /**
+     * Injected only after strict Agent admission; a host registry may never replace this reserved name.
+     * `toolList` `granted` makes the helper list only the tools `mode` grants. The prepared lane needs
+     * `complete`: its launch compares the helper's listing with the complete sealed descriptor.
+     */
     private withAgentMemoryMcp;
     /** Reconstruct all sensitive context from the active sealed task, never from MCP/model arguments. */
     private activeMemoryContext;
@@ -12810,6 +12846,7 @@ export declare const LOCAL_AGENT_RELEASE_BUILD_ID_MAX_LENGTH = 128;
  */
 export declare function resolveLocalAgentReleaseIdentity(input: LocalAgentReleaseIdentity | undefined): Readonly<LocalAgentReleaseIdentity>;
 // ==== @byok-sdk/client dist/runtime-detection.d.ts ====
+import type { RuntimeId } from '@byok-sdk/protocol';
 import { type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectResult, type RuntimeDetectionRefusalReason } from './types';
 /** Content-free observation of one configured adapter, including unavailable outcomes. */
 export interface RuntimeObservation {
@@ -12829,8 +12866,19 @@ export declare function projectRuntimeObservation(descriptor: RuntimeAdapterDesc
 export declare function parseRuntimeObservations(value: unknown): RuntimeObservation[] | undefined;
 /** Reject legacy/mixed authoring shapes; copy only validated, known facts. */
 export declare function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult;
-/** Single routing author for daemon, selection and local diagnostics. */
+/**
+ * Single routing author for daemon, selection and local diagnostics. A host
+ * platform outside `descriptor.platforms` is refused before `detect()` runs.
+ */
 export declare function observeRuntimeDetection(adapter: RuntimeAdapter, signal?: AbortSignal): Promise<RuntimeDetectResult>;
+/** Whether `id` is a frozen wire runtime id. Every other adapter id is selected by `harnessId`. */
+export declare function isWireRuntimeId(id: string): id is RuntimeId;
+/** The task selection that reaches this adapter: `runtime` for a wire runtime id, else `harnessId`. Never both. */
+export declare function taskRuntimeTarget(descriptor: Pick<RuntimeAdapterDescriptor, 'id'>): {
+    readonly runtime: RuntimeId;
+} | {
+    readonly harnessId: string;
+};
 // ==== @byok-sdk/client dist/runtime-failure.d.ts ====
 /** Closed lifecycle phases for failures after an offer has been admitted. */
 export type RuntimeFailurePhase = 'start' | 'run';
@@ -12988,6 +13036,23 @@ export declare function resolveSdkReservedHelperBin(kind: SdkReservedHelperKind,
  * stdio EOF before this resolves `true`.
  */
 export declare function runSdkReservedHelperCommand(argv?: readonly string[]): Promise<boolean>;
+// ==== @byok-sdk/client dist/testing/index.d.ts ====
+import type { RuntimeAdapter, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeDetectResult } from '../types';
+/** The built-in adapters a fake can stand in for. */
+export type FakeRuntimeAdapterId = 'claude' | 'codex' | 'grok' | 'hermes' | 'pi';
+/** What the fake does. It never spawns a process. */
+export interface FakeRuntimeAdapterBehavior {
+    /** Default: `{ kind: 'available' }`. A function is called on every probe. */
+    readonly detect?: RuntimeDetectResult | ((signal?: AbortSignal) => Promise<RuntimeDetectResult>);
+    /** Default: a non-retryable reject, so a fake starts nothing the test did not supply. */
+    readonly prepare?: (input: RuntimeAdapterPrepareInput) => Promise<RuntimeAdapterPrepareResult>;
+}
+/**
+ * A runtime adapter double whose descriptor is the real adapter's default
+ * descriptor, so its capabilities, selection target and platforms follow the
+ * SDK. Only `detect` and `prepare` are the test's.
+ */
+export declare function fakeRuntimeAdapter(id: FakeRuntimeAdapterId, behavior?: FakeRuntimeAdapterBehavior): RuntimeAdapter;
 // ==== @byok-sdk/client dist/types.d.ts ====
 import type { ExecutionScratch } from './daemon/retention/scratch';
 import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions';
@@ -13034,8 +13099,11 @@ export interface RuntimeDetectionAdvisory {
     readonly reason: 'runtime_version_unqualified';
     readonly qualifiedVersion: string;
 }
-/** `app_server_unavailable`: Codex has no `app-server`. `acp_unavailable`: an ACP runtime has no stdio ACP mode. */
-export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unavailable';
+/**
+ * `app_server_unavailable`: Codex has no `app-server`. `acp_unavailable`: an ACP runtime has no stdio ACP mode.
+ * `platform_unsupported`: the host platform is not in {@link RuntimeAdapterDescriptor.platforms}; no probe ran.
+ */
+export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unavailable' | 'platform_unsupported';
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
     /** Supports display-only Agent message drafts. Omission means unsupported. */
@@ -13236,6 +13304,12 @@ export interface RuntimeAdapterDescriptor {
      * completed. Absent: every record of this adapter is `unknown`.
      */
     readonly trajectoryEvidence?: 'event-stream';
+    /**
+     * The `process.platform` values this adapter supports. Runtime detection
+     * refuses every other platform with `platform_unsupported` before it runs a
+     * probe. Absent: no platform restriction (a custom adapter's default).
+     */
+    readonly platforms?: readonly NodeJS.Platform[];
 }
 /** The pure input to one adapter admission decision. It contains no credential values or workspace resources. */
 export interface RuntimeAdapterPrepareInput {

@@ -2160,7 +2160,7 @@ export declare function loadSqliteModule(): SqliteModule;
  * Same predicate as `@byok-sdk/server`'s `sqlite-support.ts`, and it exists for the
  * same reason: a version-number comparison does not prove built-in availability.
  * This attempts the real built-in lookup via {@link loadSqliteModule} and reports
- * whether it succeeded. The supported runtime baseline is Node 24.15+.
+ * whether it succeeded. The supported runtime baseline is Node 24.22.1+.
  *
  * Callers use it to skip a SQLite-backed path rather than fail it — the
  * package's own SQLite-backed suites gate on it — and anything else should call

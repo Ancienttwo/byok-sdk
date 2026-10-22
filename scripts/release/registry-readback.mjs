@@ -11,9 +11,10 @@ import {
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 
 // Version authority: the manifests, never a constant here. The expected
-// registry train is whatever packages/core ships, keys versions independently,
-// and the pi pin comes from packages/client, parsed by the one shared Pi
-// runtime identity reader.
+// registry train is whatever packages/core ships; keys carries the same version
+// (check:release-graph enforces it) and is read back against its own manifest.
+// The pi pin comes from packages/client, parsed by the one shared Pi runtime
+// identity reader.
 const exactReleaseVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const npmSafeDistTag = /^(?=.{1,214}$)[a-z][a-z0-9._-]*$/;
 const expectedVersion = JSON.parse(readFileSync(path.join(repoRoot, 'packages/core/package.json'), 'utf8')).version;
@@ -25,7 +26,7 @@ if (typeof expectedVersion !== 'string' || !exactReleaseVersion.test(expectedVer
   throw new Error('packages/core/package.json: version must be an exact SemVer release train version');
 }
 if (typeof keysVersion !== 'string' || !exactReleaseVersion.test(keysVersion)) {
-  throw new Error('packages/keys/package.json: version must be an exact SemVer independent version');
+  throw new Error('packages/keys/package.json: version must be an exact SemVer version');
 }
 const packages = [
   '@byok-sdk/core',

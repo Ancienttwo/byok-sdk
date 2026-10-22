@@ -194,6 +194,8 @@ export class HermesAdapter implements RuntimeAdapter {
     return freezeRuntimeAdapterDescriptor({
       id: 'hermes',
       supportsDispatchSelection: false,
+      // The gateway control channel is a named pipe on Windows. It has no evidence yet.
+      platforms: ['darwin', 'linux'],
       capabilities: { steer: false, resume: false, approvalInteractive: false, mcpToolsets: true },
     });
   }

@@ -163,6 +163,7 @@ export const knownFamilies = Object.freeze([
 // test file and script a family job runs is owned by that family.
 export const familyOwners = Object.freeze({
   'agent-memory-export-linux': [
+    /^examples\/host-execution-core\/src\/fixtures\/memory-restore-crash\.ts$/,
     /^examples\/host-execution-core\/src\/memory\.ts$/,
     /^examples\/host-execution-core\/src\/memory-restore\.ts$/,
     /^examples\/host-execution-core\/src\/memory-restore\.test\.ts$/,
@@ -227,6 +228,35 @@ export const familyOwners = Object.freeze({
     /^packages\/keys\/src\//,
   ],
 });
+// #649 and #702: release script paths that the owner reviewed for 0.28.2.
+// `tests` run the path (scripts/ci/run-targeted.mjs runs them); `install` marks
+// tests that need installed packages, so the targeted job installs first;
+// `families` are the family jobs that the path selects.
+export const reviewedScripts = Object.freeze({
+  'scripts/api-surface/check-version-authority.mjs': { tests: ['scripts/api-surface/check-version-authority.test.mjs'] },
+  'scripts/api-surface/check-version-authority.test.mjs': { tests: ['scripts/api-surface/check-version-authority.test.mjs'] },
+  'scripts/release/beta-release.test.mjs': { tests: ['scripts/release/beta-release.test.mjs'] },
+  // pack-and-smoke.mjs runs this manifest-only check in each of its 4 family
+  // jobs; #702 selects npm-release-pack alone. With the install, the targeted
+  // job also runs it directly (check:release-graph).
+  'scripts/release/check-package-graph.mjs': {
+    tests: ['scripts/release/pack-and-smoke.test.mjs', 'scripts/release/beta-release.test.mjs'],
+    install: true, families: ['npm-release-pack'],
+  },
+  'scripts/release/pack-and-smoke.mjs': {
+    tests: ['scripts/release/pack-and-smoke.test.mjs', 'scripts/release/agent-memory-helper-source.test.mjs'],
+    install: true, families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
+  },
+  'scripts/release/pack-and-smoke.test.mjs': { tests: ['scripts/release/pack-and-smoke.test.mjs'], install: true },
+  'scripts/release/publish.mjs': {
+    tests: [
+      'scripts/release/publish.test.mjs', 'scripts/release/publish-recovery.test.mjs', 'scripts/release/beta-release.test.mjs',
+      'scripts/release/install-matrix.test.mjs', 'scripts/release/registry-contract.test.mjs', 'scripts/release/agent-memory-helper-source.test.mjs',
+    ],
+    install: true,
+  },
+  'scripts/release/registry-readback.mjs': { tests: ['scripts/release/beta-release.test.mjs'] },
+});
 const rootDocs = new Set(['README.md', 'CHANGELOG.md', 'AGENTS.md', 'CLAUDE.md', 'LICENSE', 'SECURITY.md', 'CONTRIBUTING.md']);
 const rootCi = new Set(['.github/workflows/ci.yml', '.github/workflows/release.yml']);
 const sorted = values => [...values].sort();
@@ -260,9 +290,18 @@ export function selectImpact(paths, context = {}) {
       for (const id of ['npm-release-pack', 'agent-memory-helper', 'agent-memory-helper-linux']) families.add(id);
       continue;
     }
+    // #702: the Node pin is the runtime of every platform job, so a reviewed
+    // exact version selects every routine family. The complete test suite
+    // stays release-validation only.
+    if (path === '.node-version') {
+      verifyReviewedContent(path, context);
+      for (const id of knownFamilies) if (id !== 'build-test') families.add(id);
+      continue;
+    }
     if (path === 'packages/protocol/src/__tests__/golden/v3.releases.json') { leafDirs.add('packages/protocol'); continue; }
     if (path === 'package.json' || path === 'bun.lock' || /^packages\/[^/]+\/package\.json$/.test(path)) {
-      verifyReviewedContent(path, context);
+      // A reviewed dependency move also runs the suites of the workspaces that declare it.
+      for (const dir of verifyReviewedContent(path, context)) dirs.add(dir);
       if (path === 'package.json') { scripts = true; continue; }
       if (path === 'bun.lock') { families.add('npm-release-pack'); continue; }
       const dir = path.slice(0, -'/package.json'.length);
@@ -286,7 +325,7 @@ export function selectImpact(paths, context = {}) {
       for (const dir of ['examples/basic', 'examples/host-execution-core', 'examples/bot-collaboration']) dirs.add(dir);
       continue;
     }
-    if (path === 'examples/basic/clarification.test.ts' || path === 'examples/basic/goal-btw.test.ts') {
+    if (path === 'examples/basic/clarification.test.ts' || path === 'examples/basic/goal-btw.test.ts' || path === 'examples/basic/goal-btw-close.test.ts') {
       dirs.add('examples/basic'); continue;
     }
     if (path === 'api-surface/entries.json') {
@@ -296,7 +335,8 @@ export function selectImpact(paths, context = {}) {
       }
       continue;
     }
-    if (path === 'packages/client/scripts/check-hermes-session-entry.mjs' || path === 'packages/client/tsup.config.ts') {
+    if (path === 'packages/client/scripts/check-hermes-session-entry.mjs' || path === 'packages/client/scripts/check-adapters-entry.mjs'
+      || path === 'packages/client/tsup.config.ts') {
       dirs.add('packages/client'); families.add('npm-release-pack'); continue;
     }
     // #636: the keys pi-catalog subpath entry, and the generator that keys
@@ -308,6 +348,11 @@ export function selectImpact(paths, context = {}) {
       dirs.add('packages/client'); families.add('npm-release-pack'); continue;
     }
     if (/^scripts\/release\/registry-(?:contract\.test\.mjs|expectations\.json)$/.test(path)) { scripts = true; continue; }
+    if (Object.hasOwn(reviewedScripts, path)) {
+      scripts = true;
+      for (const id of reviewedScripts[path].families ?? []) families.add(id);
+      continue;
+    }
     // #652 trims these reviewed files in the pinned OAR snapshot.
     if (/^packages\/client\/vendor\/oar\/60ad09b\/(?:runtimes\/codex\/(?:app-server-client|rpc-control|session)|shared\/(?:acp\/session|session-kernel))\.ts$/.test(path)) {
       dirs.add('packages/client'); continue;
