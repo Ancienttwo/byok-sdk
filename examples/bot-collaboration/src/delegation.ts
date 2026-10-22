@@ -1,11 +1,10 @@
 import type { BotTurnOutcome } from '@byok-sdk/protocol';
-import { canonical, hash, taskId as taskIdOf, type Conclusion, type Intent, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import { hash, taskId as taskIdOf, type Conclusion, type Intent, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
 import { addTurn, json, type Batch, type CollaborationState, type Delegation, type DelegationCancel, type ReplyEntry, type Turn, type Verdict } from './model';
+import { frame, REPLY_META_MAX_BYTES } from './rules/frame';
 
 /** Host cap on a delegated Bot's accepted reply (Q8). consumeMessage checks it too. */
 export const BOT_REPLY_MAX_BYTES = 8192;
-/** Bound of one canonical metadata line in the Request section, asserted when the line is built. */
-export const REPLY_META_MAX_BYTES = 2048;
 /** Header, end line and line breaks of one framed block. */
 export const FRAME_MAX_BYTES = 96;
 export const ROOT_BOT_BUDGET = 12;
@@ -44,7 +43,6 @@ export function minimumInstructionBytes(prompt: string): number {
 }
 
 type Publish = (id: string, value: Json) => void;
-const bytes = (text: string) => Buffer.byteLength(text, 'utf8');
 const cut = (text: string, codePoints: number) => [...text].slice(0, codePoints).join('');
 
 // Unit ledger (§6.2). Each unit moves once: reserved -> spent, or reserved -> released.
@@ -410,11 +408,6 @@ export function retryReply(state: CollaborationState, d: Delegation, now: number
   if (d.status !== 'uncertain' && now - (d.pendingSince ?? now) >= uncertainAfterMs) uncertain(state, d, now, emit);
 }
 
-export function frame(label: string, meta: Record<string, unknown>, body: string): string {
-  const line = canonical(meta);
-  if (bytes(line) > REPLY_META_MAX_BYTES) throw new Error(`Delegation metadata exceeds ${REPLY_META_MAX_BYTES} bytes`);
-  return `--- ${label} (${bytes(body)} bytes) ---\n${line}\n${body}\n--- end ${label} ---`;
-}
 function sender(state: CollaborationState, botId: string) {
   return { botId, name: cut(state.team.bots[botId]?.name ?? '', 40) };
 }
