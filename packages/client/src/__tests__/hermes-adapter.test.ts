@@ -351,7 +351,8 @@ describe('HermesAdapter session', () => {
   });
 
   it('fails retryably when the gateway does not report ready in time', async () => {
-    const { open, entries } = await setup({ FAKE_HERMES_GATEWAY_NEVER_READY: '1' }, { gatewayReadyTimeoutMs: 300 });
+    // The deadline must outlast the fake gateway's process start, because its receipt is written after module load.
+    const { open, entries } = await setup({ FAKE_HERMES_GATEWAY_NEVER_READY: '1' }, { gatewayReadyTimeoutMs: 3_000 });
     await expect(open()).rejects.toMatchObject({ phase: 'start', retry: 'retryable', message: 'hermes gateway did not report ready in time' });
     const log = await entries();
     // The viewer never started, so it could not start a gateway of its own.
