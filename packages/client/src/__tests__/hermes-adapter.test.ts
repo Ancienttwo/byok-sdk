@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import { HermesAdapter, type HermesAdapterOptions } from '../adapters/hermes/hermes-adapter';
 import { hermesProfileConfig } from '../adapters/hermes/hermes-home';
@@ -10,25 +10,55 @@ import { sealRuntimeOperationManifest, SteerUnsupportedError, type Session } fro
 import { RuntimeExecutionFailure } from '../runtime-failure';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { testExecutionScratch } from './fixtures/execution-scratch';
+import { fakeHermesCommand } from './fixtures/fake-hermes-command';
 
 const fixture = fileURLToPath(new URL('./fixtures/fake-hermes.mjs', import.meta.url));
 const sessions: Session[] = [];
 const dirs: string[] = [];
 const task: TaskOfferPayload = { instruction: 'hello' };
+const windows = process.platform === 'win32';
+/** Windows children need SystemRoot for sockets and pipes. */
+const platformEnv: NodeJS.ProcessEnv = windows ? { SystemRoot: process.env.SystemRoot } : {};
+let command = fixture;
+let commandDir: string | undefined;
 
-/** Short paths: the fake gateway listens on `<profile>/gateway.sock`, and a Unix socket path has a small length limit. */
+/** Short paths: the fake gateway listens on `<profile>/gateway.sock`, and a Unix socket path has a small length limit. Windows uses a named pipe. */
 async function tempDir(prefix: string): Promise<string> {
-  const dir = await fs.mkdtemp(path.join('/tmp', prefix));
+  const dir = await fs.mkdtemp(path.join(windows ? os.tmpdir() : '/tmp', prefix));
   dirs.push(dir);
   return fs.realpath(dir);
 }
+
+/** On Windows os.homedir() reads USERPROFILE, not HOME. */
+function withUserHome(home: string, run: () => void): void {
+  const previous = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  process.env.HOME = home;
+  if (windows) process.env.USERPROFILE = home;
+  try {
+    run();
+  } finally {
+    for (const [name, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+  }
+}
+
+beforeAll(async () => {
+  if (!windows) return;
+  commandDir = await fs.mkdtemp(path.join(os.tmpdir(), 'bx-'));
+  command = fakeHermesCommand(fixture, commandDir);
+}, 60_000);
+
+afterAll(async () => {
+  if (commandDir !== undefined) await fs.rm(commandDir, { recursive: true, force: true });
+});
 
 async function setup(env: NodeJS.ProcessEnv = {}, options: Partial<HermesAdapterOptions> = {}) {
   const root = await tempDir('bh-');
   const workspaceDir = await tempDir('bw-');
   const receipt = path.join(await tempDir('br-'), 'receipt.jsonl');
-  const adapter = new HermesAdapter({ home: root, resolveBin: () => ({ command: fixture, source: 'path' }), ...options });
-  const resources = { workspaceDir, env: { PATH: process.env.PATH, HOME: os.homedir(), FAKE_HERMES_RECEIPT: receipt, ...env } };
+  const adapter = new HermesAdapter({ home: root, resolveBin: () => ({ command, source: 'path' }), ...options });
+  const resources = { workspaceDir, env: { PATH: process.env.PATH, HOME: os.homedir(), ...platformEnv, FAKE_HERMES_RECEIPT: receipt, ...env } };
   const open = async (offer: TaskOfferPayload = task, extra: Partial<typeof resources> & Record<string, unknown> = {}) => {
     const session = await startPreparedOperation(adapter, offer, { ...resources, ...extra });
     sessions.push(session);
@@ -85,26 +115,18 @@ describe('HermesAdapter construction and descriptor', () => {
     await fs.mkdir(path.join(fakeUserHome, '.hermes'));
     const link = path.join(await tempDir('bl-'), 'link');
     await fs.symlink(path.join(fakeUserHome, '.hermes'), link);
-    const previous = process.env.HOME;
-    process.env.HOME = fakeUserHome;
-    try {
+    withUserHome(fakeUserHome, () => {
       expect(() => new HermesAdapter({ home: link })).toThrow(/~\/\.hermes/);
-    } finally {
-      process.env.HOME = previous;
-    }
+    });
   });
 
   it('refuses a ~/.hermes root that does not exist yet below a symlinked home', async () => {
     const fakeUserHome = await tempDir('bu-');
     const link = path.join(await tempDir('bl-'), 'link');
     await fs.symlink(fakeUserHome, link);
-    const previous = process.env.HOME;
-    process.env.HOME = fakeUserHome;
-    try {
+    withUserHome(fakeUserHome, () => {
       expect(() => new HermesAdapter({ home: path.join(link, '.hermes') })).toThrow(/~\/\.hermes/);
-    } finally {
-      process.env.HOME = previous;
-    }
+    });
   });
 
   it('declares egress and MCP toolsets only, as a frozen custom harness', () => {
@@ -186,7 +208,7 @@ describe('HermesAdapter detect', () => {
       .toEqual({ kind: 'not-found' });
     const broken = path.join(root, 'broken-hermes.mjs');
     await fs.writeFile(broken, '#!/usr/bin/env node\nif (process.argv.includes("--version")) console.log("Hermes Agent v0.22.2+2364.g0b10b9f");\nelse process.exit(3);\n', { mode: 0o755 });
-    expect(await new HermesAdapter({ home: root, resolveBin: () => ({ command: broken, source: 'path' }) }).detect())
+    expect(await new HermesAdapter({ home: root, resolveBin: () => ({ command: fakeHermesCommand(broken, root), source: 'path' }) }).detect())
       .toEqual({ kind: 'probe-failed' });
   });
 });
@@ -343,7 +365,8 @@ describe('HermesAdapter session', () => {
     for (const entry of await entries()) expect(alive(entry.pid)).toBe(false);
   });
 
-  it('refuses a viewer that attached to a gateway the session does not own, and stops that gateway', async () => {
+  // Windows: a pipe name has one listener (EADDRINUSE), so a second gateway cannot take over the owned gateway's control channel.
+  it.skipIf(windows)('refuses a viewer that attached to a gateway the session does not own, and stops that gateway', async () => {
     const { open, root, entries } = await setup({ FAKE_HERMES_VIEWER_TAKES_SOCKET: '1' });
     await expect(open()).rejects.toMatchObject({ phase: 'start', message: 'hermes acp attached to a gateway this session does not own' });
     expect(await fs.readdir(path.join(root, 'profiles'))).toEqual([]);
@@ -351,7 +374,8 @@ describe('HermesAdapter session', () => {
   });
 
   it('fails retryably when the gateway does not report ready in time', async () => {
-    const { open, entries } = await setup({ FAKE_HERMES_GATEWAY_NEVER_READY: '1' }, { gatewayReadyTimeoutMs: 300 });
+    // The deadline must outlast the fake gateway's process start, because its receipt is written after module load.
+    const { open, entries } = await setup({ FAKE_HERMES_GATEWAY_NEVER_READY: '1' }, { gatewayReadyTimeoutMs: 3_000 });
     await expect(open()).rejects.toMatchObject({ phase: 'start', retry: 'retryable', message: 'hermes gateway did not report ready in time' });
     const log = await entries();
     // The viewer never started, so it could not start a gateway of its own.
