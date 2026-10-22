@@ -39,7 +39,7 @@ changes no code, manifest or lock file.
   patched 8.12.2.
 - A downstream product ran its own two-pass CJS bundle (SDK 0.28.2, helper
   `pi-rpc`, Node v24.22.1). Node's copy owned both slots at exit. The product
-  reports that its code calls `fetch` before the Pi host loads. So a CJS bundle
+  reports that its code touches `fetch` before the Pi host loads. So a CJS bundle
   is exposed only when nothing in the product loads Node's copy first. I did not
   reproduce this on the product's files. See "Reproduce".
 - The CHANGELOG already lists all eight advisories (`CHANGELOG.md:44-52`).
@@ -300,8 +300,9 @@ the `pi-rpc` helper on its ESM payload and on its two-pass ESM-then-CJS single-f
 main. The Pi host loaded fully in both runs. Both ended at a configuration
 refusal, so no provider request was sent. At exit both slots held an `Agent` of
 length 4572, which is Node's built-in copy. The product reads this as follows:
-some of its code calls `fetch` before the Pi host loads, so Node's copy wins even
-in its CJS bundle, and that order is incidental. The reference lengths above
+some of its code touches `fetch` before the Pi host loads, so Node's copy wins
+even in its CJS bundle, and that order is incidental. I did not check which
+touch it is. The reference lengths above
 reproduce on this machine. The report agrees with the load-order rule and with
 the emulated `Headers` check. It also shows that a CJS bundle is not always
 exposed. The product's own order decides.
