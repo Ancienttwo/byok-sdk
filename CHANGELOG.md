@@ -79,6 +79,13 @@
 - **Changed (keys, client)** — `PI_THINKING_LEVELS` is generated from pi-ai
   `MODEL_THINKING_LEVELS`, and the Pi rpc and prepared hosts import that list
   (#636). `PI_COMPAT_KEYS_BY_API` gains an `anthropic-messages` row.
+- **Behavior (client)** — Agent memory admission follow-ups (#614). With
+  `DaemonConfig.agentMemoryMcp: 'off'`, Agent task instructions get no memory
+  guidance; a `memory-reader` instruction keeps only the final-reply line. A
+  `memory-reader` Attempt now gets a `read` memory MCP that lists only
+  `memory_recall`. New `Daemon.status().agentMemoryMcp` reports `admitted`, `off`
+  or `unavailable`. The spec now states that an explicit
+  `agentMemoryHelperAssetRoot` is always validated at construction.
 - **Fixed (examples)** — the Bot collaboration Host now checks only
   non-archived Bot templates against the read-only toolset allowlist when it
   reopens. The stored template of an archived Bot no longer blocks reopening.

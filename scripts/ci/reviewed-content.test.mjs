@@ -50,6 +50,14 @@ test('API entry changes select only owner and dependents; unmapped entry is refu
   f.write('api-surface/entries.json', { unknown: {} });
   assert.throws(() => selectImpact(['api-surface/entries.json'], f), /unmapped API/);
 });
+test('a bin API entry selects the package that declares the bin; an undeclared bin is refused', t => {
+  const f = fixture(t);
+  f.write('packages/client/package.json', { ...f.manifest, bin: { 'byok-agent-memory-mcp': './dist/bin/byok-agent-memory-mcp.js' } });
+  f.write('api-surface/entries.json', { '@byok-sdk/client': { policy: { budgetBytes: 1 } }, '@byok-sdk/core': { policy: { budgetBytes: 1 } }, 'bin:byok-agent-memory-mcp': { policy: { budgetBytes: 2 } } });
+  assert.deepEqual(selectImpact(['api-surface/entries.json'], f).dirs.filter(dir => dir.startsWith('packages/')), ['packages/client']);
+  f.write('api-surface/entries.json', { '@byok-sdk/client': { policy: { budgetBytes: 1 } }, '@byok-sdk/core': { policy: { budgetBytes: 1 } }, 'bin:byok-unknown': {} });
+  assert.throws(() => selectImpact(['api-surface/entries.json'], f), /unmapped API entry bin:byok-unknown/);
+});
 test('reviewed vendor and registry paths map explicitly, siblings still refuse', () => {
   assert.ok(selectImpact(['packages/client/vendor/oar/60ad09b/runtimes/grok/session.ts']).dirs.includes('packages/client'));
   assert.deepEqual(selectImpact(['scripts/release/registry-contract.test.mjs', 'scripts/release/registry-expectations.json']).dirs, []);
