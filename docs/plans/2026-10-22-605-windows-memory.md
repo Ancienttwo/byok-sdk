@@ -96,6 +96,7 @@ release pin 不变：source digest 不含 `_test.go`（`packages/client/scripts/
 ## 4. 风险
 
 - 每个 helper PR 多一个 Windows job。手动 run 的 Go step 用了 48–65 秒，整个 job 3–4 分钟。
+- 新 leg 也进入发版门。release validation 运行全部 family，`ci-required` 要求完整清单。改 `.node-version` 的 PR 选中全部 family（`select-impact.mjs:317-321`），改 `.gitattributes` 的 PR 也选中这个 family（`:308-312`）。所以 0.28.3 的 release validation 和这些 PR 都要等这个 Windows leg 通过。
 - 随机 kill 测试有统计断言。手动 run 里 4 次都通过。例行运行后若出现 flake，按 flake 处理，不放宽断言。
 - 默认 temp 在 C:，fsync 慢（`docs/notes/2026-10-22-windows-k8-fsync-stalls.md`）。新 leg 保持默认 temp，和手动 run 的 admin step 一致。
 - family id 仍叫 `agent-memory-helper-linux`，但它现在也跑 Windows。改名要改 selector，见 Q4。
@@ -143,7 +144,17 @@ release pin 不变：source digest 不含 `_test.go`（`packages/client/scripts/
 
 ### 7.2 PR CI
 
-PR CI 跑完后补写 run 编号和 Windows leg 的结果。
+Run [39769769167](https://github.com/Ancienttwo/byok-sdk/actions/runs/39769769167)，head `7c92d091`。本节之后的 commit 只改本文。
+
+- `agent memory helper non-Darwin volume checks (windows-latest, fixed Go)`（job 119794199650）：pass，58 秒。
+  runner image `win25-vs2026` 20261018.275（Windows Server 2025），Go 1.26.5 windows/amd64，admin token，temp 在 C:。
+  `go test -v ./...`：77 PASS、2 SKIP、0 FAIL，package 用时 21.7 秒。
+  - 新测试全部通过：四个注入测试共 31 个子测试（8、4、16、3），append 2 个，reparse 5 个（parent 2、leaf 3），pinned home 1 个。
+  - pinned home 的 rename 被拒绝："The process cannot access the file because it is being used by another process."。写入仍落在原目录。
+  - 两个 SKIP：`TestWindowsRuntimeIdentityMatchesNativeHandle`（该 leg 不设 runtime 变量）和 `TestWindowsCrashProbeChild`（kill 测试的子进程入口，按设计 skip）。
+  - 已有的 model P kill 测试也在例行 leg 通过：固定点 10.2 秒，随机 kill 11.0 秒。
+- `agent memory helper non-Darwin volume checks (ubuntu-latest, fixed Go)`：pass，18 秒。
+- 写本节时其余 job 仍在运行。最终结果以 PR #722 的 checks 为准。
 
 ### 7.3 顺带发现，未修改
 
