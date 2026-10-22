@@ -4,6 +4,23 @@ import { resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { parseBunLock } from '../release/pi-runtime-identity.mjs';
 
+// #700 moves the exact undici pin from 8.11.2 to the patched 8.12.3. 8.12.2 is
+// the first 8.x release that fixes the 2026-10-15 advisories. Each workspace
+// below declares undici in exactly this manifest field.
+const UNDICI_MOVE = { from: '8.11.2', to: '8.12.3' };
+const UNDICI_FIELDS = { 'packages/client': 'dependencies', 'packages/cloud-dataplane': 'devDependencies' };
+const UNDICI_LOCK = {
+  from: ['undici@8.11.2', '', {}, 'sha512-u4UB2/IrKdU6lFxumHmmo1a3fCQO5tzQllRorfoRS63txhrB7xTpSn1PftwC4qEHkOaqP95fCWW4lJzwErwzhQ=='],
+  to: ['undici@8.12.3', '', {}, 'sha512-+fdndUTwBP86cVjihTp21hZHo7d6oj1c/47XPA3lL8mM0XHs+C4EkcjmgRsFnFk2f/UONGDy9ItBItmXsLOQHw=='],
+};
+// Restore the reviewed old pin, so that the deep comparison still sees every other change.
+function revertUndiciMove(before, after, field) {
+  if (before?.[field]?.undici !== UNDICI_MOVE.from || after?.[field]?.undici !== UNDICI_MOVE.to) return false;
+  after[field].undici = UNDICI_MOVE.from;
+  return true;
+}
+
+/** Returns the workspaces whose suites must qualify a reviewed dependency move. */
 export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) {
   if (!/^[a-f0-9]{40}$/.test(base ?? '') || /^0+$/.test(base)) throw new Error('Content-sensitive impact requires exact CI_BASE');
   const beforeText = execFileSync('git', ['show', `${base}:${path}`], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -21,9 +38,10 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       && addition.trimEnd().split('\n').every(line => !before.split('\n').includes(line)))) {
       throw new Error('Reviewed CI mapping required: only the reviewed helper LF attributes may be added');
     }
-    return;
+    return [];
   }
   const parse = path === 'bun.lock' ? parseBunLock : JSON.parse;
+  const qualify = [];
   const before = parse(beforeText), after = parse(afterText);
   const version = value => typeof value === 'string' && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value);
   if (path === 'bun.lock') {
@@ -50,7 +68,13 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
         && manifest.devDependencies?.esbuild === '0.28.1') {
         delete current.devDependencies.esbuild;
       }
+      const undiciField = UNDICI_FIELDS[dir];
+      if (undiciField && manifest[undiciField]?.undici === UNDICI_MOVE.to && revertUndiciMove(record, current, undiciField)) qualify.push(dir);
       delete record.version; delete current.version;
+    }
+    // The resolved package may move only together with a reviewed workspace pin.
+    if (qualify.length && isDeepStrictEqual(before.packages?.undici, UNDICI_LOCK.from) && isDeepStrictEqual(after.packages?.undici, UNDICI_LOCK.to)) {
+      after.packages.undici = before.packages.undici;
     }
   } else if (path === 'examples/bot-collaboration/package.json') {
     if (before.private !== true || after.private !== true
@@ -91,9 +115,12 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       const entry = { types: './dist/pi-catalog.d.ts', import: './dist/pi-catalog.js' };
       if (before.exports?.[key] === undefined && isDeepStrictEqual(after.exports?.[key], entry)) delete after.exports[key];
     }
+    const dir = path.slice(0, -'/package.json'.length);
+    if (UNDICI_FIELDS[dir] && revertUndiciMove(before, after, UNDICI_FIELDS[dir])) qualify.push(dir);
     delete before.version; delete after.version;
   }
   if (!isDeepStrictEqual(before, after)) throw new Error(`Reviewed CI mapping required: ${path} changes more than the reviewed fields`);
+  return qualify;
 }
 
 /** A `bin:<name>` entry belongs to the one workspace package whose manifest declares that bin. */

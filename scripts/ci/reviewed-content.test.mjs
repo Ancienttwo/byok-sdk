@@ -171,3 +171,44 @@ test('keys pi-catalog subpath and its generator admit exact additions only', t =
   assert.ok(generator.dirs.includes('packages/keys') && generator.dirs.includes('packages/client'));
   assert.throws(() => selectImpact(['scripts/keys/other.ts']));
 });
+test('reviewed undici security move admits only the exact pins and their lock entry (#700)', t => {
+  const cwd = mkdtempSync(join(tmpdir(), 'ci-undici-move-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const write = (path, value) => { mkdirSync(dirname(join(cwd, path)), { recursive: true }); writeFileSync(join(cwd, path), JSON.stringify(value)); };
+  const resolved = {
+    '8.11.2': ['undici@8.11.2', '', {}, 'sha512-u4UB2/IrKdU6lFxumHmmo1a3fCQO5tzQllRorfoRS63txhrB7xTpSn1PftwC4qEHkOaqP95fCWW4lJzwErwzhQ=='],
+    '8.12.3': ['undici@8.12.3', '', {}, 'sha512-+fdndUTwBP86cVjihTp21hZHo7d6oj1c/47XPA3lL8mM0XHs+C4EkcjmgRsFnFk2f/UONGDy9ItBItmXsLOQHw=='],
+    '8.12.1': ['undici@8.12.1', '', {}, 'sha512-unpatched'],
+  };
+  const state = pin => ({
+    client: { name: '@byok-sdk/client', version: '0.28.1', dependencies: { undici: pin, x: '1.0.0' } },
+    dataplane: { name: '@byok-sdk/cloud-dataplane', version: '0.28.1', devDependencies: { undici: pin } },
+    lock: { lockfileVersion: 1, workspaces: { '': { name: 'workspace' },
+      'packages/client': { name: '@byok-sdk/client', version: '0.28.1', dependencies: { undici: pin, x: '1.0.0' } },
+      'packages/cloud-dataplane': { name: '@byok-sdk/cloud-dataplane', version: '0.28.1', devDependencies: { undici: pin } } },
+    packages: { undici: resolved[pin], x: ['x@1.0.0'], '@earendil-works/pi-coding-agent/undici': ['undici@8.10.2', '', {}, 'sha512-pi'] } },
+  });
+  const apply = ({ client, dataplane, lock }) => {
+    write('packages/client/package.json', client); write('packages/cloud-dataplane/package.json', dataplane); write('bun.lock', lock);
+  };
+  apply(state('8.11.2'));
+  const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  git('init'); git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'baseline');
+  const context = { cwd, base: git('rev-parse', 'HEAD').trim() };
+  const paths = ['bun.lock', 'packages/client/package.json', 'packages/cloud-dataplane/package.json'];
+  apply(state('8.12.3'));
+  const plan = selectImpact(paths, context);
+  assert.ok(plan.dirs.includes('packages/client') && plan.dirs.includes('packages/cloud-dataplane'));
+  assert.ok(plan.families.includes('npm-release-pack') && plan.families.includes('dataplane'));
+  for (const [reason, candidate] of [
+    ['unpatched undici', state('8.12.1')],
+    ['another dependency next to undici', (s => { s.client.dependencies.x = '2.0.0'; s.lock.workspaces['packages/client'].dependencies.x = '2.0.0'; s.lock.packages.x = ['x@2.0.0']; return s; })(state('8.12.3'))],
+    ['undici in another manifest field', (s => { s.dataplane.dependencies = s.dataplane.devDependencies; delete s.dataplane.devDependencies; return s; })(state('8.12.3'))],
+    ['another integrity', (s => { s.lock.packages.undici = [...resolved['8.12.3'].slice(0, 3), 'sha512-other']; return s; })(state('8.12.3'))],
+    ['Pi undici copy', (s => { s.lock.packages['@earendil-works/pi-coding-agent/undici'] = resolved['8.12.3']; return s; })(state('8.12.3'))],
+    ['resolved package without a pin move', (s => { s.lock.packages.undici = resolved['8.12.3']; return s; })(state('8.11.2'))],
+  ]) {
+    apply(candidate);
+    assert.throws(() => selectImpact(paths, context), /more than/, reason);
+  }
+});
