@@ -72,8 +72,12 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       if (undiciField && manifest[undiciField]?.undici === UNDICI_MOVE.to && revertUndiciMove(record, current, undiciField)) qualify.push(dir);
       delete record.version; delete current.version;
     }
-    // The resolved package may move only together with a reviewed workspace pin.
-    if (qualify.length && isDeepStrictEqual(before.packages?.undici, UNDICI_LOCK.from) && isDeepStrictEqual(after.packages?.undici, UNDICI_LOCK.to)) {
+    // Both workspace pins and the resolved package move together, or nothing moves.
+    if (qualify.length) {
+      if (qualify.length !== Object.keys(UNDICI_FIELDS).length
+        || !isDeepStrictEqual(before.packages?.undici, UNDICI_LOCK.from) || !isDeepStrictEqual(after.packages?.undici, UNDICI_LOCK.to)) {
+        throw new Error('Reviewed CI mapping required: bun.lock must move both undici pins and the resolved undici entry together');
+      }
       after.packages.undici = before.packages.undici;
     }
   } else if (path === 'examples/bot-collaboration/package.json') {
