@@ -1,4 +1,6 @@
 import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { hermesProviderModel, parseHermesProviderLauncherRequest, runHermesProviderLauncher } from '../hermes-provider-launcher';
 import { parseModelProviderProfile, exactProviderProfileBinding } from '../provider-profile';
@@ -20,8 +22,8 @@ describe('Hermes custody contract', () => {
     expect(hermesProviderModel(profile)).toEqual({ provider: 'custom', model: 'fake-model', baseUrl: 'https://example.test/v1', keyEnv: 'SDK_HERMES_PROVIDER_KEY' });
     for (const unsupported of [{ ...profile, enabled: false }, { ...profile, auth_mode: 'none' as const }, { ...profile, adapter: 'anthropic' as const }, parseModelProviderProfile({ ...profile, pi_model: { api: 'openai-responses', contextWindow: 1000, maxTokens: 100, reasoning: false, thinkingLevel: 'off', thinkingLevelMap: { off: null, minimal: null, low: null, medium: null, high: null, xhigh: null, max: null }, compat: {} } })]) expect(() => hermesProviderModel(unsupported)).toThrow();
   });
-  it.skipIf(process.platform === 'win32')('admission reads no credentials and fails on pending custody', async () => {
-    const dir = await fs.mkdtemp('/tmp/bhk-'); dirs.push(dir);
+  it('admission reads no credentials and fails on pending custody', async () => {
+    const dir = await fs.mkdtemp(process.platform === 'win32' ? path.join(os.tmpdir(), 'bhk-') : '/tmp/bhk-'); dirs.push(dir);
     const profileDbPath = `${dir}/profiles.sqlite`;
     const store = new SqliteProviderProfileStore({ path: profileDbPath });
     await store.save(profile);

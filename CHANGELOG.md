@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Fixed (client, keys)** — close the Hermes on Windows follow-ups from the
+  #695 review (#712). The custody launcher now starts Hermes only after the
+  adapter writes one byte to the launcher's stdin. The adapter writes it after
+  it adopts the launcher (on Windows, into the kill-on-close job), so Hermes
+  never runs outside the owned tree. End of input fails the launch. Client and
+  keys must come from the same release: an older client never writes the byte.
+  The stale-profile sweep keeps a profile when the Windows pipe client fails.
+  The Windows process-table read now ends at the ready deadline or on start
+  abort, and the foreign-gateway check ends at 10 s or on start abort.
 - **Changed (client)** — update the private OAR source to 0.70.0
   (`44d7d61`). Keep the eight BYOK-maintained files. Update the source
   manifest and bridge paths. The only selected upstream change is the optional
@@ -28,7 +37,10 @@
   awaits. The `PI_SUBAGENT_CHILD` skip is unchanged. The source manifest
   records this delta. A CJS bundle that runs Pi must also define
   `import.meta.url` from `__filename`, because Pi reads it when it evaluates.
-  The client README and the SEA recipe README give the esbuild options.
+  The client README and the SEA recipe README give the esbuild options. They
+  also warn that, inside a SEA, this define makes a "run main when
+  `import.meta.url` matches `argv[1]`" check true, so the check needs an
+  `isSea()` guard (`node:sea`).
   A new fixture in `pi-single-file-bundle.test.ts` runs a real Pi print session
   from a single-pass CJS bundle. It covers the ordinary host, the sealed-host
   redirect and a subagent child.
