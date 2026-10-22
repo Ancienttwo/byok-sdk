@@ -699,7 +699,7 @@ export interface TaskHandleDeps {
 export declare function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHandle;
 // ==== @byok-sdk/server dist/types.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
-import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPayload, AgentRef, BlobRef, DispatchSelection, RuntimeCapabilities, RuntimeId, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskDeclinePayload, TaskState, ToolsetId, TerminalProjectionSelection, AgentHomeAccess } from '@byok-sdk/protocol';
+import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPayload, AgentRef, BlobRef, DispatchSelection, RuntimeCapabilities, RuntimeId, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskDeclinePayload, TaskState, ToolsetId, TerminalProjectionSelection, AgentHomeAccess, PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { PresenceRuntimeFact } from '@byok-sdk/core';
 import type { WakeConsumer } from './wakes/types';
@@ -864,6 +864,14 @@ interface DispatchInputBase {
      * before the task exists. Absent means a writer.
      */
     homeAccess?: AgentHomeAccess;
+    /**
+     * The Agent memory of this one task: `none`, `read` or `read-write`.
+     * Requires `agentRef` and a device that advertises `agent-memory-selection`;
+     * the kernel refuses it otherwise, before the task exists. `read-write` with
+     * `homeAccess: 'memory-reader'` is refused before the task exists. Absent
+     * keeps the daemon admission.
+     */
+    agentMemory?: PreparedAgentMemoryMode;
     /** Host-only product destination/freshness authority; never serialized to the daemon. */
     agentMessageContext?: AgentMessageServerContext;
 }

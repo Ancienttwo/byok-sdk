@@ -26,10 +26,10 @@ The crash test sends SIGKILL to a child Host during wake delivery.
 
 | File | Responsibility |
 | --- | --- |
-| `src/core.ts` | FIFO dispatch, exact recovery, cancellation, retry, outcome application and outbox scans. |
+| `src/core.ts` | FIFO dispatch, exact recovery, cancellation, retry, outcome application, occurrence hooks and outbox scans. |
 | `src/ledger.ts` | A separate Host SQLite ledger with synchronous transactions. |
 | `src/model.ts`, `src/transitions.ts` | Durable records, stable identities and atomic state changes. |
-| `src/routines.ts` | Occurrence deduplication, next-slot commit, coalescing and lifecycle. |
+| `src/routines.ts` | Occurrence deduplication, next-slot commit, coalescing, lifecycle, version switches and Host occurrence transitions. |
 | `src/schedule.ts` | The default UTC interval calendar and the shared calendar callback type. |
 | `src/index.ts` | The example's copy-and-own entrypoint. This is not a published SDK package. |
 | `src/*.test.ts` | Contract probes and real server/daemon smoke tests. |
@@ -129,7 +129,8 @@ await core.addRoutine({
 });
 ```
 
-A definition supplies exactly one of `execution` or `hostJob`. The registry is copied
+A definition supplies exactly one of `execution`, `hostJob` or `hostOccurrence`
+(see [Host occurrences](#host-occurrences)). The registry is copied
 at construction; register every persisted job type on each startup. Missing handlers,
 non-JSON inputs/results and invalid execution templates fail explicitly. Arbitrary
 unreserved wake keys are still audited; use `addRoutine` to obtain scheduling,
@@ -180,7 +181,7 @@ ledger.compact({
 });
 ```
 
-Only settled, intent-less job occurrences qualify. Pending, unknown or promoted keys
+Only settled, intent-less Host job or Host occurrence rows qualify. Pending, unknown or promoted keys
 reject the whole batch; compact promoted occurrences through `acknowledgedIntentKeys`.
 The returned `occurrences` count includes both kinds. Unlike caller intent keys, a
 removed occurrence key is unknown on a second selection. The slot tombstone prevents
@@ -190,6 +191,118 @@ The same rule bounds the identity rows of Agent routine occurrences; see
 [Agent execution retention](#agent-execution-retention).
 The JSON ledger and failed-job backlog remain small-Host reference storage: at 10x
 volume, whole-document rewrites and serialized handlers are the first bottlenecks.
+
+## Host occurrences
+
+A `hostOccurrence` routine lets the Host write its own state in the commit that records the
+occurrence. The Host decides later whether the occurrence needs an Agent execution:
+
+```ts
+import { concludeOccurrence, promoteOccurrence } from '@byok-sdk/example-host-execution-core';
+
+const core = new HostExecutionCore(server, ledger, {
+  occurrenceHooks: {
+    // Synchronous. No external I/O and no core or ledger calls.
+    'bot-routine': (run, tx) => {
+      tx.application[`turn:${run.occurrenceKey}`] = { input: run.input, plannedAt: run.trigger.plannedAt };
+    },
+  },
+});
+await core.recover();
+await core.addRoutine({
+  id: 'digest', version: 1, timeZone: 'UTC',
+  rule: { anchorMs: Date.now() + 1000, everyMs: 86_400_000 },
+  hostOccurrence: { type: 'bot-routine', input: { prompt: 'Summarize the day' } },
+  waitMs: 300_000, lateAfterMs: 60_000,
+});
+
+// Later, in a Host transaction that also updates the Host state:
+ledger.transaction(state => { promoteOccurrence(state, ledger.tenant, occurrenceKey, executionTemplate); });
+// Or, when no execution is necessary:
+ledger.transaction(state => { concludeOccurrence(state, occurrenceKey, 'cancelled'); });
+await core.drain();
+```
+
+- Register every persisted hook `type` at construction, on each startup. `addRoutine` and
+  `updateRoutine` refuse an unregistered type. The input must be JSON.
+- The core calls the hook in the transaction that writes the occurrence, its slot and the next
+  reservation. Both persist, or neither does. The hook gets copies of `type`, `input`,
+  `occurrenceKey`, `routineId`, `definitionVersion` and `trigger`, and a transaction with
+  `application` and `publish`. `publish` closes when the hook returns.
+- A replay of the slot does not call the hook again. The ledger state is exactly once, but an
+  external effect in a hook is not: a crash can roll the commit back after the effect. Keep
+  hooks free of I/O.
+- A hook that throws or returns a thenable rolls the occurrence back. The wake hook rejects, the
+  SDK delivers the wake again after 60 seconds, and the routine reserves no later slot until a
+  delivery commits. This is a fail-closed stall: repair the Host state or the hook.
+- The hook runs inside the serialized drain transaction. A slow hook slows the whole core, like
+  `applyOutcome`. A hook that calls core or ledger methods starts a second transaction and fails.
+- The occurrence has `hook: {}` and no intent. It stays unsettled until the Host calls one of
+  these exported transitions inside `ledger.transaction`, then `drain()`:
+  - `promoteOccurrence(state, tenant, occurrenceKey, execution)` adds intent `occurrence:<key>`
+    to the FIFO. The waiting deadline is `recordedAt + waitMs`, so a late promotion can expire
+    at the next scan. Settlement writes the occurrence conclusion.
+  - `concludeOccurrence(state, occurrenceKey, conclusion)` settles the occurrence without an
+    execution.
+
+  Each occurrence is promoted or concluded once. Both transitions refuse Host job and Agent
+  occurrences.
+- A newer slot marks an unpromoted occurrence with `hook.executionSuperseded`. A later promotion
+  then settles as `superseded` at once. This is the rule for a late Host job escalation.
+- An unsettled occurrence blocks a version switch. Promote or conclude every occurrence.
+- `compact` removes a concluded occurrence through `acknowledgedOccurrenceKeys`, and a promoted
+  occurrence through its intent key. It does not remove the Host's `application` rows.
+
+A core without `hostOccurrence` support refuses these definitions and fails each of their wakes.
+Settle the open occurrences and complete these routines before you roll back to such a core.
+
+## Routine versions
+
+`addRoutine` creates a routine. It is idempotent for the same definition and refuses a
+different definition for the same ID. `updateRoutine` changes the version of an existing ID:
+
+```ts
+await core.updateRoutine({ ...current, version: current.version + 1, rule: newRule });
+```
+
+- The version must be `max(current, pending) + 1`. The Host service assigns it and keeps the
+  version history and command receipts. The ledger keeps only the current definition and at
+  most one staged `pending` definition.
+- An exact replay of the current or the pending definition does nothing.
+- A lower or skipped version, or the same version with other content, throws.
+- The destination cannot change: an Agent routine stays an Agent routine, a Host job keeps its
+  `type`, and a Host occurrence routine keeps its hook `type`. An unknown or completed routine throws.
+- The new definition gets the `addRoutine` validation. Its calendar runs once before the update commits.
+
+The pending version replaces the current one when the exported pure function
+`versionSwitchDue(routine, occurrences, now)` is true: the routine is active, no occurrence of
+the routine is unsettled, and no reserved old slot is due (`next` is null or later than `now`).
+The switch cancels the old wake and reserves the first new slot after `now`. Admitted work
+finishes with the version that admitted it.
+
+- While a version is pending, a reserved old slot still records its occurrence, but the core
+  reserves no later old slot. `recover()` and a same-definition `addRoutine()` do not refill the
+  old chain either.
+- The core checks the switch in the update commit, in `lifecycle()`, after each scan and after a
+  memory change. No wake has to follow the last settlement.
+- Pause keeps the pending version. Resume switches when the switch is due; otherwise the current
+  version reserves its next slot. `completed` drops the pending version. This includes a resume
+  that completes the current version because its `endAt` has passed.
+- An old wake that arrives after the switch is audited as `reservation_mismatch`.
+- A Host job occurrence stays unsettled until its handler succeeds. A handler that keeps failing on
+  the current input therefore also blocks the switch to a version that changes the input. The
+  admitted occurrence runs with the `type` and `input` of the current definition.
+
+A core without `updateRoutine` ignores `pending`: it keeps the current version and refills its
+chain. Let pending versions switch, or restore a backup, before you roll back to such a core.
+
+### Routine commands in an outcome
+
+`OutcomeTransaction.routines` runs `create`, `update` and `lifecycle` in the outcome commit, with
+the rules of `addRoutine`, `updateRoutine` and `lifecycle()`. `list()` returns copies of the
+routine rows, with the changes made earlier in the same commit. A refused command throws before it
+changes any state, so a Host can catch the error and commit the rest of the outcome. The scan that
+applied the outcome sends the new wake changes to the SDK.
 
 ## Agent execution retention
 
@@ -313,18 +426,19 @@ The Host's `WAKE_HORIZON_MS` uses the public `WAKE_MAX_FUTURE_MS` export from `@
 Candidates beyond that horizon use `schedule_retrying` backoff without blocking other work.
 
 The Host service owns definition versions, CAS commands, sync, authentication,
-result upload policy, visibility, retention and deletion. This example mirrors an
-immutable definition. The Host service must retain its version history and command receipts.
-The example does not implement the service's version-change workflow, command API or UI.
+result upload policy, visibility, retention and deletion. This example mirrors the
+current definition and at most one pending version; see [Routine versions](#routine-versions).
+The Host service must retain its version history and command receipts.
+The example does not implement the service's command API or UI.
 
 The Aimpact scope ruling of 2026-10-18 assigns the service rows in platform PRD section 14.1
 to the downstream Host service after K2 and A2, as specified in that PRD.
 These rows cover routine sync with the browser closed, `sync_failed`, 409, `device_offline`,
 `missed`, security and cost. This reference covers the device-local Topology L execution rows.
 
-The same ruling assigns same-routine-ID version changes to K8a with `update_routine`.
-This includes current/pending versions, scheduling generation and the in-flight limit.
-This reference keeps each routine ID's definition immutable. Use a new ID to change a definition.
+The owner decisions of 2026-10-22 for #606 (O1, O2 and O8) move same-routine-ID version changes
+into K4 `updateRoutine`. K4 keeps its overlap rule: a new slot settles queued older work and keeps
+the running one. K8 keeps its own routine model until #737 moves it onto K4.
 
 K8 actions and group chat remain in their own work orders.
 P5a adds Host memory commands and Linux synthetic memory tests below.

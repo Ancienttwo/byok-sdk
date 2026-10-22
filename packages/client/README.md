@@ -419,8 +419,41 @@ task instructions: a writer gets no memory lines, and a `memory-reader` Attempt
 keeps only the line that puts its result in the final reply. Explicit
 `agentMemory` hosted projection and `agentMemoryIntents` transports are
 independent opt-ins with their existing platform checks. Omission of the switch
-preserves current behavior. Non-prepared per-task memory selection is not added
-by this change (see #614).
+preserves current behavior. An ordinary Agent offer can also select the memory
+of one task (see the next section).
+
+### Per-task memory selection
+
+An ordinary Agent offer can carry `agentMemory: 'none' | 'read' | 'read-write'`
+for its one task. These are the values of the prepared offer. Without the
+field, the daemon admission decides, as above.
+
+| `agentMemory` | SDK memory MCP | Memory guidance in the instruction |
+|---|---|---|
+| absent | `read-write` for a writer, `read` for a `memory-reader`, none when not `admitted` | as the daemon admission decides (see above) |
+| `'none'` | none; memory alone needs no adapter MCP support | none; a `memory-reader` keeps only the line that puts its result in the final reply |
+| `'read'` | sealed `read`: only `memory_recall` | read-only guidance; a `memory-reader` keeps its reader guidance |
+| `'read-write'` | sealed `read-write`: `memory_recall` and `memory_save` | the writer guidance |
+
+- A `memory-reader` Attempt with `'read-write'` is declined with
+  `agent_memory_selection_invalid`. `ByokServer.dispatch` and
+  `executions.submit` refuse it before the task exists.
+- `'read'` or `'read-write'` when `status().agentMemoryMcp` is not `admitted`
+  is declined with `agent_memory_unavailable`. The daemon does not change the
+  selection to `'none'`.
+- Both declines are non-retryable.
+
+A Host that wants memory only when the daemon admits it sends no
+`agentMemory`.
+
+The offers are strict, so the field is a gated wire addition. A daemon with an
+Agent home advertises `agent-memory-selection`, whatever its memory admission.
+The server and hosted cloud refuse an offer with the field to a device without
+that capability, before the task exists. `ByokServer.dispatch` accepts
+`agentMemory` only with an explicit `agentRef`.
+
+`AGENT_MEMORY_MCP_SERVER_NAME` is the reserved name of the SDK memory MCP
+server. Host tests and diagnostics can use it instead of the literal name.
 
 ### When `auto` does not admit the memory MCP
 
@@ -443,7 +476,8 @@ With an Agent home and `unavailable`, the Host sees this:
   writes do not go through the SDK memory tools. A `memory-reader` Attempt gets
   the read-only reader guidance.
 - Preparing or executing `agentMemory: 'read'` or `'read-write'` is refused with
-  `agent_memory_unavailable`. `'none'` works.
+  `agent_memory_unavailable`, on prepared input and on an ordinary Agent offer.
+  `'none'` works.
 
 The daemon reports `unavailable` for one of these reasons:
 
@@ -464,6 +498,8 @@ What the Host can do:
 - If the Host has its own memory writer, set `agentMemoryMcp: 'off'`. With
   `auto` and `unavailable`, the guidance stays. The model can then change
   `MEMORY.md` and `notes/` with its file tools and become a second memory writer.
+- To start one ordinary Agent task without memory, send `agentMemory: 'none'`
+  on its offer. The task then gets no memory MCP and no memory guidance.
 - If file-based memory is acceptable, keep `auto`.
 - To admit the memory MCP in a macOS single-file product, call
   `copyAgentMemoryHelperAssets({ outDir })` at build time, or use the

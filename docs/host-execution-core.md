@@ -55,10 +55,15 @@ await core.recover();
 ```
 
 `enqueue` takes a stable intent key, source, complete execution template, waiting deadline and retry policy.
-`addRoutine` takes an immutable definition mirror. It can select `hostJob` instead of
+`addRoutine` takes a definition mirror, and `updateRoutine` stages its next version
+(see [routine versions](../examples/host-execution-core/README.md#routine-versions)). A definition can select `hostJob` instead of
 `execution` for deterministic Host work. Registered handlers return a persisted summary
 and may explicitly request an Agent intent. See [Host job registration, failure and replay
 semantics](../examples/host-execution-core/README.md#host-jobs-and-execution-free-occurrences).
+A definition can also select `hostOccurrence`: a registered synchronous hook writes Host state in the
+occurrence commit, and the Host later promotes or concludes the occurrence (see
+[Host occurrences](../examples/host-execution-core/README.md#host-occurrences)).
+`applyOutcome` gets `tx.routines` to create, update or pause routines in the outcome commit.
 An execution has an explicit runtime, AgentRef, egress policy and terminal projection.
 Freeze all input context, including any selected server-held message context.
 The core assigns taskId. It never adds SessionRef or changes execution mode.
@@ -356,11 +361,12 @@ Persist the device command receipt before apply, then acknowledge it.
 The same command ID returns the same acknowledgement.
 Reject stale versions as `version_conflict`; do not merge on the device.
 Finish the current occurrence before switching definitions.
-The example accepts an immutable mirror. It does not implement command transport or the version-change workflow.
+The example mirrors the current definition and at most one pending version. `updateRoutine` stages version
+`max(current, pending) + 1` and switches when no occurrence is unsettled and no old slot is due.
+It does not implement command transport or the service's version workflow.
 
-The Aimpact scope ruling of 2026-10-18 assigns same-routine-ID version changes to K8a with `update_routine`.
-This includes current/pending versions, scheduling generation and the in-flight limit.
-This reference keeps each routine ID's definition immutable. Use a new ID to change a definition.
+The owner decisions of 2026-10-22 for #606 (O1, O2 and O8) move same-routine-ID version changes into K4.
+The Host service keeps the version history. K8 keeps its own routine model until #737 moves it onto K4.
 
 Store only `active`, `paused` and `completed` lifecycle values.
 Pause prevents new occurrences and cancels the planned wake.

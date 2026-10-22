@@ -46,6 +46,7 @@ import {
   TASK_STATES,
   TerminalProjectionSelectionSchema,
   AgentHomeAccessSchema,
+  PreparedAgentMemoryModeSchema,
   type AgentHomeProjectionPayload,
   type AgentRef,
   type AgentMessagePublishPayload,
@@ -531,6 +532,13 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     if (homeAccess !== undefined && agentRef === undefined) {
       throw new Error('homeAccess requires an explicit AgentRef; legacy task dispatch has no Agent home');
     }
+    const agentMemory = input.agentMemory === undefined ? undefined : PreparedAgentMemoryModeSchema.parse(input.agentMemory);
+    if (agentMemory !== undefined && agentRef === undefined) {
+      throw new Error('agentMemory requires an explicit AgentRef; legacy task dispatch has no Agent memory');
+    }
+    if (agentMemory === 'read-write' && homeAccess === 'memory-reader') {
+      throw new Error('agentMemory read-write requires a writer; a memory-reader Attempt reads memory only');
+    }
     const agentMessageContext =
       messageEgress === undefined ? undefined : AgentMessageServerContextSchema.parse(input.agentMessageContext);
     const dispatchSelection =
@@ -626,6 +634,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
               egressPolicy,
               ...(terminalProjection === undefined ? {} : { terminalProjection }),
               ...(homeAccess === undefined ? {} : { homeAccess }),
+              ...(agentMemory === undefined ? {} : { agentMemory }),
               ...(messageEgress === undefined ? {} : { messageEgress }),
               ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
             },
@@ -641,6 +650,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
               sessionRef: agentResume.sessionRef,
               ...(terminalProjection === undefined ? {} : { terminalProjection }),
               ...(homeAccess === undefined ? {} : { homeAccess }),
+              ...(agentMemory === undefined ? {} : { agentMemory }),
               ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
             },
           });
@@ -777,6 +787,9 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     executions: {
       async submit(input) {
         const submission = AgentExecutionInputSchema.parse(input);
+        if (submission.payload.agentMemory === 'read-write' && submission.payload.homeAccess === 'memory-reader') {
+          throw new Error('agentMemory read-write requires a writer; a memory-reader Attempt reads memory only');
+        }
         const { taskId } = submission;
         if (dispatching.has(taskId)) throw new Error('submission for this taskId is already in progress; retain the original binding');
         dispatching.add(taskId);

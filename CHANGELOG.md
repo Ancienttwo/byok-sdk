@@ -14,9 +14,29 @@
   Windows, it has flushed the file only: there is no promise for an OS crash
   or a power loss, and a delivery of the same revision and hash repairs a lost
   file. A process crash can leave a `<name>.<pid>-<n>.tmp` file in the home.
-  The SDK does not remove it. `agent-home-write-file.test.ts` kills a child process at five points
-  of a three-file apply and checks each file and the redelivery. The root
-  `@byok-sdk/client` entry grows by 1399 bytes.
+  The SDK does not remove it. `agent-home-write-file.test.ts` kills a child
+  process at five points of a three-file apply and checks each file and the
+  redelivery. The root `@byok-sdk/client` entry grows by 1399 bytes.
+- **Feature (protocol, server, cloud, client)** — an ordinary Agent offer can
+  select the Agent memory of its one task with the optional
+  `agentMemory: 'none' | 'read' | 'read-write'` (#614). The values are those of
+  the prepared offer. Absent keeps the daemon admission. `none` binds no memory
+  MCP and adds no memory guidance, so memory alone needs no adapter MCP support.
+  `read` binds only `memory_recall`. A `memory-reader` that selects
+  `read-write` is declined. `read` or `read-write` is declined when the daemon
+  does not admit the memory MCP; the daemon does not change it to `none`. A
+  Host that wants memory only when the daemon admits it sends no
+  `agentMemory`. The offers are strict, so this is a gated wire addition.
+  Every daemon with an Agent home advertises the new device capability
+  `agent-memory-selection` (`AGENT_MEMORY_SELECTION_CAPABILITY`). Server and
+  hosted cloud refuse the field to a device without it, before the task
+  exists. `ByokServer.dispatch` takes `agentMemory` only with an explicit
+  `agentRef`; `executions.submit` takes it in its payload. Both refuse
+  `read-write` for a `memory-reader` before the task exists.
+- **Feature (client)** — `@byok-sdk/client` exports
+  `AGENT_MEMORY_MCP_SERVER_NAME`, the reserved name of the SDK memory MCP
+  server (#614). Host tests and diagnostics can use it instead of the literal
+  name.
 - **Changed (keys)** — `PiModelConfigSchema` accepts a `pi_model` without
   `thinkingLevelMap`, as the prepared model wire already does. A declared map
   must still map all seven levels. Without a map, Pi applies its own handling
@@ -33,6 +53,30 @@
   profile, and their truth store fails every read and write of the registry.
   An older device answers sealed provisioning of such a `pi_model` with
   `pi_model_invalid`.
+- **Feature (examples)** — a K4 routine can change its version in place
+  (#735). `HostExecutionCore.updateRoutine` stages version
+  `max(current, pending) + 1` with the same destination and Host job type. An
+  exact replay does nothing. The ledger keeps the current definition and one
+  `pending` version; the Host service keeps the version history. The exported
+  pure function `versionSwitchDue` decides the switch: the routine is active,
+  no occurrence of it is unsettled, and no reserved old slot is due. While a
+  version is pending, the old chain gets no new slot. The core checks the
+  switch at update, at lifecycle changes, after each scan and after a memory
+  change. A Host job that keeps failing blocks the switch until its handler
+  succeeds. `LedgerState.version` stays 1. A core without `updateRoutine`
+  ignores `pending`.
+- **Feature (examples)** — a K4 routine can write Host state in its occurrence
+  commit (#736). A `hostOccurrence` definition names a hook that the Host
+  registers in `HostOptions.occurrenceHooks`. The hook runs synchronously in
+  the transaction that records the occurrence, so both persist or neither
+  does. A replay does not call it again. A throw or a thenable rolls the
+  occurrence back. The occurrence stays unsettled until the Host calls the
+  exported `promoteOccurrence`, which adds intent `occurrence:<key>` to the
+  FIFO, or `concludeOccurrence`. A newer slot makes a later promotion settle as
+  `superseded`. `compact` removes concluded Host occurrences.
+  `OutcomeTransaction.routines` runs `create`, `update` and `lifecycle` in the
+  outcome commit with the `addRoutine`, `updateRoutine` and `lifecycle()`
+  rules; a refused command changes nothing. `LedgerState.version` stays 1.
 
 ## 0.28.3 — source candidate
 

@@ -49,6 +49,11 @@ export type WireAddition =
   | { readonly kind: 'envelope'; readonly rule: 'strip-safe'; readonly surface: MessageType; readonly field: string }
   | { readonly kind: 'http'; readonly rule: 'strip-safe'; readonly surface: HttpWireSurface; readonly field: string };
 
+/**
+ * Fields of every Agent offer, the prepared one included. `agentMemory` is not
+ * here: each ordinary offer gates it below, and the prepared offer requires its
+ * own selection.
+ */
 const AGENT_OFFER_FIELDS = (surface: MessageType): readonly WireAddition[] => [
   { kind: 'envelope', rule: 'gated', surface, field: 'dispatchSelection', capability: 'dispatch-selection', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface, field: 'requiredToolsets', capability: 'toolset-selection', advertisedBy: 'device' },
@@ -67,15 +72,18 @@ export const WIRE_ADDITIONS: readonly WireAddition[] = Object.freeze([
   { kind: 'envelope', rule: 'gated', surface: 'task.offer_with_toolsets', field: 'harnessId', capability: 'custom-harness', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent', capability: 'agent-home-contract', advertisedBy: 'device' },
   ...AGENT_OFFER_FIELDS('task.offer_for_agent'),
+  { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent', field: 'agentMemory', capability: 'agent-memory-selection', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent_with_egress', capability: 'agent-home-contract', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent_with_egress', capability: 'agent-egress-policy', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent_with_egress', capability: 'agent-egress-reliable-ack', advertisedBy: 'device' },
   ...EGRESS_OFFER_FIELDS('task.offer_for_agent_with_egress'),
+  { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent_with_egress', field: 'agentMemory', capability: 'agent-memory-selection', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent_with_egress_fresh', capability: 'agent-home-contract', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent_with_egress_fresh', capability: 'agent-egress-policy', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent_with_egress_fresh', capability: 'agent-egress-reliable-ack', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent_with_egress_fresh', capability: 'agent-egress-fresh-session', advertisedBy: 'device' },
   ...EGRESS_OFFER_FIELDS('task.offer_for_agent_with_egress_fresh'),
+  { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent_with_egress_fresh', field: 'agentMemory', capability: 'agent-memory-selection', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface: 'task.offer_prepared', capability: 'agent-home-contract', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface: 'task.offer_prepared', capability: 'agent-input-preparation-v9', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface: 'task.offer_prepared', capability: 'agent-egress-policy', advertisedBy: 'device' },
