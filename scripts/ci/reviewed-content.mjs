@@ -4,6 +4,12 @@ import { resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { parseBunLock } from '../release/pi-runtime-identity.mjs';
 
+// The nine published manifests. A contract test keeps this list equal to the
+// non-private packages/*/package.json files.
+export const publicManifests = Object.freeze([
+  'client', 'cloud', 'cloud-dataplane', 'cloud-do', 'core', 'keys', 'protocol', 'server', 'ui-runtime',
+].map(name => `packages/${name}/package.json`));
+
 export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) {
   if (!/^[a-f0-9]{40}$/.test(base ?? '') || /^0+$/.test(base)) throw new Error('Content-sensitive impact requires exact CI_BASE');
   const beforeText = execFileSync('git', ['show', `${base}:${path}`], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -20,6 +26,14 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     if (!additions.some(addition => after === before + addition
       && addition.trimEnd().split('\n').every(line => !before.split('\n').includes(line)))) {
       throw new Error('Reviewed CI mapping required: only the reviewed helper LF attributes may be added');
+    }
+    return;
+  }
+  if (path === '.node-version') {
+    // #702: every CI and release setup-node step reads this pin. Admit only one
+    // exact X.Y.Z line: no range, alias, prefix, prerelease or second line.
+    if (!/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\n?$/.test(afterText)) {
+      throw new Error('Reviewed CI mapping required: .node-version must hold one exact X.Y.Z version');
     }
     return;
   }
@@ -90,6 +104,14 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       const key = './pi-catalog';
       const entry = { types: './dist/pi-catalog.d.ts', import: './dist/pi-catalog.js' };
       if (before.exports?.[key] === undefined && isDeepStrictEqual(after.exports?.[key], entry)) delete after.exports[key];
+    }
+    // #702 raises the public Node floor with the Node 24.22.1 pin. Admit only
+    // this exact engines.node edit in a public manifest. Any other engines value
+    // or key, and any other field, still fails the comparison below.
+    if (publicManifests.includes(path)
+      && before.engines?.node === '>=24.15.0'
+      && after.engines?.node === '>=24.22.1') {
+      after.engines.node = before.engines.node;
     }
     delete before.version; delete after.version;
   }

@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { selectImpact, knownFamilies } from './select-impact.mjs';
+import { selectImpact, knownFamilies, reviewedReleaseScripts } from './select-impact.mjs';
 import { planCi } from './plan-ci.mjs';
 import { requireCiPlan } from './require-ci-plan.mjs';
+import { publicManifests } from './reviewed-content.mjs';
 function fixture(t) {
   const cwd = mkdtempSync(join(tmpdir(), 'ci-reviewed-content-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
@@ -170,4 +171,102 @@ test('keys pi-catalog subpath and its generator admit exact additions only', t =
   const generator = selectImpact(['scripts/keys/generate-pi-model-catalog.ts']);
   assert.ok(generator.dirs.includes('packages/keys') && generator.dirs.includes('packages/client'));
   assert.throws(() => selectImpact(['scripts/keys/other.ts']));
+});
+
+function commit(f, message) {
+  const git = (...args) => execFileSync('git', args, { cwd: f.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', message);
+  f.base = git('rev-parse', 'HEAD').trim();
+}
+
+test('the Node pin admits one exact X.Y.Z and selects every routine family, never the complete suite', t => {
+  const f = fixture(t);
+  f.write('.node-version', '24.21.0\n'); commit(f, 'node pin');
+  const routine = knownFamilies.filter(id => id !== 'build-test').sort();
+  for (const value of ['24.22.1\n', '24.22.1', '26.0.0\n']) {
+    f.write('.node-version', value);
+    assert.deepEqual(selectImpact(['.node-version'], f), { dirs: [], files: ['.node-version'], families: routine, reason: 'impacted' });
+  }
+  f.write('.node-version', '24.22.1\n');
+  const plan = planCi({ event: 'push', sha: f.base, paths: ['.node-version'], ...f });
+  assert.deepEqual(plan.families, routine);
+  const needs = Object.fromEntries(['select', 'targeted', ...knownFamilies].map(id => [id, { result: id === 'build-test' ? 'skipped' : 'success' }]));
+  assert.doesNotThrow(() => requireCiPlan(needs, plan, 'push', f.base, f.base, f.cwd));
+  needs['build-test'] = { result: 'success' };
+  assert.throws(() => requireCiPlan(needs, plan, 'push', f.base, f.base, f.cwd), /unexpectedly ran: build-test/);
+  for (const value of ['', '24.22\n', 'v24.22.1\n', '24.22.1-rc.1\n', '>=24.22.1\n', '24.x\n', 'lts/*\n', '24.022.1\n',
+    ' 24.22.1\n', '24.22.1 \n', '24.22.1\r\n', '24.22.1\n\n', '24.22.1\n24.22.0\n']) {
+    f.write('.node-version', value);
+    assert.throws(() => selectImpact(['.node-version'], f), /one exact X\.Y\.Z/, JSON.stringify(value));
+  }
+  assert.throws(() => selectImpact(['.node-version']), /requires exact CI_BASE/);
+  rmSync(join(f.cwd, '.node-version'));
+  assert.throws(() => selectImpact(['.node-version'], f));
+});
+
+test('a public manifest admits only the engines.node raise from >=24.15.0 to >=24.22.1', t => {
+  const f = fixture(t);
+  const keys = { name: '@byok-sdk/keys', version: '0.13.1', engines: { node: '>=24.15.0' } };
+  const testkit = { name: '@byok-sdk/testkit', private: true, version: '0.0.0', engines: { node: '>=24.15.0' } };
+  const root = { ...f.rootManifest, engines: { node: '>=24.15.0' } };
+  const raise = (manifest, node = '>=24.22.1') => ({ ...manifest, engines: { ...manifest.engines, node } });
+  f.write('packages/keys/package.json', keys); f.write('packages/testkit/package.json', testkit); f.write('package.json', root);
+  commit(f, 'engines baseline');
+  for (const candidate of [raise(keys), { ...raise(keys), version: '0.13.2' }]) {
+    f.write('packages/keys/package.json', candidate);
+    assert.deepEqual(selectImpact(['packages/keys/package.json'], f).families, ['npm-release-pack']);
+  }
+  for (const candidate of [
+    raise(keys, '>=24.22.0'), raise(keys, '>=24.23.0'), raise(keys, '^24.22.1'), raise(keys, '>=24.15.0 || >=24.22.1'),
+    { ...raise(keys), engines: { node: '>=24.22.1', npm: '>=11' } },
+    { name: keys.name, version: keys.version },
+    { ...raise(keys), dependencies: { x: '1.0.0' } },
+    { ...raise(keys), description: 'neighbour' },
+  ]) {
+    f.write('packages/keys/package.json', candidate);
+    assert.throws(() => selectImpact(['packages/keys/package.json'], f), /more than/, JSON.stringify(candidate));
+  }
+  f.write('packages/keys/package.json', keys);
+  f.write('packages/testkit/package.json', raise(testkit));
+  assert.throws(() => selectImpact(['packages/testkit/package.json'], f), /more than/);
+  f.write('packages/testkit/package.json', testkit);
+  f.write('package.json', raise(root));
+  assert.throws(() => selectImpact(['package.json'], f), /more than/);
+  f.write('package.json', root);
+  for (const [from, to] of [['>=24.22.1', '>=24.15.0'], ['>=24.16.0', '>=24.22.1']]) {
+    f.write('packages/keys/package.json', raise(keys, from)); commit(f, `engines ${from}`);
+    f.write('packages/keys/package.json', raise(keys, to));
+    assert.throws(() => selectImpact(['packages/keys/package.json'], f), /more than/, `${from} -> ${to}`);
+  }
+});
+
+test('the public manifest list equals the non-private packages in the repository', () => {
+  const root = new URL('../../', import.meta.url);
+  const actual = [];
+  for (const entry of readdirSync(new URL('packages/', root), { withFileTypes: true })) {
+    const path = `packages/${entry.name}/package.json`;
+    if (!entry.isDirectory() || !existsSync(new URL(path, root))) continue;
+    if (JSON.parse(readFileSync(new URL(path, root), 'utf8')).private !== true) actual.push(path);
+  }
+  assert.deepEqual([...publicManifests].sort(), actual.sort());
+});
+
+test('the package graph check maps to the npm release pack job that runs it; siblings still refuse', () => {
+  const root = new URL('../../', import.meta.url);
+  const path = 'scripts/release/check-package-graph.mjs';
+  assert.deepEqual(selectImpact([path]), { dirs: [], files: [path], families: ['npm-release-pack'], reason: 'impacted' });
+  const workflow = readFileSync(new URL('.github/workflows/ci.yml', root), 'utf8');
+  const start = workflow.indexOf('\n  npm-release-pack:\n');
+  const next = workflow.slice(start + 1).search(/\n  [a-z0-9-]+:\n/);
+  assert.ok(start >= 0 && next > 0);
+  assert.match(workflow.slice(start, start + 1 + next), /node scripts\/release\/pack-and-smoke\.mjs/);
+  assert.match(readFileSync(new URL('scripts/release/pack-and-smoke.mjs', root), 'utf8'), /\['scripts\/release\/check-package-graph\.mjs'\]/);
+  for (const [script, families] of Object.entries(reviewedReleaseScripts)) {
+    assert.ok(existsSync(new URL(script, root)), script);
+    assert.ok(families.length > 0 && families.every(id => knownFamilies.includes(id) && id !== 'build-test'), script);
+  }
+  for (const sibling of ['scripts/release/check-package-graph.test.mjs', 'scripts/release/nested/check-package-graph.mjs',
+    'scripts/release/check-package-graph.mjs.orig', 'scripts/release/publish.mjs']) {
+    assert.throws(() => selectImpact([sibling]), /reviewed CI mapping required/i, sibling);
+  }
 });
