@@ -52,15 +52,16 @@ modes address different concerns; none alone establishes persona isolation.
 The table names the user-level sources that each pinned runtime loads, and the
 per-process switch that the pinned CLI accepts. The
 [evidence note](notes/2026-10-22-634-runtime-user-config.md) gives the source
-lines, help output and probe. An SDK option is an adapter option: it applies to
-every session that the adapter starts. A choice per task would need a new wire
-field. Each default is unchanged, and no option is an isolation guarantee.
+lines, help output and probe. The SDK option is an adapter option: it applies
+to every session that the adapter starts. A choice per task would need a new
+wire field. The default is unchanged, and the option is not an isolation
+guarantee.
 
 | Adapter (version) | User-level sources | Per-process switch | SDK option |
 | --- | --- | --- | --- |
-| Claude (2.1.302) | `~/.claude/CLAUDE.md`, `~/.claude/rules/`, `~/.claude/settings.json`, user skills, commands and subagents; also managed policy, `~/.claude.json` and auto memory | `--setting-sources` | `settingSources` |
+| Claude (2.1.302) | `~/.claude/CLAUDE.md`, `~/.claude/rules/`, `~/.claude/settings.json`, user skills, commands and subagents; also managed policy, `~/.claude.json` and auto memory | `--setting-sources`, but a home under `$HOME` keeps the user instruction files | None |
 | Codex (0.160.0) | `$CODEX_HOME/AGENTS.override.md` or `AGENTS.md`, `$CODEX_HOME/config.toml` | None | None |
-| Grok (1.0.52) | `$GROK_HOME/AGENTS.md` and `rules/`, `~/.claude/` and `~/.cursor/` instruction files and rules, `[paths] extra_rule_dirs` | Four variables, for the Claude and Cursor files only | `compatInstructions` |
+| Grok (1.0.52) | `$GROK_HOME/AGENTS.md` and `rules/`, `~/.claude/` and `~/.cursor/` instruction files and rules, `[paths] extra_rule_dirs`; also Claude and Cursor skills, hooks and MCP servers through compatibility cells | Four variables, for the Claude and Cursor instruction files and rules only | `compatInstructions` |
 | Pi (1.3.0) | Agent-directory `AGENTS.md`, `SYSTEM.md`, `APPEND_SYSTEM.md`, extensions, skills and prompts; `~/.agents/skills`; context files in every parent of the cwd | `--no-context-files` drops the persona too | None |
 | Hermes (0.22.2+2364.g0b10b9f) | None: each execution has a fresh `HERMES_HOME` | Not needed | None |
 
@@ -82,26 +83,26 @@ page lists what each setting source loads:
 - Always: managed policy, `~/.claude.json`, and auto memory unless
   `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` is set.
 
-`ClaudeAdapterOptions.settingSources` passes `--setting-sources` to every
-launch. It takes distinct `user`, `project` and `local` values; absent, the
-adapter passes no flag. `['project', 'local']` keeps the project files of the
-Agent home and drops the user files. It is not prompt isolation:
+Claude's `--setting-sources` flag selects these sources. The SDK has no option
+for it, because a launch without the `user` source keeps the user instructions
+for the usual Host layout and removes guardrails:
 
-- It also drops the user's permission rules and hooks. Under the default
+- The 2.1.302 memory loader looks for project files in every parent directory
+  of the cwd (inferred from the binary, build `2ef144e6`; not run). For an
+  Agent home under `$HOME`, it then loads `~/CLAUDE.md`, `~/.claude/CLAUDE.md`
+  and `~/.claude/rules/*.md` as project files.
+- The launch drops the user's permission rules and hooks. Under the default
   `--dangerously-skip-permissions` these are the remaining guardrails.
 - It drops the `env` block and `apiKeyHelper` of the user settings. If the
   provider login or `ANTHROPIC_BASE_URL` lives there, Claude cannot reach the
   provider.
-- When the Agent home is under `$HOME`, `~` is a parent directory of the home.
-  `~/.claude/rules/*.md` can then still load as project rules, and
-  `~/CLAUDE.md` as a project file. This follows from the docs; it was not run.
 - Managed policy and auto memory still load.
-- A resumed session keeps the instruction text of its earlier launch in its
-  history (inferred from the 2.1.302 binary). Only a fresh session starts
-  with the new set.
 
-Claude's `claudeMdExcludes` setting matches absolute paths and is narrower.
-The adapter does not set it.
+Claude's `claudeMdExcludes` setting takes glob patterns that match absolute
+file paths, at any settings layer. It could remove only the user files, and
+it applies to the parent-directory walk too. The adapter does not set it. The
+paths depend on `CLAUDE_CONFIG_DIR` and on symlinks, and only a live run can
+qualify it.
 
 ### Codex: user-level configuration
 
@@ -215,24 +216,24 @@ session, so Hermes needs no option.
 ### Evidence and remaining qualification
 
 Existing offline evidence includes `environment.test.ts` (environment inheritance),
-`claude-adapter.test.ts` (additive MCP launch, and `--setting-sources` only
-when opted in), `grok-adapter.test.ts` (the four variables reach only the
-agent process, and only with `compatInstructions: 'disabled'`),
+`claude-adapter.test.ts` (additive MCP launch), `grok-adapter.test.ts` (the
+four variables reach only the agent process, and only with
+`compatInstructions: 'disabled'`),
 `pi-rpc-host.test.ts` (user resources beside SDK extensions),
 `pi-prepared-tools.test.ts` (frozen tool surface), and
 `hermes-home.test.ts` (profile contents). The
 [evidence note](notes/2026-10-22-634-runtime-user-config.md) records the
-pinned-version sources and the `grok inspect` probe. These fixtures check
-launch arguments and environment. They do not prove an installed CLI's
-entire prompt contains no user rules. No provider ran, and no global
-configuration changed.
+pinned-version sources, the Claude loader reading and the `grok inspect`
+probe. These fixtures check launch arguments and environment. They do not
+prove an installed CLI's entire prompt contains no user rules. No provider
+ran, and no global configuration changed.
 
 For an “Agent home only” guarantee, qualify the exact runtime version with
 synthetic user-rule and Agent-home markers in a live session, show user
 markers absent while the persona remains present, and cover resume behavior
 and credential discovery. Until then, Hosts requiring that guarantee must
 treat the Claude, Codex, Grok and Pi lanes as unqualified, with or without the
-new options. [Issue #634](https://github.com/Ancienttwo/byok-sdk/issues/634)
+Grok option. [Issue #634](https://github.com/Ancienttwo/byok-sdk/issues/634)
 tracks that remaining work; adding persona text alone does not establish isolation.
 
 ## Grok

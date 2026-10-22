@@ -2,19 +2,19 @@
 
 ## Unreleased
 
-- **Feature (client)** — two opt-in adapter options for user-level
-  configuration (#634). `ClaudeAdapterOptions.settingSources` passes Claude's
-  `--setting-sources` to every launch. `GrokAdapterOptions.compatInstructions:
-  'disabled'` sets Grok's four Claude and Cursor `agents` and `rules`
-  compatibility variables to `0` in the agent process only. Each option applies
-  to every session of its adapter, and each default is unchanged. Neither
-  option is an isolation guarantee. A Claude launch without the `user` source
-  also drops the user's deny rules, hooks, settings `env` block and
-  `apiKeyHelper`. With `'disabled'`, Grok still loads `$GROK_HOME/AGENTS.md`,
-  `$GROK_HOME/rules/` and `extra_rule_dirs`. Codex 0.160.0 and Pi 1.3.0 have
-  no such switch, and Hermes needs none. `docs/adapter-capabilities.md` lists
-  the user-level sources of each pinned runtime, and
-  `docs/notes/2026-10-22-634-runtime-user-config.md` gives the evidence.
+- **Feature (client)** — an opt-in Grok option for user-level instructions
+  (#634). `GrokAdapterOptions.compatInstructions: 'disabled'` sets Grok's four
+  Claude and Cursor `agents` and `rules` compatibility variables to `0` in the
+  agent process only. It applies to every session of the adapter, and the
+  default is unchanged. It is not an isolation guarantee: Grok still loads
+  `$GROK_HOME/AGENTS.md`, `$GROK_HOME/rules/` and `extra_rule_dirs`. Claude
+  gets no option. For an Agent home under `$HOME`, Claude's
+  `--setting-sources` without `user` still loads the user instruction files,
+  as project files, and drops the user's deny rules and hooks. Codex 0.160.0
+  and Pi 1.3.0 have no such switch, and Hermes needs none.
+  `docs/adapter-capabilities.md` lists the user-level sources of each pinned
+  runtime, and `docs/notes/2026-10-22-634-runtime-user-config.md` gives the
+  evidence.
 - **Fixed (client)** — a resumed Grok memory reader no longer fails before it
   starts (#609). A resumed reader runs in the run directory that its handoff
   recorded, which has the name of the earlier task. The persona check wanted

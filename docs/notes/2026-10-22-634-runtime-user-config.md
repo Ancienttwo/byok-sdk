@@ -102,12 +102,28 @@ also with `GROK_CLAUDE_SKILLS_ENABLED=0`; the new option does not touch skills.
   the user's permission rules, hooks, its `env` block and `apiKeyHelper`.
   These drop with the `user` source. OAuth, the keychain and
   `ANTHROPIC_API_KEY` in the process environment do not depend on it.
-- Consequence for an Agent home under `$HOME`: `~` is a parent directory of
-  the home. By the table above, `~/.claude/rules/*.md` can then load as
-  project rules even without the `user` source. This was not run.
+- The memory loader in the binary (build time 2026-10-16T15:52:41Z, GIT_SHA
+  `2ef144e6f98c1c99d082b735e4b38f50e3391e55`; inferred, not run):
+  - It loads the user `CLAUDE.md` and rules only when the `userSettings`
+    source is on.
+  - When the `projectSettings` source is on, it walks from the cwd up to the
+    filesystem root. In each directory it reads `CLAUDE.md`,
+    `.claude/CLAUDE.md` and `.claude/rules/` as project files. It skips only
+    the directories between a git worktree and its main repository.
+  - It skips a file that already loaded, a file that `claudeMdExcludes`
+    matches, and a missing file. No check skips the config home. A read
+    filter for files above the cwd can only withhold files; it appears tied
+    to restricted mode and to blocked reads outside the working directories,
+    and the adapter uses neither.
+- Consequence for an Agent home under `$HOME`: without the `user` source,
+  `~/CLAUDE.md`, `~/.claude/CLAUDE.md` and `~/.claude/rules/*.md` still load,
+  as project files. With the `user` source, the walk skips the two user paths
+  because they already loaded. The memory page agrees: a `.claude/CLAUDE.md`
+  in a directory above the cwd counts as a project file, "other than your
+  `~/.claude/CLAUDE.md`".
 - Resume: a resumed session keeps the instruction text of its earlier launch
-  in its history (inferred from the binary). The option gives a clean
-  instruction set only to a fresh session.
+  in its history (inferred from the binary). A future option would give a
+  clean instruction set only to a fresh session.
 
 ### Codex 0.160.0
 
@@ -190,30 +206,39 @@ Source: `git show 0b10b9f:<path>` in a local Hermes checkout.
 
 ## P3: decision
 
-- Add an option only where the pinned CLI has a per-process switch.
+- Add an option only where the pinned CLI has a per-process switch that
+  removes user instructions and keeps the guardrails.
   - Grok: `compatInstructions: 'disabled'` sets the four compatibility
     variables in the agent process environment only. Hosted terminal
     commands keep the task environment.
-  - Claude: `settingSources` passes `--setting-sources`. It is a direct
-    pass-through of a documented flag, not an isolation claim.
-- Codex, Pi and Hermes get documentation only.
-- Each option is an adapter option and applies to every session that the
-  adapter starts. A choice per task would need a new wire field. The
-  defaults are unchanged.
+- Claude, Codex, Pi and Hermes get documentation only.
+  - Claude: Agent homes usually sit under `$HOME`, in per-user application
+    data. For such a home, `--setting-sources` without `user` keeps the
+    user instruction files (as project files) and drops the user's deny
+    rules, hooks, `env` block and `apiKeyHelper`. Under
+    `--dangerously-skip-permissions` those rules and hooks are the remaining
+    guardrails. So an option for the flag would remove guardrails and keep
+    the instructions.
+- The Grok option is an adapter option and applies to every session that the
+  adapter starts. A choice per task would need a new wire field. The default
+  is unchanged.
 - Not offered: relocating `GROK_HOME`, `CODEX_HOME` or `PI_CODING_AGENT_DIR`
   (each also moves the login and the sessions); Claude `--bare` (it never
   reads OAuth or the keychain); Claude `--restricted` (it removes Bash and
-  refuses `bypassPermissions`); `claudeMdExcludes` (the adapter would have to
-  compute absolute paths, which was not verified).
+  refuses `bypassPermissions`); `claudeMdExcludes` through `--settings` (no
+  evidence that the flag-settings layer feeds the merged exclude list, the
+  paths depend on `CLAUDE_CONFIG_DIR` and on symlinks, and only a live run can
+  qualify it).
 
 ## Residual risks
 
 - `grok inspect` shows discovery, not prompt contents. No live Grok run shows
   that the model sees no disabled file.
 - No Claude session ran. The Claude evidence is the help text, the official
-  docs, and binary reading marked as inferred. A credential-free Claude probe
-  needs the owner's approval, because Claude can read and refresh the user's
-  keychain login.
+  docs, and a reading of minified binary code, marked as inferred. A
+  credential-free Claude probe needs the owner's approval, because Claude can
+  read and refresh the user's keychain login. That probe would also qualify
+  or reject `claudeMdExcludes` as a narrower Claude option.
 - `$GROK_HOME/AGENTS.md`, `$GROK_HOME/rules/` and `extra_rule_dirs` stay
   active for Grok. The `~/.claude` and `~/.cursor` named files and rules stay
   active under `compatInstructions: 'inherit'`.

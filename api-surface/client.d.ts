@@ -14,15 +14,6 @@ export interface ClaudeAdapterOptions {
     interruptTimeoutMs?: number;
     /** Local Host callbacks for native stdio requests; never enables remote boolean approvals. */
     nativeInteractions?: NativeInteractionHostOptions;
-    /**
-     * Claude's `--setting-sources` for every session. Absent: Claude's default,
-     * all three. Leaving out `user` drops `~/.claude/CLAUDE.md` and
-     * `~/.claude/rules/`, and also the user's deny rules and hooks (the
-     * guardrails left under `--dangerously-skip-permissions`), the settings `env`
-     * block and `apiKeyHelper`, which can carry the provider login. It is not
-     * prompt isolation: see `docs/adapter-capabilities.md`.
-     */
-    settingSources?: readonly ('user' | 'project' | 'local')[];
 }
 /**
  * Claude Code stream-json adapter.
@@ -43,7 +34,6 @@ export declare class ClaudeAdapter implements RuntimeAdapter {
     private readonly options;
     readonly descriptor: import("..").RuntimeAdapterDescriptor;
     private readonly nativeOptions?;
-    private readonly settingSources?;
     constructor(options?: ClaudeAdapterOptions);
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
