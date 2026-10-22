@@ -13,7 +13,8 @@
   On POSIX, a successful call has flushed the file and its directory. On
   Windows, it has flushed the file only: there is no promise for an OS crash
   or a power loss, and a delivery of the same revision and hash repairs a lost
-  file. `agent-home-write-file.test.ts` kills a child process at five points
+  file. A process crash can leave a `<name>.<pid>-<n>.tmp` file in the home.
+  The SDK does not remove it. `agent-home-write-file.test.ts` kills a child process at five points
   of a three-file apply and checks each file and the redelivery. The root
   `@byok-sdk/client` entry grows by 1389 bytes.
 - **Changed (keys)** — `PiModelConfigSchema` accepts a `pi_model` without

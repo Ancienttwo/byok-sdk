@@ -79,6 +79,23 @@ async function extraEntries(home: string): Promise<string[]> {
   return (await fs.readdir(home)).filter(name => !SDK_ENTRIES.includes(name) && !(FILES as readonly string[]).includes(name));
 }
 
+/**
+ * The unhandled rejections while `run` and the timers it starts settle. Node
+ * reports one after the microtask queue drains, so a short timer is enough.
+ */
+async function unhandledRejections(run: () => Promise<void>): Promise<unknown[]> {
+  const reasons: unknown[] = [];
+  const record = (reason: unknown) => { reasons.push(reason); };
+  process.on('unhandledRejection', record);
+  try {
+    await run();
+    await new Promise(resolve => setTimeout(resolve, 50));
+  } finally {
+    process.off('unhandledRejection', record);
+  }
+  return reasons;
+}
+
 describe('Agent-home projection writeHomeFile', () => {
   it('replaces each named file at the home root with mode 0600 on POSIX', async () => {
     const { root, home, state } = await fixture();
@@ -127,6 +144,26 @@ describe('Agent-home projection writeHomeFile', () => {
     await expect(manager(root, ({ writeHomeFile }) => { stashed = writeHomeFile; }).project(desired('1')))
       .resolves.toBe('applied');
     await expect(stashed!('AGENTS.md', 'late')).rejects.toThrow('writeHomeFile is valid only while the projection hook runs');
+    await expect(fs.access(path.join(home, 'AGENTS.md'))).rejects.toThrow();
+  });
+
+  it('leaves no unhandled rejection for a refused name that the hook does not await', async () => {
+    const { root, home } = await fixture();
+    expect(await unhandledRejections(async () => {
+      await expect(manager(root, ({ writeHomeFile }) => { void writeHomeFile('a/b', 'refused'); })
+        .project(desired('1'))).resolves.toBe('applied');
+    })).toEqual([]);
+    expect((await fs.readdir(home)).sort()).toEqual(SDK_ENTRIES);
+  });
+
+  it('leaves no unhandled rejection for a call after the hook settles that nobody awaits', async () => {
+    const { root, home } = await fixture();
+    let stashed: ((name: string, body: string) => Promise<void>) | undefined;
+    await expect(manager(root, ({ writeHomeFile }) => { stashed = writeHomeFile; }).project(desired('1')))
+      .resolves.toBe('applied');
+    expect(await unhandledRejections(async () => {
+      setTimeout(() => { void stashed!('AGENTS.md', 'late'); }, 0);
+    })).toEqual([]);
     await expect(fs.access(path.join(home, 'AGENTS.md'))).rejects.toThrow();
   });
 

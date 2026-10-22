@@ -2114,9 +2114,13 @@ runtime, session, terminal event, or task journal record is created.
 
 The consumer hook input carries `writeHomeFile(name, body)` (#738). It
 atomically replaces one file at the root of the canonical Agent home, under the
-same writer lease. `name` is one portable file name with the Agent id segment
-rules. `.byok`, `MEMORY.md` and `notes` belong to the SDK, and the call refuses
-them in any letter case. The call is valid only while the hook runs. The SDK
+same writer lease. `name` is one portable file name. The call checks that it
+has no path separator, no `:<>"|?*` and no control character, that it does not
+end in a dot or a space, and that it is not a Windows device name. The call
+does not check the length. A name that is too long for the file system fails
+the write with `ENAMETOOLONG`, and so fails the projection. `.byok`,
+`MEMORY.md` and `notes` belong to the SDK, and the call refuses them in any
+letter case. The call is valid only while the hook runs. The SDK
 waits for every call before it writes the ordering record. A write that fails
 also fails the projection, even when the hook catches the error; a refused call
 writes nothing. Each call is atomic for its own file only. Several calls

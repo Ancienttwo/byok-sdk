@@ -1126,13 +1126,14 @@ function homeFileWriter(canonicalHome: string) {
   let open = true;
   return {
     write(name: string, body: string | Uint8Array): Promise<void> {
-      if (!open) return Promise.reject(new AgentHomeError('writeHomeFile is valid only while the projection hook runs'));
-      if (!isHomeFileName(name)) return Promise.reject(new AgentHomeError(`invalid Agent home file name: ${JSON.stringify(name)}`));
-      const write = atomicWriteFile(path.join(canonicalHome, name), body, { mode: 0o600, fsync: true });
-      // A hook that does not await a write must not crash the process with an
-      // unhandled rejection. close() still reports the failure.
+      let write: Promise<void>;
+      if (!open) write = Promise.reject(new AgentHomeError('writeHomeFile is valid only while the projection hook runs'));
+      else if (!isHomeFileName(name)) write = Promise.reject(new AgentHomeError(`invalid Agent home file name: ${JSON.stringify(name)}`));
+      else writes.push(write = atomicWriteFile(path.join(canonicalHome, name), body, { mode: 0o600, fsync: true }));
+      // A hook that does not await a call, a refused one too, must not crash
+      // the process with an unhandled rejection. A caller that awaits the
+      // call still gets the rejection, and close() still reports a failed write.
       write.catch(() => {});
-      writes.push(write);
       return write;
     },
     async close(): Promise<void> {

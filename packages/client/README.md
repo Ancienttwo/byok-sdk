@@ -371,7 +371,8 @@ transaction over several files. After a process crash, each file has its old or
 its new bytes. On POSIX, a successful call has flushed the file and its
 directory. On Windows, it has flushed the file only, so the SDK makes no promise
 for an OS crash or a power loss. A delivery of the same revision and hash
-repairs a file write that such a loss undid.
+repairs a file write that such a loss undid. A process crash can leave a
+`<name>.<pid>-<n>.tmp` file in the home. The SDK does not remove it.
 
 Startup materializes and write-probes the canonical root before publishing
 `agent-home-contract`. `agentHome` and `gitWorkspace` are mutually exclusive;
