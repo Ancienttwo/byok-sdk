@@ -6,6 +6,7 @@ import {
   PI_THINKING_LEVELS,
   PiModelConfigSchema,
   piCompatIssues,
+  piSupportedThinkingLevels,
   type PiModelApi,
   type PiModelConfig,
   type PiThinkingLevel,
@@ -60,7 +61,7 @@ export function piModelConfigFromPinnedCatalog(selection: PiCatalogSelection): P
   const entry = ownEntry(selection);
   if (entry === undefined) return { ok: false, reason: 'not_in_catalog' };
   if ('unrepresentable' in entry) return { ok: false, reason: 'unrepresentable', fields: entry.unrepresentable };
-  const supported = supportedThinkingLevels(entry.config);
+  const supported = piSupportedThinkingLevels(entry.config);
   if (!supported.includes(selection.thinkingLevel)) return { ok: false, reason: 'thinking_level_unsupported', supported };
   return {
     ok: true,
@@ -75,12 +76,6 @@ function ownEntry(selection: PiCatalogSelection): PiCatalogModelEntry | PiCatalo
   if (!(PI_MODEL_APIS as readonly string[]).includes(selection.api) || !Object.hasOwn(byApi, selection.api)) return undefined;
   const models = byApi[selection.api]!;
   return Object.hasOwn(models, selection.model) ? models[selection.model] : undefined;
-}
-
-/** The levels `PiModelConfigSchema` accepts for these settings, in Pi's order. */
-function supportedThinkingLevels(config: Pick<PiModelConfig, 'reasoning' | 'thinkingLevelMap'>): PiThinkingLevel[] {
-  if (!config.reasoning) return ['off'];
-  return PI_THINKING_LEVELS.filter((level) => config.thinkingLevelMap[level] !== null);
 }
 
 /** Pi model fields that `pi_model` does not carry by design: identity and endpoint come from the profile, cost is not projected. */
@@ -123,7 +118,7 @@ export function classifyPiCatalogModel(
     maxTokens: model.maxTokens,
     reasoning: model.reasoning,
     thinkingLevel,
-    thinkingLevelMap: model.thinkingLevelMap,
+    ...(model.thinkingLevelMap === undefined ? {} : { thinkingLevelMap: model.thinkingLevelMap }),
     compat,
     ...(model.inputLimits === undefined ? {} : { inputLimits: model.inputLimits }),
   });
