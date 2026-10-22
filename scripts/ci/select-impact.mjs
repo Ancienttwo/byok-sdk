@@ -406,6 +406,9 @@ export function selectImpact(paths, context = {}) {
     if (path === 'scripts/ci/run-windows-bot-tests.mjs') {
       families.add('adapter-lifecycle-smoke'); continue;
     }
+    // #654: the dataplane job runs hosted-plaintext-inventory.test.ts, which
+    // checks the inventory table in this doc against real Postgres and S3.
+    if (path === 'docs/security.md') { families.add('dataplane'); continue; }
     if (rootDocs.has(path) || /^(docs|tasks|deploy\/runbooks)\/.+\.md$/.test(path)) continue;
     if (rootCi.has(path) || /^scripts\/ci\/[a-z0-9-]+(?:\.test)?\.mjs$/.test(path)) { scripts = true; continue; }
     const golden = /^api-surface\/([a-z-]+)\.d\.ts$/.exec(path);
