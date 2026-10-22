@@ -16,7 +16,7 @@
   file. A process crash can leave a `<name>.<pid>-<n>.tmp` file in the home.
   The SDK does not remove it. `agent-home-write-file.test.ts` kills a child process at five points
   of a three-file apply and checks each file and the redelivery. The root
-  `@byok-sdk/client` entry grows by 1389 bytes.
+  `@byok-sdk/client` entry grows by 1399 bytes.
 - **Changed (keys)** — `PiModelConfigSchema` accepts a `pi_model` without
   `thinkingLevelMap`, as the prepared model wire already does. A declared map
   must still map all seven levels. Without a map, Pi applies its own handling
