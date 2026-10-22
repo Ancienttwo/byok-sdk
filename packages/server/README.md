@@ -486,6 +486,9 @@ prepared submission retain their existing contracts: `dispatch({ agentRef })`,
 with or without `egressPolicy`, resumes an exact session and requires
 `sessionRef` (it is refused before any write otherwise; fresh execution is
 `executions.submit`). Other `dispatch` calls may still omit taskId.
+`executions.submit` and `dispatch({ agentRef })` take an optional `agentMemory`
+(`'none'`, `'read'` or `'read-write'`) for that one task. The device must
+advertise `agent-memory-selection`; the client README describes the semantics.
 A caller taskId requires an explicit device; the façade never reselects a
 missing device for that identity. Initial dispatch requires a registered
 device. Concurrent calls for one caller identity in one façade are rejected

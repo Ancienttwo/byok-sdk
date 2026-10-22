@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope } from '@byok-sdk/protocol';
+import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { AgentHomeManager } from '../agent-home';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
@@ -210,51 +210,60 @@ describe('Agent memory guidance', () => {
 });
 
 // #614 follow-ups: the guidance follows `agentMemoryMcp`, and a reader gets no write tool.
+async function createMemoryRunner(agentMemoryMcp: 'auto' | 'off' | undefined, mcpToolsets = true) {
+  const hostStorageRoot = await makeRoot();
+  const workspaceRoot = await makeRoot();
+  const storeDir = await makeRoot();
+  const adapter = new StubRuntimeAdapter('pi', undefined, { steer: true, resume: true, approvalInteractive: true, mcpToolsets });
+  const sent: Envelope[] = [];
+  const gitWorkspaceStore = new GitWorkspaceStore(storeDir);
+  await gitWorkspaceStore.initialize();
+  const gitWorkspaceManager = new GitWorkspaceManager(workspaceRoot, { ownerId: 'agent-memory-admission-test' });
+  await gitWorkspaceManager.preflight();
+  const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    adapters: [adapter],
+    workspaceRoot,
+    agentHome: new AgentHomeManager({ hostStorageRoot }),
+    agentSessionHandoffs: new AgentSessionHandoffStore(),
+    deviceId: 'device-memory-admission',
+    send: (envelope) => { sent.push(envelope); },
+    blobClient: {
+      resolveInstruction: async () => { throw new Error('not used in this test'); },
+      uploadArtifact: async () => { throw new Error('not used in this test'); },
+    },
+    sessionWorkspaces: new SessionWorkspaceStore(storeDir),
+    gitWorkspaceManager,
+    gitWorkspaceStore,
+    approvalRegistry: new ApprovalRegistry(),
+    storeDir,
+    productId: 'product-memory-admission',
+    tenantId: 'tenant-memory-admission',
+    // `off` resolves no helper in the daemon; `auto` models an admitted
+    // secure filesystem (the macOS release helper is never opened here).
+    ...(agentMemoryMcp === 'off' ? { agentMemoryMcp } : {
+      ...(agentMemoryMcp === undefined ? {} : { agentMemoryMcp }),
+      agentMemoryMcpBin: { command: 'node', args: ['memory-mcp.js'] },
+      ...(process.platform === 'darwin' ? { resolveAgentMemoryFilesystemHelperBin: () => '/sdk/release/agent-memory-fs' } : {}),
+    }),
+  });
+  let seq = 1;
+  const offer = (taskId: string, options: { reader?: boolean; agentId?: string; agentMemory?: 'none' | 'read' | 'read-write' } = {}) =>
+    runner.handleEnvelope(createEnvelope('task.offer_for_agent', {
+      instruction: `instruction for ${taskId}`,
+      runtime: 'pi',
+      agentRef: { agentId: options.agentId ?? 'agent-admission', profileRevision: 'profile-1' },
+      ...(options.reader ? { homeAccess: 'memory-reader' as const } : {}),
+      ...(options.agentMemory === undefined ? {} : { agentMemory: options.agentMemory }),
+    }, { taskId, seq: seq++ }));
+  const declineOf = (taskId: string) => sent.find((envelope) => envelope.type === 'task.decline' && envelope.task_id === taskId);
+  return { runner, adapter, offer, declineOf };
+}
+
 describe('Agent memory admission follow-ups', () => {
   async function memoryRunner(agentMemoryMcp: 'auto' | 'off' | undefined) {
-    const hostStorageRoot = await makeRoot();
-    const workspaceRoot = await makeRoot();
-    const storeDir = await makeRoot();
-    const adapter = new StubRuntimeAdapter('pi', undefined, { steer: true, resume: true, approvalInteractive: true, mcpToolsets: true });
-    const gitWorkspaceStore = new GitWorkspaceStore(storeDir);
-    await gitWorkspaceStore.initialize();
-    const gitWorkspaceManager = new GitWorkspaceManager(workspaceRoot, { ownerId: 'agent-memory-admission-test' });
-    await gitWorkspaceManager.preflight();
-    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
-      adapters: [adapter],
-      workspaceRoot,
-      agentHome: new AgentHomeManager({ hostStorageRoot }),
-      agentSessionHandoffs: new AgentSessionHandoffStore(),
-      deviceId: 'device-memory-admission',
-      send: () => {},
-      blobClient: {
-        resolveInstruction: async () => { throw new Error('not used in this test'); },
-        uploadArtifact: async () => { throw new Error('not used in this test'); },
-      },
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
-      gitWorkspaceManager,
-      gitWorkspaceStore,
-      approvalRegistry: new ApprovalRegistry(),
-      storeDir,
-      productId: 'product-memory-admission',
-      tenantId: 'tenant-memory-admission',
-      // `off` resolves no helper in the daemon; `auto` models an admitted
-      // secure filesystem (the macOS release helper is never opened here).
-      ...(agentMemoryMcp === 'off' ? { agentMemoryMcp } : {
-        ...(agentMemoryMcp === undefined ? {} : { agentMemoryMcp }),
-        agentMemoryMcpBin: { command: 'node', args: ['memory-mcp.js'] },
-        ...(process.platform === 'darwin' ? { resolveAgentMemoryFilesystemHelperBin: () => '/sdk/release/agent-memory-fs' } : {}),
-      }),
-    });
-    let seq = 1;
-    for (const [taskId, reader] of [['writer-task', false], ['reader-task', true]] as const) {
-      await runner.handleEnvelope(createEnvelope('task.offer_for_agent', {
-        instruction: `instruction for ${taskId}`,
-        runtime: 'pi',
-        agentRef: { agentId: 'agent-admission', profileRevision: 'profile-1' },
-        ...(reader ? { homeAccess: 'memory-reader' as const } : {}),
-      }, { taskId, seq: seq++ }));
-    }
+    const { runner, adapter, offer } = await createMemoryRunner(agentMemoryMcp);
+    await offer('writer-task');
+    await offer('reader-task', { reader: true });
     expect(adapter.startCalls).toHaveLength(2);
     return { runner, writer: adapter.startCalls[0]!, reader: adapter.startCalls[1]! };
   }
@@ -321,5 +330,72 @@ describe('Agent memory admission follow-ups', () => {
     // The prepared lane compares this listing with its complete sealed descriptor.
     expect(await listToolNames((stdin, stdout) => serveAgentMemoryMcpOverStdio({ deps, mode: 'read', stdin, stdout })))
       .toEqual(['memory_recall', 'memory_save']);
+  });
+});
+
+// #614: an ordinary Agent offer selects the memory of its own task.
+describe('per-task Agent memory selection', () => {
+  const readOnlyGuidance = [
+    'At the start of this Agent task, first read `MEMORY.md` in the provided `cwd`.',
+    'Read files under `notes/` only as needed, following pointers from the index.',
+    'This task reads Agent memory only. Do not change `MEMORY.md` or `notes/`.',
+  ].join('\n');
+
+  it('none gives no memory MCP and no memory guidance, and needs no adapter MCP support', async () => {
+    const { adapter, offer, declineOf } = await createMemoryRunner('auto', false);
+    await offer('writer-none', { agentMemory: 'none' });
+    await offer('reader-none', { reader: true, agentMemory: 'none' });
+    expect(declineOf('writer-none')).toBeUndefined();
+    expect(declineOf('reader-none')).toBeUndefined();
+    expect(adapter.startCalls).toHaveLength(2);
+    const [writer, reader] = adapter.startCalls;
+    expect(writer!.task.instruction).toBe('instruction for writer-none');
+    expect(reader!.task.instruction).toBe(prependAgentReaderResultGuidance('instruction for reader-none'));
+    for (const start of [writer!, reader!]) expect(start.ctx.mcpServers?.byokagentmemory).toBeUndefined();
+  });
+
+  it.skipIf(process.platform === 'win32')('read seals a writer read-only with read-only guidance; read-write keeps the writer', async () => {
+    const { adapter, offer } = await createMemoryRunner('auto');
+    await offer('writer-read', { agentId: 'agent-read', agentMemory: 'read' });
+    await offer('writer-read-write', { agentId: 'agent-read-write', agentMemory: 'read-write' });
+    await offer('reader-read', { agentId: 'agent-read', reader: true, agentMemory: 'read' });
+    expect(adapter.startCalls).toHaveLength(3);
+    const [read, readWrite, reader] = adapter.startCalls;
+    expect(read!.task.instruction).toBe(`${readOnlyGuidance}\n\ninstruction for writer-read`);
+    expect(read!.ctx.mcpServers?.byokagentmemory?.env).toMatchObject({
+      BYOK_PREPARED_AGENT_MEMORY_MODE: 'read', BYOK_AGENT_MEMORY_TOOL_LIST: 'granted',
+    });
+    expect(readWrite!.task.instruction).toBe(prependAgentMemoryGuidance('instruction for writer-read-write'));
+    expect(readWrite!.ctx.mcpServers?.byokagentmemory?.env).toMatchObject({
+      BYOK_PREPARED_AGENT_MEMORY_MODE: 'read-write', BYOK_AGENT_MEMORY_TOOL_LIST: 'granted',
+    });
+    expect(reader!.task.instruction).toBe(prependAgentMemoryReaderGuidance('instruction for reader-read'));
+    expect(reader!.ctx.mcpServers?.byokagentmemory?.env).toMatchObject({
+      BYOK_PREPARED_AGENT_MEMORY_MODE: 'read', BYOK_AGENT_MEMORY_TOOL_LIST: 'granted',
+    });
+  });
+
+  it('declines a memory-reader that selects read-write before it starts', async () => {
+    const { adapter, offer, declineOf } = await createMemoryRunner('auto');
+    await offer('reader-read-write', { reader: true, agentMemory: 'read-write' });
+    expect(declineOf('reader-read-write')?.payload).toMatchObject({
+      retryable: false, reason: expect.stringContaining('agent_memory_selection_invalid'),
+    });
+    expect(adapter.startCalls).toHaveLength(0);
+  });
+
+  it('declines read and read-write when the daemon does not admit memory, and still runs none', async () => {
+    const { adapter, offer, declineOf } = await createMemoryRunner('off');
+    await offer('off-read', { agentId: 'agent-off-read', agentMemory: 'read' });
+    await offer('off-read-write', { agentId: 'agent-off-read-write', agentMemory: 'read-write' });
+    await offer('off-none', { agentId: 'agent-off-none', agentMemory: 'none' });
+    for (const taskId of ['off-read', 'off-read-write']) {
+      expect(declineOf(taskId)?.payload, taskId).toMatchObject({
+        retryable: false, reason: expect.stringContaining('agent_memory_unavailable'),
+      });
+    }
+    expect(adapter.startCalls).toHaveLength(1);
+    expect(adapter.startCalls[0]!.task.instruction).toBe('instruction for off-none');
+    expect(adapter.startCalls[0]!.ctx.mcpServers?.byokagentmemory).toBeUndefined();
   });
 });

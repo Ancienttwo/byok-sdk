@@ -46,6 +46,7 @@ import {
   TASK_STATES,
   TerminalProjectionSelectionSchema,
   AgentHomeAccessSchema,
+  PreparedAgentMemoryModeSchema,
   type AgentHomeProjectionPayload,
   type AgentRef,
   type AgentMessagePublishPayload,
@@ -531,6 +532,10 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     if (homeAccess !== undefined && agentRef === undefined) {
       throw new Error('homeAccess requires an explicit AgentRef; legacy task dispatch has no Agent home');
     }
+    const agentMemory = input.agentMemory === undefined ? undefined : PreparedAgentMemoryModeSchema.parse(input.agentMemory);
+    if (agentMemory !== undefined && agentRef === undefined) {
+      throw new Error('agentMemory requires an explicit AgentRef; legacy task dispatch has no Agent memory');
+    }
     const agentMessageContext =
       messageEgress === undefined ? undefined : AgentMessageServerContextSchema.parse(input.agentMessageContext);
     const dispatchSelection =
@@ -626,6 +631,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
               egressPolicy,
               ...(terminalProjection === undefined ? {} : { terminalProjection }),
               ...(homeAccess === undefined ? {} : { homeAccess }),
+              ...(agentMemory === undefined ? {} : { agentMemory }),
               ...(messageEgress === undefined ? {} : { messageEgress }),
               ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
             },
@@ -641,6 +647,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
               sessionRef: agentResume.sessionRef,
               ...(terminalProjection === undefined ? {} : { terminalProjection }),
               ...(homeAccess === undefined ? {} : { homeAccess }),
+              ...(agentMemory === undefined ? {} : { agentMemory }),
               ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
             },
           });

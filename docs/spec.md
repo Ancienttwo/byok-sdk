@@ -2214,6 +2214,23 @@ selected adapter must still support MCP toolsets for each task. The value is
 in-process only; the hello capabilities, `DaemonEvent` and the control status
 do not carry it.
 
+An ordinary Agent offer can select the memory of its one task with the
+OPTIONAL `agentMemory: 'none' | 'read' | 'read-write'`, the values of the
+prepared offer. Absent keeps the daemon admission above. `none` binds no SDK
+memory MCP and adds no memory guidance, so memory alone requires no adapter MCP
+support; a `memory-reader` instruction keeps only its final-reply line. `read`
+seals the memory MCP `read`, lists only `memory_recall` and uses the read-only
+guidance (a `memory-reader` keeps its reader guidance). `read-write` is the
+writer default. A `memory-reader` Attempt that selects `read-write` is declined
+without retry (`agent_memory_selection_invalid`). `read` or `read-write` on a
+daemon whose admission is `off` or `unavailable` is declined without retry
+(`agent_memory_unavailable`), as on the prepared lane; the daemon never changes
+a selection to `none`. The offers are strict, so the field is a gated wire
+addition: a daemon with an Agent home advertises `agent-memory-selection`
+whatever its admission, and server and cloud refuse the field to a device
+without it before task creation or mailbox append. The reference server takes
+it on `executions.submit` and on `dispatch` with an explicit `agentRef`.
+
 The client release carries Darwin arm64 and x64 helpers. The SDK resolves its
 own path and checks the build manifest before each helper open. Arbitrary
 `agentMemoryFilesystem.helperBin` configuration is removed. The ordinary build

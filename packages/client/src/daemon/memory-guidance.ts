@@ -49,3 +49,25 @@ export function prependAgentMemoryReaderGuidance(instruction: string): string {
 export function prependAgentReaderResultGuidance(instruction: string): string {
   return `${AGENT_READER_RESULT_GUIDANCE}\n\n${instruction}`;
 }
+
+/**
+ * Guidance for a writer Attempt whose task selects `agentMemory: 'read'`. Its
+ * `cwd` is the canonical home, so the paths are the writer paths.
+ */
+const AGENT_MEMORY_READ_ONLY_GUIDANCE = [
+  'At the start of this Agent task, first read `MEMORY.md` in the provided `cwd`.',
+  'Read files under `notes/` only as needed, following pointers from the index.',
+  'This task reads Agent memory only. Do not change `MEMORY.md` or `notes/`.',
+].join('\n');
+
+/**
+ * The guidance for the effective memory mode of an ordinary Agent task (#614).
+ * `none` gets no memory lines; a reader keeps its result line. `read` gets
+ * read-only guidance. `read-write` gets the writer guidance; a reader never
+ * gets this mode.
+ */
+export function prependAgentMemoryModeGuidance(instruction: string, mode: 'none' | 'read' | 'read-write', reader: boolean): string {
+  if (mode === 'none') return reader ? prependAgentReaderResultGuidance(instruction) : instruction;
+  if (reader) return prependAgentMemoryReaderGuidance(instruction);
+  return mode === 'read' ? `${AGENT_MEMORY_READ_ONLY_GUIDANCE}\n\n${instruction}` : prependAgentMemoryGuidance(instruction);
+}

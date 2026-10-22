@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Feature (protocol, server, cloud, client)** — an ordinary Agent offer can
+  select the Agent memory of its one task with the optional
+  `agentMemory: 'none' | 'read' | 'read-write'` (#614). The values are those of
+  the prepared offer. Absent keeps the daemon admission. `none` binds no memory
+  MCP and adds no memory guidance, so memory alone needs no adapter MCP support.
+  `read` binds only `memory_recall`. A `memory-reader` that selects
+  `read-write` is declined. `read` or `read-write` is declined when the daemon
+  does not admit the memory MCP; the daemon does not change it to `none`. The
+  offers are strict, so this is a gated wire addition. Every daemon with an
+  Agent home advertises the new device capability `agent-memory-selection`
+  (`AGENT_MEMORY_SELECTION_CAPABILITY`). Server and hosted cloud refuse the
+  field to a device without it, before the task exists.
+  `ByokServer.dispatch` takes `agentMemory` only with an explicit `agentRef`;
+  `executions.submit` takes it in its payload.
+
 ## 0.28.3 — source candidate
 
 The owner selected 0.28.3 as one more one-release exception to the default

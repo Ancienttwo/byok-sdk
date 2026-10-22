@@ -7006,6 +7006,13 @@ export declare function prependAgentMemoryReaderGuidance(instruction: string): s
  * lines, only the run-directory result guidance.
  */
 export declare function prependAgentReaderResultGuidance(instruction: string): string;
+/**
+ * The guidance for the effective memory mode of an ordinary Agent task (#614).
+ * `none` gets no memory lines; a reader keeps its result line. `read` gets
+ * read-only guidance. `read-write` gets the writer guidance; a reader never
+ * gets this mode.
+ */
+export declare function prependAgentMemoryModeGuidance(instruction: string, mode: 'none' | 'read' | 'read-write', reader: boolean): string;
 // ==== @byok-sdk/client dist/daemon/observer.d.ts ====
 import type { RetentionClassId, RetentionTrigger, SweepReport } from './retention/registry';
 import { type AgentEvent, type BlobRef, type Envelope, type TaskState } from '@byok-sdk/protocol';
@@ -9313,6 +9320,8 @@ export declare class TaskRunner {
     private revokeAgentResultContext;
     private agentResultStore;
     private revokeAgentMessageContext;
+    /** What `status().agentMemoryMcp` reports as `admitted`. */
+    private agentMemoryMcpAdmitted;
     /**
      * Injected only after strict Agent admission; a host registry may never replace this reserved name.
      * `toolList` `granted` makes the helper list only the tools `mode` grants. The prepared lane needs

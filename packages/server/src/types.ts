@@ -21,6 +21,7 @@ import type {
   ToolsetId,
   TerminalProjectionSelection,
   AgentHomeAccess,
+  PreparedAgentMemoryMode,
 } from '@byok-sdk/protocol';
 import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { PresenceRuntimeFact } from '@byok-sdk/core';
@@ -185,6 +186,13 @@ interface DispatchInputBase {
    * before the task exists. Absent means a writer.
    */
   homeAccess?: AgentHomeAccess;
+  /**
+   * The Agent memory of this one task: `none`, `read` or `read-write`.
+   * Requires `agentRef` and a device that advertises `agent-memory-selection`;
+   * the kernel refuses it otherwise, before the task exists. Absent keeps the
+   * daemon admission.
+   */
+  agentMemory?: PreparedAgentMemoryMode;
   /** Host-only product destination/freshness authority; never serialized to the daemon. */
   agentMessageContext?: AgentMessageServerContext;
 }
