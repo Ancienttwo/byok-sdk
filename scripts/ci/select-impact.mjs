@@ -297,7 +297,8 @@ export function selectImpact(paths, context = {}) {
       }
       continue;
     }
-    if (path === 'packages/client/scripts/check-hermes-session-entry.mjs' || path === 'packages/client/tsup.config.ts') {
+    if (path === 'packages/client/scripts/check-hermes-session-entry.mjs' || path === 'packages/client/scripts/check-adapters-entry.mjs'
+      || path === 'packages/client/tsup.config.ts') {
       dirs.add('packages/client'); families.add('npm-release-pack'); continue;
     }
     // #636: the keys pi-catalog subpath entry, and the generator that keys

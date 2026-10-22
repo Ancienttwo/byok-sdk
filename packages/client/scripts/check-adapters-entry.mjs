@@ -100,8 +100,15 @@ const adapters = await import(new URL('../dist/adapters/index.js', import.meta.u
 const root = await import(new URL('../dist/index.js', import.meta.url));
 assert.deepEqual(
   Object.keys(adapters).sort(),
-  ['ClaudeAdapter', 'CodexAdapter', 'GrokAdapter', 'HermesAdapter', 'NativeInteractionController', 'NativeInteractionError', 'PI_PACKAGE_NAME', 'PiAdapter', 'RuntimeDisposalFailure', 'RuntimeExecutionFailure', 'RuntimeStartupDisposalFailure', 'ScratchRootPathError', 'buildRuntimeEnv', 'createExecutionScratch'],
+  ['ClaudeAdapter', 'CodexAdapter', 'GrokAdapter', 'HermesAdapter', 'NativeInteractionController', 'NativeInteractionError', 'PI_PACKAGE_NAME', 'PiAdapter', 'RuntimeDisposalFailure', 'RuntimeExecutionFailure', 'RuntimeStartupDisposalFailure', 'ScratchRootPathError', 'buildRuntimeEnv', 'createExecutionScratch', 'isWireRuntimeId', 'observeRuntimeDetection', 'projectRuntimeObservation', 'taskRuntimeTarget', 'validateRuntimeDetectResult'],
 );
+// The public testing entry is transport-free too: a Host test must not load the daemon.
+const bundledTesting = readFileSync(new URL('../dist/testing/index.js', import.meta.url), 'utf8');
+assert.doesNotMatch(bundledTesting, /(?:from|import\()\s*["']ws["']/);
+assert.doesNotMatch(bundledTesting, /ws-transport|createDaemon/);
+const testing = await import(new URL('../dist/testing/index.js', import.meta.url));
+assert.deepEqual(Object.keys(testing).sort(), ['fakeRuntimeAdapter']);
+assert.deepEqual(testing.fakeRuntimeAdapter('claude').descriptor, new adapters.ClaudeAdapter().descriptor);
 const crossEntryFailure = new adapters.RuntimeExecutionFailure({
   phase: 'start',
   category: 'infrastructure',

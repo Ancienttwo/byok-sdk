@@ -1839,6 +1839,8 @@ export * from './capability-constants';
 export declare const AGENT_MEMORY_MAX_SNAPSHOT_BYTES: number;
 /** Maximum memory files in one local Host export, including MEMORY.md. */
 export declare const AGENT_MEMORY_MAX_SNAPSHOT_FILES = 128;
+/** The frozen wire runtime ids. Any other adapter id is a custom harness (`harnessId`). */
+export declare const RUNTIME_IDS: readonly ["pi", "claude", "codex"];
 // ==== @byok-sdk/protocol dist/envelope.d.ts ====
 import { z } from 'zod';
 import { type MessageType } from './messages';

@@ -1,3 +1,5 @@
+import { RUNTIME_IDS } from '@byok-sdk/protocol/constants';
+import type { RuntimeId } from '@byok-sdk/protocol';
 import { RUNTIME_DETECTION_FAILURE_KINDS, type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectionAdvisory, type RuntimeDetectResult, type RuntimeDetectionRefusalReason } from './types';
 
 /** Content-free observation of one configured adapter, including unavailable outcomes. */
@@ -56,7 +58,7 @@ export function parseRuntimeObservations(value: unknown): RuntimeObservation[] |
   return observations;
 }
 
-const REFUSAL_REASONS: readonly RuntimeDetectionRefusalReason[] = Object.freeze(['app_server_unavailable', 'acp_unavailable']);
+const REFUSAL_REASONS: readonly RuntimeDetectionRefusalReason[] = Object.freeze(['app_server_unavailable', 'acp_unavailable', 'platform_unsupported']);
 const MAX_VERSION_CHARS = 256;
 
 function isVersionText(value: unknown): value is string {
@@ -104,7 +106,24 @@ export function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult
   throw new TypeError('invalid runtime detection result');
 }
 
-/** Single routing author for daemon, selection and local diagnostics. */
+/**
+ * Single routing author for daemon, selection and local diagnostics. A host
+ * platform outside `descriptor.platforms` is refused before `detect()` runs.
+ */
 export async function observeRuntimeDetection(adapter: RuntimeAdapter, signal?: AbortSignal): Promise<RuntimeDetectResult> {
+  const platforms = adapter.descriptor.platforms;
+  if (platforms !== undefined && !platforms.includes(process.platform)) {
+    return validateRuntimeDetectResult({ kind: 'refused', reason: 'platform_unsupported' });
+  }
   return validateRuntimeDetectResult(await adapter.detect(signal));
+}
+
+/** Whether `id` is a frozen wire runtime id. Every other adapter id is selected by `harnessId`. */
+export function isWireRuntimeId(id: string): id is RuntimeId {
+  return (RUNTIME_IDS as readonly string[]).includes(id);
+}
+
+/** The task selection that reaches this adapter: `runtime` for a wire runtime id, else `harnessId`. Never both. */
+export function taskRuntimeTarget(descriptor: Pick<RuntimeAdapterDescriptor, 'id'>): { readonly runtime: RuntimeId } | { readonly harnessId: string } {
+  return isWireRuntimeId(descriptor.id) ? { runtime: descriptor.id } : { harnessId: descriptor.id };
 }

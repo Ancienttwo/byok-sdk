@@ -10,7 +10,11 @@ export type {
   RuntimeOperationStartInput,
   RuntimeCapabilities,
   RuntimeDetectResult,
+  RuntimeDetectionAdvisory,
+  RuntimeDetectionRefusalReason,
 } from '../types';
+export { isWireRuntimeId, observeRuntimeDetection, projectRuntimeObservation, taskRuntimeTarget, validateRuntimeDetectResult } from '../runtime-detection';
+export type { RuntimeObservation } from '../runtime-detection';
 export { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
 export type {
   RuntimeDisposalFailureInput,
