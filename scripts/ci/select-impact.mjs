@@ -163,6 +163,10 @@ export const knownFamilies = Object.freeze([
 // test file and script a family job runs is owned by that family.
 export const familyOwners = Object.freeze({
   'agent-memory-export-linux': [
+    /^examples\/host-execution-core\/src\/memory\.ts$/,
+    /^examples\/host-execution-core\/src\/memory-restore\.ts$/,
+    /^examples\/host-execution-core\/src\/memory-restore\.test\.ts$/,
+    /^examples\/host-execution-core\/src\/memory-linux\.test\.ts$/,
     /^packages\/client\/src\/daemon\/agent-memory-(?:export|filesystem|fs-helper)\.ts$/,
     /^packages\/client\/src\/__tests__\/agent-memory-export[^/]*$/,
   ],
