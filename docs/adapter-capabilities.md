@@ -191,7 +191,8 @@ dependency.
   semantics. Live persona and unchanged MCP/hooks trust acceptance remain
   pending (#628); no new Grok version is qualified by this change.
 - Platforms: macOS and Linux. Windows uses the shared process-tree path but has
-  no Grok evidence.
+  no Grok evidence. The descriptor declares `platforms: ['darwin', 'linux']`, so
+  detection on Windows is refused with `platform_unsupported` and runs no probe.
 
 The fixture suite proves the adapter contract against a fake ACP agent. It is
 not live certification. No live Grok run is part of CI.
@@ -220,7 +221,26 @@ Evidence: `hermes-adapter.test.ts` (synthetic `fake-hermes.mjs`, offline) and
 the [S0 note](notes/2026-10-20-519-hermes-acp-s0.md), which records one real
 Hermes `0.22.2+2364.g0b10b9f` turn with a fake model endpoint on macOS. No
 live-provider run, Linux run or Windows run is part of this evidence.
-`prepare()` refuses on Windows.
+The descriptor declares `platforms: ['darwin', 'linux']`, so detection on
+Windows is refused with `platform_unsupported` before any probe.
+
+## Selection and platforms
+
+A Host reads the adapter list, not a table of its own. `taskRuntimeTarget(descriptor)`
+from `@byok-sdk/client/adapters` returns `{ runtime }` for a frozen wire runtime
+id (`RUNTIME_IDS` in `@byok-sdk/protocol/constants`) and `{ harnessId }` for any
+other id. `descriptor.platforms` lists the supported `process.platform` values:
+Claude, Codex and Pi declare macOS, Linux and Windows; Grok, Hermes and durable
+Pi declare macOS and Linux. A descriptor without `platforms` has no platform
+restriction. `observeRuntimeDetection` refuses an unsupported platform with
+`platform_unsupported` before `detect()` runs, and `projectRuntimeObservation`
+gives the same fields the daemon emits in its `runtimes-detected` event. Both
+are in the transport-free `./adapters` entry. A refused adapter is not
+advertised in `conn.hello`, so the cloud rejects a submit for that harness
+before an offer exists. An explicit offer that does reach the daemon is
+declined with a `platform_unsupported:` reason and `retryable: true`.
+`@byok-sdk/client/testing` exports `fakeRuntimeAdapter(id, behavior)`, whose
+descriptor is the real adapter's default descriptor.
 
 ## What the qualification suite proves
 

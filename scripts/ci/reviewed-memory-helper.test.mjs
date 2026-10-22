@@ -75,3 +75,36 @@ test('Hermes private session mapping and smoke admit exact additions only', t =>
   }
   assert.throws(() => selectImpact(['packages/client/scripts/check-other-entry.mjs']));
 });
+
+test('client testing entry admits the exact reviewed export only', t => {
+  const cwd = mkdtempSync(join(tmpdir(), 'ci-testing-entry-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  mkdirSync(join(cwd, 'packages/client'), { recursive: true });
+  const file = join(cwd, 'packages/client/package.json');
+  const baseline = { name: '@byok-sdk/client', version: '0.28.1', exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js' } } };
+  writeFileSync(file, JSON.stringify(baseline));
+  const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  git('init'); git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'baseline');
+  const context = { cwd, base: git('rev-parse', 'HEAD').trim() };
+  const candidate = structuredClone(baseline);
+  candidate.exports['./testing'] = { types: './dist/testing/index.d.ts', import: './dist/testing/index.js' };
+  const write = value => writeFileSync(file, JSON.stringify(value));
+  write(candidate);
+  assert.ok(selectImpact(['packages/client/package.json'], context).families.includes('npm-release-pack'));
+  for (const mutate of [
+    m => { m.exports['./testing'].import = './dist/other.js'; },
+    m => { m.exports['./testing'].default = './dist/testing/index.js'; },
+    m => { m.exports['./other'] = { types: './dist/other.d.ts', import: './dist/other.js' }; },
+    m => { m.exports['.'].import = './dist/replaced.js'; },
+  ]) {
+    const invalid = structuredClone(candidate); mutate(invalid); write(invalid);
+    assert.throws(() => selectImpact(['packages/client/package.json'], context), /more than/);
+  }
+});
+
+test('the client entry check selects client packaging without broad fallback', () => {
+  const impact = selectImpact(['packages/client/scripts/check-adapters-entry.mjs']);
+  assert.ok(impact.dirs.includes('packages/client'));
+  assert.ok(impact.families.includes('npm-release-pack'));
+  assert.throws(() => selectImpact(['packages/client/scripts/check-unreviewed-entry.mjs']));
+});

@@ -58,6 +58,10 @@
       "types": "./dist/mcp-server/http.d.ts",
       "import": "./dist/mcp-server/http.js"
     },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

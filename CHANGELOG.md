@@ -137,6 +137,18 @@ qualification. All nine public manifests and their lock records move to
   (`outbox_full`) and rolls back the whole ledger transaction. The defaults
   stay unlimited, and nothing is removed automatically. Other #602 bounds stay
   open (#602).
+- **Feature (client, protocol)** — adapter metadata for Hosts (#635). Each
+  built-in descriptor declares `platforms`. Runtime detection refuses another
+  platform with `platform_unsupported` before any probe; Grok and Hermes
+  support macOS and Linux only. The daemon declines an explicit offer for such a
+  runtime with a `platform_unsupported:` reason and `retryable: true`.
+  `@byok-sdk/client/adapters` exports `observeRuntimeDetection`,
+  `projectRuntimeObservation`, `validateRuntimeDetectResult`, `isWireRuntimeId`
+  and `taskRuntimeTarget`. The new `@byok-sdk/client/testing` entry exports
+  `fakeRuntimeAdapter(id, behavior)` with the real adapter descriptor.
+  `@byok-sdk/protocol/constants` exports `RUNTIME_IDS`, the one source of
+  `RuntimeIdSchema`. No wire change: a cloud submit for a harness the device
+  does not advertise still fails before an offer reaches the daemon.
 
 ## 0.28.1 / @byok-sdk/keys 0.13.1 — 2026-10-21 (published)
 
