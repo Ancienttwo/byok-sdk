@@ -37,6 +37,12 @@ The projection writes `api` on the Pi provider. It never infers `api` from
 the base URL or the model name. An `anthropic` profile always projects
 `'anthropic-messages'` and must not set `api`.
 
+`thinkingLevelMap` is optional. A declared map must map all seven levels.
+Without a map, Pi applies its own handling of each level, as it does for a
+pi-ai catalog model that has no map. For a reasoning model, Pi then offers
+`off` through `high`. The schema refuses `xhigh` and `max`, because Pi offers
+them only when a map names them.
+
 ### `pi_model` from the pinned pi-ai catalog
 
 `piModelConfigFromPinnedCatalog({ provider, api, model, thinkingLevel })`, from
@@ -72,10 +78,12 @@ The result is one of these:
 The mapping from a pi-ai catalog entry to `pi_model`:
 
 - `contextWindow`, `maxTokens`, `reasoning` and `inputLimits` are copied.
-- `thinkingLevelMap` is copied. It must declare all seven levels. Pi reads an
-  absent level differently from `null` and from the level name, so the
-  mapping does not fill one in. An entry with a partial map, or with no map,
-  is refused with `thinkingLevelMap`.
+- `thinkingLevelMap` is copied when the entry has one. It must then declare
+  all seven levels. Pi reads an absent level differently from `null` and from
+  the level name, so the mapping does not fill one in. An entry with a partial
+  map is refused with `thinkingLevelMap.<level>` for each missing level. An
+  entry with no map gives a `pi_model` with no map, for example MiniMax M2.7
+  and Z.AI GLM-4.7.
 - `api` is copied for `'openai-responses'`. It is omitted for
   `'openai-completions'`, the default, and for `'anthropic-messages'`, which
   the `anthropic` adapter decides. An entry whose `api` is not the vendor's
@@ -109,7 +117,8 @@ The prepared runtime entry compiles `'openai-completions'` only. It refuses a
 profile that declares `'openai-responses'` or `inputLimits`. It also refuses
 `compat.supportsLongCacheRetention`, `compat.supportsStrictMode` and
 `compat.requiresReasoningContentOnAssistantMessages`, because the frozen
-prepared wire does not carry them.
+prepared wire does not carry them. A profile without `thinkingLevelMap`
+passes: the prepared wire may leave the map out.
 
 The SQLite profile schema changes in this candidate. Existing stores are
 rejected and preserved: explicitly provision a separate current-schema store

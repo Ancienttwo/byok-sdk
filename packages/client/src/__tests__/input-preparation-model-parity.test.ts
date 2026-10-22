@@ -261,9 +261,9 @@ interface ProjectedProvider {
   readonly models: readonly Record<string, unknown>[];
 }
 
-function projected(): { providerId: string; provider: ProjectedProvider; entry: Record<string, unknown> } {
-  const projection = buildPiProviderProjection(PROFILE, 'pi-prepared') as { providers: Record<string, ProjectedProvider> };
-  const providerId = piProjectionProviderId(PROFILE.profile_ref);
+function projected(profile = PROFILE): { providerId: string; provider: ProjectedProvider; entry: Record<string, unknown> } {
+  const projection = buildPiProviderProjection(profile, 'pi-prepared') as { providers: Record<string, ProjectedProvider> };
+  const providerId = piProjectionProviderId(profile.profile_ref);
   const provider = projection.providers[providerId]!;
   return { providerId, provider, entry: provider.models[0]! };
 }
@@ -279,8 +279,8 @@ function projected(): { providerId: string; provider: ProjectedProvider; entry: 
  * so the value is stated here rather than defaulted by this SDK: the composer
  * owns the price, and a second default would be this package quietly deciding one.
  */
-function projectedWireModel(): Record<string, unknown> {
-  const { providerId, provider, entry } = projected();
+function projectedWireModel(profile = PROFILE): Record<string, unknown> {
+  const { providerId, provider, entry } = projected(profile);
   return {
     id: entry['id'],
     name: entry['name'],
@@ -292,7 +292,8 @@ function projectedWireModel(): Record<string, unknown> {
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: entry['contextWindow'],
     maxTokens: entry['maxTokens'],
-    thinkingLevelMap: entry['thinkingLevelMap'],
+    // An undeclared map stays absent on the wire, as the prepared session maps it.
+    ...(Object.hasOwn(entry, 'thinkingLevelMap') ? { thinkingLevelMap: entry['thinkingLevelMap'] } : {}),
     compat: entry['compat'],
   };
 }
@@ -333,13 +334,17 @@ describe('input preparation model: every carrier admits the same closed shape', 
   it("requires exactly Pi's thinking levels in every carrier and in the keys schema", () => {
     expect(Object.keys(THINKING_LEVEL_MAP)).toEqual(MODEL_THINKING_LEVELS);
     expect(PiModelConfigSchema.shape.thinkingLevel.options).toEqual(MODEL_THINKING_LEVELS);
-    expect(Object.keys(PiModelConfigSchema.shape.thinkingLevelMap.shape)).toEqual(MODEL_THINKING_LEVELS);
+    expect(Object.keys(PiModelConfigSchema.shape.thinkingLevelMap.unwrap().shape)).toEqual(MODEL_THINKING_LEVELS);
     for (const level of MODEL_THINKING_LEVELS) {
       const { [level]: _dropped, ...missing } = THINKING_LEVEL_MAP;
       const candidate = model({ thinkingLevelMap: missing });
       expect([level, throughWireSchema(candidate), throughControlProtocol(candidate), throughPreparedHost(candidate)])
         .toEqual([level, undefined, undefined, undefined]);
+      // #636: keys admits an absent map, as the wire does, and refuses a partial one, as the wire does.
+      expect([level, PiModelConfigSchema.shape.thinkingLevelMap.safeParse(missing).success]).toEqual([level, false]);
     }
+    expect(PiModelConfigSchema.shape.thinkingLevelMap.safeParse(undefined).success).toBe(true);
+    expect(InputPreparationModelSchema.shape.thinkingLevelMap.safeParse(undefined).success).toBe(true);
   });
 
   it.each(FIXTURES.filter(([, , verdict]) => verdict === 'accept').map(([label, candidate]) => [label, candidate] as const))(
@@ -508,6 +513,15 @@ describe('input preparation model: the wire carries what the launcher projects',
     expect(throughPreparedHost(wireModel)).toEqual(wireModel);
   });
 
+  it('carries a profile without a thinkingLevelMap as an undeclared map (#636)', () => {
+    const { thinkingLevelMap: _, ...withoutMap } = PROFILE.pi_model!;
+    const wireModel = projectedWireModel(ModelProviderProfileSchema.parse({ ...PROFILE, pi_model: withoutMap }));
+    expect(Object.hasOwn(wireModel, 'thinkingLevelMap')).toBe(false);
+    expect(throughWireSchema(wireModel)).toEqual(wireModel);
+    expect(throughControlProtocol(wireModel)).toEqual(wireModel);
+    expect(throughPreparedHost(wireModel)).toEqual(wireModel);
+  });
+
   it('carries every model-entry key the projection emits that is not the launch thinking level', () => {
     const { entry } = projected();
     // `thinkingLevel` is stripped by the projection itself (it travels as the
@@ -525,7 +539,7 @@ describe('input preparation model: the wire carries what the launcher projects',
     // dependency. This is the check that keeps the restatement honest: the two
     // definitions are compared directly, in the one place both are importable.
     const local = PiModelConfigSchema.shape;
-    const localLevelMap = local.thinkingLevelMap;
+    const localLevelMap = local.thinkingLevelMap.unwrap();
     const localCompat = local.compat;
     const wireLevelMap = InputPreparationModelSchema.shape.thinkingLevelMap.unwrap();
     const wireCompat = InputPreparationModelSchema.shape.compat.unwrap();

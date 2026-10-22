@@ -89,7 +89,14 @@ const inputLimits = z.object({
   }).strict().optional(),
 }).strict();
 
-/** Local declared Pi configuration, without identity, endpoint, headers or secrets. */
+/**
+ * Local declared Pi configuration, without identity, endpoint, headers or secrets.
+ *
+ * `thinkingLevelMap` is absent or complete, as on the prepared model wire.
+ * Without a map, Pi applies its own handling of each level. A partial map is
+ * refused, because Pi reads an absent level differently from `null` and from
+ * the level name.
+ */
 export const PiModelConfigSchema = z.object({
   api: z.enum(PI_OPENAI_COMPATIBLE_APIS).optional(),
   contextWindow: limit,
@@ -99,14 +106,14 @@ export const PiModelConfigSchema = z.object({
   thinkingLevelMap: z.object({
     off: effort, minimal: effort, low: effort, medium: effort,
     high: effort, xhigh: effort, max: effort,
-  }).strict(),
+  }).strict().optional(),
   compat,
   inputLimits: inputLimits.optional(),
 }).strict().superRefine((config, ctx) => {
   if (config.maxTokens > config.contextWindow) {
     ctx.addIssue({ code: 'custom', path: ['maxTokens'], message: 'Pi maximum output cannot exceed its context window' });
   }
-  if (config.reasoning && config.thinkingLevelMap[config.thinkingLevel] === null) {
+  if (config.reasoning && !piSupportedThinkingLevels(config).includes(config.thinkingLevel)) {
     ctx.addIssue({ code: 'custom', path: ['thinkingLevel'], message: 'Pi thinking level is not supported by the declared model' });
   }
   if (!config.reasoning && config.thinkingLevel !== 'off') {
@@ -123,6 +130,23 @@ export const PiModelConfigSchema = z.object({
     }
   }
 });
+
+/**
+ * The thinking levels Pi offers for these settings, in Pi's order. This
+ * restates pi-ai `getSupportedThinkingLevels`; a client test compares the two.
+ * A non-reasoning model has `off` only. A level mapped to `null` is not
+ * offered, and Pi offers `xhigh` and `max` only when the map names them.
+ */
+export function piSupportedThinkingLevels(
+  config: Pick<PiModelConfig, 'reasoning' | 'thinkingLevelMap'>,
+): PiThinkingLevel[] {
+  if (!config.reasoning) return ['off'];
+  return PI_THINKING_LEVELS.filter((level) => {
+    const mapped = config.thinkingLevelMap?.[level];
+    if (mapped === null) return false;
+    return (level !== 'xhigh' && level !== 'max') || mapped !== undefined;
+  });
+}
 
 /** One issue per declared compat key outside `admitted`, at `['compat', key]`. */
 export function piCompatIssues(
