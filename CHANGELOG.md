@@ -38,6 +38,18 @@
   profile, and their truth store fails every read and write of the registry.
   An older device answers sealed provisioning of such a `pi_model` with
   `pi_model_invalid`.
+- **Feature (examples)** — a K4 routine can change its version in place
+  (#735). `HostExecutionCore.updateRoutine` stages version
+  `max(current, pending) + 1` with the same destination and Host job type. An
+  exact replay does nothing. The ledger keeps the current definition and one
+  `pending` version; the Host service keeps the version history. The exported
+  pure function `versionSwitchDue` decides the switch: the routine is active,
+  no occurrence of it is unsettled, and no reserved old slot is due. While a
+  version is pending, the old chain gets no new slot. The core checks the
+  switch at update, at lifecycle changes, after each scan and after a memory
+  change. A Host job that keeps failing blocks the switch until its handler
+  succeeds. `LedgerState.version` stays 1. A core without `updateRoutine`
+  ignores `pending`.
 
 ## 0.28.3 — source candidate
 

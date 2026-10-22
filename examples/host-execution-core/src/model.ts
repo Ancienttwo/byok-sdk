@@ -51,6 +51,8 @@ export interface HostJobResult { summary: Json; execution?: ExecutionTemplate }
 export type HostJobHandler = (run: HostJobRun) => HostJobResult | Promise<HostJobResult>;
 export interface Routine {
   definition: RoutineDefinition;
+  /** The next version from `updateRoutine`. It replaces `definition` when `versionSwitchDue` is true. */
+  pending?: RoutineDefinition;
   lifecycle: 'active' | 'paused' | 'completed';
   status: 'ok' | 'schedule_retrying' | 'no_occurrence_within_horizon' | 'calendar_error';
   next: WakeScheduleInput | null;
