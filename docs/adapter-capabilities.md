@@ -78,7 +78,7 @@ SDK per-session user-rules exclusion has been qualified.
 
 ### Grok: user-level configuration
 
-The [vendored launch profile](../packages/client/vendor/oar/60ad09b/runtimes/grok/session.ts)
+The [vendored launch profile](../packages/client/vendor/oar/44d7d61/runtimes/grok/session.ts)
 uses `agent --always-approve --no-leader stdio`; the adapter forwards the task
 environment. It does not disable home rules or compatibility scanning.
 Grok's [Project rules guide](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/12-project-rules.md)
@@ -140,7 +140,7 @@ tracks that remaining work; adding persona text alone does not establish isolati
 
 `GrokAdapter` runs Grok Build over ACP: `grok agent --always-approve
 --no-leader stdio`, through the vendored OAR Grok profile
-(`packages/client/vendor/oar/60ad09b`). The ACP stack is a private entry that
+(`packages/client/vendor/oar/44d7d61`). The ACP stack is a private entry that
 loads at session start, so `@byok-sdk/client/adapters` carries no ACP
 dependency.
 

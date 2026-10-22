@@ -1,7 +1,7 @@
 /**
  * Grok version policy, as for Codex: read the version, never gate on it. Grok
  * updates itself, so another version is an advisory. This is the newest
- * version with OAR 60ad09b live evidence for the vendored profile (the
+ * version with OAR 44d7d61 live evidence for the vendored profile (the
  * prompt-option probe, docs/runtimes/grok.md). Native contracts the adapter
  * depends on are probed directly (`agent stdio`).
  */
