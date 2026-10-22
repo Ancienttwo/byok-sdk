@@ -93,7 +93,10 @@
   envelope, and the connection manager does not queue an envelope id that is
   already queued or in flight. Retries continue after the outage ends. A retry
   that arrives after the cloud committed the message now settles as
-  `duplicate`, not `accepted` (#693).
+  `duplicate`, not `accepted`. Each such retry now adds 1 to the client
+  `outbound.duplicate` counter and to the server `dedupDrops` counter. Before,
+  it added 1 to `accepted`. `observer.onInboundCommitted` now fires only once
+  for each message (#693).
 
 ## 0.28.1 / @byok-sdk/keys 0.13.1 — 2026-10-21 (published)
 
