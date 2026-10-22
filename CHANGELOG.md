@@ -23,6 +23,28 @@
   CLI bundle) until a Pi release moves them. Node's own undici on the Node
   builds that `engines.node` admits (v26.10.0 carries 8.10.2) is a Node runtime
   matter. #700 stays open.
+- **Feature (client)** — an opt-in Grok option for user-level instructions
+  (#634). `GrokAdapterOptions.compatInstructions: 'disabled'` sets Grok's four
+  Claude and Cursor `agents` and `rules` compatibility variables to `0` on the
+  Grok agent process. Client-hosted terminal commands do not get them;
+  children that Grok starts itself may inherit them. It applies to every
+  session of the adapter, and the default is unchanged. It is not an
+  isolation guarantee: Grok still loads `$GROK_HOME/AGENTS.md`,
+  `$GROK_HOME/rules/` and `extra_rule_dirs`. Claude gets no option. For an
+  Agent home under `$HOME`, Claude's `--setting-sources` without `user` still
+  loads the user instruction files, as project files, and drops the user's
+  deny rules and hooks. Codex 0.160.0 and Pi 1.3.0 have no such switch, and
+  Hermes needs none. `docs/adapter-capabilities.md` lists the user-level
+  sources of each pinned runtime, and
+  `docs/notes/2026-10-22-634-runtime-user-config.md` gives the evidence.
+- **Fixed (client)** — a resumed Grok memory reader no longer fails before it
+  starts (#609). A resumed reader runs in the run directory that its handoff
+  recorded, which has the name of the earlier task. The persona check wanted
+  the name of the new task, so every resumed reader failed with "grok Agent
+  persona cwd does not match its sealed lease". The check now accepts a direct
+  child of `<home>/.byok/runs/` for a resumed reader. A resumed reader with a
+  persona now gets "persona resume is not qualified", as a writer does. A new
+  test runs fresh and resumed readers through the real `TaskRunner`.
 - **Tests (client)** — the Grok fixture contract now runs on Windows in routine
   CI (#609). The `adapter-lifecycle-smoke` Windows leg runs the new
   `grok-windows-contract.test.ts`. It drives the adapter against the fake ACP

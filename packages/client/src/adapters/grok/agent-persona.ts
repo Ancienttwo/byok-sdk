@@ -15,10 +15,12 @@ export async function grokAgentPersona(manifest: RuntimeOperationManifest): Prom
     throw refuse('grok Agent persona requires a sealed canonical-home lease');
   }
   const reader = manifest.homeAccess === 'memory-reader';
-  if (reader && (path.basename(manifest.taskId) !== manifest.taskId || ['.', '..'].includes(manifest.taskId))) {
+  // A fresh reader runs in `runs/<taskId>`; a resumed reader runs again in the run directory its handoff recorded.
+  const run = reader && manifest.sessionRef !== undefined ? path.basename(manifest.cwd ?? '') : manifest.taskId;
+  if (reader && (path.basename(run) !== run || ['', '.', '..'].includes(run))) {
     throw refuse('grok Agent persona has an invalid reader task path');
   }
-  const expectedCwd = reader ? path.join(home, '.byok', 'runs', manifest.taskId) : home;
+  const expectedCwd = reader ? path.join(home, '.byok', 'runs', run) : home;
   if (manifest.cwd !== expectedCwd) throw refuse('grok Agent persona cwd does not match its sealed lease');
   let text: string | undefined;
   try {

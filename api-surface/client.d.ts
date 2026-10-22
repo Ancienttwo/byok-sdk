@@ -433,6 +433,18 @@ export interface GrokAdapterOptions {
     nativeAssetRoot?: string;
     /** Grok model id for every session (`session/set_model`). Absent: the user's Grok default. */
     model?: string;
+    /**
+     * `disabled` sets Grok's four Claude and Cursor `agents` and `rules`
+     * variables to `0` on the Grok agent process. That turns off its scanning of
+     * the named instruction files and rules directories under `~/.claude/` and
+     * `~/.cursor/`, and the project `.claude/CLAUDE*.md`, `.claude/rules/` and
+     * `.cursor/rules/`. Client-hosted terminal commands do not get the variables;
+     * children that Grok starts itself, such as stdio MCP servers and hooks, may
+     * inherit them. `$GROK_HOME/AGENTS.md`, `$GROK_HOME/rules/` and
+     * `[paths] extra_rule_dirs` still load; Grok has no per-process switch for
+     * them. Default `inherit`: the user's Grok settings apply.
+     */
+    compatInstructions?: 'inherit' | 'disabled';
     resolveBin?: () => ResolvedBin;
     spawnFn?: typeof nodeSpawn;
     maxRetainedBytes?: number;
