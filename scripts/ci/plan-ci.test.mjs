@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { planCi, changedPaths, isReleaseRef } from './plan-ci.mjs';
+import { planCi, changedPaths, isReleaseRef, needsBuild } from './plan-ci.mjs';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, renameSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { requireCiPlan } from './require-ci-plan.mjs';
-import { knownFamilies } from './select-impact.mjs';
+import { knownFamilies, reviewedScripts } from './select-impact.mjs';
 const sha = 'a'.repeat(40);
 const ref = 'refs/heads/main';
 const results = plan => Object.fromEntries(['select', 'targeted', ...knownFamilies].map(id => [id, {
@@ -152,4 +152,15 @@ test('a routine plan never contains the complete test suite', () => {
     assert.ok(!plan.families.includes('build-test'));
     assert.throws(() => requireCiPlan(results(plan), { ...plan, families: [...knownFamilies] }, event, sha));
   }
+});
+
+// #649: the targeted job installs for a reviewed script whose tests need
+// installed packages; the other reviewed scripts run their tests without one.
+test('reviewed release scripts install only when their tests need packages', () => {
+  const install = ['scripts/release/pack-and-smoke.mjs', 'scripts/release/pack-and-smoke.test.mjs', 'scripts/release/publish.mjs'];
+  for (const path of Object.keys(reviewedScripts)) {
+    assert.equal(needsBuild(planCi({ event: 'push', sha, paths: [path] })), install.includes(path), path);
+  }
+  assert.equal(needsBuild(planCi({ event: 'push', sha, paths: ['README.md'] })), false);
+  assert.equal(needsBuild(planCi({ event: 'push', sha, paths: ['packages/core/src/index.ts'] })), true);
 });

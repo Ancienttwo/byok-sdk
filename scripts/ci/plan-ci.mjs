@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { knownFamilies, selectImpact } from './select-impact.mjs';
+import { knownFamilies, reviewedScripts, selectImpact } from './select-impact.mjs';
 
 // The complete matrix is release validation only: main, or a release/* candidate branch.
 export const isReleaseRef = ref => ref === 'refs/heads/main' || /^refs\/heads\/release\/[A-Za-z0-9._-]+$/.test(ref ?? '');
@@ -18,6 +18,11 @@ export function planCi({ event, sha, approvedSha, ref, paths, base, cwd }) {
   if (plan.families.includes('build-test')) throw new Error('A targeted plan never selects the complete test suite');
   return plan;
 }
+
+// The targeted job installs and builds for a selected workspace, a manifest or
+// lock change, or a reviewed script whose tests need installed packages.
+export const needsBuild = plan => plan.dirs.length > 0 || plan.files.some(path => path === 'bun.lock'
+  || /^packages\/[^/]+\/package\.json$/.test(path) || (Object.hasOwn(reviewedScripts, path) && reviewedScripts[path].install === true));
 
 export function changedPaths(base, cwd = process.cwd()) {
   if (!/^[a-f0-9]{40}$/.test(base ?? '') || /^0+$/.test(base)) throw new Error('Missing comparison base: explicit release validation required');
@@ -56,5 +61,5 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
   const plan = planCi({ event, sha: process.env.GITHUB_SHA, approvedSha: process.env.CI_RELEASE_SHA, ref: process.env.CI_REF, paths, base });
   console.log(JSON.stringify(plan, null, 2));
-  appendFileSync(process.env.GITHUB_OUTPUT, `plan=${JSON.stringify(plan)}\nfamilies=${JSON.stringify(plan.families)}\nrelease=${plan.mode === 'release'}\nbuild=${plan.dirs.length > 0 || plan.files.some(path => path === 'bun.lock' || /^packages\/[^/]+\/package\.json$/.test(path))}\n`);
+  appendFileSync(process.env.GITHUB_OUTPUT, `plan=${JSON.stringify(plan)}\nfamilies=${JSON.stringify(plan.families)}\nrelease=${plan.mode === 'release'}\nbuild=${needsBuild(plan)}\n`);
 }

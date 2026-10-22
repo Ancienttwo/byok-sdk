@@ -228,19 +228,27 @@ export const familyOwners = Object.freeze({
     /^packages\/keys\/src\//,
   ],
 });
-// #649: release script paths that the owner reviewed for 0.28.2. Each maps to
-// the node tests that run it; scripts/ci/run-targeted.mjs runs those tests.
-export const reviewedScriptTests = Object.freeze({
-  'scripts/api-surface/check-version-authority.mjs': ['scripts/api-surface/check-version-authority.test.mjs'],
-  'scripts/api-surface/check-version-authority.test.mjs': ['scripts/api-surface/check-version-authority.test.mjs'],
-  'scripts/release/beta-release.test.mjs': ['scripts/release/beta-release.test.mjs'],
-  'scripts/release/pack-and-smoke.mjs': ['scripts/release/pack-and-smoke.test.mjs', 'scripts/release/agent-memory-helper-source.test.mjs'],
-  'scripts/release/pack-and-smoke.test.mjs': ['scripts/release/pack-and-smoke.test.mjs'],
-  'scripts/release/publish.mjs': [
-    'scripts/release/publish.test.mjs', 'scripts/release/publish-recovery.test.mjs', 'scripts/release/beta-release.test.mjs',
-    'scripts/release/install-matrix.test.mjs', 'scripts/release/registry-contract.test.mjs', 'scripts/release/agent-memory-helper-source.test.mjs',
-  ],
-  'scripts/release/registry-readback.mjs': ['scripts/release/beta-release.test.mjs'],
+// #649: release script paths that the owner reviewed for 0.28.2. `tests` run
+// the path (scripts/ci/run-targeted.mjs runs them); `install` marks tests that
+// need installed packages, so the targeted job installs first; `families` are
+// the jobs that run the path itself.
+export const reviewedScripts = Object.freeze({
+  'scripts/api-surface/check-version-authority.mjs': { tests: ['scripts/api-surface/check-version-authority.test.mjs'] },
+  'scripts/api-surface/check-version-authority.test.mjs': { tests: ['scripts/api-surface/check-version-authority.test.mjs'] },
+  'scripts/release/beta-release.test.mjs': { tests: ['scripts/release/beta-release.test.mjs'] },
+  'scripts/release/pack-and-smoke.mjs': {
+    tests: ['scripts/release/pack-and-smoke.test.mjs', 'scripts/release/agent-memory-helper-source.test.mjs'],
+    install: true, families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
+  },
+  'scripts/release/pack-and-smoke.test.mjs': { tests: ['scripts/release/pack-and-smoke.test.mjs'], install: true },
+  'scripts/release/publish.mjs': {
+    tests: [
+      'scripts/release/publish.test.mjs', 'scripts/release/publish-recovery.test.mjs', 'scripts/release/beta-release.test.mjs',
+      'scripts/release/install-matrix.test.mjs', 'scripts/release/registry-contract.test.mjs', 'scripts/release/agent-memory-helper-source.test.mjs',
+    ],
+    install: true,
+  },
+  'scripts/release/registry-readback.mjs': { tests: ['scripts/release/beta-release.test.mjs'] },
 });
 const rootDocs = new Set(['README.md', 'CHANGELOG.md', 'AGENTS.md', 'CLAUDE.md', 'LICENSE', 'SECURITY.md', 'CONTRIBUTING.md']);
 const rootCi = new Set(['.github/workflows/ci.yml', '.github/workflows/release.yml']);
@@ -323,10 +331,9 @@ export function selectImpact(paths, context = {}) {
       dirs.add('packages/client'); families.add('npm-release-pack'); continue;
     }
     if (/^scripts\/release\/registry-(?:contract\.test\.mjs|expectations\.json)$/.test(path)) { scripts = true; continue; }
-    // The release pack script also selects the release pack family that runs it.
-    if (Object.hasOwn(reviewedScriptTests, path)) {
+    if (Object.hasOwn(reviewedScripts, path)) {
       scripts = true;
-      if (path === 'scripts/release/pack-and-smoke.mjs') families.add('npm-release-pack');
+      for (const id of reviewedScripts[path].families ?? []) families.add(id);
       continue;
     }
     // #652 trims these reviewed files in the pinned OAR snapshot.
