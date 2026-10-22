@@ -14,6 +14,15 @@ export interface ClaudeAdapterOptions {
     interruptTimeoutMs?: number;
     /** Local Host callbacks for native stdio requests; never enables remote boolean approvals. */
     nativeInteractions?: NativeInteractionHostOptions;
+    /**
+     * Claude's `--setting-sources` for every session. Absent: Claude's default,
+     * all three. Leaving out `user` drops `~/.claude/CLAUDE.md` and
+     * `~/.claude/rules/`, and also the user's deny rules and hooks (the
+     * guardrails left under `--dangerously-skip-permissions`), the settings `env`
+     * block and `apiKeyHelper`, which can carry the provider login. It is not
+     * prompt isolation: see `docs/adapter-capabilities.md`.
+     */
+    settingSources?: readonly ('user' | 'project' | 'local')[];
 }
 /**
  * Claude Code stream-json adapter.
@@ -34,6 +43,7 @@ export declare class ClaudeAdapter implements RuntimeAdapter {
     private readonly options;
     readonly descriptor: import("..").RuntimeAdapterDescriptor;
     private readonly nativeOptions?;
+    private readonly settingSources?;
     constructor(options?: ClaudeAdapterOptions);
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
@@ -433,6 +443,15 @@ export interface GrokAdapterOptions {
     nativeAssetRoot?: string;
     /** Grok model id for every session (`session/set_model`). Absent: the user's Grok default. */
     model?: string;
+    /**
+     * `disabled` turns off Grok's Claude and Cursor instruction scanning in each
+     * agent process: the named instruction files and rules directories under
+     * `~/.claude/` and `~/.cursor/`, and the project `.claude/CLAUDE*.md`,
+     * `.claude/rules/` and `.cursor/rules/`. `$GROK_HOME/AGENTS.md`,
+     * `$GROK_HOME/rules/` and `[paths] extra_rule_dirs` still load; Grok has no
+     * per-process switch for them. Default `inherit`: the user's Grok settings apply.
+     */
+    compatInstructions?: 'inherit' | 'disabled';
     resolveBin?: () => ResolvedBin;
     spawnFn?: typeof nodeSpawn;
     maxRetainedBytes?: number;

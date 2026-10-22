@@ -49,20 +49,59 @@ Host process environment except `CLAUDECODE` and `BYOK_*`. Paths such as `HOME`,
 MCP configuration, a fresh native session, folder trust and filesystem permission
 modes address different concerns; none alone establishes persona isolation.
 
+The table names the user-level sources that each pinned runtime loads, and the
+per-process switch that the pinned CLI accepts. The
+[evidence note](notes/2026-10-22-634-runtime-user-config.md) gives the source
+lines, help output and probe. An SDK option is an adapter option: it applies to
+every session that the adapter starts. A choice per task would need a new wire
+field. Each default is unchanged, and no option is an isolation guarantee.
+
+| Adapter (version) | User-level sources | Per-process switch | SDK option |
+| --- | --- | --- | --- |
+| Claude (2.1.302) | `~/.claude/CLAUDE.md`, `~/.claude/rules/`, `~/.claude/settings.json`, user skills, commands and subagents; also managed policy, `~/.claude.json` and auto memory | `--setting-sources` | `settingSources` |
+| Codex (0.160.0) | `$CODEX_HOME/AGENTS.override.md` or `AGENTS.md`, `$CODEX_HOME/config.toml` | None | None |
+| Grok (1.0.52) | `$GROK_HOME/AGENTS.md` and `rules/`, `~/.claude/` and `~/.cursor/` instruction files and rules, `[paths] extra_rule_dirs` | Four variables, for the Claude and Cursor files only | `compatInstructions` |
+| Pi (1.3.0) | Agent-directory `AGENTS.md`, `SYSTEM.md`, `APPEND_SYSTEM.md`, extensions, skills and prompts; `~/.agents/skills`; context files in every parent of the cwd | `--no-context-files` drops the persona too | None |
+| Hermes (0.22.2+2364.g0b10b9f) | None: each execution has a fresh `HERMES_HOME` | Not needed | None |
+
 ### Claude: user-level configuration
 
 The [Claude adapter](../packages/client/src/adapters/claude/claude-adapter.ts)
-adds task MCP servers with `--mcp-config`; it intentionally retains user settings,
-deny rules and hooks. It does not supply `--setting-sources` or isolate the user
-configuration directory. Upstream documents user instructions at
-`~/.claude/CLAUDE.md`, user rules under `~/.claude/rules/`, and user settings in
-`~/.claude/settings.json`, alongside project and managed configuration. See
-[Claude memory](https://code.claude.com/docs/en/memory) and
-[settings precedence](https://code.claude.com/docs/en/settings).
-These are upstream loading rules, not a new SDK live qualification. Restricting
-settings sources must not be advertised as proof that all instruction files or
-managed policies are excluded. The adapter exposes no qualified per-session
-“Agent home only” option.
+adds task MCP servers with `--mcp-config`. By default it keeps the user's
+settings, deny rules and hooks. The evidence version is Claude Code 2.1.302;
+the adapter pins no Claude version. Claude's
+[Agent SDK features](https://code.claude.com/docs/en/agent-sdk/claude-code-features)
+page lists what each setting source loads:
+
+- `user`: `~/.claude/settings.json`, `~/.claude/CLAUDE.md`,
+  `~/.claude/rules/*.md`, and the user skills, commands and subagents.
+- `project`: `<cwd>/.claude/settings.json` and its hooks, and `CLAUDE.md` and
+  `.claude/rules/*.md` in the cwd and in every parent directory.
+- `local`: `CLAUDE.local.md` in the cwd and every parent directory, and
+  `<cwd>/.claude/settings.local.json`.
+- Always: managed policy, `~/.claude.json`, and auto memory unless
+  `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` is set.
+
+`ClaudeAdapterOptions.settingSources` passes `--setting-sources` to every
+launch. It takes distinct `user`, `project` and `local` values; absent, the
+adapter passes no flag. `['project', 'local']` keeps the project files of the
+Agent home and drops the user files. It is not prompt isolation:
+
+- It also drops the user's permission rules and hooks. Under the default
+  `--dangerously-skip-permissions` these are the remaining guardrails.
+- It drops the `env` block and `apiKeyHelper` of the user settings. If the
+  provider login or `ANTHROPIC_BASE_URL` lives there, Claude cannot reach the
+  provider.
+- When the Agent home is under `$HOME`, `~` is a parent directory of the home.
+  `~/.claude/rules/*.md` can then still load as project rules, and
+  `~/CLAUDE.md` as a project file. This follows from the docs; it was not run.
+- Managed policy and auto memory still load.
+- A resumed session keeps the instruction text of its earlier launch in its
+  history (inferred from the 2.1.302 binary). Only a fresh session starts
+  with the new set.
+
+Claude's `claudeMdExcludes` setting matches absolute paths and is narrower.
+The adapter does not set it.
 
 ### Codex: user-level configuration
 
@@ -74,24 +113,57 @@ Upstream documents user `config.toml` and global `AGENTS.override.md` / `AGENTS.
 under `CODEX_HOME` (normally `~/.codex`), with project instruction discovery added
 for the working directory. See [configuration](https://developers.openai.com/codex/config-basic)
 and [instruction discovery](https://developers.openai.com/codex/guides/agents-md).
-A per-thread MCP override is not an exclusion of those instruction sources. No
-SDK per-session user-rules exclusion has been qualified.
+
+The Codex 0.160.0 app server always reads `$CODEX_HOME/AGENTS.override.md`,
+else `$CODEX_HOME/AGENTS.md`. No configuration key, flag or environment
+variable turns that file off. `project_doc_max_bytes = 0` stops only the
+project files. The `config`, `base_instructions` and `developer_instructions`
+fields of `thread/start` and `thread/resume` do not remove the user file, and a
+per-thread MCP override does not either. `CODEX_HOME` also holds `auth.json`
+and the sessions, so moving it moves the login. The SDK has no Codex option
+for user instructions.
 
 ### Grok: user-level configuration
 
 The [vendored launch profile](../packages/client/vendor/oar/44d7d61/runtimes/grok/session.ts)
 uses `agent --always-approve --no-leader stdio`; the adapter forwards the task
-environment. It does not disable home rules or compatibility scanning.
+environment. `grok agent` 1.0.52 has no flag for rule loading or folder trust.
 Grok's [Project rules guide](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/12-project-rules.md)
-describes `$GROK_HOME/rules/` (normally `~/.grok/rules/`), enabled Claude and Cursor
-home rules, and `[paths] extra_rule_dirs`. These home sources apply across
-projects; extra directories are independent of folder trust. The
+loads these home sources wherever Grok starts:
+
+- `$GROK_HOME/AGENTS.md` and `$GROK_HOME/rules/` (normally under `~/.grok/`).
+- `~/.claude/CLAUDE.md` and `~/.claude/rules/`, under the
+  `compat.claude.agents` and `compat.claude.rules` cells.
+- `~/.cursor/AGENTS.md` and `~/.cursor/rules/`, under the
+  `compat.cursor.agents` and `compat.cursor.rules` cells.
+- Each `[paths] extra_rule_dirs` entry, also without folder trust.
+
+Project `AGENTS.md` loading requires folder trust. In a trusted folder, the
+`agents` and `rules` cells also cover the project `.claude/CLAUDE*.md`,
+`.claude/rules/` and `.cursor/rules/`; a top-level project `CLAUDE.md` stays
+recognized.
+
+`GrokAdapterOptions.compatInstructions: 'disabled'` sets
+`GROK_CLAUDE_AGENTS_ENABLED`, `GROK_CLAUDE_RULES_ENABLED`,
+`GROK_CURSOR_AGENTS_ENABLED` and `GROK_CURSOR_RULES_ENABLED` to `0` in the
+agent process. The
 [configuration guide](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/05-configuration.md)
-distinguishes `compat.claude.rules` from `compat.claude.agents`: disabling one is
-not a complete exclusion of the other or of generic top-level instruction names.
-The local extracted guide snapshot was checked for this documentation; it is
-upstream documentation evidence, not a live SDK prompt-contamination test.
-No new SDK trust, home relocation or rule-isolation option is provided here.
+puts an environment variable before `config.toml`, so the user's own
+`compat` settings do not turn these cells on again. Commands that Grok asks
+the client to run keep the task environment. The default, `'inherit'`, sets
+nothing. With `'disabled'`, these stay:
+
+- `$GROK_HOME/AGENTS.md`, `$GROK_HOME/rules/` and `extra_rule_dirs`. No
+  environment variable controls them, and the `GROK_CONFIG` overlay cannot set
+  `paths` or `compat`.
+- The Claude and Cursor `skills`, `hooks` and `mcps` cells, with their
+  configured values.
+
+Moving `GROK_HOME` also moves `auth.json` and the sessions; the adapter does
+not do it. With the four variables, `grok inspect --json` 1.0.52 lists the
+four Claude and Cursor files as `disabled`; without them, as `enabled`. The
+probe ran in a synthetic home with the network denied. `inspect` reports
+discovery, not prompt text. No live Grok session shows what the model sees.
 
 ### Pi: user-level configuration
 
@@ -100,6 +172,18 @@ loads the user's extensions and skills beside SDK extensions. Its task MCP launc
 file does not disable the normal resource loader or all ambient context sources.
 Credential custody and environment filtering also do not establish prompt
 isolation: the allowlisted environment retains home/config discovery paths.
+
+Pi 1.3.0 reads its agent directory, `$PI_CODING_AGENT_DIR` or else
+`~/.pi/agent`. From it, Pi loads a context file (`AGENTS.override.md`,
+`AGENTS.md` or `CLAUDE.md`), `SYSTEM.md`, `APPEND_SYSTEM.md`, extensions,
+prompts, themes and skills. It also loads skills from `~/.agents/skills`. The
+context walk goes from the cwd up to the filesystem root and does not stop at
+the git root. So an `AGENTS.md` or `CLAUDE.md` in `~` loads for an Agent home
+below `~`. Pi's `--no-context-files` drops every context file, the Agent-home
+`AGENTS.md` too, and the SDK host accepts no Pi resource flag. The agent
+directory also holds `auth.json`, `models.json` and the sessions. The SDK has
+no ordinary-Pi option for user instructions. Pi's `agentsFilesOverride` API
+could drop only the agent-directory file in a future host option.
 
 The [prepared Pi session](../packages/client/src/adapters/pi/prepared-session.ts)
 is different: it uses in-memory settings and disables discovered extensions,
@@ -120,21 +204,35 @@ disabled, carrying only designated model metadata caches. This isolates that
 Hermes profile from the normal user home. It does not promise that arbitrary
 runtime tools, project files or the rest of the process environment are isolated.
 
+Hermes 0.22.2+2364.g0b10b9f reads `SOUL.md` from `HERMES_HOME`, so it seeds
+its own default text in the fresh home. It reads `MEMORY.md` and `USER.md` only
+when they are enabled. Project context comes from the cwd and the git-root
+chain; Hermes has no user-level context file. Skills come from trusted project
+directories, `HERMES_HOME/skills` and configured skill directories, which the
+SDK profile does not set. No user-level instruction source reaches the
+session, so Hermes needs no option.
+
 ### Evidence and remaining qualification
 
 Existing offline evidence includes `environment.test.ts` (environment inheritance),
-`claude-adapter.test.ts` (additive MCP launch), `pi-rpc-host.test.ts`
-(user resources beside SDK extensions), `pi-prepared-tools.test.ts`
-(frozen tool surface), and
-`hermes-home.test.ts` (profile contents). These fixtures do not prove an installed
-CLI's entire prompt contains no user rules. This documentation change runs no
-provider, edits no global configuration and supplies no new isolation toggle.
+`claude-adapter.test.ts` (additive MCP launch, and `--setting-sources` only
+when opted in), `grok-adapter.test.ts` (the four variables reach only the
+agent process, and only with `compatInstructions: 'disabled'`),
+`pi-rpc-host.test.ts` (user resources beside SDK extensions),
+`pi-prepared-tools.test.ts` (frozen tool surface), and
+`hermes-home.test.ts` (profile contents). The
+[evidence note](notes/2026-10-22-634-runtime-user-config.md) records the
+pinned-version sources and the `grok inspect` probe. These fixtures check
+launch arguments and environment. They do not prove an installed CLI's
+entire prompt contains no user rules. No provider ran, and no global
+configuration changed.
 
-For a future “Agent home only” option, qualify the exact runtime version with
-synthetic user-rule and Agent-home markers, show user markers absent while the
-persona remains present, and cover resume behavior and credential discovery.
-Until then Hosts requiring that guarantee must treat the unsupported lanes as
-unqualified. [Issue #634](https://github.com/Ancienttwo/byok-sdk/issues/634)
+For an “Agent home only” guarantee, qualify the exact runtime version with
+synthetic user-rule and Agent-home markers in a live session, show user
+markers absent while the persona remains present, and cover resume behavior
+and credential discovery. Until then, Hosts requiring that guarantee must
+treat the Claude, Codex, Grok and Pi lanes as unqualified, with or without the
+new options. [Issue #634](https://github.com/Ancienttwo/byok-sdk/issues/634)
 tracks that remaining work; adding persona text alone does not establish isolation.
 
 ## Grok
@@ -182,10 +280,15 @@ dependency.
   The file must be a stable regular UTF-8 file, at most 64 KiB; symlinks and
   unsafe reads fail with a non-retryable authority error. Missing/empty files
   add no rules. Reader sessions keep their sealed run cwd; ancestor and run
-  directory instruction files are not scanned by this SDK injection.
+  directory instruction files are not scanned by this SDK injection. A fresh
+  reader runs in `<home>/.byok/runs/<taskId>` and gets the home `AGENTS.md`.
+  A resumed reader runs again in the run directory its handoff recorded,
+  which must be a direct child of `<home>/.byok/runs/`.
   Persona-bearing Agent resume is refused with `grok Agent persona resume is
   not qualified`: append-only rules cannot safely be reapplied on resume.
   Ordinary non-Agent resume and Agent resume with no persona are unchanged.
+  `grok-reader-persona.test.ts` runs these reader cases through the real
+  `TaskRunner` and Agent home against the fake ACP agent.
   The adapter does not grant folder trust, change trust configuration, load
   hooks/skills, or replace Grok's built-in prompt. Synthetic ACP fixtures verify
   routing and unchanged launch policy, not model adherence or runtime trust

@@ -47,7 +47,8 @@ export interface GrokAdapterOptions {
   /**
    * `disabled` turns off Grok's Claude and Cursor instruction scanning in each
    * agent process: the named instruction files and rules directories under
-   * `~/.claude/` and `~/.cursor/`, and their project counterparts. `$GROK_HOME/AGENTS.md`,
+   * `~/.claude/` and `~/.cursor/`, and the project `.claude/CLAUDE*.md`,
+   * `.claude/rules/` and `.cursor/rules/`. `$GROK_HOME/AGENTS.md`,
    * `$GROK_HOME/rules/` and `[paths] extra_rule_dirs` still load; Grok has no
    * per-process switch for them. Default `inherit`: the user's Grok settings apply.
    */

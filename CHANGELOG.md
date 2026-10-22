@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- **Feature (client)** — two opt-in adapter options for user-level
+  configuration (#634). `ClaudeAdapterOptions.settingSources` passes Claude's
+  `--setting-sources` to every launch. `GrokAdapterOptions.compatInstructions:
+  'disabled'` sets Grok's four Claude and Cursor `agents` and `rules`
+  compatibility variables to `0` in the agent process only. Each option applies
+  to every session of its adapter, and each default is unchanged. Neither
+  option is an isolation guarantee. A Claude launch without the `user` source
+  also drops the user's deny rules, hooks, settings `env` block and
+  `apiKeyHelper`. With `'disabled'`, Grok still loads `$GROK_HOME/AGENTS.md`,
+  `$GROK_HOME/rules/` and `extra_rule_dirs`. Codex 0.160.0 and Pi 1.3.0 have
+  no such switch, and Hermes needs none. `docs/adapter-capabilities.md` lists
+  the user-level sources of each pinned runtime, and
+  `docs/notes/2026-10-22-634-runtime-user-config.md` gives the evidence.
+- **Fixed (client)** — a resumed Grok memory reader no longer fails before it
+  starts (#609). A resumed reader runs in the run directory that its handoff
+  recorded, which has the name of the earlier task. The persona check wanted
+  the name of the new task, so every resumed reader failed with "grok Agent
+  persona cwd does not match its sealed lease". The check now accepts a direct
+  child of `<home>/.byok/runs/` for a resumed reader. A resumed reader with a
+  persona now gets "persona resume is not qualified", as a writer does. A new
+  test runs fresh and resumed readers through the real `TaskRunner`.
 - **Tests (client)** — the Windows memory helper tests now run in routine CI
   (#605). The `agent-memory-helper-linux` job has a `windows-latest` leg. It
   runs for pull requests that change the Go helper. New Windows tests inject
