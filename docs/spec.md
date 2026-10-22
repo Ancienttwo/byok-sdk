@@ -612,6 +612,16 @@ is unsettled and no reserved old slot is due (the pure `versionSwitchDue`). Whil
 a version is pending, the old chain gets no new slot, and admitted work finishes
 with the version that admitted it. See
 [K4 routine versions](../examples/host-execution-core/README.md#routine-versions).
+K4 also accepts `hostOccurrence` routine definitions. A registered synchronous
+hook writes Host state in the transaction that records the occurrence: both
+persist or neither does, a replay does not call the hook, and a throw or a
+thenable rolls the occurrence back. The occurrence stays unsettled until the
+Host calls the exported `promoteOccurrence`, which adds intent
+`occurrence:<key>` to the FIFO, or `concludeOccurrence`. A newer slot makes a
+later promotion settle as `superseded`. `OutcomeTransaction.routines` runs
+`create`, `update` and `lifecycle` in the outcome commit with the same rules as
+the core methods. See
+[K4 Host occurrences](../examples/host-execution-core/README.md#host-occurrences).
 
 ### K4 Host reply transaction
 
