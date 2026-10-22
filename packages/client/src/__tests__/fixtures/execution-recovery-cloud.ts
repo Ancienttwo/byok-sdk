@@ -377,6 +377,7 @@ const httpServer = serve({
         appendFileSync(`${config.dbPath}.message-blocked-batches`, `${JSON.stringify(messages.map((message) => message.type))}\n`);
         // The cloud applies a batch in order and never rolls back (handlers/messages.ts),
         // so an outage at the publish leaves the envelopes before it committed.
+        // No test arms the terminal fault below together with this outage.
         if (publishAt > 0) {
           const prefix = messages.slice(0, publishAt);
           const headers = new Headers(request.headers);

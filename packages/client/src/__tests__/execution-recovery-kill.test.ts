@@ -512,7 +512,8 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
     const cloud = await startCloud();
     const { daemon, deviceId } = await pair(cloud, { agentHome: true });
     await fs.writeFile(`${current!.cloudDb}.message-outage`, '503');
-    await fs.writeFile(`${current!.cloudDb}.claim-delay`, '150');
+    // Long enough for the runtime to start and publish behind the held claim reply under load.
+    await fs.writeFile(`${current!.cloudDb}.claim-delay`, '1000');
     const offer = await cloud.rpc('enqueueMessageOffer', { deviceId, taskId: globalThis.crypto.randomUUID() }) as { taskId: string };
     await waitForFile(`${current!.cloudDb}.message-blocked`);
     // The race this test exists for: task.started left in the request the outage refused.
