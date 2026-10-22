@@ -59,7 +59,7 @@ guarantee.
 
 | Adapter (version) | User-level sources | Per-process switch | SDK option |
 | --- | --- | --- | --- |
-| Claude (2.1.302) | `~/.claude/CLAUDE.md`, `~/.claude/rules/`, `~/.claude/settings.json`, user skills, commands and subagents; also managed policy, `~/.claude.json` and auto memory | `--setting-sources`, but a home under `$HOME` keeps the user instruction files | None |
+| Claude (2.1.302) | `~/.claude/CLAUDE.md`, `~/.claude/rules/`, `~/.claude/settings.json`, user skills, commands and subagents; also managed policy, `~/.claude.json` and auto memory | `--setting-sources`, but a home under `$HOME` keeps the user instruction files; `claudeMdExcludes` through `--settings` removes only the files it names | None |
 | Codex (0.160.0) | `$CODEX_HOME/AGENTS.override.md` or `AGENTS.md`, `$CODEX_HOME/config.toml` | None | None |
 | Grok (1.0.52) | `$GROK_HOME/AGENTS.md` and `rules/`, `~/.claude/` and `~/.cursor/` instruction files and rules, `[paths] extra_rule_dirs`; also Claude and Cursor skills, hooks and MCP servers through compatibility cells | Four variables, for the Claude and Cursor instruction files and rules only | `compatInstructions` |
 | Pi (1.3.0) | Agent-directory `AGENTS.md`, `SYSTEM.md`, `APPEND_SYSTEM.md`, extensions, skills and prompts; `~/.agents/skills`; context files in every parent of the cwd | `--no-context-files` drops the persona too | None |
@@ -88,9 +88,9 @@ for it, because a launch without the `user` source keeps the user instructions
 for the usual Host layout and removes guardrails:
 
 - The 2.1.302 memory loader looks for project files in every parent directory
-  of the cwd (inferred from the binary, build `2ef144e6`; not run). For an
-  Agent home under `$HOME`, it then loads `~/CLAUDE.md`, `~/.claude/CLAUDE.md`
-  and `~/.claude/rules/*.md` as project files.
+  of the cwd. For an Agent home under `$HOME`, it then loads `~/CLAUDE.md`,
+  `~/.claude/CLAUDE.md` and `~/.claude/rules/*.md` as project files. A local
+  probe against a fake endpoint confirmed this.
 - The launch drops the user's permission rules and hooks. Under the default
   `--dangerously-skip-permissions` these are the remaining guardrails.
 - It drops the `env` block and `apiKeyHelper` of the user settings. If the
@@ -99,10 +99,12 @@ for the usual Host layout and removes guardrails:
 - Managed policy and auto memory still load.
 
 Claude's `claudeMdExcludes` setting takes glob patterns that match absolute
-file paths, at any settings layer. It could remove only the user files, and
-it applies to the parent-directory walk too. The adapter does not set it. The
-paths depend on `CLAUDE_CONFIG_DIR` and on symlinks, and only a live run can
-qualify it.
+file paths, at any settings layer. In the local probe, `--settings` with
+patterns for `~/.claude/CLAUDE.md` and `~/.claude/rules/**` removed those two
+files and kept the user settings. `~/CLAUDE.md` still loaded, as a project
+file. To remove every instruction file above the Agent home, the patterns
+must name each parent directory. The paths also depend on `CLAUDE_CONFIG_DIR`
+and on symlinks. The adapter does not set it.
 
 ### Codex: user-level configuration
 
@@ -225,8 +227,9 @@ four variables reach the agent process only with
 `pi-prepared-tools.test.ts` (frozen tool surface), and
 `hermes-home.test.ts` (profile contents). The
 [evidence note](notes/2026-10-22-634-runtime-user-config.md) records the
-pinned-version sources, the Claude loader reading and the `grok inspect`
-probe. These fixtures check launch arguments and environment. They do not
+pinned-version sources, the Claude loader reading, a local Claude probe
+against a fake endpoint, and the `grok inspect` probe. These fixtures check
+launch arguments and environment. They do not
 prove an installed CLI's entire prompt contains no user rules. No provider
 ran, and no global configuration changed.
 
