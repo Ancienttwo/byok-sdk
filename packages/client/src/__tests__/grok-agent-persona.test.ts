@@ -87,6 +87,30 @@ it('rejects writer cwd inconsistent with its sealed canonical home', async () =>
   await expect(fs.access(fixture.log)).rejects.toMatchObject({ code: 'ENOENT' });
 });
 
+it('refuses a resumed reader cwd outside the home run directories before spawning', async () => {
+  const fixture = await setup(true);
+  const outside = path.join(fixture.home, 'notes');
+  await fs.mkdir(outside, { recursive: true });
+  await expect(openTracked(fixture.adapter, { instruction: 'hello', sessionRef: 'fake-grok-session' }, { ...fixture.resources, workspaceDir: outside }))
+    .rejects.toMatchObject({ category: 'authority', retry: 'non-retryable' });
+  await expect(fs.access(fixture.log)).rejects.toMatchObject({ code: 'ENOENT' });
+});
+
+it.each([
+  ['a fresh reader in another Attempt run directory', false, (home: string) => path.join(home, '.byok', 'runs', 'other-task')],
+  ['a nested run directory', true, (home: string) => path.join(home, '.byok', 'runs', 'first-task', 'nested')],
+  ['an unnormalized path out of the run directories', true, (home: string) => `${home}/.byok/runs/../../notes`],
+  ['the run directories root', true, (home: string) => path.join(home, '.byok', 'runs')],
+  ['the canonical home', true, (home: string) => home],
+] as const)('refuses %s as a reader cwd before spawning', async (_shape, resumed, cwdOf) => {
+  const fixture = await setup(true);
+  const cwd = cwdOf(fixture.home);
+  await fs.mkdir(path.resolve(cwd), { recursive: true });
+  await expect(openTracked(fixture.adapter, { instruction: 'hello', ...(resumed ? { sessionRef: 'fake-grok-session' } : {}) }, { ...fixture.resources, workspaceDir: cwd }))
+    .rejects.toMatchObject({ category: 'authority', retry: 'non-retryable' });
+  await expect(fs.access(fixture.log)).rejects.toMatchObject({ code: 'ENOENT' });
+});
+
 it('does not read ordinary workspace AGENTS.md or change ordinary resume', async () => {
   const fixture = await setup();
   await fs.mkdir(path.join(fixture.cwd, 'AGENTS.md'));

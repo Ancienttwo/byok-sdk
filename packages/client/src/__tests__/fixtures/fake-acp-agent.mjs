@@ -103,11 +103,13 @@ async function prompt(message) {
     result(message.id, answer());
     return;
   }
-  if (input === 'terminal' || input === 'terminal-hang') {
+  if (input === 'terminal' || input === 'terminal-hang' || input === 'terminal-compat') {
     // Grok sends one quoted shell line as `command` with no `args`.
     const command = input === 'terminal'
       ? `${JSON.stringify(process.execPath)} -e "process.stdout.write(process.env.FAKE_TERMINAL_MARK ?? 'unset')"`
-      : `${JSON.stringify(process.execPath)} -e "setInterval(()=>{},1000)"`;
+      : input === 'terminal-compat'
+        ? `${JSON.stringify(process.execPath)} -e "process.stdout.write(['GROK_CLAUDE_AGENTS_ENABLED','GROK_CLAUDE_RULES_ENABLED','GROK_CURSOR_AGENTS_ENABLED','GROK_CURSOR_RULES_ENABLED'].map(name=>process.env[name]??'unset').join())"`
+        : `${JSON.stringify(process.execPath)} -e "setInterval(()=>{},1000)"`;
     const created = await ask('terminal/create', { sessionId: SESSION, command, env: [{ name: 'FAKE_TERMINAL_MARK', value: 'terminal-ok' }] });
     log({ kind: 'terminal', created });
     if (input === 'terminal-hang') { pending.set(message.id, 'silent'); return; }
