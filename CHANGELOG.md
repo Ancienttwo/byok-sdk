@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Tests (client)** — the Windows memory helper tests now run in routine CI
+  (#605). The `agent-memory-helper-linux` job has a `windows-latest` leg. It
+  runs for pull requests that change the Go helper. New Windows tests inject
+  barrier failures on NTFS. They also replace `notes` or a note with a junction
+  or a symlink after the home is pinned. Windows admission stays closed, and B
+  stays false. The plan and the owner decisions are in
+  `docs/plans/2026-10-22-605-windows-memory.md`.
 - **Fixed (client, keys)** — close the Hermes on Windows follow-ups from the
   #695 review (#712). The custody launcher now starts Hermes only after the
   adapter writes one byte to the launcher's stdin, and reads the key only after
