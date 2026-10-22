@@ -96,6 +96,19 @@ async function unhandledRejections(run: () => Promise<void>): Promise<unknown[]>
   return reasons;
 }
 
+/** The pid in a `<name>.<pid>-<n>.tmp` temp file name. */
+const tempPid = (entry: string) => Number(/\.(\d+)-\d+\.tmp$/u.exec(entry)?.[1]);
+
+/** Signal 0 checks the process only. EPERM still means that it exists. */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+}
+
 describe('Agent-home projection writeHomeFile', () => {
   it('replaces each named file at the home root with mode 0600 on POSIX', async () => {
     const { root, home, state } = await fixture();
@@ -124,7 +137,8 @@ describe('Agent-home projection writeHomeFile', () => {
     const { root, home } = await fixture();
     const names: unknown[] = ['', '.', '..', 'a/b', 'a\\b', 'C:AGENTS.md', 'AGENTS.md:stream', 'a?b', 'a*b', 'a<b',
       'a>b', 'a|b', 'a"b', 'line\nbreak', 'nul\u0000', 'trailing.', 'trailing ', 'CON', 'con.md', 'Nul', 'AUX',
-      'PRN', 'COM1', 'lpt9.txt', '.byok', '.BYOK', 'MEMORY.md', 'memory.MD', 'notes', 'NOTES', 7, undefined];
+      'PRN', 'COM1', 'lpt9.txt', '.byok', '.BYOK', 'MEMORY.md', 'memory.MD', 'notes', 'NOTES', 'AGENTS.md.5-0.tmp',
+      'persona.json.12-3.TMP', 7, undefined];
     const failures: unknown[] = [];
     await expect(manager(root, async ({ writeHomeFile }) => {
       for (const name of names) failures.push(await writeHomeFile(name as string, 'refused').catch((error: unknown) => error));
@@ -191,6 +205,27 @@ describe('Agent-home projection writeHomeFile', () => {
       throw new Error('hook failed');
     }).project(desired('2'))).rejects.toThrow('hook failed');
     expect(await recordedRevision(state)).toBe('1');
+  });
+
+  it('removes the temp files that an ended process left for the same name, and keeps the others', async () => {
+    const { root, home } = await fixture();
+    await expect(manager(root, () => {}).project(desired('1'))).resolves.toBe('applied');
+    // No process can have pid 2147483647: it is above the Linux and macOS pid
+    // limits, and Windows pids are multiples of 4.
+    const ended = 2147483647;
+    expect(alive(ended)).toBe(false);
+    const removed = `AGENTS.md.${ended}-0.tmp`;
+    // The parent process is alive, and this process never writes a temp file with its pid.
+    expect(alive(process.ppid)).toBe(true);
+    const kept = [`AGENTS.md.${process.ppid}-0.tmp`, `CLAUDE.md.${ended}-0.tmp`, 'AGENTS.md.backup.tmp', `xAGENTS.md.${ended}-0.tmp`];
+    for (const name of [removed, ...kept]) await fs.writeFile(path.join(home, name), 'residue');
+    const directory = `AGENTS.md.${ended}-1.tmp`;
+    await fs.mkdir(path.join(home, directory));
+
+    await expect(manager(root, ({ writeHomeFile }) => writeHomeFile('AGENTS.md', 'new')).project(desired('2')))
+      .resolves.toBe('applied');
+    expect(await fs.readFile(path.join(home, 'AGENTS.md'), 'utf8')).toBe('new');
+    expect((await extraEntries(home)).sort()).toEqual([...kept, directory].sort());
   });
 
   it('replaces a link at the name and does not write through it', async ({ skip }) => {
@@ -271,8 +306,13 @@ describe('Agent-home projection writeHomeFile under a process kill', () => {
     await expect(manager(root).project(desired('2'))).resolves.toBe(redelivery);
     expect(await fileStates(home)).toEqual(['new', 'new', 'new']);
     expect(await recordedRevision(state)).toBe('2');
+    // The redelivery writes the same name, so it removes the temp file of the
+    // killed child. Only an OS reuse of the child's pid can keep it.
+    for (const entry of await extraEntries(home)) {
+      expect(entry).toMatch(/\.\d+-\d+\.tmp$/u);
+      expect(alive(tempPid(entry)), entry).toBe(true);
+    }
     await expect(manager(root).project(desired('2'))).resolves.toBe('idempotent');
     expect(await fileStates(home)).toEqual(['new', 'new', 'new']);
-    expect(await extraEntries(home)).toEqual(extra);
   }, 60_000);
 });
