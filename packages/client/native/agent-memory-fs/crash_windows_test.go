@@ -29,7 +29,7 @@ import (
 // kills the child with TerminateProcess and then reads the store from disk.
 // The ledger here holds one record, not the real record list. A process kill
 // keeps the OS cache, so these tests prove nothing about OS crash or power
-// loss, and openSession stays closed on Windows.
+// loss.
 const (
 	crashPrefix     = "CRASHPROBE"
 	crashHomeEnv    = "BYOK_TEST_CRASH_HOME"
@@ -89,6 +89,17 @@ func TestWindowsCrashProbeChild(t *testing.T) {
 	}
 }
 
+// crashHomeIdentity reads the identity from a separate handle, as the TS
+// caller does before it sends open.
+func crashHomeIdentity(home string) (rootIdentity, error) {
+	root, err := os.OpenRoot(home)
+	if err != nil {
+		return rootIdentity{}, err
+	}
+	defer root.Close()
+	return identityForRoot(root, nil)
+}
+
 func runCrashChild(home string) error {
 	last, err := strconv.Atoi(os.Getenv(crashLastEnv))
 	if err != nil {
@@ -100,12 +111,15 @@ func runCrashChild(home string) error {
 			return err
 		}
 	}
-	root, err := os.OpenRoot(home)
+	identity, err := crashHomeIdentity(home)
 	if err != nil {
 		return err
 	}
-	defer root.Close()
-	active := &session{root: root}
+	active, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, ExpectedIdentity: identity})
+	if failure != nil {
+		return failure
+	}
+	defer active.root.Close()
 	original := strictSync
 	strictSync = func(file *os.File) error {
 		kind := "file"

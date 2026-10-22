@@ -80,6 +80,15 @@
   `Routine`, and `snapshot()` has no routines. Read the Bot routine views
   with `botRoutines(Object.values(ledger.snapshot().routines))`.
   `BotOptions.hostJobs` runs Host job routines on the same core.
+- **Changed (client)** — the Agent memory Go helper can now open a home on
+  Windows (#605). The SDK does not use this yet. The TypeScript gate still
+  refuses Windows, and the package has no Windows helper asset. On Windows the
+  helper accepts only an NTFS volume. It does not flush the directories above
+  the home. So a Windows write is atomic under a process crash and flushes its
+  own file and directory, but it is not durable after an OS crash or a power
+  loss. B stays false. CI now runs the helper tests on Windows Server 2025 and
+  Windows Server 2022, as the administrator and as a standard user. It also
+  checks the root identity that Node and Bun compute.
 
 ## 0.28.3 — source candidate
 

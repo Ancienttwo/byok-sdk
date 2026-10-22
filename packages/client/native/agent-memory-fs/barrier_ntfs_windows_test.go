@@ -14,6 +14,8 @@ import (
 )
 
 // The test claims NTFS, so it checks the file system of the actual temp volume.
+// It queries the volume itself rather than through volumeFileSystemName, the
+// helper code that the open check uses.
 func requireNTFS(t *testing.T, root *os.Root) {
 	t.Helper()
 	directory, err := root.Open(".")
@@ -36,9 +38,8 @@ func requireNTFS(t *testing.T, root *os.Root) {
 // directory barrier runs. The spy only records each real platformStrictSync
 // result on a directory handle. If any such barrier fails, the operation must
 // be io_failure, never success or revision_conflict. If all succeed, it must
-// succeed. openSession stays closed on Windows, so the test builds the session
-// itself. It exercises this window only. It is not containment, admission or
-// model S proof, and a pass does not grant B.
+// succeed. It exercises this window only. It is not model S proof, and a pass
+// does not grant B.
 func TestWindowsMemoryResultBarrierFailsClosedOnNTFS(t *testing.T) {
 	for _, operation := range []string{"replace-existing", "replace-new", "delete"} {
 		t.Run(operation, func(t *testing.T) {
@@ -54,13 +55,12 @@ func TestWindowsMemoryResultBarrierFailsClosedOnNTFS(t *testing.T) {
 				}
 				base = stateForBytes([]byte("old")).Revision
 			}
-			root, err := os.OpenRoot(home)
-			if err != nil {
-				t.Fatal(err)
+			active, openErr := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, ExpectedIdentity: identityForTest(t, home)})
+			if openErr != nil {
+				t.Fatalf("open: %#v", openErr)
 			}
-			defer root.Close()
-			requireNTFS(t, root)
-			active := &session{root: root}
+			defer active.root.Close()
+			requireNTFS(t, active.root)
 
 			original := strictSync
 			t.Cleanup(func() { strictSync = original })

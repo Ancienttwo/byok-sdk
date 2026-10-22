@@ -23,3 +23,7 @@ func identityForRoot(_ *os.Root, info fs.FileInfo) (rootIdentity, error) {
 		Ino:  fmt.Sprintf("%d", uint64(stat.Ino)),
 	}, nil
 }
+
+// checkRootVolume has no file system rule on Unix: dev and ino identify the
+// root on every volume.
+func checkRootVolume(*os.Root) error { return nil }
