@@ -195,7 +195,7 @@ test('the Node pin admits one exact X.Y.Z and selects every routine family, neve
   needs['build-test'] = { result: 'success' };
   assert.throws(() => requireCiPlan(needs, plan, 'push', f.base, f.base, f.cwd), /unexpectedly ran: build-test/);
   for (const value of ['', '24.22\n', 'v24.22.1\n', '24.22.1-rc.1\n', '>=24.22.1\n', '24.x\n', 'lts/*\n', '24.022.1\n',
-    ' 24.22.1\n', '24.22.1 \n', '24.22.1\r\n', '24.22.1\n\n', '24.22.1\n24.22.0\n']) {
+    ' 24.22.1\n', '24.22.1 \n', '24.22.1\r\n', '﻿24.22.1\n', '24.22.1\n\n', '24.22.1\n24.22.0\n']) {
     f.write('.node-version', value);
     assert.throws(() => selectImpact(['.node-version'], f), /one exact X\.Y\.Z/, JSON.stringify(value));
   }
