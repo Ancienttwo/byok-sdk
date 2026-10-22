@@ -1,5 +1,4 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import type { HostOptions } from './core';
 import { hash, type AgentRoutineDefinition, type HostJobRoutineDefinition, type HostJobRun } from './model';
 import { nextIntervalOccurrence } from './schedule';
 import { openHost, template, type TestHost } from './test-support';
@@ -8,7 +7,7 @@ const MINUTE = 60_000;
 let host: TestHost;
 let clock = 0;
 afterEach(async () => { await host?.close(); vi.restoreAllMocks(); });
-async function open(options: HostOptions = {}): Promise<void> {
+async function open(options: Parameters<typeof openHost>[0] = {}): Promise<void> {
   // Only the core reads this clock. The SDK keeps real time, so no routine wake becomes due in the SDK during a test.
   clock = Date.now();
   host = await openHost({ ...options, now: () => clock });
