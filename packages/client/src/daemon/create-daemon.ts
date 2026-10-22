@@ -4185,6 +4185,9 @@ export function buildDaemonWithAdapters(
     return observer.tasks();
   }
 
+  /** Each retry of a held record resends one envelope id (#698); a restart builds a new one. */
+  const reliableEnvelopes = new WeakMap<AgentReliableEgressRecord, Envelope>();
+
   function dispatchReliableRecord(record: AgentReliableEgressRecord): void {
     if (record.sessionRef === undefined) {
       agentEgress.noteTransportDrop('invalid_envelope', record.agentRef);
@@ -4197,7 +4200,7 @@ export function buildDaemonWithAdapters(
       agentEgress.noteTransportDrop('capability_missing', record.agentRef);
       return;
     }
-    const envelope = record.wireType === 'agent.egress.reliable'
+    const envelope = reliableEnvelopes.get(record) ?? (record.wireType === 'agent.egress.reliable'
       ? createEnvelope('agent.egress.reliable', {
           agentRef: record.agentRef,
           sessionRef: record.sessionRef,
@@ -4218,7 +4221,8 @@ export function buildDaemonWithAdapters(
             ...(record.taskId === undefined ? {} : { taskId: record.taskId }),
             sessionRef: record.sessionRef,
           },
-        );
+        ));
+    reliableEnvelopes.set(record, envelope);
     connection.send(envelope);
   }
 
