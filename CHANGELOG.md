@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Tests (client)** — the Grok fixture contract now runs on Windows in routine
+  CI (#609). The `adapter-lifecycle-smoke` Windows leg runs the new
+  `grok-windows-contract.test.ts`. It drives the adapter against the fake ACP
+  agent behind a compiled launcher: one turn, a hosted terminal command,
+  `session/cancel`, and the end of the agent tree and of a hung terminal tree
+  on close. Windows detection still refuses Grok, and the descriptor still
+  declares only macOS and Linux. No live Grok run is part of CI.
+  `docs/adapter-capabilities.md` lists what a live Windows run must still show.
 - **Tests (client)** — the Windows memory helper tests now run in routine CI
   (#605). The `agent-memory-helper-linux` job has a `windows-latest` leg. It
   runs for pull requests that change the Go helper. New Windows tests inject
