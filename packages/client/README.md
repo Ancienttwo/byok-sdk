@@ -141,6 +141,21 @@ Inside a SEA, this define makes `import.meta.url` the executable's URL, and
 main when `import.meta.url` matches `argv[1]`" check is true there. If the
 product also has a separate SEA entry, main then runs twice. Guard such a check
 with `!require('node:sea').isSea()`, or remove it from the SEA entry.
+`import.meta.url` is the only `import.meta` property that SDK code needs. The
+SDK resolves installed packages from it, so a CJS bundle beside `node_modules`
+finds them as ESM does (#724). Three bundled third-party modules keep an empty
+`import.meta`:
+- koffi's loader reads `import.meta.dirname`, and the SDK loads koffi for
+  Windows process ownership. On Windows, a CJS or SEA product must pass
+  `nativeAssetRoot` (see `copySdkNativeAssets` below). The SDK then loads the
+  addon itself and never runs koffi's loader. Without it, koffi's loader runs
+  with an empty `import.meta.dirname`. That is not supported, and a koffi load
+  failure makes Windows process ownership fail closed.
+- Pi's extension loader reads `import.meta.resolve` only without
+  `PI_BUNDLED_NODE`, which `runSdkReservedHelperCommand()` sets.
+- unpdf, used by the Pi web extension, reads `import.meta.resolve` inside
+  try/catch. In a CJS bundle, PDF reads do not get its standard font and CMap
+  defaults.
 Every other import of an extension resolves from the extension's own
 directory. An extension that does not load still fails the pi task.
 

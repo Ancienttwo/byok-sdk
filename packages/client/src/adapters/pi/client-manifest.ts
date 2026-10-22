@@ -1,9 +1,14 @@
 import { byok } from '../../../package.json';
+import { createRequire } from 'node:module';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
+/**
+ * `createRequire` needs only `import.meta.url`, so a CommonJS product bundle
+ * that defines it resolves the same way (#724). The `./package.json` export has
+ * no conditions, so the require resolver finds the same file as ESM.
+ */
 export function clientManifestPath(): string {
-  return fileURLToPath(import.meta.resolve('@byok-sdk/client/package.json'));
+  return createRequire(import.meta.url).resolve('@byok-sdk/client/package.json');
 }
 
 export function clientPackageRoot(): string {

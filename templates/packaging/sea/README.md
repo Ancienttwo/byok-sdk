@@ -114,9 +114,22 @@ the SEA. If the product also has a separate SEA entry, main then runs twice.
 Guard such a check with `!require('node:sea').isSea()`, or remove it from the
 SEA entry.
 
+`import.meta.url` is the only `import.meta` property that SDK code needs
+(#724). esbuild still leaves three third-party modules with an empty
+`import.meta`:
+- koffi's native loader (`import.meta.dirname`). On Windows, pass
+  `nativeAssetRoot` from `copySdkNativeAssets`. The SDK then loads the addon
+  itself, and koffi's loader never runs. `examples/packaging/native-assets-smoke.mjs`
+  proves this route in a Windows SEA built with this recipe.
+- Pi's extension loader (`import.meta.resolve`). It is not reached, because
+  `runSdkReservedHelperCommand()` sets `PI_BUNDLED_NODE`.
+- unpdf (`import.meta.resolve`, inside try/catch). PDF reads lose their
+  standard font and CMap defaults.
+
 `pi-single-file-bundle.test.ts` proves this for a single-pass CJS bundle run by
-Node, with the ordinary host and with the sealed-host redirect. It does not run
-that bundle inside a SEA binary.
+Node, with the ordinary host and with the sealed-host redirect. It fails if any
+other module keeps an empty `import.meta`. It does not run that bundle inside a
+SEA binary.
 
 Unused-export elimination relies on dependency `sideEffects` declarations
 and ordinary esbuild semantics. A version or side-effect declaration change
