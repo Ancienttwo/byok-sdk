@@ -62,7 +62,7 @@ test('reviewed vendor and registry paths map explicitly, siblings still refuse',
   assert.ok(selectImpact(['packages/client/vendor/oar/60ad09b/runtimes/grok/session.ts']).dirs.includes('packages/client'));
   assert.deepEqual(selectImpact(['scripts/release/registry-contract.test.mjs', 'scripts/release/registry-expectations.json']).dirs, []);
   assert.throws(() => selectImpact(['packages/client/vendor/oar/60ad09b/unreviewed.ts']));
-  assert.throws(() => selectImpact(['scripts/release/publish.mjs']));
+  assert.throws(() => selectImpact(['scripts/release/registry-contract.mjs']));
 });
 test('CLI and aggregate revalidate content against the same trusted comparison base', t => {
   const f = fixture(t); f.write('packages/client/package.json', { ...f.manifest, version: '0.28.1' });
