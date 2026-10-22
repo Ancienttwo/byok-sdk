@@ -2111,6 +2111,23 @@ Busy, containment, hook, fsync, transport, or readback mismatch leaves the
 cursor at its prior value and redelivers after reconnect/restart. No fake task,
 runtime, session, terminal event, or task journal record is created.
 
+The consumer hook input carries `writeHomeFile(name, body)` (#738). It
+atomically replaces one file at the root of the canonical Agent home, under the
+same writer lease. `name` is one portable file name with the Agent id segment
+rules. `.byok`, `MEMORY.md` and `notes` belong to the SDK, and the call refuses
+them in any letter case. The call is valid only while the hook runs. The SDK
+waits for every call before it writes the ordering record, and a failed call
+fails the projection. Each call is atomic for its own file only. Several calls
+are not one transaction. After a process crash on any platform, each file has
+its old bytes or its new bytes. On POSIX, a successful call has flushed the
+file and its directory. On Windows, a successful call has flushed the file
+only. Node has no Windows directory flush, and the NTFS barrier is not proven
+(`B=false`), so the SDK makes no promise for an OS crash or a power loss there:
+the ordering record can survive while the new file name is lost. Only a
+delivery of the same revision and hash calls the hook again and repairs the
+file. A process crash can leave a `<name>.<pid>-<n>.tmp` file in the home; the
+SDK does not remove it.
+
 Local Host memory export is a separate, explicitly enabled in-process API.
 `DaemonConfig.agentMemoryExport: true` exposes
 `daemon.exportAgentMemory(agentRef, { signal })`; without that opt-in the method

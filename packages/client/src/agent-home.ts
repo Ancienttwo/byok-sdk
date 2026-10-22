@@ -106,6 +106,30 @@ export interface AgentHomeProjectionApplyInput extends AgentHomeProjectionInput 
   readonly requestId: string;
   readonly projectionHash: string;
   readonly projection: unknown;
+  /**
+   * Atomically replace one file at the root of the canonical Agent home with
+   * `body`. A string body is written as UTF-8. `name` is one portable file
+   * name: no path separator, no `:<>"|?*`, no control character, no trailing
+   * dot or space and no Windows device name. `.byok`, `MEMORY.md` and `notes`
+   * belong to the SDK and are refused in any letter case.
+   *
+   * The call is valid only while this hook runs. The SDK waits for every call
+   * before it records the projection, and refuses a call after the hook
+   * settles.
+   *
+   * Each call is atomic for its own file only. There is no transaction over
+   * several files. After a process crash, the file has its old bytes or its
+   * new bytes, never a mix. The call replaces the directory entry of `name`,
+   * so it never writes through a link at `name`. On POSIX, the file has mode
+   * 0600, and a successful return means that the file and its directory are
+   * flushed to storage. On Windows, a successful return means only that the
+   * file is flushed. Node has no directory flush on Windows, so after an OS
+   * crash or a power loss the new name can be lost while the SDK projection
+   * record stays. Only a delivery of the same revision and hash calls this
+   * hook again and repairs the file. A process crash can leave a
+   * `<name>.<pid>-<n>.tmp` file in the home. The SDK does not remove it.
+   */
+  readonly writeHomeFile: (name: string, body: string | Uint8Array) => Promise<void>;
 }
 
 /**
@@ -126,6 +150,7 @@ export interface AgentHomeProjection {
    * Task-free opaque desired-state consumer. It must atomically and
    * idempotently ensure its own durable bytes because exact revision/hash
    * requests may replay after local derived-file loss or transport failure.
+   * `input.writeHomeFile` writes one file at the home root in this way.
    */
   apply?(input: AgentHomeProjectionApplyInput): void | Promise<void>;
 }
@@ -1080,6 +1105,42 @@ async function writeProjectionState(
   await atomicWriteFile(filePath, `${JSON.stringify(state)}\n`, { mode: 0o600, fsync: true });
 }
 
+/** Home entries that the SDK owns, compared in lower case. */
+const SDK_HOME_ENTRIES = new Set([AGENT_HOME_INTERNAL_DIRECTORY, 'memory.md', 'notes']);
+
+/** One portable file name at the home root, with the same segment rules as an Agent id. */
+function isHomeFileName(name: unknown): name is string {
+  return typeof name === 'string' && /^[^\u0000-\u001f\u007f\\/:<>"|?*]+$/u.test(name) && !/[. ]$/u.test(name)
+    && !/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/iu.test(name) && !SDK_HOME_ENTRIES.has(name.toLowerCase());
+}
+
+/**
+ * The `writeHomeFile` of one projection hook call. `close()` refuses new
+ * calls and waits for the started ones, so that no write lands after the
+ * projection record or outside the writer lease. It throws the first failed
+ * write.
+ */
+function homeFileWriter(canonicalHome: string) {
+  const writes: Promise<void>[] = [];
+  let open = true;
+  return {
+    write(name: string, body: string | Uint8Array): Promise<void> {
+      if (!open) return Promise.reject(new AgentHomeError('writeHomeFile is valid only while the projection hook runs'));
+      if (!isHomeFileName(name)) return Promise.reject(new AgentHomeError(`invalid Agent home file name: ${JSON.stringify(name)}`));
+      const write = atomicWriteFile(path.join(canonicalHome, name), body, { mode: 0o600, fsync: true });
+      // A hook that does not await a write must not crash the process with an
+      // unhandled rejection. close() still reports the failure.
+      write.catch(() => {});
+      writes.push(write);
+      return write;
+    },
+    async close(): Promise<void> {
+      open = false;
+      for (const result of await Promise.allSettled(writes)) if (result.status === 'rejected') throw result.reason;
+    },
+  };
+}
+
 function compareProjectionRevision(left: string, right: string): -1 | 0 | 1 {
   const leftRevision = BigInt(left);
   const rightRevision = BigInt(right);
@@ -1301,13 +1362,22 @@ export class AgentHomeManager {
         if (apply === undefined) {
           throw new AgentHomeError('task-free Agent-home projection is not configured');
         }
-        await apply({
-          ...resolution,
-          cwd: lease.cwd,
-          requestId: payload.requestId,
-          projectionHash: payload.projectionHash,
-          projection: payload.projection,
-        });
+        const writer = homeFileWriter(resolution.canonicalHome);
+        try {
+          await apply({
+            ...resolution,
+            cwd: lease.cwd,
+            requestId: payload.requestId,
+            projectionHash: payload.projectionHash,
+            projection: payload.projection,
+            writeHomeFile: writer.write,
+          });
+        } catch (error) {
+          // Report the hook's own failure, after its started writes settle.
+          await writer.close().catch(() => {});
+          throw error;
+        }
+        await writer.close();
         if (await fs.realpath(resolution.homeDir) !== resolution.canonicalHome) {
           throw new AgentHomeResolutionError('Agent projection changed the canonical home path');
         }

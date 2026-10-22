@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Feature (client)** — the task-free projection hook gets
+  `writeHomeFile(name, body)` on its input (#738, #606 R6). One call
+  atomically replaces one file at the root of the canonical Agent home under
+  the writer lease. `name` is one portable file name. `.byok`, `MEMORY.md` and
+  `notes` belong to the SDK and are refused. The SDK waits for every call
+  before it writes its projection record, and it refuses a call after the hook
+  settles. Each call is atomic for one file only, and several calls are not one
+  transaction. After a process crash, each file has its old or its new bytes.
+  On POSIX, a successful call has flushed the file and its directory. On
+  Windows, it has flushed the file only: there is no promise for an OS crash
+  or a power loss, and a delivery of the same revision and hash repairs a lost
+  file. `agent-home-write-file.test.ts` kills a child process at five points
+  of a three-file apply and checks each file and the redelivery. The root
+  `@byok-sdk/client` entry grows by 1389 bytes.
+
 ## 0.28.3 — source candidate
 
 The owner selected 0.28.3 as one more one-release exception to the default
