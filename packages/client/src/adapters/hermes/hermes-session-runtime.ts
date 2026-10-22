@@ -103,7 +103,8 @@ export function createHermesSession(scratch: ExecutionScratch, root: string, liv
     /**
      * Waits until the gateway serving `home` runs in the owned tree at `root`
      * and reports ready. Returns the gateway's own pid. The ownership check
-     * runs once per answering pid: on Windows it reads the process table.
+     * runs once per answering pid: on Windows it reads the process table, and
+     * only an owned pipe server receives `identify`.
      */
     async awaitGatewayReady(home: string, root: number, timeoutMs: number, signal: AbortSignal | undefined): Promise<number> {
       const served = await fs.realpath(home);
@@ -112,11 +113,11 @@ export function createHermesSession(scratch: ExecutionScratch, root: string, liv
       for (;;) {
         if (this.failure) throw this.failure;
         if (signal?.aborted) throw infrastructure('start', 'hermes start was aborted', 'retryable');
-        const identity = await identifyHermesGateway(home);
+        const identity = await identifyHermesGateway(home, { owned: (pid) => pid === owned });
         if (identity !== undefined) {
           if (identity.pid !== owned) {
-            const ours = await ownsHermesGatewayPid(root, identity.pid).catch(() => {
-              throw infrastructure('start', 'hermes gateway ownership check failed', 'retryable');
+            const ours = await this.withinStart(ownsHermesGatewayPid(root, identity.pid), deadline, signal).catch((error: unknown) => {
+              throw isRuntimeExecutionFailure(error) ? error : infrastructure('start', 'hermes gateway ownership check failed', 'retryable');
             });
             if (!ours) throw infrastructure('start', 'another Hermes gateway serves the execution profile');
             owned = identity.pid;
@@ -126,6 +127,20 @@ export function createHermesSession(scratch: ExecutionScratch, root: string, liv
         if (Date.now() >= deadline) throw infrastructure('start', 'hermes gateway did not report ready in time', 'retryable');
         await new Promise((resolve) => setTimeout(resolve, GATEWAY_POLL_MS));
       }
+    }
+
+    /** `work`, unless the ready deadline passes or the start is aborted first. */
+    private withinStart<T>(work: Promise<T>, deadline: number, signal: AbortSignal | undefined): Promise<T> {
+      return new Promise<T>((resolve, reject) => {
+        const timer = setTimeout(() => reject(infrastructure('start', 'hermes gateway did not report ready in time', 'retryable')), Math.max(0, deadline - Date.now()));
+        const abort = (): void => reject(infrastructure('start', 'hermes start was aborted', 'retryable'));
+        signal?.addEventListener('abort', abort, { once: true });
+        if (signal?.aborted) abort();
+        work.then(resolve, reject).finally(() => {
+          clearTimeout(timer);
+          signal?.removeEventListener('abort', abort);
+        });
+      });
     }
 
     ready(sessionId: string): void {

@@ -28,8 +28,7 @@ export function servesHermesHome(identity: HermesGatewayIdentity, served: string
   return identity.servedHomes.some((home) => key(home) === key(served));
 }
 
-async function controlPath(home: string): Promise<string> {
-  if (process.platform === 'win32') return hermesGatewayPipeName(await fs.realpath(home).catch(() => path.resolve(home)));
+async function socketPath(home: string): Promise<string> {
   const direct = path.join(home, 'gateway.sock');
   return fs.lstat(direct).then(
     () => direct,
@@ -37,16 +36,62 @@ async function controlPath(home: string): Promise<string> {
   );
 }
 
+const IDENTIFY_REQUEST = `${JSON.stringify({ protocol: 1, id: 1, verb: 'identify' })}\n`;
+
+function parseIdentity(line: string): HermesGatewayIdentity | undefined {
+  try {
+    const result = (JSON.parse(line) as { result?: Record<string, unknown> }).result;
+    const served = Array.isArray(result?.served_profiles) ? result.served_profiles : [];
+    return typeof result?.pid === 'number' && typeof result.state === 'string'
+      ? {
+          pid: result.pid,
+          state: result.state,
+          servedHomes: served.flatMap((entry) => {
+            const home = (entry as { home?: unknown } | null)?.home;
+            return typeof home === 'string' ? [home] : [];
+          }),
+        }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export interface IdentifyHermesGatewayOptions {
+  timeoutMs?: number;
+  /**
+   * Windows: the server pids the caller owns. The kernel names the server;
+   * only an owned server receives the request. Any other server yields
+   * `{ pid: <server pid>, state: 'unverified', servedHomes: [] }`. POSIX
+   * ignores it: only this execution can reach the profile directory.
+   */
+  owned?: (serverPid: number) => boolean;
+  nativeAssetRoot?: string;
+}
+
+/** Windows: one exchange with the koffi pipe client (`gateway-pipe-win32.ts`). */
+async function identifyOverPipe(home: string, options: IdentifyHermesGatewayOptions): Promise<HermesGatewayIdentity | undefined> {
+  const { exchangeHermesPipe } = await import('./gateway-pipe-win32');
+  const name = hermesGatewayPipeName(await fs.realpath(home).catch(() => path.resolve(home)));
+  const answer = await exchangeHermesPipe(name, IDENTIFY_REQUEST, options.owned ?? (() => false), Date.now() + (options.timeoutMs ?? 1_000), options.nativeAssetRoot);
+  if (answer === undefined) return undefined;
+  const identity = answer.line === undefined ? undefined : parseIdentity(answer.line);
+  if (identity === undefined) return { pid: answer.serverPid, state: 'unverified', servedHomes: [] };
+  // An answer that names another process than the kernel does is judged by its claim and is never ready.
+  return identity.pid === answer.serverPid ? identity : { pid: identity.pid, state: 'mismatch', servedHomes: [] };
+}
+
 /**
  * Asks the gateway that serves `home` who it is, over its control channel.
  * POSIX: the Unix socket `<home>/gateway.sock`, else the path written in
  * `<home>/gateway.sock.path` when the direct path is too long for a Unix
- * socket. Windows: the named pipe {@link hermesGatewayPipeName}. The Hermes ACP
- * viewer reads the same answer before it attaches. Undefined: no gateway
- * answered.
+ * socket. Windows: the named pipe {@link hermesGatewayPipeName}, see
+ * {@link IdentifyHermesGatewayOptions.owned}. The Hermes ACP viewer reads the
+ * same answer before it attaches. Undefined: no gateway answered.
  */
-export async function identifyHermesGateway(home: string, timeoutMs = 1_000): Promise<HermesGatewayIdentity | undefined> {
-  const socketPath = await controlPath(home);
+export async function identifyHermesGateway(home: string, options: IdentifyHermesGatewayOptions = {}): Promise<HermesGatewayIdentity | undefined> {
+  if (process.platform === 'win32') return identifyOverPipe(home, options).catch(() => undefined);
+  const target = await socketPath(home);
   return new Promise((resolve) => {
     let buffer = '';
     let settled = false;
@@ -57,32 +102,16 @@ export async function identifyHermesGateway(home: string, timeoutMs = 1_000): Pr
       socket.destroy();
       resolve(value);
     };
-    const timer = setTimeout(() => finish(undefined), timeoutMs);
-    const socket = net.createConnection({ path: socketPath });
-    socket.on('connect', () => socket.write(`${JSON.stringify({ protocol: 1, id: 1, verb: 'identify' })}\n`));
+    const timer = setTimeout(() => finish(undefined), options.timeoutMs ?? 1_000);
+    const socket = net.createConnection({ path: target });
+    socket.on('connect', () => socket.write(IDENTIFY_REQUEST));
     socket.on('error', () => finish(undefined));
     socket.on('close', () => finish(undefined));
     socket.on('data', (chunk) => {
       buffer += chunk.toString('utf8');
       if (buffer.length > 256 * 1024) return finish(undefined);
       const newline = buffer.indexOf('\n');
-      if (newline === -1) return;
-      try {
-        const result = (JSON.parse(buffer.slice(0, newline)) as { result?: Record<string, unknown> }).result;
-        const served = Array.isArray(result?.served_profiles) ? result.served_profiles : [];
-        finish(typeof result?.pid === 'number' && typeof result.state === 'string'
-          ? {
-              pid: result.pid,
-              state: result.state,
-              servedHomes: served.flatMap((entry) => {
-                const home = (entry as { home?: unknown } | null)?.home;
-                return typeof home === 'string' ? [home] : [];
-              }),
-            }
-          : undefined);
-      } catch {
-        finish(undefined);
-      }
+      if (newline !== -1) finish(parseIdentity(buffer.slice(0, newline)));
     });
   });
 }

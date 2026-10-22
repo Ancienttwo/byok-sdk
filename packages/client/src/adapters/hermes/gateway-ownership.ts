@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import path from 'node:path';
+import { servesHermesHome, type HermesGatewayIdentity } from './gateway-identity';
 
 /**
  * Parent links to walk. Windows custody: launcher, `hermes.exe` console
@@ -71,15 +72,16 @@ export async function ownsHermesGatewayPid(root: number, pid: number): Promise<b
 }
 
 /**
- * Whether the adapter may stop a gateway it does not own that serves the
- * execution profile. On POSIX only this execution can reach the profile
- * directory that holds the control socket, so such a gateway was started for
- * it. On Windows the control pipe name is in one machine-wide namespace, and
- * the client cannot check the pipe owner, so the `identify` answer alone proves
- * nothing: the gateway must also run below the viewer the adapter started.
+ * Whether the adapter may stop a gateway it does not own that answered after
+ * the viewer attached. On POSIX only this execution can reach the profile
+ * directory that holds the control socket, so a gateway that serves the
+ * profile (`served`, a real path) was started for it. On Windows the pipe
+ * name is in one machine-wide namespace: the gateway must run below the
+ * viewer the adapter started. There `identity.pid` is the server pid from the
+ * kernel, because a server the adapter does not own receives no request.
  */
-export async function mayStopForeignHermesGateway(viewer: number | undefined, pid: number): Promise<boolean> {
-  if (process.platform !== 'win32') return true;
+export async function mayStopForeignHermesGateway(identity: HermesGatewayIdentity, served: string, viewer: number | undefined): Promise<boolean> {
+  if (process.platform !== 'win32') return servesHermesHome(identity, served);
   if (viewer === undefined) return false;
-  return ownsHermesGatewayPid(viewer, pid).catch(() => false);
+  return ownsHermesGatewayPid(viewer, identity.pid).catch(() => false);
 }

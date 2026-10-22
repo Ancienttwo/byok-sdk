@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { HermesModelSelection } from './hermes-adapter';
+import { ensureSecureDir } from '../../util/secure-dir';
 import { identifyHermesGateway } from './gateway-identity';
 
 /**
@@ -95,7 +96,8 @@ export async function ensureHermesRoot(root: string): Promise<void> {
 /** Creates `<root>/profiles/byok-<id>` with the SDK config and the carried model caches. */
 export async function createHermesProfile(root: string, id: string, model: HermesModelSelection | undefined): Promise<string> {
   const profiles = path.join(root, 'profiles');
-  await fs.mkdir(profiles, { recursive: true, mode: 0o700 });
+  // A mode does not restrict a Windows directory; this sets a DACL there. A profile holds the session and names the control pipe.
+  await ensureSecureDir(profiles);
   const home = path.join(profiles, `${PROFILE_PREFIX}${id}`);
   await fs.mkdir(home, { mode: 0o700 });
   try {
@@ -130,7 +132,7 @@ export async function removeHermesProfile(root: string, home: string): Promise<v
  * {@link STALE_PROFILE_MS}, or while any gateway answers for it. `live` knows
  * only this process's sessions, so one root serves one Host process.
  */
-export async function sweepStaleHermesProfiles(root: string, live: ReadonlySet<string>, now = Date.now()): Promise<void> {
+export async function sweepStaleHermesProfiles(root: string, live: ReadonlySet<string>, now = Date.now(), nativeAssetRoot?: string): Promise<void> {
   const profiles = path.join(root, 'profiles');
   const names = await fs.readdir(profiles).catch(() => [] as string[]);
   for (const name of names) {
@@ -138,7 +140,7 @@ export async function sweepStaleHermesProfiles(root: string, live: ReadonlySet<s
     if (!name.startsWith(PROFILE_PREFIX) || live.has(home)) continue;
     const stat = await fs.lstat(home).catch(() => undefined);
     if (stat === undefined || !stat.isDirectory() || now - stat.mtimeMs < STALE_PROFILE_MS) continue;
-    if (await identifyHermesGateway(home) !== undefined) continue;
+    if (await identifyHermesGateway(home, { nativeAssetRoot }) !== undefined) continue;
     await fs.rm(home, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }).catch(() => {});
   }
 }
