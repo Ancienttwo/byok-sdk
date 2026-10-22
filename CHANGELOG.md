@@ -4,10 +4,14 @@
 
 - **Fixed (client, keys)** — close the Hermes on Windows follow-ups from the
   #695 review (#712). The custody launcher now starts Hermes only after the
-  adapter writes one byte to the launcher's stdin. The adapter writes it after
-  it adopts the launcher (on Windows, into the kill-on-close job), so Hermes
-  never runs outside the owned tree. End of input fails the launch. Client and
-  keys must come from the same release: an older client never writes the byte.
+  adapter writes one byte to the launcher's stdin, and reads the key only after
+  that byte. The adapter writes it after it adopts the launcher (on Windows,
+  into the kill-on-close job), so neither the key nor Hermes exists outside the
+  owned tree. End of input fails the launch. Client and keys must come from
+  the same release. A new keys launcher with an older client waits for a byte
+  that never comes, and the start fails after 20 s with the misleading "hermes
+  gateway did not report ready in time". An older keys launcher with a new
+  client passes the byte to Hermes as one blank stdin line.
   The stale-profile sweep keeps a profile when the Windows pipe client fails.
   The Windows process-table read now ends at the ready deadline or on start
   abort, and the foreign-gateway check ends at 10 s or on start abort.
