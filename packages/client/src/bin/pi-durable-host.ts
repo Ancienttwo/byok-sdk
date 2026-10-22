@@ -10,9 +10,10 @@ import { receiveLauncherCredential } from '../adapters/pi/launcher-credential';
 import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../adapters/provider-credential-environment';
 import { admitReplica, type DurableReplicaBinding } from '../adapters/pi-durable/replica';
 import { openDurableEngine } from '../adapters/pi-durable/engine';
-import { projectDurableEvent } from '../adapters/pi-durable/events';
+import { projectDurableEvent, withMcpIdentity } from '../adapters/pi-durable/events';
 import { parseTaskScopedMcpConfig, McpServerPool } from '../adapters/pi/mcp-server-pool';
 import { createPiMcpTools } from '../adapters/pi/mcp-tools';
+import { mcpEventIdentities } from '../mcp/event-identity';
 import { projectMcpTools, type McpToolProjection } from '../mcp/projection';
 import { isReservedMcpServerName } from '../sdk-reserved-mcp';
 import { RPC_MAX_FRAME_BYTES } from '../util/rpc-frame';
@@ -70,6 +71,7 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
   const pool = new McpServerPool(mcp, fail);
   const tools: ToolRegistration[] = [];
   const projected = projectMcpTools(mcp.observation);
+  const identities = mcpEventIdentities(mcp.observation);
   const reserved: McpToolProjection[] = [];
   for (const server of Object.keys(mcp.mcpServers).filter(isReservedMcpServerName).sort()) {
     for (const tool of await pool.observe(server)) reserved.push({ toolsetId: server, serverName: server, toolName: tool.name, description: tool.description, inputSchema: tool.inputSchema });
@@ -111,7 +113,7 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
         beforeTool: (nativeId, toolCallId, call) => new Promise<void>((resolve, reject) => {
           toolIds.set(nativeId, toolCallId);
           pending.set(toolCallId, { resolve, reject }); write({ type: 'tool_intent', toolCallId });
-          write({ type: 'agent_event', event: { type: 'tool_use', tool: call.name, toolCallId, input: call.arguments } });
+          write({ type: 'agent_event', event: withMcpIdentity({ type: 'tool_use', tool: call.name, toolCallId, input: call.arguments }, identities) });
         }),
         events: async events => { for (const event of events) {
           if (event.type === 'tool_execution_start') continue; // Hook supplies the durable task identity.
@@ -119,7 +121,7 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
           if (event.type === 'tool_execution_end' && event.entry !== undefined && toolCallId !== undefined && admitted.delete(toolCallId)) write({ type: 'tool_committed', toolCallId });
           for (const projectedEvent of projectDurableEvent(event)) {
             const normalized = projectedEvent.type === 'tool_result' && toolCallId ? { ...projectedEvent, toolCallId } : projectedEvent;
-            write({ type: 'agent_event', event: normalized, ...(event.type === 'message_end' ? { usageId: String(event.entry.id) } : {}) });
+            write({ type: 'agent_event', event: withMcpIdentity(normalized, identities), ...(event.type === 'message_end' ? { usageId: String(event.entry.id) } : {}) });
           }
         } },
         completed: async () => { write({ type: 'durable_complete' }); },

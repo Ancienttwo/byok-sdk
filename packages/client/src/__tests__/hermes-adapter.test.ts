@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import { HermesAdapter, type HermesAdapterOptions } from '../adapters/hermes/hermes-adapter';
 import { hermesProfileConfig } from '../adapters/hermes/hermes-home';
@@ -11,6 +11,19 @@ import { RuntimeExecutionFailure } from '../runtime-failure';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { testExecutionScratch } from './fixtures/execution-scratch';
 import { fakeHermesCommand } from './fixtures/fake-hermes-command';
+
+// Pass-through: records the signal the adapter gives the foreign-gateway check; the real check still runs.
+const foreignCheckSignals = vi.hoisted(() => [] as Array<AbortSignal | undefined>);
+vi.mock('../adapters/hermes/gateway-ownership', async (original) => {
+  const real = await original<typeof import('../adapters/hermes/gateway-ownership')>();
+  return {
+    ...real,
+    mayStopForeignHermesGateway: (...args: Parameters<typeof real.mayStopForeignHermesGateway>) => {
+      foreignCheckSignals.push(args[3]);
+      return real.mayStopForeignHermesGateway(...args);
+    },
+  };
+});
 
 const fixture = fileURLToPath(new URL('./fixtures/fake-hermes.mjs', import.meta.url));
 const sessions: Session[] = [];
@@ -371,6 +384,33 @@ describe('HermesAdapter session', () => {
     await expect(open()).rejects.toMatchObject({ phase: 'start', message: 'hermes acp attached to a gateway this session does not own' });
     expect(await fs.readdir(path.join(root, 'profiles'))).toEqual([]);
     for (const entry of await entries()) expect(alive(entry.pid)).toBe(false);
+  });
+
+  it.skipIf(windows)('bounds the foreign-gateway check by 10 s and by the start signal', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    try {
+      const { adapter, workspaceDir, env } = await setup({ FAKE_HERMES_VIEWER_TAKES_SOCKET: '1' });
+      const prepared = await adapter.prepare({ offer: task, descriptor: adapter.descriptor, requiredToolsetIds: [] });
+      if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
+      const controller = new AbortController();
+      foreignCheckSignals.length = 0;
+      await expect(prepared.operation.start({
+        kind: 'instruction', instruction: 'hello', signal: controller.signal, env,
+        scratch: await testExecutionScratch(),
+        manifest: sealRuntimeOperationManifest({
+          taskId: 'foreign-check', runtimeId: 'hermes', descriptor: adapter.descriptor, requiredToolsetIds: [],
+          workspace: { workspaceDir }, forwardedEnvironmentNames: [],
+        }),
+      })).rejects.toMatchObject({ phase: 'start', message: 'hermes acp attached to a gateway this session does not own' });
+      expect(timeout).toHaveBeenCalledWith(10_000);
+      expect(foreignCheckSignals).toHaveLength(1);
+      const signal = foreignCheckSignals[0]!;
+      expect(signal.aborted).toBe(false);
+      controller.abort();
+      expect(signal.aborted).toBe(true);
+    } finally {
+      timeout.mockRestore();
+    }
   });
 
   it('fails retryably when the gateway does not report ready in time', async () => {
