@@ -13,6 +13,8 @@ export interface McpHttpServerOptions extends Omit<McpServerOptions, 'input' | '
   readonly sessionMode?: 'stateful' | 'stateless';
   /** Trusted public origin, e.g. https://host.example. Never derive it from the request Host header. */
   readonly origin: string;
+  /** Additional exact Origin values from trusted Host configuration, validated like `origin`. Default none. */
+  readonly allowedOrigins?: readonly string[];
   /** Positive integer, at most MCP_HTTP_MAX_BODY_BYTES. */
   readonly maxBodyBytes?: number;
   /** Bounds idle sessions as well as emitter subscriptions. Default 64. Applies only in stateful mode. */
@@ -68,7 +70,7 @@ function accepts(header: string | null, mediaType: string): boolean {
  * Sessions are scoped to this instance; never share it between authenticated callers.
  */
 export function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServer {
-  const origin = trustedOrigin(options.origin);
+  const origins = new Set([options.origin, ...(options.allowedOrigins ?? [])].map(trustedOrigin));
   if (options.sessionMode !== undefined && !['stateful', 'stateless'].includes(options.sessionMode)) throw new TypeError('invalid sessionMode');
   const stateless = options.sessionMode === 'stateless';
   if (stateless && options.toolsListChanged) throw new TypeError('stateless HTTP MCP does not support toolsListChanged');
@@ -224,7 +226,7 @@ export function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServe
     async fetch(request) {
       if (closed) return failure(503, 'MCP server closed');
       const requestOrigin = request.headers.get('origin');
-      if (requestOrigin !== null && requestOrigin !== origin) return failure(403, 'Invalid Origin');
+      if (requestOrigin !== null && !origins.has(requestOrigin)) return failure(403, 'Invalid Origin');
       const version = request.headers.get('mcp-protocol-version');
       if (version !== null && !HTTP_VERSIONS.includes(version)) return failure(400, 'Unsupported MCP protocol version');
       if (!['POST', 'GET', 'DELETE'].includes(request.method)) {

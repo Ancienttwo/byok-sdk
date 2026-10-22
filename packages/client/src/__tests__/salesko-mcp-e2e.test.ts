@@ -31,6 +31,7 @@ async function tmpDir(prefix: string): Promise<string> {
 describe('Salesko fake connector MCP end to end', () => {
   it('offer id -> local registry -> strict Claude config -> stdio MCP tool call -> terminal result', async () => {
     const sent: Envelope[] = [];
+    const mcpToolsetToolsProbe = vi.fn(async () => { throw new Error('Claude admission must not probe tools/list'); });
     const adapter = new ClaudeAdapter({
       resolveBin: () => ({ command: CLAUDE_FIXTURE, source: 'path' }),
     });
@@ -45,6 +46,7 @@ describe('Salesko fake connector MCP end to end', () => {
       approvalRegistry: new ApprovalRegistry(),
       storeDir: 'unused-store-dir',
       productId: 'salesko',
+      mcpToolsetToolsProbe,
       getMcpToolsets: () => new Map([
         [
           'salesko',
@@ -79,6 +81,16 @@ describe('Salesko fake connector MCP end to end', () => {
     expect(sent.some((envelope) => envelope.type === 'task.started')).toBe(true);
     expect(JSON.stringify(sent)).toContain('mcp__salesko__find_leads');
     expect(JSON.stringify(sent)).toContain('salesko-fake');
+    // #633: the identity comes from Claude's own mcp_status answer, not an admission probe.
+    expect(mcpToolsetToolsProbe).not.toHaveBeenCalled();
+    const tools = sent
+      .filter((envelope) => envelope.type === 'task.progress')
+      .flatMap((envelope) => (envelope.payload as { events: Array<{ type: string }> }).events)
+      .filter((event) => event.type === 'tool_use' || event.type === 'tool_result');
+    expect(tools.map((event) => event.type)).toEqual(['tool_use', 'tool_result']);
+    for (const event of tools) {
+      expect(event).toMatchObject({ tool: 'mcp__salesko__find_leads', mcp: { server: 'salesko', tool: 'find_leads' } });
+    }
     const terminal = sent.find((envelope) => envelope.type === 'task.complete');
     expect(terminal?.payload).toMatchObject({ sessionRef: 'fake-claude-session-1' });
     expect(JSON.stringify(terminal)).toContain('Ada Lead');

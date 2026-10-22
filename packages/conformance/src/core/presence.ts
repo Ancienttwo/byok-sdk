@@ -66,6 +66,32 @@ export function runPresenceConformance(factory: CoreCompositionFactory): void {
       });
     });
 
+    it('disables publication throttling at zero interval after clock rollback', async () => {
+      await withComposition(factory, async handle => {
+        const input = { deviceId: 'rollback-zero', level: 'online' as const, ttlMs: 60_000, minimumIntervalMs: 0 };
+        await handle.stores.presence.publish(TENANT_A, input);
+        await handle.advanceTime(-5_000);
+        const observedAt = handle.now();
+        const published = await handle.stores.presence.publish(TENANT_A, { ...input, level: 'working' });
+        expect(published).toMatchObject({ level: 'working', observedAt,
+          expiresAt: new Date(Date.parse(observedAt) + input.ttlMs).toISOString() });
+        expect(await handle.stores.presence.read(TENANT_A, input.deviceId)).toEqual(published);
+      });
+    });
+
+    it('preserves positive publication throttling after clock rollback', async () => {
+      await withComposition(factory, async handle => {
+        const input = { deviceId: 'rollback-positive', level: 'online' as const, ttlMs: 60_000, minimumIntervalMs: 10_000 };
+        const initial = await handle.stores.presence.publish(TENANT_A, input);
+        await handle.advanceTime(-5_000);
+        await expect(handle.stores.presence.publish(TENANT_A, { ...input, level: 'working' }))
+          .rejects.toMatchObject({ code: 'hint_rate_limited' });
+        expect(await handle.stores.presence.read(TENANT_A, input.deviceId)).toEqual(initial);
+        await handle.advanceTime(15_000);
+        expect((await handle.stores.presence.publish(TENANT_A, { ...input, level: 'working' })).level).toBe('working');
+      });
+    });
+
     it('enforces the configured publication interval at the store authority', async () => {
       await withComposition(factory, async (handle) => {
         await handle.stores.presence.publish(TENANT_A, {

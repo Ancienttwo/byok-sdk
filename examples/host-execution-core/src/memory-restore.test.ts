@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { AgentMemoryExport } from '@byok-sdk/client';
-import { HostLedger } from './ledger';
+import { HostLedger, MIN_TOMBSTONE_RETENTION_MS } from './ledger';
 import { HostMemoryPage, memoryRevision, MemoryBlockedError, type MemoryOptions } from './memory';
 import type { MemoryRestoreInput, MemoryRestoreResult } from './memory-restore';
 import { HostExecutionCore, type ExecutionServer } from './core';
@@ -59,6 +59,23 @@ it('holds the gate across all readbacks and preserves stable retry identity acro
   await page.restore(input()); await complete(first.files[0]!);
   expect(Object.keys(ledger.snapshot().memory!.intents)).toEqual(ids);
   expect(Object.values(ledger.snapshot().memory!.intents).every(row => !('content' in row.intent))).toBe(true);
+});
+it('compacts restore intents only after the restore is terminal and keeps its result', async () => {
+  const first = await page.restore(input());
+  await complete(first.files[0]!);
+  const compact = (ids: string[]) => ledger.compact({ acknowledgedIntentKeys: [], acknowledgedMemoryIntentIds: ids,
+    now: 1000, tombstoneRetentionMs: MIN_TOMBSTONE_RETENTION_MS });
+  const before = ledger.snapshot();
+  expect(() => compact([first.files[0]!.intentId!])).toThrow('active restore');
+  expect(ledger.snapshot()).toEqual(before);
+  for (const file of first.files.slice(1)) await complete(file);
+  const result = page.restoreResult(binding, 'restore-1')!;
+  expect(result.status).toBe('applied');
+  expect(compact(first.files.map(file => file.intentId!)).memoryIntents).toBe(3);
+  expect(ledger.snapshot().memory!.intents).toEqual({}); expect(ledger.snapshot().memory!.approvals).toEqual({});
+  expect(page.restoreResult(binding, 'restore-1')).toEqual(result);
+  expect(await page.restore(input())).toEqual(result);
+  expect(ledger.snapshot().memory!.intents).toEqual({});
 });
 it('initial nonempty home conflicts as a batch without minting any write, including absent target notes', async () => {
   current = snapshot({ 'MEMORY.md': 'existing' });

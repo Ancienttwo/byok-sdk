@@ -131,3 +131,35 @@ test('result-helper close regression selects only its exact basic workspace path
   assert.deepEqual(selectImpact(['examples/basic/goal-btw-close.test.ts']).dirs, ['examples/basic']);
   assert.throws(() => selectImpact(['examples/basic/goal-btw-close-other.test.ts']));
 });
+
+test('keys pi-catalog subpath and its generator admit exact additions only', t => {
+  const cwd = mkdtempSync(join(tmpdir(), 'ci-keys-pi-catalog-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  mkdirSync(join(cwd, 'packages/keys'), { recursive: true });
+  const file = join(cwd, 'packages/keys/package.json');
+  const baseline = { name: '@byok-sdk/keys', version: '0.13.1', exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js' } } };
+  writeFileSync(file, JSON.stringify(baseline));
+  const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  git('init'); git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'baseline');
+  const context = { cwd, base: git('rev-parse', 'HEAD').trim() };
+  const candidate = structuredClone(baseline);
+  candidate.exports['./pi-catalog'] = { types: './dist/pi-catalog.d.ts', import: './dist/pi-catalog.js' };
+  const write = value => writeFileSync(file, JSON.stringify(value));
+  write(candidate);
+  assert.ok(selectImpact(['packages/keys/package.json'], context).families.includes('npm-release-pack'));
+  for (const mutate of [
+    m => { m.exports['./pi-catalog'].import = './dist/other.js'; },
+    m => { m.exports['.'].import = './dist/replaced.js'; },
+    m => { m.exports['./other'] = './dist/other.js'; },
+    m => { m.dependencies = { '@earendil-works/pi-ai': '1.3.0' }; },
+  ]) {
+    const invalid = structuredClone(candidate); mutate(invalid); write(invalid);
+    assert.throws(() => selectImpact(['packages/keys/package.json'], context), /more than/);
+  }
+  const entry = selectImpact(['packages/keys/tsup.config.ts']);
+  assert.ok(entry.dirs.includes('packages/keys'));
+  assert.ok(entry.families.includes('npm-release-pack'));
+  const generator = selectImpact(['scripts/keys/generate-pi-model-catalog.ts']);
+  assert.ok(generator.dirs.includes('packages/keys') && generator.dirs.includes('packages/client'));
+  assert.throws(() => selectImpact(['scripts/keys/other.ts']));
+});

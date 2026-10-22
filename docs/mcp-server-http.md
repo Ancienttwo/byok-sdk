@@ -113,8 +113,14 @@ It implements no legacy HTTP+SSE fallback and no 2026-era protocol extensions.
 Configure `origin` from trusted Host configuration. It must be one canonical
 HTTPS origin or loopback HTTP origin, without a trailing slash or credentials.
 An absent Origin is accepted for native clients. A present Origin must match
-the configured origin exactly, on POST, GET and DELETE. Other values return 403.
-No CORS or arbitrary-Origin allow list is provided.
+the configured origin, or one entry of the optional `allowedOrigins` list,
+exactly, on POST, GET and DELETE. Other values return 403. Each
+`allowedOrigins` entry has the same validation as `origin`. The list comes from
+trusted Host configuration, never from a request. This transport sends no CORS
+headers. For browser clients on loopback, mount it through `listenLoopback`
+with the same `allowedOrigins`; that listener answers preflight and adds the
+CORS response headers (see the
+[server README](../packages/server/README.md#browser-clients-from-loopback-origins)).
 
 ## Bounds and ownership
 
