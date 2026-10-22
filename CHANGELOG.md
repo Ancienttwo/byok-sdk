@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Tests (client)** — the Windows memory helper tests now run in routine CI
+  (#605). The `agent-memory-helper-linux` job has a `windows-latest` leg. It
+  runs for pull requests that change the Go helper. New Windows tests inject
+  barrier failures on NTFS. They also replace `notes` or a note with a junction
+  or a symlink after the home is pinned. Windows admission stays closed, and B
+  stays false. The plan and the owner decisions are in
+  `docs/plans/2026-10-22-605-windows-memory.md`.
 - **Changed (client)** — update the private OAR source to 0.70.0
   (`44d7d61`). Keep the eight BYOK-maintained files. Update the source
   manifest and bridge paths. The only selected upstream change is the optional
