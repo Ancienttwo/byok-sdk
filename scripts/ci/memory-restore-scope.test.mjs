@@ -6,7 +6,7 @@ import { planCi } from './plan-ci.mjs';
 import { requireCiPlan } from './require-ci-plan.mjs';
 const id = 'agent-memory-export-linux';
 const sha = 'a'.repeat(40);
-for (const name of ['memory.ts', 'memory-restore.ts', 'memory-restore.test.ts', 'memory-linux.test.ts']) {
+for (const name of ['memory.ts', 'memory-restore.ts', 'memory-restore.test.ts', 'memory-linux.test.ts', 'fixtures/memory-restore-crash.ts']) {
   const file = `examples/host-execution-core/src/${name}`;
   test(`${name} requires native restore qualification and aggregate success`, () => {
     assert.deepEqual(selectImpact([file]).families, ['adapter-lifecycle-smoke', id]);
@@ -25,7 +25,7 @@ for (const name of ['memory.ts', 'memory-restore.ts', 'memory-restore.test.ts', 
   });
 }
 test('unrelated K4 sources do not fan out to Linux memory qualification', () => {
-  for (const name of ['index.ts', 'memory-other.ts', 'memory-restore.test-support.ts']) {
+  for (const name of ['index.ts', 'memory-other.ts', 'memory-restore.test-support.ts', 'fixtures/memory-restore-other.ts', 'fixtures/memory-restore-crash-extra.ts', 'fixtures/nested/memory-restore-crash.ts']) {
     assert.deepEqual(selectImpact([`examples/host-execution-core/src/${name}`]).families, ['adapter-lifecycle-smoke']);
   }
 });
