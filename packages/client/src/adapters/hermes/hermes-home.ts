@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { HermesModelSelection } from './hermes-adapter';
+import { ensureSecureDir } from '../../util/secure-dir';
 import { identifyHermesGateway } from './gateway-identity';
 
 /**
@@ -31,6 +32,7 @@ const STALE_PROFILE_MS = 15 * 60_000;
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /** Hermes otherwise checks GitHub for updates on `--version` and at gateway start (`hermes_cli/source_check.py`). */
 const NO_UPDATE_CHECK = ['updates:', '  check: false'];
+const ROOT_RENAME_ATTEMPTS = 5;
 const ROOT_CONFIG = `${['# Written by @byok-sdk/client. Root of the SDK-owned Hermes profiles.', ...NO_UPDATE_CHECK].join('\n')}\n`;
 
 export function assertHermesModelSelection(value: HermesModelSelection, label: string): void {
@@ -72,24 +74,32 @@ export function hermesProfileConfig(model: HermesModelSelection | undefined): st
 
 /** Creates the root and its `config.yaml` (update check off) when they are missing or differ. */
 export async function ensureHermesRoot(root: string): Promise<void> {
-  await fs.mkdir(root, { recursive: true, mode: 0o700 });
+  // A new root gets a Windows DACL (a mode restricts nothing there). An existing root keeps the Host's ACL:
+  // a change on it would propagate through the whole Python environment below it.
+  if (await fs.mkdir(root, { recursive: true, mode: 0o700 }) !== undefined) await ensureSecureDir(root);
   const file = path.join(root, 'config.yaml');
-  if (await fs.readFile(file, 'utf8').catch(() => undefined) === ROOT_CONFIG) return;
-  // Write then rename: a concurrent `hermes --version` never reads a truncated config with the update check on.
-  const temporary = `${file}.${randomUUID()}.tmp`;
-  try {
-    await fs.writeFile(temporary, ROOT_CONFIG, { mode: 0o600, flag: 'wx' });
-    await fs.rename(temporary, file);
-  } catch (error) {
-    await fs.rm(temporary, { force: true });
-    throw error;
+  for (let attempt = 1; ; attempt += 1) {
+    if (await fs.readFile(file, 'utf8').catch(() => undefined) === ROOT_CONFIG) return;
+    // Write then rename: a concurrent `hermes --version` never reads a truncated config with the update check on.
+    const temporary = `${file}.${randomUUID()}.tmp`;
+    try {
+      await fs.writeFile(temporary, ROOT_CONFIG, { mode: 0o600, flag: 'wx' });
+      await fs.rename(temporary, file);
+      return;
+    } catch (error) {
+      await fs.rm(temporary, { force: true });
+      // Windows refuses a rename onto a file that a concurrent writer is replacing. That writer writes the same text: read again.
+      if (process.platform !== 'win32' || attempt === ROOT_RENAME_ATTEMPTS || (error as { code?: unknown }).code !== 'EPERM') throw error;
+      await new Promise((resolve) => setTimeout(resolve, 10 * attempt));
+    }
   }
 }
 
 /** Creates `<root>/profiles/byok-<id>` with the SDK config and the carried model caches. */
 export async function createHermesProfile(root: string, id: string, model: HermesModelSelection | undefined): Promise<string> {
   const profiles = path.join(root, 'profiles');
-  await fs.mkdir(profiles, { recursive: true, mode: 0o700 });
+  // A mode does not restrict a Windows directory; this sets a DACL there. A profile holds the session and names the control pipe.
+  await ensureSecureDir(profiles);
   const home = path.join(profiles, `${PROFILE_PREFIX}${id}`);
   await fs.mkdir(home, { mode: 0o700 });
   try {
@@ -124,7 +134,7 @@ export async function removeHermesProfile(root: string, home: string): Promise<v
  * {@link STALE_PROFILE_MS}, or while any gateway answers for it. `live` knows
  * only this process's sessions, so one root serves one Host process.
  */
-export async function sweepStaleHermesProfiles(root: string, live: ReadonlySet<string>, now = Date.now()): Promise<void> {
+export async function sweepStaleHermesProfiles(root: string, live: ReadonlySet<string>, now = Date.now(), nativeAssetRoot?: string): Promise<void> {
   const profiles = path.join(root, 'profiles');
   const names = await fs.readdir(profiles).catch(() => [] as string[]);
   for (const name of names) {
@@ -132,7 +142,7 @@ export async function sweepStaleHermesProfiles(root: string, live: ReadonlySet<s
     if (!name.startsWith(PROFILE_PREFIX) || live.has(home)) continue;
     const stat = await fs.lstat(home).catch(() => undefined);
     if (stat === undefined || !stat.isDirectory() || now - stat.mtimeMs < STALE_PROFILE_MS) continue;
-    if (await identifyHermesGateway(home) !== undefined) continue;
+    if (await identifyHermesGateway(home, { nativeAssetRoot }) !== undefined) continue;
     await fs.rm(home, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }).catch(() => {});
   }
 }
