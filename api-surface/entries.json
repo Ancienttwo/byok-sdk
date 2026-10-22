@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2071126,
+      "budgetBytes": 2072807,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -154,7 +154,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Embedded Agent memory service",
-      "budgetBytes": 69427,
+      "budgetBytes": 69526,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -752,7 +752,7 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 96325,
+          "line": 96331,
           "rule": "opaque import()"
         },
         {
@@ -2128,7 +2128,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent memory MCP helper",
-      "budgetBytes": 49477,
+      "budgetBytes": 49779,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2169,7 +2169,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent message MCP helper",
-      "budgetBytes": 49483,
+      "budgetBytes": 49784,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2251,7 +2251,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent team MCP helper",
-      "budgetBytes": 49466,
+      "budgetBytes": 49769,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
