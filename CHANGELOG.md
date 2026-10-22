@@ -42,6 +42,21 @@
   `OutcomeTransaction.routines` runs `create`, `update` and `lifecycle` in the
   outcome commit with the `addRoutine`, `updateRoutine` and `lifecycle()`
   rules; a refused command changes nothing. `LedgerState.version` stays 1.
+- **Breaking (examples)** — K8 Bot routines are K4 routines (#737). Each Bot
+  routine is a `hostOccurrence` definition with the `bot-routine` hook, and K4
+  owns its versions, slots, occurrences and wakes. The hook writes the routine
+  Turn in the occurrence commit, and the Host promotes it with
+  `promoteOccurrence`. `CollaborationState.version` is 2 and has no
+  `routines`, `occurrences` or `operations`. The Host refuses a version 1
+  ledger with a clear error and writes no migration. Documented behavior
+  changes: the overlap rule is the K4 rule, so the limit of two unsettled
+  occurrences and the `capacity` decision are gone; a routine Turn id is
+  `occurrence:<occurrence key>`; its five-minute wait counts from the
+  occurrence record, not from the enqueue; K4 rejects a wake that differs
+  from its reservation; a failed SDK wake call rejects the drain instead of a
+  K8 retry after 60 seconds; K4 keeps no old routine versions.
+  `BotOptions.hostJobs` runs Host job routines on the same core, and
+  `botRoutines` reads the Bot routine views.
 
 ## 0.28.3 — source candidate
 

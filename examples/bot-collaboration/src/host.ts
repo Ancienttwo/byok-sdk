@@ -4,16 +4,17 @@ import type { BotTurnOutcome, ResultSchema, UpdateRoutineAction } from '@byok-sd
 import { BOT_TURN_OUTCOME_CONTRACT, BotTurnOutcomeSchemaError, validateResultOutcome } from '@byok-sdk/protocol';
 import type { ByokServer, CreateByokServerOptions, DueWake } from '@byok-sdk/server';
 import { HostExecutionCore, type ExecutionServer, type OutcomeTransaction, type MessageTransaction } from '@byok-sdk/example-host-execution-core';
+import { promoteOccurrence, type HostJobHandler, type Routine } from '@byok-sdk/example-host-execution-core';
 import { HostLedger } from '@byok-sdk/example-host-execution-core';
 import { hash, project, time, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
 import { enqueue } from '@byok-sdk/example-host-execution-core';
-import { WAKE_HORIZON_MS } from '@byok-sdk/example-host-execution-core';
-import { addTurn, json, stateOf, type CollaborationState, type Delegation, type Routine, type Turn } from './model';
+import { addTurn, json, stateOf, type CollaborationState, type Delegation, type Turn } from './model';
 import { turnInstruction, outcomeSchema, SYSTEM_PROMPT } from './schema';
 import { abandonDelegation, applyDelegate, arbitrateCancel, BOT_REPLY_MAX_BYTES, DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   delegationDue, endChain, minimumInstructionBytes, observeDevices, observeStart, reconcileReply, REPLY_UNCERTAIN_AFTER_MS, resolveDelegation, retryReply,
   settleDelegations, type DelegationTimers } from './delegation';
-import { arm, consumeRoutine, createRoutine, lifecycle, operation, owned, switchVersion, updateRoutine } from './routines';
+import { BOT_ROUTINE, botRoutines, concludeRoutineTurn, createDefinition, owned, routineCalendar, routineOccurrence, routineTurn,
+  updateDefinition } from './routines';
 
 import { activeBot, applyManagement, requireMain, roomFields, updateBot } from './team';
 import { advanceRooms, applySpeech, memberPresent, roomInput, roomVisibility, type Mentions } from './rooms';
@@ -53,6 +54,11 @@ export interface BotOptions {
    * windowMs 1000 to 60_000, maxItems 2 to 16, or maxBytes 1024 to contextMaxBytes / 4.
    */
   coalesce?: Partial<CoalescePolicy>;
+  /**
+   * Handlers for the Host's own K4 Host job routines. They share the core with Bot routines,
+   * so their rules use the same calendar: a `RoutineSchedule` whose `tz` is the definition time zone.
+   */
+  hostJobs?: Readonly<Record<string, HostJobHandler>>;
 }
 /** Reply readback port (§3.3). The Host acceptance record stays the body authority. */
 export type MessageServer = { tasks: Partial<Pick<ByokServer['tasks'], 'agentMessage'>> };
@@ -108,7 +114,9 @@ export class BotCollaboration {
     if (this.instructionMaxBytes < minimum) throw new Error(`instructionMaxBytes must be at least ${minimum}`);
     this.timers = { cancelGraceMs: time(options.cancelGraceMs ?? DEFAULT_CANCEL_GRACE_MS), uncertainAfterMs: time(options.uncertainAfterMs ?? REPLY_UNCERTAIN_AFTER_MS) };
     if (this.timers.cancelGraceMs < 1 || this.timers.uncertainAfterMs < 1) throw new Error('Invalid delegation timers');
-    this.core = new HostExecutionCore(server, ledger, { now: this.now, reconcileMs: 100,
+    this.core = new HostExecutionCore(server, ledger, { now: this.now, reconcileMs: 100, nextOccurrence: routineCalendar,
+      ...(options.hostJobs ? { hostJobs: options.hostJobs } : {}),
+      occurrenceHooks: { [BOT_ROUTINE]: (run, tx) => routineTurn(stateOf(tx.application), run) },
       applyMessage: (input, tx) => this.applyMessage(input, tx),
       applyOutcome: (document, tx) => this.applyOutcome(document, tx) });
     ledger.transaction(s => {
@@ -279,12 +287,13 @@ export class BotCollaboration {
       if (d.verdict) throw new Error('already_resolved');
       arbitrateCancel(this.ledger.snapshot(), state, d, this.now(), tx.publish, 'main_bot_cancelled');
     }));
+    // K4 routine commands refuse before any write, so a rejected action changes no routine.
     outcome.create_routine?.forEach((action, index) => accept('create_routine', () => {
-      createRoutine(state, turn.botId, tx.intent.taskId, index, action, this.now(), turn.authority ?? 'bot');
+      tx.routines.create(createDefinition(tx.routines.list(), turn.botId, tx.intent.taskId, index, action, turn.authority ?? 'bot'));
     }));
-    outcome.update_routine?.forEach(action => accept('update_routine', () => updateRoutine(state, turn.botId, action, this.now())));
+    outcome.update_routine?.forEach(action => accept('update_routine', () => tx.routines.update(updateDefinition(tx.routines.list(), turn.botId, action))));
     outcome.cancel_routine?.forEach(action => accept('cancel_routine', () => {
-      lifecycle(state, owned(state, turn.botId, action.routineId), 'completed', this.now());
+      tx.routines.lifecycle(owned(tx.routines.list(), turn.botId, action.routineId).definition.id, 'completed');
     }));
     outcome.confirmable_action?.forEach((action, index) => {
       const id = hash([tx.intent.taskId, 'confirmable_action', index]);
@@ -462,31 +471,25 @@ export class BotCollaboration {
       if (error) throw new Error(error);
     });
   }
+  /** Owner API for the Main Bot's own routines. */
   async setRoutineLifecycle(id: string, value: Routine['lifecycle']): Promise<void> {
     await this.exclusive(async () => {
-      this.ledger.transaction(s => lifecycle(stateOf(s.application), owned(stateOf(s.application), this.options.botId, id), value, this.now()));
+      await this.core.lifecycle(owned(this.routineRows(), this.options.botId, id).definition.id, value);
       await this.process();
     });
   }
   async updateRoutine(action: UpdateRoutineAction): Promise<void> {
     await this.exclusive(async () => {
-      this.ledger.transaction(s => updateRoutine(stateOf(s.application), this.options.botId, action, this.now()));
+      await this.core.updateRoutine(updateDefinition(this.routineRows(), this.options.botId, action));
       await this.process();
     });
   }
+  private routineRows(): Routine[] { return Object.values(this.ledger.snapshot().routines); }
+  /** K4 records routine wakes. The `bot-routine` hook writes the routine Turn in the same commit. */
   readonly consume = (wake: DueWake, signal: AbortSignal): Promise<void> => this.exclusive(async () => {
     signal.throwIfAborted();
-    if (wake.dedupKey.startsWith('host-scan:')) {
-      this.ledger.transaction(s => { this.sync(s); });
-      await this.core.consume(wake, signal);
-    }
-    else this.ledger.transaction(s => {
-      const state = stateOf(s.application);
-      consumeRoutine(state, wake, this.now(), (id, request, routine) => {
-        const occurrence = state.occurrences[wake.dedupKey]!;
-        addTurn(state, { id, root: id, source: 'routine', request, botId: occurrence.definition!.target, hop: 0, authority: routine.authority ?? 'bot' });
-      });
-    });
+    this.ledger.transaction(s => { this.sync(s); });
+    await this.core.consume(wake, signal);
     await this.process();
   });
   drain(): Promise<void> { return this.exclusive(() => this.process()); }
@@ -524,15 +527,6 @@ export class BotCollaboration {
         this.sync(s);
       });
       await this.core.recover();
-      const pending = new Set((await this.server.wakes.pending()).map(w => w.dedupKey));
-      this.ledger.transaction(s => {
-        const state = stateOf(s.application);
-        for (const routine of Object.values(state.routines)) {
-          if (routine.lifecycle !== 'active') continue;
-          if (routine.armed && !pending.has(routine.armed.key)) operation(state, routine, 'schedule', routine.armed);
-          else if (!routine.armed && routine.pending === null) arm(state, routine, this.now(), this.now());
-        }
-      });
       await this.process();
     });
   }
@@ -553,12 +547,15 @@ export class BotCollaboration {
       if (card.state === 'pending' && this.now() >= card.expiresAt) card.state = 'expired';
     }
     let materialized = false;
+    const routines = botRoutines(Object.values(s.routines));
     // Seats never manage or delegate (§5), so no seat Turn carries owner authority.
     advanceRooms(s, state, this.now(), (id, botId, request) => addTurn(state, { id, root: id, source: 'room_slot', request, botId, hop: 0, authority: 'bot' }));
     for (const turn of Object.values(state.turns)) {
       const intent = s.intents[hash(turn.id)];
       const bot = state.team.bots[turn.botId];
       if (!intent && bot?.archived) { turn.status = 'failed'; turn.conclusion = 'cancelled'; }
+      // A concluded occurrence can make a staged version due, so the next pass drains K4 again.
+      if (!intent && turn.conclusion && turn.source === 'routine') materialized = concludeRoutineTurn(s, turn) || materialized;
       if (!intent && (turn.conclusion || turn.source === 'room_slot' && state.team.seats[turn.id]?.status === 'blocked')) continue;
       if (intent && bot?.archived && !s.executions[intent.taskId]?.started && !intent.conclusion) intent.cancelReason = 'cancelled';
       if (!intent) {
@@ -576,8 +573,9 @@ export class BotCollaboration {
         delete turn.profileFailure;
         let schema: ResultSchema, frozen: ReturnType<typeof turnInstruction>;
         try {
-          schema = outcomeSchema(turn.botId, state, turn, Object.keys(this.models()));
-          frozen = turnInstruction(state, turn, { turnLimit: this.contextTurnLimit, contextMaxBytes: this.contextMaxBytes, instructionMaxBytes: this.instructionMaxBytes });
+          schema = outcomeSchema(turn.botId, state, turn, Object.keys(this.models()), routines);
+          frozen = turnInstruction(state, turn, { turnLimit: this.contextTurnLimit, contextMaxBytes: this.contextMaxBytes,
+            instructionMaxBytes: this.instructionMaxBytes }, routines);
         } catch (error) {
           if (error instanceof BotTurnOutcomeSchemaError && error.code === 'schema-over-budget') {
             this.blockTurn(s, turn, `Outcome schema over budget after flat fallback: ${error.message}`);
@@ -595,10 +593,12 @@ export class BotCollaboration {
           payload: { ...base.payload, messageEgress: { ...egress, maxBytes: Math.min(egress.maxBytes, BOT_REPLY_MAX_BYTES) } },
         } : undefined;
         const execution = turn.source === 'room_slot' ? { ...base, agentMessageContext: undefined, payload: roomPayload } : { ...base, ...chain };
-        enqueue(s, this.ledger.tenant, { key: turn.id, source: turn.source === 'routine' ? 'routine' : turn.source === 'user' || turn.source === 'answer' ? 'user' : 'bot',
-          waitUntil: this.now() + 300_000, execution: { ...execution, payload: { ...execution.payload, instruction: frozen.instruction,
-            terminalProjection: { mode: 'result-document', contract: BOT_TURN_OUTCOME_CONTRACT, schema },
-          } } });
+        const offer = { ...execution, payload: { ...execution.payload, instruction: frozen.instruction,
+          terminalProjection: { mode: 'result-document' as const, contract: BOT_TURN_OUTCOME_CONTRACT, schema } } };
+        // A routine Turn joins the FIFO as its occurrence intent. Its wait counts from the occurrence record.
+        if (turn.source === 'routine') promoteOccurrence(s, this.ledger.tenant, routineOccurrence(turn), offer);
+        else enqueue(s, this.ledger.tenant, { key: turn.id, source: turn.source === 'user' || turn.source === 'answer' ? 'user' : 'bot',
+          waitUntil: this.now() + 300_000, execution: offer });
         for (const rejection of frozen.context.rejectedActions) rejection.consumedBy = turn.id;
         delete turn.blockedReason;
         turn.status = 'processing';
@@ -616,17 +616,6 @@ export class BotCollaboration {
       }
     }
     settleDelegations(s, state, this.now(), (key, value) => project(s, key, value), this.timers);
-    for (const routine of Object.values(state.routines)) {
-      routine.inflight = routine.inflight.filter(key => {
-        const occurrence = state.occurrences[key]!;
-        const turn = state.turns[occurrence.turnId!]!;
-        if (turn.status !== 'succeeded' && turn.status !== 'failed') return true;
-        occurrence.settled = true; return false;
-      });
-      // A due armed slot also counts as old work.
-      if (!routine.inflight.length && routine.pending !== null && routine.lifecycle === 'active'
-        && !(routine.armed && routine.armed.at <= this.now())) switchVersion(state, routine, this.now());
-    }
     for (const card of Object.values(state.cards)) {
       if (card.state !== 'pending' && (card.state !== 'confirmed' || card.result !== undefined || card.error !== undefined)) {
         if (!card.decisionReported) {
@@ -644,44 +633,6 @@ export class BotCollaboration {
     cleanReplyTokens(s, state, this.now());
     projectInputBatches(state, (key, value) => project(s, key, value));
     return materialized;
-  }
-  private async flushWakes(): Promise<void> {
-    // All mutations and store calls run on this instance's single serial chain.
-    const blocked = new Set<string>();
-    for (const op of this.snapshot().operations.filter(o => o.state === 'pending').sort((a, b) => a.sequence - b.sequence)) {
-      if (blocked.has(op.routineId)) continue;
-      const routine = this.snapshot().routines[op.routineId]!;
-      if (op.kind === 'schedule' && (routine.generation !== op.generation || routine.lifecycle !== 'active' || routine.armed?.key !== op.slot.key)) {
-        this.ledger.transaction(s => { stateOf(s.application).operations.find(o => o.sequence === op.sequence)!.state = 'obsolete'; });
-        continue;
-      }
-      if (op.retryAt !== undefined && op.retryAt > this.now()) {
-        blocked.add(op.routineId);
-        continue;
-      }
-      try {
-        if (op.kind === 'cancel') await this.server.wakes.cancel(op.slot.key);
-        else {
-          if (op.slot.at - this.now() > WAKE_HORIZON_MS) throw new Error('Wake is beyond the 368 day horizon');
-          await this.server.wakes.schedule({ dedupKey: op.slot.key, availableAt: op.slot.at });
-        }
-        this.ledger.transaction(s => {
-          const state = stateOf(s.application), row = state.operations.find(o => o.sequence === op.sequence)!;
-          row.state = 'done'; delete row.retryAt;
-          const routine = state.routines[op.routineId]!;
-          const retrying = state.operations.some(o => o.routineId === op.routineId && o.state === 'pending' && o.retryAt !== undefined);
-          if (!retrying && (op.kind === 'schedule' || routine.status === 'schedule_retrying')) routine.status = 'ok';
-        });
-      } catch (error) {
-        this.ledger.transaction(s => {
-          const state = stateOf(s.application), row = state.operations.find(o => o.sequence === op.sequence)!;
-          row.error = String(error instanceof Error ? error.message : error).slice(0, 1024); row.retryAt = this.now() + 60_000;
-          state.routines[op.routineId]!.status = 'schedule_retrying';
-        });
-        // Only this routine waits. Its later operations cannot overtake the failure.
-        blocked.add(op.routineId);
-      }
-    }
   }
   /** Example reconcile loop (§3.10). K4 arms no scan after a settled intent, so the Host checks replies itself. */
   private async flushReplies(): Promise<void> {
@@ -785,7 +736,6 @@ export class BotCollaboration {
       await this.refreshDevices();
       await this.flushCards();
       materialized = this.ledger.transaction(s => this.sync(s)) || materialized;
-      await this.flushWakes();
       await this.flushReplies();
       materialized = this.ledger.transaction(s => this.sync(s)) || materialized;
       await this.flushDeliveries();
@@ -802,12 +752,7 @@ export class BotCollaboration {
     if (!this.closed) {
       // Durable state is authority. The timer only retries outbox work, expires cards and seals input batches at their window end.
       const state = this.snapshot();
-      const heads = new Map<string, number>();
-      for (const op of state.operations.filter(o => o.state === 'pending').sort((a, b) => a.sequence - b.sequence)) {
-        if (!heads.has(op.routineId)) heads.set(op.routineId, op.retryAt ?? this.now());
-      }
-      const due = [...heads.values(),
-        ...(this.options.channel ? Object.values(state.channel?.deliveries ?? {}).filter(row => row.state === 'pending').map(row => row.nextAttemptAt ?? this.now()) : []),
+      const due = [...(this.options.channel ? Object.values(state.channel?.deliveries ?? {}).filter(row => row.state === 'pending').map(row => row.nextAttemptAt ?? this.now()) : []),
         ...Object.values(state.channel?.inbounds ?? {}).filter(row => row.reply?.token).map(row => row.reply!.expiresAt),
         ...Object.values(state.cards).filter(c => c.state === 'pending').map(c => c.expiresAt),
         ...Object.values(state.team.seats).filter(seat => !seat.released && seat.deadline !== undefined).map(seat => seat.deadline!),

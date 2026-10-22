@@ -6,7 +6,7 @@ import { crossBot } from './cross-bot.test-support';
 import { stateOf, type Delegation, type Turn } from './model';
 import { outcomeSchema, turnContext } from './schema';
 import { OPEN_DELEGATIONS_MAX_ITEMS } from './delegation';
-import { createRoutine } from './routines';
+import { routineViews } from './routines.test-support';
 
 let fixture: TestTeam | undefined;
 afterEach(async () => { await fixture?.close(); fixture = undefined; vi.restoreAllMocks(); });
@@ -150,8 +150,7 @@ it('measures the Main Bot schema with 24 Bots, 8 routines and 24 open delegation
   const protocol = await import('@byok-sdk/protocol');
   const { state, ids, open, owner } = team(24);
   for (let n = 0; n < OPEN_DELEGATIONS_MAX_ITEMS; n++) open(n);
-  for (let n = 0; n < 8; n++) createRoutine(state, ids[0]!, `main-${n}`, 0, { localId: 'new_routine_1', schedule: { minute: 0, hour: 9, tz: 'UTC' }, prompt: 'r' }, Date.UTC(2026, 9, 19));
-  const schema = outcomeSchema(ids[0]!, state, owner);
+  const schema = outcomeSchema(ids[0]!, state, owner, ['default'], routineViews(ids[0]!, 8));
   expect(schema.properties!.cancel_delegation!.items!.properties!.delegationId!.enum).toHaveLength(OPEN_DELEGATIONS_MAX_ITEMS);
   expect(schema.properties!.cancel_delegation!.maxItems).toBe(2);
   expect(Buffer.byteLength(JSON.stringify(schema))).toBe(15_949);

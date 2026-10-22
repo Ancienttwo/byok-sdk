@@ -9,7 +9,8 @@ import { hash, HostLedger } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration } from './host';
 import { stateOf, type CollaborationState, type Turn } from './model';
-import { createRoutine } from './routines';
+import type { BotRoutine } from './routines';
+import { routineViews } from './routines.test-support';
 import { outcomeSchema, SYSTEM_PROMPT, turnInstruction } from './schema';
 import { BOT_REPLY_MAX_BYTES, DEFAULT_INSTRUCTION_MAX_BYTES, minimumInstructionBytes, OPEN_DELEGATION_ENTRY_MAX_BYTES, OPEN_DELEGATIONS_MAX_BYTES } from './delegation';
 
@@ -33,7 +34,7 @@ function worstCase(request: string) {
   state.team.notes = Array.from({ length: 20 }, (_, i) => ({ id: `note-${i}`, text: worst(300) }));
   for (let r = 0; r < 6; r++) state.team.rooms[`room-${r}`] = { id: `room-${r}`, name: worst(40), members: ids.slice(0, 12), mode: 'mention',
     announcement: worst(300), admin: ids[0], visibleFrom: {}, messages: [] };
-  for (let n = 0; n < 8; n++) createRoutine(state, a, `seed-${n}`, 0, { localId: 'new_routine_1', schedule: { minute: 0, hour: 9, tz: 'UTC' }, prompt: worst(500) }, Date.UTC(2026, 9, 19));
+  const routines = routineViews(a, 8, worst(500));
   for (const bot of [a, b]) for (let n = 0; n < 150; n++) {
     const id = `${bot}-old-${n}`;
     state.turns[id] = { id, root: id, botId: bot, source: 'user', request: worst(1000), hop: 0, status: 'succeeded', authority: 'owner', outcome: { delegate: [] } };
@@ -52,10 +53,10 @@ function worstCase(request: string) {
     replies: [d1, d2].map((id, i) => ({ delegationId: id, from: i ? c : b, request: worst(1000), verdict: 'answered' as const, reason: 'continuation_refused', reply: `${id}-task`, continuationRefused: true as const })) };
   const botRequest: Turn = { id: d1, root: 'root', botId: b, source: 'bot_request', request, hop: 1, status: 'queued', authority: 'bot', delegationId: d1 };
   state.turns[reply.id] = reply; state.turns[botRequest.id] = botRequest;
-  return { state, turns: [reply, botRequest] };
+  return { state, turns: [reply, botRequest], routines };
 }
-function check(state: CollaborationState, turn: Turn, instructionMaxBytes: number) {
-  const { instruction, context } = turnInstruction(state, turn, { turnLimit: 100, contextMaxBytes: 32_768, instructionMaxBytes });
+function check(state: CollaborationState, turn: Turn, instructionMaxBytes: number, routines: readonly BotRoutine[]) {
+  const { instruction, context } = turnInstruction(state, turn, { turnLimit: 100, contextMaxBytes: 32_768, instructionMaxBytes }, routines);
   expect(bytes(instruction)).toBeLessThanOrEqual(instructionMaxBytes);
   expect(context.historyWindow.metadataOverBudget).toBe(false);
   expect(context.historyWindow.notice).toBe('Earlier history was omitted.');
@@ -70,15 +71,15 @@ it('bounds every worst-case Cross-Bot instruction, never blocks it, and the real
   fixture = await openTeam();
   const server = fixture.server;
   for (const request of ['😀'.repeat(1000), worst(1000)]) {
-    const { state, turns } = worstCase(request);
+    const { state, turns, routines } = worstCase(request);
     for (const budget of [DEFAULT_INSTRUCTION_MAX_BYTES, minimum]) {
       for (const turn of turns) {
-        const instruction = check(state, turn, budget);
+        const instruction = check(state, turn, budget, routines);
         // Request text and bodies appear once as raw UTF-8, never JSON-escaped a second time.
         expect(instruction.split(turn.source === 'bot_request' ? request : '😀'.repeat(BOT_REPLY_MAX_BYTES / 4))).toHaveLength(2);
         const base = template(fixture.deviceId, turn.botId);
         await expect(server.executions.submit({ ...base, taskId: hash([turn.id, budget, request]), payload: { ...base.payload, instruction,
-          terminalProjection: { mode: 'result-document', contract: protocol.BOT_TURN_OUTCOME_CONTRACT, schema: outcomeSchema(turn.botId, state, turn) } } })).resolves.toBeDefined();
+          terminalProjection: { mode: 'result-document', contract: protocol.BOT_TURN_OUTCOME_CONTRACT, schema: outcomeSchema(turn.botId, state, turn, ['default'], routines) } } })).resolves.toBeDefined();
       }
     }
     expect(bytes(turns[0]!.replies!.map(r => state.replies[r.reply!]!.body!).join(''))).toBe(2 * BOT_REPLY_MAX_BYTES);
@@ -100,11 +101,11 @@ it('refuses an instructionMaxBytes below the computed minimum at construction', 
 it('measures the Main Bot schema with 24 delegate ids: eight routines fit; rooms on top exceed the cap and block, never cut', () => {
   const { state } = worstCase('x');
   const main = Object.values(state.team.bots)[0]!;
-  for (let n = 0; n < 8; n++) createRoutine(state, main.id, `main-${n}`, 0, { localId: 'new_routine_1', schedule: { minute: 0, hour: 9, tz: 'UTC' }, prompt: 'r' }, Date.UTC(2026, 9, 19));
+  const routines = routineViews(main.id, 8);
   const turn: Turn = { id: 'owner', root: 'owner', botId: main.id, source: 'user', request: 'x', hop: 0, status: 'queued', authority: 'owner' };
   const rooms = state.team.rooms;
   state.team.rooms = {};
-  const schema = outcomeSchema(main.id, state, turn);
+  const schema = outcomeSchema(main.id, state, turn, ['default'], routines);
   expect(schema.properties!.delegate!.items!.properties!.to!.enum).toHaveLength(24);
   expect(schema.properties).toHaveProperty('create_bot');
   expect(Buffer.byteLength(JSON.stringify(schema))).toBe(14_820);
@@ -113,13 +114,13 @@ it('measures the Main Bot schema with 24 delegate ids: eight routines fit; rooms
   // update_room adds a room enum and members. The Host blocks such a Turn with a visible reason.
   state.team.rooms = { [Object.keys(rooms)[0]!]: Object.values(rooms)[0]! };
   let error: unknown;
-  try { outcomeSchema(main.id, state, turn); } catch (cause) { error = cause; }
+  try { outcomeSchema(main.id, state, turn, ['default'], routines); } catch (cause) { error = cause; }
   expect(error).toBeInstanceOf(protocol.BotTurnOutcomeSchemaError);
   expect(error).toMatchObject({ code: 'schema-over-budget', message: expect.stringMatching(/^schema is 17\d{3} bytes; cap 16384$/) });
 });
 
 it('bounds a Main Bot reply Turn that lists 24 worst-case open delegations, with the rest only counted', () => {
-  const { state, turns: [reply] } = worstCase(worst(1000));
+  const { state, turns: [reply], routines } = worstCase(worst(1000));
   const main = Object.values(state.team.bots)[0]!;
   const template = state.delegations[reply!.replies![0]!.delegationId]!;
   for (let n = 0; n < 25; n++) {
@@ -129,8 +130,8 @@ it('bounds a Main Bot reply Turn that lists 24 worst-case open delegations, with
   const turn: Turn = { ...reply!, id: hash(['bot_reply', 'main']), botId: main.id };
   state.turns[turn.id] = turn;
   const minimum = minimumInstructionBytes(SYSTEM_PROMPT);
-  check(state, turn, minimum);
-  const { context } = turnInstruction(state, turn, { turnLimit: 100, contextMaxBytes: 32_768, instructionMaxBytes: minimum });
+  check(state, turn, minimum, routines);
+  const { context } = turnInstruction(state, turn, { turnLimit: 100, contextMaxBytes: 32_768, instructionMaxBytes: minimum }, routines);
   expect(context.openDelegations).toMatchObject({ omitted: 1 });
   expect(context.openDelegations!.items).toHaveLength(24);
   expect(bytes(JSON.stringify(context.openDelegations!.items[0]))).toBeLessThanOrEqual(OPEN_DELEGATION_ENTRY_MAX_BYTES);

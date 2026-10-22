@@ -5,7 +5,8 @@ import type { ExecutionServer } from '@byok-sdk/example-host-execution-core';
 import { BotCollaboration, type BotOptions } from './host';
 import { contextPack } from './schema';
 import { stateOf } from './model';
-import { createRoutine } from './routines';
+import { botRoutines } from './routines';
+import { deliverRoutine, routineOf, seedRoutine } from './routines.test-support';
 
 let fixture: TestHost;
 let bot: BotCollaboration;
@@ -135,44 +136,50 @@ it('runs a real scheduled wake and returns the routine result to its owner', asy
   await vi.waitFor(async () => { await bot.drain(); expect(Object.values(bot.snapshot().turns).some(t => t.source === 'routine')).toBe(true); }, { timeout: 5000 });
   const routineTurn = Object.values(bot.snapshot().turns).find(t => t.source === 'routine')!;
   await finish(routineTurn.id);
-  expect(Object.values(bot.snapshot().occurrences)[0]).toMatchObject({ decision: 'run', settled: true, definition: { prompt: 'Daily report', target: 'main' } });
+  const [routine] = botRoutines(Object.values(fixture.ledger.snapshot().routines));
+  expect(routine!.definition).toEqual({ version: 1, schedule: { hour: date.getUTCHours(), minute: date.getUTCMinutes(), tz: 'UTC' }, prompt: 'Daily report', target: 'main' });
+  expect(Object.values(fixture.ledger.snapshot().occurrences)[0]).toMatchObject({ routineId: routine!.id, definitionVersion: 1, conclusion: 'succeeded' });
+  expect(routineTurn).toMatchObject({ botId: 'main', request: 'Daily report' });
   expect(Object.values(fixture.ledger.snapshot().outbox)).toContainEqual(expect.objectContaining({ kind: 'projection', id: `bot-turn:${routineTurn.id}`, value: expect.objectContaining({ owner: 'main', source: 'routine', status: 'succeeded' }) }));
-  const routine = Object.values(bot.snapshot().routines)[0]!;
   const emptyUpdate = await bot.input('empty-update', 'No changes');
-  await finish(emptyUpdate, { update_routine: [{ routineId: routine.id }] });
-  expect(bot.snapshot().routines[routine.id]!.current).toBe(1);
+  await finish(emptyUpdate, { update_routine: [{ routineId: routine!.id }] });
+  expect(routineOf(bot, routine!.id).definition.version).toBe(1);
   expect(bot.snapshot().rejected).toContainEqual(expect.objectContaining({ action: 'update_routine', reason: 'An update must change schedule or prompt' }));
   const update = await bot.input('update-routine', 'Change the report');
-  await finish(update, { update_routine: [{ routineId: routine.id, prompt: 'New daily report' }] });
-  expect(bot.snapshot().routines[routine.id]).toMatchObject({ current: 2, pending: null, armed: { version: 2 } });
+  await finish(update, { update_routine: [{ routineId: routine!.id, prompt: 'New daily report' }] });
+  expect(botRoutines([routineOf(bot, routine!.id)])[0]).toMatchObject({ current: 2, pending: null });
+  expect(routineOf(bot, routine!.id).next!.dedupKey).toMatch(new RegExp(`^${routine!.id}:2:`));
   const cancelTurn = await bot.input('cancel-routine', 'Stop the daily routine');
-  await finish(cancelTurn, { cancel_routine: [{ routineId: routine.id }] });
-  expect(bot.snapshot().routines[routine.id]).toMatchObject({ lifecycle: 'completed', armed: null });
-  expect((await fixture.server.wakes.pending()).filter(w => w.dedupKey.startsWith(routine.id))).toEqual([]);
+  await finish(cancelTurn, { cancel_routine: [{ routineId: routine!.id }] });
+  expect(routineOf(bot, routine!.id)).toMatchObject({ lifecycle: 'completed', next: null });
+  expect((await fixture.server.wakes.pending()).filter(w => w.dedupKey.startsWith(routine!.id))).toEqual([]);
 });
 
 it('settles old work before switching pending version, including pause and resume', async () => {
   let now = Date.now();
   await setup({ now: () => now });
   const schedule = { hour: 9, minute: 0, tz: 'UTC' };
-  const routineId = fixture.ledger.transaction(s => createRoutine(stateOf(s.application), 'main', 'seed', 0,
-    { localId: 'new_routine_1', schedule, prompt: 'v1 prompt' }, now).id);
+  const routineId = await seedRoutine(bot, 'seed', 'v1 prompt', schedule);
   await bot.drain();
-  const oldSlot = bot.snapshot().routines[routineId]!.armed!;
-  now = oldSlot.at;
-  await bot.consume({ wakeId: 'manual', dedupKey: oldSlot.key, availableAt: oldSlot.at, deliveredAt: now, delivery: 1 }, new AbortController().signal);
+  const oldSlot = routineOf(bot, routineId).next!;
+  now = oldSlot.availableAt;
+  await deliverRoutine(bot, routineId, now);
   const old = Object.values(bot.snapshot().turns).find(t => t.source === 'routine')!;
   await running(old.id);
   await bot.updateRoutine({ routineId, prompt: 'v2 prompt' });
   await bot.setRoutineLifecycle(routineId, 'paused');
   await bot.setRoutineLifecycle(routineId, 'active');
-  expect(bot.snapshot().routines[routineId]).toMatchObject({ current: 1, pending: 2, armed: { version: 1 } });
+  expect(botRoutines([routineOf(bot, routineId)])[0]).toMatchObject({ current: 1, pending: 2 });
+  expect(routineOf(bot, routineId).next!.dedupKey).toMatch(new RegExp(`^${routineId}:1:`));
   await finish(old.id);
-  expect(bot.snapshot().routines[routineId]).toMatchObject({ current: 2, pending: null, inflight: [], armed: { version: 2 } });
-  const stored = bot.snapshot().occurrences[oldSlot.key]!;
-  expect(stored.definition?.prompt).toBe('v1 prompt');
-  await bot.consume({ wakeId: 'manual', dedupKey: oldSlot.key, availableAt: oldSlot.at, deliveredAt: now + 120_000, delivery: 2 }, new AbortController().signal);
-  expect(bot.snapshot().occurrences[oldSlot.key]).toEqual(stored);
+  expect(botRoutines([routineOf(bot, routineId)])[0]).toMatchObject({ current: 2, pending: null });
+  expect(routineOf(bot, routineId).next!.dedupKey).toMatch(new RegExp(`^${routineId}:2:`));
+  const { slotReplayCount: _replays, ...stored } = Object.values(fixture.ledger.snapshot().occurrences)[0]!;
+  expect(stored).toMatchObject({ definitionVersion: 1, conclusion: 'succeeded' });
+  expect(old.request).toBe('v1 prompt');
+  await bot.consume({ wakeId: 'manual', dedupKey: oldSlot.dedupKey, availableAt: oldSlot.availableAt, deliveredAt: now + 120_000, delivery: 2 }, new AbortController().signal);
+  expect(Object.values(fixture.ledger.snapshot().occurrences)).toEqual([{ ...stored, slotReplayCount: 1 }]);
+  expect(Object.values(bot.snapshot().turns).filter(t => t.source === 'routine')).toHaveLength(1);
 });
 
 it('puts an invalid routine action in ContextPack and still applies a valid self delegation', async () => {
@@ -180,7 +187,7 @@ it('puts an invalid routine action in ContextPack and still applies a valid self
   const root = await bot.input('bad-schedule', 'Create a report');
   await finish(root, { create_routine: [{ localId: 'new_routine_1', schedule: { hour: 9, minute: 0, dayOfMonth: 31, month: 4, tz: 'UTC' }, prompt: 'Impossible date' }],
     delegate: [{ to: 'main', request: 'Explain the refusal' }] });
-  expect(Object.values(bot.snapshot().routines)).toEqual([]);
+  expect(fixture.ledger.snapshot().routines).toEqual({});
   expect(bot.snapshot().rejected).toContainEqual(expect.objectContaining({ action: 'create_routine', reason: expect.stringContaining('schedule_unreachable') }));
   const child = Object.values(bot.snapshot().turns).find(t => t.source === 'continuation')!;
   await running(child.id);
@@ -224,10 +231,9 @@ it('serializes a blocked cancel before resume schedules the same future key', as
     },
     schedule: async input => { if (!input.dedupKey.startsWith('host-scan:')) calls.push('schedule'); return server.wakes.schedule(input); },
   } }));
-  const id = fixture.ledger.transaction(s => createRoutine(stateOf(s.application), 'main', 'ordered', 0,
-    { localId: 'new_routine_1', schedule: { hour: 9, minute: 0, tz: 'UTC' }, prompt: 'run' }, Date.now()).id);
+  const id = await seedRoutine(bot, 'ordered', 'run', { hour: 9, minute: 0, tz: 'UTC' });
   await bot.drain();
-  const original = bot.snapshot().routines[id]!.armed!;
+  const original = routineOf(bot, id).next!;
   intercept = true;
   const pause = bot.setRoutineLifecycle(id, 'paused');
   await cancelled;
@@ -235,8 +241,8 @@ it('serializes a blocked cancel before resume schedules the same future key', as
   expect(calls).toEqual(['schedule', 'cancel']);
   release(); await Promise.all([pause, resume]);
   expect(calls).toEqual(['schedule', 'cancel', 'schedule']);
-  expect(bot.snapshot().routines[id]!.armed!.key).toBe(original.key);
-  expect((await fixture.server.wakes.pending()).map(w => w.dedupKey)).toContain(original.key);
+  expect(routineOf(bot, id).next!.dedupKey).toBe(original.dedupKey);
+  expect((await fixture.server.wakes.pending()).map(w => w.dedupKey)).toContain(original.dedupKey);
 });
 
 it('reports a missing outcome as failure and exposes cancellation through the serial Host entrypoint', async () => {
