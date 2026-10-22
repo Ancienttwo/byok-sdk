@@ -47,6 +47,11 @@
   write; the restore is not an atomic tree rollback.
 - **Feature (protocol, client)** — `tool_use` and `tool_result` events carry
   the authoritative MCP `server` and `tool` identity (#633).
+- **Feature (client)** — ordinary Claude daemon execution sets `mcp` on
+  `tool_use` and `tool_result` for host toolset MCP tools. The identity comes
+  from Claude's own `mcp_status` answer at the first MCP call, so admission
+  does not probe. Built-in tools, SDK helpers and ambiguous names stay without
+  `mcp`. Grok is unchanged until live ACP evidence exists (#633).
 - **Docs (client)** — document which user-level runtime configuration each
   adapter loads and the available isolation boundaries (#634).
 - **Feature (server, cloud)** — Hosts can await the durable terminal state of an
