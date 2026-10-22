@@ -1,8 +1,19 @@
 import type { AgentEvent } from '@byok-sdk/protocol';
 import type { AgentEvent as DurableEvent } from '@earendil-works/pi-durable';
+import type { McpEventIdentities } from '../../mcp/event-identity';
 
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' ? value as Record<string, unknown> : {};
 const count = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+/**
+ * `mcp` by the exact registered name (`mcp__<server>__<tool>`) of a tool in the
+ * daemon's observed toolsets. A builtin, an SDK-reserved helper (registered
+ * bare) or any other name gets none; the name is never split.
+ */
+export function withMcpIdentity(event: AgentEvent, identities: McpEventIdentities): AgentEvent {
+  if (event.type !== 'tool_use' && event.type !== 'tool_result') return event;
+  const mcp = identities.get(event.tool);
+  return mcp === undefined ? event : { ...event, mcp };
+}
 /** Snapshot, partial usage, and model-turn boundaries never replay or complete a BYOK execution. */
 export function projectDurableEvent(event: DurableEvent): AgentEvent[] {
   if (event.type === 'message_update') return event.changes.flatMap(change => change.type === 'text_delta' ? [{ type: 'progress' as const, text: change.delta }] : []);

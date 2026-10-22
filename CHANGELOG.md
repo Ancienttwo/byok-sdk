@@ -48,6 +48,14 @@
   A new fixture in `pi-single-file-bundle.test.ts` runs a real Pi print session
   from a single-pass CJS bundle. It covers the ordinary host, the sealed-host
   redirect and a subagent child.
+- **Feature (client)** — durable Pi sets `mcp` on `tool_use` and
+  `tool_result` for host toolset MCP tools (#633). It uses the exact-name rule
+  of ordinary and prepared Pi, against the daemon's observation in the launch
+  config. Built-in tools and SDK helpers stay without `mcp`. Grok and Hermes
+  also stay without `mcp`. ACP `tool_call` defines no MCP server field. The
+  Hermes title is only its registry name, and Grok has no live MCP evidence
+  yet. The new `docs/protocol.md` §11.7 gives the source of `mcp` for each
+  adapter. No public type changes.
 
 ## 0.28.2 — source candidate
 
