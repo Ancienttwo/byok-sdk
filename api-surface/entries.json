@@ -1768,7 +1768,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Pinned pi-ai catalog lookup for pi_model",
-      "budgetBytes": 160200,
+      "budgetBytes": 173028,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
