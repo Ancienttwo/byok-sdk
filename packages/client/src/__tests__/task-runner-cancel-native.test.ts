@@ -218,6 +218,8 @@ function expectUsage(c: Awaited<ReturnType<typeof setup>>, promptTokens: number,
 describe('TaskRunner prompt Claude startup disposal', () => {
   it.each(['cancel', 'shutdown', 'deadline'] as const)('reaps on %s without releasing native init', async action => {
     const c = await setup('claude', 'startup', action === 'deadline' ? { startupTimeoutMs: 1000 } : {});
+    // Own when the unchanged 1s startup deadline fires, so a slow fixture boot cannot expire it before native init is gated.
+    if (action === 'deadline') c.synchronizeInterruptClock();
     const offered = c.offer();
     await c.timing.waitFor(event => event.event === 'startup.ready');
     expect(await c.trace()).toContain('startup');
@@ -225,7 +227,15 @@ describe('TaskRunner prompt Claude startup disposal', () => {
     else if (action === 'shutdown') {
       c.runner.stopAcceptingOffers();
       await c.runner.shutdownActiveTasks('operator');
-    } else await c.waitForTerminal();
+    } else {
+      await vi.advanceTimersByTimeAsync(1000);
+      // Tree disposal polls on the same fake clock; vi.waitFor advances it until the start settles.
+      let settled = false;
+      void Promise.all([offered, c.startSettled.promise]).then(() => { settled = true; });
+      await vi.waitFor(() => expect(settled).toBe(true), { timeout: 5_000 });
+      c.restoreClock();
+      await c.waitForTerminal();
+    }
     await offered; await c.startSettled.promise;
     // The first cancellation may precede the adapter's rejected-start receipt.
     // Join that now-returned owner without opening the native init gate.
@@ -298,10 +308,21 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
   });
 
   it('startup deadline publishes one failure and retains the late owner until its disposal receipt', async () => {
-    const c = await setup(runtime, 'startup', { startupTimeoutMs: 1000, holdStartupReceipt: true }); const offered = c.offer();
+    const c = await setup(runtime, 'startup', { startupTimeoutMs: 1000, holdStartupReceipt: true });
+    // Own when the unchanged 1s startup deadline fires, so a slow fixture boot cannot expire it before native init is gated.
+    c.synchronizeInterruptClock();
+    const offered = c.offer();
     await c.timing.waitFor(event => event.event === 'startup.ready');
     expect(await c.trace()).toContain('startup');
-    await vi.waitFor(() => expect(c.terminals()).toHaveLength(1)); await offered;
+    await vi.advanceTimersByTimeAsync(1000);
+    // Tree disposal polls on the same fake clock; vi.waitFor advances it until the offer and the held disposal settle.
+    let settled = false;
+    void offered.then(() => { settled = true; });
+    await vi.waitFor(() => expect(settled && c.terminals().length === 1).toBe(true), { timeout: 5_000 });
+    if (runtime === 'claude') await vi.waitFor(() => expect(c.timing.events.some(event => event.event === 'startup.disposal.real.complete')).toBe(true), { timeout: 5_000 });
+    // The abort grace for a start that has not returned (runtime-start.ts, 5s) is armed on the same fake clock.
+    await vi.advanceTimersByTimeAsync(5_000);
+    c.restoreClock();
     expect(c.terminals()[0]).toMatchObject({ type: 'task.fail', payload: { retryable: false } });
     expect(c.sent.some(event => event.type === 'task.started')).toBe(false);
     await c.assertStartupReceiptRetained();
