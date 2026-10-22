@@ -2,6 +2,7 @@ import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-
 import { readFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { getAgentDir, type CreateAgentSessionOptions } from '@earendil-works/pi-coding-agent';
+import { MODEL_THINKING_LEVELS } from '@earendil-works/pi-ai/providers/model-schema';
 import { PI_RPC_IPC_KEY_MARKER, receiveLauncherCredential } from '../adapters/pi/launcher-credential';
 import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../adapters/provider-credential-environment';
 import { runPiSessionRuntime } from './pi-session-runtime';
@@ -130,7 +131,8 @@ export function parsePiRpcHostArgs(
   if (!configPath || !isAbsolute(configPath)) reject('--config must be an absolute path');
   if (values.get('--mode') !== 'rpc') reject('--mode rpc is required');
   const thinking = values.get('--thinking');
-  if (thinking !== undefined && !['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(thinking)) {
+  // Pi's own level list; `@byok-sdk/keys` generates its `PI_THINKING_LEVELS` from the same pinned pi-ai.
+  if (thinking !== undefined && !(MODEL_THINKING_LEVELS as readonly string[]).includes(thinking)) {
     reject('invalid --thinking level');
   }
   if (values.has('--provider') && !values.has('--model')) reject('--provider requires --model');

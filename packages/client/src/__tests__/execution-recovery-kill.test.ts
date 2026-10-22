@@ -508,6 +508,28 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
     expect(starts()).toHaveLength(1);
   }, 30_000);
 
+  it('#687: keeps task.started that shared a batch with a never-admitted message across SIGKILL', async () => {
+    const cloud = await startCloud();
+    const { daemon, deviceId } = await pair(cloud, { agentHome: true });
+    await fs.writeFile(`${current!.cloudDb}.message-outage`, '503');
+    // Long enough for the runtime to start and publish behind the held claim reply under load.
+    await fs.writeFile(`${current!.cloudDb}.claim-delay`, '1000');
+    const offer = await cloud.rpc('enqueueMessageOffer', { deviceId, taskId: globalThis.crypto.randomUUID() }) as { taskId: string };
+    await waitForFile(`${current!.cloudDb}.message-blocked`);
+    // The race this test exists for: task.started left in the request the outage refused.
+    const [blocked] = (await fs.readFile(`${current!.cloudDb}.message-blocked-batches`, 'utf8')).trim().split('\n')
+      .map((line) => JSON.parse(line) as string[]);
+    expect(blocked!.slice(0, blocked!.indexOf('agent.message.publish'))).toContain('task.started');
+    expect((await cloud.rpc('readTaskAttempt', { taskId: offer.taskId }) as { status: string }).status).toBe('running');
+    daemon.kill();
+    await daemon.exited();
+
+    await startDaemon({ agentHome: true });
+    expect((await cloud.rpc('readTaskAttempt', { taskId: offer.taskId }) as { status: string }).status).toBe('running');
+    expect(await cloud.rpc('readMessages')).toEqual([]);
+    expect(starts()).toHaveLength(1);
+  }, 30_000);
+
   it('does not bypass cloud cancellation for a never-admitted recovered message', async () => {
     const cloud = await startCloud();
     const { daemon, deviceId } = await pair(cloud, { agentHome: true });

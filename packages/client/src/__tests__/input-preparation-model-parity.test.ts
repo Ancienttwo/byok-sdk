@@ -27,6 +27,7 @@ import {
 import { canonicalPreparedValue, PreparedSessionError } from '../adapters/pi/prepared-request';
 import { createPreparedGate, registerPreparedProvider } from '../adapters/pi/prepared-session';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
+import { MODEL_THINKING_LEVELS } from '@earendil-works/pi-ai/providers/model-schema';
 // Relative, and test-only: the release graph
 // (`scripts/release/check-package-graph.mjs`) keeps `@byok-sdk/keys` and the
 // dispatch packages disjoint as SHIPPED dependencies, which is exactly why the
@@ -325,6 +326,21 @@ describe('input preparation model: every carrier admits the same closed shape', 
       }
     },
   );
+
+  // #636: the level set has one authority, Pi's own `MODEL_THINKING_LEVELS`.
+  // The prepared host imports it, keys generates its copy from it, and the
+  // daemon reader and the wire schema restate it; all of them take exactly it.
+  it("requires exactly Pi's thinking levels in every carrier and in the keys schema", () => {
+    expect(Object.keys(THINKING_LEVEL_MAP)).toEqual(MODEL_THINKING_LEVELS);
+    expect(PiModelConfigSchema.shape.thinkingLevel.options).toEqual(MODEL_THINKING_LEVELS);
+    expect(Object.keys(PiModelConfigSchema.shape.thinkingLevelMap.shape)).toEqual(MODEL_THINKING_LEVELS);
+    for (const level of MODEL_THINKING_LEVELS) {
+      const { [level]: _dropped, ...missing } = THINKING_LEVEL_MAP;
+      const candidate = model({ thinkingLevelMap: missing });
+      expect([level, throughWireSchema(candidate), throughControlProtocol(candidate), throughPreparedHost(candidate)])
+        .toEqual([level, undefined, undefined, undefined]);
+    }
+  });
 
   it.each(FIXTURES.filter(([, , verdict]) => verdict === 'accept').map(([label, candidate]) => [label, candidate] as const))(
     '%s: survives a durable write and a replay from a second store, byte-stably',

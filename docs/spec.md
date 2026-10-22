@@ -31,6 +31,33 @@ saved identity without another quota charge. Only an SDK device-terminal readbac
 can release a task slot. Revocation stops authorization; it does not cancel SDK
 tasks. The reference adds no task/result authority or B3 tool implementation.
 
+## Embedded server loopback listener
+
+`@byok-sdk/server` exports `listenLoopback` for Topology L Hosts. It serves a
+Host handler, such as `server.hono.fetch` or a Host-authenticated MCP router,
+on `127.0.0.1` only. The Host supplies durable, identity-scoped port storage.
+The daemon cursor identity includes `serverUrl`, so an assigned port never
+changes. A new identity draws at most 16 ports from `[24000, 32768)` and
+retries only `EADDRINUSE`/`EACCES`. An existing identity fails closed. The
+listener binds before it claims the port, and it answers 503 until claim
+readback and handler construction finish. A failed bind removes its own
+listeners.
+
+Requests must carry one exact `Host: 127.0.0.1:<port>` and an origin-form
+target. The listener refuses Cookie, upgrades, CONNECT and browser fetch
+metadata other than native fetch's `Sec-Fetch-Mode: cors`. It refuses every
+Origin by default. Bodies are buffered and capped before dispatch (2 MiB
+default). The listener is not authentication.
+
+`allowedOrigins` is an opt-in list of exact loopback browser origins. When a
+listed origin sends fetch metadata, only CORS mode passes. The listener answers its preflight
+without dispatch and adds `Access-Control-Allow-Origin`, `Vary: Origin` and
+`Access-Control-Expose-Headers: Mcp-Session-Id` to its responses. It never
+allows credentials, and Cookie stays refused. It does not rewrite Origin. An
+MCP handler must list the same origins in `createMcpHttpServer`'s
+`allowedOrigins`, or its own Origin check refuses them. See the
+[server README](../packages/server/README.md#browser-clients-from-loopback-origins).
+
 ## Canonical Terms
 
 - **subscription lane** — a dispatch through the user's existing Claude Code
@@ -182,6 +209,13 @@ startup. Direct provider transports do not require Pi configuration. Vendor
 kind, endpoint and model name never infer it; Pi's built-in catalog does not
 override the namespaced local projection. Model limits do not constitute Host
 ContextPack budgets or measured available input tokens.
+
+`@byok-sdk/keys` can derive such a configuration from the pi-ai catalog that
+the client pins. The table is a checked-in generated file; a test fails until
+it is regenerated for the pinned pi-ai. Keys does not read pi-ai at run time. A derived configuration
+is a value the Host stores in the local profile, and the same schema validates
+it. A catalog entry that the schema cannot express exactly is refused with its
+blocking fields, never narrowed.
 
 The launcher accepts the adapter's bounded absolute extension paths and an
 absolute `--config` path. Provider/model/thinking selection remains local
@@ -1455,11 +1489,18 @@ The first protocol slice adds only additive optional observability fields:
 
 - `tool_use.mcp?` and `tool_result.mcp?` carry `{ server, tool }` when
   authoritative MCP identity is available. Codex projects native `mcpToolCall`
-  fields; ordinary/prepared Pi and Claude resolve exact native tool names against
-  supplied observed toolsets. No prefix splitting or title guessing is performed.
-  Claude discovery/admission is unchanged: without an observation the field is
-  absent. Builtins, unobserved SDK helpers and Grok ACP titles are not assigned
-  MCP identity. These fields describe events, not tool authorization decisions.
+  fields. Ordinary and prepared Pi resolve exact native tool names against the
+  daemon's observed toolsets. Claude admission is unchanged: the daemon does not
+  probe for Claude. At the first `mcp__` tool call of a Claude process, the
+  adapter sends Claude's own `mcp_status` control request. The answer lists each
+  connected server under its configured name, with the original tool names
+  from that server's `tools/list`. Only the task-projected toolset servers get
+  an identity, and only when Claude reports the command and args the SDK wrote
+  for that server. A runtime name that two reported tools share gets none. A failed
+  or late answer (5 s) leaves the field absent; the task continues. No prefix
+  splitting or title guessing is performed. Builtins, SDK helpers and Grok ACP
+  titles are not assigned MCP identity. These fields describe events, not tool
+  authorization decisions.
 - `tool_use.toolCallId?: string` and `tool_result.toolCallId?: string` identify
   the same native tool call. A generic `id` is forbidden because envelope IDs,
   RPC request IDs, and approval IDs have different authorities.

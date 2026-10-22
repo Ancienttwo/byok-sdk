@@ -1,5 +1,5 @@
 import { createInProcessMailboxWake } from '../../../../cloud/src/index';
-import { existsSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../../daemon/agent-egress-policy';
 import { createInterface } from 'node:readline';
 import type { Server as HttpServer } from 'node:http';
@@ -372,11 +372,30 @@ const httpServer = serve({
       : undefined;
     if (faultCandidate !== undefined) {
       const messages = (faultCandidate as { messages?: Array<{ type: string; payload: unknown }> }).messages ?? [];
-      if (messages.some((message) => message.type === 'agent.message.publish') && existsSync(`${config.dbPath}.message-outage`)) {
-        writeFileSync(`${config.dbPath}.message-blocked`, JSON.stringify(messages.find((message) => message.type === 'agent.message.publish')!.payload));
+      const publishAt = messages.findIndex((message) => message.type === 'agent.message.publish');
+      if (publishAt >= 0 && existsSync(`${config.dbPath}.message-outage`)) {
+        appendFileSync(`${config.dbPath}.message-blocked-batches`, `${JSON.stringify(messages.map((message) => message.type))}\n`);
+        // The cloud applies a batch in order and never rolls back (handlers/messages.ts),
+        // so an outage at the publish leaves the envelopes before it committed.
+        // No test arms the terminal fault below together with this outage.
+        if (publishAt > 0) {
+          const prefix = messages.slice(0, publishAt);
+          const headers = new Headers(request.headers);
+          headers.delete('content-length');
+          await ownerWrite(() => db.prepare('INSERT INTO fixture_wire (body) VALUES (?)').run(JSON.stringify(prefix)));
+          const committed = await cloud.fetch(new Request(request.url, {
+            method: 'POST', headers, body: JSON.stringify({ ...(faultCandidate as object), messages: prefix }),
+          }));
+          if (!committed.ok) return committed;
+        }
+        writeFileSync(`${config.dbPath}.message-blocked`, JSON.stringify(messages[publishAt]!.payload));
         return new Response('message admission unavailable', { status: 503 });
       }
       await ownerWrite(() => db.prepare('INSERT INTO fixture_wire (body) VALUES (?)').run(JSON.stringify(messages)));
+      // A slow claim reply lets the envelopes queued behind it leave together.
+      if (messages.some((message) => message.type === 'task.claim') && existsSync(`${config.dbPath}.claim-delay`)) {
+        await new Promise((resolve) => setTimeout(resolve, Number(readFileSync(`${config.dbPath}.claim-delay`, 'utf8'))));
+      }
     }
     const response = await cloud.fetch(request);
     if (response.ok && hasTerminal(faultCandidate) && existsSync(config.faultFile)) {
