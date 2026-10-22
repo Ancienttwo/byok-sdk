@@ -154,9 +154,10 @@ same key replaces a pending cancel with the schedule, so the SDK holds one
 wake. A failed SDK wake call rejects the K4 drain, and the Host call that
 started it rejects after its commit. The K4 outbox keeps the row with
 `lastError`. A process timer retries it after 60 seconds, and each later
-drain, wake delivery or `recover()` also retries it. A failed pass still
-arms the timer, so card expiry, delivery retries, seat deadlines and input
-batch seals keep their times. Startup schedules a reserved wake that the SDK
+drain, wake delivery or `recover()` also retries it. A failed K4 drain does
+not stop the rest of its process pass, and the pass arms the timer, so card
+expiry, delivery retries, reply checks, seat deadlines and input batch seals
+keep their times. The pass then rethrows the drain error. Startup schedules a reserved wake that the SDK
 no longer holds. K4 rejects a wake whose time differs from its reservation,
 and the SDK delivers it again. K4 records an unknown, inactive or superseded
 wake in `ignoredWakes`. Calendar errors stop the chain, record an audit, and

@@ -6,7 +6,9 @@ import { createByokServer } from '@byok-sdk/server';
 import type { ExecutionServer } from '@byok-sdk/example-host-execution-core';
 import { hash, HostLedger } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
+import type { ChannelPort } from './channel';
 import { BotCollaboration, type BotOptions } from './host';
+import { stateOf } from './model';
 import { routineOf, seedRoutine } from './routines.test-support';
 
 let root: string;
@@ -124,4 +126,25 @@ it('keeps one SDK wake when a resume of the same key follows a failed cancel', a
   expect(routineOf(bot, id).next).toEqual(armed);
   expect(outbox()).toEqual([]);
   expect(await pending()).toEqual([armed.dedupKey]);
+});
+
+it('sends a due delivery and keeps the timer at 60 seconds while a routine wake call keeps failing', async () => {
+  const probe = failingSchedule('failing');
+  const send = vi.fn<ChannelPort['send']>(async () => ({ result: 'accepted', platformMessageId: 'sent' }));
+  await setup(probe.wrap, { channel: { port: { send } } });
+  await expect(seedRoutine(bot, 'failing', 'failing')).rejects.toThrow('Wake dispatch failed');
+  const conversation = { kind: 'direct', id: 'main' } as const, now = Date.now();
+  ledger.transaction(s => {
+    const channel = stateOf(s.application).channel ??= { inbounds: {}, pushRoutes: {}, deliveries: {} };
+    channel.pushRoutes.push = { kind: 'push', id: 'push', conversation, channel: 'fake', target: 'chat', optedInBy: 'owner', optedInAt: now };
+    channel.deliveries.due = { id: 'due', taskId: 'task', messageId: 'message', body: 'Report', conversation, channel: 'fake',
+      route: { kind: 'push', pushRouteId: 'push' }, state: 'pending', attempts: 0, nextAttemptAt: now };
+  });
+  const before = probe.attempts;
+  await expect(bot.drain()).rejects.toThrow('Wake dispatch failed');
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(bot.snapshot().channel!.deliveries.due).toMatchObject({ state: 'accepted', platformMessageId: 'sent' });
+  // A due time in the past would arm a 1 ms timer and call the SDK in a loop.
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(probe.attempts - before).toBeLessThanOrEqual(2);
 });

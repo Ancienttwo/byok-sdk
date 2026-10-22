@@ -724,14 +724,19 @@ export class BotCollaboration {
   private async process(): Promise<void> {
     try { await this.pass(); } finally { this.armTimer(); }
   }
+  /**
+   * A failed K4 drain does not stop the rest of the pass, so deliveries and reply checks still move their due times.
+   * The pass does not repeat after it, and it rethrows the first drain error for the caller and the SDK hook.
+   */
   private async pass(): Promise<void> {
+    let failure: { error: unknown } | undefined;
     let more: boolean;
     do {
       // A failed delivery keeps `delivered = false`. The timer retries it.
       await this.deliverCancels().catch(() => {});
       const admitted = this.ledger.transaction(s => this.sync(s));
       await flushHomes(this.server, this.ledger, this.now);
-      await this.core.drain();
+      try { await this.core.drain(); } catch (error) { failure ??= { error }; }
       // A Main Bot cancel applied in this drain commits with delivered = false.
       await this.deliverCancels().catch(() => {});
       let materialized = this.ledger.transaction(s => this.sync(s));
@@ -749,7 +754,8 @@ export class BotCollaboration {
         || Object.values(state.turns).some(turn => !turn.conclusion && !ledger.intents[hash(turn.id)] && turn.status !== 'blocked'
         && turn.status !== 'failed' && !!state.team.bots[turn.botId] && !state.team.bots[turn.botId]!.archived
         && state.team.bots[turn.botId]?.readyRevision === state.team.bots[turn.botId]?.revision);
-    } while (more);
+    } while (more && !failure);
+    if (failure) throw failure.error;
   }
   private armTimer(): void {
     clearTimeout(this.timer);
