@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2077486,
+      "budgetBytes": 2077564,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -120,6 +120,7 @@
         "child_process",
         "crypto",
         "fs",
+        "module",
         "net",
         "os",
         "path",
@@ -139,6 +140,7 @@
           "child_process",
           "crypto",
           "fs",
+          "module",
           "net",
           "os",
           "path",
@@ -358,7 +360,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 372601,
+      "budgetBytes": 372711,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -379,6 +381,7 @@
         "child_process",
         "crypto",
         "fs",
+        "module",
         "net",
         "os",
         "path",
@@ -398,6 +401,7 @@
           "child_process",
           "crypto",
           "fs",
+          "module",
           "net",
           "os",
           "path",
@@ -810,12 +814,12 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 88114,
+          "line": 88116,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 96331,
+          "line": 96333,
           "rule": "opaque import()"
         },
         {
@@ -1137,12 +1141,12 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host-sealed.js",
-          "line": 88039,
+          "line": 88041,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host-sealed.js",
-          "line": 95570,
+          "line": 95572,
           "rule": "opaque import()"
         },
         {

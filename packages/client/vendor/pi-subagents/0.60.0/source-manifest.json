@@ -893,9 +893,10 @@
     {
       "path": "src/runs/shared/pi-spawn.ts",
       "upstreamSha256": "b52607ba8f25fd1fb2f029aa7826ab445ed1ad45dc38495d73987304239b573c",
-      "vendoredSha256": "bcf386ef427d9e9e5943de07217e0b32858d8ea90aa67cfd9e55819347e22a76",
+      "vendoredSha256": "9756f19fd054a5ccce41e112d5d910715dd568d76ac38e9cecaf7894f4367a7c",
       "delta": [
-        "SDK subagent re-entry: the legacy spawn-command chain (getPiSpawnCommand, the PI_SUBAGENT_PI_BINARY seam, CLI script resolution) is deleted; only the package-root resolvers the SDK build flavor still needs remain."
+        "SDK subagent re-entry: the legacy spawn-command chain (getPiSpawnCommand, the PI_SUBAGENT_PI_BINARY seam, CLI script resolution) is deleted; only the package-root resolvers the SDK build flavor still needs remain.",
+        "SDK resolveInstalledPiPackageRoot finds the first node_modules package directory in its ancestor chain, skipping a non-directory, as ESM resolution does, instead of import.meta.resolve, which CommonJS bundles do not have (#724)."
       ]
     },
     {

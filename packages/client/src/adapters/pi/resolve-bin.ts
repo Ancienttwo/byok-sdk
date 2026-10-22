@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readClientPiRuntimePin } from './client-manifest';
@@ -77,18 +77,19 @@ export function resolvePiRuntimeIdentity(): PiRuntimeIdentity {
   return { name: PI_PACKAGE_NAME, version: spec };
 }
 
-function findPackageRoot(
-  startDir: string,
-): { dir: string; manifest: MinimalPackageJson } | undefined {
-  let dir = startDir;
-  for (let depth = 0; depth < 6; depth++) {
-    const manifest = readPackageJson(dir);
-    if (manifest?.name !== undefined) return { dir, manifest };
-    const parent = path.dirname(dir);
-    if (parent === dir) return undefined;
-    dir = parent;
+/**
+ * The installed directory of `name`, found the way Node's ESM resolver finds a
+ * bare specifier: the first `node_modules/<name>` directory in this module's
+ * ancestor chain, through symlinks. A non-directory there is skipped. It reads no package `exports`, so it also
+ * finds an import-only package. It needs only `import.meta.url`, so a CommonJS
+ * product bundle that defines it resolves the same way (#724).
+ */
+function locateInstalledPackageDir(name: string): string | undefined {
+  for (let dir = path.dirname(fileURLToPath(import.meta.url)); ; dir = path.dirname(dir)) {
+    const candidate = path.join(dir, 'node_modules', name);
+    if (statSync(candidate, { throwIfNoEntry: false })?.isDirectory()) return realpathSync(candidate);
+    if (path.dirname(dir) === dir) return undefined;
   }
-  return undefined;
 }
 
 /**
@@ -99,10 +100,9 @@ function findPackageRoot(
  * Deliberately does NOT use `createRequire(...).resolve()`: this package is
  * pure ESM with no `require` export condition (`exports["."]` only offers
  * `import`), so CJS-style resolution fails with
- * `ERR_PACKAGE_PATH_NOT_EXPORTED`. It also does NOT resolve the
- * `./package.json` subpath directly (also not exported); instead it resolves
- * the package's main entry via `import.meta.resolve` and walks upward to the
- * enclosing package root.
+ * `ERR_PACKAGE_PATH_NOT_EXPORTED`. It does not use `import.meta.resolve`
+ * either, which a CommonJS bundle does not have. It locates the package
+ * directory itself; the root is the same one ESM resolution reaches.
  */
 export function resolvePinnedPiPackage(remedy: string): {
   readonly dir: string;
@@ -110,22 +110,17 @@ export function resolvePinnedPiPackage(remedy: string): {
   readonly bin: string | Record<string, string> | undefined;
 } {
   const expected = resolvePiRuntimeIdentity();
-  let mainEntry: string;
-  try {
-    mainEntry = fileURLToPath(import.meta.resolve(PI_PACKAGE_NAME));
-  } catch (cause) {
-    throw new Error(`Required ${PI_PACKAGE_NAME} could not be resolved; ${remedy}`, { cause });
+  const dir = locateInstalledPackageDir(PI_PACKAGE_NAME);
+  const manifest = dir === undefined ? undefined : readPackageJson(dir);
+  if (dir === undefined || manifest === undefined) {
+    throw new Error(`Required ${PI_PACKAGE_NAME} could not be resolved; ${remedy}`);
   }
-  const root = findPackageRoot(path.dirname(mainEntry));
-  if (root === undefined) {
-    throw new Error(`Required ${PI_PACKAGE_NAME} resolved to ${mainEntry}, which has no enclosing package manifest; ${remedy}`);
-  }
-  if (root.manifest.name !== expected.name || root.manifest.version !== expected.version) {
+  if (manifest.name !== expected.name || manifest.version !== expected.version) {
     throw new Error(
-      `${PI_PACKAGE_NAME} resolved to ${String(root.manifest.name)}@${String(root.manifest.version)}, but @byok-sdk/client pins ${expected.name}@${expected.version}; ${remedy}`,
+      `${PI_PACKAGE_NAME} resolved to ${String(manifest.name)}@${String(manifest.version)}, but @byok-sdk/client pins ${expected.name}@${expected.version}; ${remedy}`,
     );
   }
-  return { dir: root.dir, identity: expected, bin: root.manifest.bin };
+  return { dir, identity: expected, bin: manifest.bin };
 }
 
 const PI_BIN_REMEDY = 'reinstall @byok-sdk/client dependencies, or ship pi through sdkHelperHost and copyPiRuntimeAssets';
