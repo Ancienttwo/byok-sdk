@@ -1506,8 +1506,8 @@ The first protocol slice adds only additive optional observability fields:
 
 - `tool_use.mcp?` and `tool_result.mcp?` carry `{ server, tool }` when
   authoritative MCP identity is available. Codex projects native `mcpToolCall`
-  fields. Ordinary and prepared Pi resolve exact native tool names against the
-  daemon's observed toolsets. Claude admission is unchanged: the daemon does not
+  fields. Ordinary, prepared and durable Pi resolve exact native tool names
+  against the daemon's observed toolsets. Claude admission is unchanged: the daemon does not
   probe for Claude. At the first `mcp__` tool call of a Claude process, the
   adapter sends Claude's own `mcp_status` control request. The answer lists each
   connected server under its configured name, with the original tool names
@@ -1515,9 +1515,13 @@ The first protocol slice adds only additive optional observability fields:
   an identity, and only when Claude reports the command and args the SDK wrote
   for that server. A runtime name that two reported tools share gets none. A failed
   or late answer (5 s) leaves the field absent; the task continues. No prefix
-  splitting or title guessing is performed. Builtins, SDK helpers and Grok ACP
-  titles are not assigned MCP identity. These fields describe events, not tool
-  authorization decisions.
+  splitting or title guessing is performed. Builtins and Grok and Hermes ACP
+  titles are not assigned MCP identity. Claude and Pi assign none to SDK
+  helpers. Codex projects its native `mcpToolCall` fields for every server it
+  runs, so SDK helper calls carry `mcp` there; whether helpers should carry it
+  is an open owner decision (#633). These fields describe events, not tool
+  authorization decisions. `docs/protocol.md` §11.7 lists the source per
+  adapter.
 - `tool_use.toolCallId?: string` and `tool_result.toolCallId?: string` identify
   the same native tool call. A generic `id` is forbidden because envelope IDs,
   RPC request IDs, and approval IDs have different authorities.

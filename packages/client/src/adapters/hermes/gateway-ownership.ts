@@ -6,14 +6,14 @@ import { servesHermesHome, type HermesGatewayIdentity } from './gateway-identity
  * custody launcher replaces itself with Hermes, so the gateway pid is `root`.
  * On Windows a console-script `hermes.exe` and the custody launcher start
  * Hermes's Python as a child, so the gateway is below `root`. Rejects when the
- * Windows process table cannot be read.
+ * Windows process table cannot be read, or when `signal` aborts the read.
  */
-export async function ownsHermesGatewayPid(root: number, pid: number): Promise<boolean> {
+export async function ownsHermesGatewayPid(root: number, pid: number, signal?: AbortSignal): Promise<boolean> {
   if (pid === root) return true;
   if (process.platform !== 'win32') return false;
   // The Windows walk lives in the lazy session entry, so the root entries do not carry it.
   const { descendsOnWindows } = await import('#byok-hermes-session');
-  return descendsOnWindows(root, pid);
+  return descendsOnWindows(root, pid, signal);
 }
 
 /**
@@ -24,9 +24,10 @@ export async function ownsHermesGatewayPid(root: number, pid: number): Promise<b
  * name is in one machine-wide namespace: the gateway must run below the
  * viewer the adapter started. There `identity.pid` is the server pid from the
  * kernel, because a server the adapter does not own receives no request.
+ * A process-table read that fails or outlives `signal` means "do not stop".
  */
-export async function mayStopForeignHermesGateway(identity: HermesGatewayIdentity, served: string, viewer: number | undefined): Promise<boolean> {
+export async function mayStopForeignHermesGateway(identity: HermesGatewayIdentity, served: string, viewer: number | undefined, signal?: AbortSignal): Promise<boolean> {
   if (process.platform !== 'win32') return servesHermesHome(identity, served);
   if (viewer === undefined) return false;
-  return ownsHermesGatewayPid(viewer, identity.pid).catch(() => false);
+  return ownsHermesGatewayPid(viewer, identity.pid, signal).catch(() => false);
 }

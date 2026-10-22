@@ -136,6 +136,11 @@ host. CJS output has no `import.meta`, and pi reads `import.meta.url` when it
 evaluates. So the bundler must define it from `__filename` (esbuild
 `define: { 'import.meta.url': '__product_import_meta_url' }` with the banner
 `const __product_import_meta_url = require('node:url').pathToFileURL(__filename).href;`).
+Inside a SEA, this define makes `import.meta.url` the executable's URL, and
+`process.argv[1]` is the path that started the executable. So a common "run
+main when `import.meta.url` matches `argv[1]`" check is true there. If the
+product also has a separate SEA entry, main then runs twice. Guard such a check
+with `!require('node:sea').isSea()`, or remove it from the SEA entry.
 Every other import of an extension resolves from the extension's own
 directory. An extension that does not load still fails the pi task.
 

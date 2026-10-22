@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { readSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
@@ -36,6 +37,11 @@ export function parseHermesProviderLauncherRequest(args: readonly string[]): Her
  * as a child with the credential in the child's environment only, resolves
  * when Hermes exits and sets `process.exitCode` to its exit code. The adapter
  * accepts a gateway below the launcher PID on Windows.
+ * Before it reads the credential, launch reads one byte from stdin: the
+ * adapter writes it after it has adopted this process (on Windows, into its
+ * kill-on-close job), so neither the key nor Hermes exists outside the owned
+ * tree. End of input fails the launch. The launcher program must not read
+ * stdin itself.
  * The Host supplies its account-scoped store here, never in the daemon.
  */
 export async function runHermesProviderLauncher(request: HermesProviderLauncherRequest, host: { createSecretStore(): SecretStore }): Promise<void> {
@@ -53,6 +59,7 @@ export async function runHermesProviderLauncher(request: HermesProviderLauncherR
       process.stdout.write(`${JSON.stringify(model)}\n`);
       return;
     }
+    if (readSync(0, Buffer.alloc(1), 0, 1, null) !== 1) throw new Error('Hermes launcher was not adopted');
     const secret = await readProviderCustodySnapshot({ profiles, profile, createSecretStore: host.createSecretStore });
     if (!secret) throw new Error('Hermes provider credential unavailable');
     assertSharedSecretValue(secret);

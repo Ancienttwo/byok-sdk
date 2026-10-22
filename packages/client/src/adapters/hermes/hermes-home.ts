@@ -131,7 +131,8 @@ export async function removeHermesProfile(root: string, home: string): Promise<v
  * Deletes SDK profiles that a dead Host left behind. The daemon's owned
  * process ledger already reaps such a Host's gateway process group at the next
  * start. A profile is kept while it is in `live`, while it is younger than
- * {@link STALE_PROFILE_MS}, or while any gateway answers for it. `live` knows
+ * {@link STALE_PROFILE_MS}, while any gateway answers for it, or while the
+ * Windows pipe client fails, which proves no gateway gone. `live` knows
  * only this process's sessions, so one root serves one Host process.
  */
 export async function sweepStaleHermesProfiles(root: string, live: ReadonlySet<string>, now = Date.now(), nativeAssetRoot?: string): Promise<void> {
@@ -142,7 +143,7 @@ export async function sweepStaleHermesProfiles(root: string, live: ReadonlySet<s
     if (!name.startsWith(PROFILE_PREFIX) || live.has(home)) continue;
     const stat = await fs.lstat(home).catch(() => undefined);
     if (stat === undefined || !stat.isDirectory() || now - stat.mtimeMs < STALE_PROFILE_MS) continue;
-    if (await identifyHermesGateway(home, { nativeAssetRoot }) !== undefined) continue;
+    if (await identifyHermesGateway(home, { nativeAssetRoot }).catch(() => true) !== undefined) continue;
     await fs.rm(home, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }).catch(() => {});
   }
 }

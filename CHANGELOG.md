@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Fixed (client, keys)** — close the Hermes on Windows follow-ups from the
+  #695 review (#712). The custody launcher now starts Hermes only after the
+  adapter writes one byte to the launcher's stdin, and reads the key only after
+  that byte. The adapter writes it after it adopts the launcher (on Windows,
+  into the kill-on-close job), so neither the key nor Hermes exists outside the
+  owned tree. End of input fails the launch. Client and keys must come from
+  the same release. A new keys launcher with an older client waits for a byte
+  that never comes, and the start fails after 20 s with the misleading "hermes
+  gateway did not report ready in time". An older keys launcher with a new
+  client passes the byte to Hermes as one blank stdin line.
+  The stale-profile sweep keeps a profile when the Windows pipe client fails.
+  The Windows process-table read now ends at the ready deadline or on start
+  abort, and the foreign-gateway check ends at 10 s or on start abort.
 - **Changed (client)** — update the private OAR source to 0.70.0
   (`44d7d61`). Keep the eight BYOK-maintained files. Update the source
   manifest and bridge paths. The only selected upstream change is the optional
@@ -28,10 +41,21 @@
   awaits. The `PI_SUBAGENT_CHILD` skip is unchanged. The source manifest
   records this delta. A CJS bundle that runs Pi must also define
   `import.meta.url` from `__filename`, because Pi reads it when it evaluates.
-  The client README and the SEA recipe README give the esbuild options.
+  The client README and the SEA recipe README give the esbuild options. They
+  also warn that, inside a SEA, this define makes a "run main when
+  `import.meta.url` matches `argv[1]`" check true, so the check needs an
+  `isSea()` guard (`node:sea`).
   A new fixture in `pi-single-file-bundle.test.ts` runs a real Pi print session
   from a single-pass CJS bundle. It covers the ordinary host, the sealed-host
   redirect and a subagent child.
+- **Feature (client)** — durable Pi sets `mcp` on `tool_use` and
+  `tool_result` for host toolset MCP tools (#633). It uses the exact-name rule
+  of ordinary and prepared Pi, against the daemon's observation in the launch
+  config. Built-in tools and SDK helpers stay without `mcp`. Grok and Hermes
+  also stay without `mcp`. ACP `tool_call` defines no MCP server field. The
+  Hermes title is only its registry name, and Grok has no live MCP evidence
+  yet. The new `docs/protocol.md` §11.7 gives the source of `mcp` for each
+  adapter. No public type changes.
 - **Changed (keys)** — `PiModelConfigSchema` accepts a `pi_model` without
   `thinkingLevelMap`, as the prepared model wire already does. A declared map
   must still map all seven levels. Without a map, Pi applies its own handling
