@@ -57,8 +57,13 @@ qualification. All nine public manifests and their lock records move to
   Still open: Pi's own copies (the nested 8.10.2 and the copy inlined in its
   CLI bundle) until a Pi release moves them. Node's own undici on the Node
   builds that `engines.node` admits (v26.10.0 carries 8.10.2) is a Node runtime
-  matter, and no Node floor change is decided. #700 is closed with these items
-  open. `docs/notes/2026-10-22-700-undici-copies.md` records them (#725).
+  matter, and no Node floor change is decided. openai 7.19.0, which Pi's
+  pi-ai 1.3.0 uses, declares undici as an optional peer dependency. So on
+  openai's node x509 path, the Host's own tree decides which undici copy
+  loads. A copy older than 7.30.1 (or, on the 8 line, older than 8.12.2) has
+  the advisories. #700 is closed with these items open. The Pi and Node
+  items are in `docs/notes/2026-10-22-700-undici-copies.md` (#725). The
+  openai item is in a #700 comment.
 - **Feature (client)** — an opt-in Grok option for user-level instructions
   (#634). `GrokAdapterOptions.compatInstructions: 'disabled'` sets Grok's four
   Claude and Cursor `agents` and `rules` compatibility variables to `0` on the
@@ -66,7 +71,8 @@ qualification. All nine public manifests and their lock records move to
   children that Grok starts itself may inherit them. It applies to every
   session of the adapter, and the default is unchanged. It is not an
   isolation guarantee: Grok still loads `$GROK_HOME/AGENTS.md`,
-  `$GROK_HOME/rules/` and `extra_rule_dirs`. Claude gets no option. For an
+  `$GROK_HOME/rules/` and `extra_rule_dirs`, and the Claude and Cursor
+  skills, hooks and MCP servers. Claude gets no option. For an
   Agent home under `$HOME`, Claude's `--setting-sources` without `user` still
   loads the user instruction files, as project files, and drops the user's
   deny rules and hooks. Codex 0.160.0 and Pi 1.3.0 have no such switch, and
@@ -148,9 +154,9 @@ qualification. All nine public manifests and their lock records move to
   now reject. The sweep then keeps the profile, and the ready wait and the
   post-attach check retry, as before. The `#byok-hermes-session` closure
   budget rises by 332 B for this check (owner-approved). The new
-  `hermes-pipe-open-errors.test.ts` sets each open error through a kernel32
-  stand-in on every OS. No test opens a real busy or access-denied pipe on
-  Windows.
+  `hermes-pipe-open-errors.test.ts` fakes `win32` and sets each open error
+  through a kernel32 stand-in, so it needs no Windows host. No test opens a
+  real busy or access-denied pipe on Windows.
 - **Changed (client)** — update the private OAR source to 0.70.0
   (`44d7d61`). Keep the eight BYOK-maintained files. Update the source
   manifest and bridge paths. The only selected upstream change is the optional
