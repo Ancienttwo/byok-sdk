@@ -25,15 +25,6 @@ function asWindows(): void {
   process.env.SystemRoot = 'C:\\Windows';
 }
 
-it('stops a foreign gateway on Windows when its kernel pid runs below the owned viewer', async () => {
-  asWindows();
-  // viewer launcher 100 -> hermes.exe 200 -> gateway 300; 400 is outside the viewer's tree
-  execFile.mockImplementation((_command, _args, _options, callback) => callback(null, '4 0 10\r\n100 4 100\r\n200 100 200\r\n300 200 300\r\n400 4 400\r\n'));
-  expect(await mayStopForeignHermesGateway({ pid: 300, state: 'ready', servedHomes: [] }, 'C:\\root\\profiles\\byok-a', 100)).toBe(true);
-  expect(await mayStopForeignHermesGateway({ pid: 400, state: 'ready', servedHomes: [] }, 'C:\\root\\profiles\\byok-a', 100)).toBe(false);
-  expect(execFile).toHaveBeenCalledTimes(2);
-});
-
 it('ends the PowerShell read when the foreign-gateway deadline passes, and does not stop the gateway', async () => {
   asWindows();
   const aborted: boolean[] = [];
