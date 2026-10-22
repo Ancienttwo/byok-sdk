@@ -58,7 +58,7 @@ describe('Hermes gateway ownership on Windows', () => {
       expect(await mayStopForeignHermesGateway(identity, '/root/profiles/byok-a', undefined)).toBe(true);
       expect(await mayStopForeignHermesGateway(identity, '/root/profiles/byok-b', undefined)).toBe(false);
     }
-  });
+  }, 30_000); // Windows: a cold process-table read takes seconds.
 
   it('refuses a reused parent pid, a missing parent, an unknown creation time and a chain deeper than four links', () => {
     // pid 10 was reused by a process created after its supposed child 20
