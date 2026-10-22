@@ -4,8 +4,11 @@ Date: 2026-10-22. Base: main `7c0bbebc`. Published release: `0.28.2` (tag
 `v0.28.2`). Repo file and line numbers refer to the base commit. Numbers for
 `dist/` files refer to the published `0.28.2` packages and to Pi 1.3.0. This note
 records acceptance item 2 of #700: for each older undici copy, does a consumer
-install reach it at run time, and how is it fixed or why is it not reachable. It
-changes no code, manifest or lock file.
+install reach it at run time, and how is it fixed or why is it not reachable.
+The measurements in "P1", "P2" and "Reproduce" are from before the fix. The owner
+chose options B and C on 2026-10-22, and the same change carries them. "P3" and
+"After the change" record the fix. The change adds no dependency and changes no
+manifest or lock file.
 
 ## Summary
 
@@ -21,7 +24,8 @@ changes no code, manifest or lock file.
   loads it.
 - Pi's nested 8.10.2 loads in every SDK Pi host. It serves requests only when it
   owns the process-wide dispatcher slots. Load order decides that. In the ESM
-  shapes it does not own them. In a CommonJS bundle of the host it does. A Host
+  shapes it does not own them. In a CommonJS bundle of the host it did, before
+  the fix in this change (see "After the change"). A Host
   can build such a bundle from 0.28.2 (ESM first, then CJS, with an
   `import.meta.url` define). Main builds it in one pass and documents it (#709).
 - The CJS result narrows an earlier #700 status comment. That comment says that
@@ -43,6 +47,10 @@ changes no code, manifest or lock file.
   is exposed only when nothing in the product loads Node's copy first. I did not
   reproduce this on the product's files. See "Reproduce".
 - The CHANGELOG already lists all eight advisories (`CHANGELOG.md:44-52`).
+- Owner decision, 2026-10-22: B and C. The SDK now reads `globalThis.Headers`
+  before it imports the Pi host. Node's undici then owns the dispatcher in a CJS
+  bundle, as it does in ESM. The client README and the CHANGELOG say so. See
+  "P3" and "After the change".
 - #700 stays open.
 
 ## Method
@@ -340,47 +348,134 @@ GHSA-qq8j-7v2v-3rwp (2026-10-14, high), covers `>=8.11.0 <8.11.2` only. It
 touches none of the older copies. So the CHANGELOG needs no new entry for
 acceptance item 3. The 0.28.2 section is frozen.
 
-## P3: Status and options
+## P3: Decision, status and options
+
+Owner decision, 2026-10-22: B and C. This change carries both. A, D and E are
+not part of it.
+
+- B (code and test). `runSdkReservedHelperCommand()` reads `globalThis.Headers`
+  with `Reflect.get` before each import of `#byok-pi-runtime-host`: for the
+  `pi-subagent-runner` and `pi-subagent-print` kinds, and for the `pi-rpc`,
+  `pi-prepared` and `pi-durable` kinds. The `byok-pi-rpc`, `byok-pi-prepared`,
+  `byok-pi-durable` and `byok-agent` entries read it before their own import of
+  the host. `pi-single-file-bundle.test.ts` checks, in the three CJS fixtures and
+  for four more Pi helper kinds, that no npm undici claims the dispatcher slots.
+- C (docs). The CJS recipe in `packages/client/README.md`, and one "Security
+  (client)" entry under "Unreleased" in the CHANGELOG.
 
 Acceptance of #700:
 
 | Item | State |
 | --- | --- |
 | The SDK's own pins use a patched 8.12.x | Met. Published in 0.28.2. |
-| Each older copy: reached at run time, and fixed or not reachable | Recorded here. Not met for Pi's two copies: they are reachable in some shapes and not fixed. The owner posts the record on the issue. |
-| The CHANGELOG lists the advisories | Met (`CHANGELOG.md:44-52`). |
+| Each older copy: reached at run time, and fixed or not reachable | Recorded here. In a CJS bundle that runs Pi through the SDK's helpers, Pi's npm 8.10.2 no longer owns the dispatcher (B). Pi's two copies are not fixed. The owner posts the record on the issue. |
+| The CHANGELOG lists the advisories | Met (`CHANGELOG.md`, section "0.28.2"). The "Unreleased" entry records the load-order change. |
 
 Stays open:
 
-1. Pi's npm 8.10.2 and the inlined CLI copy, until a Pi release moves them.
-2. CJS bundles of the Pi host: Pi's 8.10.2 owns the process-wide dispatcher unless
-   the Host or the SDK changes the load order. This exists in 0.28.2 (ESM then
-   CJS, with a define) and on main (single pass, documented).
+1. Pi's npm 8.10.2 and the inlined CLI copy, until a Pi release moves them (D).
+   The npm copy still loads in every Pi host. It no longer owns the dispatcher in
+   a CJS bundle of the SDK's helpers. A product that imports pi itself must make
+   the same read, or its bundle keeps the old order. The inlined copy runs with
+   the `pi` bin and the `./rpc-entry` export.
+2. Node's own undici on the builds that the floor admits (E). Not decided.
 3. The record on the issue itself.
 
-Options for the owner. None is done in this change.
+Options. B and C are done in this change. The others are not.
 
 - A. Host guidance now. A nested override replaces the npm copy (tested with npm;
   the syntax for pnpm, Yarn and Bun was not tested). It does not replace the
   inlined CLI copy. Pi 1.3.0 with undici 8.12.3 passed one print session here;
-  Pi's own tests were not run.
-- B. SDK change, small. Make the load order fixed in the Pi host entry, before the
-  Pi import. Either import the client's own `undici` (the patched copy owns the
-  slots), or read a lazy web global (Node's copy owns the slots, as in ESM).
-  Both worked in an emulated CJS bundle. The second keeps Node's fetch and
-  dispatcher on one implementation. Pi's own comment at `http-dispatcher.js:86-89`
-  warns about a mix of Node's fetch with an npm dispatcher on Node 26.0. Either
-  option needs a guard in `pi-single-file-bundle.test.ts` that no npm undici
-  owns the slots after load.
-- C. Docs only. Add the caution and the override to the CJS recipe in
-  `packages/client/README.md:133-138`, and one CHANGELOG sentence under
-  "Unreleased".
+  Pi's own tests were not run. The client README documents it as optional Host
+  guidance, with this limit.
+- B. SDK change, small. Make the load order fixed before the Pi import. Either
+  import the client's own `undici` (the patched copy owns the slots), or read a
+  lazy web global (Node's copy owns the slots, as in ESM). Both worked in an
+  emulated CJS bundle. The second keeps Node's fetch and dispatcher on one
+  implementation. Pi's own comment at `http-dispatcher.js:86-89` warns about a
+  mix of Node's fetch with an npm dispatcher on Node 26.0. Either option needs a
+  guard in `pi-single-file-bundle.test.ts` that no npm undici owns the slots
+  after load. Chosen: the second.
+- C. Docs. Add the caution and the override to the CJS recipe in
+  `packages/client/README.md`, and one CHANGELOG entry under "Unreleased".
 - D. Wait for Pi. No date. A Pi release must also rebuild the CLI bundle.
 - E. Node floor. `engines.node >=24.22.1` admits Node 26 builds whose built-in
   undici is in the advisory range (v26.10.0). The owner can narrow the range or
   accept it. A narrower range changes nine public manifests.
 
 Not covered: Node on Linux and Windows (all probes ran on macOS arm64), Node 26
-builds other than v26.10.0, pnpm and Yarn layouts, `bun build
---compile` products, helper kinds other than `pi-subagent-print`, and whether a
-given advisory applies to a given request.
+builds other than v26.10.0, pnpm and Yarn layouts, `bun build --compile`
+products, and whether a given advisory applies to a given request. The probes
+before the fix ran one helper kind, `pi-subagent-print`. The checks after the fix
+cover all five Pi kinds.
+
+## After the change
+
+### What changed
+
+- `packages/client/src/sdk-reserved-helper-host.ts`: a private function
+  `loadNodeUndici()` calls `Reflect.get(globalThis, 'Headers')`. The
+  `pi-subagent-runner` and `pi-subagent-print` branches call it before their
+  import of the host. `runSdkReservedHelperCommand()` calls it before
+  `runSdkReservedHelper()` for `pi-rpc`, `pi-prepared` and `pi-durable`, which
+  import the host in `bin/sdk-reserved-helper-runners.ts`. The MCP helper kinds
+  never load Pi, so they skip it.
+- `bin/byok-pi-rpc.ts`, `byok-pi-prepared.ts`, `byok-pi-durable.ts` and, for its
+  team operator command, `byok-agent.ts`: the same one-line read before the
+  dynamic import of the host. These entries run as ESM. There the host's own
+  `node:http` import makes Node load its undici before Pi evaluates, so the read
+  changes no owner. A run of `byok-pi-rpc.js` on v24.22.1 with and without the
+  line ended with Node's copy in both slots. The line makes every importer of the
+  seam read first. The thin bins carry it inline, because a shared function does
+  not fit their closure budgets (about 45 bytes of slack each).
+- `pi-single-file-bundle.test.ts`: a preload records the stack frame that writes
+  each dispatcher slot. A frame inside `node:internal/deps/undici` is Node's copy.
+  Any other frame is an npm copy. The check reads no version string, because Node
+  v26.10.0 and Pi's pin are both 8.10.2.
+
+### Why the read sits at each call site
+
+- A statement in the host module body runs after the host's hoisted static
+  imports, so Pi has already evaluated.
+- A side-effect import of a prelude module is dropped by a bundler when the
+  package declares `"sideEffects": false`, as the client does.
+- In a bundle, `import('#byok-pi-runtime-host')` becomes a lazy initializer. Code
+  that runs before it runs before Pi evaluates.
+
+### The read must be a call
+
+Stand-in module with `sideEffects: false`, bundled to CommonJS with esbuild
+0.28.1, rollup 4.62.2 and Bun 1.4.3, and run on v24.22.1. A cell says whether the
+statement was still in the bundle: kept means Node's undici owned slot 2 after
+the run, dropped means slot 2 was empty.
+
+| Statement | esbuild | esbuild minify | esbuild syntax+whitespace | rollup 4.62.2 default | rollup smallest | Bun 1.4.3 minify |
+| --- | --- | --- | --- | --- | --- | --- |
+| `globalThis.Headers;` | kept | kept | kept | dropped | dropped | kept |
+| `void new Headers()` | kept | kept | kept | kept | kept | dropped |
+| `Reflect.get(globalThis, 'Headers')` | kept | kept | kept | kept | kept | kept |
+
+Terser and webpack were not tested. On Bun 1.4.3, `Headers` is a plain property
+and `process.versions.undici` is undefined. The read returns the class and
+loads nothing: slot 2 stayed empty.
+
+### Checks
+
+| Check | Result |
+| --- | --- |
+| The new tests, before the fix, v24.22.1 | 7 of 7 fail: "slot 2 was claimed by an npm undici", frame `setGlobalDispatcher2` in the bundle |
+| The same, before the fix, v26.10.0 | 7 of 7 fail with the same message. Both copies are 8.10.2 there, and the check still tells them apart |
+| The new tests, after the fix | 7 of 7 pass on v24.22.1, v26.10.0 and v24.21.0 |
+| Four more Pi kinds (`pi-rpc`, `pi-prepared`, `pi-durable`, `pi-subagent-runner`), before the fix | They reach their own refusal message and then fail the slot check |
+| Real print session, single-pass CJS, after the fix, v24.22.1 | Exit 0, one provider request. Both slot writers are in `node:internal/deps/undici`. |
+| Real print session, ESM then CJS, after the fix, v24.22.1 | The same |
+| Single-pass CJS with esbuild `minify`, all five Pi kinds, after the fix, v24.22.1 | Both slot writers are in `node:internal/deps/undici` |
+
+### Cost
+
+Measured on v24.22.1, macOS arm64. The read loads Node's undici in the process
+that makes it: the median start-up time of `node -e` rises from 32.0 ms to
+50.3 ms (30 runs each), the load takes 16 ms, and the resident set grows from
+42.2 MB to 59.8 MB. A Pi helper that sends a request loads Node's undici at its
+first `fetch` anyway. The read moves that load to the start. A refusal path pays
+it without a request.

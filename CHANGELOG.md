@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- **Security (client)** — a CommonJS bundle of the Pi host no longer lets Pi's
+  nested undici own the process-wide `fetch` dispatcher (#700). Pi depends on
+  the exact npm undici 8.10.2. That version is in the range of the undici
+  advisories of 2026-10-15 (fixed in 8.12.2). An undici copy claims the
+  dispatcher when it first evaluates. In ESM, Node's own undici evaluates first.
+  In a CJS bundle (single pass, or ESM then CJS) nothing did, so Pi's copy
+  served every `fetch` in the process, including Pi's provider requests. ESM
+  Hosts were not affected.
+  `runSdkReservedHelperCommand()` and the `byok-pi-rpc`, `byok-pi-prepared`,
+  `byok-pi-durable` and `byok-agent` entries now read the `Headers` global
+  before they import the Pi host. Node then loads its own undici, and its copy
+  keeps the dispatcher, as in ESM. A product that imports pi itself must make
+  the same read. The client README says how. It also documents an optional
+  nested `overrides` of Pi's undici (npm) and the limit of that override. New
+  fixtures in `pi-single-file-bundle.test.ts` check, for every Pi helper kind in
+  a CJS bundle, that no npm undici claims the dispatcher. They read no version
+  string.
+  Still open: Pi's own copies (the nested 8.10.2 and the copy inlined in its
+  CLI bundle) until a Pi release moves them. Node's own undici on the Node
+  builds that `engines.node` admits (v26.10.0 carries 8.10.2) is a Node runtime
+  matter. #700 stays open.
 - **Tests (client)** — the Grok fixture contract now runs on Windows in routine
   CI (#609). The `adapter-lifecycle-smoke` Windows leg runs the new
   `grok-windows-contract.test.ts`. It drives the adapter against the fake ACP

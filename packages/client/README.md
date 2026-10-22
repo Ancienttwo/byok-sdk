@@ -161,6 +161,38 @@ finds them as ESM does (#724). Three bundled third-party modules keep an empty
 Every other import of an extension resolves from the extension's own
 directory. An extension that does not load still fails the pi task.
 
+Pi 1.3.0, the version this client pins, depends on the exact npm package
+`undici` 8.10.2. That version is in the range of the undici advisories of
+2026-10-15 (fixed in 8.12.2). An undici copy claims the process-wide `fetch`
+dispatcher when it first evaluates, and that copy then serves every `fetch` in
+the process. In ESM, Node's own undici has always evaluated first and keeps the
+dispatcher. In a CommonJS bundle nothing makes it evaluate first, so Pi's copy
+would claim the dispatcher. `runSdkReservedHelperCommand()` therefore reads the
+`Headers` global before it imports the Pi host, for every Pi helper. Node loads
+its own undici when it first reads a web global, so Node's copy keeps the
+dispatcher, as in ESM. A product that imports pi itself must make the read run
+before pi evaluates, for example from a module that its entry imports first.
+Use a call, `Reflect.get(globalThis, 'Headers')`. A bundler can drop a bare
+`globalThis.Headers` statement as pure.
+
+Node's own undici is part of the Node build (`process.versions.undici`). Some
+builds that `engines.node` admits carry a copy in the advisory range, for
+example v26.10.0 with undici 8.10.2. That is a Node runtime matter. Run a Node
+build with a patched undici.
+
+A Host can also replace Pi's npm copy. This is optional. In npm, an `overrides`
+entry sets the `undici` of `@earendil-works/pi-coding-agent` to the version that
+`@byok-sdk/client` pins:
+
+```json
+{ "overrides": { "@earendil-works/pi-coding-agent": { "undici": "8.12.3" } } }
+```
+
+Only npm was checked. The override does not reach the copy of undici that Pi
+inlines in its own bundle. The `pi` bin and the
+`@earendil-works/pi-coding-agent/rpc-entry` export use that copy. A Host that
+runs either of them still uses 8.10.2 for all `fetch` traffic of that process.
+
 Normal Node/Bun source hosts omit `sdkHelperHost` and continue to use the
 package's installed helper scripts. A required-message offer performs an exact
 stdio MCP initialize/tools-list handshake before adapter preparation; an
