@@ -179,9 +179,9 @@ const SECURE_DIRECTORY_DESCRIPTOR_ROOT = '/proc/self/fd';
 
 /**
  * The sole platform gate for the Agent-memory write authority. Linux retains
- * the native procfs descriptor backend. macOS requires the SDK release
- * helper that passed its native proof and deployment digest check. Windows remains unavailable rather
- * than selecting an unproved fallback.
+ * the native procfs descriptor backend. macOS and Windows x64 require the SDK
+ * release helper that passed its native proof and deployment digest check.
+ * Other platforms remain unavailable rather than selecting an unproved fallback.
  */
 export function isAgentMemorySecureFilesystemAvailable(externalHelperConfigured = false): boolean {
   const nativeLinux = process.platform === 'linux'
@@ -189,9 +189,10 @@ export function isAgentMemorySecureFilesystemAvailable(externalHelperConfigured 
     && typeof fsConstants.O_DIRECTORY === 'number'
     && typeof fsConstants.O_NONBLOCK === 'number'
     && existsSync(SECURE_DIRECTORY_DESCRIPTOR_ROOT);
-  // Windows requires both reparse containment and model S recovery proof.
-  // File flush or a successful readback alone does not prove OS/power recovery.
-  return nativeLinux || (externalHelperConfigured && process.platform === 'darwin');
+  // The Windows helper proves reparse containment, not OS/power recovery; the
+  // intent backend keeps that distinction (`strictLedgerBarrier`).
+  return nativeLinux || (externalHelperConfigured
+    && (process.platform === 'darwin' || (process.platform === 'win32' && process.arch === 'x64')));
 }
 
 function requireSecureDirectoryDescriptors(): string {

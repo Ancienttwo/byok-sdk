@@ -1012,7 +1012,8 @@ actual Agent-home volume with strict `F_FULLFSYNC`. The verified helper provides
 the ledger barrier and conflict-before-rename ordering, so that daemon can
 advertise. Missing or invalid helper assets cannot admit memory tools. An
 explicit intent configuration with invalid assets fails before startup.
-Windows does not advertise. Its accepted model S covers process
+Windows does not advertise. The Windows x64 SDK helper admits the memory
+tools, but its backend reports no strict ledger barrier. Its accepted model S covers process
 crash, OS crash and power loss. The proposed domain is local NTFS on an
 explicit OS build with a normal user token and storage that honors flush.
 It excludes SMB, synced directories and other file systems. Windows B stays

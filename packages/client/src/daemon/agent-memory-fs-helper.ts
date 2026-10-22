@@ -39,11 +39,11 @@ function safeHelperPath(value: unknown): string {
 }
 
 function helperPlatformSupported(): boolean {
-  // Windows requires containment and model S recovery proof (process/OS crash
-  // and power loss). A green denial matrix does not grant admission.
-  // Linux retains its existing native descriptor backend;
-  // the external process authority is admitted only for the proven macOS gap.
-  return process.platform === 'darwin';
+  // Linux retains its existing native descriptor backend. The external process
+  // authority is admitted for macOS and for Windows x64, which has an SDK
+  // release target. Windows has no OS-crash or power-loss proof, so its intent
+  // backend does not claim the strict barrier and intents stay unadvertised.
+  return process.platform === 'darwin' || (process.platform === 'win32' && process.arch === 'x64');
 }
 
 export function isAgentMemoryFilesystemHelperSupported(): boolean {

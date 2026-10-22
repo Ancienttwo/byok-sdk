@@ -20,6 +20,7 @@ vi.mock('../daemon/prepared-tool-surface', async importOriginal => {
   } };
 });
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
+import { isAgentMemoryFilesystemHelperSupported } from '../daemon/agent-memory-fs-helper';
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -41,7 +42,7 @@ function config(directory: string) {
     agentHome: { hostStorageRoot: path.join(directory, 'homes') } };
 }
 
-describe.skipIf(process.platform !== 'darwin')('macOS native deployment admission', () => {
+describe.skipIf(!isAgentMemoryFilesystemHelperSupported())('helper platform native deployment admission', () => {
   it.each(['missing SDK package', 'missing binary', 'digest mismatch'])('refuses prepared memory before probing when the helper has %s', async message => {
     capture.helper.mockImplementation(() => { throw new Error(message); });
     createDaemonWithAdapters(config(await root()), []);
@@ -68,7 +69,7 @@ describe.skipIf(process.platform !== 'darwin')('macOS native deployment admissio
   const bun = resolveBunBin();
   it.skipIf(bun === undefined)('rejects hosted memory in a real compiled product with no SDK native assets', async () => {
     const directory = await root();
-    const executable = path.join(directory, 'memory-product');
+    const executable = path.join(directory, process.platform === 'win32' ? 'memory-product.exe' : 'memory-product');
     const fixture = fileURLToPath(new URL('./fixtures/agent-memory-compiled-availability.ts', import.meta.url));
     execFileSync(bun!, ['build', fixture, '--compile', '--outfile', executable], { stdio: 'pipe' });
     const result = JSON.parse(execFileSync(executable, [directory], { encoding: 'utf8' }));

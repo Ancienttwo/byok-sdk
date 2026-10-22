@@ -343,7 +343,7 @@ export interface DaemonConfig {
   agentMemoryMcp?: 'auto' | 'off';
   /** Optional, one-way hosted projection. Without all guards it has zero network activity. */
   agentMemory?: AgentMemoryHostedProjection;
-  /** Explicit raw local Host export opt-in. No control/wire endpoint, upload, or projection callback. Requires agentHome and the admitted Linux/macOS memory backend. */
+  /** Explicit raw local Host export opt-in. No control/wire endpoint, upload, or projection callback. Requires agentHome and the admitted Linux, macOS or Windows x64 memory backend. */
   agentMemoryExport?: true;
   /** Absolute directory copied by copyAgentMemoryHelperAssets. Only SDK release assets are admitted; not a helper executable or digest override. */
   agentMemoryHelperAssetRoot?: string;
@@ -627,7 +627,8 @@ export interface DaemonConfig {
    * secure memory filesystem is available AND that backend's ledger write is
    * a proven durable barrier (temp sync, rename, directory sync). Linux uses
    * native descriptors. macOS uses the verified SDK helper after a strict
-   * full-sync volume probe. Windows does not advertise. A notice that arrives without the capability is NOT
+   * full-sync volume probe. Windows does not advertise: its helper has no
+   * OS-crash or power-loss proof. A notice that arrives without the capability is NOT
    * acknowledged: it fails `transport_unconfigured` or
    * `filesystem_unavailable` before any fetch. There is no control-socket
    * method for intents; the only entry is the mailbox notice.
@@ -792,7 +793,7 @@ export interface DaemonStatus {
    * each task. `off`: `DaemonConfig.agentMemoryMcp` is `off`; no Agent task
    * gets the memory MCP or the memory guidance. `unavailable`: `auto`, but
    * this daemon has no Agent home or no secure memory filesystem (for example
-   * macOS without the SDK release helper, or Windows).
+   * macOS or Windows x64 without the SDK release helper, or Windows arm64).
    */
   agentMemoryMcp: 'admitted' | 'off' | 'unavailable';
 }
@@ -1365,7 +1366,7 @@ export function buildDaemonWithAdapters(
     throw new Error('DaemonConfig.agentMemory requires a platform with safe descriptor-relative filesystem operations');
   }
   if (config.agentMemoryExport === true && !isAgentMemorySecureFilesystemAvailable(externalAgentMemoryFilesystem)) {
-    throw new Error('DaemonConfig.agentMemoryExport requires a secure Linux or macOS memory backend');
+    throw new Error('DaemonConfig.agentMemoryExport requires a secure Linux, macOS or Windows x64 memory backend');
   }
   const agentMemoryMcpBin = !agentMemoryMcpEnabled || config.agentHome === undefined
     ? undefined

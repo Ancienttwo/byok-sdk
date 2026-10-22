@@ -21,6 +21,7 @@ import type { AgentMemoryIntentTransport } from '../daemon/agent-memory-intent';
 const helperBuilt = builtAgentMemoryFilesystemHelperBin() !== undefined;
 const itProvenBackend = process.platform === 'darwin' && !helperBuilt ? it.skip : it;
 const itMacHelper = process.platform === 'darwin' && helperBuilt ? it : it.skip;
+const itWindowsHelper = process.platform === 'win32' && helperBuilt ? it : it.skip;
 
 const PI_FIXTURE = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
 const CLAUDE_FIXTURE = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
@@ -343,7 +344,7 @@ describe('conn.hello.capabilities (C2: approval-targeting)', () => {
  * an Agent home, the secure memory filesystem and a backend whose ledger write
  * is a proven durable barrier are ALL present. Today that is the native Linux
  * descriptor backend or the SDK macOS helper after a real volume probe.
- * Windows never advertises.
+ * Windows never advertises: its helper admits recall and save without B.
  */
 describe('conn.hello.capabilities (WP2I-S2: agent-memory-intent.v1)', () => {
   let server: TestServer;
@@ -392,10 +393,10 @@ describe('conn.hello.capabilities (WP2I-S2: agent-memory-intent.v1)', () => {
 
   itProvenBackend('advertises with a transport and an Agent home with a proven Linux or SDK macOS backend', async () => {
     const capabilities = await helloCapabilities({ transport });
-    if (isAgentMemorySecureFilesystemAvailable(process.platform === 'darwin')) {
+    if (isAgentMemorySecureFilesystemAvailable(false) || process.platform === 'darwin') {
       expect(capabilities).toContain(AGENT_MEMORY_INTENT_CAPABILITY);
     } else {
-      // Windows has no proven secure backend.
+      // The Windows helper backend has no strict ledger barrier.
       expect(capabilities).not.toContain(AGENT_MEMORY_INTENT_CAPABILITY);
     }
   });
@@ -411,6 +412,14 @@ describe('conn.hello.capabilities (WP2I-S2: agent-memory-intent.v1)', () => {
   itMacHelper('advertises on macOS only after the SDK helper passes the real volume probe', async () => {
     const capabilities = await helloCapabilities({ transport });
     expect(capabilities).toContain(AGENT_MEMORY_INTENT_CAPABILITY);
+  });
+
+  itWindowsHelper('withholds Windows intents with the SDK helper, before any volume probe', async () => {
+    const probe = vi.spyOn(helperClient, 'openAgentMemoryFilesystemHelper');
+    try {
+      expect(await helloCapabilities({ transport })).not.toContain(AGENT_MEMORY_INTENT_CAPABILITY);
+      expect(probe).not.toHaveBeenCalled();
+    } finally { probe.mockRestore(); }
   });
 
   itMacHelper.each(['ENOTSUP', 'EINVAL', 'EPERM', 'EIO'])('withholds macOS intents when the real-volume helper probe refuses %s', async code => {
@@ -454,15 +463,18 @@ describe('conn.hello.capabilities (WP2I-S2: agent-memory-intent.v1)', () => {
     } finally { probe.mockRestore(); open.mockRestore(); errors.mockRestore(); }
   });
 
-  it('Windows has no secure memory backend, with or without a helper', () => {
-    const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
-    if (descriptor === undefined) throw new Error('process.platform descriptor is unavailable');
-    Object.defineProperty(process, 'platform', { ...descriptor, value: 'win32' });
+  it.each([['x64', true], ['arm64', false]] as const)('Windows %s has a secure memory backend only with a helper: %s', (arch, withHelper) => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+    const actualArch = Object.getOwnPropertyDescriptor(process, 'arch');
+    if (platform === undefined || actualArch === undefined) throw new Error('process descriptors are unavailable');
+    Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+    Object.defineProperty(process, 'arch', { ...actualArch, value: arch });
     try {
       expect(isAgentMemorySecureFilesystemAvailable(false)).toBe(false);
-      expect(isAgentMemorySecureFilesystemAvailable(true)).toBe(false);
+      expect(isAgentMemorySecureFilesystemAvailable(true)).toBe(withHelper);
     } finally {
-      Object.defineProperty(process, 'platform', descriptor);
+      Object.defineProperty(process, 'platform', platform);
+      Object.defineProperty(process, 'arch', actualArch);
     }
   });
 

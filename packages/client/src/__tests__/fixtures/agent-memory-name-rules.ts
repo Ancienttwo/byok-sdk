@@ -15,7 +15,9 @@ const sha256 = (value: string): string => `sha256:${createHash('sha256').update(
  */
 export async function expectAgentMemoryNameRules(context: AgentMemoryTaskContext, outside: string, refusal: { readonly caseAlias: string; readonly hardLink: string }): Promise<void> {
   const notes = path.join(context.canonicalHome, 'notes');
-  await fs.writeFile(path.join(notes, 'con.md'), 'device name', 'utf8');
+  // Win32 maps `con.md` to the console device; the `\\?\` form names the file.
+  const deviceFile = path.toNamespacedPath(path.join(notes, 'con.md'));
+  await fs.writeFile(deviceFile, 'device name', 'utf8');
   await fs.writeFile(path.join(notes, 'plain.md'), 'plain', 'utf8');
   await fs.writeFile(path.join(notes, 'Upper.md'), 'upper', 'utf8');
   const caseInsensitive = await fs.lstat(path.join(notes, 'UPPER.md')).then(() => true, () => false);
@@ -39,4 +41,6 @@ export async function expectAgentMemoryNameRules(context: AgentMemoryTaskContext
   expect(snapshot.files.map((file) => file.path)).toEqual(caseInsensitive ? ['MEMORY.md', 'notes/Upper.md', 'notes/plain.md'] : ['MEMORY.md', 'notes/plain.md']);
   expect(await fs.readFile(sentinel, 'utf8')).toBe('outside sentinel');
   expect((await fs.readdir(notes)).sort()).toEqual(caseInsensitive ? ['Upper.md', 'con.md', 'linked.md', 'plain.md'] : ['Upper.md', 'con.md', 'linked.md', 'plain.md', 'upper.md']);
+  // A recursive cleanup could not name the device file on Windows.
+  await fs.rm(deviceFile);
 }

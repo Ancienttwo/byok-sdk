@@ -370,8 +370,14 @@ jobs:
             goarch: arm64
           - os: macos-15-intel
             goarch: amd64
+          # Windows x64 admits recall and save without B (#605 W3b).
+          - os: windows-latest
+            goarch: amd64
     env:
       BYOK_EXPECT_GOARCH: ${{ matrix.goarch }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -398,11 +404,14 @@ jobs:
       - name: Build and verify SDK helper release assets
         run: bun run --filter @byok-sdk/client build:agent-memory-helper
 
+      # The non-Darwin volume job runs the Windows Go tests.
       - name: Test Go helper
+        if: runner.os == 'macOS'
         working-directory: packages/client/native/agent-memory-fs
         run: GOTOOLCHAIN=go1.26.5 go test -race ./...
 
       - name: Build Go helper
+        if: runner.os == 'macOS'
         working-directory: packages/client/native/agent-memory-fs
         run: CGO_ENABLED=0 GOTOOLCHAIN=go1.26.5 go build -buildvcs=false -trimpath -o "$RUNNER_TEMP/byok-agent-memory-fs" .
 
@@ -410,10 +419,20 @@ jobs:
         run: node packages/client/scripts/check-agent-memory-helper-build.mjs
 
       - name: Check native architecture and filesystem
+        if: runner.os == 'macOS'
         run: |
           test "$(go env GOARCH)" = "$BYOK_EXPECT_GOARCH"
           cmp "$RUNNER_TEMP/byok-agent-memory-fs" "packages/client/dist/native/agent-memory-fs/darwin-$(node -p 'process.arch')"
           diskutil info "$(df -P "$RUNNER_TEMP" | awk 'NR==2 {print $1}')" | grep 'File System Personality'
+
+      - name: Check native architecture and NTFS temp volume
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if ((go env GOARCH) -ne $env:BYOK_EXPECT_GOARCH) { throw "GOARCH is not $env:BYOK_EXPECT_GOARCH" }
+          $volume = Get-Volume -DriveLetter ([IO.Path]::GetTempPath()[0])
+          if ($volume.FileSystemType -ne 'NTFS') { throw "temp volume is $($volume.FileSystemType)" }
+          "temp volume $($volume.DriveLetter): $($volume.FileSystemType)"
 
       - name: Run SDK helper, intent and capability contracts
         run: |
@@ -429,7 +448,9 @@ jobs:
           node packages/client/scripts/agent-memory-runtime-smoke.mjs
           bun packages/client/scripts/agent-memory-runtime-smoke.mjs
 
+      # npm-release-pack verifies the Windows pack.
       - name: Verify the installed release artifacts and re-signing policy
+        if: runner.os == 'macOS'
         run: bun run check:release-pack -- --out-dir .ci-artifacts/mac-helper-pack
 
   execution-recovery-native:

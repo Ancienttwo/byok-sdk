@@ -11,8 +11,16 @@
   (`build:release`). `sdkNativeAssetTargets['win32-x64']` gets an
   `agentMemoryHelper` group with its own files and signing policy. The helper manifest is now version 2 and records the digest
   algorithm of each entry. Product assets copied from an older release fail
-  with a manifest mismatch; copy them again. The SDK still does not admit Agent
-  memory on Windows.
+  with a manifest mismatch; copy them again.
+- **Feature (client)** — Windows x64 admits Agent memory through the SDK
+  release helper (#605). The memory MCP (`memory_recall`, `memory_save`), the
+  hosted projection (`agentMemory`) and the task-free export
+  (`agentMemoryExport`) work there, and `agentMemoryHelperAssetRoot` is valid
+  there. The Agent home must be on NTFS; another file system fails with
+  `unsafe_root`. Each write flushes its file and directory, but the SDK makes
+  no OS-crash or power-loss claim on Windows. So the Windows helper intent
+  backend reports `strictLedgerBarrier: false`, and a Windows daemon does not
+  advertise `agent-memory-intent.v1`. Windows arm64 stays unavailable.
 
 - **Feature (protocol, server, cloud, client)** — an ordinary Agent offer can
   select the Agent memory of its one task with the optional

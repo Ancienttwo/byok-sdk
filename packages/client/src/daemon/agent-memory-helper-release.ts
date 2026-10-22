@@ -38,11 +38,13 @@ function verifiedRelease(directory: string, key: HelperTarget): string {
 
 /** Resolve SDK release assets only: package-installed by default, or a complete SDK-copied product directory. No PATH or caller digest. */
 export function resolveAgentMemoryFilesystemHelper(assetRoot?: string): string {
-  if (process.platform !== 'darwin' || !['arm64', 'x64'].includes(process.arch)) {
+  // The pinned release targets are the admitted platforms.
+  const key = `${process.platform}-${process.arch}`;
+  if (!Object.hasOwn(AGENT_MEMORY_HELPER_RELEASE.entries, key)) {
     throw new Error('SDK Agent memory helper is not admitted on this platform');
   }
   try {
-    return verifiedRelease(assetDirectory(assetRoot), `darwin-${process.arch as 'arm64' | 'x64'}`);
+    return verifiedRelease(assetDirectory(assetRoot), key as HelperTarget);
   } catch (cause) {
     const code = (cause as NodeJS.ErrnoException | undefined)?.code;
     if (code === 'ENOENT' || code === 'MODULE_NOT_FOUND' || code === 'ERR_MODULE_NOT_FOUND') {
