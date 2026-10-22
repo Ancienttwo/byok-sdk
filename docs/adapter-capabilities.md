@@ -233,7 +233,9 @@ Platform notes:
   server to impersonate the daemon), takes the server pid from the kernel and
   sends `identify` only to a server it owns. It stops a foreign gateway only
   when that pid runs below the viewer the adapter started. The profiles
-  directory gets a DACL for the current user, SYSTEM and Administrators.
+  directory, and a root the adapter creates, get a DACL for the current user,
+  SYSTEM and Administrators. A root that already exists keeps its ACL, so do
+  not put it where other users can write.
 - Windows custody: the launcher cannot replace itself, so it starts Hermes as
   a child and stays alive until Hermes exits (see the client README).
 - Windows executable: give `resolveBin` the venv `hermes.exe`. Node does not

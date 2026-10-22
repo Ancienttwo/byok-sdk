@@ -64,8 +64,9 @@ The same branch ran the suites again on it (run 39699864273).
   `identify` only when that pid is the owned gateway pid. A first dial to a
   new server pid writes nothing: the adapter checks ownership of the kernel
   pid, then dials again. Reads poll `PeekNamedPipe` and read only the bytes
-  available, under a 1 s deadline. An answer that names another pid than the
-  kernel is never ready.
+  available, under a 1 s deadline. An owned server whose answer names another
+  pid than the kernel fails the start. On Windows every identity pid the
+  adapter judges or stops is the kernel's server pid.
 - Ownership: on Windows a console-script `hermes.exe` and the custody launcher
   start Hermes's Python as a child. So the gateway pid must be the spawned pid
   or a descendant at most four parent links below it. A link counts only when
@@ -80,7 +81,11 @@ The same branch ran the suites again on it (run 39699864273).
   started; otherwise it only fails the start.
 - Profiles directory: on Windows a mode restricts nothing. `ensureSecureDir`
   gives `<root>/profiles` a DACL (current user, SYSTEM, Administrators), so
-  other users cannot list the random profile names that name the pipes.
+  other users cannot list the random profile names that name the pipes. A
+  root that the adapter creates gets the same DACL. A root that already exists
+  keeps the Host's ACL: a DACL change on it would propagate through the whole
+  Python environment below it. The Host must not put an existing root where
+  other users can write.
 - Custody: the Windows launcher starts Hermes as a child with the key in the
   child environment object only, then waits and forwards the exit code. The
   launcher process holds the key in memory while the execution runs.

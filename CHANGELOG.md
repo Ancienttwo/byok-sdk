@@ -23,7 +23,8 @@
   environment only. The adapter dials the pipe through kernel32 at the
   identification level, sends `identify` only to a server whose kernel pid it
   owns, and stops a foreign gateway only when it runs below the owned viewer.
-  The profiles directory gets a Windows DACL. Concurrent Hermes root initialization retries the
+  The profiles directory, and a root the adapter creates, get a Windows DACL.
+  Concurrent Hermes root initialization retries the
   `config.yaml` rename that Windows refuses (EPERM). Real-provider and real
   Windows Hermes runs are still open (#608).
 - **Feature (client)** — add an opt-in task-free export of Agent memory for
