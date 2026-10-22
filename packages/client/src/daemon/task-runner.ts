@@ -1436,6 +1436,8 @@ export class TaskRunner {
   private readonly recoveredMessageOutboxes = new Map<string, AgentMessageOutbox>();
   private readonly cancelledRecoveredMessages = new Set<string>();
   private readonly recoveredMessageRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Retries resend one envelope id per record (#693); the cloud replays the disposition per arrival. */
+  private readonly agentMessageEnvelopes = new WeakMap<AgentMessageOutboxRecord, Envelope>();
   /**
    * Finding F4 (cancel lost during the offer-processing window): a
    * `task.cancel` for a taskId that hasn't finished `handleOffer` yet (still
@@ -1842,10 +1844,12 @@ export class TaskRunner {
       active.messageDraft?.stop();
       active.messageSendAttempted = true;
     }
-    this.deps.send(createEnvelope('agent.message.publish', outbox.publishPayload(record), {
+    const envelope = this.agentMessageEnvelopes.get(record) ?? createEnvelope('agent.message.publish', outbox.publishPayload(record), {
       taskId: record.taskId,
       sessionRef: record.sessionRef,
-    }));
+    });
+    this.agentMessageEnvelopes.set(record, envelope);
+    this.deps.send(envelope);
     if (active?.messageOutbox === outbox) {
       if (active.messageRetryTimer !== undefined) clearTimeout(active.messageRetryTimer);
       active.messageRetryTimer = setTimeout(() => {

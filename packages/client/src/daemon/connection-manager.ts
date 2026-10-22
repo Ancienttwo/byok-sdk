@@ -185,13 +185,13 @@ export class ConnectionManager {
    */
   private ingressBudget: ActivityIngress | undefined;
   /**
-   * Finding F5(b): how many envelopes `drainOutbox` has
+   * Finding F5(b): the envelopes `drainOutbox` has
    * currently spliced OUT of `this.outbox` for an in-flight (not yet
-   * confirmed delivered) `postBatch` call — 0 the rest of the time. See
+   * confirmed delivered) `postBatch` call — empty the rest of the time. See
    * `outboxLength`'s own doc comment for why this needs to be tracked
-   * separately from `this.outbox.length` at all.
+   * separately from `this.outbox` at all.
    */
-  private inFlightBatchSize = 0;
+  private inFlightBatch: readonly Envelope[] = [];
   private draining = false;
   private stopped = false;
   private haltReason: ConnectionHaltReason | undefined;
@@ -381,10 +381,15 @@ export class ConnectionManager {
    * Design B (finding N4): push onto the single shared outbox and try to
    * drain it now. Never routes directly to either transport itself — see
    * `drainOutbox`.
+   * An id still queued or in flight is not queued again, so a timer retry
+   * during an outage keeps one copy in its original place (#693).
    */
   send(envelope: Envelope): void {
-    this.outbox.push(envelope);
-    this.opts.onOutboundQueued?.(envelope);
+    const pending = (queued: Envelope) => queued.id === envelope.id;
+    if (!this.outbox.some(pending) && !this.inFlightBatch.some(pending)) {
+      this.outbox.push(envelope);
+      this.opts.onOutboundQueued?.(envelope);
+    }
     void this.drainOutbox();
   }
 
@@ -463,12 +468,12 @@ export class ConnectionManager {
         // read right now would UNDERCOUNT it entirely (this is exactly what
         // a stalled/hung `postBatch` call means: neither queued nor
         // delivered, just stuck). See `outboxLength`'s own doc comment.
-        this.inFlightBatchSize = batch.length;
+        this.inFlightBatch = batch;
         let retained: Retained | undefined;
         try {
           retained = await postAndSettle(batch);
         } finally {
-          this.inFlightBatchSize = 0;
+          this.inFlightBatch = [];
         }
         if (retained === undefined) {
           if (this.isEnded()) return;
@@ -604,7 +609,7 @@ export class ConnectionManager {
    * `performControlShutdown`, which surfaces this on the `shutdown-complete`
    * audit event rather than silently claiming everything was delivered.
    *
-   * Deliberately `this.outbox.length + this.inFlightBatchSize`, NOT just
+   * Deliberately `this.outbox.length + this.inFlightBatch.length`, NOT just
    * `this.outbox.length` alone: `drainOutbox`'s long-poll branch SPLICES a
    * batch out of `this.outbox` before awaiting `postBatch` (so a concurrent
    * `send()` sees an accurate, non-double-counted queue) — while that POST
@@ -615,7 +620,7 @@ export class ConnectionManager {
    * for the one case (a hung POST) this finding exists to catch honestly.
    */
   outboxLength(): number {
-    return this.outbox.length + this.inFlightBatchSize;
+    return this.outbox.length + this.inFlightBatch.length;
   }
 
   /** Throws before the first advertisement: no work runs before an accepted handshake. */

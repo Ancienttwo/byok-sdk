@@ -276,7 +276,8 @@ export function selectImpact(paths, context = {}) {
     }
     if (path === 'packages/protocol/src/__tests__/golden/v3.releases.json') { leafDirs.add('packages/protocol'); continue; }
     if (path === 'package.json' || path === 'bun.lock' || /^packages\/[^/]+\/package\.json$/.test(path)) {
-      verifyReviewedContent(path, context);
+      // A reviewed dependency move also runs the suites of the workspaces that declare it.
+      for (const dir of verifyReviewedContent(path, context)) dirs.add(dir);
       if (path === 'package.json') { scripts = true; continue; }
       if (path === 'bun.lock') { families.add('npm-release-pack'); continue; }
       const dir = path.slice(0, -'/package.json'.length);
