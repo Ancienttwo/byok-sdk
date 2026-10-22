@@ -474,14 +474,14 @@ export class BotCollaboration {
   /** Owner API for the Main Bot's own routines. */
   async setRoutineLifecycle(id: string, value: Routine['lifecycle']): Promise<void> {
     await this.exclusive(async () => {
-      await this.core.lifecycle(owned(this.routineRows(), this.options.botId, id).definition.id, value);
-      await this.process();
+      try { await this.core.lifecycle(owned(this.routineRows(), this.options.botId, id).definition.id, value); }
+      finally { await this.process(); }
     });
   }
   async updateRoutine(action: UpdateRoutineAction): Promise<void> {
     await this.exclusive(async () => {
-      await this.core.updateRoutine(updateDefinition(this.routineRows(), this.options.botId, action));
-      await this.process();
+      try { await this.core.updateRoutine(updateDefinition(this.routineRows(), this.options.botId, action)); }
+      finally { await this.process(); }
     });
   }
   private routineRows(): Routine[] { return Object.values(this.ledger.snapshot().routines); }
@@ -489,8 +489,7 @@ export class BotCollaboration {
   readonly consume = (wake: DueWake, signal: AbortSignal): Promise<void> => this.exclusive(async () => {
     signal.throwIfAborted();
     this.ledger.transaction(s => { this.sync(s); });
-    await this.core.consume(wake, signal);
-    await this.process();
+    try { await this.core.consume(wake, signal); } finally { await this.process(); }
   });
   drain(): Promise<void> { return this.exclusive(() => this.process()); }
   cancelTurn(id: string, ...by: PrincipalArg): Promise<void> {
@@ -526,8 +525,7 @@ export class BotCollaboration {
         for (const row of Object.values(stateOf(s.application).channel?.deliveries ?? {})) recoverDelivery(row);
         this.sync(s);
       });
-      await this.core.recover();
-      await this.process();
+      try { await this.core.recover(); } finally { await this.process(); }
     });
   }
   private blockTurn(state: LedgerState, turn: Turn, reason: string): void {
@@ -722,7 +720,11 @@ export class BotCollaboration {
     }
     this.ledger.transaction(s => cleanReplyTokens(s, stateOf(s.application), this.now()));
   }
+  /** A failed pass still re-arms the timer, so the timer retries a failed K4 wake call. */
   private async process(): Promise<void> {
+    try { await this.pass(); } finally { this.armTimer(); }
+  }
+  private async pass(): Promise<void> {
     let more: boolean;
     do {
       // A failed delivery keeps `delivered = false`. The timer retries it.
@@ -748,11 +750,16 @@ export class BotCollaboration {
         && turn.status !== 'failed' && !!state.team.bots[turn.botId] && !state.team.bots[turn.botId]!.archived
         && state.team.bots[turn.botId]?.readyRevision === state.team.bots[turn.botId]?.revision);
     } while (more);
+  }
+  private armTimer(): void {
     clearTimeout(this.timer);
     if (!this.closed) {
       // Durable state is authority. The timer only retries outbox work, expires cards and seals input batches at their window end.
-      const state = this.snapshot();
-      const due = [...(this.options.channel ? Object.values(state.channel?.deliveries ?? {}).filter(row => row.state === 'pending').map(row => row.nextAttemptAt ?? this.now()) : []),
+      const ledger = this.ledger.snapshot(), state = stateOf(ledger.application);
+      // K4 keeps a failed wake call in its outbox with `lastError`. Retry it after 60 seconds.
+      const wakes = Object.values(ledger.outbox).filter(row => (row.kind === 'schedule' || row.kind === 'cancel-wake') && row.lastError !== undefined);
+      const due = [...wakes.map(() => this.now() + 60_000),
+        ...(this.options.channel ? Object.values(state.channel?.deliveries ?? {}).filter(row => row.state === 'pending').map(row => row.nextAttemptAt ?? this.now()) : []),
         ...Object.values(state.channel?.inbounds ?? {}).filter(row => row.reply?.token).map(row => row.reply!.expiresAt),
         ...Object.values(state.cards).filter(c => c.state === 'pending').map(c => c.expiresAt),
         ...Object.values(state.team.seats).filter(seat => !seat.released && seat.deadline !== undefined).map(seat => seat.deadline!),

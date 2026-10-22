@@ -137,12 +137,7 @@ completed and stops new occurrences. Accepted work finishes with its old
 version. To stop an execution too, use K4 cancellation explicitly. Routine
 results are owner turns with source `routine`.
 
-K4 rejects a wake that differs from its reservation, and the SDK delivers it
-again. K4 records an unknown, inactive or superseded wake in `ignoredWakes`.
-A failed SDK wake call rejects the K4 drain, so the Host call that started it
-rejects after its commit, and the rest of that process pass does not run. The
-K4 outbox keeps the row with `lastError`. The next drain, wake delivery or
-`recover()` sends it again; no timer retries it. `compact` removes settled routine rows: a promoted
+`compact` removes settled routine rows: a promoted
 occurrence through its intent key, and a concluded occurrence through its
 occurrence key. `botRoutines` reads the Bot routine views from the K4 rows.
 Other K4 routines of the Host, for example Host jobs from `BotOptions.hostJobs`,
@@ -154,13 +149,18 @@ backup made before this change, or start a new ledger.
 
 The Host drains application commands until all new turns have a K4 intent.
 An immediate terminal cannot leave a continuation without a wake.
-A schedule must match the active generation and armed slot. A cancel cannot
-be overtaken by a later schedule for the same key. Failed operations retain
-a retry time. A process timer retries them. Startup repairs a missing armed
-wake. A mismatched wake time records an audit and resolves without a retry
-loop. A successful cancel retry clears its stale failure status.
-Calendar errors stop the chain, record an audit, and let the accepted
-occurrence finish. Startup or explicit pause/resume retries the calendar.
+K4 schedules and cancels routine wakes through its outbox. A resume of the
+same key replaces a pending cancel with the schedule, so the SDK holds one
+wake. A failed SDK wake call rejects the K4 drain, and the Host call that
+started it rejects after its commit. The K4 outbox keeps the row with
+`lastError`. A process timer retries it after 60 seconds, and each later
+drain, wake delivery or `recover()` also retries it. A failed pass still
+arms the timer, so card expiry, delivery retries, seat deadlines and input
+batch seals keep their times. Startup schedules a reserved wake that the SDK
+no longer holds. K4 rejects a wake whose time differs from its reservation,
+and the SDK delivers it again. K4 records an unknown, inactive or superseded
+wake in `ignoredWakes`. Calendar errors stop the chain, record an audit, and
+let the accepted occurrence finish. Pause and resume retry the calendar.
 
 ## Boundaries
 

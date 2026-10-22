@@ -6,7 +6,7 @@ import { createByokServer } from '@byok-sdk/server';
 import type { ExecutionServer } from '@byok-sdk/example-host-execution-core';
 import { hash, HostLedger } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
-import { BotCollaboration } from './host';
+import { BotCollaboration, type BotOptions } from './host';
 import { routineOf, seedRoutine } from './routines.test-support';
 
 let root: string;
@@ -18,13 +18,23 @@ afterEach(async () => {
   if (root) await rm(root, { recursive: true, force: true });
   vi.useRealTimers(); vi.restoreAllMocks();
 });
-async function setup(wrap: (server: ExecutionServer) => ExecutionServer) {
+async function setup(wrap: (server: ExecutionServer) => ExecutionServer, options: Partial<BotOptions> = {}) {
   vi.useFakeTimers(); vi.setSystemTime(Date.UTC(2026, 9, 19, 8));
   root = await mkdtemp(path.join(tmpdir(), 'bot-retry-'));
   ledger = new HostLedger(path.join(root, 'host.sqlite'), 'wake-retry');
   server = createByokServer({ productId: 'wake-retry', storage: { kind: 'sqlite', path: path.join(root, 'server.sqlite') },
     wake: { consume: async () => {} } });
-  bot = new BotCollaboration(wrap(server), ledger, { botId: 'main', execution: template('device'), connector: async () => null });
+  bot = new BotCollaboration(wrap(server), ledger, { botId: 'main', execution: template('device'), connector: async () => null, ...options });
+}
+const pending = async () => (await server.wakes.pending()).map(wake => wake.dedupKey).filter(key => !key.startsWith('host-scan:'));
+/** An SDK schedule that fails for the routine that `taskId` creates, and counts its calls. */
+function failingSchedule(taskId: string) {
+  const prefix = `${hash([taskId, 'create_routine', 0])}:`;
+  const probe = { fail: true, attempts: 0, wrap: (server: ExecutionServer): ExecutionServer => ({ ...server, wakes: { ...server.wakes, schedule: async input => {
+    if (input.dedupKey.startsWith(prefix)) { probe.attempts++; if (probe.fail) throw new Error('schedule unavailable'); }
+    return server.wakes.schedule(input);
+  } } }) };
+  return probe;
 }
 const outbox = () => Object.values(ledger.snapshot().outbox).filter(row => row.kind === 'schedule' || row.kind === 'cancel-wake');
 
@@ -64,4 +74,54 @@ it('completes a routine whose wake cancel fails, and sends the cancel on a later
   await bot.drain();
   expect(outbox()).toEqual([]);
   expect(await server.wakes.pending()).toEqual([]);
+});
+
+it('retries a failed routine wake call from the process timer after 60 seconds', async () => {
+  const probe = failingSchedule('failing');
+  await setup(probe.wrap);
+  // One call in the K4 command, one in the K8 pass. The failed pass still arms the timer.
+  await expect(seedRoutine(bot, 'failing', 'failing')).rejects.toThrow('Wake dispatch failed');
+  await expect(bot.drain()).rejects.toThrow('Wake dispatch failed');
+  expect(probe.attempts).toBe(2);
+  await vi.advanceTimersByTimeAsync(59_999);
+  expect(probe.attempts).toBe(2);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(probe.attempts).toBe(3);
+  probe.fail = false;
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(probe.attempts).toBe(4);
+  expect(outbox()).toEqual([]);
+  expect(await pending()).toEqual([routineOf(bot, hash(['failing', 'create_routine', 0])).next!.dedupKey]);
+});
+
+it('keeps other timer work on time while a routine wake call keeps failing', async () => {
+  const probe = failingSchedule('failing');
+  await setup(probe.wrap, { coalesce: {} });
+  await expect(seedRoutine(bot, 'failing', 'failing')).rejects.toThrow('Wake dispatch failed');
+  // The first input makes the Bot busy, so the second one opens a batch that seals at its window end.
+  await expect(bot.input('first', 'Long task')).rejects.toThrow('Wake dispatch failed');
+  await expect(bot.input('second', 'One more thing')).rejects.toThrow('Wake dispatch failed');
+  const batch = hash(['user', 'main', 'second']);
+  expect(bot.snapshot().inputBatches![batch]).toMatchObject({ state: 'open' });
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(bot.snapshot().inputBatches![batch]).toMatchObject({ state: 'sealed', sealReason: 'window' });
+  expect(outbox()).toEqual([expect.objectContaining({ kind: 'schedule', lastError: 'schedule unavailable' })]);
+});
+
+it('keeps one SDK wake when a resume of the same key follows a failed cancel', async () => {
+  let fail = false;
+  await setup(server => ({ ...server, wakes: { ...server.wakes, cancel: async key => {
+    if (fail) throw new Error('cancel unavailable');
+    return server.wakes.cancel(key);
+  } } }));
+  const id = await seedRoutine(bot, 'resume', 'report');
+  const armed = routineOf(bot, id).next!;
+  fail = true;
+  await expect(bot.setRoutineLifecycle(id, 'paused')).rejects.toThrow('Wake dispatch failed');
+  await bot.setRoutineLifecycle(id, 'active');
+  fail = false;
+  await bot.drain();
+  expect(routineOf(bot, id).next).toEqual(armed);
+  expect(outbox()).toEqual([]);
+  expect(await pending()).toEqual([armed.dedupKey]);
 });
