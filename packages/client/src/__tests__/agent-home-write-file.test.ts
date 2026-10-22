@@ -130,7 +130,7 @@ describe('Agent-home projection writeHomeFile', () => {
     await expect(fs.access(path.join(home, 'AGENTS.md'))).rejects.toThrow();
   });
 
-  it('waits for writes that the hook did not await before it records the projection', async () => {
+  it('waits for every started write, and a failed write fails the projection', async () => {
     const { root, home, state } = await fixture();
     await expect(manager(root, ({ writeHomeFile }) => { void writeHomeFile('AGENTS.md', 'not awaited'); })
       .project(desired('1'))).resolves.toBe('applied');
@@ -140,6 +140,12 @@ describe('Agent-home projection writeHomeFile', () => {
     await fs.mkdir(path.join(home, 'blocked.md'));
     await expect(manager(root, ({ writeHomeFile }) => { void writeHomeFile('blocked.md', 'fails'); })
       .project(desired('2'))).rejects.toThrow();
+    expect(await recordedRevision(state)).toBe('1');
+
+    // A failed write fails the projection even when the hook catches it.
+    await expect(manager(root, async ({ writeHomeFile }) => {
+      await writeHomeFile('blocked.md', 'fails').catch(() => {});
+    }).project(desired('2'))).rejects.toThrow();
     expect(await recordedRevision(state)).toBe('1');
 
     // The hook's own error wins over the failed write that it did not await.

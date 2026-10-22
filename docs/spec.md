@@ -2116,8 +2116,9 @@ atomically replaces one file at the root of the canonical Agent home, under the
 same writer lease. `name` is one portable file name with the Agent id segment
 rules. `.byok`, `MEMORY.md` and `notes` belong to the SDK, and the call refuses
 them in any letter case. The call is valid only while the hook runs. The SDK
-waits for every call before it writes the ordering record, and a failed call
-fails the projection. Each call is atomic for its own file only. Several calls
+waits for every call before it writes the ordering record. A write that fails
+also fails the projection, even when the hook catches the error; a refused call
+writes nothing. Each call is atomic for its own file only. Several calls
 are not one transaction. After a process crash on any platform, each file has
 its old bytes or its new bytes. On POSIX, a successful call has flushed the
 file and its directory. On Windows, a successful call has flushed the file

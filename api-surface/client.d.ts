@@ -1082,7 +1082,8 @@ export interface AgentHomeProjectionApplyInput extends AgentHomeProjectionInput 
      *
      * The call is valid only while this hook runs. The SDK waits for every call
      * before it records the projection, and refuses a call after the hook
-     * settles.
+     * settles. A write that fails also fails the projection, even when the hook
+     * catches the error. A refused call writes nothing.
      *
      * Each call is atomic for its own file only. There is no transaction over
      * several files. After a process crash, the file has its old bytes or its
