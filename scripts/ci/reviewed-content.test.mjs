@@ -127,6 +127,11 @@ test('shared goal fixture selects its consumers without broadening unknown root 
   assert.throws(() => selectImpact(['examples/basic/other.test-support.ts']));
 });
 
+test('result-helper close regression selects only its exact basic workspace path', () => {
+  assert.deepEqual(selectImpact(['examples/basic/goal-btw-close.test.ts']).dirs, ['examples/basic']);
+  assert.throws(() => selectImpact(['examples/basic/goal-btw-close-other.test.ts']));
+});
+
 test('keys pi-catalog subpath and its generator admit exact additions only', t => {
   const cwd = mkdtempSync(join(tmpdir(), 'ci-keys-pi-catalog-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
