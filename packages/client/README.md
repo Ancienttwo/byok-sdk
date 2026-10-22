@@ -130,6 +130,12 @@ reads it once, when the bundle first evaluates pi. So the product entry must
 call `runSdkReservedHelperCommand()` before its code imports pi. A product that
 imports pi itself at the top of its entry must define `PI_BUNDLED_NODE` as
 `true` in its bundler (esbuild/Bun `define: { PI_BUNDLED_NODE: 'true' }`).
+A CommonJS product bundle, single-pass or ESM-then-CJS, can include the Pi
+host with no redirect or with `#byok-pi-runtime-host` redirected to the sealed
+host. CJS output has no `import.meta`, and pi reads `import.meta.url` when it
+evaluates. So the bundler must define it from `__filename` (esbuild
+`define: { 'import.meta.url': '__product_import_meta_url' }` with the banner
+`const __product_import_meta_url = require('node:url').pathToFileURL(__filename).href;`).
 Every other import of an extension resolves from the extension's own
 directory. An extension that does not load still fails the pi task.
 
