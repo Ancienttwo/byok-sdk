@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Docs (client)** — the client README explains what a Host sees when
+  `agentMemoryMcp: 'auto'` does not admit the memory MCP, why the daemon then
+  reports `status().agentMemoryMcp` as `unavailable`, and what the Host can do
+  (#614). Under `auto` the file-based memory guidance stays, so a Host with its
+  own memory writer sets `off`. The README no longer says that `off` keeps the
+  instruction guidance.
 - **Feature (client)** — an opt-in Grok option for user-level instructions
   (#634). `GrokAdapterOptions.compatInstructions: 'disabled'` sets Grok's four
   Claude and Cursor `agents` and `rules` compatibility variables to `0` on the

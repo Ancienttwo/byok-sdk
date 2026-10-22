@@ -359,11 +359,74 @@ tools, message egress and result-document helpers keep their existing admission
 requirements. Invalid switch values fail construction.
 
 This controls SDK task memory tools, not filesystem permissions. Agent-home
-initialization, leases and instruction guidance remain unchanged; a runtime's
-native filesystem tools can still access files. Explicit `agentMemory` hosted
-projection and `agentMemoryIntents` transports are independent opt-ins with their
-existing platform checks. Omission of the switch preserves current behavior.
-Non-prepared per-task memory selection is not added by this change (see #614).
+initialization and leases remain unchanged; a runtime's native filesystem tools
+can still access files. `off` also removes the Agent memory guidance from Agent
+task instructions: a writer gets no memory lines, and a `memory-reader` Attempt
+keeps only the line that puts its result in the final reply. Explicit
+`agentMemory` hosted projection and `agentMemoryIntents` transports are
+independent opt-ins with their existing platform checks. Omission of the switch
+preserves current behavior. Non-prepared per-task memory selection is not added
+by this change (see #614).
+
+### When `auto` does not admit the memory MCP
+
+`Daemon.status().agentMemoryMcp` reports the effective admission: `admitted`,
+`off` or `unavailable`. `unavailable` means that the switch is `auto`, but this
+daemon cannot admit the SDK memory MCP. The value is fixed at construction. It
+is in-process only: the hello capabilities, `DaemonEvent` and the control status
+do not carry it. Read it from `status()`; do not infer it from the
+configuration.
+
+With an Agent home and `unavailable`, the Host sees this:
+
+- Ordinary Agent tasks start without the SDK memory MCP server, so the model has
+  no `memory_recall` or `memory_save`. Memory alone does not require adapter MCP
+  toolset support.
+- The instruction still starts with the Agent memory guidance. This guidance is
+  the file-based memory from before the memory MCP. It tells a writer to read
+  `MEMORY.md` and, when task permissions allow, to update `notes/` and
+  `MEMORY.md`. The model uses its runtime's own file tools for this, so these
+  writes do not go through the SDK memory tools. A `memory-reader` Attempt gets
+  the read-only reader guidance.
+- Preparing or executing `agentMemory: 'read'` or `'read-write'` is refused with
+  `agent_memory_unavailable`. `'none'` works.
+
+The daemon reports `unavailable` for one of these reasons:
+
+- `DaemonConfig.agentHome` is not set.
+- Windows: the SDK has no Agent memory backend on Windows yet (#605).
+- macOS: the SDK release helper is missing or does not verify. Without
+  `agentMemoryHelperAssetRoot`, the daemon looks for the helper in the installed
+  `@byok-sdk/client` package (`dist/native/agent-memory-fs`). A single-file
+  bundle or SEA that ships without `node_modules` cannot resolve that package. A
+  source build without `bun run build:release` has no helper. A missing helper
+  is not a construction error, unless the Host also sets `agentMemory`,
+  `agentMemoryIntents` or `agentMemoryExport`.
+- Linux: the native backend needs `/proc/self/fd`. A sandbox or container
+  without it cannot admit memory.
+
+What the Host can do:
+
+- If the Host has its own memory writer, set `agentMemoryMcp: 'off'`. With
+  `auto` and `unavailable`, the guidance stays. The model can then change
+  `MEMORY.md` and `notes/` with its file tools and become a second memory writer.
+- If file-based memory is acceptable, keep `auto`.
+- To admit the memory MCP in a macOS single-file product, call
+  `copyAgentMemoryHelperAssets({ outDir })` at build time, or use the
+  `agent-memory-fs` subdirectory that `copySdkNativeAssets` returns. Ship that
+  directory and set `agentMemoryHelperAssetRoot` to its absolute installed path.
+  Set the root only on macOS: a root on Linux or Windows fails construction.
+  With an explicit root, a missing or changed helper fails construction; it does
+  not become a silent `unavailable`.
+- On Linux, run the daemon where `/proc/self/fd` exists. On Windows, the memory
+  MCP cannot be admitted in this release.
+- After the memory MCP is admitted, each ordinary Agent task needs an adapter
+  with MCP toolset support. Without it, the daemon declines the task with
+  `runtime "<id>" cannot project required MCP toolsets`.
+- For prepared input, select `agentMemory: 'none'` when the state is not
+  `admitted`.
+- In a packaging test, assert the `status().agentMemoryMcp` value that the
+  product build must have.
 
 ## Embedded Agent memory
 
