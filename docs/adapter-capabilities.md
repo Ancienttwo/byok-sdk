@@ -141,18 +141,20 @@ loads these home sources wherever Grok starts:
 
 Project `AGENTS.md` loading requires folder trust. In a trusted folder, the
 `agents` and `rules` cells also cover the project `.claude/CLAUDE*.md`,
-`.claude/rules/` and `.cursor/rules/`; a top-level project `CLAUDE.md` stays
-recognized.
+`.claude/rules/` and `.cursor/rules/`, and a top-level project `CLAUDE.md`
+stays recognized (from the guide; not probed).
 
 `GrokAdapterOptions.compatInstructions: 'disabled'` sets
 `GROK_CLAUDE_AGENTS_ENABLED`, `GROK_CLAUDE_RULES_ENABLED`,
-`GROK_CURSOR_AGENTS_ENABLED` and `GROK_CURSOR_RULES_ENABLED` to `0` in the
-agent process. The
+`GROK_CURSOR_AGENTS_ENABLED` and `GROK_CURSOR_RULES_ENABLED` to `0` on the
+Grok agent process. Commands that Grok asks the client to run do not get
+them. Children that Grok starts itself, such as stdio MCP servers and hooks,
+may inherit them. The
 [configuration guide](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/05-configuration.md)
 puts an environment variable before `config.toml`, so the user's own
-`compat` settings do not turn these cells on again. Commands that Grok asks
-the client to run keep the task environment. The default, `'inherit'`, sets
-nothing. With `'disabled'`, these stay:
+`compat` settings do not turn these cells on again (from the guide; not
+probed). The default, `'inherit'`, sets nothing. With `'disabled'`, these
+stay:
 
 - `$GROK_HOME/AGENTS.md`, `$GROK_HOME/rules/` and `extra_rule_dirs`. No
   environment variable controls them, and the `GROK_CONFIG` overlay cannot set
@@ -217,8 +219,8 @@ session, so Hermes needs no option.
 
 Existing offline evidence includes `environment.test.ts` (environment inheritance),
 `claude-adapter.test.ts` (additive MCP launch), `grok-adapter.test.ts` (the
-four variables reach only the agent process, and only with
-`compatInstructions: 'disabled'`),
+four variables reach the agent process only with
+`compatInstructions: 'disabled'`, and never a hosted terminal command),
 `pi-rpc-host.test.ts` (user resources beside SDK extensions),
 `pi-prepared-tools.test.ts` (frozen tool surface), and
 `hermes-home.test.ts` (profile contents). The

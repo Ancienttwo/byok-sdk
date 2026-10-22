@@ -4,9 +4,10 @@
 
 - **Feature (client)** — an opt-in Grok option for user-level instructions
   (#634). `GrokAdapterOptions.compatInstructions: 'disabled'` sets Grok's four
-  Claude and Cursor `agents` and `rules` compatibility variables to `0` in the
-  agent process only. It applies to every session of the adapter, and the
-  default is unchanged. It is not an isolation guarantee: Grok still loads
+  Claude and Cursor `agents` and `rules` compatibility variables to `0` on the
+  Grok agent process. Client-hosted terminal commands do not get them;
+  children that Grok starts itself may inherit them. It applies to every
+  session of the adapter, and the default is unchanged. It is not an isolation guarantee: Grok still loads
   `$GROK_HOME/AGENTS.md`, `$GROK_HOME/rules/` and `extra_rule_dirs`. Claude
   gets no option. For an Agent home under `$HOME`, Claude's
   `--setting-sources` without `user` still loads the user instruction files,

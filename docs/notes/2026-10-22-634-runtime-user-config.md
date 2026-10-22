@@ -209,8 +209,9 @@ Source: `git show 0b10b9f:<path>` in a local Hermes checkout.
 - Add an option only where the pinned CLI has a per-process switch that
   removes user instructions and keeps the guardrails.
   - Grok: `compatInstructions: 'disabled'` sets the four compatibility
-    variables in the agent process environment only. Hosted terminal
-    commands keep the task environment.
+    variables on the Grok agent process. Client-hosted terminal commands do
+    not get them. Children that Grok starts itself, such as stdio MCP servers
+    and hooks, may inherit them.
 - Claude, Codex, Pi and Hermes get documentation only.
   - Claude: Agent homes usually sit under `$HOME`, in per-user application
     data. For such a home, `--setting-sources` without `user` keeps the
@@ -242,3 +243,11 @@ Source: `git show 0b10b9f:<path>` in a local Hermes checkout.
 - `$GROK_HOME/AGENTS.md`, `$GROK_HOME/rules/` and `extra_rule_dirs` stay
   active for Grok. The `~/.claude` and `~/.cursor` named files and rules stay
   active under `compatInstructions: 'inherit'`.
+- The probe ran in an untrusted folder and set no `compat` keys in
+  `config.toml`. Two guide statements are not probed: that the variables win
+  over the user's `config.toml`, and that a top-level project `CLAUDE.md`
+  stays recognized in a trusted folder.
+- Older than this change: the manifest does not seal the lease cwd. A
+  resumed reader's cwd comes from the runtime-sessions ledger, which has no
+  integrity protection, so a writer Attempt could change a reader entry's
+  cwd.

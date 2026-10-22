@@ -108,7 +108,7 @@ async function prompt(message) {
     const command = input === 'terminal'
       ? `${JSON.stringify(process.execPath)} -e "process.stdout.write(process.env.FAKE_TERMINAL_MARK ?? 'unset')"`
       : input === 'terminal-compat'
-        ? `${JSON.stringify(process.execPath)} -e "process.stdout.write(process.env.GROK_CLAUDE_RULES_ENABLED ?? 'unset')"`
+        ? `${JSON.stringify(process.execPath)} -e "process.stdout.write(['GROK_CLAUDE_AGENTS_ENABLED','GROK_CLAUDE_RULES_ENABLED','GROK_CURSOR_AGENTS_ENABLED','GROK_CURSOR_RULES_ENABLED'].map(name=>process.env[name]??'unset').join())"`
         : `${JSON.stringify(process.execPath)} -e "setInterval(()=>{},1000)"`;
     const created = await ask('terminal/create', { sessionId: SESSION, command, env: [{ name: 'FAKE_TERMINAL_MARK', value: 'terminal-ok' }] });
     log({ kind: 'terminal', created });

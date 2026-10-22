@@ -45,12 +45,15 @@ export interface GrokAdapterOptions {
   /** Grok model id for every session (`session/set_model`). Absent: the user's Grok default. */
   model?: string;
   /**
-   * `disabled` turns off Grok's Claude and Cursor instruction scanning in each
-   * agent process: the named instruction files and rules directories under
-   * `~/.claude/` and `~/.cursor/`, and the project `.claude/CLAUDE*.md`,
-   * `.claude/rules/` and `.cursor/rules/`. `$GROK_HOME/AGENTS.md`,
-   * `$GROK_HOME/rules/` and `[paths] extra_rule_dirs` still load; Grok has no
-   * per-process switch for them. Default `inherit`: the user's Grok settings apply.
+   * `disabled` sets Grok's four Claude and Cursor `agents` and `rules`
+   * variables to `0` on the Grok agent process. That turns off its scanning of
+   * the named instruction files and rules directories under `~/.claude/` and
+   * `~/.cursor/`, and the project `.claude/CLAUDE*.md`, `.claude/rules/` and
+   * `.cursor/rules/`. Client-hosted terminal commands do not get the variables;
+   * children that Grok starts itself, such as stdio MCP servers and hooks, may
+   * inherit them. `$GROK_HOME/AGENTS.md`, `$GROK_HOME/rules/` and
+   * `[paths] extra_rule_dirs` still load; Grok has no per-process switch for
+   * them. Default `inherit`: the user's Grok settings apply.
    */
   compatInstructions?: 'inherit' | 'disabled';
   resolveBin?: () => ResolvedBin;
@@ -145,7 +148,7 @@ export class GrokAdapter implements RuntimeAdapter {
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('grok manifest has no sealed cwd');
     const persona = await grokAgentPersona(input.manifest);
-    // Only the agent process gets the compatibility switches; hosted terminal commands keep the task env.
+    // Set on the agent; its own children may inherit them. Hosted terminal commands keep the task env.
     const compat = this.options.compatInstructions === 'disabled' ? COMPAT_INSTRUCTIONS_OFF : undefined;
     // As OAR: the servers go in the ACP mcpServers of session/new or session/resume.
     const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
