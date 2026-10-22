@@ -155,22 +155,86 @@ export const knownFamilies = Object.freeze([
   'windows-git-workspace', 'packageability-smoke', 'npm-release-pack',
   'release-pack-migrate', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
 ]);
-const clientFamilies = [
-  'agent-memory-export-linux',
-  'agent-memory-helper-linux', 'agent-memory-helper', 'execution-recovery-native',
-  'adapter-lifecycle-smoke', 'windows-git-workspace', 'packageability-smoke',
-  'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
-];
+// A routine PR selects a platform family only when it changes a path that the
+// family owns: its tests, smoke scripts and the source they qualify. Package
+// membership alone never selects a platform family; the Linux targeted job
+// runs the complete owning and dependent workspace suites, and explicit
+// release validation runs every family. The contract test checks that each
+// test file and script a family job runs is owned by that family.
+export const familyOwners = Object.freeze({
+  'agent-memory-export-linux': [
+    /^packages\/client\/src\/daemon\/agent-memory-(?:export|filesystem|fs-helper)\.ts$/,
+    /^packages\/client\/src\/__tests__\/agent-memory-export[^/]*$/,
+  ],
+  'agent-memory-helper-linux': [
+    /^packages\/client\/native\/agent-memory-fs\//,
+    /^packages\/client\/scripts\/[a-z-]*agent-memory-helper[a-z-]*\.mjs$/,
+    /^scripts\/release\/agent-memory-helper-source\.test\.mjs$/,
+  ],
+  'agent-memory-helper': [
+    /^packages\/client\/native\/agent-memory-fs\//,
+    /^packages\/client\/scripts\/[a-z-]*agent-memory[a-z-]*\.mjs$/,
+    /^scripts\/release\/agent-memory-helper-source\.test\.mjs$/,
+    /^packages\/client\/src\/(?:agent-memory\/|agent-home|daemon\/(?:agent-memory|prepared-agent-memory|resolve-agent-memory))/,
+    /^packages\/client\/src\/__tests__\/(?:agent-memory|agent-home-directory-barrier|daemon-conn-hello-capabilities)[^/]*$/,
+  ],
+  'execution-recovery-native': [
+    /^packages\/client\/src\/daemon\/journal\//,
+    /^packages\/client\/src\/__tests__\/(?:execution-recovery|journal-sqlite)[^/]*$/,
+    /^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:runtimes|shared)\//,
+  ],
+  'adapter-lifecycle-smoke': [
+    /^packages\/client\/src\/(?:adapters|runtime)\//,
+    /^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:runtimes|shared)\//,
+    /^packages\/client\/scripts\/adapter-task-smoke\.mjs$/,
+    /^examples\/(?:host-execution-core|bot-collaboration)\//,
+    /^examples\/basic\/goal-btw\.test-support\.ts$/,
+    /^scripts\/ci\/run-windows-bot-tests\.mjs$/,
+    /^packages\/keys\/src\/(?:windows-credential-custody[^/]*|(?:windows-credential-manager|device-sealing-key|sealed-provisioning|pi-provider-launcher-core|provider-profile|secret-store|sqlite-profile-store|command-runner)\.ts)$/,
+  ],
+  'windows-git-workspace': [
+    /^packages\/client\/src\/daemon\/(?:git-workspace|git-workspace-store|session-workspace-store|auth-manager|daemon-lifecycle|daemon-owner|daemon-record)\.ts$/,
+    /^packages\/client\/src\/(?:util\/(?:secure-dir|atomic-write)\.ts|diagnostics\/|bin\/commands\/)/,
+    /^packages\/client\/src\/__tests__\/(?:git-workspace|bin-workspaces|secure-dir|diagnostics|support-bundle|daemon-auth|daemon-stop-shutdown-parity)[^/]*$/,
+  ],
+  'packageability-smoke': [
+    /^examples\/packaging\//,
+    /^templates\/packaging\//,
+    /^packages\/client\/native\/agent-memory-fs\//,
+    /^packages\/client\/src\/(?:sdk-native-assets|sdk-reserved-helper-host)/,
+    /^packages\/client\/scripts\/single-file-sdk-helper-smoke\.mjs$/,
+    /^packages\/server\/src\/(?:__tests__\/)?loopback[^/]*$/,
+    /^examples\/byok-mcp-server\/src\/loopback[^/]*$/,
+  ],
+  'windows-service-smoke': [
+    /^templates\/service\/winsw\//,
+    /^packages\/client\/src\/(?:lifecycle\/|util\/secure-dir\.ts$)/,
+  ],
+  'ipc-smoke': [
+    /^packages\/client\/src\/daemon\/(?:control-protocol|control-server|device-credential-provider|device-credential-store)\.ts$/,
+    /^packages\/client\/src\/(?:bin\/control-client|util\/atomic-write)\.ts$/,
+    /^packages\/client\/src\/__tests__\/device-credential-store[^/]*$/,
+    /^packages\/client\/scripts\/(?:ipc-smoke|control-socket-check)\.mjs$/,
+  ],
+  'credential-isolation-audit': [
+    /^packages\/client\/src\/adapters\//,
+    /^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:runtimes|shared)\//,
+    /^packages\/client\/scripts\/(?:credential-audit-core|credential-audit-positive-control|linux-credential-audit|adapter-task-smoke)\.mjs$/,
+    /^packages\/keys\/src\//,
+  ],
+});
 const rootDocs = new Set(['README.md', 'CHANGELOG.md', 'AGENTS.md', 'CLAUDE.md', 'LICENSE', 'SECURITY.md', 'CONTRIBUTING.md']);
 const rootCi = new Set(['.github/workflows/ci.yml', '.github/workflows/release.yml']);
 const sorted = values => [...values].sort();
-function requireRelease(path) {
-  throw new Error(`Reviewed release validation required: unmapped or broad-impact path ${JSON.stringify(path)}`);
+// An unmapped path is a selector gap. Fix it with a reviewed mapping; a
+// feature PR never falls back to the complete release matrix.
+function requireMapping(path) {
+  throw new Error(`Reviewed CI mapping required: unmapped or broad-impact path ${JSON.stringify(path)}; add it to scripts/ci/select-impact.mjs`);
 }
 
 /** Deleted paths remain inputs. Never silently convert unknown impact to a full run. */
 export function selectImpact(paths, context = {}) {
-  if (!Array.isArray(paths) || paths.length === 0) throw new Error('Changed paths must be a nonempty JSON array; reviewed release validation required');
+  if (!Array.isArray(paths) || paths.length === 0) throw new Error('Changed paths must be a nonempty JSON array; reviewed CI mapping required');
   const files = new Set();
   const dirs = new Set();
   const leafDirs = new Set();
@@ -178,11 +242,19 @@ export function selectImpact(paths, context = {}) {
   let scripts = false;
   for (const path of paths) {
     if (typeof path !== 'string' || !path || /[\\\x00-\x1f\x7f]/.test(path)
-      || path.startsWith('/') || path.split('/').some(part => !part || part === '.' || part === '..')) requireRelease(path);
+      || path.startsWith('/') || path.split('/').some(part => !part || part === '.' || part === '..')) requireMapping(path);
     files.add(path);
+    let owned = false;
+    if (!path.endsWith('.md')) {
+      for (const [id, owners] of Object.entries(familyOwners)) {
+        if (owners.some(owner => owner.test(path))) { families.add(id); owned = true; }
+      }
+    }
     if (path === '.gitattributes') {
       verifyReviewedContent(path, context);
-      dirs.add('packages/client'); families.add('npm-release-pack'); continue;
+      dirs.add('packages/client');
+      for (const id of ['npm-release-pack', 'agent-memory-helper', 'agent-memory-helper-linux']) families.add(id);
+      continue;
     }
     if (path === 'packages/protocol/src/__tests__/golden/v3.releases.json') { leafDirs.add('packages/protocol'); continue; }
     if (path === 'package.json' || path === 'bun.lock' || /^packages\/[^/]+\/package\.json$/.test(path)) {
@@ -190,7 +262,7 @@ export function selectImpact(paths, context = {}) {
       if (path === 'package.json') { scripts = true; continue; }
       if (path === 'bun.lock') { families.add('npm-release-pack'); continue; }
       const dir = path.slice(0, -'/package.json'.length);
-      if (!workspaceGraph[dir]) requireRelease(path);
+      if (!workspaceGraph[dir]) requireMapping(path);
       families.add('npm-release-pack'); continue;
     }
     if (path === 'examples/bot-collaboration/package.json') {
@@ -211,7 +283,7 @@ export function selectImpact(paths, context = {}) {
     }
     if (path === 'api-surface/entries.json') {
       for (const dir of changedApiOwners(context)) {
-        if (!workspaceGraph[dir]) requireRelease(path);
+        if (!workspaceGraph[dir]) requireMapping(path);
         dirs.add(dir);
       }
       continue;
@@ -243,33 +315,39 @@ export function selectImpact(paths, context = {}) {
     const golden = /^api-surface\/([a-z-]+)\.d\.ts$/.exec(path);
     if (golden) {
       const dir = `packages/${golden[1]}`;
-      if (!workspaceGraph[dir]) requireRelease(path);
+      if (!workspaceGraph[dir]) requireMapping(path);
       dirs.add(dir); continue;
     }
     const template = /^templates\/(packaging\/(sea|bun)|service\/(winsw|launchd|systemd))\//.exec(path);
     if (template) {
       if (path.endsWith('/README.md')) continue;
-      if (!/\.(?:mjs|js|sh|xml|plist|service)$/.test(path)) requireRelease(path);
+      if (!/\.(?:mjs|js|sh|xml|plist|service)$/.test(path)) requireMapping(path);
       dirs.add('packages/client');
       families.add('packageability-smoke'); families.add('npm-release-pack');
       if (template[3] === 'winsw') families.add('windows-service-smoke');
       continue;
     }
     const match = /^(packages|examples)\/([^/]+)\/(.+)$/.exec(path);
-    if (!match) requireRelease(path);
+    if (!match) requireMapping(path);
     const dir = `${match[1]}/${match[2]}`;
     const relative = match[3];
-    if (!workspaceGraph[dir]) requireRelease(path);
+    if (!workspaceGraph[dir]) requireMapping(path);
     if (/^(?:README|AGENTS|CLAUDE)\.md$/.test(relative)) continue;
     if (/^(?:tsconfig(?:\.[a-z-]+)?\.json|vitest\.config\.[cm]?ts)$/.test(relative)) { dirs.add(dir); continue; }
     if (dir === 'packages/client' && /^native\/agent-memory-fs\/.+\.(?:go|mod|sum)$/.test(relative)) {
       dirs.add(dir); families.add('npm-release-pack'); continue;
     }
-    if (dir === 'packages/client' && /^scripts\/(?:build|check|verify|copy)-agent-memory-helper[^/]*\.[cm]?[jt]s$/.test(relative)) {
+    if (dir === 'packages/client' && /^scripts\/(?:(?:build|check|verify|copy)-agent-memory-helper[^/]*|agent-memory-helper-source)\.[cm]?[jt]s$/.test(relative)) {
       dirs.add(dir); families.add('npm-release-pack'); continue;
     }
+    // A workspace smoke script is accepted only when a platform family owns it.
+    if (owned && /^scripts\/[a-z0-9-]+\.mjs$/.test(relative)) {
+      dirs.add(dir);
+      if (dir === 'examples/packaging') families.add('npm-release-pack');
+      continue;
+    }
     if (!/^(?:src|test|tests|migrations)\//.test(relative)
-      || !/\.(?:[cm]?[jt]sx?|json|ndjson|sql|sh|go|txt|md)$/.test(relative)) requireRelease(path);
+      || !/\.(?:[cm]?[jt]sx?|json|ndjson|sql|sh|go|txt|md)$/.test(relative)) requireMapping(path);
     dirs.add(dir);
     if (dir === 'examples/packaging') { families.add('packageability-smoke'); families.add('npm-release-pack'); }
     if (/\.sql$/.test(relative) || /(?:migrat(?:e|ion)|schema)/i.test(relative)) {
@@ -289,10 +367,7 @@ export function selectImpact(paths, context = {}) {
     }
   }
   for (const dir of leafDirs) dirs.add(dir);
-  if (dirs.has('packages/client')) for (const id of clientFamilies) families.add(id);
-  if (dirs.has('packages/keys')) for (const id of ['adapter-lifecycle-smoke', 'ipc-smoke', 'credential-isolation-audit']) families.add(id);
   if (dirs.has('packages/cloud-dataplane') || dirs.has('packages/conformance')) families.add('dataplane');
-  if (dirs.has('examples/host-execution-core') || dirs.has('examples/bot-collaboration')) families.add('adapter-lifecycle-smoke');
   return { dirs: sorted(dirs), files: sorted(files), families: sorted(families),
     reason: dirs.size || families.size ? 'impacted' : scripts ? 'root-ci-scripts' : 'docs-only' };
 }
