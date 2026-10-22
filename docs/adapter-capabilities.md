@@ -228,9 +228,12 @@ Platform notes:
   a child. So a gateway pid at most four parent links below the spawned pid is
   owned. The adapter reads the process table once per start with PowerShell
   CIM (about 0.4 s warm, 3.5 s cold on `windows-latest`). Hermes gives the pipe
-  a DACL for the current user only. The Node client cannot check the pipe
-  server's owner, so on Windows the adapter stops a foreign gateway only when
-  it runs below the viewer the adapter started.
+  a DACL for the current user only. The adapter dials the pipe through
+  kernel32 at the identification level (Node's `net` client would allow the
+  server to impersonate the daemon), takes the server pid from the kernel and
+  sends `identify` only to a server it owns. It stops a foreign gateway only
+  when that pid runs below the viewer the adapter started. The profiles
+  directory gets a DACL for the current user, SYSTEM and Administrators.
 - Windows custody: the launcher cannot replace itself, so it starts Hermes as
   a child and stays alive until Hermes exits (see the client README).
 - Windows executable: give `resolveBin` the venv `hermes.exe`. Node does not

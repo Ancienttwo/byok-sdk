@@ -15,8 +15,12 @@ qualified Hermes `0.22.2+2364.g0b10b9f`):
 - Wire: one JSON line in, one JSON line out, then the client closes.
 - Security: a protected DACL with one ACE for the gateway user's SID, and
   `FILE_FLAG_FIRST_PIPE_INSTANCE`. The server identifies the client from its
-  token and refuses another user. The Hermes Python client also checks the
-  server's SID. A Node client cannot do that check.
+  token and refuses another user. The Hermes Python client opens the pipe with
+  `SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION` and checks the server's
+  SID.
+- Node's `net` client cannot do either. libuv (Node 24.21.0,
+  `deps/uv/src/win/pipe.c`) calls `CreateFileW` with `FILE_FLAG_OVERLAPPED`
+  only, so the server gets the default impersonation level.
 
 The keys custody launcher also refused Windows, before its validation step,
 because it uses `process.execve` to keep the gateway pid.
@@ -45,21 +49,38 @@ and the keys `hermes-provider-launcher.test.ts` (2 passed, 1 skipped). The
 first run found one product defect: concurrent `ensureHermesRoot` calls failed
 with `EPERM` on the `config.yaml` rename. `prepare()` calls that function.
 
+The first version dialed the pipe with Node's `net` client. An independent
+security review found that a process that creates the pipe name first could
+then impersonate the daemon user. The second version replaced the client.
+The same branch ran the suites again on it (run 39699864273).
+
 ## P3: decision
 
 - The pipe name is Hermes's, not the SDK's `controlPipeName` scheme: the
   gateway owns the name.
+- Pipe client: koffi (already the Windows dependency of the kill-on-close
+  job) opens the pipe with `SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION`,
+  reads the server pid with `GetNamedPipeServerProcessId`, and writes
+  `identify` only when that pid is the owned gateway pid. A first dial to a
+  new server pid writes nothing: the adapter checks ownership of the kernel
+  pid, then dials again. Reads poll `PeekNamedPipe` and read only the bytes
+  available, under a 1 s deadline. An answer that names another pid than the
+  kernel is never ready.
 - Ownership: on Windows a console-script `hermes.exe` and the custody launcher
   start Hermes's Python as a child. So the gateway pid must be the spawned pid
   or a descendant at most four parent links below it. A link counts only when
   the parent started no later than the child, so a reused pid does not count.
-  The check runs once per answering pid; a failed read fails the start
-  retryably. POSIX keeps exact pid equality.
+  The check runs once per server pid, bounded by the ready deadline and the
+  abort signal; a failed read fails the start retryably. POSIX keeps exact
+  pid equality.
 - Foreign gateway: on POSIX only this execution reaches the profile directory,
   so a gateway that serves the profile was started for it, and the adapter
-  stops it. On Windows the pipe namespace is machine-wide and the client cannot
-  check the server owner. The adapter stops such a gateway only when it runs
-  below the viewer the adapter started; otherwise it only fails the start.
+  stops it. On Windows the pipe namespace is machine-wide. The adapter stops
+  such a gateway only when its kernel pid runs below the viewer the adapter
+  started; otherwise it only fails the start.
+- Profiles directory: on Windows a mode restricts nothing. `ensureSecureDir`
+  gives `<root>/profiles` a DACL (current user, SYSTEM, Administrators), so
+  other users cannot list the random profile names that name the pipes.
 - Custody: the Windows launcher starts Hermes as a child with the key in the
   child environment object only, then waits and forwards the exit code. The
   launcher process holds the key in memory while the execution runs.
@@ -75,11 +96,18 @@ with `EPERM` on the `config.yaml` rename. `prepare()` calls that function.
   console script, and the pipe name matches Hermes's own function, but the
   native Hermes pipe server and its peer check did not answer this client in
   a run.
-- A process on the same machine that creates the pipe name first can answer
-  `identify`. The answer carries no credential, the profile path is random
-  per execution, and the real viewer checks the server SID itself. The
-  adapter does not kill a pid that such an answer names unless the process
-  table puts it below the owned viewer.
+- A process on the same machine that creates the pipe name first gets no
+  token it can act as and no request. The adapter sees a server pid it does
+  not own and fails the start. That is a denial of service only. The profile
+  path is random per execution (48 bits) and its directory has a DACL.
+- The SDK's own daemon control pipe (`controlPipeName`) is dialed by Node's
+  `net` client too, at the default impersonation level. Its name is
+  deterministic from `productId` and `storeDir`. This change does not touch
+  it; it is a separate finding for the owner.
+- Hermes needs Python 3.11 or later, whose `ntpath.normcase` uses
+  `LCMapStringEx`. JavaScript `toLowerCase` can differ for some non-ASCII
+  letters (for example U+0130). A home path with such a letter names a pipe
+  Hermes never creates, and the start fails by timeout.
 - The kill-on-close job is assigned after spawn. A launcher that starts its
   child within that window leaves the child outside the job. Normal disposal
   (`taskkill /T`) still ends it; a daemon crash in that window may not.
