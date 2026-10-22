@@ -252,15 +252,16 @@ jobs:
     if: ${{ contains(fromJSON(needs.select.outputs.families), 'agent-memory-helper-linux') }}
     name: agent memory helper non-Darwin volume checks (${{ matrix.os }}, fixed Go)
     runs-on: ${{ matrix.os }}
-    # windows-latest runs the Go tests on NTFS twice: as the runner's
+    # Each Windows leg runs the Go tests on NTFS twice: as the runner's
     # administrator, and as a new standard user. Node and Bun also check the
-    # root identity that the TS caller sends to open. The helper admits a
-    # Windows open, but the TS gate stays closed and B stays false.
-    # See docs/plans/2026-10-22-605-windows-memory.md.
+    # root identity that the TS caller sends to open. windows-latest is
+    # Server 2025 and windows-2022 is Server 2022, so the evidence covers two
+    # Windows builds. The helper admits a Windows open, but the TS gate stays
+    # closed and B stays false. See docs/plans/2026-10-22-605-windows-memory.md.
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, windows-2022]
     steps:
       - name: Checkout
         uses: actions/checkout@v7

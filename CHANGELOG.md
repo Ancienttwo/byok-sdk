@@ -8,8 +8,9 @@
   helper accepts only an NTFS volume. It does not flush the directories above
   the home. So a Windows write is atomic under a process crash and flushes its
   own file and directory, but it is not durable after an OS crash or a power
-  loss. B stays false. The Windows CI leg now also runs the helper tests as a
-  standard user, and checks the root identity that Node and Bun compute.
+  loss. B stays false. CI now runs the helper tests on Windows Server 2025 and
+  Windows Server 2022, as the administrator and as a standard user. It also
+  checks the root identity that Node and Bun compute.
 
 ## 0.28.3 — source candidate
 
