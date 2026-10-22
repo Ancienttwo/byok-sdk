@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- **Security (client)** — a CommonJS bundle of the Pi host no longer lets Pi's
+  nested undici own the process-wide `fetch` dispatcher (#700). Pi depends on
+  the exact npm undici 8.10.2. That version is in the range of the undici
+  advisories of 2026-10-15 (fixed in 8.12.2). An undici copy claims the
+  dispatcher when it first evaluates. In an ESM graph, a static `node:http`
+  import makes Node's own undici evaluate first. In a CJS bundle (single pass,
+  or ESM then CJS) nothing did, so Pi's copy served every `fetch` in the
+  process, including Pi's provider requests. The SDK's own Pi host was not
+  affected when it ran as ESM. `runSdkReservedHelperCommand()` and the
+  `byok-pi-rpc`, `byok-pi-prepared` and `byok-pi-durable` entries now read the
+  `Headers` global before they import the Pi host. `byok-agent` makes the same
+  read only on its team operator path. Node then loads its own undici, and its
+  copy keeps the dispatcher, as in ESM. A product that imports pi itself must
+  make the same read. The client README says how. It also documents an optional
+  nested `overrides` of Pi's undici (npm) and the limit of that override. New
+  fixtures in `pi-single-file-bundle.test.ts` check, for every Pi helper kind in
+  a CJS bundle, that no npm undici claims the dispatcher. They read no version
+  string.
+  Still open: Pi's own copies (the nested 8.10.2 and the copy inlined in its
+  CLI bundle) until a Pi release moves them. Node's own undici on the Node
+  builds that `engines.node` admits (v26.10.0 carries 8.10.2) is a Node runtime
+  matter. #700 stays open.
 - **Feature (client)** — an opt-in Grok option for user-level instructions
   (#634). `GrokAdapterOptions.compatInstructions: 'disabled'` sets Grok's four
   Claude and Cursor `agents` and `rules` compatibility variables to `0` on the

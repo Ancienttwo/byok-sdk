@@ -106,6 +106,22 @@ function declareBundledPiRuntime(): void {
   (globalThis as { PI_BUNDLED_NODE?: boolean }).PI_BUNDLED_NODE = true;
 }
 
+/**
+ * Pi depends on an exact npm undici (#700). An undici claims the process-wide
+ * `fetch` dispatcher when it first evaluates. In an ESM graph, a static
+ * `node:http` import makes Node load its own undici first, so Node's copy keeps
+ * the dispatcher. In a CommonJS bundle nothing loads it first, so Pi's copy would
+ * claim the dispatcher and serve every `fetch` in the process.
+ *
+ * Node loads its undici when a web global such as `Headers` is first read. Read
+ * it before the runtime host import below, which evaluates Pi. The read must be
+ * a call: a bundler can drop a bare `globalThis.Headers` statement as pure. Bun
+ * has no lazy global, so the read does nothing there.
+ */
+function loadNodeUndici(): void {
+  Reflect.get(globalThis, 'Headers');
+}
+
 function isHelperKind(value: string | undefined): value is SdkReservedHelperKind {
   return value !== undefined && RESERVED_HELPER_KIND_SET.has(value);
 }
@@ -125,6 +141,7 @@ export async function runSdkReservedHelperCommand(
     // runner config path. The runtime host is an external-dynamic import so
     // the library root never loads the vendored runner closure.
     if (argv.length !== 3) throw new Error('invalid SDK-reserved helper command');
+    loadNodeUndici();
     const host = await import('#byok-pi-runtime-host');
     await host.runSubagentRunner(argv[2]!);
     return true;
@@ -132,6 +149,7 @@ export async function runSdkReservedHelperCommand(
   if (argv[1] === 'pi-subagent-print') {
     // A Pi subagent print child (`subagents/spawn.ts`). The tail is the
     // vendor's pi-style print argv.
+    loadNodeUndici();
     const host = await import('#byok-pi-runtime-host');
     const exitCode = await host.runSubagentPrint(argv.slice(2));
     if (exitCode !== 0) throw new Error(`pi-subagent-print exited ${exitCode}`);
@@ -140,6 +158,8 @@ export async function runSdkReservedHelperCommand(
   if (!isHelperKind(argv[1]) || (argv[1] !== 'pi-rpc' && argv[1] !== 'pi-prepared' && argv[1] !== 'pi-durable' && argv.length !== 2)) {
     throw new Error('invalid SDK-reserved helper command');
   }
+  // These three kinds import the runtime host in `runSdkReservedHelper`. The MCP kinds never load Pi.
+  if (argv[1] === 'pi-rpc' || argv[1] === 'pi-prepared' || argv[1] === 'pi-durable') loadNodeUndici();
   await runSdkReservedHelper(argv[1], argv.slice(2));
   return true;
 }

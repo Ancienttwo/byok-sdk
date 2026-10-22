@@ -450,6 +450,36 @@ function emptyImportMetaModules(bundle: string): string[] {
   return [...modules].sort();
 }
 
+/**
+ * #700: records which undici claims the two process-wide fetch dispatcher slots.
+ * Pi depends on an exact npm undici. When that copy evaluates first, as it does
+ * in a CommonJS bundle, it claims the slots and every global `fetch` then runs
+ * through it. The host loads Node's built-in undici first so that Node's copy
+ * keeps them, as it does in ESM. The preload runs before the bundle and notes the
+ * frame that wrote each slot. A frame inside `node:internal/deps/undici` is Node's
+ * copy. Any other frame is an npm copy. It reads no version string, because Node
+ * v26.10.0 and Pi's pin are both undici 8.10.2.
+ */
+const SLOT_OWNER_PRELOAD = `
+const fs = require('node:fs');
+const slots = new Map([[Symbol.for('undici.globalDispatcher.1'), 'slot 1'], [Symbol.for('undici.globalDispatcher.2'), 'slot 2']]);
+const writes = [];
+const define = Object.defineProperty;
+Object.defineProperty = function (object, key, descriptor) {
+  if (object === globalThis && slots.has(key)) writes.push({ slot: slots.get(key), writer: new Error().stack.split('\\n')[2].trim() });
+  return define.call(this, object, key, descriptor);
+};
+process.on('exit', () => fs.writeFileSync(process.env.BYOK_TEST_SLOT_REPORT, JSON.stringify(writes)));
+`;
+
+async function expectNodeUndiciOwnsDispatcher(slotReport: string): Promise<void> {
+  // Bun has no built-in undici, so the check applies to Node only.
+  if (typeof process.versions.undici !== 'string') return;
+  const writes = JSON.parse(await fs.readFile(slotReport, 'utf8')) as { slot: string; writer: string }[];
+  expect([...new Set(writes.map(write => write.slot))].sort(), 'no undici claimed the dispatcher slots').toEqual(['slot 1', 'slot 2']);
+  for (const write of writes) expect(write.writer, `${write.slot} was claimed by an npm undici`).toContain('node:internal/deps/undici');
+}
+
 describe('Pi host — single-pass CommonJS product bundle (#701)', () => {
   it.each([
     ['the ordinary host', undefined, {}, true],
@@ -504,18 +534,67 @@ describe('Pi host — single-pass CommonJS product bundle (#701)', () => {
       await fs.writeFile(path.join(agentDir, 'settings.json'), JSON.stringify({
         defaultProvider: 'zai', defaultModel: 'glm-4.6', retry: { enabled: false } }));
 
+      const slotPreload = path.join(release, 'slot-owner.cjs');
+      const slotReport = path.join(release, 'slot-owner.json');
+      await fs.writeFile(slotPreload, SLOT_OWNER_PRELOAD);
       const env = { ...childEnv, PATH: process.env.PATH ?? '', HOME: release, TMPDIR: release,
-        PI_CODING_AGENT_DIR: agentDir, PI_PACKAGE_DIR: assetRoot };
+        PI_CODING_AGENT_DIR: agentDir, PI_PACKAGE_DIR: assetRoot, BYOK_TEST_SLOT_REPORT: slotReport };
       await execFileAsync(process.execPath,
-        [path.join(release, 'entry.cjs'), '__byok_sdk_helper', 'pi-subagent-print', '--mode', 'json', 'Say hi'],
+        ['-r', slotPreload, path.join(release, 'entry.cjs'), '__byok_sdk_helper', 'pi-subagent-print', '--mode', 'json', 'Say hi'],
         { cwd: release, env, timeout: 30_000 });
       expect(toolNames.length).toBeGreaterThan(0);
       for (const names of toolNames) {
         expect(names).toContain('read');
         expect(names.includes('subagent')).toBe(subagentTools);
       }
+
+      // #700: the request above ran through Node's built-in undici, not through Pi's npm copy.
+      await expectNodeUndiciOwnsDispatcher(slotReport);
     } finally {
       await new Promise<void>(resolve => provider.close(() => resolve()));
+      await fs.rm(release, { recursive: true, force: true });
+    }
+  }, 60_000);
+});
+
+/**
+ * #700: the other Pi helper kinds import the host at their own sites. Each runs the
+ * ordinary-host bundle with no launch config: the host loads and evaluates Pi, then the
+ * kind refuses before any provider request. The refusal text shows that Pi's module graph
+ * ran, so a slot report that holds only Node's undici is not a skipped load.
+ */
+describe('Pi host — CommonJS product bundle loads Node undici for every Pi helper kind (#700)', () => {
+  it.each([
+    ['pi-rpc', [], /byok-pi-rpc: exactly one --config-digest=<sha256> is required/],
+    ['pi-prepared', [], /byok-pi-prepared: exactly one --config-digest=<sha256> is required/],
+    ['pi-durable', [], /byok-pi-durable: exactly one --config-digest=<sha256> is required/],
+    ['pi-subagent-runner', ['/nonexistent/runner-config.json'], /Subagent runner error: .*ENOENT/],
+  ] as const)('%s', async (kind, tail, refusal) => {
+    const { build } = await import('esbuild');
+    const release = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-cjs-kind-')));
+    try {
+      await fs.writeFile(path.join(release, 'entry.mjs'), CJS_ENTRY_SOURCE);
+      const result = await build({
+        entryPoints: [path.join(release, 'entry.mjs')], outfile: path.join(release, 'entry.cjs'),
+        bundle: true, platform: 'node', format: 'cjs', logLevel: 'silent',
+        define: { 'import.meta.url': '__product_import_meta_url' },
+        banner: { js: "const __product_import_meta_url = require('node:url').pathToFileURL(__filename).href;" },
+      });
+      expect(result.errors).toEqual([]);
+
+      const agentDir = path.join(release, 'agent');
+      await fs.mkdir(agentDir);
+      const slotPreload = path.join(release, 'slot-owner.cjs');
+      const slotReport = path.join(release, 'slot-owner.json');
+      await fs.writeFile(slotPreload, SLOT_OWNER_PRELOAD);
+      const env = { PATH: process.env.PATH ?? '', HOME: release, TMPDIR: release,
+        PI_CODING_AGENT_DIR: agentDir, PI_PACKAGE_DIR: release, BYOK_TEST_SLOT_REPORT: slotReport };
+      const refused = await execFileAsync(process.execPath,
+        ['-r', slotPreload, path.join(release, 'entry.cjs'), '__byok_sdk_helper', kind, ...tail],
+        { cwd: release, env, timeout: 30_000 }).then(() => undefined, (error: { stderr: string }) => error);
+      expect(refused?.stderr, `${kind} must reach its refusal`).toMatch(refusal);
+      await expectNodeUndiciOwnsDispatcher(slotReport);
+    } finally {
       await fs.rm(release, { recursive: true, force: true });
     }
   }, 60_000);
