@@ -281,6 +281,10 @@ jobs:
         if: runner.os == 'Windows'
         uses: oven-sh/setup-bun@v2
 
+      - name: Install dependencies
+        if: runner.os == 'Windows'
+        run: bun ci
+
       - name: Test Go helper and non-Darwin volume identity
         working-directory: packages/client/native/agent-memory-fs
         run: go test -v ./...
