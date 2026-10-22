@@ -99,7 +99,54 @@ const listener = await listenLoopback({
 ```
 
 The helper does not remove/rewrite Origin or bypass MCP's own Origin check.
-Browser origin allowlists and CORS preflight remain outside this API.
+
+### Browser clients from loopback origins
+
+By default the listener refuses every request that carries Origin. To serve a
+browser MCP client, list its exact loopback origins in `allowedOrigins`. Each
+entry must be a canonical `http:` or `https:` origin on `localhost`,
+`127.0.0.1` or `[::1]`, with no path or trailing slash. Other values throw
+before the port store is read.
+
+```ts
+const browser = 'http://localhost:5173';
+const listener = await listenLoopback({
+  portStore,
+  allowedOrigins: [browser],
+  createHandler: serverUrl => {
+    // MCP checks Origin itself. List the same origins there.
+    return makeAuthenticatedMcpRouter({ origin: serverUrl, allowedOrigins: [browser] }).fetch;
+  },
+});
+```
+
+For a listed origin, the listener:
+
+- Accepts `Sec-Fetch-Mode: cors`, `Sec-Fetch-Dest: empty` and any
+  `Sec-Fetch-Site`. A page on `localhost` is cross-site to `127.0.0.1`, so the
+  origin list is the check. When the browser sends fetch metadata, the
+  listener refuses navigation, `no-cors`, `Sec-Fetch-User` and other values.
+  A request from a listed origin without fetch metadata is accepted, as for
+  older browsers.
+- Answers a preflight (`OPTIONS` with `Access-Control-Request-Method`) with 204
+  and does not dispatch it. A preflight with body framing gets 400. The
+  response allows `GET, POST, DELETE` and the headers `authorization,
+  content-type, accept, last-event-id, mcp-session-id, mcp-protocol-version`.
+  These lists are fixed: a Host that authenticates with another header cannot
+  serve it to a browser. The preflight caches for 600 seconds.
+- Adds `Access-Control-Allow-Origin: <origin>`, `Vary: Origin` and
+  `Access-Control-Expose-Headers: Mcp-Session-Id` to every response, including
+  503, 413 and 400 refusals. A handler header with the same name replaces the
+  listener value. `WWW-Authenticate` is not exposed, so a browser client cannot
+  read it for OAuth discovery.
+
+The listener never sends `Access-Control-Allow-Credentials`, and it still
+refuses Cookie. The Host Header check is unchanged, so the browser client
+must use the `127.0.0.1` URL in `serverUrl`, not `localhost`. Unlisted origins
+get 403 with no CORS headers. The list does not authenticate the caller: each
+request still needs Host authentication, such as a bearer token. Private
+Network Access preflights are not handled. A listed loopback page does not
+need them.
 
 ## HTTP long-poll delivery
 

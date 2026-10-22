@@ -7,7 +7,7 @@ import { ByokKeysError } from './errors';
 import { PI_PREPARED_COMPAT_KEYS } from './pi-model-config';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
 import {
-  PI_LAUNCHER_RUNTIME_ENTRIES, PI_PROJECTED_KEY_ENV, buildPiPreparedArgs, buildPiProviderArgs,
+  PI_LAUNCHER_RUNTIME_ENTRIES, PI_PROJECTED_KEY_ENV, assertPiLaunchArgs, buildPiPreparedArgs, buildPiProviderArgs,
   buildPiProviderProjection, type PiLauncherRuntimeEntry,
 } from './pi-provider-projection';
 import type { ProviderProfileStore } from './profile-store';
@@ -677,6 +677,7 @@ export async function runPiProviderLauncher(
       assertExactProviderProfileBinding(profile, options.expectedBinding);
     }
     if (options.runtimeEntry === 'pi-prepared') assertPiPreparedProviderProfile(profile);
+    if (options.runtimeEntry === 'pi-rpc') assertPiLaunchArgs(profile);
     buildPiProviderProjection(profile, options.runtimeEntry);
     if (options.validateOnly) {
       await assertProviderCustodyIdle({ profiles, profile });

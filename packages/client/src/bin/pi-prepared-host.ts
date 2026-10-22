@@ -1,4 +1,6 @@
 import { TerminalProjectionSelectionSchema, type TerminalProjectionSelection } from '@byok-sdk/protocol';
+// The level set is Pi's own; this reader restates only the value checks.
+import { MODEL_THINKING_LEVELS as THINKING_LEVELS } from '@earendil-works/pi-ai/providers/model-schema';
 import { AGENT_RESULT_TOOL_NAME } from '../sdk-reserved-mcp';
 import { PI_PROJECTED_KEY_ENV } from '../adapters/provider-credential-environment';
 import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding';
@@ -135,7 +137,6 @@ function requireStringRecord(value: unknown, field: string): Readonly<Record<str
  * `../__tests__/input-preparation-model-parity.test.ts` pins by feeding one
  * fixture table through all of them.
  */
-const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 const COMPAT_FLAGS = [
   'supportsStore',
   'supportsDeveloperRole',

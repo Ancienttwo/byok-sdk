@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
-import { knownFamilies, selectImpact, workspaceGraph } from './select-impact.mjs';
+import { familyOwners, knownFamilies, selectImpact, workspaceGraph } from './select-impact.mjs';
 const root = new URL('../../', import.meta.url);
 
 test('reviewed graph covers every workspace and all local dependency edges', () => {
@@ -32,15 +32,92 @@ test('docs and known CI contracts select light checks, not release families', ()
   }
 });
 
-test('client source/deleted tests select native safety families and reverse dependents', () => {
+test('client source/deleted tests select reverse dependents but no platform family', () => {
   for (const path of ['packages/client/src/daemon/task-runner.ts', 'packages/client/src/__tests__/deleted.test.ts', 'api-surface/client.d.ts']) {
     const impact = selectImpact([path]);
     assert.ok(impact.dirs.includes('packages/client'));
     assert.ok(impact.dirs.includes('examples/host-execution-core'));
-    for (const family of ['execution-recovery-native', 'credential-isolation-audit', 'ipc-smoke', 'windows-git-workspace', 'adapter-lifecycle-smoke', 'agent-memory-helper', 'agent-memory-export-linux', 'agent-memory-helper-linux', 'packageability-smoke', 'windows-service-smoke']) assert.ok(impact.families.includes(family), family);
-    assert.ok(!impact.families.includes('build-test'));
-    assert.ok(!impact.families.includes('npm-release-pack'));
+    assert.deepEqual(impact.families, [], path);
   }
+});
+
+test('a platform family is selected only by a path it owns', () => {
+  const owned = {
+    'agent-memory-export-linux': 'packages/client/src/daemon/agent-memory-export.ts',
+    'agent-memory-helper-linux': 'packages/client/native/agent-memory-fs/main.go',
+    'agent-memory-helper': 'packages/client/src/daemon/agent-memory-intent.ts',
+    'execution-recovery-native': 'packages/client/src/daemon/journal/sqlite-journal.ts',
+    'adapter-lifecycle-smoke': 'packages/client/src/adapters/codex/codex-adapter.ts',
+    'windows-git-workspace': 'packages/client/src/daemon/git-workspace.ts',
+    'packageability-smoke': 'packages/client/src/sdk-native-assets.ts',
+    'windows-service-smoke': 'packages/client/src/lifecycle/winsw.ts',
+    'ipc-smoke': 'packages/client/src/daemon/control-server.ts',
+    'credential-isolation-audit': 'packages/keys/src/index.ts',
+  };
+  assert.deepEqual(Object.keys(owned).sort(), Object.keys(familyOwners).sort());
+  const tracked = new Set(spawnSync('git', ['ls-files'], { cwd: fileURLToPath(root), encoding: 'utf8' }).stdout.split('\n').filter(Boolean));
+  for (const path of Object.values(owned)) assert.ok(tracked.has(path), `example path is not tracked: ${path}`);
+  for (const [family, owners] of Object.entries(familyOwners)) {
+    for (const owner of owners) assert.ok([...tracked].some(path => owner.test(path)), `${family} owner ${owner} matches no tracked file`);
+  }
+  for (const [family, path] of Object.entries(owned)) assert.ok(selectImpact([path]).families.includes(family), `${family}: ${path}`);
+  for (const path of ['packages/client/src/daemon/task-runner.ts', 'packages/protocol/src/task.ts', 'packages/core/src/index.ts', 'packages/server/src/index.ts']) {
+    assert.deepEqual(selectImpact([path]).families.filter(id => id in familyOwners), [], path);
+  }
+});
+
+test('shared Windows filesystem helpers select their real Windows consumers', () => {
+  assert.deepEqual(selectImpact(['packages/client/src/util/secure-dir.ts']).families, ['windows-git-workspace', 'windows-service-smoke']);
+  assert.deepEqual(selectImpact(['packages/client/src/util/atomic-write.ts']).families, ['ipc-smoke', 'windows-git-workspace']);
+});
+
+test('owned helper build scripts keep release packaging qualification', () => {
+  for (const path of ['packages/client/scripts/build-agent-memory-helper.mjs', 'packages/client/scripts/check-agent-memory-helper-build.mjs', 'packages/client/scripts/agent-memory-helper-source.mjs']) {
+    const families = selectImpact([path]).families;
+    for (const id of ['npm-release-pack', 'agent-memory-helper', 'agent-memory-helper-linux']) assert.ok(families.includes(id), `${path}: ${id}`);
+  }
+});
+
+// Each test file and script that a family job runs must select that family.
+test('family owners cover every test file and script their CI job runs', () => {
+  const workflow = readFileSync(new URL('.github/workflows/ci.yml', root), 'utf8');
+  const dirOf = name => Object.keys(workspaceGraph).find(dir => workspaceGraph[dir].name === name);
+  const clientScripts = JSON.parse(readFileSync(new URL('packages/client/package.json', root), 'utf8')).scripts;
+  let checked = 0;
+  for (const family of Object.keys(familyOwners)) {
+    const start = workflow.indexOf(`\n  ${family}:\n`);
+    assert.ok(start >= 0, family);
+    const next = workflow.slice(start + 1).search(/\n  [a-z0-9-]+:\n/);
+    const block = workflow.slice(start, next < 0 ? undefined : start + 1 + next).replace(/[`\\]\r?\n\s*/g, ' ');
+    const paths = [];
+    for (const match of block.matchAll(/bun run (?:--filter (\S+)|--cwd (\S+)) (test|[a-z]+:[a-z-]+)(?: --([^\n]*))?/g)) {
+      const dir = match[2] ?? dirOf(match[1]);
+      assert.ok(dir, match[0]);
+      if (match[3] === 'test') {
+        const files = (match[4] ?? '').split(/\s+/).map(file => file.replace(/\)$/, '')).filter(file => /\.test\.ts$/.test(file));
+        paths.push(...(files.length ? files.map(file => `${dir}/${file}`) : [`${dir}/src/suite-probe.ts`]));
+      } else if (dir === 'packages/client' && match[3] !== 'build:agent-memory-helper') {
+        for (const script of clientScripts[match[3]].matchAll(/scripts\/[a-z-]+\.mjs/g)) paths.push(`packages/client/${script[0]}`);
+      }
+    }
+    for (const match of block.matchAll(/(?:node|bun) ((?:packages|examples|templates|scripts)\/[\w./-]+\.mjs)/g)) paths.push(match[1]);
+    for (const match of block.matchAll(/working-directory: (\S+)\s+run: [^\n]*\bgo test\b/g)) paths.push(`${match[1]}/suite-probe.go`);
+    assert.ok(paths.length > 0, `${family}: no job input checked`);
+    for (const path of paths) {
+      assert.ok(selectImpact([path]).families.includes(family), `${family} runs ${path} but a change to it does not select ${family}`);
+      checked++;
+    }
+  }
+  assert.ok(checked >= 30, `only ${checked} job inputs checked`);
+});
+
+test('no routine selection ever includes the complete test suite', () => {
+  const tracked = spawnSync('git', ['ls-files'], { cwd: fileURLToPath(root), encoding: 'utf8' }).stdout.split('\n').filter(Boolean);
+  const selectable = tracked.filter(path => { try { selectImpact([path]); return true; } catch { return false; } });
+  assert.ok(selectable.length > 1000);
+  const all = selectImpact(selectable);
+  assert.ok(!all.families.includes('build-test'));
+  assert.notDeepEqual(all.families, [...knownFamilies].sort());
 });
 
 test('shared protocol changes propagate through multiple dependency levels', () => {
@@ -68,10 +145,10 @@ test('schema, native memory and SEA changes retain relevant qualification', () =
 
 test('unknown, broad policy/dependency inputs and malformed paths fail closed', () => {
   for (const path of ['bun.lock', 'package.json', 'packages/client/package.json', 'api-surface/entries.json', '.github/workflows/unreviewed.yml', 'packages/new/src/index.ts', 'packages/client/vendor/new.js', 'scripts/release/publish.mjs', 'other/a.md', '../README.md', './README.md', '/README.md', 'docs//a.md', 'docs/../README.md', 'docs/a\nb.md', 'docs\\a.md', '', null]) {
-    assert.throws(() => selectImpact([path]), /release validation required|requires exact CI_BASE/i, String(path));
+    assert.throws(() => selectImpact([path]), /reviewed CI mapping required|requires exact CI_BASE/i, String(path));
   }
-  for (const paths of [[], null, {}, 'README.md']) assert.throws(() => selectImpact(paths), /release validation required|requires exact CI_BASE/i);
-  assert.throws(() => selectImpact(['README.md', 'unknown']), /release validation required|requires exact CI_BASE/i);
+  for (const paths of [[], null, {}, 'README.md']) assert.throws(() => selectImpact(paths), /reviewed CI mapping required|requires exact CI_BASE/i);
+  assert.throws(() => selectImpact(['README.md', 'unknown']), /reviewed CI mapping required|requires exact CI_BASE/i);
 });
 
 test('selection is deterministic, deduplicated, and uses only known family IDs', () => {
@@ -115,6 +192,19 @@ test('native asset packaging fixtures select their real platform smoke without b
     });
   }
   for (const path of ['examples/packaging/native-assets-unknown.ts', 'examples/packaging/unreviewed-smoke.mjs']) {
+    assert.throws(() => selectImpact([path]), /reviewed CI mapping required/i);
+  }
+});
+
+
+test('SQLite packaging fixtures select only their reviewed packaging owner', () => {
+  for (const path of ['examples/packaging/sqlite-fixture.ts', 'examples/packaging/sqlite-smoke.mjs']) {
+    assert.deepEqual(selectImpact([path]), {
+      dirs: ['examples/packaging'], files: [path], families: ['packageability-smoke'], reason: 'impacted',
+    });
+  }
+  for (const path of ['examples/packaging/sqlite-unknown.ts', 'examples/packaging/sqlite-smoke-extra.mjs',
+    'examples/packaging/nested/sqlite-fixture.ts']) {
     assert.throws(() => selectImpact([path]), /reviewed release validation required/i);
   }
 });

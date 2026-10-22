@@ -3,14 +3,20 @@ import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { knownFamilies, selectImpact } from './select-impact.mjs';
 
-export function planCi({ event, sha, approvedSha, paths, base, cwd }) {
+// The complete matrix is release validation only: main, or a release/* candidate branch.
+export const isReleaseRef = ref => ref === 'refs/heads/main' || /^refs\/heads\/release\/[A-Za-z0-9._-]+$/.test(ref ?? '');
+
+export function planCi({ event, sha, approvedSha, ref, paths, base, cwd }) {
   if (!/^[a-f0-9]{40}$/.test(sha ?? '')) throw new Error('CI requires an exact commit SHA');
   if (event === 'workflow_dispatch') {
+    if (!isReleaseRef(ref)) throw new Error(`Release validation runs only on main or release/* refs, not ${JSON.stringify(ref)}`);
     if (approvedSha !== sha) throw new Error('Release validation SHA differs from the dispatched commit');
     return { mode: 'release', sha, dirs: [], files: [], families: [...knownFamilies] };
   }
   if (!['pull_request', 'push'].includes(event)) throw new Error('Unsupported CI event');
-  return { ...selectImpact(paths, { base, cwd }), base, mode: 'targeted', sha };
+  const plan = { ...selectImpact(paths, { base, cwd }), base, mode: 'targeted', sha };
+  if (plan.families.includes('build-test')) throw new Error('A targeted plan never selects the complete test suite');
+  return plan;
 }
 
 export function changedPaths(base, cwd = process.cwd()) {
@@ -48,7 +54,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (event !== 'workflow_dispatch') {
     paths = changedPaths(base);
   }
-  const plan = planCi({ event, sha: process.env.GITHUB_SHA, approvedSha: process.env.CI_RELEASE_SHA, paths, base });
+  const plan = planCi({ event, sha: process.env.GITHUB_SHA, approvedSha: process.env.CI_RELEASE_SHA, ref: process.env.CI_REF, paths, base });
   console.log(JSON.stringify(plan, null, 2));
   appendFileSync(process.env.GITHUB_OUTPUT, `plan=${JSON.stringify(plan)}\nfamilies=${JSON.stringify(plan.families)}\nrelease=${plan.mode === 'release'}\nbuild=${plan.dirs.length > 0 || plan.files.some(path => path === 'bun.lock' || /^packages\/[^/]+\/package\.json$/.test(path))}\n`);
 }

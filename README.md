@@ -391,12 +391,12 @@ Third-party dependencies and code-generation evidence follow static dependency e
 
 | Import / command | Purpose | Third-party dependencies | Zod | Budget |
 | --- | --- | --- | --- | ---: |
-| `@byok-sdk/client` | Local daemon composition | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2075515 B |
+| `@byok-sdk/client` | Local daemon composition | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2079005 B |
 | `@byok-sdk/client/adapters` | Runtime adapters; private hosts load lazily | — | forbidden | 415785 B |
 | `@byok-sdk/client/agent-memory` | Embedded Agent memory service | — | forbidden | 69427 B |
 | `@byok-sdk/client/assertion-client` | Task/device assertions; core includes protected Zod probes | `zod` | allowed | 171848 B |
 | `@byok-sdk/client/mcp-server` | Tools-only MCP server | — | forbidden | 17719 B |
-| `@byok-sdk/client/mcp-server/http` | Tools-only MCP Streamable HTTP framing | — | forbidden | 36482 B |
+| `@byok-sdk/client/mcp-server/http` | Tools-only MCP Streamable HTTP framing | — | forbidden | 36534 B |
 | `@byok-sdk/client/package.json` | Package metadata | — | forbidden | 5029 B |
 | `@byok-sdk/client#byok-acp-runtime` | Private ACP runtime stack (Grok) | `@agentclientprotocol/sdk`, `zod` | allowed | 83751 B |
 | `@byok-sdk/client#byok-hermes-session` | Private Hermes session runtime; loaded only when starting an execution | — | forbidden | 14052 B |
@@ -414,6 +414,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/core/package.json` | Package metadata | — | forbidden | 1397 B |
 | `@byok-sdk/keys` | Local provider credential custody | `zod` | allowed | 290208 B |
 | `@byok-sdk/keys/package.json` | Package metadata | — | forbidden | 1466 B |
+| `@byok-sdk/keys/pi-catalog` | Pinned pi-ai catalog lookup for pi_model | `zod` | allowed | 160200 B |
 | `@byok-sdk/protocol` | Wire schemas and codecs; codegen negative control | `@cfworker/json-schema`, `zod` | allowed | 128104 B |
 | `@byok-sdk/protocol/constants` | Schema-free protocol values | — | forbidden | 4429 B |
 | `@byok-sdk/protocol/package.json` | Package metadata | — | forbidden | 1667 B |

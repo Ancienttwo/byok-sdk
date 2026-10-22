@@ -25,7 +25,7 @@ for (const dir of plan.dirs) {
   for (const script of ['typecheck', 'test']) {
     if (!manifest.scripts?.[script]) {
       if (dir === 'examples/packaging' && script === 'test' && plan.families.includes('packageability-smoke')) continue;
-      throw new Error(`Selected workspace ${dir} has no ${script} check; explicit release validation required`);
+      throw new Error(`Selected workspace ${dir} has no ${script} check; add a reviewed workspace check`);
     }
     const result = spawnSync('bun', ['run', '--cwd', dir, script], { stdio: 'inherit', env: process.env });
     if (result.error) throw result.error;
