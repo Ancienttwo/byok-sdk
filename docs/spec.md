@@ -202,7 +202,8 @@ authenticated session and device assertion.
 
 Pi execution requires an explicit `pi_model` configuration in that local
 profile: context window, maximum output tokens, reasoning support, selected
-thinking level, a complete thinking-level map and supported protocol overrides.
+thinking level, a thinking-level map that is complete or absent, and supported
+protocol overrides.
 The configuration is validated, persisted and included in the exact profile
 hash. Missing or stale configuration rejects before credential access or Pi
 startup. Direct provider transports do not require Pi configuration. Vendor
