@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
@@ -10,17 +11,42 @@ export interface HermesGatewayIdentity {
 }
 
 /**
- * Asks the gateway that serves `home` who it is, over its control socket:
- * `<home>/gateway.sock`, else the path written in `<home>/gateway.sock.path`
- * when the direct path is too long for a Unix socket. The Hermes ACP viewer
- * reads the same answer before it attaches. Undefined: no gateway answered.
+ * Hermes's Windows control pipe for a home (`windows_pipe_name` in
+ * `gateway/control_socket.py`): the first 16 hex digits of the SHA-256 of the
+ * home's real path, normalized as `os.path.normcase` does (backslashes,
+ * lower case). `realHome` must be the native real path, so that an 8.3 short
+ * form names the same pipe as the long form Hermes resolves.
  */
-export async function identifyHermesGateway(home: string, timeoutMs = 1_000): Promise<HermesGatewayIdentity | undefined> {
+export function hermesGatewayPipeName(realHome: string): string {
+  const key = realHome.replaceAll('/', '\\').toLowerCase();
+  return `\\\\.\\pipe\\hermes-gateway-${createHash('sha256').update(key, 'utf8').digest('hex').slice(0, 16)}`;
+}
+
+/** Whether the gateway names `served` (a real path) among its profiles. Windows paths compare without case. */
+export function servesHermesHome(identity: HermesGatewayIdentity, served: string): boolean {
+  const key = (value: string): string => (process.platform === 'win32' ? value.toLowerCase() : value);
+  return identity.servedHomes.some((home) => key(home) === key(served));
+}
+
+async function controlPath(home: string): Promise<string> {
+  if (process.platform === 'win32') return hermesGatewayPipeName(await fs.realpath(home).catch(() => path.resolve(home)));
   const direct = path.join(home, 'gateway.sock');
-  const socketPath = await fs.lstat(direct).then(
+  return fs.lstat(direct).then(
     () => direct,
     () => fs.readFile(path.join(home, 'gateway.sock.path'), 'utf8').then((text) => text.trim(), () => direct),
   );
+}
+
+/**
+ * Asks the gateway that serves `home` who it is, over its control channel.
+ * POSIX: the Unix socket `<home>/gateway.sock`, else the path written in
+ * `<home>/gateway.sock.path` when the direct path is too long for a Unix
+ * socket. Windows: the named pipe {@link hermesGatewayPipeName}. The Hermes ACP
+ * viewer reads the same answer before it attaches. Undefined: no gateway
+ * answered.
+ */
+export async function identifyHermesGateway(home: string, timeoutMs = 1_000): Promise<HermesGatewayIdentity | undefined> {
+  const socketPath = await controlPath(home);
   return new Promise((resolve) => {
     let buffer = '';
     let settled = false;

@@ -31,6 +31,7 @@ const STALE_PROFILE_MS = 15 * 60_000;
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /** Hermes otherwise checks GitHub for updates on `--version` and at gateway start (`hermes_cli/source_check.py`). */
 const NO_UPDATE_CHECK = ['updates:', '  check: false'];
+const ROOT_RENAME_ATTEMPTS = 5;
 const ROOT_CONFIG = `${['# Written by @byok-sdk/client. Root of the SDK-owned Hermes profiles.', ...NO_UPDATE_CHECK].join('\n')}\n`;
 
 export function assertHermesModelSelection(value: HermesModelSelection, label: string): void {
@@ -74,15 +75,20 @@ export function hermesProfileConfig(model: HermesModelSelection | undefined): st
 export async function ensureHermesRoot(root: string): Promise<void> {
   await fs.mkdir(root, { recursive: true, mode: 0o700 });
   const file = path.join(root, 'config.yaml');
-  if (await fs.readFile(file, 'utf8').catch(() => undefined) === ROOT_CONFIG) return;
-  // Write then rename: a concurrent `hermes --version` never reads a truncated config with the update check on.
-  const temporary = `${file}.${randomUUID()}.tmp`;
-  try {
-    await fs.writeFile(temporary, ROOT_CONFIG, { mode: 0o600, flag: 'wx' });
-    await fs.rename(temporary, file);
-  } catch (error) {
-    await fs.rm(temporary, { force: true });
-    throw error;
+  for (let attempt = 1; ; attempt += 1) {
+    if (await fs.readFile(file, 'utf8').catch(() => undefined) === ROOT_CONFIG) return;
+    // Write then rename: a concurrent `hermes --version` never reads a truncated config with the update check on.
+    const temporary = `${file}.${randomUUID()}.tmp`;
+    try {
+      await fs.writeFile(temporary, ROOT_CONFIG, { mode: 0o600, flag: 'wx' });
+      await fs.rename(temporary, file);
+      return;
+    } catch (error) {
+      await fs.rm(temporary, { force: true });
+      // Windows refuses a rename onto a file that a concurrent writer is replacing. That writer writes the same text: read again.
+      if (process.platform !== 'win32' || attempt === ROOT_RENAME_ATTEMPTS || (error as { code?: unknown }).code !== 'EPERM') throw error;
+      await new Promise((resolve) => setTimeout(resolve, 10 * attempt));
+    }
   }
 }
 

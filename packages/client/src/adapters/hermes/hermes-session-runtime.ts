@@ -5,7 +5,8 @@ import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import type { RuntimeExecutionFailure, RuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
 import type { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import type { AcpConnection, AcpMethodNotFound, AcpRpcError } from './acp-connection';
-import type { identifyHermesGateway } from './gateway-identity';
+import type { identifyHermesGateway, servesHermesHome } from './gateway-identity';
+import type { ownsHermesGatewayPid } from './gateway-ownership';
 import type { removeHermesProfile } from './hermes-home';
 import { AsyncQueue } from '../../util/async-queue';
 import { HermesProjection } from './projection';
@@ -22,6 +23,8 @@ export interface HermesSessionDependencies {
   isRuntimeExecutionFailure: typeof isRuntimeExecutionFailure;
   infrastructure: (phase: 'start' | 'run', reason: string, retry?: 'retryable' | 'non-retryable') => RuntimeExecutionFailure;
   identifyHermesGateway: typeof identifyHermesGateway;
+  servesHermesHome: typeof servesHermesHome;
+  ownsHermesGatewayPid: typeof ownsHermesGatewayPid;
   removeHermesProfile: typeof removeHermesProfile;
 }
 export interface HermesSessionHandle extends Session {
@@ -29,7 +32,7 @@ export interface HermesSessionHandle extends Session {
   assertOpen(): void;
   ownGateway(gateway: OwnedLineProcess): void;
   ownViewer(viewer: OwnedLineProcess): AcpConnection;
-  awaitGatewayReady(home: string, pid: number, timeoutMs: number, signal: AbortSignal | undefined): Promise<void>;
+  awaitGatewayReady(home: string, root: number, timeoutMs: number, signal: AbortSignal | undefined): Promise<number>;
   ready(sessionId: string): void;
   prompt(text: string): void;
 }
@@ -37,7 +40,7 @@ const GATEWAY_POLL_MS = 100;
 export function createHermesSession(scratch: ExecutionScratch, root: string, liveHomes: Set<string>, interruptMs: number, dependencies: HermesSessionDependencies): HermesSessionHandle {
   const { AcpConnection, AcpMethodNotFound, AcpRpcError, RuntimeExecutionFailure, RuntimeDisposalFailure,
     PolicyUnsupportedError, SteerUnsupportedError, isRuntimeExecutionFailure, infrastructure,
-    identifyHermesGateway, removeHermesProfile } = dependencies;
+    identifyHermesGateway, servesHermesHome, ownsHermesGatewayPid, removeHermesProfile } = dependencies;
 
   class HermesSession implements Session {
     sessionRef = '';
@@ -97,17 +100,28 @@ export function createHermesSession(scratch: ExecutionScratch, root: string, liv
       return this.connection;
     }
 
-    /** Waits until the gateway serving `home` is the owned process and reports ready. */
-    async awaitGatewayReady(home: string, pid: number, timeoutMs: number, signal: AbortSignal | undefined): Promise<void> {
+    /**
+     * Waits until the gateway serving `home` runs in the owned tree at `root`
+     * and reports ready. Returns the gateway's own pid. The ownership check
+     * runs once per answering pid: on Windows it reads the process table.
+     */
+    async awaitGatewayReady(home: string, root: number, timeoutMs: number, signal: AbortSignal | undefined): Promise<number> {
       const served = await fs.realpath(home);
       const deadline = Date.now() + timeoutMs;
+      let owned: number | undefined;
       for (;;) {
         if (this.failure) throw this.failure;
         if (signal?.aborted) throw infrastructure('start', 'hermes start was aborted', 'retryable');
         const identity = await identifyHermesGateway(home);
         if (identity !== undefined) {
-          if (identity.pid !== pid) throw infrastructure('start', 'another Hermes gateway serves the execution profile');
-          if (identity.state === 'ready' && identity.servedHomes.includes(served)) return;
+          if (identity.pid !== owned) {
+            const ours = await ownsHermesGatewayPid(root, identity.pid).catch(() => {
+              throw infrastructure('start', 'hermes gateway ownership check failed', 'retryable');
+            });
+            if (!ours) throw infrastructure('start', 'another Hermes gateway serves the execution profile');
+            owned = identity.pid;
+          }
+          if (identity.state === 'ready' && servesHermesHome(identity, served)) return owned;
         }
         if (Date.now() >= deadline) throw infrastructure('start', 'hermes gateway did not report ready in time', 'retryable');
         await new Promise((resolve) => setTimeout(resolve, GATEWAY_POLL_MS));

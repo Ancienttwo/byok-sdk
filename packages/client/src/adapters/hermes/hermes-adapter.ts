@@ -24,7 +24,8 @@ import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import { classifyDetectError } from '../detect-outcome';
 import type { ResolvedBin } from '../codex/resolve-bin';
 import { AcpConnection, AcpMethodNotFound, AcpRpcError } from './acp-connection';
-import { identifyHermesGateway, type HermesGatewayIdentity } from './gateway-identity';
+import { identifyHermesGateway, servesHermesHome, type HermesGatewayIdentity } from './gateway-identity';
+import { mayStopForeignHermesGateway, ownsHermesGatewayPid } from './gateway-ownership';
 import {
   assertHermesModelSelection, createHermesProfile, ensureHermesRoot, removeHermesProfile, sweepStaleHermesProfiles,
 } from './hermes-home';
@@ -163,7 +164,7 @@ async function identifyAfterAttach(home: string): Promise<HermesGatewayIdentity 
   return undefined;
 }
 
-/** SIGKILL to a detached Hermes gateway's own process group (it starts in a new session), else to the pid. */
+/** SIGKILL to a detached Hermes gateway's own process group (it starts in a new session), else to the pid (always on Windows). */
 function stopProcessGroup(pid: number): void {
   try { process.kill(-pid, 'SIGKILL'); } catch {
     try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
@@ -280,8 +281,6 @@ export class HermesAdapter implements RuntimeAdapter {
 
   /** Cheap admission, as Codex: the version probe only. The ACP probe and root build belong to `detect()`. */
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
-    // The gateway control channel is a named pipe on Windows. It has no evidence yet.
-    if (process.platform === 'win32') return { kind: 'reject', reason: 'hermes adapter is not qualified on Windows', retryable: false };
     if (input.offer.dispatchSelection !== undefined) return { kind: 'reject', reason: 'hermes does not accept a dispatch selection; the Host configures its model', retryable: false };
     if (input.offer.sessionRef !== undefined) return { kind: 'reject', reason: 'hermes does not resume native sessions', retryable: false };
     const command = this.command();
@@ -309,7 +308,7 @@ export class HermesAdapter implements RuntimeAdapter {
     const session = createHermesSession(input.scratch, this.root, this.liveHomes, this.options.interruptTimeoutMs ?? 1_000, {
       AcpConnection, AcpMethodNotFound, AcpRpcError, RuntimeExecutionFailure, RuntimeDisposalFailure,
       PolicyUnsupportedError, SteerUnsupportedError, isRuntimeExecutionFailure, infrastructure,
-      identifyHermesGateway, removeHermesProfile,
+      identifyHermesGateway, servesHermesHome, ownsHermesGatewayPid, removeHermesProfile,
     });
     try {
       const home = await createHermesProfile(this.root, input.scratch.token, custody?.model ?? this.options.model);
@@ -329,13 +328,17 @@ export class HermesAdapter implements RuntimeAdapter {
       const gateway = spawnGateway(gatewayLaunch.command, gatewayLaunch.args, { cwd: home, env });
       session.ownGateway(gateway);
       await withDeadline(gateway.spawned, OPEN_REQUEST_TIMEOUT_MS, input.signal, () => infrastructure('start', 'hermes gateway did not spawn', 'retryable'));
-      const gatewayPid = gatewayChild?.pid;
-      if (gatewayPid === undefined) throw infrastructure('start', 'hermes gateway has no process id', 'retryable');
-      await session.awaitGatewayReady(home, gatewayPid, this.options.gatewayReadyTimeoutMs ?? 20_000, input.signal);
+      const gatewayRoot = gatewayChild?.pid;
+      if (gatewayRoot === undefined) throw infrastructure('start', 'hermes gateway has no process id', 'retryable');
+      const gatewayPid = await session.awaitGatewayReady(home, gatewayRoot, this.options.gatewayReadyTimeoutMs ?? 20_000, input.signal);
       // A gateway that exited after ready already closed the session; a viewer started now would start its own.
       session.assertOpen();
       const viewerLaunch = launch('viewer', ['--yolo', 'acp']);
-      const viewer = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn })(viewerLaunch.command, viewerLaunch.args, { cwd: workspace, env });
+      let viewerChild: ChildProcess | undefined;
+      const viewer = createOwnedLineProcessSpawn({
+        nativeAssetRoot: this.options.nativeAssetRoot,
+        spawnFn: (bin, args, options) => (viewerChild = (this.options.spawnFn ?? nodeSpawn)(bin, [...args], options)),
+      })(viewerLaunch.command, viewerLaunch.args, { cwd: workspace, env });
       const connection = session.ownViewer(viewer);
       const open = <T>(method: string, params: Record<string, unknown>) => withDeadline(
         connection.request(method, params) as Promise<T>, OPEN_REQUEST_TIMEOUT_MS, input.signal,
@@ -361,7 +364,7 @@ export class HermesAdapter implements RuntimeAdapter {
       if (attached === undefined) throw infrastructure('start', 'hermes gateway did not answer identify after attach', 'retryable');
       if (attached.pid !== gatewayPid) {
         // Only this execution uses the fresh profile, so a gateway that serves it was started for it.
-        if (attached.servedHomes.includes(await fs.realpath(home))) stopProcessGroup(attached.pid);
+        if (servesHermesHome(attached, await fs.realpath(home)) && await mayStopForeignHermesGateway(viewerChild?.pid, attached.pid)) stopProcessGroup(attached.pid);
         throw infrastructure('start', 'hermes acp attached to a gateway this session does not own');
       }
       if (input.signal?.aborted) throw infrastructure('start', 'hermes start was aborted', 'retryable');

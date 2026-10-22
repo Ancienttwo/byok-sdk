@@ -420,7 +420,11 @@ binding and optional fixed gateway/viewer launch role. Validation emits only
 non-secret model metadata and reads no key. Launch re-reads the exact profile
 under its configuration lock, rejects pending custody changes, obtains the
 profile-specific key, closes SQLite and uses POSIX `process.execve` to replace
-the launcher with Hermes. The original PID remains the gateway identity.
+the launcher with Hermes. The original PID remains the gateway identity. On
+Windows, launch starts Hermes as a child with the key in the child environment
+only (never in the launcher's `process.env`). The launcher resolves when
+Hermes exits and sets `process.exitCode` to Hermes's exit code; the adapter
+accepts a gateway below the launcher PID.
 No plaintext is returned to the daemon or written to a profile/config file.
 Only the selected key is injected as `SDK_HERMES_PROVIDER_KEY`; inherited
 provider/loader variables are removed. The Host executable and target Hermes
@@ -428,7 +432,6 @@ binary remain trusted code and must not log credentials.
 
 This slice supports enabled `openai_compatible` + `bearer` profiles without
 `pi_model` overrides. It deliberately refuses unsupported provider semantics;
-it does not translate Pi Responses/compat configuration. Windows and runtimes
-without `process.execve` fail closed. Use absolute executable paths and a
-supported POSIX Node runtime. No built-in OS-store selection is implied: the
+it does not translate Pi Responses/compat configuration. POSIX runtimes
+without `process.execve` fail closed. Use absolute executable paths. No built-in OS-store selection is implied: the
 Host supplies its own account scope just as for its Pi custody launcher.
