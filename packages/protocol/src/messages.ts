@@ -1,5 +1,6 @@
 import { PreparedAgentMemoryModeSchema } from './input-preparation';
 import { z } from 'zod';
+import { RUNTIME_IDS } from './constants';
 import { BlobRefSchema } from './blob';
 import { AgentEventOrUnknownSchema } from './agent-event';
 import {
@@ -49,7 +50,7 @@ function isWithinInlineByteLimit(value: string): boolean {
 // conn.* — connection handshake
 // ---------------------------------------------------------------------------
 
-export const RuntimeIdSchema = z.enum(['pi', 'claude', 'codex']);
+export const RuntimeIdSchema = z.enum(RUNTIME_IDS);
 export type RuntimeId = z.infer<typeof RuntimeIdSchema>;
 
 /** Wire-safe protocol version number: bounded before JSON reaches a store or comparison. */
@@ -100,7 +101,7 @@ export type RuntimeInfo = z.infer<typeof RuntimeInfoSchema>;
 
 /** Custom identities are disjoint from the frozen built-in runtime enum. */
 export const HarnessIdSchema = z.string().min(1).max(128).regex(/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/)
-  .refine(value => !['pi', 'claude', 'codex'].includes(value), 'built-in runtime must use runtime');
+  .refine(value => !(RUNTIME_IDS as readonly string[]).includes(value), 'built-in runtime must use runtime');
 export type HarnessId = z.infer<typeof HarnessIdSchema>;
 export const HarnessInfoSchema = z.object({
   id: HarnessIdSchema,

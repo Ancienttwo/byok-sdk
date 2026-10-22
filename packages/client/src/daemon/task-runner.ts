@@ -5706,6 +5706,10 @@ export class TaskRunner {
         };
       }
       const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, signal), signal);
+      // Another device may support this platform, as it may have the runtime installed.
+      if (detected.kind === 'refused' && detected.reason === 'platform_unsupported') {
+        return { ok: false, reason: `platform_unsupported: runtime "${requestedRuntime}" does not support ${process.platform}`, retryable: true };
+      }
       if (detected.kind !== 'available') {
         return {
           ok: false,

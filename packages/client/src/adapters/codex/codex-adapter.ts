@@ -89,6 +89,7 @@ export class CodexAdapter implements RuntimeAdapter {
     id: 'codex',
     supportsDispatchSelection: true,
     progressEventsAreMessages: true,
+    platforms: ['darwin', 'linux', 'win32'],
     capabilities: {
       steer: true,
       resume: true,

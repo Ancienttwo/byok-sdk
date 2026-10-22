@@ -51,8 +51,11 @@ export interface RuntimeDetectionAdvisory {
   readonly qualifiedVersion: string;
 }
 
-/** `app_server_unavailable`: Codex has no `app-server`. `acp_unavailable`: an ACP runtime has no stdio ACP mode. */
-export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unavailable';
+/**
+ * `app_server_unavailable`: Codex has no `app-server`. `acp_unavailable`: an ACP runtime has no stdio ACP mode.
+ * `platform_unsupported`: the host platform is not in {@link RuntimeAdapterDescriptor.platforms}; no probe ran.
+ */
+export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unavailable' | 'platform_unsupported';
 
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
@@ -270,6 +273,12 @@ export interface RuntimeAdapterDescriptor {
    * completed. Absent: every record of this adapter is `unknown`.
    */
   readonly trajectoryEvidence?: 'event-stream';
+  /**
+   * The `process.platform` values this adapter supports. Runtime detection
+   * refuses every other platform with `platform_unsupported` before it runs a
+   * probe. Absent: no platform restriction (a custom adapter's default).
+   */
+  readonly platforms?: readonly NodeJS.Platform[];
 }
 
 /** The pure input to one adapter admission decision. It contains no credential values or workspace resources. */
@@ -522,6 +531,7 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
     requiresMcpToolsetToolObservation: descriptor.requiresMcpToolsetToolObservation === true,
     ...(descriptor.progressEventsAreMessages === true ? { progressEventsAreMessages: true } : {}),
     ...(descriptor.trajectoryEvidence === 'event-stream' ? { trajectoryEvidence: 'event-stream' as const } : {}),
+    ...(descriptor.platforms === undefined ? {} : { platforms: Object.freeze([...descriptor.platforms]) }),
     capabilities: Object.freeze({
       ...(descriptor.capabilities.durablePi === undefined ? {} : { durablePi: descriptor.capabilities.durablePi === true }),
       ...(descriptor.capabilities.nativeInteractions === undefined ? {} : {

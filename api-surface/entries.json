@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2073366,
+      "budgetBytes": 2074310,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -154,7 +154,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Embedded Agent memory service",
-      "budgetBytes": 69526,
+      "budgetBytes": 69599,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -349,6 +349,61 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [],
+        "thirdParty": []
+      },
+      "codegen": []
+    }
+  },
+  "@byok-sdk/client/testing": {
+    "kind": "exports",
+    "policy": {
+      "purpose": "Runtime adapter test doubles; no daemon",
+      "budgetBytes": 369582,
+      "zod": false,
+      "codegen": false,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": true
+      }
+    },
+    "facts": {
+      "target": "packages/client/dist/testing/index.js",
+      "conditions": [
+        "import"
+      ],
+      "types": [
+        "packages/client/dist/testing/index.d.ts"
+      ],
+      "bareImports": [
+        "@byok-sdk/protocol/constants",
+        "child_process",
+        "crypto",
+        "fs",
+        "net",
+        "os",
+        "path",
+        "url",
+        "util"
+      ],
+      "lazyImports": [
+        "#byok-acp-runtime",
+        "#byok-hermes-session",
+        "koffi"
+      ],
+      "thirdParty": [],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [
+          "child_process",
+          "crypto",
+          "fs",
+          "net",
+          "os",
+          "path",
+          "url",
+          "util"
+        ],
         "thirdParty": []
       },
       "codegen": []
@@ -1156,7 +1211,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Cloud coordination and HTTP handlers",
-      "budgetBytes": 534547,
+      "budgetBytes": 534592,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1209,7 +1264,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 784419,
+      "budgetBytes": 784435,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1748,7 +1803,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Wire schemas and codecs; codegen negative control",
-      "budgetBytes": 128104,
+      "budgetBytes": 128149,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1954,7 +2009,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 562807,
+      "budgetBytes": 562852,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2128,7 +2183,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent memory MCP helper",
-      "budgetBytes": 49779,
+      "budgetBytes": 49852,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2169,7 +2224,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent message MCP helper",
-      "budgetBytes": 49784,
+      "budgetBytes": 49857,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2251,7 +2306,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent team MCP helper",
-      "budgetBytes": 49769,
+      "budgetBytes": 49842,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
