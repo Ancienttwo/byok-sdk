@@ -62,14 +62,24 @@ export async function handleAgentMemoryToolCall(call: McpServerToolCall, deps: A
   }
 }
 
-export function serveAgentMemoryMcpOverStdio(input: { deps: AgentMemoryMcpDeps; mode: 'read' | 'read-write'; stdin?: NodeJS.ReadableStream; stdout?: NodeJS.WritableStream }): void {
+function serveAgentMemoryToolsOverStdio(tools: readonly AgentMemoryToolDefinition[], input: Parameters<typeof serveAgentMemoryMcpOverStdio>[0]): void {
   serveMcpOverStdio({
     serverInfo: AGENT_MEMORY_MCP_SERVER_INFO,
-    tools: AGENT_MEMORY_TOOLS,
+    tools,
     callTool: (call) => handleAgentMemoryToolCall(call, input.deps, input.mode),
     input: input.stdin,
     output: input.stdout,
   });
+}
+
+/** Lists the complete tool set; the prepared lane compares it with its sealed descriptor. */
+export function serveAgentMemoryMcpOverStdio(input: { deps: AgentMemoryMcpDeps; mode: 'read' | 'read-write'; stdin?: NodeJS.ReadableStream; stdout?: NodeJS.WritableStream }): void {
+  serveAgentMemoryToolsOverStdio(AGENT_MEMORY_TOOLS, input);
+}
+
+/** Lists only the tools `mode` grants: a `read` helper lists `memory_recall` and no write tool. */
+export function serveGrantedAgentMemoryMcpOverStdio(input: Parameters<typeof serveAgentMemoryMcpOverStdio>[0]): void {
+  serveAgentMemoryToolsOverStdio(AGENT_MEMORY_TOOLS.filter((tool) => input.mode === 'read-write' || tool.operation === 'read'), input);
 }
 
 /** A task-free descriptor has the same tools/list identity, but never an execution handler. */

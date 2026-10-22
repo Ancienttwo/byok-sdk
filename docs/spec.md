@@ -2163,11 +2163,31 @@ Absent or `auto` preserves platform/helper-based admission. `off` omits the SDK
 memory MCP and prepared descriptor bindings: ordinary Agent tasks acquire no SDK
 memory tools, and prepared `read`/`read-write` selections fail closed while `none`
 remains supported. Other required helpers retain their own admission gates.
-Invalid values are construction errors. This switch does not change the wire,
-Agent-home initialization/leases/guidance, runtime filesystem authority, or the
-explicit hosted projection and memory intent transport opt-ins. An off switch
-alone does not resolve native helper assets; configured projection/intents still
-require their existing helper and platform proofs.
+Invalid values are construction errors. `off` also omits the Agent memory
+guidance: a writer instruction gets no memory prefix, and a `memory-reader`
+instruction keeps only the line that puts the result in the final reply. Under
+`auto` the guidance does not change, also when no memory MCP is admitted (for
+example macOS without the release helper, or Windows): that guidance is the
+file-based memory that existed before the memory MCP. This switch does not
+change the wire, Agent-home initialization/leases, runtime filesystem
+authority, or the explicit hosted projection and memory intent transport
+opt-ins. An off switch alone does not resolve native helper assets; configured
+projection/intents still require their existing helper and platform proofs. An
+explicit `agentMemoryHelperAssetRoot` is always validated at daemon
+construction, independent of `off`: an invalid root fails construction, and a
+valid root is read and digested once, even when no task opens the helper.
+
+An ordinary Agent writer that gets the memory MCP is sealed `read-write` and its
+helper lists `memory_recall` and `memory_save`. A `memory-reader` Attempt is
+sealed `read`, and its helper lists only `memory_recall`; a write call is
+denied by the sealed capability. The prepared lane keeps the complete listing,
+because its launch compares that listing with the sealed descriptor, and its
+runtime registers only the selected tools. `Daemon.status().agentMemoryMcp`
+reports the effective daemon-level admission: `admitted`, `off`, or
+`unavailable` (`auto` without an Agent home or a secure memory filesystem). The
+selected adapter must still support MCP toolsets for each task. The value is
+in-process only; the hello capabilities, `DaemonEvent` and the control status
+do not carry it.
 
 The client release carries Darwin arm64 and x64 helpers. The SDK resolves its
 own path and checks the build manifest before each helper open. Arbitrary

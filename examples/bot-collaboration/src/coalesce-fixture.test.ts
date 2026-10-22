@@ -24,7 +24,7 @@ function controlledHelper() {
   return { child, session, requests };
 }
 
-it('awaits result injection and helper exit before starting the Host convergence observer', async () => {
+it('settles the completion receipt after result injection and helper close', async () => {
   const { child, session, requests } = controlledHelper();
   const events = session.events[Symbol.asyncIterator]();
   let emitted = false;
@@ -42,10 +42,13 @@ it('awaits result injection and helper exit before starting the Host convergence
     await vi.waitFor(() => expect(child.kill).toHaveBeenCalledOnce());
     expect(observerStarted).toBe(false); expect(emitted).toBe(false);
     child.emit('exit', 0);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(observerStarted).toBe(false); expect(emitted).toBe(false);
+    child.emit('close', 0);
     await observer;
     expect(await first).toMatchObject({ value: { type: 'progress', text: '{"text":"done"}' } });
     expect(await events.next()).toMatchObject({ value: { type: 'turn_end' } });
-  } finally { child.emit('exit', 0); await session.close(); await first; await observer; }
+  } finally { child.emit('exit', 0); child.emit('close', 0); await session.close(); await first; await observer; }
 });
 
 it('keeps ignored completion promises handled while delivering helper failures through events', async () => {
@@ -59,9 +62,11 @@ it('keeps ignored completion promises handled while delivering helper failures t
     child.stdout.write(JSON.stringify({ id: call.id, error: { message: 'controlled failure' } }) + '\n');
     await vi.waitFor(() => expect(child.kill).toHaveBeenCalledOnce());
     child.emit('exit', 0);
+    child.emit('close', 0);
     await observed;
   } finally {
     child.emit('exit', 0);
+    child.emit('close', 0);
     await session.close();
     await observed.catch(() => {});
   }
