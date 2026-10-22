@@ -34,6 +34,8 @@ import { resolveHermesBin } from './resolve-bin';
 
 const VERSION_TIMEOUT_MS = 5_000;
 const OPEN_REQUEST_TIMEOUT_MS = 60_000;
+/** Bound for the Windows process-table read before a foreign gateway is stopped; a cold read measured 3.5 s. */
+const FOREIGN_GATEWAY_CHECK_MS = 10_000;
 const GATEWAY_POLL_MS = 100;
 /** No fs or terminal methods: Hermes runs every tool inside its own gateway. No elicitation: clarify falls back to a permission request. */
 const INITIALIZE_PARAMS = Object.freeze({
@@ -369,7 +371,7 @@ export class HermesAdapter implements RuntimeAdapter {
       const attached = await identifyAfterAttach(home, { owned: (pid) => pid === gatewayPid, nativeAssetRoot: this.options.nativeAssetRoot });
       if (attached === undefined) throw infrastructure('start', 'hermes gateway did not answer identify after attach', 'retryable');
       if (attached.pid !== gatewayPid || attached.state === 'mismatch') {
-        if (await mayStopForeignHermesGateway(attached, await fs.realpath(home), viewerChild?.pid, AbortSignal.timeout(OPEN_REQUEST_TIMEOUT_MS))) stopProcessGroup(attached.pid);
+        if (await mayStopForeignHermesGateway(attached, await fs.realpath(home), viewerChild?.pid, AbortSignal.any([AbortSignal.timeout(FOREIGN_GATEWAY_CHECK_MS), ...(input.signal ? [input.signal] : [])]))) stopProcessGroup(attached.pid);
         throw infrastructure('start', 'hermes acp attached to a gateway this session does not own');
       }
       if (input.signal?.aborted) throw infrastructure('start', 'hermes start was aborted', 'retryable');
