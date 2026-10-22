@@ -69,7 +69,7 @@ changes no code, manifest or lock file.
 | `openai` 7.19.0 optional peer `undici` `>=5 <9` | `@earendil-works/pi-ai` 1.3.0 depends on `openai`. `pi-ai` is a dependency of `client` and `cloud-do`. | The SDK does not install the peer. The package manager and the Host tree choose the copy. See "The openai peer". | None. See "The openai peer". |
 | `undici` `^8.9.0` range | `pi-web-access` 0.24.1 (`packages/client/package.json:97`; `bun.lock:1280`) | The package installs. The SDK never imports it: `tsup.config.ts:42` inlines it, and the published dist has no import of it. | The inlined code is the Gemini Web fetch in row 1. It resolves the client's pin. |
 | `undici-types`, `@google/genai`, `eventsource` | Types only; `@google/genai@2.21.0` and `eventsource@3.0.7` name undici in `devDependencies` only. | No run-time edge (`npm ls undici --all` shows none). | None. |
-| Node's built-in undici | The Node runtime (`process.versions.undici`): 7.29.1 in v24.21.0, 7.30.1 in v24.22.1 (release notes), 8.10.2 in v26.10.0, 8.12.2 in v26.12.1 (release notes). | Not part of the install. Every process that runs the SDK holds it. | It loads on demand. In ESM it serves global `fetch`. See "Who owns the global dispatcher". |
+| Node's built-in undici | The Node runtime (`process.versions.undici`): 7.29.1 in v24.21.0, 7.30.1 in v24.22.1 (release notes), 8.10.2 in v26.10.0, 8.12.2 in v26.12.1 (release notes). | Not part of the install. Every process that runs the SDK holds it. | It loads on demand. In the SDK's ESM host shapes it serves global `fetch`. See "Who owns the global dispatcher". |
 
 The repo tree (`bun pm ls --all`) shows the same three runtime copies: 8.12.3 at
 the root, 8.10.2 under Pi, 7.29.0 under miniflare.
@@ -114,17 +114,18 @@ when it loads (`lib/global.js:14-16`). `getGlobalDispatcher()` reads only slot
 `Symbol.for('undici.globalDispatcher.2')`. `setGlobalDispatcher()` writes slot 2
 and also overwrites slot 1 with a `Dispatcher1Wrapper` (`lib/global.js:18-55`).
 The built-in `fetch` of Node 24 (built-in undici 7.x) reads slot 1 for each
-request, and the wrapper forwards to slot 2. The built-in `fetch` of v26.10.0
-(built-in undici 8.10.2) reads slot 2. The dispatch counts show both cases. So
-the first undici 8.x copy that loads, with no earlier undici in slot 2, becomes
-the dispatcher of every global `fetch` call in the process. `lib/global.js` is identical in 8.10.2
-and 8.12.3.
+request. When an 8.x copy owns the slots, slot 1 holds a wrapper that forwards
+to slot 2. The built-in `fetch` of v26.10.0 (built-in undici 8.10.2) reads
+slot 2. The dispatch counts show both cases. So the first undici 8.x copy that
+loads, with no earlier undici in slot 2, becomes the dispatcher of every global
+`fetch` call in the process. `lib/global.js` is identical in 8.10.2 and 8.12.3.
 
 Load order decides the owner. In an ESM graph, one static `import … from 'http'`
 is enough. Node reads the lazy `WebSocket` export of `node:http` when it builds
-the ESM wrapper for that built-in (trace on v24.21.0: `get [as WebSocket] (node:http:237)`,
-`lazyUndici (node:http:129)`, no JavaScript caller). The read loads Node's
-built-in undici, which writes both slots. The published host imports `http` at
+the ESM wrapper for that built-in (trace on v24.21.0:
+`get [as WebSocket] (node:http:237)`, `lazyUndici (node:http:129)`, no
+JavaScript caller). The read loads Node's built-in undici, which writes both
+slots. The published host imports `http` at
 `dist/bin/pi-runtime-host.js:29`, after Pi at `:18`, and Node's copy still wins.
 So Node builds that wrapper while it links the graph, before any module body
 runs. A bare `await import('node:http')` shows the same effect; `node:https`
@@ -166,9 +167,10 @@ What this means:
   share the load order. I did not run them.
 
 Node versions. The shapes above ran on two Node builds. Each result cell is one
-real Pi print session: exit 0, one provider request. The slot writer comes from the stack
-frames. A `node:internal/deps/undici` frame means Node's copy. On v26.10.0 Node's
-copy and Pi's copy are both 8.10.2, so the version cannot tell them apart.
+real Pi print session: exit 0, one provider request. The slot writer comes from
+the stack frames. A `node:internal/deps/undici` frame means Node's copy. On
+v26.10.0 Node's copy and Pi's copy are both 8.10.2, so the version cannot tell
+them apart.
 
 | Node | Built-in undici | ESM shapes (0.28.2 unbundled and single file; main single file) | CJS shapes (0.28.2 ESM then CJS; 0.28.2 single pass with the #709 change; main single pass) |
 | --- | --- | --- | --- |
@@ -178,13 +180,13 @@ copy and Pi's copy are both 8.10.2, so the version cannot tell them apart.
 
 The mechanism predicts this for v24.22.1 (inferred, not run). An ESM Host keeps
 Node's patched 7.30.1 as the `fetch` dispatcher. A CJS bundle replaces it with
-Pi's unpatched 8.10.2. So the CJS shape matters most on the version that the floor
-names.
+Pi's unpatched 8.10.2. So the CJS shape matters most on the version that the
+floor names.
 
 Node's own copy is in the advisory range on some builds that the floor admits.
-`engines.node >=24.22.1` admits v26.10.0 (8.10.2). The v26.12.1 release notes list
-the patched 8.12.2. That is a Node runtime matter and not an SDK pin. This note
-changes nothing about it.
+`engines.node >=24.22.1` admits v26.10.0 (8.10.2). The v26.12.1 release notes
+list the patched 8.12.2. That is a Node runtime matter and not an SDK pin. This
+note changes nothing about it.
 
 Fix checks, on the same flow:
 
