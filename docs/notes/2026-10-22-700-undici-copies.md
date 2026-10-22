@@ -211,8 +211,9 @@ v24.22.1 and v26.10.0 the CJS result of each of the three checks is the same.
   prints the version at `main.js:503`. That call sets an `EnvHttpProxyAgent` and
   replaces `globalThis.fetch` (`http-dispatcher.js:73-96`). A probe of
   `cli.js --version` exited 0 and printed `1.3.0`. The slots ended as
-  `EnvHttpProxyAgent`. The probe counted zero `dispatch()` calls. So `detect()`
-  loads the inlined 8.10.2 and sends no request.
+  `EnvHttpProxyAgent`. The probe counted zero `dispatch()` calls. The same probe
+  on v24.22.1 and v26.10.0 printed `1.3.0` and gave the same slots and the same
+  count. So `detect()` loads the inlined 8.10.2 and sends no request.
 - A task runs the Pi CLI only when `PiAdapterOptions.resolveBin` is set
   (`pi-adapter.ts:84`, `:390-392`). Otherwise it runs the SDK entry
   `dist/bin/byok-pi-rpc.js`. `resolveBin` is documented as a test seam.
