@@ -3,6 +3,7 @@ import type { BotTurnOutcome, CreateBotAction, RoomFields, UpdateBotAction } fro
 import { hash, canonical, type ExecutionTemplate } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState } from './model';
 import type { BotProfile, Room, TeamState } from './team-model';
+import { roomVisibility } from './rules/rooms';
 
 export const NEW_BOTS = ['new_bot_1', 'new_bot_2', 'new_bot_3'] as const;
 export const NEW_ROOMS = ['new_room_1'] as const;
@@ -66,12 +67,6 @@ export function roomFields(team: TeamState, fields: RoomFields): Omit<Room, 'id'
   members.forEach(id => activeBot(team, id));
   if (fields.admin && !members.includes(fields.admin)) throw new Error('Admin must be a room member');
   return { name: fields.name, members, visibleFrom: Object.fromEntries(members.map(id => [id, 0])), ...(fields.admin ? { admin: fields.admin } : {}), mode: 'mention', announcement: fields.announcement ?? '' };
-}
-/** Append offsets stay valid because the ledger retains its complete audit history. */
-export function roomVisibility(room: Room, members: readonly string[]): Record<string, number> {
-  return Object.fromEntries(members.map(id => [id,
-    room.members.includes(id) ? room.visibleFrom?.[id] ?? room.messages.length : room.messages.length,
-  ]));
 }
 export function applyManagement(state: CollaborationState, actor: string, taskId: string, outcome: BotTurnOutcome,
   models: Record<string, ExecutionTemplate>, accept: (action: string, work: () => void) => void, readOnlyToolsets: readonly string[] = []): void {

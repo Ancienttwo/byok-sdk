@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { getSupportedThinkingLevels } from '@earendil-works/pi-ai/models';
 import { getBuiltinModels } from '@earendil-works/pi-ai/providers/all';
 import { MODEL_THINKING_LEVELS } from '@earendil-works/pi-ai/providers/model-schema';
 import clientManifest from '../../package.json' with { type: 'json' };
@@ -9,7 +10,7 @@ import clientManifest from '../../package.json' with { type: 'json' };
 import { PI_MODEL_CATALOG_FILE, renderPiModelCatalog } from '../../../../scripts/keys/generate-pi-model-catalog';
 import { PI_MODEL_CATALOG, PI_MODEL_CATALOG_PI_AI_VERSION } from '../../../keys/src/pi-model-catalog.generated';
 import { piModelConfigFromPinnedCatalog } from '../../../keys/src/pi-model-catalog';
-import { PI_MODEL_APIS, PI_THINKING_LEVELS, type PiModelApi } from '../../../keys/src/pi-model-config';
+import { PI_MODEL_APIS, PI_THINKING_LEVELS, piSupportedThinkingLevels, type PiModelApi } from '../../../keys/src/pi-model-config';
 import { buildPiProviderProjection } from '../../../keys/src/pi-provider-projection';
 import { MODEL_PROVIDER_VENDORS, type ModelProviderVendorId } from '../../../keys/src/provider-catalog';
 import { parseModelProviderProfile } from '../../../keys/src/provider-profile';
@@ -54,10 +55,10 @@ describe('keys Pi model catalog against the pinned pi-ai', () => {
       if (accepted === undefined) {
         const refusal = levels[0]!;
         if (refusal.ok || refusal.reason !== 'unrepresentable') throw new Error(`${provider}/${model.id}: ${JSON.stringify(refusal)}`);
-        // Each refused path starts at the vendor api, the required map, or a field the pinned model declares.
+        // Each refused path starts at the vendor api or at a field the pinned model declares.
         for (const field of refusal.fields) {
           const head = field.split('.')[0]!;
-          const named = head === 'api' || head === 'thinkingLevelMap' || Object.hasOwn(model, head);
+          const named = head === 'api' || Object.hasOwn(model, head);
           expect([provider, model.id, field, named]).toEqual([provider, model.id, field, true]);
         }
         continue;
@@ -77,7 +78,37 @@ describe('keys Pi model catalog against the pinned pi-ai', () => {
       const pick = (source: Record<string, unknown>) => Object.fromEntries(fields.map((field) => [field, source[field] ?? null]));
       expect({ provider, ...pick(entry) }).toEqual({ provider, ...pick({ compat: {}, ...model }) });
     }
-    // Cerebras, Z.AI GLM-5.x and the other full-map entries; a pi-ai upgrade that empties this set is a regression.
+    // Cerebras, Z.AI GLM, MiniMax and the other entries; a pi-ai upgrade that empties this set is a regression.
     expect(representable).toBeGreaterThan(0);
+  });
+
+  it('accepts exactly the thinking levels Pi offers for each representable entry', () => {
+    let compared = 0;
+    for (const { provider, model } of pinnedModels()) {
+      const accepted = PI_THINKING_LEVELS.filter((thinkingLevel) => piModelConfigFromPinnedCatalog({
+        provider, api: model.api as PiModelApi, model: model.id, thinkingLevel,
+      }).ok);
+      if (accepted.length === 0) continue;
+      compared += 1;
+      expect([provider, model.id, accepted]).toEqual([provider, model.id, getSupportedThinkingLevels(model as never)]);
+    }
+    expect(compared).toBeGreaterThan(0);
+  });
+
+  it("restates Pi's supported-level rule for every map shape the schema admits", () => {
+    const everyLevel = Object.fromEntries(PI_THINKING_LEVELS.map((level) => [level, level]));
+    const maps = [
+      undefined,
+      everyLevel,
+      Object.fromEntries(PI_THINKING_LEVELS.map((level) => [level, null])),
+      { ...everyLevel, off: null, xhigh: null, max: 'max' },
+    ];
+    for (const reasoning of [true, false]) {
+      for (const thinkingLevelMap of maps) {
+        const config = { reasoning, ...(thinkingLevelMap === undefined ? {} : { thinkingLevelMap }) };
+        expect([config, piSupportedThinkingLevels(config as never)])
+          .toEqual([config, getSupportedThinkingLevels(config as never)]);
+      }
+    }
   });
 });

@@ -3,6 +3,7 @@ import { InMemoryTruthStore, tenantId } from '@byok-sdk/core';
 import { PI_MODEL_FIXTURE } from './fixtures/pi-model-config';
 import { parseModelProviderProfile, exactProviderProfileBinding, assertExactProviderProfileBinding } from './provider-profile';
 import { assertPiLaunchArgs, buildPiProviderArgs, buildPiProviderProjection } from './pi-provider-projection';
+import { assertPiPreparedProviderProfile } from './pi-provider-launcher-core';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
 import { InMemoryProviderProfileStore } from './profile-store';
 import { TruthStoreProviderProfileStore } from './truth-profile-store';
@@ -147,6 +148,56 @@ describe('Pi compat keys added for the pinned pi-ai catalog', () => {
     ['openai-responses requiresReasoningContentOnAssistantMessages', profileInput, { api: 'openai-responses', compat: { requiresReasoningContentOnAssistantMessages: true } }, /requiresReasoningContentOnAssistantMessages does not apply to openai-responses/],
   ] as const)('rejects %s', (_, base, override, message) => {
     expect(() => parseModelProviderProfile({ ...base, pi_model: { ...PI_MODEL_FIXTURE, ...override } })).toThrow(message);
+  });
+});
+
+describe('Pi configuration without a thinkingLevelMap', () => {
+  const { thinkingLevelMap: _, ...NO_MAP } = PI_MODEL_FIXTURE;
+
+  it('admits a reasoning model without a map, projects no map and launches the declared level', () => {
+    const profile = parseModelProviderProfile({ ...profileInput, pi_model: NO_MAP });
+    expect(profile.pi_model).toEqual(NO_MAP);
+    const model = (buildPiProviderProjection(profile, 'pi-rpc') as any).providers['byok-sdk-test-zai'].models[0];
+    expect(Object.hasOwn(model, 'thinkingLevelMap')).toBe(false);
+    expect(buildPiProviderArgs(profile, ['--mode', 'rpc']).slice(-2)).toEqual(['--thinking', NO_MAP.thinkingLevel]);
+  });
+
+  it.each(['off', 'minimal', 'low', 'medium', 'high'] as const)('admits thinking level %s', (thinkingLevel) => {
+    expect(parseModelProviderProfile({ ...profileInput, pi_model: { ...NO_MAP, thinkingLevel } }).pi_model?.thinkingLevel)
+      .toBe(thinkingLevel);
+  });
+
+  it.each(['xhigh', 'max'] as const)('refuses thinking level %s, which Pi offers only when the map names it', (thinkingLevel) => {
+    expect(() => parseModelProviderProfile({ ...profileInput, pi_model: { ...NO_MAP, thinkingLevel } }))
+      .toThrow(/Pi thinking level is not supported by the declared model/);
+  });
+
+  it('passes the prepared entry admission, because the prepared wire may leave the map out', () => {
+    const profile = parseModelProviderProfile({ ...profileInput, auth_mode: 'bearer', pi_model: NO_MAP });
+    expect(() => assertPiPreparedProviderProfile(profile)).not.toThrow();
+  });
+
+  it('reads a map key set to undefined as no map', () => {
+    const absent = parseModelProviderProfile({ ...profileInput, pi_model: NO_MAP });
+    const declaredUndefined = parseModelProviderProfile({ ...profileInput, pi_model: { ...NO_MAP, thinkingLevelMap: undefined } });
+    expect(exactProviderProfileBinding(declaredUndefined).profileHash).toBe(exactProviderProfileBinding(absent).profileHash);
+    expect(JSON.stringify(buildPiProviderProjection(declaredUndefined, 'pi-rpc')))
+      .toBe(JSON.stringify(buildPiProviderProjection(absent, 'pi-rpc')));
+  });
+
+  it.each(['memory', 'sqlite', 'truth'] as const)('persists it through %s registry unchanged, with the same hash', async (kind) => {
+    const store = kind === 'memory' ? new InMemoryProviderProfileStore()
+      : kind === 'sqlite' ? new SqliteProviderProfileStore({ path: ':memory:' })
+      : new TruthStoreProviderProfileStore({ tenant: tenantId('pi-model-test'), truthStore: new InMemoryTruthStore({ now: () => new Date(profileInput.updated_at) }) });
+    try {
+      const registry = new ProviderRegistry({ profileStore: store, secretStore: new InMemorySecretStore(), now: () => new Date(profileInput.updated_at) });
+      const original = parseModelProviderProfile({ ...profileInput, pi_model: NO_MAP });
+      const status = await registry.configure(original);
+      const stored = await store.get(original.profile_ref);
+      expect(stored?.pi_model).toEqual(NO_MAP);
+      expect(Object.hasOwn(stored!.pi_model!, 'thinkingLevelMap')).toBe(false);
+      expect(exactProviderProfileBinding(stored!).profileHash).toBe(status.profile_hash);
+    } finally { await store.close(); }
   });
 });
 
