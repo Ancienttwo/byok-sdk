@@ -57,10 +57,12 @@ import {
   publicJwk,
   toHex,
   vectorPlaintext,
+  type ChainFailureVector,
   type ChainVector,
   type CraftedOpenVector,
   type KeyPackageVector,
   type PlaintextFill,
+  type PolicyOpenVector,
   type SealedPayloadVectors,
   type SealedVector,
   type VectorKeyPair,
@@ -93,6 +95,7 @@ async function vectorMember(name: string): Promise<VectorMember> {
 
 const TENANT = 'tenant-1';
 const SCOPE = { id: 'scope-1', epoch: 1 } as const;
+const SEALING = { scopeId: SCOPE.id, epoch: SCOPE.epoch } as const;
 const PACKAGE_DOMAIN = 'byok-scope-key-package-v1\n';
 
 function frameContents(): string[] {
@@ -225,6 +228,7 @@ async function craftedVectors(scopeKey: Uint8Array, client: VectorMember, chainH
       defect,
       header,
       binding,
+      sealing: SEALING,
       ciphertext: nodeAesGcm(contentKey, nonce, sealedContentAad(header, binding), frame),
       maxContentLength: 1024,
       expect: expectReason,
@@ -274,6 +278,48 @@ async function chainVectors(client: VectorMember, device: VectorMember): Promise
     prev = hash;
   }
   return out;
+}
+
+async function policyVectors(sealed: readonly SealedVector[]): Promise<PolicyOpenVector[]> {
+  const offer = sealed.find((vector) => vector.name === 'c1-task-offer')!;
+  const routine = sealed.find((vector) => vector.name === 'routine-template')!;
+  const vector = (
+    source: SealedVector,
+    defect: PolicyOpenVector['defect'],
+    expectReason: PolicyOpenVector['expect'],
+    change: Partial<Pick<PolicyOpenVector, 'header' | 'binding' | 'sealing'>>,
+  ): PolicyOpenVector => ({
+    name: `policy-${defect}`,
+    defect,
+    header: source.header,
+    binding: source.binding,
+    sealing: source.sealing,
+    ciphertext: source.ciphertext!,
+    maxContentLength: source.maxContentLength,
+    expect: expectReason,
+    ...change,
+  });
+  const otherKeyId = await deriveScopeKeyId(labelBytes('other-scope-key'));
+  return [
+    vector(offer, 'key-id', 'sealed_key_unavailable', { header: { ...offer.header, scope: { ...offer.header.scope, keyId: otherKeyId } } }),
+    vector(offer, 'category-not-sealed', 'sealing_policy_mismatch', { binding: { ...offer.binding, categories: ['task-output'] } }),
+    vector(offer, 'scope-id', 'sealing_policy_mismatch', { sealing: { ...offer.sealing, scopeId: 'scope-2' } }),
+    vector(offer, 'epoch-below', 'sealing_policy_mismatch', { sealing: { ...offer.sealing, epoch: offer.header.scope.epoch + 1 } }),
+    vector(offer, 'categories-order', 'sealing_policy_mismatch', { binding: { ...offer.binding, categories: ['task-output', 'agent-message', 'task-input'] } }),
+    vector(routine, 'not-after-format', 'sealing_policy_mismatch', { binding: { ...routine.binding, notAfter: '2026-12-31T00:00:00Z' } }),
+  ];
+}
+
+function chainFailureVectors(chain: readonly ChainVector[], other: VectorMember): ChainFailureVector[] {
+  const [first, second] = chain as [ChainVector, ChainVector];
+  const sig = Buffer.from(second.entry.sig, 'base64url');
+  sig[63]! ^= 0x01;
+  return [
+    { name: 'chain-signature', defect: 'signature', signer: second.signer, entry: { ...second.entry, sig: sig.toString('base64url') }, expect: 'member_chain_signature_invalid' },
+    { name: 'chain-tenant', defect: 'tenant', signer: second.signer, entry: { ...second.entry, tenantId: 'tenant-2' }, expect: 'member_chain_signature_invalid' },
+    { name: 'chain-prev-rule', defect: 'prev-rule', signer: first.signer, entry: { ...first.entry, prev: second.hash }, expect: 'member_chain_entry_invalid' },
+    { name: 'chain-signer-key', defect: 'signer-key', signer: other.name, entry: second.entry, expect: 'member_chain_entry_invalid' },
+  ];
 }
 
 function rawPoint(pair: VectorKeyPair): Uint8Array {
@@ -360,6 +406,7 @@ async function buildVectors(): Promise<SealedPayloadVectors> {
       sender: input.sender.memberId,
       category: input.category,
       binding: input.binding,
+      sealing: SEALING,
       ...(input.plaintext === undefined ? {} : { plaintext: input.plaintext }),
       ...(input.plaintextFill === undefined ? {} : { plaintextFill: input.plaintextFill }),
       maxContentLength: input.maxContentLength,
@@ -375,7 +422,7 @@ async function buildVectors(): Promise<SealedPayloadVectors> {
   }
 
   return {
-    note: 'Sealed-payload v1 vectors (#654 E1a). Regenerate with BYOK_CORE_UPDATE_GOLDEN=1 bun run --filter @byok-sdk/core test. A diff in a deterministic field is a breaking change to the v1 format. Chain signatures and key packages are random at generation, so they are verify-only and change on every regeneration. All keys derive from public labels and are test values only.',
+    note: 'Sealed-payload v1 vectors (#654 E1a, E1b). Regenerate with BYOK_CORE_UPDATE_GOLDEN=1 bun run --filter @byok-sdk/core test. A diff in a deterministic field is a breaking change to the v1 format. Chain signatures and key packages are random at generation, so they are verify-only and change on every regeneration. All keys derive from public labels and are test values only.',
     padding: [4, 5, 256, 257, 512, 16383, 16384, 16385, 17408, 17409, 20017, 32768, 32769, 65536, 65537, 1_000_000, 4 + 0xffff_ffff]
       .map((frameLength) => ({ frameLength, paddedLength: sealedPaddedLength(frameLength) })),
     frames: frameContents().map((content) => ({ content, frame: toHex(encodeSealedFrame(fromHex(content))) })),
@@ -391,7 +438,9 @@ async function buildVectors(): Promise<SealedPayloadVectors> {
     members: [client, device, stranger],
     sealed,
     craftedOpenFailures: await craftedVectors(scopeKey, client, chainHead),
+    policyOpenFailures: await policyVectors(sealed),
     chain,
+    chainFailures: chainFailureVectors(chain, device),
     keyPackages: await keyPackageVectors(scopeKey, client, device, stranger),
   };
 }
@@ -497,6 +546,8 @@ function memberById(memberId: string): VectorMember {
   return found;
 }
 
+const CATEGORY_ORDER = ['task-input', 'agent-message', 'task-output', 'memory-projection'];
+
 const arrayBuffer = (bytes: Uint8Array): ArrayBuffer => new Uint8Array(bytes).buffer;
 
 async function hpkeOpenWith(pair: VectorKeyPair, pkg: ScopeKeyPackageV1): Promise<Buffer> {
@@ -525,7 +576,9 @@ describe('sealed-payload v1 vectors', () => {
       members: golden.members.length,
       sealed: golden.sealed.length,
       craftedOpenFailures: golden.craftedOpenFailures.length,
+      policyOpenFailures: golden.policyOpenFailures.length,
       chain: golden.chain.length,
+      chainFailures: golden.chainFailures.length,
       keyPackages: golden.keyPackages.length,
     });
     expect(counts.sealedRejections).toBeGreaterThanOrEqual(golden.sealed.length * 30);
@@ -536,6 +589,9 @@ describe('sealed-payload v1 vectors', () => {
     expect(golden.sealed.some((vector) => vector.binding.deviceId === null && vector.binding.notAfter !== null)).toBe(true);
     expect(golden.sealed.some((vector) => vector.header.paddedLength > 16_384)).toBe(true);
     expect(golden.craftedOpenFailures.map((vector) => vector.defect)).toEqual(['content-mac', 'padding-byte', 'padded-length', 'length-overflow', 'non-canonical-json']);
+    expect(golden.policyOpenFailures.map((vector) => vector.defect)).toEqual(['key-id', 'category-not-sealed', 'scope-id', 'epoch-below', 'categories-order', 'not-after-format']);
+    expect(new Set(golden.policyOpenFailures.map((vector) => vector.expect))).toEqual(new Set(['sealed_key_unavailable', 'sealing_policy_mismatch']));
+    expect(new Set(golden.chainFailures.map((vector) => vector.expect))).toEqual(new Set(['member_chain_entry_invalid', 'member_chain_signature_invalid']));
     expect(new Set(golden.keyPackages.map((vector) => vector.expect))).toEqual(
       new Set(['ok', 'key_package_open_failed', 'key_package_signature_invalid', 'key_package_invalid']),
     );
@@ -614,6 +670,36 @@ describe('sealed-payload v1 vectors against an independent oracle', () => {
         else if (oracleContentMac(oracleMacInput(vector.header.category, vector.binding, text)) !== vector.header.contentMac) defects.add('content-mac');
       }
       expect([...defects]).toEqual([vector.defect]);
+    }
+  });
+
+  it('policy failures carry exactly their defect', () => {
+    for (const vector of golden.policyOpenFailures) {
+      const categories: readonly string[] = vector.binding.categories;
+      const defects = new Set<string>();
+      if (vector.header.scope.keyId !== oracleKeyId(scopeKeyBytes)) defects.add('key-id');
+      if (!categories.includes(vector.header.category)) defects.add('category-not-sealed');
+      if (categories.some((category, index) => index > 0 && CATEGORY_ORDER.indexOf(categories[index - 1]!) >= CATEGORY_ORDER.indexOf(category))) {
+        defects.add('categories-order');
+      }
+      if (vector.sealing.scopeId !== vector.header.scope.id) defects.add('scope-id');
+      if (vector.header.scope.epoch < vector.sealing.epoch) defects.add('epoch-below');
+      if (vector.binding.notAfter !== null && new Date(vector.binding.notAfter).toISOString() !== vector.binding.notAfter) defects.add('not-after-format');
+      expect([...defects]).toEqual([vector.defect]);
+    }
+  });
+
+  it('chain failures carry exactly their defect', () => {
+    for (const vector of golden.chainFailures) {
+      const { sig, ...unsigned } = vector.entry;
+      const signer = golden.members.find((entry) => entry.name === vector.signer)!;
+      const input = Buffer.concat([Buffer.from('byok-member-chain-v1\n'), Buffer.from(oracleCanonical(unsigned), 'utf8')]);
+      let defect: string;
+      if ((unsigned.seq === 1) !== (unsigned.prev === null)) defect = 'prev-rule';
+      else if (signer.memberId !== unsigned.signer) defect = 'signer-key';
+      else if (oracleVerify(signer.signing, input, sig)) defect = 'none';
+      else defect = unsigned.tenantId === golden.chain[0]!.entry.tenantId ? 'signature' : 'tenant';
+      expect(defect).toBe(vector.defect);
     }
   });
 

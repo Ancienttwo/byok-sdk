@@ -359,7 +359,10 @@ export interface SealContentInput {
   readonly maxContentLength: number;
 }
 
-/** The salt and nonce of one seal. */
+/**
+ * The salt and nonce of one seal, for test vectors only.
+ * @internal Stripped from the published declarations.
+ */
 export interface SealedContentRandomness {
   readonly salt: Uint8Array;
   readonly nonce: Uint8Array;
@@ -380,6 +383,7 @@ export async function sealContent(input: SealContentInput): Promise<SealedConten
  * {@link sealContent} with a caller-chosen salt and nonce, for test vectors
  * only. The package root does not export it: a reused nonce under one content
  * key breaks AES-GCM.
+ * @internal Stripped from the published declarations.
  */
 export async function sealContentWithRandomness(input: SealContentInput, randomness: SealedContentRandomness): Promise<SealedContent> {
   const binding = parseBinding(input.binding);
@@ -423,9 +427,22 @@ export type SealedContentOpenFailure =
   | 'sealed_content_mac_mismatch'
   | 'sealing_policy_mismatch';
 
+/**
+ * An opened content, with the header that the AEAD authenticated. The caller
+ * reads `chainHead` and `sender` from it for the sender-view check (§7.3).
+ */
 export type SealedContentOpenResult =
-  | { readonly ok: true; readonly plaintext: JsonObject }
+  | { readonly ok: true; readonly plaintext: JsonObject; readonly header: SealedContentHeaderV1 }
   | { readonly ok: false; readonly reason: SealedContentOpenFailure };
+
+/** The task's frozen `sealing` scope (§6.2). Its `categories` are {@link SealedBinding.categories}. */
+export interface SealedScopePolicy {
+  readonly scopeId: string;
+  /** The lowest epoch the task accepts: the epoch of the offer's C1 content. */
+  readonly epoch: number;
+}
+
+const SealedScopePolicySchema = z.strictObject({ scopeId: NonEmptyStringSchema, epoch: PositiveIntegerSchema });
 
 export interface OpenSealedContentInput {
   /** The header as received. It is untrusted. */
@@ -433,7 +450,10 @@ export interface OpenSealedContentInput {
   readonly ciphertext: Uint8Array;
   /** The scope key the receiver holds for `header.scope`. */
   readonly scopeKey: Uint8Array;
+  /** Partly written by the Host (`sealing.categories`, `notAfter`), so it is untrusted too. */
   readonly binding: SealedBinding;
+  /** From the task's `sealing`, which the Host writes. Untrusted. */
+  readonly sealing: SealedScopePolicy;
   readonly maxContentLength: number;
 }
 
@@ -442,20 +462,32 @@ function failure(reason: SealedContentOpenFailure): SealedContentOpenResult {
 }
 
 /**
- * Open one sealed content, fail closed. In order: header shape; category within
- * the task's categories (`sealing_policy_mismatch`); key id of the held scope
- * key (`sealed_key_unavailable`); ciphertext length; AEAD under the rebuilt
- * AAD; the five frame checks; canonical JSON of a plain object (all
+ * Open one sealed content, fail closed. In order: a binding and a task scope
+ * that parse, the category within the task's categories, and the header scope
+ * equal to the task's scope at its epoch or later (all
+ * `sealing_policy_mismatch`); header shape (`sealed_open_failed`); key id of
+ * the held scope key (`sealed_key_unavailable`); ciphertext length; AEAD under
+ * the rebuilt AAD; the five frame checks; canonical JSON of a plain object (all
  * `sealed_open_failed`); and the content MAC (`sealed_content_mac_mismatch`).
- * There is no plaintext fallback, and nothing here throws for hostile bytes.
+ * There is no plaintext fallback, and nothing here throws for hostile input.
  */
 export async function openSealedContent(input: OpenSealedContentInput): Promise<SealedContentOpenResult> {
-  const binding = parseBinding(input.binding);
   assertMaxContentLength(input.maxContentLength);
+  const parsedBinding = SealedBindingSchema.safeParse(input.binding);
+  const parsedSealing = SealedScopePolicySchema.safeParse(input.sealing);
+  if (!parsedBinding.success || !parsedSealing.success) return failure('sealing_policy_mismatch');
+  const binding = parsedBinding.data;
+  const sealing = parsedSealing.data;
   const parsed = SealedContentHeaderV1Schema.safeParse(input.header);
   if (!parsed.success) return failure('sealed_open_failed');
   const header = parsed.data;
-  if (!binding.categories.includes(header.category)) return failure('sealing_policy_mismatch');
+  if (
+    !binding.categories.includes(header.category)
+    || header.scope.id !== sealing.scopeId
+    || header.scope.epoch < sealing.epoch
+  ) {
+    return failure('sealing_policy_mismatch');
+  }
   if ((await deriveScopeKeyId(input.scopeKey)) !== header.scope.keyId) return failure('sealed_key_unavailable');
   if (input.ciphertext.byteLength !== header.paddedLength + AEAD_TAG_BYTES) return failure('sealed_open_failed');
 
@@ -475,7 +507,7 @@ export async function openSealedContent(input: OpenSealedContentInput): Promise<
     if ((await contentMacOf(input.scopeKey, header.category, binding, plaintext.text)) !== header.contentMac) {
       return failure('sealed_content_mac_mismatch');
     }
-    return { ok: true, plaintext: plaintext.value };
+    return { ok: true, plaintext: plaintext.value, header };
   } finally {
     frame.fill(0);
   }

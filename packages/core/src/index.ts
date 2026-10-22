@@ -381,6 +381,7 @@ export type {
   SealedContentOpenFailure,
   SealedContentOpenResult,
   SealedDirection,
+  SealedScopePolicy,
 } from './sealed-payload/sealed-content';
 export { deriveScopeKeyId, generateScopeKey, openScopeKeyPackage, sealScopeKeyPackage } from './sealed-payload/scope-key';
 export type {

@@ -1411,7 +1411,7 @@ export type { AuthenticateDeviceAssertionDeps, AuthenticatedAssertion, Authentic
 export { PROVIDER_PROVISIONING_MAX_TTL_MS, PROVIDER_PROVISIONING_OPERATIONS, PROVIDER_PROVISIONING_REQUEST_VERSION, PROVIDER_PROVISIONING_SECRET_OPERATIONS, PROVIDER_SECRET_HPKE_INFO, PROVIDER_SECRET_HPKE_SUITE, PROVIDER_SECRET_MAX_BYTES, PROVIDER_SECRET_MAX_PADDED_BYTES, PROVIDER_SECRET_PAD_BLOCK_BYTES, ProviderProvisioningConfigV1Schema, ProviderProvisioningExpectedProfileSchema, ProviderProvisioningHeaderV1Schema, ProviderProvisioningIdentityRevisionSchema, ProviderProvisioningRequestV1Schema, SEALING_KEY_ID_LENGTH, SealedProviderSecretV1Schema, SealingKeyClaimV1Schema, SealingKeyIdSchema, SealingPublicJwkSchema, assertProviderProvisioningConfigDigest, deriveSealingKeyId, openProviderProvisioningSecret, parseProviderProvisioningRequest, providerProvisioningConfigDigest, providerProvisioningRequestDigest, providerSecretAadBytes, sealProviderProvisioningRequest, sealingKeyClaimCanonicalBytes, } from './sealed-provider-secret';
 export type { ProviderProvisioningConfigV1, ProviderProvisioningExpectedProfile, ProviderProvisioningHeaderV1, ProviderProvisioningOperation, ProviderProvisioningRequestV1, ProviderSecretRecipient, SealProviderProvisioningRequestInput, SealedProviderSecretV1, SealingKeyClaimV1, SealingPublicJwk, WebCryptoKey, } from './sealed-provider-secret';
 export { SEALED_CATEGORIES, SEALED_CONTENT_SUITE, SEALED_CONTENT_VERSION, SEALED_DIRECTIONS, SealedContentHeaderV1Schema, openSealedContent, sealContent, } from './sealed-payload/sealed-content';
-export type { OpenSealedContentInput, SealContentInput, SealedBinding, SealedCategory, SealedContent, SealedContentHeaderV1, SealedContentOpenFailure, SealedContentOpenResult, SealedDirection, } from './sealed-payload/sealed-content';
+export type { OpenSealedContentInput, SealContentInput, SealedBinding, SealedCategory, SealedContent, SealedContentHeaderV1, SealedContentOpenFailure, SealedContentOpenResult, SealedDirection, SealedScopePolicy, } from './sealed-payload/sealed-content';
 export { deriveScopeKeyId, generateScopeKey, openScopeKeyPackage, sealScopeKeyPackage } from './sealed-payload/scope-key';
 export type { OpenScopeKeyPackageInput, ScopeKeyPackageOpenResult, ScopeKeyPackageV1, SealScopeKeyPackageInput, } from './sealed-payload/scope-key';
 export { MEMBER_CHAIN_OPS, deriveMemberId, memberChainEntryHash, signMemberChainEntry, verifyMemberChainEntry, } from './sealed-payload/member-chain';
@@ -2447,11 +2447,6 @@ export interface SealContentInput {
     /** The plaintext limit of this message type, in UTF-8 bytes of canonical JSON. */
     readonly maxContentLength: number;
 }
-/** The salt and nonce of one seal. */
-export interface SealedContentRandomness {
-    readonly salt: Uint8Array;
-    readonly nonce: Uint8Array;
-}
 export interface SealedContent {
     readonly header: SealedContentHeaderV1;
     /** AES-256-GCM output: the padded frame followed by the 16-byte tag. */
@@ -2459,37 +2454,47 @@ export interface SealedContent {
 }
 /** Seal one category of a payload once. A retry must resend these bytes, never seal again (§9.2). */
 export declare function sealContent(input: SealContentInput): Promise<SealedContent>;
-/**
- * {@link sealContent} with a caller-chosen salt and nonce, for test vectors
- * only. The package root does not export it: a reused nonce under one content
- * key breaks AES-GCM.
- */
-export declare function sealContentWithRandomness(input: SealContentInput, randomness: SealedContentRandomness): Promise<SealedContent>;
 /** The receiver failure codes of design §8.3. */
 export type SealedContentOpenFailure = 'sealed_key_unavailable' | 'sealed_open_failed' | 'sealed_content_mac_mismatch' | 'sealing_policy_mismatch';
+/**
+ * An opened content, with the header that the AEAD authenticated. The caller
+ * reads `chainHead` and `sender` from it for the sender-view check (§7.3).
+ */
 export type SealedContentOpenResult = {
     readonly ok: true;
     readonly plaintext: JsonObject;
+    readonly header: SealedContentHeaderV1;
 } | {
     readonly ok: false;
     readonly reason: SealedContentOpenFailure;
 };
+/** The task's frozen `sealing` scope (§6.2). Its `categories` are {@link SealedBinding.categories}. */
+export interface SealedScopePolicy {
+    readonly scopeId: string;
+    /** The lowest epoch the task accepts: the epoch of the offer's C1 content. */
+    readonly epoch: number;
+}
 export interface OpenSealedContentInput {
     /** The header as received. It is untrusted. */
     readonly header: unknown;
     readonly ciphertext: Uint8Array;
     /** The scope key the receiver holds for `header.scope`. */
     readonly scopeKey: Uint8Array;
+    /** Partly written by the Host (`sealing.categories`, `notAfter`), so it is untrusted too. */
     readonly binding: SealedBinding;
+    /** From the task's `sealing`, which the Host writes. Untrusted. */
+    readonly sealing: SealedScopePolicy;
     readonly maxContentLength: number;
 }
 /**
- * Open one sealed content, fail closed. In order: header shape; category within
- * the task's categories (`sealing_policy_mismatch`); key id of the held scope
- * key (`sealed_key_unavailable`); ciphertext length; AEAD under the rebuilt
- * AAD; the five frame checks; canonical JSON of a plain object (all
+ * Open one sealed content, fail closed. In order: a binding and a task scope
+ * that parse, the category within the task's categories, and the header scope
+ * equal to the task's scope at its epoch or later (all
+ * `sealing_policy_mismatch`); header shape (`sealed_open_failed`); key id of
+ * the held scope key (`sealed_key_unavailable`); ciphertext length; AEAD under
+ * the rebuilt AAD; the five frame checks; canonical JSON of a plain object (all
  * `sealed_open_failed`); and the content MAC (`sealed_content_mac_mismatch`).
- * There is no plaintext fallback, and nothing here throws for hostile bytes.
+ * There is no plaintext fallback, and nothing here throws for hostile input.
  */
 export declare function openSealedContent(input: OpenSealedContentInput): Promise<SealedContentOpenResult>;
 // ==== @byok-sdk/core dist/sealed-provider-secret.d.ts ====

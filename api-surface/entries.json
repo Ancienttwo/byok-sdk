@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2101698,
+      "budgetBytes": 2102176,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -201,7 +201,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Task/device assertions; core includes protected Zod probes",
-      "budgetBytes": 174330,
+      "budgetBytes": 174808,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1219,7 +1219,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Cloud coordination and HTTP handlers",
-      "budgetBytes": 557376,
+      "budgetBytes": 557854,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1272,7 +1272,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 807219,
+      "budgetBytes": 807697,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1604,7 +1604,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Shared contracts and validation",
-      "budgetBytes": 149053,
+      "budgetBytes": 149531,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1679,7 +1679,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local provider credential custody",
-      "budgetBytes": 310944,
+      "budgetBytes": 311422,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1920,7 +1920,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 703285,
+      "budgetBytes": 703763,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2017,7 +2017,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 585636,
+      "budgetBytes": 586114,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2415,7 +2415,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Provider credential custody launcher",
-      "budgetBytes": 238325,
+      "budgetBytes": 238803,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

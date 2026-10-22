@@ -50,6 +50,8 @@ const BINDING: SealedBinding = {
   notAfter: null,
 };
 
+const SEALING = { scopeId: 'scope-1', epoch: 1 } as const;
+
 function sealInput(overrides: Partial<SealContentInput> = {}): SealContentInput {
   return {
     scopeKey: new Uint8Array(32).fill(3),
@@ -111,8 +113,8 @@ describe('sealContent', () => {
     expect(first.header.nonce).not.toBe(second.header.nonce);
     expect(first.header.contentMac).toBe(second.header.contentMac);
     for (const sealed of [first, second]) {
-      const opened = await openSealedContent({ ...sealed, scopeKey: sealInput().scopeKey, binding: BINDING, maxContentLength: 1024 });
-      expect(opened).toEqual({ ok: true, plaintext: { input: 'hello' } });
+      const opened = await openSealedContent({ ...sealed, scopeKey: sealInput().scopeKey, binding: BINDING, sealing: SEALING, maxContentLength: 1024 });
+      expect(opened).toEqual({ ok: true, plaintext: { input: 'hello' }, header: sealed.header });
     }
   });
 
@@ -146,8 +148,25 @@ describe('openSealedContent', () => {
   it('returns a typed failure for hostile headers and never throws', async () => {
     const sealed = await sealContent(sealInput());
     for (const header of [undefined, 'header', [], { ...sealed.header, salt: 'not base64url!' }, { ...sealed.header, paddedLength: 2 ** 60 }]) {
-      const opened = await openSealedContent({ header, ciphertext: sealed.ciphertext, scopeKey: sealInput().scopeKey, binding: BINDING, maxContentLength: 1024 });
+      const opened = await openSealedContent({ header, ciphertext: sealed.ciphertext, scopeKey: sealInput().scopeKey, binding: BINDING, sealing: SEALING, maxContentLength: 1024 });
       expect(opened).toEqual({ ok: false, reason: 'sealed_open_failed' });
+    }
+  });
+
+  it('returns sealing_policy_mismatch for a hostile binding or task scope and never throws', async () => {
+    const sealed = await sealContent(sealInput());
+    const open = (binding: unknown, sealing: unknown) => openSealedContent({
+      ...sealed,
+      scopeKey: sealInput().scopeKey,
+      binding: binding as SealedBinding,
+      sealing: sealing as typeof SEALING,
+      maxContentLength: 1024,
+    });
+    for (const binding of [null, { ...BINDING, categories: ['task-output', 'task-input'] }, { ...BINDING, notAfter: '2026-12-31T00:00:00Z' }]) {
+      expect(await open(binding, SEALING)).toEqual({ ok: false, reason: 'sealing_policy_mismatch' });
+    }
+    for (const sealing of [null, { scopeId: '', epoch: 1 }, { scopeId: 'scope-1', epoch: 0 }, { scopeId: 'scope-2', epoch: 1 }, { scopeId: 'scope-1', epoch: 2 }]) {
+      expect(await open(BINDING, sealing)).toEqual({ ok: false, reason: 'sealing_policy_mismatch' });
     }
   });
 });
