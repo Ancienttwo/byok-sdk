@@ -54,7 +54,7 @@ envelope 的字段（`packages/protocol/src/envelope.ts:22-41`）：
 | 字段 | 作用 | Host 怎样使用 |
 | --- | --- | --- |
 | `v` | 协议版本，必须等于 `PROTOCOL_VERSION`，现在是 3（`packages/protocol/src/version.ts:35`） | 版本门 |
-| `id` | envelope 的 UUID | inbound 去重。server → daemon 方向等于 mailbox 的 `message_id`（`packages/cloud/src/cloud.ts:1134-1135`、`:1987`） |
+| `id` | envelope 的 UUID | inbound 去重。server → daemon 方向，offer、审批和 steer 把 mailbox 的 `message_id` 用作 envelope id（`packages/cloud/src/cloud.ts:1134-1135`、`:1987`、`:1623`）。content ack 和消息 disposition 的 `message_id` 带命名空间前缀，与 envelope id 不同（`cloud.ts:1857-1859`、`:1890-1893`） |
 | `ts` | 带时区的时间 | 传输元数据 |
 | `type` | 消息类型 | 选择 payload schema；类型白名单；路由 |
 | `task_id` | task 身份 | 所有权、状态机、取消过滤 |
@@ -249,7 +249,7 @@ v1 的范围（§14 D17）：只交付 C1 和 C3，C2 按需开启。下面三�
 - 策略按 task 冻结。offer 带一个明文字段 `sealing`：`{ scopeId, epoch, categories }`。task 创建后它不再变化。这个 task 的每个 envelope 都按它处理。`epoch` 是 offer 里 C1 密文用的 epoch。之后的 envelope 用发送方封装时的当前 epoch，不低于它（§7.5、§13.5）。
 - 降级保护：C1 密文的 AAD 包含 `categories`（§8.2）。Host 不能保留用户的 C1 密文，同时把 C3 改成明文。offer 的策略与 AAD 不一致时，设备以 `sealing_policy_mismatch` 做非重试 decline。
 - 每个 scope 有一条成员签名的 `scope-policy`（§7.4）。设备拒绝策略低于它的 task。
-- `cloud-do` 托管执行器必须读明文。Host 不能把带 `sealing` 的 task 交给它。
+- `cloud-do` 托管执行器必须读明文。Host 不能把带 `sealing` 的 task 交给它。这是产品的义务：`cloud-do` 与托管 wire 没有连接点（§2.0），SDK 无法替产品检查。
 - AiphaBee 的建议配置：研究 scope 开启 C1 和 C3；研究任务发 Agent 消息时再开 C2；Bot 对话和 Bot 记忆保持明文。由 owner 确认（§14 D1、D3）。
 
 ### 6.3 Host 发起的 routine 任务
@@ -394,9 +394,10 @@ AiphaBee 自研的配对和 device grant，在 SDK 里对应 `/byok/pair` 和 `/
 - 明文是移走字段组成的对象的 canonical JSON，例如 `{ "instruction": "..." }`。
 - 内容密钥为 `HKDF-SHA-256(SK, salt, "byok-sdk.sealed.v1.enc")`。每条内容用新 salt，所以每个内容密钥只用一次。
 - 加密前先组帧：`frame = u32be(contentLength) || content || 0x00 × (paddedLength − 4 − contentLength)`。`content` 是明文对象的 canonical JSON 的 UTF-8 字节；blob 时是原始字节。`paddedLength` 是帧长，算法见 §8.6。
-- 接收端解密后检查两项：`contentLength ≤ paddedLength − 4`；填充字节全是 0。任何一项不符，按 `sealed_open_failed` 拒绝。帧在 AEAD 之内，所以原长和填充都受认证。同一份密文只有一种解码结果。
+- 接收端解密后检查五项：解密得到的帧长等于 `paddedLength`；`contentLength ≤ paddedLength − 4`；`paddedLength = pad(4 + contentLength)`（§8.6）；填充字节全是 0；`contentLength` 不超过这个消息类型的明文上限。任何一项不符，按 `sealed_open_failed` 拒绝。
+- 帧在 AEAD 之内，所以原长和填充都受认证。帧是规范的：同一内容只有一个合法的 `paddedLength`，同一份密文只有一种解码结果。发送方不能用 `paddedLength` 另带信息，同一内容的两次提交也不会因长度不同被判为冲突（§9.2）。
 - `ciphertext` 与 `ciphertextRef` 二选一。`paddedLength` 超过 256 KiB 时用 `ciphertextRef`（§8.6）。
-- blob 里的内容先按同一规则封装字节，再上传。`BlobRef` 放进加密的内层对象。
+- 协议字段里的 blob（例如 `instruction.blobRef`、artifact）先按同一规则封装字节，再上传。blob 自己的 `salt`、`nonce` 和 `paddedLength` 与 `BlobRef` 一起放进加密的内层对象。blob 的 AAD 是外层的 AAD 加上字段路径，例如 `instruction`，所以 Host 不能在字段之间互换 blob。
 
 ### 8.2 AAD
 
@@ -444,13 +445,20 @@ Host 用这些字段运行现有的 claim、所有权、能力、去重、取消
 ### 8.6 长度上限、填充与大内容
 
 - 发送方先按今天的上限检查明文。
-- 帧长 `paddedLength` 由帧的原长 `n = 4 + contentLength` 决定：
+- 帧长 `paddedLength = pad(n)`，其中 `n = 4 + contentLength` 是帧的原长：
   - `n ≤ 16 KiB`：向上取 256 字节的整数倍。
-  - `n > 16 KiB`：用 Padmé 填充。`E = floor(log2 n)`，`S = floor(log2 E) + 1`，`mask = 2^(E − S) − 1`，`paddedLength = (n + mask) & ~mask`。在这个区间，多出的字节少于 6.25%，长度只透露 O(log log n) 位。
-- 第一版写的是「更大时取 2 的幂」。这会让最大的终态发不出去：`task.complete` 的 `summary` 和 `finalMessage` 没有 schema 上限（`packages/protocol/src/messages.ts:1196-1207`），`document` 最多 1 MiB（`messages.ts:962`）。三项合起来稍过 1 MiB 时，2 的幂填充到 2 MiB，base64url 之后约 2.7 MiB，超过 `POST /byok/messages` 的 2 MiB 上限（`packages/cloud/src/handlers/messages.ts:87`）。今天能发出的终态，加密后会被拒绝。
-- 大内容放进 blob。`paddedLength` 超过 256 KiB 时，发送方把密文作为 blob 上传，`sealed` 里用 `ciphertextRef`（指向密文字节的 `BlobRef`）代替 `ciphertext`。256 KiB 等于 Agent 消息的上限（`packages/protocol/src/agent-egress.ts:18`）。每个加密 envelope 因此远小于批次上限，大内容也不再付 base64url 的 33%。
-- `ciphertextRef` 的 blob 由引用它的行持有。保留和删除与今天的 blob 引用相同（§2.2 的 R2 一行）。
+  - `n > 16 KiB`：用 Padmé 填充。`E = floor(log2 n)`，`S = floor(log2 E) + 1`，`mask = 2^(E − S) − 1`，`pad(n) = (n + mask) & ~mask`。在这个区间，多出的字节少于 6.25%，长度只透露 O(log log n) 位。
+- 选 Padmé 的理由是开销。第一版的 2 的幂桶最多多出 100%，而填充字节计入 mailbox 配额和 blob 配额（§12.3）。
+- 大内容放进 blob。`paddedLength` 不超过 256 KiB 时，密文内联在 `ciphertext` 里。超过时，发送方把密文作为 blob 上传，`sealed` 里用 `ciphertextRef`（指向密文字节的 `BlobRef`）代替 `ciphertext`。schema 强制这条规则。256 KiB 等于 Agent 消息的上限（`packages/protocol/src/agent-egress.ts:18`）。
+- 第一版只允许内联密文，最大的终态会因此发不出去。`task.complete` 的 `summary` 和 `finalMessage` 没有 schema 上限（`packages/protocol/src/messages.ts:1196-1207`），`document` 最多 1 MiB（`messages.ts:962`）。base64url 让内联密文大 33%。不填充时，约 1.5 MiB 的明文就超过 `POST /byok/messages` 的 2 MiB 上限（`packages/cloud/src/handlers/messages.ts:87`）。用 2 的幂桶时，稍过 1 MiB 就超过。`ciphertextRef` 解决这个问题，与填充方式无关。
+- `ciphertextRef` 的规则：
+  - Host 接受 envelope 时检查：blob 已经 committed，大小等于 `paddedLength + 16`。schema 看不到 blob 的大小，所以这一步由 Host 做。
+  - 引用它的每一行（receipt、outbox、admission、egress、attested record）都写一条 `object_reference`。今天没有任何 task 行引用 blob：云端只在 truth 提交时写引用（`packages/cloud-dataplane/src/truth-committer.ts:596`）。没有引用的 committed 对象在 24 小时宽限后被回收（`packages/cloud-dataplane/src/stores/core/objects.ts:115-118`；`packages/cloud/src/maintenance.ts:19`）。不写引用，终态正文一天后就会消失，而指向它的 receipt 永不过期。
+  - 这条引用只由 scoped row-delete（§11.3）或 tenant erasure 释放。crypto-shredding 不改行，所以不释放它。
+  - 发送方的持久 outbox（§9.2）保存上传后的 `ciphertextRef`。重试复用同一个 blob，不重新封装。
+  - `ciphertextRef` 不进 AAD。它的 hash 覆盖密文，绑定它会形成循环。也不需要绑定：AEAD 已把密文绑定到身份，换掉 blob 就打不开。
 - Host 的上限改为对外层计算：内联时是 `base64url(paddedLength + 16)` 加外层字段的上限；用 `ciphertextRef` 时是 blob 的大小上限。
+- 批次要按字节分块。daemon 今天只按条数分块，每批最多 256 个 envelope（`packages/client/src/daemon/connection-manager.ts:458`）。服务端对超过 2 MiB 的请求返回 413（`packages/cloud/src/handlers/messages.ts:154-155`）。内联密文的 base64url 之后最多约 342 KiB，约 6 个就到 2 MiB。E3 让 drain 同时按字节分块。
 - Agent 消息的 `byteCount` 不再明文出现。Host 用 `paddedLength` 检查 `maxBytes` 的桶上限，精确检查由接收方做。
 
 ## 9. 密文上的幂等（任务 5）
@@ -503,17 +511,21 @@ MAC 只依赖 scope、epoch、类别、消息族、身份和明文，与 salt �
 | `artifact.projection.digest`；`counter.providerEvidence.projectionDigest` | 同一回执（`input-preparation.ts:523`、`:443`） | provider 请求体的投影 P(D) | keyed MAC |
 | offer binding 的 `requestDigest`、`artifactDigest` | `task.offer_prepared`，Host 原样回传（`input-preparation.ts:656-662`） | 上面两个值的副本 | 跟随原值 |
 | `preparedObservation.requestDigest` | `task.complete` 与 `task.fail` 的终态（`packages/protocol/src/messages.ts:1103-1105`） | 同 `artifact.requestDigest` | keyed MAC |
-| 记忆文件的 `revision`、`baseRevision` | 记忆 intent 的请求与回执（`packages/protocol/src/agent-memory-intent.ts:46-49`、`:109-110`） | 记忆文件的字节（C4） | keyed MAC |
+| 观察到的 `revision`；intent 的 `baseRevision`、`targetRevision` 和 `operationDigest` | 记忆 intent 的回执与请求（`packages/protocol/src/agent-memory-intent.ts:169-173`、`:109-113`） | 设备上记忆文件的字节；`targetRevision` 是 Host 写的正文的摘要；`operationDigest` 覆盖两个 revision（`packages/core/src/agent-memory-intent.ts:20-31`） | v2 设计 C4 时确定 |
+| 输入准备 blob context 的 `contentHash` | `agent.input.preparation`（`packages/protocol/src/messages.ts:679-680`） | blob 字节，设备用它核对解码后的字节 | 密文的 SHA-256，与 blob 规则相同 |
 
 输入准备和 C4 在 v1 不开放（§6.1），所以这几行在 v2 生效。v1 的加密 task 不会是 prepared offer，终态也不会带 `preparedObservation`。
 
-规则（§14 D16）：加密类别里，对内容计算的摘要只能取下面三种形式之一。
+记忆 intent 的正文由 Host 写出，按作者规则保持明文（§6.1）。但 `revision` 和 `baseRevision` 是设备上整个文件的摘要，文件里可能有设备写入的内容。v2 开启 C4 时，要一起决定这几个字段和终态里 `agentHomeMemoryChange.paths`（改动过的记忆文件路径）的处理。
+
+规则（§14 D16）：加密类别里，每个摘要字段都归入下面四类之一。
 
 1. 密文的 SHA-256。Host 要校验它存下的字节时用，例如 blob key、truth `content_hash` 和 `redactedHash`。
 2. keyed MAC：`HMAC-SHA-256(K_mac, 域分隔串 || 身份 || 内容)`。`K_mac` 与 §9.1 相同，每个字段用自己的域分隔串。两端要比较相等时用。Host 只原样转交。
 3. 移进密文。只有端点用到它时用。
+4. 不由内容推出的摘要，保持明文。例如 `toolManifestDigest`、`toolBindingDigest`、`closureDigest`、`profileRevision`。
 
-§8.3 的划分表为每个加密消息类型列出摘要字段和它的规则。E3 加一个 schema 测试：加密消息类型里，名字含 `Digest`、`Hash` 或 `revision` 的字段，都必须出现在划分表里。
+§8.3 的划分表为每个加密消息类型列出全部摘要字段和它的类别。E3 加一个 schema 测试：加密消息类型里，名字含 `digest`、`hash` 或 `revision` 的字段（不区分大小写），都必须在划分表里归入一类。
 
 device proof 的 `bodySha256`（`packages/core/src/attestation.ts:190`）对整个 HTTP 请求体求摘要。truth 正文加密之后，它的输入已是密文，不用改。
 
@@ -526,6 +538,7 @@ device proof 的 `bodySha256`（`packages/core/src/attestation.ts:190`）对整�
 ### 10.2 加密后的输入
 
 - 开启 C2 的 task，`consume` 收到另一种输入。它没有 `body`，带 `sealed`、`contentMac`、`paddedLength`、`contentType`、`contract`、`messageId`、`cursor`、`agentRef`、`sessionRef` 和冻结上下文。类型上与明文输入分开，产品代码不能把密文当正文用。
+- `sealed` 里是 `ciphertext` 或 `ciphertextRef`（§8.6）。接近上限的 Agent 消息填充后约 264 KiB，总是走 `ciphertextRef`。产品存密文时，要么存 `BlobRef` 并为它写引用，要么把 blob 字节复制进自己的存储。
 - 产品要显式声明能处理加密消息。三条写 Agent 消息 offer 的路径都检查这个声明：`submitAgentExecution`、`enqueuePreparedOffer` 和 `enqueueAgentEgressOffer`。没有声明时，它们拒绝开启 C2 的 offer。今天只有 `submitAgentExecution` 检查有没有 `consume`（`cloud.ts:1940-1942`），另外两条不检查（`cloud.ts:2021-2047`）。
 - inbound 再检查一次，因为 offer 和 `POST /byok/messages` 可以在不同的部署上运行。加密消息到达时，如果没有能处理加密输入的 consumer，Host 走今天的无 consumer 路径：新 reservation 记 `held`，原因代码是 `consumer_unavailable`（`inbound.ts:278-282`）。明文 consumer 收不到密文输入。
 - 产品的去重键改为 `(tenant, device, task, agentRef, messageId, contentMac)`。
@@ -644,7 +657,7 @@ identity receipt 是防重放的 fence，同时保存了正文，而且永不过
 - E1 字节规则：`@byok-sdk/core` 的封装对象、AAD、MAC、成员链条目、key package 和测试向量。同一组向量在 Chromium、WebKit、Gecko、Node 和 Bun 上运行。
 - E2 成员与密钥：daemon 的成员密钥托管和配对验证秘密；客户端参考库；成员链校验；key package 通知；客户端丢失密钥后的重新批准（§7.8）。
 - E3 wire 与存储：划分表、两个能力门、Host 的比较投影和长度上限。memory、SQLite 和 Postgres 三种 store 一起修改。routine 模板的 `routineRef`、比较投影和设备校验也在这一片（§6.3）。填充帧、`ciphertextRef` 和摘要规则的 schema 测试也在这一片（§8.6、§9.3）。
-- E4 读写接口：`consume` 的加密输入；读接口返回密文；对加密任务拒绝草稿；拒绝把加密任务交给 `cloud-do`。
+- E4 读写接口：`consume` 的加密输入；读接口返回密文；对加密任务拒绝草稿；文档写明产品不能把加密任务交给 `cloud-do`。
 - E5 删除：crypto-shredding 流程；Workers 上的 scoped row-delete。明文行的 scoped row-delete 不依赖 E1 到 E4，可以先交付；加密行的部分随 E3 一起做。
 - E6 conformance 与文档：把 S0 的 canary 清单改为加密类别零命中；在 `docs/security.md` 补加密后的威胁模型（#654 需求 6）；同步 spec 和 protocol。
 
@@ -691,7 +704,7 @@ identity receipt 是防重放的 fence，同时保存了正文，而且永不过
 | AEAD 失败、帧检查失败，或 `ciphertextRef` 的 blob 缺失 | 接收端 | `sealed_open_failed` | 拒绝这条内容 |
 | MAC 与内容不符 | 接收端 | `sealed_content_mac_mismatch` | 拒绝这条内容 |
 | `sealing` 与 AAD 或 `scope-policy` 不符 | 设备 | `sealing_policy_mismatch`，非重试 decline（§6.2） | Host 的降级被挡住 |
-| 同一身份跨 epoch 重试 | Host | MAC 不同，返回 `coordination_input_invalid`（§9.2） | 发送方必须重发第一次的字节 |
+| 同一身份跨 epoch 重试 | Host | MAC 不同，按冲突处理。offer 返回 `coordination_input_invalid`，其他身份用各自现有的冲突代码（§9.2） | 发送方必须重发第一次的字节 |
 | task 运行中有成员被移除 | 设备 | 封装输出前检查链，按 §7.5 轮换到新 epoch 再封装。已发出的密文不变 | 被移除方读不到之后的输出 |
 | Host 扣留成员链的 `remove` | 签署 `remove` 的成员 | 从后续内容 AAD 的链头和 epoch 发现，提示用户（§7.6） | 被撤销方可能读到扣留期间的内容 |
 | 浏览器丢失成员密钥 | 浏览器 | 由设备或另一个客户端重新批准，重发 key package（§7.8） | 一次重新批准。浏览器里未确认的待提交密文丢失 |
@@ -699,8 +712,9 @@ identity receipt 是防重放的 fence，同时保存了正文，而且永不过
 | 被撤销的设备一直离线 | — | 无法清除它的密钥（§5.4） | 它仍能读旧 epoch 的内容 |
 | routine 模板过了 `notAfter`，或与 offer 不符 | 设备 | 非重试 decline（§6.3） | 这次执行不运行 |
 | 产品没有声明能处理加密消息 | Host | 拒绝开启 C2 的 offer。inbound 记 `held`，原因是 `consumer_unavailable`（§10.2） | 消息不交给产品 |
-| 加密 task 被交给 `cloud-do` | Host | 拒绝（§6.2） | — |
-| 加密内容超过批次上限 | 发送方 | `paddedLength` 超过 256 KiB 时走 `ciphertextRef`（§8.6） | 不会超限 |
+| 加密 task 被交给 `cloud-do` | 产品 | 产品的义务是不这样做。SDK 无法检查（§6.2） | 明文进入 DO 存储 |
+| `ciphertextRef` 的 blob 没有引用 | — | E3 为引用它的行写 `object_reference`（§8.6） | 不写时，blob 一天后被回收，正文丢失 |
+| 一批 envelope 超过 2 MiB | 服务端 | 返回 413（`packages/cloud/src/handlers/messages.ts:154-155`）。E3 让 drain 按字节分块（§8.6） | 分块之前，这一批发不出去 |
 
 ### 13.6 0.28.3 的首个切片
 
@@ -709,7 +723,12 @@ identity receipt 是防重放的 fence，同时保存了正文，而且永不过
 建议 0.28.3 只交付 S0。S0 不改 wire、API、依赖或 SQL：
 
 - S0-a 文档：在 `docs/security.md` 加「托管 surface 的威胁模型」一节，写今天的状态。按数据类别列出 Host 的运营方、Postgres、R2、日志和备份能读到什么，以及每类数据怎样删除。内容取自 §2.0、§2.2 和 hosted Host contract 第 6 节。这是 #654 需求 6 的现状部分。
-- S0-b 测试：canary 明文清单。它放在 `cloud-dataplane` 的真实 Postgres 加 S3 测试里（`packages/cloud-dataplane/src/__tests__/support/dataplane.ts`）。用一段 canary 跑通配对、任务下发、结果回传、Agent 消息和记忆投影。然后按 `TENANT_ERASURE_TABLES` 扫描每个表、每个列和每个对象，查找 canary 的 UTF-8、JSON 转义、base64、base64url 和 hex 形式。测试有一份期望清单，它断言两件事：扫描命中的 `(表, 列)` 集合等于清单；`docs/security.md` 的表格列出同一个集合。以后新增存内容的列而不更新清单和文档，测试就失败。E6 只把加密类别的期望改为零命中，扫描代码不变。这是 #654 需求 5 的测量部分。
+- S0-b 测试：canary 明文清单。它放在 `cloud-dataplane` 的真实 Postgres 加 S3 测试里（`packages/cloud-dataplane/src/__tests__/support/dataplane.ts`）。用一段 canary 跑通配对、任务下发、结果回传、Agent 消息和记忆投影。然后扫描每个表、每个列和每个对象。
+  - 表清单用 tenant erasure 的同一个查询从 `pg_class` 读出（`packages/cloud-dataplane/src/tenant-erasure.ts:266-284`），不用常量。新表因此也会被扫描。
+  - 查找 canary 的 UTF-8、JSON 转义和 hex 形式。base64 和 base64url 形式按三种字节偏移各生成一次；也可以先解码能解码的列，再查找。
+  - 测试有一份期望清单，它断言两件事：扫描命中的 `(表, 列)` 集合等于清单；`docs/security.md` 的表格列出同一个集合。以后新增存内容的列而不更新清单和文档，测试就失败。
+  - 摘要列不会命中 canary。`docs/security.md` 把它们单独列出（§9.3）。
+  - E6 只把加密类别的期望改为零命中，扫描代码不变。这是 #654 需求 5 的测量部分。
 
 S0-b 是已有测试目录里的一个新文件，预计不改 CI 映射。实现时在 PR 里确认。
 
@@ -719,9 +738,9 @@ S0-b 是已有测试目录里的一个新文件，预计不改 CI 映射。实�
 
 | 切片 | 等待的原因 |
 | --- | --- |
-| E1 字节规则 | 依赖 D2（AAD 里的成员身份和链头）、D7、D8、D10、D12。字节格式发布以后很难再改。决定之后可以开工，随 E3 一起发布 |
+| E1 字节规则 | 依赖 D2（AAD 里的成员身份和链头）、D7、D8、D10、D12、D16。字节格式发布以后很难再改。决定之后可以开工，随 E3 一起发布 |
 | E2 成员与密钥 | 依赖 D2、D4、D5、D13。配对体验会变 |
-| E3 wire 与存储 | 双向 gated addition，是 wire 改动。memory、SQLite、Postgres 三种 store 要一起改 |
+| E3 wire 与存储 | 依赖 D7、D8、D16、D17。双向 gated addition，是 wire 改动。memory、SQLite、Postgres 三种 store 要一起改 |
 | E4 读写接口 | 依赖 D11。`consume` 和读接口的形状会变 |
 | E5 后半：crypto-shredding | 依赖 D5、D6 和 E2 |
 | E6 零命中与文档 | 依赖 E1–E4 |
@@ -741,7 +760,7 @@ S0-b 是已有测试目录里的一个新文件，预计不改 CI 映射。实�
 | D5 | key package 保留方式 | 长期保留，shred 后成员轮换 KEM 密钥；只在投递窗口内保留 | 长期保留。它支持多设备和重装后恢复 |
 | D6 | 删除 | crypto-shredding 加 Workers 上的 scoped row-delete；明文类别也用 Host 持有的密钥做 shredding | 前者。明文行的 row-delete 可以先于 E1 交付。Workers 上的整 tenant erasure 另开 issue |
 | D7 | wire 版本 | v3 内的双向 gated addition；升到 v4 | v3 内的 gated addition |
-| D8 | 填充与大内容 | 长度前缀帧，16 KiB 以内 256 字节对齐、以上用 Padmé，超过 256 KiB 走 `ciphertextRef`；第一版的 2 的幂桶；固定桶；不填充 | 第一项（§8.1、§8.6）。2 的幂桶会让最大的终态超过 2 MiB 的批次上限 |
+| D8 | 填充与大内容 | 长度前缀帧，16 KiB 以内 256 字节对齐、以上用 Padmé，超过 256 KiB 走 `ciphertextRef`；第一版的 2 的幂桶，只能内联；固定桶；不填充 | 第一项（§8.1、§8.6）。Padmé 的开销少于 6.25%，2 的幂桶最多 100%。只能内联时，最大的终态超过 2 MiB 的批次上限 |
 | D9 | 加密任务的草稿 | v1 拒绝；加密帧追加日志 | v1 拒绝 |
 | D10 | 多用户 tenant 与发送方认证 | v1 只支持单用户 scope；每条内容加发送方签名 | v1 只支持单用户 scope |
 | D11 | `consume` 的形状 | 独立的加密输入加显式声明；同一函数加判别字段 | 独立输入加显式声明 |
@@ -755,7 +774,7 @@ S0-b 是已有测试目录里的一个新文件，预计不改 CI 映射。实�
 
 ### 14.1 请 owner 回答的问题
 
-AiphaBee 已同意 D1–D14 的建议（PR #685 的评论）。D15 按 AiphaBee 的选择写入。下面的问题请 owner 以 SDK 维护者的身份回答。
+AiphaBee 已同意第一版 D1–D14 的建议（PR #685 的评论）。第二版改了 D8 和 D14 的建议，要请 AiphaBee 再确认。D15 按 AiphaBee 的选择写入。下面的问题请 owner 以 SDK 维护者的身份回答。
 
 1. D1、D3–D7、D9–D13、D15：是否把这些建议定为 SDK 的决定？
 2. D2：信任锚是否用随配对码携带的 128 位验证秘密 `pv`？代价是配对时要传一长串或扫二维码。
