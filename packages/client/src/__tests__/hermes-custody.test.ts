@@ -129,28 +129,40 @@ describe('Hermes separate credential custody', () => {
     const child = spawn(process.execPath, [f.launcher, '--hermes-custody-request', JSON.stringify(request)], { stdio: ['pipe', 'ignore', 'ignore'] });
     const exited = new Promise<number | null>(resolve => child.once('exit', resolve));
     const rows = async () => f.read().catch(() => [] as Array<{ kind: string; role?: string }>);
-    await expect.poll(async () => (await rows()).some(row => row.kind === 'launcher'), { timeout: 10_000 }).toBe(true);
-    // Time for the launcher to read the profile and the fake key, then wait.
-    await new Promise(resolve => setTimeout(resolve, 500));
+    try {
+      await expect.poll(async () => (await rows()).some(row => row.kind === 'launcher'), { timeout: 10_000 }).toBe(true);
+      // Time for the launcher to read the profile, then wait.
+      await new Promise(resolve => setTimeout(resolve, 500));
+    } catch (error) {
+      child.kill();
+      throw error;
+    }
     const started = async () => (await rows()).some(row => row.kind === 'hermes' && row.role === 'viewer');
     return { child, exited, started };
   }
 
   it('starts Hermes only after the adapter adopts the launcher', async () => {
     const launched = await startLauncher(await setup());
-    expect(await launched.started()).toBe(false);
-    launched.child.stdin!.write('\n');
-    await expect.poll(launched.started, { timeout: 10_000 }).toBe(true);
-    launched.child.stdin!.end();
-    launched.child.kill();
-    await launched.exited;
+    try {
+      expect(await launched.started()).toBe(false);
+      launched.child.stdin!.write('\n');
+      await expect.poll(launched.started, { timeout: 10_000 }).toBe(true);
+      launched.child.stdin!.end();
+    } finally {
+      launched.child.kill();
+      await launched.exited;
+    }
   }, 30_000);
 
   it('does not start Hermes when the adapter ends the launcher input before adoption', async () => {
     const launched = await startLauncher(await setup());
-    launched.child.stdin!.end();
-    expect(await launched.exited).toBe(1);
-    expect(await launched.started()).toBe(false);
+    try {
+      launched.child.stdin!.end();
+      expect(await launched.exited).toBe(1);
+      expect(await launched.started()).toBe(false);
+    } finally {
+      launched.child.kill();
+    }
   }, 30_000);
 
   it('rejects stale exact binding during admission without launching Hermes', async () => {
