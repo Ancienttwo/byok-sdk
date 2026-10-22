@@ -14,6 +14,18 @@
   Concurrent Hermes root initialization retries the
   `config.yaml` rename that Windows refuses (EPERM). Real-provider and real
   Windows Hermes runs are still open (#608).
+- **Fixed (client)** — a single-pass esbuild CommonJS bundle of the client
+  root now builds and runs the Pi host (#701). Before, esbuild stopped with
+  "Top-level await is currently not supported with the cjs output format".
+  The vendored pi-subagents entry `index.ts` used a top-level `await import()`.
+  It now loads the parent extension inside its async factory, which Pi
+  awaits. The `PI_SUBAGENT_CHILD` skip is unchanged. The source manifest
+  records this delta. A CJS bundle that runs Pi must also define
+  `import.meta.url` from `__filename`, because Pi reads it when it evaluates.
+  The client README and the SEA recipe README give the esbuild options.
+  A new fixture in `pi-single-file-bundle.test.ts` runs a real Pi print session
+  from a single-pass CJS bundle. It covers the ordinary host, the sealed-host
+  redirect and a subagent child.
 
 ## 0.28.2 — source candidate
 

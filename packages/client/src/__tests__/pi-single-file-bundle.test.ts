@@ -400,3 +400,87 @@ await response.arrayBuffer();
     }
   }, 15_000);
 });
+
+/**
+ * #701: a Host that bundles its whole CLI as one CommonJS file in a single
+ * esbuild pass (no ESM pass first). The bundle must load the Pi host and run a
+ * real print session through the SDK-reserved helper, with no redirect or with
+ * the sealed redirect. The subagents factory then loads its parent extension
+ * lazily, so the provider request carries the subagent tools, except in a
+ * subagent child. CommonJS output has no `import.meta`; Pi reads
+ * `import.meta.url` when it evaluates, so the Host defines it from `__filename`.
+ */
+const CJS_ENTRY_SOURCE = `
+import { runSdkReservedHelperCommand } from ${JSON.stringify(CLIENT_DIST)};
+runSdkReservedHelperCommand(process.argv.slice(2)).then(handled => {
+  if (!handled) throw new Error('not an SDK helper invocation');
+}).catch(error => { console.error(error); process.exitCode = 1; });
+`;
+const SEALED_HOST = fileURLToPath(new URL('../../dist/bin/pi-runtime-host-sealed.js', import.meta.url));
+
+describe('Pi host — single-pass CommonJS product bundle (#701)', () => {
+  it.each([
+    ['the ordinary host', undefined, {}, true],
+    ['the sealed host redirect', SEALED_HOST, {}, true],
+    ['the ordinary host in a subagent child', undefined, { PI_SUBAGENT_CHILD: '1' }, false],
+  ] as const)('runs a Pi print session from %s', async (_name, redirect, childEnv, subagentTools) => {
+    const { build } = await import('esbuild');
+    const release = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-cjs-release-')));
+    const toolNames: string[][] = [];
+    const provider = createServer((request, response) => {
+      let body = '';
+      request.on('data', bytes => { body += String(bytes); });
+      request.on('end', () => {
+        const tools = (JSON.parse(body) as { tools?: { function: { name: string } }[] }).tools ?? [];
+        toolNames.push(tools.map(tool => tool.function.name));
+        response.writeHead(503).end();
+      });
+    });
+    await new Promise<void>(resolve => provider.listen(0, '127.0.0.1', resolve));
+    try {
+      await fs.writeFile(path.join(release, 'entry.mjs'), CJS_ENTRY_SOURCE);
+      let redirects = 0;
+      const result = await build({
+        entryPoints: [path.join(release, 'entry.mjs')], outfile: path.join(release, 'entry.cjs'),
+        bundle: true, platform: 'node', format: 'cjs', metafile: true, logLevel: 'silent',
+        define: { 'import.meta.url': '__product_import_meta_url' },
+        banner: { js: "const __product_import_meta_url = require('node:url').pathToFileURL(__filename).href;" },
+        plugins: redirect === undefined ? [] : [{ name: 'sealed-host-author', setup(builder) {
+          builder.onResolve({ filter: /^#byok-pi-runtime-host$/ }, () => { redirects++; return { path: redirect }; });
+        } }],
+      });
+      expect(result.errors).toEqual([]);
+      expect(redirects).toBe(redirect === undefined ? 0 : 1);
+      const hosts = Object.keys(result.metafile.inputs).map(input => path.basename(input)).filter(name => name.startsWith('pi-runtime-host'));
+      expect(hosts).toEqual([redirect === undefined ? 'pi-runtime-host.js' : 'pi-runtime-host-sealed.js']);
+      await fs.rm(path.join(release, 'entry.mjs'));
+
+      const sdk = await import(CLIENT_DIST) as typeof import('../index');
+      const assetRoot = path.join(release, 'assets');
+      await sdk.copyPiRuntimeAssets({ outDir: assetRoot, form: 'interpreter+bundle' });
+      const agentDir = path.join(release, 'agent');
+      await fs.mkdir(agentDir);
+      const model = { id: 'glm-4.6', name: 'Synthetic GLM 4.6 fixture', reasoning: false, input: ['text'],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 8192, maxTokens: 1024 };
+      const providerUrl = `http://127.0.0.1:${(provider.address() as { port: number }).port}/v1`;
+      await fs.writeFile(path.join(agentDir, 'models.json'), JSON.stringify({ providers: { zai: {
+        api: 'openai-completions', baseUrl: providerUrl, apiKey: 'synthetic-loopback-only', models: [model] } } }));
+      await fs.writeFile(path.join(agentDir, 'settings.json'), JSON.stringify({
+        defaultProvider: 'zai', defaultModel: 'glm-4.6', retry: { enabled: false } }));
+
+      const env = { ...childEnv, PATH: process.env.PATH ?? '', HOME: release, TMPDIR: release,
+        PI_CODING_AGENT_DIR: agentDir, PI_PACKAGE_DIR: assetRoot };
+      await execFileAsync(process.execPath,
+        [path.join(release, 'entry.cjs'), '__byok_sdk_helper', 'pi-subagent-print', '--mode', 'json', 'Say hi'],
+        { cwd: release, env, timeout: 30_000 });
+      expect(toolNames.length).toBeGreaterThan(0);
+      for (const names of toolNames) {
+        expect(names).toContain('read');
+        expect(names.includes('subagent')).toBe(subagentTools);
+      }
+    } finally {
+      await new Promise<void>(resolve => provider.close(() => resolve()));
+      await fs.rm(release, { recursive: true, force: true });
+    }
+  }, 60_000);
+});

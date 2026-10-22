@@ -360,6 +360,12 @@ export function selectImpact(paths, context = {}) {
     if (/^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:PROVENANCE\.md|source-manifest\.json|runtimes\/grok\/session\.ts)$/.test(path)) {
       dirs.add('packages/client'); continue;
     }
+    // #701: the vendored pi-subagents factory and its provenance. Both Pi host
+    // flavors inline it; the client suite binds every vendored byte and runs
+    // the CommonJS single-file fixture.
+    if (/^packages\/client\/vendor\/pi-subagents\/0\.60\.0\/(?:index\.ts|PROVENANCE\.md|source-manifest\.json|src\/.+\.ts)$/.test(path)) {
+      dirs.add('packages/client'); continue;
+    }
     if (path === 'examples/host-execution-core/VALIDATION.md'
       || path === 'examples/bot-collaboration/VALIDATION.md'
       || path === 'examples/host-execution-core/PLAN-612.md') continue;
