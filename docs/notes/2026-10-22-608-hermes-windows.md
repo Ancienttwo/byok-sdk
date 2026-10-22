@@ -91,12 +91,21 @@ The same branch ran the suites again on it (run 39699864273).
   launcher process holds the key in memory while the execution runs.
 - Root config: on Windows, a rename that fails with `EPERM` is retried after
   a re-read, up to five attempts. The concurrent writer writes the same text.
+- Entry size: the koffi pipe client and the process-table walk load with the
+  lazy `#byok-hermes-session` entry. The root closure keeps the pipe name, the
+  identity parser and a dynamic import of that entry on Windows only. The
+  root grew by 2,628 bytes and the session entry by 8,215 bytes, against
+  7,879 and 1,523 bytes with all of it in the root. The suites ran on
+  `windows-latest` again with this layout (run 39708969670). A copy of the
+  `packageability-smoke` job ran all six bun and SEA legs green, with
+  `sqlite-smoke.mjs --sea` on each OS (run 39709294261).
 
 ## Coverage and residual risk
 
-- No job of the PR CI runs the Hermes suites on Windows: `windows-git-workspace`
-  and the other Windows legs run fixed file lists, and `targeted` runs on
-  Ubuntu. The natural home is `windows-git-workspace`.
+- No job of the PR CI runs the Hermes suites on Windows: the Windows legs run
+  fixed file lists, and `targeted` runs on Ubuntu. The natural home is
+  `windows-git-workspace`. The PR selection does not include
+  `packageability-smoke` either.
 - No real Hermes ran on Windows. The fake has the process shape of a venv
   console script, and the pipe name matches Hermes's own function, but the
   native Hermes pipe server and its peer check did not answer this client in
