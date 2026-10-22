@@ -390,6 +390,8 @@ V3 starts at `ae7acb2c`. Aimpact made these scope decisions on 2026-10-18:
 - Same-routine-ID version changes belong to K8a with `update_routine`.
   This includes current/pending versions, scheduling generation and the in-flight limit.
   K4 keeps definitions immutable. A changed definition needs a new ID.
+  The owner decisions of 2026-10-22 for #606 replace this row: #735 adds K4 `updateRoutine`
+  (see the README section "Routine versions").
 
 Both decisions are recorded in the Host guide and example README.
 
