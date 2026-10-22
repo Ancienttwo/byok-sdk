@@ -859,7 +859,14 @@ export declare const PI_ANTHROPIC_PROFILE_COMPAT_KEYS: readonly PiCompatKey[];
  * entry refuses a profile that declares any other compat key.
  */
 export declare const PI_PREPARED_COMPAT_KEYS: readonly string[];
-/** Local declared Pi configuration, without identity, endpoint, headers or secrets. */
+/**
+ * Local declared Pi configuration, without identity, endpoint, headers or secrets.
+ *
+ * `thinkingLevelMap` is absent or complete, as on the prepared model wire.
+ * Without a map, Pi applies its own handling of each level. A partial map is
+ * refused, because Pi reads an absent level differently from `null` and from
+ * the level name.
+ */
 export declare const PiModelConfigSchema: z.ZodObject<{
     api: z.ZodOptional<z.ZodEnum<{
         "openai-completions": "openai-completions";
@@ -877,7 +884,7 @@ export declare const PiModelConfigSchema: z.ZodObject<{
         off: "off";
         xhigh: "xhigh";
     }>;
-    thinkingLevelMap: z.ZodObject<{
+    thinkingLevelMap: z.ZodOptional<z.ZodObject<{
         off: z.ZodNullable<z.ZodString>;
         minimal: z.ZodNullable<z.ZodString>;
         low: z.ZodNullable<z.ZodString>;
@@ -885,7 +892,7 @@ export declare const PiModelConfigSchema: z.ZodObject<{
         high: z.ZodNullable<z.ZodString>;
         xhigh: z.ZodNullable<z.ZodString>;
         max: z.ZodNullable<z.ZodString>;
-    }, z.core.$strict>;
+    }, z.core.$strict>>;
     compat: z.ZodObject<{
         supportsStore: z.ZodOptional<z.ZodBoolean>;
         supportsDeveloperRole: z.ZodOptional<z.ZodBoolean>;
@@ -928,6 +935,13 @@ export declare const PiModelConfigSchema: z.ZodObject<{
         }, z.core.$strict>>;
     }, z.core.$strict>>;
 }, z.core.$strict>;
+/**
+ * The thinking levels Pi offers for these settings, in Pi's order. This
+ * restates pi-ai `getSupportedThinkingLevels`; a client test compares the two.
+ * A non-reasoning model has `off` only. A level mapped to `null` is not
+ * offered, and Pi offers `xhigh` and `max` only when the map names them.
+ */
+export declare function piSupportedThinkingLevels(config: Pick<PiModelConfig, 'reasoning' | 'thinkingLevelMap'>): PiThinkingLevel[];
 /** One issue per declared compat key outside `admitted`, at `['compat', key]`. */
 export declare function piCompatIssues(declared: object, admitted: readonly string[], api: string): {
     code: 'custom';
@@ -1499,7 +1513,7 @@ export declare const ModelProviderProfileSchema: z.ZodObject<{
             off: "off";
             xhigh: "xhigh";
         }>;
-        thinkingLevelMap: z.ZodObject<{
+        thinkingLevelMap: z.ZodOptional<z.ZodObject<{
             off: z.ZodNullable<z.ZodString>;
             minimal: z.ZodNullable<z.ZodString>;
             low: z.ZodNullable<z.ZodString>;
@@ -1507,7 +1521,7 @@ export declare const ModelProviderProfileSchema: z.ZodObject<{
             high: z.ZodNullable<z.ZodString>;
             xhigh: z.ZodNullable<z.ZodString>;
             max: z.ZodNullable<z.ZodString>;
-        }, z.core.$strict>;
+        }, z.core.$strict>>;
         compat: z.ZodObject<{
             supportsStore: z.ZodOptional<z.ZodBoolean>;
             supportsDeveloperRole: z.ZodOptional<z.ZodBoolean>;

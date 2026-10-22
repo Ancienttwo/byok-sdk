@@ -32,6 +32,22 @@
   A new fixture in `pi-single-file-bundle.test.ts` runs a real Pi print session
   from a single-pass CJS bundle. It covers the ordinary host, the sealed-host
   redirect and a subagent child.
+- **Changed (keys)** — `PiModelConfigSchema` accepts a `pi_model` without
+  `thinkingLevelMap`, as the prepared model wire already does. A declared map
+  must still map all seven levels. Without a map, Pi applies its own handling
+  of each level. For a reasoning model the schema then accepts `off` through
+  `high`, the levels that pi-ai `getSupportedThinkingLevels` offers, and
+  refuses `xhigh` and `max`. `piModelConfigFromPinnedCatalog` now derives the
+  pinned entries that have no map, for example MiniMax M2.7 and M3 and Z.AI
+  GLM-4.7 and GLM-5-turbo: 184 of 1,022 entries, up from 83. An entry with a
+  partial map is still refused. `PiModelConfig['thinkingLevelMap']` is optional
+  in the type (#636).
+  Downgrade: 0.28.2 and earlier refuse a `pi_model` without a map. Before a
+  downgrade, give each such profile a complete map or delete it. If you do
+  not, the 0.28.2 SQLite store fails `list()` and each read of that profile,
+  and the 0.28.2 truth store fails every read and write of the registry. An
+  older device answers sealed provisioning of such a `pi_model` with
+  `pi_model_invalid`.
 
 ## 0.28.2 — source candidate
 
