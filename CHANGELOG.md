@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Docs (client)** — the client README explains what a Host sees when
+  `agentMemoryMcp: 'auto'` does not admit the memory MCP, why the daemon then
+  reports `status().agentMemoryMcp` as `unavailable`, and what the Host can do
+  (#614). Under `auto` the file-based memory guidance stays, so a Host with its
+  own memory writer sets `off`. The README no longer says that `off` keeps the
+  instruction guidance.
 - **Security (client)** — a CommonJS bundle of the Pi host no longer lets Pi's
   nested undici own the process-wide `fetch` dispatcher (#700). Pi depends on
   the exact npm undici 8.10.2. That version is in the range of the undici
