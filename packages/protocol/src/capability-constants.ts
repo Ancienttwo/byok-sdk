@@ -50,6 +50,9 @@ export const AGENT_MEMORY_INTENT_CAPABILITY = 'agent-memory-intent.v1' as const;
 /** Capability required before the optional hosted Agent-memory projection can be used. */
 export const AGENT_MEMORY_PROJECTION_CAPABILITY = 'agent.memory.projection' as const;
 
+/** Device capability required before an ordinary Agent offer may carry `agentMemory`. */
+export const AGENT_MEMORY_SELECTION_CAPABILITY = 'agent-memory-selection' as const;
+
 /** Exact capability of the single input-preparation wire authority. */
 export const AGENT_INPUT_PREPARATION_CAPABILITY =
   `agent-input-preparation-v${INPUT_PREPARATION_WIRE_VERSION}` as const;

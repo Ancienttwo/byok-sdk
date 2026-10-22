@@ -1644,6 +1644,8 @@ export declare const PROVIDER_PROVISIONING_CAPABILITY: 'provider-provisioning.v1
 export declare const AGENT_MEMORY_INTENT_CAPABILITY: 'agent-memory-intent.v1';
 /** Capability required before the optional hosted Agent-memory projection can be used. */
 export declare const AGENT_MEMORY_PROJECTION_CAPABILITY: 'agent.memory.projection';
+/** Device capability required before an ordinary Agent offer may carry `agentMemory`. */
+export declare const AGENT_MEMORY_SELECTION_CAPABILITY: 'agent-memory-selection';
 /** Exact capability of the single input-preparation wire authority. */
 export declare const AGENT_INPUT_PREPARATION_CAPABILITY: "agent-input-preparation-v9";
 /** Single value authority shared by schema validation and schema-free consumers. */
@@ -2055,6 +2057,11 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             profileRevision: z.ZodString;
         }, z.core.$strict>;
         homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+        agentMemory: z.ZodOptional<z.ZodEnum<{
+            none: "none";
+            read: "read";
+            "read-write": "read-write";
+        }>>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
@@ -2124,6 +2131,11 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             profileRevision: z.ZodString;
         }, z.core.$strict>;
         homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+        agentMemory: z.ZodOptional<z.ZodEnum<{
+            none: "none";
+            read: "read";
+            "read-write": "read-write";
+        }>>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
@@ -2229,6 +2241,11 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             profileRevision: z.ZodString;
         }, z.core.$strict>;
         homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+        agentMemory: z.ZodOptional<z.ZodEnum<{
+            none: "none";
+            read: "read";
+            "read-write": "read-write";
+        }>>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
@@ -3639,6 +3656,11 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 profileRevision: z.ZodString;
             }, z.core.$strict>;
             homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+            agentMemory: z.ZodOptional<z.ZodEnum<{
+                none: "none";
+                read: "read";
+                "read-write": "read-write";
+            }>>;
             requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
             runtime: z.ZodOptional<z.ZodEnum<{
                 claude: "claude";
@@ -3708,6 +3730,11 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 profileRevision: z.ZodString;
             }, z.core.$strict>;
             homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+            agentMemory: z.ZodOptional<z.ZodEnum<{
+                none: "none";
+                read: "read";
+                "read-write": "read-write";
+            }>>;
             requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
             runtime: z.ZodOptional<z.ZodEnum<{
                 claude: "claude";
@@ -3813,6 +3840,11 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 profileRevision: z.ZodString;
             }, z.core.$strict>;
             homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+            agentMemory: z.ZodOptional<z.ZodEnum<{
+                none: "none";
+                read: "read";
+                "read-write": "read-write";
+            }>>;
             requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
             runtime: z.ZodOptional<z.ZodEnum<{
                 claude: "claude";
@@ -6619,6 +6651,11 @@ export type AgentHomeAccess = z.infer<typeof AgentHomeAccessSchema>;
  * Strict additive offer for a durable host-owned Agent. An older daemon that
  * does not advertise `agent-home-contract` skips this distinct message type
  * instead of stripping identity and applying legacy workspace semantics.
+ *
+ * `agentMemory` selects the Agent memory of this one task, with the values of
+ * the prepared offer. Absent keeps the daemon admission. A host sends it only
+ * to a device that advertises `agent-memory-selection`. The prepared offer
+ * replaces it with its own required selection.
  */
 export declare const TaskOfferForAgentPayloadSchema: z.ZodObject<{
     instruction: z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
@@ -6635,6 +6672,11 @@ export declare const TaskOfferForAgentPayloadSchema: z.ZodObject<{
         profileRevision: z.ZodString;
     }, z.core.$strict>;
     homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+    agentMemory: z.ZodOptional<z.ZodEnum<{
+        none: "none";
+        read: "read";
+        "read-write": "read-write";
+    }>>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
     runtime: z.ZodOptional<z.ZodEnum<{
         claude: "claude";
@@ -6702,6 +6744,11 @@ export declare const TaskOfferForAgentWithEgressPayloadSchema: z.ZodObject<{
         profileRevision: z.ZodString;
     }, z.core.$strict>;
     homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+    agentMemory: z.ZodOptional<z.ZodEnum<{
+        none: "none";
+        read: "read";
+        "read-write": "read-write";
+    }>>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
     runtime: z.ZodOptional<z.ZodEnum<{
         claude: "claude";
@@ -6806,6 +6853,11 @@ export declare const TaskOfferForAgentWithEgressFreshPayloadSchema: z.ZodObject<
         profileRevision: z.ZodString;
     }, z.core.$strict>;
     homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+    agentMemory: z.ZodOptional<z.ZodEnum<{
+        none: "none";
+        read: "read";
+        "read-write": "read-write";
+    }>>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
     runtime: z.ZodOptional<z.ZodEnum<{
         claude: "claude";
@@ -8226,6 +8278,11 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
             profileRevision: z.ZodString;
         }, z.core.$strict>;
         homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+        agentMemory: z.ZodOptional<z.ZodEnum<{
+            none: "none";
+            read: "read";
+            "read-write": "read-write";
+        }>>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
@@ -8287,6 +8344,11 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
             profileRevision: z.ZodString;
         }, z.core.$strict>;
         homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+        agentMemory: z.ZodOptional<z.ZodEnum<{
+            none: "none";
+            read: "read";
+            "read-write": "read-write";
+        }>>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
@@ -8384,6 +8446,11 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
             profileRevision: z.ZodString;
         }, z.core.$strict>;
         homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+        agentMemory: z.ZodOptional<z.ZodEnum<{
+            none: "none";
+            read: "read";
+            "read-write": "read-write";
+        }>>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
@@ -8682,6 +8749,11 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             profileRevision: z.ZodString;
         }, z.core.$strict>;
         homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+        agentMemory: z.ZodOptional<z.ZodEnum<{
+            none: "none";
+            read: "read";
+            "read-write": "read-write";
+        }>>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
@@ -8743,6 +8815,11 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             profileRevision: z.ZodString;
         }, z.core.$strict>;
         homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+        agentMemory: z.ZodOptional<z.ZodEnum<{
+            none: "none";
+            read: "read";
+            "read-write": "read-write";
+        }>>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
@@ -8840,6 +8917,11 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             profileRevision: z.ZodString;
         }, z.core.$strict>;
         homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+        agentMemory: z.ZodOptional<z.ZodEnum<{
+            none: "none";
+            read: "read";
+            "read-write": "read-write";
+        }>>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
@@ -10427,7 +10509,7 @@ export declare const AGENT_HOME_READERS_CAPABILITY: 'agent-home-readers';
  * cannot accidentally execute the instruction without the required tools.
  */
 export declare const CUSTOM_HARNESS_CAPABILITY: 'custom-harness';
-export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1", 'agent-message-draft'];
+export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", 'agent-message-draft'];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
 // ==== @byok-sdk/protocol dist/wire-additions.d.ts ====
 /**

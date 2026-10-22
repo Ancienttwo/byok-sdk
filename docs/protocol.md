@@ -298,6 +298,16 @@ gain the OPTIONAL `agentHomeMemoryChange` evidence of a reader Attempt. No flag
 gates the terminal field: it is observability only, and an older server strips
 it. The frozen fingerprint golden was regenerated for these additive changes.
 
+**Landed additive minor: per-task Agent offer `agentMemory`.** The ordinary
+Agent offers (`task.offer_for_agent`, `task.offer_for_agent_with_egress` and
+`task.offer_for_agent_with_egress_fresh`) gain an OPTIONAL
+`agentMemory: 'none' | 'read' | 'read-write'` (§2.2). The values are those of
+`task.offer_prepared`, which keeps its own required `agentMemory`. The offers
+are strict, so an older daemon cannot accept the field. A host sends it only to
+a device that durably advertises the new capability flag
+`agent-memory-selection`; server and hosted cloud refuse it otherwise before
+task creation or mailbox append. An offer without the field does not change.
+
 **Agent message drafts (additive v3).** `agent.message.draft` is gated on the
 server's `agent-message-draft` flag. Its payload is strict. It has no reliable
 ack or spool entry. `RuntimeCapabilities.messageDraft` is optional strip-safe
@@ -421,7 +431,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `conn.ack` | S→D | optional | **required** | `protocolVersion`, `capabilities[]`, `serverTime` | Historical handshake acknowledgement; current long-poll uses response metadata |
 | `task.offer` | S→D | **required** | **required** | `instruction`, `runtime?`, `dispatchSelection?` (additive — see below), `sessionRef?`, `workspaceHint?` (reserved — see note below), `limits?` | `dispatch()` targets a device |
 | `task.offer_with_toolsets` | S→D | **required** | **required** | All `task.offer` fields plus `requiredToolsets` (1–16 logical ids) | A toolset-aware host targets a capable device |
-| `task.offer_for_agent` | S→D | **required** | **required** | `instruction`, `agentRef`, `homeAccess?` (additive — §2.2), `runtime?`, `dispatchSelection?`, `sessionRef?`, `requiredToolsets?`, `limits?` | An Agent dispatch targets a durably capable device |
+| `task.offer_for_agent` | S→D | **required** | **required** | `instruction`, `agentRef`, `homeAccess?` (additive — §2.2), `agentMemory?` (additive — §2.2), `runtime?`, `dispatchSelection?`, `sessionRef?`, `requiredToolsets?`, `limits?` | An Agent dispatch targets a durably capable device |
 | `task.offer_for_agent_with_egress` | S→D | **required** | **required** | All strict Agent fields plus required `sessionRef` and exact `egressPolicy` | An Agent dispatch targets a daemon that consumed the revisioned egress contract |
 | `task.offer_for_agent_with_egress_fresh` | S→D | **required** | **required** | All strict Agent fields plus exact `egressPolicy`, with no `sessionRef` | A fresh Agent dispatch targets a daemon advertising `agent-egress-fresh-session` |
 | `task.offer_prepared` | S→D | **required** | **required** | `agentRef`, `homeAccess?`, `agentMemory`, `egressPolicy`, `messageEgress?`, `preparation` (`reference`, `requestDigest`, `artifactDigest?`), `runtime?`, `dispatchSelection?`, `requiredToolsets?`, `terminalProjection?`, `limits?` — and deliberately NO `instruction` and NO `sessionRef` | An already-counted preparation is dispatched to the device that counted it |
@@ -738,6 +748,19 @@ sees only Attempts it runs. A host that writes memory files itself
 while readers run makes the attribution ambiguous. The field is absent on a
 writer terminal and on a claimed failure before the Attempt became active. The
 cloud read model (`readTaskResult`) projects it verbatim.
+
+**`agentMemory` selects the Agent memory of one ordinary task.** Without the
+field, the daemon admission decides, as before. `none` binds no SDK memory MCP
+and adds no memory guidance, so memory alone requires no adapter MCP support;
+a reader keeps only the line that puts its result in the final reply. `read`
+binds the memory MCP sealed `read`, so the model has only `memory_recall`.
+`read-write` is the writer default. A `memory-reader` offer that selects
+`read-write` gets a non-retryable decline (`agent_memory_selection_invalid`);
+the reference server refuses that dispatch before the task exists. `read` or
+`read-write` on a daemon that does not admit the memory MCP gets a
+non-retryable decline (`agent_memory_unavailable`); the daemon never changes
+the selection to `none`. A daemon advertises `agent-memory-selection` whenever
+it has an Agent home, whatever its memory admission.
 
 ### 2.3 Task-free sealed provider provisioning notice
 

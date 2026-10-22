@@ -348,12 +348,18 @@ export type AgentHomeAccess = z.infer<typeof AgentHomeAccessSchema>;
  * Strict additive offer for a durable host-owned Agent. An older daemon that
  * does not advertise `agent-home-contract` skips this distinct message type
  * instead of stripping identity and applying legacy workspace semantics.
+ *
+ * `agentMemory` selects the Agent memory of this one task, with the values of
+ * the prepared offer. Absent keeps the daemon admission. A host sends it only
+ * to a device that advertises `agent-memory-selection`. The prepared offer
+ * replaces it with its own required selection.
  */
 export const TaskOfferForAgentPayloadSchema = z
   .object({
     instruction: z.union([z.string(), InstructionBlobRefSchema]),
     agentRef: AgentRefSchema,
     homeAccess: AgentHomeAccessSchema.optional(),
+    agentMemory: PreparedAgentMemoryModeSchema.optional(),
     requiredToolsets: RequiredToolsetsSchema.optional(),
     runtime: RuntimeIdSchema.optional(),
     harnessId: HarnessIdSchema.optional(),
@@ -421,6 +427,7 @@ export type TaskOfferForAgentWithEgressFreshPayload = z.infer<typeof TaskOfferFo
 export const TaskOfferPreparedPayloadSchema = TaskOfferForAgentPayloadSchema.omit({
   instruction: true,
   sessionRef: true,
+  agentMemory: true,
 })
   .extend({
     preparation: InputPreparationOfferBindingSchema,
