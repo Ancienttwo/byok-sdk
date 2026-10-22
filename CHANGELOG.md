@@ -10,6 +10,15 @@ See the [release notes](docs/releases/v0.28.2.md) for scope and outstanding
 qualification. All nine public manifests and their lock records move to
 0.28.2; keys leaves its own version line to join the release train.
 
+- **Security (client)** — update the `undici` pin from 8.11.2 to 8.12.3 (#700).
+  8.11.2 is in the range of eight advisories from 2026-10-15. Four are high
+  (GHSA-qrxm-fqhp-jwvm, GHSA-2m5v-pch6-74hx, GHSA-4w7w-5xrc-9h26,
+  GHSA-xjj6-f33q-929c) and four are medium (GHSA-55wc-3pg8-jfw6,
+  GHSA-f72v-6w45-q472, GHSA-4qv8-2p9j-2685, GHSA-9fm3-97px-rjf6). 8.12.2 fixes
+  all of them. The cloud-dataplane test dependency moves to the same version.
+  `@earendil-works/pi-coding-agent` 1.3.0 still carries its own unpatched
+  undici: an exact 8.10.2 dependency and a copy in its CLI bundle. This change
+  does not update them.
 - **Changed (keys, release)** — keys uses the release train version. From
   0.28.2, all nine public packages share one version, so keys moves from 0.13.1
   to 0.28.2. This is a version alignment, not a breaking change, and the keys
@@ -149,6 +158,17 @@ qualification. All nine public manifests and their lock records move to
   `@byok-sdk/protocol/constants` exports `RUNTIME_IDS`, the one source of
   `RuntimeIdSchema`. No wire change: a cloud submit for a harness the device
   does not advertise still fails before an offer reaches the daemon.
+- **Fixed (client)** — during a route outage, the daemon outbox keeps one copy
+  of a pending `agent.message.publish`. Before, each retry added a new copy
+  with a new envelope id: one per second for a live task, and one per
+  reconnect for a recovered task. Each retry of a message now resends the same
+  envelope, and the connection manager does not queue an envelope id that is
+  already queued or in flight. Retries continue after the outage ends. A retry
+  that arrives after the cloud committed the message now settles as
+  `duplicate`, not `accepted`. Each such retry now adds 1 to the client
+  `outbound.duplicate` counter and to the server `dedupDrops` counter. Before,
+  it added 1 to `accepted`. `observer.onInboundCommitted` now fires only once
+  for each message (#693).
 
 ## 0.28.1 / @byok-sdk/keys 0.13.1 — 2026-10-21 (published)
 
