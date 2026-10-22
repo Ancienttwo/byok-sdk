@@ -13020,6 +13020,10 @@ export declare const sdkDistributionManifest: Readonly<{
             integrity: "sha512-09p81HVKDsLXkyMRrLQzsFtCjdcFgbRW765roAu5iChHj4gfWVrGDdvtBldc1BulIEgH1/gRwa2E4vEtW3/hlw==";
             files: readonly string[];
             signingPolicy: "unmodified-official-addon";
+            agentMemoryHelper: Readonly<{
+                files: readonly string[];
+                signingPolicy: "product-resigning-allowed";
+            }>;
         }>;
         darwin: Readonly<{
             files: readonly string[];
