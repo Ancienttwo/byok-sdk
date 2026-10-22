@@ -5,8 +5,8 @@ It provides native SQLite storage, inline tools, wake and inbox processing,
 usage limits, settlement hooks, and transcript reads.
 
 The current stable release is 0.28.1, in the nine-package release set with
-keys 0.13.1, published on npm `latest`. The npm registry read on 2026-10-21 at
-18:13 UTC lists these versions as `latest`. See the
+keys 0.13.1, published on npm `latest`. The npm registry read on 2026-10-22 at
+03:41 UTC lists these versions as `latest`. See the
 [release notes](../../docs/releases/v0.28.1.md).
 The earlier stable release was 0.28.0 / keys 0.13.0 (published 2026-10-20, UTC);
 see its [release notes](../../docs/releases/v0.28.0.md).
