@@ -108,15 +108,15 @@ function declareBundledPiRuntime(): void {
 
 /**
  * Pi depends on an exact npm undici (#700). An undici claims the process-wide
- * `fetch` dispatcher when it first evaluates. In ESM, Node's own undici has
- * evaluated by then, so Node's copy keeps the dispatcher. In a CommonJS bundle
- * nothing loads it first, so Pi's copy would claim the dispatcher and serve every
- * `fetch` in the process.
+ * `fetch` dispatcher when it first evaluates. In an ESM graph, a static
+ * `node:http` import makes Node load its own undici first, so Node's copy keeps
+ * the dispatcher. In a CommonJS bundle nothing loads it first, so Pi's copy would
+ * claim the dispatcher and serve every `fetch` in the process.
  *
  * Node loads its undici when a web global such as `Headers` is first read. Read
  * it before the runtime host import below, which evaluates Pi. The read must be
- * a call: bundlers drop a bare `globalThis.Headers` statement as pure. Bun has
- * no lazy global, so the read does nothing there.
+ * a call: a bundler can drop a bare `globalThis.Headers` statement as pure. Bun
+ * has no lazy global, so the read does nothing there.
  */
 function loadNodeUndici(): void {
   Reflect.get(globalThis, 'Headers');

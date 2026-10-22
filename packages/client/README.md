@@ -165,9 +165,9 @@ Pi 1.3.0, the version this client pins, depends on the exact npm package
 `undici` 8.10.2. That version is in the range of the undici advisories of
 2026-10-15 (fixed in 8.12.2). An undici copy claims the process-wide `fetch`
 dispatcher when it first evaluates, and that copy then serves every `fetch` in
-the process. In ESM, Node's own undici has always evaluated first and keeps the
-dispatcher. In a CommonJS bundle nothing makes it evaluate first, so Pi's copy
-would claim the dispatcher. `runSdkReservedHelperCommand()` therefore reads the
+the process. In an ESM graph, a static `node:http` import makes Node's own undici
+evaluate first, so Node's copy keeps the dispatcher. In a CommonJS bundle nothing
+makes it evaluate first, so Pi's copy would claim the dispatcher. `runSdkReservedHelperCommand()` therefore reads the
 `Headers` global before it imports the Pi host, for every Pi helper. Node loads
 its own undici when it first reads a web global, so Node's copy keeps the
 dispatcher, as in ESM. A product that imports pi itself must make the read run

@@ -6,10 +6,10 @@
   nested undici own the process-wide `fetch` dispatcher (#700). Pi depends on
   the exact npm undici 8.10.2. That version is in the range of the undici
   advisories of 2026-10-15 (fixed in 8.12.2). An undici copy claims the
-  dispatcher when it first evaluates. In ESM, Node's own undici evaluates first.
-  In a CJS bundle (single pass, or ESM then CJS) nothing did, so Pi's copy
-  served every `fetch` in the process, including Pi's provider requests. ESM
-  Hosts were not affected.
+  dispatcher when it first evaluates. In an ESM graph, a static `node:http`
+  import makes Node's own undici evaluate first. In a CJS bundle (single pass,
+  or ESM then CJS) nothing did, so Pi's copy served every `fetch` in the
+  process, including Pi's provider requests. ESM Hosts were not affected.
   `runSdkReservedHelperCommand()` and the `byok-pi-rpc`, `byok-pi-prepared`,
   `byok-pi-durable` and `byok-agent` entries now read the `Headers` global
   before they import the Pi host. Node then loads its own undici, and its copy
