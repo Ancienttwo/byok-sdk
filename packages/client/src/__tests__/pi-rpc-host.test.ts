@@ -5,6 +5,10 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync, existsSync
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
+// Relative and test-only: the release graph keeps `@byok-sdk/keys` and the dispatch packages disjoint.
+import { PI_THINKING_LEVELS } from '../../../keys/src/pi-model-config';
+import { assertPiLaunchArgs, buildPiProviderArgs } from '../../../keys/src/pi-provider-projection';
+import { parseModelProviderProfile } from '../../../keys/src/provider-profile';
 
 const clientRoot = resolve(import.meta.dirname, '../..');
 // Private parser/session exports are not public API. Compile their test entry
@@ -76,6 +80,43 @@ describe('SDK ordinary Pi RPC entry', () => {
       console.log(JSON.stringify(rejected));
     `);
     expect(result).toEqual(Array(15).fill(true));
+  });
+
+  // #636: a Host validates a keys profile with `assertPiLaunchArgs` when it
+  // saves it. That verdict must be the rpc host parser's verdict on the
+  // `--provider`/`--model`/`--thinking` values the launcher appends.
+  it('accepts exactly the launch values keys accepts', () => {
+    const everyLevel = Object.fromEntries(PI_THINKING_LEVELS.map((level) => [level, level === 'off' ? 'none' : level]));
+    const cases = ['glm-5.3', 'org/model:tag', '-x', '--tools', '--'].flatMap((model) =>
+      [...PI_THINKING_LEVELS, 'auto', 'MAX', ''].map((thinking) => ({ model, thinking })));
+    const keys = cases.map(({ model, thinking }) => {
+      try {
+        const profile = parseModelProviderProfile({
+          adapter: 'openai_compatible', auth_mode: 'none', base_url: 'http://127.0.0.1:9191/v1', capabilities: [],
+          created_at: '2026-10-21T00:00:00.000Z', updated_at: '2026-10-21T00:00:00.000Z', display_name: 'Parity',
+          enabled: true, kind: 'model', model, profile_ref: 'parity', provider_kind: 'custom',
+          pi_model: { contextWindow: 1_000, maxTokens: 100, reasoning: true, thinkingLevel: thinking, thinkingLevelMap: everyLevel, compat: {} },
+        });
+        assertPiLaunchArgs(profile);
+        expect(buildPiProviderArgs(profile, ['--mode', 'rpc'])).toEqual(
+          ['--mode', 'rpc', '--provider', 'byok-sdk-parity', '--model', model, '--thinking', thinking]);
+        return true;
+      } catch { return false; }
+    });
+    const host = evaluate(`
+      const accepted = [];
+      for (const { model, thinking } of ${JSON.stringify(cases)}) {
+        try {
+          host.parsePiRpcHostArgs(['--config-digest='+'a'.repeat(64), '--config', '/x', '--mode', 'rpc',
+            '--provider', 'byok-sdk-parity', '--model', model, '--thinking', thinking]);
+          accepted.push(true);
+        } catch { accepted.push(false); }
+      }
+      console.log(JSON.stringify(accepted));
+    `);
+    expect(cases.map((entry, index) => ({ ...entry, accepted: host[index] })))
+      .toEqual(cases.map((entry, index) => ({ ...entry, accepted: keys[index] })));
+    expect(keys.filter(Boolean)).toHaveLength(3 * PI_THINKING_LEVELS.length);
   });
 
   // #385: a keys-profile launch takes its provider key only over the

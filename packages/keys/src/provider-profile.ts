@@ -8,7 +8,7 @@ import {
   type ModelProviderVendorId,
 } from './provider-catalog';
 import { normalizeProviderUrl } from './url';
-import { PiModelConfigSchema } from './pi-model-config';
+import { PI_ANTHROPIC_PROFILE_COMPAT_KEYS, PI_COMPAT_KEYS_BY_API, PiModelConfigSchema, piCompatIssues } from './pi-model-config';
 
 /**
  * Opaque, portable identity of one locally configured provider profile.
@@ -201,6 +201,14 @@ export const ModelProviderProfileSchema = z
         message: 'Anthropic profiles project anthropic-messages and declare no Pi api',
         path: ['pi_model', 'api'],
       });
+    }
+    if (profile.pi_model !== undefined && profile.pi_model.api === undefined) {
+      const [admitted, api] = profile.adapter === 'anthropic'
+        ? [PI_ANTHROPIC_PROFILE_COMPAT_KEYS, 'anthropic-messages']
+        : [PI_COMPAT_KEYS_BY_API['openai-completions'], 'openai-completions'];
+      for (const issue of piCompatIssues(profile.pi_model.compat, admitted, api)) {
+        ctx.addIssue({ ...issue, path: ['pi_model', ...issue.path] });
+      }
     }
     const vendor = modelProviderVendor(profile.provider_kind);
     if (vendor !== undefined && vendor.adapter !== profile.adapter) {

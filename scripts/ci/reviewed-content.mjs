@@ -19,7 +19,7 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     const additions = [rule, nativeRules, rule + nativeRules];
     if (!additions.some(addition => after === before + addition
       && addition.trimEnd().split('\n').every(line => !before.split('\n').includes(line)))) {
-      throw new Error('Reviewed release validation required: only the reviewed helper LF attributes may be added');
+      throw new Error('Reviewed CI mapping required: only the reviewed helper LF attributes may be added');
     }
     return;
   }
@@ -85,9 +85,15 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       const smoke = ' && node scripts/check-hermes-session-entry.mjs';
       if (typeof before.scripts?.build === 'string' && after.scripts?.build === before.scripts.build + smoke) after.scripts.build = before.scripts.build;
     }
+    if (path === 'packages/keys/package.json') {
+      // #636 adds one subpath for the generated pinned pi-ai catalog lookup.
+      const key = './pi-catalog';
+      const entry = { types: './dist/pi-catalog.d.ts', import: './dist/pi-catalog.js' };
+      if (before.exports?.[key] === undefined && isDeepStrictEqual(after.exports?.[key], entry)) delete after.exports[key];
+    }
     delete before.version; delete after.version;
   }
-  if (!isDeepStrictEqual(before, after)) throw new Error(`Reviewed release validation required: ${path} changes more than the reviewed fields`);
+  if (!isDeepStrictEqual(before, after)) throw new Error(`Reviewed CI mapping required: ${path} changes more than the reviewed fields`);
 }
 
 export function changedApiOwners({ base, cwd = process.cwd() } = {}) {
@@ -98,7 +104,7 @@ export function changedApiOwners({ base, cwd = process.cwd() } = {}) {
   for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
     if (isDeepStrictEqual(before[key], after[key])) continue;
     const match = /^@byok-sdk\/([a-z-]+)(?:[/#]|$)/.exec(key);
-    if (!match) throw new Error(`Reviewed release validation required: unmapped API entry ${key}`);
+    if (!match) throw new Error(`Reviewed CI mapping required: unmapped API entry ${key}`);
     owners.add(`packages/${match[1]}`);
   }
   return [...owners];

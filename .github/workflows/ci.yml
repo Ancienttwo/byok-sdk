@@ -23,8 +23,11 @@ name: CI
 # loopback socket binding and will flake those tests specifically; GitHub-
 # hosted runners have a normal network stack and don't hit this.
 
-# Routine PR/main changes run only the reviewed impact plan. A full matrix
-# requires an explicit release-validation dispatch pinned to this exact SHA.
+# Routine PR/main changes run only the reviewed impact plan: the Linux
+# affected-workspace job plus the platform families whose owned paths changed
+# (scripts/ci/select-impact.mjs familyOwners). A PR never runs the complete
+# matrix. The complete matrix requires an explicit release-validation dispatch
+# on main or a release/* branch, pinned to this exact SHA.
 on:
   push:
     branches: [main]
@@ -32,7 +35,7 @@ on:
   workflow_dispatch:
     inputs:
       release_sha:
-        description: Exact 40-character commit approved for complete release validation
+        description: Exact 40-character commit approved for complete release validation (main or release/* only)
         type: string
         required: true
 
@@ -63,6 +66,7 @@ jobs:
           CI_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           CI_PR_HEAD: ${{ github.event.pull_request.head.sha }}
           CI_RELEASE_SHA: ${{ inputs.release_sha }}
+          CI_REF: ${{ github.ref }}
         run: node scripts/ci/plan-ci.mjs
 
   targeted:
@@ -1498,4 +1502,5 @@ jobs:
           CI_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           CI_PR_HEAD: ${{ github.event.pull_request.head.sha }}
           CI_EVENT: ${{ github.event_name }}
+          CI_REF: ${{ github.ref }}
         run: node scripts/ci/require-ci-plan.mjs
