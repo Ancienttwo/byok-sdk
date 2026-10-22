@@ -37,6 +37,11 @@ changes no code, manifest or lock file.
 - Node's own undici is in the advisory range on some builds that the floor
   admits. Node v26.10.0 carries 8.10.2. The v26.12.1 release notes list the
   patched 8.12.2.
+- A downstream product ran its own two-pass CJS bundle (SDK 0.28.2, helper
+  `pi-rpc`, Node v24.22.1). Node's copy owned both slots at exit. The product
+  reports that its code calls `fetch` before the Pi host loads. So a CJS bundle
+  is exposed only when nothing in the product loads Node's copy first. I did not
+  reproduce this on the product's files. See "Reproduce".
 - The CHANGELOG already lists all eight advisories (`CHANGELOG.md:44-52`).
 - #700 stays open.
 
@@ -161,10 +166,12 @@ What this means:
   advisory a given request meets.
 - The result depends on order, not on the bundle format. A product that reads
   `Headers`, `Response` or `WebSocket` before the host loads lets Node's copy win
-  in CJS too (emulated with `Headers`; see "Fix checks"). The same mechanism is
-  open upstream as `earendil-works/pi` issue 9787.
+  in CJS too (emulated with `Headers`; see "Fix checks"). A call to `fetch` does
+  the same. A read of `globalThis.fetch` alone does not (v24.22.1). The same
+  mechanism is open upstream as `earendil-works/pi` issue 9787.
 - I ran one helper kind (`pi-subagent-print`). All helper kinds in the same bundle
-  share the load order. I did not run them.
+  share the load order. I did not run the others. A downstream run used `pi-rpc`
+  (see "Reproduce").
 
 Node versions. The shapes above ran on three Node builds. Each result cell is
 one real Pi print session: exit 0, one provider request. The slot writer comes
@@ -273,6 +280,35 @@ Run it on `node_modules/@byok-sdk/client/dist/bin/pi-runtime-host.js` of a scrat
 `npm install --ignore-scripts @byok-sdk/client@0.28.2`. A CJS bundle uses the
 `esbuild` options of `pi-single-file-bundle.test.ts` (`format: 'cjs'`, the
 `import.meta.url` define and banner).
+
+A second probe needs no stack frames. It prints the source length of each slot's
+constructor: `String(globalThis[Symbol.for('undici.globalDispatcher.1')].constructor).length`,
+and the same for `.2`. The length names the writer. The npm lengths do not change
+between Node builds.
+
+| Writer | Slot 1 | Slot 2 |
+| --- | --- | --- |
+| npm undici 8.10.2 (Pi's copy) | `Dispatcher1Wrapper`, 1141 | `Agent`, 4546 |
+| npm undici 8.12.3 (the client's pin) | `Dispatcher1Wrapper`, 1489 | `Agent`, 4630 |
+| Node v24.22.1 built-in (7.30.1), after `fetch('data:,')` | `Agent`, 4572 | `Agent`, 4572 |
+| Node v24.21.0 built-in (7.29.1), same call | `Agent`, 4476 | `Agent`, 4476 |
+| Node v26.10.0 built-in (8.10.2), same call | `Dispatcher1Wrapper`, 1210 | `Agent`, 4700 |
+
+A downstream product reported this probe on its own bundles. I did not reproduce
+it on the product's files. The product used v24.22.1 and SDK 0.28.2, and it ran
+the `pi-rpc` helper on its ESM payload and on its two-pass ESM-then-CJS single-file
+main. The Pi host loaded fully in both runs. Both ended at a configuration
+refusal, so no provider request was sent. At exit both slots held an `Agent` of
+length 4572, which is Node's built-in copy. The product reads this as follows:
+some of its code calls `fetch` before the Pi host loads, so Node's copy wins even
+in its CJS bundle, and that order is incidental. The reference lengths above
+reproduce on this machine. The report agrees with the load-order rule and with
+the emulated `Headers` check. It also shows that a CJS bundle is not always
+exposed. The product's own order decides.
+
+On v24.22.1, a read of `globalThis.Headers`, `Response`, `WebSocket` or `FormData`
+loads Node's copy and fills both slots. So does a call to `fetch`. A read of
+`globalThis.fetch` alone does not, and neither does `new AbortController()`.
 
 ## Pi upstream (checked 2026-10-22)
 
