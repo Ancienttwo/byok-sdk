@@ -49,20 +49,24 @@ export function parseWindowsProcessTable(text: string): Map<number, WindowsProce
   return table;
 }
 
-function readWindowsProcessTable(): Promise<Map<number, WindowsProcessEntry>> {
+function readWindowsProcessTable(signal?: AbortSignal): Promise<Map<number, WindowsProcessEntry>> {
   const systemRoot = process.env.SystemRoot;
   if (systemRoot === undefined || !path.win32.isAbsolute(systemRoot)) return Promise.reject(new Error('Windows SystemRoot must be an absolute path'));
   const command = path.win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   const args = ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(PROCESS_TABLE_SCRIPT, 'utf16le').toString('base64')];
   return new Promise((resolve, reject) => {
-    execFile(command, args, { encoding: 'utf8', windowsHide: true, timeout: QUERY_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 }, (error, stdout) => {
+    execFile(command, args, { encoding: 'utf8', windowsHide: true, timeout: QUERY_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024, signal }, (error, stdout) => {
       if (error !== null) reject(new Error('Windows process table read failed', { cause: error }));
       else resolve(parseWindowsProcessTable(stdout));
     });
   });
 }
 
-/** Whether `pid` runs at most four parent links below `root`, after one process-table read. Rejects when the table cannot be read. */
-export async function descendsOnWindows(root: number, pid: number): Promise<boolean> {
-  return descendsFrom(await readWindowsProcessTable(), root, pid);
+/**
+ * Whether `pid` runs at most four parent links below `root`, after one
+ * process-table read. Rejects when the table cannot be read, or when `signal`
+ * aborts; the abort also ends the PowerShell child.
+ */
+export async function descendsOnWindows(root: number, pid: number, signal?: AbortSignal): Promise<boolean> {
+  return descendsFrom(await readWindowsProcessTable(signal), root, pid);
 }

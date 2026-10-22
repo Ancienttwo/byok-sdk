@@ -117,12 +117,12 @@ export function createHermesSession(scratch: ExecutionScratch, root: string, liv
       for (;;) {
         if (this.failure) throw this.failure;
         if (signal?.aborted) throw infrastructure('start', 'hermes start was aborted', 'retryable');
-        const identity = await identifyHermesGateway(home, { owned: (pid) => pid === owned });
+        const identity = await identifyHermesGateway(home, { owned: (pid) => pid === owned }).catch(() => undefined);
         if (identity !== undefined) {
           // Windows: the owned server's answer names another process than the kernel does.
           if (identity.state === 'mismatch') throw infrastructure('start', 'another Hermes gateway serves the execution profile');
           if (identity.pid !== owned) {
-            const ours = await this.withinStart(ownsHermesGatewayPid(root, identity.pid), deadline, signal).catch((error: unknown) => {
+            const ours = await this.withinStart((bound) => ownsHermesGatewayPid(root, identity.pid, bound), deadline, signal).catch((error: unknown) => {
               throw isRuntimeExecutionFailure(error) ? error : infrastructure('start', 'hermes gateway ownership check failed', 'retryable');
             });
             if (!ours) throw infrastructure('start', 'another Hermes gateway serves the execution profile');
@@ -135,14 +135,19 @@ export function createHermesSession(scratch: ExecutionScratch, root: string, liv
       }
     }
 
-    /** `work`, unless the ready deadline passes or the start is aborted first. */
-    private withinStart<T>(work: Promise<T>, deadline: number, signal: AbortSignal | undefined): Promise<T> {
+    /** `work`, unless the ready deadline passes or the start is aborted first. Either one also aborts the signal `work` gets. */
+    private withinStart<T>(work: (signal: AbortSignal) => Promise<T>, deadline: number, signal: AbortSignal | undefined): Promise<T> {
+      const bound = new AbortController();
       return new Promise<T>((resolve, reject) => {
-        const timer = setTimeout(() => reject(infrastructure('start', 'hermes gateway did not report ready in time', 'retryable')), Math.max(0, deadline - Date.now()));
-        const abort = (): void => reject(infrastructure('start', 'hermes start was aborted', 'retryable'));
+        const stop = (reason: string): void => {
+          reject(infrastructure('start', reason, 'retryable'));
+          bound.abort();
+        };
+        const timer = setTimeout(() => stop('hermes gateway did not report ready in time'), Math.max(0, deadline - Date.now()));
+        const abort = (): void => stop('hermes start was aborted');
         signal?.addEventListener('abort', abort, { once: true });
         if (signal?.aborted) abort();
-        work.then(resolve, reject).finally(() => {
+        work(bound.signal).then(resolve, reject).finally(() => {
           clearTimeout(timer);
           signal?.removeEventListener('abort', abort);
         });

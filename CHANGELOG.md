@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Fixed (client, keys)** — close the Hermes on Windows follow-ups from the
+  #695 review (#712). The custody launcher now starts Hermes only after the
+  adapter writes one byte to the launcher's stdin. The adapter writes it after
+  it adopts the launcher (on Windows, into the kill-on-close job), so Hermes
+  never runs outside the owned tree. End of input fails the launch. Client and
+  keys must come from the same release: an older client never writes the byte.
+  The stale-profile sweep keeps a profile when the Windows pipe client fails.
+  The Windows process-table read now ends at the ready deadline or on start
+  abort, and the foreign-gateway check ends at 10 s or on start abort.
 - **Changed (client)** — update the private OAR source to 0.70.0
   (`44d7d61`). Keep the eight BYOK-maintained files. Update the source
   manifest and bridge paths. The only selected upstream change is the optional

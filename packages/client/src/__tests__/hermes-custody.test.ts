@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -50,7 +51,7 @@ await import(${JSON.stringify(fixture)});
   const command = fakeHermesCommand(hermes, dir);
   const adapter = new HermesAdapter({ home: root, resolveBin: () => ({ command, source: 'path' }), byokLauncher: { command: process.execPath, args: [launcher], profileDbPath, selectProfile: () => binding } });
   const read = async () => (await fs.readFile(custodyReceipt, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
-  return { dir, profile, profileDbPath, binding, root, adapter, read };
+  return { dir, profile, profileDbPath, binding, root, adapter, read, command, launcher };
 }
 
 it('rejects malformed launcher arguments and conflicting static model selection', () => {
@@ -118,6 +119,38 @@ describe('Hermes separate credential custody', () => {
     } finally {
       if (previous === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = previous;
     }
+  }, 30_000);
+
+  // The adapter writes one byte after it adopts the launcher (on Windows, into the kill-on-close job).
+  async function startLauncher(f: Awaited<ReturnType<typeof setup>>) {
+    const home = path.join(f.dir, 'launch-home');
+    await fs.mkdir(home);
+    const request = { profileDbPath: f.profileDbPath, binding: f.binding, launch: { hermesBin: f.command, home, role: 'viewer' } };
+    const child = spawn(process.execPath, [f.launcher, '--hermes-custody-request', JSON.stringify(request)], { stdio: ['pipe', 'ignore', 'ignore'] });
+    const exited = new Promise<number | null>(resolve => child.once('exit', resolve));
+    const rows = async () => f.read().catch(() => [] as Array<{ kind: string; role?: string }>);
+    await expect.poll(async () => (await rows()).some(row => row.kind === 'launcher'), { timeout: 10_000 }).toBe(true);
+    // Time for the launcher to read the profile and the fake key, then wait.
+    await new Promise(resolve => setTimeout(resolve, 500));
+    const started = async () => (await rows()).some(row => row.kind === 'hermes' && row.role === 'viewer');
+    return { child, exited, started };
+  }
+
+  it('starts Hermes only after the adapter adopts the launcher', async () => {
+    const launched = await startLauncher(await setup());
+    expect(await launched.started()).toBe(false);
+    launched.child.stdin!.write('\n');
+    await expect.poll(launched.started, { timeout: 10_000 }).toBe(true);
+    launched.child.stdin!.end();
+    launched.child.kill();
+    await launched.exited;
+  }, 30_000);
+
+  it('does not start Hermes when the adapter ends the launcher input before adoption', async () => {
+    const launched = await startLauncher(await setup());
+    launched.child.stdin!.end();
+    expect(await launched.exited).toBe(1);
+    expect(await launched.started()).toBe(false);
   }, 30_000);
 
   it('rejects stale exact binding during admission without launching Hermes', async () => {

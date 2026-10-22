@@ -90,10 +90,11 @@ async function identifyOverPipe(home: string, options: IdentifyHermesGatewayOpti
  * `<home>/gateway.sock.path` when the direct path is too long for a Unix
  * socket. Windows: the named pipe {@link hermesGatewayPipeName}, see
  * {@link IdentifyHermesGatewayOptions.owned}. The Hermes ACP viewer reads the
- * same answer before it attaches. Undefined: no gateway answered.
+ * same answer before it attaches. Undefined: no gateway answered. Rejects when
+ * the Windows pipe client fails, which says nothing about a gateway.
  */
 export async function identifyHermesGateway(home: string, options: IdentifyHermesGatewayOptions = {}): Promise<HermesGatewayIdentity | undefined> {
-  if (process.platform === 'win32') return identifyOverPipe(home, options).catch(() => undefined);
+  if (process.platform === 'win32') return identifyOverPipe(home, options);
   const target = await socketPath(home);
   return new Promise((resolve) => {
     let buffer = '';

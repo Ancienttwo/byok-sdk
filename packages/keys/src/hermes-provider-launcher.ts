@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { readSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
@@ -36,6 +37,10 @@ export function parseHermesProviderLauncherRequest(args: readonly string[]): Her
  * as a child with the credential in the child's environment only, resolves
  * when Hermes exits and sets `process.exitCode` to its exit code. The adapter
  * accepts a gateway below the launcher PID on Windows.
+ * Before it starts Hermes, launch reads one byte from stdin: the adapter writes
+ * it after it has adopted this process (on Windows, into its kill-on-close
+ * job), so Hermes never starts outside the owned tree. End of input fails the
+ * launch. The launcher program must not read stdin itself.
  * The Host supplies its account-scoped store here, never in the daemon.
  */
 export async function runHermesProviderLauncher(request: HermesProviderLauncherRequest, host: { createSecretStore(): SecretStore }): Promise<void> {
@@ -63,6 +68,7 @@ export async function runHermesProviderLauncher(request: HermesProviderLauncherR
   } finally { await profiles.close(); }
   const launch = options.launch!;
   const args = launch.role === 'gateway' ? ['gateway', 'run', '--quiet', '--external-supervisor', '--force'] : ['--yolo', 'acp'];
+  if (readSync(0, Buffer.alloc(1), 0, 1, null) !== 1) throw new Error('Hermes launcher was not adopted');
   if (process.platform === 'win32') {
     const child = spawn(launch.hermesBin, args, { env: environment, stdio: 'inherit', windowsHide: true });
     environment = undefined;
