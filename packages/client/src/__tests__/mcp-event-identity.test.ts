@@ -1,8 +1,11 @@
 import { expect, it } from 'vitest';
-import { AgentEventSchema } from '@byok-sdk/protocol';
+import { AgentEventSchema, type AgentEvent } from '@byok-sdk/protocol';
 import { mcpEventIdentities } from '../mcp/event-identity';
 import { createToolUseCorrelation, mapClaudeMessageToAgentEvents } from '../adapters/claude/events';
 import { mapPiMessageToAgentEvent } from '../adapters/pi/events';
+import { projectDurableEvent, withMcpIdentity } from '../adapters/pi-durable/events';
+import { GrokProjection } from '../adapters/grok/projection';
+import { HermesProjection } from '../adapters/hermes/projection';
 
 const identities = mcpEventIdentities({ market__feed: { toolsetId: 'market', serverName: 'market__feed', serverInfo: { name: 'market', version: '1' }, protocolVersion: '2025-03-26', tools: [
   { name: 'get__quote', description: 'quote', inputSchema: { type: 'object' } },
@@ -39,6 +42,42 @@ it('annotates both Pi native events from the exact registered tool identity', ()
   for (const toolName of ['bash', 'mcp__unknown__quote']) {
     expect(mapPiMessageToAgentEvent({ type: 'tool_execution_start', toolName, toolCallId: 'other', args: {} }, identities)).not.toHaveProperty('mcp');
   }
+});
+
+it('annotates both durable Pi tool events from the exact observed toolset name only', () => {
+  const use = withMcpIdentity({ type: 'tool_use', tool: name, toolCallId: 'task-call', input: {} }, identities);
+  const result = withMcpIdentity(projectDurableEvent({ type: 'tool_execution_end', toolName: name, toolCallId: 'pi-call' })[0]!, identities);
+  expect(use).toEqual({ type: 'tool_use', tool: name, mcp, toolCallId: 'task-call', input: {} });
+  expect(result).toMatchObject({ type: 'tool_result', tool: name, mcp });
+  expect(AgentEventSchema.parse(result)).toHaveProperty('mcp', mcp);
+  for (const tool of ['bash', 'submit_result', 'mcp__unknown__quote']) {
+    expect(withMcpIdentity({ type: 'tool_use', tool, toolCallId: 'other', input: {} }, identities)).not.toHaveProperty('mcp');
+  }
+  expect(withMcpIdentity({ type: 'progress', text: name }, identities)).toEqual({ type: 'progress', text: name });
+});
+
+it('assigns Grok no MCP identity from its collapsed tool name', () => {
+  const events: AgentEvent[] = [];
+  // Grok 1.0.62 names an MCP tool `<server>__<tool>` and also routes MCP calls through `use_tool` / `CallMcpTool`.
+  const tools = ['market__feed__get__quote', name, 'use_tool', 'CallMcpTool', 'run_terminal_command'];
+  new GrokProjection('root').consume({ seq: 1, sessionId: 'root', agentPath: [], kind: 'frame', body: { events: tools.flatMap((tool, index) => [
+    { kind: 'tool_call_started', callId: `call-${index}`, tool, input: '{}' },
+    { kind: 'tool_call_ended', callId: `call-${index}`, result: 'completed' },
+  ]) } }, event => events.push(event), () => {});
+  expect(events.map(event => event.type)).toEqual(tools.flatMap(() => ['tool_use', 'tool_result']));
+  for (const event of events) expect(event).not.toHaveProperty('mcp');
+});
+
+it('assigns Hermes no MCP identity from its ACP title', () => {
+  const events: AgentEvent[] = [];
+  const projection = new HermesProjection();
+  // Hermes 0.22.4 titles an MCP call with its registry name, often followed by `: <preview>`.
+  for (const [index, title] of [name, `${name}: AAPL`, 'terminal: ls'].entries()) {
+    projection.update({ sessionUpdate: 'tool_call', toolCallId: `call-${index}`, title, rawInput: {} }, event => events.push(event));
+    projection.update({ sessionUpdate: 'tool_call_update', toolCallId: `call-${index}`, status: 'completed', rawOutput: 'ok' }, event => events.push(event));
+  }
+  expect(events.map(event => event.type)).toEqual(['tool_use', 'tool_result', 'tool_use', 'tool_result', 'tool_use', 'tool_result']);
+  for (const event of events) expect(event).not.toHaveProperty('mcp');
 });
 
 it('rejects ambiguous qualified-name collisions rather than assigning an arbitrary server', () => {
