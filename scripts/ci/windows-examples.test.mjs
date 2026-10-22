@@ -2,17 +2,16 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import test from 'node:test';
 import { selectImpact } from './select-impact.mjs';
-import { windowsPersonaSuites, windowsBotArgs } from './run-windows-bot-tests.mjs';
+import { windowsBotArgs } from './run-windows-bot-tests.mjs';
 
-test('Windows exclusions match only suites using the real POSIX persona fixture', () => {
+// #738: the persona consumer writes with the SDK writeHomeFile, so the suites
+// that use the real persona fixture run on Windows too. Nothing is excluded.
+test('the K8 Windows runner runs every suite, with the real persona fixture suites', () => {
   const root = new URL('../../examples/bot-collaboration/src/', import.meta.url);
   const persona = readdirSync(root).filter(name => name.endsWith('.test.ts')
     && readFileSync(new URL(name, root), 'utf8').includes("from './team.test-support'"));
-  assert.deepEqual([...windowsPersonaSuites].sort(), persona.map(name => `src/${name}`).sort());
-  assert.equal(new Set(windowsPersonaSuites).size, windowsPersonaSuites.length);
-  assert.ok(readdirSync(root).filter(name => name.endsWith('.test.ts')).length > persona.length);
-  assert.deepEqual(windowsBotArgs(), ['run', '--cwd', 'examples/bot-collaboration', 'test', '--',
-    ...windowsPersonaSuites.flatMap(path => ['--exclude', path])]);
+  assert.ok(persona.length > 0);
+  assert.deepEqual(windowsBotArgs(), ['run', '--cwd', 'examples/bot-collaboration', 'test']);
 });
 
 test('K4, K8 and Windows runner changes require the Windows-containing family', () => {

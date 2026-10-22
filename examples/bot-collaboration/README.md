@@ -48,7 +48,7 @@ templates through an authorized Host migration before reopening; this slice adds
 no migration API.
 Effectful actions still use `confirmable_action` and owner confirmation.
 This is the same-device read-only toolset slice of #606; external-authority
-storage, Windows persona persistence and two-process relay remain separate.
+storage and two-process relay remain separate.
 
 The allowlist governs Bot turns only. `bot.core` is public. The rule to avoid
 direct K4 mutation calls still holds. If a Host calls `bot.core.enqueue` itself,
@@ -157,8 +157,9 @@ The default is the initial Main Bot. Ordinary turns keep the K8a actions.
 Give the Host the real server home projection API. Install
 `createBotPersonaProjection()` as the daemon's `agentHome.projection` consumer.
 It validates the opaque profile digest. It writes persona text to the Bot's
-own `AGENTS.md` under the SDK writer lease. New profiles and updates wait for
-an exact `applied` or `idempotent` readback. The readback must match device,
+own `AGENTS.md` with the SDK `writeHomeFile`, under the SDK writer lease. New
+profiles and updates wait for an exact `applied` or `idempotent` readback.
+The readback must match device,
 AgentRef, request id, and digest. New execution input then uses that revision.
 Already frozen executions keep their old input. A pending projection does not
 permit dispatch. All management actions participate in the K4 outcome commit.
@@ -281,12 +282,16 @@ also survives a Host restart. It does not bypass schema or persona admission.
 A stale device may need profile-state reconciliation before retry can succeed.
 Transient delivery errors remain pending and use the existing automatic retry.
 
-The supplied `createBotPersonaProjection` consumer requires POSIX directory
-open and fsync support. It is not supported on Windows. Node on Windows can
-return EPERM when it opens a directory. This consumer does not skip that
-barrier or claim Windows durability. A Windows deployment must supply its own
-persona consumer with a defined persistence contract. The Host failure and
-retry API does not remove that platform limit.
+The supplied `createBotPersonaProjection` consumer writes `AGENTS.md` with
+the SDK `writeHomeFile` (#738). It runs on Windows, Linux and macOS. After a
+process crash, `AGENTS.md` has its old or its new persona. On POSIX, an
+`applied` readback means that the file and its directory are flushed. On
+Windows, it means that the file only is flushed. There, an OS crash or a power
+loss after the readback can bring back the old persona while the SDK record
+keeps the new revision. This Host does not deliver an acknowledged revision
+again, so the old file stays until the next persona update writes it. A process
+crash can leave an `AGENTS.md.<pid>-<n>.tmp` file in the home. The Host failure
+and retry API does not change these limits.
 
 
 ## Deferred Main Bot routine target

@@ -77,6 +77,15 @@
   `OutcomeTransaction.routines` runs `create`, `update` and `lifecycle` in the
   outcome commit with the `addRoutine`, `updateRoutine` and `lifecycle()`
   rules; a refused command changes nothing. `LedgerState.version` stays 1.
+- **Feature (examples)** — the K8 `createBotPersonaProjection` consumer writes
+  `AGENTS.md` with `writeHomeFile` and runs on Windows (#738). It no longer
+  opens or flushes a directory itself. The K8 Windows CI leg no longer excludes
+  the 14 suites that use the real persona consumer, so every K8 suite runs on
+  `windows-latest` with the same assertions. On Windows, an OS crash or a power
+  loss can bring back the old persona after an `applied` readback, and this
+  Host does not deliver that revision again; the next persona update writes the
+  file. A new `persona.test.ts` checks the write, a same-revision repair and a
+  refused digest.
 
 ## 0.28.3 — source candidate
 
