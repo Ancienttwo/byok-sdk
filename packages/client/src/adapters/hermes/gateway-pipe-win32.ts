@@ -21,6 +21,8 @@ const OPEN_EXISTING = 3;
 /** SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION: the server may identify this client, never act as it. */
 const SQOS_IDENTIFICATION = 0x00100000 | 0x00010000;
 const INVALID_HANDLE = -1;
+/** The only open failure that means no pipe has the name. */
+const ERROR_FILE_NOT_FOUND = 2;
 const POLL_MS = 10;
 const MAX_ANSWER_BYTES = 256 * 1024;
 
@@ -28,6 +30,7 @@ type Handle = number;
 type Out = [number];
 interface PipeBindings {
   createFile(name: string, access: number, share: number, security: null, disposition: number, flags: number, template: null): Handle;
+  lastError(): number;
   serverPid(pipe: Handle, pid: Out): number;
   write(file: Handle, data: Buffer, size: number, written: Out, overlapped: null): number;
   peek(pipe: Handle, buffer: null, size: number, read: null, available: Out, left: null): number;
@@ -52,6 +55,8 @@ async function loadPipeBindings(nativeAssetRoot: string | undefined): Promise<Pi
   const bind = (name: string, result: unknown, args: unknown[]): never => kernel32.func('__stdcall', name, result, args) as never;
   return {
     createFile: bind('CreateFileW', 'intptr_t', ['str16', 'uint32_t', 'uint32_t', 'void *', 'uint32_t', 'uint32_t', 'void *']),
+    // koffi keeps the last-error value of the previous call for this one.
+    lastError: bind('GetLastError', 'uint32_t', []),
     serverPid: bind('GetNamedPipeServerProcessId', 'int', ['intptr_t', dword]),
     write: bind('WriteFile', 'int', ['intptr_t', 'void *', 'uint32_t', dword, 'void *']),
     peek: bind('PeekNamedPipe', 'int', ['intptr_t', 'void *', 'uint32_t', 'void *', dword, 'void *']),
@@ -79,8 +84,10 @@ export interface HermesPipeAnswer {
 }
 
 /**
- * One request/answer exchange on the pipe `name`. Undefined: no server could
- * be opened. The request is written only when `owned(serverPid)` is true.
+ * One request/answer exchange on the pipe `name`. Undefined: no pipe has that
+ * name. Rejects for any other open failure (for example a busy pipe or access
+ * denied), because a server exists. The request is written only when
+ * `owned(serverPid)` is true.
  */
 export async function exchangeHermesPipe(
   name: string,
@@ -91,10 +98,13 @@ export async function exchangeHermesPipe(
 ): Promise<HermesPipeAnswer | undefined> {
   const api = await bindings(nativeAssetRoot);
   const pipe = api.createFile(name, GENERIC_READ_WRITE, 0, null, OPEN_EXISTING, SQOS_IDENTIFICATION, null);
-  if (pipe === INVALID_HANDLE || pipe === 0) return undefined;
+  if (pipe === INVALID_HANDLE || pipe === 0) {
+    if (api.lastError() === ERROR_FILE_NOT_FOUND) return undefined;
+    throw new Error('Hermes gateway pipe exists but could not be opened');
+  }
   try {
     const pid: Out = [0];
-    if (api.serverPid(pipe, pid) === 0) return undefined;
+    if (api.serverPid(pipe, pid) === 0) throw new Error('Hermes gateway pipe server is unknown');
     const serverPid = pid[0];
     if (!owned(serverPid)) return { serverPid };
     const bytes = Buffer.from(request, 'utf8');
