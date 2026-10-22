@@ -451,6 +451,7 @@ Host 用这些字段运行现有的 claim、所有权、能力、去重、取消
 - 选 Padmé 的理由是开销。第一版的 2 的幂桶最多多出 100%，而填充字节计入 mailbox 配额和 blob 配额（§12.3）。
 - 大内容放进 blob。`paddedLength` 不超过 256 KiB 时，密文内联在 `ciphertext` 里。超过时，发送方把密文作为 blob 上传，`sealed` 里用 `ciphertextRef`（指向密文字节的 `BlobRef`）代替 `ciphertext`。schema 强制这条规则。256 KiB 等于 Agent 消息的上限（`packages/protocol/src/agent-egress.ts:18`）。
 - 第一版只允许内联密文，最大的终态会因此发不出去。`task.complete` 的 `summary` 和 `finalMessage` 没有 schema 上限（`packages/protocol/src/messages.ts:1196-1207`），`document` 最多 1 MiB（`messages.ts:962`）。base64url 让内联密文大 33%。不填充时，约 1.5 MiB 的明文就超过 `POST /byok/messages` 的 2 MiB 上限（`packages/cloud/src/handlers/messages.ts:87`）。用 2 的幂桶时，稍过 1 MiB 就超过。`ciphertextRef` 解决这个问题，与填充方式无关。
+- 加密终态要有明确的明文上限。今天的明文终态受 2 MiB 请求上限约束，但 `summary` 和 `finalMessage` 本身没有上限。`ciphertextRef` 去掉了请求上限的约束，加密终态最大可以到 blob 的 100 MiB（`packages/cloud/src/cloud.ts:214`）。建议 C3 的明文上限取 2 MiB，与今天的有效上限一致。§8.1 的接收端检查用这个值。由 owner 在 D8 里确认。
 - `ciphertextRef` 的规则：
   - Host 接受 envelope 时检查：blob 已经 committed，大小等于 `paddedLength + 16`。schema 看不到 blob 的大小，所以这一步由 Host 做。
   - 引用它的每一行（receipt、outbox、admission、egress、attested record）都写一条 `object_reference`。今天没有任何 task 行引用 blob：云端只在 truth 提交时写引用（`packages/cloud-dataplane/src/truth-committer.ts:596`）。没有引用的 committed 对象在 24 小时宽限后被回收（`packages/cloud-dataplane/src/stores/core/objects.ts:115-118`；`packages/cloud/src/maintenance.ts:19`）。不写引用，终态正文一天后就会消失，而指向它的 receipt 永不过期。
@@ -760,7 +761,7 @@ S0-b 是已有测试目录里的一个新文件，预计不改 CI 映射。实�
 | D5 | key package 保留方式 | 长期保留，shred 后成员轮换 KEM 密钥；只在投递窗口内保留 | 长期保留。它支持多设备和重装后恢复 |
 | D6 | 删除 | crypto-shredding 加 Workers 上的 scoped row-delete；明文类别也用 Host 持有的密钥做 shredding | 前者。明文行的 row-delete 可以先于 E1 交付。Workers 上的整 tenant erasure 另开 issue |
 | D7 | wire 版本 | v3 内的双向 gated addition；升到 v4 | v3 内的 gated addition |
-| D8 | 填充与大内容 | 长度前缀帧，16 KiB 以内 256 字节对齐、以上用 Padmé，超过 256 KiB 走 `ciphertextRef`；第一版的 2 的幂桶，只能内联；固定桶；不填充 | 第一项（§8.1、§8.6）。Padmé 的开销少于 6.25%，2 的幂桶最多 100%。只能内联时，最大的终态超过 2 MiB 的批次上限 |
+| D8 | 填充与大内容 | 长度前缀帧，16 KiB 以内 256 字节对齐、以上用 Padmé，超过 256 KiB 走 `ciphertextRef`；第一版的 2 的幂桶，只能内联；固定桶；不填充 | 第一项（§8.1、§8.6）。Padmé 的开销少于 6.25%，2 的幂桶最多 100%。只能内联时，最大的终态超过 2 MiB 的批次上限。加密终态的明文上限取 2 MiB |
 | D9 | 加密任务的草稿 | v1 拒绝；加密帧追加日志 | v1 拒绝 |
 | D10 | 多用户 tenant 与发送方认证 | v1 只支持单用户 scope；每条内容加发送方签名 | v1 只支持单用户 scope |
 | D11 | `consume` 的形状 | 独立的加密输入加显式声明；同一函数加判别字段 | 独立输入加显式声明 |
@@ -780,6 +781,6 @@ AiphaBee 已同意第一版 D1–D14 的建议（PR #685 的评论）。第二�
 2. D2：信任锚是否用随配对码携带的 128 位验证秘密 `pv`？代价是配对时要传一长串或扫二维码。
 3. D18：0.28.3 是否只交付 S0？还是同时交付 S0+？S0+ 新增 control-plane API，可能加 SQL 迁移。
 4. D17：v1 是否只交付 C1 和 C3，C2 按需开启，C4、输入准备和草稿等到 v2？AiphaBee 的研究任务用不用输入准备？
-5. D8：填充是否改为长度前缀帧、256 字节对齐加 Padmé，并让填充后超过 256 KiB 的密文走 blob？
+5. D8：填充是否改为长度前缀帧、256 字节对齐加 Padmé，并让填充后超过 256 KiB 的密文走 blob？加密终态的明文上限是否取 2 MiB？
 6. D16：加密类别里对内容的摘要，是否一律改为密文 SHA-256、keyed MAC 或移进密文，并用 schema 测试守住？
 7. D14：E1–E6 是否进之后的功能版本，例如 0.29.0？发布条件是否为 Workers 加 Hyperdrive、两台设备和浏览器矩阵的证据？是否先定 #655？
