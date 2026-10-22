@@ -7,8 +7,16 @@
 The owner selected 0.28.2 as a second one-release exception to the default
 pre-1.0 MINOR policy for additive changes. This candidate is not published.
 See the [release notes](docs/releases/v0.28.2.md) for scope and outstanding
-qualification. The eight aligned manifests and lock records move to 0.28.2.
+qualification. All nine public manifests and their lock records move to
+0.28.2; keys leaves its own version line to join the release train.
 
+- **Changed (keys, release)** — keys uses the release train version. From
+  0.28.2, all nine public packages share one version, so keys moves from 0.13.1
+  to 0.28.2. This is a version alignment, not a breaking change, and the keys
+  dependency rules do not change. `check:release-graph` now requires keys at
+  the train version, `check:version-authority` reads one version, and
+  `publish.mjs` and `pack-and-smoke.mjs` treat keys as part of the train. A
+  Host with a keys range such as `^0.13.1` must change it to match 0.28.2.
 - **Feature (server, client)** — complete #613 with opt-in CORS for loopback
   browser MCP clients. `listenLoopback({ allowedOrigins })` admits exact
   loopback origins, answers their preflight without dispatch and adds

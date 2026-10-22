@@ -69,7 +69,7 @@ test('publish and readback reject a missing or latest prerelease tag before regi
         path.join(fixtureRoot, piOraclePath, name),
       );
     }
-    for (const [name, version] of [['core', '0.8.0-beta.0'], ['keys', '0.3.0'], ['client', '0.8.0-beta.0']]) {
+    for (const [name, version] of [['core', '0.8.0-beta.0'], ['keys', '0.8.0-beta.0'], ['client', '0.8.0-beta.0']]) {
       const fixturePackage = path.join(fixtureRoot, 'packages', name);
       mkdirSync(fixturePackage, { recursive: true });
       const manifest = { name: `@byok-sdk/${name}`, version };

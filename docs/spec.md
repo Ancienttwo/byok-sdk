@@ -229,16 +229,23 @@ of this candidate.
 
 ## Pre-1.0 package version policy
 
-The aligned dispatch train uses one version. Before 1.0, PATCH is limited to
-corrections with no new public behavior, API, persistence, or security
-authority; MINOR covers additive public API/features, new forward
-migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
-independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.28.2`; publication requires separate release
-authorization and registry readback. The current independent keys release is
-`0.13.1`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.28.2`, proven from an isolated standard npm install rather
-than the workspace graph.
+All nine public packages use one version: the eight aligned dispatch packages
+and `@byok-sdk/keys`. Before 1.0, PATCH is limited to corrections with no new
+public behavior, API, persistence, or security authority; MINOR covers additive
+public API/features, new forward migrations/authority, and any pre-1.0
+breaking cut. A version bump does not authorize publish. The current
+aligned release is `0.28.2`; publication requires separate release
+authorization and registry readback. The packed and published keys
+`@byok-sdk/core` edge must be the exact current release, `0.28.2`, proven from
+an isolated standard npm install rather than the workspace graph.
+
+The owner's 2026-10-22 decision puts keys on the release train version from
+0.28.2. Before that decision keys had its own version line, and its last
+release on that line is 0.13.1. The move from keys 0.13.1 to 0.28.2 is a
+version alignment, not a breaking change. The keys changes in this train are
+in the CHANGELOG, as for every other package. The dependency rules do not
+change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
+on keys.
 
 For this release only, the owner's 2026-10-22 instruction to name the next
 release 0.28.2 selects PATCH despite the included additive public APIs and new
@@ -393,7 +400,8 @@ and `npm view @byok-sdk/keys version`.
 The public package set is exactly nine packages: the eight aligned train
 packages `@byok-sdk/core`, `@byok-sdk/protocol`, `@byok-sdk/client`,
 `@byok-sdk/server`, `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`, `@byok-sdk/cloud-do`
-and `@byok-sdk/ui-runtime`, plus the independently versioned `@byok-sdk/keys`.
+and `@byok-sdk/ui-runtime`, plus `@byok-sdk/keys`. From 0.28.2 all nine carry
+the same version.
 `@byok-sdk/implementation-identity` is retired: the SDK no longer attests
 executables, and no later train publishes it. Every other workspace package is
 private. Starting with 0.21.0 the unscoped `byok-sdk` namespace umbrella is

@@ -7,7 +7,8 @@ composition over Postgres and R2.
 
 ## Release status
 
-The source candidate is **0.28.2** for the eight aligned packages. It is not
+The source candidate is **0.28.2** for all nine packages. From 0.28.2, keys
+uses the release train version instead of its own version line. It is not
 published. See the
 [candidate notes](docs/releases/v0.28.2.md) and
 [release process](docs/releases/README.md).
@@ -148,7 +149,7 @@ Hono/HTTP façade over the shared `cloud` kernel, `client` is the local
 daemon, and `keys` keeps provider credentials on the device.
 
 ```sh
-npm install @byok-sdk/client@0.28.2 @byok-sdk/server@0.28.2 @byok-sdk/keys@0.13.1
+npm install @byok-sdk/client@0.28.2 @byok-sdk/server@0.28.2 @byok-sdk/keys@0.28.2
 ```
 
 Also installed: `@byok-sdk/cloud`, `@byok-sdk/core`, `@byok-sdk/protocol`.
@@ -349,7 +350,7 @@ It is intentionally outside the dispatch packages and their entire dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys@0.13.1
+npm install @byok-sdk/keys@0.28.2
 ```
 
 ## Host connector composition
@@ -365,7 +366,7 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK and the independently installable `@byok-sdk/keys@0.13.1`
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.28.2`
 require Node.js 24.15.0 or newer. MIT licensed.
 
 ## Entry dependencies

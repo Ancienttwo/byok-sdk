@@ -77,8 +77,8 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 
 ## Version selection
 
-The next source candidate is 0.28.2 for the eight aligned packages. It is not
-published.
+The next source candidate is 0.28.2 for all nine packages, keys included. It is
+not published.
 See the [candidate notes](../../docs/releases/v0.28.2.md).
 The current release is 0.28.1 / keys 0.13.1. The registry lists it as `latest`.
 See the [release notes](../../docs/releases/v0.28.1.md).
@@ -94,8 +94,9 @@ require `runtimeEntry` and moves the pi-rpc key to private IPC (#385). Keep
 manifests, lock workspace records, version documents and packed internal
 dependencies consistent.
 
-A release set contains eight aligned packages plus keys: nine packages.
-`@byok-sdk/implementation-identity` remains retired. Every public package targets
+A release set contains eight aligned packages plus keys: nine packages. From
+0.28.2 all nine carry one version; `check:release-graph` fails when keys
+differs from the train. `@byok-sdk/implementation-identity` remains retired. Every public package targets
 the dist-tag `latest`, observed at 0.28.1 / keys 0.13.1 on 2026-10-22 at 03:41 UTC.
 The pre-publication
 [reviewed registry baseline](../../scripts/release/registry-expectations.json)
