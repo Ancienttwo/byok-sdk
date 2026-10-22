@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Changed (client)** — the Agent memory Go helper can now open a home on
+  Windows (#605). The SDK does not use this yet. The TypeScript gate still
+  refuses Windows, and the package has no Windows helper asset. On Windows the
+  helper accepts only an NTFS volume. It does not flush the directories above
+  the home. So a Windows write is atomic under a process crash and flushes its
+  own file and directory, but it is not durable after an OS crash or a power
+  loss. B stays false. The Windows CI leg now also runs the helper tests as a
+  standard user, and checks the root identity that Node and Bun compute.
+
 ## 0.28.3 — source candidate
 
 The owner selected 0.28.3 as one more one-release exception to the default

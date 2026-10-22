@@ -1,5 +1,3 @@
-//go:build !windows
-
 package main
 
 import (
@@ -74,7 +72,11 @@ func TestVersionAndOpenProtocol(t *testing.T) {
 func TestOpenRejectsMismatchedTaggedIdentity(t *testing.T) {
 	home := newMemoryHome(t)
 	expected := identityForTest(t, home)
-	expected.Ino = "0"
+	if expected.Kind == "windows" {
+		expected.FileIndex = "0"
+	} else {
+		expected.Ino = "0"
+	}
 	helper := startHelper(t)
 	response := helper.request(map[string]any{
 		"id":               "wrong-identity",

@@ -8,26 +8,17 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"syscall"
 	"testing"
-	"unsafe"
 )
 
 // The test claims NTFS, so it checks the file system of the actual temp volume.
 func requireNTFS(t *testing.T, root *os.Root) {
 	t.Helper()
-	directory, err := root.Open(".")
+	fileSystem, err := volumeFileSystemName(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("GetVolumeInformationByHandleW failed: %v", err)
 	}
-	defer directory.Close()
-	var name [syscall.MAX_PATH + 1]uint16
-	query := syscall.NewLazyDLL("kernel32.dll").NewProc("GetVolumeInformationByHandleW")
-	ok, _, callErr := query.Call(directory.Fd(), 0, 0, 0, 0, 0, uintptr(unsafe.Pointer(&name[0])), uintptr(len(name)))
-	if ok == 0 {
-		t.Fatalf("GetVolumeInformationByHandleW failed: %v", callErr)
-	}
-	if fileSystem := syscall.UTF16ToString(name[:]); fileSystem != "NTFS" {
+	if fileSystem != "NTFS" {
 		t.Fatalf("temp volume file system is %q, not NTFS", fileSystem)
 	}
 }
@@ -36,9 +27,8 @@ func requireNTFS(t *testing.T, root *os.Root) {
 // directory barrier runs. The spy only records each real platformStrictSync
 // result on a directory handle. If any such barrier fails, the operation must
 // be io_failure, never success or revision_conflict. If all succeed, it must
-// succeed. openSession stays closed on Windows, so the test builds the session
-// itself. It exercises this window only. It is not containment, admission or
-// model S proof, and a pass does not grant B.
+// succeed. It exercises this window only. It is not model S proof, and a pass
+// does not grant B.
 func TestWindowsMemoryResultBarrierFailsClosedOnNTFS(t *testing.T) {
 	for _, operation := range []string{"replace-existing", "replace-new", "delete"} {
 		t.Run(operation, func(t *testing.T) {
@@ -54,13 +44,12 @@ func TestWindowsMemoryResultBarrierFailsClosedOnNTFS(t *testing.T) {
 				}
 				base = stateForBytes([]byte("old")).Revision
 			}
-			root, err := os.OpenRoot(home)
-			if err != nil {
-				t.Fatal(err)
+			active, openErr := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, ExpectedIdentity: identityForTest(t, home)})
+			if openErr != nil {
+				t.Fatalf("open: %#v", openErr)
 			}
-			defer root.Close()
-			requireNTFS(t, root)
-			active := &session{root: root}
+			defer active.root.Close()
+			requireNTFS(t, active.root)
 
 			original := strictSync
 			t.Cleanup(func() { strictSync = original })

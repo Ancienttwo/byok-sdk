@@ -161,3 +161,18 @@ Run [39769769167](https://github.com/Ancienttwo/byok-sdk/actions/runs/3976976916
 POSIX 的 `TestStrictBarrierFailuresNeverBecomeConflict`（`barrier_test.go:80`）检查 temp 前缀 `.byok-replace`。
 helper 的 temp 名是 `.byok-agent-memory-replace-…`（`main.go` 的 `temporaryName`），所以这个残留检查永远匹配不到。
 Windows 移植版用真实前缀。改 POSIX 版是加强断言，作为后续工作，不在本 PR。
+
+## 8. 0.29.0 切片（lane C）
+
+owner 在 2026-10-22 定了 §6 的 10 个问题（见 #605）。0.29.0 先放行 `memory_recall` / `memory_save`，B 保持 `false`。切片顺序：
+
+1. **W3-go**：Go helper 在 Windows 放行 open。
+   - Windows 只接受 NTFS，其他卷返回 `unsafe_root`。只有在 NTFS 上，volume serial 加 64 位 file index 才唯一。ReFS 的 file ID 是 128 位，64 位 index 不唯一。FAT 的 file ID 随目录项移动而变。
+   - Windows 不跑 home 链屏障，链规则（W2）和 B 一起做。写法对齐 #738 的 O6：进程崩溃下单文件原子，每次写严格 flush 自己的文件和目录；不承诺 OS 崩溃和断电后仍持久。
+   - TS 门仍关，包里也没有 Windows 资产，所以产品行为不变。
+2. **W1**：名称规则（保留名、以点结尾的段、硬链接、大小写别名），所有平台。要确认 budget 和大小写别名的语义。
+3. **W3a**：win32-x64 发布物和 `pe-content-v1` digest。要确认 budget 和 `sdkNativeAssetTargets` 的公开类型。
+4. **W3b**：TS 门放行 win32-x64 的 recall/save，Windows 上 B 为 `false`。要确认 budget。
+5. **W7**：删除 `agent-memory-windows.yml`，family 改名。要确认 selector 映射。
+
+W2、W4、W5、W6 等 owner 提供 Windows 环境后再做。

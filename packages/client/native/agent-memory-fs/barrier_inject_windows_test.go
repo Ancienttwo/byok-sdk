@@ -12,11 +12,9 @@ import (
 )
 
 // Windows ports of the four failure-injection tests in barrier_test.go, which
-// is !windows. openSession stays closed on Windows, so each test builds the
-// session itself, as crash_windows_test.go does. The spy fails the chosen
-// barrier and passes every other call to the real platformStrictSync, which
-// must succeed on NTFS. A pass covers the helper failure paths only. It is not
-// containment, admission or model S proof, and it does not grant B.
+// is !windows. The spy fails the chosen barrier and passes every other call to
+// the real platformStrictSync, which must succeed on NTFS. A pass covers the
+// helper failure paths only. It is not model S proof, and it does not grant B.
 
 // Errors that a Windows flush can return: no write access on the handle
 // (#580), no flush support on the device or file system, a device I/O error.
@@ -30,8 +28,8 @@ var windowsBarrierErrors = []struct {
 	{"ERROR_IO_DEVICE", syscall.Errno(1117)},
 }
 
-// pinnedNTFSSession returns a session pinned on an NTFS home that holds notes/
-// and MEMORY.md with "old", the layout of newMemoryHome in main_test.go.
+// pinnedNTFSSession opens a session on an NTFS home that holds notes/ and
+// MEMORY.md with "old", the layout of newMemoryHome in main_test.go.
 func pinnedNTFSSession(t *testing.T) (string, *session) {
 	t.Helper()
 	home := filepath.Join(t.TempDir(), "home")
@@ -41,13 +39,13 @@ func pinnedNTFSSession(t *testing.T) (string, *session) {
 	if err := os.WriteFile(filepath.Join(home, "MEMORY.md"), []byte("old"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	root, err := os.OpenRoot(home)
-	if err != nil {
-		t.Fatal(err)
+	active, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, ExpectedIdentity: identityForTest(t, home)})
+	if failure != nil {
+		t.Fatalf("open: %#v", failure)
 	}
-	t.Cleanup(func() { _ = root.Close() })
-	requireNTFS(t, root)
-	return home, &session{root: root}
+	t.Cleanup(func() { _ = active.root.Close() })
+	requireNTFS(t, active.root)
+	return home, active
 }
 
 type barrierSpy struct {
