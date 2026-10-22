@@ -2,6 +2,7 @@ import { testScratchOwner, testScratchRoot } from "./fixtures/execution-scratch"
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { AgentHomeManager } from '../agent-home';
@@ -13,7 +14,14 @@ import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { GitWorkspaceManager } from '../daemon/git-workspace';
 import { GitWorkspaceStore } from '../daemon/git-workspace-store';
-import { AGENT_MEMORY_GUIDANCE, prependAgentMemoryGuidance } from '../daemon/memory-guidance';
+import {
+  AGENT_MEMORY_GUIDANCE,
+  AGENT_MEMORY_READER_GUIDANCE,
+  prependAgentMemoryGuidance,
+  prependAgentMemoryReaderGuidance,
+  prependAgentReaderResultGuidance,
+} from '../daemon/memory-guidance';
+import { serveAgentMemoryMcpOverStdio, serveGrantedAgentMemoryMcpOverStdio } from '../bin/agent-memory-mcp-server';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -198,5 +206,120 @@ describe('Agent memory guidance', () => {
       expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi')])).toThrow('agentMemoryFilesystem is removed');
       expect(resolveAgentMemoryMcpBin(true)).toBeUndefined();
     }
+  });
+});
+
+// #614 follow-ups: the guidance follows `agentMemoryMcp`, and a reader gets no write tool.
+describe('Agent memory admission follow-ups', () => {
+  async function memoryRunner(agentMemoryMcp: 'auto' | 'off' | undefined) {
+    const hostStorageRoot = await makeRoot();
+    const workspaceRoot = await makeRoot();
+    const storeDir = await makeRoot();
+    const adapter = new StubRuntimeAdapter('pi', undefined, { steer: true, resume: true, approvalInteractive: true, mcpToolsets: true });
+    const gitWorkspaceStore = new GitWorkspaceStore(storeDir);
+    await gitWorkspaceStore.initialize();
+    const gitWorkspaceManager = new GitWorkspaceManager(workspaceRoot, { ownerId: 'agent-memory-admission-test' });
+    await gitWorkspaceManager.preflight();
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+      adapters: [adapter],
+      workspaceRoot,
+      agentHome: new AgentHomeManager({ hostStorageRoot }),
+      agentSessionHandoffs: new AgentSessionHandoffStore(),
+      deviceId: 'device-memory-admission',
+      send: () => {},
+      blobClient: {
+        resolveInstruction: async () => { throw new Error('not used in this test'); },
+        uploadArtifact: async () => { throw new Error('not used in this test'); },
+      },
+      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
+      gitWorkspaceManager,
+      gitWorkspaceStore,
+      approvalRegistry: new ApprovalRegistry(),
+      storeDir,
+      productId: 'product-memory-admission',
+      tenantId: 'tenant-memory-admission',
+      // `off` resolves no helper in the daemon; `auto` models an admitted
+      // secure filesystem (the macOS release helper is never opened here).
+      ...(agentMemoryMcp === 'off' ? { agentMemoryMcp } : {
+        ...(agentMemoryMcp === undefined ? {} : { agentMemoryMcp }),
+        agentMemoryMcpBin: { command: 'node', args: ['memory-mcp.js'] },
+        ...(process.platform === 'darwin' ? { resolveAgentMemoryFilesystemHelperBin: () => '/sdk/release/agent-memory-fs' } : {}),
+      }),
+    });
+    let seq = 1;
+    for (const [taskId, reader] of [['writer-task', false], ['reader-task', true]] as const) {
+      await runner.handleEnvelope(createEnvelope('task.offer_for_agent', {
+        instruction: `instruction for ${taskId}`,
+        runtime: 'pi',
+        agentRef: { agentId: 'agent-admission', profileRevision: 'profile-1' },
+        ...(reader ? { homeAccess: 'memory-reader' as const } : {}),
+      }, { taskId, seq: seq++ }));
+    }
+    expect(adapter.startCalls).toHaveLength(2);
+    return { runner, writer: adapter.startCalls[0]!, reader: adapter.startCalls[1]! };
+  }
+
+  async function listToolNames(serve: (stdin: PassThrough, stdout: PassThrough) => void): Promise<string[]> {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    let buffer = '';
+    stdout.on('data', (chunk: Buffer) => { buffer += chunk.toString('utf8'); });
+    serve(stdin, stdout);
+    stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} })}\n`);
+    await vi.waitFor(() => expect(buffer).toContain('\n'));
+    stdin.end();
+    const response = JSON.parse(buffer.slice(0, buffer.indexOf('\n'))) as { result: { tools: { name: string }[] } };
+    return response.result.tools.map((tool) => tool.name);
+  }
+
+  const deps = {
+    recall: async () => { throw new Error('not used in this test'); },
+    save: async () => { throw new Error('not used in this test'); },
+  };
+
+  it('keeps the auto reader guidance byte-identical and adds a result-only reader guidance', () => {
+    const memoryLines = [
+      'At the start of this Agent task, first read `MEMORY.md` in the Agent home, which is `../../../MEMORY.md` from the provided `cwd`.',
+      'Read files under the Agent home `notes/` (`../../../notes/`) only as needed, following pointers from the index.',
+      'This task reads Agent memory only. Do not change `MEMORY.md` or `notes/`: another task writes memory.',
+    ];
+    const resultLine = 'Give the result of this task in your final reply. Files in the provided `cwd` are scratch files: do not expect the host to read them.';
+    expect(AGENT_MEMORY_READER_GUIDANCE).toBe([...memoryLines, resultLine].join('\n'));
+    expect(prependAgentReaderResultGuidance('work')).toBe(`${resultLine}\n\nwork`);
+  });
+
+  it('omits the memory guidance and the memory MCP for writer and reader when agentMemoryMcp is off', async () => {
+    const { writer, reader } = await memoryRunner('off');
+    expect(writer.task.instruction).toBe('instruction for writer-task');
+    expect(reader.task.instruction).toBe(prependAgentReaderResultGuidance('instruction for reader-task'));
+    for (const start of [writer, reader]) {
+      expect(start.task.instruction).not.toContain('MEMORY.md');
+      expect(start.task.instruction).not.toContain('notes/');
+      expect(start.ctx.mcpServers?.byokagentmemory).toBeUndefined();
+    }
+  });
+
+  it.skipIf(process.platform === 'win32').each([undefined, 'auto'] as const)(
+    'with agentMemoryMcp %s seals a reader read-only and lists only granted tools', async (mode) => {
+      const { writer, reader } = await memoryRunner(mode);
+      expect(writer.task.instruction).toBe(prependAgentMemoryGuidance('instruction for writer-task'));
+      expect(reader.task.instruction).toBe(prependAgentMemoryReaderGuidance('instruction for reader-task'));
+      expect(writer.ctx.mcpServers?.byokagentmemory?.env).toMatchObject({
+        BYOK_PREPARED_AGENT_MEMORY_MODE: 'read-write', BYOK_AGENT_MEMORY_TOOL_LIST: 'granted',
+      });
+      expect(reader.ctx.mcpServers?.byokagentmemory?.env).toMatchObject({
+        BYOK_PREPARED_AGENT_MEMORY_MODE: 'read', BYOK_AGENT_MEMORY_TOOL_LIST: 'granted',
+      });
+    },
+  );
+
+  it('lists only memory_recall from a granted read helper and keeps the complete prepared listing', async () => {
+    expect(await listToolNames((stdin, stdout) => serveGrantedAgentMemoryMcpOverStdio({ deps, mode: 'read', stdin, stdout })))
+      .toEqual(['memory_recall']);
+    expect(await listToolNames((stdin, stdout) => serveGrantedAgentMemoryMcpOverStdio({ deps, mode: 'read-write', stdin, stdout })))
+      .toEqual(['memory_recall', 'memory_save']);
+    // The prepared lane compares this listing with its complete sealed descriptor.
+    expect(await listToolNames((stdin, stdout) => serveAgentMemoryMcpOverStdio({ deps, mode: 'read', stdin, stdout })))
+      .toEqual(['memory_recall', 'memory_save']);
   });
 });

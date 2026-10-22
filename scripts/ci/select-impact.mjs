@@ -163,6 +163,7 @@ export const knownFamilies = Object.freeze([
 // test file and script a family job runs is owned by that family.
 export const familyOwners = Object.freeze({
   'agent-memory-export-linux': [
+    /^examples\/host-execution-core\/src\/fixtures\/memory-restore-crash\.ts$/,
     /^examples\/host-execution-core\/src\/memory\.ts$/,
     /^examples\/host-execution-core\/src\/memory-restore\.ts$/,
     /^examples\/host-execution-core\/src\/memory-restore\.test\.ts$/,
@@ -286,7 +287,7 @@ export function selectImpact(paths, context = {}) {
       for (const dir of ['examples/basic', 'examples/host-execution-core', 'examples/bot-collaboration']) dirs.add(dir);
       continue;
     }
-    if (path === 'examples/basic/clarification.test.ts' || path === 'examples/basic/goal-btw.test.ts') {
+    if (path === 'examples/basic/clarification.test.ts' || path === 'examples/basic/goal-btw.test.ts' || path === 'examples/basic/goal-btw-close.test.ts') {
       dirs.add('examples/basic'); continue;
     }
     if (path === 'api-surface/entries.json') {

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { parseBunLock } from '../release/pi-runtime-identity.mjs';
@@ -96,6 +96,16 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
   if (!isDeepStrictEqual(before, after)) throw new Error(`Reviewed CI mapping required: ${path} changes more than the reviewed fields`);
 }
 
+/** A `bin:<name>` entry belongs to the one workspace package whose manifest declares that bin. */
+function binOwner(name, cwd) {
+  const owners = readdirSync(resolve(cwd, 'packages')).filter(dir => {
+    const manifest = resolve(cwd, 'packages', dir, 'package.json');
+    return existsSync(manifest) && Object.hasOwn(JSON.parse(readFileSync(manifest, 'utf8')).bin ?? {}, name);
+  });
+  if (owners.length !== 1) throw new Error(`Reviewed CI mapping required: unmapped API entry bin:${name}`);
+  return `packages/${owners[0]}`;
+}
+
 export function changedApiOwners({ base, cwd = process.cwd() } = {}) {
   if (!/^[a-f0-9]{40}$/.test(base ?? '') || /^0+$/.test(base)) throw new Error('API impact requires exact CI_BASE');
   const before = JSON.parse(execFileSync('git', ['show', `${base}:api-surface/entries.json`], { cwd, encoding: 'utf8' }));
@@ -103,6 +113,8 @@ export function changedApiOwners({ base, cwd = process.cwd() } = {}) {
   const owners = new Set();
   for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
     if (isDeepStrictEqual(before[key], after[key])) continue;
+    const bin = /^bin:([a-z0-9-]+)$/.exec(key);
+    if (bin) { owners.add(binOwner(bin[1], cwd)); continue; }
     const match = /^@byok-sdk\/([a-z-]+)(?:[/#]|$)/.exec(key);
     if (!match) throw new Error(`Reviewed CI mapping required: unmapped API entry ${key}`);
     owners.add(`packages/${match[1]}`);
