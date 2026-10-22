@@ -267,6 +267,32 @@ describe('conn.hello.capabilities (C2: approval-targeting)', () => {
     expect(hello.payload.capabilities).toContain('agent-home-contract');
   });
 
+  // #614: `none` runs on every Agent-home daemon, so the flag does not follow memory admission.
+  it('advertises agent-memory-selection with the Agent home, also when agentMemoryMcp is off', async () => {
+    const workspaceRoot = await tmpDir('byok-conn-hello-memory-workspace-');
+    const storeDir = await tmpDir('byok-conn-hello-memory-store-');
+    const hostStorageRoot = await tmpDir('byok-conn-hello-memory-root-');
+    daemon = createDaemonWithAdapters(
+      { storage: { scratchRoot: testScratchRoot() },
+        localAgentRelease: { version: '0.0.0-test' },
+        productName: 'Test Product',
+        productId: 'test-product',
+        serverUrl: server.url,
+        workspaceRoot,
+        storeDir,
+        agentHome: { hostStorageRoot },
+        agentMemoryMcp: 'off',
+      },
+      [],
+    );
+    await daemon.pair('pairing-code');
+    await daemon.start();
+
+    const hello = await server.waitFor((event) => event.type === 'conn.hello');
+    if (hello.type !== 'conn.hello') throw new Error('unreachable');
+    expect(hello.payload.capabilities).toContain('agent-memory-selection');
+  });
+
   it('fails start before advertising Agent capability when hostStorageRoot is not a directory', async () => {
     const workspaceRoot = await tmpDir('byok-conn-hello-agent-invalid-workspace-');
     const storeDir = await tmpDir('byok-conn-hello-agent-invalid-store-');

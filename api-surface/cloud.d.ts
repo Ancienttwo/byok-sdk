@@ -260,6 +260,11 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
             profileRevision: z.ZodString;
         }, z.core.$strict>;
         homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+        agentMemory: z.ZodOptional<z.ZodEnum<{
+            none: "none";
+            read: "read";
+            "read-write": "read-write";
+        }>>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";

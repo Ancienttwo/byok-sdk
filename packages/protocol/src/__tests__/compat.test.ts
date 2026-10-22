@@ -353,6 +353,17 @@ describe('compat v3: corpus coverage and WIRE_ADDITIONS', () => {
     expect(unused, 'append a v3 corpus line that carries each of these (golden/v3.envelopes.ndjson is append-only)').toEqual([]);
   });
 
+  it('gates the per-task agentMemory selection on the ordinary Agent offers only (#614)', () => {
+    for (const type of ['task.offer_for_agent', 'task.offer_for_agent_with_egress', 'task.offer_for_agent_with_egress_fresh'] as const) {
+      for (const agentMemory of ['none', 'read', 'read-write'] as const) {
+        expect(requiredReceiverCapabilities(type, { agentMemory }), `${type} ${agentMemory}`).toContain('agent-memory-selection');
+      }
+      expect(requiredReceiverCapabilities(type, {}), type).not.toContain('agent-memory-selection');
+    }
+    // Every prepared offer carries its own required selection under its own gate.
+    expect(requiredReceiverCapabilities('task.offer_prepared', { agentMemory: 'read' })).not.toContain('agent-memory-selection');
+  });
+
   it('requiredReceiverCapabilities derives field and value gates from the table; document and the v2 strip-safe fields need none', () => {
     expect(requiredReceiverCapabilities('task.offer_for_agent', { homeAccess: 'memory-reader' })).toEqual([
       'agent-home-contract',
