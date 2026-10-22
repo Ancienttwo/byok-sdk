@@ -13,7 +13,10 @@
   `import.meta.resolve` (#724). esbuild leaves `import.meta` empty in CJS
   output, so the calls threw when they ran. `PiAdapter.detect()` without
   `sdkHelperHost` reached one of them. The client manifest lookup now uses
-  `createRequire(import.meta.url)`. The pinned Pi package lookup now finds the
+  `createRequire(import.meta.url)` and refuses a manifest that is not this
+  client's name and version, because that resolver also searches `NODE_PATH`
+  and the global folders. The root and `testing` closure budgets rise by 78 B
+  and 110 B for this check (owner-approved). The pinned Pi package lookup now finds the
   first `node_modules` package directory in the module's ancestor chain, as
   ESM resolution does. So does the vendored pi-subagents
   `resolveInstalledPiPackageRoot`, recorded as a maintained delta. ESM results

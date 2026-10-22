@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2077486,
+      "budgetBytes": 2077564,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -360,7 +360,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 372601,
+      "budgetBytes": 372711,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
