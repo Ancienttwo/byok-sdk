@@ -74,7 +74,9 @@ export function hermesProfileConfig(model: HermesModelSelection | undefined): st
 
 /** Creates the root and its `config.yaml` (update check off) when they are missing or differ. */
 export async function ensureHermesRoot(root: string): Promise<void> {
-  await fs.mkdir(root, { recursive: true, mode: 0o700 });
+  // A new root gets a Windows DACL (a mode restricts nothing there). An existing root keeps the Host's ACL:
+  // a change on it would propagate through the whole Python environment below it.
+  if (await fs.mkdir(root, { recursive: true, mode: 0o700 }) !== undefined) await ensureSecureDir(root);
   const file = path.join(root, 'config.yaml');
   for (let attempt = 1; ; attempt += 1) {
     if (await fs.readFile(file, 'utf8').catch(() => undefined) === ROOT_CONFIG) return;

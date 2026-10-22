@@ -62,8 +62,10 @@ export interface IdentifyHermesGatewayOptions {
   /**
    * Windows: the server pids the caller owns. The kernel names the server;
    * only an owned server receives the request. Any other server yields
-   * `{ pid: <server pid>, state: 'unverified', servedHomes: [] }`. POSIX
-   * ignores it: only this execution can reach the profile directory.
+   * `{ pid: <server pid>, state: 'unverified', servedHomes: [] }`, and an
+   * owned server whose answer names another pid yields `state: 'mismatch'`.
+   * On Windows `pid` is always the kernel's server pid. POSIX ignores it:
+   * only this execution can reach the profile directory.
    */
   owned?: (serverPid: number) => boolean;
   nativeAssetRoot?: string;
@@ -77,8 +79,8 @@ async function identifyOverPipe(home: string, options: IdentifyHermesGatewayOpti
   if (answer === undefined) return undefined;
   const identity = answer.line === undefined ? undefined : parseIdentity(answer.line);
   if (identity === undefined) return { pid: answer.serverPid, state: 'unverified', servedHomes: [] };
-  // An answer that names another process than the kernel does is judged by its claim and is never ready.
-  return identity.pid === answer.serverPid ? identity : { pid: identity.pid, state: 'mismatch', servedHomes: [] };
+  // The server names another process than the kernel does: it is not the gateway it claims to be.
+  return identity.pid === answer.serverPid ? identity : { pid: answer.serverPid, state: 'mismatch', servedHomes: [] };
 }
 
 /**

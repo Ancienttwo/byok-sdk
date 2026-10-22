@@ -111,10 +111,10 @@ describe.runIf(process.platform === 'win32')('Hermes gateway pipe client on Wind
     expect(received.join('')).toBe('{"protocol":1,"id":1,"verb":"identify"}\n');
   });
 
-  it('never reports ready for an answer that names another pid than the kernel', async () => {
+  it('marks an answer that names another pid than the kernel as a mismatch, under the kernel pid', async () => {
     const { home } = await serve(() => ready(process.pid + 100_000, 'C:\\served'));
     expect(await identifyHermesGateway(home, { owned: (pid) => pid === process.pid }))
-      .toEqual({ pid: process.pid + 100_000, state: 'mismatch', servedHomes: [] });
+      .toEqual({ pid: process.pid, state: 'mismatch', servedHomes: [] });
   });
 
   it('reports no gateway when nothing serves the pipe', async () => {

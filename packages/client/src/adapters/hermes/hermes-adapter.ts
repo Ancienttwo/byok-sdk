@@ -363,7 +363,7 @@ export class HermesAdapter implements RuntimeAdapter {
       // The viewer must have attached to the owned gateway, not to one it started itself.
       const attached = await identifyAfterAttach(home, { owned: (pid) => pid === gatewayPid, nativeAssetRoot: this.options.nativeAssetRoot });
       if (attached === undefined) throw infrastructure('start', 'hermes gateway did not answer identify after attach', 'retryable');
-      if (attached.pid !== gatewayPid) {
+      if (attached.pid !== gatewayPid || attached.state === 'mismatch') {
         if (await mayStopForeignHermesGateway(attached, await fs.realpath(home), viewerChild?.pid)) stopProcessGroup(attached.pid);
         throw infrastructure('start', 'hermes acp attached to a gateway this session does not own');
       }

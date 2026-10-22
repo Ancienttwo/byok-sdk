@@ -115,6 +115,8 @@ export function createHermesSession(scratch: ExecutionScratch, root: string, liv
         if (signal?.aborted) throw infrastructure('start', 'hermes start was aborted', 'retryable');
         const identity = await identifyHermesGateway(home, { owned: (pid) => pid === owned });
         if (identity !== undefined) {
+          // Windows: the owned server's answer names another process than the kernel does.
+          if (identity.state === 'mismatch') throw infrastructure('start', 'another Hermes gateway serves the execution profile');
           if (identity.pid !== owned) {
             const ours = await this.withinStart(ownsHermesGatewayPid(root, identity.pid), deadline, signal).catch((error: unknown) => {
               throw isRuntimeExecutionFailure(error) ? error : infrastructure('start', 'hermes gateway ownership check failed', 'retryable');
