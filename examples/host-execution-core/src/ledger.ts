@@ -36,7 +36,7 @@ export class RetiredIntentIdentityError extends Error {
 export interface CompactionOptions {
   /** Explicit acknowledgement that these results may be removed under the Host's retention policy. */
   acknowledgedIntentKeys: readonly string[];
-  /** Settled Host-only occurrences; promoted occurrences are selected through their intent. */
+  /** Settled Host job or Host occurrence rows without an intent; promoted occurrences are selected through their intent. */
   acknowledgedOccurrenceKeys?: readonly string[];
   /** Terminal memory intents whose readback the Host has acknowledged. */
   acknowledgedMemoryIntentIds?: readonly string[];
@@ -194,7 +194,7 @@ export class HostLedger {
       }
       for (const key of occurrenceKeys) {
         const occurrence = state.occurrences[key];
-        if (!occurrence || occurrence.key !== key || !occurrence.job || occurrence.intentId || !occurrence.conclusion
+        if (!occurrence || occurrence.key !== key || !(occurrence.job || occurrence.hook) || occurrence.intentId || !occurrence.conclusion
           || Object.values(state.outbox).some(row => row.kind === 'host-job' && row.occurrenceKey === key)
           || occurrenceOwners.has(key)) throw new Error('Only settled Host-only occurrences can be compacted');
         const slot = hash(occurrence.wakeKey);
