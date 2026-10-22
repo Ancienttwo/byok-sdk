@@ -291,6 +291,10 @@ export function selectImpact(paths, context = {}) {
     if (path === 'packages/client/scripts/check-hermes-session-entry.mjs' || path === 'packages/client/tsup.config.ts') {
       dirs.add('packages/client'); families.add('npm-release-pack'); continue;
     }
+    // #636: the keys pi-catalog subpath entry, and the generator that keys
+    // source imports and the client drift test re-runs.
+    if (path === 'packages/keys/tsup.config.ts') { dirs.add('packages/keys'); families.add('npm-release-pack'); continue; }
+    if (path === 'scripts/keys/generate-pi-model-catalog.ts') { dirs.add('packages/keys'); dirs.add('packages/client'); continue; }
     if (path === 'packages/client/scripts/packed-agent-memory-helper-smoke.mjs'
       || path === 'scripts/release/agent-memory-helper-source.test.mjs') {
       dirs.add('packages/client'); families.add('npm-release-pack'); continue;

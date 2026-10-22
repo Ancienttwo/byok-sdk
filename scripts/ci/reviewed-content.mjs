@@ -85,6 +85,12 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       const smoke = ' && node scripts/check-hermes-session-entry.mjs';
       if (typeof before.scripts?.build === 'string' && after.scripts?.build === before.scripts.build + smoke) after.scripts.build = before.scripts.build;
     }
+    if (path === 'packages/keys/package.json') {
+      // #636 adds one subpath for the generated pinned pi-ai catalog lookup.
+      const key = './pi-catalog';
+      const entry = { types: './dist/pi-catalog.d.ts', import: './dist/pi-catalog.js' };
+      if (before.exports?.[key] === undefined && isDeepStrictEqual(after.exports?.[key], entry)) delete after.exports[key];
+    }
     delete before.version; delete after.version;
   }
   if (!isDeepStrictEqual(before, after)) throw new Error(`Reviewed CI mapping required: ${path} changes more than the reviewed fields`);

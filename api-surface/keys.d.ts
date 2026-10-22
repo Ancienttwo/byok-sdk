@@ -552,8 +552,8 @@ export declare function assertLiveModelResponse(value: string): void;
 // ==== @byok-sdk/keys dist/index.d.ts ====
 export { ByokKeysError, BYOK_KEYS_ERROR_CODES } from './errors';
 export type { ByokKeysErrorCode } from './errors';
-export { PiModelConfigSchema, PI_THINKING_LEVELS, PI_OPENAI_COMPATIBLE_APIS, PI_COMPAT_KEYS_BY_API } from './pi-model-config';
-export type { PiModelConfig, PiOpenAICompatibleApi } from './pi-model-config';
+export { PiModelConfigSchema, PI_THINKING_LEVELS, PI_OPENAI_COMPATIBLE_APIS, PI_MODEL_APIS, PI_COMPAT_KEYS_BY_API, } from './pi-model-config';
+export type { PiCompatKey, PiModelApi, PiModelConfig, PiOpenAICompatibleApi, PiThinkingLevel } from './pi-model-config';
 export { MODEL_PROVIDER_ADAPTERS, MODEL_PROVIDER_KINDS, PROVIDER_AUTH_MODES, PROVIDER_MODEL_CAPABILITIES, ModelProviderProfileSchema, ProviderModelCapabilitySchema, ProviderProfileRefSchema, parseModelProviderProfile, exactProviderProfileBinding, assertExactProviderProfileBinding, } from './provider-profile';
 export type { ModelProviderAdapter, ModelProviderKind, ModelProviderProfile, ModelProviderProfileInput, ExactProviderProfileBinding, ProviderAuthMode, ProviderModelCapability, ProviderProfileRef, } from './provider-profile';
 export { MODEL_PROVIDER_VENDORS, MODEL_PROVIDER_VENDOR_IDS, modelProviderVendor, } from './provider-catalog';
@@ -595,7 +595,7 @@ export { PROVIDER_KEY_CHECK_TIMEOUT_MS, checkProviderKey } from './provider-key-
 export type { ProviderKeyCheckOptions } from './provider-key-check';
 export { ProviderRegistry } from './registry';
 export type { ModelProviderClient, ProviderConfiguration, ProviderRegistryOptions, ProviderStatus, } from './registry';
-export { PI_AUTH_NONE_API_KEY, PI_PROJECTED_KEY_ENV, buildPiProviderProjection, } from './pi-provider-projection';
+export { PI_AUTH_NONE_API_KEY, PI_PROJECTED_KEY_ENV, assertPiLaunchArgs, buildPiProviderProjection, } from './pi-provider-projection';
 export { parsePiProviderLauncherOptions, runPiProviderLauncher, } from './pi-provider-launcher-core';
 export type { PiProviderLauncherHost, PiProviderLauncherOptions, } from './pi-provider-launcher-core';
 export { HERMES_PROVIDER_KEY_ENV, hermesProviderModel, parseHermesProviderLauncherRequest, runHermesProviderLauncher } from './hermes-provider-launcher';
@@ -713,9 +713,88 @@ export declare class OpenAiCompatibleChatClient {
  * narrative method).
  */
 export declare function chatCompletionText(payload: Record<string, unknown>): string;
+// ==== @byok-sdk/keys dist/pi-catalog.d.ts ====
+export { PI_MODEL_CATALOG_PI_AI_VERSION, piModelConfigFromPinnedCatalog } from './pi-model-catalog';
+export type { PiCatalogLookup, PiCatalogModelInput, PiCatalogSelection } from './pi-model-catalog';
+// ==== @byok-sdk/keys dist/pi-model-catalog.d.ts ====
+import type { ModelProviderAdapter } from './provider-profile';
+import { type PiModelApi, type PiModelConfig, type PiThinkingLevel } from './pi-model-config';
+export { PI_MODEL_CATALOG_PI_AI_VERSION } from './pi-model-catalog.generated';
+/** The input modalities a Pi catalog entry declares; a profile states `image` as the `image-input` capability. */
+export type PiCatalogModelInput = 'text' | 'image';
+/** A catalog entry that `PiModelConfig` expresses exactly, without the launch-time thinking level. */
+export interface PiCatalogModelEntry {
+    readonly config: Omit<PiModelConfig, 'thinkingLevel'>;
+    readonly input: readonly PiCatalogModelInput[];
+}
+/** A catalog entry that `PiModelConfig` cannot express, with every field path that blocks it. */
+export interface PiCatalogUnrepresentableEntry {
+    readonly unrepresentable: readonly string[];
+}
+/** Vendor id → Pi api → model id → entry. Generated; see `pi-model-catalog.generated.ts`. */
+export type PiModelCatalogTable = Readonly<Record<string, Readonly<Partial<Record<PiModelApi, Readonly<Record<string, PiCatalogModelEntry | PiCatalogUnrepresentableEntry>>>>>>>;
+export interface PiCatalogSelection {
+    /** A `MODEL_PROVIDER_VENDORS` id, which is also the pi-ai provider id. */
+    readonly provider: string;
+    readonly api: PiModelApi;
+    readonly model: string;
+    /** The launch thinking level. The catalog has none, and this package invents no default. */
+    readonly thinkingLevel: PiThinkingLevel;
+}
+export type PiCatalogLookup = {
+    readonly ok: true;
+    readonly config: PiModelConfig;
+    readonly input: readonly PiCatalogModelInput[];
+} | {
+    readonly ok: false;
+    readonly reason: 'not_in_catalog';
+} | {
+    readonly ok: false;
+    readonly reason: 'unrepresentable';
+    readonly fields: readonly string[];
+} | {
+    readonly ok: false;
+    readonly reason: 'thinking_level_unsupported';
+    readonly supported: readonly PiThinkingLevel[];
+};
+/**
+ * The `pi_model` for one entry of the pinned pi-ai catalog.
+ *
+ * The table is generated from the pi-ai version `@byok-sdk/client` pins
+ * ({@link PI_MODEL_CATALOG_PI_AI_VERSION}); nothing is read at run time. An
+ * entry is either expressed exactly or refused with the field paths that
+ * `PiModelConfig` cannot carry. Identity, endpoint and cost fields are not
+ * part of `pi_model` and never cause a refusal; `input` is returned for the
+ * profile's `image-input` capability.
+ */
+export declare function piModelConfigFromPinnedCatalog(selection: PiCatalogSelection): PiCatalogLookup;
+/**
+ * Classify one pi-ai built-in chat model for the vendor adapter that serves it.
+ *
+ * The generator calls this for every catalog entry. Admission is the same
+ * `PiModelConfigSchema` a profile is parsed with, plus the exact compat set of
+ * the entry's own api. Any Pi field this package does not know is refused, so
+ * a new pi-ai field never passes silently.
+ */
+export declare function classifyPiCatalogModel(model: Readonly<Record<string, unknown>>, adapter: ModelProviderAdapter): PiCatalogModelEntry | PiCatalogUnrepresentableEntry;
+// ==== @byok-sdk/keys dist/pi-model-catalog.generated.d.ts ====
+import type { PiModelCatalogTable } from './pi-model-catalog';
+/** The pi-ai version this table and the thinking levels were generated from. */
+export declare const PI_MODEL_CATALOG_PI_AI_VERSION = "1.3.0";
+/** Pi's `MODEL_THINKING_LEVELS`, in Pi's order. */
+export declare const PI_THINKING_LEVELS: readonly ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+/** Every chat model of each vendor in `MODEL_PROVIDER_VENDORS`, for the Pi apis a profile projects. */
+export declare const PI_MODEL_CATALOG: PiModelCatalogTable;
 // ==== @byok-sdk/keys dist/pi-model-config.d.ts ====
 import { z } from 'zod';
-export declare const PI_THINKING_LEVELS: readonly ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+import { PI_THINKING_LEVELS } from './pi-model-catalog.generated';
+/**
+ * Pi's own `MODEL_THINKING_LEVELS`, generated from the pinned
+ * `@earendil-works/pi-ai` (see `pi-model-catalog.generated.ts`). The Pi host
+ * entries in `@byok-sdk/client` import the same pinned list from pi-ai.
+ */
+export { PI_THINKING_LEVELS };
+export type PiThinkingLevel = (typeof PI_THINKING_LEVELS)[number];
 /**
  * The Pi wire APIs an `openai_compatible` profile may declare. Absent means
  * `openai-completions`; an `anthropic` profile always projects
@@ -723,11 +802,14 @@ export declare const PI_THINKING_LEVELS: readonly ['off', 'minimal', 'low', 'med
  */
 export declare const PI_OPENAI_COMPATIBLE_APIS: readonly ['openai-completions', 'openai-responses'];
 export type PiOpenAICompatibleApi = (typeof PI_OPENAI_COMPATIBLE_APIS)[number];
+/** Every Pi wire API a profile projects: the two `openai_compatible` APIs and `anthropic-messages`. */
+export declare const PI_MODEL_APIS: readonly ["openai-completions", "openai-responses", "anthropic-messages"];
+export type PiModelApi = (typeof PI_MODEL_APIS)[number];
 /**
  * Every `compat` member this schema admits, for any API. Each API admits only
  * its own subset of Pi's compat schema for that API (see
  * {@link PI_COMPAT_KEYS_BY_API}); a member outside the subset is refused,
- * never silently ignored.
+ * never silently ignored. Each member is passed to Pi verbatim.
  */
 declare const compat: z.ZodObject<{
     supportsStore: z.ZodOptional<z.ZodBoolean>;
@@ -753,8 +835,21 @@ declare const compat: z.ZodObject<{
     }>>;
     zaiToolStream: z.ZodOptional<z.ZodBoolean>;
     supportsLongCacheRetention: z.ZodOptional<z.ZodBoolean>;
+    supportsStrictMode: z.ZodOptional<z.ZodBoolean>;
+    requiresReasoningContentOnAssistantMessages: z.ZodOptional<z.ZodBoolean>;
+    forceAdaptiveThinking: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strict>;
-export declare const PI_COMPAT_KEYS_BY_API: Readonly<Record<PiOpenAICompatibleApi, readonly (keyof z.infer<typeof compat>)[]>>;
+export type PiCompatKey = keyof z.infer<typeof compat>;
+/** The subset of Pi's per-API compat schema this package carries, for each Pi wire API. */
+export declare const PI_COMPAT_KEYS_BY_API: Readonly<Record<PiModelApi, readonly PiCompatKey[]>>;
+/**
+ * The compat keys an `anthropic` profile admits. It projects
+ * `anthropic-messages`, but it has always admitted the `openai-completions`
+ * set too, and a stored profile may declare one of those keys. Pi's
+ * Anthropic compat schema does not read them. Tightening this set would
+ * refuse such a stored profile, so it is a separate decision.
+ */
+export declare const PI_ANTHROPIC_PROFILE_COMPAT_KEYS: readonly PiCompatKey[];
 /**
  * The compat keys the frozen prepared model wire carries. The prepared runtime
  * entry refuses a profile that declares any other compat key.
@@ -811,6 +906,9 @@ export declare const PiModelConfigSchema: z.ZodObject<{
         }>>;
         zaiToolStream: z.ZodOptional<z.ZodBoolean>;
         supportsLongCacheRetention: z.ZodOptional<z.ZodBoolean>;
+        supportsStrictMode: z.ZodOptional<z.ZodBoolean>;
+        requiresReasoningContentOnAssistantMessages: z.ZodOptional<z.ZodBoolean>;
+        forceAdaptiveThinking: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strict>;
     inputLimits: z.ZodOptional<z.ZodObject<{
         maxRequestBytes: z.ZodOptional<z.ZodNumber>;
@@ -826,8 +924,13 @@ export declare const PiModelConfigSchema: z.ZodObject<{
         }, z.core.$strict>>;
     }, z.core.$strict>>;
 }, z.core.$strict>;
+/** One issue per declared compat key outside `admitted`, at `['compat', key]`. */
+export declare function piCompatIssues(declared: object, admitted: readonly string[], api: string): {
+    code: 'custom';
+    path: string[];
+    message: string;
+}[];
 export type PiModelConfig = z.infer<typeof PiModelConfigSchema>;
-export {};
 // ==== @byok-sdk/keys dist/pi-provider-launcher-core.d.ts ====
 import { type ChildProcess } from 'node:child_process';
 import { type CommandRunner } from './command-runner';
@@ -1032,6 +1135,19 @@ export declare function piProjectionProviderId(profileRef: string): string;
  * or base URL.
  */
 export declare function buildPiProviderProjection(profile: ModelProviderProfile, runtimeEntry: PiLauncherRuntimeEntry): object;
+/**
+ * Refuse a profile whose rpc launch values the Pi rpc host would refuse.
+ *
+ * The launcher appends `--provider`, `--model` and `--thinking` from the
+ * profile. The `@byok-sdk/client` rpc host (`parsePiRpcHostArgs`) takes each
+ * value only when it is non-empty and does not start with `--`, and takes
+ * `--thinking` only from Pi's thinking levels. `PiModelConfigSchema` already
+ * restricts `thinkingLevel` to those levels. A Host can call this on a parsed
+ * profile when it saves the profile. The launcher calls it before admission
+ * and again before spawn. A client test runs the same argv through the real
+ * host parser.
+ */
+export declare function assertPiLaunchArgs(profile: ModelProviderProfile): void;
 /**
  * Validate the credential-blind RPC argv the client may delegate, then bind
  * the Pi child to the namespaced projection and exact configured model.
@@ -1412,6 +1528,9 @@ export declare const ModelProviderProfileSchema: z.ZodObject<{
             }>>;
             zaiToolStream: z.ZodOptional<z.ZodBoolean>;
             supportsLongCacheRetention: z.ZodOptional<z.ZodBoolean>;
+            supportsStrictMode: z.ZodOptional<z.ZodBoolean>;
+            requiresReasoningContentOnAssistantMessages: z.ZodOptional<z.ZodBoolean>;
+            forceAdaptiveThinking: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strict>;
         inputLimits: z.ZodOptional<z.ZodObject<{
             maxRequestBytes: z.ZodOptional<z.ZodNumber>;

@@ -42,6 +42,20 @@
   adapter loads and the available isolation boundaries (#634).
 - **Feature (server, cloud)** — Hosts can await the durable terminal state of an
   Agent-home projection instead of polling (#637).
+- **Feature (keys)** — add `piModelConfigFromPinnedCatalog` and
+  `PI_MODEL_CATALOG_PI_AI_VERSION` on the new `@byok-sdk/keys/pi-catalog`
+  export (#636). The table is generated from the
+  pinned `@earendil-works/pi-ai` with `bun scripts/keys/generate-pi-model-catalog.ts`, and
+  a client test fails on drift. An entry is returned exactly or refused with its
+  blocking fields; an entry without a complete `thinkingLevelMap` is refused.
+  `PiModelConfigSchema.compat` accepts `supportsStrictMode`,
+  `requiresReasoningContentOnAssistantMessages` (`openai-completions`) and
+  `forceAdaptiveThinking` (`anthropic` profiles); the prepared entry still
+  refuses keys outside its wire. Add `assertPiLaunchArgs`; the launcher now
+  refuses a model id that starts with `--` before admission.
+- **Changed (keys, client)** — `PI_THINKING_LEVELS` is generated from pi-ai
+  `MODEL_THINKING_LEVELS`, and the Pi rpc and prepared hosts import that list
+  (#636). `PI_COMPAT_KEYS_BY_API` gains an `anthropic-messages` row.
 - **Fixed (examples)** — the Bot collaboration Host now checks only
   non-archived Bot templates against the read-only toolset allowlist when it
   reopens. The stored template of an archived Bot no longer blocks reopening.

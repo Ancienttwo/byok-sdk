@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { InMemoryTruthStore, tenantId } from '@byok-sdk/core';
 import { PI_MODEL_FIXTURE } from './fixtures/pi-model-config';
 import { parseModelProviderProfile, exactProviderProfileBinding, assertExactProviderProfileBinding } from './provider-profile';
-import { buildPiProviderArgs, buildPiProviderProjection } from './pi-provider-projection';
+import { assertPiLaunchArgs, buildPiProviderArgs, buildPiProviderProjection } from './pi-provider-projection';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
 import { InMemoryProviderProfileStore } from './profile-store';
 import { TruthStoreProviderProfileStore } from './truth-profile-store';
@@ -113,5 +113,56 @@ describe('explicit Pi model authority', () => {
       expect(changed.profile_hash).not.toBe(status.profile_hash);
       expect(BigInt(changed.profile_revision)).toBeGreaterThan(BigInt(status.profile_revision));
     } finally { await store.close(); }
+  });
+});
+
+describe('Pi compat keys added for the pinned pi-ai catalog', () => {
+  const anthropicProfile = {
+    ...profileInput, adapter: 'anthropic', auth_mode: 'x_api_key', base_url: 'https://api.anthropic.com/v1',
+  } as const;
+
+  it.each([
+    ['openai-completions', 'supportsStrictMode'],
+    ['openai-completions', 'requiresReasoningContentOnAssistantMessages'],
+    ['openai-responses', 'supportsStrictMode'],
+  ] as const)('admits %s compat.%s and projects it to Pi', (api, key) => {
+    const pi_model = { ...PI_MODEL_FIXTURE, ...(api === 'openai-responses' ? { api } : {}),
+      compat: api === 'openai-responses' ? { [key]: true } : { ...PI_MODEL_FIXTURE.compat, [key]: true } };
+    const profile = parseModelProviderProfile({ ...profileInput, pi_model });
+    const model = (buildPiProviderProjection(profile, 'pi-rpc') as any).providers['byok-sdk-test-zai'].models[0];
+    expect(model.compat).toEqual(pi_model.compat);
+  });
+
+  it('admits compat.forceAdaptiveThinking on an anthropic profile and projects it to Pi', () => {
+    const pi_model = { ...PI_MODEL_FIXTURE, compat: { forceAdaptiveThinking: true } };
+    const profile = parseModelProviderProfile({ ...anthropicProfile, pi_model });
+    const provider = (buildPiProviderProjection(profile, 'pi-rpc') as any).providers['byok-sdk-test-zai'];
+    expect(provider.api).toBe('anthropic-messages');
+    expect(provider.models[0].compat).toEqual({ forceAdaptiveThinking: true });
+  });
+
+  it.each([
+    ['openai-completions forceAdaptiveThinking', profileInput, { compat: { forceAdaptiveThinking: true } }, /forceAdaptiveThinking does not apply to openai-completions/],
+    ['openai-responses forceAdaptiveThinking', profileInput, { api: 'openai-responses', compat: { forceAdaptiveThinking: true } }, /forceAdaptiveThinking does not apply to openai-responses/],
+    ['openai-responses requiresReasoningContentOnAssistantMessages', profileInput, { api: 'openai-responses', compat: { requiresReasoningContentOnAssistantMessages: true } }, /requiresReasoningContentOnAssistantMessages does not apply to openai-responses/],
+  ] as const)('rejects %s', (_, base, override, message) => {
+    expect(() => parseModelProviderProfile({ ...base, pi_model: { ...PI_MODEL_FIXTURE, ...override } })).toThrow(message);
+  });
+});
+
+describe('assertPiLaunchArgs', () => {
+  it('accepts a profile whose launch values the Pi rpc host takes', () => {
+    expect(() => assertPiLaunchArgs(parseModelProviderProfile(profileInput))).not.toThrow();
+  });
+
+  it('refuses a model the Pi rpc host reads as a flag, at validation and at argv build', () => {
+    const profile = parseModelProviderProfile({ ...profileInput, model: '--tools' });
+    expect(() => assertPiLaunchArgs(profile)).toThrow(/Pi --model value "--tools" is not accepted by the Pi rpc host/);
+    expect(() => buildPiProviderArgs(profile, ['--mode', 'rpc'])).toThrow(/is not accepted by the Pi rpc host/);
+  });
+
+  it('refuses a profile without pi_model', () => {
+    const { pi_model: _, ...directProfile } = profileInput;
+    expect(() => assertPiLaunchArgs(parseModelProviderProfile(directProfile))).toThrow(/requires explicit pi_model/);
   });
 });

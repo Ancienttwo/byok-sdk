@@ -183,6 +183,13 @@ kind, endpoint and model name never infer it; Pi's built-in catalog does not
 override the namespaced local projection. Model limits do not constitute Host
 ContextPack budgets or measured available input tokens.
 
+`@byok-sdk/keys` can derive such a configuration from the pi-ai catalog that
+the client pins. The table is a checked-in generated file; a test fails until
+it is regenerated for the pinned pi-ai. Keys does not read pi-ai at run time. A derived configuration
+is a value the Host stores in the local profile, and the same schema validates
+it. A catalog entry that the schema cannot express exactly is refused with its
+blocking fields, never narrowed.
+
 The launcher accepts the adapter's bounded absolute extension paths and an
 absolute `--config` path. Provider/model/thinking selection remains local
 profile authority; delegated flags cannot override it. The Pi child gets a
