@@ -43,7 +43,7 @@ import {
 } from '../sealed-payload/scope-key';
 import {
   encodeSealedFrame,
-  sealContent,
+  sealContentWithRandomness,
   sealedContentAad,
   sealedPaddedLength,
   type SealedBinding,
@@ -214,7 +214,7 @@ async function craftedVectors(scopeKey: Uint8Array, client: VectorMember, chainH
   ): Promise<CraftedOpenVector> => {
     const salt = labelBytes(`crafted-${defect}-salt`);
     const nonce = labelBytes(`crafted-${defect}-nonce`, 12);
-    const sealed = await sealContent(
+    const sealed = await sealContentWithRandomness(
       { scopeKey, scope: SCOPE, chainHead, sender: client.memberId, category: 'task-input', binding, plaintext: { note: 'crafted' }, maxContentLength: 1024 },
       { salt, nonce },
     );
@@ -348,7 +348,7 @@ async function buildVectors(): Promise<SealedPayloadVectors> {
     const salt = labelBytes(`${input.name}-salt`);
     const nonce = labelBytes(`${input.name}-nonce`, 12);
     const plaintext = vectorPlaintext(input);
-    const result = await sealContent(
+    const result = await sealContentWithRandomness(
       { scopeKey, scope: SCOPE, chainHead, sender: input.sender.memberId, category: input.category, binding: input.binding, plaintext, maxContentLength: input.maxContentLength },
       { salt, nonce },
     );

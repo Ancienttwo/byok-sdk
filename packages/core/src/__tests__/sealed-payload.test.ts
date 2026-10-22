@@ -20,6 +20,7 @@ import {
   encodeSealedFrame,
   openSealedContent,
   sealContent,
+  sealContentWithRandomness,
   sealedPaddedLength,
   type SealContentInput,
   type SealedBinding,
@@ -136,8 +137,8 @@ describe('sealContent', () => {
   });
 
   it('rejects a fixed salt or nonce of the wrong length', async () => {
-    await expectInvalid(sealContent(sealInput(), { salt: new Uint8Array(16), nonce: new Uint8Array(12) }));
-    await expectInvalid(sealContent(sealInput(), { salt: new Uint8Array(32), nonce: new Uint8Array(16) }));
+    await expectInvalid(sealContentWithRandomness(sealInput(), { salt: new Uint8Array(16), nonce: new Uint8Array(12) }));
+    await expectInvalid(sealContentWithRandomness(sealInput(), { salt: new Uint8Array(32), nonce: new Uint8Array(16) }));
   });
 });
 

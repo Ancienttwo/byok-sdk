@@ -359,7 +359,7 @@ export interface SealContentInput {
   readonly maxContentLength: number;
 }
 
-/** A caller-fixed salt and nonce. Test vectors only; production always draws fresh ones. */
+/** The salt and nonce of one seal. */
 export interface SealedContentRandomness {
   readonly salt: Uint8Array;
   readonly nonce: Uint8Array;
@@ -372,7 +372,16 @@ export interface SealedContent {
 }
 
 /** Seal one category of a payload once. A retry must resend these bytes, never seal again (§9.2). */
-export async function sealContent(input: SealContentInput, fixed?: SealedContentRandomness): Promise<SealedContent> {
+export async function sealContent(input: SealContentInput): Promise<SealedContent> {
+  return sealContentWithRandomness(input, { salt: randomBytes(SEALED_SALT_BYTES), nonce: randomBytes(SEALED_NONCE_BYTES) });
+}
+
+/**
+ * {@link sealContent} with a caller-chosen salt and nonce, for test vectors
+ * only. The package root does not export it: a reused nonce under one content
+ * key breaks AES-GCM.
+ */
+export async function sealContentWithRandomness(input: SealContentInput, randomness: SealedContentRandomness): Promise<SealedContent> {
   const binding = parseBinding(input.binding);
   assertMaxContentLength(input.maxContentLength);
   if (!binding.categories.includes(input.category)) {
@@ -382,8 +391,7 @@ export async function sealContent(input: SealContentInput, fixed?: SealedContent
   const content = utf8(plaintextText);
   if (content.byteLength > input.maxContentLength) throw invalidInput('Sealed content exceeds its plaintext limit');
   const frame = encodeSealedFrame(content);
-  const salt = fixed?.salt ?? randomBytes(SEALED_SALT_BYTES);
-  const nonce = fixed?.nonce ?? randomBytes(SEALED_NONCE_BYTES);
+  const { salt, nonce } = randomness;
   const parsed = SealedContentHeaderV1Schema.safeParse({
     v: SEALED_CONTENT_VERSION,
     suite: SEALED_CONTENT_SUITE,

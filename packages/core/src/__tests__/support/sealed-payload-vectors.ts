@@ -31,7 +31,7 @@ import {
   decodeSealedFrame,
   encodeSealedFrame,
   openSealedContent,
-  sealContent,
+  sealContentWithRandomness,
   sealedContentAad,
   sealedContentMac,
   sealedPaddedLength,
@@ -314,7 +314,7 @@ async function checkSealed(vectors: SealedPayloadVectors, scopeKey: Uint8Array):
   for (const vector of vectors.sealed) {
     const label = `sealed ${vector.name}`;
     const plaintext = vectorPlaintext(vector);
-    const sealed = await sealContent(
+    const sealed = await sealContentWithRandomness(
       {
         scopeKey,
         scope: vector.scope,

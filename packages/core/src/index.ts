@@ -359,6 +359,50 @@ export type {
   WebCryptoKey,
 } from './sealed-provider-secret';
 
+// Sealed payload v1 (#654): sealed contents, scope keys and key packages, and
+// member chain entries. The browser, the device and the hosted Host run this
+// same WebCrypto code.
+export {
+  SEALED_CATEGORIES,
+  SEALED_CONTENT_SUITE,
+  SEALED_CONTENT_VERSION,
+  SEALED_DIRECTIONS,
+  SealedContentHeaderV1Schema,
+  openSealedContent,
+  sealContent,
+} from './sealed-payload/sealed-content';
+export type {
+  OpenSealedContentInput,
+  SealContentInput,
+  SealedBinding,
+  SealedCategory,
+  SealedContent,
+  SealedContentHeaderV1,
+  SealedContentOpenFailure,
+  SealedContentOpenResult,
+  SealedDirection,
+} from './sealed-payload/sealed-content';
+export { deriveScopeKeyId, generateScopeKey, openScopeKeyPackage, sealScopeKeyPackage } from './sealed-payload/scope-key';
+export type {
+  OpenScopeKeyPackageInput,
+  ScopeKeyPackageOpenResult,
+  ScopeKeyPackageV1,
+  SealScopeKeyPackageInput,
+} from './sealed-payload/scope-key';
+export {
+  MEMBER_CHAIN_OPS,
+  deriveMemberId,
+  memberChainEntryHash,
+  signMemberChainEntry,
+  verifyMemberChainEntry,
+} from './sealed-payload/member-chain';
+export type {
+  MemberChainEntryV1,
+  MemberChainEntryVerifyResult,
+  MemberChainOp,
+  UnsignedMemberChainEntryV1,
+} from './sealed-payload/member-chain';
+
 // Host-approved Agent memory intent identity digest
 export { AGENT_MEMORY_INTENT_DIGEST_VERSION, agentMemoryIntentOperationDigest } from './agent-memory-intent';
 export type { AgentMemoryIntentDigestInput } from './agent-memory-intent';
