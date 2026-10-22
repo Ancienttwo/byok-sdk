@@ -12214,6 +12214,8 @@ export interface McpHttpServerOptions extends Omit<McpServerOptions, 'input' | '
     readonly sessionMode?: 'stateful' | 'stateless';
     /** Trusted public origin, e.g. https://host.example. Never derive it from the request Host header. */
     readonly origin: string;
+    /** Additional exact Origin values from trusted Host configuration, validated like `origin`. Default none. */
+    readonly allowedOrigins?: readonly string[];
     /** Positive integer, at most MCP_HTTP_MAX_BODY_BYTES. */
     readonly maxBodyBytes?: number;
     /** Bounds idle sessions as well as emitter subscriptions. Default 64. Applies only in stateful mode. */

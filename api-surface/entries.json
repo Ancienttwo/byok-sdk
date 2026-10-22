@@ -292,7 +292,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Tools-only MCP Streamable HTTP framing",
-      "budgetBytes": 36482,
+      "budgetBytes": 36534,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {

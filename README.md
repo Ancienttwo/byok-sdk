@@ -396,7 +396,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/client/agent-memory` | Embedded Agent memory service | — | forbidden | 69427 B |
 | `@byok-sdk/client/assertion-client` | Task/device assertions; core includes protected Zod probes | `zod` | allowed | 171848 B |
 | `@byok-sdk/client/mcp-server` | Tools-only MCP server | — | forbidden | 17719 B |
-| `@byok-sdk/client/mcp-server/http` | Tools-only MCP Streamable HTTP framing | — | forbidden | 36482 B |
+| `@byok-sdk/client/mcp-server/http` | Tools-only MCP Streamable HTTP framing | — | forbidden | 36534 B |
 | `@byok-sdk/client/package.json` | Package metadata | — | forbidden | 5029 B |
 | `@byok-sdk/client#byok-acp-runtime` | Private ACP runtime stack (Grok) | `@agentclientprotocol/sdk`, `zod` | allowed | 83751 B |
 | `@byok-sdk/client#byok-hermes-session` | Private Hermes session runtime; loaded only when starting an execution | — | forbidden | 12529 B |
