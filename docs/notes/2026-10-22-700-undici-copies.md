@@ -36,8 +36,8 @@ manifest or lock file.
 - The probes ran on Node v24.22.1 (the 0.28.2 floor, `engines.node >=24.22.1`;
   built-in undici 7.30.1, the patched 7.x line), on v26.10.0 (inside the floor)
   and on v24.21.0 (below it). Every shape gives the same result on all three. On
-  v24.22.1 an ESM Host keeps the patched built-in copy for `fetch`. A CJS bundle
-  replaces it with Pi's unpatched 8.10.2.
+  v24.22.1 an ESM Host that runs the SDK's Pi host keeps the patched built-in
+  copy for `fetch`. A CJS bundle replaces it with Pi's unpatched 8.10.2.
 - Node's own undici is in the advisory range on some builds that the floor
   admits. Node v26.10.0 carries 8.10.2. The v26.12.1 release notes list the
   patched 8.12.2.
@@ -193,11 +193,12 @@ them apart.
 | v26.10.0 (inside the floor) | 8.10.2 | Node's copy writes the slots and serves | Pi's nested 8.10.2 writes the slots and serves |
 | v24.21.0 (below the floor) | 7.29.1 | Node's copy writes the slots and serves | Pi's nested 8.10.2 writes the slots and serves |
 
-On v24.22.1 an ESM Host keeps Node's 7.30.1 as the `fetch` dispatcher. That is
-the patched 7.x line. In those rows the slot-2 `Agent` options keep a `tls` key,
-as the 8.12.3 copy does. Pi's 8.10.2 has no such key, and the CJS rows show the
-shape without it. A CJS bundle replaces Node's copy with Pi's unpatched 8.10.2.
-So the CJS shape matters most on the version that the floor names.
+On v24.22.1 an ESM Host that runs the SDK's Pi host keeps Node's 7.30.1 as the
+`fetch` dispatcher. That is the patched 7.x line. In those rows the slot-2
+`Agent` options keep a `tls` key, as the 8.12.3 copy does. Pi's 8.10.2 has no
+such key, and the CJS rows show the shape without it. A CJS bundle replaces
+Node's copy with Pi's unpatched 8.10.2. So the CJS shape matters most on the
+version that the floor names.
 
 Node's own copy is in the advisory range on some builds that the floor admits.
 `engines.node >=24.22.1` admits v26.10.0 (8.10.2). The v26.12.1 release notes
@@ -356,9 +357,10 @@ not part of it.
 - B (code and test). `runSdkReservedHelperCommand()` reads `globalThis.Headers`
   with `Reflect.get` before each import of `#byok-pi-runtime-host`: for the
   `pi-subagent-runner` and `pi-subagent-print` kinds, and for the `pi-rpc`,
-  `pi-prepared` and `pi-durable` kinds. The `byok-pi-rpc`, `byok-pi-prepared`,
-  `byok-pi-durable` and `byok-agent` entries read it before their own import of
-  the host. `pi-single-file-bundle.test.ts` checks, in the three CJS fixtures and
+  `pi-prepared` and `pi-durable` kinds. The `byok-pi-rpc`, `byok-pi-prepared`
+  and `byok-pi-durable` entries read it before their own import of the host.
+  `byok-agent` reads it on its team operator path only.
+  `pi-single-file-bundle.test.ts` checks, in the three CJS fixtures and
   for four more Pi helper kinds, that no npm undici claims the dispatcher slots.
 - C (docs). The CJS recipe in `packages/client/README.md`, and one "Security
   (client)" entry under "Unreleased" in the CHANGELOG.
