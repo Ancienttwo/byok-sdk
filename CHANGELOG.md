@@ -58,6 +58,12 @@
   clock. Heartbeats with a non-zero minimum interval keep their throttle. The
   conformance suite now covers the rollback case, and `advanceTime` accepts a
   negative value (#674).
+- **Fixed (client)** — during a route outage, the daemon outbox keeps one copy
+  of a pending `agent.message.publish`. Before, each retry added a new copy
+  with a new envelope id: one per second for a live task, and one per
+  reconnect for a recovered task. Each retry of a message now resends the same
+  envelope, and the connection manager does not queue an envelope id that is
+  already queued or in flight. Retries continue after the outage ends (#693).
 
 ## 0.28.1 / @byok-sdk/keys 0.13.1 — 2026-10-21 (published)
 

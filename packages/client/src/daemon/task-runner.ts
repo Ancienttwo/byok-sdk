@@ -1431,6 +1431,13 @@ export class TaskRunner {
   private readonly cancelledRecoveredMessages = new Set<string>();
   private readonly recoveredMessageRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /**
+   * One publish envelope per activated (frozen, immutable) message record, so
+   * every retry resends the same id and the transport keeps one pending copy
+   * during an outage (#693). The cloud replays the disposition by `messageId`
+   * on each arrival, so a resent id still re-elicits the disposition.
+   */
+  private readonly agentMessageEnvelopes = new WeakMap<AgentMessageOutboxRecord, Envelope>();
+  /**
    * Finding F4 (cancel lost during the offer-processing window): a
    * `task.cancel` for a taskId that hasn't finished `handleOffer` yet (still
    * awaiting adapter detection / instruction resolution / workspace setup /
@@ -1836,10 +1843,15 @@ export class TaskRunner {
       active.messageDraft?.stop();
       active.messageSendAttempted = true;
     }
-    this.deps.send(createEnvelope('agent.message.publish', outbox.publishPayload(record), {
-      taskId: record.taskId,
-      sessionRef: record.sessionRef,
-    }));
+    let envelope = this.agentMessageEnvelopes.get(record);
+    if (envelope === undefined) {
+      envelope = createEnvelope('agent.message.publish', outbox.publishPayload(record), {
+        taskId: record.taskId,
+        sessionRef: record.sessionRef,
+      });
+      this.agentMessageEnvelopes.set(record, envelope);
+    }
+    this.deps.send(envelope);
     if (active?.messageOutbox === outbox) {
       if (active.messageRetryTimer !== undefined) clearTimeout(active.messageRetryTimer);
       active.messageRetryTimer = setTimeout(() => {
