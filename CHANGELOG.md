@@ -13,6 +13,23 @@ field on durable Pi tool events and `HermesAdapter.prepare()` on Windows. The
 qualification. All nine public manifests and their lock records move to
 0.28.3.
 
+- **Docs (cloud-dataplane)** — `docs/security.md` has a new "Hosted surface
+  threat model" section (#654). For each data category (C1 to C4 and routing
+  metadata), it states what the Host operator, Postgres, R2, logs and backups
+  can read, and how the category is deleted. It also records two facts about
+  the current code. `task.complete` writes no `object_reference` row for its
+  artifact, so the artifact has `ref_count` 0, and maintenance deletes it
+  about 1 day after upload unless the product adds a reference. `revokeDevice`
+  deletes the `device` row, but the `pairing-completion:v1:` receipt keeps the
+  device name until tenant erasure. No wire, API, dependency or SQL changes.
+- **Tests (cloud-dataplane)** — the new `hosted-plaintext-inventory.test.ts`
+  sends one canary through the hosted wire on real Postgres and S3 (#654). It
+  then reads every column of every tenant table (the table list comes from
+  `pg_class`), every object in the bucket and the console output. It looks
+  for the canary as UTF-8, JSON-escaped, hex, base64 and base64url text. The
+  set of places that hold it must equal the table in `docs/security.md`. A
+  change to `docs/security.md` also runs the test in CI (#741). Some content
+  locations are outside the canary run. The doc lists them.
 - **Docs (client)** — the client README explains what a Host sees when
   `agentMemoryMcp: 'auto'` does not admit the memory MCP, why the daemon then
   reports `status().agentMemoryMcp` as `unavailable`, and what the Host can do
@@ -40,7 +57,8 @@ qualification. All nine public manifests and their lock records move to
   Still open: Pi's own copies (the nested 8.10.2 and the copy inlined in its
   CLI bundle) until a Pi release moves them. Node's own undici on the Node
   builds that `engines.node` admits (v26.10.0 carries 8.10.2) is a Node runtime
-  matter. #700 stays open.
+  matter, and no Node floor change is decided. #700 is closed with these items
+  open. `docs/notes/2026-10-22-700-undici-copies.md` records them (#725).
 - **Feature (client)** — an opt-in Grok option for user-level instructions
   (#634). `GrokAdapterOptions.compatInstructions: 'disabled'` sets Grok's four
   Claude and Cursor `agents` and `rules` compatibility variables to `0` on the
@@ -111,12 +129,24 @@ qualification. All nine public manifests and their lock records move to
   The stale-profile sweep keeps a profile when the Windows pipe client fails.
   The Windows process-table read now ends at the ready deadline or on start
   abort, and the foreign-gateway check ends at 10 s or on start abort.
+- **Fixed (client)** — on Windows, the stale-profile sweep no longer deletes a
+  live Hermes profile whose gateway pipe exists but cannot be opened (#712).
+  Before, the pipe client took every `CreateFileW` failure as "no gateway". It
+  did the same when `GetNamedPipeServerProcessId` failed. Now it reads
+  `GetLastError`. Only `ERROR_FILE_NOT_FOUND` means that no pipe has the
+  name. A busy pipe (`ERROR_PIPE_BUSY`), a pipe that denies access
+  (`ERROR_ACCESS_DENIED`), any other open failure and an unknown server pid
+  now reject. The sweep then keeps the profile, and the ready wait and the
+  post-attach check retry, as before. The `#byok-hermes-session` closure
+  budget rises by 332 B for this check (owner-approved). The new
+  `hermes-pipe-open-errors.test.ts` sets each open error through a kernel32
+  stand-in on every OS. No test opens a real busy or access-denied pipe on
+  Windows.
 - **Changed (client)** — update the private OAR source to 0.70.0
   (`44d7d61`). Keep the eight BYOK-maintained files. Update the source
   manifest and bridge paths. The only selected upstream change is the optional
   `LoginOptions.openBrowser` contract field; no vendored runtime calls login.
   No public API or npm dependency changes.
-
 - **Feature (client, keys)** — `HermesAdapter.prepare()` runs on Windows. The
   adapter asks the gateway `identify` over the named pipe that Hermes derives
   from the profile home. A gateway at most four parent links below the spawned
