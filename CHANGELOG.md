@@ -93,6 +93,18 @@
   clock. Heartbeats with a non-zero minimum interval keep their throttle. The
   conformance suite now covers the rollback case, and `advanceTime` accepts a
   negative value (#674).
+- **Feature (client, protocol)** — adapter metadata for Hosts (#635). Each
+  built-in descriptor declares `platforms`. Runtime detection refuses another
+  platform with `platform_unsupported` before any probe; Grok and Hermes
+  support macOS and Linux only. The daemon declines an explicit offer for such a
+  runtime with a `platform_unsupported:` reason and `retryable: true`.
+  `@byok-sdk/client/adapters` exports `observeRuntimeDetection`,
+  `projectRuntimeObservation`, `validateRuntimeDetectResult`, `isWireRuntimeId`
+  and `taskRuntimeTarget`. The new `@byok-sdk/client/testing` entry exports
+  `fakeRuntimeAdapter(id, behavior)` with the real adapter descriptor.
+  `@byok-sdk/protocol/constants` exports `RUNTIME_IDS`, the one source of
+  `RuntimeIdSchema`. No wire change: a cloud submit for a harness the device
+  does not advertise still fails before an offer reaches the daemon.
 - **Security, compatibility (runtime, CI, release)** — CI and the release job
   now use Node 24.22.1, and the 9 public packages declare `engines.node`
   `>=24.22.1`. Before, `.node-version` pinned 24.21.0 and `engines.node` was

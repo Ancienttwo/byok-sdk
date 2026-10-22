@@ -88,7 +88,7 @@ describe('GrokAdapter sessions', () => {
   it('declares resume and MCP toolsets, no steer, no approvals and no dispatch selection', async () => {
     const a = adapter();
     expect(a.descriptor).toEqual({
-      id: 'grok', supportsDispatchSelection: false, requiresMcpToolsetToolObservation: false,
+      id: 'grok', supportsDispatchSelection: false, requiresMcpToolsetToolObservation: false, platforms: ['darwin', 'linux'],
       capabilities: { steer: false, resume: true, approvalInteractive: false, mcpToolsets: true },
     });
     const prepared = await a.prepare({
