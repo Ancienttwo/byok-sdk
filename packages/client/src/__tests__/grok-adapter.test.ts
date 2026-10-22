@@ -147,6 +147,20 @@ describe('GrokAdapter sessions', () => {
     ]);
   });
 
+  it('turns off Claude and Cursor instruction scanning in the agent process only when asked (#634)', async () => {
+    expect(() => adapter({ compatInstructions: 'off' as never })).toThrow(TypeError);
+    const plain = await ctx();
+    await turn(await open(adapter(), { instruction: 'hello' }, plain));
+    expect(Object.keys(facts(plain.log).find(fact => fact.kind === 'start')!.env).filter(name => name.startsWith('GROK_'))).toEqual([]);
+    const resources = await ctx();
+    const s = await open(adapter({ compatInstructions: 'disabled' }), { instruction: 'terminal-compat' }, resources);
+    // The hosted terminal command keeps the task env.
+    expect(await turn(s)).toEqual([{ type: 'progress', text: 'terminal:unset' }, usage, { type: 'turn_end' }]);
+    expect(facts(resources.log).find(fact => fact.kind === 'start')!.env).toMatchObject({
+      GROK_CLAUDE_AGENTS_ENABLED: '0', GROK_CLAUDE_RULES_ENABLED: '0', GROK_CURSOR_AGENTS_ENABLED: '0', GROK_CURSOR_RULES_ENABLED: '0',
+    });
+  });
+
   it('resumes the exact native session and fails closed on a missing one', async () => {
     const resources = await ctx();
     const s = await open(adapter(), { instruction: 'again', sessionRef: 'fake-grok-session' }, resources);
