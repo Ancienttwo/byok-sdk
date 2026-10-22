@@ -29,6 +29,15 @@ changes no code, manifest or lock file.
   ESM. It does not hold for a CJS bundle.
 - A nested override of Pi's undici fixes the npm copy for a Host. It cannot fix
   the inlined copy.
+- The probes ran on Node v24.21.0 (below the 0.28.2 floor, `engines.node
+  >=24.22.1`) and on v26.10.0 (inside it). Every shape gives the same result on
+  both. Node 24.22.1 was not on this machine, and I did not download it. Its
+  release notes list built-in undici 7.30.1, the patched 7.x line. So on 24.22.1
+  an ESM Host keeps the patched built-in copy for `fetch`, and a CJS bundle
+  replaces it with Pi's 8.10.2 (inferred, not run).
+- Node's own undici is in the advisory range on some builds that the floor
+  admits. Node v26.10.0 carries 8.10.2. The v26.12.1 release notes list the
+  patched 8.12.2.
 - The CHANGELOG already lists all eight advisories (`CHANGELOG.md:44-52`).
 - #700 stays open.
 
@@ -39,8 +48,9 @@ changes no code, manifest or lock file.
   `cloud-dataplane` alone), Bun 1.4.3 with the hoisted linker and with the
   isolated linker, and npm with an older `undici@7.28.0` at the Host root.
 - `npm ls undici --all`, `bun pm ls --all`, and `grep` over the installed files.
-- Run-time probes on Node v24.21.0. Node 24.22.1 was not available. Node's own
-  undici in v24.21.0 is 7.29.1 (`process.versions.undici`).
+- Run-time probes on Node v24.21.0 (Node's own undici 7.29.1) and v26.10.0
+  (Node's own undici 8.10.2), from `process.versions.undici`. Node 24.22.1, the
+  0.28.2 floor, was not on this machine. I did not download it.
 - Most run-time rows below ran one real Pi print session. It used
   `runSdkReservedHelperCommand` with `pi-subagent-print` against a loopback
   provider, as in `pi-single-file-bundle.test.ts`. The provider got one request
@@ -59,12 +69,14 @@ changes no code, manifest or lock file.
 | `openai` 7.19.0 optional peer `undici` `>=5 <9` | `@earendil-works/pi-ai` 1.3.0 depends on `openai`. `pi-ai` is a dependency of `client` and `cloud-do`. | The SDK does not install the peer. The package manager and the Host tree choose the copy. See "The openai peer". | None. See "The openai peer". |
 | `undici` `^8.9.0` range | `pi-web-access` 0.24.1 (`packages/client/package.json:97`; `bun.lock:1280`) | The package installs. The SDK never imports it: `tsup.config.ts:42` inlines it, and the published dist has no import of it. | The inlined code is the Gemini Web fetch in row 1. It resolves the client's pin. |
 | `undici-types`, `@google/genai`, `eventsource` | Types only; `@google/genai@2.21.0` and `eventsource@3.0.7` name undici in `devDependencies` only. | No run-time edge (`npm ls undici --all` shows none). | None. |
+| Node's built-in undici | The Node runtime (`process.versions.undici`): 7.29.1 in v24.21.0, 7.30.1 in v24.22.1 (release notes), 8.10.2 in v26.10.0, 8.12.2 in v26.12.1 (release notes). | Not part of the install. Every process that runs the SDK holds it. | It loads on demand. In ESM it serves global `fetch`. See "Who owns the global dispatcher". |
 
 The repo tree (`bun pm ls --all`) shows the same three runtime copies: 8.12.3 at
 the root, 8.10.2 under Pi, 7.29.0 under miniflare.
 
 Each of the eight advisories of 2026-10-15 covers 8.0.0 up to 8.12.2 and 7.18.0
-up to 7.30.1 (most start earlier). So 8.10.2 and 7.29.0 are both in range.
+up to 7.30.1 (most start earlier). So 8.10.2 and 7.29.0 are both in range. So
+are Node's built-in 7.29.1 (v24.21.0) and 8.10.2 (v26.10.0).
 
 Pi's inlined copy has the pre-8.12.2 `Agent` shape
 (`this[kOptions]={...util.deepClone(options),maxOrigins,connect}` in
@@ -101,20 +113,23 @@ undici 8.x runs `if (getGlobalDispatcher() === undefined) setGlobalDispatcher(ne
 when it loads (`lib/global.js:14-16`). `getGlobalDispatcher()` reads only slot
 `Symbol.for('undici.globalDispatcher.2')`. `setGlobalDispatcher()` writes slot 2
 and also overwrites slot 1 with a `Dispatcher1Wrapper` (`lib/global.js:18-55`).
-Node's built-in `fetch` reads slot 1 for each request. So the first undici 8.x
-copy that loads, with no earlier undici in slot 2, becomes the dispatcher of
-every global `fetch` call in the process. `lib/global.js` is identical in 8.10.2
+The built-in `fetch` of Node 24 (built-in undici 7.x) reads slot 1 for each
+request, and the wrapper forwards to slot 2. The built-in `fetch` of v26.10.0
+(built-in undici 8.10.2) reads slot 2. The dispatch counts show both cases. So
+the first undici 8.x copy that loads, with no earlier undici in slot 2, becomes
+the dispatcher of every global `fetch` call in the process. `lib/global.js` is identical in 8.10.2
 and 8.12.3.
 
 Load order decides the owner. In an ESM graph, one static `import … from 'http'`
 is enough. Node reads the lazy `WebSocket` export of `node:http` when it builds
-the ESM wrapper for that built-in (trace: `get [as WebSocket] (node:http:237)`,
+the ESM wrapper for that built-in (trace on v24.21.0: `get [as WebSocket] (node:http:237)`,
 `lazyUndici (node:http:129)`, no JavaScript caller). The read loads Node's
 built-in undici, which writes both slots. The published host imports `http` at
 `dist/bin/pi-runtime-host.js:29`, after Pi at `:18`, and Node's copy still wins.
 So Node builds that wrapper while it links the graph, before any module body
 runs. A bare `await import('node:http')` shows the same effect; `node:https`
-does not.
+does not. On v26.10.0 the ESM rows show the same Node-internal writer. I did not
+trace the trigger there.
 In CommonJS, `require('http')` does not read that export. The first undici to
 evaluate wins.
 
@@ -150,6 +165,27 @@ What this means:
 - I ran one helper kind (`pi-subagent-print`). All helper kinds in the same bundle
   share the load order. I did not run them.
 
+Node versions. The shapes above ran on two Node builds. Each result cell is one
+real Pi print session: exit 0, one provider request. The slot writer comes from the stack
+frames. A `node:internal/deps/undici` frame means Node's copy. On v26.10.0 Node's
+copy and Pi's copy are both 8.10.2, so the version cannot tell them apart.
+
+| Node | Built-in undici | ESM shapes (0.28.2 unbundled and single file; main single file) | CJS shapes (0.28.2 ESM then CJS; 0.28.2 single pass with the #709 change; main single pass) |
+| --- | --- | --- | --- |
+| v24.21.0 (below the floor) | 7.29.1 | Node's copy writes the slots and serves | Pi's nested 8.10.2 writes the slots and serves |
+| v26.10.0 (inside the floor) | 8.10.2 | Node's copy writes the slots and serves | Pi's nested 8.10.2 writes the slots and serves |
+| v24.22.1 (the floor) | 7.30.1 (release notes) | Not run | Not run |
+
+The mechanism predicts this for v24.22.1 (inferred, not run). An ESM Host keeps
+Node's patched 7.30.1 as the `fetch` dispatcher. A CJS bundle replaces it with
+Pi's unpatched 8.10.2. So the CJS shape matters most on the version that the floor
+names.
+
+Node's own copy is in the advisory range on some builds that the floor admits.
+`engines.node >=24.22.1` admits v26.10.0 (8.10.2). The v26.12.1 release notes list
+the patched 8.12.2. That is a Node runtime matter and not an SDK pin. This note
+changes nothing about it.
+
 Fix checks, on the same flow:
 
 | Change | Result |
@@ -159,7 +195,8 @@ Fix checks, on the same flow:
 | Emulated: the same bundle, with one read of `globalThis.Headers` placed before the host | The slot writer is Node's built-in undici, as in ESM. |
 
 The override works because the frames name `pi-coding-agent/node_modules/undici`,
-the npm copy that the bundler inlines. It does not reach the CLI chunk.
+the npm copy that the bundler inlines. It does not reach the CLI chunk. On
+v26.10.0 the CJS result of each of the three checks is the same.
 
 ### Pi CLI path
 
@@ -274,11 +311,13 @@ Acceptance of #700:
 
 Stays open:
 
-1. Pi's npm 8.10.2 and the inlined CLI copy, until a Pi release moves them.
-2. CJS bundles of the Pi host: Pi's 8.10.2 owns the process-wide dispatcher unless
+1. The probes on Node 24.22.1, the 0.28.2 floor. They ran on v24.21.0 and
+   v26.10.0 only.
+2. Pi's npm 8.10.2 and the inlined CLI copy, until a Pi release moves them.
+3. CJS bundles of the Pi host: Pi's 8.10.2 owns the process-wide dispatcher unless
    the Host or the SDK changes the load order. This exists in 0.28.2 (ESM then
    CJS, with a define) and on main (single pass, documented).
-3. The record on the issue itself.
+4. The record on the issue itself.
 
 Options for the owner. None is done in this change.
 
@@ -298,7 +337,11 @@ Options for the owner. None is done in this change.
   `packages/client/README.md:133-138`, and one CHANGELOG sentence under
   "Unreleased".
 - D. Wait for Pi. No date. A Pi release must also rebuild the CLI bundle.
+- E. Node floor. `engines.node >=24.22.1` admits Node 26 builds whose built-in
+  undici is in the advisory range (v26.10.0). The owner can narrow the range or
+  accept it. A narrower range changes nine public manifests.
 
-Not covered: Node 24.22.1 and Node 26 runs, pnpm and Yarn layouts, `bun build
+Not covered: Node 24.22.1 runs, Node 26 builds other than v26.10.0, pnpm and
+Yarn layouts, `bun build
 --compile` products, helper kinds other than `pi-subagent-print`, and whether a
 given advisory applies to a given request.
