@@ -492,6 +492,10 @@ export declare function parseHermesProviderLauncherRequest(args: readonly string
  * as a child with the credential in the child's environment only, resolves
  * when Hermes exits and sets `process.exitCode` to its exit code. The adapter
  * accepts a gateway below the launcher PID on Windows.
+ * Before it starts Hermes, launch reads one byte from stdin: the adapter writes
+ * it after it has adopted this process (on Windows, into its kill-on-close
+ * job), so Hermes never starts outside the owned tree. End of input fails the
+ * launch. The launcher program must not read stdin itself.
  * The Host supplies its account-scoped store here, never in the daemon.
  */
 export declare function runHermesProviderLauncher(request: HermesProviderLauncherRequest, host: {
