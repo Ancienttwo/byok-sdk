@@ -2,6 +2,9 @@ import type { AskUserAction, ConfirmableAction, ResultSchema, RoutineScheduleFie
 import { emptyTeam, type TeamState } from './team-model';
 import type { Json } from '@byok-sdk/example-host-execution-core';
 import type { ChannelState } from './delivery-routing';
+import { sealAtBoundary, type Authority, type BatchTurn, type InputBatch, type UserInput } from './rules/coalesce';
+
+export type { Authority, InputBatch, SealReason, UserInput } from './rules/coalesce';
 
 export interface Turn {
   id: string; root: string; botId: string;
@@ -20,22 +23,6 @@ export interface Turn {
   /** Input batch Turns: the user inputs that this one reply answers, in arrival order. */
   inputIds?: string[];
   blockedReason?: string; profileFailure?: { sequence: number; revision: string; reason: string }; outcome?: Json; conclusion?: string; reported?: boolean;
-}
-export type Authority = 'owner' | 'bot';
-/** One durable record per user input while input coalescing is in use. `key` is the caller's input key. */
-export interface UserInput {
-  id: string; key: string; botId: string; request: string; bytes: number;
-  sender: string; authority: Authority; receivedAt: number; batchId: string;
-}
-export type SealReason = 'idle' | 'window' | 'items' | 'bytes' | 'boundary' | 'key_changed' | 'cancel' | 'policy_off' | 'archived';
-/**
- * `id` is the first input's id and the batch Turn id. `key` is the coalescing key.
- * `request` is the rendered Request while the batch is open; sealing moves it into the batch Turn.
- * `bytes` is its UTF-8 size, framing included. `revision` is the last projected revision: 1 is open, 2 is sealed.
- */
-export interface InputBatch {
-  id: string; botId: string; key: string; inputIds: string[]; bytes: number;
-  openedAt: number; sealAt: number; state: 'open' | 'sealed'; sealReason?: SealReason; request?: string; revision?: 1 | 2;
 }
 export type Verdict = 'answered' | 'failed' | 'cancelled' | 'refused' | 'expired' | 'abandoned';
 export interface ReplyEntry {
@@ -137,22 +124,18 @@ export interface TurnFields {
  * A new Turn first seals its Bot's open input batch, so the queue keeps arrival order.
  */
 export function addTurn(state: CollaborationState, fields: TurnFields): Turn {
-  const open = state.turns[fields.id] ? undefined : openInputBatch(state, fields.botId);
-  if (open) sealInputBatch(state, open, 'boundary');
+  const sealed = state.turns[fields.id] ? undefined : sealAtBoundary(state, fields.botId);
+  if (sealed) addBatchTurns(state, [sealed]);
+  return insertTurn(state, fields);
+}
+/** One user Turn per sealed input batch, in order. A batch Turn id is new and its batch is sealed, so no boundary seal applies. */
+export function addBatchTurns(state: CollaborationState, sealed: readonly BatchTurn[]): void {
+  for (const batch of sealed) insertTurn(state, { id: batch.id, root: batch.id, source: 'user', request: batch.request, botId: batch.botId, hop: 0,
+    authority: batch.authority, inputIds: batch.inputIds });
+}
+function insertTurn(state: CollaborationState, fields: TurnFields): Turn {
   state.turns[fields.id] ??= { ...fields, status: 'queued' };
   state.budgets[fields.root] ??= { continuation: 0, delegation: 0 };
   return state.turns[fields.id]!;
-}
-/** A Bot has at most one open input batch. */
-export function openInputBatch(state: CollaborationState, botId: string): InputBatch | undefined {
-  return Object.values(state.inputBatches ?? {}).find(batch => batch.botId === botId && batch.state === 'open');
-}
-/** The batch becomes one user Turn with the batch id. Neither changes after this. */
-export function sealInputBatch(state: CollaborationState, batch: InputBatch, reason: SealReason): Turn {
-  const request = batch.request;
-  if (batch.state !== 'open' || request === undefined) throw new Error('Input batch is already sealed');
-  batch.state = 'sealed'; batch.sealReason = reason; delete batch.request;
-  return addTurn(state, { id: batch.id, root: batch.id, source: 'user', request, botId: batch.botId, hop: 0,
-    authority: state.inputs![batch.id]!.authority, inputIds: [...batch.inputIds] });
 }
 export function json(value: unknown): Json { return JSON.parse(JSON.stringify(value)) as Json; }
