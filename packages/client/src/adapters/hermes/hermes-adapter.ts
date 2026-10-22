@@ -157,7 +157,7 @@ function canonicalPath(value: string): string {
 /** A busy gateway can miss one `identify` deadline; ask a few times before treating it as gone. */
 async function identifyAfterAttach(home: string, options: IdentifyHermesGatewayOptions): Promise<HermesGatewayIdentity | undefined> {
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const identity = await identifyHermesGateway(home, options);
+    const identity = await identifyHermesGateway(home, options).catch(() => undefined);
     if (identity !== undefined) return identity;
     await new Promise((resolve) => setTimeout(resolve, GATEWAY_POLL_MS));
   }
@@ -331,6 +331,8 @@ export class HermesAdapter implements RuntimeAdapter {
       const gateway = spawnGateway(gatewayLaunch.command, gatewayLaunch.args, { cwd: home, env });
       session.ownGateway(gateway);
       await withDeadline(gateway.spawned, OPEN_REQUEST_TIMEOUT_MS, input.signal, () => infrastructure('start', 'hermes gateway did not spawn', 'retryable'));
+      // The custody launcher starts Hermes only after this byte, so Hermes never runs outside the adopted tree.
+      if (custody) gateway.write('\n');
       const gatewayRoot = gatewayChild?.pid;
       if (gatewayRoot === undefined) throw infrastructure('start', 'hermes gateway has no process id', 'retryable');
       const gatewayPid = await session.awaitGatewayReady(home, gatewayRoot, this.options.gatewayReadyTimeoutMs ?? 20_000, input.signal);
@@ -348,6 +350,7 @@ export class HermesAdapter implements RuntimeAdapter {
         () => infrastructure('start', `hermes ${method} timed out`, 'retryable'),
       );
       await withDeadline(viewer.spawned, OPEN_REQUEST_TIMEOUT_MS, input.signal, () => infrastructure('start', 'hermes acp did not spawn', 'retryable'));
+      if (custody) viewer.write('\n');
       const initialized = await open<{ protocolVersion?: unknown }>('initialize', INITIALIZE_PARAMS);
       if (initialized?.protocolVersion !== 1) throw infrastructure('start', 'hermes acp did not negotiate ACP protocol version 1');
       const opened = await open<{ sessionId?: unknown }>('session/new', {
@@ -366,7 +369,7 @@ export class HermesAdapter implements RuntimeAdapter {
       const attached = await identifyAfterAttach(home, { owned: (pid) => pid === gatewayPid, nativeAssetRoot: this.options.nativeAssetRoot });
       if (attached === undefined) throw infrastructure('start', 'hermes gateway did not answer identify after attach', 'retryable');
       if (attached.pid !== gatewayPid || attached.state === 'mismatch') {
-        if (await mayStopForeignHermesGateway(attached, await fs.realpath(home), viewerChild?.pid)) stopProcessGroup(attached.pid);
+        if (await mayStopForeignHermesGateway(attached, await fs.realpath(home), viewerChild?.pid, AbortSignal.timeout(OPEN_REQUEST_TIMEOUT_MS))) stopProcessGroup(attached.pid);
         throw infrastructure('start', 'hermes acp attached to a gateway this session does not own');
       }
       if (input.signal?.aborted) throw infrastructure('start', 'hermes start was aborted', 'retryable');
