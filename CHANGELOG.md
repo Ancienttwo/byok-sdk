@@ -62,6 +62,23 @@
   `OutcomeTransaction.routines` runs `create`, `update` and `lifecycle` in the
   outcome commit with the `addRoutine`, `updateRoutine` and `lifecycle()`
   rules; a refused command changes nothing. `LedgerState.version` stays 1.
+- **Breaking (examples)** — K8 Bot routines are K4 routines (#737). Each Bot
+  routine is a `hostOccurrence` definition with the `bot-routine` hook, and K4
+  owns its versions, slots, occurrences and wakes. The hook writes the routine
+  Turn in the occurrence commit, and the Host promotes it with
+  `promoteOccurrence`. `CollaborationState.version` is 2 and has no
+  `routines`, `occurrences` or `operations`. The Host refuses a version 1
+  ledger with a clear error and writes no migration. Documented behavior
+  changes: the overlap rule is the K4 rule, so the limit of two unsettled
+  occurrences and the `capacity` decision are gone; a routine Turn id is
+  `occurrence:<occurrence key>`; its five-minute wait counts from the
+  occurrence record, not from the enqueue; K4 rejects a wake that differs
+  from its reservation; a failed SDK wake call stays in the K4 outbox and
+  rejects the Host call, and the K8 process timer retries it after 60
+  seconds; K4 keeps no old routine versions. The K8 index no longer exports `Definition`, `Occurrence` and
+  `Routine`, and `snapshot()` has no routines. Read the Bot routine views
+  with `botRoutines(Object.values(ledger.snapshot().routines))`.
+  `BotOptions.hostJobs` runs Host job routines on the same core.
 - **Changed (client)** — the Agent memory Go helper can now open a home on
   Windows (#605). The SDK does not use this yet. The TypeScript gate still
   refuses Windows, and the package has no Windows helper asset. On Windows the

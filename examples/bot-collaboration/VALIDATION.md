@@ -149,7 +149,7 @@ Small follow-up fixes have local evidence and no third independent verdict.
 | --- | --- | --- |
 | Two-device embedded-server delegation | PASS | Synthetic runtime; same test computer. Physical and hosted gaps remain below |
 | Hosted `submitAgentExecution` cross-device path | OPEN | Downstream hosted Host adapter and execution evidence |
-| Two Topology L Host processes | OPEN | Implemented service relay and durable request/verdict recovery tests |
+| Two Topology L Host processes | OPEN | Not in the first release (#606 O4). Implemented service relay and durable request/verdict recovery tests |
 | Two physical computers | OPEN | A run on separate machines; synthetic machine identity does not prove this |
 | Real runtime `submit_result` success rates (Pi / Claude / Codex / Grok, per model/platform) | OPEN | [WO-10b measurement method](../../docs/submit-result-measurement.md); separately authorized real-runtime datasets remain missing |
 | Downstream deployment, macOS/Windows product acceptance | OPEN | Fixed downstream build and device acceptance |
