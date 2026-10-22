@@ -1,4 +1,6 @@
-import { mcpEventIdentities, type McpEventIdentities } from '../../mcp/event-identity';
+import { isReservedMcpServerName } from '../../sdk-reserved-mcp';
+import { claudeMcpEventIdentities } from './mcp-identity';
+import type { McpEventIdentity } from '../../mcp/event-identity';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { execFile } from 'node:child_process';
@@ -10,6 +12,7 @@ import {
   PolicyUnsupportedError,
   SteerUnsupportedError,
   freezeRuntimeAdapterDescriptor,
+  type McpStdioServerConfig,
   type RuntimeAdapter,
   type RuntimeDetectResult,
   type RuntimeAdapterPrepareInput,
@@ -23,7 +26,7 @@ import { resolveClaudeBin, type ResolvedBin } from './resolve-bin';
 import { createClaudeControlChannel } from './control-channel';
 import { ClaudeNativeInteractionBridge, CLAUDE_NATIVE_INTERACTION_CAPABILITIES } from './native-interactions';
 import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions';
-import { AssistantMessageTracker, createToolUseCorrelation, mapClaudeMessageToAgentEvents, type ToolUseCorrelation } from './events';
+import { AssistantMessageTracker, createToolUseCorrelation, mapClaudeMessageToAgentEvents, type ClaudeStreamMessage, type ToolUseCorrelation } from './events';
 import { ClaudeProcessClient, type SpawnFn } from './process-client';
 
 
@@ -399,7 +402,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         startInput.scratch,
         manifestModelId,
         native,
-        mcpEventIdentities(startInput.mcpToolsetTools),
+        new Map(Object.entries(taskMcpServers).filter(([name]) => !isReservedMcpServerName(name))),
       );
     } catch (cause) {
       return rejectOwnedStartup(cause, client, startInput.scratch, cancellation !== undefined);
@@ -456,11 +459,23 @@ function subscriptionModel(
   return selection.modelId;
 }
 
+/** Whether an assistant frame calls a Claude MCP tool (`mcp__…`) the session has no identity for yet. */
+function callsUnresolvedMcpTool(message: ClaudeStreamMessage, correlation: ToolUseCorrelation): boolean {
+  if (message.type !== 'assistant') return false;
+  const content = (message.message as { content?: unknown } | undefined)?.content;
+  return Array.isArray(content) && content.some((block: { type?: unknown; name?: unknown }) =>
+    block?.type === 'tool_use' && typeof block.name === 'string' && block.name.startsWith('mcp__')
+    && correlation.mcpIdentities?.has(block.name) !== true);
+}
+
 class ClaudeSession implements Session {
   declare readonly interactions?: NativeInteractionChannel;
   private readonly correlation: ToolUseCorrelation;
   private readonly assistantMessages = new AssistantMessageTracker();
   private closeAttempt: Promise<void> | undefined;
+  /** Filled once from Claude's own `mcp_status` answer (`./mcp-identity.ts`). */
+  private readonly mcpIdentities = new Map<string, McpEventIdentity>();
+  private mcpStatusRequested = false;
 
   constructor(
     public readonly sessionRef: string,
@@ -471,8 +486,9 @@ class ClaudeSession implements Session {
     private readonly scratch: ExecutionScratch,
     private readonly modelId?: string,
     private readonly native?: ClaudeNativeInteractionBridge,
-    identities?: McpEventIdentities,
-  ) { this.correlation = createToolUseCorrelation(identities); if (native !== undefined) this.interactions = native.channel; }
+    /** Task-projected toolset servers in `--mcp-config`; only these receive event MCP identity. */
+    private readonly toolsetServers: ReadonlyMap<string, McpStdioServerConfig> = new Map(),
+  ) { this.correlation = createToolUseCorrelation(this.mcpIdentities); if (native !== undefined) this.interactions = native.channel; }
 
   get events(): AsyncIterable<AgentEvent> {
     const client = this.client;
@@ -480,6 +496,9 @@ class ClaudeSession implements Session {
     const assistantMessages = this.assistantMessages;
     const workspaceDir = this.workspaceDir;
     const control = this.control;
+    const toolsetServers = this.toolsetServers;
+    const mcpIdentities = this.mcpIdentities;
+    const session = this;
     return {
       [Symbol.asyncIterator](): AsyncIterator<AgentEvent> {
         const inner = client.events[Symbol.asyncIterator]();
@@ -552,6 +571,13 @@ class ClaudeSession implements Session {
 
               if (value.type === 'result') turnSettled = true;
 
+              if (!session.mcpStatusRequested && toolsetServers.size > 0 && callsUnresolvedMcpTool(value, correlation)) {
+                // Asked at the first MCP call, when Claude has connected its
+                // servers: an earlier answer reports them `pending` with no
+                // tools. One lookup per process; a failure leaves `mcp` absent.
+                session.mcpStatusRequested = true;
+                for (const [name, identity] of claudeMcpEventIdentities(await control.mcpStatus(), toolsetServers)) mcpIdentities.set(name, identity);
+              }
               const mapped = mapClaudeMessageToAgentEvents(value, correlation, { workspaceDir });
               if (value.type === 'result' && control.contextWindow !== null) {
                 const usage = mapped.events.find(event => event.type === 'usage');

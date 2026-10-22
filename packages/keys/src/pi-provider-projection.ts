@@ -135,6 +135,35 @@ function piApiKey(profile: ModelProviderProfile, runtimeEntry: PiLauncherRuntime
 }
 
 /**
+ * Refuse a profile whose rpc launch values the Pi rpc host would refuse.
+ *
+ * The launcher appends `--provider`, `--model` and `--thinking` from the
+ * profile. The `@byok-sdk/client` rpc host (`parsePiRpcHostArgs`) takes each
+ * value only when it is non-empty and does not start with `--`, and takes
+ * `--thinking` only from Pi's thinking levels. `PiModelConfigSchema` already
+ * restricts `thinkingLevel` to those levels. A Host can call this on a parsed
+ * profile when it saves the profile. The launcher calls it before admission
+ * and again before spawn. A client test runs the same argv through the real
+ * host parser.
+ */
+export function assertPiLaunchArgs(profile: ModelProviderProfile): void {
+  const config = requirePiModelConfig(profile);
+  const values: readonly (readonly [string, string])[] = [
+    ['--provider', piProjectionProviderId(profile.profile_ref)],
+    ['--model', profile.model],
+    ['--thinking', config.thinkingLevel],
+  ];
+  for (const [flag, value] of values) {
+    if (value.length === 0 || value.startsWith('--')) {
+      throw new ByokKeysError(
+        'PROVIDER_PROFILE_INVALID',
+        `${profile.profile_ref} Pi ${flag} value ${JSON.stringify(value)} is not accepted by the Pi rpc host`,
+      );
+    }
+  }
+}
+
+/**
  * Validate the credential-blind RPC argv the client may delegate, then bind
  * the Pi child to the namespaced projection and exact configured model.
  */
@@ -142,6 +171,7 @@ export function buildPiProviderArgs(
   profile: ModelProviderProfile,
   delegatedArgs: readonly string[],
 ): string[] {
+  assertPiLaunchArgs(profile);
   const config = requirePiModelConfig(profile);
   if (delegatedArgs.length > 128) throw new Error('Pi launcher delegated argument limit exceeded');
   let modeCount = 0;

@@ -1,6 +1,13 @@
 import { z } from 'zod';
+import { PI_THINKING_LEVELS } from './pi-model-catalog.generated';
 
-export const PI_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+/**
+ * Pi's own `MODEL_THINKING_LEVELS`, generated from the pinned
+ * `@earendil-works/pi-ai` (see `pi-model-catalog.generated.ts`). The Pi host
+ * entries in `@byok-sdk/client` import the same pinned list from pi-ai.
+ */
+export { PI_THINKING_LEVELS };
+export type PiThinkingLevel = (typeof PI_THINKING_LEVELS)[number];
 
 /**
  * The Pi wire APIs an `openai_compatible` profile may declare. Absent means
@@ -10,6 +17,10 @@ export const PI_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'x
 export const PI_OPENAI_COMPATIBLE_APIS = ['openai-completions', 'openai-responses'] as const;
 export type PiOpenAICompatibleApi = (typeof PI_OPENAI_COMPATIBLE_APIS)[number];
 
+/** Every Pi wire API a profile projects: the two `openai_compatible` APIs and `anthropic-messages`. */
+export const PI_MODEL_APIS = [...PI_OPENAI_COMPATIBLE_APIS, 'anthropic-messages'] as const;
+export type PiModelApi = (typeof PI_MODEL_APIS)[number];
+
 const effort = z.string().min(1).max(64).regex(/^[a-zA-Z0-9_-]+$/u).nullable();
 const limit = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 
@@ -17,7 +28,7 @@ const limit = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
  * Every `compat` member this schema admits, for any API. Each API admits only
  * its own subset of Pi's compat schema for that API (see
  * {@link PI_COMPAT_KEYS_BY_API}); a member outside the subset is refused,
- * never silently ignored.
+ * never silently ignored. Each member is passed to Pi verbatim.
  */
 const compat = z.object({
   supportsStore: z.boolean().optional(),
@@ -29,13 +40,32 @@ const compat = z.object({
     'chat-template', 'qwen-chat-template', 'string-thinking', 'ant-ling']).optional(),
   zaiToolStream: z.boolean().optional(),
   supportsLongCacheRetention: z.boolean().optional(),
+  supportsStrictMode: z.boolean().optional(),
+  requiresReasoningContentOnAssistantMessages: z.boolean().optional(),
+  forceAdaptiveThinking: z.boolean().optional(),
 }).strict();
 
-export const PI_COMPAT_KEYS_BY_API: Readonly<Record<PiOpenAICompatibleApi, readonly (keyof z.infer<typeof compat>)[]>> = {
+export type PiCompatKey = keyof z.infer<typeof compat>;
+
+/** The subset of Pi's per-API compat schema this package carries, for each Pi wire API. */
+export const PI_COMPAT_KEYS_BY_API: Readonly<Record<PiModelApi, readonly PiCompatKey[]>> = {
   'openai-completions': ['supportsStore', 'supportsDeveloperRole', 'supportsReasoningEffort', 'supportsUsageInStreaming',
-    'maxTokensField', 'thinkingFormat', 'zaiToolStream', 'supportsLongCacheRetention'],
-  'openai-responses': ['supportsDeveloperRole', 'supportsLongCacheRetention'],
+    'maxTokensField', 'thinkingFormat', 'zaiToolStream', 'supportsLongCacheRetention', 'supportsStrictMode',
+    'requiresReasoningContentOnAssistantMessages'],
+  'openai-responses': ['supportsDeveloperRole', 'supportsLongCacheRetention', 'supportsStrictMode'],
+  'anthropic-messages': ['supportsLongCacheRetention', 'forceAdaptiveThinking'],
 };
+
+/**
+ * The compat keys an `anthropic` profile admits. It projects
+ * `anthropic-messages`, but it has always admitted the `openai-completions`
+ * set too, and a stored profile may declare one of those keys. Pi's
+ * Anthropic compat schema does not read them. Tightening this set would
+ * refuse such a stored profile, so it is a separate decision.
+ */
+export const PI_ANTHROPIC_PROFILE_COMPAT_KEYS: readonly PiCompatKey[] = [
+  ...new Set([...PI_COMPAT_KEYS_BY_API['openai-completions'], ...PI_COMPAT_KEYS_BY_API['anthropic-messages']]),
+];
 
 /**
  * The compat keys the frozen prepared model wire carries. The prepared runtime
@@ -82,13 +112,24 @@ export const PiModelConfigSchema = z.object({
   if (!config.reasoning && config.thinkingLevel !== 'off') {
     ctx.addIssue({ code: 'custom', path: ['thinkingLevel'], message: 'Non-reasoning Pi models require thinking off' });
   }
-  const api = config.api ?? 'openai-completions';
-  const admitted: readonly string[] = PI_COMPAT_KEYS_BY_API[api];
-  for (const key of Object.keys(config.compat)) {
-    if (!admitted.includes(key)) {
-      ctx.addIssue({ code: 'custom', path: ['compat', key], message: `Pi compat ${key} does not apply to ${api}` });
+  // An absent api is decided by the profile adapter, which this schema cannot
+  // see. It admits what either adapter admits (the anthropic set is that
+  // union); `ModelProviderProfileSchema` checks the adapter's own set.
+  if (config.api !== undefined) {
+    for (const issue of piCompatIssues(config.compat, PI_COMPAT_KEYS_BY_API[config.api], config.api)) ctx.addIssue(issue);
+  } else {
+    for (const issue of piCompatIssues(config.compat, PI_ANTHROPIC_PROFILE_COMPAT_KEYS, 'openai-completions or anthropic-messages')) {
+      ctx.addIssue(issue);
     }
   }
 });
+
+/** One issue per declared compat key outside `admitted`, at `['compat', key]`. */
+export function piCompatIssues(
+  declared: object, admitted: readonly string[], api: string,
+): { code: 'custom'; path: string[]; message: string }[] {
+  return Object.keys(declared).filter((key) => !admitted.includes(key))
+    .map((key) => ({ code: 'custom', path: ['compat', key], message: `Pi compat ${key} does not apply to ${api}` }));
+}
 
 export type PiModelConfig = z.infer<typeof PiModelConfigSchema>;
