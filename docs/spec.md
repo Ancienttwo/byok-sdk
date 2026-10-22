@@ -3260,9 +3260,12 @@ files. `reservedHelperKinds` plus `piSubagentHelperKinds` is exactly the set tha
 `DaemonConfig`, or to each custom adapter constructor. An explicit root is scoped
 to that adapter's owned process trees and fails closed on missing or modified
 bytes without searching installed dependencies. Omission keeps installed behavior.
-For Darwin the copier delegates to the existing memory-helper release copier;
-`agentMemoryHelperAssetRoot` remains the separate memory-helper authority. Windows
-memory remains unavailable. Native target metadata is not platform qualification;
+For Darwin the copier delegates to the existing memory-helper release copier.
+For Windows x64 it also copies the Windows memory helper and its manifest into
+`agent-memory-fs/`, listed in `sdkNativeAssetTargets['win32-x64'].agentMemoryHelper`
+with the policy `product-resigning-allowed`; the Koffi `files` keep
+`unmodified-official-addon`. `agentMemoryHelperAssetRoot` remains the separate
+memory-helper authority. Windows memory remains unavailable. Native target metadata is not platform qualification;
 Windows SEA qualification requires the actual Windows CI process-ownership fixture.
 
 ### Embedded Agent-home projection completion waiting

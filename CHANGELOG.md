@@ -6,7 +6,10 @@
   helper, `dist/native/agent-memory-fs/win32-x64.exe` (#605). Its
   `pe-content-v1` digest ignores what Authenticode signing writes, so a product
   can sign the exe. `copyAgentMemoryHelperAssets` takes `platform: 'win32'` to
-  copy it. The helper manifest is now version 2 and records the digest
+  copy it, and `copySdkNativeAssets({ platform: 'win32', arch: 'x64' })` now
+  also copies it into `agent-memory-fs/`. That call now needs the helper build
+  (`build:release`). `sdkNativeAssetTargets['win32-x64']` gets an
+  `agentMemoryHelper` group with its own files and signing policy. The helper manifest is now version 2 and records the digest
   algorithm of each entry. Product assets copied from an older release fail
   with a manifest mismatch; copy them again. The SDK still does not admit Agent
   memory on Windows.

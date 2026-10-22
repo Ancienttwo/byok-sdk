@@ -994,11 +994,16 @@ that `runSdkReservedHelperCommand` accepts. Only Pi subagent children re-enter w
 `piSubagentHelperKinds`; they carry a tail argv and have no `dist/bin` script. For
 Darwin, the copier delegates to `copyAgentMemoryHelperAssets`; use its returned
 `agent-memory-fs` subdirectory as the existing `agentMemoryHelperAssetRoot`. This
-preserves the established memory-helper configuration API. Windows memory is still
+preserves the established memory-helper configuration API. For Windows x64 the
+copier also writes `agent-memory-fs/manifest.json` and
+`agent-memory-fs/win32-x64.exe` from the SDK release; the build host needs the
+helper build (`build:release`). `sdkNativeAssetTargets['win32-x64'].agentMemoryHelper`
+lists these files with their own signing policy. Windows memory is still
 unavailable. Windows native asset qualification currently targets x64 only.
 
 The Windows addon must retain the official pinned bytes. The enclosing executable
 and installer may be product-signed, but changing/signing the addon itself changes
-its digest and is refused. Darwin memory helpers retain their separate product
+its digest and is refused. The Windows Agent memory helper may be
+Authenticode-signed: its `pe-content-v1` digest ignores the signature. Darwin memory helpers retain their separate product
 re-signing policy. Copying assets proves packaging, not platform execution: the
 relocated Windows SEA CI fixture must pass before Windows qualification is claimed.

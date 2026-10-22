@@ -11,7 +11,9 @@ import { copyAgentMemoryHelperAssets } from './daemon/agent-memory-helper-releas
 import { KOFFI } from './sdk-native-assets-pin';
 
 export const sdkNativeAssetTargets = Object.freeze({
-  'win32-x64': Object.freeze({ ...KOFFI, files: ['KOFFI-LICENSE.txt', 'manifest.json', 'win32-x64/koffi.node'] as readonly string[], signingPolicy: 'unmodified-official-addon' }),
+  // Koffi must stay byte-identical; the Agent memory helper may be re-signed.
+  'win32-x64': Object.freeze({ ...KOFFI, files: ['KOFFI-LICENSE.txt', 'manifest.json', 'win32-x64/koffi.node'] as readonly string[], signingPolicy: 'unmodified-official-addon',
+    agentMemoryHelper: Object.freeze({ files: ['agent-memory-fs/manifest.json', 'agent-memory-fs/win32-x64.exe'] as readonly string[], signingPolicy: 'product-resigning-allowed' }) }),
   darwin: Object.freeze({ files: ['agent-memory-fs/darwin-arm64', 'agent-memory-fs/darwin-x64', 'agent-memory-fs/manifest.json'] as readonly string[], signingPolicy: 'product-resigning-allowed' }),
 });
 export interface CopySdkNativeAssetsOptions {
@@ -23,7 +25,7 @@ function absoluteRoot(root: string): string {
   if (typeof root !== 'string' || !path.isAbsolute(root) || /[\0\r\n]/u.test(root)) throw new Error('SDK native asset root must be an absolute directory');
   return root;
 }
-/** Build-time only. Fetches the integrity-pinned official Windows archive on any build host; never executes it. Darwin delegates to the existing release-helper copier. */
+/** Build-time only. Fetches the integrity-pinned official Windows archive on any build host; never executes it. Both platforms copy the Agent memory helper through the release-helper copier. */
 export async function copySdkNativeAssets(options: CopySdkNativeAssetsOptions): Promise<readonly string[]> {
   const root = absoluteRoot(options.outDir);
   if (!['win32', 'darwin'].includes(options.platform) || !['x64', 'arm64'].includes(options.arch)
@@ -76,13 +78,14 @@ export async function copySdkNativeAssets(options: CopySdkNativeAssetsOptions): 
   const installed = JSON.parse(await fs.readFile(path.join(packageRoot, 'package.json'), 'utf8'));
   if (installed.version !== KOFFI.version) throw new Error('Koffi license source version mismatch');
   const license = await fs.readFile(path.join(packageRoot, 'LICENSE.txt'));
+  const helperFiles = await copyAgentMemoryHelperAssets({ outDir: path.join(root, 'agent-memory-fs'), platform: 'win32' });
   const manifest = { version: 1, target: 'win32-x64', package: KOFFI.package, packageVersion: KOFFI.version,
     archiveIntegrity: KOFFI.integrity, sha256: createHash('sha256').update(addon).digest('hex') };
   await fs.mkdir(path.join(root, 'win32-x64'), { recursive: true });
   await fs.writeFile(path.join(root, 'win32-x64/koffi.node'), addon, { flag: 'wx' });
   await fs.writeFile(path.join(root, 'manifest.json'), `${JSON.stringify(manifest)}\n`, { flag: 'wx' });
   await fs.writeFile(path.join(root, 'KOFFI-LICENSE.txt'), license, { flag: 'wx' });
-  return Object.freeze(['KOFFI-LICENSE.txt', 'manifest.json', 'win32-x64/koffi.node']);
+  return Object.freeze(['KOFFI-LICENSE.txt', 'manifest.json', 'win32-x64/koffi.node', ...helperFiles.map(file => `agent-memory-fs/${file}`)].sort());
 }
 export { loadSdkKoffiAsset } from './sdk-native-assets-runtime';
 

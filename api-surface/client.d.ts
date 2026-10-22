@@ -12987,6 +12987,10 @@ export declare const sdkNativeAssetTargets: Readonly<{
         integrity: "sha512-09p81HVKDsLXkyMRrLQzsFtCjdcFgbRW765roAu5iChHj4gfWVrGDdvtBldc1BulIEgH1/gRwa2E4vEtW3/hlw==";
         files: readonly string[];
         signingPolicy: "unmodified-official-addon";
+        agentMemoryHelper: Readonly<{
+            files: readonly string[];
+            signingPolicy: "product-resigning-allowed";
+        }>;
     }>;
     darwin: Readonly<{
         files: readonly string[];
@@ -12998,7 +13002,7 @@ export interface CopySdkNativeAssetsOptions {
     readonly platform: 'win32' | 'darwin';
     readonly arch: 'x64' | 'arm64';
 }
-/** Build-time only. Fetches the integrity-pinned official Windows archive on any build host; never executes it. Darwin delegates to the existing release-helper copier. */
+/** Build-time only. Fetches the integrity-pinned official Windows archive on any build host; never executes it. Both platforms copy the Agent memory helper through the release-helper copier. */
 export declare function copySdkNativeAssets(options: CopySdkNativeAssetsOptions): Promise<readonly string[]>;
 export { loadSdkKoffiAsset } from './sdk-native-assets-runtime';
 /** Machine-readable build inputs. Target presence is not runtime/platform qualification. */
