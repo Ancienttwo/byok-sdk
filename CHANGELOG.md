@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Tests (client)** — the Windows memory helper tests now run in routine CI
+  (#605). The `agent-memory-helper-linux` job has a `windows-latest` leg. It
+  runs for pull requests that change the Go helper. New Windows tests inject
+  barrier failures on NTFS. They also replace `notes` or a note with a junction
+  or a symlink after the home is pinned. Windows admission stays closed, and B
+  stays false. The plan and the owner decisions are in
+  `docs/plans/2026-10-22-605-windows-memory.md`.
 - **Fixed (client, keys)** — close the Hermes on Windows follow-ups from the
   #695 review (#712). The custody launcher now starts Hermes only after the
   adapter writes one byte to the launcher's stdin, and reads the key only after
@@ -56,6 +63,21 @@
   Hermes title is only its registry name, and Grok has no live MCP evidence
   yet. The new `docs/protocol.md` §11.7 gives the source of `mcp` for each
   adapter. No public type changes.
+- **Fixed (client)** — the daemon outbox keeps one copy of each held
+  `agent.egress.reliable` and `agent.content.receipt` record across
+  reconnects. Each reconnect advertises `agent-egress-reliable-ack` again, and
+  the daemon then sends each held record again. Before, each of these sends
+  used a new envelope id. On a flapping route, where the handshake succeeds and
+  the data post fails, each reconnect added one more copy of each held record.
+  Each later request carried all copies. Each send of a held record now uses
+  the same envelope, so the connection manager skips it while a copy is queued
+  or in flight (#693). After a restart, the daemon builds a new envelope. A
+  resend that arrives after the cloud recorded the event now settles as
+  `duplicate`, not `accepted`. It adds 1 to the client `outbound.duplicate`
+  counter and to the server `dedupDrops` counter. Before, it added 1 to
+  `accepted`. The cloud still appends the exact `agent.egress.ack` for a
+  duplicate. In one daemon run, `observer.onInboundCommitted` now fires only
+  once for each record (#698).
 - **Changed (keys)** — `PiModelConfigSchema` accepts a `pi_model` without
   `thinkingLevelMap`, as the prepared model wire already does. A declared map
   must still map all seven levels. Without a map, Pi applies its own handling
