@@ -1,5 +1,5 @@
 import { WAKE_MAX_FUTURE_MS, type DueWake, type WakeScheduleInput } from '@byok-sdk/server';
-import { hash, time, type ExecutionTemplate, type IgnoredWakeAudit, type LedgerState, type Occurrence, type Routine, type RoutineDefinition } from './model';
+import { canonical, hash, time, type ExecutionTemplate, type IgnoredWakeAudit, type LedgerState, type Occurrence, type Routine, type RoutineDefinition } from './model';
 import { cancelWake, enqueue, settle } from './transitions';
 import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
 
@@ -66,8 +66,39 @@ export function auditCalendarError(routine: Routine, now: number, error: unknown
 export function applyPlan(state: LedgerState, routine: Routine, plan: WakePlan, now: number): void {
   routine.next = plan.next; routine.status = plan.status;
   delete routine.scheduleRetryAt; delete routine.scheduleRetryCount;
-  if (plan.completed) { routine.lifecycle = 'completed'; routine.status = 'ok'; }
+  if (plan.completed) { routine.lifecycle = 'completed'; routine.status = 'ok'; delete routine.pending; }
   scheduleNext(state, routine, now);
+}
+
+/** A staged version replaces the definition only when no older work can still use it. Pure: it reads no ledger. */
+export function versionSwitchDue(routine: Readonly<Routine>, occurrences: Iterable<Readonly<Occurrence>>, now: number): boolean {
+  if (routine.lifecycle !== 'active' || !routine.pending) return false;
+  // A due slot that is not delivered yet is old-version work too.
+  if (routine.next && routine.next.availableAt <= now) return false;
+  for (const occurrence of occurrences) if (occurrence.routineId === routine.definition.id && !occurrence.conclusion) return false;
+  return true;
+}
+export function switchVersion(state: LedgerState, routine: Routine, now: number, nextTime: NextOccurrence): void {
+  if (routine.next) cancelWake(state, routine.next.dedupKey);
+  routine.definition = routine.pending!;
+  delete routine.pending;
+  try { applyPlan(state, routine, nextWake(routine.definition, now, nextTime, now), now); }
+  catch (error) { auditCalendarError(routine, now, error); }
+}
+const destination = (definition: RoutineDefinition): string => definition.hostJob ? `host-job:${definition.hostJob.type}` : 'execution';
+/** Stages the next version of a validated definition. The Host service assigns versions and keeps their history. */
+export function stageVersion(state: LedgerState, definition: RoutineDefinition, now: number, nextTime: NextOccurrence): void {
+  const routine = state.routines[hash(definition.id)];
+  if (!routine) throw new Error('Routine not found');
+  const text = canonical(definition);
+  if (text === canonical(routine.definition) || routine.pending && text === canonical(routine.pending)) return;
+  if (routine.lifecycle === 'completed') throw new Error('A completed routine cannot change');
+  if (definition.version !== Math.max(routine.definition.version, routine.pending?.version ?? 0) + 1) {
+    throw new Error('Routine version conflict; supply max(current, pending) + 1');
+  }
+  if (destination(definition) !== destination(routine.definition)) throw new Error('A routine version cannot change its destination or Host job type');
+  routine.pending = structuredClone(definition);
+  if (versionSwitchDue(routine, Object.values(state.occurrences), now)) switchVersion(state, routine, now, nextTime);
 }
 
 /** Called inside the same transaction that creates the occurrence and its work. */
@@ -88,12 +119,15 @@ export function recordOccurrence(state: LedgerState, tenant: string, wake: DueWa
   const definition = routine.definition;
   const trigger = { kind: now - wake.availableAt > definition.lateAfterMs ? 'catch_up' as const : 'scheduled' as const, plannedAt: wake.availableAt };
   const key = hash([definition.id, definition.version, trigger]);
-  let plan: WakePlan;
-  // A Host clock behind the scheduler must not reserve the delivered slot again.
-  try { plan = nextWake(definition, Math.max(now, wake.availableAt), nextTime, now); }
-  catch (error) {
-    auditCalendarError(routine, now, error, wake.dedupKey);
-    plan = { next: null, status: 'calendar_error', completed: false };
+  // A staged version stops the old chain: record this slot, but reserve no later old slot.
+  let plan: WakePlan = { next: null, status: 'ok', completed: false };
+  if (!routine.pending) {
+    // A Host clock behind the scheduler must not reserve the delivered slot again.
+    try { plan = nextWake(definition, Math.max(now, wake.availableAt), nextTime, now); }
+    catch (error) {
+      auditCalendarError(routine, now, error, wake.dedupKey);
+      plan = { next: null, status: 'calendar_error', completed: false };
+    }
   }
   const next = plan.next;
 
@@ -155,5 +189,10 @@ export function setLifecycle(state: LedgerState, id: string, lifecycle: Routine[
   routine.lifecycle = lifecycle;
   routine.next = null; routine.status = 'ok';
   delete routine.scheduleRetryAt; delete routine.scheduleRetryCount;
-  if (lifecycle === 'active') applyPlan(state, routine, nextWake(routine.definition, now, nextTime, now), now);
+  if (lifecycle === 'completed') delete routine.pending;
+  // Pause keeps a staged version. Resume switches to it when due; otherwise the current version continues.
+  if (lifecycle === 'active') {
+    if (versionSwitchDue(routine, Object.values(state.occurrences), now)) switchVersion(state, routine, now, nextTime);
+    else applyPlan(state, routine, nextWake(routine.definition, now, nextTime, now), now);
+  }
 }

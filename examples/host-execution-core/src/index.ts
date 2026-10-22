@@ -12,6 +12,6 @@ export type { MemoryApproval, MemoryBinding, MemoryOptions, MemoryContextPack } 
 export { hash, canonical, project, time } from './model';
 export type { LedgerState, IgnoredWakeAudit } from './model';
 export { enqueue } from './transitions';
-export { WAKE_HORIZON_MS, IGNORED_WAKE_AUDIT_LIMIT, parseRoutineWakeKey } from './routines';
+export { WAKE_HORIZON_MS, IGNORED_WAKE_AUDIT_LIMIT, parseRoutineWakeKey, versionSwitchDue } from './routines';
 
 export type { MemoryRestoreInput, MemoryRestoreResult, MemoryRestoreFileResult } from './memory-restore';

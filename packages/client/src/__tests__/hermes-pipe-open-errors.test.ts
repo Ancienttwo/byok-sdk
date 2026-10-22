@@ -24,6 +24,7 @@ vi.mock('koffi', () => ({
 
 const { exchangeHermesPipe } = await import('../adapters/hermes/gateway-pipe-win32');
 const { sweepStaleHermesProfiles } = await import('../adapters/hermes/hermes-home');
+const koffi = (await import('koffi')).default;
 
 const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
 const dirs: string[] = [];
@@ -43,10 +44,10 @@ async function staleProfile(): Promise<{ root: string; home: string }> {
 
 it('reports no gateway only when no pipe has the name', async () => {
   kernel.lastError = ERROR_FILE_NOT_FOUND;
-  await expect(exchangeHermesPipe('\\\\.\\pipe\\hermes-gateway-0', 'x\n', () => true, Date.now() + 1_000)).resolves.toBeUndefined();
+  await expect(exchangeHermesPipe('\\\\.\\pipe\\hermes-gateway-0', 'x\n', () => true, Date.now() + 1_000, koffi)).resolves.toBeUndefined();
   for (const error of [ERROR_PIPE_BUSY, ERROR_ACCESS_DENIED]) {
     kernel.lastError = error;
-    await expect(exchangeHermesPipe('\\\\.\\pipe\\hermes-gateway-0', 'x\n', () => true, Date.now() + 1_000)).rejects.toThrow(/could not be opened/);
+    await expect(exchangeHermesPipe('\\\\.\\pipe\\hermes-gateway-0', 'x\n', () => true, Date.now() + 1_000, koffi)).rejects.toThrow(/could not be opened/);
   }
 });
 
