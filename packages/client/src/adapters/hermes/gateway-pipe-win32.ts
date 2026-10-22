@@ -12,7 +12,8 @@ import { loadSdkKoffiAsset } from '../../sdk-native-assets-runtime';
  * reads the server pid from the kernel, and it writes only to a server the
  * caller owns: a server that never reads cannot block this synchronous handle.
  *
- * POSIX never loads this module; `koffi` is imported only on first use.
+ * It loads with the lazy `#byok-hermes-session` entry; `koffi` is imported
+ * only on first use, which happens only on Windows.
  */
 
 const GENERIC_READ_WRITE = 0xC0000000;

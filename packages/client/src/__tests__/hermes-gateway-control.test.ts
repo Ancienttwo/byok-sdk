@@ -4,7 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { hermesGatewayPipeName, identifyHermesGateway, servesHermesHome } from '../adapters/hermes/gateway-identity';
-import { descendsFrom, mayStopForeignHermesGateway, parseWindowsProcessTable, type WindowsProcessEntry } from '../adapters/hermes/gateway-ownership';
+import { mayStopForeignHermesGateway } from '../adapters/hermes/gateway-ownership';
+import { descendsFrom, parseWindowsProcessTable, type WindowsProcessEntry } from '../adapters/hermes/windows-process-table';
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {

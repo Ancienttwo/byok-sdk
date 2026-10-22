@@ -73,7 +73,8 @@ export interface IdentifyHermesGatewayOptions {
 
 /** Windows: one exchange with the koffi pipe client (`gateway-pipe-win32.ts`). */
 async function identifyOverPipe(home: string, options: IdentifyHermesGatewayOptions): Promise<HermesGatewayIdentity | undefined> {
-  const { exchangeHermesPipe } = await import('./gateway-pipe-win32');
+  // The koffi client lives in the lazy session entry, so the root entries do not carry it.
+  const { exchangeHermesPipe } = await import('#byok-hermes-session');
   const name = hermesGatewayPipeName(await fs.realpath(home).catch(() => path.resolve(home)));
   const answer = await exchangeHermesPipe(name, IDENTIFY_REQUEST, options.owned ?? (() => false), Date.now() + (options.timeoutMs ?? 1_000), options.nativeAssetRoot);
   if (answer === undefined) return undefined;
