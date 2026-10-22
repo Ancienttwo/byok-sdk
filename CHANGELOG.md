@@ -157,13 +157,17 @@
   duplicate. In one daemon run, `observer.onInboundCommitted` now fires only
   once for each record (#698).
 
-## 0.28.2 — source candidate
+## 0.28.2 — 2026-10-22 (published)
 
 The owner selected 0.28.2 as a second one-release exception to the default
-pre-1.0 MINOR policy for additive changes. This candidate is not published.
-See the [release notes](docs/releases/v0.28.2.md) for scope and outstanding
-qualification. All nine public manifests and their lock records move to
-0.28.2; keys leaves its own version line to join the release train.
+pre-1.0 MINOR policy for additive changes. The npm registry lists all nine
+public packages at 0.28.2, keys included. The registry publication times fall
+on 2026-10-22 (UTC). The registry read on 2026-10-22 at 15:58 UTC reports
+0.28.2 as `latest` for all nine. See the
+[release notes](docs/releases/v0.28.2.md) for scope and the qualification
+limits that were recorded at preparation. All nine public manifests and their
+lock records move to 0.28.2; keys leaves its own version line to join the
+release train.
 
 - **Security (client)** — update the `undici` pin from 8.11.2 to 8.12.3 (#700).
   8.11.2 is in the range of eight advisories from 2026-10-15. Four are high
@@ -338,13 +342,14 @@ qualification. All nine public manifests and their lock records move to
   it added 1 to `accepted`. `observer.onInboundCommitted` now fires only once
   for each message (#693).
 
-## 0.28.1 / @byok-sdk/keys 0.13.1 — 2026-10-21 (published)
+## 0.28.1 / @byok-sdk/keys 0.13.1 — 2026-10-21 (published; superseded by 0.28.2)
 
 The owner selected 0.28.1 as a one-release exception to the default pre-1.0
 MINOR policy for additive changes. The npm registry lists all eight aligned
-packages at 0.28.1 and keys at 0.13.1. Both are `latest`. The registry
-publication times fall on 2026-10-21 (UTC). The registry read was on
-2026-10-21 at 18:13 UTC. See the [release notes](docs/releases/v0.28.1.md)
+packages at 0.28.1 and keys at 0.13.1. The registry publication times fall on
+2026-10-21 (UTC). The registry read on 2026-10-21 at 18:13 UTC reported both
+as `latest`. The read on 2026-10-22 at 15:58 UTC reports 0.28.2 as `latest`.
+See the [release notes](docs/releases/v0.28.1.md)
 for scope and the qualification limits that were recorded at preparation.
 The eight aligned manifests and lock records move to 0.28.1; keys moves to
 0.13.1 with an exact packed core edge of 0.28.1.
@@ -382,7 +387,7 @@ The eight aligned manifests and lock records move to 0.28.1; keys moves to
 
 The npm registry lists all eight aligned packages at 0.28.0 and keys at 0.13.0.
 The registry publication times fall on 2026-10-20 (UTC). The registry read was
-on 2026-10-21 at 18:13 UTC. 0.28.1 is now `latest`. See the
+on 2026-10-21 at 18:13 UTC. That read reported 0.28.1 as `latest`. See the
 [release notes](docs/releases/v0.28.0.md).
 
 - **Feature (client)** — add `GrokAdapter` and `HermesAdapter` over ACP.
