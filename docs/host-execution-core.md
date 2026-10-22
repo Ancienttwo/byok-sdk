@@ -60,6 +60,10 @@ await core.recover();
 `execution` for deterministic Host work. Registered handlers return a persisted summary
 and may explicitly request an Agent intent. See [Host job registration, failure and replay
 semantics](../examples/host-execution-core/README.md#host-jobs-and-execution-free-occurrences).
+A definition can also select `hostOccurrence`: a registered synchronous hook writes Host state in the
+occurrence commit, and the Host later promotes or concludes the occurrence (see
+[Host occurrences](../examples/host-execution-core/README.md#host-occurrences)).
+`applyOutcome` gets `tx.routines` to create, update or pause routines in the outcome commit.
 An execution has an explicit runtime, AgentRef, egress policy and terminal projection.
 Freeze all input context, including any selected server-held message context.
 The core assigns taskId. It never adds SessionRef or changes execution mode.

@@ -2,10 +2,10 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import type { ByokServer, ByokServerEvent, CreateByokServerOptions, DueWake } from '@byok-sdk/server';
 import { MemoryBlockedError, type HostMemoryPage, type MemoryBinding } from './memory';
 import { HostLedger, OutboxFullError } from './ledger';
-import { canonical, hash, project, taskId, time, validateInput, validateJson, validateRetry, type HostJobHandler, type Attempt, type Intent, type IntentInput,
-  type Json, type LedgerState, type Routine, type RoutineDefinition, type Terminal } from './model';
+import { canonical, hash, project, taskId, time, validateInput, validateJson, validateRetry, type HostJobHandler, type HostOccurrenceRun, type Attempt,
+  type Intent, type IntentInput, type Json, type LedgerState, type Occurrence, type Routine, type RoutineDefinition, type Terminal } from './model';
 import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
-import { applyPlan, auditCalendarError, auditIgnoredWake, deferSchedule, nextWake, promoteOccurrence, recordOccurrence, scheduleNext, setLifecycle,
+import { applyPlan, auditCalendarError, auditIgnoredWake, createRoutine, deferSchedule, nextWake, promote, recordOccurrence, scheduleNext, setLifecycle,
   stageVersion, switchVersion, versionSwitchDue, WAKE_HORIZON_MS } from './routines';
 import { cancelWake, enqueue, settle } from './transitions';
 
@@ -16,13 +16,32 @@ export type ExecutionServer = {
   /** Embedded process-local hints; reads from tasks remain authoritative. */
   events?: ByokServer['events'];
 };
+/** Routine commands in the caller's transaction. A refused command throws before it changes any state. */
+export interface RoutineCommands {
+  /** The rules of `addRoutine`. */
+  create(definition: RoutineDefinition): void;
+  /** The rules of `updateRoutine`. */
+  update(definition: RoutineDefinition): void;
+  /** The rules of `lifecycle()`. */
+  lifecycle(id: string, lifecycle: Routine['lifecycle']): void;
+  /** Copies of the routine rows, including changes earlier in this transaction. */
+  list(): Routine[];
+}
 export interface OutcomeTransaction {
   readonly intent: Readonly<Intent>;
   readonly terminal: Terminal;
   /** Business state participates in the same SQLite commit. Do not do external I/O here. */
   application: Record<string, Json>;
   publish(id: string, value: Json): void;
+  routines: RoutineCommands;
 }
+export interface OccurrenceTransaction {
+  /** Business state participates in the occurrence commit. No external I/O and no core or ledger calls. */
+  application: Record<string, Json>;
+  publish(id: string, value: Json): void;
+}
+/** Runs synchronously in the commit of a new `hostOccurrence` occurrence. A throw or a thenable rolls the occurrence back. */
+export type OccurrenceHook = (run: HostOccurrenceRun, transaction: OccurrenceTransaction) => void;
 export type AgentMessageInput = Parameters<NonNullable<CreateByokServerOptions['agentMessage']>['consume']>[0];
 export type MessageDecision = { outcome: 'accepted' | 'refused'; reasonCode?: string };
 export interface MessageTransaction {
@@ -33,6 +52,7 @@ export interface MessageTransaction {
 }
 export interface HostOptions {
   hostJobs?: Readonly<Record<string, HostJobHandler>>;
+  occurrenceHooks?: Readonly<Record<string, OccurrenceHook>>;
   memory?: HostMemoryPage;
   now?: () => number;
   reconcileMs?: number;
@@ -66,9 +86,11 @@ export class HostExecutionCore {
   private readonly outboxContext = new AsyncLocalStorage<boolean>();
   private scheduleRetryTimer?: ReturnType<typeof setTimeout>;
   private readonly hostJobs: Map<string, HostJobHandler>;
+  private readonly occurrenceHooks: Map<string, OccurrenceHook>;
   private readonly jobAbort = new AbortController();
   constructor(readonly server: ExecutionServer, readonly ledger: HostLedger, private readonly options: HostOptions = {}) {
     this.hostJobs = new Map(Object.entries(options.hostJobs ?? {}));
+    this.occurrenceHooks = new Map(Object.entries(options.occurrenceHooks ?? {}));
     if (options.memory && options.memory.ledger.tenant !== ledger.tenant) throw new Error('Memory tenant must match execution tenant');
     this.now = () => time((options.now ?? Date.now)());
     this.nextTime = options.nextOccurrence ?? nextIntervalOccurrence;
@@ -154,22 +176,7 @@ export class HostExecutionCore {
   }
   async addRoutine(definition: RoutineDefinition): Promise<void> {
     this.assertOpen();
-    this.validateDefinition(definition);
-    const now = this.now();
-    const plan = nextWake(definition, now - 1, this.nextTime, now);
-    this.ledger.transaction(state => {
-      const id = hash(definition.id);
-      if (state.routines[id]) {
-        if (canonical(state.routines[id]!.definition) !== canonical(definition)) throw new Error('Routine definition is immutable in addRoutine; use updateRoutine for the next version');
-        // A staged version owns the next reservation; the old chain gets no refill.
-        if (state.routines[id]!.lifecycle === 'active' && state.routines[id]!.status === 'no_occurrence_within_horizon' && !state.routines[id]!.pending) {
-          applyPlan(state, state.routines[id]!, plan, now);
-        }
-        return;
-      }
-      state.routines[id] = { definition: structuredClone(definition), lifecycle: 'active', status: 'ok', next: null };
-      applyPlan(state, state.routines[id]!, plan, now);
-    });
+    this.ledger.transaction(state => this.routineCommands(state).create(definition));
     await this.drain();
   }
   /**
@@ -178,9 +185,7 @@ export class HostExecutionCore {
    */
   async updateRoutine(definition: RoutineDefinition): Promise<void> {
     this.assertOpen();
-    this.validateDefinition(definition);
-    nextWake(definition, this.now(), this.nextTime, this.now()); // Refuse a calendar error before staging.
-    this.ledger.transaction(state => stageVersion(state, definition, this.now(), this.nextTime));
+    this.ledger.transaction(state => this.routineCommands(state).update(definition));
     await this.drain();
   }
   private validateDefinition(definition: RoutineDefinition): void {
@@ -190,17 +195,40 @@ export class HostExecutionCore {
     time(this.now() + definition.waitMs);
     if (definition.retry !== undefined) validateRetry(definition.retry);
     if (definition.endAt !== undefined) time(definition.endAt);
-    if ((definition.execution !== undefined) === (definition.hostJob !== undefined)) throw new Error('Supply exactly one of execution or hostJob');
+    if ([definition.execution, definition.hostJob, definition.hostOccurrence].filter(kind => kind !== undefined).length !== 1) {
+      throw new Error('Supply exactly one of execution, hostJob or hostOccurrence');
+    }
     if (definition.hostJob) {
       if (!definition.hostJob.type?.trim() || typeof this.hostJobs.get(definition.hostJob.type) !== 'function') throw new Error('Host job handler not registered');
       validateJson(definition.hostJob.input);
+    } else if (definition.hostOccurrence) {
+      if (!definition.hostOccurrence.type?.trim() || typeof this.occurrenceHooks.get(definition.hostOccurrence.type) !== 'function') {
+        throw new Error('Occurrence hook not registered');
+      }
+      validateJson(definition.hostOccurrence.input);
     } else {
       validateInput({ key: definition.id, source: 'routine', execution: definition.execution!, waitUntil: this.now() + definition.waitMs, retry: definition.retry });
     }
   }
+  /** The one path for routine commands. Each command validates and plans before it writes, so a caught refusal changes nothing. */
+  private routineCommands(state: LedgerState): RoutineCommands {
+    return {
+      create: definition => {
+        this.validateDefinition(definition);
+        createRoutine(state, definition, this.now(), this.nextTime);
+      },
+      update: definition => {
+        this.validateDefinition(definition);
+        nextWake(definition, this.now(), this.nextTime, this.now()); // Refuse a calendar error before staging.
+        stageVersion(state, definition, this.now(), this.nextTime);
+      },
+      lifecycle: (id, lifecycle) => setLifecycle(state, id, lifecycle, this.now(), this.nextTime),
+      list: () => structuredClone(Object.values(state.routines)),
+    };
+  }
   async lifecycle(id: string, lifecycle: Routine['lifecycle']): Promise<void> {
     this.assertOpen();
-    this.ledger.transaction(state => setLifecycle(state, id, lifecycle, this.now(), this.nextTime));
+    this.ledger.transaction(state => this.routineCommands(state).lifecycle(id, lifecycle));
     await this.drain();
   }
   async cancel(key: string): Promise<void> {
@@ -218,7 +246,10 @@ export class HostExecutionCore {
       if (this.ledger.hasTombstone('slot', wake.dedupKey, this.now())) return true;
       if (state.scanWake?.dedupKey === wake.dedupKey) state.scanWake = null;
       else if (wake.dedupKey.startsWith('host-scan:')) auditIgnoredWake(state, wake, this.now(), 'stale_scan');
-      else recordOccurrence(state, this.ledger.tenant, wake, this.now(), this.nextTime);
+      else {
+        const occurrence = recordOccurrence(state, this.ledger.tenant, wake, this.now(), this.nextTime);
+        if (occurrence?.hook) this.runOccurrenceHook(state, occurrence);
+      }
       return false;
     });
     if (replay) return;
@@ -226,6 +257,27 @@ export class HostExecutionCore {
     // Does not wait for execution completion. All unsettled work stays in the outbox.
     await this.drain();
   };
+  /** The hook shares the occurrence commit: both persist, or neither does. */
+  private runOccurrenceHook(state: LedgerState, occurrence: Occurrence): void {
+    const { type, input } = state.routines[hash(occurrence.routineId)]!.definition.hostOccurrence!;
+    const hook = this.occurrenceHooks.get(type);
+    if (typeof hook !== 'function') throw new Error('Occurrence hook not registered');
+    let open = true;
+    try {
+      const result: unknown = hook({ type, input: structuredClone(input), occurrenceKey: occurrence.key, routineId: occurrence.routineId,
+        definitionVersion: occurrence.definitionVersion, trigger: structuredClone(occurrence.trigger) }, {
+        application: state.application,
+        publish: (id, value) => {
+          if (!open) throw new Error('Occurrence transaction is closed');
+          project(state, id, value);
+        },
+      });
+      if (result && typeof (result as { then?: unknown }).then === 'function') {
+        void Promise.resolve(result).catch(() => {});
+        throw new Error('Occurrence hook must be synchronous');
+      }
+    } finally { open = false; }
+  }
   async recover(): Promise<void> {
     this.assertOpen();
     const pending = new Set((await this.server.wakes.pending()).map(wake => wake.dedupKey));
@@ -388,7 +440,7 @@ export class HostExecutionCore {
         this.ledger.transaction(state => {
           const occurrence = state.occurrences[row.occurrenceKey]!;
           occurrence.job!.summary = structuredClone(result.summary);
-          if (result.execution !== undefined) promoteOccurrence(state, this.ledger.tenant, occurrence, result.execution);
+          if (result.execution !== undefined) promote(state, this.ledger.tenant, occurrence, result.execution);
           else occurrence.conclusion = 'succeeded';
           delete state.outbox[key];
         });
@@ -656,7 +708,7 @@ export class HostExecutionCore {
         if (!state.applied[row.taskId]) {
           const result = this.options.applyOutcome?.(envelope.payload.document, {
             intent: structuredClone(row), terminal: structuredClone(terminal), application: state.application,
-            publish: (id, value) => project(state, id, value),
+            publish: (id, value) => project(state, id, value), routines: this.routineCommands(state),
           });
           if (result && typeof (result as { then?: unknown }).then === 'function') throw new Error('Outcome handler must be synchronous');
           state.applied[row.taskId] = true;

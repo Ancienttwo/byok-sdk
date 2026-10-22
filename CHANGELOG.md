@@ -30,6 +30,18 @@
   change. A Host job that keeps failing blocks the switch until its handler
   succeeds. `LedgerState.version` stays 1. A core without `updateRoutine`
   ignores `pending`.
+- **Feature (examples)** — a K4 routine can write Host state in its occurrence
+  commit (#736). A `hostOccurrence` definition names a hook that the Host
+  registers in `HostOptions.occurrenceHooks`. The hook runs synchronously in
+  the transaction that records the occurrence, so both persist or neither
+  does. A replay does not call it again. A throw or a thenable rolls the
+  occurrence back. The occurrence stays unsettled until the Host calls the
+  exported `promoteOccurrence`, which adds intent `occurrence:<key>` to the
+  FIFO, or `concludeOccurrence`. A newer slot makes a later promotion settle as
+  `superseded`. `compact` removes concluded Host occurrences.
+  `OutcomeTransaction.routines` runs `create`, `update` and `lifecycle` in the
+  outcome commit with the `addRoutine`, `updateRoutine` and `lifecycle()`
+  rules; a refused command changes nothing. `LedgerState.version` stays 1.
 - **Changed (client)** — the Agent memory Go helper can now open a home on
   Windows (#605). The SDK does not use this yet. The TypeScript gate still
   refuses Windows, and the package has no Windows helper asset. On Windows the
