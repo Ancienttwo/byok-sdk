@@ -16,6 +16,10 @@
   field to a device without it, before the task exists.
   `ByokServer.dispatch` takes `agentMemory` only with an explicit `agentRef`;
   `executions.submit` takes it in its payload.
+- **Feature (client)** — `@byok-sdk/client` exports
+  `AGENT_MEMORY_MCP_SERVER_NAME`, the reserved name of the SDK memory MCP
+  server (#614). Host tests and diagnostics can use it instead of the literal
+  name.
 
 ## 0.28.3 — source candidate
 

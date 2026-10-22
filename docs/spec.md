@@ -2230,6 +2230,8 @@ addition: a daemon with an Agent home advertises `agent-memory-selection`
 whatever its admission, and server and cloud refuse the field to a device
 without it before task creation or mailbox append. The reference server takes
 it on `executions.submit` and on `dispatch` with an explicit `agentRef`.
+`AGENT_MEMORY_MCP_SERVER_NAME` from `@byok-sdk/client` is the reserved name of
+the SDK memory MCP server, so Host tests and diagnostics need no literal name.
 
 The client release carries Darwin arm64 and x64 helpers. The SDK resolves its
 own path and checks the build manifest before each helper open. Arbitrary

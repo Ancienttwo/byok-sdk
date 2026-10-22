@@ -10535,6 +10535,8 @@ export type { OutboundStatus, OutboundRejection } from './daemon/outbound-settle
 export { createExecutionScratch, ScratchRootPathError } from './daemon/retention/scratch';
 export type { ExecutionScratch } from './daemon/retention/scratch';
 export { copyAgentMemoryHelperAssets, type CopyAgentMemoryHelperAssetsOptions } from './daemon/agent-memory-helper-release';
+/** The reserved name of the SDK memory MCP server in an Agent task's MCP servers. */
+export { AGENT_MEMORY_MCP_SERVER_NAME } from './sdk-reserved-mcp';
 export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, type CopySdkNativeAssetsOptions } from './sdk-native-assets';
 export type { AgentMemoryExport, AgentMemoryExportOptions } from './daemon/agent-memory-export';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====
@@ -13056,6 +13058,33 @@ export declare function resolveSdkReservedHelperBin(kind: SdkReservedHelperKind,
  * stdio EOF before this resolves `true`.
  */
 export declare function runSdkReservedHelperCommand(argv?: readonly string[]): Promise<boolean>;
+// ==== @byok-sdk/client dist/sdk-reserved-mcp.d.ts ====
+/** SDK-owned names shared by daemon injection, adapter policy, and MCP helpers. */
+export declare const AGENT_MESSAGE_MCP_SERVER_NAME = "byokagentmessage";
+export declare const AGENT_MESSAGE_TOOL_NAME = "send_agent_message";
+export declare const AGENT_MEMORY_MCP_SERVER_NAME = "byokagentmemory";
+export declare const AGENT_TEAM_MCP_SERVER_NAME = "byokagentteam";
+/** The structured outcome channel of a `terminalProjection.mode: 'result-document'` offer (wire v3). */
+export declare const AGENT_RESULT_MCP_SERVER_NAME = "byokagentresult";
+/** Its one tool; the `inputSchema` it advertises is the offer's frozen result schema. */
+export declare const AGENT_RESULT_TOOL_NAME = "submit_result";
+export declare const AGENT_RESULT_TOOL_DESCRIPTION = "Submit the structured outcome required by this execution. A staged receipt confirms durable storage, not execution success.";
+/**
+ * Every MCP server name the SDK owns. A server under one of these names is
+ * never a projected host toolset server: `toolset-registry.ts` refuses to
+ * configure one, and the adapters grant each reserved server exactly the
+ * fixed tool its own protocol needs rather than anything observed.
+ *
+ * A frozen tuple rather than a `Set`: `Object.freeze` on a `Set` freezes the
+ * object's own properties and leaves `add`/`delete` fully functional, so the
+ * previous shape advertised an immutability it did not have. Four entries
+ * make `includes` the same cost as a hash lookup, and the array really is
+ * immutable. Use {@link isReservedMcpServerName} rather than reaching for
+ * membership directly.
+ */
+export declare const RESERVED_MCP_SERVER_NAMES: readonly ["byokagentmessage", "byokagentmemory", "byokagentteam", "byokagentresult"];
+/** Whether `name` is one of the SDK-owned MCP server names above. */
+export declare function isReservedMcpServerName(name: string): boolean;
 // ==== @byok-sdk/client dist/testing/index.d.ts ====
 import type { RuntimeAdapter, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeDetectResult } from '../types';
 /** The built-in adapters a fake can stand in for. */

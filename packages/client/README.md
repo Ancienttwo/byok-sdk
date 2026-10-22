@@ -428,6 +428,9 @@ The server and hosted cloud refuse an offer with the field to a device without
 that capability, before the task exists. `ByokServer.dispatch` accepts
 `agentMemory` only with an explicit `agentRef`.
 
+`AGENT_MEMORY_MCP_SERVER_NAME` is the reserved name of the SDK memory MCP
+server. Host tests and diagnostics can use it instead of the literal name.
+
 ### When `auto` does not admit the memory MCP
 
 `Daemon.status().agentMemoryMcp` reports the effective admission: `admitted`,

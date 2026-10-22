@@ -341,6 +341,11 @@ describe('per-task Agent memory selection', () => {
     'This task reads Agent memory only. Do not change `MEMORY.md` or `notes/`.',
   ].join('\n');
 
+  it('exports the reserved name of the memory server in the task MCP servers', async () => {
+    const { AGENT_MEMORY_MCP_SERVER_NAME } = await import('../index');
+    expect(AGENT_MEMORY_MCP_SERVER_NAME).toBe('byokagentmemory');
+  });
+
   it('none gives no memory MCP and no memory guidance, and needs no adapter MCP support', async () => {
     const { adapter, offer, declineOf } = await createMemoryRunner('auto', false);
     await offer('writer-none', { agentMemory: 'none' });
