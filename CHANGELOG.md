@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Changed (keys)** — `PiModelConfigSchema` accepts a `pi_model` without
+  `thinkingLevelMap`, as the prepared model wire already does. A declared map
+  must still map all seven levels. Without a map, Pi applies its own handling
+  of each level. For a reasoning model the schema then accepts `off` through
+  `high`, the levels that pi-ai `getSupportedThinkingLevels` offers, and
+  refuses `xhigh` and `max`. `piModelConfigFromPinnedCatalog` now derives the
+  pinned entries that have no map, for example MiniMax M2.7 and M3 and Z.AI
+  GLM-4.7 and GLM-5-turbo: 184 of 1,022 entries, up from 83. An entry with a
+  partial map is still refused. `PiModelConfig['thinkingLevelMap']` is optional
+  in the type (#636).
+  Downgrade: 0.28.3 and earlier refuse a `pi_model` without a map. Before a
+  downgrade, give each such profile a complete map or delete it. If you do
+  not, the SQLite store of those releases fails `list()` and each read of that
+  profile, and their truth store fails every read and write of the registry.
+  An older device answers sealed provisioning of such a `pi_model` with
+  `pi_model_invalid`.
 - **Changed (client)** — the Agent memory Go helper can now open a home on
   Windows (#605). The SDK does not use this yet. The TypeScript gate still
   refuses Windows, and the package has no Windows helper asset. On Windows the
