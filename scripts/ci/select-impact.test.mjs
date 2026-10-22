@@ -205,6 +205,6 @@ test('SQLite packaging fixtures select only their reviewed packaging owner', () 
   }
   for (const path of ['examples/packaging/sqlite-unknown.ts', 'examples/packaging/sqlite-smoke-extra.mjs',
     'examples/packaging/nested/sqlite-fixture.ts']) {
-    assert.throws(() => selectImpact([path]), /reviewed release validation required/i);
+    assert.throws(() => selectImpact([path]), /reviewed CI mapping required/i);
   }
 });
