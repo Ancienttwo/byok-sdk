@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2079005,
+      "budgetBytes": 2073754,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -417,7 +417,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Hermes session runtime; loaded only when starting an execution",
-      "budgetBytes": 14052,
+      "budgetBytes": 20744,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -434,15 +434,23 @@
         "packages/client/dist/adapters/hermes/hermes-session-runtime.d.ts"
       ],
       "bareImports": [
-        "fs"
+        "child_process",
+        "crypto",
+        "fs",
+        "path"
       ],
-      "lazyImports": [],
+      "lazyImports": [
+        "koffi"
+      ],
       "thirdParty": [],
       "unavailableOptional": [],
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
-          "fs"
+          "child_process",
+          "crypto",
+          "fs",
+          "path"
         ],
         "thirdParty": []
       },
