@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
+import { loadKoffi } from '../win32-job-object';
 
 /** The fields of a Hermes gateway `identify` answer that the adapter checks. */
 export interface HermesGatewayIdentity {
@@ -76,7 +77,7 @@ async function identifyOverPipe(home: string, options: IdentifyHermesGatewayOpti
   // The koffi client lives in the lazy session entry, so the root entries do not carry it.
   const { exchangeHermesPipe } = await import('#byok-hermes-session');
   const name = hermesGatewayPipeName(await fs.realpath(home).catch(() => path.resolve(home)));
-  const answer = await exchangeHermesPipe(name, IDENTIFY_REQUEST, options.owned ?? (() => false), Date.now() + (options.timeoutMs ?? 1_000), options.nativeAssetRoot);
+  const answer = await exchangeHermesPipe(name, IDENTIFY_REQUEST, options.owned ?? (() => false), Date.now() + (options.timeoutMs ?? 1_000), await loadKoffi(options.nativeAssetRoot));
   if (answer === undefined) return undefined;
   const identity = answer.line === undefined ? undefined : parseIdentity(answer.line);
   if (identity === undefined) return { pid: answer.serverPid, state: 'unverified', servedHomes: [] };
