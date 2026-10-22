@@ -143,6 +143,25 @@ function isNullHandle(value: Win32Handle): boolean {
 
 const installedBindings = Symbol('installed');
 const cachedBindings = new Map<string | symbol, JobObjectBindings>();
+const loadedKoffi = new Map<string | symbol, KoffiModule>();
+
+/**
+ * koffi from the installed optional dependency, or from the SDK native assets
+ * at `nativeAssetRoot`. The Hermes pipe client gets koffi here, so the lazy
+ * Hermes session entry carries no second native-asset loader.
+ */
+export async function loadKoffi(nativeAssetRoot?: string): Promise<unknown> {
+  const key = nativeAssetRoot === undefined ? installedBindings : nativeAssetRoot;
+  let koffi = loadedKoffi.get(key);
+  if (koffi === undefined) {
+    const imported = nativeAssetRoot === undefined
+      ? (await import('koffi')) as unknown as { default?: KoffiModule }
+      : loadSdkKoffiAsset(nativeAssetRoot) as { default?: KoffiModule };
+    koffi = (imported.default ?? imported) as KoffiModule;
+    loadedKoffi.set(key, koffi);
+  }
+  return koffi;
+}
 
 /**
  * Resolve the kernel32 binding table, importing `koffi` on first use only.
@@ -158,10 +177,7 @@ export async function loadBindings(nativeAssetRoot?: string): Promise<JobObjectB
 
   let koffi: KoffiModule;
   try {
-    const imported = nativeAssetRoot === undefined
-      ? (await import('koffi')) as unknown as { default?: KoffiModule }
-      : loadSdkKoffiAsset(nativeAssetRoot) as { default?: KoffiModule };
-    koffi = (imported.default ?? imported) as KoffiModule;
+    koffi = await loadKoffi(nativeAssetRoot) as KoffiModule;
   } catch (cause) {
     throw new Win32JobObjectFailure({
       step: 'loadKoffi',
