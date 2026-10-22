@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { z } from 'zod';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
@@ -30,12 +31,16 @@ export function parseHermesProviderLauncherRequest(args: readonly string[]): Her
 
 /**
  * Run only in a dedicated Host launcher process. Validation returns non-secret
- * model metadata; launch replaces this process, preserving Hermes gateway PID.
+ * model metadata. On POSIX, launch replaces this process, preserving the
+ * Hermes gateway PID. Windows has no process replacement: launch starts Hermes
+ * as a child with the credential in the child's environment only, resolves
+ * when Hermes exits and sets `process.exitCode` to its exit code. The adapter
+ * accepts a gateway below the launcher PID on Windows.
  * The Host supplies its account-scoped store here, never in the daemon.
  */
 export async function runHermesProviderLauncher(request: HermesProviderLauncherRequest, host: { createSecretStore(): SecretStore }): Promise<void> {
   const options = RequestSchema.parse(request);
-  if (process.platform === 'win32' || typeof process.execve !== 'function') throw new Error('Hermes custody requires POSIX Node process replacement');
+  if (process.platform !== 'win32' && typeof process.execve !== 'function') throw new Error('Hermes custody requires POSIX Node process replacement');
   const profiles = new SqliteProviderProfileStore({ path: options.profileDbPath, readOnly: true });
   let environment: Record<string, string> | undefined;
   try {
@@ -58,6 +63,15 @@ export async function runHermesProviderLauncher(request: HermesProviderLauncherR
   } finally { await profiles.close(); }
   const launch = options.launch!;
   const args = launch.role === 'gateway' ? ['gateway', 'run', '--quiet', '--external-supervisor', '--force'] : ['--yolo', 'acp'];
-  process.execve(launch.hermesBin, [launch.hermesBin, ...args], environment!);
+  if (process.platform === 'win32') {
+    const child = spawn(launch.hermesBin, args, { env: environment, stdio: 'inherit', windowsHide: true });
+    environment = undefined;
+    await new Promise<void>((resolve, reject) => {
+      child.once('error', () => reject(new Error('Hermes launch failed')));
+      child.once('exit', (code) => { process.exitCode = code ?? 1; resolve(); });
+    });
+    return;
+  }
+  process.execve!(launch.hermesBin, [launch.hermesBin, ...args], environment!);
   throw new Error('Hermes process replacement returned unexpectedly');
 }

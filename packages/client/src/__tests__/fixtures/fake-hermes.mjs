@@ -3,14 +3,17 @@
 //
 //   hermes --version                 version line (FAKE_HERMES_VERSION)
 //   hermes gateway run ...           long-lived gateway that answers the
-//                                    control-socket `identify` verb, as the
-//                                    real gateway does (gateway/control_socket.py)
+//                                    control-channel `identify` verb, as the
+//                                    real gateway does (gateway/control_socket.py):
+//                                    <home>/gateway.sock on POSIX, the named
+//                                    pipe hermes-gateway-<hash> on Windows
 //   hermes [--yolo] acp              ACP v1 agent over stdio (the viewer)
 //
 // The viewer refuses session/new unless a ready gateway serves its
 // HERMES_HOME, as the real viewer cannot run a turn without one. Every
 // observable input is appended to FAKE_HERMES_RECEIPT as one JSON line.
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
@@ -32,9 +35,18 @@ if (argv.includes('--version')) {
 }
 
 const hermesEnv = Object.keys(env).filter((name) => name.startsWith('HERMES_')).sort();
+// Native: on Windows the JS realpath keeps 8.3 short names; Hermes resolves the long form.
+const realHome = () => realpathSync.native(home);
+
+/** `windows_pipe_name` in Hermes's gateway/control_socket.py, derived here independently of the adapter. */
+function controlPath() {
+  if (process.platform !== 'win32') return path.join(home, 'gateway.sock');
+  const hash = createHash('sha256').update(realHome().replaceAll('/', '\\').toLowerCase(), 'utf8').digest('hex').slice(0, 16);
+  return `\\\\.\\pipe\\hermes-gateway-${hash}`;
+}
 
 function serveIdentify(socketPath, identity) {
-  if (existsSync(socketPath)) unlinkSync(socketPath);
+  if (process.platform !== 'win32' && existsSync(socketPath)) unlinkSync(socketPath);
   const server = net.createServer((socket) => {
     let buffer = '';
     socket.on('data', (chunk) => {
@@ -60,8 +72,8 @@ if (argv[0] === 'gateway' && argv[1] === 'run') {
   // The real gateway prints a banner on stdout even with --quiet.
   console.log('Hermes Gateway Starting...');
   const readyAt = Date.now() + Number(env.FAKE_HERMES_GATEWAY_READY_DELAY_MS ?? 0);
-  const served = realpathSync(home);
-  serveIdentify(path.join(home, 'gateway.sock'), () => ({
+  const served = realHome();
+  serveIdentify(controlPath(), () => ({
     kind: 'hermes-gateway',
     pid: env.FAKE_HERMES_GATEWAY_WRONG_PID === '1' ? process.pid + 100_000 : process.pid,
     state: env.FAKE_HERMES_GATEWAY_NEVER_READY === '1' || Date.now() < readyAt ? 'starting' : 'ready',
@@ -79,7 +91,7 @@ if (argv[0] === 'gateway' && argv[1] === 'run') {
 
 function identifyGateway() {
   return new Promise((resolve) => {
-    const socket = net.createConnection(path.join(home, 'gateway.sock'));
+    const socket = net.createConnection(controlPath());
     let buffer = '';
     socket.on('connect', () => socket.write('{"protocol":1,"id":1,"verb":"identify"}\n'));
     socket.on('data', (chunk) => {
@@ -97,13 +109,13 @@ function identifyGateway() {
  * adapter's explicit stop can end it. It exits by itself after 20 s.
  */
 async function startForeignGateway() {
-  const socketPath = path.join(home, 'gateway.sock');
-  const readyFile = `${socketPath}.foreign`;
+  const socketPath = controlPath();
+  const readyFile = path.join(home, 'gateway.sock.foreign');
   const server = `const net=require('node:net'),fs=require('node:fs');const [sock,served,ready]=process.argv.slice(1);
 try{fs.unlinkSync(sock)}catch{}setTimeout(()=>process.exit(0),20000);
 net.createServer(s=>{let b='';s.on('data',c=>{b+=c;if(b.includes('\\n'))s.end(JSON.stringify({ok:true,protocol:1,id:1,result:{pid:process.pid,state:'ready',served_profiles:[{home:served}]}})+'\\n')})}).listen(sock,()=>fs.writeFileSync(ready,String(process.pid)));`;
   const launcher = `const {spawn}=require('node:child_process');spawn(process.execPath,['-e',process.argv[1],...process.argv.slice(2)],{detached:true,stdio:'ignore'}).unref();`;
-  spawn(process.execPath, ['-e', launcher, server, socketPath, realpathSync(home), readyFile], { stdio: 'ignore' });
+  spawn(process.execPath, ['-e', launcher, server, socketPath, realHome(), readyFile], { stdio: 'ignore' });
   for (let waited = 0; waited < 5_000; waited += 20) {
     if (existsSync(readyFile)) return Number(readFileSync(readyFile, 'utf8'));
     await new Promise((resolve) => setTimeout(resolve, 20));

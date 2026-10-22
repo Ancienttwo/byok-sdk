@@ -750,7 +750,10 @@ variable for a `custom` endpoint. The first `detect()` on a new root waits
 while Hermes builds its Python environment there (up to `probeTimeoutMs`,
 default 180 s). A turn start takes about 20 s, so a Host may raise
 `startupTimeoutMs`. Qualified build and limits:
-[S0 note](../../docs/notes/2026-10-20-519-hermes-acp-s0.md).
+[S0 note](../../docs/notes/2026-10-20-519-hermes-acp-s0.md). On Windows the
+adapter reaches the gateway over Hermes's named pipe; give `resolveBin` the
+venv `hermes.exe`. Platform notes:
+[adapter capabilities](../../docs/adapter-capabilities.md#hermes-adapter-custom-harness).
 
 ### Hermes with a separate credential-custody launcher
 
@@ -775,15 +778,21 @@ profile binding. The dedicated executable uses the keys package's
 Host's account-scoped `SecretStore`; see [keys](../keys/README.md#hermes-custody-launcher).
 Admission returns only model metadata. Each gateway/viewer launch revalidates
 the binding and pending-custody state before reading the selected credential.
-The daemon never receives that credential; the launcher replaces itself with
-Hermes, preserving the PID required by the gateway identity check.
+The daemon never receives that credential. On POSIX the launcher replaces
+itself with Hermes, preserving the PID required by the gateway identity check.
+On Windows there is no process replacement: the launcher starts Hermes as a
+child with the credential in the child environment only, stays alive until
+Hermes exits and exits with its code. The adapter accepts a gateway below the
+launcher PID on Windows. While the execution runs, the launcher process also
+holds the credential in memory.
 
 This initial mapping accepts enabled OpenAI-compatible bearer profiles without
 `pi_model` overrides and maps them to Hermes `custom`. Other authentication,
-Anthropic, Responses/compat overrides and Windows remain unsupported. Use a
-POSIX Node runtime supporting `process.execve` (the SDK's Node >=24.22.1 floor)
-and an absolute Hermes executable; no PATH lookup or child-process proxy is
-used for launch. A Bun-only executable without `process.execve` is rejected.
+Anthropic and Responses/compat overrides remain unsupported. On POSIX, use a
+Node runtime supporting `process.execve` (the SDK's Node >=24.22.1 floor); a
+Bun-only executable without `process.execve` is rejected, and no child-process
+proxy is used for launch. Use an absolute Hermes executable (on Windows, the
+venv `hermes.exe`); no PATH lookup is used for launch.
 Custody mode filters inherited environment variables and injects only
 `SDK_HERMES_PROVIDER_KEY`; unlike direct mode it does not forward arbitrary
 provider or loader variables. The Host must still trust its launcher and Hermes
