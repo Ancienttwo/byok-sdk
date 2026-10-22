@@ -234,29 +234,34 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.28.1`; publication requires separate release
+aligned dispatch release is `0.28.2`; publication requires separate release
 authorization and registry readback. The current independent keys release is
 `0.13.1`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.28.1`, proven from an isolated standard npm install rather
+dispatch release, `0.28.2`, proven from an isolated standard npm install rather
 than the workspace graph.
 
-For this release only, the owner's 2026-10-21 instruction to continue the
-0.28.1 release selects PATCH despite the included additive APIs and persistence
-changes. This explicit exception does not change the general policy above or
-waive validation, publication authorization, or registry readback. keys 0.13.1
-updates its exact packed core dependency; keys remains independently versioned.
-See the [0.28.1 release notes](releases/v0.28.1.md).
+For this release only, the owner's 2026-10-22 instruction to name the next
+release 0.28.2 selects PATCH despite the included additive public APIs and new
+public behavior. This explicit exception does not change the general policy
+above or waive validation, publication authorization, or registry readback.
+See the [0.28.2 candidate notes](releases/v0.28.2.md).
 
-Public registry metadata read on 2026-10-21 at 18:13 UTC reports `latest`
-0.28.1 for all eight aligned packages and `latest` 0.13.1 for keys. The same
-read lists 0.28.0 / keys 0.13.0 as the earlier published versions. The registry
-publication times are 2026-10-20 (UTC) for 0.28.0 / keys 0.13.0 and
-2026-10-21 (UTC) for 0.28.1 / keys 0.13.1. The keys 0.13.1 package depends on
-exactly `@byok-sdk/core` 0.28.1. The 0.28.0 and 0.28.1 source-candidate notes
-are preparation history. They are not publication records. This read confirms
-registry availability. It does not establish isolated-install qualification.
-A later release needs the accepted final-commit CI artifact and separate owner
-authorization.
+0.28.1 / keys 0.13.1 used an earlier one-release exception. The owner's
+2026-10-21 instruction to continue the 0.28.1 release selected PATCH despite
+its additive APIs and persistence changes. See the
+[0.28.1 release notes](releases/v0.28.1.md).
+
+Public registry metadata read on 2026-10-22 at 03:41 UTC reports `latest`
+0.28.1 for all eight aligned packages and `latest` 0.13.1 for keys. The keys
+0.13.1 package depends on exactly `@byok-sdk/core` 0.28.1. Version 0.28.2 was
+absent for all nine packages at that read; recheck before publishing. An
+earlier read on 2026-10-21 at 18:13 UTC listed 0.28.0 / keys 0.13.0 as the
+earlier published versions. The registry publication times are 2026-10-20
+(UTC) for 0.28.0 / keys 0.13.0 and 2026-10-21 (UTC) for 0.28.1 / keys 0.13.1.
+The 0.28.0 and 0.28.1 source-candidate notes are preparation history. They are
+not publication records. These reads confirm registry availability. They do
+not establish isolated-install qualification. Publication of 0.28.2 needs the
+accepted final-commit CI artifact and separate owner authorization.
 
 0.27.0 / keys 0.12.0 was published on `latest` from `v0.27.0` (`cd977261`). It
 was `latest` until 0.28.0.
