@@ -84,6 +84,21 @@
   Hermes title is only its registry name, and Grok has no live MCP evidence
   yet. The new `docs/protocol.md` §11.7 gives the source of `mcp` for each
   adapter. No public type changes.
+- **Fixed (client)** — the daemon outbox keeps one copy of each held
+  `agent.egress.reliable` and `agent.content.receipt` record across
+  reconnects. Each reconnect advertises `agent-egress-reliable-ack` again, and
+  the daemon then sends each held record again. Before, each of these sends
+  used a new envelope id. On a flapping route, where the handshake succeeds and
+  the data post fails, each reconnect added one more copy of each held record.
+  Each later request carried all copies. Each send of a held record now uses
+  the same envelope, so the connection manager skips it while a copy is queued
+  or in flight (#693). After a restart, the daemon builds a new envelope. A
+  resend that arrives after the cloud recorded the event now settles as
+  `duplicate`, not `accepted`. It adds 1 to the client `outbound.duplicate`
+  counter and to the server `dedupDrops` counter. Before, it added 1 to
+  `accepted`. The cloud still appends the exact `agent.egress.ack` for a
+  duplicate. In one daemon run, `observer.onInboundCommitted` now fires only
+  once for each record (#698).
 
 ## 0.28.2 — source candidate
 
