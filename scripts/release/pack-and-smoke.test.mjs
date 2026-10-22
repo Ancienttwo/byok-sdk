@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import {
+  copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
-  parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER, PI_DIRECT_CLOSURE, PI_RUNTIME_CLOSURE, readInstalledPiClosure, readLockedPiClosure,
+  parseBunLock, parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER, PI_DIRECT_CLOSURE, PI_RUNTIME_CLOSURE, readInstalledPiClosure,
+  readLockedPiClosure,
 } from './pi-runtime-identity.mjs';
 
 const releasePackSource = readFileSync(
@@ -17,7 +21,7 @@ test('release pack includes keys and verifies its packed core edge', () => {
   assert.match(
     releasePackSource,
     /name:\s*'@byok-sdk\/keys',\s*directory:\s*'packages\/keys'/,
-    'the release pack must include the independently versioned keys package',
+    'the release pack must include the keys package',
   );
   assert.match(
     releasePackSource,
@@ -26,9 +30,58 @@ test('release pack includes keys and verifies its packed core edge', () => {
   );
   assert.match(
     releasePackSource,
-    /keysVersion/,
-    'the pack manifest must retain keys as an independently versioned artifact',
+    /packages\.map\(\(\{ name \}\) => \[name, releaseVersion\]\)/,
+    'every packed package, keys included, must carry the release train version',
   );
+  assert.doesNotMatch(releasePackSource, /keysVersion/, 'keys has no version of its own to pack against');
+});
+
+test('release graph requires keys to carry the release train version', (t) => {
+  // Run the real graph check on a copy of its inputs, so keys can move off the
+  // train version without touching the checkout.
+  const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
+  const lockText = readFileSync(path.join(repoRoot, 'bun.lock'), 'utf8');
+  const workspaces = Object.keys(parseBunLock(lockText).workspaces).filter((directory) => directory !== '');
+  const manifestOf = (directory) => JSON.parse(readFileSync(path.join(repoRoot, directory, 'package.json'), 'utf8'));
+  const publicDirectories = workspaces.filter((directory) => directory.startsWith('packages/') && manifestOf(directory).private !== true);
+  const releaseVersion = manifestOf('packages/core').version;
+  const keysRecord = /("packages\/keys": \{\r?\n\s+"name": "@byok-sdk\/keys",\r?\n\s+"version": ")[^"]+(")/;
+  assert.match(lockText, keysRecord);
+  const runGraph = (keysVersion) => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'byok-release-graph-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const copy = (relative) => {
+      mkdirSync(path.dirname(path.join(root, relative)), { recursive: true });
+      copyFileSync(path.join(repoRoot, relative), path.join(root, relative));
+    };
+    for (const name of readdirSync(path.join(repoRoot, 'scripts/release'))) {
+      if (name.endsWith('.mjs')) copy(`scripts/release/${name}`);
+    }
+    for (const name of ['official-pi-installation.mjs', 'official-pi-closure.json']) copy(`packages/client/src/adapters/pi/${name}`);
+    for (const relative of ['LICENSE', 'packages/client/tsup.config.ts']) copy(relative);
+    for (const directory of workspaces) copy(`${directory}/package.json`);
+    for (const directory of publicDirectories) for (const name of ['README.md', 'LICENSE']) copy(`${directory}/${name}`);
+    // The purity audit resolves the installed client dependencies.
+    for (const directory of ['', 'packages/client']) {
+      const installed = path.join(repoRoot, directory, 'node_modules');
+      if (existsSync(installed)) symlinkSync(installed, path.join(root, directory, 'node_modules'), 'junction');
+    }
+    const keysManifestPath = path.join(root, 'packages/keys/package.json');
+    writeFileSync(keysManifestPath, `${JSON.stringify({ ...manifestOf('packages/keys'), version: keysVersion }, null, 2)}\n`);
+    // Keep the lock record equal to the manifest, so only the version rule can fail.
+    writeFileSync(path.join(root, 'bun.lock'), lockText.replace(keysRecord, `$1${keysVersion}$2`));
+    return spawnSync(process.execPath, ['scripts/release/check-package-graph.mjs'], { cwd: root, encoding: 'utf8' });
+  };
+
+  const aligned = runGraph(releaseVersion);
+  assert.equal(aligned.status, 0, aligned.stderr);
+  assert.match(aligned.stdout, /\[release-graph\] OK: published set is exactly 9 packages at /);
+
+  const split = runGraph('0.13.1');
+  assert.equal(split.status, 1);
+  assert.deepEqual(split.stderr.trim().split(/\r?\n/), [
+    `[release-graph] packages/keys/package.json: expected version ${releaseVersion}, got 0.13.1`,
+  ]);
 });
 
 test('release pack accepts exact prerelease versions while Pi remains a stable pin', () => {

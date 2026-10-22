@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { verifyPrPlan } from './plan-ci.mjs';
-import { selectImpact } from './select-impact.mjs';
+import { reviewedScripts, selectImpact } from './select-impact.mjs';
 
 const plan = JSON.parse(process.env.CI_PLAN ?? '');
 if (plan.mode !== 'targeted') throw new Error('Targeted runner refuses a release or missing plan');
@@ -15,8 +15,9 @@ const extraTests = [];
 if (plan.files.includes('scripts/release/agent-memory-helper-source.test.mjs')) extraTests.push('scripts/release/agent-memory-helper-source.test.mjs');
 if (plan.files.some(path => /^scripts\/release\/registry-/.test(path))) extraTests.push('scripts/release/registry-contract.test.mjs', 'scripts/release/registry-npm.test.mjs');
 if (plan.files.some(path => path.startsWith('packages/client/vendor/oar/'))) extraTests.push('scripts/api-surface/check-oar-bridge.test.mjs');
+for (const path of plan.files) if (Object.hasOwn(reviewedScripts, path)) extraTests.push(...reviewedScripts[path].tests);
 if (extraTests.length) {
-  const result = spawnSync(process.execPath, ['--test', '--test-concurrency=1', ...extraTests], { stdio: 'inherit', env: process.env });
+  const result = spawnSync(process.execPath, ['--test', '--test-concurrency=1', ...new Set(extraTests)], { stdio: 'inherit', env: process.env });
   if (result.error) throw result.error;
   if (result.status !== 0) process.exit(result.status ?? 1);
 }

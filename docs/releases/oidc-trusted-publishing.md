@@ -18,8 +18,8 @@ provenance attestation.
 
 - Workflow: [`.github/workflows/release.yml`](../../.github/workflows/release.yml).
 - Driver: `node scripts/release/publish.mjs --trusted-publishing --artifacts <dir>`.
-- The package set stays the nine public packages of ADR-035. Keys keeps
-  its own version.
+- The package set stays the nine public packages of ADR-035. From 0.28.2,
+  keys uses the release train version.
 
 ## Constraints
 

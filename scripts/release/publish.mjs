@@ -47,10 +47,6 @@ export const exactStableVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 export const exactReleaseVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const npmSafeDistTag = /^(?=.{1,214}$)[a-z][a-z0-9._-]*$/;
 
-// Versions independently of the release train, so it is compared against its own
-// manifest version and never against the shared train version.
-const independentPackages = new Set(['@byok-sdk/keys']);
-
 const runtimeFields = ['dependencies', 'optionalDependencies', 'peerDependencies'];
 
 const nodeBin = process.execPath;
@@ -585,7 +581,7 @@ async function main() {
 
   // --- Step 1: version consistency + registry candidacy -------------------
   const manifests = readPublicManifests(packagesDir);
-  const trainEntries = [...manifests.values()].filter((entry) => !independentPackages.has(entry.name));
+  const trainEntries = [...manifests.values()];
   if (trainEntries.length === 0) throw new Error('no release-train packages found');
   const trainVersion = trainEntries[0].version;
   const desynced = trainEntries.filter((entry) => entry.version !== trainVersion);
@@ -604,9 +600,6 @@ async function main() {
     }
   }
   log(`step 1/8: release train version ${trainVersion} across ${trainEntries.length} public package(s)`);
-  for (const entry of manifests.values()) {
-    if (independentPackages.has(entry.name)) log(`${entry.name} versions independently at ${entry.version}`);
-  }
 
   // The tag is the release's completion marker: it exists only once the registry
   // has been read back, so an existing tag means there is nothing left to do.

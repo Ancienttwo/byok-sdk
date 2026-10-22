@@ -25,8 +25,11 @@ function runTargeted(plan, cwd = root) {
     const env = { ...process.env, CI_EVENT: 'push', CI_BASE: plan.base, CI_PLAN: JSON.stringify(plan),
       FAKE_BUN_LOG: log, PATH: `${bin}${path.delimiter}${process.env.PATH}` };
     delete env.CI_PR_HEAD; delete env.GITHUB_SHA;
+    // Under node --test the runner's own node --test child would report to this
+    // test process instead of printing; CI runs the runner outside node --test.
+    delete env.NODE_TEST_CONTEXT;
     const result = spawnSync(process.execPath, [fileURLToPath(new URL('./run-targeted.mjs', import.meta.url))], { cwd, env, encoding: 'utf8' });
-    return { status: result.status, stderr: result.stderr, calls: readFileSync(log, 'utf8').split('\n').filter(Boolean) };
+    return { status: result.status, stdout: result.stdout, stderr: result.stderr, calls: readFileSync(log, 'utf8').split('\n').filter(Boolean) };
   } finally { rmSync(bin, { recursive: true, force: true }); }
 }
 
@@ -62,4 +65,16 @@ test('another selected workspace without a test check still fails closed', posix
     assert.match(stderr, /Selected workspace packages\/keys has no test check/);
     assert.ok(calls.includes('run --cwd examples/packaging typecheck'));
   } finally { rmSync(cwd, { recursive: true, force: true }); }
+});
+
+// #649: a reviewed release script path runs the node tests mapped to it, and no
+// workspace check.
+test('a reviewed release script path runs its mapped node tests', posixOnly, () => {
+  const plan = planCi({ event: 'push', sha, base, paths: ['scripts/api-surface/check-version-authority.mjs'] });
+  assert.deepEqual([plan.dirs, plan.families], [[], []]);
+  const { status, stdout, stderr, calls } = runTargeted(plan);
+  assert.equal(status, 0, stderr);
+  assert.match(stdout, /a README keys version that differs from the release train fails/);
+  assert.match(stdout, /(?:ℹ|#) fail 0/);
+  assert.deepEqual(calls, []);
 });

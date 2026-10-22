@@ -16,8 +16,8 @@ const dispatchPackages = [
 ];
 const keys = ['packages/keys', '@byok-sdk/keys'];
 const alignedPackages = [...dispatchPackages];
-// The published set is exactly these packages: the aligned train plus the
-// independently versioned keys. Every other workspace manifest under
+// The published set is exactly these packages: the aligned train plus keys,
+// all on the one release version. Every other workspace manifest under
 // packages/ must be private, because publish.mjs publishes every non-private
 // manifest it finds there. Since 0.21.0 the `byok-sdk` umbrella is retired
 // (ADR-035: no empty umbrella, alias package or dual export) and
@@ -130,8 +130,8 @@ function readJson(relativePath) {
 }
 
 // Version authority: the manifests themselves, never a constant in this file.
-// The release train version is whatever packages/core ships, keys versions
-// independently from packages/keys, and the pi pin from packages/client.
+// The release train version is whatever packages/core ships, every public
+// package (keys included) carries it, and the pi pin comes from packages/client.
 // Every check below compares against these derived values, so a train bump
 // cannot desync the gate from the manifests it guards.
 // Release packages may use an exact SemVer prerelease (for example
@@ -141,7 +141,6 @@ function readJson(relativePath) {
 const exactStableVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const exactReleaseVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const releaseVersion = readJson('packages/core/package.json').version;
-const keysVersion = readJson('packages/keys/package.json').version;
 let piRuntime;
 try {
   piRuntime = parsePiRuntimeIdentity(readJson('packages/client/package.json'));
@@ -161,12 +160,6 @@ if (piRuntime) for (const [directory] of publicPackages) {
 if (typeof releaseVersion !== 'string' || !exactReleaseVersion.test(releaseVersion)) {
   errors.push('packages/core/package.json: version must be an exact SemVer release train version');
 }
-if (typeof keysVersion !== 'string' || !exactReleaseVersion.test(keysVersion)) {
-  errors.push('packages/keys/package.json: version must be an exact SemVer version');
-}
-if (keysVersion === releaseVersion) {
-  errors.push(`packages/keys/package.json: keys must remain independently versioned from the ${releaseVersion} dispatch train`);
-}
 
 const manifests = new Map();
 for (const [directory, expectedName] of publicPackages) {
@@ -174,8 +167,7 @@ for (const [directory, expectedName] of publicPackages) {
   const manifest = readJson(manifestPath);
   manifests.set(manifest.name, manifest);
   if (manifest.name !== expectedName) errors.push(`${manifestPath}: expected name ${expectedName}, got ${manifest.name}`);
-  const expectedVersion = expectedName === keys[1] ? keysVersion : releaseVersion;
-  if (manifest.version !== expectedVersion) errors.push(`${manifestPath}: expected version ${expectedVersion}, got ${manifest.version}`);
+  if (manifest.version !== releaseVersion) errors.push(`${manifestPath}: expected version ${releaseVersion}, got ${manifest.version}`);
   if (manifest.license !== 'MIT') errors.push(`${manifestPath}: license must be MIT`);
   if (manifest.publishConfig?.access !== 'public') errors.push(`${manifestPath}: publishConfig.access must be public`);
   const expectedEngine = '>=24.22.1';
@@ -434,4 +426,4 @@ if (errors.length > 0) {
   process.exit(1);
 }
 
-console.log(`[release-graph] OK: published set is exactly ${publicPackages.length} packages — ${alignedPackages.length} aligned manifests at ${releaseVersion}, keys at ${keysVersion}; ${privatePackages.map(([, name]) => name).join(', ')} private; no aligned package reaches keys`);
+console.log(`[release-graph] OK: published set is exactly ${publicPackages.length} packages at ${releaseVersion} — ${alignedPackages.length} aligned manifests plus keys; ${privatePackages.map(([, name]) => name).join(', ')} private; no aligned package reaches keys`);
