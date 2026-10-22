@@ -117,9 +117,10 @@ SEA entry.
 `import.meta.url` is the only `import.meta` property that SDK code needs
 (#724). esbuild still leaves three third-party modules with an empty
 `import.meta`:
-- koffi's native loader (`import.meta.dirname`). On Windows, pass
-  `nativeAssetRoot` from `copySdkNativeAssets`. The SDK then loads the addon
-  itself, and koffi's loader never runs. `examples/packaging/native-assets-smoke.mjs`
+- koffi's native loader (`import.meta.dirname`). On Windows the SDK loads koffi
+  for process ownership and for the Hermes gateway pipe. Pass `nativeAssetRoot`
+  from `copySdkNativeAssets`. The SDK then loads the addon itself, and koffi's
+  loader never runs. `examples/packaging/native-assets-smoke.mjs`
   proves this route in a Windows SEA built with this recipe.
 - Pi's extension loader (`import.meta.resolve`). It is not reached, because
   `runSdkReservedHelperCommand()` sets `PI_BUNDLED_NODE`.

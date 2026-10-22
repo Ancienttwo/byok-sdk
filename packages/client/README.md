@@ -145,12 +145,14 @@ with `!require('node:sea').isSea()`, or remove it from the SEA entry.
 SDK resolves installed packages from it, so a CJS bundle beside `node_modules`
 finds them as ESM does (#724). Three bundled third-party modules keep an empty
 `import.meta`:
-- koffi's loader reads `import.meta.dirname`, and the SDK loads koffi for
-  Windows process ownership. On Windows, a CJS or SEA product must pass
-  `nativeAssetRoot` (see `copySdkNativeAssets` below). The SDK then loads the
-  addon itself and never runs koffi's loader. Without it, koffi's loader runs
-  with an empty `import.meta.dirname`. That is not supported, and a koffi load
-  failure makes Windows process ownership fail closed.
+- koffi's loader reads `import.meta.dirname`. On Windows the SDK loads koffi
+  for process ownership and for the Hermes gateway pipe. A CJS or SEA product
+  must pass `nativeAssetRoot` (see `copySdkNativeAssets` below) to
+  `createDaemon` or to each adapter it constructs. The SDK then loads the addon
+  itself and never runs koffi's loader. Without it, koffi's loader runs with an
+  empty `import.meta.dirname`. That is not supported. A koffi load failure
+  makes process ownership fail closed and the Hermes gateway identification
+  reject.
 - Pi's extension loader reads `import.meta.resolve` only without
   `PI_BUNDLED_NODE`, which `runSdkReservedHelperCommand()` sets.
 - unpdf, used by the Pi web extension, reads `import.meta.resolve` inside

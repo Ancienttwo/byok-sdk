@@ -485,7 +485,7 @@ describe('Pi host — single-pass CommonJS product bundle (#701)', () => {
       expect(result.warnings.filter(warning => warning.id === 'empty-import-meta').map(warning => warning.location?.file)).toEqual([]);
       const emptyImportMeta = emptyImportMetaModules(await fs.readFile(path.join(release, 'entry.cjs'), 'utf8'));
       expect(emptyImportMeta.filter(module => !CJS_EMPTY_IMPORT_META_ALLOWLIST.some(allowed => allowed.test(module)))).toEqual([]);
-      expect(emptyImportMeta).toHaveLength(CJS_EMPTY_IMPORT_META_ALLOWLIST.length);
+      for (const allowed of CJS_EMPTY_IMPORT_META_ALLOWLIST) expect(emptyImportMeta.filter(module => allowed.test(module)), String(allowed)).toHaveLength(1);
       expect(redirects).toBe(redirect === undefined ? 0 : 1);
       const hosts = Object.keys(result.metafile.inputs).map(input => path.basename(input)).filter(name => name.startsWith('pi-runtime-host'));
       expect(hosts).toEqual([redirect === undefined ? 'pi-runtime-host.js' : 'pi-runtime-host-sealed.js']);

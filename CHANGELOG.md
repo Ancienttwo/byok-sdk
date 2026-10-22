@@ -22,7 +22,8 @@
   property a CJS Host must define. The client README and the SEA recipe README
   list the three third-party modules that keep an empty `import.meta`. On
   Windows, a CJS or SEA Host must pass `nativeAssetRoot` so that koffi's loader
-  does not run. `WindowsCredentialManagerSecretStore` does not use koffi. The
+  does not run. koffi serves Windows process ownership and the Hermes gateway
+  pipe; `WindowsCredentialManagerSecretStore` does not use it. The
   CJS fixture in `pi-single-file-bundle.test.ts` now fails on any other empty
   `import.meta` in the bundle.
 - **Fixed (client, keys)** — close the Hermes on Windows follow-ups from the

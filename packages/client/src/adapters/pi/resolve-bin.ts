@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readClientPiRuntimePin } from './client-manifest';
@@ -80,14 +80,14 @@ export function resolvePiRuntimeIdentity(): PiRuntimeIdentity {
 /**
  * The installed directory of `name`, found the way Node's ESM resolver finds a
  * bare specifier: the first `node_modules/<name>` directory in this module's
- * ancestor chain, through symlinks. It reads no package `exports`, so it also
+ * ancestor chain, through symlinks. A non-directory there is skipped. It reads no package `exports`, so it also
  * finds an import-only package. It needs only `import.meta.url`, so a CommonJS
  * product bundle that defines it resolves the same way (#724).
  */
 function locateInstalledPackageDir(name: string): string | undefined {
   for (let dir = path.dirname(fileURLToPath(import.meta.url)); ; dir = path.dirname(dir)) {
     const candidate = path.join(dir, 'node_modules', name);
-    if (existsSync(candidate)) return realpathSync(candidate);
+    if (statSync(candidate, { throwIfNoEntry: false })?.isDirectory()) return realpathSync(candidate);
     if (path.dirname(dir) === dir) return undefined;
   }
 }
