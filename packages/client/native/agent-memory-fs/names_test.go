@@ -99,7 +99,7 @@ func requireEntry(t *testing.T, directory, name string) {
 }
 
 func TestPortableSegmentRefusesWindowsAliasNames(t *testing.T) {
-	for _, name := range []string{"CON", "con", "CON.md", "nul.x.md", "Aux", "prn.txt", "COM0", "com9.md", "LPT5", "lpt0.md", "COM\u00b9", "CONIN$", "conout$.md", "con .md", "x.", "notes.", "a.md.", "a ", "a.md "} {
+	for _, name := range []string{"CON", "con", "CON.md", "nul.x.md", "Aux", "prn.txt", "COM0", "com9.md", "LPT5", "lpt0.md", "COM\u00b9", "CONIN$", "conout$.md", "con .md", "MEMORY.md:x", "a.md:s", "a:b", "x.", "notes.", "a.md.", "a ", "a.md "} {
 		if portableSegment(name) {
 			t.Errorf("portableSegment(%q) = true, want false", name)
 		}
@@ -113,7 +113,7 @@ func TestPortableSegmentRefusesWindowsAliasNames(t *testing.T) {
 
 func TestRequestsRefuseWindowsAliasNames(t *testing.T) {
 	active := openNamesSession(t, newMemoryHome(t))
-	for _, path := range []string{"notes/CON.md", "notes/con", "notes/nul.x.md", "notes/x./a.md", "notes/a.md.", "notes/a "} {
+	for _, path := range []string{"MEMORY.md:x", "notes/a.md:s", "notes/CON.md", "notes/con", "notes/nul.x.md", "notes/x./a.md", "notes/a.md.", "notes/a "} {
 		for _, operation := range []string{"read", "replace", "delete", "append", "walk"} {
 			if failure := pinnedOperation(active, operation, path, emptyFileState().Revision); failure == nil || failure.code != "invalid_request" {
 				t.Errorf("%s %q = %v, want invalid_request", operation, path, failure)
@@ -236,5 +236,35 @@ func TestHardLinkedFilesAreRefusedAndLeftOutOfWalk(t *testing.T) {
 	}
 	if !slices.Equal(names, []string{"first.md", "linked.md", "plain.md", "second.md"}) {
 		t.Fatalf("notes entries = %v", names)
+	}
+}
+
+// Windows reads "name:stream" as an alternate data stream of name. Elsewhere
+// a colon is an ordinary character, and walk leaves such a file out.
+func TestColonNamesAreRefusedAndLeftOutOfWalk(t *testing.T) {
+	home := newMemoryHome(t)
+	notes := filepath.Join(home, "notes")
+	writeLiteral(t, notes, "plain.md", "plain")
+	if runtime.GOOS == "windows" {
+		if err := os.WriteFile(filepath.Join(notes, "plain.md:hidden"), []byte("stream"), 0o600); err != nil {
+			t.Fatalf("stream setup failed: %v", err)
+		}
+		if data, err := os.ReadFile(filepath.Join(notes, "plain.md:hidden")); err != nil || string(data) != "stream" {
+			t.Fatalf("stream fixture = %q, %v", data, err)
+		}
+	} else {
+		writeLiteral(t, notes, "plain.md:hidden", "colon name")
+	}
+	active := openNamesSession(t, home)
+	for _, operation := range []string{"read", "replace", "delete", "append"} {
+		if failure := pinnedOperation(active, operation, "notes/plain.md:hidden", emptyFileState().Revision); failure == nil || failure.code != "invalid_request" {
+			t.Errorf("%s notes/plain.md:hidden = %v, want invalid_request", operation, failure)
+		}
+	}
+	if paths, failure := walkNames(t, active, 8); failure != nil || !reflect.DeepEqual(paths, []string{"notes/plain.md"}) {
+		t.Fatalf("walk = %v, %v; want only notes/plain.md", paths, failure)
+	}
+	if data, err := os.ReadFile(filepath.Join(notes, "plain.md")); err != nil || string(data) != "plain" {
+		t.Fatalf("plain.md changed: %q, %v", data, err)
 	}
 }

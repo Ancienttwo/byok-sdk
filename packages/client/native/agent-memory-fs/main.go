@@ -353,6 +353,8 @@ func openSession(req openRequest) (*session, *protocolError) {
 	// Windows has no home-chain barrier while its intent backend keeps B false.
 	// It promises single-file atomicity under a process crash and the strict
 	// flushes of each write, not durability after an OS crash or power loss.
+	// The Windows chain rule waits for the B decision (W2 in
+	// docs/plans/2026-10-22-605-windows-memory.md).
 	if runtime.GOOS != "windows" {
 		if err := syncHomeChain(req.Root, root); err != nil {
 			return nil, failure("io_failure", "home directory barrier failed")
@@ -898,12 +900,13 @@ func validRelativePath(value string) bool {
 	return true
 }
 
-// portableSegment refuses a name that Windows maps to another name: a device
-// name, with or without an extension, or a name that ends in a dot or a
-// space. The rule applies on every platform, so a home has the same names
+// portableSegment refuses a name that Windows maps to another name or object:
+// a name with a colon, which Windows reads as an alternate data stream, a
+// device name, with or without an extension, or a name that ends in a dot or
+// a space. The rule applies on every platform, so a home has the same names
 // everywhere.
 func portableSegment(value string) bool {
-	if strings.HasSuffix(value, ".") || strings.HasSuffix(value, " ") {
+	if strings.Contains(value, ":") || strings.HasSuffix(value, ".") || strings.HasSuffix(value, " ") {
 		return false
 	}
 	base, _, _ := strings.Cut(value, ".")
