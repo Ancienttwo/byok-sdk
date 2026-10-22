@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Changed (client)** — update the private OAR source to 0.70.0
+  (`44d7d61`). Keep the eight BYOK-maintained files. Update the source
+  manifest and bridge paths. The only selected upstream change is the optional
+  `LoginOptions.openBrowser` contract field; no vendored runtime calls login.
+  No public API or npm dependency changes.
+
 - **Security (client)** — update the `undici` pin from 8.11.2 to 8.12.3 (#700).
   8.11.2 is in the range of eight advisories from 2026-10-15. Four are high
   (GHSA-qrxm-fqhp-jwvm, GHSA-2m5v-pch6-74hx, GHSA-4w7w-5xrc-9h26,
