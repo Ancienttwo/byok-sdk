@@ -287,7 +287,7 @@ export function selectImpact(paths, context = {}) {
       for (const dir of ['examples/basic', 'examples/host-execution-core', 'examples/bot-collaboration']) dirs.add(dir);
       continue;
     }
-    if (path === 'examples/basic/clarification.test.ts' || path === 'examples/basic/goal-btw.test.ts') {
+    if (path === 'examples/basic/clarification.test.ts' || path === 'examples/basic/goal-btw.test.ts' || path === 'examples/basic/goal-btw-close.test.ts') {
       dirs.add('examples/basic'); continue;
     }
     if (path === 'api-surface/entries.json') {

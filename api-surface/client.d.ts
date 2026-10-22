@@ -1599,12 +1599,15 @@ export declare const AGENT_MEMORY_MCP_SERVER_INFO: Readonly<{
  * envelope, framing and protocol faults belong to `../mcp-server`.
  */
 export declare function handleAgentMemoryToolCall(call: McpServerToolCall, deps: AgentMemoryMcpDeps, mode: 'read' | 'read-write'): Promise<Record<string, unknown>>;
+/** Lists the complete tool set; the prepared lane compares it with its sealed descriptor. */
 export declare function serveAgentMemoryMcpOverStdio(input: {
     deps: AgentMemoryMcpDeps;
     mode: 'read' | 'read-write';
     stdin?: NodeJS.ReadableStream;
     stdout?: NodeJS.WritableStream;
 }): void;
+/** Lists only the tools `mode` grants: a `read` helper lists `memory_recall` and no write tool. */
+export declare function serveGrantedAgentMemoryMcpOverStdio(input: Parameters<typeof serveAgentMemoryMcpOverStdio>[0]): void;
 /** A task-free descriptor has the same tools/list identity, but never an execution handler. */
 export declare function serveAgentMemoryDescriptorOverStdio(input: {
     stdin?: NodeJS.ReadableStream;
@@ -4213,8 +4216,9 @@ export interface DaemonConfig {
         hostStorageRoot: string;
         projection?: AgentHomeProjection;
     };
-    /** Task memory MCP admission. Absent/auto preserves platform-based admission; off disables both ordinary and prepared memory tools.
-     * This does not disable Agent-home guidance or explicit hosted projection/intent transports, and is not a filesystem sandbox. */
+    /** Task memory MCP admission. Absent/auto preserves platform-based admission; off disables both ordinary and prepared memory tools,
+     * and drops the Agent memory guidance from Agent task instructions. `status().agentMemoryMcp` reports the effective admission.
+     * This does not disable explicit hosted projection/intent transports, and is not a filesystem sandbox. */
     agentMemoryMcp?: 'auto' | 'off';
     /** Optional, one-way hosted projection. Without all guards it has zero network activity. */
     agentMemory?: AgentMemoryHostedProjection;
@@ -4656,6 +4660,17 @@ export interface DaemonStatus {
     outbound: OutboundStatus;
     /** WP0: per-canonical-Agent-home execution serialization — see {@link AgentHomeExecutionStatus}. */
     agentHomeExecution: AgentHomeExecutionStatus;
+    /**
+     * Effective daemon-level SDK memory MCP admission for ordinary Agent tasks.
+     * `admitted`: Agent tasks get the SDK memory MCP; a writer gets
+     * `memory_recall` and `memory_save`, a `memory-reader` Attempt only
+     * `memory_recall`. The selected adapter must still support MCP toolsets for
+     * each task. `off`: `DaemonConfig.agentMemoryMcp` is `off`; no Agent task
+     * gets the memory MCP or the memory guidance. `unavailable`: `auto`, but
+     * this daemon has no Agent home or no secure memory filesystem (for example
+     * macOS without the SDK release helper, or Windows).
+     */
+    agentMemoryMcp: 'admitted' | 'off' | 'unavailable';
 }
 export interface Daemon {
     /** Present only with agentMemoryExport: true. Holds the home writer lease; AgentHomeBusyError is retryable. Raw contents remain Host-owned. */
@@ -6973,6 +6988,11 @@ export declare const AGENT_MEMORY_GUIDANCE: string;
 export declare const AGENT_MEMORY_READER_GUIDANCE: string;
 export declare function prependAgentMemoryGuidance(instruction: string): string;
 export declare function prependAgentMemoryReaderGuidance(instruction: string): string;
+/**
+ * A `memory-reader` Attempt on a daemon with `agentMemoryMcp: 'off'`: no memory
+ * lines, only the run-directory result guidance.
+ */
+export declare function prependAgentReaderResultGuidance(instruction: string): string;
 // ==== @byok-sdk/client dist/daemon/observer.d.ts ====
 import type { RetentionClassId, RetentionTrigger, SweepReport } from './retention/registry';
 import { type AgentEvent, type BlobRef, type Envelope, type TaskState } from '@byok-sdk/protocol';
@@ -8844,6 +8864,12 @@ export interface TaskRunnerDeps {
     mcpToolsetToolsProbe?: (serverName: string, server: Readonly<McpStdioServerConfig>, options: McpToolsProbeOptions) => Promise<McpServerObservation>;
     /** SDK-owned MCP helper injected only into strict Agent tasks. */
     agentMemoryMcpBin?: Readonly<ResolvedAgentMemoryMcpBin>;
+    /**
+     * `DaemonConfig.agentMemoryMcp`. `off` also drops the Agent memory guidance
+     * from the instruction, so the model gets no request to change `MEMORY.md`
+     * or `notes/`. Absent is `auto`.
+     */
+    agentMemoryMcp?: 'auto' | 'off';
     /** SDK-owned task-free Agent-memory descriptor helper a preparation observes. */
     agentMemoryDescribeBin?: Readonly<ResolvedAgentMemoryMcpBin>;
     /** Resolve the verified SDK helper only when memory needs filesystem authority. */
@@ -9274,7 +9300,11 @@ export declare class TaskRunner {
     private revokeAgentResultContext;
     private agentResultStore;
     private revokeAgentMessageContext;
-    /** Injected only after strict Agent admission; a host registry may never replace this reserved name. */
+    /**
+     * Injected only after strict Agent admission; a host registry may never replace this reserved name.
+     * `toolList` `granted` makes the helper list only the tools `mode` grants. The prepared lane needs
+     * `complete`: its launch compares the helper's listing with the complete sealed descriptor.
+     */
     private withAgentMemoryMcp;
     /** Reconstruct all sensitive context from the active sealed task, never from MCP/model arguments. */
     private activeMemoryContext;
