@@ -734,6 +734,124 @@ explicitly.
 | Other local user | — | Complete the control handshake without `control.token` (0600), and therefore reach this method at all |
 | Holder of a leaked assertion, **against a conforming exchange** (one that performs the downstream-MUST list above — compares `audience`/`issuer`/`productId` and burns `jti`) | Present it to the named audience until it expires (≤300s) or that exchange burns its `jti` | Use it against a different audience/issuer/product, extend it, or replay it once that exchange has burned the `jti` — *because the exchange enforces those comparisons.* `verifyDeviceAssertion` itself does NOT compare audience/issuer/product; it surfaces the claims for exactly that comparison. Against a NON-conforming exchange that skips the checks, none of these "Cannot"s hold — which is why the downstream-MUST list is mandatory, not advisory |
 
+## Hosted surface threat model
+
+This section states the current state of a hosted Host (Topology H).
+The Host runs `createByokCloud` from `@byok-sdk/cloud` with the `@byok-sdk/cloud-dataplane` stores on Postgres and R2.
+The [hosted Host contract](hosted-host-contract.md) gives its rules.
+Code citations use `path:line` at commit `c824092b`.
+
+The SDK does not encrypt task content on the hosted wire.
+The Host decodes each envelope that a device sends (`packages/protocol/src/http-api.ts:271-272`).
+It decodes each mailbox row again before delivery (`packages/cloud/src/handlers/events.ts:157`).
+The stores keep each payload as they get it.
+Issue [#654](https://github.com/Ancienttwo/byok-sdk/issues/654) asks for end-to-end encryption by data category.
+The design draft is [`docs/plans/2026-10-22-654-hosted-wire-e2ee.md`](plans/2026-10-22-654-hosted-wire-e2ee.md).
+
+`@byok-sdk/cloud-do` is not on this surface.
+It is a session host in a Durable Object (`packages/cloud-do/README.md:3-5`).
+It runs the model with platform keys (`packages/cloud-do/README.md:104-105`), so it must read plaintext.
+Tenant erasure does not reach its storage.
+
+### Readers by data category
+
+The categories are the ones that the #654 design uses (§6.1).
+
+| Category | Host operator | Postgres | R2 | Logs | Backups | Deleted by |
+| --- | --- | --- | --- | --- | --- | --- |
+| C1 Task input: `instruction` with any ContextPack, `agent.input.preparation` context, `task.steer` text | All | `device_request_receipts.body` (`task-offer:`, `agent-input-preparation-request:`); `outbox.body` | An instruction blob; large preparation context | None from the SDK | A copy | Receipts: tenant erasure only. Outbox: maintenance, `discardDeadLetter` or tenant erasure. R2: maintenance or tenant erasure. |
+| C2 Agent message: `agent.message.publish` body, `agent.egress.reliable` payload, draft text | All | `agent_message_admission.payload_body` and `terminal_body`; `agent_egress_event.payload_json`; `agent_message_draft.text` | — | None from the SDK | A copy | Admission and egress rows: tenant erasure only. A draft: at the terminal or after its TTL. |
+| C3 Task output: `summary`, `finalMessage`, `document`, artifacts, progress events, approval summaries, failure and cancel reasons, truth `task.terminal` | All | `device_request_receipts.body` (`task:<id>:terminal`); `activity_tail.entries`; `approval_timeline_tail.entries`; `task.terminal_cause`; `attested_record.body_inline` | Artifact blobs | None from the SDK | A copy | Terminal receipt, `task` row and truth records: tenant erasure only. Activity and approval entries: after their TTL. R2: maintenance or tenant erasure. |
+| C4 Memory projection: the redacted snapshot, truth `memory` records | All | `agent_memory_projection_head.redacted_snapshot`; `attested_record.body_inline` | — | None from the SDK | A copy | Projection head: `eraseAgentMemoryProjection` or tenant erasure. Truth records: tenant erasure only. |
+| Routing metadata: device name, ids, AgentRef, times, sizes, content digests | All | `device.device_name`; `device_request_receipts.body` (`pairing-completion:v1:`); key, id and digest columns | Object keys | Error logs can name ids | A copy | Device row: `revokeDevice` or tenant erasure. Other metadata goes with its row. |
+
+The columns, one reader at a time:
+
+- **Host operator.** The operator runs the Host code and holds the Postgres and R2 credentials. So it reads every category in plaintext.
+- **Postgres** (with Hyperdrive and any replica) keeps the columns above, in plaintext.
+- **R2** keeps blob bytes. Each key holds the plaintext SHA-256 of the bytes (`packages/core/src/blob.ts:110`).
+- **Logs.** The SDK writes no payload to a log. The cloud sets no Hono `onError`. So the Hono default handler writes an uncaught route error with `console.error(err)`. An error that a product hook throws can carry content. The pool and the Postgres mailbox wake log only connection errors (`packages/cloud-dataplane/src/pool.ts:86`, `packages/cloud-dataplane/src/mailbox-wake.ts:46`).
+- **Backups** hold a copy of Postgres and R2 from backup time. A delete in the live store does not reach a backup, and tenant erasure does not either. The operator sets backup retention.
+- **Product backend.** `agentMessage.consume` gets the message body. The observer, `readTaskResult` and `readDeviceTerminal` give the terminal. What the product keeps or logs is outside the SDK.
+
+### Deletion paths
+
+Timed deletes run only when the Host calls `runMaintenance`.
+`DEFAULT_RETENTION_POLICY` sets the times (`packages/cloud/src/maintenance.ts:15-20`):
+
+- **Outbox.** An acked row goes 1 day after it was appended. A pending row older than 7 days becomes `expired` and keeps its body (`packages/cloud-dataplane/src/stores/core/mailbox.ts:322-332`). Only `discardDeadLetter` (`packages/cloud-dataplane/src/cleanup.ts:255`) or tenant erasure deletes it.
+- **Activity and approval timeline.** The default TTL is 10 minutes (`packages/cloud/src/coordination.ts:14`, `packages/cloud/src/approval-timeline.ts:7`).
+- **Drafts.** The terminal deletes the draft of its task (`packages/cloud/src/inbound.ts:882`). Otherwise the draft expires 10 minutes after its last write (`packages/cloud-dataplane/src/stores/agent-message-draft.ts:23`).
+- **R2.** Maintenance deletes an object that has no `object_reference` row and no change for 1 day (`objectOrphanGraceMs`, `packages/cloud-dataplane/src/stores/core/objects.ts:115-119`). `task.complete` writes no reference for its `artifactRefs`. So an artifact goes about 1 day after upload, unless the product adds a reference.
+- **Receipts.** Every receipt family is `identity` class (`packages/cloud/src/receipt-retention.ts:4-13`). So `collectExpired` removes no receipt (`packages/cloud-dataplane/src/stores/receipts.ts:47`).
+
+Deletes that a call starts:
+
+- `revokeDevice` deletes the device row and its presence, nonce, inbound dedup and assertion replay rows. It keeps the `task`, `agent_egress_event`, `outbox` and `device_stream` rows (`packages/cloud-dataplane/src/stores/devices.ts:71-99`, `:258-264`). The `pairing-completion:v1:` receipt keeps the device name (`packages/cloud-dataplane/src/stores/pairing-codes.ts:43-50`, `:232-236`).
+- `eraseAgentMemoryProjection(tenant, agentId)` revokes the consent grant. Then it deletes the head and its metering receipts, and keeps an epoch fence with no body (`packages/cloud/src/cloud.ts:1782`).
+- Tenant erasure (`createPostgresTenantErasure`) deletes the rows of every tenant table (`packages/cloud-dataplane/src/tenant-erasure.ts:25-59`) and the tenant's R2 objects (`packages/cloud-dataplane/src/tenant-erasure.ts:342-359`). It is the only delete path for task receipts, `task` rows, admission rows, egress rows and truth records. It runs only on Node (`packages/cloud-dataplane/src/tenant-erasure.ts:9` imports `node:crypto`).
+- No call deletes task content by task, device, Agent or time. The hosted Host contract lists this gap ([section 6](hosted-host-contract.md#6-data-retention)).
+
+### Measured inventory
+
+`packages/cloud-dataplane/src/__tests__/hosted-plaintext-inventory.test.ts` checks the table below on real Postgres and S3.
+One canary text goes through pairing (in the device name), task dispatch, progress, an Agent message, a memory projection and result return.
+The result return carries a summary, a final message, a result document and an artifact blob.
+The test reads the table list from `pg_class` with the tenant erasure query, so it also scans a new table.
+It reads each column of each row, each object in the bucket and the console output of the run.
+It looks for the canary as UTF-8, JSON-escaped, hex, and base64 and base64url at three byte offsets.
+The set of hits must equal the table below.
+A change that stores the canary in a new place fails the test until this table names that place.
+When #654 seals a category, its rows leave this table, and the scan stays the same.
+
+<!-- hosted-plaintext-inventory:start -->
+| Location | Category | Holds |
+| --- | --- | --- |
+| `activity_tail.entries` | C3 | `task.progress` events: progress text, tool input and tool output |
+| `agent_memory_projection_head.redacted_snapshot` | C4 | The latest redacted memory snapshot, as bytes |
+| `agent_message_admission.payload_body` | C2 | The publish payload with the message body |
+| `agent_message_admission.terminal_body` | C2 | The publish payload again, with its disposition |
+| `device.device_name` | Routing metadata | The device name from pairing |
+| `device_request_receipts.body` | C1, C3, routing metadata | `task-offer:` (the full offer payload), `task:<id>:terminal` (the first terminal envelope), `pairing-completion:v1:` (the device name) |
+| `outbox.body` | C1 | Each envelope for the device, the offer included |
+| `r2:tenants/<tenant>/objects/sha256/<hex>` | C3 | The artifact bytes |
+<!-- hosted-plaintext-inventory:end -->
+
+### Plaintext that the canary run does not reach
+
+These locations also hold content.
+The canary run does not write them, so the test does not check them.
+
+| Location | Content | Source |
+| --- | --- | --- |
+| `agent_egress_event.payload_json` | C2 reliable egress payload | `deploy/sql/0013_agent_egress_contract.sql:18` |
+| `agent_message_draft.text` | C2 draft text, until the terminal | `deploy/sql/0026_agent_message_draft.sql:11` |
+| `approval_timeline_tail.entries` | C3 approval summaries | `deploy/sql/0007_approval_timeline.sql:7` |
+| `attested_record.body_inline` | Truth records: `task.terminal`, `profile` and `memory` | `deploy/sql/0002_core_domain.sql:206` |
+| `task.terminal_cause` | The `reason` of `task.fail`, `task.decline` or `task.cancelled` | `packages/cloud/src/inbound.ts:945-948` |
+| `task.cancel_reason` | The cancel reason from the Host | `deploy/sql/0009_task_cancellation.sql:5` |
+| `device_request_receipts.body` | `agent-input-preparation-request:` (preparation context) and `agent-home-projection-request:` (home projection values) | `packages/cloud/src/receipt-retention.ts:7-8` |
+| `skill_pack_file.content` | Skill pack text from the Host | `deploy/sql/0005_skill_packs.sql:76` |
+| `board_item.title` | Board titles from the Host | `deploy/sql/0002_core_domain.sql:163` |
+
+### Content digests
+
+These columns hold a plaintext SHA-256 of content.
+They never contain the canary, so the scan does not report them.
+A reader who guesses the content can confirm the guess with the digest.
+The #654 design gives the digest rules for sealed categories (§9.3).
+
+| Location | Digest of | Source |
+| --- | --- | --- |
+| `outbox.body_hash` | The envelope | `deploy/sql/0002_core_domain.sql:101` |
+| `agent_egress_event.content_hash` | The egress payload | `deploy/sql/0013_agent_egress_contract.sql:19` |
+| `agent_memory_projection_head.redacted_hash`, `agent_memory_projection_metering_receipt.redacted_hash` | The redacted snapshot | `deploy/sql/0014_agent_memory_projection.sql:22`, `:78` |
+| `attested_record.content_hash` | The truth record body | `deploy/sql/0002_core_domain.sql:203` |
+| `object_manifest.hash`, `object_reference.hash`, `storage_reservation.content_hash` and the R2 key | The blob bytes | `deploy/sql/0002_core_domain.sql:286`, `:311`, `:400` |
+| `contentHash` in `agent_message_admission.payload_body` | The message body | `packages/client/src/daemon/agent-message-outbox.ts:57-59` |
+| `skill_pack.content_hash`, `skill_pack_file.content_hash` | Skill pack text | `deploy/sql/0005_skill_packs.sql:44`, `:74` |
+| Input preparation receipt digests | The preparation request and its context | #654 design §9.3 |
+
 ## Residual risks (explicit)
 
 - **A same-user process can resolve approvals or read device credentials.**
