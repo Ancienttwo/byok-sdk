@@ -368,6 +368,7 @@ function runProbeOrTurnFlow() {
     '--permission-prompt-tool': true,
     '--mcp-config': true,
     '--strict-mcp-config': false,
+    '--setting-sources': true,
   };
 
   for (let i = 0; i < argv.length; i++) {
