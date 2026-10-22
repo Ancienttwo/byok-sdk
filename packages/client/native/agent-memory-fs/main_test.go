@@ -285,8 +285,10 @@ func TestMaximumReadResponseIsBounded(t *testing.T) {
 	helper.close()
 }
 
+// A failed symlink fixture fails the test: a skip is no evidence. The subtest
+// names end in -symlink, so a run without symlink rights can leave them out.
 func TestRootParentAndLeafSymlinkSwapsCannotTouchOutsideSentinel(t *testing.T) {
-	t.Run("root", func(t *testing.T) {
+	t.Run("root-symlink", func(t *testing.T) {
 		parent := t.TempDir()
 		home := filepath.Join(parent, "home")
 		outside := filepath.Join(parent, "outside")
@@ -305,7 +307,7 @@ func TestRootParentAndLeafSymlinkSwapsCannotTouchOutsideSentinel(t *testing.T) {
 			t.Fatal(err)
 		}
 		if err := os.Symlink(outside, home); err != nil {
-			t.Skipf("symlink unavailable: %v", err)
+			t.Fatalf("symlink setup failed: %v", err)
 		}
 		helper := startHelper(t)
 		response := helper.request(map[string]any{
@@ -322,7 +324,7 @@ func TestRootParentAndLeafSymlinkSwapsCannotTouchOutsideSentinel(t *testing.T) {
 		helper.stop()
 	})
 
-	t.Run("parent", func(t *testing.T) {
+	t.Run("parent-symlink", func(t *testing.T) {
 		home := newMemoryHome(t)
 		outside := filepath.Join(t.TempDir(), "outside")
 		if err := os.MkdirAll(outside, 0o700); err != nil {
@@ -337,7 +339,7 @@ func TestRootParentAndLeafSymlinkSwapsCannotTouchOutsideSentinel(t *testing.T) {
 			t.Fatal(err)
 		}
 		if err := os.Symlink(outside, filepath.Join(home, "notes")); err != nil {
-			t.Skipf("symlink unavailable: %v", err)
+			t.Fatalf("symlink setup failed: %v", err)
 		}
 		response := helper.request(map[string]any{
 			"id":               helper.id("parent-swap"),
@@ -353,7 +355,7 @@ func TestRootParentAndLeafSymlinkSwapsCannotTouchOutsideSentinel(t *testing.T) {
 		helper.close()
 	})
 
-	t.Run("leaf", func(t *testing.T) {
+	t.Run("leaf-symlink", func(t *testing.T) {
 		home := newMemoryHome(t)
 		entry := filepath.Join(home, "notes", "entry.md")
 		if err := os.WriteFile(entry, []byte("inside"), 0o600); err != nil {
@@ -376,7 +378,7 @@ func TestRootParentAndLeafSymlinkSwapsCannotTouchOutsideSentinel(t *testing.T) {
 			t.Fatal(err)
 		}
 		if err := os.Symlink(sentinel, entry); err != nil {
-			t.Skipf("symlink unavailable: %v", err)
+			t.Fatalf("symlink setup failed: %v", err)
 		}
 		response := helper.request(map[string]any{
 			"id":               helper.id("leaf-swap"),

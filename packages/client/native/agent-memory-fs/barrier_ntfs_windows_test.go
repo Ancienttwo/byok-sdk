@@ -8,17 +8,28 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
+	"unsafe"
 )
 
 // The test claims NTFS, so it checks the file system of the actual temp volume.
+// It queries the volume itself rather than through volumeFileSystemName, the
+// helper code that the open check uses.
 func requireNTFS(t *testing.T, root *os.Root) {
 	t.Helper()
-	fileSystem, err := volumeFileSystemName(root)
+	directory, err := root.Open(".")
 	if err != nil {
-		t.Fatalf("GetVolumeInformationByHandleW failed: %v", err)
+		t.Fatal(err)
 	}
-	if fileSystem != "NTFS" {
+	defer directory.Close()
+	var name [syscall.MAX_PATH + 1]uint16
+	query := syscall.NewLazyDLL("kernel32.dll").NewProc("GetVolumeInformationByHandleW")
+	ok, _, callErr := query.Call(directory.Fd(), 0, 0, 0, 0, 0, uintptr(unsafe.Pointer(&name[0])), uintptr(len(name)))
+	if ok == 0 {
+		t.Fatalf("GetVolumeInformationByHandleW failed: %v", callErr)
+	}
+	if fileSystem := syscall.UTF16ToString(name[:]); fileSystem != "NTFS" {
 		t.Fatalf("temp volume file system is %q, not NTFS", fileSystem)
 	}
 }

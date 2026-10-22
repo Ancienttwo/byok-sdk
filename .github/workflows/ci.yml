@@ -313,9 +313,10 @@ jobs:
           go test -c -o "$env:RUNNER_TEMP/agent-memory-fs-tests.exe" .
           if ($LASTEXITCODE -ne 0) { throw 'test binary build failed' }
           # The runner token is an administrator. A new local account in Users
-          # runs the same test binary. It cannot create symlinks, so only the
-          # administrator step runs the symlink subtests; junctions need no
-          # privilege and stay in this run.
+          # runs the same test binary. A standard user can create symlinks only
+          # when Developer Mode is on, so the symlink subtests run only in the
+          # administrator step. Their names end in -symlink, and -test.skip
+          # leaves them out here. Junctions need no privilege and stay in this run.
           $user = 'byokntfs'
           # net user prompts for confirmation above 14 characters.
           $password = 'Aa1!' + [guid]::NewGuid().ToString('N').Substring(0, 10)
