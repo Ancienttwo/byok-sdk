@@ -13,3 +13,11 @@ test('reviewed OAR trim paths retain client and native qualification, unknown ve
   }
   assert.throws(() => selectImpact(['packages/client/vendor/oar/44d7d61/shared/unreviewed.ts']));
 });
+
+test('an OAR snapshot path is reviewed only when its source manifest lists it', () => {
+  for (const file of ['contracts/login.ts', 'observe/graph.ts', 'LICENSE', 'shared/acp/profile.ts']) {
+    assert.ok(selectImpact([`packages/client/vendor/oar/44d7d61/${file}`]).dirs.includes('packages/client'));
+  }
+  assert.throws(() => selectImpact(['packages/client/vendor/oar/44d7d61/contracts/unreviewed.ts']));
+  assert.throws(() => selectImpact(['packages/client/vendor/oar/aaaaaaa/contracts/login.ts']));
+});

@@ -1,4 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { verifyReviewedContent, changedApiOwners } from './reviewed-content.mjs';
 
@@ -257,6 +259,25 @@ export const reviewedScripts = Object.freeze({
   },
   'scripts/release/registry-readback.mjs': { tests: ['scripts/release/beta-release.test.mjs'] },
 });
+// An OAR re-vendor adds one snapshot directory and deletes the previous one.
+// A snapshot path is reviewed only when that snapshot's source-manifest.json
+// lists it: read from the checkout, or from the exact comparison base for a
+// deleted snapshot. Any other path under vendor/oar still refuses.
+function oarSnapshotListed(path, { base, cwd = process.cwd() } = {}) {
+  const match = /^packages\/client\/vendor\/oar\/([a-f0-9]{7,40})\/(.+)$/.exec(path);
+  if (!match) return false;
+  const manifestPath = `packages/client/vendor/oar/${match[1]}/source-manifest.json`;
+  let text;
+  if (existsSync(resolve(cwd, manifestPath))) text = readFileSync(resolve(cwd, manifestPath), 'utf8');
+  else if (/^[a-f0-9]{40}$/.test(base ?? '') && !/^0+$/.test(base)) {
+    try {
+      text = execFileSync('git', ['show', `${base}:${manifestPath}`], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch { return false; }
+  } else return false;
+  const manifest = JSON.parse(text);
+  return manifest.format === 'byok.vendor-source' && manifest.package === '@botiverse/oar'
+    && Array.isArray(manifest.files) && manifest.files.some(row => row.path === match[2]);
+}
 const rootDocs = new Set(['README.md', 'CHANGELOG.md', 'AGENTS.md', 'CLAUDE.md', 'LICENSE', 'SECURITY.md', 'CONTRIBUTING.md']);
 const rootCi = new Set(['.github/workflows/ci.yml', '.github/workflows/release.yml']);
 const sorted = values => [...values].sort();
@@ -360,6 +381,18 @@ export function selectImpact(paths, context = {}) {
     if (/^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:PROVENANCE\.md|source-manifest\.json|runtimes\/grok\/session\.ts)$/.test(path)) {
       dirs.add('packages/client'); continue;
     }
+    if (oarSnapshotListed(path, context)) { dirs.add('packages/client'); continue; }
+    // The client build copies vendor notices and OAR provenance into dist.
+    if (path === 'packages/client/scripts/build-todo-assets.mjs' || path === 'packages/client/vendor/THIRD-PARTY.md') {
+      dirs.add('packages/client'); families.add('npm-release-pack'); continue;
+    }
+    // The OAR bridge contract: run-targeted runs check-oar-bridge.test.mjs
+    // (it typechecks oar-bridge-types.ts) against the installed client.
+    if (/^scripts\/api-surface\/(?:check-oar-bridge\.test\.mjs|oar-bridge-types\.ts|tsconfig\.oar-bridge\.json)$/.test(path)) {
+      dirs.add('packages/client'); continue;
+    }
+    // Manual live Codex smoke (smoke:codex-app-server); it imports the vendored session.
+    if (path === 'packages/client/scripts/codex-app-server-real.mjs') { dirs.add('packages/client'); continue; }
     if (path === 'examples/host-execution-core/VALIDATION.md'
       || path === 'examples/bot-collaboration/VALIDATION.md'
       || path === 'examples/host-execution-core/PLAN-612.md') continue;

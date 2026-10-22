@@ -14,7 +14,8 @@ if (JSON.stringify(verified.dirs) !== JSON.stringify(plan.dirs) || JSON.stringif
 const extraTests = [];
 if (plan.files.includes('scripts/release/agent-memory-helper-source.test.mjs')) extraTests.push('scripts/release/agent-memory-helper-source.test.mjs');
 if (plan.files.some(path => /^scripts\/release\/registry-/.test(path))) extraTests.push('scripts/release/registry-contract.test.mjs', 'scripts/release/registry-npm.test.mjs');
-if (plan.files.some(path => path.startsWith('packages/client/vendor/oar/'))) extraTests.push('scripts/api-surface/check-oar-bridge.test.mjs');
+if (plan.files.some(path => path.startsWith('packages/client/vendor/oar/')
+  || /^scripts\/api-surface\/(?:check-oar-bridge\.test\.mjs|oar-bridge-types\.ts|tsconfig\.oar-bridge\.json)$/.test(path))) extraTests.push('scripts/api-surface/check-oar-bridge.test.mjs');
 for (const path of plan.files) if (Object.hasOwn(reviewedScripts, path)) extraTests.push(...reviewedScripts[path].tests);
 if (extraTests.length) {
   const result = spawnSync(process.execPath, ['--test', '--test-concurrency=1', ...new Set(extraTests)], { stdio: 'inherit', env: process.env });
