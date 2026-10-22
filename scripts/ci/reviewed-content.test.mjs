@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { selectImpact, knownFamilies, reviewedReleaseScripts } from './select-impact.mjs';
+import { selectImpact, knownFamilies, reviewedScripts } from './select-impact.mjs';
 import { planCi } from './plan-ci.mjs';
 import { requireCiPlan } from './require-ci-plan.mjs';
 import { publicManifests } from './reviewed-content.mjs';
@@ -261,9 +261,9 @@ test('the package graph check maps to the npm release pack job that runs it; sib
   assert.ok(start >= 0 && next > 0);
   assert.match(workflow.slice(start, start + 1 + next), /node scripts\/release\/pack-and-smoke\.mjs/);
   assert.match(readFileSync(new URL('scripts/release/pack-and-smoke.mjs', root), 'utf8'), /\['scripts\/release\/check-package-graph\.mjs'\]/);
-  for (const [script, families] of Object.entries(reviewedReleaseScripts)) {
+  for (const [script, { tests, families = [] }] of Object.entries(reviewedScripts)) {
     assert.ok(existsSync(new URL(script, root)), script);
-    assert.ok(families.length > 0 && families.every(id => knownFamilies.includes(id) && id !== 'build-test'), script);
+    assert.ok((families.length > 0 || tests.length > 0) && families.every(id => knownFamilies.includes(id) && id !== 'build-test'), script);
   }
   for (const sibling of ['scripts/release/check-package-graph.test.mjs', 'scripts/release/nested/check-package-graph.mjs',
     'scripts/release/check-package-graph.mjs.orig', 'scripts/release/registry-contract.mjs']) {

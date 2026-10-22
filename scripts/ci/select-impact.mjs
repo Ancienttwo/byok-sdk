@@ -228,14 +228,21 @@ export const familyOwners = Object.freeze({
     /^packages\/keys\/src\//,
   ],
 });
-// #649: release script paths that the owner reviewed for 0.28.2. `tests` run
-// the path (scripts/ci/run-targeted.mjs runs them); `install` marks tests that
-// need installed packages, so the targeted job installs first; `families` are
-// the jobs that run the path itself.
+// #649 and #702: release script paths that the owner reviewed for 0.28.2.
+// `tests` run the path (scripts/ci/run-targeted.mjs runs them); `install` marks
+// tests that need installed packages, so the targeted job installs first;
+// `families` are the family jobs that the path selects.
 export const reviewedScripts = Object.freeze({
   'scripts/api-surface/check-version-authority.mjs': { tests: ['scripts/api-surface/check-version-authority.test.mjs'] },
   'scripts/api-surface/check-version-authority.test.mjs': { tests: ['scripts/api-surface/check-version-authority.test.mjs'] },
   'scripts/release/beta-release.test.mjs': { tests: ['scripts/release/beta-release.test.mjs'] },
+  // pack-and-smoke.mjs runs this manifest-only check in each of its 4 family
+  // jobs; #702 selects npm-release-pack alone. With the install, the targeted
+  // job also runs it directly (check:release-graph).
+  'scripts/release/check-package-graph.mjs': {
+    tests: ['scripts/release/pack-and-smoke.test.mjs', 'scripts/release/beta-release.test.mjs'],
+    install: true, families: ['npm-release-pack'],
+  },
   'scripts/release/pack-and-smoke.mjs': {
     tests: ['scripts/release/pack-and-smoke.test.mjs', 'scripts/release/agent-memory-helper-source.test.mjs'],
     install: true, families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
@@ -252,11 +259,6 @@ export const reviewedScripts = Object.freeze({
 });
 const rootDocs = new Set(['README.md', 'CHANGELOG.md', 'AGENTS.md', 'CLAUDE.md', 'LICENSE', 'SECURITY.md', 'CONTRIBUTING.md']);
 const rootCi = new Set(['.github/workflows/ci.yml', '.github/workflows/release.yml']);
-// Reviewed release scripts and the families whose jobs run them. The npm
-// release pack job runs pack-and-smoke.mjs, which runs the package graph check.
-export const reviewedReleaseScripts = Object.freeze({
-  'scripts/release/check-package-graph.mjs': Object.freeze(['npm-release-pack']),
-});
 const sorted = values => [...values].sort();
 // An unmapped path is a selector gap. Fix it with a reviewed mapping; a
 // feature PR never falls back to the complete release matrix.
@@ -349,10 +351,6 @@ export function selectImpact(paths, context = {}) {
     if (Object.hasOwn(reviewedScripts, path)) {
       scripts = true;
       for (const id of reviewedScripts[path].families ?? []) families.add(id);
-      continue;
-    }
-    if (Object.hasOwn(reviewedReleaseScripts, path)) {
-      for (const id of reviewedReleaseScripts[path]) families.add(id);
       continue;
     }
     // #652 trims these reviewed files in the pinned OAR snapshot.

@@ -157,7 +157,8 @@ test('a routine plan never contains the complete test suite', () => {
 // #649: the targeted job installs for a reviewed script whose tests need
 // installed packages; the other reviewed scripts run their tests without one.
 test('reviewed release scripts install only when their tests need packages', () => {
-  const install = ['scripts/release/pack-and-smoke.mjs', 'scripts/release/pack-and-smoke.test.mjs', 'scripts/release/publish.mjs'];
+  const install = ['scripts/release/check-package-graph.mjs', 'scripts/release/pack-and-smoke.mjs', 'scripts/release/pack-and-smoke.test.mjs',
+    'scripts/release/publish.mjs'];
   for (const path of Object.keys(reviewedScripts)) {
     assert.equal(needsBuild(planCi({ event: 'push', sha, paths: [path] })), install.includes(path), path);
   }
