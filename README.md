@@ -7,18 +7,19 @@ composition over Postgres and R2.
 
 ## Release status
 
-The source candidate is **0.28.2** for all nine packages. From 0.28.2, keys
-uses the release train version instead of its own version line. It is not
+The source candidate is **0.28.3** for all nine packages. It is not
 published. See the
-[candidate notes](docs/releases/v0.28.2.md) and
+[candidate notes](docs/releases/v0.28.3.md) and
 [release process](docs/releases/README.md).
 
-The current stable release is **0.28.1** for the eight aligned packages and
-**0.13.1** for keys. See the [release notes](docs/releases/v0.28.1.md).
-Public npm metadata read on 2026-10-22 at 03:41 UTC reports `latest` **0.28.1**
-for the eight aligned packages and independent keys **0.13.1**. The registry
-lists 0.28.0 / keys 0.13.0 as the earlier published versions (2026-10-20, UTC).
-This read confirms registry availability, not isolated-install qualification.
+The current stable release is **0.28.2** for all nine packages. From 0.28.2,
+keys uses the release train version instead of its own version line. See the
+[release notes](docs/releases/v0.28.2.md).
+Public npm metadata read on 2026-10-22 at 15:58 UTC reports `latest` **0.28.2**
+for all nine packages. The registry lists 0.28.1 / keys 0.13.1 (2026-10-21,
+UTC) and 0.28.0 / keys 0.13.0 (2026-10-20, UTC) as the earlier published
+versions. This read confirms registry availability, not isolated-install
+qualification.
 
 Historically, all nine **0.27.0** / keys **0.12.0** packages were published from
 `v0.27.0` (`cd977261`), and complete registry readback and isolated installation
@@ -33,7 +34,7 @@ changes server, cloud, client and keys APIs.
 and the Host upgrade and migration steps.
 
 Versioned install examples below name the unpublished source candidate.
-Use the stable 0.28.1 / keys 0.13.1 until this candidate is published.
+Use the stable 0.28.2 until this candidate is published.
 The historical `rc` publication is **0.27.0-rc.2** / keys **0.12.0-rc.2**; see its
 [publication record](docs/releases/v0.27.0-rc.2-publication.md).
 
@@ -149,7 +150,7 @@ Hono/HTTP façade over the shared `cloud` kernel, `client` is the local
 daemon, and `keys` keeps provider credentials on the device.
 
 ```sh
-npm install @byok-sdk/client@0.28.2 @byok-sdk/server@0.28.2 @byok-sdk/keys@0.28.2
+npm install @byok-sdk/client@0.28.3 @byok-sdk/server@0.28.3 @byok-sdk/keys@0.28.3
 ```
 
 Also installed: `@byok-sdk/cloud`, `@byok-sdk/core`, `@byok-sdk/protocol`.
@@ -167,7 +168,7 @@ Durable Objects, and `ui-runtime` for the Live Activity Timeline. On a
 Node/VPS host without Durable Objects, leave out `@byok-sdk/cloud-do`.
 
 ```sh
-npm install @byok-sdk/cloud@0.28.2 @byok-sdk/cloud-dataplane@0.28.2 @byok-sdk/cloud-do@0.28.2 @byok-sdk/ui-runtime@0.28.2
+npm install @byok-sdk/cloud@0.28.3 @byok-sdk/cloud-dataplane@0.28.3 @byok-sdk/cloud-do@0.28.3 @byok-sdk/ui-runtime@0.28.3
 ```
 
 Also installed: `@byok-sdk/core`, `@byok-sdk/protocol`.
@@ -180,7 +181,7 @@ Objects (no `nodejs_compat`): `cloud-do` for the session runtime and
 [the cloud-do README](packages/cloud-do/README.md) for the subclass and binding.
 
 ```sh
-npm install @byok-sdk/cloud-do@0.28.2 @byok-sdk/protocol@0.28.2
+npm install @byok-sdk/cloud-do@0.28.3 @byok-sdk/protocol@0.28.3
 npm install --save-dev @cloudflare/workers-types
 ```
 
@@ -350,7 +351,7 @@ It is intentionally outside the dispatch packages and their entire dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys@0.28.2
+npm install @byok-sdk/keys@0.28.3
 ```
 
 ## Host connector composition
@@ -366,7 +367,7 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK and the independently installable `@byok-sdk/keys@0.28.2`
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.28.3`
 require Node.js 24.22.1 or newer. MIT licensed.
 
 ## Entry dependencies

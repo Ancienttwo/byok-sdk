@@ -77,12 +77,13 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 
 ## Version selection
 
-The next source candidate is 0.28.2 for all nine packages, keys included. It is
-not published.
-See the [candidate notes](../../docs/releases/v0.28.2.md).
-The current release is 0.28.1 / keys 0.13.1. The registry lists it as `latest`.
-See the [release notes](../../docs/releases/v0.28.1.md).
-The public registry read on 2026-10-22 at 03:41 UTC reports `latest` 0.28.1 / keys 0.13.1.
+The next source candidate is 0.28.3 for all nine packages. It is not
+published.
+See the [candidate notes](../../docs/releases/v0.28.3.md).
+The current release is 0.28.2 for all nine packages, keys included. The
+registry lists it as `latest`.
+See the [release notes](../../docs/releases/v0.28.2.md).
+The public registry read on 2026-10-22 at 15:58 UTC reports `latest` 0.28.2 for all nine packages.
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
 Historical 0.27.0 preparation named train 0.27.0 and
@@ -97,10 +98,10 @@ dependencies consistent.
 A release set contains eight aligned packages plus keys: nine packages. From
 0.28.2 all nine carry one version; `check:release-graph` fails when keys
 differs from the train. `@byok-sdk/implementation-identity` remains retired. Every public package targets
-the dist-tag `latest`, observed at 0.28.1 / keys 0.13.1 on 2026-10-22 at 03:41 UTC.
+the dist-tag `latest`, observed at 0.28.2 for all nine packages on 2026-10-22 at 15:58 UTC.
 The pre-publication
 [reviewed registry baseline](../../scripts/release/registry-expectations.json)
-records that prior `latest` for all nine packages: 0.28.1 / keys 0.13.1.
+records that prior `latest` for all nine packages: 0.28.2.
 This train has no first publication.
 The [implemented contract](../../scripts/release/registry-contract.mjs) verifies
 package-document absence before a declared first publication, then exact-version
@@ -108,10 +109,10 @@ readback and the declared absent `latest` after an RC. Missing tags/versions or
 failed registry reads do not establish package absence.
 
 Source preparation and npm execution need separate authorization. The owner
-provided both for 0.27.0. The registry lists 0.28.0 and 0.28.1 as published
-(2026-10-20 and 2026-10-21, UTC). This repository has no publication record
-for either version. The 0.28.2 candidate has source-preparation authorization
-only. Live qualification and production rollout
+provided both for 0.27.0. The registry lists 0.28.0, 0.28.1 and 0.28.2 as
+published (2026-10-20, 2026-10-21 and 2026-10-22, UTC). This repository has no
+publication record for these versions. The 0.28.3 candidate has
+source-preparation authorization only. Live qualification and production rollout
 remain separate operations.
 The [publication record](../../docs/releases/v0.27.0-publication.md) confirms
 the exact source, package order and completed registry readback.
