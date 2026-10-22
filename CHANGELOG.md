@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.28.3 — source candidate
+
+The owner selected 0.28.3 as one more one-release exception to the default
+pre-1.0 MINOR policy, after the 0.28.1 and 0.28.2 exceptions. The candidate
+adds public API and behavior: the Grok `compatInstructions` option, the `mcp`
+field on durable Pi tool events and `HermesAdapter.prepare()` on Windows. The
+0.29.0 schedule does not change. This candidate is not published. See the
+[release notes](docs/releases/v0.28.3.md) for scope and outstanding
+qualification. All nine public manifests and their lock records move to
+0.28.3.
+
 - **Docs (client)** — the client README explains what a Host sees when
   `agentMemoryMcp: 'auto'` does not admit the memory MCP, why the daemon then
   reports `status().agentMemoryMcp` as `unavailable`, and what the Host can do

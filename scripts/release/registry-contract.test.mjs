@@ -93,15 +93,14 @@ function mutateResponse(fixture, selector, change) {
   fixture.responses.set(selector, good(value));
 }
 
-// Independently pin the public registry baseline reviewed for the 0.28.2 release.
+// Independently pin the public registry baseline reviewed for the 0.28.3 release.
 // Do not derive expected versions from the file under test.
 test('the reviewed plan enumerates all nine packages with their prior stable latest', () => {
   assert.equal(names.length, 9);
   assert.equal(validateRegistryExpectations(reviewed, names), reviewed);
   assert.ok(!names.includes('@byok-sdk/implementation-identity'));
   for (const name of names) {
-    assert.deepEqual(reviewed.packages[name],
-      { priorPublication: 'existing', previousLatest: name === '@byok-sdk/keys' ? '0.13.1' : '0.28.1' });
+    assert.deepEqual(reviewed.packages[name], { priorPublication: 'existing', previousLatest: '0.28.2' });
   }
 });
 
