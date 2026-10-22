@@ -29,8 +29,9 @@ it('ends the PowerShell read when the foreign-gateway deadline passes, and does 
   asWindows();
   const aborted: boolean[] = [];
   execFile.mockImplementation((_command, _args, options: { signal?: AbortSignal }, callback) => {
-    // Like execFile: an abort kills the child and fails the call.
-    options.signal?.addEventListener('abort', () => { aborted.push(true); callback(new Error('aborted'), ''); }, { once: true });
+    // Like execFile: an abort, also one before the call, kills the child and fails the call.
+    const abort = () => { aborted.push(true); callback(new Error('aborted'), ''); };
+    if (options.signal?.aborted) abort(); else options.signal?.addEventListener('abort', abort, { once: true });
   });
   const started = Date.now();
   expect(await mayStopForeignHermesGateway({ pid: 300, state: 'ready', servedHomes: [] }, 'C:\\root\\profiles\\byok-a', 100, AbortSignal.timeout(50))).toBe(false);
