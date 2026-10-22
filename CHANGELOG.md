@@ -100,6 +100,14 @@
   loss. B stays false. CI now runs the helper tests on Windows Server 2025 and
   Windows Server 2022, as the administrator and as a standard user. It also
   checks the root identity that Node and Bun compute.
+- **Changed (client)** — Agent memory names are now the same on every
+  platform (#605). A memory path may not use a Windows device name, such as
+  `notes/con.md`, or a segment that ends in `.`. Below `notes`, two names in
+  one directory may not differ only in ASCII letter case. Recall, save, intents
+  and observation also refuse a file with more than one hard link. Capture and
+  export leave these files out. Existing notes with these names or links stop
+  being visible to recall and export. A `MEMORY.md` with more than one hard
+  link makes capture fail.
 
 ## 0.28.3 — source candidate
 

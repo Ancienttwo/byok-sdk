@@ -86,8 +86,6 @@ func flushSameObject(original, reopened syscall.Handle) error {
 	return syscall.FlushFileBuffers(reopened)
 }
 
-// openSession does not run syncHomeChain on Windows. Its chain rule waits for
-// the B decision (W2 in docs/plans/2026-10-22-605-windows-memory.md).
 func sameVolume(os.FileInfo, os.FileInfo) (bool, error) {
 	return false, errors.New("Windows home volume proof is not admitted")
 }
