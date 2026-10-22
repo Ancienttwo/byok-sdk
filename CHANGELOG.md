@@ -63,7 +63,9 @@
   with a new envelope id: one per second for a live task, and one per
   reconnect for a recovered task. Each retry of a message now resends the same
   envelope, and the connection manager does not queue an envelope id that is
-  already queued or in flight. Retries continue after the outage ends (#693).
+  already queued or in flight. Retries continue after the outage ends. A retry
+  that arrives after the cloud committed the message now settles as
+  `duplicate`, not `accepted` (#693).
 
 ## 0.28.1 / @byok-sdk/keys 0.13.1 — 2026-10-21 (published)
 

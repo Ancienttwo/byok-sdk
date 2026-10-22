@@ -189,8 +189,7 @@ export class ConnectionManager {
    * currently spliced OUT of `this.outbox` for an in-flight (not yet
    * confirmed delivered) `postBatch` call — empty the rest of the time. See
    * `outboxLength`'s own doc comment for why this needs to be tracked
-   * separately from `this.outbox` at all, and `send` for why it holds the
-   * envelopes and not only their count.
+   * separately from `this.outbox` at all.
    */
   private inFlightBatch: readonly Envelope[] = [];
   private draining = false;
@@ -382,12 +381,8 @@ export class ConnectionManager {
    * Design B (finding N4): push onto the single shared outbox and try to
    * drain it now. Never routes directly to either transport itself — see
    * `drainOutbox`.
-   *
-   * An envelope id names one set of bytes, so a resend of an envelope that
-   * is still queued or in flight is already pending and is not queued again
-   * (#693): a caller that retries on a timer during a route outage keeps one
-   * copy at its original position instead of growing the queue. Once that
-   * copy settles, the next resend is queued as usual.
+   * An id still queued or in flight is not queued again, so a timer retry
+   * during an outage keeps one copy in its original place (#693).
    */
   send(envelope: Envelope): void {
     const pending = (queued: Envelope) => queued.id === envelope.id;

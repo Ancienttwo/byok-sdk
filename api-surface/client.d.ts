@@ -3238,13 +3238,13 @@ export declare class ConnectionManager {
      */
     private ingressBudget;
     /**
-     * Finding F5(b): how many envelopes `drainOutbox` has
+     * Finding F5(b): the envelopes `drainOutbox` has
      * currently spliced OUT of `this.outbox` for an in-flight (not yet
-     * confirmed delivered) `postBatch` call — 0 the rest of the time. See
+     * confirmed delivered) `postBatch` call — empty the rest of the time. See
      * `outboxLength`'s own doc comment for why this needs to be tracked
-     * separately from `this.outbox.length` at all.
+     * separately from `this.outbox` at all.
      */
-    private inFlightBatchSize;
+    private inFlightBatch;
     private draining;
     private stopped;
     private haltReason;
@@ -3304,6 +3304,8 @@ export declare class ConnectionManager {
      * Design B (finding N4): push onto the single shared outbox and try to
      * drain it now. Never routes directly to either transport itself — see
      * `drainOutbox`.
+     * An id still queued or in flight is not queued again, so a timer retry
+     * during an outage keeps one copy in its original place (#693).
      */
     send(envelope: Envelope): void;
     /** Publish a fresh local configuration snapshot while this daemon is running. */
@@ -3390,7 +3392,7 @@ export declare class ConnectionManager {
      * `performControlShutdown`, which surfaces this on the `shutdown-complete`
      * audit event rather than silently claiming everything was delivered.
      *
-     * Deliberately `this.outbox.length + this.inFlightBatchSize`, NOT just
+     * Deliberately `this.outbox.length + this.inFlightBatch.length`, NOT just
      * `this.outbox.length` alone: `drainOutbox`'s long-poll branch SPLICES a
      * batch out of `this.outbox` before awaiting `postBatch` (so a concurrent
      * `send()` sees an accurate, non-double-counted queue) — while that POST
@@ -8946,6 +8948,8 @@ export declare class TaskRunner {
     private readonly recoveredMessageOutboxes;
     private readonly cancelledRecoveredMessages;
     private readonly recoveredMessageRetryTimers;
+    /** Retries resend one envelope id per record (#693); the cloud replays the disposition per arrival. */
+    private readonly agentMessageEnvelopes;
     /**
      * Finding F4 (cancel lost during the offer-processing window): a
      * `task.cancel` for a taskId that hasn't finished `handleOffer` yet (still
