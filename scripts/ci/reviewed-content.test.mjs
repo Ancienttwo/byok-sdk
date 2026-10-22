@@ -266,7 +266,7 @@ test('the package graph check maps to the npm release pack job that runs it; sib
     assert.ok(families.length > 0 && families.every(id => knownFamilies.includes(id) && id !== 'build-test'), script);
   }
   for (const sibling of ['scripts/release/check-package-graph.test.mjs', 'scripts/release/nested/check-package-graph.mjs',
-    'scripts/release/check-package-graph.mjs.orig', 'scripts/release/publish.mjs']) {
+    'scripts/release/check-package-graph.mjs.orig', 'scripts/release/registry-contract.mjs']) {
     assert.throws(() => selectImpact([sibling]), /reviewed CI mapping required/i, sibling);
   }
 });
