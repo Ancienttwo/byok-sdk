@@ -613,6 +613,16 @@ is unsettled and no reserved old slot is due (the pure `versionSwitchDue`). Whil
 a version is pending, the old chain gets no new slot, and admitted work finishes
 with the version that admitted it. See
 [K4 routine versions](../examples/host-execution-core/README.md#routine-versions).
+K4 also accepts `hostOccurrence` routine definitions. A registered synchronous
+hook writes Host state in the transaction that records the occurrence: both
+persist or neither does, a replay does not call the hook, and a throw or a
+thenable rolls the occurrence back. The occurrence stays unsettled until the
+Host calls the exported `promoteOccurrence`, which adds intent
+`occurrence:<key>` to the FIFO, or `concludeOccurrence`. A newer slot makes a
+later promotion settle as `superseded`. `OutcomeTransaction.routines` runs
+`create`, `update` and `lifecycle` in the outcome commit with the same rules as
+the core methods. See
+[K4 Host occurrences](../examples/host-execution-core/README.md#host-occurrences).
 
 ### K4 Host reply transaction
 
@@ -2223,6 +2233,27 @@ reports the effective daemon-level admission: `admitted`, `off`, or
 selected adapter must still support MCP toolsets for each task. The value is
 in-process only; the hello capabilities, `DaemonEvent` and the control status
 do not carry it.
+
+An ordinary Agent offer can select the memory of its one task with the
+OPTIONAL `agentMemory: 'none' | 'read' | 'read-write'`, the values of the
+prepared offer. Absent keeps the daemon admission above. `none` binds no SDK
+memory MCP and adds no memory guidance, so memory alone requires no adapter MCP
+support; a `memory-reader` instruction keeps only its final-reply line. `read`
+seals the memory MCP `read`, lists only `memory_recall` and uses the read-only
+guidance (a `memory-reader` keeps its reader guidance). `read-write` is the
+writer default. A `memory-reader` Attempt that selects `read-write` is declined
+without retry (`agent_memory_selection_invalid`). `read` or `read-write` on a
+daemon whose admission is `off` or `unavailable` is declined without retry
+(`agent_memory_unavailable`), as on the prepared lane; the daemon never changes
+a selection to `none`, so a Host that wants memory only when it is admitted
+sends no `agentMemory`. The offers are strict, so the field is a gated wire
+addition: a daemon with an Agent home advertises `agent-memory-selection`
+whatever its admission, and server and cloud refuse the field to a device
+without it before task creation or mailbox append. The reference server takes
+it on `executions.submit` and on `dispatch` with an explicit `agentRef`, and
+both refuse `read-write` for a `memory-reader` before the task exists.
+`AGENT_MEMORY_MCP_SERVER_NAME` from `@byok-sdk/client` is the reserved name of
+the SDK memory MCP server, so Host tests and diagnostics need no literal name.
 
 The client release carries Darwin arm64 and x64 helpers. The SDK resolves its
 own path and checks the build manifest before each helper open. Arbitrary

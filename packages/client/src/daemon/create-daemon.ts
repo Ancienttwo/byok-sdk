@@ -27,6 +27,7 @@ import {
   HOST_MCP_TASK_CONTEXT_CAPABILITY,
   AGENT_HOME_PROJECTION_CAPABILITY,
   AGENT_HOME_READERS_CAPABILITY,
+  AGENT_MEMORY_SELECTION_CAPABILITY,
   AGENT_INPUT_PREPARATION_CAPABILITY,
   TERMINAL_PROJECTION_SELECTION_CAPABILITY,
   PROVIDER_PROFILE_BINDING_CAPABILITY,
@@ -1068,7 +1069,9 @@ function computeCapabilities(
   if (adapters.some((adapter) => adapter.descriptor.capabilities.mcpToolsets === true)) {
     flags.push('toolset-selection');
   }
-  if (agentHomeConfigured) flags.push('agent-home-contract', AGENT_HOME_READERS_CAPABILITY);
+  // Every Agent-home daemon reads the per-task memory selection, whatever its
+  // memory admission: `none` always runs, and an unadmitted selection declines.
+  if (agentHomeConfigured) flags.push('agent-home-contract', AGENT_HOME_READERS_CAPABILITY, AGENT_MEMORY_SELECTION_CAPABILITY);
   if (strictAgentOnly) flags.push(STRICT_AGENT_ONLY_CAPABILITY);
   if (agentHomeProjectionConfigured) flags.push(AGENT_HOME_PROJECTION_CAPABILITY);
   // Advertised only by a daemon whose `inputPreparation` section is present

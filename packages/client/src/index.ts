@@ -563,6 +563,8 @@ export { createExecutionScratch, ScratchRootPathError } from './daemon/retention
 export type { ExecutionScratch } from './daemon/retention/scratch';
 
 export { copyAgentMemoryHelperAssets, type CopyAgentMemoryHelperAssetsOptions } from './daemon/agent-memory-helper-release';
+/** The reserved name of the SDK memory MCP server in an Agent task's MCP servers. */
+export { AGENT_MEMORY_MCP_SERVER_NAME } from './sdk-reserved-mcp';
 
 export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, type CopySdkNativeAssetsOptions } from './sdk-native-assets';
 
