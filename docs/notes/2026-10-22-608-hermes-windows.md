@@ -122,6 +122,9 @@ The same branch ran the suites again on it (run 39699864273).
   `LCMapStringEx`. JavaScript `toLowerCase` can differ for some non-ASCII
   letters (for example U+0130). A home path with such a letter names a pipe
   Hermes never creates, and the start fails by timeout.
-- The kill-on-close job is assigned after spawn. A launcher that starts its
-  child within that window leaves the child outside the job. Normal disposal
-  (`taskkill /T`) still ends it; a daemon crash in that window may not.
+- The kill-on-close job is assigned after spawn. The custody launcher now
+  waits for one stdin byte that the adapter writes after the assignment, so
+  Hermes starts inside the job (#712). A non-custody `hermes.exe` that starts
+  its child within that window still leaves the child outside the job. Normal
+  disposal (`taskkill /T`) still ends it; a daemon crash in that window may
+  not.

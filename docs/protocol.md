@@ -2597,6 +2597,38 @@ Additive-minor: an optional field on two existing variants, no
 `PROTOCOL_VERSION` bump — the freeze golden (`golden/v1.frozen.json`) is
 regenerated, which is exactly the additive case the freeze rule describes.
 
+### 11.7 `mcp` on `tool_use` / `tool_result` — structured MCP identity (additive)
+
+Both variants optionally carry an MCP identity (`agent-event.ts`):
+
+```
+mcp?: { server: string, tool: string }   // .strict(), both non-empty
+```
+
+`server` is the configured name of the MCP server. `tool` is the original
+tool name from that server's `tools/list`. The `tool` field of the event keeps
+its adapter-specific value, for example `mcp__<server>__<tool>` or
+`mcp_tool_call`. A consumer that needs the MCP identity reads `mcp`.
+
+An adapter sets `mcp` only from an authoritative source. It never splits a
+runtime tool name and never parses a title. An absent `mcp` means that the
+adapter did not resolve an identity. It does not prove that the tool is not an
+MCP tool. Built-in tools never carry `mcp`. Claude and Pi set it only for task
+toolset servers. Codex sets it for every MCP server it runs, SDK-reserved
+helpers included. The field describes the event. It is not a tool
+authorization decision.
+
+| Adapter | Source of `mcp` | No `mcp` |
+| --- | --- | --- |
+| Claude | Claude's own `mcp_status` control answer, sent once per process at the first `mcp__` call. Only task toolset servers that Claude reports with the command and args the SDK wrote. | Built-in tools, the user's own servers, SDK helpers, a runtime name that two reported tools share, an error or no answer in 5 s. |
+| Codex | The `server` and `tool` fields of the native `mcpToolCall` item, for every server Codex runs, task toolset servers and SDK helpers included. | Other item types; an `mcpToolCall` without a non-empty `server` and `tool`. |
+| Pi (ordinary, prepared, durable) | The exact registered name `mcp__<server>__<tool>` of a tool in the daemon's observation of the task toolsets. | Built-in tools, SDK helpers (registered bare), names outside the observation. |
+| Grok | None. ACP `tool_call` defines no MCP server field, and no live Grok frame for an MCP call is recorded yet. | All calls, until live ACP evidence shows an authoritative field. |
+| Hermes | None. The ACP `tool_call` title is the Hermes registry name, often followed by `: <preview>`. | All calls. |
+
+Additive-minor, like §11.6: an optional field on two existing variants, no
+`PROTOCOL_VERSION` bump.
+
 ## 12. Historical task lease (M2; superseded by WP3B Step 2)
 
 > Historical (pre-WP3B Step 2; non-normative): the lease/reaper contract in

@@ -21,6 +21,7 @@ they are not a second runtime-selection registry.
 | Recover pending native interactions after process restart | Unsupported | Unsupported | Unsupported | No new support introduced |
 | Host browser/mobile reconnect | Host-owned; not native session resume | Host-owned; not native session resume | Host-owned; not native session resume | Host-owned |
 | Trajectory evidence for the execution record (`trajectoryEvidence`) | Not declared; records are `unknown` | Not declared; records are `unknown` | Not declared; records are `unknown` | Declared (`event-stream`); not declared with `durablePi: true` |
+| MCP identity on tool events (`tool_use.mcp`, `tool_result.mcp`) | Set for task toolset servers from Claude's own `mcp_status` answer | Set from the native `mcpToolCall` `server` and `tool`, for every server Codex runs, SDK helpers included | Not set; ACP `tool_call` defines no MCP server field, and live Grok evidence is pending (#633) | Set by exact observed name; ordinary, prepared and durable |
 
 By default Claude and Codex run YOLO
 ([ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md)): Claude with
@@ -209,6 +210,7 @@ custom-harness path (`harnessId: 'hermes'`). Its descriptor declares:
 | Redirect the active turn (`steer`) | Unsupported; typed `SteerUnsupportedError` |
 | New instruction after an idle turn (`followUp`) | Supported, same ACP session |
 | Task MCP toolsets (`mcpToolsets`) | Supported; ACP `session/new.mcpServers` stdio entries |
+| MCP identity on tool events (`tool_use.mcp`, `tool_result.mcp`) | Not set; the ACP title is the Hermes registry name, not an authoritative identity |
 | Legacy boolean interactive approval, native interactions, message drafts | Unsupported and omitted |
 | Trajectory evidence | Not declared |
 
@@ -416,6 +418,9 @@ the [downstream diagnostics guide](agent-diagnostics-integration.md).
 
 - Source contract: `packages/client/src/types.ts`.
 - Adapter evidence: `claude-adapter.test.ts` and `codex-adapter.test.ts`.
+- MCP identity on tool events: `docs/protocol.md` §11.7 gives the source per
+  adapter. Evidence: `mcp-event-identity.test.ts`,
+  `claude-mcp-identity.test.ts` and `codex-events.test.ts`.
 - Host recovery boundary: Host reconnect next step (`docs/researches/2026-10-06-host-reconnect-boundary.md`, untracked since #390).
 - Architecture: [SDK architecture](architecture/sdk-architecture.md), especially
   the adapter and embedded server boundaries.

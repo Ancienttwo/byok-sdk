@@ -107,6 +107,13 @@ define: { 'import.meta.url': '__product_import_meta_url' },
 banner: { js: "const __product_import_meta_url = require('node:url').pathToFileURL(__filename).href;" },
 ```
 
+Inside the SEA binary, this define makes `import.meta.url` the executable's
+URL, and `process.argv[1]` is the path that started the executable. So a
+common "run main when `import.meta.url` matches `argv[1]`" check is true in
+the SEA. If the product also has a separate SEA entry, main then runs twice.
+Guard such a check with `!require('node:sea').isSea()`, or remove it from the
+SEA entry.
+
 `pi-single-file-bundle.test.ts` proves this for a single-pass CJS bundle run by
 Node, with the ordinary host and with the sealed-host redirect. It does not run
 that bundle inside a SEA binary.
