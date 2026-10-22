@@ -54,7 +54,7 @@ envelope 的字段（`packages/protocol/src/envelope.ts:22-41`）：
 | 字段 | 作用 | Host 怎样使用 |
 | --- | --- | --- |
 | `v` | 协议版本，必须等于 `PROTOCOL_VERSION`，现在是 3（`packages/protocol/src/version.ts:35`） | 版本门 |
-| `id` | envelope 的 UUID | inbound 去重。server → daemon 方向等于 mailbox 的 `message_id`（`packages/cloud/src/cloud.ts:1134-1135`） |
+| `id` | envelope 的 UUID | inbound 去重。server → daemon 方向等于 mailbox 的 `message_id`（`packages/cloud/src/cloud.ts:1134-1135`、`:1987`） |
 | `ts` | 带时区的时间 | 传输元数据 |
 | `type` | 消息类型 | 选择 payload schema；类型白名单；路由 |
 | `task_id` | task 身份 | 所有权、状态机、取消过滤 |
