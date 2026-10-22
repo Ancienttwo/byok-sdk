@@ -65,6 +65,8 @@ it.skipIf(process.platform !== 'linux' && process.platform !== 'darwin').each([u
       expect(result.type).toBe('task.started');
       expect(adapter.startCalls).toHaveLength(1);
       expect(adapter.startCalls[0]!.ctx.mcpServers?.byokagentmemory).toBeUndefined();
+      // #614: `off` also drops the memory guidance, so no second memory writer is asked for.
+      expect(adapter.startCalls[0]!.task.instruction).toBe('No external action');
       expect(capture.helper).not.toHaveBeenCalled();
     } else {
       expect(result.type).toBe('task.decline');
@@ -74,6 +76,21 @@ it.skipIf(process.platform !== 'linux' && process.platform !== 'darwin').each([u
     }
   },
 );
+
+// #614: a Host reads the effective admission instead of inferring it from configuration.
+it('reports the effective memory MCP admission in status', async () => {
+  expect(createDaemonWithAdapters(await config('off'), []).status().agentMemoryMcp).toBe('off');
+  const noHome = await config(undefined);
+  delete noHome.agentHome;
+  delete noHome.strictAgentOnly;
+  noHome.workspaceRoot = path.join(path.dirname(noHome.storeDir!), 'workspace');
+  expect(createDaemonWithAdapters(noHome, []).status().agentMemoryMcp).toBe('unavailable');
+  for (const mode of [undefined, 'auto'] as const) {
+    // Native Linux and the macOS resolver seam above admit memory; Windows has no backend.
+    expect(createDaemonWithAdapters(await config(mode), []).status().agentMemoryMcp)
+      .toBe(process.platform === 'linux' || process.platform === 'darwin' ? 'admitted' : 'unavailable');
+  }
+});
 
 it('refuses prepared memory selections when disabled, without degrading them to none', async () => {
   daemon = createDaemonWithAdapters(await config('off'), []);
