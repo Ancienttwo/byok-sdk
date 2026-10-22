@@ -290,28 +290,6 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     await expect(fs.access(configPath)).rejects.toThrow();
   });
 
-  it('passes opted-in setting sources to the launch and none by default (#634)', async () => {
-    expect(() => new ClaudeAdapter({ settingSources: [] })).toThrow(TypeError);
-    expect(() => new ClaudeAdapter({ settingSources: ['user', 'user'] })).toThrow(TypeError);
-    expect(() => new ClaudeAdapter({ settingSources: ['global' as never] })).toThrow(TypeError);
-    for (const settingSources of [undefined, ['project', 'local'] as const]) {
-      const spawnCalls: string[][] = [];
-      const adapter = new ClaudeAdapter({
-        resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
-        spawnFn: ((command: string, args: readonly string[] = [], options: object = {}) => {
-          spawnCalls.push([...args]);
-          return realSpawn(command, [...args], options);
-        }) as unknown as SpawnFn,
-        ...(settingSources === undefined ? {} : { settingSources }),
-      });
-      const session = await startAdapter(adapter, baseTask, await makeCtx());
-      openSessions.push(session);
-      const args = spawnCalls[0] ?? [];
-      if (settingSources === undefined) expect(args).not.toContain('--setting-sources');
-      else expect(args.slice(args.indexOf('--setting-sources'), args.indexOf('--setting-sources') + 2)).toEqual(['--setting-sources', 'project,local']);
-    }
-  });
-
   it('prepares a valid blob-ref without fetching it; TaskRunner resolves its string after claim', async () => {
     const adapter = fakeClaudeAdapter();
     const task: TaskOfferPayload = {

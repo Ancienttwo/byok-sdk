@@ -87,15 +87,6 @@ export interface ClaudeAdapterOptions {
   interruptTimeoutMs?: number;
   /** Local Host callbacks for native stdio requests; never enables remote boolean approvals. */
   nativeInteractions?: NativeInteractionHostOptions;
-  /**
-   * Claude's `--setting-sources` for every session. Absent: Claude's default,
-   * all three. Leaving out `user` drops `~/.claude/CLAUDE.md` and
-   * `~/.claude/rules/`, and also the user's deny rules and hooks (the
-   * guardrails left under `--dangerously-skip-permissions`), the settings `env`
-   * block and `apiKeyHelper`, which can carry the provider login. It is not
-   * prompt isolation: see `docs/adapter-capabilities.md`.
-   */
-  settingSources?: readonly ('user' | 'project' | 'local')[];
 }
 
 /**
@@ -116,16 +107,10 @@ export interface ClaudeAdapterOptions {
 export class ClaudeAdapter implements RuntimeAdapter {
   readonly descriptor;
   private readonly nativeOptions?: NativeInteractionHostOptions;
-  private readonly settingSources?: string;
 
   constructor(private readonly options: ClaudeAdapterOptions = {}) {
     const timeout = options.interruptTimeoutMs ?? 1000;
     if (!Number.isFinite(timeout) || timeout <= 0 || timeout > 2_147_483_647) throw new TypeError('invalid Claude interrupt timeout');
-    const sources = options.settingSources;
-    if (sources !== undefined && (sources.length === 0 || new Set(sources).size !== sources.length
-      || sources.some(source => source !== 'user' && source !== 'project' && source !== 'local')))
-      throw new TypeError('ClaudeAdapterOptions.settingSources must list distinct user, project or local sources');
-    this.settingSources = sources?.join(',');
     this.nativeOptions = options.nativeInteractions === undefined ? undefined : snapshotNativeInteractionHostOptions(options.nativeInteractions);
     this.descriptor = freezeRuntimeAdapterDescriptor({
       id: 'claude',
@@ -306,7 +291,6 @@ export class ClaudeAdapter implements RuntimeAdapter {
         ...(this.nativeOptions === undefined
           ? ['--dangerously-skip-permissions']
           : ['--permission-prompt-tool', 'stdio', '--permission-mode', 'acceptEdits']),
-        ...(this.settingSources === undefined ? [] : ['--setting-sources', this.settingSources]),
         ...mcpArgs,
       ];
 
