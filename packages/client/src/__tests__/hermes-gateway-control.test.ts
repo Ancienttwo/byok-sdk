@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -5,6 +6,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { hermesGatewayPipeName, identifyHermesGateway, servesHermesHome } from '../adapters/hermes/gateway-identity';
 import { mayStopForeignHermesGateway } from '../adapters/hermes/gateway-ownership';
+import { loadKoffi } from '../adapters/win32-job-object';
 import { descendsFrom, parseWindowsProcessTable, type WindowsProcessEntry } from '../adapters/hermes/windows-process-table';
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -29,6 +31,34 @@ describe('Hermes gateway control pipe name', () => {
     expect(servesHermesHome(identity, 'C:\\Root\\profiles\\byok-a')).toBe(true);
     expect(servesHermesHome(identity, 'c:\\root\\profiles\\byok-a')).toBe(process.platform === 'win32');
     expect(servesHermesHome(identity, 'C:\\Root\\profiles\\byok-b')).toBe(false);
+  });
+
+  // #712: letters whose lower case is longer than one UTF-16 unit (U+0130) or depends on the
+  // next letter (a final U+03A3). Hermes 0b10b9f hashes os.path.normcase(home)
+  // (gateway/control_socket.py:40-41). On Windows, CPython 3.11 to 3.14 (Hermes needs >=3.11,<3.15)
+  // ntpath.normcase is `_winapi.LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_LOWERCASE, s.replace('/', '\\'))`.
+  it.runIf(process.platform === 'win32')('names the pipe Hermes names when a home has U+0130 or a final U+03A3', async () => {
+    const koffi = await loadKoffi() as {
+      load(path: string): { func(convention: string, name: string, result: string, args: string[]): (...args: unknown[]) => number };
+    };
+    // LCMapStringEx(lpLocaleName, dwMapFlags, lpSrcStr, cchSrc, lpDestStr, cchDest, lpVersionInformation, lpReserved, sortHandle)
+    const lcMapStringEx = koffi.load('kernel32.dll').func('__stdcall', 'LCMapStringEx', 'int',
+      ['str16', 'uint32_t', 'void *', 'int', 'void *', 'int', 'void *', 'void *', 'intptr_t']);
+    const LCMAP_LOWERCASE = 0x100;
+    const normcase = (home: string): string => {
+      const source = Buffer.from(home.replaceAll('/', '\\'), 'utf16le');
+      const target = Buffer.alloc(source.length * 2);
+      // LOCALE_NAME_INVARIANT is the empty string.
+      const written = lcMapStringEx('', LCMAP_LOWERCASE, source, source.length / 2, target, target.length / 2, null, null, 0);
+      expect(written).toBeGreaterThan(0);
+      return target.subarray(0, written * 2).toString('utf16le');
+    };
+    const escaped = (text: string): string => text.replace(/[^\x20-\x7e]/gu, (letter) => `\\u{${letter.codePointAt(0)!.toString(16)}}`);
+    for (const home of ['C:\\Users\\\u0130lker\\hermes', 'C:\\Users\\\u039A\u03A9\u03A3\\hermes']) {
+      const lowered = normcase(home);
+      const hermes = `\\\\.\\pipe\\hermes-gateway-${createHash('sha256').update(lowered, 'utf8').digest('hex').slice(0, 16)}`;
+      expect(hermesGatewayPipeName(home), `Windows normcase: ${escaped(lowered)}; JS toLowerCase: ${escaped(home.toLowerCase())}`).toBe(hermes);
+    }
   });
 });
 
