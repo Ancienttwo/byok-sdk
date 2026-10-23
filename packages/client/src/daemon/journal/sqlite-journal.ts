@@ -52,6 +52,8 @@ import {
   type RecoverableTask,
   type RecoveryOutcome,
   type ReceivedEnvelopeRecord,
+  type WithheldOfferRecord,
+  type WithheldOfferTask,
 } from './journal';
 import {
   isSqliteAvailable,
@@ -142,9 +144,8 @@ export interface SqliteLocalTaskJournalOptions {
    * Per-record byte bound. Default {@link DEFAULT_MAX_RECORD_BYTES}. An inbound
    * envelope record may still reach a floor derived from the inline sealed
    * maximum (415083 bytes), so a sealed envelope can be journaled and declined.
-   * The floor covers the inline maximum plus 64 KiB of plaintext metadata.
-   * Larger metadata stalls the cursor, the same way as a large plain offer
-   * (#826).
+   * A task-opening envelope above the bound is kept without its bytes and
+   * declined ({@link SqliteLocalTaskJournal.appendWithheldOffer}, #826).
    */
   readonly maxRecordBytes?: number;
   /** Test seam — see {@link JournalFaultSeam}. Never supplied in production. */
@@ -400,6 +401,19 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
       db.close();
       throw new JournalUnavailableError('hash-only journal format cannot replay terminals; preserve/export this journal and resolve it before starting the new execution-recovery format');
     }
+    // #826: the length of a withheld offer's bytes; NULL for a stored
+    // envelope. The one declaration of the column, so a journal written before
+    // it existed and a new one take the same path. A failed ALTER leaves a
+    // valid older journal, so it is not quarantined.
+    const envelopeColumns = db.prepare('PRAGMA table_info(journal_envelope)').all() as Array<{ name: string }>;
+    if (!envelopeColumns.some((column) => column.name === 'withheld_bytes')) {
+      try {
+        db.exec('ALTER TABLE journal_envelope ADD COLUMN withheld_bytes INTEGER');
+      } catch (err) {
+        db.close();
+        throw err;
+      }
+    }
     this.#db = db;
     try {
       secureJournalFilePermissions(this.#dbPath);
@@ -503,7 +517,61 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
       );
     }
 
-    return this.#enqueue('appendEnvelope', () => {
+    return this.#append('appendEnvelope', record, record.bytes, null, (committedAt) => {
+      if (!record.opensTask || record.taskId === undefined) return;
+      const task = this.#db.prepare('SELECT * FROM journal_task WHERE task_id = ?').get(record.taskId) as Record<string, unknown> | undefined;
+      if (task) {
+        this.#assertIdentity(task, record.identity);
+        const original = this.#db.prepare('SELECT bytes, withheld_bytes FROM journal_envelope WHERE envelope_id = ?')
+          .get(task.envelope_id as string) as { bytes: string; withheld_bytes: number | null };
+        // Transport IDs/seq can change on duplicate delivery, but the execution
+        // contract (including exact AgentRef) must never change under task_id.
+        // A withheld offer has no contract to compare: its task is declined.
+        if (original.withheld_bytes === null) {
+          const oldOffer = JSON.parse(original.bytes) as { type?: unknown; payload?: unknown };
+          const newOffer = JSON.parse(record.bytes) as { type?: unknown; payload?: unknown };
+          if (oldOffer.type !== newOffer.type || JSON.stringify(oldOffer.payload) !== JSON.stringify(newOffer.payload)) {
+            throw new Error('journal task identity reused with a different execution contract');
+          }
+        }
+      }
+      // `OR IGNORE`: a second, different envelope re-opening the same task
+      // id (a re-offer after the cloud lost track) must not clobber the
+      // admission/claim state the first one already accumulated. The
+      // envelope row above still records that the second envelope arrived.
+      this.#insertTask(record, record.taskId, RECEIVED_STATE, committedAt);
+    });
+  }
+
+  /** #826: the decline commits with the row, because the cursor moves once this commits. */
+  appendWithheldOffer(record: WithheldOfferRecord): Promise<JournalReceipt> {
+    const { decline, taskId } = record;
+    return this.#append('appendWithheldOffer', record, '', record.byteLength, (committedAt) => {
+      const task = this.#db.prepare(`SELECT t.tenant_id, t.product_id, t.device_id, e.withheld_bytes FROM journal_task t
+        JOIN journal_envelope e ON e.envelope_id = t.envelope_id WHERE t.task_id = ?`).get(taskId) as Record<string, unknown> | undefined;
+      if (task) {
+        this.#assertIdentity(task, record.identity);
+        // A task opened by a stored offer may be running: a decline must not
+        // become its terminal. A task opened by a withheld offer is already declined.
+        if (task.withheld_bytes === null) throw new Error('journal task identity reused with a different execution contract');
+        return;
+      }
+      this.#assertTerminalBytes(decline.bytes, decline.payloadHash);
+      this.#insertTask(record, taskId, 'terminal:declined', committedAt);
+      this.#insertTerminal({ taskId, terminalType: 'declined', bytes: decline.bytes, payloadHash: decline.payloadHash,
+        truthState: 'pending', attempt: 1, recordedAt: committedAt });
+    });
+  }
+
+  /** One transaction: envelope row, task step and receipt; a redelivery is answered from its receipt. */
+  #append(
+    operation: string,
+    record: Omit<ReceivedEnvelopeRecord, 'bytes' | 'opensTask'>,
+    bytes: string,
+    withheldBytes: number | null,
+    openTask: (committedAt: string) => void,
+  ): Promise<JournalReceipt> {
+    return this.#enqueue(operation, () => {
       this.#fault('append:before-begin');
       const committed = this.#transaction((): JournalReceipt => {
         const existing = this.#db
@@ -521,8 +589,8 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
         this.#db
           .prepare(
             `INSERT INTO journal_envelope
-               (envelope_id, tenant_id, product_id, device_id, seq, task_id, bytes, bytes_hash, received_at, committed_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+               (envelope_id, tenant_id, product_id, device_id, seq, task_id, bytes, bytes_hash, withheld_bytes, received_at, committed_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             record.envelopeId,
@@ -531,48 +599,14 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
             record.identity.deviceId,
             record.seq,
             record.taskId ?? null,
-            record.bytes,
+            bytes,
             record.bytesHash,
+            withheldBytes,
             record.receivedAt,
             committedAt,
           );
         this.#fault('append:after-envelope');
-
-        if (record.opensTask && record.taskId !== undefined) {
-          const task = this.#db.prepare('SELECT * FROM journal_task WHERE task_id = ?').get(record.taskId) as Record<string, unknown> | undefined;
-          if (task) {
-            this.#assertIdentity(task, record.identity);
-            const original = this.#db.prepare('SELECT bytes FROM journal_envelope WHERE envelope_id = ?').get(task.envelope_id as string) as { bytes: string };
-            // Transport IDs/seq can change on duplicate delivery, but the execution
-            // contract (including exact AgentRef) must never change under task_id.
-            const oldOffer = JSON.parse(original.bytes) as { type?: unknown; payload?: unknown };
-            const newOffer = JSON.parse(record.bytes) as { type?: unknown; payload?: unknown };
-            if (oldOffer.type !== newOffer.type || JSON.stringify(oldOffer.payload) !== JSON.stringify(newOffer.payload)) {
-              throw new Error('journal task identity reused with a different execution contract');
-            }
-          }
-          // `OR IGNORE`: a second, different envelope re-opening the same task
-          // id (a re-offer after the cloud lost track) must not clobber the
-          // admission/claim state the first one already accumulated. The
-          // envelope row above still records that the second envelope arrived.
-          this.#db
-            .prepare(
-              `INSERT OR IGNORE INTO journal_task
-                 (task_id, envelope_id, tenant_id, product_id, device_id, seq, local_state, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            )
-            .run(
-              record.taskId,
-              record.envelopeId,
-              record.identity.tenantId,
-              record.identity.productId,
-              record.identity.deviceId,
-              record.seq,
-              RECEIVED_STATE,
-              committedAt,
-              committedAt,
-            );
-        }
+        openTask(committedAt);
         this.#fault('append:after-task');
 
         const receipt: Omit<JournalReceipt, 'created'> = {
@@ -592,6 +626,17 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
       this.#fault('append:after-commit');
       return committed;
     });
+  }
+
+  #insertTask(record: { identity: JournalIdentity; envelopeId: string; seq: number }, taskId: string, localState: string, at: string): void {
+    this.#db
+      .prepare(
+        `INSERT OR IGNORE INTO journal_task
+           (task_id, envelope_id, tenant_id, product_id, device_id, seq, local_state, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(taskId, record.envelopeId, record.identity.tenantId, record.identity.productId, record.identity.deviceId,
+        record.seq, localState, at, at);
   }
 
   recordAdmission(record: AdmissionRecord): Promise<void> {
@@ -670,22 +715,13 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
    */
   recordTerminal(record: LocalTerminalRecord): Promise<void> {
     return this.#enqueue('recordTerminal', () => {
-      if (typeof record.bytes !== 'string' || journalHash(record.bytes) !== record.payloadHash) {
-        throw new Error('terminal bytes do not match their canonical hash');
-      }
-      if (byteLength(record.bytes) > this.#maxRecordBytes) {
-        throw new JournalRecordTooLargeError('terminal bytes', byteLength(record.bytes), this.#maxRecordBytes);
-      }
+      this.#assertTerminalBytes(record.bytes, record.payloadHash);
       this.#transaction(() => {
         this.#requireTask(record.taskId, 'recordTerminal');
         const existing = this.#db.prepare('SELECT * FROM journal_terminal WHERE task_id = ?')
           .get(record.taskId) as { payload_hash: string; bytes: string; truth_state: string } | undefined;
         if (!existing) {
-          this.#db.prepare(`INSERT INTO journal_terminal
-            (task_id, terminal_type, bytes, payload_hash, truth_state, attempt, last_error, recorded_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-            .run(record.taskId, record.terminalType, record.bytes, record.payloadHash, record.truthState,
-              record.attempt, record.lastError ?? null, record.recordedAt, record.recordedAt);
+          this.#insertTerminal(record);
           this.#db.prepare('UPDATE journal_task SET local_state = ?, updated_at = ? WHERE task_id = ?')
             .run(`terminal:${record.terminalType}`, record.recordedAt, record.taskId);
         } else if (existing.payload_hash === record.payloadHash && existing.bytes === record.bytes && existing.truth_state !== 'confirmed') {
@@ -704,29 +740,57 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
     });
   }
 
+  #assertTerminalBytes(bytes: string, payloadHash: string): void {
+    if (typeof bytes !== 'string' || journalHash(bytes) !== payloadHash) {
+      throw new Error('terminal bytes do not match their canonical hash');
+    }
+    if (byteLength(bytes) > this.#maxRecordBytes) {
+      throw new JournalRecordTooLargeError('terminal bytes', byteLength(bytes), this.#maxRecordBytes);
+    }
+  }
+
+  #insertTerminal(record: LocalTerminalRecord): void {
+    this.#db.prepare(`INSERT INTO journal_terminal
+      (task_id, terminal_type, bytes, payload_hash, truth_state, attempt, last_error, recorded_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(record.taskId, record.terminalType, record.bytes, record.payloadHash, record.truthState,
+        record.attempt, record.lastError ?? null, record.recordedAt, record.recordedAt);
+  }
+
   #assertIdentity(row: Record<string, unknown>, identity: JournalIdentity): void {
     if (row.tenant_id !== identity.tenantId || row.product_id !== identity.productId || row.device_id !== identity.deviceId) {
       throw new Error('journal enrollment identity mismatch; refusing cross-enrollment execution or terminal replay');
     }
   }
 
-  #taskRow(row: Record<string, unknown>): RecoverableTask {
-    if (typeof row.envelope_bytes !== 'string' || journalHash(row.envelope_bytes) !== row.envelope_hash) {
-      throw new Error('durable offer bytes/hash mismatch');
-    }
+  #taskFields(row: Record<string, unknown>): Omit<RecoverableTask, 'envelopeBytes'> {
     return {
       taskId: row.task_id as string, envelopeId: row.envelope_id as string, seq: Number(row.seq),
       identity: { tenantId: row.tenant_id as string, productId: row.product_id as string, deviceId: row.device_id as string },
       localState: row.recovery_marker !== null && !String(row.local_state).startsWith('terminal:') ? 'interrupted' : row.local_state as string,
       ...(row.claimed_runtime == null ? {} : { claimedRuntime: row.claimed_runtime as string }),
       ...(row.workspace_ref == null ? {} : { workspaceRef: row.workspace_ref as string }),
-      updatedAt: row.updated_at as string, envelopeBytes: row.envelope_bytes as string,
+      updatedAt: row.updated_at as string,
     };
   }
 
-  readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | undefined> {
+  /** Recovery never reads a withheld offer: its task always has a terminal. */
+  #storedTaskRow(row: Record<string, unknown>): RecoverableTask {
+    if (typeof row.envelope_bytes !== 'string' || journalHash(row.envelope_bytes) !== row.envelope_hash) {
+      throw new Error('durable offer bytes/hash mismatch');
+    }
+    return { ...this.#taskFields(row), envelopeBytes: row.envelope_bytes };
+  }
+
+  #taskRow(row: Record<string, unknown>): RecoverableTask | WithheldOfferTask {
+    if (row.withheld_bytes === null) return this.#storedTaskRow(row);
+    if (row.envelope_bytes !== '') throw new Error('withheld offer row carries bytes');
+    return { ...this.#taskFields(row), withheldEnvelopeBytes: Number(row.withheld_bytes) };
+  }
+
+  readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | WithheldOfferTask | undefined> {
     return this.#enqueue('readTask', () => {
-      const row = this.#db.prepare(`SELECT t.*, e.bytes AS envelope_bytes, e.bytes_hash AS envelope_hash FROM journal_task t
+      const row = this.#db.prepare(`SELECT t.*, e.bytes AS envelope_bytes, e.bytes_hash AS envelope_hash, e.withheld_bytes FROM journal_task t
         JOIN journal_envelope e ON e.envelope_id = t.envelope_id WHERE t.task_id = ?`).get(taskId) as Record<string, unknown> | undefined;
       if (!row) return undefined;
       this.#assertIdentity(row, identity);
@@ -740,7 +804,7 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
         JOIN journal_envelope e ON e.envelope_id = t.envelope_id
         LEFT JOIN journal_terminal term ON term.task_id = t.task_id
         WHERE term.task_id IS NULL ORDER BY t.seq, t.task_id`).all() as Record<string, unknown>[];
-      return rows.map((row) => { this.#assertIdentity(row, identity); return this.#taskRow(row); });
+      return rows.map((row) => { this.#assertIdentity(row, identity); return this.#storedTaskRow(row); });
     });
   }
 

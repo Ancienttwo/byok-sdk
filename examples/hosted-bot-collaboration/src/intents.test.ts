@@ -32,7 +32,7 @@ async function freeze(scope: string, turnId = randomUUID(), waitUntil = clock + 
   await opened!.store.seed(scope, () => {});
   return inSchema(opened!.pool, opened!.store.schema, async client => {
     await lockScope(client, storedKey(scope));
-    return freezeIntent(client, scope, { turnId, execution: template(host!.deviceId), waitUntil });
+    return freezeIntent(client, scope, { key: turnId, source: 'user', execution: template(host!.deviceId), waitUntil });
   });
 }
 /** The SDK mailbox rows of the task's offer. */
@@ -63,7 +63,16 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('H submitter on real Postgres and a real SDK 
     expect(await freeze(scope, turnId)).toEqual(input);
     await expect(inSchema(opened!.pool, opened!.store.schema, async client => {
       await lockScope(client, storedKey(scope));
-      return freezeIntent(client, scope, { turnId, execution: { ...template(host!.deviceId), deviceId: 'other' }, waitUntil: clock + 60_000 });
+      return freezeIntent(client, scope, { key: turnId, source: 'user', execution: { ...template(host!.deviceId), deviceId: 'other' }, waitUntil: clock + 60_000 });
+    })).rejects.toThrow('Intent identity conflict');
+  });
+
+  it('refuses a second freeze of the Turn with another source (#793 D2b-2)', async () => {
+    const scope = `tenant:${randomUUID()}`, turnId = randomUUID();
+    await freeze(scope, turnId);
+    await expect(inSchema(opened!.pool, opened!.store.schema, async client => {
+      await lockScope(client, storedKey(scope));
+      return freezeIntent(client, scope, { key: turnId, source: 'bot', execution: template(host!.deviceId), waitUntil: clock + 60_000 });
     })).rejects.toThrow('Intent identity conflict');
   });
 
@@ -124,6 +133,47 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('H submitter on real Postgres and a real SDK 
     expect(submitted).toEqual([]);
     clock += 2000;
     expect(await submitter(port).run()).toEqual({ tried: 0, failed: [] });
+  });
+
+  it('keeps the cancel reason of a sync cancel that lands during a stopped try (#793 D2b-2)', async () => {
+    const scope = `tenant:${randomUUID()}`, input = await freeze(scope, randomUUID(), clock + 10), { port, submitted } = sdkPort();
+    // The sync cancel commits between the claim and the late write, and the wait ends, so the try stops.
+    const racing: FrozenSubmitPort = { ...port, offer: async id => {
+      await update(scope, input.taskId, `cancel_reason = 'cancelled'`);
+      clock += 10;
+      return port.offer(id);
+    } };
+    expect(await submitter(racing).run()).toEqual({ tried: 1, failed: [] });
+    expect(await row(scope, input.taskId)).toMatchObject({ submission: 'uncertain', tries: 1, cancel_reason: 'cancelled', conclusion: null });
+    expect(submitted).toEqual([]);
+  });
+
+  it('does not submit a claimed row that a sync cancels while its wait is still open (#793 D2b-2)', async () => {
+    const scope = `tenant:${randomUUID()}`, input = await freeze(scope), { port, submitted } = sdkPort();
+    // The sync cancel commits between the claim and the check before the SDK call.
+    const racing: FrozenSubmitPort = { ...port, offer: async id => {
+      await update(scope, input.taskId, `cancel_reason = 'cancelled'`);
+      return port.offer(id);
+    } };
+    expect(await submitter(racing).run()).toEqual({ tried: 1, failed: [] });
+    expect(await row(scope, input.taskId)).toMatchObject({ submission: 'uncertain', tries: 1, cancel_reason: 'cancelled', conclusion: null });
+    expect(submitted).toEqual([]);
+    expect(await offers(input.taskId)).toBe(0);
+  });
+
+  it('does not submit when the read before the SDK call crosses wait_until (#793 D2b-2)', async () => {
+    const scope = `tenant:${randomUUID()}`, input = await freeze(scope, randomUUID(), clock + 10), { port, submitted } = sdkPort();
+    // The deadline passes during the database round trip of the check before the SDK call.
+    const pool = opened!.pool, slowRead = { connect: async () => {
+      const client = await pool.connect();
+      return new Proxy(client, { get: (target, name) => name === 'query'
+        ? (query: unknown, values?: unknown[]) => { if (String(query).includes('AS open')) clock += 10; return target.query(query as string, values); }
+        : typeof Reflect.get(target, name) === 'function' ? Reflect.get(target, name).bind(target) : Reflect.get(target, name) });
+    } } as unknown as pg.Pool;
+    const slow = new HostedSubmitter(slowRead, opened!.store.schema, { port: () => port, now: () => clock, leaseMs: 1000, backoffMs: 500 });
+    expect(await slow.run()).toEqual({ tried: 1, failed: [] });
+    expect(await row(scope, input.taskId)).toMatchObject({ submission: 'uncertain', tries: 1, cancel_reason: 'expired', conclusion: null });
+    expect(submitted).toEqual([]);
   });
 
   it('submits only the FIFO head of an agent, and the next intent waits until the head concludes', async () => {

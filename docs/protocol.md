@@ -1134,6 +1134,35 @@ the schema never strips a sealing policy or sealed content.
 - `paddedLength` above 256 KiB: `ciphertextRef`, a `BlobRef` without `url`
   whose `size` is `paddedLength + 16`.
 
+**Host check of a `ciphertextRef`.** A sealed hosted entry accepts a
+`ciphertextRef` only when the object with its `contentHash` is `committed` in
+the same tenant, with the declared `size` and `contentType`. Otherwise it
+fails with `coordination_input_invalid` before any task, receipt or mailbox
+write. The receiver checks that the SHA-256 of the bytes it fetches by
+`blobId` equals `contentHash`, before it opens them. The task then holds an
+object reference to the object (kind `sealed-task`, id the task id), so
+orphan GC keeps the ciphertext while the task lives. `redactTasks` releases
+the reference. It deletes the object when a stored row of the task still
+names it. Retention can prune the mailbox row of a delivered steer. Then no
+row names its object, and orphan GC deletes the object later. Tenant erasure
+also releases the reference.
+
+**Host comparison of a sealed retry.** The Host compares two sealed
+submissions of one identity by their comparison projection: the plaintext
+fields, plus `v`, `suite`, `category`, `scope`, `paddedLength` and
+`contentMac` of `sealed`. The salt, the nonce, the ciphertext, the
+`ciphertextRef`, `chainHead` and `sender` do not count. An equal projection
+is a duplicate, and the first ciphertext stays. A different projection fails
+with `coordination_input_invalid`. For an offer, the identity is the task id.
+For `task.steer_sealed`, it is the task id and the `steerId`: one `steerId`
+names one steer row in the mailbox. A sender still seals once and retries
+with the same bytes. The projection keeps a retry safe when it did not.
+The Host check holds while the mailbox keeps the row. Mailbox retention
+deletes an acknowledged row, also while its task runs. A later retry under
+the same `steerId` then appends a new row, and the Host does not see a
+conflict. So the device keeps the `steerId`s it has opened for each active
+task, and drops a steer whose `steerId` it has seen (decision 12a).
+
 `paddedLength` is the one legal padded length of the content: the next
 multiple of 256 bytes up to 16 KiB, Padmé above. The plaintext limit is 2 MiB
 of canonical JSON for each v1 category, so `paddedLength` is at most

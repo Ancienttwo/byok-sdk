@@ -74,6 +74,8 @@ CREATE TABLE IF NOT EXISTS intent (
   ordinal        bigint  NOT NULL CHECK (ordinal >= 0),
   -- K4 agentKey(scope, execution): one FIFO for each scope, device and Agent.
   agent          text    NOT NULL,
+  -- K4 IntentInput.source, part of the intent identity. A routine occurrence is not an H intent before D2f.
+  source         text    NOT NULL CHECK (source IN ('user', 'bot')),
   -- The frozen AgentExecutionInput.
   input          json    NOT NULL,
   wait_until     bigint  NOT NULL CHECK (wait_until >= 0),
