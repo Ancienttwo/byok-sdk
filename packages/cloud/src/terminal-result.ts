@@ -11,6 +11,7 @@ import {
   type TaskDeclinePayload,
 } from '@byok-sdk/protocol';
 import { ByokCloudError } from './errors';
+import { assertTaskContentPresent } from './task-redaction';
 import type { RequestReceipt } from './stores/ports';
 
 /** Canonical device evidence, independent of the Host cancellation projection. */
@@ -20,6 +21,7 @@ export interface DeviceTerminal {
 }
 
 export function readDeviceTerminalReceipt(taskId: string, receipt: RequestReceipt): DeviceTerminal {
+  assertTaskContentPresent(taskId, receipt.body);
   const envelope = decodeEnvelope(receipt.body);
   if (envelope.task_id !== taskId ||
       (envelope.type !== 'task.complete' && envelope.type !== 'task.fail' &&
@@ -109,6 +111,7 @@ export interface TerminalResult {
  * error, never a best-effort shape.
  */
 export function projectTerminalResult(taskId: string, receipt: RequestReceipt): TerminalResult {
+  assertTaskContentPresent(taskId, receipt.body);
   let envelope: Envelope;
   try {
     envelope = decodeEnvelope(receipt.body);
