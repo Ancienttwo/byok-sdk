@@ -38,7 +38,7 @@ test('only the exact helper pin LF attribute addition selects client and release
   writeFileSync(join(cwd, '.gitattributes'), before + rule);
   const plan = selectImpact(['.gitattributes'], context);
   assert.ok(plan.dirs.includes('packages/client'));
-  for (const id of ['agent-memory-helper', 'agent-memory-helper-linux', 'npm-release-pack']) {
+  for (const id of ['agent-memory-helper', 'agent-memory-helper-non-darwin', 'npm-release-pack']) {
     assert.ok(plan.families.includes(id), id);
   }
   for (const after of [before + '* text eol=lf\n', before + rule + '*.ts -text\n',

@@ -152,7 +152,7 @@ export const workspaceGraph = {
 };
 
 export const knownFamilies = Object.freeze([
-  'build-test', 'agent-memory-export-linux', 'agent-memory-helper-linux', 'agent-memory-helper',
+  'build-test', 'agent-memory-export-linux', 'agent-memory-helper-non-darwin', 'agent-memory-helper',
   'execution-recovery-native', 'adapter-lifecycle-smoke', 'dataplane',
   'windows-git-workspace', 'packageability-smoke', 'npm-release-pack',
   'release-pack-migrate', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
@@ -173,7 +173,7 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/daemon\/agent-memory-(?:export|filesystem|fs-helper)\.ts$/,
     /^packages\/client\/src\/__tests__\/agent-memory-export[^/]*$/,
   ],
-  'agent-memory-helper-linux': [
+  'agent-memory-helper-non-darwin': [
     /^packages\/client\/native\/agent-memory-fs\//,
     /^packages\/client\/scripts\/[a-z-]*agent-memory-helper[a-z-]*\.mjs$/,
     /^scripts\/release\/agent-memory-helper-source\.test\.mjs$/,
@@ -314,7 +314,7 @@ export function selectImpact(paths, context = {}) {
     if (path === '.gitattributes') {
       verifyReviewedContent(path, context);
       dirs.add('packages/client');
-      for (const id of ['npm-release-pack', 'agent-memory-helper', 'agent-memory-helper-linux']) families.add(id);
+      for (const id of ['npm-release-pack', 'agent-memory-helper', 'agent-memory-helper-non-darwin']) families.add(id);
       continue;
     }
     // #702: the Node pin is the runtime of every platform job, so a reviewed
