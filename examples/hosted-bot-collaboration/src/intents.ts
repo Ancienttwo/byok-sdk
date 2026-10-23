@@ -6,6 +6,7 @@ import type { SyncFacts, SyncStep } from '@byok-sdk/example-bot-collaboration/ru
 import { activeBinding, DeviceBindingError } from './binding';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';
 import { storedKey } from './layout';
+import { retiredTurns } from './retention';
 import { inSchema, lockScope } from './store';
 
 /** What a Turn freezes: the `freeze` step input of the sync rule. `key` is the Turn id. */
@@ -48,7 +49,7 @@ export async function frozenIntent(client: PoolClient, scope: string, task: stri
 type IntentFact = NonNullable<ReturnType<SyncFacts['intent']>>;
 /**
  * The sync rule facts of these Turns, read in the sync transaction. `started` is the reconciliation's attempt fact
- * (D2d). H retires no Turn id before D2g.
+ * (D2d). `retired` reads the Turn tombstones of retention (D2g).
  */
 export async function syncFacts(client: PoolClient, scope: string, turnIds: readonly string[]): Promise<SyncFacts> {
   const found = await client.query<{ key: string; task_id: string; conclusion: IntentFact['conclusion'] | null;
@@ -58,7 +59,10 @@ export async function syncFacts(client: PoolClient, scope: string, turnIds: read
   const facts = new Map(found.rows.map(row => [row.key, { taskId: row.task_id, ...(row.conclusion ? { conclusion: row.conclusion } : {}),
     ...(row.cancel_reason ? { cancelReason: row.cancel_reason } : {}) } satisfies IntentFact]));
   const started = new Set(found.rows.filter(row => row.started).map(row => row.key));
-  return { intent: turnId => facts.get(storedKey(turnId)), executionStarted: turnId => started.has(storedKey(turnId)), retired: () => undefined };
+  // H keeps every intent row, so no intent result is retired before it is seen. Retention retires Turn ids (#793 D2g).
+  const retired = await retiredTurns(client, storedKey(scope), turnIds);
+  return { intent: turnId => facts.get(storedKey(turnId)), executionStarted: turnId => started.has(storedKey(turnId)),
+    retired: turnId => retired.has(turnId) ? 'turn_retired' : undefined };
 }
 
 /** Writes the intent side of one sync step, as L writes it to K4. The caller holds the scope lock. */

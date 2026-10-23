@@ -4,8 +4,8 @@ Private reference example for #793 (#606 D2). It is the hosted (H) adapter of th
 commit contract (`examples/bot-collaboration`, #739 D1), on Node and Postgres.
 
 Status: the commit store, the intent submitter (D2b-1), the sync step (D2b-2), the message consumer (D2c), result
-reconciliation (D2d) and the device binding (D2e). The command entry, the routine scheduler and retention come in later
-slices of #793.
+reconciliation (D2d), the device binding (D2e) and retention (D2g). The command entry and the routine scheduler come in
+later slices of #793.
 Do not use this example as a deployed Host yet.
 
 ## Commit store
@@ -60,6 +60,8 @@ schema. The SDK tables stay under the SDK migrations. This example never writes 
 | `outbox` | projection or delivery that a commit wrote |
 | `intent` | Turn intent: the frozen SDK input, the stable task id, the FIFO order, the submit state and the SDK result read back |
 | `device_binding` | device of a scope: its mode (`L` or `H`), its mode revision and its revoke time |
+| `retired_identity` | K8 identity that retention retired for good: `hash([namespace, id])` |
+| `archived_row` | row that retention moved out of the state, by namespace and id; a command record has an expiry |
 
 Each scope and each key is stored as `JSON.stringify(value)`, so two values that UTF-8 would merge stay
 apart, and a NUL is safe. Each body is `json` text, so the stored bytes keep their key order. `ordinal`
@@ -69,8 +71,8 @@ keeps the insertion order of each kind.
 
 - A commit loads every row of its scope, except the command records: it loads only the one record that
   it can replay. Retention, after #798, bounds the scope rows.
-- When a list gets shorter, the positions of its later elements are renumbered. No K8 list gets shorter
-  today. Retention needs a base offset, so that positions never change.
+- When a list gets shorter, the positions of its later elements are renumbered. Retention shortens the
+  `rejected`, `audit` and `homeOperations` lists, so their positions change; their content and order stay.
 - The `kind` CHECK lists come from the layout at the first `migrate()`. `CREATE TABLE IF NOT EXISTS`
   keeps the old CHECK, so a new kind needs an explicit `ALTER` in a later migration.
 - One commit must not delete a map key and add it back. The store keeps the old ordinal, but a JavaScript
@@ -160,6 +162,24 @@ mode revision in one write, and keeps the row as the tombstone.
   under its own identity. A revoke does not cancel the open intents of the device.
 - The command entry and the routine scheduler take the same check when they are built.
 
+## Retention
+
+`HostedCollaborationStore.retain(scope, input, limits)` runs K8 `retainRoots` (#798) in one transaction under the
+scope lock, as L `retainInLedger` does. The acknowledged roots move into `archived_row`, their Turn, input, round and
+root ids are retired in `retired_identity`, and every moved command record answers replays until it expires
+(`retentionMs`, at least seven days). A refusal or a throw writes nothing.
+
+- The rule is synchronous, so the store loads what it can read first: the expired command records, the root tombstones
+  of the acknowledged roots and of the records' roots, and the intent rows. A read outside that set throws.
+- A moved command record leaves the `command` table in the same transaction. Only command records expire.
+- The commit, the message consumer and the terminal transaction read a moved record by its id for a replay, and refuse
+  a retired id at admission, as L `commitInLedger` does. The sync fails a Turn whose id was retired (`turn_retired`).
+- An accepted Agent message stays accepted for an exact replay after retention. The consumer checks the task's reply
+  in the state or in `archived_row`, where retention keeps it with no expiry, as K4 keeps its receipt. A refused message
+  replays from its moved record until the record expires, as in L.
+- H keeps every intent row, settled or not. Intent row compaction, and its permanent intent tombstones, is later work.
+- The namespace and id of each archived row are checked against the K4 limits (128 and 1024 characters).
+
 ## Tests
 
 ```sh
@@ -177,6 +197,7 @@ three and runs these suites.
 - The D2b sync vectors run on the store.
 - The message consumer tests port the K4 Host-side message vectors (`host-execution-core/src/message.test.ts`).
 - The device binding tests use an SDK tenant in memory for the submit checks.
+- The K8 retention vectors (`retentionVectors`) run on the store, with H tests for message replays after retention.
 - The reconciliation tests run a real daemon for the completed outcome, a replayed terminal and a busy decline. The
   busy decline runs on L too (K4 with the sync rule's wait), and both conclude `declined` at generation 0. An SDK
   tenant in memory covers the cancel, expiry, lease and identity cases.

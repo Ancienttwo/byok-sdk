@@ -3,10 +3,10 @@ import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
 import { canonical, FrozenOfferMismatchError, sameFrozenOffer, type Conclusion, type FrozenInput, type FrozenSubmitPort,
   type Json } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
-import { commitCommand } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { revisionOf, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';
 import { syncFacts } from './intents';
+import { commitStored } from './retention';
 import { storedKey } from './layout';
 import { inSchema, lockScope, type Decision, type HostedCollaborationStore, type PortsFactory, type Publish } from './store';
 
@@ -200,9 +200,9 @@ export async function decideFinish(client: PoolClient, scope: string, turnId: st
     // The intent rows before this row concludes, as L reads its ledger before the terminal transaction writes.
     const committed = await syncFacts(client, scope, Object.keys(state.turns));
     const base = ports(state, publish), head = revisionOf(state);
-    const result = commitCommand(state, { scope, commandId: row.task_id,
+    const result = await commitStored(client, scope, state, { scope, commandId: row.task_id,
       command: { kind: 'outcome', turnId, taskId: row.task_id, document: envelope.payload.document as Json } },
-    { scope, recordCallbacks: true }, { ...base, ...(base.outcome ? { outcome: { ...base.outcome, committed } } : {}) });
+    { ...base, ...(base.outcome ? { outcome: { ...base.outcome, committed } } : {}) });
     outbox = result.revision === head + 1 ? result.outbox : [];
     conclusion = 'succeeded';
   } else conclusion = envelope.type === 'task.decline' ? 'declined' : 'failed';

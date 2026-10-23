@@ -122,4 +122,21 @@ CREATE TABLE IF NOT EXISTS device_binding (
   PRIMARY KEY (scope, device),
   UNIQUE (scope, ordinal)
 );
+-- Permanent K8 row tombstones (K4 kind 'row'). They never expire.
+CREATE TABLE IF NOT EXISTS retired_identity (
+  scope     text NOT NULL REFERENCES scope (scope),
+  -- K4 hash([namespace, id]).
+  identity  text NOT NULL,
+  PRIMARY KEY (scope, identity)
+);
+CREATE TABLE IF NOT EXISTS archived_row (
+  scope       text   NOT NULL REFERENCES scope (scope),
+  namespace   text   NOT NULL,
+  -- JSON.stringify(row id). Code checks the K4 namespace and id limits (K4 ledger.ts:52-58) on the raw values.
+  id          text   NOT NULL,
+  body        json   NOT NULL,
+  expires_at  bigint CHECK (expires_at >= 0),
+  PRIMARY KEY (scope, namespace, id)
+);
+CREATE INDEX IF NOT EXISTS archived_row_expiry ON archived_row (scope, namespace, expires_at) WHERE expires_at IS NOT NULL;
 `;
