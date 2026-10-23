@@ -1,6 +1,7 @@
 import type { MemoryState } from './memory';
 import { createHash } from 'node:crypto';
 import type { AgentExecutionInput, ByokServer, WakeScheduleInput } from '@byok-sdk/server';
+import { HarnessIdSchema, RuntimeIdSchema } from '@byok-sdk/protocol';
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 export type ExecutionTemplate = Omit<AgentExecutionInput, 'taskId'>;
@@ -132,8 +133,12 @@ export function validateInput(input: IntentInput): void {
   if (!input.key.trim() || !['user', 'bot', 'routine'].includes(input.source)) throw new Error('Invalid intent identity');
   time(input.waitUntil);
   const { execution } = input;
+  const { runtime, harnessId } = execution.payload;
+  const validIdentity = runtime !== undefined
+    ? harnessId === undefined && RuntimeIdSchema.safeParse(runtime).success
+    : HarnessIdSchema.safeParse(harnessId).success;
   if (!execution.deviceId || !execution.payload.agentRef?.agentId || !execution.payload.agentRef.profileRevision
-    || !execution.payload.runtime || !execution.payload.egressPolicy || !execution.payload.terminalProjection
+    || !validIdentity || !execution.payload.egressPolicy || !execution.payload.terminalProjection
     || 'sessionRef' in execution.payload || 'taskId' in execution) throw new Error('Supply a complete fresh execution template');
   validateRetry(input.retry ?? DEFAULT_RETRY);
 }
