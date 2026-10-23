@@ -5,6 +5,7 @@ import type { CollaborationState } from './model';
 import { outcomeSchema } from './schema';
 import { CommitConflict, type CommitRequest, type CommitResult } from './rules/commit';
 import type { Command } from './rules/commands';
+import { TeamModeError, type TeamSnapshotBot } from './rules/team';
 
 /**
  * #739 D1 commit contract vectors. Each store runs the same cases: the K8 L ledger now, and the H adapter in D2.
@@ -19,8 +20,12 @@ export interface CommitSubject {
   state(): CollaborationState;
 }
 export const VECTOR_NOW = 1000;
-/** One active Main Bot `main`, its processing Turn `t1` with a frozen schema, an open question `q1` and an expired card `c1`. */
-export function seedCollaboration(state: CollaborationState): void {
+/**
+ * One active Main Bot `main`, its processing Turn `t1` with a frozen schema, an open question `q1` and an expired card `c1`.
+ * `external`: the team authority owns the Bots, and its team revision 1 holds `main`.
+ */
+export type SeedTeam = 'local' | 'external';
+export function seedCollaboration(state: CollaborationState, team: SeedTeam = 'local'): void {
   state.team.bots.main = { id: 'main', name: 'Main', role: 'Team owner', persona: '', model: 'default', mainBot: true, archived: false,
     revision: '1', readyRevision: '1', execution: template('device', 'main') };
   state.turns.t1 = { id: 't1', root: 't1', botId: 'main', source: 'user', request: 'Work', hop: 0, status: 'processing', authority: 'owner' };
@@ -28,10 +33,11 @@ export function seedCollaboration(state: CollaborationState): void {
   state.schemas.t1 = outcomeSchema('main', state, state.turns.t1);
   state.questions.q1 = { id: 'q1', turnId: 't1', value: { question: 'Go?', answerKind: 'text' } };
   state.cards.c1 = { id: 'c1', turnId: 't1', action: { action: 'send_message', summary: 'Send', draft: { text: 'hi' } }, state: 'pending', expiresAt: 0 };
+  if (team === 'external') state.team.external = { revision: 1 };
 }
 const input = (key: string, request = 'Hello'): Extract<Command, { kind: 'input' }> => ({ kind: 'input', botId: 'main', key, request, sender: 'owner' });
 
-export function commitVectors(name: string, open: () => CommitSubject): void {
+export function commitVectors(name: string, open: (team?: SeedTeam) => CommitSubject): void {
   describe(`commit contract: ${name}`, () => {
     const request = (subject: CommitSubject, commandId: string, command: Command, expectedRevision?: number): CommitRequest<Command> =>
       ({ scope: subject.scope, commandId, command, ...(expectedRevision === undefined ? {} : { expectedRevision }) });
@@ -119,6 +125,65 @@ export function commitVectors(name: string, open: () => CommitSubject): void {
         expect(subject.commit(request(subject, id, input(`k${index}`)))).toEqual(first);
         expect(subject.stored()).toBe(stored);
       }
+    });
+
+    const main = { id: 'main', name: 'Main', role: 'Team owner', mainBot: true };
+    const team = (revision: number, ...bots: Array<Partial<TeamSnapshotBot> & { id: string }>): [string, Command] => [hash(['team', revision]),
+      { kind: 'team_snapshot', snapshot: { revision, bots: bots.map(bot => ({ name: bot.id, role: 'Helper', persona: '', model: 'default', mainBot: false, ...bot })) } }];
+    const teamError = (work: () => unknown) => {
+      try { work(); } catch (cause) { return cause instanceof TeamModeError ? cause.code : cause; }
+      return 'no error';
+    };
+
+    it('applies a newer team snapshot: archives a missing Bot, adds a new one and queues a projection for a changed one (#739 Q4c)', () => {
+      const subject = open('external');
+      subject.commit(request(subject, ...team(2, main, { id: 'b2' })));
+      expect(subject.commit(request(subject, ...team(3, { ...main, persona: 'New' })))).toEqual({ revision: 2, disposition: { outcome: 'accepted' }, outbox: [] });
+      const state = subject.state();
+      expect(state.team.external).toEqual({ revision: 3 });
+      expect(state.team.bots.b2).toMatchObject({ archived: true, mainBot: false, revision: '1', readyRevision: null });
+      expect(state.team.bots.main).toMatchObject({ archived: false, mainBot: true, persona: 'New', revision: '2', readyRevision: null });
+      expect(state.team.homeOperations.map(op => [op.botId, op.request.payload.agentRef.profileRevision])).toEqual([['b2', '1'], ['main', '2']]);
+    });
+
+    it('replays a team revision with the same Bots in any order, and refuses other Bots for it', () => {
+      const subject = open('external'), first = subject.commit(request(subject, ...team(2, main, { id: 'b2' })));
+      const stored = subject.stored();
+      expect(subject.commit(request(subject, ...team(2, { id: 'b2' }, main)))).toEqual(first);
+      expect(subject.stored()).toBe(stored);
+      conflict(subject, request(subject, ...team(2, main)), 'identity_conflict', 'Team snapshot identity conflict');
+    });
+
+    it('refuses a team revision that is not newer with stale_team, after a replay check', () => {
+      const subject = open('external'), applied = subject.commit(request(subject, ...team(2, main)));
+      subject.commit(request(subject, ...team(4, main)));
+      // A replay comes first: an exact retry of the applied revision 2 gets its first result.
+      expect(subject.commit(request(subject, ...team(2, main)))).toEqual(applied);
+      expect(subject.commit(request(subject, ...team(3, main)))).toEqual({ revision: 3,
+        disposition: { outcome: 'refused', reasonCode: 'stale_team', reason: 'stale_team: team revision 3 is not newer than 4' }, outbox: [] });
+      // The seed holds revision 1 with no command record.
+      expect(subject.commit(request(subject, ...team(1, main))).disposition).toMatchObject({ reasonCode: 'stale_team' });
+      expect(subject.state().team.external).toEqual({ revision: 4 });
+    });
+
+    it('changes nothing for an invalid team snapshot, a returning archived Bot or setMainBot in external mode', () => {
+      const subject = open('external'), before = subject.stored();
+      expect(() => subject.commit(request(subject, ...team(2, main, main)))).toThrow('Duplicate team snapshot Bot');
+      for (const id of ['__proto__', 'constructor']) expect(() => subject.commit(request(subject, ...team(2, main, { id })))).toThrow('Invalid team snapshot Bot id');
+      expect(() => subject.commit(request(subject, ...team(2, { ...main, model: 'absent' })))).toThrow('Unavailable model');
+      expect(teamError(() => subject.commit(request(subject, 'm1', { kind: 'set_main_bot', botId: 'main', mainBot: false })))).toBe('external_team');
+      expect(subject.stored()).toBe(before);
+      subject.commit(request(subject, ...team(2, main, { id: 'b2' })));
+      subject.commit(request(subject, ...team(3, main)));
+      const archived = subject.stored();
+      expect(() => subject.commit(request(subject, ...team(4, main, { id: 'b2' })))).toThrow('An archived Bot cannot return');
+      expect(subject.stored()).toBe(archived);
+    });
+
+    it('refuses a team snapshot for a local team', () => {
+      const subject = open(), before = subject.stored();
+      expect(() => subject.commit(request(subject, ...team(1, main)))).toThrow('Team snapshots need the external team mode');
+      expect(subject.stored()).toBe(before);
     });
 
     it('returns the outbox rows that the commit wrote', () => {

@@ -1,7 +1,7 @@
 import type { RoomFields } from '@byok-sdk/protocol';
 import { hash } from '@byok-sdk/example-host-execution-core';
 import { addBatchTurns, addTurn, json, type Json, type Turn } from './turn';
-import { activeBot } from './team';
+import { activeBot, archiveBot, refuseExternalTeam, teamSnapshot, type ExternalTeam, type TeamSnapshot, type TeamSnapshotBot } from './team';
 import { roomInput, updateRoom, type Mentions } from './rooms';
 import { sealBatchForCancel, type InputFields } from './coalesce';
 import { abandonDelegation, arbitrateCancel, type IntentFacts, type Publish } from './delegation';
@@ -28,7 +28,9 @@ export type KeyedCommand =
   /** K4 callback: the first acceptance of an Agent message. */
   | { kind: 'message'; turnId: string; message: MessageFields }
   /** K4 callback: the Bot routine occurrence hook. */
-  | { kind: 'occurrence'; key: string };
+  | { kind: 'occurrence'; key: string }
+  /** External team mode (#739 Q4c): the authority's team snapshot. The command id comes from its team revision. */
+  | { kind: 'team_snapshot'; snapshot: TeamSnapshot };
 /** The same shape as the channel `Conversation`. */
 export interface Conversation { kind: 'direct' | 'group'; id: string }
 /**
@@ -50,7 +52,8 @@ export type Command = KeyedCommand | KeylessCommand;
 /** The Bot and home rows that the team commands read and change. */
 interface TeamRows {
   team: {
-    bots: Readonly<Record<string, { mainBot: boolean; readonly revision: string; readonly persona: string }>>;
+    external?: ExternalTeam;
+    bots: Readonly<Record<string, { mainBot: boolean; archived: boolean; readonly revision: string; readonly persona: string }>>;
     homeOperations: ReadonlyArray<{ readonly botId: string; readonly status: string;
       readonly request: { readonly payload: { readonly agentRef: { readonly profileRevision: string } } } }>;
   };
@@ -73,6 +76,8 @@ export interface CommandPorts {
   intents?: Pick<IntentFacts, 'intent'>;
   /** Advances the desired persona revision of a Bot with the Host models and toolset policy. */
   updatePersona?(botId: string, persona: string): void;
+  /** Writes one snapshot Bot's profile with the Host template, and queues its persona projection when the profile changed. */
+  teamBot?(bot: TeamSnapshotBot): void;
   /** The channel route rows. Each function returns the id of the row that it wrote. */
   routes?: {
     enable(conversation: Conversation, channel: string, target: string, owner: string): string;
@@ -105,6 +110,7 @@ export function commandEvidence(command: KeyedCommand): Json {
     case 'message': return { kind: command.kind, taskId: command.message.taskId, messageId: command.message.payload.messageId,
       contentHash: command.message.payload.contentHash };
     case 'occurrence': return { kind: command.kind, key: command.key };
+    case 'team_snapshot': return { kind: command.kind, snapshot: json(teamSnapshot(command.snapshot)) };
   }
 }
 const mentionsJson = (value: Mentions): Json => value === 'all' ? 'all' : Array.isArray(value) ? [...value] : null;
@@ -122,6 +128,7 @@ function conflictMessage(state: CommandState, command: KeyedCommand): string {
     case 'outcome': return 'Outcome identity conflict';
     case 'message': return 'message_conflict';
     case 'occurrence': return 'Occurrence identity conflict';
+    case 'team_snapshot': return 'Team snapshot identity conflict';
   }
 }
 function need<T>(port: T | undefined, kind: string): T {
@@ -188,7 +195,9 @@ export function decideCommand(state: CommandState, command: Command, ports: Comm
     case 'occurrence':
       need(ports.occurrence, command.kind)();
       return accepted();
+    case 'team_snapshot': return applyTeamSnapshot(state, teamSnapshot(command.snapshot), ports);
     case 'set_main_bot':
+      refuseExternalTeam(state.team, 'setMainBot');
       activeBot(state.team, command.botId).mainBot = command.mainBot;
       return accepted();
     case 'update_room':
@@ -233,6 +242,29 @@ export function decideCommand(state: CommandState, command: Command, ports: Comm
     }
     case 'cancel_turn': return cancelTurn(state, command.turnId, ports, publish);
   }
+}
+/**
+ * T2–T5: a newer snapshot archives each missing Bot, then writes each listed Bot and its Main Bot flag.
+ * A snapshot that is not newer is refused with `stale_team`. A replay of an applied snapshot never gets here.
+ */
+function applyTeamSnapshot(state: CommandState, snapshot: TeamSnapshot, ports: CommandPorts): Disposition {
+  const team = state.team, external = team.external;
+  if (!external) throw new Error('Team snapshots need the external team mode');
+  if (snapshot.revision <= external.revision) {
+    return { outcome: 'refused', reasonCode: 'stale_team', reason: `stale_team: team revision ${snapshot.revision} is not newer than ${external.revision}` };
+  }
+  // An archive is permanent, as for delete_bot. Check before any change.
+  if (snapshot.bots.some(bot => team.bots[bot.id]?.archived)) throw new Error('An archived Bot cannot return');
+  const listed = new Set(snapshot.bots.map(bot => bot.id));
+  for (const bot of Object.values(team.bots)) if (!bot.archived && !listed.has(bot.id)) archiveBot(team, bot.id);
+  const write = need(ports.teamBot, 'team_snapshot');
+  for (const bot of snapshot.bots) {
+    write(bot);
+    // The flag is not in the persona projection, so it changes no profile revision.
+    activeBot(team, bot.id).mainBot = bot.mainBot;
+  }
+  external.revision = snapshot.revision;
+  return accepted();
 }
 /**
  * `deliver`: the chain path committed a cancel fact for the Host to deliver.

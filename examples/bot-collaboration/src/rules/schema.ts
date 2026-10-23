@@ -19,6 +19,8 @@ export interface ContextState extends DelegationView {
   team: Pick<RoomsState, 'rooms' | 'rounds' | 'seats'> & {
     bots: Readonly<Record<string, ContextBot>>; notes: Array<{ id: string; text: string }>;
     homeOperations: ReadonlyArray<{ readonly botId: string; readonly status: string }>;
+    /** External team mode: the team authority owns the Bots (#739 Q4c). */
+    readonly external?: { readonly revision: number };
   };
 }
 /** The routine fields that the schema reads. The ContextPack copies the whole view. */
@@ -82,8 +84,11 @@ export function outcomeSchema(botId: string, state: ContextState, turn?: Turn, m
       const botIds = Object.values(state.team.bots).filter(b => !b.archived).map(b => b.id) as unknown as NonEmptyIds;
       const memberIds = [...botIds, ...NEW_BOTS] as unknown as NonEmptyIds;
       Object.assign(fragments, {
-        create_bot: f.createBot({ localIds: NEW_BOTS, models: models as unknown as NonEmptyIds }),
-        update_bot: f.updateBot({ botIds, models: models as unknown as NonEmptyIds }), delete_bot: f.deleteBot({ botIds }),
+        // T3: in external team mode, the authority owns the Bots, so these three actions are not offered.
+        ...(state.team.external ? {} : {
+          create_bot: f.createBot({ localIds: NEW_BOTS, models: models as unknown as NonEmptyIds }),
+          update_bot: f.updateBot({ botIds, models: models as unknown as NonEmptyIds }), delete_bot: f.deleteBot({ botIds }),
+        }),
         create_room: f.createRoom({ localIds: NEW_ROOMS, members: memberIds }), team_note: f.teamNote(),
         ...(Object.keys(state.team.rooms).length ? { update_room: f.updateRoom({ roomIds: Object.keys(state.team.rooms) as unknown as NonEmptyIds, members: memberIds }) } : {}),
         ...(open.length ? { cancel_delegation: f.cancelDelegation({ delegationIds: open as unknown as NonEmptyIds }) } : {}),

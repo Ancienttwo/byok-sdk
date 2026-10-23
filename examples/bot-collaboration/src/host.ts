@@ -19,7 +19,8 @@ import { CommitConflict, commitInLedger, type CommitResult } from './commit';
 import { BOT_ROUTINE, botRoutines, concludeRoutineTurn, createDefinition, owned, routineCalendar, routineOccurrence, routineTurn,
   updateDefinition } from './routines';
 
-import { applyManagement, updateBot } from './team';
+import { applyManagement, updateBot, writeSnapshotBot } from './team';
+import { teamSnapshot, TeamModeError, type TeamSnapshot } from './rules/team';
 import { advanceRooms, type Mentions } from './rooms';
 import type { RoomFields } from '@byok-sdk/protocol';
 
@@ -70,6 +71,13 @@ export interface BotOptions {
    * A read that throws or returns another shape leaves the Turn queued, and the timer tries again.
    */
   history?: (input: { botId: string; turnId: string }) => Promise<readonly ContextTurn[]>;
+  /**
+   * External team authority (#739 Q4c). Absent: this Host creates the Main Bot and owns its local team.
+   * `external`: the constructor creates no Bot. `applyTeam` writes the authority's Bot snapshots, and
+   * `setMainBot`, `create_bot`, `update_bot` and `delete_bot` refuse with `external_team`. The mode is stored
+   * in the ledger, so a ledger cannot change its mode at a restart.
+   */
+  team?: 'external';
 }
 /** Phase 1 of a history-mode sync: the injected rows of each Turn that can freeze its offer next. */
 type InjectedHistory = ReadonlyMap<string, { rows: ContextTurn[]; digest: string }>;
@@ -117,9 +125,13 @@ export class BotCollaboration {
       readOnlyToolsets: ownReadOnlyToolsets(options.readOnlyToolsets) };
     admitBotToolsets(options.execution, options.readOnlyToolsets);
     for (const model of Object.values(this.models())) admitBotToolsets(model, options.readOnlyToolsets);
-    const persisted = ledger.snapshot();
+    const persisted = ledger.snapshot(), team = stateOf(persisted.application).team;
+    // The team mode is stored in the ledger. A restart cannot change it.
+    if (options.team === 'external' ? !team.external && Object.keys(team.bots).length : team.external) {
+      throw new Error(`This ledger has ${team.external ? 'an external' : 'a local'} team`);
+    }
     // An archived Bot never runs a new Turn, so its stored template is not "current".
-    for (const bot of Object.values(stateOf(persisted.application).team.bots)) if (!bot.archived) admitBotToolsets(bot.execution, options.readOnlyToolsets);
+    for (const bot of Object.values(team.bots)) if (!bot.archived) admitBotToolsets(bot.execution, options.readOnlyToolsets);
     // Recovery can resubmit a frozen older generation after the Bot changes models.
     // Historical settled executions remain readable; only outstanding work must be admitted.
     for (const intent of Object.values(persisted.intents)) {
@@ -156,6 +168,10 @@ export class BotCollaboration {
     ledger.transaction(s => {
       const state = stateOf(s.application);
       promoteReplyReceipts(ledger, s, state, this.now());
+      if (options.team === 'external') {
+        state.team.external ??= { revision: 0 };
+        return;
+      }
       state.team.bots[options.botId] ??= { id: options.botId, name: 'Main Bot', role: 'Team owner', persona: '',
         model: Object.keys(this.models())[0]!, mainBot: true, archived: false,
         revision: options.execution.payload.agentRef.profileRevision, readyRevision: options.execution.payload.agentRef.profileRevision,
@@ -363,6 +379,20 @@ export class BotCollaboration {
     await this.exclusive(async () => {
       this.commitKeyless({ kind: 'retry_persona', botId });
       await this.process();
+    });
+  }
+  /**
+   * External team mode (#739 Q4c): apply the authority's team snapshot. The command id is its team revision,
+   * so the same revision with the same Bots replays, and other Bots are an identity conflict. A revision that
+   * is not newer, and not applied before, refuses with `stale_team` after the process pass.
+   */
+  async applyTeam(snapshot: TeamSnapshot): Promise<void> {
+    await this.exclusive(async () => {
+      const valid = teamSnapshot(snapshot);
+      const { disposition } = this.commitOwner(hash(['team', valid.revision]), { kind: 'team_snapshot', snapshot: valid },
+        (_s, state) => ({ teamBot: row => writeSnapshotBot(state, row, this.models(), this.options.readOnlyToolsets) }));
+      await this.process();
+      if (disposition.outcome === 'refused') throw new TeamModeError('stale_team', disposition.reason ?? 'stale_team');
     });
   }
   async setMainBot(botId: string, mainBot: boolean): Promise<void> {

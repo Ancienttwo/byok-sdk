@@ -6,7 +6,7 @@ import type { BotProfile, Room } from './team-model';
 import { roomFields, roomVisibility } from './rules/rooms';
 
 import { NEW_BOTS, NEW_ROOMS } from './rules/schema';
-import { activeBot, requireMain } from './rules/team';
+import { activeBot, archiveBot, refuseExternalTeam, requireMain, TEAM_BOT_LIMIT, type TeamSnapshotBot } from './rules/team';
 
 export { activeBot, NEW_BOTS, NEW_ROOMS, requireMain, roomFields };
 export const TEAM_NOTE_LIMIT = 20;
@@ -24,7 +24,7 @@ function projection(state: CollaborationState, bot: BotProfile): void {
 }
 export function createBot(state: CollaborationState, taskId: string, action: CreateBotAction, models: Record<string, ExecutionTemplate>, readOnlyToolsets: readonly string[] = []): BotProfile {
   if (!NEW_BOTS.includes(action.localId as typeof NEW_BOTS[number])) throw new Error('Unknown local Bot slot');
-  if (Object.values(state.team.bots).filter(b => !b.archived).length >= 24) throw new Error('Team Bot limit is 24');
+  if (Object.values(state.team.bots).filter(b => !b.archived).length >= TEAM_BOT_LIMIT) throw new Error(`Team Bot limit is ${TEAM_BOT_LIMIT}`);
   const base = models[action.model];
   if (!base) throw new Error('Unavailable model');
   admitBotToolsets(base, readOnlyToolsets);
@@ -54,20 +54,37 @@ export function updateBot(state: CollaborationState, action: UpdateBotAction, mo
     model, revision, readyRevision: null, execution });
   projection(state, bot);
 }
+/**
+ * The `teamBot` port of a team snapshot (#739 Q4c). A new Bot gets the snapshot id and its first projection.
+ * A profile change takes the `update_bot` path, so it queues the same persona projection (T4).
+ */
+export function writeSnapshotBot(state: CollaborationState, row: TeamSnapshotBot, models: Record<string, ExecutionTemplate>, readOnlyToolsets: readonly string[] = []): void {
+  const bot = state.team.bots[row.id];
+  if (bot) {
+    if (bot.name !== row.name || bot.role !== row.role || bot.persona !== row.persona || bot.model !== row.model) {
+      updateBot(state, { botId: row.id, name: row.name, role: row.role, persona: row.persona, model: row.model }, models, readOnlyToolsets);
+    }
+    return;
+  }
+  const base = models[row.model];
+  if (!base) throw new Error('Unavailable model');
+  admitBotToolsets(base, readOnlyToolsets);
+  const execution = structuredClone(base);
+  execution.payload.agentRef = { agentId: row.id, profileRevision: '1' };
+  const created: BotProfile = { id: row.id, name: row.name, role: row.role, persona: row.persona, model: row.model,
+    mainBot: false, archived: false, revision: '1', readyRevision: null, execution };
+  state.team.bots[row.id] = created;
+  projection(state, created);
+}
 export function applyManagement(state: CollaborationState, actor: string, taskId: string, outcome: BotTurnOutcome,
   models: Record<string, ExecutionTemplate>, accept: (action: string, work: () => void) => void, readOnlyToolsets: readonly string[] = []): void {
   const team = state.team, local: Record<string, string> = {};
   const managed = (kind: string, work: () => void) => accept(kind, () => { requireMain(team, actor); work(); });
-  outcome.create_bot?.forEach(action => managed('create_bot', () => { local[action.localId] = createBot(state, taskId, action, models, readOnlyToolsets).id; }));
-  outcome.update_bot?.forEach(action => managed('update_bot', () => updateBot(state, action, models, readOnlyToolsets)));
-  outcome.delete_bot?.forEach(action => managed('delete_bot', () => {
-    activeBot(team, action.botId).archived = true;
-    for (const room of Object.values(team.rooms)) {
-      room.members = room.members.filter(id => id !== action.botId);
-      if (room.visibleFrom) delete room.visibleFrom[action.botId];
-      if (room.admin === action.botId) delete room.admin;
-    }
-  }));
+  // T3: the team authority owns the Bots. Rooms and team notes stay local.
+  const bots = (kind: string, work: () => void) => managed(kind, () => { refuseExternalTeam(team, kind); work(); });
+  outcome.create_bot?.forEach(action => bots('create_bot', () => { local[action.localId] = createBot(state, taskId, action, models, readOnlyToolsets).id; }));
+  outcome.update_bot?.forEach(action => bots('update_bot', () => updateBot(state, action, models, readOnlyToolsets)));
+  outcome.delete_bot?.forEach(action => bots('delete_bot', () => archiveBot(team, action.botId)));
   const resolve = (fields: Partial<RoomFields>) => ({ ...fields,
     ...(fields.members ? { members: fields.members.map(id => local[id] ?? id) } : {}),
     ...(fields.admin ? { admin: local[fields.admin] ?? fields.admin } : {}),
