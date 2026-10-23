@@ -263,6 +263,55 @@ const E2_FIELDS: readonly { readonly name: string; readonly base: object; readon
   { name: 'verifyMemberChainFromAnchor approverSigningPublicJwk', base: client.signing.publicJwk, fields: ['x', 'y'], receiver: true, call: (i) => verifyMemberChainFromAnchor({ ...anchorInput, approverSigningPublicJwk: i as never }) },
 ];
 
+/**
+ * A subject that passes its first inspection and throws on the next one: the
+ * second `ownKeys` call, and every trap after it, throws. It catches a parse
+ * that checks the caller's object and then reads that object again.
+ */
+function secondInspectionThrows(): object {
+  let inspections = 0;
+  let armed = false;
+  const guard = <T>(read: () => T): T => {
+    if (armed) trap();
+    return read();
+  };
+  return new Proxy({ scopeId: 'scope-1' }, {
+    ownKeys: (target) => {
+      inspections += 1;
+      if (inspections > 1) armed = true;
+      return guard(() => Reflect.ownKeys(target));
+    },
+    get: (target, key) => guard(() => Reflect.get(target, key)),
+    getOwnPropertyDescriptor: (target, key) => guard(() => Reflect.getOwnPropertyDescriptor(target, key)),
+    getPrototypeOf: (target) => guard(() => Reflect.getPrototypeOf(target)),
+    has: (target, key) => guard(() => Reflect.has(target, key)),
+  });
+}
+
+describe('member chain entries whose subject throws on the second inspection', () => {
+  const unsigned = (subject: object): Record<string, unknown> => ({ ...ENTRY, op: 'shred', subject, signer: client.bundle.memberId });
+  const typedCalls: Record<string, (subject: object) => unknown> = {
+    memberChainEntryHash: (subject) => memberChainEntryHash(unsigned(subject) as never),
+    signMemberChainEntry: (subject) => signMemberChainEntry(unsigned(subject) as never, client.signing),
+  };
+  for (const [name, call] of Object.entries(typedCalls)) {
+    it(`${name}: returns or throws a ByokCoreError`, async () => {
+      await expect(outcome(() => call(secondInspectionThrows()))).resolves.toBe('typed');
+    });
+  }
+
+  const receivers: Record<string, (subject: object) => Promise<{ readonly ok: boolean }>> = {
+    verifyMemberChainEntry: (subject) => verifyMemberChainEntry({ ...unsigned(subject), sig: 'A'.repeat(86) }, client.signing.publicJwk),
+    applyMemberChainEntries: (subject) => applyMemberChainEntries(emptyMemberChainState('tenant-1'), [{ ...genesisWith(subject), signer: client.bundle.memberId }]),
+    verifyMemberChainFromAnchor: (subject) => verifyMemberChainFromAnchor({ ...anchorInput, entries: [genesis, { ...addDevice, subject }] }),
+  };
+  for (const [name, call] of Object.entries(receivers)) {
+    it(`${name}: returns a failure and does not throw`, async () => {
+      await expect(call(secondInspectionThrows())).resolves.toMatchObject({ ok: false });
+    });
+  }
+});
+
 describe('E2 member entry points with one hostile field', () => {
   for (const { name, base, fields, receiver, call } of E2_FIELDS) {
     for (const field of fields) {
