@@ -1,7 +1,9 @@
 import type { CollectExpiredInput, CollectExpiredResult } from '@byok-sdk/core';
 import { tenantKey, type TenantId } from '@byok-sdk/core';
+import { SealedTaskOutputSchema } from '@byok-sdk/protocol';
 import { z } from 'zod';
 import { ByokCloudError } from './errors';
+import { sameSealedProjection } from './sealed-comparison';
 
 export const DEFAULT_APPROVAL_TIMELINE_CAPACITY = 50;
 export const DEFAULT_APPROVAL_TIMELINE_TTL_MS = 10 * 60 * 1_000;
@@ -15,6 +17,15 @@ const ApprovalRequestedEventSchema = z
     type: z.literal('approval_requested'),
     summary: z.string(),
     approvalId: NonBlankIdSchema.optional(),
+  })
+  .strict();
+
+/** A `task.await_approval_sealed` request: the summary stays in `sealed` (#654 12e). */
+const SealedApprovalRequestedEventSchema = z
+  .object({
+    type: z.literal('approval_requested'),
+    approvalId: NonBlankIdSchema,
+    sealed: SealedTaskOutputSchema,
   })
   .strict();
 
@@ -58,12 +69,24 @@ const HostRejectResolutionEventSchema = z
 
 export const ApprovalTimelineEventSchema = z.union([
   ApprovalRequestedEventSchema,
+  SealedApprovalRequestedEventSchema,
   LocalApprovalResolutionEventSchema,
   HostApprovalResolutionEventSchema,
   HostRejectResolutionEventSchema,
 ]);
 
 export type ApprovalTimelineEvent = Readonly<z.infer<typeof ApprovalTimelineEventSchema>>;
+
+/**
+ * True when two observations of one source envelope are the same event. A
+ * sealed request compares by its comparison projection, so a retry that
+ * sealed the same summary again is the same request (§9.2).
+ */
+export function sameApprovalTimelineEvent(left: ApprovalTimelineEvent, right: ApprovalTimelineEvent): boolean {
+  return 'sealed' in left && 'sealed' in right
+    ? sameSealedProjection(left, right)
+    : JSON.stringify(left) === JSON.stringify(right);
+}
 
 export const ApprovalObservationSchema = z.object({
   taskId: TaskIdSchema,
@@ -160,7 +183,7 @@ export function validateApprovalTimelineAppend(
     );
   }
   if (
-    parsed.data.event.type === 'approval_requested' &&
+    'summary' in parsed.data.event &&
     new TextEncoder().encode(parsed.data.event.summary).byteLength > APPROVAL_SUMMARY_MAX_BYTES
   ) {
     throw new ByokCloudError(

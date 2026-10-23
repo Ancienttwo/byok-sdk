@@ -3,8 +3,8 @@
 Private reference example for #793 (#606 D2). It is the hosted (H) adapter of the K8 collaboration
 commit contract (`examples/bot-collaboration`, #739 D1), on Node and Postgres.
 
-Status: the commit store, the intent submitter (D2b-1), the sync step (D2b-2) and the message consumer (D2c).
-Result reconciliation, the command entry, the routine scheduler and retention come in later slices of #793.
+Status: the commit store, the intent submitter (D2b-1), the sync step (D2b-2), the message consumer (D2c) and
+result reconciliation (D2d). The command entry, the routine scheduler and retention come in later slices of #793.
 Do not use this example as a deployed Host yet.
 
 ## Commit store
@@ -23,7 +23,8 @@ transaction. The transaction holds the state change, the command record and the 
 
 `freezeIntent` saves one intent for a Turn: its source, the frozen SDK input and the stable task id
 `taskId(turnId, 0)` of K4. The caller holds the scope lock. A second freeze with the same source, input and
-wait changes nothing. Another one throws `Intent identity conflict`, as K4 `enqueue` does.
+wait changes nothing. Another one throws `Intent identity conflict`, as K4 `enqueue` does. A freeze with a K4 `retry` policy throws,
+because H never retries a task (D2d option A) and must not drop the policy.
 
 `HostedSubmitter.run()` takes the due rows and runs the K4 rules on them: the FIFO head (`fifoHeads`), the
 queued expiry (`queuedExpiry`) and the frozen submit (`submitFrozen`).
@@ -56,7 +57,7 @@ schema. The SDK tables stay under the SDK migrations. This example never writes 
 | `entry` | element of a list (audit, rejected, team note, home operation, room message), keyed by position |
 | `command` | command record: the dedup evidence, the first result and the retention root (nullable) |
 | `outbox` | projection or delivery that a commit wrote |
-| `intent` | Turn intent: the frozen SDK input, the stable task id, the FIFO order and the submit state |
+| `intent` | Turn intent: the frozen SDK input, the stable task id, the FIFO order, the submit state and the SDK result read back |
 
 Each scope and each key is stored as `JSON.stringify(value)`, so two values that UTF-8 would merge stay
 apart, and a NUL is safe. Each body is `json` text, so the stored bytes keep their key order. `ordinal`
@@ -85,7 +86,9 @@ SDK call.
 insertion order, in one transaction under the scope lock. It writes each step as L writes it to K4:
 
 - `freeze`: `freezeIntent` stores the rule's intent input as it is.
-- `cancel`: the open intent of an archived Bot gets `cancel_reason = 'cancelled'`.
+- `cancel`: the open intent of an archived Bot gets `cancel_reason = 'cancelled'`. A row that no submit tried also gets
+  the conclusion `cancelled`, as K4 `queuedExpiry` concludes a cancelled queued intent: the submit claim runs under the
+  same lock, so no SDK attempt can exist. A tried row waits for the reconciliation.
 - `ended`: nothing for a Turn that is not a routine Turn.
 - A routine Turn throws, because H has no routine occurrences before D2f.
 
@@ -93,8 +96,8 @@ In history mode, `options.history` maps each Turn id to that Turn's history rows
 an entry does not freeze.
 
 The projections that the rule publishes reach the outbox in the same transaction. A sync writes no command
-record and keeps the revision. A throw writes nothing. H records no execution start before D2d, so the rule
-sees every open intent as not started. H retires no Turn id before D2g.
+record and keeps the revision. A throw writes nothing. The rule's `executionStarted` fact is the intent's `started`
+column, which the reconciliation sets. H retires no Turn id before D2g.
 
 ## Message consumer
 
@@ -114,6 +117,30 @@ accepted reply stays. H never returns `held`. A throw writes nothing and leaves 
 Two decisions differ from K4. A message for another tenant gets `unknown_task`, because H maps each tenant to
 its own scope. H has no `stale_generation`, because each H task is generation 0.
 
+## Reconciliation
+
+`HostedReconciler.run()` reads the SDK result of each tried intent with no conclusion, and concludes it with the rules
+of K4 `reconcile` and `finish`. It reads `readTaskOffer`, `readDeviceTerminal` and `readTaskAttempt`, and calls
+`cancelTask`. It does not read `readTaskResult`, as K4 does not.
+
+- The offer readback must be the frozen input, and the attempt must have the frozen task, device and Agent.
+  Otherwise the row throws, and nothing but its next readback time is written.
+- A row with no terminal, no cancel reason and no observed claim gets `cancel_reason = 'expired'` at `wait_until`. The
+  write checks `started` again under the scope lock, so a claim that another pass saw keeps the row waiting.
+- A row with a cancel reason and an attempt cancels the SDK task. With no attempt, it concludes, but only when its
+  submit lease had ended before the attempt read, because a try in flight can still create an attempt. K4 serializes
+  this with each submit.
+- `started` is set once an attempt has a claim. A cancelled attempt with no claim and no terminal concludes the row.
+- A device terminal concludes the row in one store transaction, under the scope lock: `cancelled` for a cancellation
+  or `task.cancelled`; `succeeded` for `task.complete`, with the K8 `outcome` command; otherwise `declined` or `failed`.
+- The `outcome` command commits under the command id `taskId`, as L does. A replayed terminal gets the first result
+  from the command record, so the outcome is applied once. `outcome.committed` is the H intent rows before this row
+  concludes.
+- H never retries a task, so each task stays at generation 0. L does not retry a K8 Turn either: each K8 wait window
+  (`OFFER_WAIT_MS`, `ROUTINE_WAIT_MS`) is at most the first K4 retry delay. A K8 test pins that.
+- Each SDK call runs outside the scope lock. Each write takes the lock and is fenced on `conclusion IS NULL`.
+- A row with no terminal is read again after `pollMs`. The SDK task observer does not wake the reconciler yet.
+
 ## Tests
 
 ```sh
@@ -130,6 +157,9 @@ three and runs these suites.
 - The D1 commit vectors run on the store and on a reference subject (the pure rules in memory).
 - The D2b sync vectors run on the store.
 - The message consumer tests port the K4 Host-side message vectors (`host-execution-core/src/message.test.ts`).
+- The reconciliation tests run a real daemon for the completed outcome, a replayed terminal and a busy decline. The
+  busy decline runs on L too (K4 with the sync rule's wait), and both conclude `declined` at generation 0. An SDK
+  tenant in memory covers the cancel, expiry, lease and identity cases.
 - The sync test freezes the same Turns in an L ledger with K4 `enqueue`. Each H input is byte-equal to the K4
   execution input, and the H state bytes equal the L state bytes.
 - The submitter tests use the hosted SDK composition (`createByokCloud` over `createPostgresCloudStores`, with
