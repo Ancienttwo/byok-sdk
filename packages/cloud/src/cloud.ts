@@ -1746,7 +1746,9 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     const { taskId } = input;
     const payload = MESSAGE_PAYLOAD_SCHEMAS[type].parse(input.payload);
     // A sealed instruction binds the task id, so cloud cannot mint one for it.
-    if (taskId === undefined && payload.sealed !== undefined) throw new ByokCloudError('coordination_input_invalid', 'a sealed instruction needs its taskId');
+    if (payload.sealed !== undefined && (typeof taskId !== 'string' || taskId === '')) {
+      throw new ByokCloudError('coordination_input_invalid', 'a sealed instruction needs its taskId');
+    }
     if (type === 'task.offer_sealed' || type === 'task.offer_with_toolsets_sealed') await assertLegacyAdmission(tenant, deviceId);
     if (type === 'task.offer_for_agent_sealed') assertResumeSessionRef(payload);
     await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities(type, payload));

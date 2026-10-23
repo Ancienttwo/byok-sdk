@@ -351,12 +351,12 @@ describe('sealed payload v1: each sealed type has its own hosted entry (#654)', 
   );
 
   // The four enqueue lanes take an optional task id. The fresh lane always requires one.
-  const enqueueLanes: Record<string, (harness: ReturnType<typeof createHarness>, deviceId: string, payload: never) => Promise<{ taskId: string }>> = {
-    'task.offer_sealed': (h, d, payload) => h.cloud.enqueueSealedOffer(TENANT_A, d, { payload }),
-    'task.offer_with_toolsets_sealed': (h, d, payload) => h.cloud.enqueueSealedToolsetOffer(TENANT_A, d, { payload }),
-    'task.offer_for_agent_sealed': (h, d, payload) => h.cloud.enqueueSealedAgentOffer(TENANT_A, d, { payload }),
-    'task.offer_for_agent_with_egress_sealed': (h, d, payload) =>
-      h.cloud.enqueueSealedAgentEgressOffer(TENANT_A, d, { payload, ...withContext(payload as { messageEgress?: unknown }) }),
+  const enqueueLanes: Record<string, (harness: ReturnType<typeof createHarness>, deviceId: string, payload: never, taskId?: string) => Promise<{ taskId: string }>> = {
+    'task.offer_sealed': (h, d, payload, taskId) => h.cloud.enqueueSealedOffer(TENANT_A, d, { taskId, payload }),
+    'task.offer_with_toolsets_sealed': (h, d, payload, taskId) => h.cloud.enqueueSealedToolsetOffer(TENANT_A, d, { taskId, payload }),
+    'task.offer_for_agent_sealed': (h, d, payload, taskId) => h.cloud.enqueueSealedAgentOffer(TENANT_A, d, { taskId, payload }),
+    'task.offer_for_agent_with_egress_sealed': (h, d, payload, taskId) =>
+      h.cloud.enqueueSealedAgentEgressOffer(TENANT_A, d, { taskId, payload, ...withContext(payload as { messageEgress?: unknown }) }),
   };
 
   it.each(laneLines.filter((line) => line.type in enqueueLanes).map((line) => [line.type, line.payload.sealed === undefined ? 'output only' : 'sealed input', line] as const))(
@@ -369,6 +369,10 @@ describe('sealed payload v1: each sealed type has its own hosted entry (#654)', 
 
       if (label === 'sealed input') {
         await expect(enqueueLanes[type]!(harness, device.deviceId, line.payload as never)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+        // A JavaScript caller may pass a value that is not a task id.
+        for (const taskId of [null, '']) {
+          await expect(enqueueLanes[type]!(harness, device.deviceId, line.payload as never, taskId as never)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+        }
         expect((await page()).messages).toEqual([]);
       } else {
         const enqueued = await enqueueLanes[type]!(harness, device.deviceId, line.payload as never);
