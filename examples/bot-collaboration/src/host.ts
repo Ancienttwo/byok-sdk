@@ -6,19 +6,20 @@ import type { ByokServer, CreateByokServerOptions, DueWake } from '@byok-sdk/ser
 import { HostExecutionCore, type ExecutionServer, type OutcomeTransaction, type MessageTransaction } from '@byok-sdk/example-host-execution-core';
 import { promoteOccurrence, type HostJobHandler, type Routine } from '@byok-sdk/example-host-execution-core';
 import { HostLedger } from '@byok-sdk/example-host-execution-core';
-import { hash, project, time, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import { canonical, hash, project, time, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
 import { enqueue } from '@byok-sdk/example-host-execution-core';
 import { addTurn, json, stateOf, type CollaborationState, type Delegation, type Turn } from './model';
-import { turnInstruction, outcomeSchema, SYSTEM_PROMPT } from './schema';
+import { contextTurns, turnInstruction, outcomeSchema, SYSTEM_PROMPT, type ContextTurn } from './schema';
 import { abandonDelegation, arbitrateCancel, BOT_REPLY_MAX_BYTES, DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   delegationDue, intentRows, minimumInstructionBytes, observeDevices, reconcileReply, REPLY_UNCERTAIN_AFTER_MS, resolveDelegation, retryReply,
   settleDelegations, type DelegationTimers } from './delegation';
-import { applyTurnOutcome } from './rules/outcome';
+import { commitCommand, type Command, type CommandPorts } from './rules/commands';
+import { CommitConflict, commitInLedger, type CommitResult } from './commit';
 import { BOT_ROUTINE, botRoutines, concludeRoutineTurn, createDefinition, owned, routineCalendar, routineOccurrence, routineTurn,
   updateDefinition } from './routines';
 
 import { activeBot, applyManagement, roomFields, updateBot } from './team';
-import { advanceRooms, roomInput, roomVisibility, type Mentions } from './rooms';
+import { advanceRooms, roomVisibility, type Mentions } from './rooms';
 import type { RoomFields } from '@byok-sdk/protocol';
 
 import { CurrentRequestTooLargeError, HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS } from './history';
@@ -60,11 +61,31 @@ export interface BotOptions {
    * so their rules use the same calendar: a `RoutineSchedule` whose `tz` is the definition time zone.
    */
   hostJobs?: Readonly<Record<string, HostJobHandler>>;
+  /**
+   * External history authority (#739 Q4). Absent: the ContextPack reads this ledger's Turns.
+   * Present: before a Bot Turn freezes its offer, the Host reads the Bot's earlier history here, oldest first,
+   * in the ContextPack row shape. The rows replace the stored Turns in that ContextPack and are not stored;
+   * the Turn keeps only their hash. Cards, questions and rejected actions stay Host state. Room seats read room messages.
+   * A read that throws or returns another shape leaves the Turn queued, and the timer tries again.
+   */
+  history?: (input: { botId: string; turnId: string }) => Promise<readonly ContextTurn[]>;
 }
+/** Phase 1 of a history-mode sync: the injected rows of each Turn that can freeze its offer next. */
+type InjectedHistory = ReadonlyMap<string, { rows: ContextTurn[]; digest: string }>;
 /** Reply readback port (§3.3). The Host acceptance record stays the body authority. */
 export type MessageServer = { tasks: Partial<Pick<ByokServer['tasks'], 'agentMessage'>> };
 export type AgentMessageInput = Parameters<NonNullable<CreateByokServerOptions['agentMessage']>['consume']>[0];
 
+/** A Turn that has no offer yet and can freeze one: not concluded or failed, and its Bot is active with its profile applied. */
+function awaitsOffer(ledger: LedgerState, state: CollaborationState, turn: Turn): boolean {
+  const bot = state.team.bots[turn.botId];
+  return !turn.conclusion && !ledger.intents[hash(turn.id)] && turn.status !== 'failed' && !!bot && !bot.archived && bot.readyRevision === bot.revision;
+}
+/** The Turn or round id of an input command. These commands never refuse; they throw. */
+function turnOf(result: CommitResult): string {
+  if (result.disposition.outcome !== 'accepted' || typeof result.disposition.value !== 'string') throw new Error('Input command has no Turn id');
+  return result.disposition.value;
+}
 /** Copy-and-own Host example. Use one instance per ledger tenant. */
 export class BotCollaboration {
   readonly core: HostExecutionCore;
@@ -81,6 +102,8 @@ export class BotCollaboration {
   private readonly coalesce?: CoalescePolicy;
   /** The default principal of the owner APIs: the caller that the Host authenticated as the owner. */
   private readonly owner: Principal;
+  /** History mode: Turns whose history read failed in this pass. The timer reads them again. */
+  private unread = new Set<string>();
   constructor(readonly server: ExecutionServer & HomeServer & MessageServer & Partial<Pick<ByokServer, 'machines'>>, readonly ledger: HostLedger, private readonly options: BotOptions) {
     if (!options.botId || options.execution.payload.agentRef.agentId !== options.botId) throw new Error('Select this Bot Agent');
     options = this.options = { ...options, execution: structuredClone(options.execution),
@@ -117,7 +140,11 @@ export class BotCollaboration {
     if (this.timers.cancelGraceMs < 1 || this.timers.uncertainAfterMs < 1) throw new Error('Invalid delegation timers');
     this.core = new HostExecutionCore(server, ledger, { now: this.now, reconcileMs: 100, nextOccurrence: routineCalendar,
       ...(options.hostJobs ? { hostJobs: options.hostJobs } : {}),
-      occurrenceHooks: { [BOT_ROUTINE]: (run, tx) => routineTurn(stateOf(tx.application), run) },
+      occurrenceHooks: { [BOT_ROUTINE]: (run, tx) => {
+        const state = stateOf(tx.application);
+        this.commitCallback(state, run.occurrenceKey, { kind: 'occurrence', key: run.occurrenceKey },
+          { publish: tx.publish, occurrence: () => routineTurn(state, run) });
+      } },
       applyMessage: (input, tx) => this.applyMessage(input, tx),
       applyOutcome: (document, tx) => this.applyOutcome(document, tx) });
     ledger.transaction(s => {
@@ -143,16 +170,11 @@ export class BotCollaboration {
    * Only the owner starts a 1:1 execution (R2).
    */
   input(key: string, request: string, botId = this.options.botId, ...by: PrincipalArg): Promise<string> {
-    const id = hash(['user', botId, key]);
     return this.exclusive(async () => {
       const principal = this.ownerOnly(by, 'input', botId);
-      const turnId = this.ledger.transaction(s => {
-        const state = stateOf(s.application);
-        activeBot(state.team, botId);
-        return admitUserInput(state, { id, key, botId, request, sender: principal.id, authority: 'owner' }, this.coalesce, this.now());
-      });
+      const result = this.commitOwner(hash(['input', botId, key]), { kind: 'input', botId, key, request, sender: principal.id });
       await this.process();
-      return turnId;
+      return turnOf(result);
     });
   }
   /**
@@ -174,19 +196,14 @@ export class BotCollaboration {
     }
     if (kind === 'owner_input' || kind === 'room_input') return this.exclusive(async () => {
       const principal = kind === 'owner_input' ? this.ownerOnly([sender], 'input', conversation.id) : this.verifiedOnly(sender, 'roomInput', conversation.id);
-      const id = this.ledger.transaction(s => {
-        const state = stateOf(s.application), key = inboundKey(message);
-        let root: string;
-        if (kind === 'owner_input') {
-          activeBot(state.team, conversation.id);
-          root = admitUserInput(state, { id: hash(['user', conversation.id, key]), key, botId: conversation.id,
-            request: message.text, sender: principal.id, authority: 'owner' }, this.coalesce, this.now());
-        } else root = roomInput(state, key, conversation.id, message.text, message.mentions, principal.id);
-        if (this.options.channel) rememberInbound(state, message, root);
-        return root;
-      });
+      const key = inboundKey(message);
+      const command: Command = kind === 'owner_input'
+        ? { kind: 'receive', inbound: kind, key, botId: conversation.id, request: message.text, sender: principal.id }
+        : { kind: 'receive', inbound: kind, key, roomId: conversation.id, text: message.text, mentions: message.mentions, from: principal.id };
+      const result = this.commitOwner(hash(['receive', key]), command,
+        (_s, state) => this.options.channel ? { remember: root => rememberInbound(state, message, root) } : {});
       await this.process();
-      return { kind, id };
+      return { kind, id: turnOf(result) };
     });
     if (kind === 'bot_background') {
       return { kind, id: await this.roomInput(inboundKey(message), conversation.id, message.text, message.mentions, sender) };
@@ -246,18 +263,35 @@ export class BotCollaboration {
   }
   private applyOutcome(document: unknown, tx: OutcomeTransaction): void {
     const state = stateOf(tx.application), taskId = tx.intent.taskId;
-    applyTurnOutcome(state, tx.intent.key, taskId, document, {
-      now: this.now, publish: tx.publish,
-      // The terminal transaction has not written yet, so a ledger snapshot is the committed state.
-      committed: { intent: key => intentRows(this.ledger.snapshot()).intent(key) },
-      manage: (turn, outcome, managed) => applyManagement(state, turn.botId, taskId, outcome, this.models(), managed, this.options.readOnlyToolsets),
-      createRoutine: (turn, action, index) => tx.routines.create(createDefinition(tx.routines.list(), turn.botId, taskId, index, action, turn.authority ?? 'bot')),
-      updateRoutine: (turn, action) => tx.routines.update(updateDefinition(tx.routines.list(), turn.botId, action)),
-      cancelRoutine: (turn, action) => tx.routines.lifecycle(owned(tx.routines.list(), turn.botId, action.routineId).definition.id, 'completed'),
-      ...(this.options.channel ? { deliver: (turn: Turn, key: string, text: string) => {
-        queueDelivery(this.ledger.snapshot(), state, turn, taskId, key, text, this.now());
-      } } : {}),
+    this.commitCallback(state, taskId, { kind: 'outcome', turnId: tx.intent.key, taskId, document: document as Json }, {
+      publish: tx.publish,
+      ...this.deliverPort(state, taskId),
+      outcome: {
+        // The terminal transaction has not written yet, so a ledger snapshot is the committed state.
+        committed: { intent: key => intentRows(this.ledger.snapshot()).intent(key) },
+        manage: (turn, outcome, managed) => applyManagement(state, turn.botId, taskId, outcome, this.models(), managed, this.options.readOnlyToolsets),
+        createRoutine: (turn, action, index) => tx.routines.create(createDefinition(tx.routines.list(), turn.botId, taskId, index, action, turn.authority ?? 'bot')),
+        updateRoutine: (turn, action) => tx.routines.update(updateDefinition(tx.routines.list(), turn.botId, action)),
+        cancelRoutine: (turn, action) => tx.routines.lifecycle(owned(tx.routines.list(), turn.botId, action.routineId).definition.id, 'completed'),
+      },
     });
+  }
+  /** The channel outbox port of a K4 callback. Delivery code reads the committed ledger. */
+  private deliverPort(state: CollaborationState, taskId: string): Pick<CommandPorts, 'deliver'> {
+    if (!this.options.channel) return {};
+    return { deliver: (turn, key, text) => queueDelivery(this.ledger.snapshot(), state, turn, taskId, key, text, this.now())?.id };
+  }
+  /** An owner command in its own ledger transaction. K4 callbacks use `commitCallback` inside the K4 transaction. */
+  private commitOwner(commandId: string, command: Command, extra?: (s: LedgerState, state: CollaborationState) => Partial<CommandPorts>): CommitResult {
+    return commitInLedger(this.ledger, { scope: this.ledger.tenant, commandId, command }, s => {
+      const state = stateOf(s.application);
+      return { now: this.now, publish: (key, value) => project(s, key, value),
+        admitInput: fields => admitUserInput(state, fields, this.coalesce, this.now()), ...extra?.(s, state) };
+    });
+  }
+  private commitCallback(state: CollaborationState, commandId: string, command: Command, ports: Omit<CommandPorts, 'now'>): CommitResult {
+    return commitCommand(state, { scope: this.ledger.tenant, commandId, command }, { scope: this.ledger.tenant, recordCallbacks: false },
+      { now: this.now, ...ports });
   }
 
   /**
@@ -272,24 +306,17 @@ export class BotCollaboration {
   }
   private applyMessage(input: AgentMessageInput, tx: MessageTransaction): { outcome: 'accepted' | 'refused'; reasonCode?: string } {
     const state = stateOf(tx.application);
-    const refuse = (reasonCode: string) => ({ outcome: 'refused' as const, reasonCode });
-    const turn = state.turns[tx.intent.key];
-    if (!turn) return refuse('binding_mismatch');
-    const delegation = turn.delegationId ? state.delegations[turn.delegationId] : undefined;
-    if (delegation?.verdict) {
-      state.audit.push(`Delegation message after verdict: ${delegation.id} ${input.taskId}`);
-      return refuse('delegation_resolved');
+    let disposition;
+    try {
+      ({ disposition } = this.commitCallback(state, `${input.taskId}:${input.payload.messageId}`,
+        { kind: 'message', turnId: tx.intent.key, message: { taskId: input.taskId, payload: input.payload } },
+        { publish: tx.publish, ...this.deliverPort(state, input.taskId) }));
+    } catch (cause) {
+      // Other content for the id of a refused message: the same refusal that K4 gives for an accepted one.
+      if (cause instanceof CommitConflict && cause.code === 'identity_conflict') return { outcome: 'refused', reasonCode: 'message_conflict' };
+      throw cause;
     }
-    // Cancel and first acceptance meet in this transaction boundary (§8.8).
-    if (delegation?.cancel?.targetTurnId === turn.id) {
-      state.audit.push(`Delegation message after cancel: ${delegation.id} ${input.taskId}`);
-      return refuse('delegation_cancelled');
-    }
-    if (delegation && Buffer.byteLength(input.payload.body, 'utf8') > BOT_REPLY_MAX_BYTES) return refuse('reply_too_large');
-    state.replies[input.taskId] = { turnId: turn.id, messageId: input.payload.messageId, contentHash: input.payload.contentHash,
-      contentType: input.payload.contentType, acceptedAt: this.now(), ...(delegation ? { body: input.payload.body } : {}) };
-    if (this.options.channel) queueDelivery(this.ledger.snapshot(), state, turn, input.taskId, input.payload.messageId, input.payload.body, this.now());
-    return { outcome: 'accepted' as const };
+    return disposition.outcome === 'accepted' ? { outcome: 'accepted' } : { outcome: 'refused', reasonCode: disposition.reasonCode };
   }
   /**
    * Owner API ("Cancel", §8.8), from A's delegation chip or from B's `bot_request` Turn.
@@ -359,7 +386,9 @@ export class BotCollaboration {
       const principal = by.length ? this.verifiedOnly(by[0], 'roomInput', roomId) : undefined;
       // R5: a bot message is room background. Its mention entities select no seat.
       const called = principal?.kind === 'bot' ? [] : mentions;
-      this.ledger.transaction(s => { id = roomInput(stateOf(s.application), key, roomId, text, called, principal?.id); });
+      const result = this.commitOwner(hash(['room_input', roomId, key]),
+        { kind: 'room_input', key, roomId, text, mentions: called, ...(principal ? { from: principal.id } : {}) });
+      id = turnOf(result);
       await this.process();
     });
     return id;
@@ -381,19 +410,7 @@ export class BotCollaboration {
   async answer(id: string, answer: string, ...by: PrincipalArg): Promise<void> {
     await this.exclusive(async () => {
       this.ownerOnly(by, 'answer', id);
-      this.ledger.transaction(s => {
-        const state = stateOf(s.application), question = state.questions[id];
-        if (!question) throw new Error('Question not found');
-        if (question.answer !== undefined) {
-          if (question.answer !== answer) throw new Error('Answer identity conflict');
-          return;
-        }
-        if (!answer.trim() || question.value.answerKind === 'single_choice' && !question.value.options.some(o => o.id === answer)) throw new Error('Invalid answer');
-        question.answer = answer;
-        const turnId = hash(['answer', id]);
-        addTurn(state, { id: turnId, root: turnId, source: 'answer', request: JSON.stringify({ question: question.value, answer }),
-          botId: state.turns[question.turnId]!.botId, hop: 0, authority: 'owner' });
-      });
+      this.commitOwner(hash(['answer', id]), { kind: 'answer', questionId: id, answer });
       await this.process();
     });
   }
@@ -401,14 +418,15 @@ export class BotCollaboration {
   async decide(id: string, decision: 'confirmed' | 'rejected', ...by: PrincipalArg): Promise<void> {
     await this.exclusive(async () => {
       this.ownerOnly(by, 'decide', id);
-      const error = this.ledger.transaction(s => {
-        const state = stateOf(s.application), card = state.cards[id];
-        if (!card) throw new Error('Card not found');
-        if (card.state === 'pending' && this.now() >= card.expiresAt) card.state = 'expired';
-        if (card.state === 'expired') return 'Card expired';
-        if (card.state !== 'pending') return card.state === decision ? undefined : `Card already ${card.state}`;
-        card.state = decision;
-      });
+      let error: string | undefined;
+      try {
+        const { disposition } = this.commitOwner(hash(['decide', id]), { kind: 'decide', cardId: id, decision });
+        if (disposition.outcome === 'refused') error = disposition.reason;
+      } catch (cause) {
+        // A different decision for a decided card throws after the process pass, as a refused decision does.
+        if (!(cause instanceof CommitConflict) || cause.code !== 'identity_conflict') throw cause;
+        error = cause.message;
+      }
       await this.process();
       if (error) throw new Error(error);
     });
@@ -478,7 +496,7 @@ export class BotCollaboration {
     if (seat) { seat.status = 'blocked'; seat.released = true; seat.reason = reason; }
     turn.status = 'blocked'; turn.blockedReason = reason;
   }
-  private sync(s: LedgerState): boolean {
+  private sync(s: LedgerState, injected?: InjectedHistory): boolean {
     const state = stateOf(s.application);
     // A batch sealed here is enqueued in this pass, before later Turns of its Bot.
     sealDueBatches(state, this.coalesce, this.now());
@@ -511,11 +529,14 @@ export class BotCollaboration {
           continue;
         }
         delete turn.profileFailure;
+        // Phase 2 of a history-mode sync: a Bot Turn freezes only with the history read before this transaction.
+        const history = this.options.history && turn.source !== 'room_slot' ? injected?.get(turn.id) : undefined;
+        if (this.options.history && turn.source !== 'room_slot' && !history) continue;
         let schema: ResultSchema, frozen: ReturnType<typeof turnInstruction>;
         try {
           schema = outcomeSchema(turn.botId, state, turn, Object.keys(this.models()), routines);
           frozen = turnInstruction(state, turn, { turnLimit: this.contextTurnLimit, contextMaxBytes: this.contextMaxBytes,
-            instructionMaxBytes: this.instructionMaxBytes }, routines);
+            instructionMaxBytes: this.instructionMaxBytes }, routines, history?.rows);
         } catch (error) {
           if (error instanceof BotTurnOutcomeSchemaError && error.code === 'schema-over-budget') {
             this.blockTurn(s, turn, `Outcome schema over budget after flat fallback: ${error.message}`);
@@ -540,6 +561,7 @@ export class BotCollaboration {
         else enqueue(s, this.ledger.tenant, { key: turn.id, source: turn.source === 'user' || turn.source === 'answer' ? 'user' : 'bot',
           waitUntil: this.now() + 300_000, execution: offer });
         for (const rejection of frozen.context.rejectedActions) rejection.consumedBy = turn.id;
+        if (history) turn.historyDigest = history.digest;
         delete turn.blockedReason;
         turn.status = 'processing';
         materialized = true;
@@ -662,6 +684,24 @@ export class BotCollaboration {
     }
     this.ledger.transaction(s => cleanReplyTokens(s, stateOf(s.application), this.now()));
   }
+  /** One sync transaction. In history mode, phase 1 reads the history first, outside the transaction. */
+  private async syncWithHistory(): Promise<boolean> {
+    const injected = await this.readHistory();
+    return this.ledger.transaction(s => this.sync(s, injected));
+  }
+  private async readHistory(): Promise<InjectedHistory | undefined> {
+    const read = this.options.history;
+    if (!read) return undefined;
+    const ledger = this.ledger.snapshot(), state = stateOf(ledger.application), rows = new Map<string, { rows: ContextTurn[]; digest: string }>();
+    for (const turn of Object.values(state.turns)) {
+      if (turn.source === 'room_slot' || !awaitsOffer(ledger, state, turn) || this.unread.has(turn.id)) continue;
+      try {
+        const history = contextTurns(await read({ botId: turn.botId, turnId: turn.id }));
+        rows.set(turn.id, { rows: history, digest: hash(canonical(history)) });
+      } catch { this.unread.add(turn.id); }
+    }
+    return rows;
+  }
   /** A failed pass still re-arms the timer, so other timer work keeps its times. K4 retries a failed wake call itself. */
   private async process(): Promise<void> {
     try { await this.pass(); } finally { this.armTimer(); }
@@ -671,31 +711,30 @@ export class BotCollaboration {
    * The pass does not repeat after it, and it rethrows the first drain error for the caller and the SDK hook.
    */
   private async pass(): Promise<void> {
+    this.unread.clear();
     let failure: { error: unknown } | undefined;
     let more: boolean;
     do {
       // A failed delivery keeps `delivered = false`. The timer retries it.
       await this.deliverCancels().catch(() => {});
-      const admitted = this.ledger.transaction(s => this.sync(s));
+      const admitted = await this.syncWithHistory();
       await flushHomes(this.server, this.ledger, this.now);
       try { await this.core.drain(); } catch (error) { failure ??= { error }; }
       // A Main Bot cancel applied in this drain commits with delivered = false.
       await this.deliverCancels().catch(() => {});
-      let materialized = this.ledger.transaction(s => this.sync(s));
+      let materialized = await this.syncWithHistory();
       await this.refreshDevices();
       await this.flushCards();
-      materialized = this.ledger.transaction(s => this.sync(s)) || materialized;
+      materialized = await this.syncWithHistory() || materialized;
       await this.flushReplies();
-      materialized = this.ledger.transaction(s => this.sync(s)) || materialized;
+      materialized = await this.syncWithHistory() || materialized;
       await this.flushDeliveries();
       const ledger = this.ledger.snapshot();
       // An immediate runtime terminal can create another turn on any pass.
       // Drain to a fixed point, so no application-only turn can lose its wake.
       const state = stateOf(ledger.application);
       more = admitted || materialized || Object.values(ledger.intents).some(intent => intent.phase === 'queued' && intent.cancelReason && !intent.conclusion)
-        || Object.values(state.turns).some(turn => !turn.conclusion && !ledger.intents[hash(turn.id)] && turn.status !== 'blocked'
-        && turn.status !== 'failed' && !!state.team.bots[turn.botId] && !state.team.bots[turn.botId]!.archived
-        && state.team.bots[turn.botId]?.readyRevision === state.team.bots[turn.botId]?.revision);
+        || Object.values(state.turns).some(turn => turn.status !== 'blocked' && awaitsOffer(ledger, state, turn) && !this.unread.has(turn.id));
     } while (more && !failure);
     if (failure) throw failure.error;
   }
@@ -712,7 +751,8 @@ export class BotCollaboration {
         ...state.team.homeOperations.filter(op => op.status === 'pending').map(op => Math.max(this.now() + 1000, op.retryAt ?? 0)),
         ...delegationDue(state, this.timers),
         ...Object.values(state.inputBatches ?? {}).filter(batch => batch.state === 'open').map(batch => batch.sealAt),
-        ...Object.values(state.delegations).filter(d => d.cancel && !d.cancel.delivered).map(() => this.now() + 1000)];
+        ...Object.values(state.delegations).filter(d => d.cancel && !d.cancel.delivered).map(() => this.now() + 1000),
+        ...this.unread.size ? [this.now() + 1000] : []];
       if (due.length) {
         this.timer = setTimeout(() => { void this.drain().catch(() => {}); }, Math.max(1, Math.min(60_000, Math.min(...due) - this.now())));
         this.timer.unref?.();

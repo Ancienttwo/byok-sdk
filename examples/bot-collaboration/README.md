@@ -173,13 +173,75 @@ let the accepted occurrence finish. Pause and resume retry the calendar.
 
 ## Boundaries
 
-The collaboration state has version 1. The Host rejects unsupported or
+The collaboration state has version 2. The Host rejects unsupported or
 unversioned stored state. It does not reset or migrate that state.
 
 This example has one team and one owner per ledger. Paid Pi success-rate
 measurement belongs to [WO-10b](../../docs/submit-result-measurement.md); the method defines per-runtime/model/platform cells and does not supply live data. Application history,
 versions and audit rows have no retention policy in this small example.
 
+## Commit contract
+
+Each collaboration command goes through one commit (#739 D1,
+`src/rules/commit.ts`). A commit takes a scope, a command id, an optional
+expected revision and the command. It returns the new revision, the
+disposition and the outbox rows that it wrote. One store transaction holds
+the state change, the command record and the outbox rows.
+
+- A replay of a command id with the same evidence returns the first result
+  and changes nothing. The evidence is the hash of the fields that decide the
+  command's effect.
+- The same command id with other evidence is an `identity_conflict`. The Host
+  keeps the existing error text, for example `Input identity conflict`.
+- Without an expected revision, the commit decides on the head. An explicit
+  revision that is not the head is a `stale_revision` conflict. A replay is
+  checked first, so a retry with its original revision gets its first result.
+- Each new commit adds 1 to the revision, also for a refused disposition.
+  Host passes that only apply evidence (sync, reply checks, deliveries, device
+  refresh) do not change the revision.
+
+The commands are owner input, received IM input, room input, answers, card
+decisions, and three K4 callbacks: a terminal outcome, an Agent message and a
+Bot routine occurrence. `src/rules/commands.ts` decides them. The routine
+owner APIs are K4 commands on K4 rows and do not commit here.
+
+In this L example the scope is the ledger tenant. Owner APIs pass no expected
+revision. K4 already deduplicates terminals (`applied`) and accepted messages (the
+message receipt), so L stores no record for those callbacks. K4 writes no
+receipt for a refused message, so L keeps a record for it: a retry gets the
+same refusal and does not change the revision. Other content for the same
+message id is refused with `message_conflict`. The D1 vectors in
+`src/commit-vectors.test-support.ts` run against a pure in-memory store and
+against the L ledger; the D2 H adapter runs the same vectors.
+
+Known L limit: K4 stores the whole Host ledger, with the collaboration state,
+in one JSON row per tenant. Turns, replies, audit rows and command records
+make that row grow. Command records are dedup evidence; retention must not
+delete a record while a retry of its command can still arrive. Per-entity L
+storage and K8 retention are #798.
+
+## External history authority
+
+With the `history` option, the ContextPack history of a Bot Turn comes from an
+external authority, not from this ledger (#739 D1, #606). Before a Bot Turn
+freezes its offer, the Host reads the Bot's earlier history outside the ledger
+transaction. Then one transaction freezes the offer with those rows. The
+transaction freezes only a Turn that still has no offer.
+
+- The authority returns rows in the ContextPack row shape: `id`, `root`,
+  `source`, `request`, `hop`, `status`, optional `conclusion` and
+  `outcomeSummary`. Rows in another shape are refused.
+- The rows replace the stored Turns in that ContextPack. The current Turn
+  always comes from this ledger.
+- The collaboration state does not store the rows. The Turn keeps their hash
+  in `historyDigest`. K4 keeps the frozen instruction of the offer, as for
+  every offer.
+- Cards, questions and rejected actions stay Host state. Room seats read room
+  messages, so they read no history.
+- A read that throws or returns another shape leaves the Turn queued. The
+  timer reads again after about one second.
+
+The team still comes from this ledger in this mode.
 
 ## Group chat and Main Bot
 

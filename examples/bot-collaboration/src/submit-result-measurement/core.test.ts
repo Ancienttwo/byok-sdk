@@ -4,8 +4,11 @@ import { expect, it } from 'vitest';
 import { CORPUS, corpusCase, preflightCorpus } from './corpus';
 import { resultDigest } from './digest';
 import { classifyTrial, extractSubmissions, findHelperBody, type CallPredicate, type ObservedEvent, type TrialObservation } from './evidence';
-import { readFileSync } from 'node:fs';
-import { CALIBRATION_CASE, plannedManifest, planTrials, RESERVED_CELL_KEYS, sdkBuild, trialTerminal } from './harness';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { CALIBRATION_CASE, distTreeSha256, plannedManifest, planTrials, RESERVED_CELL_KEYS, SDK_RUNTIME_PACKAGES, sdkBuild, trialTerminal } from './harness';
 import { redact } from './records';
 import { wilson } from './summary';
 
@@ -160,4 +163,42 @@ it('records the SDK build identity in every cell', () => {
     expect(build.packages[manifest.name]).toEqual({ version: manifest.version, distSha256: expect.stringMatching(/^[0-9a-f]{64}$/) });
   }
   if (build.commit !== null) expect(build.commit).toMatch(/^[0-9a-f]{40}$/);
+});
+
+it('records every SDK package the runner loads at runtime', () => {
+  // The closure of @byok-sdk imports in the built dist of the packages the runner imports.
+  const packagesRoot = fileURLToPath(new URL('../../../../packages/', import.meta.url));
+  const seen = new Set<string>();
+  const queue = ['client', 'server', 'protocol'];
+  while (queue.length > 0) {
+    const name = queue.shift()!;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const dist = path.join(packagesRoot, name, 'dist');
+    for (const file of readdirSync(dist, { recursive: true, encoding: 'utf8' }).filter(entry => /\.[cm]?js$/.test(entry))) {
+      for (const match of readFileSync(path.join(dist, file), 'utf8').matchAll(/(?:from|import\(|require\()\s*["']@byok-sdk\/([a-z-]+)/g)) queue.push(match[1]!);
+    }
+  }
+  expect([...SDK_RUNTIME_PACKAGES].sort()).toEqual([...seen].sort());
+  const build = sdkBuild() as { packages: Record<string, unknown> };
+  expect(Object.keys(build.packages).sort()).toEqual(SDK_RUNTIME_PACKAGES.map(name => `@byok-sdk/${name}`).sort());
+});
+
+it('hashes the whole built dist, not only its entry', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'm610-dist-'));
+  try {
+    mkdirSync(path.join(root, 'bin'));
+    writeFileSync(path.join(root, 'index.js'), 'export {};');
+    writeFileSync(path.join(root, 'bin', 'helper.js'), 'console.log(1);');
+    const first = distTreeSha256(root);
+    expect(first).toMatch(/^[0-9a-f]{64}$/);
+    writeFileSync(path.join(root, 'index.js.map'), '{}');
+    writeFileSync(path.join(root, 'index.d.ts'), 'export {};');
+    expect(distTreeSha256(root)).toBe(first);
+    writeFileSync(path.join(root, 'bin', 'helper.js'), 'console.log(2);');
+    expect(distTreeSha256(root)).not.toBe(first);
+    expect(distTreeSha256(path.join(root, 'missing'))).toBeNull();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

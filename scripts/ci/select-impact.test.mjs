@@ -183,6 +183,10 @@ test('schema, native memory and SEA changes retain relevant qualification', () =
   }
 });
 
+test('the removed Windows memory workflow selects the families that run its checks', () => {
+  assert.deepEqual(selectImpact(['.github/workflows/agent-memory-windows.yml']).families, ['agent-memory-helper', 'agent-memory-helper-non-darwin']);
+});
+
 test('unknown, broad policy/dependency inputs and malformed paths fail closed', () => {
   for (const path of ['bun.lock', 'package.json', 'packages/client/package.json', 'api-surface/entries.json', '.github/workflows/unreviewed.yml', 'packages/new/src/index.ts', 'packages/client/vendor/new.js', 'scripts/release/pg-migrate-smoke.mjs', 'other/a.md', '../README.md', './README.md', '/README.md', 'docs//a.md', 'docs/../README.md', 'docs/a\nb.md', 'docs\\a.md', '', null]) {
     assert.throws(() => selectImpact([path]), /reviewed CI mapping required|requires exact CI_BASE/i, String(path));
