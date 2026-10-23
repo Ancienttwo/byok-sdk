@@ -76,13 +76,17 @@ SDK call.
 
 ```sh
 docker compose -f docker-compose.test.yml up -d --wait
-BYOK_TEST_POSTGRES_URL=postgres://byok:byok@127.0.0.1:5433/byok_test bun run --cwd examples/hosted-bot-collaboration test
+BYOK_TEST_POSTGRES_URL=postgres://byok:byok@127.0.0.1:5433/byok_test BYOK_TEST_S3_ENDPOINT=http://127.0.0.1:9100 \
+  bun run --cwd examples/hosted-bot-collaboration test
 ```
 
-Without `BYOK_TEST_POSTGRES_URL`, the Postgres suites skip. With `BYOK_REQUIRE_DATAPLANE=1`, a missing URL
-is a failure. The CI `dataplane` job sets both and runs these suites.
+Without `BYOK_TEST_POSTGRES_URL`, the Postgres suites skip. The submitter suite also needs
+`BYOK_TEST_S3_ENDPOINT` (`http://127.0.0.1:9100` with the compose file), because the SDK composition takes an
+object store. With `BYOK_REQUIRE_DATAPLANE=1`, a missing value is a failure. The CI `dataplane` job sets all
+three and runs these suites.
 
 - The D1 commit vectors run on the store and on a reference subject (the pure rules in memory).
-- The submitter tests use a real SDK server and a real daemon, paired over loopback HTTP (the K4 test
-  fixture, on its SQLite storage). The intents are frozen directly, because D2b ships no product entry.
+- The submitter tests use the hosted SDK composition (`createByokCloud` over `createPostgresCloudStores`, with
+  the SDK migrations in its own schema), served over loopback HTTP, and a real daemon paired through the
+  public pairing route. The intents are frozen directly, because D2b ships no product entry.
 - After each step of two command scripts, the store's state bytes equal the reference subject's state bytes.

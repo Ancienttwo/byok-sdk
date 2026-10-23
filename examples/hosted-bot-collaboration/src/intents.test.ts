@@ -1,24 +1,26 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sameFrozenOffer, taskId, type FrozenSubmitPort } from '@byok-sdk/example-host-execution-core';
-import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
+import { template } from '@byok-sdk/example-host-execution-core/test-support';
+import { openHostedCloud, SKIP_HOSTED_CLOUD, type HostedCloud } from './hosted-cloud.test-support';
 import { freezeIntent, HostedSubmitter, type SubmitterOptions } from './intents';
 import { storedKey } from './layout';
-import { openStore, POSTGRES_URL } from './postgres.test-support';
+import { openStore } from './postgres.test-support';
 import { inSchema, lockScope } from './store';
 
-// The SDK side is a real ByokServer with a real daemon, paired over loopback HTTP (the K4 fixture, on its SQLite
-// storage). The H side is a real Postgres. D2b ships no product entry: the tests freeze intents directly.
+// The SDK side is the hosted composition (createByokCloud over createPostgresCloudStores) with a real daemon, paired
+// over loopback HTTP. The H side is its own schema of the same Postgres. D2b ships no product entry: the tests
+// freeze intents directly.
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
-let host: TestHost | undefined;
+let host: HostedCloud | undefined;
 let clock = 0;
 
 /** The tenant port, with a count of the SDK submits that really ran. */
 function sdkPort() {
   const submitted: string[] = [];
   const port: FrozenSubmitPort = {
-    submit: async input => { const enqueued = await host!.server.executions.submit(input); submitted.push(input.taskId); return enqueued; },
-    offer: id => host!.server.tasks.offer(id),
+    submit: async input => { const enqueued = await host!.port.submit(input); submitted.push(input.taskId); return enqueued; },
+    offer: id => host!.port.offer(id),
   };
   return { port, submitted };
 }
@@ -41,9 +43,9 @@ async function row(scope: string, task: string): Promise<Row> {
 const update = (scope: string, task: string, set: string) =>
   opened!.pool.query(`UPDATE "${opened!.store.schema}".intent SET ${set} WHERE scope = $1 AND task_id = $2`, [storedKey(scope), task]);
 
-describe.skipIf(POSTGRES_URL === undefined)('H submitter on real Postgres and a real SDK server (#793 D2b-1)', () => {
+describe.skipIf(SKIP_HOSTED_CLOUD)('H submitter on real Postgres and a real SDK server (#793 D2b-1)', () => {
   // One SDK server for the suite. One schema for each test, because the submit scan covers the whole schema.
-  beforeAll(async () => { host = await openHost({ externalCore: true }); clock = Date.now(); });
+  beforeAll(async () => { host = await openHostedCloud(); clock = Date.now(); });
   afterAll(async () => { await host?.close(); });
   beforeEach(async () => { opened = await openStore(); });
   afterEach(async () => { await opened?.close(); });
@@ -63,7 +65,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H submitter on real Postgres and a 
     const scope = `tenant:${randomUUID()}`, input = await freeze(scope), { port, submitted } = sdkPort();
     expect(await submitter(port).run()).toBe(1);
     expect(await row(scope, input.taskId)).toMatchObject({ submission: 'delivered', tries: 1, last_error: null });
-    const offer = await host!.server.tasks.offer(input.taskId);
+    const offer = await host!.port.offer(input.taskId);
     expect(offer && sameFrozenOffer(offer, input)).toBe(true);
     expect(submitted).toEqual([input.taskId]);
   });
@@ -78,7 +80,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H submitter on real Postgres and a 
     await submitter(port).run();
     expect(await row(scope, input.taskId)).toMatchObject({ submission: 'delivered', tries: 2, last_error: null });
     expect(submitted).toEqual([input.taskId]);
-    expect(await host!.server.tasks.attempt(input.taskId)).toMatchObject({ taskId: input.taskId, deviceId: host!.deviceId });
+    expect(await host!.cloud.readTaskAttempt(host!.tenant, input.taskId)).toMatchObject({ taskId: input.taskId, deviceId: host!.deviceId });
   });
 
   it('after a lost SDK response, reads the offer back and does not submit again', async () => {
@@ -91,7 +93,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H submitter on real Postgres and a 
 
   it('never submits when the SDK holds another offer for the task id, and keeps the error', async () => {
     const scope = `tenant:${randomUUID()}`, input = await freeze(scope), { port, submitted } = sdkPort();
-    await host!.server.executions.submit({ ...input, payload: { ...input.payload, instruction: 'Another Turn.' } });
+    await host!.port.submit({ ...input, payload: { ...input.payload, instruction: 'Another Turn.' } });
     await submitter(port).run();
     expect(await row(scope, input.taskId)).toMatchObject({ submission: 'uncertain', tries: 1, last_error: 'Offer differs from the frozen input' });
     expect(submitted).toEqual([]);
@@ -103,7 +105,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H submitter on real Postgres and a 
     expect(await submitter(port).run()).toBe(1);
     expect(await row(scope, input.taskId)).toMatchObject({ submission: 'reserved', tries: 0, conclusion: 'expired' });
     expect(submitted).toEqual([]);
-    expect(await host!.server.tasks.attempt(input.taskId)).toBeUndefined();
+    expect(await host!.cloud.readTaskAttempt(host!.tenant, input.taskId)).toBeUndefined();
   });
 
   it('never submits a tried row past wait_until: it gets a cancel reason, no conclusion, and leaves the scan', async () => {
