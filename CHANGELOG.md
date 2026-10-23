@@ -9,9 +9,14 @@
   copy it, and `copySdkNativeAssets({ platform: 'win32', arch: 'x64' })` now
   also copies it into `agent-memory-fs/`. That call now needs the helper build
   (`build:release`). `sdkNativeAssetTargets['win32-x64']` gets an
-  `agentMemoryHelper` group with its own files and signing policy. The helper manifest is now version 2 and records the digest
-  algorithm of each entry. Product assets copied from an older release fail
-  with a manifest mismatch; copy them again.
+  `agentMemoryHelper` group with its own files and signing policy.
+- **Changed (client)** — the Agent memory helper manifest is now version 2 and
+  records the digest algorithm of each entry (#605). The resolver requires
+  every entry to equal the pin of the running SDK. So a product asset folder
+  that an older SDK copied fails with a manifest mismatch after the upgrade,
+  also on macOS, where the Darwin digests do not change. Migration: run
+  `copyAgentMemoryHelperAssets` or `copySdkNativeAssets` again with the new SDK
+  and ship the new folder.
 - **Feature (client)** — Windows x64 admits Agent memory through the SDK
   release helper (#605). The memory MCP (`memory_recall`, `memory_save`), the
   hosted projection (`agentMemory`) and the task-free export
@@ -159,6 +164,17 @@
   export leave these files out. Existing notes with these names or links stop
   being visible to recall and export. A `MEMORY.md` with more than one hard
   link makes capture fail.
+
+- **Fix (examples)** — K4 settles a cancelled claimed task soon after its
+  device terminal arrives (#762). Before, the intent waited for the next
+  `reconcileMs` scan, because the server emits no event for that terminal.
+  While it waited, it held the FIFO of its Agent. The core now reads the device
+  terminal of each such task on its own backoff. The interval starts at 25 ms
+  and doubles up to 1 s, and it is never more than `reconcileMs`. Each task
+  gets at most 20 reads, about 15.6 s in all. A read does not write the Host
+  ledger. A found terminal ends the reads of that task and starts one drain.
+  After the last read, only the `reconcileMs` scans remain. This also covers a
+  claimed task that the core cancels at its waiting deadline.
 
 ## 0.28.3 — source candidate
 

@@ -2338,8 +2338,9 @@ Authenticode signing writes. A certificate table must start on an 8-byte
 boundary after the headers and the raw data of every section, and must end the
 file. Each certificate must fit in the table. The content is padded with zeros
 to 8 bytes, as a signer pads it. The release manifest (version 2) records the
-digest algorithm of each entry. The compiled pin, not the manifest, selects the
-algorithm for a target. `copyAgentMemoryHelperAssets({ outDir, platform:
+digest algorithm of each entry. The target name, not the manifest, selects the
+digest function; the resolver then requires every manifest entry, with its
+algorithm, to equal the compiled pin. `copyAgentMemoryHelperAssets({ outDir, platform:
 'win32' })` copies the Windows target and the manifest.
 
 On Windows x64 the daemon resolves and opens this helper. It admits memory
@@ -2348,8 +2349,8 @@ an Agent home only on a local NTFS volume. It refuses a remote volume first,
 from the handle's device information, so an SMB share whose server reports NTFS
 also fails the open with `unsafe_root`; another file system fails the same way.
 The platform gate reads the process architecture: x64 Node under emulation on
-Windows arm64 runs the x64 helper and is admitted. Each write flushes its own file and directory, so one file stays
-atomic under a process crash. Windows runs no home-chain barrier and makes no
+Windows arm64 runs the x64 helper and is admitted. Each write flushes its own
+file and directory, so one file stays atomic under a process crash. Windows runs no home-chain barrier and makes no
 OS-crash or power-loss claim. The Windows helper intent backend therefore has
 `conflictProvesNoRename: true` and `strictLedgerBarrier: false`, and the daemon
 does not advertise `agent-memory-intent.v1` on Windows.
