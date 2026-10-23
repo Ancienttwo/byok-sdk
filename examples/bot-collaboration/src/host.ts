@@ -519,6 +519,9 @@ export class BotCollaboration {
       if (!intent && !turn.conclusion
         && (this.ledger.hasTombstone('intent', turn.id, this.now()) || turn.source === 'routine' && !s.occurrences[routineOccurrence(turn)])) {
         turn.status = 'failed'; turn.conclusion = 'failed';
+        // The seat facts no longer see the intent, so release the seat here, as for a failed conclusion. Its round moves on.
+        const seat = state.team.seats[turn.id];
+        if (seat && !seat.released) { seat.status = 'failed'; seat.released = true; seat.reason = 'result_retired'; }
         state.audit.push(`Turn result retired before sync: ${turn.id}`);
         project(s, `bot-turn:${turn.id}`, json({ owner: turn.botId, ...turn, reason: 'result_retired' }));
         turn.reported = true;
