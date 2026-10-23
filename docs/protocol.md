@@ -1156,6 +1156,54 @@ or `sealing_policy_mismatch` in `code`. These codes go only on the plaintext
 `task.decline_sealed` refuses them: a device that cannot open or use the
 scope key often cannot seal a reply either, so one outcome has one encoding.
 
+### 2.6 E2EE member routes (#654 E2c-2)
+
+These HTTP routes let a device store and read E2EE member state on the Host.
+They add no envelope type. The Host checks shapes and the first-writer rules
+only; members verify every signature (design §7.3). A deployment mounts the
+routes only when its capability declaration has `e2ee.member` and the
+composition supplies an `E2eeMemberStore`. Declaring `e2ee.member` without a
+store fails at construction. `fullCapabilityDeclaration()` leaves it out
+unless `includeE2eeMember` is set.
+
+The three writes are device-proof routes (`x-byok-device-proof`). The proof's
+`operation` is the constant in the table, and its `resource` is the route path.
+The tenant and device come from the proven device row. The body may be at most
+`maxE2eeRequestBytes` (default 4 MiB + 64 KiB, room for one append of 64
+entries of 64 KiB); a larger body gets 413 before the proof is checked.
+
+| Route | Class | Operation | Body | 200 response |
+| --- | --- | --- | --- | --- |
+| `POST /byok/e2ee/member-key` | proof | `e2ee-member-key.register` | `{ member, mac }` | `{ memberId }` |
+| `POST /byok/e2ee/chain` | proof | `e2ee-member-chain.append` | `{ entries }` | `{ appended, replayed }` |
+| `POST /byok/e2ee/key-packages` | proof | `e2ee-scope-key-package.put` | `{ packages }` | `{ stored }` |
+| `GET /byok/e2ee/chain?afterSeq=&limit=` | device | — | — | `{ entries }` |
+| `GET /byok/e2ee/key-packages?scopeId=&epoch=` | device | — | — | `{ packages }` |
+| `GET /byok/e2ee/pairing-mac` | device | — | — | `{ mac, member, chainHead }` |
+
+- **Registration.** `member` is the device's own member key bundle, so its
+  `deviceId` must be the proven device; `mac` is the device pairing MAC
+  (§7.2 step 3). The first registration of a device wins. An identical retry
+  succeeds and replaces the MAC. The MAC is kept for one pairing window
+  (`PAIRING_CODE_TTL_MS`).
+- **Writes.** The chain append and the package put run the same checks as
+  the Host control plane calls `appendMemberChainEntries` and
+  `putScopeKeyPackages`.
+- **Reads.** A device route checks the bearer against the device row, so a
+  revoked or superseded device gets 401. The package read returns only the
+  packages addressed to the device's registered member; a query names no
+  recipient. A query accepts only the names in the table, each once.
+- **Errors.** Every error body is `{ error }`:
+
+  | Status | `error` |
+  | --- | --- |
+  | 400 | `coordination_input_invalid`, or an unreadable body |
+  | 401 | `unauthorized` |
+  | 404 | `e2ee_pairing_mac_not_found` |
+  | 409 | `e2ee_member_chain_conflict`, `e2ee_scope_key_conflict`, `e2ee_member_key_conflict`, `e2ee_member_not_registered` |
+  | 413 | the body is over `maxE2eeRequestBytes` |
+  | 500 | `e2ee_member_state_unreadable` |
+
 ## 3. Task state machine (M1 gap #2, #5, #6)
 
 ```mermaid

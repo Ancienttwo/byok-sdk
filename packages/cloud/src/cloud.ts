@@ -29,6 +29,7 @@ import { HarnessIdSchema, requiredReceiverCapabilities } from '@byok-sdk/protoco
 import {
   contentHash,
   parseCapabilityDeclaration,
+  principalTenant,
   type BoardItem,
   type BoardItemInput,
   type BoardListQuery,
@@ -37,6 +38,7 @@ import {
   type Clock,
   type ControlPlanePrincipal,
   type CoreStores,
+  type DevicePrincipal,
   type PresenceHint,
   type SkillPackStore,
   type TenantId,
@@ -1240,7 +1242,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     const e2eeDeps = {
       proof: { devices: options.cloud.devices, crypto: options.crypto, clock: options.clock },
       device: deviceRouteDeps,
-      context: e2eeMemberContext,
+      context: (device: DevicePrincipal) => e2eeMemberContext(principalTenant(device)),
       maxRequestBytes: options.maxE2eeRequestBytes ?? DEFAULT_MAX_E2EE_REQUEST_BYTES,
     };
     registry.register({ method: 'POST', path: BYOK_E2EE_MEMBER_KEY_PATH, class: 'proof' }, e2eeMemberKeyRegisterHandler(e2eeDeps));

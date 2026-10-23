@@ -7,7 +7,7 @@
  * Every handler calls the same functions as the Host control plane, so a
  * device write meets exactly the checks a Host write meets.
  */
-import { principalTenant, type TenantId } from '@byok-sdk/core';
+import type { DevicePrincipal } from '@byok-sdk/core';
 import {
   BYOK_E2EE_CHAIN_PATH,
   BYOK_E2EE_KEY_PACKAGES_PATH,
@@ -31,7 +31,8 @@ export const DEFAULT_MAX_E2EE_REQUEST_BYTES = E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRI
 export interface E2eeMemberRouteDeps {
   readonly proof: DeviceProofAuthDeps;
   readonly device: DeviceRouteDeps;
-  readonly context: (tenant: TenantId) => e2eeMember.E2eeMemberContext;
+  /** The member context of the authenticated device's tenant. */
+  readonly context: (device: DevicePrincipal) => e2eeMember.E2eeMemberContext;
   readonly maxRequestBytes: number;
 }
 
@@ -59,7 +60,7 @@ function proofWriteHandler(deps: E2eeMemberRouteDeps, operation: string, resourc
     } catch {
       return c.json({ error: 'invalid request body' }, 400);
     }
-    return respond(c, () => write(deps.context(principalTenant(proven.device)), proven.device.deviceId, json));
+    return respond(c, () => write(deps.context(proven.device), proven.device.deviceId, json));
   };
 }
 
@@ -86,7 +87,8 @@ type DeviceRead = (context: e2eeMember.E2eeMemberContext, deviceId: string, quer
 function readQuery(c: Context, allowed: readonly string[], numeric: readonly string[]): Record<string, number | string> | undefined {
   const params = new URL(c.req.url).searchParams;
   const query: Record<string, number | string> = {};
-  for (const name of new Set(params.keys())) {
+  // A repeated name fails on its first occurrence, so each name is read once.
+  for (const name of params.keys()) {
     const values = params.getAll(name);
     if (!allowed.includes(name) || values.length !== 1) return undefined;
     const value = values[0]!;
@@ -108,7 +110,7 @@ function deviceReadHandler(deps: E2eeMemberRouteDeps, allowed: readonly string[]
     const query = readQuery(c, allowed, numeric);
     if (query === undefined) return c.json({ error: 'coordination_input_invalid' }, 400);
     const { device } = authenticated;
-    return respond(c, () => read(deps.context(principalTenant(device)), device.deviceId, query));
+    return respond(c, () => read(deps.context(device), device.deviceId, query));
   };
 }
 
