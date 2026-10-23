@@ -2,9 +2,9 @@
  * Sealed-payload v1 test vectors (#654 E1a), Node leg.
  *
  * `golden/sealed-payload-v1.json` pins the v1 bytes: plaintext numbers,
- * padding, frames, scope key derivations, member ids, sealed contents, crafted
- * receiver failures, member chain entries and key packages. Two checks run
- * against it:
+ * padding, frames, scope key derivations, member ids, sealed contents, sealed
+ * blobs, crafted receiver failures, member chain entries and key packages.
+ * Two checks run against it:
  *
  * 1. `support/sealed-payload-vectors.ts` runs every vector through the core
  *    modules. The Bun leg (`sealed-payload-bun.test.ts`) runs the same checker.
@@ -44,7 +44,9 @@ import {
 } from '../sealed-payload/scope-key';
 import {
   encodeSealedFrame,
+  sealBlobWithRandomness,
   sealContentWithRandomness,
+  sealedBlobAad,
   sealedContentAad,
   sealedPaddedLength,
   type SealedBinding,
@@ -58,7 +60,9 @@ import {
   importVectorPrivateKey,
   publicJwk,
   toHex,
+  vectorBlobBytes,
   vectorPlaintext,
+  type BlobVector,
   type ChainFailureVector,
   type ChainVector,
   type CraftedOpenVector,
@@ -236,6 +240,48 @@ function sealedInputs(client: VectorMember, device: VectorMember): SealedInput[]
       maxContentLength: 64 * 1024,
     },
   ];
+}
+
+/** #654 E1c: one blob per field shape, each sealed under the header and binding of an outer vector. */
+const BLOB_INPUTS: readonly Pick<BlobVector, 'name' | 'outer' | 'fieldPath' | 'bytes' | 'bytesLength' | 'maxContentLength'>[] = [
+  { name: 'instruction-blob', outer: 'c1-task-offer', fieldPath: '/instruction/blobRef', bytes: `${Buffer.from('Attached notes ✓\n').toString('hex')}00ff`, maxContentLength: 1024 },
+  { name: 'progress-spill-blob-empty', outer: 'c3-task-output-padme', fieldPath: '/events/2/spill/blob', bytes: '', maxContentLength: 1024 },
+  { name: 'artifact-blob-padme', outer: 'c3-task-output-numbers', fieldPath: '/artifactRefs/1', bytesLength: 20_000, maxContentLength: 2 * 1024 * 1024 },
+  { name: 'routine-template-blob', outer: 'routine-template', fieldPath: '/input/blobRef', bytes: '0102030405', maxContentLength: 1024 },
+];
+
+async function blobVectors(scopeKey: Uint8Array, sealed: readonly SealedVector[]): Promise<BlobVector[]> {
+  const out: BlobVector[] = [];
+  for (const input of BLOB_INPUTS) {
+    const outer = sealed.find((vector) => vector.name === input.outer)!;
+    const salt = labelBytes(`${input.name}-salt`);
+    const nonce = labelBytes(`${input.name}-nonce`, 12);
+    const result = await sealBlobWithRandomness(
+      {
+        scopeKey,
+        scope: outer.scope,
+        chainHead: outer.chainHead,
+        sender: outer.sender,
+        category: outer.category,
+        binding: outer.binding,
+        fieldPath: input.fieldPath,
+        bytes: vectorBlobBytes(input),
+        maxContentLength: input.maxContentLength,
+      },
+      { salt, nonce },
+    );
+    out.push({
+      ...input,
+      salt: salt.toString('hex'),
+      nonce: nonce.toString('hex'),
+      params: result.params,
+      aad: toHex(sealedBlobAad(outer.header, outer.binding, result.params.paddedLength, input.fieldPath)),
+      ...(input.bytesLength === undefined
+        ? { ciphertext: toHex(result.ciphertext) }
+        : { ciphertextSha256: createHash('sha256').update(result.ciphertext).digest('hex') }),
+    });
+  }
+  return out;
 }
 
 function macInputHex(category: SealedCategory, binding: SealedBinding, plaintext: JsonObject): string {
@@ -490,6 +536,7 @@ async function buildVectors(): Promise<SealedPayloadVectors> {
     },
     members: [client, device, stranger],
     sealed,
+    blobs: await blobVectors(scopeKey, sealed),
     craftedOpenFailures: await craftedVectors(scopeKey, client, chainHead),
     policyOpenFailures: await policyVectors(sealed),
     chain,
@@ -579,6 +626,14 @@ function oracleAad(header: SealedContentHeaderV1, binding: SealedBinding): Buffe
   }), 'utf8');
 }
 
+/** §8.1, E1c: the outer AAD members without `paddedLength` and `contentMac`, plus the blob's own `paddedLength` and `fieldPath`. */
+function oracleBlobAad(header: SealedContentHeaderV1, binding: SealedBinding, paddedLength: number, fieldPath: string): Buffer {
+  const outer = JSON.parse(oracleAad(header, binding).toString('utf8')) as Record<string, unknown>;
+  delete outer['paddedLength'];
+  delete outer['contentMac'];
+  return Buffer.from(oracleCanonical({ ...outer, paddedLength, fieldPath }), 'utf8');
+}
+
 function oracleMacInput(category: string, binding: SealedBinding, plaintextText: string): string {
   return `byok-content-mac-v1\n${category}\n${binding.family}\n${oracleCanonical(binding.identity)}\n${plaintextText}`;
 }
@@ -643,6 +698,8 @@ describe('sealed-payload v1 vectors', () => {
       keyPackages: golden.keyPackages.length,
     });
     expect(counts.sealedRejections).toBeGreaterThanOrEqual(golden.sealed.length * 30);
+    expect(counts.blobs).toBe(golden.blobs.length);
+    expect(counts.blobRejections).toBeGreaterThanOrEqual(golden.blobs.length * 35);
   });
 
   it('cover every category, the routine template, each crafted defect and each key package outcome', () => {
@@ -650,6 +707,9 @@ describe('sealed-payload v1 vectors', () => {
     expect(golden.sealed.some((vector) => vector.binding.deviceId === null && vector.binding.notAfter !== null)).toBe(true);
     expect(golden.sealed.some((vector) => vector.header.paddedLength > 16_384)).toBe(true);
     expect(golden.sealed.find((vector) => vector.name === 'c3-task-output-numbers')?.plaintext).toBeDefined();
+    expect(golden.blobs.map((vector) => vector.fieldPath)).toEqual(['/instruction/blobRef', '/events/2/spill/blob', '/artifactRefs/1', '/input/blobRef']);
+    expect(golden.blobs.some((vector) => vector.params.paddedLength > 16_384)).toBe(true);
+    expect(golden.blobs.some((vector) => vector.bytes === '')).toBe(true);
     expect(golden.craftedOpenFailures.map((vector) => vector.defect)).toEqual(['content-mac', 'padding-byte', 'padded-length', 'length-overflow', 'non-canonical-json']);
     expect(golden.policyOpenFailures.map((vector) => vector.defect)).toEqual(['key-id', 'category-not-sealed', 'scope-id', 'epoch-below', 'categories-order', 'not-after-format']);
     expect(new Set(golden.policyOpenFailures.map((vector) => vector.expect))).toEqual(new Set(['sealed_key_unavailable', 'sealing_policy_mismatch']));
@@ -723,6 +783,27 @@ describe('sealed-payload v1 vectors against an independent oracle', () => {
       expect(Buffer.from(macInput, 'utf8').toString('hex')).toBe(vector.macInput);
       const aad = oracleAad(vector.header, vector.binding);
       expect(aad.toString('hex')).toBe(vector.aad);
+      const ciphertext = nodeAesGcm(oracleContentKey(salt), nonce, aad, frame);
+      if (vector.ciphertext === undefined) expect(createHash('sha256').update(Buffer.from(ciphertext, 'hex')).digest('hex')).toBe(vector.ciphertextSha256);
+      else expect(ciphertext).toBe(vector.ciphertext);
+    }
+  });
+
+  it('sealed blobs: params, AAD and ciphertext (#654 E1c)', () => {
+    for (const vector of golden.blobs) {
+      const outer = golden.sealed.find((entry) => entry.name === vector.outer)!;
+      const bytes = Buffer.from(vectorBlobBytes(vector));
+      const frame = oracleFrame(bytes);
+      const salt = Buffer.from(vector.salt, 'hex');
+      const nonce = Buffer.from(vector.nonce, 'hex');
+      expect(vector.params).toEqual({ salt: salt.toString('base64url'), nonce: nonce.toString('base64url'), paddedLength: frame.length });
+      expect(vector.fieldPath).toMatch(/^(?:\/(?:[A-Za-z][A-Za-z0-9]*|0|[1-9][0-9]*))+$/u);
+      const aad = oracleBlobAad(outer.header, outer.binding, frame.length, vector.fieldPath);
+      expect(aad.toString('hex')).toBe(vector.aad);
+      const members = Object.keys(JSON.parse(aad.toString('utf8')) as object);
+      expect(members).toHaveLength(18);
+      expect(members).toContain('fieldPath');
+      expect(members).not.toContain('contentMac');
       const ciphertext = nodeAesGcm(oracleContentKey(salt), nonce, aad, frame);
       if (vector.ciphertext === undefined) expect(createHash('sha256').update(Buffer.from(ciphertext, 'hex')).digest('hex')).toBe(vector.ciphertextSha256);
       else expect(ciphertext).toBe(vector.ciphertext);

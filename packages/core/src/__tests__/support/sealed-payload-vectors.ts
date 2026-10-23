@@ -30,13 +30,18 @@ import {
   SEALED_CATEGORIES,
   decodeSealedFrame,
   encodeSealedFrame,
+  openSealedBlob,
   openSealedContent,
+  sealBlobWithRandomness,
   sealContentWithRandomness,
+  sealedBlobAad,
   sealedContentAad,
   sealedContentMac,
   sealedPaddedLength,
+  type OpenSealedBlobInput,
   type OpenSealedContentInput,
   type SealedBinding,
+  type SealedBlobParamsV1,
   type SealedCategory,
   type SealedContentHeaderV1,
   type SealedContentOpenFailure,
@@ -85,6 +90,27 @@ export interface SealedVector {
   readonly aad: string;
   readonly macInput: string;
   /** Hex of the whole ciphertext, or only its SHA-256 for a large content. */
+  readonly ciphertext?: string;
+  readonly ciphertextSha256?: string;
+}
+
+/**
+ * One sealed blob (#654 E1c). It shares scope, chain head, sender, category
+ * and binding with the outer sealed vector named by `outer`.
+ */
+export interface BlobVector {
+  readonly name: string;
+  readonly outer: string;
+  /** RFC 6901 pointer to the BlobRef node in the moved-fields object. */
+  readonly fieldPath: string;
+  /** Hex of the blob bytes, or a rule for a large blob: byte `i` is `(i * 31 + 7) & 0xff`. */
+  readonly bytes?: string;
+  readonly bytesLength?: number;
+  readonly maxContentLength: number;
+  readonly salt: string;
+  readonly nonce: string;
+  readonly params: SealedBlobParamsV1;
+  readonly aad: string;
   readonly ciphertext?: string;
   readonly ciphertextSha256?: string;
 }
@@ -166,6 +192,7 @@ export interface SealedPayloadVectors {
   };
   readonly members: readonly VectorMember[];
   readonly sealed: readonly SealedVector[];
+  readonly blobs: readonly BlobVector[];
   readonly craftedOpenFailures: readonly CraftedOpenVector[];
   readonly policyOpenFailures: readonly PolicyOpenVector[];
   readonly chain: readonly ChainVector[];
@@ -182,6 +209,8 @@ export interface VectorCheckCounts {
   readonly members: number;
   readonly sealed: number;
   readonly sealedRejections: number;
+  readonly blobs: number;
+  readonly blobRejections: number;
   readonly craftedOpenFailures: number;
   readonly policyOpenFailures: number;
   readonly chain: number;
@@ -204,6 +233,12 @@ export function vectorPlaintext(vector: Pick<SealedVector, 'plaintext' | 'plaint
   if (vector.plaintext !== undefined) return vector.plaintext;
   if (vector.plaintextFill === undefined) throw new Error('sealed vector has no plaintext');
   return { [vector.plaintextFill.key]: vector.plaintextFill.unit.repeat(vector.plaintextFill.count) };
+}
+
+export function vectorBlobBytes(vector: Pick<BlobVector, 'bytes' | 'bytesLength'>): Uint8Array<ArrayBuffer> {
+  if (vector.bytes !== undefined) return fromHex(vector.bytes);
+  if (vector.bytesLength === undefined) throw new Error('blob vector has no bytes');
+  return Uint8Array.from({ length: vector.bytesLength }, (_, index) => (index * 31 + 7) & 0xff);
 }
 
 export function publicJwk(pair: VectorKeyPair): P256PublicJwk {
@@ -475,6 +510,164 @@ async function checkSealed(vectors: SealedPayloadVectors, scopeKey: Uint8Array):
   return rejections;
 }
 
+async function expectBlobOpenFailure(label: string, input: OpenSealedBlobInput, expected: SealedContentOpenFailure): Promise<void> {
+  const result = await openSealedBlob(input);
+  if (result.ok || result.reason !== expected) {
+    throw new Error(`${label}: expected ${expected}, got ${result.ok ? 'ok' : result.reason}`);
+  }
+}
+
+/** A frame with one defect, encrypted under the right blob AAD, so only the frame check can refuse it. */
+async function craftedBlobCiphertext(scopeKey: Uint8Array, vector: BlobVector, outer: SealedVector, frame: Uint8Array): Promise<Uint8Array> {
+  const key = await crypto.subtle.importKey('raw', new Uint8Array(await deriveSealedContentKey(scopeKey, fromHex(vector.salt))), 'AES-GCM', false, ['encrypt']);
+  const aad = new Uint8Array(sealedBlobAad(outer.header, outer.binding, frame.byteLength, vector.fieldPath));
+  return new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: fromHex(vector.nonce), additionalData: aad }, key, new Uint8Array(frame)));
+}
+
+function blobRejections(vector: BlobVector, outer: SealedVector, otherMemberId: string): BlobRejection[] {
+  const { header, binding } = outer;
+  const failed = (label: string, value: Partial<BlobRejection>): BlobRejection => ({ label, ...value, expect: 'sealed_open_failed' });
+  const policy = (label: string, value: Partial<BlobRejection>): BlobRejection => ({ label, ...value, expect: 'sealing_policy_mismatch' });
+  const [firstField] = Object.keys(binding.identity);
+  const listedOther = binding.categories.find((category) => category !== header.category);
+  const unlisted = SEALED_CATEGORIES.find((category) => category !== header.category)!;
+  const list: BlobRejection[] = [
+    failed('field path other field', { fieldPath: '/other' }),
+    failed('field path deeper', { fieldPath: `${vector.fieldPath}/0` }),
+    ...['instruction/blobRef', '/', '', '/01', '/a~0b', '/a/-', '/blob ref'].map((fieldPath) => failed(`field path syntax ${JSON.stringify(fieldPath)}`, { fieldPath })),
+    failed('params salt', { params: { ...vector.params, salt: encodeBase64Url(new Uint8Array(32).fill(7)) } }),
+    failed('params nonce', { params: { ...vector.params, nonce: encodeBase64Url(new Uint8Array(12).fill(7)) } }),
+    failed('params padded length', { params: { ...vector.params, paddedLength: sealedPaddedLength(vector.params.paddedLength + 1) } }),
+    failed('params illegal padded length', { params: { ...vector.params, paddedLength: vector.params.paddedLength + 1 } }),
+    failed('params extra field', { params: { ...vector.params, blobRef: {} } }),
+    failed('params not an object', { params: null }),
+    failed('header chain head', { header: { ...header, chainHead: { ...header.chainHead, seq: header.chainHead.seq + 1 } } }),
+    failed('header sender', { header: { ...header, sender: otherMemberId } }),
+    failed('header epoch', { header: { ...header, scope: { ...header.scope, epoch: header.scope.epoch + 1 } } }),
+    failed('header scope id', { header: { ...header, scope: { ...header.scope, id: `${header.scope.id}-other` } } }),
+    failed('header not an object', { header: null as never }),
+    { label: 'header key id', header: { ...header, scope: { ...header.scope, keyId: 'A'.repeat(22) } }, expect: 'sealed_key_unavailable' },
+    failed('binding tenant', { binding: { ...binding, tenantId: `${binding.tenantId}-other` } }),
+    failed('binding direction', { binding: { ...binding, direction: binding.direction === 'server-to-daemon' ? 'daemon-to-server' : 'server-to-daemon' } }),
+    failed('binding identity', { binding: { ...binding, identity: { ...binding.identity, [firstField!]: `${String(binding.identity[firstField!])}-other` } } }),
+    failed('binding agent', {
+      binding: { ...binding, agentRef: binding.agentRef === null ? { agentId: 'agent-other', profileRevision: 'rev-other' } : { ...binding.agentRef, agentId: 'agent-other' } },
+    }),
+    policy('binding category not sealed', { binding: { ...binding, categories: [unlisted] } }),
+    policy('binding not an object', { binding: null as never }),
+  ];
+  if (binding.deviceId !== null) list.push(failed('binding family', { binding: { ...binding, family: 'task.other_family' } }), failed('binding device', { binding: { ...binding, deviceId: `${binding.deviceId}-other` } }));
+  if (listedOther !== undefined) list.push(failed('header category swap', { header: { ...header, category: listedOther } }));
+  return list;
+}
+
+interface BlobRejection {
+  readonly label: string;
+  readonly header?: SealedContentHeaderV1;
+  readonly binding?: SealedBinding;
+  readonly fieldPath?: string;
+  readonly params?: unknown;
+  readonly ciphertext?: Uint8Array;
+  readonly scopeKey?: Uint8Array;
+  readonly maxContentLength?: number;
+  readonly expect: SealedContentOpenFailure;
+}
+
+async function checkBlobs(vectors: SealedPayloadVectors, scopeKey: Uint8Array): Promise<number> {
+  let rejections = 0;
+  for (const vector of vectors.blobs) {
+    const label = `blob ${vector.name}`;
+    const outer = vectors.sealed.find((candidate) => candidate.name === vector.outer);
+    if (outer === undefined) throw new Error(`${label}: no outer vector ${vector.outer}`);
+    const bytes = vectorBlobBytes(vector);
+    const sealed = await sealBlobWithRandomness(
+      {
+        scopeKey,
+        scope: outer.scope,
+        chainHead: outer.chainHead,
+        sender: outer.sender,
+        category: outer.category,
+        binding: outer.binding,
+        fieldPath: vector.fieldPath,
+        bytes,
+        maxContentLength: vector.maxContentLength,
+      },
+      { salt: fromHex(vector.salt), nonce: fromHex(vector.nonce) },
+    );
+    expectEqual(`${label} params`, sealed.params, vector.params);
+    if (vector.ciphertext !== undefined) expectEqual(`${label} ciphertext`, toHex(sealed.ciphertext), vector.ciphertext);
+    else expectEqual(`${label} ciphertext sha256`, await sha256Hex(sealed.ciphertext), vector.ciphertextSha256);
+    expectEqual(`${label} aad`, toHex(sealedBlobAad(outer.header, outer.binding, vector.params.paddedLength, vector.fieldPath)), vector.aad);
+
+    const base: OpenSealedBlobInput = {
+      header: outer.header,
+      binding: outer.binding,
+      scopeKey,
+      fieldPath: vector.fieldPath,
+      params: vector.params,
+      ciphertext: sealed.ciphertext,
+      maxContentLength: vector.maxContentLength,
+    };
+    const opened = await openSealedBlob(base);
+    if (!opened.ok) throw new Error(`${label}: open failed with ${opened.reason}`);
+    expectEqual(`${label} bytes`, toHex(opened.bytes), toHex(bytes));
+
+    const otherMemberId = vectors.members.find((candidate) => candidate.memberId !== outer.sender)!.memberId;
+    const appended = new Uint8Array(sealed.ciphertext.byteLength + 1);
+    appended.set(sealed.ciphertext);
+    const overflow = encodeSealedFrame(bytes);
+    new DataView(overflow.buffer).setUint32(0, overflow.byteLength - 3, false);
+    const padding = encodeSealedFrame(bytes);
+    const list: BlobRejection[] = [
+      ...blobRejections(vector, outer, otherMemberId),
+      { label: 'ciphertext first byte', ciphertext: flipByte(sealed.ciphertext, 0), expect: 'sealed_open_failed' },
+      { label: 'ciphertext tag byte', ciphertext: flipByte(sealed.ciphertext, sealed.ciphertext.byteLength - 1), expect: 'sealed_open_failed' },
+      { label: 'ciphertext truncated', ciphertext: sealed.ciphertext.subarray(0, sealed.ciphertext.byteLength - 1), expect: 'sealed_open_failed' },
+      { label: 'ciphertext extended', ciphertext: appended, expect: 'sealed_open_failed' },
+      { label: 'other scope key', scopeKey: flipByte(scopeKey, 0), expect: 'sealed_key_unavailable' },
+      { label: 'crafted length overflow', ciphertext: await craftedBlobCiphertext(scopeKey, vector, outer, overflow), expect: 'sealed_open_failed' },
+    ];
+    if (padding.byteLength > 4 + bytes.byteLength) {
+      padding[padding.byteLength - 1] = 1;
+      list.push({ label: 'crafted padding byte', ciphertext: await craftedBlobCiphertext(scopeKey, vector, outer, padding), expect: 'sealed_open_failed' });
+    }
+    if (bytes.byteLength > 0) list.push({ label: 'content limit', maxContentLength: bytes.byteLength - 1, expect: 'sealed_open_failed' });
+    for (const rejection of list) {
+      await expectBlobOpenFailure(`${label} ${rejection.label}`, {
+        header: 'header' in rejection ? rejection.header! : base.header,
+        binding: 'binding' in rejection ? rejection.binding! : base.binding,
+        scopeKey: rejection.scopeKey ?? base.scopeKey,
+        fieldPath: 'fieldPath' in rejection ? rejection.fieldPath! : base.fieldPath,
+        params: 'params' in rejection ? rejection.params : base.params,
+        ciphertext: rejection.ciphertext ?? base.ciphertext,
+        maxContentLength: rejection.maxContentLength ?? base.maxContentLength,
+      }, rejection.expect);
+      rejections += 1;
+    }
+
+    // Domain separation: the blob does not open as an outer content, and an outer content does not open as a blob.
+    await expectOpenFailure(`${label} opened as an outer content`, {
+      header: { ...outer.header, salt: vector.params.salt, nonce: vector.params.nonce, paddedLength: vector.params.paddedLength },
+      ciphertext: sealed.ciphertext,
+      scopeKey,
+      binding: outer.binding,
+      sealing: outer.sealing,
+      maxContentLength: vector.maxContentLength,
+    }, 'sealed_open_failed');
+    rejections += 1;
+    if (outer.ciphertext !== undefined) {
+      await expectBlobOpenFailure(`${label} outer content opened as a blob`, {
+        ...base,
+        params: { salt: outer.header.salt, nonce: outer.header.nonce, paddedLength: outer.header.paddedLength },
+        ciphertext: fromHex(outer.ciphertext),
+        maxContentLength: outer.maxContentLength,
+      }, 'sealed_open_failed');
+      rejections += 1;
+    }
+  }
+  return rejections;
+}
+
 async function checkOpenFailures(vectors: SealedPayloadVectors, scopeKey: Uint8Array): Promise<void> {
   for (const vector of [...vectors.craftedOpenFailures, ...vectors.policyOpenFailures]) {
     await expectOpenFailure(`open failure ${vector.name}`, {
@@ -576,6 +769,7 @@ export async function checkSealedPayloadVectors(vectors: SealedPayloadVectors): 
   }
   const scopeKey = await checkScopeKey(vectors);
   const sealedRejections = await checkSealed(vectors, scopeKey);
+  const blobRejectionCount = await checkBlobs(vectors, scopeKey);
   await checkOpenFailures(vectors, scopeKey);
   await checkChain(vectors);
   await checkChainFailures(vectors);
@@ -589,6 +783,8 @@ export async function checkSealedPayloadVectors(vectors: SealedPayloadVectors): 
     members: vectors.members.length,
     sealed: vectors.sealed.length,
     sealedRejections,
+    blobs: vectors.blobs.length,
+    blobRejections: blobRejectionCount,
     craftedOpenFailures: vectors.craftedOpenFailures.length,
     policyOpenFailures: vectors.policyOpenFailures.length,
     chain: vectors.chain.length,
