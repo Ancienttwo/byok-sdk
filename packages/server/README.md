@@ -487,8 +487,9 @@ with or without `egressPolicy`, resumes an exact session and requires
 `sessionRef` (it is refused before any write otherwise; fresh execution is
 `executions.submit`). Other `dispatch` calls may still omit taskId.
 `executions.submit` and `dispatch({ agentRef })` take an optional `agentMemory`
-(`'none'`, `'read'` or `'read-write'`) for that one task. The device must
-advertise `agent-memory-selection`; the client README describes the semantics.
+(`'none'`, `'read'`, `'read-write'` or `'read-if-admitted'`) for that one task. The device must
+advertise `agent-memory-selection`, and also `agent-memory-read-if-admitted` for
+`'read-if-admitted'`; the client README describes the semantics.
 Both refuse `'read-write'` with `homeAccess: 'memory-reader'` before the task
 exists.
 A caller taskId requires an explicit device; the façade never reselects a
