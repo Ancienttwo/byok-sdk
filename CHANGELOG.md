@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Changed (client)** — on macOS the Agent memory helper refuses a directory
+  or a file below the Agent home that is on another device than its parent
+  directory (#781). Before, the local-volume rule (#765) checked only the home
+  itself, so a network volume mounted over `notes` was admitted. The helper
+  compares the `lstat` device of each entry before it opens the entry. A read,
+  replace, delete, append or walk that reaches such an entry fails with
+  `unsafe_path`. A walk that meets one fails as a whole, as it does for a
+  symbolic link. Windows already refuses a volume mount point, because it is a
+  reparse point. Compatibility: on macOS a mount below the home, for example a
+  network volume, a nested APFS volume or a disk image, now fails memory recall
+  and save, the hosted projection and the task-free export where they reach
+  it. Move such a mount out of the home. Linux uses its own backend and has no
+  volume rule.
 - **Feature (protocol, cloud)** — wire v3 gets the rules of sealed payload v1,
   behind the new capability `sealed-payload-v1` (#654 E3a). `PROTOCOL_VERSION`
   stays 3. There are 13 new sealed message types, one for each sealed plain
