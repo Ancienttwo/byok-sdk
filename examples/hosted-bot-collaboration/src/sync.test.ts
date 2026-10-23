@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { DEFAULT_RETRY, enqueue, HostLedger, project, taskId, type FrozenInput } from '@byok-sdk/example-host-execution-core';
+import { DEFAULT_RETRY, enqueue, hash, HostLedger, project, taskId, type FrozenInput } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { stateOf, type CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { syncTurn } from '@byok-sdk/example-bot-collaboration/rules/commands';
@@ -167,7 +167,8 @@ describe.skipIf(POSTGRES_URL === undefined)('H sync step on real Postgres (#793 
     const h = await hosted();
     await h.change(state => {
       queueTurns(state);
-      state.turns.r1 = { id: 'r1', root: 'r1', botId: 'main', source: 'routine', request: 'Daily', hop: 0, status: 'queued', authority: 'owner' };
+      const id = `occurrence:${hash('no occurrence row')}`;
+      state.turns[id] = { id, root: id, botId: 'main', source: 'routine', request: 'Daily', hop: 0, status: 'queued', authority: 'owner' };
     });
     const before = await h.stored();
     await expect(h.sync()).rejects.toThrow('Host occurrence not found');

@@ -95,7 +95,7 @@ export class HostedCollaborationStore {
         'SELECT key, ordinal::text, evidence, result::text, root FROM command WHERE scope = $1 ORDER BY key',
         'SELECT key, ordinal::text, kind, body::text FROM outbox WHERE scope = $1 ORDER BY key',
         `SELECT key, task_id, ordinal::text, agent, source, input::text, wait_until::text, submission, tries, next_at::text, last_error,
-          cancel_reason, conclusion, started, attempt::text, terminal::text, reconcile_at::text FROM intent WHERE scope = $1 ORDER BY key`,
+          cancel_reason, conclusion, started, attempt::text, terminal::text, reconcile_at::text, retry_until::text FROM intent WHERE scope = $1 ORDER BY key`,
         'SELECT device, ordinal::text, mode, mode_revision::text, revoked_at::text FROM device_binding WHERE scope = $1 ORDER BY device',
         'SELECT identity FROM retired_identity WHERE scope = $1 ORDER BY identity',
         'SELECT namespace, id, body::text, expires_at::text FROM archived_row WHERE scope = $1 ORDER BY namespace, id',
