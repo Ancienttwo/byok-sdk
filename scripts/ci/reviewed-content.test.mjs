@@ -403,10 +403,18 @@ test('#793: the K8 manifest admits only the reviewed hosted entries, and stays p
     [{ ...manifest, exports: { ...exports, '.': './src/index.ts' } }, 'a root entry'],
     [{ ...manifest, exports: { ...exports, './host': './src/host.ts' } }, 'another entry'],
     [{ ...manifest, exports, scripts: { test: 'echo bypass' } }, 'another field'],
+    [{ ...manifest, exports: { ...exports, './model': './src/index.ts' } }, 'an entry retargeted to another file'],
+    [{ ...manifest, exports: Object.fromEntries(Object.entries(exports).filter(([key]) => key !== './team')) }, 'a subset of the entries'],
   ]) {
     f.write(path, candidate);
     assert.throws(() => selectImpact([path], f), /more than/, reason);
   }
   f.write(path, { ...manifest, exports, private: false });
   assert.throws(() => selectImpact([path], f), /must stay private/);
+  // The entries are admitted only as a new field: a base that already has other entries cannot become these.
+  f.write(path, { ...manifest, exports: { './other': './src/other.ts' } });
+  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'K8 with other entries');
+  f.base = git('rev-parse', 'HEAD').trim();
+  f.write(path, { ...manifest, exports });
+  assert.throws(() => selectImpact([path], f), /more than/, 'a base that already has exports');
 });

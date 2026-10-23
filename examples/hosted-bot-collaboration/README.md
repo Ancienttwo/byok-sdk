@@ -9,4 +9,5 @@ The SDK tables stay under the SDK migrations. This example owns only its own col
 ## Tests
 
 `bun run --cwd examples/hosted-bot-collaboration test` runs the D1 commit vectors on the reference
-subject. The CI `dataplane` job runs this suite against a real Postgres.
+subject: the pure rules in memory. No test uses Postgres yet. The CI `dataplane` job also runs this
+suite, because it is the only job with a real Postgres for the store suites.

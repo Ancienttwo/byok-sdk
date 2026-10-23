@@ -499,7 +499,7 @@ export function selectImpact(paths, context = {}) {
     }
   }
   for (const dir of leafDirs) dirs.add(dir);
-  // #793 O5: the hosted example runs its suites only in the dataplane job, which has the real Postgres.
+  // #793 O5: the hosted example also runs in the dataplane job, the only job with a real Postgres.
   if (dirs.has('packages/cloud-dataplane') || dirs.has('packages/conformance') || dirs.has('examples/hosted-bot-collaboration')) families.add('dataplane');
   return { dirs: sorted(dirs), files: sorted(files), families: sorted(families),
     reason: dirs.size || families.size ? 'impacted' : scripts ? 'root-ci-scripts' : 'docs-only' };
