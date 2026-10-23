@@ -34,6 +34,7 @@ interface PipeBindings {
   peek(pipe: Handle, buffer: null, size: number, read: null, available: Out, left: null): number;
   read(file: Handle, data: Buffer, size: number, read: Out, overlapped: null): number;
   close(handle: Handle): number;
+  lower(locale: string, flags: number, source: Buffer, units: number, target: Buffer | null, size: number, version: null, reserved: null, sort: number): number;
 }
 interface KoffiModule {
   load(path: string): { func(convention: string, name: string, result: unknown, args: unknown[]): (...args: never[]) => unknown };
@@ -65,8 +66,25 @@ function loadPipeBindings(koffi: KoffiModule): PipeBindings {
     peek: bind('PeekNamedPipe', 'int', ['intptr_t', 'void *', 'uint32_t', 'void *', dword, 'void *']),
     read: bind('ReadFile', 'int', ['intptr_t', 'void *', 'uint32_t', dword, 'void *']),
     close: bind('CloseHandle', 'int', ['intptr_t']),
+    lower: bind('LCMapStringEx', 'int', ['str16', 'uint32_t', 'void *', 'int', 'void *', 'int', 'void *', 'void *', 'intptr_t']),
   };
 }
+
+/**
+ * The lower case of `os.path.normcase` in CPython 3.11 to 3.14 on Windows:
+ * `LCMapStringEx` with the invariant locale (the empty name) and
+ * `LCMAP_LOWERCASE` (0x100). As CPython, it asks for the output size first,
+ * because the output can be longer than the input. Hermes names its pipe from
+ * this string. It differs from `toLowerCase`: U+0130 stays, and a final U+03A3
+ * becomes U+03C3. An empty key gives an empty string, as in CPython.
+ */
+export const windowsLower = (koffi: unknown) => (key: string): string => {
+  const source = Buffer.from(key, 'utf16le');
+  const map = (out: Buffer | null, size: number): number => bindings(koffi as KoffiModule).lower('', 0x100, source, key.length, out, size, null, null, 0);
+  const target = Buffer.alloc(map(null, 0) * 2);
+  if (map(target, target.length / 2) * 2 !== target.length) throw new Error('LCMapStringEx failed');
+  return target.toString('utf16le');
+};
 
 export interface HermesPipeAnswer {
   /** The pid of the process that serves the pipe, from the kernel. */
