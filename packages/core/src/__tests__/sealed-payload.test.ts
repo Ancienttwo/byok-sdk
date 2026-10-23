@@ -50,6 +50,15 @@ const BINDING: SealedBinding = {
   notAfter: null,
 };
 
+/** The one family that binds no device: it binds an expiry instead. */
+const TEMPLATE_BINDING: SealedBinding = {
+  ...BINDING,
+  family: 'routine.template',
+  identity: { routineId: 'routine-1', definitionVersion: 1 },
+  deviceId: null,
+  notAfter: '2026-12-31T00:00:00.000Z',
+};
+
 const SEALING = { scopeId: 'scope-1', epoch: 1 } as const;
 
 function sealInput(overrides: Partial<SealContentInput> = {}): SealContentInput {
@@ -135,12 +144,12 @@ describe('sealContent', () => {
     await expectInvalid(sealContent(sealInput({ binding: { ...BINDING, family: 'task' } })));
     await expectInvalid(sealContent(sealInput({ binding: { ...BINDING, notAfter: '2026-12-31T00:00:00.000Z' } })));
     await expectInvalid(sealContent(sealInput({ binding: { ...BINDING, deviceId: null } })));
-    await expectInvalid(sealContent(sealInput({ binding: { ...BINDING, deviceId: null, notAfter: '2026-12-31T00:00:00Z' } })));
+    await expectInvalid(sealContent(sealInput({ binding: { ...TEMPLATE_BINDING, notAfter: '2026-12-31T00:00:00Z' } })));
   });
 
   it('binds a device for every family except routine.template', async () => {
-    const expiry = '2026-12-31T00:00:00.000Z';
-    const template = { ...BINDING, family: 'routine.template', identity: { routineId: 'routine-1', definitionVersion: 1 }, deviceId: null, notAfter: expiry };
+    const template = TEMPLATE_BINDING;
+    const expiry = template.notAfter;
     await expect(sealContent(sealInput({ binding: template }))).resolves.toHaveProperty('header');
     await expectInvalid(sealContent(sealInput({ binding: { ...BINDING, deviceId: null, notAfter: expiry } })));
     await expectInvalid(sealContent(sealInput({ binding: { ...BINDING, family: 'task.result', direction: 'daemon-to-server', deviceId: null, notAfter: expiry } })));
@@ -176,7 +185,7 @@ describe('openSealedContent', () => {
     for (const binding of [
       null,
       { ...BINDING, categories: ['task-output', 'task-input'] },
-      { ...BINDING, notAfter: '2026-12-31T00:00:00Z' },
+      { ...TEMPLATE_BINDING, notAfter: '2026-12-31T00:00:00Z' },
       { ...BINDING, deviceId: null, notAfter: '2026-12-31T00:00:00.000Z' },
     ]) {
       expect(await open(binding, SEALING)).toEqual({ ok: false, reason: 'sealing_policy_mismatch' });
