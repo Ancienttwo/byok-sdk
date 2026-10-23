@@ -99,4 +99,23 @@ describe('DeviceSealingKeyStore', () => {
     await expect(store.loadOrCreate(ENROLLMENT)).rejects.toMatchObject({ code: 'DEVICE_SEALING_KEY_INVALID' });
     await expect(secrets.get(DEVICE_SEALING_SECRET_NAME)).resolves.toBe(mixed);
   });
+
+  it('fails closed on a key coordinate in noncanonical base64url and never regenerates it', async () => {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    for (const field of ['x', 'y', 'd'] as const) {
+      const secrets = new InMemorySecretStore();
+      const store = new DeviceSealingKeyStore({ secretStore: secrets });
+      await store.loadOrCreate(ENROLLMENT);
+      const record = JSON.parse((await secrets.get(DEVICE_SEALING_SECRET_NAME))!);
+      const value: string = record.jwk[field];
+      // 32 bytes leave the 2 low bits of the last character unused. Setting one
+      // keeps the bytes a lenient decoder returns, but is not the canonical text.
+      const noncanonical = value.slice(0, -1) + alphabet[alphabet.indexOf(value.at(-1)!) ^ 1];
+      expect(Buffer.from(noncanonical, 'base64url').equals(Buffer.from(value, 'base64url'))).toBe(true);
+      const tampered = JSON.stringify({ ...record, jwk: { ...record.jwk, [field]: noncanonical } });
+      await secrets.set(DEVICE_SEALING_SECRET_NAME, tampered);
+      await expect(store.loadOrCreate(ENROLLMENT)).rejects.toMatchObject({ code: 'DEVICE_SEALING_KEY_INVALID' });
+      await expect(secrets.get(DEVICE_SEALING_SECRET_NAME)).resolves.toBe(tampered);
+    }
+  });
 });

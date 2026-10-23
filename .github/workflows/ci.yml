@@ -468,7 +468,7 @@ jobs:
 
       - name: Run SDK helper, intent and capability contracts
         run: |
-          bun run --filter @byok-sdk/client test -- src/__tests__/agent-memory-fs-helper.test.ts src/__tests__/agent-memory-helper-release.test.ts src/__tests__/agent-memory-helper-assets.test.ts src/__tests__/agent-memory-helper-asset-root-daemon.test.ts src/__tests__/agent-memory-helper-release-errors.test.ts src/__tests__/agent-memory-helper-admission.test.ts src/__tests__/agent-memory-mcp-admission.test.ts src/__tests__/agent-memory-helper-crash.test.ts src/__tests__/agent-memory-intent.test.ts src/__tests__/daemon-conn-hello-capabilities.test.ts src/__tests__/agent-home-directory-barrier.test.ts
+          bun run --filter @byok-sdk/client test -- src/__tests__/agent-memory-fs-helper.test.ts src/__tests__/agent-memory-helper-release.test.ts src/__tests__/agent-memory-helper-assets.test.ts src/__tests__/agent-memory-helper-asset-root-daemon.test.ts src/__tests__/agent-memory-helper-release-errors.test.ts src/__tests__/agent-memory-helper-admission.test.ts src/__tests__/agent-memory-mcp-admission.test.ts src/__tests__/agent-memory-helper-crash.test.ts src/__tests__/agent-memory-intent.test.ts src/__tests__/daemon-conn-hello-capabilities.test.ts src/__tests__/agent-home-directory-barrier.test.ts src/__tests__/agent-memory-helper-identity.test.ts src/__tests__/agent-memory-windows-gate.test.ts
 
       - name: Qualify task-free export against the release helper
         env:
@@ -479,6 +479,19 @@ jobs:
         run: |
           node packages/client/scripts/agent-memory-runtime-smoke.mjs
           bun packages/client/scripts/agent-memory-runtime-smoke.mjs
+
+      # Node and Bun spawn the release helper with an empty environment. A
+      # junction home is refused, and a junction inside the home refuses the
+      # write. Moved from agent-memory-windows.yml (#605 W7).
+      - name: Check the helper open with junction fixtures under Node and Bun
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $helper = (Resolve-Path packages/client/dist/native/agent-memory-fs/win32-x64.exe).Path
+          node packages/client/scripts/agent-memory-windows-junction-smoke.mjs $helper
+          if ($LASTEXITCODE -ne 0) { throw 'Node junction smoke failed' }
+          bun packages/client/scripts/agent-memory-windows-junction-smoke.mjs $helper
+          if ($LASTEXITCODE -ne 0) { throw 'Bun junction smoke failed' }
 
       # Node runs the same flow in agent-memory-intent.test.ts (W4).
       - name: Run the intent processor over the real helper under Bun

@@ -3,7 +3,7 @@
 // helper. It captures what the Host received at its HTTP boundary.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { mkdir, readdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
@@ -234,13 +234,31 @@ export const RESERVED_CELL_KEYS: readonly string[] = Object.freeze([
 ]);
 
 const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
-const SDK_PACKAGES = ['client', 'server', 'protocol', 'core'] as const;
+/**
+ * Every SDK package the runner loads at runtime: the closure of `@byok-sdk/*`
+ * imports in the built dist of client, server and protocol. A test recomputes
+ * this closure from the dist files.
+ */
+export const SDK_RUNTIME_PACKAGES = ['client', 'server', 'protocol', 'core', 'cloud'] as const;
+
+/** Hex SHA-256 over every built file in `dist` except type declarations and source maps; `null` without a dist. */
+export function distTreeSha256(distRoot: string): string | null {
+  if (!existsSync(distRoot)) return null;
+  const files = (readdirSync(distRoot, { recursive: true, withFileTypes: true }))
+    .filter(entry => entry.isFile() && !/\.(?:map|d\.[cm]?ts)$/.test(entry.name))
+    .map(entry => path.join(entry.parentPath, entry.name))
+    .map(file => ({ file, relative: path.relative(distRoot, file).split(path.sep).join('/') }))
+    .sort((a, b) => (a.relative < b.relative ? -1 : a.relative > b.relative ? 1 : 0));
+  const tree = createHash('sha256');
+  for (const { file, relative } of files) tree.update(`${relative}\0${createHash('sha256').update(readFileSync(file)).digest('hex')}\n`);
+  return tree.digest('hex');
+}
 
 /**
  * The SDK build that runs the cell: the checkout commit, whether tracked files
- * differ from it, and each package version with the SHA-256 of its built
- * `dist/index.js`. The dist hash identifies the bytes even when the build is
- * older than the checkout. Unavailable values are `null`.
+ * differ from it, and each runtime package version with a hash of its whole
+ * built dist (entries, bins and helpers). The dist hash identifies the bytes
+ * even when the build is older than the checkout. Unavailable values are `null`.
  */
 export function sdkBuild(): Record<string, unknown> {
   const git = (args: string[]) => {
@@ -248,12 +266,10 @@ export function sdkBuild(): Record<string, unknown> {
   };
   const commit = git(['rev-parse', 'HEAD']);
   const status = commit === null ? null : git(['status', '--porcelain', '--untracked-files=no']);
-  const packages = Object.fromEntries(SDK_PACKAGES.map(name => {
+  const packages = Object.fromEntries(SDK_RUNTIME_PACKAGES.map(name => {
     const root = path.join(REPO_ROOT, 'packages', name);
     const manifest = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { name: string; version: string };
-    const dist = path.join(root, 'dist', 'index.js');
-    const distSha256 = existsSync(dist) ? createHash('sha256').update(readFileSync(dist)).digest('hex') : null;
-    return [manifest.name, { version: manifest.version, distSha256 }];
+    return [manifest.name, { version: manifest.version, distSha256: distTreeSha256(path.join(root, 'dist')) }];
   }));
   return { commit, dirty: status === null ? null : status.length > 0, packages };
 }
