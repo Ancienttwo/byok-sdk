@@ -55,6 +55,9 @@ export const workspaceGraph = {
   "examples/hosted-bot-collaboration": {
     "name": "@byok-sdk/example-hosted-bot-collaboration",
     "dependencies": [
+      "@byok-sdk/client",
+      "@byok-sdk/cloud",
+      "@byok-sdk/cloud-dataplane",
       "@byok-sdk/example-bot-collaboration",
       "@byok-sdk/example-host-execution-core"
     ]

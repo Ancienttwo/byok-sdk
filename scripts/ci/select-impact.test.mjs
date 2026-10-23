@@ -265,7 +265,8 @@ test('actual exported migration runner selects installed-tarball upgrade validat
   });
   assert.equal(result.status, 0, result.stderr);
   const plan = JSON.parse(result.stdout);
-  assert.deepEqual(plan.dirs, ['packages/cloud-dataplane']);
+  // The hosted example depends on cloud-dataplane (#793 D2b-1), so the graph also selects it.
+  assert.deepEqual(plan.dirs, ['examples/hosted-bot-collaboration', 'packages/cloud-dataplane']);
   assert.deepEqual(plan.families, ['dataplane', 'release-pack-migrate']);
 });
 
