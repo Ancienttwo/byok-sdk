@@ -86,6 +86,9 @@ insertion order, in one transaction under the scope lock. It writes each step as
 - `ended`: nothing for a Turn that is not a routine Turn.
 - A routine Turn throws, because H has no routine occurrences before D2f.
 
+In history mode, `options.history` maps each Turn id to that Turn's history rows, as L reads them. A Turn without
+an entry does not freeze.
+
 The projections that the rule publishes reach the outbox in the same transaction. A sync writes no command
 record and keeps the revision. A throw writes nothing. H records no execution start before D2d, so the rule
 sees every open intent as not started. H retires no Turn id before D2g.

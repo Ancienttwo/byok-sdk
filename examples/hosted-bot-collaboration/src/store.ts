@@ -13,6 +13,9 @@ export class HostedStoreVersionError extends Error {
 }
 export type Publish = (id: string, value: Json) => void;
 type Decision<T> = { value: T; outbox: OutboxIntent[] };
+type TurnHistory = NonNullable<SyncOptions<never>['history']>;
+/** The sync options of a scope. In history mode, `history` holds the rows of each Turn that may freeze, by Turn id. */
+export type HostedSyncOptions = Omit<SyncOptions<never>, 'history'> & { history?: ReadonlyMap<string, TurnHistory> };
 /** Builds the command ports on the state of the open commit. `publish` writes a projection in the same commit. */
 export type PortsFactory = (state: CollaborationState, publish: Publish) => CommandPorts;
 
@@ -89,12 +92,13 @@ export class HostedCollaborationStore {
    * under the scope lock. It reads the intent facts in that transaction, and writes each step with the state and the
    * projections. It writes no command record and keeps the revision. A throw writes nothing.
    */
-  sync(scope: string, options: SyncOptions<never>): Promise<void> {
+  sync(scope: string, options: HostedSyncOptions): Promise<void> {
     return this.change(scope, undefined, async (state, publish, client) => {
       const facts = await syncFacts(client, scope, Object.keys(state.turns)), published = new Set<string>();
       const steps: Array<[Turn, SyncStep<ExecutionTemplate>]> = [];
       for (const turn of Object.values(state.turns)) {
-        const step = syncTurn(state, turn, facts, options, (id, body) => { publish(id, body); published.add(id); });
+        const step = syncTurn(state, turn, facts, { ...options, history: options.history?.get(turn.id) },
+          (id, body) => { publish(id, body); published.add(id); });
         if (step) steps.push([turn, step]);
       }
       for (const [turn, step] of steps) await writeSyncStep(client, scope, turn, step);

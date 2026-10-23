@@ -25,7 +25,7 @@ async function hosted(): Promise<SyncSubject> {
     stored: () => store().dump(scope),
     state: () => store().read(scope),
     change: edit => store().seed(scope, edit),
-    sync: () => store().sync(scope, SYNC_OPTIONS),
+    sync: () => store().sync(scope, { ...SYNC_OPTIONS, history: undefined }),
     intent: async turnId => {
       const found = await pool.query<{ key: string; source: SyncIntentRecord['source']; input: FrozenInput; wait_until: string }>(
         `SELECT key, source, input, wait_until::text FROM ${table('intent')} WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(turnId)]);
@@ -101,6 +101,17 @@ describe.skipIf(POSTGRES_URL === undefined)('H sync step on real Postgres (#793 
     const stored = await h.stored();
     await h.sync();
     expect(await h.stored()).toBe(stored);
+  });
+
+  it('in history mode, freezes a Turn only with its own history rows', async () => {
+    const h = await hosted();
+    await h.change(queueTurns);
+    await store().sync(h.scope, { ...SYNC_OPTIONS, historyMode: true, history: new Map([['q1', { rows: [], digest: 'digest-q1' }]]) });
+    const state = await h.state();
+    expect([state.turns.q1!.status, state.turns.q1!.historyDigest]).toEqual(['processing', 'digest-q1']);
+    expect([state.turns.q2!.status, state.turns.q2!.historyDigest]).toEqual(['queued', undefined]);
+    expect(await intentRow(h.scope, 'q1')).toBeDefined();
+    expect(await intentRow(h.scope, 'q2')).toBeUndefined();
   });
 
   it('refuses a routine Turn before D2f, and writes nothing', async () => {
