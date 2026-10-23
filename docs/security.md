@@ -801,6 +801,7 @@ Deletes that a call starts:
   - The tombstone keeps the SHA-256 and the byte length of the plaintext body. A person who can read the database can use them to confirm a guessed body. The replay fences need this digest; the hosted design accepts the trade-off (`docs/plans/2026-10-22-654-hosted-wire-e2ee.md` §11.3).
   - The objects go in a first step, and the rows change in a second transaction. If the second step fails or refuses, the objects are gone but the bodies stay, so their `artifactRefs` name deleted objects. A retry completes the redaction and records `objectsDeleted: 0`.
   - A body that a device writes between the two steps keeps its objects. Orphan GC deletes them after its grace period.
+  - It keeps an object that another receipt body or a pending outbox row of the tenant still names, and leaves it to orphan GC. It cannot see an upload that no body names yet, such as the artifact of a running task that shares the hash. That case waits for `object_reference` rows (E3b).
   - A progress or approval report that a device sends while the redaction runs can add an activity or approval row after the second step. A second `redactTasks` call deletes that row and returns `redacted`.
   - `listDeadLetters` lists a redacted expired row with the tombstone as its body. `replayDeadLetter` refuses that row, and `discardDeadLetter` deletes it.
 - No call deletes egress rows or truth records by task, or any content by device, Agent or time. The hosted Host contract lists this gap ([section 6](hosted-host-contract.md#6-data-retention)).

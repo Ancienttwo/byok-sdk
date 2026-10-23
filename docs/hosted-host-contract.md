@@ -366,7 +366,7 @@ Deletion paths:
   It replaces the bodies of the task receipts, the admission row and the acked and expired outbox rows with a tombstone.
   The tombstone holds the SHA-256 and the byte length of the body, and the envelope type.
   It clears the free-text `task` columns, deletes the activity, approval and draft rows,
-  and deletes the objects that the bodies name when no reference or upload holds them.
+  and deletes the objects that the bodies name when no reference, upload, other receipt body or pending outbox row holds them.
   A replay of the same body still matches, and new content is still a conflict.
   When the task has no terminal receipt, it writes a tombstone there, so a late device terminal stores nothing.
   Content reads of the task, `readTerminalReceipt` included, then throw `task_content_redacted`.

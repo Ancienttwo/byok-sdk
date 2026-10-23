@@ -122,7 +122,7 @@ Postgres store 分两步：
 
 ### 4.5 R2 对象与同 hash 共享
 
-task 不写 `object_reference`，所以 task 的对象 `ref_count` 为 0。orphan GC 本来就会在 1 天的 grace 之后删除它们。同一 tenant 里，两个 task 的内容相同时，共用一个对象。redaction 删除这个对象后，另一个 task 也读不到它。没有 redaction 时，它也会在 grace 之后被删除。这一点要维护者确认（§6 第 4 项）。本切片不开始写 `object_reference`。
+task 不写 `object_reference`，所以 task 的对象 `ref_count` 为 0。同一 tenant 里，两个 task 的正文可以引用同一个对象。维护者要求在本 PR 里保护它（2026-10-23）：第一步删对象前，再检查两件事。租户内有别的 `device_request_receipts` 正文（key 不属于本 task）含这个 hash，或有 `pending` 的 `outbox` 行含这个 hash，就不删，留给 orphan GC。检查用 `strpos`，在标记和加锁两处都做。还没有任何正文引用的上传（例如运行中 task 的 artifact）看不到，留给 E3b 的 `object_reference`。
 
 ### 4.6 观测
 
@@ -157,6 +157,7 @@ store 是 `PostgresTaskRedactionStore`，从 `@byok-sdk/cloud-dataplane/runtime`
 - Workers：`wrangler dev` 下的 fixture Worker 通过 `@byok-sdk/cloud-dataplane/runtime` 和 Hyperdrive 运行 `redactTasks`。Node 写入数据，并扫描结果。门控沿用 `BYOK_TEST_WORKER_DATAPLANE`，dataplane job 已设置 `BYOK_REQUIRE_WORKER_DATAPLANE=1`。
 - S0 的扫描函数移到 `__tests__/support/plaintext-scan.ts`，两个测试共用。S0 的断言不变。
 - 终态 fence：task D 在 redaction 后收到带 canary 的 `task.decline` 和 `task.cancelled`，canary 仍零命中，`readTerminalReceipt` 和 `readDeviceTerminal` 抛 `task_content_redacted`，`readTaskResult` 仍是 `cancelled`。
+- 共享对象：task C 的终态引用 task A 的 BlobRef。redact A 后，只被 A 引用的对象被删，共享对象还在，C 能下载。去掉保护时测试失败。
 - 两步之间失败：第二步的 tombstone 回调抛错。对象已删，内容行不变，没有 fence 和审计行。重试返回 `redacted`，`objectsDeleted` 为 0，canary 零命中。
 
 ## 6. 要维护者确认
