@@ -7,6 +7,7 @@ import {
 } from '@byok-sdk/core';
 import { z } from 'zod';
 
+import { CanonicalBase64Url32 } from './canonical-base64url';
 import { ByokKeysError } from './errors';
 import { assertSecretName } from './secret-name';
 import type { SecretStore } from './secret-store';
@@ -38,8 +39,6 @@ export interface DeviceSealingKey {
   readonly enrollment: DeviceSealingEnrollment;
 }
 
-const Base64Url32 = z.string().regex(/^[A-Za-z0-9_-]{43}$/u);
-
 /** The stored record: one canonical JSON line, holding the private scalar. */
 const StoredSealingKeySchema = z.strictObject({
   v: z.literal(1),
@@ -49,9 +48,9 @@ const StoredSealingKeySchema = z.strictObject({
   jwk: z.strictObject({
     kty: z.literal('EC'),
     crv: z.literal('P-256'),
-    x: Base64Url32,
-    y: Base64Url32,
-    d: Base64Url32,
+    x: CanonicalBase64Url32,
+    y: CanonicalBase64Url32,
+    d: CanonicalBase64Url32,
   }),
 });
 type StoredSealingKey = z.infer<typeof StoredSealingKeySchema>;

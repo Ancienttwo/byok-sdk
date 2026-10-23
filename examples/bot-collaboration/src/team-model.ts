@@ -1,6 +1,7 @@
 import type { AgentHomeProjectionRequest } from '@byok-sdk/server';
 import type { ExecutionTemplate } from '@byok-sdk/example-host-execution-core';
 import type { Room, Round, Seat } from './rules/rooms';
+import type { ExternalTeam } from './rules/team';
 
 export type { Room, Round, Seat };
 export interface BotProfile {
@@ -18,6 +19,8 @@ export interface TeamState {
   seats: Record<string, Seat>; roots: Record<string, { autonomous: number; late: number }>;
   notes: Array<{ id: string; text: string }>;
   homeOperations: HomeOperation[];
+  /** External team mode (#739 Q4c). Absent: this Host owns its local team. */
+  external?: ExternalTeam;
 }
 export function emptyTeam(): TeamState {
   return { bots: {}, rooms: {}, rounds: {}, seats: {}, roots: {}, notes: [], homeOperations: [] };

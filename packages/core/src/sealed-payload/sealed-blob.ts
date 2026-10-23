@@ -16,7 +16,7 @@ import { z } from 'zod';
 
 import { canonicalizeJsonBytes } from '../attestation';
 import { safeParseTotal } from '../total-parse';
-import { base64UrlBytes, copy, decodeBase64Url, encodeBase64Url, invalidInput, randomBytes, type Bytes } from './primitives';
+import { copy, decodeBase64Url, encodeBase64Url, invalidInput, randomBytes, base64UrlBytes, type Bytes } from './primitives';
 import { SEALED_SALT_BYTES, deriveScopeKeyId, deriveSealedContentKey } from './scope-key';
 import {
   AEAD_TAG_BYTES,

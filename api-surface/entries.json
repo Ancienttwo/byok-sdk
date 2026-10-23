@@ -1679,7 +1679,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Sealed payload v1 byte rules",
-      "budgetBytes": 171998,
+      "budgetBytes": 172216,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

@@ -19,10 +19,11 @@ import { enrollSecondDevice } from './second-device.test-support';
  * `holdMessage` runs before and after the Host acceptance transaction.
  * `offline` closes the HTTP listener, so the daemon loses the server without a terminal.
  * The Host keeps its in-process server port. `online` listens again on the same port.
+ * `bot` sets the external team and history options of the Host.
  */
 export async function openTeam(options: { now?: () => number; holdProjection?: () => Promise<void>; routeMessages?: boolean; secondDevice?: boolean;
   wrapServer?: (server: ByokServer) => ConstructorParameters<typeof BotCollaboration>[0]; instructionMaxBytes?: number;
-  holdMessage?: (input: AgentMessageInput, stage: 'before' | 'after') => Promise<void> } = {}) {
+  holdMessage?: (input: AgentMessageInput, stage: 'before' | 'after') => Promise<void>; bot?: Pick<BotOptions, 'team' | 'history'> } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'k8b-'));
   const productId = 'k8b-test';
   let ledger = new HostLedger(join(root, 'host.sqlite'), `product:${productId}`);
@@ -68,7 +69,7 @@ export async function openTeam(options: { now?: () => number; holdProjection?: (
   const botOptions: BotOptions = { botId: 'main', execution: { ...base,
     agentMessageContext: { destinationBinding: 'owner', freshnessCursor: 'k8b' }, payload: { ...base.payload,
       messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 65536 },
-    } }, connector: async id => ({ id }), now: options.now, instructionMaxBytes: options.instructionMaxBytes };
+    } }, connector: async id => ({ id }), now: options.now, instructionMaxBytes: options.instructionMaxBytes, ...options.bot };
   if (secondDevice) botOptions.models = { local: botOptions.execution, remote: { ...botOptions.execution, deviceId: secondDevice.deviceId } };
   const port = options.wrapServer?.(server) ?? server;
   host = new BotCollaboration(port, ledger, botOptions);

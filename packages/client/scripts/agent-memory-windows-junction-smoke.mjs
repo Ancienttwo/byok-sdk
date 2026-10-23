@@ -95,7 +95,7 @@ try {
     await directory.close();
   }
   console.log(JSON.stringify({
-    acceptance: 'HELPER OPEN WITH JUNCTION FIXTURES; TS GATE CLOSED; NO S PROOF; B=false', runtime: process.versions, directoryFsync,
+    acceptance: 'HELPER OPEN WITH JUNCTION FIXTURES; TS GATE ADMITS WIN32-X64 WITHOUT B; NO S PROOF; B=false', runtime: process.versions, directoryFsync,
     osRelease: os.release(), helperSha256: createHash('sha256').update(await readFile(helperBin)).digest('hex'),
     childEnvironment: {}, results,
   }, null, 2));
