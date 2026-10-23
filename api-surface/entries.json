@@ -1651,7 +1651,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 1397,
+      "budgetBytes": 1403,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1673,6 +1673,54 @@
         "thirdParty": []
       },
       "codegen": []
+    }
+  },
+  "@byok-sdk/core/sealed-payload": {
+    "kind": "exports",
+    "policy": {
+      "purpose": "Sealed payload v1 byte rules",
+      "budgetBytes": 170822,
+      "zod": true,
+      "codegen": true,
+      "nodeBuiltins": {
+        "workspace": false,
+        "thirdParty": false
+      }
+    },
+    "facts": {
+      "target": "packages/core/dist/sealed-payload/index.js",
+      "conditions": [
+        "import"
+      ],
+      "types": [
+        "packages/core/dist/sealed-payload/index.d.ts"
+      ],
+      "bareImports": [
+        "@byok-sdk/core",
+        "zod"
+      ],
+      "lazyImports": [],
+      "thirdParty": [
+        "zod"
+      ],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [],
+        "thirdParty": []
+      },
+      "codegen": [
+        {
+          "file": "zod/v4/core/doc.js",
+          "line": 28,
+          "rule": "Function reference"
+        },
+        {
+          "file": "zod/v4/core/util.js",
+          "line": 156,
+          "rule": "Function reference"
+        }
+      ]
     }
   },
   "@byok-sdk/keys": {

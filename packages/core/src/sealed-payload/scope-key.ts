@@ -169,7 +169,11 @@ export interface SealScopeKeyPackageInput {
 
 const PackageIdentitySchema = ScopeKeyPackageV1Schema.omit({ enc: true, ciphertext: true, sig: true });
 
-/** Wrap one scope key to one member and sign the package. */
+/**
+ * Wrap one scope key to one member and sign the package. A signing private key
+ * that does not pair with `sender.signingPublicJwk` throws
+ * `sealed_secret_invalid`.
+ */
 export async function sealScopeKeyPackage(input: SealScopeKeyPackageInput): Promise<ScopeKeyPackageV1> {
   const parsed = PackageIdentitySchema.safeParse({
     v: SCOPE_KEY_PACKAGE_VERSION,
@@ -189,7 +193,7 @@ export async function sealScopeKeyPackage(input: SealScopeKeyPackageInput): Prom
     plaintext: input.scopeKey,
   });
   const unsigned = { ...identity, enc: encodeBase64Url(enc), ciphertext: encodeBase64Url(ciphertext) };
-  return { ...unsigned, sig: await ecdsaSign(input.sender.signingPrivateKey, packageSigningInput(unsigned)) };
+  return { ...unsigned, sig: await ecdsaSign(input.sender.signingPublicJwk, input.sender.signingPrivateKey, packageSigningInput(unsigned)) };
 }
 
 export interface OpenScopeKeyPackageInput {
