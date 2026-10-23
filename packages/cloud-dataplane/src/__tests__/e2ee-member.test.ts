@@ -40,6 +40,18 @@ async function memberRows(pool: Pool, tenant: TenantId, deviceId: string, member
   };
 }
 
+/** Wait until one connection of this scope's pool waits on a row lock. */
+async function waitForLockWait(pool: Pool): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const { rows } = await pool.query<{ waiting: number }>(
+      `SELECT count(*)::int AS waiting FROM pg_stat_activity
+        WHERE application_name = current_setting('application_name') AND wait_event_type = 'Lock'`);
+    if (rows[0]!.waiting > 0) return;
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  throw new Error('the revoke never waited on the held package lock');
+}
+
 async function seed(devices: PostgresDeviceDirectory, store: PostgresE2eeMemberStore, tenant: TenantId, deviceId: string, machineId?: string) {
   await devices.register(tenant, {
     productId: 'product',
@@ -81,6 +93,35 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres device cleanup removes the device memb
       await devices.revoke(TENANT_A, 'kept-device');
       expect(await store.readChainEntries(TENANT_A, { afterSeq: 0, limit: 256 })).toEqual([{ seq: 1, entry: '{}' }]);
     } finally {
+      await scope.dispose();
+    }
+  });
+
+  it('locks package rows in the order a put locks them, so a revoke racing a put does not deadlock', async () => {
+    const scope = await createDataplaneScope(4);
+    const holder = await scope.pool.connect();
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const devices = new PostgresDeviceDirectory(scope.pool, createMutableClock());
+      const store = new PostgresE2eeMemberStore(scope.pool, createMutableClock());
+      const member = await seed(devices, store, TENANT_A, 'raced-device');
+      // Store scope 'b' before scope 'a', so the table order is not the put order.
+      for (const scopeId of ['b', 'a']) {
+        await store.putScopeKeyPackages(TENANT_A, [{ scopeId, epoch: 1, recipient: member, keyId: 'key', sender: member, package: '{}' }]);
+      }
+      const lock = 'SELECT 1 FROM e2ee_scope_key_package WHERE tenant_id = $1 AND scope_id = $2 AND epoch = 1 AND recipient = $3 FOR UPDATE';
+      // The holder locks rows as a sorted put does: 'a', then 'b'.
+      await holder.query('BEGIN');
+      await holder.query(lock, [TENANT_A, 'a', member]);
+      const revoked = devices.revoke(TENANT_A, 'raced-device');
+      await waitForLockWait(scope.pool);
+      await holder.query(lock, [TENANT_A, 'b', member]);
+      await holder.query('COMMIT');
+      await revoked;
+
+      await expect(memberRows(scope.pool, TENANT_A, 'raced-device', member)).resolves.toEqual({ member_key: 0, pairing_mac: 0, packages: 0 });
+    } finally {
+      holder.release();
       await scope.dispose();
     }
   });

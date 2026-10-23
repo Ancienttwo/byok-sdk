@@ -82,6 +82,12 @@ export function runE2eeMemberStoreConformance(name: string, factory: E2eeMemberC
       expect(await store.readScopeKeyPackages(other, { scopeId: 'scope-1' })).toEqual([]);
       expect(await store.putScopeKeyPackages(other, [pkg(1, 'r1', 'k9')])).toEqual({ outcome: 'stored', stored: 1 });
     });
+    check('lets the first row of a new scope epoch fix its keyId within one put', async store => {
+      expect(await store.putScopeKeyPackages(tenant, [pkg(1, 'r1', 'k1'), pkg(1, 'r2', 'k2')]))
+        .toEqual({ outcome: 'key_id_conflict', scopeId: 'scope-1', epoch: 1, keyId: 'k1' });
+      expect(await store.readScopeKeyPackages(tenant, { scopeId: 'scope-1' })).toEqual([]);
+      expect(await store.putScopeKeyPackages(tenant, [pkg(1, 'r2', 'k2')])).toEqual({ outcome: 'stored', stored: 1 });
+    });
     check('serializes two concurrent first puts of one scope epoch', async store => {
       const results = await Promise.all([
         store.putScopeKeyPackages(tenant, [pkg(1, 'r1', 'k1')]),

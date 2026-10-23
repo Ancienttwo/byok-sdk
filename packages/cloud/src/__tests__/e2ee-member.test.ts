@@ -75,10 +75,9 @@ async function keyPackage(tenant: TenantId, sender: Member, recipient: Member, e
   });
 }
 
-function setup(withStore = true) {
+function setup(withStore = true, store = new InMemoryE2eeMemberStore()) {
   const clock = createMutableClock();
   const base = createInMemoryByokCloud({ clock });
-  const store = new InMemoryE2eeMemberStore();
   const cloud: ByokCloud = createByokCloud({
     core: base.core,
     cloud: base.stores,
@@ -227,6 +226,52 @@ describe('E2EE member control plane', () => {
     expect(await code(cloud.readScopeKeyPackages(TENANT_A, { scopeId: '' }))).toBe('coordination_input_invalid');
     expect(await code(cloud.readScopeKeyPackages(TENANT_A, { scopeId: 'scope-1', epoch: 0 }))).toBe('coordination_input_invalid');
     expect(await cloud.readScopeKeyPackages(TENANT_A, { scopeId: 'scope-1' })).toEqual({ packages: [] });
+  });
+
+  it('bounds scopeId at 512 characters on put and read', async () => {
+    const { cloud } = setup();
+    const sender = await newMember();
+    const one = await keyPackage(TENANT_A, sender, sender, 1);
+    const longest = 'x'.repeat(512);
+    expect(await code(cloud.putScopeKeyPackages(TENANT_A, { packages: [{ ...one, scopeId: `${longest}x` }] }))).toBe('coordination_input_invalid');
+    expect(await code(cloud.readScopeKeyPackages(TENANT_A, { scopeId: `${longest}x` }))).toBe('coordination_input_invalid');
+    expect(await cloud.putScopeKeyPackages(TENANT_A, { packages: [{ ...one, scopeId: longest }] })).toEqual({ stored: 1 });
+    expect(await cloud.readScopeKeyPackages(TENANT_A, { scopeId: longest })).toEqual({ packages: [{ ...one, scopeId: longest }] });
+  });
+
+  it('hands the store package rows in one lock order: scope and recipient by code point, then epoch', async () => {
+    const received: Array<readonly [string, number, string]> = [];
+    class OrderSpy extends InMemoryE2eeMemberStore {
+      override async putScopeKeyPackages(tenant: TenantId, rows: Parameters<InMemoryE2eeMemberStore['putScopeKeyPackages']>[1]) {
+        received.push(...rows.map(row => [row.scopeId, row.epoch, row.recipient] as const));
+        return super.putScopeKeyPackages(tenant, rows);
+      }
+    }
+    const { cloud } = setup(true, new OrderSpy());
+    const sender = await newMember();
+    const other = await newMember();
+    const [low, high] = [sender.bundle.memberId, other.bundle.memberId].sort();
+    const base = await keyPackage(TENANT_A, sender, sender, 1);
+    // UTF-16 order puts the surrogate pair of U+1F600 before U+FF61; code point
+    // order, which Postgres COLLATE "C" uses, puts it after.
+    const packages = [
+      ['\u{1F600}', 1, high], ['b', 2, low], ['\uFF61', 1, low], ['b', 1, high], ['a', 1, high], ['b', 1, low],
+    ].map(([scopeId, epoch, recipient]) => ({ ...base, scopeId: scopeId as string, epoch: epoch as number, recipient: recipient as string }));
+    expect(await cloud.putScopeKeyPackages(TENANT_A, { packages })).toEqual({ stored: 6 });
+    expect(received).toEqual([
+      ['a', 1, high], ['b', 1, low], ['b', 1, high], ['b', 2, low], ['\uFF61', 1, low], ['\u{1F600}', 1, high],
+    ]);
+  });
+
+  it('fails a stored row that is not a valid value with a typed error', async () => {
+    const { cloud, store, clock, registerDevice } = setup();
+    await store.appendChainEntries(TENANT_A, [{ seq: 1, entry: '{"seq":1}' }]);
+    expect(await code(cloud.readMemberChain(TENANT_A))).toBe('e2ee_member_state_unreadable');
+    await store.putScopeKeyPackages(TENANT_A, [{ scopeId: 'scope-1', epoch: 1, recipient: 'r', keyId: 'k', sender: 's', package: 'not json' }]);
+    expect(await code(cloud.readScopeKeyPackages(TENANT_A, { scopeId: 'scope-1' }))).toBe('e2ee_member_state_unreadable');
+    await registerDevice(TENANT_A, 'device-1');
+    await store.registerMember(TENANT_A, { deviceId: 'device-1', memberId: 'm', bundle: '{}', deviceMac: 'mac', macExpiresAt: clock.now().toISOString() });
+    expect(await code(cloud.readMemberKeyRegistration(TENANT_A, 'device-1'))).toBe('e2ee_member_state_unreadable');
   });
 
   it('returns a registration only for an active device, with its MAC inside the pairing window', async () => {

@@ -8,6 +8,7 @@ import { createWebCrypto } from '@byok-sdk/cloud';
 import { runE2eeMemberStoreConformance } from '../../../conformance/src/cloud/e2ee-member';
 import { isSqliteAvailable } from '../sqlite-support';
 import { createSqliteEmbeddedStores, type SqliteEmbeddedStores } from '../stores/sqlite';
+import { E2EE_MEMBER_SCHEMA, SqliteE2eeMemberStore } from '../stores/sqlite/e2ee-member';
 
 const describeSqlite = isSqliteAvailable() ? describe : describe.skip;
 const TENANT = tenantId('sqlite-e2ee');
@@ -117,6 +118,45 @@ describeSqlite('SQLite E2EE member state', () => {
       expect(await memberState(stores, 'new-device', fresh)).toEqual({ registration: true, clientMac: true, packages: 1 });
     } finally {
       await stores.close();
+    }
+  });
+});
+
+describeSqlite('SQLite pairing MAC map', () => {
+  it('drops MACs whose pairing window has passed on the next MAC write', async () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec(E2EE_MEMBER_SCHEMA);
+    const coordinator = {
+      run: async <T>(operation: (db: DatabaseSync) => T | Promise<T>) => operation(db),
+      transaction: async <T>(operation: (db: DatabaseSync) => T | Promise<T>) => {
+        db.exec('BEGIN');
+        try {
+          const result = await operation(db);
+          db.exec('COMMIT');
+          return result;
+        } catch (error) {
+          db.exec('ROLLBACK');
+          throw error;
+        }
+      },
+    };
+    const clock = createMutableClock(new Date('2026-10-24T00:00:00.000Z'));
+    const macs = new Map<string, { readonly body: string; readonly expiresAt: string }>();
+    const store = new SqliteE2eeMemberStore(coordinator, clock, macs);
+    const register = (deviceId: string, expiresAt: string) =>
+      store.registerMember(TENANT, { deviceId, memberId: `member-${deviceId}`, bundle: `{"m":"${deviceId}"}`, deviceMac: 'mac', macExpiresAt: expiresAt });
+    try {
+      expect(await register('ending', '2026-10-24T00:10:00.000Z')).toBe('registered');
+      expect(await store.putClientPairingMac(TENANT, { deviceId: 'ending', body: '{}', expiresAt: '2026-10-24T00:10:00.000Z' })).toBe('stored');
+      expect(await register('lasting', '2026-10-24T00:30:00.000Z')).toBe('registered');
+      expect(macs.size).toBe(3);
+
+      clock.advance(10 * 60_000);
+      expect(await register('fresh', '2026-10-24T00:20:00.000Z')).toBe('registered');
+
+      expect([...macs.keys()].map(key => JSON.parse(key))).toEqual([[TENANT, 'lasting', 'device'], [TENANT, 'fresh', 'device']]);
+    } finally {
+      db.close();
     }
   });
 });

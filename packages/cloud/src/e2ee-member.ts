@@ -107,8 +107,9 @@ export interface E2eeMemberStore {
     input: { readonly afterSeq: number; readonly limit: number },
   ): Promise<readonly E2eeMemberChainRow[]>;
   /**
-   * The first package of a `(scopeId, epoch)` fixes its `keyId`. A package
-   * with that `keyId` inserts or replaces the row of its recipient.
+   * The first package of a `(scopeId, epoch)` fixes its `keyId`, also within
+   * this call: a second `keyId` for that scope epoch refuses the whole put. A
+   * package with that `keyId` inserts or replaces the row of its recipient.
    */
   putScopeKeyPackages(tenant: TenantId, rows: readonly E2eeScopeKeyPackageRow[]): Promise<E2eeScopeKeyPackagePutResult>;
   /** Ordered by epoch, then recipient. */
@@ -134,8 +135,31 @@ export interface E2eeMemberStore {
   ): Promise<string | undefined>;
 }
 
+/**
+ * The longest scope id, in UTF-16 code units, as for other opaque Host ids.
+ * Core sets no maximum, so the bound lives here, not in the protocol shape
+ * the parity test compares; it keeps every backend's index key in range.
+ */
+const E2EE_SCOPE_ID_MAX_LENGTH = 512;
+
 function invalid(message: string): ByokCloudError {
   return new ByokCloudError('coordination_input_invalid', message);
+}
+
+/** A stored row must still be the value its schema requires; only the store writes it. */
+function storedValue<S extends z.ZodType>(schema: S, text: string, what: string): z.infer<S> {
+  let parsed: z.ZodSafeParseResult<z.infer<S>> | undefined;
+  try {
+    parsed = schema.safeParse(JSON.parse(text));
+  } catch {}
+  if (parsed?.success !== true) {
+    throw new ByokCloudError('e2ee_member_state_unreadable', `A stored ${what} is not valid. The store contract is broken.`);
+  }
+  return parsed.data;
+}
+
+function scopeIdValid(scopeId: unknown): scopeId is string {
+  return typeof scopeId === 'string' && scopeId.length > 0 && scopeId.length <= E2EE_SCOPE_ID_MAX_LENGTH;
 }
 
 /** Read caller data once into canonical JSON, then check it against the wire shape. */
@@ -220,7 +244,7 @@ export async function readMemberChain(
     throw invalid(`limit must be 1 to ${E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES}`);
   }
   const rows = await ctx.store.readChainEntries(ctx.tenant, { afterSeq, limit });
-  return { entries: rows.map(row => JSON.parse(row.entry) as E2eeMemberChainEntry) };
+  return { entries: rows.map(row => storedValue(E2eeMemberChainEntrySchema, row.entry, 'member chain entry')) };
 }
 
 export async function putScopeKeyPackages(
@@ -233,6 +257,7 @@ export async function putScopeKeyPackages(
   const rows = list.map((input, index) => {
     const { text, value } = canonicalParse(E2eeScopeKeyPackageSchema, input, `Scope key package ${index}`);
     if (value.tenantId !== ctx.tenant) throw invalid(`Scope key package ${index} names another tenant`);
+    if (!scopeIdValid(value.scopeId)) throw invalid(`Scope key package ${index} has a scopeId over ${E2EE_SCOPE_ID_MAX_LENGTH} characters`);
     // JSON text of the tuple keeps the composite key unambiguous for any string.
     const epochKey = JSON.stringify([value.scopeId, value.epoch]);
     if ((keyIds.get(epochKey) ?? value.keyId) !== value.keyId) {
@@ -251,9 +276,10 @@ export async function putScopeKeyPackages(
       package: text,
     };
   });
-  // One lock order for every writer, so two puts that share scope epochs
-  // cannot deadlock on the epoch rows.
-  rows.sort((a, b) => compareText(a.scopeId, b.scopeId) || a.epoch - b.epoch || compareText(a.recipient, b.recipient));
+  // One lock order for every writer: Postgres puts and device cleanup both
+  // lock rows by (scopeId, epoch, recipient) in code point order, so two
+  // writers that share rows cannot deadlock.
+  rows.sort((a, b) => compareCodePoints(a.scopeId, b.scopeId) || a.epoch - b.epoch || compareCodePoints(a.recipient, b.recipient));
   const result = await ctx.store.putScopeKeyPackages(ctx.tenant, rows);
   if (result.outcome === 'key_id_conflict') {
     throw new ByokCloudError(
@@ -269,7 +295,7 @@ export async function readScopeKeyPackages(
   input: { readonly scopeId: string; readonly epoch?: number; readonly recipient?: string },
 ): Promise<{ readonly packages: readonly E2eeScopeKeyPackage[] }> {
   const { scopeId, epoch, recipient } = readFields(input);
-  if (typeof scopeId !== 'string' || scopeId.length === 0) throw invalid('scopeId is required');
+  if (!scopeIdValid(scopeId)) throw invalid(`scopeId must have 1 to ${E2EE_SCOPE_ID_MAX_LENGTH} characters`);
   if (epoch !== undefined && (!Number.isSafeInteger(epoch) || epoch < 1)) {
     throw invalid('epoch must be a positive safe integer');
   }
@@ -281,11 +307,18 @@ export async function readScopeKeyPackages(
     ...(epoch === undefined ? {} : { epoch }),
     ...(recipient === undefined ? {} : { recipient }),
   });
-  return { packages: rows.map(row => JSON.parse(row.package) as E2eeScopeKeyPackage) };
+  return { packages: rows.map(row => storedValue(E2eeScopeKeyPackageSchema, row.package, 'scope key package')) };
 }
 
-function compareText(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
+/** Code point order, which is UTF-8 byte order and Postgres `COLLATE "C"` order. */
+function compareCodePoints(a: string, b: string): number {
+  for (let index = 0; index < a.length && index < b.length;) {
+    const left = a.codePointAt(index)!;
+    const right = b.codePointAt(index)!;
+    if (left !== right) return left - right;
+    index += left > 0xffff ? 2 : 1;
+  }
+  return a.length - b.length;
 }
 
 async function activeDevice(ctx: E2eeMemberContext, deviceId: string): Promise<boolean> {
@@ -306,7 +339,7 @@ export async function readMemberKeyRegistration(
   if (!(await activeDevice(ctx, deviceId))) return undefined;
   const row = await ctx.store.readMemberRegistration(ctx.tenant, { deviceId, now: ctx.now().toISOString() });
   if (row === undefined) return undefined;
-  const member = E2eeMemberKeyBundleSchema.parse(JSON.parse(row.bundle));
+  const member = storedValue(E2eeMemberKeyBundleSchema, row.bundle, 'member key bundle');
   return row.deviceMac === undefined ? { member } : { member, deviceMac: row.deviceMac };
 }
 

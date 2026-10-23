@@ -58,6 +58,8 @@ export const CLOUD_ERROR_CODES = {
   e2ee_scope_key_conflict: 'e2ee_scope_key_conflict',
   /** The device has not registered a member key bundle. */
   e2ee_member_not_registered: 'e2ee_member_not_registered',
+  /** A stored E2EE member row is not the value its schema requires. Whatever wrote it broke the store contract. */
+  e2ee_member_state_unreadable: 'e2ee_member_state_unreadable',
   /** Explicit legacy dispatch target is unknown or revoked in this tenant. */
   device_not_found: 'device_not_found',
   /**

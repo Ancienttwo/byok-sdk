@@ -1,4 +1,4 @@
-import type { TenantId } from '@byok-sdk/core';
+import type { Clock, TenantId } from '@byok-sdk/core';
 import type {
   E2eeMemberChainAppendResult,
   E2eeMemberChainRow,
@@ -86,12 +86,24 @@ type PackageRow = Record<string, unknown> & {
 /**
  * SQLite E2EE member store. The coordinator runs one call at a time, so each
  * transaction checks every row before it writes any. Pairing MACs live for
- * one pairing window and stay in memory, like pairing codes.
+ * one pairing window and stay in memory, like pairing codes. Each MAC write
+ * first drops the MACs whose window has passed.
  */
 export class SqliteE2eeMemberStore implements E2eeMemberStore {
-  readonly #macs = new Map<string, Expiring>();
+  /** `macs` is the pairing MAC map; a test passes its own to watch the sweep. */
+  constructor(
+    private readonly coordinator: Coordinator,
+    private readonly clock: Clock,
+    private readonly macs: Map<string, Expiring> = new Map(),
+  ) {}
 
-  constructor(private readonly coordinator: Coordinator) {}
+  #setMac(key: string, value: Expiring): void {
+    const now = this.clock.now().getTime();
+    for (const [stored, mac] of this.macs) {
+      if (Date.parse(mac.expiresAt) <= now) this.macs.delete(stored);
+    }
+    this.macs.set(key, value);
+  }
 
   appendChainEntries(tenant: TenantId, rows: readonly E2eeMemberChainRow[]): Promise<E2eeMemberChainAppendResult> {
     return this.coordinator.transaction(db => {
@@ -119,12 +131,16 @@ export class SqliteE2eeMemberStore implements E2eeMemberStore {
 
   putScopeKeyPackages(tenant: TenantId, rows: readonly E2eeScopeKeyPackageRow[]): Promise<E2eeScopeKeyPackagePutResult> {
     return this.coordinator.transaction(db => {
-      const fixed = db.prepare('SELECT key_id FROM e2ee_scope_epoch WHERE tenant_id = ? AND scope_id = ? AND epoch = ?');
+      const stored = db.prepare('SELECT key_id FROM e2ee_scope_epoch WHERE tenant_id = ? AND scope_id = ? AND epoch = ?');
+      // The first row of a new scope epoch fixes its keyId for the rest of the call.
+      const fixed = new Map<string, string>();
       for (const row of rows) {
-        const keyId = (fixed.get(tenant, row.scopeId, row.epoch) as { key_id: string } | undefined)?.key_id;
+        const epochKey = JSON.stringify([row.scopeId, row.epoch]);
+        const keyId = (stored.get(tenant, row.scopeId, row.epoch) as { key_id: string } | undefined)?.key_id ?? fixed.get(epochKey);
         if (keyId !== undefined && keyId !== row.keyId) {
           return { outcome: 'key_id_conflict', scopeId: row.scopeId, epoch: row.epoch, keyId };
         }
+        fixed.set(epochKey, row.keyId);
       }
       const epoch = db.prepare('INSERT INTO e2ee_scope_epoch (tenant_id, scope_id, epoch, key_id) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING');
       const put = db.prepare(`INSERT INTO e2ee_scope_key_package (tenant_id, scope_id, epoch, recipient, key_id, sender, package)
@@ -163,7 +179,7 @@ export class SqliteE2eeMemberStore implements E2eeMemberStore {
       return existing === undefined ? 'registered' : 'replayed';
     });
     if (result === 'registered' || result === 'replayed') {
-      this.#macs.set(macKey(tenant, input.deviceId, 'device'), { body: input.deviceMac, expiresAt: input.macExpiresAt });
+      this.#setMac(macKey(tenant, input.deviceId, 'device'), { body: input.deviceMac, expiresAt: input.macExpiresAt });
     }
     return result;
   }
@@ -176,7 +192,7 @@ export class SqliteE2eeMemberStore implements E2eeMemberStore {
       const row = db.prepare('SELECT member_id, bundle FROM e2ee_member_key WHERE tenant_id = ? AND device_id = ?')
         .get(tenant, input.deviceId) as { member_id: string; bundle: string } | undefined;
       if (row === undefined) return undefined;
-      const mac = live(this.#macs.get(macKey(tenant, input.deviceId, 'device')), input.now);
+      const mac = live(this.macs.get(macKey(tenant, input.deviceId, 'device')), input.now);
       return mac === undefined ? { memberId: row.member_id, bundle: row.bundle } : { memberId: row.member_id, bundle: row.bundle, deviceMac: mac };
     });
   }
@@ -189,7 +205,7 @@ export class SqliteE2eeMemberStore implements E2eeMemberStore {
       if (db.prepare('SELECT 1 FROM e2ee_member_key WHERE tenant_id = ? AND device_id = ?').get(tenant, input.deviceId) === undefined) {
         return 'not_registered';
       }
-      this.#macs.set(macKey(tenant, input.deviceId, 'client'), { body: input.body, expiresAt: input.expiresAt });
+      this.#setMac(macKey(tenant, input.deviceId, 'client'), { body: input.body, expiresAt: input.expiresAt });
       return 'stored';
     });
   }
@@ -200,7 +216,7 @@ export class SqliteE2eeMemberStore implements E2eeMemberStore {
     return this.coordinator.run(db =>
       db.prepare('SELECT 1 FROM e2ee_member_key WHERE tenant_id = ? AND device_id = ?').get(tenant, input.deviceId) === undefined
         ? undefined
-        : live(this.#macs.get(macKey(tenant, input.deviceId, 'client')), input.now));
+        : live(this.macs.get(macKey(tenant, input.deviceId, 'client')), input.now));
   }
 }
 

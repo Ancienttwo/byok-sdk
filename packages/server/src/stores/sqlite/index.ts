@@ -1419,7 +1419,7 @@ export function createSqliteEmbeddedStores(
     core,
     cloud,
     blobContentProxy,
-    e2eeMember: new SqliteE2eeMemberStore(coordinator),
+    e2eeMember: new SqliteE2eeMemberStore(coordinator, dependencies.clock),
     wakes: tenant => new SqliteWakeStore(coordinator, tenant),
     close: () => coordinator.close(),
   };

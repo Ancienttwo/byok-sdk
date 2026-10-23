@@ -76,11 +76,15 @@ export class InMemoryE2eeMemberStore implements E2eeMemberStore {
 
   async putScopeKeyPackages(tenant: TenantId, rows: readonly E2eeScopeKeyPackageRow[]): Promise<E2eeScopeKeyPackagePutResult> {
     const state = this.#state(tenant);
+    // The first row of a new scope epoch fixes its keyId for the rest of the call.
+    const fixed = new Map<string, string>();
     for (const row of rows) {
-      const keyId = state.epochKeyIds.get(JSON.stringify([row.scopeId, row.epoch]));
+      const epochKey = JSON.stringify([row.scopeId, row.epoch]);
+      const keyId = state.epochKeyIds.get(epochKey) ?? fixed.get(epochKey);
       if (keyId !== undefined && keyId !== row.keyId) {
         return { outcome: 'key_id_conflict', scopeId: row.scopeId, epoch: row.epoch, keyId };
       }
+      fixed.set(epochKey, row.keyId);
     }
     for (const row of rows) {
       state.epochKeyIds.set(JSON.stringify([row.scopeId, row.epoch]), row.keyId);

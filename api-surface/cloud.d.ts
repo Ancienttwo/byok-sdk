@@ -2268,8 +2268,9 @@ export interface E2eeMemberStore {
         readonly limit: number;
     }): Promise<readonly E2eeMemberChainRow[]>;
     /**
-     * The first package of a `(scopeId, epoch)` fixes its `keyId`. A package
-     * with that `keyId` inserts or replaces the row of its recipient.
+     * The first package of a `(scopeId, epoch)` fixes its `keyId`, also within
+     * this call: a second `keyId` for that scope epoch refuses the whole put. A
+     * package with that `keyId` inserts or replaces the row of its recipient.
      */
     putScopeKeyPackages(tenant: TenantId, rows: readonly E2eeScopeKeyPackageRow[]): Promise<E2eeScopeKeyPackagePutResult>;
     /** Ordered by epoch, then recipient. */
@@ -2397,6 +2398,8 @@ export declare const CLOUD_ERROR_CODES: {
     readonly e2ee_scope_key_conflict: 'e2ee_scope_key_conflict';
     /** The device has not registered a member key bundle. */
     readonly e2ee_member_not_registered: 'e2ee_member_not_registered';
+    /** A stored E2EE member row is not the value its schema requires. Whatever wrote it broke the store contract. */
+    readonly e2ee_member_state_unreadable: 'e2ee_member_state_unreadable';
     /** Explicit legacy dispatch target is unknown or revoked in this tenant. */
     readonly device_not_found: 'device_not_found';
     /**
