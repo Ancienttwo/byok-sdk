@@ -125,6 +125,10 @@ import {
   type TaskOfferForAgentWithEgressSealedPayload,
   type TaskOfferWithToolsetsPayload,
   type TaskOfferWithToolsetsSealedPayload,
+  type E2eeClientPairingMac,
+  type E2eeMemberChainEntry,
+  type E2eeMemberKeyBundle,
+  type E2eeScopeKeyPackage,
 } from '@byok-sdk/protocol';
 import { SteerRejectedError } from './steer-control';
 import { createAuthPlane, type AuthPlane } from './auth/plane';
@@ -229,6 +233,8 @@ import {
   type TaskRedactionTaskResult,
 } from './task-redaction';
 import { tenantStoresFor, type CloudRootStores, type TenantStores } from './tenant-stores';
+import * as e2eeMember from './e2ee-member';
+import type { E2eeMemberStore } from './e2ee-member';
 import type { TruthCommitter, TruthObjectDownloads } from './truth/contract';
 
 /** Matches the reference server's ceiling (§7). */
@@ -357,6 +363,8 @@ export interface ByokCloudOptions {
   readonly agentMemoryProjectionStore?: AgentMemoryProjectionStore;
   /** Durable authority for {@link ByokCloud.redactTasks}. Without it, `redactTasks` fails closed. */
   readonly taskRedactionStore?: TaskRedactionStore;
+  /** Durable authority for the E2EE member chain, key packages and pairing MACs. Without it, those calls fail closed. */
+  readonly e2eeMemberStore?: E2eeMemberStore;
   readonly maxBlobSizeBytes?: number;
   readonly longPollHoldMs?: number;
   readonly eventsPageLimit?: number;
@@ -778,6 +786,46 @@ export interface ByokCloud {
    * Each task is redacted on its own; a refused task can be retried.
    */
   redactTasks(tenant: TenantId, input: { readonly taskIds: readonly string[] }): Promise<TaskRedactionResult>;
+  /**
+   * Host control plane (#654 E2c): append signed member chain entries. First
+   * writer wins per seq: an entry already stored with the same bytes is a
+   * replay, and a different one throws `e2ee_member_chain_conflict`. The
+   * first new entry must follow the stored head. The Host checks shapes and
+   * the tenant only; members verify signatures and links.
+   */
+  appendMemberChainEntries(
+    tenant: TenantId,
+    input: { readonly entries: readonly E2eeMemberChainEntry[] },
+  ): Promise<{ readonly appended: number; readonly replayed: number }>;
+  /** Host control plane: member chain entries after `afterSeq` (default 0), ascending, at most `limit` (default and maximum 256). */
+  readMemberChain(
+    tenant: TenantId,
+    input?: { readonly afterSeq?: number; readonly limit?: number },
+  ): Promise<{ readonly entries: readonly E2eeMemberChainEntry[] }>;
+  /**
+   * Host control plane: store scope key packages. The first package of a
+   * scope epoch fixes its `keyId`; a package with another `keyId` throws
+   * `e2ee_scope_key_conflict`, and the call stores nothing.
+   */
+  putScopeKeyPackages(
+    tenant: TenantId,
+    input: { readonly packages: readonly E2eeScopeKeyPackage[] },
+  ): Promise<{ readonly stored: number }>;
+  /** Host control plane: the stored packages of one scope, optionally for one epoch or one recipient. */
+  readScopeKeyPackages(
+    tenant: TenantId,
+    input: { readonly scopeId: string; readonly epoch?: number; readonly recipient?: string },
+  ): Promise<{ readonly packages: readonly E2eeScopeKeyPackage[] }>;
+  /**
+   * Host control plane: the member key bundle an active device registered,
+   * and its pairing MAC while the pairing window is open (§7.2 step 3).
+   */
+  readMemberKeyRegistration(
+    tenant: TenantId,
+    deviceId: string,
+  ): Promise<{ readonly member: E2eeMemberKeyBundle; readonly deviceMac?: string } | undefined>;
+  /** Host control plane: relay the client pairing MAC to a registered device (§7.2 step 4). */
+  relayClientPairingMac(tenant: TenantId, deviceId: string, input: E2eeClientPairingMac): Promise<void>;
   /** Host control plane: durably request cancellation by tenant/task id. Idempotent. */
   cancelTask(tenant: TenantId, taskId: string, reason?: string): Promise<TaskAttempt>;
   /**
@@ -1982,6 +2030,14 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     return store.erase({ tenantId: tenant, agentId });
   }
 
+  function e2eeMemberContext(tenant: TenantId): e2eeMember.E2eeMemberContext {
+    const store = options.e2eeMemberStore;
+    if (store === undefined) {
+      throw new ByokCloudError('e2ee_member_store_unavailable', 'E2EE member storage is not configured for this deployment.');
+    }
+    return { store, tenant, devices: options.cloud.devices, now: () => options.clock.now() };
+  }
+
   async function redactTasks(tenant: TenantId, input: { readonly taskIds: readonly string[] }): Promise<TaskRedactionResult> {
     const store = options.taskRedactionStore;
     if (store === undefined) {
@@ -2499,6 +2555,25 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     completeInputPreparation,
     eraseAgentMemoryProjection,
     redactTasks,
+
+    async appendMemberChainEntries(tenant, input) {
+      return e2eeMember.appendMemberChainEntries(e2eeMemberContext(tenant), input);
+    },
+    async readMemberChain(tenant, input) {
+      return e2eeMember.readMemberChain(e2eeMemberContext(tenant), input);
+    },
+    async putScopeKeyPackages(tenant, input) {
+      return e2eeMember.putScopeKeyPackages(e2eeMemberContext(tenant), input);
+    },
+    async readScopeKeyPackages(tenant, input) {
+      return e2eeMember.readScopeKeyPackages(e2eeMemberContext(tenant), input);
+    },
+    async readMemberKeyRegistration(tenant, deviceId) {
+      return e2eeMember.readMemberKeyRegistration(e2eeMemberContext(tenant), deviceId);
+    },
+    async relayClientPairingMac(tenant, deviceId, input) {
+      return e2eeMember.relayClientPairingMac(e2eeMemberContext(tenant), deviceId, input);
+    },
 
     approveTask(tenant, taskId, opts) {
       return resolveApproval(tenant, taskId, 'approve', opts);

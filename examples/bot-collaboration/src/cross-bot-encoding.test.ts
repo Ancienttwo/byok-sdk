@@ -11,7 +11,8 @@ import { BotCollaboration } from './host';
 import { stateOf, type CollaborationState, type Turn } from './model';
 import type { BotRoutine } from './routines';
 import { routineViews } from './routines.test-support';
-import { outcomeSchema, SYSTEM_PROMPT, turnInstruction } from './schema';
+import { outcomeSchema, SYSTEM_PROMPT } from './schema';
+import { botTurnInstruction } from './rules/context';
 import { BOT_REPLY_MAX_BYTES, DEFAULT_INSTRUCTION_MAX_BYTES, minimumInstructionBytes, OPEN_DELEGATION_ENTRY_MAX_BYTES, OPEN_DELEGATIONS_MAX_BYTES } from './delegation';
 import { botCompactVeto } from './compaction';
 
@@ -57,7 +58,7 @@ function worstCase(request: string) {
   return { state, turns: [reply, botRequest], routines };
 }
 function check(state: CollaborationState, turn: Turn, instructionMaxBytes: number, routines: readonly BotRoutine[]) {
-  const { instruction, context } = turnInstruction(state, turn, { turnLimit: 100, contextMaxBytes: 32_768, instructionMaxBytes }, routines);
+  const { instruction, context } = botTurnInstruction(state, turn, { turnLimit: 100, contextMaxBytes: 32_768, instructionMaxBytes }, routines);
   expect(bytes(instruction)).toBeLessThanOrEqual(instructionMaxBytes);
   expect(context.historyWindow.metadataOverBudget).toBe(false);
   expect(context.historyWindow.notice).toBe('Earlier history was omitted.');
@@ -132,7 +133,7 @@ it('bounds a Main Bot reply Turn that lists 24 worst-case open delegations, with
   state.turns[turn.id] = turn;
   const minimum = minimumInstructionBytes(SYSTEM_PROMPT);
   check(state, turn, minimum, routines);
-  const { context } = turnInstruction(state, turn, { turnLimit: 100, contextMaxBytes: 32_768, instructionMaxBytes: minimum }, routines);
+  const { context } = botTurnInstruction(state, turn, { turnLimit: 100, contextMaxBytes: 32_768, instructionMaxBytes: minimum }, routines);
   expect(context.openDelegations).toMatchObject({ omitted: 1 });
   expect(context.openDelegations!.items).toHaveLength(24);
   expect(bytes(JSON.stringify(context.openDelegations!.items[0]))).toBeLessThanOrEqual(OPEN_DELEGATION_ENTRY_MAX_BYTES);

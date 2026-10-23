@@ -1,4 +1,3 @@
-import { admitBotToolsets } from './toolset-policy';
 import type { BotTurnOutcome, CreateBotAction, RoomFields, UpdateBotAction } from '@byok-sdk/protocol';
 import { hash, canonical, type ExecutionTemplate } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState } from './model';
@@ -6,7 +5,7 @@ import type { BotProfile, Room } from './team-model';
 import { roomFields, roomVisibility } from './rules/rooms';
 
 import { NEW_BOTS, NEW_ROOMS } from './rules/schema';
-import { activeBot, archiveBot, profileProjection, refuseExternalTeam, requireMain, TEAM_BOT_LIMIT, type TeamSnapshotBot } from './rules/team';
+import { activeBot, admitBotToolsets, archiveBot, profileProjection, refuseExternalTeam, requireMain, TEAM_BOT_LIMIT, type TeamSnapshotBot } from './rules/team';
 
 export { activeBot, NEW_BOTS, NEW_ROOMS, requireMain, roomFields };
 export const TEAM_NOTE_LIMIT = 20;
