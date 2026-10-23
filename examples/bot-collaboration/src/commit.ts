@@ -4,7 +4,7 @@ import { intentFacts } from './delegation';
 import { turnIntentRetired } from './compaction';
 import { concludeRoutineTurn, routineOccurrence, type BotRoutine } from './routines';
 import { syncTurn, type SyncFacts, type SyncOptions } from './rules/sync';
-import { commitCommand, refuseRetired, type AdmittedIds, type Command, type CommandPorts } from './rules/commands';
+import { commitCommand, refuseRetired, retiredIdentity, type AdmittedIds, type Command, type CommandPorts } from './rules/commands';
 import type { CommandRecord, CommitRequest, CommitResult } from './rules/commit';
 import { retainRoots, type RetentionInput, type RetentionLimits, type RetentionResult } from './retention';
 
@@ -44,7 +44,7 @@ export function syncTurnInLedger(ledger: HostLedger, s: LedgerState, rows: Appli
   const facts: SyncFacts = {
     intent: intentFacts(s).intent,
     executionStarted: id => { const row = s.intents[hash(id)]; return !!row && !!s.executions[row.taskId]?.started; },
-    retired: id => turnIntentRetired(ledger, s, turn, options.now) ? 'result_retired' : rows.isRetired('turn', id) ? 'turn_retired' : undefined,
+    retired: id => turnIntentRetired(ledger, s, turn, options.now) ? 'result_retired' : retiredIdentity('turn', id, (namespace, row) => rows.isRetired(namespace, row)) ? 'turn_retired' : undefined,
   };
   const step = syncTurn(stateOf(s.application), turn, facts, options, (key, value) => project(s, key, value));
   switch (step?.kind) {

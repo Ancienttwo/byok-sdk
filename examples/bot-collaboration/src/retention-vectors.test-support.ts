@@ -182,6 +182,26 @@ export function retentionVectors(name: string, open: () => RetentionSubject | Pr
       expect(await retain(subject, ['r2'])).toMatchObject({ archivedRoots: 1 });
     });
 
+    it('refuses the id of a retired batch member when it returns as a Turn', async () => {
+      const subject = await opened();
+      const first = hash(['user', 'main', 'kx']), member = hash(['user', 'main', 'ky']);
+      const row = (id: string, key: string) => ({ id, key, botId: 'main', request: key, bytes: 2, sender: 'owner', authority: 'owner' as const, receivedAt: 0, batchId: first });
+      // A batch Turn takes its first input's id. The later member's id is retired only as an input.
+      await subject.change(state => {
+        settledRoot(state, first);
+        state.turns[first]!.inputIds = [first, member];
+        state.inputs = { [first]: row(first, 'kx'), [member]: row(member, 'ky') };
+        state.inputBatches = { [first]: { ...inputBatch('sealed'), id: first, key: 'kx', inputIds: [first, member] } };
+        settledRoot(state, 'r3');
+      });
+      expect(await retain(subject, [first])).toMatchObject({ archivedRoots: 1 });
+      // These stores do not coalesce, so a retry of `ky` admits a Turn with the member's id.
+      await refused(subject, () => settle(() => subject.commit(request(subject, 'iy', input('ky')))), error => {
+        expect(error).toBeInstanceOf(RetiredIdentityError);
+        expect(error).toMatchObject({ code: 'retired_identity', namespace: 'turn', id: member });
+      });
+    });
+
     it('refuses a retired round id at admission', async () => {
       const subject = await opened();
       await subject.change(state => {

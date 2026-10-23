@@ -222,7 +222,10 @@ does that on the Host's explicit acknowledgement. It never runs on its own.
   commit throw `RetiredIdentityError` and change nothing. A store makes that
   check itself: `commitCommand` hands the ids that `decide` added to
   `CommandStore.admitted`, and the store calls `refuseRetired` before it
-  commits. Sync fails a Turn with a retired id instead of running it.
+  commits. Sync fails a Turn with a retired id instead of running it. A Turn
+  id and an input id are one identity space (`retiredIdentity`): an input
+  that does not coalesce becomes a Turn with its own id, and the coalescing
+  policy can change between retention and a retry.
 - The ContextPack window of a Bot with a Turn that has not frozen yet (queued
   or blocked) is its last `contextTurnLimit + 1` Turns, because that Turn
   reads the last `contextTurnLimit` other Turns.

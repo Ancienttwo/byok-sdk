@@ -11,7 +11,7 @@ import { retainRoots, type RetentionStore } from './retention';
 import { retentionVectors, type RetentionSubject } from './retention-vectors.test-support';
 import type { CommandRecord } from './rules/commit';
 import { DatabaseSync } from 'node:sqlite';
-import { commitCommand, refuseRetired, type AdmittedIds, type Command, type CommandPorts } from './rules/commands';
+import { commitCommand, refuseRetired, RetiredIdentityError, type AdmittedIds, type Command, type CommandPorts } from './rules/commands';
 import { commitVectors, seedCollaboration, SYNC_OPTIONS, syncVectors, VECTOR_NOW, type CommitSubject, type SeedTeam, type SyncIntentRecord,
   type SyncSubject } from './commit-vectors.test-support';
 import { syncTurn } from './rules/sync';
@@ -169,6 +169,14 @@ it('L: keeps a record for a refused message only; K4 deduplicates an accepted on
   const state = stateOf(subject.ledger.snapshot().application);
   expect(state.revision).toBe(2);
   expect(Object.keys(state.commands ?? {})).toEqual(['task-9:m1']);
+});
+
+it('treats a Turn id and an input id as one identity space at admission, and keeps rounds apart', () => {
+  const retired = (namespace: string) => (ns: string, id: string) => ns === namespace && id === 'x';
+  expect(() => refuseRetired({ turn: [], input: ['x'], round: [] }, retired('turn'))).toThrow(RetiredIdentityError);
+  expect(() => refuseRetired({ turn: ['x'], input: [], round: [] }, retired('input'))).toThrow(RetiredIdentityError);
+  expect(() => refuseRetired({ turn: [], input: [], round: ['x'] }, retired('turn'))).not.toThrow();
+  expect(() => refuseRetired({ turn: ['x'], input: ['x'], round: [] }, retired('round'))).not.toThrow();
 });
 
 it('records the root of the input itself when the input also seals an earlier due batch', () => {
