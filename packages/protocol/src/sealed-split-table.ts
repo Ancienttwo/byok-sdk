@@ -25,7 +25,10 @@ export type SealedDigestRule = 'ciphertext-sha256' | 'keyed-mac' | 'sealed' | 'p
 
 /** One sealed message type in the split table. */
 export interface SealedSplitEntry {
-  /** The plaintext message type this type seals. */
+  /**
+   * The plaintext message type this type seals. The AAD and the content MAC
+   * bind it as the family, not the sealed wire type.
+   */
   readonly plainType: MessageType;
   readonly category: SealedPayloadV1Category;
   /**

@@ -12,13 +12,12 @@
  *
  * An `add` chain entry carries the bundle. The pairing MACs bind it. In a
  * later slice, the device registers it with device proof.
- *
- * This module is internal: the subpath index does not export it.
  */
 import { z } from 'zod';
 
 import { canonicalizeJsonBytes } from '../attestation';
 import type { WebCryptoKey } from '../webcrypto';
+import { safeParseTotal } from '../total-parse';
 import { deriveMemberId, MEMBER_ID_PATTERN } from './member-chain';
 import {
   P256PublicJwkSchema,
@@ -53,7 +52,8 @@ export interface MemberKeyBundleV1 {
 export const KemEpochSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 export const KemSigSchema = base64UrlBytes(64);
 
-const MemberKeyBundleV1Schema = z.strictObject({
+/** @internal The strict bundle shape. Shared with `pairing-verification.ts`. */
+export const MemberKeyBundleV1Schema = z.strictObject({
   v: z.literal(MEMBER_KEY_BUNDLE_VERSION),
   memberId: z.string().regex(MEMBER_ID_PATTERN),
   signingPublicJwk: P256PublicJwkSchema,
@@ -62,6 +62,19 @@ const MemberKeyBundleV1Schema = z.strictObject({
   kemSig: KemSigSchema,
   deviceId: z.string().min(1).optional(),
 });
+
+/** The caller data of `createMemberKeyBundle`, read once. The private key is kept as given; `ecdsaSign` checks it. */
+const CreateInputSchema = z.object({
+  signingPublicJwk: P256PublicJwkSchema,
+  signingPrivateKey: z.custom<WebCryptoKey>(),
+  kemPublicJwk: P256PublicJwkSchema,
+  kemEpoch: KemEpochSchema,
+  deviceId: z.string().min(1).optional(),
+});
+
+/** The fields `verifyMemberKem` reads, as plain values. Other fields, such as the rest of a bundle, are ignored. */
+const KemSignerSchema = z.object({ memberId: z.string().regex(MEMBER_ID_PATTERN), signingPublicJwk: P256PublicJwkSchema });
+const KemStatementSchema = z.object({ kemPublicJwk: P256PublicJwkSchema, kemEpoch: KemEpochSchema, kemSig: KemSigSchema });
 
 /** `MEMBER_KEM_DOMAIN_PREFIX || canonicalJson({ memberId, kemPublicKey: { x, y }, kemEpoch })`. */
 export function memberKemSigningInput(memberId: string, kemPublicJwk: P256PublicJwk, kemEpoch: number): Bytes {
@@ -81,24 +94,20 @@ export interface CreateMemberKeyBundleInput {
 
 /** Build a bundle: derive the member id and sign the KEM statement. Bad input throws `sealed_secret_invalid`. */
 export async function createMemberKeyBundle(input: CreateMemberKeyBundleInput): Promise<MemberKeyBundleV1> {
-  const memberId = await deriveMemberId(input.signingPublicJwk);
-  if (!(await isValidMemberKemKey(input.kemPublicJwk, input.signingPublicJwk)) || !KemEpochSchema.safeParse(input.kemEpoch).success) {
-    throw invalidInput('Member KEM key or epoch is invalid');
-  }
-  if (input.deviceId !== undefined && input.deviceId.length === 0) throw invalidInput('Member device id must not be empty');
-  const kemSig = await ecdsaSign(
-    input.signingPublicJwk,
-    input.signingPrivateKey,
-    memberKemSigningInput(memberId, input.kemPublicJwk, input.kemEpoch),
-  );
+  const parsed = safeParseTotal(CreateInputSchema, input);
+  if (!parsed.success) throw invalidInput('Member key bundle input is invalid');
+  const { signingPublicJwk, signingPrivateKey, kemPublicJwk, kemEpoch, deviceId } = parsed.data;
+  const memberId = await deriveMemberId(signingPublicJwk);
+  if (!(await isValidMemberKemKey(kemPublicJwk, signingPublicJwk))) throw invalidInput('Member KEM key is invalid');
+  const kemSig = await ecdsaSign(signingPublicJwk, signingPrivateKey, memberKemSigningInput(memberId, kemPublicJwk, kemEpoch));
   return {
     v: MEMBER_KEY_BUNDLE_VERSION,
     memberId,
-    signingPublicJwk: input.signingPublicJwk,
-    kemPublicJwk: input.kemPublicJwk,
-    kemEpoch: input.kemEpoch,
+    signingPublicJwk,
+    kemPublicJwk,
+    kemEpoch,
     kemSig,
-    ...(input.deviceId === undefined ? {} : { deviceId: input.deviceId }),
+    ...(deviceId === undefined ? {} : { deviceId }),
   };
 }
 
@@ -118,9 +127,14 @@ export async function verifyMemberKem(
   member: { readonly memberId: string; readonly signingPublicJwk: P256PublicJwk },
   kem: { readonly kemPublicJwk: P256PublicJwk; readonly kemEpoch: number; readonly kemSig: string },
 ): Promise<boolean> {
-  if (!(await isValidMemberKemKey(kem.kemPublicJwk, member.signingPublicJwk))) return false;
+  const signer = safeParseTotal(KemSignerSchema, member);
+  const statement = safeParseTotal(KemStatementSchema, kem);
+  if (!signer.success || !statement.success) return false;
+  const { memberId, signingPublicJwk } = signer.data;
+  const { kemPublicJwk, kemEpoch, kemSig } = statement.data;
+  if (!(await isValidMemberKemKey(kemPublicJwk, signingPublicJwk))) return false;
   try {
-    return await ecdsaVerify(member.signingPublicJwk, kem.kemSig, memberKemSigningInput(member.memberId, kem.kemPublicJwk, kem.kemEpoch));
+    return await ecdsaVerify(signingPublicJwk, kemSig, memberKemSigningInput(memberId, kemPublicJwk, kemEpoch));
   } catch {
     return false;
   }
@@ -134,7 +148,7 @@ export async function verifyMemberKem(
  * hostile input.
  */
 export async function parseMemberKeyBundle(value: unknown): Promise<MemberKeyBundleV1 | undefined> {
-  const parsed = MemberKeyBundleV1Schema.safeParse(value);
+  const parsed = safeParseTotal(MemberKeyBundleV1Schema, value);
   if (!parsed.success) return undefined;
   const bundle = parsed.data;
   try {

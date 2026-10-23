@@ -1756,7 +1756,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     taskId: string,
     payload: TaskSteerPayload,
   ): Promise<EnqueuedAgentControl> {
-    refuseSealedFields(payload, ['sealed', 'steerId'], 'steerSealedTask');
+    refuseSealedFields(payload, ['sealing', 'sealed', 'steerId'], 'steerSealedTask');
     const ownerDeviceId = await runningSteerTarget(tenant, taskId);
     const messageId = options.crypto.randomUuid();
     return enqueueAgentControlEnvelope(tenant, ownerDeviceId, messageId, (seq) =>

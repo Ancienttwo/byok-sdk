@@ -40,9 +40,6 @@ import type { SecretStore } from './secret-store';
  * cross-process lock: the daemon that uses it holds the daemon owner lock for
  * its store directory. With two concurrent writers, the last write wins, and
  * an earlier caller can hold keys that the credential store no longer has.
- *
- * This module is internal until the daemon slice uses it. It is not exported
- * from the package root.
  */
 export const DEVICE_MEMBER_SECRET_NAME = 'device-member-p256-v1';
 export type DeviceMemberSecretName = typeof DEVICE_MEMBER_SECRET_NAME;

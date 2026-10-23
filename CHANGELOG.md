@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Feature (protocol, server, cloud, client)** — an ordinary Agent offer can
+  select `agentMemory: 'read-if-admitted'` (#815). It runs exactly as `read`
+  when the daemon admits the memory MCP, and exactly as `none` when it does
+  not. It never gets `agent_memory_unavailable`, for a writer or a
+  `memory-reader`. A Host that cannot see the admission can now ask for
+  read-only memory without a decline. Prepared offers do not accept the value.
+  `none`, `read`, `read-write` and an absent field do not change. The value is
+  a gated wire addition: every daemon with an Agent home advertises the new
+  device capability `agent-memory-read-if-admitted`
+  (`AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY`), and server and hosted cloud
+  refuse the value to a device without it, before the task exists. The new
+  `AgentMemorySelectionSchema` and `AgentMemorySelection` describe the
+  ordinary values. The daemon now reads its memory admission once per offer
+  and binds the memory MCP from that answer. The terminal does not report
+  which mode ran.
+
 - **Changed (client)** — on macOS the Agent memory helper refuses a directory
   or a file below the Agent home that is on another device than its parent
   directory (#781). Before, the local-volume rule (#765) checked only the home
@@ -42,6 +58,14 @@
   message with `sealed_payload_unsupported`. The sealed hosted entries refuse
   a `ciphertextRef` with `coordination_input_invalid`, because the Host does
   not yet check and retain the referenced blob. Inline ciphertext works.
+- **Changed (client)** — the hosted journal admits an inbound envelope record
+  up to the larger of `hostedJournal.maxRecordBytes` and 415083 bytes (#654
+  E3a). The journal derives this floor from the largest inline sealed member:
+  256 KiB + 16 bytes of ciphertext as base64url, plus 64 KiB for the other
+  fields. Before, a sealed offer or steer at the inline maximum (about 342
+  KiB) was over the default bound of 256 KiB. The cursor stalled, and the
+  daemon sent no decline. Terminal and transition records keep
+  `maxRecordBytes`. There is no new config option.
 - **Feature (cloud, cloud-dataplane)** — the sealed hosted entries accept a
   `ciphertextRef` (#654 E3b). The object with the declared hash must be
   committed in the tenant, with the declared size and content type. The

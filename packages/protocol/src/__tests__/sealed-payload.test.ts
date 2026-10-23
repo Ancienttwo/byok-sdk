@@ -299,6 +299,21 @@ describe('sealed payload v1: plaintext types never carry sealed content', () => 
     }
   });
 
+  it('refuses a non-enumerable sealed member or sealing policy under each plaintext type (#654)', () => {
+    // A strict schema checks unknown keys by enumeration, so only a declared
+    // field catches a non-enumerable own property.
+    const sealedOffer = sealedLines.find((line) => line.type === 'task.offer_sealed')!.payload;
+    for (const type of plainTypes) {
+      const plain = corpus.find((line) => line.type === type && line.payload.sealed === undefined)!;
+      for (const field of ['sealed', 'sealing'] as const) {
+        const payload = structuredClone(plain.payload);
+        Object.defineProperty(payload, field, { value: sealedOffer[field], enumerable: false });
+        expect(MESSAGE_PAYLOAD_SCHEMAS[type].safeParse(payload).success, `${type}.${field}`).toBe(false);
+        expect(() => createEnvelope(type, payload as never, { taskId: 'task-hidden', seq: 1 }), `${type}.${field}`).toThrow();
+      }
+    }
+  });
+
   it('refuses an output-only sealed offer tagged as task.offer, so it cannot run as plaintext', () => {
     const outputOnly = corpus.find((line) => line.type === 'task.offer_sealed' && line.payload.sealed === undefined)!;
     expect(MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse(outputOnly.payload).success).toBe(false);

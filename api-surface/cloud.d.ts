@@ -246,6 +246,8 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
     taskId: z.ZodString;
     deviceId: z.ZodString;
     payload: z.ZodObject<{
+        sealed: z.ZodOptional<z.ZodNever>;
+        sealing: z.ZodOptional<z.ZodNever>;
         instruction: z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
             blobRef: z.ZodObject<{
                 blobId: z.ZodString;
@@ -263,6 +265,7 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
         agentMemory: z.ZodOptional<z.ZodEnum<{
             none: "none";
             read: "read";
+            "read-if-admitted": "read-if-admitted";
             "read-write": "read-write";
         }>>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
@@ -369,6 +372,7 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
         agentMemory: z.ZodOptional<z.ZodEnum<{
             none: "none";
             read: "read";
+            "read-if-admitted": "read-if-admitted";
             "read-write": "read-write";
         }>>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;

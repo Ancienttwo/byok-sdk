@@ -295,10 +295,12 @@ export const DispatchSelectionSchema = z.discriminatedUnion('lane', [
 export type DispatchSelection = z.infer<typeof DispatchSelectionSchema>;
 
 /**
- * #654: a loose plaintext type that has a sealed sibling refuses the sealed
- * members. Without this, the schema would strip them, and sealed content or
- * a sealing policy would pass as plaintext. A sealed message uses its own
- * `*_sealed` type. The strict plaintext types already refuse unknown keys.
+ * #654: a plaintext type that has a sealed sibling refuses the sealed
+ * members. Without this, a loose schema would strip them, and sealed content
+ * or a sealing policy would pass as plaintext. A strict schema needs it too:
+ * its unknown-key check sees only enumerable keys, so a non-enumerable
+ * `sealed` or `sealing` would be dropped. A sealed message uses its own
+ * `*_sealed` type.
  */
 const NO_SEALED_MEMBER = { sealed: z.never().optional(), sealing: z.never().optional() };
 
@@ -361,21 +363,31 @@ export const AgentHomeAccessSchema = z.literal('memory-reader');
 export type AgentHomeAccess = z.infer<typeof AgentHomeAccessSchema>;
 
 /**
+ * The `agentMemory` of an ordinary Agent offer: the prepared modes plus
+ * `read-if-admitted`. That value runs as `read` when the daemon admits the
+ * memory MCP and as `none` when it does not. A host sends it only to a device
+ * that advertises `agent-memory-read-if-admitted`. Prepared offers refuse it.
+ */
+export const AgentMemorySelectionSchema = z.enum([...PreparedAgentMemoryModeSchema.options, 'read-if-admitted']);
+export type AgentMemorySelection = z.infer<typeof AgentMemorySelectionSchema>;
+
+/**
  * Strict additive offer for a durable host-owned Agent. An older daemon that
  * does not advertise `agent-home-contract` skips this distinct message type
  * instead of stripping identity and applying legacy workspace semantics.
  *
- * `agentMemory` selects the Agent memory of this one task, with the values of
- * the prepared offer. Absent keeps the daemon admission. A host sends it only
- * to a device that advertises `agent-memory-selection`. The prepared offer
- * replaces it with its own required selection.
+ * `agentMemory` selects the Agent memory of this one task (see
+ * {@link AgentMemorySelectionSchema}). Absent keeps the daemon admission. A
+ * host sends it only to a device that advertises `agent-memory-selection`. The
+ * prepared offer replaces it with its own required selection.
  */
 export const TaskOfferForAgentPayloadSchema = z
   .object({
+    ...NO_SEALED_MEMBER,
     instruction: z.union([z.string(), InstructionBlobRefSchema]),
     agentRef: AgentRefSchema,
     homeAccess: AgentHomeAccessSchema.optional(),
-    agentMemory: PreparedAgentMemoryModeSchema.optional(),
+    agentMemory: AgentMemorySelectionSchema.optional(),
     requiredToolsets: RequiredToolsetsSchema.optional(),
     runtime: RuntimeIdSchema.optional(),
     harnessId: HarnessIdSchema.optional(),

@@ -7,6 +7,7 @@ import { z } from 'zod';
 import * as previousRelease from 'byok-protocol-previous';
 import * as currentModule from '../index';
 import {
+  AgentMemorySelectionSchema,
   CAPABILITY_FLAGS,
   EnvelopeSchema,
   MESSAGE_PAYLOAD_SCHEMAS,
@@ -22,6 +23,7 @@ import {
   isServerToDaemonType,
   parseMessage,
   requiredReceiverCapabilities,
+  TaskOfferPreparedPayloadSchema,
   type MessageType,
   type WireAddition,
 } from '../index';
@@ -364,6 +366,19 @@ describe('compat v3: corpus coverage and WIRE_ADDITIONS', () => {
     }
     // Every prepared offer carries its own required selection under its own gate.
     expect(requiredReceiverCapabilities('task.offer_prepared', { agentMemory: 'read' })).not.toContain('agent-memory-selection');
+  });
+
+  it('gates agentMemory read-if-admitted on its own flag, on the ordinary Agent offers only (#815)', () => {
+    for (const type of ['task.offer_for_agent', 'task.offer_for_agent_with_egress', 'task.offer_for_agent_with_egress_fresh'] as const) {
+      expect(requiredReceiverCapabilities(type, { agentMemory: 'read-if-admitted' }), type)
+        .toEqual(expect.arrayContaining(['agent-memory-selection', 'agent-memory-read-if-admitted']));
+      for (const agentMemory of ['none', 'read', 'read-write'] as const) {
+        expect(requiredReceiverCapabilities(type, { agentMemory }), `${type} ${agentMemory}`).not.toContain('agent-memory-read-if-admitted');
+      }
+    }
+    expect(AgentMemorySelectionSchema.options).toEqual(['none', 'read', 'read-write', 'read-if-admitted']);
+    // The prepared offer keeps the three prepared modes.
+    expect(TaskOfferPreparedPayloadSchema.shape.agentMemory.safeParse('read-if-admitted').success).toBe(false);
   });
 
   it('requiredReceiverCapabilities derives field and value gates from the table; document and the v2 strip-safe fields need none', () => {
