@@ -3,6 +3,7 @@ import {
   type OutboundRefusalReason,
   type ActivityIngress,
   MAX_MESSAGES_PER_BATCH,
+  MESSAGES_SEND_MAX_BODY_BYTES,
   createEnvelope,
   isServerToDaemonType,
   PROTOCOL_VERSION,
@@ -455,7 +456,14 @@ export class ConnectionManager {
         if (this.state !== 'open' || this.isEnded()) return;
 
         const generation = this.sessionGeneration;
-        let batch = this.outbox.splice(0, MAX_MESSAGES_PER_BATCH);
+        // Cut at the count cap or before the encoded body would pass the byte cap
+        // (`{"messages":[` + `]}` is 15 bytes, one comma between envelopes); one envelope always goes.
+        let count = 0;
+        for (let bytes = 14; count < Math.min(this.outbox.length, MAX_MESSAGES_PER_BATCH); count++) {
+          bytes += Buffer.byteLength(JSON.stringify(this.outbox[count])) + 1;
+          if (count > 0 && bytes > MESSAGES_SEND_MAX_BODY_BYTES) break;
+        }
+        let batch = this.outbox.splice(0, count);
         // serveSession applies handshake capabilities before opening this drain.
         // Re-gate queued drafts after reconnect; dropped drafts have no receipt.
         if (!this.serverCapabilities.includes('agent-message-draft')) {

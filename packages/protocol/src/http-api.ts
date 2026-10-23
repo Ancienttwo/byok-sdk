@@ -268,6 +268,9 @@ export type EventsPollResponse = z.infer<typeof EventsPollResponseSchema>;
  */
 export const MAX_MESSAGES_PER_BATCH = 256;
 
+/** Request body ceiling for `POST /byok/messages`; the cloud answers 413 above it, so the client chunks its drain by it. */
+export const MESSAGES_SEND_MAX_BODY_BYTES = 2 * 1024 * 1024;
+
 /** Annotated so declaration emit names `EnvelopeSchema` instead of copying it. Type-only. */
 export const MessagesSendRequestSchema: z.ZodObject<{ messages: z.ZodArray<typeof EnvelopeSchema> }, z.core.$strip> = z.object({
   messages: z.array(EnvelopeSchema).max(MAX_MESSAGES_PER_BATCH),
