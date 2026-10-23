@@ -478,6 +478,10 @@ jobs:
           node packages/client/scripts/agent-memory-runtime-smoke.mjs
           bun packages/client/scripts/agent-memory-runtime-smoke.mjs
 
+      # Node runs the same flow in agent-memory-intent.test.ts (W4).
+      - name: Run the intent processor over the real helper under Bun
+        run: bun packages/client/scripts/agent-memory-intent-helper-smoke.mjs
+
       # npm-release-pack verifies the Windows pack.
       - name: Verify the installed release artifacts and re-signing policy
         if: runner.os == 'macOS'
