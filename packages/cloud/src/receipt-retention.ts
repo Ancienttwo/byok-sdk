@@ -6,7 +6,7 @@ export const RECEIPT_RETENTION: readonly Readonly<{ prefix: string; class: Recei
   'agent-content-request:', 'agent-content-receipt:',
   'agent-home-projection-request:', 'agent-home-projection-completion:',
   'agent-input-preparation-request:', 'agent-input-preparation-completion:',
-  'pairing-completion:v1:',
+  'pairing-completion:v1:', 'task-redaction:',
 ].map(prefix => Object.freeze({ prefix, class: 'identity' as const })));
 export const REQUEST_RECEIPT_PREFIXES: readonly string[] = Object.freeze(
   RECEIPT_RETENTION.filter(entry => entry.class === 'request').map(entry => entry.prefix),
