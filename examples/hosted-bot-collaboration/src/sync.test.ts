@@ -3,13 +3,16 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { enqueue, HostLedger, project, taskId, type FrozenInput } from '@byok-sdk/example-host-execution-core';
+import { DEFAULT_RETRY, enqueue, HostLedger, project, taskId, type FrozenInput } from '@byok-sdk/example-host-execution-core';
+import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { stateOf, type CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { syncTurn } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { seedCollaboration, SYNC_OPTIONS, syncVectors, type SyncIntentRecord, type SyncSubject } from '@byok-sdk/example-bot-collaboration/test-support';
+import { freezeIntent, type IntentFreeze } from './intents';
 import { storedKey } from './layout';
 import { vectorPorts } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
+import { inSchema, lockScope } from './store';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;
@@ -47,8 +50,9 @@ function queueTurns(state: CollaborationState): void {
   state.turns.q1 = { id: 'q1', root: 'q1', botId: 'main', source: 'user', request: 'First', hop: 0, status: 'queued', authority: 'owner' };
   state.turns.q2 = { id: 'q2', root: 'q1', botId: 'main', source: 'continuation', request: 'Next', hop: 0, status: 'queued', authority: 'owner' };
 }
-const intentRow = async (scope: string, turnId: string) => (await opened!.pool.query<{ source: string; input: string; wait_until: string; cancel_reason: string | null }>(
-  `SELECT source, input::text, wait_until::text, cancel_reason FROM ${table('intent')} WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(turnId)])).rows[0];
+const intentRow = async (scope: string, turnId: string) => (await opened!.pool.query<{ source: string; input: string; wait_until: string;
+  cancel_reason: string | null; conclusion: string | null }>(
+  `SELECT source, input::text, wait_until::text, cancel_reason, conclusion FROM ${table('intent')} WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(turnId)])).rows[0];
 
 describe.skipIf(POSTGRES_URL === undefined)('H sync step on real Postgres (#793 D2b-2)', () => {
   beforeAll(async () => { opened = await openStore(); });
@@ -87,7 +91,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H sync step on real Postgres (#793 
     }
   });
 
-  it('cancels the open intent of an archived Bot, and a second sync changes nothing', async () => {
+  it('cancels and concludes the never-tried intent of an archived Bot, the next sync reports its Turn, and a third changes nothing', async () => {
     const h = await hosted();
     await h.change(queueTurns);
     await h.sync();
@@ -96,11 +100,43 @@ describe.skipIf(POSTGRES_URL === undefined)('H sync step on real Postgres (#793 
     await h.sync();
     // The cancel changes only intent rows, so this also shows that the stored bytes cover them.
     expect(await h.stored()).not.toBe(archived);
-    expect((await intentRow(h.scope, 'q1'))!.cancel_reason).toBe('cancelled');
-    expect((await intentRow(h.scope, 'q2'))!.cancel_reason).toBe('cancelled');
+    // No submit tried these rows, so no SDK attempt can exist: the cancel write concludes them, as K4 queuedExpiry does.
+    expect(await intentRow(h.scope, 'q1')).toMatchObject({ cancel_reason: 'cancelled', conclusion: 'cancelled' });
+    expect(await intentRow(h.scope, 'q2')).toMatchObject({ cancel_reason: 'cancelled', conclusion: 'cancelled' });
+    await h.sync();
+    const state = await h.state();
+    for (const turnId of ['q1', 'q2']) {
+      expect(state.turns[turnId], turnId).toMatchObject({ status: 'failed', conclusion: 'cancelled', reported: true });
+      expect(await h.projection(`bot-turn:${turnId}`), turnId).toHaveLength(1);
+    }
     const stored = await h.stored();
     await h.sync();
     expect(await h.stored()).toBe(stored);
+  });
+
+  it('keeps the started intent of an archived Bot open, as L does, and cancels only the never-tried one (#793 D2d)', async () => {
+    const h = await hosted();
+    await h.change(queueTurns);
+    await h.sync();
+    // The reconciliation saw a claim of q1: L reads the same fact from the K4 execution (K8 commit.ts executionStarted).
+    await opened!.pool.query(`UPDATE ${table('intent')} SET submission = 'delivered', tries = 1, started = true WHERE scope = $1 AND key = $2`,
+      [storedKey(h.scope), storedKey('q1')]);
+    await h.change(state => { state.team.bots.main!.archived = true; });
+    await h.sync();
+    expect(await intentRow(h.scope, 'q1')).toMatchObject({ cancel_reason: null, conclusion: null });
+    expect(await intentRow(h.scope, 'q2')).toMatchObject({ cancel_reason: 'cancelled', conclusion: 'cancelled' });
+    const state = await h.state();
+    expect([state.turns.q1!.status, state.turns.q1!.conclusion]).toEqual(['processing', undefined]);
+  });
+
+  it('refuses a freeze input with a K4 retry policy, and writes nothing (#793 D2d option A)', async () => {
+    const h = await hosted();
+    const before = await h.stored();
+    await expect(inSchema(opened!.pool, store().schema, async client => {
+      await lockScope(client, storedKey(h.scope));
+      return freezeIntent(client, h.scope, { key: 'r1', source: 'user', waitUntil: 1, execution: template('device'), retry: DEFAULT_RETRY } as IntentFreeze);
+    })).rejects.toThrow('H intents have no retry policy');
+    expect(await h.stored()).toBe(before);
   });
 
   it('in history mode, freezes a Turn only with its own history rows', async () => {
