@@ -518,20 +518,22 @@ function compareCodeUnits(left: string, right: string): number {
 }
 
 /**
- * RFC 8785: keys sorted by UTF-16 code unit; a finite number as ECMAScript
- * `Number.prototype.toString`. Its number text is pinned to the RFC table by
- * the RFC 8785 test below, not by this function.
+ * RFC 8785: keys sorted by UTF-16 code unit. `numbers: 'safe-integer'` is the
+ * attestation value space (AAD, MAC identity, chain, key packages);
+ * `'finite'` is the sealed plaintext rule (#786), whose number text the RFC
+ * 8785 test below pins to the RFC table.
  */
-function oracleCanonical(value: unknown): string {
+function oracleCanonical(value: unknown, numbers: 'safe-integer' | 'finite' = 'safe-integer'): string {
   if (value === null || typeof value === 'boolean' || typeof value === 'string') return JSON.stringify(value);
   if (typeof value === 'number') {
-    if (!Number.isFinite(value)) throw new Error(`oracle: ${value} has no JSON form`);
+    const admitted = numbers === 'finite' ? Number.isFinite(value) : Number.isSafeInteger(value);
+    if (!admitted) throw new Error(`oracle: ${value} is outside the ${numbers} number space`);
     return String(value);
   }
-  if (Array.isArray(value)) return `[${value.map(oracleCanonical).join(',')}]`;
+  if (Array.isArray(value)) return `[${value.map((entry) => oracleCanonical(entry, numbers)).join(',')}]`;
   const record = value as Record<string, unknown>;
   const keys = Object.keys(record).sort(compareCodeUnits);
-  return `{${keys.map((key) => `${JSON.stringify(key)}:${oracleCanonical(record[key])}`).join(',')}}`;
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${oracleCanonical(record[key], numbers)}`).join(',')}}`;
 }
 
 function oraclePaddedLength(frameLength: number): number {
@@ -666,14 +668,16 @@ describe('sealed-payload v1 vectors against an independent oracle', () => {
       const value = Buffer.from(ieee, 'hex').readDoubleBE(0);
       if (json === null) {
         expect(Number.isFinite(value)).toBe(false);
+        expect(() => oracleCanonical(value, 'finite')).toThrow();
         continue;
       }
+      expect(oracleCanonical(value, 'finite')).toBe(json);
       // The RFC text parses back to the same double; JSON has no -0, so only zero may lose its sign.
       expect(JSON.parse(json)).toBe(value === 0 ? 0 : value);
     }
     for (const text of golden.nonCanonicalNumbers) {
       expect(Number.isFinite(JSON.parse(text))).toBe(true);
-      expect(oracleCanonical(JSON.parse(text))).not.toBe(text);
+      expect(oracleCanonical(JSON.parse(text), 'finite')).not.toBe(text);
     }
   });
 
@@ -699,7 +703,7 @@ describe('sealed-payload v1 vectors against an independent oracle', () => {
 
   it('sealed contents: header, AAD, content MAC and ciphertext', () => {
     for (const vector of golden.sealed) {
-      const plaintextText = oracleCanonical(vectorPlaintext(vector));
+      const plaintextText = oracleCanonical(vectorPlaintext(vector), 'finite');
       const frame = oracleFrame(Buffer.from(plaintextText, 'utf8'));
       const salt = Buffer.from(vector.salt, 'hex');
       const nonce = Buffer.from(vector.nonce, 'hex');
@@ -744,7 +748,7 @@ describe('sealed-payload v1 vectors against an independent oracle', () => {
         const text = frame.subarray(4, 4 + length).toString('utf8');
         if (oraclePaddedLength(4 + length) !== frame.length) defects.add('padded-length');
         if (frame.subarray(4 + length).some((byte) => byte !== 0)) defects.add('padding-byte');
-        if (oracleCanonical(JSON.parse(text)) !== text) defects.add('non-canonical-json');
+        if (oracleCanonical(JSON.parse(text), 'finite') !== text) defects.add('non-canonical-json');
         else if (oracleContentMac(oracleMacInput(vector.header.category, vector.binding, text)) !== vector.header.contentMac) defects.add('content-mac');
       }
       expect([...defects]).toEqual([vector.defect]);
