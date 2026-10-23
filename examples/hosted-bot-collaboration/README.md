@@ -3,9 +3,9 @@
 Private reference example for #793 (#606 D2). It is the hosted (H) adapter of the K8 collaboration
 commit contract (`examples/bot-collaboration`, #739 D1), on Node and Postgres.
 
-Status: the commit store and the intent submitter (D2b-1). The Turn freeze in the sync step (D2b-2), the
-message consumer, result reconciliation, the command entry, the routine scheduler and retention come in
-later slices of #793. Do not use this example as a deployed Host yet.
+Status: the commit store, the intent submitter (D2b-1), the sync step (D2b-2) and the message consumer (D2c).
+Result reconciliation, the command entry, the routine scheduler and retention come in later slices of #793.
+Do not use this example as a deployed Host yet.
 
 ## Commit store
 
@@ -21,8 +21,9 @@ transaction. The transaction holds the state change, the command record and the 
 
 ## Intent submitter
 
-`freezeIntent` saves one intent for a Turn: the frozen SDK input and the stable task id `taskId(turnId, 0)`
-of K4. The caller holds the scope lock. D2b-2 calls it in the Turn's sync transaction.
+`freezeIntent` saves one intent for a Turn: its source, the frozen SDK input and the stable task id
+`taskId(turnId, 0)` of K4. The caller holds the scope lock. A second freeze with the same source, input and
+wait changes nothing. Another one throws `Intent identity conflict`, as K4 `enqueue` does.
 
 `HostedSubmitter.run()` takes the due rows and runs the K4 rules on them: the FIFO head (`fifoHeads`), the
 queued expiry (`queuedExpiry`) and the frozen submit (`submitFrozen`).
@@ -32,7 +33,10 @@ queued expiry (`queuedExpiry`) and the frozen submit (`submitFrozen`).
   submitter cannot overwrite a newer try, and a delivered row never changes back.
 - A row that was never tried expires at `wait_until`. A tried row past `wait_until` is never submitted
   again. It gets `cancel_reason = 'expired'` and no conclusion, because an SDK attempt can still exist.
-  Reconciliation (D2d) checks the attempt first.
+  Reconciliation (D2d) checks the attempt first. A sync cancel that lands during the try keeps its reason.
+- Right before the SDK call, a try reads the row again, as K4 does. It stops when the row has a conclusion or a
+  cancel reason. The read is outside the scope lock, so a cancel after it can still reach the SDK. D2d's attempt
+  check is the guard for that case.
 - A delivered head holds its agent's queue until it has a conclusion. The scan returns only FIFO heads, so the
   followers of a queue never fill a pass ahead of a due head.
 - A row whose try throws outside the SDK call is backed off, and the pass goes on. `run()` reports it in
@@ -75,6 +79,41 @@ One Postgres database can hold the SDK tables and this example's schema. The sto
 `pg.Pool`, so a separate database also works. No path assumes one atomic commit across the store and an
 SDK call.
 
+## Sync step
+
+`HostedCollaborationStore.sync(scope, options)` runs the K8 sync rule (`syncTurn`) for each stored Turn, in
+insertion order, in one transaction under the scope lock. It writes each step as L writes it to K4:
+
+- `freeze`: `freezeIntent` stores the rule's intent input as it is.
+- `cancel`: the open intent of an archived Bot gets `cancel_reason = 'cancelled'`.
+- `ended`: nothing for a Turn that is not a routine Turn.
+- A routine Turn throws, because H has no routine occurrences before D2f.
+
+In history mode, `options.history` maps each Turn id to that Turn's history rows, as L reads them. A Turn without
+an entry does not freeze.
+
+The projections that the rule publishes reach the outbox in the same transaction. A sync writes no command
+record and keeps the revision. A throw writes nothing. H records no execution start before D2d, so the rule
+sees every open intent as not started. H retires no Turn id before D2g.
+
+## Message consumer
+
+`hostedMessageConsumer(store, { scopeOf, ports })` is the `agentMessage` option of `createByokCloud`. Its
+`consume` decides each Agent message in one transaction under the scope lock, in the order of K4
+`consumeMessage`:
+
+1. A tenant whose scope has no row, or a task with no frozen intent: `unknown_task`.
+2. A device, Agent or message context that differs from the frozen input: `binding_mismatch`.
+3. Another message than the task's accepted reply: `message_conflict`. A task has one accepted reply.
+4. Otherwise the `message` command commits under the id `taskId:messageId`. A replay returns the decision of
+   its command record. Other content for that id is `message_conflict`.
+
+Steps 1 to 3 write nothing. A replay gets the same decision, because the frozen input never changes and an
+accepted reply stays. H never returns `held`. A throw writes nothing and leaves the SDK admission pending.
+
+Two decisions differ from K4. A message for another tenant gets `unknown_task`, because H maps each tenant to
+its own scope. H has no `stale_generation`, because each H task is generation 0.
+
 ## Tests
 
 ```sh
@@ -89,6 +128,10 @@ object store. With `BYOK_REQUIRE_DATAPLANE=1`, a missing value is a failure. The
 three and runs these suites.
 
 - The D1 commit vectors run on the store and on a reference subject (the pure rules in memory).
+- The D2b sync vectors run on the store.
+- The message consumer tests port the K4 Host-side message vectors (`host-execution-core/src/message.test.ts`).
+- The sync test freezes the same Turns in an L ledger with K4 `enqueue`. Each H input is byte-equal to the K4
+  execution input, and the H state bytes equal the L state bytes.
 - The submitter tests use the hosted SDK composition (`createByokCloud` over `createPostgresCloudStores`, with
   the SDK migrations in its own schema), served over loopback HTTP, and a real daemon paired through the
   public pairing route. The intents are frozen directly, because D2b ships no product entry.

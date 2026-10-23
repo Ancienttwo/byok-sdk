@@ -498,6 +498,11 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
                 contentType: z.ZodString;
             }, z.core.$strict>>;
         }, z.core.$strict>>;
+        routineRef: z.ZodOptional<z.ZodObject<{
+            routineId: z.ZodString;
+            definitionVersion: z.ZodNumber;
+            notAfter: z.ZodString;
+        }, z.core.$strict>>;
     }, z.core.$strict>;
     agentMessageContext: z.ZodOptional<z.ZodObject<{
         destinationBinding: z.ZodString;
@@ -4386,6 +4391,15 @@ export interface TaskRedactionStoreInput {
     readonly receiptKeys: readonly string[];
     /** The device terminal receipt key. It is one of `receiptKeys`. When it is absent, the store writes `codec.absent` there. */
     readonly terminalReceiptKey: string;
+    /**
+     * The object references this task holds (#654: its sealed ciphertext
+     * blobs). The store removes them inside the redaction, after its refusal
+     * checks, so the objects that the bodies name can then be deleted.
+     */
+    readonly releaseObjectReferences: readonly {
+        readonly refKind: string;
+        readonly refId: string;
+    }[];
     /** The identity receipt that records this redaction. */
     readonly auditReceiptKey: string;
     readonly codec: TaskRedactionCodec;

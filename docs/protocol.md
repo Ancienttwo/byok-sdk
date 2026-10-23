@@ -1124,6 +1124,39 @@ sealed offer type, so a device without the flag never receives it. A
 plaintext type that has a sealed sibling refuses `sealing` and `sealed`, so
 the schema never strips a sealing policy or sealed content.
 
+**Routine template.** A `task.offer_for_agent_with_egress_fresh_sealed` can
+carry a plaintext `routineRef: { routineId, definitionVersion, notAfter }`.
+Its `sealed` member is then a routine template: the member sealed it once, as
+family `routine.template`, for every occurrence of one routine version (design
+§6.3). No other offer type takes `routineRef`, and the offer must seal
+`task-input`.
+
+- The device rebuilds the template binding from the offer: identity
+  `{ routineId, definitionVersion }`, no `deviceId`, the offer's `agentRef`
+  and `sealing.categories`, and `notAfter`. The binding names no task, so the
+  same template opens for each occurrence.
+- `definitionVersion` is a non-negative integer, because the binding tells
+  `4` and `"4"` apart. `notAfter` is a canonical UTC instant
+  (`YYYY-MM-DDTHH:mm:ss.sssZ`), the form that core binds. The AAD binds
+  `notAfter`, so it travels in plaintext.
+- The offer's `sealing.epoch` is the template's epoch, so `sealed.scope` is
+  `{ id: scopeId, epoch }` as for every sealed offer. The device seals the
+  task output at its current epoch, which is at or above it.
+- The device, not the Host, compares `notAfter` with its clock. It declines a
+  passed `notAfter` with `sealing_policy_mismatch`. A changed routine, Agent
+  or category list fails the AEAD, and the device declines with
+  `sealed_open_failed`.
+- A template sealed before the scope's `scope-policy` raised its categories
+  names fewer categories than the policy. The device refuses it until the
+  member renews it.
+- The Host comparison projection keeps `routineRef` and the template's
+  `contentMac`. So another `routineRef` or another template under the same
+  task id fails with `coordination_input_invalid`.
+- Release rule: the first release whose daemon advertises
+  `sealed-payload-v1` must include `routineRef` and the daemon template check
+  (#654 E3d-3). A daemon without the check would open a template under the
+  task binding and decline every routine occurrence.
+
 **Sealed member.** `sealed` has the outer fields of a sealed content: `v` (1),
 `suite` (`byok-sealed-v1.hkdf-sha256.aes-256-gcm`), `category`, `scope`
 (`id`, `epoch`, `keyId`), `chainHead`, `sender`, `salt`, `nonce`,
@@ -1133,6 +1166,35 @@ the schema never strips a sealing policy or sealed content.
   base64url of `paddedLength + 16` bytes.
 - `paddedLength` above 256 KiB: `ciphertextRef`, a `BlobRef` without `url`
   whose `size` is `paddedLength + 16`.
+
+**Host check of a `ciphertextRef`.** A sealed hosted entry accepts a
+`ciphertextRef` only when the object with its `contentHash` is `committed` in
+the same tenant, with the declared `size` and `contentType`. Otherwise it
+fails with `coordination_input_invalid` before any task, receipt or mailbox
+write. The receiver checks that the SHA-256 of the bytes it fetches by
+`blobId` equals `contentHash`, before it opens them. The task then holds an
+object reference to the object (kind `sealed-task`, id the task id), so
+orphan GC keeps the ciphertext while the task lives. `redactTasks` releases
+the reference. It deletes the object when a stored row of the task still
+names it. Retention can prune the mailbox row of a delivered steer. Then no
+row names its object, and orphan GC deletes the object later. Tenant erasure
+also releases the reference.
+
+**Host comparison of a sealed retry.** The Host compares two sealed
+submissions of one identity by their comparison projection: the plaintext
+fields, plus `v`, `suite`, `category`, `scope`, `paddedLength` and
+`contentMac` of `sealed`. The salt, the nonce, the ciphertext, the
+`ciphertextRef`, `chainHead` and `sender` do not count. An equal projection
+is a duplicate, and the first ciphertext stays. A different projection fails
+with `coordination_input_invalid`. For an offer, the identity is the task id.
+For `task.steer_sealed`, it is the task id and the `steerId`: one `steerId`
+names one steer row in the mailbox. A sender still seals once and retries
+with the same bytes. The projection keeps a retry safe when it did not.
+The Host check holds while the mailbox keeps the row. Mailbox retention
+deletes an acknowledged row, also while its task runs. A later retry under
+the same `steerId` then appends a new row, and the Host does not see a
+conflict. So the device keeps the `steerId`s it has opened for each active
+task, and drops a steer whose `steerId` it has seen (decision 12a).
 
 `paddedLength` is the one legal padded length of the content: the next
 multiple of 256 bytes up to 16 KiB, Padmé above. The plaintext limit is 2 MiB

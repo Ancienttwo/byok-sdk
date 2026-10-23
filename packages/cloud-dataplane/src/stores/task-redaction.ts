@@ -81,6 +81,9 @@ export class PostgresTaskRedactionStore implements TaskRedactionStore {
     if (task === undefined) return { taskId, outcome: 'not_found' };
     const refusal = await refusalFor(this.#pool, tenant, taskId, task, false);
     if (refusal !== undefined) return refusal;
+    // The task is terminal with no pending delivery, so it no longer needs the
+    // objects it holds (#654). Release them before the deletes below.
+    await this.#releaseReferences(tenant, input.releaseObjectReferences);
 
     const bodies = [
       ...(await readReceipts(this.#pool, tenant, input.receiptKeys, false)).map((row) => row.body),
@@ -193,6 +196,31 @@ export class PostgresTaskRedactionStore implements TaskRedactionStore {
       throw cause;
     } finally {
       client.release();
+    }
+  }
+
+  async #releaseReferences(tenant: TenantId, releases: TaskRedactionStoreInput['releaseObjectReferences']): Promise<void> {
+    for (const { refKind, refId } of releases) {
+      const held = await this.#pool.query<{ hash: string }>(
+        'SELECT hash FROM object_reference WHERE tenant_id = $1 AND ref_kind = $2 AND ref_id = $3',
+        [tenant, refKind, refId],
+      );
+      for (const { hash } of held.rows) {
+        // Manifest row first, then the reference: the lock order of `addReference`.
+        await inTransaction(this.#pool, async (client) => {
+          await client.query('SELECT 1 FROM object_manifest WHERE tenant_id = $1 AND hash = $2 FOR UPDATE', [tenant, hash]);
+          await client.query(
+            'DELETE FROM object_reference WHERE tenant_id = $1 AND hash = $2 AND ref_kind = $3 AND ref_id = $4',
+            [tenant, hash, refKind, refId],
+          );
+          await client.query(
+            `UPDATE object_manifest SET ref_count = (SELECT count(*) FROM object_reference r WHERE r.tenant_id = $1 AND r.hash = $2),
+                    updated_at = $3
+              WHERE tenant_id = $1 AND hash = $2`,
+            [tenant, hash, this.#clock.now().toISOString()],
+          );
+        });
+      }
     }
   }
 
