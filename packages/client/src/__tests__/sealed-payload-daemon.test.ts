@@ -378,6 +378,8 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
       adapter.sessions[0]!.emit({ type: 'turn_end' });
       const failed = await server.waitFor((envelope) => envelope.type === 'task.fail_sealed' && envelope.task_id === 'huge', 15_000);
       expect(await openOutput(keyring, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
+      // The local observer sees the failure that was sent, not the completion it replaced.
+      await vi.waitFor(() => expect(daemon!.tasks().find((task) => task.taskId === 'huge')).toMatchObject({ state: 'Failed', summary: 'terminal_result_unsealable' }), BUDGET_MS);
     } finally {
       diagnostic.mockRestore();
     }

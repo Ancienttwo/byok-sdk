@@ -247,18 +247,22 @@ export class SealedTasks {
     const taskId = envelope.task_id!;
     const payload = envelope.payload as JsonObject;
     let sealed: Envelope | undefined;
+    let plain = envelope;
     try {
       sealed = await this.#seal(taskId, task, envelope.type, payload);
     } catch (error) {
       if (error instanceof SealedUploadError || !TERMINAL_TYPES.has(envelope.type)) throw error;
       // A terminal that cannot be sealed as it is (over the plaintext limit,
       // or not a valid sealed message) would hold the task's terminal commit
-      // forever. Settle it with a small sealed failure instead.
+      // forever. Settle it with a small sealed failure instead, and show the
+      // local observer that failure, not the terminal it replaced.
       console.error(`[byok/client] ${envelope.type} for sealed task ${taskId} replaced by a sealed failure: ${error instanceof Error ? error.message : String(error)}`);
-      sealed = await this.#seal(taskId, task, 'task.fail', { reason: 'terminal_result_unsealable', retryable: false, ...pick(payload, UNSEALABLE_FAIL_FIELDS) });
+      const failure = { reason: 'terminal_result_unsealable', retryable: false, ...pick(payload, UNSEALABLE_FAIL_FIELDS) };
+      sealed = await this.#seal(taskId, task, 'task.fail', failure);
+      plain = createEnvelope('task.fail', failure as never, { taskId });
     }
     if (sealed === undefined) return this.#unsealable(envelope);
-    this.#plainBySealedId.set(sealed.id, envelope);
+    this.#plainBySealedId.set(sealed.id, plain);
     return sealed;
   }
 
