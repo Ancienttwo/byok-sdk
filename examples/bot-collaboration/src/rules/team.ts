@@ -1,3 +1,4 @@
+import { AgentHomeProjectionAgentRefSchema, AgentHomeProjectionValueSchema } from '@byok-sdk/protocol';
 import type { Room } from './rooms';
 /** Team role checks as pure rules (#739 D1). They read only the Bot rows that the caller gives. */
 export function activeBot<B extends { readonly archived: boolean }>(team: { readonly bots: Readonly<Record<string, B>> }, id: string): B {
@@ -25,6 +26,10 @@ export function refuseExternalTeam(team: { readonly external?: ExternalTeam }, a
   if (team.external) throw new TeamModeError('external_team', `external_team: ${action} is owned by the team authority`);
 }
 const text = (value: unknown): value is string => typeof value === 'string';
+/** The persona projection value of a Bot profile. `update_bot` and a team snapshot write the same value. */
+export function profileProjection(bot: { readonly name: string; readonly role: string; readonly persona: string; readonly model: string }) {
+  return { schemaVersion: 'bot-profile.v1', name: bot.name, role: bot.role, persona: bot.persona, model: bot.model };
+}
 /** A validated copy, with the Bots sorted by id: the Bot order is not content. */
 export function teamSnapshot(value: unknown): TeamSnapshot {
   const row = value as Partial<TeamSnapshot> | null;
@@ -34,9 +39,15 @@ export function teamSnapshot(value: unknown): TeamSnapshot {
   const bots = row.bots.map(bot => {
     if (!bot || typeof bot !== 'object' || !text(bot.id) || !bot.id || !text(bot.name) || !text(bot.role) || !text(bot.persona)
       || !text(bot.model) || typeof bot.mainBot !== 'boolean') throw new Error('Invalid team snapshot Bot');
-    // Bot rows are plain object keys, so an id such as `__proto__` or `constructor` is refused.
-    if (bot.id in Object.prototype) throw new Error('Invalid team snapshot Bot id');
-    return { id: bot.id, name: bot.name, role: bot.role, persona: bot.persona, model: bot.model, mainBot: bot.mainBot };
+    // The id becomes the projection agentRef and a home directory name. Bot rows are plain object keys, so an id
+    // such as `__proto__` or `constructor` is refused too.
+    if (bot.id in Object.prototype || !AgentHomeProjectionAgentRefSchema.safeParse({ agentId: bot.id, profileRevision: '1' }).success) {
+      throw new Error('Invalid team snapshot Bot id');
+    }
+    const row = { id: bot.id, name: bot.name, role: bot.role, persona: bot.persona, model: bot.model, mainBot: bot.mainBot };
+    // A projection that the server refuses would leave the Bot never ready, so the snapshot is refused first.
+    if (!AgentHomeProjectionValueSchema.safeParse(profileProjection(row)).success) throw new Error('Team snapshot Bot projection is too large');
+    return row;
   }).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   if (new Set(bots.map(bot => bot.id)).size !== bots.length) throw new Error('Duplicate team snapshot Bot');
   if (bots.length > TEAM_BOT_LIMIT) throw new Error(`Team Bot limit is ${TEAM_BOT_LIMIT}`);

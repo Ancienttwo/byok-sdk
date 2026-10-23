@@ -31,6 +31,7 @@ import {
   importP256PublicKey,
 } from './hpke';
 import { isCanonicalTimestamp } from './time';
+import { safeParseTotal } from './total-parse';
 import { webCryptoSubtle, type WebCryptoKey } from './webcrypto';
 
 export type { WebCryptoKey } from './webcrypto';
@@ -168,7 +169,7 @@ export type SealingPublicJwk = z.infer<typeof SealingPublicJwkSchema>;
 export const SealingKeyIdSchema = z.string().regex(new RegExp(`^[A-Za-z0-9_-]{${SEALING_KEY_ID_LENGTH}}$`));
 
 function parseSealingPublicJwk(input: unknown): SealingPublicJwk {
-  const result = SealingPublicJwkSchema.safeParse(input);
+  const result = safeParseTotal(SealingPublicJwkSchema, input);
   if (!result.success) {
     throw new ByokCoreError('sealed_secret_invalid', 'Sealing public key must be a strict P-256 EC public JWK');
   }
@@ -206,7 +207,7 @@ export type SealingKeyClaimV1 = z.infer<typeof SealingKeyClaimV1Schema>;
 
 /** Canonical UTF-8 bytes of a sealing-key claim. */
 export function sealingKeyClaimCanonicalBytes(claim: SealingKeyClaimV1): Uint8Array {
-  const result = SealingKeyClaimV1Schema.safeParse(claim);
+  const result = safeParseTotal(SealingKeyClaimV1Schema, claim);
   if (!result.success) {
     throw new ByokCoreError('sealed_secret_invalid', 'Sealing key claim is invalid');
   }
@@ -348,11 +349,11 @@ export type ProviderProvisioningRequestV1 = z.infer<typeof ProviderProvisioningR
 
 /** Parse a request fail-closed. Issue text names paths and rules only, never values. */
 export function parseProviderProvisioningRequest(input: unknown): ProviderProvisioningRequestV1 {
-  const result = ProviderProvisioningRequestV1Schema.safeParse(input);
+  const result = safeParseTotal(ProviderProvisioningRequestV1Schema, input);
   if (!result.success) {
     throw new ByokCoreError(
       'provider_provisioning_request_invalid',
-      `Invalid provider provisioning request: ${result.error.issues
+      `Invalid provider provisioning request: ${(result.error?.issues ?? [{ path: [], message: 'is not readable' }])
         .map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`)
         .join('; ')}`,
     );
@@ -370,7 +371,7 @@ function configJson(config: ProviderProvisioningConfigV1): JsonObject {
 
 /** `sha256:<hex>` over the canonical JSON of the non-secret config. */
 export async function providerProvisioningConfigDigest(config: ProviderProvisioningConfigV1): Promise<string> {
-  const result = ProviderProvisioningConfigV1Schema.safeParse(config);
+  const result = safeParseTotal(ProviderProvisioningConfigV1Schema, config);
   if (!result.success) {
     throw new ByokCoreError('provider_provisioning_request_invalid', 'Provider provisioning config is invalid');
   }
@@ -384,8 +385,8 @@ export async function providerProvisioningConfigDigest(config: ProviderProvision
  * config digest, or time window fails the AEAD.
  */
 export function providerSecretAadBytes(header: ProviderProvisioningHeaderV1, keyId: string): Uint8Array {
-  const parsed = ProviderProvisioningHeaderV1Schema.safeParse(header);
-  if (!parsed.success || !SealingKeyIdSchema.safeParse(keyId).success) {
+  const parsed = safeParseTotal(ProviderProvisioningHeaderV1Schema, header);
+  if (!parsed.success || !safeParseTotal(SealingKeyIdSchema, keyId).success) {
     throw new ByokCoreError('provider_provisioning_request_invalid', 'Provider provisioning AAD input is invalid');
   }
   const value = parsed.data;
@@ -499,12 +500,12 @@ export interface SealProviderProvisioningRequestInput {
 export async function sealProviderProvisioningRequest(
   input: SealProviderProvisioningRequestInput,
 ): Promise<ProviderProvisioningRequestV1> {
-  const configResult = ProviderProvisioningConfigV1Schema.safeParse(input.config);
+  const configResult = safeParseTotal(ProviderProvisioningConfigV1Schema, input.config);
   if (!configResult.success) {
     throw new ByokCoreError('provider_provisioning_request_invalid', 'Provider provisioning config is invalid');
   }
   const config = configResult.data;
-  const headerResult = ProviderProvisioningHeaderV1Schema.safeParse({
+  const headerResult = safeParseTotal(ProviderProvisioningHeaderV1Schema, {
     ...input.header,
     configDigest: await providerProvisioningConfigDigest(config),
   });

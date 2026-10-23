@@ -6,7 +6,7 @@ import type { BotProfile, Room } from './team-model';
 import { roomFields, roomVisibility } from './rules/rooms';
 
 import { NEW_BOTS, NEW_ROOMS } from './rules/schema';
-import { activeBot, archiveBot, refuseExternalTeam, requireMain, TEAM_BOT_LIMIT, type TeamSnapshotBot } from './rules/team';
+import { activeBot, archiveBot, profileProjection, refuseExternalTeam, requireMain, TEAM_BOT_LIMIT, type TeamSnapshotBot } from './rules/team';
 
 export { activeBot, NEW_BOTS, NEW_ROOMS, requireMain, roomFields };
 export const TEAM_NOTE_LIMIT = 20;
@@ -15,7 +15,7 @@ export function projectionRequestId(value: unknown): string {
   return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-4${digest.slice(13, 16)}-a${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
 }
 function projection(state: CollaborationState, bot: BotProfile): void {
-  const value = { schemaVersion: 'bot-profile.v1', name: bot.name, role: bot.role, persona: bot.persona, model: bot.model };
+  const value = profileProjection(bot);
   const requestId = projectionRequestId([bot.id, bot.revision]);
   state.team.homeOperations.push({ sequence: ++state.sequence, botId: bot.id, status: 'pending', retries: [], request: {
     deviceId: bot.execution.deviceId, payload: { requestId,
