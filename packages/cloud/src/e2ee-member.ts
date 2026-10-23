@@ -19,6 +19,7 @@ import {
   E2eeClientPairingMacSchema,
   E2eeMemberChainEntrySchema,
   E2eeMemberKeyBundleSchema,
+  E2eeMemberKeyRegisterRequestSchema,
   E2eeScopeKeyPackageSchema,
   type E2eeClientPairingMac,
   type E2eeMemberChainEntry,
@@ -358,4 +359,61 @@ export async function relayClientPairingMac(
   if (result === 'not_registered') {
     throw new ByokCloudError('e2ee_member_not_registered', `Device ${deviceId} has not registered a member key bundle.`);
   }
+}
+
+/**
+ * A device registers its own member key bundle with the device pairing MAC
+ * (§7.2 step 3). The bundle must name the proven device. The MAC is kept for
+ * one pairing window; an identical retry replaces it.
+ */
+export async function registerDeviceMemberKey(
+  ctx: E2eeMemberContext,
+  deviceId: string,
+  input: unknown,
+): Promise<{ readonly memberId: string }> {
+  const { value } = canonicalParse(E2eeMemberKeyRegisterRequestSchema, input, 'Member key registration');
+  if (value.member.deviceId !== deviceId) throw invalid('The member key bundle names another device');
+  const result = await ctx.store.registerMember(ctx.tenant, {
+    deviceId,
+    memberId: value.member.memberId,
+    bundle: canonicalizeJson(value.member as unknown as JsonValue),
+    deviceMac: value.mac,
+    macExpiresAt: new Date(ctx.now().getTime() + PAIRING_CODE_TTL_MS).toISOString(),
+  });
+  if (result === 'device_conflict' || result === 'member_conflict') {
+    throw new ByokCloudError(
+      'e2ee_member_key_conflict',
+      result === 'device_conflict'
+        ? `Device ${deviceId} registered another member key bundle.`
+        : `Member ${value.member.memberId} is registered to another device.`,
+    );
+  }
+  return { memberId: value.member.memberId };
+}
+
+/** The scope key packages addressed to the device's own registered member. */
+export async function readDeviceScopeKeyPackages(
+  ctx: E2eeMemberContext,
+  deviceId: string,
+  input: { readonly scopeId: string; readonly epoch?: number },
+): Promise<{ readonly packages: readonly E2eeScopeKeyPackage[] }> {
+  const registration = await ctx.store.readMemberRegistration(ctx.tenant, { deviceId, now: ctx.now().toISOString() });
+  if (registration === undefined) {
+    throw new ByokCloudError('e2ee_member_not_registered', `Device ${deviceId} has not registered a member key bundle.`);
+  }
+  const { scopeId, epoch } = readFields(input);
+  return readScopeKeyPackages(ctx, {
+    scopeId: scopeId as string,
+    ...(epoch === undefined ? {} : { epoch }),
+    recipient: registration.memberId,
+  });
+}
+
+/** The client pairing MAC relayed to the device, while its pairing window is open. */
+export async function readDeviceClientPairingMac(
+  ctx: E2eeMemberContext,
+  deviceId: string,
+): Promise<E2eeClientPairingMac | undefined> {
+  const body = await ctx.store.readClientPairingMac(ctx.tenant, { deviceId, now: ctx.now().toISOString() });
+  return body === undefined ? undefined : storedValue(E2eeClientPairingMacSchema, body, 'client pairing MAC');
 }

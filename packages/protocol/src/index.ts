@@ -506,6 +506,10 @@ export {
   BYOK_RECORDS_PATH,
   BYOK_RECORD_ROUTE,
   byokRecordPath,
+  BYOK_E2EE_MEMBER_KEY_PATH,
+  BYOK_E2EE_CHAIN_PATH,
+  BYOK_E2EE_KEY_PACKAGES_PATH,
+  BYOK_E2EE_PAIRING_MAC_PATH,
   BYOK_SKILL_PACKS_PATH,
   BYOK_SKILL_PACK_FILE_ROUTE,
   byokSkillPackFilePath,
@@ -565,17 +569,27 @@ export { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from './i
 
 export {
   E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES,
+  E2EE_MEMBER_CHAIN_APPEND_OPERATION,
   E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES,
   E2EE_MEMBER_CHAIN_OPS,
   E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES,
+  E2EE_MEMBER_KEY_REGISTER_OPERATION,
   E2EE_SCOPE_KEY_PACKAGE_PUT_MAX,
+  E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION,
   E2eeClientPairingMacSchema,
   E2eeMemberChainEntrySchema,
   E2eeMemberKeyBundleSchema,
+  E2eeMemberKeyRegisterRequestSchema,
   E2eePairingMacSchema,
   E2eeScopeKeyPackageSchema,
 } from './e2ee-member';
-export type { E2eeClientPairingMac, E2eeMemberChainEntry, E2eeMemberKeyBundle, E2eeScopeKeyPackage } from './e2ee-member';
+export type {
+  E2eeClientPairingMac,
+  E2eeMemberChainEntry,
+  E2eeMemberKeyBundle,
+  E2eeMemberKeyRegisterRequest,
+  E2eeScopeKeyPackage,
+} from './e2ee-member';
 
 export * from './bot-turn-outcome';
 export { resultOutcomeMaxBytes } from './result-schema';

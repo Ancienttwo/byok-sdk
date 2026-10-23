@@ -519,6 +519,15 @@ export function byokRecordPath(kind: string, key: string): string {
   return `/byok/records/${encodeURIComponent(kind)}/${encodeURIComponent(key)}`;
 }
 
+/** `POST /byok/e2ee/member-key` — device proof: register the device's member key bundle and pairing MAC (#654). */
+export const BYOK_E2EE_MEMBER_KEY_PATH = '/byok/e2ee/member-key';
+/** `POST /byok/e2ee/chain` (device proof: append) and `GET` (device: read) — the member chain. */
+export const BYOK_E2EE_CHAIN_PATH = '/byok/e2ee/chain';
+/** `POST /byok/e2ee/key-packages` (device proof: put) and `GET` (device: this device's packages). */
+export const BYOK_E2EE_KEY_PACKAGES_PATH = '/byok/e2ee/key-packages';
+/** `GET /byok/e2ee/pairing-mac` — device: the client pairing MAC relayed to this device. */
+export const BYOK_E2EE_PAIRING_MAC_PATH = '/byok/e2ee/pairing-mac';
+
 /** `GET /byok/skill-packs` — skill-pack manifest catalogue. */
 export const BYOK_SKILL_PACKS_PATH = '/byok/skill-packs';
 /** Router template for a skill-pack file — `GET /byok/skill-packs/:name/files/:path`. */
