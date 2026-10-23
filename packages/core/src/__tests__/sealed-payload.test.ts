@@ -164,6 +164,13 @@ describe('sealContent', () => {
     const throwingGetter = { get value(): string { throw new TypeError('getter'); } };
     await expectInvalid(sealContent(sealInput({ plaintext: throwingGetter as never })));
     await expectInvalid(sealContent(sealInput({ plaintext: { nested: throwingGetter } as never })));
+    const trap = () => { throw new TypeError('trap'); };
+    for (const handler of [{ getPrototypeOf: trap }, { ownKeys: trap }, { getOwnPropertyDescriptor: trap }]) {
+      await expectInvalid(sealContent(sealInput({ plaintext: new Proxy({ input: 'hello' }, handler) as never })));
+    }
+    const revoked = Proxy.revocable({ input: 'hello' }, {});
+    revoked.revoke();
+    await expectInvalid(sealContent(sealInput({ plaintext: revoked.proxy as never })));
     await expectInvalid(sealContent(sealInput({ maxContentLength: 4 })));
     await expectInvalid(sealContent(sealInput({ maxContentLength: -1 })));
     await expectInvalid(sealContent(sealInput({ scopeKey: new Uint8Array(16) })));

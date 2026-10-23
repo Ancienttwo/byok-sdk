@@ -282,13 +282,13 @@ function isNonEmptyPlainObject(value: unknown): boolean {
 
 /** The plaintext text, with the RFC 8785 number rule (#786). The AAD and the MAC identity keep `canonicalizeJson`. */
 function canonicalPlaintext(plaintext: JsonObject): string {
-  if (!isNonEmptyPlainObject(plaintext)) throw invalidInput('Sealed plaintext must be a non-empty plain JSON object');
   try {
-    return canonicalizeSealedJson(plaintext);
+    if (isNonEmptyPlainObject(plaintext)) return canonicalizeSealedJson(plaintext);
   } catch (cause) {
-    // A throwing getter or proxy trap reaches here too; the caller sees one typed error.
+    // A throwing getter or proxy trap reaches here too, from either check; the caller sees one typed error.
     throw new ByokCoreError('sealed_secret_invalid', 'Sealed plaintext is not canonical JSON', { cause });
   }
+  throw invalidInput('Sealed plaintext must be a non-empty plain JSON object');
 }
 
 /** Decoded content, only when it is the canonical JSON text of a non-empty plain object. */
