@@ -30,11 +30,13 @@ if (process.platform === 'win32') {
   const scratch = mkdtempSync(path.join(tmpdir(), 'byok-packed-helper-pe-'));
   const copy = path.join(scratch, 'agent-memory-fs.exe');
   // A real signer, not a model of one: Authenticode signing twice must keep
-  // the content digest, and changed code must not.
+  // the content digest, and changed code must not. Windows PowerShell gets no
+  // inherited PSModulePath: a pwsh 7 parent's module path hides its Cert: drive.
+  const signerEnv = Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toUpperCase() !== 'PSMODULEPATH'));
   const sign = () => execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
     "$ErrorActionPreference = 'Stop'; $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=byok packed helper test' -CertStoreLocation Cert:\\CurrentUser\\My; "
     + "try { $result = Set-AuthenticodeSignature -FilePath $env:BYOK_SIGN_TARGET -Certificate $cert -HashAlgorithm SHA256; if ($null -eq $result.SignerCertificate) { throw 'no signature written' } } "
-    + "finally { Remove-Item -LiteralPath (Join-Path 'Cert:\\CurrentUser\\My' $cert.Thumbprint) }"], { env: { ...process.env, BYOK_SIGN_TARGET: copy }, stdio: 'inherit' });
+    + "finally { Remove-Item -LiteralPath (Join-Path 'Cert:\\CurrentUser\\My' $cert.Thumbprint) }"], { env: { ...signerEnv, BYOK_SIGN_TARGET: copy }, stdio: 'inherit' });
   try {
     writeFileSync(copy, original);
     assert.equal(execFileSync(copy, ['--version'], { encoding: 'utf8' }), `${manifest.helperVersion}\n`);
