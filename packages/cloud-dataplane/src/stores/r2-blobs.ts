@@ -398,11 +398,6 @@ export class R2CloudBlobStore implements CloudBlobStore {
    * This is a pure committed-manifest gate. Observation and commit belong to
    * the explicit finalize route; a download must never decide accounting.
    */
-  /** An R2 blob id is its content hash. Cloud reads the committed state from the tenant's object manifest. */
-  async uploadedContentHash(_tenant: TenantId, blobId: string): Promise<string | undefined> {
-    return isContentHash(blobId) ? blobId : undefined;
-  }
-
   async getDownloadUrl(tenant: TenantId, blobId: string): Promise<string | undefined> {
     // Not an error: a caller holding a junk id learns the same nothing a caller
     // holding another tenant's id learns. It is also the point past which a

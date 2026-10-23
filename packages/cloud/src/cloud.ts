@@ -1387,17 +1387,18 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
   /**
    * A sealed member above the inline limit names its ciphertext blob (#654).
-   * The blob must be a committed object of this tenant with the declared
-   * hash, size and content type. This check writes nothing, so a lane runs it
-   * before any task, receipt or mailbox write.
+   * The object with the declared hash must be committed in this tenant, with
+   * the declared size (the schema fixes it at `paddedLength + 16`) and
+   * content type. The receiver checks the SHA-256 of the bytes it fetches.
+   * This check writes nothing, so a lane runs it before any task, receipt or
+   * mailbox write.
    */
   async function assertSealedCiphertext(tenant: TenantId, payload: object): Promise<void> {
     const ref = sealedCiphertextRef(payload);
     if (ref === undefined) return;
-    const hash = await options.cloud.blobs.uploadedContentHash(tenant, ref.blobId);
-    const object = hash === ref.contentHash ? await options.core.objects.get(tenant, ref.contentHash as ContentHash) : undefined;
+    const object = await options.core.objects.get(tenant, ref.contentHash as ContentHash);
     if (object?.state !== 'committed' || object.byteSize !== BigInt(ref.size) || object.contentType !== ref.contentType) {
-      throw new ByokCloudError('coordination_input_invalid', 'A sealed ciphertextRef must name a committed blob of this tenant with its hash, size and content type.');
+      throw new ByokCloudError('coordination_input_invalid', 'A sealed ciphertextRef must name a committed object of this tenant with its size and content type.');
     }
   }
 

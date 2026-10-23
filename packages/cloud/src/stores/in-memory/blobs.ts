@@ -170,11 +170,6 @@ export class InMemoryCloudBlobStore implements CloudBlobStore {
     };
   }
 
-  async uploadedContentHash(tenant: TenantId, blobId: string): Promise<string | undefined> {
-    const record = this.#registry.blobs.get(blobId);
-    return record === undefined || record.tenantId !== tenant ? undefined : record.contentHash;
-  }
-
   async getDownloadUrl(tenant: TenantId, blobId: string): Promise<string | undefined> {
     const record = this.#registry.blobs.get(blobId);
     // Another tenant's blob and a blob that does not exist answer identically.

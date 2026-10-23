@@ -1309,13 +1309,6 @@ export class SqliteCloudBlobStore implements CloudBlobStore {
     });
   }
 
-  uploadedContentHash(tenant: TenantId, blobId: string): Promise<string | undefined> {
-    return this.registry.coordinator.run((db) => {
-      const row = db.prepare('SELECT * FROM blob WHERE blob_id = ?').get(blobId) as BlobRow | undefined;
-      return row === undefined || row.tenant_id !== tenant ? undefined : row.content_hash;
-    });
-  }
-
   async getDownloadUrl(tenant: TenantId, blobId: string): Promise<string | undefined> {
     const found = await this.registry.coordinator.run((db) => {
       const row = db.prepare('SELECT * FROM blob WHERE blob_id = ?').get(blobId) as BlobRow | undefined;

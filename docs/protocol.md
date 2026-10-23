@@ -1120,13 +1120,15 @@ the schema never strips a sealing policy or sealed content.
   whose `size` is `paddedLength + 16`.
 
 **Host check of a `ciphertextRef`.** A sealed hosted entry accepts a
-`ciphertextRef` only when its `blobId` names a blob of the same tenant with
-the declared `contentHash`, and that object is `committed` with the declared
-`size` and `contentType`. Otherwise it fails with `coordination_input_invalid`
-before any task, receipt or mailbox write. The task then holds an object
-reference to the blob (kind `sealed-task`, id the task id), so orphan GC keeps
-the ciphertext while the task lives. `redactTasks` releases the reference and
-deletes the object with the rest of the task content.
+`ciphertextRef` only when the object with its `contentHash` is `committed` in
+the same tenant, with the declared `size` and `contentType`. Otherwise it
+fails with `coordination_input_invalid` before any task, receipt or mailbox
+write. The receiver checks that the SHA-256 of the bytes it fetches by
+`blobId` equals `contentHash`, before it opens them. The task then holds an
+object reference to the object (kind `sealed-task`, id the task id), so
+orphan GC keeps the ciphertext while the task lives. `redactTasks` releases
+the reference and deletes the object with the rest of the task content.
+Tenant erasure also releases it.
 
 **Host comparison of a sealed retry.** The Host compares two sealed
 submissions of one identity by their comparison projection: the plaintext

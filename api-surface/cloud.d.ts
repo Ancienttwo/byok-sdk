@@ -3014,7 +3014,6 @@ export declare class InMemoryCloudBlobStore implements CloudBlobStore {
         uploadUrl: string;
     }>;
     observeUpload(tenant: TenantId, blobId: string, reservation: StorageReservation): Promise<BlobObservation | undefined>;
-    uploadedContentHash(tenant: TenantId, blobId: string): Promise<string | undefined>;
     getDownloadUrl(tenant: TenantId, blobId: string): Promise<string | undefined>;
 }
 /** The optional half: the bytes this composition has nowhere else to put. */
@@ -3936,13 +3935,6 @@ export interface CloudBlobStore {
     observeUpload(tenant: TenantId, blobId: string, reservation: StorageReservation): Promise<BlobObservation | undefined>;
     /** A presigned GET URL for a blob THIS tenant owns that has finished uploading; `undefined` otherwise — including for another tenant's blob. */
     getDownloadUrl(tenant: TenantId, blobId: string): Promise<string | undefined>;
-    /**
-     * The content hash that `blobId` names for THIS tenant; `undefined` for an
-     * unknown or foreign id, which answer alike. It binds a
-     * `ciphertextRef.blobId` to its object (#654). Cloud then requires a
-     * committed object manifest for the hash in this tenant.
-     */
-    uploadedContentHash(tenant: TenantId, blobId: string): Promise<string | undefined>;
 }
 /**
  * The byte-proxying half: an OPTIONAL composition input, not a port.

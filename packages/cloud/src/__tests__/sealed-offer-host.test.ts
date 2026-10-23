@@ -3,9 +3,10 @@
  *
  * - A retry that seals the same content again is a duplicate by its
  *   comparison projection (§9.2). The first ciphertext stays the offer.
- * - A `ciphertextRef` must name a committed blob of this tenant with the
- *   declared hash, size and content type. The task then holds an object
- *   reference to it, so orphan GC keeps it while the task lives.
+ * - The object with the declared hash of a `ciphertextRef` must be
+ *   committed in this tenant, with the declared size and content type. The
+ *   task then holds an object reference to it, so orphan GC keeps it while
+ *   the task lives.
  *
  * Every blob here goes through the device blob routes. No store is mocked.
  */
@@ -96,7 +97,7 @@ describe('a sealed offer retry keeps the first ciphertext (#654 §9.2)', () => {
 });
 
 describe('a sealed offer by ciphertextRef (#654 E3b)', () => {
-  it('accepts a committed blob with the declared hash, size and content type, and holds one reference to it', async () => {
+  it('accepts a committed object with the declared hash, size and content type, and holds one reference to it', async () => {
     const { harness, device } = await sealedDevice();
     const content = await seal(device, 'x'.repeat(BY_REFERENCE_TEXT_LENGTH));
     const ref = await uploadCiphertext(harness, device, content.ciphertext);
@@ -133,14 +134,9 @@ describe('a sealed offer by ciphertextRef (#654 E3b)', () => {
     ['a blob of another tenant', async (harness, _device, ciphertext) => ({
       ref: await uploadCiphertext(harness, await harness.pairDevice(TENANT_B), ciphertext),
     })],
-    ['a declared hash that is not the hash of the blob', async (harness, device, ciphertext) => {
+    ['a declared hash that names no object of this tenant', async (harness, device, ciphertext) => {
       const uploaded = await uploadCiphertext(harness, device, ciphertext);
       return { ref: { ...uploaded, contentHash: await sha256Hash(ciphertext.subarray(1)) }, uploaded };
-    }],
-    ['a blob id of another blob, next to the hash of this ciphertext', async (harness, device, ciphertext) => {
-      const uploaded = await uploadCiphertext(harness, device, ciphertext);
-      const other = await uploadCiphertext(harness, device, ciphertext.map((byte) => byte ^ 0xff));
-      return { ref: { ...uploaded, blobId: other.blobId }, uploaded };
     }],
     ['a declared content type that is not the type of the blob', async (harness, device, ciphertext) => {
       const uploaded = await uploadCiphertext(harness, device, ciphertext, { contentType: 'text/plain' });
