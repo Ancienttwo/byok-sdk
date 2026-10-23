@@ -42,22 +42,28 @@ export async function frozenIntent(client: PoolClient, scope: string, task: stri
 
 type IntentFact = NonNullable<ReturnType<SyncFacts['intent']>>;
 /**
- * The sync rule facts of these Turns, read in the sync transaction. H records no execution start before D2d,
- * and retires no Turn id before D2g.
+ * The sync rule facts of these Turns, read in the sync transaction. `started` is the reconciliation's attempt fact
+ * (D2d). H retires no Turn id before D2g.
  */
 export async function syncFacts(client: PoolClient, scope: string, turnIds: readonly string[]): Promise<SyncFacts> {
-  const found = await client.query<{ key: string; task_id: string; conclusion: IntentFact['conclusion'] | null; cancel_reason: IntentFact['cancelReason'] | null }>(
-    'SELECT key, task_id, conclusion, cancel_reason FROM intent WHERE scope = $1 AND key = ANY($2::text[])', [storedKey(scope), turnIds.map(storedKey)]);
+  const found = await client.query<{ key: string; task_id: string; conclusion: IntentFact['conclusion'] | null;
+    cancel_reason: IntentFact['cancelReason'] | null; started: boolean }>(
+    'SELECT key, task_id, conclusion, cancel_reason, started FROM intent WHERE scope = $1 AND key = ANY($2::text[])',
+    [storedKey(scope), turnIds.map(storedKey)]);
   const facts = new Map(found.rows.map(row => [row.key, { taskId: row.task_id, ...(row.conclusion ? { conclusion: row.conclusion } : {}),
     ...(row.cancel_reason ? { cancelReason: row.cancel_reason } : {}) } satisfies IntentFact]));
-  return { intent: turnId => facts.get(storedKey(turnId)), executionStarted: () => false, retired: () => undefined };
+  const started = new Set(found.rows.filter(row => row.started).map(row => row.key));
+  return { intent: turnId => facts.get(storedKey(turnId)), executionStarted: turnId => started.has(storedKey(turnId)), retired: () => undefined };
 }
 
 /** Writes the intent side of one sync step, as L writes it to K4. The caller holds the scope lock. */
 export async function writeSyncStep(client: PoolClient, scope: string, turn: Turn, step: SyncStep<ExecutionTemplate>): Promise<void> {
   if (step.kind === 'freeze') await freezeIntent(client, scope, step.input);
   else if (step.kind === 'cancel') {
-    await client.query(`UPDATE intent SET cancel_reason = 'cancelled' WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(turn.id)]);
+    // A row that was never tried has no SDK call, because the claim runs under this lock. It concludes now, as K4
+    // queuedExpiry concludes a cancelled queued intent. A tried row waits for the reconciliation to check its attempt.
+    await client.query(`UPDATE intent SET cancel_reason = 'cancelled', conclusion = CASE WHEN tries = 0 THEN 'cancelled' ELSE conclusion END
+      WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(turn.id)]);
   } else if (step.kind === 'routine' || turn.source === 'routine') throw new Error('H has no routine Turns before #793 D2f');
 }
 

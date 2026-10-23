@@ -47,8 +47,9 @@ function queueTurns(state: CollaborationState): void {
   state.turns.q1 = { id: 'q1', root: 'q1', botId: 'main', source: 'user', request: 'First', hop: 0, status: 'queued', authority: 'owner' };
   state.turns.q2 = { id: 'q2', root: 'q1', botId: 'main', source: 'continuation', request: 'Next', hop: 0, status: 'queued', authority: 'owner' };
 }
-const intentRow = async (scope: string, turnId: string) => (await opened!.pool.query<{ source: string; input: string; wait_until: string; cancel_reason: string | null }>(
-  `SELECT source, input::text, wait_until::text, cancel_reason FROM ${table('intent')} WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(turnId)])).rows[0];
+const intentRow = async (scope: string, turnId: string) => (await opened!.pool.query<{ source: string; input: string; wait_until: string;
+  cancel_reason: string | null; conclusion: string | null }>(
+  `SELECT source, input::text, wait_until::text, cancel_reason, conclusion FROM ${table('intent')} WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(turnId)])).rows[0];
 
 describe.skipIf(POSTGRES_URL === undefined)('H sync step on real Postgres (#793 D2b-2)', () => {
   beforeAll(async () => { opened = await openStore(); });
@@ -87,7 +88,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H sync step on real Postgres (#793 
     }
   });
 
-  it('cancels the open intent of an archived Bot, and a second sync changes nothing', async () => {
+  it('cancels and concludes the never-tried intent of an archived Bot, the next sync reports its Turn, and a third changes nothing', async () => {
     const h = await hosted();
     await h.change(queueTurns);
     await h.sync();
@@ -96,8 +97,15 @@ describe.skipIf(POSTGRES_URL === undefined)('H sync step on real Postgres (#793 
     await h.sync();
     // The cancel changes only intent rows, so this also shows that the stored bytes cover them.
     expect(await h.stored()).not.toBe(archived);
-    expect((await intentRow(h.scope, 'q1'))!.cancel_reason).toBe('cancelled');
-    expect((await intentRow(h.scope, 'q2'))!.cancel_reason).toBe('cancelled');
+    // No submit tried these rows, so no SDK attempt can exist: the cancel write concludes them, as K4 queuedExpiry does.
+    expect(await intentRow(h.scope, 'q1')).toMatchObject({ cancel_reason: 'cancelled', conclusion: 'cancelled' });
+    expect(await intentRow(h.scope, 'q2')).toMatchObject({ cancel_reason: 'cancelled', conclusion: 'cancelled' });
+    await h.sync();
+    const state = await h.state();
+    for (const turnId of ['q1', 'q2']) {
+      expect(state.turns[turnId], turnId).toMatchObject({ status: 'failed', conclusion: 'cancelled', reported: true });
+      expect(await h.projection(`bot-turn:${turnId}`), turnId).toHaveLength(1);
+    }
     const stored = await h.stored();
     await h.sync();
     expect(await h.stored()).toBe(stored);
