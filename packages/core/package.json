@@ -25,6 +25,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./sealed-payload": {
+      "types": "./dist/sealed-payload/index.d.ts",
+      "import": "./dist/sealed-payload/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

@@ -1,0 +1,5 @@
+{
+  "name": "byok-sealed-payload-vectors",
+  "main": "index.ts",
+  "compatibility_date": "2026-08-01"
+}

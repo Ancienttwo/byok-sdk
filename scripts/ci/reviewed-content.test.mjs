@@ -141,6 +141,35 @@ test('result-helper close regression selects only its exact basic workspace path
   assert.throws(() => selectImpact(['examples/basic/goal-btw-close-other.test.ts']));
 });
 
+test('core sealed-payload subpath admits the exact addition only', t => {
+  const cwd = mkdtempSync(join(tmpdir(), 'ci-core-sealed-payload-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  mkdirSync(join(cwd, 'packages/core'), { recursive: true });
+  const file = join(cwd, 'packages/core/package.json');
+  const baseline = { name: '@byok-sdk/core', version: '0.28.3', exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js' }, './package.json': './package.json' } };
+  writeFileSync(file, JSON.stringify(baseline));
+  const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  git('init'); git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'baseline');
+  const context = { cwd, base: git('rev-parse', 'HEAD').trim() };
+  const candidate = structuredClone(baseline);
+  candidate.exports['./sealed-payload'] = { types: './dist/sealed-payload/index.d.ts', import: './dist/sealed-payload/index.js' };
+  const write = value => writeFileSync(file, JSON.stringify(value));
+  write(candidate);
+  assert.ok(selectImpact(['packages/core/package.json'], context).families.includes('npm-release-pack'));
+  for (const mutate of [
+    m => { m.exports['./sealed-payload'].import = './dist/other.js'; },
+    m => { m.exports['.'].import = './dist/replaced.js'; },
+    m => { m.exports['./other'] = './dist/other.js'; },
+    m => { m.dependencies = { zod: '4.0.0' }; },
+  ]) {
+    const invalid = structuredClone(candidate); mutate(invalid); write(invalid);
+    assert.throws(() => selectImpact(['packages/core/package.json'], context), /more than/);
+  }
+  const entry = selectImpact(['packages/core/tsup.config.ts']);
+  assert.ok(entry.dirs.includes('packages/core'));
+  assert.ok(entry.families.includes('npm-release-pack'));
+});
+
 test('keys pi-catalog subpath and its generator admit exact additions only', t => {
   const cwd = mkdtempSync(join(tmpdir(), 'ci-keys-pi-catalog-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
