@@ -349,4 +349,26 @@ describe('sealed payload v1: each sealed type has its own hosted entry (#654)', 
       expect(page.messages).toEqual([]);
     },
   );
+
+  // E3a: the Host does not yet check or retain a ciphertextRef blob, so a sealed lane refuses it.
+  // Each lane line with sealed input, with the ciphertextRef member of the large corpus line of its type.
+  const byReference = Object.keys(lanes).map((type) => {
+    const line = laneLines.find((candidate) => candidate.type === type && candidate.payload.sealed !== undefined)!;
+    const large = corpus.find((candidate) => candidate.type === type && (candidate.payload.sealed as Json | undefined)?.ciphertextRef !== undefined)!;
+    return { ...line, payload: { ...line.payload, sealed: large.payload.sealed } };
+  });
+
+  it.each(byReference.map((line, index) => [index, line.type, line] as const))(
+    'line %i (%s) by ciphertextRef is refused on a device with every flag, before any task or mailbox state',
+    async (_index, type, line) => {
+      const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+      const device = await harness.pairDevice(TENANT_A);
+      await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: requiredReceiverCapabilities(type, line.payload) });
+
+      await expect(lanes[type]!.sealed(harness, device.deviceId, line.payload as never)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+      expect(await harness.cloud.readTaskAttempt(TENANT_A, 'sealed-lane')).toBeUndefined();
+      const page = await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0, limit: 10 });
+      expect(page.messages).toEqual([]);
+    },
+  );
 });

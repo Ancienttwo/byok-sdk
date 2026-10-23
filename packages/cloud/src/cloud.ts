@@ -496,6 +496,20 @@ function refuseSealedFields(payload: unknown, fields: readonly string[], sealedE
   }
 }
 
+/**
+ * #654 E3a: a sealed lane refuses a `ciphertextRef` after its gates and before
+ * any task, receipt or mailbox write.
+ * The Host does not yet check that the blob is committed with the declared
+ * hash and size, or hold an object reference to it (E3b), so a durable offer
+ * could point at a missing or collectable blob.
+ */
+function refuseCiphertextRef(payload: unknown): void {
+  // Object() maps null and undefined to an empty object.
+  if (Object(Object(payload).sealed).ciphertextRef !== undefined) {
+    throw new ByokCloudError('coordination_input_invalid', 'a sealed ciphertextRef is not accepted yet');
+  }
+}
+
 /** Resume-only Agent lanes refuse a payload without an exact `sessionRef`. */
 function assertResumeSessionRef(payload: { readonly sessionRef?: unknown }): void {
   const sessionRef: unknown = payload.sessionRef;
@@ -1730,6 +1744,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     if (type === 'task.offer_sealed' || type === 'task.offer_with_toolsets_sealed') await assertLegacyAdmission(tenant, deviceId);
     if (type === 'task.offer_for_agent_sealed') assertResumeSessionRef(input.payload);
     await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities(type, input.payload));
+    refuseCiphertextRef(input.payload);
     const payload = MESSAGE_PAYLOAD_SCHEMAS[type].parse(input.payload);
     const agentRef = 'agentRef' in payload ? payload.agentRef : undefined;
     return enqueueTaskEnvelope(
@@ -1753,6 +1768,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     const sealed = MESSAGE_PAYLOAD_SCHEMAS['task.steer_sealed'].parse(payload);
     const ownerDeviceId = await runningSteerTarget(tenant, taskId);
     await assertAgentCapabilities(tenant, ownerDeviceId, requiredReceiverCapabilities('task.steer_sealed', sealed));
+    refuseCiphertextRef(sealed);
     const messageId = options.crypto.randomUuid();
     return enqueueAgentControlEnvelope(tenant, ownerDeviceId, messageId, (seq) =>
       createEnvelope('task.steer_sealed', sealed, { id: messageId, taskId, seq }),
@@ -2159,6 +2175,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       );
     }
     await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities(type, payload));
+    refuseCiphertextRef(payload);
     const enqueued = await enqueueTaskEnvelope(
       tenant,
       deviceId,

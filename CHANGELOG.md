@@ -36,7 +36,9 @@
 - **Changed (client, cloud)** — until the sealed receivers exist, the daemon
   declines a sealed offer non-retryably (`sealed_payload_unsupported`) and
   drops a sealed steer (#654 E3a). Cloud inbound refuses a sealed daemon
-  message with `sealed_payload_unsupported`.
+  message with `sealed_payload_unsupported`. The sealed hosted entries refuse
+  a `ciphertextRef` with `coordination_input_invalid`, because the Host does
+  not yet check and retain the referenced blob. Inline ciphertext works.
 
 ## 0.29.0 — 2026-10-23 (published)
 

@@ -208,6 +208,19 @@ describe('steerTask (GAP-2)', () => {
     expect(page.events[0]).toMatchObject({ type: 'task.steer_sealed', task_id: task.taskId, payload: sealedSteer });
   });
 
+  it('steerSealedTask refuses a sealed steer by ciphertextRef until the Host retains the blob, and writes no mailbox row (#654)', async () => {
+    const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url), 'utf8');
+    const byReference = corpus.trimEnd().split('\n').map((raw) => JSON.parse(raw) as { type: string; payload: TaskSteerSealedPayload })
+      .find((line) => line.type === 'task.steer_sealed' && 'ciphertextRef' in line.payload.sealed)!.payload;
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const task = await running(harness, device, { runtime: 'pi', capabilities: { steer: true } });
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: ['sealed-payload-v1'] });
+
+    await expect(harness.cloud.steerSealedTask(TENANT_A, task.taskId, byReference)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+    expect((await poll(harness, device, task.seq)).events).toEqual([]);
+  });
+
   it('refuses a claim that reported steer: false, and allocates no mailbox row', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
