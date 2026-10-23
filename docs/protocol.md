@@ -1152,6 +1152,10 @@ family `routine.template`, for every occurrence of one routine version (design
 - The Host comparison projection keeps `routineRef` and the template's
   `contentMac`. So another `routineRef` or another template under the same
   task id fails with `coordination_input_invalid`.
+- Release rule: the first release whose daemon advertises
+  `sealed-payload-v1` must include `routineRef` and the daemon template check
+  (#654 E3d-3). A daemon without the check would open a template under the
+  task binding and decline every routine occurrence.
 
 **Sealed member.** `sealed` has the outer fields of a sealed content: `v` (1),
 `suite` (`byok-sealed-v1.hkdf-sha256.aes-256-gcm`), `category`, `scope`

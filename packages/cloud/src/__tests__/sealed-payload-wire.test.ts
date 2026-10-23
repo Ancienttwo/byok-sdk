@@ -24,6 +24,7 @@ import {
   type SealedBinding,
 } from '@byok-sdk/core/sealed-payload';
 import {
+  MESSAGE_PAYLOAD_SCHEMAS,
   SEALED_PAYLOAD_CATEGORIES,
   SEALED_PAYLOAD_SUITE,
   SEALED_PAYLOAD_VERSION,
@@ -77,7 +78,7 @@ function bindingOf(line: (typeof corpus)[number]): SealedBinding {
   if (offer === undefined) throw new Error(`no sealed offer for ${line.task_id}`);
   const agentRef = offer.payload.agentRef as SealedBinding['agentRef'] | undefined;
   const routineRef = line.payload.routineRef as RoutineRef | undefined;
-  if (routineRef !== undefined) return templateBinding(routineRef, agentRef!);
+  if (routineRef !== undefined) return templateBinding(line);
   return {
     tenantId: GOLDEN_TENANT,
     family: SEALED_SPLIT_TABLE[line.type].plainType,
@@ -93,11 +94,14 @@ function bindingOf(line: (typeof corpus)[number]): SealedBinding {
 type RoutineRef = { routineId: string; definitionVersion: number; notAfter: string };
 
 /**
- * The binding of a routine template (#654 E3d), rebuilt from the offer's
+ * The binding of a routine template (#654 E3d), rebuilt from the offer line's
  * plaintext `routineRef`, `agentRef` and `sealing.categories`. It names no
  * task and no device, so one template opens for every occurrence.
  */
-function templateBinding(routineRef: RoutineRef, agentRef: NonNullable<SealedBinding['agentRef']>): SealedBinding {
+function templateBinding(line: (typeof corpus)[number]): SealedBinding {
+  const routineRef = line.payload.routineRef as RoutineRef;
+  const agentRef = line.payload.agentRef as NonNullable<SealedBinding['agentRef']>;
+  const sealing = line.payload.sealing as { categories: SealedBinding['categories'] };
   return {
     tenantId: GOLDEN_TENANT,
     family: 'routine.template',
@@ -105,7 +109,7 @@ function templateBinding(routineRef: RoutineRef, agentRef: NonNullable<SealedBin
     identity: { routineId: routineRef.routineId, definitionVersion: routineRef.definitionVersion },
     deviceId: null,
     agentRef: { agentId: agentRef.agentId, profileRevision: agentRef.profileRevision },
-    categories: [...GOLDEN_CATEGORIES],
+    categories: [...sealing.categories],
     notAfter: routineRef.notAfter,
   };
 }
@@ -287,6 +291,40 @@ describe('sealed payload v1: a routine template opens under the binding its rout
       maxContentLength: 2 * 1024 * 1024,
     });
   };
+
+  // Protocol restates core's canonical instant for `notAfter`. The two rules
+  // must accept the same values, or a member and a device disagree on the AAD.
+  it.each([
+    ['2026-12-31T00:00:00.000Z', true],
+    ['2028-02-29T23:59:59.999Z', true],
+    ['0000-01-01T00:00:00.000Z', true],
+    ['2026-12-31T00:00:00Z', false],
+    ['2026-12-31T00:00:00.0000Z', false],
+    ['2026-12-31T00:00:00.000+00:00', false],
+    ['2026-12-31t00:00:00.000z', false],
+    ['2026-12-31 00:00:00.000Z', false],
+    ['2027-02-29T00:00:00.000Z', false],
+    ['2026-02-30T00:00:00.000Z', false],
+    ['2026-12-31T24:00:00.000Z', false],
+    ['2026-12-31T00:60:00.000Z', false],
+    ['+012026-12-31T00:00:00.000Z', false],
+    ['', false],
+  ] as const)('notAfter %j: protocol accepts it exactly when core seals with it (%s)', async (notAfter, accepted) => {
+    const line = routineLines[0]!;
+    const wire = MESSAGE_PAYLOAD_SCHEMAS['task.offer_for_agent_with_egress_fresh_sealed']
+      .safeParse({ ...line.payload, routineRef: { ...(line.payload.routineRef as RoutineRef), notAfter } }).success;
+    const core = await sealContent({
+      scopeKey: GOLDEN_SCOPE_KEY,
+      scope: { id: GOLDEN_SCOPE.scopeId, epoch: GOLDEN_SCOPE.epoch },
+      chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` },
+      sender: 'A'.repeat(43),
+      category: 'task-input',
+      binding: { ...bindingOf(line), notAfter },
+      plaintext: { instruction: 'Write the daily digest.' },
+      maxContentLength: 2 * 1024 * 1024,
+    }).then(() => true, () => false);
+    expect({ wire, core }).toEqual({ wire: accepted, core: accepted });
+  });
 
   it('has two occurrences of one template, and an expired template', () => {
     const [first, second, expired] = routineLines;
