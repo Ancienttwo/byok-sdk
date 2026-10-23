@@ -173,13 +173,49 @@ let the accepted occurrence finish. Pause and resume retry the calendar.
 
 ## Boundaries
 
-The collaboration state has version 1. The Host rejects unsupported or
+The collaboration state has version 2. The Host rejects unsupported or
 unversioned stored state. It does not reset or migrate that state.
 
 This example has one team and one owner per ledger. Paid Pi success-rate
 measurement belongs to [WO-10b](../../docs/submit-result-measurement.md); the method defines per-runtime/model/platform cells and does not supply live data. Application history,
 versions and audit rows have no retention policy in this small example.
 
+## Commit contract
+
+Each collaboration command goes through one commit (#739 D1,
+`src/rules/commit.ts`). A commit takes a scope, a command id, an optional
+expected revision and the command. It returns the new revision, the
+disposition and the outbox rows that it wrote. One store transaction holds
+the state change, the command record and the outbox rows.
+
+- A replay of a command id with the same evidence returns the first result
+  and changes nothing. The evidence is the hash of the fields that decide the
+  command's effect.
+- The same command id with other evidence is an `identity_conflict`. The Host
+  keeps the existing error text, for example `Input identity conflict`.
+- Without an expected revision, the commit decides on the head. An explicit
+  revision that is not the head is a `stale_revision` conflict. A replay is
+  checked first, so a retry with its original revision gets its first result.
+- Each new commit adds 1 to the revision, also for a refused disposition.
+  Host passes that only apply evidence (sync, reply checks, deliveries, device
+  refresh) do not change the revision.
+
+The commands are owner input, received IM input, room input, answers, card
+decisions, and three K4 callbacks: a terminal outcome, an Agent message and a
+Bot routine occurrence. `src/rules/commands.ts` decides them. The routine
+owner APIs are K4 commands on K4 rows and do not commit here.
+
+In this L example the scope is the ledger tenant. Owner APIs pass no expected
+revision. K4 already deduplicates terminals (`applied`) and messages (the
+message receipt), so L stores no record for the callbacks. The D1 vectors in
+`src/commit-vectors.test-support.ts` run against a pure in-memory store and
+against the L ledger; the D2 H adapter runs the same vectors.
+
+Known L limit: K4 stores the whole Host ledger, with the collaboration state,
+in one JSON row per tenant. Turns, replies, audit rows and command records
+make that row grow. Command records are dedup evidence; retention must not
+delete a record while a retry of its command can still arrive. Per-entity L
+storage and K8 retention are #798.
 
 ## Group chat and Main Bot
 
