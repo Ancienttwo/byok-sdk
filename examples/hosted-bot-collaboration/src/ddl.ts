@@ -62,4 +62,37 @@ CREATE TABLE IF NOT EXISTS outbox (
   PRIMARY KEY (scope, key),
   UNIQUE (scope, ordinal)
 );
+-- One row per Turn intent (#793 D2b). No intent row is deleted before D2g adds tombstones:
+-- a deleted row would let the same Turn freeze again under the same task id.
+CREATE TABLE IF NOT EXISTS intent (
+  scope          text    NOT NULL REFERENCES scope (scope),
+  -- JSON.stringify(turn id): one intent per Turn.
+  key            text    NOT NULL,
+  -- K4 taskId(turn id, 0). It is never updated.
+  task_id        text    NOT NULL,
+  -- The FIFO order, the K4 sequence.
+  ordinal        bigint  NOT NULL CHECK (ordinal >= 0),
+  -- K4 agentKey(scope, execution): one FIFO for each scope, device and Agent.
+  agent          text    NOT NULL,
+  -- The frozen AgentExecutionInput.
+  input          json    NOT NULL,
+  wait_until     bigint  NOT NULL CHECK (wait_until >= 0),
+  submission     text    NOT NULL CHECK (submission IN ('reserved', 'uncertain', 'delivered')),
+  -- Submit tries. A row with tries = 0 never reached the SDK. Each try raises it, and every write
+  -- after the SDK call is fenced with WHERE tries = $mine AND submission <> 'delivered'.
+  tries          integer NOT NULL DEFAULT 0 CHECK (tries >= 0),
+  -- The earliest time of the next submit try: a lease while a submitter is in flight, then a backoff.
+  next_at        bigint  NOT NULL DEFAULT 0 CHECK (next_at >= 0),
+  last_error     text,
+  cancel_reason  text    CHECK (cancel_reason IN ('expired', 'cancelled')),
+  conclusion     text    CHECK (conclusion IN ('succeeded', 'failed', 'declined', 'cancelled', 'expired', 'superseded')),
+  CONSTRAINT intent_input_task CHECK ((input ->> 'taskId') = task_id),
+  PRIMARY KEY (scope, key),
+  UNIQUE (scope, task_id),
+  UNIQUE (scope, ordinal)
+);
+-- The FIFO head and the reconciliation read only unsettled rows.
+CREATE INDEX IF NOT EXISTS intent_unsettled ON intent (scope, agent, ordinal) WHERE conclusion IS NULL;
+-- The submit scan: unsettled, not delivered and not cancelled.
+CREATE INDEX IF NOT EXISTS intent_due ON intent (next_at) WHERE conclusion IS NULL AND submission <> 'delivered' AND cancel_reason IS NULL;
 `;
