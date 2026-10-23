@@ -421,6 +421,32 @@ test('#793: the K8 manifest admits only the reviewed hosted entries, and stays p
   assert.throws(() => selectImpact([path], f), /more than/, 'a base that already has exports');
 });
 
+test('#793 D2g: the K8 manifest admits the retention entries only on top of the hosted entries', t => {
+  const f = fixture(t);
+  const dir = 'examples/bot-collaboration', path = `${dir}/package.json`;
+  const hosted = {
+    './rules/commands': './src/rules/commands.ts', './rules/commit': './src/rules/commit.ts', './model': './src/model.ts',
+    './coalesce': './src/coalesce.ts', './team': './src/team.ts', './test-support': './src/commit-vectors.test-support.ts',
+  };
+  const manifest = { name: '@byok-sdk/example-bot-collaboration', private: true, version: '0.0.1', exports: hosted };
+  f.write(path, manifest);
+  const git = (...args) => execFileSync('git', args, { cwd: f.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'K8 with the hosted entries');
+  f.base = git('rev-parse', 'HEAD').trim();
+  const retention = { './retention': './src/retention.ts', './retention-vectors': './src/retention-vectors.test-support.ts' };
+  f.write(path, { ...manifest, exports: { ...hosted, ...retention } });
+  assert.deepEqual(selectImpact([path], f).dirs.filter(name => name === dir), [dir]);
+  for (const [candidate, reason] of [
+    [{ ...manifest, exports: { ...hosted, './retention': './src/retention.ts' } }, 'one of the two entries'],
+    [{ ...manifest, exports: { ...hosted, ...retention, './host': './src/host.ts' } }, 'another entry'],
+    [{ ...manifest, exports: { ...hosted, ...retention, './retention': './src/host.ts' } }, 'an entry retargeted to another file'],
+    [{ ...manifest, exports: { ...retention } }, 'the retention entries without the hosted entries'],
+  ]) {
+    f.write(path, candidate);
+    assert.throws(() => selectImpact([path], f), /more than/, reason);
+  }
+});
+
 test('#658: the K8 cloud edge is admitted only as a workspace spec', t => {
   const f = fixture(t);
   const path = 'examples/bot-collaboration/package.json';

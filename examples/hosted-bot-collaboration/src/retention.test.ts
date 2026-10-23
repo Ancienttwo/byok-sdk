@@ -63,33 +63,55 @@ describe.skipIf(POSTGRES_URL === undefined)('H retention on real Postgres (#793 
     state.turns.r3 = { id: 'r3', root: 'r3', botId: 'main', source: 'user', request: 'r3', hop: 0, status: 'succeeded', conclusion: 'succeeded', reported: true, authority: 'owner' };
   };
 
-  it('accepts an exact replay of an accepted message after retention, and after its command record expires (838-review L4)', async () => {
+  /** An accepted reply of `t1`, then a retention that moves `t1` with its reply and the message's command record. */
+  async function acceptedAndRetained() {
     const { h, input } = await messaged('t1');
     expect(await consumer().consume(input)).toEqual({ outcome: 'accepted' });
     await h.change(settle);
     expect(await h.retain(retention(RETENTION_NOW, ['t1']), LIMITS)).toMatchObject({ archivedRoots: 1, archivedCommands: 1 });
     expect([(await h.state()).replies[input.taskId], await commands(h.scope)]).toEqual([undefined, []]);
-    const retained = await h.stored();
-    expect(await consumer().consume(input)).toEqual({ outcome: 'accepted' });
-    expect(await consumer().consume({ ...input, payload: { ...input.payload, messageId: 'two', contentHash: 'sha256:two' } }))
-      .toEqual({ outcome: 'refused', reasonCode: 'message_conflict' });
-    expect(await h.stored()).toBe(retained);
-    expect(await h.retain(retention(RETENTION_NOW + MIN_TOMBSTONE_RETENTION_MS), LIMITS)).toMatchObject({ expiredCommands: 1 });
-    const expired = await h.stored();
-    expect(await consumer().consume(input)).toEqual({ outcome: 'accepted' });
-    expect(await h.stored()).toBe(expired);
-  });
-
-  it('replays a refused message from its moved command record, though the state changed after it', async () => {
-    // The intent's Turn is not in the state, so the rule refuses the message, and the refusal has a record with no root.
+    return { h, input };
+  }
+  /** A refused message (its Turn is not in the state), a retention that moves its record, and then its Turn added. */
+  async function refusedAndRetained() {
     const { h, input } = await messaged('ghost');
     expect(await consumer().consume(input)).toEqual({ outcome: 'refused', reasonCode: 'binding_mismatch' });
     expect(await h.retain(retention(), LIMITS)).toMatchObject({ archivedCommands: 1 });
+    expect(await commands(h.scope)).toEqual([]);
     await h.change(state => {
       state.turns.ghost = { id: 'ghost', root: 'ghost', botId: 'main', source: 'user', request: 'Late', hop: 0, status: 'processing', authority: 'owner' };
     });
-    const stored = await h.stored();
+    return { h, input };
+  }
+
+  it('(i) replays the stored disposition of a message from its moved command record (838-review L4)', async () => {
+    const { h, input } = await refusedAndRetained(), stored = await h.stored();
+    // The Turn exists now, so a new decision would accept: the refusal comes from the moved record.
     expect(await consumer().consume(input)).toEqual({ outcome: 'refused', reasonCode: 'binding_mismatch' });
+    expect(await consumer().consume({ ...input, payload: { ...input.payload, contentHash: 'sha256:other' } }))
+      .toEqual({ outcome: 'refused', reasonCode: 'message_conflict' });
+    expect(await h.stored()).toBe(stored);
+  });
+
+  it('(ii) accepts an exact replay of an accepted message after its record expired, from the archived reply, with no commit', async () => {
+    const { h, input } = await acceptedAndRetained();
+    expect(await h.retain(retention(RETENTION_NOW + MIN_TOMBSTONE_RETENTION_MS), LIMITS)).toMatchObject({ expiredCommands: 1 });
+    const stored = await h.stored();
+    expect(await consumer().consume(input)).toEqual({ outcome: 'accepted' });
+    expect(await h.stored()).toBe(stored);
+  });
+
+  it('(iii) decides a refused message again after its record expired, as L does', async () => {
+    const { h, input } = await refusedAndRetained();
+    expect(await h.retain(retention(RETENTION_NOW + MIN_TOMBSTONE_RETENTION_MS), LIMITS)).toMatchObject({ expiredCommands: 1 });
+    expect(await consumer().consume(input)).toEqual({ outcome: 'accepted' });
+    expect(await commands(h.scope)).toEqual([`${input.taskId}:one`]);
+  });
+
+  it('(iv) refuses another message for a task whose accepted reply retention moved: message_conflict', async () => {
+    const { h, input } = await acceptedAndRetained(), stored = await h.stored();
+    expect(await consumer().consume({ ...input, payload: { ...input.payload, messageId: 'two', contentHash: 'sha256:two' } }))
+      .toEqual({ outcome: 'refused', reasonCode: 'message_conflict' });
     expect(await consumer().consume({ ...input, payload: { ...input.payload, contentHash: 'sha256:other' } }))
       .toEqual({ outcome: 'refused', reasonCode: 'message_conflict' });
     expect(await h.stored()).toBe(stored);
