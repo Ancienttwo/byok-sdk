@@ -7,7 +7,7 @@ import type { ByokServer, CreateByokServerOptions, DueWake } from '@byok-sdk/ser
 import { HostExecutionCore, type ExecutionServer, type OutcomeTransaction, type MessageTransaction } from '@byok-sdk/example-host-execution-core';
 import { promoteOccurrence, type HostJobHandler, type Routine } from '@byok-sdk/example-host-execution-core';
 import { HostLedger } from '@byok-sdk/example-host-execution-core';
-import { canonical, hash, project, time, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import { canonical, hash, project, time, type ApplicationRows, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
 import { enqueue } from '@byok-sdk/example-host-execution-core';
 import { addTurn, json, stateOf, type CollaborationState, type Turn } from './model';
 import { contextTurns, turnInstruction, outcomeSchema, SYSTEM_PROMPT, type ContextTurn } from './schema';
@@ -15,7 +15,8 @@ import { BOT_REPLY_MAX_BYTES, DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_B
   delegationDue, intentRows, minimumInstructionBytes, observeDevices, reconcileReply, REPLY_UNCERTAIN_AFTER_MS, resolveDelegation, retryReply,
   settleDelegations, type DelegationTimers } from './delegation';
 import { commitCommand, type Command, type CommandPorts, type KeylessCommand } from './rules/commands';
-import { CommitConflict, commitInLedger, type CommitResult } from './commit';
+import { CommitConflict, commitInLedger, retainInLedger, type CommitResult } from './commit';
+import type { RetentionInput, RetentionResult } from './retention';
 import { BOT_ROUTINE, botRoutines, concludeRoutineTurn, createDefinition, owned, routineCalendar, routineOccurrence, routineTurn,
   updateDefinition } from './routines';
 
@@ -465,7 +466,7 @@ export class BotCollaboration {
   /** K4 records routine wakes. The `bot-routine` hook writes the routine Turn in the same commit. */
   readonly consume = (wake: DueWake, signal: AbortSignal): Promise<void> => this.exclusive(async () => {
     signal.throwIfAborted();
-    this.ledger.transaction(s => { this.sync(s); });
+    this.ledger.transaction((s, rows) => { this.sync(s, rows); });
     try { await this.core.consume(wake, signal); } finally { await this.process(); }
   });
   drain(): Promise<void> { return this.exclusive(() => this.process()); }
@@ -479,11 +480,18 @@ export class BotCollaboration {
       await this.process();
     });
   }
+  /**
+   * Explicit retention (#798). Moves every row of each acknowledged settled root out of the state, and retires its ids.
+   * A root that is still in use throws `RetentionRefused`, and nothing changes. Never runs on its own.
+   */
+  retain(input: RetentionInput): Promise<RetentionResult> {
+    return this.exclusive(async () => retainInLedger(this.ledger, input, { contextTurnLimit: this.contextTurnLimit }));
+  }
   recover(): Promise<void> {
     return this.exclusive(async () => {
-      this.ledger.transaction(s => {
+      this.ledger.transaction((s, rows) => {
         for (const row of Object.values(stateOf(s.application).channel?.deliveries ?? {})) recoverDelivery(row);
-        this.sync(s);
+        this.sync(s, rows);
       });
       try { await this.core.recover(); } finally { await this.process(); }
     });
@@ -496,7 +504,7 @@ export class BotCollaboration {
     if (seat) { seat.status = 'blocked'; seat.released = true; seat.reason = reason; }
     turn.status = 'blocked'; turn.blockedReason = reason;
   }
-  private sync(s: LedgerState, injected?: InjectedHistory): boolean {
+  private sync(s: LedgerState, rows: ApplicationRows, injected?: InjectedHistory): boolean {
     const state = stateOf(s.application);
     // A batch sealed here is enqueued in this pass, before later Turns of its Bot.
     sealDueBatches(state, this.coalesce, this.now());
@@ -517,12 +525,14 @@ export class BotCollaboration {
       if (!intent && (turn.conclusion || turn.source === 'room_slot' && state.team.seats[turn.id]?.status === 'blocked')) continue;
       if (intent && bot?.archived && !s.executions[intent.taskId]?.started && !intent.conclusion) intent.cancelReason = 'cancelled';
       if (!intent) {
-        if (this.ledger.hasTombstone('intent', turn.id, this.now())) {
-          // #816: K4 compacted the intent before this sync saw its result. The identity can never run again.
-          // K8 does not know the K4 conclusion, so the Turn fails, and every reader of `turn.conclusion` can settle.
+        // #816: K4 compacted the intent before this sync saw its result. #798: retention archived this Turn id.
+        // Either identity can never run again. K8 does not know a K4 conclusion, so the Turn fails, and every reader of
+        // `turn.conclusion` can settle.
+        const retired = this.ledger.hasTombstone('intent', turn.id, this.now()) ? 'result_retired' : rows.isRetired('turn', turn.id) ? 'turn_retired' : undefined;
+        if (retired) {
           turn.status = 'failed'; turn.conclusion = 'failed';
-          state.audit.push(`Turn result retired before sync: ${turn.id}`);
-          project(s, `bot-turn:${turn.id}`, json({ owner: turn.botId, ...turn, reason: 'result_retired' }));
+          state.audit.push(`Turn ${retired === 'result_retired' ? 'result retired before sync' : 'identity retired'}: ${turn.id}`);
+          project(s, `bot-turn:${turn.id}`, json({ owner: turn.botId, ...turn, reason: retired }));
           turn.reported = true;
           continue;
         }
@@ -697,7 +707,7 @@ export class BotCollaboration {
   /** One sync transaction. In history mode, phase 1 reads the history first, outside the transaction. */
   private async syncWithHistory(): Promise<boolean> {
     const injected = await this.readHistory();
-    return this.ledger.transaction(s => this.sync(s, injected));
+    return this.ledger.transaction((s, rows) => this.sync(s, rows, injected));
   }
   private async readHistory(): Promise<InjectedHistory | undefined> {
     const read = this.options.history;

@@ -7,7 +7,7 @@ import { sealBatchForCancel, type InputFields } from './coalesce';
 import { abandonDelegation, arbitrateCancel, type IntentFacts, type Publish } from './delegation';
 import { applyTurnOutcome, type OutcomePorts, type OutcomeState } from './outcome';
 import { acceptMessage, type MessageFields } from './message';
-import { commit, type CommitRequest, type CommitResult, type CommitState, type Disposition, type OutboxIntent } from './commit';
+import { commit, type CommandRecord, type CommitRequest, type CommitResult, type CommitState, type Disposition, type OutboxIntent } from './commit';
 
 // The collaboration commands and their decisions as pure rules (#739 D1). `commitCommand` runs one command
 // through the commit contract. Owner commands and the K4 callbacks use the same function.
@@ -89,7 +89,21 @@ export interface CommandPorts {
  * `recordCallbacks` is false when the caller deduplicates the K4 callbacks durably, as K4 does in L.
  * K4 dedups terminals and occurrences, and accepted messages by their receipt. A refused message still gets a record.
  */
-export interface CommandStore { scope: string; recordCallbacks: boolean }
+/** The identities that retention retires for good (#798). Only an owner command can bring one back, so a commit checks them. */
+export type RetiredNamespace = 'turn' | 'input' | 'round';
+/** What retention moved out of the state. The store reads it by id. */
+export interface CommandArchive {
+  command(commandId: string): CommandRecord | undefined;
+  retired(namespace: RetiredNamespace, id: string): boolean;
+}
+/** A commit would admit an identity that retention retired. The store rolls the commit back. */
+export class RetiredIdentityError extends Error {
+  readonly code = 'retired_identity' as const;
+  constructor(readonly namespace: RetiredNamespace, readonly id: string) {
+    super(`Retired ${namespace} identity cannot be reused`); this.name = 'RetiredIdentityError';
+  }
+}
+export interface CommandStore { scope: string; recordCallbacks: boolean; archive?: CommandArchive }
 
 const CALLBACKS = new Set<Command['kind']>(['outcome', 'message', 'occurrence']);
 const KEYLESS = new Set<Command['kind']>(['set_main_bot', 'update_room', 'retry_persona', 'enable_push_route', 'revoke_push_route',
@@ -288,14 +302,42 @@ function cancelTurn(state: CommandState, turnId: string, ports: CommandPorts, pu
   }
   return accepted({ target, admitted: false });
 }
+/** The root of a command's effect, for its record. An input answered by an open batch belongs to the batch's root. */
+function commandRoot(state: CommandState, command: Command, disposition: Disposition, turns: string[], rounds: string[]): string | undefined {
+  if (turns.length) return state.turns[turns[0]!]!.root;
+  if (rounds.length) return state.team.rounds[rounds[0]!]!.root;
+  const turnRoot = (turnId: string | undefined) => turnId === undefined ? undefined : state.turns[turnId]?.root;
+  switch (command.kind) {
+    case 'input': case 'receive': {
+      const value = disposition.outcome === 'accepted' ? disposition.value : undefined;
+      return typeof value === 'string' ? turnRoot(value) ?? value : undefined;
+    }
+    case 'answer': return turnRoot(Object.hasOwn(state.questions, command.questionId) ? state.questions[command.questionId]!.turnId : undefined);
+    case 'decide': return turnRoot(Object.hasOwn(state.cards, command.cardId) ? state.cards[command.cardId]!.turnId : undefined);
+    default: return undefined;
+  }
+}
 /** One command through the commit contract. The caller runs it inside one store transaction. A keyless command gets no record. */
 export function commitCommand(state: CommandState, request: CommitRequest<Command>, store: CommandStore, ports: CommandPorts): CommitResult {
   const command = request.command;
-  if (isKeyless(command)) return commit(state, request, { scope: store.scope }, out => decideCommand(state, command, ports, out));
+  let root: string | undefined;
+  const decide = (out: (intent: OutboxIntent) => void): Disposition => {
+    const before = { turn: new Set(Object.keys(state.turns)), input: new Set(Object.keys(state.inputs ?? {})), round: new Set(Object.keys(state.team.rounds)) };
+    const disposition = decideCommand(state, command, ports, out);
+    const added = (namespace: RetiredNamespace, rows: Record<string, unknown>) => Object.keys(rows).filter(id => !before[namespace].has(id));
+    const turns = added('turn', state.turns), rounds = added('round', state.team.rounds);
+    // Admission (#798): a retired identity never comes back as new work. A throw rolls the commit back.
+    for (const [namespace, ids] of [['turn', turns], ['input', added('input', state.inputs ?? {})], ['round', rounds]] as const) {
+      for (const id of ids) if (store.archive?.retired(namespace, id)) throw new RetiredIdentityError(namespace, id);
+    }
+    root = commandRoot(state, command, disposition, turns, rounds);
+    return disposition;
+  };
+  const archived = store.archive && ((id: string) => store.archive!.command(id));
+  if (isKeyless(command)) return commit(state, request, { scope: store.scope }, decide);
   const deduplicated = !store.recordCallbacks && CALLBACKS.has(command.kind);
   // K4 writes a message receipt only for an acceptance, so a refused message keeps its record here.
   const record = !deduplicated || command.kind === 'message' ? { evidence: commandEvidence(command), conflict: () => conflictMessage(state, command),
-    ...(deduplicated ? { keep: (disposition: Disposition) => disposition.outcome === 'refused' } : {}) } : undefined;
-  return commit(state, request, { scope: store.scope, ...(record ? { record } : {}) },
-  out => decideCommand(state, command, ports, out));
+    root: () => root, ...(deduplicated ? { keep: (disposition: Disposition) => disposition.outcome === 'refused' } : {}) } : undefined;
+  return commit(state, request, { scope: store.scope, ...(record ? { record } : {}), ...(archived ? { archived } : {}) }, decide);
 }

@@ -178,7 +178,48 @@ K4 result. It writes an audit line and reports the Turn once, with
 `reason: 'result_retired'`. A due reply check of a compacted chain intent takes
 the failed readback path. The Host keeps processing other work.
 
-`CollaborationState.version` is 2. Version 1 kept the routines in K8 state.
+### Retention
+
+Every transaction reads and rewrites the collaboration state, so settled
+history must leave it. `bot.retain({ acknowledgedRoots, now, retentionMs })`
+does that on the Host's explicit acknowledgement. It never runs on its own.
+
+- A root is the `root` field of a Turn projection. One root holds its Turns,
+  budget, delegations and their batches and units, replies, schemas, cards,
+  questions, the rejections that its Turns consumed, its input batch and
+  inputs, its rounds with their seats, seat Turns and `team.roots` row, its
+  inbounds and their deliveries. A seat Turn belongs to its round's root:
+  acknowledging the seat id throws `RetentionRefused`.
+- One ledger transaction moves every row of each acknowledged root into K4
+  application rows by map name and id (the K4 row port). It retires the
+  root's Turn, input and round ids for good.
+- `RetentionRefused` (code `protected_root`) rolls back the whole call while a
+  root is still in use: a Turn that is not concluded, or that still has its
+  K4 intent and is not reported; an unresolved delegation, an unreleased
+  batch or a reserved unit; an open card or question; an open input batch; an
+  open round or seat; an open delivery or a live reply route; an open routine
+  occurrence; or a Turn, card or question in the ContextPack window of its
+  Bot (the last `contextTurnLimit` Turns, the last 12 cards and questions).
+  Unconsumed rejections stay in the state.
+- An unknown root throws. A root that is already archived counts as
+  `alreadyArchivedRoots`.
+- Each call also moves the command records of archived roots and the records
+  with no root. They answer replays for at least `retentionMs`, which must be
+  seven days or more; a later call removes them after that. A retry after the
+  window decides again, and an archived Turn, input or round id makes the
+  commit throw `RetiredIdentityError` and change nothing. Sync fails a Turn
+  with a retired id instead of running it.
+- Each call moves the audit lines, revoked push routes that no delivery uses,
+  and settled persona deliveries: applied ones except the newest of each Bot,
+  and failures of an older profile revision. These archived rows stay.
+- `historyWindow.omitted*` counts only rows still in the state.
+- `room.messages` stays in the state: room offsets count from its start.
+
+After retention, a late message for an archived Turn gets `binding_mismatch`,
+and an echo can no longer match an archived delivery. Back up the whole SQLite
+database: a JSON-only restore loses the archived rows and tombstones.
+
+`CollaborationState.version` is 3. Version 1 kept the routines in K8 state.
 The Host refuses a version 1 ledger and changes nothing. Restore a ledger
 backup made before this change, or start a new ledger.
 
@@ -201,12 +242,15 @@ let the accepted occurrence finish. Pause and resume retry the calendar.
 
 ## Boundaries
 
-The collaboration state has version 2. The Host rejects unsupported or
-unversioned stored state. It does not reset or migrate that state.
+The collaboration state has version 3. The Host rejects version 2, unsupported
+and unversioned stored state. It does not reset or migrate that state. A
+version 2 ledger cannot hold archived rows, so restore a ledger backup made
+before this change, or start a new ledger.
 
 This example has one team and one owner per ledger. Paid Pi success-rate
-measurement belongs to [WO-10b](../../docs/submit-result-measurement.md); the method defines per-runtime/model/platform cells and does not supply live data. Application history,
-versions and audit rows have no retention policy in this small example.
+measurement belongs to [WO-10b](../../docs/submit-result-measurement.md); the method defines per-runtime/model/platform cells and does not supply live data. Retention of the
+collaboration history is explicit ([Retention](#retention)). K4 routine
+versions have no retention policy in this small example.
 
 ## Commit contract
 
