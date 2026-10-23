@@ -1646,6 +1646,8 @@ export declare const AGENT_MEMORY_INTENT_CAPABILITY: 'agent-memory-intent.v1';
 export declare const AGENT_MEMORY_PROJECTION_CAPABILITY: 'agent.memory.projection';
 /** Device capability required before an ordinary Agent offer may carry `agentMemory`. */
 export declare const AGENT_MEMORY_SELECTION_CAPABILITY: 'agent-memory-selection';
+/** Device capability required before an ordinary Agent offer may carry `agentMemory: 'read-if-admitted'`. */
+export declare const AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY: 'agent-memory-read-if-admitted';
 /** Exact capability of the single input-preparation wire authority. */
 export declare const AGENT_INPUT_PREPARATION_CAPABILITY: "agent-input-preparation-v9";
 /**
@@ -2745,8 +2747,8 @@ export { RESULT_SCHEMA_MAX_BYTES, RESULT_OUTCOME_MAX_BYTES, RESULT_SCHEMA_MAX_DE
 export type { ResultSchema, ResultSchemaKeyword, ResultSchemaInstanceType, ResultIssue, ResultDocumentFailureReason, ResultSchemaCheck, ResultOutcomeCheck, } from './result-schema';
 export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
 export type { TaskState } from './task-state';
-export { MESSAGE_TYPES, TASK_OFFER_TYPES, isTaskOfferType, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, ConnAckPayloadSchema, TaskOfferPayloadSchema, TaskOfferWithToolsetsPayloadSchema, AgentHomeAccessSchema, TaskOfferForAgentPayloadSchema, TaskOfferForAgentWithEgressPayloadSchema, TaskOfferForAgentWithEgressFreshPayloadSchema, TaskOfferPreparedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDraftPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskClaimPayloadSchema, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TerminalAgentHomeProjectionSchema, TerminalAgentHomeMemoryChangeSchema, AGENT_HOME_MEMORY_DIGEST_MAX_FILES, AGENT_HOME_MEMORY_DIGEST_MAX_BYTES, AGENT_HOME_MEMORY_PATH_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
-export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, ConnAckPayload, TaskOfferPayload, TaskOfferWithToolsetsPayload, TaskOfferForAgentPayload, TaskOfferForAgentWithEgressPayload, TaskOfferForAgentWithEgressFreshPayload, TaskOfferPreparedPayload, TaskOfferSealedPayload, TaskOfferWithToolsetsSealedPayload, TaskOfferForAgentSealedPayload, TaskOfferForAgentWithEgressSealedPayload, TaskOfferForAgentWithEgressFreshSealedPayload, TaskSteerSealedPayload, TaskCompleteSealedPayload, TaskFailSealedPayload, TaskDeclineSealedPayload, TaskCancelledSealedPayload, TaskProgressSealedPayload, TaskArtifactSealedPayload, TaskAwaitApprovalSealedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDraftPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, TaskStartedPayload, TaskDeclinePayload, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, TerminalAgentHomeProjection, TerminalAgentHomeMemoryChange, AgentHomeAccess, } from './messages';
+export { MESSAGE_TYPES, TASK_OFFER_TYPES, isTaskOfferType, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, ConnAckPayloadSchema, TaskOfferPayloadSchema, TaskOfferWithToolsetsPayloadSchema, AgentHomeAccessSchema, AgentMemorySelectionSchema, TaskOfferForAgentPayloadSchema, TaskOfferForAgentWithEgressPayloadSchema, TaskOfferForAgentWithEgressFreshPayloadSchema, TaskOfferPreparedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDraftPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskClaimPayloadSchema, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TerminalAgentHomeProjectionSchema, TerminalAgentHomeMemoryChangeSchema, AGENT_HOME_MEMORY_DIGEST_MAX_FILES, AGENT_HOME_MEMORY_DIGEST_MAX_BYTES, AGENT_HOME_MEMORY_PATH_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
+export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, ConnAckPayload, TaskOfferPayload, TaskOfferWithToolsetsPayload, TaskOfferForAgentPayload, TaskOfferForAgentWithEgressPayload, TaskOfferForAgentWithEgressFreshPayload, TaskOfferPreparedPayload, TaskOfferSealedPayload, TaskOfferWithToolsetsSealedPayload, TaskOfferForAgentSealedPayload, TaskOfferForAgentWithEgressSealedPayload, TaskOfferForAgentWithEgressFreshSealedPayload, TaskSteerSealedPayload, TaskCompleteSealedPayload, TaskFailSealedPayload, TaskDeclineSealedPayload, TaskCancelledSealedPayload, TaskProgressSealedPayload, TaskArtifactSealedPayload, TaskAwaitApprovalSealedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDraftPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, TaskStartedPayload, TaskDeclinePayload, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, TerminalAgentHomeProjection, TerminalAgentHomeMemoryChange, AgentHomeAccess, AgentMemorySelection, } from './messages';
 export { EnvelopeSchema, isServerToDaemonType } from './envelope';
 export type { Envelope } from './envelope';
 export { ProtocolError, EnvelopeParseError, UnknownMessageTypeError, EnvelopeValidationError, } from './errors';
@@ -3904,14 +3906,27 @@ export type TaskOfferWithToolsetsPayload = z.infer<typeof TaskOfferWithToolsetsP
 export declare const AgentHomeAccessSchema: z.ZodLiteral<"memory-reader">;
 export type AgentHomeAccess = z.infer<typeof AgentHomeAccessSchema>;
 /**
+ * The `agentMemory` of an ordinary Agent offer: the prepared modes plus
+ * `read-if-admitted`. That value runs as `read` when the daemon admits the
+ * memory MCP and as `none` when it does not. A host sends it only to a device
+ * that advertises `agent-memory-read-if-admitted`. Prepared offers refuse it.
+ */
+export declare const AgentMemorySelectionSchema: z.ZodEnum<{
+    none: "none";
+    read: "read";
+    "read-if-admitted": "read-if-admitted";
+    "read-write": "read-write";
+}>;
+export type AgentMemorySelection = z.infer<typeof AgentMemorySelectionSchema>;
+/**
  * Strict additive offer for a durable host-owned Agent. An older daemon that
  * does not advertise `agent-home-contract` skips this distinct message type
  * instead of stripping identity and applying legacy workspace semantics.
  *
- * `agentMemory` selects the Agent memory of this one task, with the values of
- * the prepared offer. Absent keeps the daemon admission. A host sends it only
- * to a device that advertises `agent-memory-selection`. The prepared offer
- * replaces it with its own required selection.
+ * `agentMemory` selects the Agent memory of this one task (see
+ * {@link AgentMemorySelectionSchema}). Absent keeps the daemon admission. A
+ * host sends it only to a device that advertises `agent-memory-selection`. The
+ * prepared offer replaces it with its own required selection.
  */
 export declare const TaskOfferForAgentPayloadSchema: z.ZodObject<{
     instruction: z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
@@ -3931,6 +3946,7 @@ export declare const TaskOfferForAgentPayloadSchema: z.ZodObject<{
     agentMemory: z.ZodOptional<z.ZodEnum<{
         none: "none";
         read: "read";
+        "read-if-admitted": "read-if-admitted";
         "read-write": "read-write";
     }>>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
@@ -4003,6 +4019,7 @@ export declare const TaskOfferForAgentWithEgressPayloadSchema: z.ZodObject<{
     agentMemory: z.ZodOptional<z.ZodEnum<{
         none: "none";
         read: "read";
+        "read-if-admitted": "read-if-admitted";
         "read-write": "read-write";
     }>>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
@@ -4112,6 +4129,7 @@ export declare const TaskOfferForAgentWithEgressFreshPayloadSchema: z.ZodObject<
     agentMemory: z.ZodOptional<z.ZodEnum<{
         none: "none";
         read: "read";
+        "read-if-admitted": "read-if-admitted";
         "read-write": "read-write";
     }>>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
@@ -5609,6 +5627,7 @@ export declare const TaskOfferForAgentSealedPayloadSchema: z.ZodObject<{
     agentMemory: z.ZodOptional<z.ZodEnum<{
         none: "none";
         read: "read";
+        "read-if-admitted": "read-if-admitted";
         "read-write": "read-write";
     }>>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
@@ -5711,6 +5730,7 @@ export declare const TaskOfferForAgentWithEgressSealedPayloadSchema: z.ZodObject
     agentMemory: z.ZodOptional<z.ZodEnum<{
         none: "none";
         read: "read";
+        "read-if-admitted": "read-if-admitted";
         "read-write": "read-write";
     }>>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
@@ -5849,6 +5869,7 @@ export declare const TaskOfferForAgentWithEgressFreshSealedPayloadSchema: z.ZodO
     agentMemory: z.ZodOptional<z.ZodEnum<{
         none: "none";
         read: "read";
+        "read-if-admitted": "read-if-admitted";
         "read-write": "read-write";
     }>>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
@@ -7492,7 +7513,7 @@ export declare const AGENT_HOME_READERS_CAPABILITY: 'agent-home-readers';
  * cannot accidentally execute the instruction without the required tools.
  */
 export declare const CUSTOM_HARNESS_CAPABILITY: 'custom-harness';
-export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", 'agent-message-draft', "sealed-payload-v1"];
+export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", "agent-memory-read-if-admitted", 'agent-message-draft', "sealed-payload-v1"];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
 // ==== @byok-sdk/protocol dist/wire-additions.d.ts ====
 /**

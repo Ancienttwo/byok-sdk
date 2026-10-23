@@ -120,4 +120,48 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
     expect(await started.byok.tasks.attempt('fresh-reader-read-write')).toBeUndefined();
     expect(await started.byok.tasks.offer('fresh-reader-read-write')).toBeUndefined();
   });
+
+  it('refuses read-if-admitted to a device without agent-memory-read-if-admitted, on dispatch and on submit', async () => {
+    const started = await start();
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
+      productId: PRODUCT_ID,
+      capabilities: ALL_CAPABILITIES,
+    });
+    await expect(started.byok.dispatch({
+      deviceId: daemon.deviceId,
+      taskId: 'read-if-admitted-refused',
+      instruction: 'chat turn',
+      agentRef: AGENT_REF,
+      sessionRef: 'memory-session',
+      agentMemory: 'read-if-admitted',
+    })).rejects.toMatchObject({ code: 'agent_capability_missing' });
+    await expect(started.byok.executions.submit({
+      taskId: 'fresh-read-if-admitted-refused',
+      deviceId: daemon.deviceId,
+      payload: {
+        instruction: 'chat turn', runtime: 'codex', terminalProjection: { mode: 'none' }, agentRef: AGENT_REF,
+        egressPolicy: POLICY, agentMemory: 'read-if-admitted',
+      },
+    })).rejects.toMatchObject({ code: 'agent_capability_missing' });
+    expect(await started.byok.tasks.attempt('read-if-admitted-refused')).toBeUndefined();
+    expect(await started.byok.tasks.offer('fresh-read-if-admitted-refused')).toBeUndefined();
+  });
+
+  it('delivers read-if-admitted to a device that advertises agent-memory-read-if-admitted', async () => {
+    const started = await start();
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
+      productId: PRODUCT_ID,
+      capabilities: [...ALL_CAPABILITIES, 'agent-memory-read-if-admitted'],
+    });
+    await started.byok.dispatch({
+      deviceId: daemon.deviceId,
+      instruction: 'chat turn',
+      agentRef: AGENT_REF,
+      sessionRef: 'memory-session',
+      agentMemory: 'read-if-admitted',
+    });
+    const offered = await nextEnvelope(daemon);
+    expect(offered.type).toBe('task.offer_for_agent');
+    expect(offered.payload).toMatchObject({ agentRef: AGENT_REF, agentMemory: 'read-if-admitted' });
+  });
 });

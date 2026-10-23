@@ -1,4 +1,10 @@
-import { AGENT_MEMORY_SELECTION_CAPABILITY, decodeEnvelope, type AgentEgressPolicy } from '@byok-sdk/protocol';
+import {
+  AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY,
+  AGENT_MEMORY_SELECTION_CAPABILITY,
+  decodeEnvelope,
+  type AgentEgressPolicy,
+  type AgentMemorySelection,
+} from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { TENANT_A, createHarness, type CloudHarness } from './support/harness';
 
@@ -26,20 +32,21 @@ const BASE_CAPABILITIES = [
 
 type MemoryOffer = (harness: CloudHarness, deviceId: string, taskId: string) => Promise<unknown>;
 
-const memoryOffers: ReadonlyArray<readonly [string, MemoryOffer]> = [
+const memoryOffersWith = (agentMemory: AgentMemorySelection): ReadonlyArray<readonly [string, MemoryOffer]> => [
   ['enqueueAgentOffer', (harness, deviceId, taskId) => harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, {
     taskId,
-    payload: { instruction: 'plan only', agentRef: AGENT_REF, sessionRef: 'memory-session', agentMemory: 'none' },
+    payload: { instruction: 'plan only', agentRef: AGENT_REF, sessionRef: 'memory-session', agentMemory },
   })],
   ['enqueueAgentEgressOffer', (harness, deviceId, taskId) => harness.cloud.enqueueAgentEgressOffer(TENANT_A, deviceId, {
     taskId,
-    payload: { instruction: 'plan only', agentRef: AGENT_REF, sessionRef: 'memory-session', egressPolicy: POLICY, agentMemory: 'none' },
+    payload: { instruction: 'plan only', agentRef: AGENT_REF, sessionRef: 'memory-session', egressPolicy: POLICY, agentMemory },
   })],
   ['submitAgentExecution', (harness, deviceId, taskId) => harness.cloud.submitAgentExecution(TENANT_A, { deviceId,
     taskId,
-    payload: { instruction: 'plan only', runtime: 'codex', terminalProjection: { mode: 'none' }, agentRef: AGENT_REF, egressPolicy: POLICY, agentMemory: 'none' },
+    payload: { instruction: 'plan only', runtime: 'codex', terminalProjection: { mode: 'none' }, agentRef: AGENT_REF, egressPolicy: POLICY, agentMemory },
   })],
 ];
+const memoryOffers = memoryOffersWith('none');
 
 async function deviceWith(capabilities: readonly string[]): Promise<{ harness: CloudHarness; deviceId: string }> {
   const harness = createHarness();
@@ -82,5 +89,30 @@ describe('hosted per-task Agent memory selection (#614)', () => {
       payload: { instruction: 'continue', agentRef: AGENT_REF, sessionRef: 'memory-session' },
     });
     expect(await mailboxTypes(harness, deviceId)).toEqual(['task.offer_for_agent']);
+  });
+});
+
+describe('hosted agentMemory read-if-admitted (#815)', () => {
+  const readIfAdmitted = memoryOffersWith('read-if-admitted');
+  const selection = [...BASE_CAPABILITIES, AGENT_MEMORY_SELECTION_CAPABILITY];
+
+  it.each(readIfAdmitted)('%s refuses read-if-admitted to a device without agent-memory-read-if-admitted before task or mailbox state', async (_name, enqueue) => {
+    const { harness, deviceId } = await deviceWith(selection);
+
+    await expect(enqueue(harness, deviceId, 'memory-refused')).rejects.toMatchObject({
+      code: 'agent_capability_missing',
+      message: expect.stringContaining(AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY),
+    });
+    expect(await harness.cloud.readTaskAttempt(TENANT_A, 'memory-refused')).toBeUndefined();
+    expect(await mailboxTypes(harness, deviceId)).toEqual([]);
+  });
+
+  it.each(readIfAdmitted)('%s delivers read-if-admitted to a device that advertises both flags', async (_name, enqueue) => {
+    const { harness, deviceId } = await deviceWith([...selection, AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY]);
+
+    await enqueue(harness, deviceId, 'memory-admitted');
+    const page = await harness.core.mailbox.readAfter(TENANT_A, { deviceId, afterSeq: 0, limit: 10 });
+    expect(page.messages).toHaveLength(1);
+    expect(decodeEnvelope(page.messages[0]!.body).payload).toMatchObject({ agentMemory: 'read-if-admitted' });
   });
 });

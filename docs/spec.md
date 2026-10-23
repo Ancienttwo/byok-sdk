@@ -2301,10 +2301,18 @@ without retry (`agent_memory_selection_invalid`). `read` or `read-write` on a
 daemon whose admission is `off` or `unavailable` is declined without retry
 (`agent_memory_unavailable`), as on the prepared lane; the daemon never changes
 a selection to `none`, so a Host that wants memory only when it is admitted
-sends no `agentMemory`. The offers are strict, so the field is a gated wire
-addition: a daemon with an Agent home advertises `agent-memory-selection`
-whatever its admission, and server and cloud refuse the field to a device
-without it before task creation or mailbox append. The reference server takes
+sends no `agentMemory`. An ordinary offer can also select `read-if-admitted`:
+it runs exactly as `read` when the daemon admits the memory MCP and exactly as
+`none` when it does not, for a writer and a `memory-reader`, and it never gets
+`agent_memory_unavailable`. This is the read-only choice for a Host that cannot
+see the admission. The daemon reads its admission once per offer, and the
+runtime binding uses that answer, so the two cannot disagree. The terminal
+does not report which mode ran. Prepared offers do not accept the value. The
+offers are strict, so the field is a gated wire addition: a daemon with an
+Agent home advertises `agent-memory-selection` and
+`agent-memory-read-if-admitted` whatever its admission, and server and cloud
+refuse the field (or the `read-if-admitted` value) to a device without the
+matching flag before task creation or mailbox append. The reference server takes
 it on `executions.submit` and on `dispatch` with an explicit `agentRef`, and
 both refuse `read-write` for a `memory-reader` before the task exists.
 `AGENT_MEMORY_MCP_SERVER_NAME` from `@byok-sdk/client` is the reserved name of

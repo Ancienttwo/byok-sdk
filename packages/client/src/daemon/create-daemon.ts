@@ -28,6 +28,7 @@ import {
   AGENT_HOME_PROJECTION_CAPABILITY,
   AGENT_HOME_READERS_CAPABILITY,
   AGENT_MEMORY_SELECTION_CAPABILITY,
+  AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY,
   AGENT_INPUT_PREPARATION_CAPABILITY,
   TERMINAL_PROJECTION_SELECTION_CAPABILITY,
   PROVIDER_PROFILE_BINDING_CAPABILITY,
@@ -1075,8 +1076,11 @@ function computeCapabilities(
     flags.push('toolset-selection');
   }
   // Every Agent-home daemon reads the per-task memory selection, whatever its
-  // memory admission: `none` always runs, and an unadmitted selection declines.
-  if (agentHomeConfigured) flags.push('agent-home-contract', AGENT_HOME_READERS_CAPABILITY, AGENT_MEMORY_SELECTION_CAPABILITY);
+  // memory admission: `none` and `read-if-admitted` always run, and an
+  // unadmitted `read` or `read-write` declines.
+  if (agentHomeConfigured) {
+    flags.push('agent-home-contract', AGENT_HOME_READERS_CAPABILITY, AGENT_MEMORY_SELECTION_CAPABILITY, AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY);
+  }
   if (strictAgentOnly) flags.push(STRICT_AGENT_ONLY_CAPABILITY);
   if (agentHomeProjectionConfigured) flags.push(AGENT_HOME_PROJECTION_CAPABILITY);
   // Advertised only by a daemon whose `inputPreparation` section is present

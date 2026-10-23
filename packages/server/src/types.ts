@@ -21,7 +21,7 @@ import type {
   ToolsetId,
   TerminalProjectionSelection,
   AgentHomeAccess,
-  PreparedAgentMemoryMode,
+  AgentMemorySelection,
 } from '@byok-sdk/protocol';
 import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { PresenceRuntimeFact } from '@byok-sdk/core';
@@ -187,13 +187,15 @@ interface DispatchInputBase {
    */
   homeAccess?: AgentHomeAccess;
   /**
-   * The Agent memory of this one task: `none`, `read` or `read-write`.
+   * The Agent memory of this one task: `none`, `read`, `read-write` or
+   * `read-if-admitted` (`read` when the daemon admits the memory MCP, else
+   * `none`; the device must also advertise `agent-memory-read-if-admitted`).
    * Requires `agentRef` and a device that advertises `agent-memory-selection`;
    * the kernel refuses it otherwise, before the task exists. `read-write` with
    * `homeAccess: 'memory-reader'` is refused before the task exists. Absent
    * keeps the daemon admission.
    */
-  agentMemory?: PreparedAgentMemoryMode;
+  agentMemory?: AgentMemorySelection;
   /** Host-only product destination/freshness authority; never serialized to the daemon. */
   agentMessageContext?: AgentMessageServerContext;
 }

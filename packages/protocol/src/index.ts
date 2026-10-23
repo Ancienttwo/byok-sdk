@@ -340,6 +340,7 @@ export {
   TaskOfferPayloadSchema,
   TaskOfferWithToolsetsPayloadSchema,
   AgentHomeAccessSchema,
+  AgentMemorySelectionSchema,
   TaskOfferForAgentPayloadSchema,
   TaskOfferForAgentWithEgressPayloadSchema,
   TaskOfferForAgentWithEgressFreshPayloadSchema,
@@ -443,6 +444,7 @@ export type {
   TerminalAgentHomeProjection,
   TerminalAgentHomeMemoryChange,
   AgentHomeAccess,
+  AgentMemorySelection,
 } from './messages';
 
 export { EnvelopeSchema, isServerToDaemonType } from './envelope';

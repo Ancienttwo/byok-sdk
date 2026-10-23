@@ -281,6 +281,92 @@ export declare function withConfigurationLock<T>(store: {
     acquireConfigurationLock(): Promise<ProviderConfigurationLock>;
 }, body: () => Promise<T>): Promise<T>;
 export declare function configurationPendingError(): ByokKeysError;
+// ==== @byok-sdk/keys dist/device-member-key.d.ts ====
+import { type SealingPublicJwk, type WebCryptoKey } from '@byok-sdk/core';
+import type { DeviceSealingEnrollment } from './device-sealing-key';
+import type { SecretStore } from './secret-store';
+/**
+ * Device member keys for hosted wire end-to-end encryption (#654 design §7.1).
+ *
+ * A device member holds two P-256 keys:
+ *
+ * - The signing key (ECDSA) is the member identity. The member id derives
+ *   from its public key, so it never rotates. A new enrollment is a new
+ *   member with a new signing key (§7.5). This store does not compute the
+ *   id: the one rule is `deriveMemberId` in `@byok-sdk/core/sealed-payload`,
+ *   and the daemon calls it. So this package does not import that subpath.
+ * - The KEM key (ECDH) receives scope key packages. It rotates by epoch
+ *   without a change to the member id (§7.5).
+ *
+ * KEM rotation has two steps, in the order of §7.5: register the new public
+ * key, re-wrap the held scope keys to it, then delete the old private key.
+ * `beginKemRotation` stores the next KEM key beside the current one. The old
+ * key stays until `finishKemRotation`, so a crash in between loses nothing,
+ * and the next process resumes the same rotation.
+ *
+ * Both keys live in ONE new credential entry, separate from the provider
+ * sealing key (D12), because the two uses and rotation cycles differ. One
+ * entry makes every write and every read one coherent snapshot: a caller never
+ * gets the signing key of one write and the KEM key of another.
+ *
+ * The store expects one writer. Like `DeviceSealingKeyStore`, it has no
+ * cross-process lock: the daemon that uses it holds the daemon owner lock for
+ * its store directory. With two concurrent writers, the last write wins, and
+ * an earlier caller can hold keys that the credential store no longer has.
+ */
+export declare const DEVICE_MEMBER_SECRET_NAME = "device-member-p256-v1";
+export type DeviceMemberSecretName = typeof DEVICE_MEMBER_SECRET_NAME;
+export interface DeviceMemberKeys {
+    readonly enrollment: DeviceSealingEnrollment;
+    /**
+     * Signs member chain entries and scope key packages. `privateKey` is
+     * non-extractable. The member id is `deriveMemberId(signing.publicJwk)`; it
+     * stays the same across KEM rotations.
+     */
+    readonly signing: {
+        readonly publicJwk: SealingPublicJwk;
+        readonly privateKey: WebCryptoKey;
+    };
+    /** Opens scope key packages. `privateKey` is non-extractable. `epoch` starts at 1 for each member. */
+    readonly kem: DeviceMemberKemKey;
+    /** The KEM key of a rotation that has begun and not finished, at `kem.epoch + 1`. */
+    readonly nextKem?: DeviceMemberKemKey;
+}
+export interface DeviceMemberKemKey {
+    readonly epoch: number;
+    readonly publicJwk: SealingPublicJwk;
+    readonly privateKey: WebCryptoKey;
+}
+/**
+ * Loads, creates, and rotates the device member keys in the OS credential
+ * store (through {@link SecretStore}; never a plain file).
+ *
+ * - `loadOrCreate` returns the stored keys when they belong to the current
+ *   enrollment. Missing keys, or keys bound to a different enrollment, are
+ *   replaced by a new member: a new signing key and a new KEM key at epoch 1.
+ * - `beginKemRotation` stores a new KEM key at the next epoch beside the
+ *   current one. When a rotation is already pending, it returns that rotation
+ *   and generates nothing.
+ * - `finishKemRotation(epoch)` makes the pending key current and deletes the
+ *   old private key. The caller calls it only after the `rotate` entry is
+ *   registered and every held scope key is re-wrapped to the new key.
+ * - A malformed stored record fails closed. It is never silently regenerated,
+ *   because a new signing key would silently create a new member.
+ */
+export declare class DeviceMemberKeyStore {
+    #private;
+    constructor(options: {
+        secretStore: SecretStore<DeviceMemberSecretName>;
+    });
+    loadOrCreate(enrollment: DeviceSealingEnrollment): Promise<DeviceMemberKeys>;
+    beginKemRotation(enrollment: DeviceSealingEnrollment): Promise<DeviceMemberKeys>;
+    /**
+     * Finish the rotation to `epoch`. A repeat call after the rotation finished
+     * returns the current keys. Any other epoch throws
+     * `DEVICE_MEMBER_KEY_ROTATION_MISMATCH` and changes nothing.
+     */
+    finishKemRotation(enrollment: DeviceSealingEnrollment, epoch: number): Promise<DeviceMemberKeys>;
+}
 // ==== @byok-sdk/keys dist/device-sealing-key.d.ts ====
 import { type SealingPublicJwk, type WebCryptoKey } from '@byok-sdk/core';
 import type { SecretStore } from './secret-store';
@@ -387,6 +473,8 @@ export declare const BYOK_KEYS_ERROR_CODES: {
     readonly CREDENTIAL_MANAGER_SECRET_INVALID: 'CREDENTIAL_MANAGER_SECRET_INVALID';
     readonly CREDENTIAL_MANAGER_UNAVAILABLE: 'CREDENTIAL_MANAGER_UNAVAILABLE';
     readonly CREDENTIAL_MANAGER_WRITE_FAILED: 'CREDENTIAL_MANAGER_WRITE_FAILED';
+    readonly DEVICE_MEMBER_KEY_INVALID: 'DEVICE_MEMBER_KEY_INVALID';
+    readonly DEVICE_MEMBER_KEY_ROTATION_MISMATCH: 'DEVICE_MEMBER_KEY_ROTATION_MISMATCH';
     readonly DEVICE_SEALING_KEY_INVALID: 'DEVICE_SEALING_KEY_INVALID';
     readonly KEYCHAIN_ARGUMENT_INVALID: 'KEYCHAIN_ARGUMENT_INVALID';
     readonly KEYCHAIN_DELETE_FAILED: 'KEYCHAIN_DELETE_FAILED';
@@ -597,6 +685,8 @@ export type { TruthStoreProviderProfileStoreOptions } from './truth-profile-stor
 export { PROVIDER_CONFIGURATION_LOCK_WAIT_MS, PROVIDER_CUSTODY_RECEIPT_LIMIT, PROVIDER_KEY_CHECK_OUTCOMES, PROVIDER_PROVISIONING_REJECTIONS, withConfigurationLock, } from './custody';
 export type { ProviderConfigurationLock, ProviderCustodyCommit, ProviderCustodyOperation, ProviderCustodyPending, ProviderCustodyReceipt, ProviderKeyCheckOutcome, ProviderProvisioningBinding, ProviderProvisioningRejection, ProviderProvisioningResult, } from './custody';
 export { DEVICE_SEALING_SECRET_NAME, DeviceSealingKeyStore } from './device-sealing-key';
+export { DEVICE_MEMBER_SECRET_NAME, DeviceMemberKeyStore } from './device-member-key';
+export type { DeviceMemberKemKey, DeviceMemberKeys, DeviceMemberSecretName } from './device-member-key';
 export type { DeviceSealingEnrollment, DeviceSealingKey, DeviceSealingSecretName, } from './device-sealing-key';
 export { PROVIDER_PROVISIONING_MAX_CLOCK_SKEW_MS, PROVIDER_PROVISIONING_SECRET_MAX_BYTES, applySealedProviderProvisioning, readSealedProvisioningResult, } from './sealed-provisioning';
 export type { ApplySealedProviderProvisioningOptions, ProviderProvisioningIdentitySnapshot, SealedProvisioningReadback, ProviderProvisioningCutPoint, ProviderProvisioningFaultSeam, } from './sealed-provisioning';
