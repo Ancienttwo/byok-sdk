@@ -124,9 +124,6 @@ describe('public API surface', () => {
     './stores',
     './ports-contract',
     './sealed-provider-secret',
-    './sealed-payload/sealed-content',
-    './sealed-payload/scope-key',
-    './sealed-payload/member-chain',
     './agent-memory-intent',
     './retention',
     './in-memory/index',
@@ -145,6 +142,29 @@ describe('public API surface', () => {
   it('exports no conformance harness', () => {
     expect(stripComments(read('index.ts'))).not.toContain('__tests__');
     expect(Object.keys(publicApi)).not.toContain('runCoreConformance');
+  });
+
+  it('keeps sealed payload v1 on its own subpath, with a frozen runtime export list', async () => {
+    const subpath = await import('../sealed-payload/index');
+    expect(Object.keys(subpath).sort()).toEqual([
+      'MEMBER_CHAIN_OPS',
+      'SEALED_CATEGORIES',
+      'SEALED_CONTENT_SUITE',
+      'SEALED_CONTENT_VERSION',
+      'SEALED_DIRECTIONS',
+      'SealedContentHeaderV1Schema',
+      'deriveMemberId',
+      'deriveScopeKeyId',
+      'generateScopeKey',
+      'memberChainEntryHash',
+      'openScopeKeyPackage',
+      'openSealedContent',
+      'sealContent',
+      'sealScopeKeyPackage',
+      'signMemberChainEntry',
+      'verifyMemberChainEntry',
+    ]);
+    for (const name of Object.keys(subpath)) expect(Object.keys(publicApi)).not.toContain(name);
   });
 
   it('freezes the runtime export list', () => {
@@ -192,7 +212,6 @@ describe('public API surface', () => {
       'InMemoryStorageLedger',
       'InMemoryTruthStore',
       'MAILBOX_MESSAGE_STATES',
-      'MEMBER_CHAIN_OPS',
       'NONCE_SIGNING_DOMAIN',
       'OBJECT_KEY_PREFIX_PATTERN',
       'OBJECT_STATES',
@@ -217,10 +236,6 @@ describe('public API surface', () => {
       'ROUTINE_HORIZON_MS',
       'ROUTINE_MAX_NOW',
       'ROUTINE_MIN_NOW',
-      'SEALED_CATEGORIES',
-      'SEALED_CONTENT_SUITE',
-      'SEALED_CONTENT_VERSION',
-      'SEALED_DIRECTIONS',
       'SEALING_KEY_ID_LENGTH',
       'SKILL_FRONTMATTER_FIELDS',
       'SKILL_PACK_DESCRIPTION_MAX_LENGTH',
@@ -241,7 +256,6 @@ describe('public API surface', () => {
       'STORAGE_RESERVATION_STATES',
       'STORAGE_WRITE_KINDS',
       'STORAGE_WRITE_POSTURES',
-      'SealedContentHeaderV1Schema',
       'SealedProviderSecretV1Schema',
       'SealingKeyClaimV1Schema',
       'SealingKeyIdSchema',
@@ -276,8 +290,6 @@ describe('public API surface', () => {
       'createInMemoryCoreCompositionWithClock',
       'createInMemoryCoreStores',
       'createMutableClock',
-      'deriveMemberId',
-      'deriveScopeKeyId',
       'deriveSealingKeyId',
       'deviceAssertionCanonicalClaims',
       'deviceAssertionCanonicalJson',
@@ -285,7 +297,6 @@ describe('public API surface', () => {
       'deviceProofCanonicalClaims',
       'deviceProofCanonicalJson',
       'deviceProofSigningInput',
-      'generateScopeKey',
       'hasCapability',
       'isCanonicalTimestamp',
       'isContentHash',
@@ -297,13 +308,10 @@ describe('public API surface', () => {
       'isLegalObjectTransition',
       'isSkillPackPathSafe',
       'isTenantId',
-      'memberChainEntryHash',
       'nextRoutineOccurrence',
       'nonceSigningBytes',
       'objectKeyPrefix',
       'openProviderProvisioningSecret',
-      'openScopeKeyPackage',
-      'openSealedContent',
       'parseCapabilityDeclaration',
       'parseDeviceAssertionEnvelope',
       'parseDeviceProofEnvelope',
@@ -315,11 +323,8 @@ describe('public API surface', () => {
       'providerProvisioningConfigDigest',
       'providerProvisioningRequestDigest',
       'providerSecretAadBytes',
-      'sealContent',
       'sealProviderProvisioningRequest',
-      'sealScopeKeyPackage',
       'sealingKeyClaimCanonicalBytes',
-      'signMemberChainEntry',
       'skillPackContentHashInput',
       'taskAssertionCanonicalClaims',
       'taskAssertionCanonicalJson',
@@ -328,7 +333,6 @@ describe('public API surface', () => {
       'tenantKey',
       'tenantObjectKey',
       'verifyDeviceAssertion',
-      'verifyMemberChainEntry',
       'verifyTaskAssertion',
     ]);
   });

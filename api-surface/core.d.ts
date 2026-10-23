@@ -1410,12 +1410,6 @@ export { authenticateTaskAssertion, TASK_ASSERTION_AGENT_REF_MAX_BYTES, TASK_ASS
 export type { AuthenticateDeviceAssertionDeps, AuthenticatedAssertion, AuthenticatedDeviceAssertion, AuthenticatedTaskAssertion, DeviceAssertionAlgorithm, DeviceAssertionAuthorityRow, DeviceAssertionClaims, DeviceAssertionDeviceRow, DeviceAssertionEnvelopeV1, DeviceAssertionExpectedBinding, DeviceAssertionReplayConsumeInput, DeviceAssertionReplayAuthority, DeviceAssertionReplaySchemaId, DeviceAssertionVerifier, DeviceAssertionVerifyDeps, DeviceAssertionVerifyInput, TaskAssertionAgentRef, TaskAssertionClaims, TaskAssertionEnvelopeV1, } from './device-assertion';
 export { PROVIDER_PROVISIONING_MAX_TTL_MS, PROVIDER_PROVISIONING_OPERATIONS, PROVIDER_PROVISIONING_REQUEST_VERSION, PROVIDER_PROVISIONING_SECRET_OPERATIONS, PROVIDER_SECRET_HPKE_INFO, PROVIDER_SECRET_HPKE_SUITE, PROVIDER_SECRET_MAX_BYTES, PROVIDER_SECRET_MAX_PADDED_BYTES, PROVIDER_SECRET_PAD_BLOCK_BYTES, ProviderProvisioningConfigV1Schema, ProviderProvisioningExpectedProfileSchema, ProviderProvisioningHeaderV1Schema, ProviderProvisioningIdentityRevisionSchema, ProviderProvisioningRequestV1Schema, SEALING_KEY_ID_LENGTH, SealedProviderSecretV1Schema, SealingKeyClaimV1Schema, SealingKeyIdSchema, SealingPublicJwkSchema, assertProviderProvisioningConfigDigest, deriveSealingKeyId, openProviderProvisioningSecret, parseProviderProvisioningRequest, providerProvisioningConfigDigest, providerProvisioningRequestDigest, providerSecretAadBytes, sealProviderProvisioningRequest, sealingKeyClaimCanonicalBytes, } from './sealed-provider-secret';
 export type { ProviderProvisioningConfigV1, ProviderProvisioningExpectedProfile, ProviderProvisioningHeaderV1, ProviderProvisioningOperation, ProviderProvisioningRequestV1, ProviderSecretRecipient, SealProviderProvisioningRequestInput, SealedProviderSecretV1, SealingKeyClaimV1, SealingPublicJwk, WebCryptoKey, } from './sealed-provider-secret';
-export { SEALED_CATEGORIES, SEALED_CONTENT_SUITE, SEALED_CONTENT_VERSION, SEALED_DIRECTIONS, SealedContentHeaderV1Schema, openSealedContent, sealContent, } from './sealed-payload/sealed-content';
-export type { OpenSealedContentInput, SealContentInput, SealedBinding, SealedCategory, SealedContent, SealedContentHeaderV1, SealedContentOpenFailure, SealedContentOpenResult, SealedDirection, SealedScopePolicy, } from './sealed-payload/sealed-content';
-export { deriveScopeKeyId, generateScopeKey, openScopeKeyPackage, sealScopeKeyPackage } from './sealed-payload/scope-key';
-export type { OpenScopeKeyPackageInput, ScopeKeyPackageOpenResult, ScopeKeyPackageV1, SealScopeKeyPackageInput, } from './sealed-payload/scope-key';
-export { MEMBER_CHAIN_OPS, deriveMemberId, memberChainEntryHash, signMemberChainEntry, verifyMemberChainEntry, } from './sealed-payload/member-chain';
-export type { MemberChainEntryV1, MemberChainEntryVerifyResult, MemberChainOp, UnsignedMemberChainEntryV1, } from './sealed-payload/member-chain';
 export { AGENT_MEMORY_INTENT_DIGEST_VERSION, agentMemoryIntentOperationDigest } from './agent-memory-intent';
 export type { AgentMemoryIntentDigestInput } from './agent-memory-intent';
 export { NONCE_SIGNING_DOMAIN, nonceSigningBytes } from './pairing';
@@ -2117,6 +2111,22 @@ export declare function checkRoutineSchedule(schedule: RoutineSchedule): Routine
  * later local time never resolves earlier. Assumes a gap is at most one day.
  */
 export declare function nextRoutineOccurrence(schedule: RoutineSchedule, now: number): number | null;
+// ==== @byok-sdk/core dist/sealed-payload/index.d.ts ====
+/**
+ * `@byok-sdk/core/sealed-payload` — sealed payload v1 (#654): sealed contents,
+ * scope keys and key packages, and member chain entries. The browser, the
+ * device and the hosted Host run this same WebCrypto code.
+ *
+ * It is a subpath, not part of the package root, so the root bundle and every
+ * closure that imports the root do not grow. Only a consumer that seals or
+ * opens content imports it.
+ */
+export { SEALED_CATEGORIES, SEALED_CONTENT_SUITE, SEALED_CONTENT_VERSION, SEALED_DIRECTIONS, SealedContentHeaderV1Schema, openSealedContent, sealContent, } from './sealed-content';
+export type { OpenSealedContentInput, SealContentInput, SealedBinding, SealedCategory, SealedContent, SealedContentHeaderV1, SealedContentOpenFailure, SealedContentOpenResult, SealedDirection, SealedScopePolicy, } from './sealed-content';
+export { deriveScopeKeyId, generateScopeKey, openScopeKeyPackage, sealScopeKeyPackage } from './scope-key';
+export type { OpenScopeKeyPackageInput, ScopeKeyPackageOpenResult, ScopeKeyPackageV1, SealScopeKeyPackageInput, } from './scope-key';
+export { MEMBER_CHAIN_OPS, deriveMemberId, memberChainEntryHash, signMemberChainEntry, verifyMemberChainEntry, } from './member-chain';
+export type { MemberChainEntryV1, MemberChainEntryVerifyResult, MemberChainOp, UnsignedMemberChainEntryV1, } from './member-chain';
 // ==== @byok-sdk/core dist/sealed-payload/member-chain.d.ts ====
 import { type JsonObject } from '../attestation';
 import type { WebCryptoKey } from '../webcrypto';
