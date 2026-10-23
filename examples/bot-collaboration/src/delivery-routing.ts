@@ -65,7 +65,7 @@ export function revokePush(state: CollaborationState, id: string, now: number): 
 function activePush(state: CollaborationState, conversation: Conversation): PushRoute | undefined {
   return Object.values(state.channel?.pushRoutes ?? {}).find(route => route.revokedAt === undefined && sameConversation(route.conversation, conversation));
 }
-function insert(state: CollaborationState, input: Pick<Delivery, 'taskId' | 'messageId' | 'body' | 'conversation' | 'channel' | 'route'>): Delivery {
+function insert(state: CollaborationState, input: Pick<Delivery, 'taskId' | 'turnId' | 'messageId' | 'body' | 'conversation' | 'channel' | 'route'>): Delivery {
   const id = deliveryId(input.taskId, input.messageId, input.route);
   return channelState(state).deliveries[id] ??= { id, ...input, state: 'pending', attempts: 0 };
 }
@@ -75,10 +75,10 @@ export function queueDelivery(ledger: LedgerState, state: CollaborationState, tu
   const inbound = Object.values(state.channel?.inbounds ?? {}).filter(row => row.root === root && sameConversation(row.conversation, conversation))
     .sort((a, b) => b.sequence - a.sequence)[0];
   if (inbound?.reply?.token && inbound.reply.expiresAt > now && rootOpen(ledger, state, root, conversation)) {
-    return insert(state, { taskId, messageId, body, conversation, channel: inbound.reply.channel, route: { kind: 'reply', inboundId: inbound.id } });
+    return insert(state, { taskId, turnId: turn.id, messageId, body, conversation, channel: inbound.reply.channel, route: { kind: 'reply', inboundId: inbound.id } });
   }
   const push = activePush(state, conversation);
-  if (push) return insert(state, { taskId, messageId, body, conversation, channel: push.channel, route: { kind: 'push', pushRouteId: push.id } });
+  if (push) return insert(state, { taskId, turnId: turn.id, messageId, body, conversation, channel: push.channel, route: { kind: 'push', pushRouteId: push.id } });
   state.audit.push(`Delivery ${inbound?.reply ? 'reply_route_expired' : 'no_push_route'}: ${taskId} ${messageId}`);
   return undefined;
 }
@@ -99,7 +99,7 @@ export function refuseRoute(state: CollaborationState, row: Delivery): void {
   row.code = row.route.kind === 'reply' ? 'reply_route_expired' : 'push_route_revoked';
   state.audit.push(`Delivery ${row.code}: ${row.taskId} ${row.messageId}`);
   const push = row.route.kind === 'reply' ? activePush(state, row.conversation) : undefined;
-  if (push) insert(state, { taskId: row.taskId, messageId: row.messageId, body: row.body, conversation: row.conversation,
+  if (push) insert(state, { taskId: row.taskId, turnId: row.turnId, messageId: row.messageId, body: row.body, conversation: row.conversation,
     channel: push.channel, route: { kind: 'push', pushRouteId: push.id } });
 }
 export function cleanReplyTokens(ledger: LedgerState, state: CollaborationState, now: number): void {
@@ -119,7 +119,7 @@ export function resendUnknown(state: CollaborationState, id: string, now: number
   if (!available) throw new Error('No active delivery route');
   const route: Delivery['route'] = available.kind === 'reply' ? old.route : { kind: 'push', pushRouteId: available.id };
   const nextId = deliveryId(old.taskId, old.messageId, route, String(++state.sequence));
-  const row: Delivery = { id: nextId, taskId: old.taskId, messageId: old.messageId, body: old.body, conversation: { ...old.conversation },
+  const row: Delivery = { id: nextId, taskId: old.taskId, turnId: old.turnId, messageId: old.messageId, body: old.body, conversation: { ...old.conversation },
     channel: available.channel, route: { ...route }, state: 'pending', attempts: 0, resendOf: old.id };
   state.channel!.deliveries[nextId] = row;
   return row;

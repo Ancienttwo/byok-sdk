@@ -118,7 +118,8 @@ records a permanent identity tombstone, and `isRetired` reads it. The port has n
 tombstone, and `compact` never removes one. The rows commit or roll back with the body. The port
 reads and writes only this ledger's tenant. It closes when `apply` returns or throws, so a kept
 reference or a write after an `await` throws. The caller never gets the database handle: all SQL,
-the transaction end and the retired-identity tables stay in K4.
+the transaction end and the retired-identity tables stay in K4. The `applyMessage` hook gets the
+same port as `tx.rows`, so it reads the rows of its own message commit.
 
 Ignored routine wakes are visible in `ledger.snapshot().ignoredWakes`. The optional
 array retains the newest `IGNORED_WAKE_AUDIT_LIMIT` (128) observations in delivery

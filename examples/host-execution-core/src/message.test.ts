@@ -62,6 +62,19 @@ it('rolls back business writes and projections on exception or asynchronous hook
     expect(Object.values(f.ledger.snapshot().outbox).filter(r => r.kind === 'projection')).toEqual([]);
   }
 });
+it('gives the hook the application rows of its commit, rolls them back with it, and closes the port after it', async () => {
+  const f = fixture();
+  f.ledger.transaction((_s, rows) => rows.put('records', 'old', 1));
+  let kept: MessageTransaction['rows'] | undefined;
+  const failing = new HostExecutionCore({} as ExecutionServer, f.ledger, { applyMessage: (_input, tx) => { tx.rows.put('records', 'lost', 1); throw new Error('failed'); } });
+  await expect(failing.consumeMessage(f.input)).rejects.toThrow('failed');
+  const core = new HostExecutionCore({} as ExecutionServer, f.ledger, { applyMessage: (_input, tx) => {
+    kept = tx.rows; tx.rows.put('records', 'new', tx.rows.get('records', 'old') as number + 1); return { outcome: 'refused', reasonCode: 'test' };
+  } });
+  expect(await core.consumeMessage(f.input)).toEqual({ outcome: 'refused', reasonCode: 'test' });
+  expect(f.ledger.transaction((_s, rows) => ['old', 'new', 'lost'].map(id => rows.get('records', id)))).toEqual([1, 2, undefined]);
+  expect(() => kept!.get('records', 'old')).toThrow('The application row port is closed');
+});
 it('revokes publish authority after callback and refuses an unconfigured handler', async () => {
   const f = fixture(); expect(await f.core.consumeMessage(f.input)).toMatchObject({ reasonCode: 'message_handler_unconfigured' });
   let publish!: (id: string, value: string) => void;

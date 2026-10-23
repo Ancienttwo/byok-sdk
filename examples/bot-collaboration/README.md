@@ -187,7 +187,60 @@ moves on. At Host start, a business reply receipt of a compacted Turn stays,
 also for a routine Turn after its tombstone expired. A due reply check of a compacted chain intent takes
 the failed readback path. The Host keeps processing other work.
 
-`CollaborationState.version` is 2. Version 1 kept the routines in K8 state.
+### Retention
+
+Every transaction reads and rewrites the collaboration state, so settled
+history must leave it. `bot.retain({ acknowledgedRoots, now, retentionMs })`
+does that on the Host's explicit acknowledgement. It never runs on its own.
+
+- A root is the `root` field of a Turn projection, or the round root that
+  `roomInput` and a room `receive` return. One root holds its Turns,
+  budget, delegations and their batches and units, replies, schemas, cards,
+  questions, the rejections that its Turns consumed, its input batch and
+  inputs, its rounds with their seats, seat Turns and `team.roots` row, its
+  inbounds, and the deliveries that its Turns queued (each delivery stores
+  its `turnId`). A seat Turn belongs to its round's root, but
+  its projection shows its seat id as `root`. Acknowledging a seat id throws
+  `RetentionRefused` with code `seat_root` and the round's root in
+  `roundRoot`. Acknowledge that root instead.
+- One ledger transaction moves every row of each acknowledged root into K4
+  application rows by map name and id (the K4 row port). It retires the
+  root's Turn, input and round ids for good.
+- `RetentionRefused` with code `protected_root` rolls back the whole call while a
+  root is still in use: a Turn that is not concluded, or that still has its
+  K4 intent and is not reported; an unresolved delegation, an unreleased
+  batch or a reserved unit; an open card or question; an open input batch; an
+  open round or seat; an open delivery or a live reply route; an open routine
+  occurrence; or a Turn, card or question in the ContextPack window of its
+  Bot (the last `contextTurnLimit` Turns, the last 12 cards and questions).
+  Unconsumed rejections stay in the state.
+- An unknown root throws. A root that is already archived counts as
+  `alreadyArchivedRoots`.
+- Each call also moves the command records of archived roots and the records
+  with no root. They answer replays for at least `retentionMs`, which must be
+  seven days or more; a later call removes them after that. A retry after the
+  window decides again, and an archived Turn, input or round id makes the
+  commit throw `RetiredIdentityError` and change nothing. A store makes that
+  check itself: `commitCommand` hands the ids that `decide` added to
+  `CommandStore.admitted`, and the store calls `refuseRetired` before it
+  commits. Sync fails a Turn with a retired id instead of running it. A Turn
+  id and an input id are one identity space (`retiredIdentity`): an input
+  that does not coalesce becomes a Turn with its own id, and the coalescing
+  policy can change between retention and a retry.
+- The ContextPack window of a Bot with a Turn that has not frozen yet (queued
+  or blocked) is its last `contextTurnLimit + 1` Turns, because that Turn
+  reads the last `contextTurnLimit` other Turns.
+- Each call moves the audit lines, revoked push routes that no delivery uses,
+  and settled persona deliveries: applied ones except the newest of each Bot,
+  and failures of an older profile revision. These archived rows stay.
+- `historyWindow.omitted*` counts only rows still in the state.
+- `room.messages` stays in the state: room offsets count from its start.
+
+After retention, a late message for an archived Turn gets `binding_mismatch`,
+and an echo can no longer match an archived delivery. Back up the whole SQLite
+database: a JSON-only restore loses the archived rows and tombstones.
+
+`CollaborationState.version` is 3. Version 1 kept the routines in K8 state.
 The Host refuses a version 1 ledger and changes nothing. Restore a ledger
 backup made before this change, or start a new ledger.
 
@@ -210,12 +263,15 @@ let the accepted occurrence finish. Pause and resume retry the calendar.
 
 ## Boundaries
 
-The collaboration state has version 2. The Host rejects unsupported or
-unversioned stored state. It does not reset or migrate that state.
+The collaboration state has version 3. The Host rejects version 2, unsupported
+and unversioned stored state. It does not reset or migrate that state. A
+version 2 ledger cannot hold archived rows, so restore a ledger backup made
+before this change, or start a new ledger.
 
 This example has one team and one owner per ledger. Paid Pi success-rate
-measurement belongs to [WO-10b](../../docs/submit-result-measurement.md); the method defines per-runtime/model/platform cells and does not supply live data. Application history,
-versions and audit rows have no retention policy in this small example.
+measurement belongs to [WO-10b](../../docs/submit-result-measurement.md); the method defines per-runtime/model/platform cells and does not supply live data. Retention of the
+collaboration history is explicit ([Retention](#retention)). K4 routine
+versions have no retention policy in this small example.
 
 ## Commit contract
 
@@ -256,7 +312,8 @@ In this L example the scope is the ledger tenant. Owner APIs pass no expected
 revision. K4 already deduplicates terminals (`applied`) and accepted messages (the
 message receipt), so L stores no record for those callbacks. K4 writes no
 receipt for a refused message, so L keeps a record for it: a retry gets the
-same refusal and does not change the revision. Other content for the same
+same refusal and does not change the revision. When retention moves that
+record, the message hook reads it from the K4 rows of its own transaction. Other content for the same
 message id is refused with `message_conflict`. The D1 vectors in
 `src/commit-vectors.test-support.ts` run against a pure in-memory store and
 against the L ledger; the D2 H adapter runs the same vectors.

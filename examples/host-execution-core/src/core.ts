@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { ByokServer, ByokServerEvent, CreateByokServerOptions, DueWake } from '@byok-sdk/server';
 import { MemoryBlockedError, type HostMemoryPage, type MemoryBinding } from './memory';
-import { HostLedger, OutboxFullError } from './ledger';
+import { HostLedger, OutboxFullError, type ApplicationRows } from './ledger';
 import { canonical, hash, project, taskId, time, validateInput, validateJson, validateRetry, type HostJobHandler, type HostOccurrenceRun, type Attempt,
   type Intent, type IntentInput, type Json, type LedgerState, type Occurrence, type Routine, type RoutineDefinition, type Terminal } from './model';
 import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
@@ -58,6 +58,8 @@ export interface MessageTransaction {
   readonly intent: Readonly<Intent>;
   /** Synchronous business updates share the receipt/projection commit. No external I/O. */
   application: Record<string, Json>;
+  /** The application rows of the same commit. The port closes when the hook returns. */
+  rows: ApplicationRows;
   publish(id: string, value: Json): void;
 }
 export interface HostOptions {
@@ -149,7 +151,7 @@ export class HostExecutionCore {
   /** Install directly as agentMessage.consume; SDK owns payload/schema admission. */
   readonly consumeMessage = async (input: AgentMessageInput): Promise<MessageDecision> => {
     this.assertOpen();
-    return this.ledger.transaction(state => {
+    return this.ledger.transaction((state, rows) => {
       const refuse = (reasonCode: string): MessageDecision => ({ outcome: 'refused', reasonCode });
       const execution = state.executions[input.taskId];
       if (!execution) return refuse('unknown_task');
@@ -167,7 +169,7 @@ export class HostExecutionCore {
       let decision: MessageDecision;
       try {
         decision = this.options.applyMessage(structuredClone(input), {
-          intent: structuredClone(intent), application: state.application,
+          intent: structuredClone(intent), application: state.application, rows,
           publish: (id, value) => {
             if (!open) throw new Error('Message transaction is closed');
             project(state, id, value);
