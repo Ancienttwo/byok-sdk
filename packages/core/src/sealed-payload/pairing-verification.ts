@@ -171,6 +171,7 @@ function bundleJson(member: MemberKeyBundleV1) {
     signingPublicJwk: jwk(member.signingPublicJwk),
     kemPublicJwk: jwk(member.kemPublicJwk),
     kemEpoch: member.kemEpoch,
+    kemSig: member.kemSig,
     ...(member.deviceId === undefined ? {} : { deviceId: member.deviceId }),
   };
 }
