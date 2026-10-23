@@ -319,12 +319,13 @@ describe('member chain walk', () => {
     // After genesis, a second self-signed add by a non-member is refused.
     await expect(apply(state, await next(state, other, 'add', { member: bundleJson(other.bundle) })))
       .resolves.toEqual({ ok: false, reason: 'member_chain_signer_invalid', index: 0 });
-    // After the only member removes itself, the member set is empty but the chain has a head.
-    // Genesis is only for the empty state, so a stranger cannot add itself and take over the chain.
-    const removedAll = await applied(state, await next(state, client, 'remove', { memberId: client.bundle.memberId }));
-    expect(removedAll.members.size).toBe(0);
-    expect(removedAll.head?.seq).toBe(2);
-    await expect(apply(removedAll, await next(removedAll, other, 'add', { member: bundleJson(other.bundle) })))
+    // The only member cannot remove itself (14A), so the walk never makes a state with a head and no members.
+    await expect(apply(state, await next(state, client, 'remove', { memberId: client.bundle.memberId })))
+      .resolves.toEqual({ ok: false, reason: 'member_chain_subject_invalid', index: 0 });
+    // Genesis is only for the empty state. A hand-built state with a head and no members
+    // checks that a stranger still cannot add itself and take over the chain.
+    const noMembers: MemberChainState = { ...state, members: new Map() };
+    await expect(apply(noMembers, await next(noMembers, other, 'add', { member: bundleJson(other.bundle) })))
       .resolves.toEqual({ ok: false, reason: 'member_chain_signer_invalid', index: 0 });
   });
 
@@ -381,6 +382,12 @@ describe('member chain walk', () => {
     await rejected(start, client, 'add', { member: bundleJson(device.bundle), extra: true });
     await rejected(start, client, 'remove', { memberId: device.bundle.memberId });
     await rejected(removedDevice, client, 'remove', { memberId: device.bundle.memberId });
+    // A member may remove itself, but the last member may not (14A).
+    const selfRemoved = await applied(withDevice, await next(withDevice, device, 'remove', { memberId: device.bundle.memberId }));
+    expect([...selfRemoved.members.keys()]).toEqual([client.bundle.memberId]);
+    expect(selfRemoved.removed.has(device.bundle.memberId)).toBe(true);
+    await rejected(removedDevice, client, 'remove', { memberId: client.bundle.memberId });
+    await rejected(start, client, 'remove', { memberId: client.bundle.memberId });
     // Only the member itself rotates its KEM key, to exactly the next epoch.
     await rejected(withDevice, client, 'rotate', await rotateSubject(device, kem, 2));
     await rejected(withDevice, device, 'rotate', await rotateSubject(device, kem, 3));
