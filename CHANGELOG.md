@@ -94,6 +94,36 @@
   redacted task. Only task redaction and tenant erasure release the
   reference, so the ciphertext of a sealed task stays stored as long as its
   offer receipt does.
+- **Feature (protocol, cloud, cloud-dataplane, ui-runtime)** — the Host accepts the sealed task
+  output, and the cloud advertises `sealed-payload-v1` (#654 E3b-2). A task whose offer sealed
+  `task-output` must report its output sealed. Its plaintext terminal may
+  carry only a closed code from the new `SEALED_TASK_PLAIN_CODES`: a
+  `task.fail` with `daemon_interrupted` or `sealed_key_unavailable`, a
+  `task.decline` whose `reason` is its sealed decline `code`, or a
+  `task.cancelled` with no reason. `task.complete`, `task.progress`,
+  `task.artifact` and `task.await_approval` have no plaintext form.
+  `isSealedTaskPlainOutput` checks that rule by exact match. A task without output sealing reports no sealed output. A
+  sealed terminal takes every gate of its plaintext type, and
+  `task.fail_sealed` with `recovery` is refused. `task.terminal_cause` keeps
+  only a closed code for a sealed terminal. `readDeviceTerminal` returns the
+  sealed terminal with its sealed member, and `readTaskResult` projects only
+  its plaintext fields. A sealed artifact is accepted and not stored. A sealed progress batch
+  is one activity tail entry with `sealed` in place of `event`, so the tail
+  capacity counts batches. A sealed approval request has `approvalId` and
+  `sealed`, and the Host resolves it by `approvalId`. A replay with the same
+  comparison projection is the same entry. A sealed output by `ciphertextRef`
+  is refused. The Postgres activity store accepts a stored sealed entry.
+  `replayTimeline` refuses a sealed batch, and the approval projection gives
+  no `summary` for a sealed request. Compatibility: `INBOUND_REFUSAL_REASONS`
+  gets `sealed_output_required`. `DeviceTerminal.envelope` can be one of the
+  four sealed terminal types. `ActivityTail.entries` is now
+  `ActivityTailEntry[]` (`TimelineEvent | SealedActivityBatch`), and
+  `ApprovalTimelineEvent` gets the sealed request member, so a reader that
+  reads `entry.event` or `summary` must narrow first. `projectTimelineEvents`
+  and `parseTimelineEvents` return `ActivityTailEntry[]`.
+  `activitySourceBatchState` and `activityCursor` take `ActivityTailEntry[]`.
+  `ApprovalTimelineEventSchema` and `ApprovalObservationSchema` accept the
+  sealed request member.
 
 ## 0.29.0 — 2026-10-23 (published)
 
