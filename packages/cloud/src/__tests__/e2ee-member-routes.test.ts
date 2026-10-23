@@ -15,6 +15,8 @@ import {
   E2EE_MEMBER_CHAIN_APPEND_OPERATION,
   E2EE_MEMBER_KEY_REGISTER_OPERATION,
   E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION,
+  SEALED_PAYLOAD_CAPABILITY,
+  decodeEnvelope,
   type PairResponse,
 } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
@@ -199,7 +201,7 @@ describe('E2EE member device routes', () => {
     const theirs = await keyPackage(TENANT_A, other, other, 1, key);
     const put = (value: unknown) => env.write(device, '/byok/e2ee/key-packages', E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, value);
 
-    expect(await answer(await put({ packages: [mine, theirs] }))).toEqual({ status: 200, body: { stored: 2 } });
+    expect(await answer(await put({ packages: [mine, theirs] }))).toEqual({ status: 200, body: { stored: 2, skippedDeviceIds: [device.deviceId] } });
     expect(await answer(await put({ packages: [await keyPackage(TENANT_A, other, member, 1)] }))).toEqual({ status: 409, body: { error: 'e2ee_scope_key_conflict' } });
     expect(await answer(await put({ packages: [await keyPackage(TENANT_B, other, member, 1)] }))).toEqual({ status: 400, body: { error: 'coordination_input_invalid' } });
 
@@ -211,6 +213,22 @@ describe('E2EE member device routes', () => {
     expect(await answer(await env.read(unregistered, '/byok/e2ee/key-packages?scopeId=scope-1')))
       .toEqual({ status: 409, body: { error: 'e2ee_member_not_registered' } });
     expect(await answer(await env.read(unregistered, '/byok/e2ee/key-packages'))).toEqual({ status: 400, body: { error: 'coordination_input_invalid' } });
+  });
+
+  it('sends the key package notice from the device put route to a recipient device with sealed-payload-v1', async () => {
+    const env = setup();
+    const device = await env.pair(TENANT_A);
+    const member = await newMember(device.deviceId);
+    const sender = await newMember();
+    expect((await env.write(device, '/byok/e2ee/member-key', E2EE_MEMBER_KEY_REGISTER_OPERATION, { member: member.bundle, mac: MAC })).status).toBe(200);
+    await env.base.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: [SEALED_PAYLOAD_CAPABILITY] });
+    const put = { packages: [await keyPackage(TENANT_A, sender, member, 1)] };
+
+    expect(await answer(await env.write(device, '/byok/e2ee/key-packages', E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, put)))
+      .toEqual({ status: 200, body: { stored: 1, skippedDeviceIds: [] } });
+    const page = await env.base.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0, limit: 10 });
+    expect(page.messages.map(row => decodeEnvelope(row.body)).filter(envelope => envelope.type === 'e2ee.key_package.available').map(envelope => envelope.payload))
+      .toEqual([{ scopeId: 'scope-1', epoch: 1 }]);
   });
 
   it('refuses an unknown top-level field on the chain append and the package put, and stores nothing', async () => {
