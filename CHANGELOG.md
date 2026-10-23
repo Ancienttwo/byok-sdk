@@ -113,8 +113,12 @@
   gets the member bundle, chain entry and key package schemas. Postgres
   migration `0027_e2ee_member.sql` adds five tables. A device removal deletes
   the device rows from three of them, and tenant erasure covers all five.
-  Upgrade: a Postgres Host applies migration 0027 before it runs 0.30.0.
-- **Feature (core, keys)** — `@byok-sdk/core/sealed-payload` exports the E2
+  Upgrade: a Postgres Host applies migration 0027 before it runs 0.30.0. With
+  `redactTasks` (#654 E5a) and the six sealed hosted entries (#654 E3a),
+  `ByokCloud` has 13 new methods. Code that implements or mocks `ByokCloud`
+  must add them. This is not a breaking change for code that only calls
+  `ByokCloud`.
+- **Feature (core)** — `@byok-sdk/core/sealed-payload` exports the E2
   member key and member chain modules (#654 E2a, E2b, E2). The new exports
   are the member key bundle (`createMemberKeyBundle`,
   `parseMemberKeyBundle`), the KEM self-signature check (`verifyMemberKem`),
@@ -122,10 +126,9 @@
   and the pairing MACs, and the member chain walk
   (`applyMemberChainEntries`, `verifyMemberChainFromAnchor`,
   `memberChainScopeRecipients`). The chain refuses a remove of its last
-  member. A hostile JavaScript object gets a typed failure. keys exports
-  `DeviceMemberKeyStore` and `DEVICE_MEMBER_SECRET_NAME`, with the error codes
-  `DEVICE_MEMBER_KEY_INVALID` and `DEVICE_MEMBER_KEY_ROTATION_MISMATCH`. There
-  is no wire or SQL change.
+  member. A hostile JavaScript object gets a typed failure. There is no wire
+  or SQL change. keys does not export a device member key store in this
+  release (#841).
 - **Changed (core)** — sealed content seals plaintext numbers with the RFC
   8785 number rule (#786). A decimal or a large double in the plaintext is now
   accepted. Number text that is not canonical, such as `1.0`, `1E3` or `-0`, is
