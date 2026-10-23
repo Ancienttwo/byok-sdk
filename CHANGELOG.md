@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- **Feature (protocol, cloud)** — wire v3 gets the rules of sealed payload v1,
+  behind the new capability `sealed-payload-v1` (#654 E3a). `PROTOCOL_VERSION`
+  stays 3. There are 13 new sealed message types, one for each sealed plain
+  type: the five offers, `task.steer_sealed`, and seven daemon outputs from
+  `task.complete_sealed` to `task.await_approval_sealed`. Each type is gated as
+  a whole on the flag, and it also has every gate of its plain type, except
+  gates on the fields that it seals. The split table `SEALED_SPLIT_TABLE`
+  names the identity, the sealed fields and the digest rules of each type.
+  `task.steer_sealed` has a `steerId`, and `task.artifact_sealed` has an
+  `artifactId`. A sealed message has no plaintext blob reference yet.
+  `task.decline` accepts four sealed decline codes. Cloud gets six sealed
+  hosted entries, from `enqueueSealedOffer` to `steerSealedTask`. Cloud does
+  not advertise the flag yet.
+- **Changed (cloud, server)** — the plaintext hosted entries now refuse
+  `sealing` and `sealed` with `coordination_input_invalid` (#654 E3a). Before,
+  the plain payload schema dropped these keys, and the task ran in plaintext.
+  `steerTask` also refuses `steerId`. The reference server `dispatch()` and
+  `executions.submit` refuse `sealing` and `sealed` the same way.
+- **Changed (client, cloud)** — until the sealed receivers exist, the daemon
+  declines a sealed offer non-retryably (`sealed_payload_unsupported`) and
+  drops a sealed steer (#654 E3a). Cloud inbound refuses a sealed daemon
+  message with `sealed_payload_unsupported`.
+
 ## 0.29.0 — 2026-10-23 (published)
 
 0.29.0 is a MINOR release under the default pre-1.0 policy, with no
