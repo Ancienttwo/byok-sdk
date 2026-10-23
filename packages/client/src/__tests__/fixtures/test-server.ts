@@ -84,9 +84,6 @@ export class TestServer {
   private failMessagesSends = false;
   private rejectHello = false;
   private failBlobUploads = false;
-  private blobUploadHold: Promise<void> | undefined;
-  /** Blob content PUTs that reached a hold (see {@link holdBlobUploads}). */
-  blobUploadsHeld = 0;
   private dropNextBlobFinalizeResponse = false;
   /** Capabilities advertised in every subsequent long-poll response. */
   private ackCapabilities: string[] = [];
@@ -177,16 +174,6 @@ export class TestServer {
   /** Make every blob content PUT fail with a 500 while `true` — used to test the client's handling of an upload failure (finding F7). */
   setFailBlobUploads(fail: boolean): void {
     this.failBlobUploads = fail;
-  }
-
-  /** Hold every blob content PUT, after its body arrived, until the returned function runs. */
-  holdBlobUploads(): () => void {
-    let release!: () => void;
-    this.blobUploadHold = new Promise<void>((resolve) => { release = resolve; });
-    return () => {
-      this.blobUploadHold = undefined;
-      release();
-    };
   }
 
   /** Commit finalize, then drop the first response to exercise same-key replay. */
@@ -555,13 +542,7 @@ export class TestServer {
       res.writeHead(500, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'simulated upload failure' }));
       return;
     }
-    const bytes = await readRawBody(req);
-    const hold = this.blobUploadHold;
-    if (hold !== undefined) {
-      this.blobUploadsHeld += 1;
-      await hold;
-    }
-    blob.bytes = bytes;
+    blob.bytes = await readRawBody(req);
     res.writeHead(200).end();
   }
 

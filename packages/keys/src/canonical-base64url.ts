@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 /**
  * Exactly 32 bytes in canonical unpadded base64url, for the stored P-256 JWK
- * coordinates and private scalars of the device key stores.
+ * coordinates and private scalars of the device sealing key store.
  *
  * The re-encode check rejects a last character whose unused low bits are not
  * zero. WebCrypto reads such a string as the same scalar, so a length and

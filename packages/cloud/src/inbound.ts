@@ -476,6 +476,24 @@ const SEALED_OUTPUT_PLAIN_TYPES: readonly MessageType[] = Object.values(SEALED_S
   .map((entry) => entry.plainType);
 
 /**
+ * The frozen `sealing` of a task, from its offer receipt, or `redacted` when
+ * task redaction replaced that receipt. A task without a receipt has no
+ * sealing.
+ */
+async function frozenOfferSealing(
+  stores: TenantStores,
+  deviceId: string,
+  taskId: string,
+  agentRef: AgentRef | undefined,
+): Promise<{ readonly categories: readonly string[] } | 'redacted' | undefined> {
+  const messageId = await taskOfferMessageId(stores.tenant, taskId, deviceId, agentRef, hashOfferBytes);
+  const offer = await stores.receipts.get(`task-offer:${messageId}`);
+  if (offer === undefined) return undefined;
+  if (isTaskRedactionTombstone(offer.body)) return 'redacted';
+  return (JSON.parse(offer.body) as { payload: { sealing?: { categories: readonly string[] } } }).payload.sealing;
+}
+
+/**
  * The output rule of a task's frozen `sealing` (#654 12d). When the offer
  * sealed `task-output`, the device reports output sealed, or plaintext with
  * only the closed codes. Otherwise it reports no sealed output. A redacted
@@ -491,13 +509,9 @@ async function sealedOutputRefusal(
 ): Promise<Refused | undefined> {
   const sealedType = isSealedMessageType(envelope.type);
   if (!sealedType && !SEALED_OUTPUT_PLAIN_TYPES.includes(envelope.type)) return undefined;
-  const messageId = await taskOfferMessageId(stores.tenant, taskId, deviceId, agentRef, hashOfferBytes);
-  const offer = await stores.receipts.get(`task-offer:${messageId}`);
-  if (offer !== undefined && isTaskRedactionTombstone(offer.body)) return undefined;
-  const categories = offer === undefined
-    ? []
-    : (JSON.parse(offer.body) as { payload: { sealing?: { categories?: readonly string[] } } }).payload.sealing?.categories ?? [];
-  const outputSealed = categories.includes('task-output');
+  const sealing = await frozenOfferSealing(stores, deviceId, taskId, agentRef);
+  if (sealing === 'redacted') return undefined;
+  const outputSealed = sealing?.categories.includes('task-output') === true;
   if (sealedType) return outputSealed ? undefined : refuse('sealed_payload_unsupported');
   return !outputSealed || isSealedTaskPlainOutput(envelope.type, envelope.payload) ? undefined : refuse('sealed_output_required');
 }
@@ -601,9 +615,13 @@ async function applyInboundGate(
     let binding;
     try { binding = await readTaskAgentMessageBinding(stores, deviceId, envelope.task_id, parsed.data.agentRef); }
     catch { return refuse('agent_message_draft_invalid'); }
+    // A draft is plaintext, so a task with any sealing streams none (#654 §6.1).
     if (binding === undefined
       || await stores.tasks.readTaskAgentMessage({ taskId: envelope.task_id, deviceId }) !== undefined
-      || await stores.receipts.get(terminalReceiptKey(envelope.task_id)) !== undefined) return refuse('agent_message_draft_invalid');
+      || await stores.receipts.get(terminalReceiptKey(envelope.task_id)) !== undefined
+      || await frozenOfferSealing(stores, deviceId, envelope.task_id, binding.attempt.agentRef) !== undefined) {
+      return refuse('agent_message_draft_invalid');
+    }
     await stores.agentMessageDraft.apply({ ...parsed.data, taskId: envelope.task_id, deviceId,
       maxBytes: binding.frozen.requirement.maxBytes, now });
     // A terminal or publish may commit while this ephemeral write is in flight.

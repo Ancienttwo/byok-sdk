@@ -135,6 +135,11 @@
   `activitySourceBatchState` and `activityCursor` take `ActivityTailEntry[]`.
   `ApprovalTimelineEventSchema` and `ApprovalObservationSchema` accept the
   sealed request member.
+- **Feature (cloud)** — the Host refuses `agent.message.draft` for a task
+  whose offer has any `sealing`, with `agent_message_draft_invalid`, because
+  a draft is plaintext (#654 E4a). The docs state that a sealed task must not
+  go to `@byok-sdk/cloud-do`, which reads its content in plaintext. No public
+  type changes.
 
 ## 0.29.0 — 2026-10-23 (published)
 
