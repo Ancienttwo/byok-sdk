@@ -12,7 +12,7 @@ const alive = pid => { try { process.kill(pid, 0); return true; } catch { return
 const until = async check => { const deadline = Date.now() + 15_000; while (!check()) { if (Date.now() > deadline) throw Error('native SEA fixture condition timed out'); await new Promise(r => setTimeout(r, 50)); } };
 try {
   const files = await copySdkNativeAssets({ outDir: assets, platform: 'win32', arch: 'x64' });
-  assert.deepEqual(files, ['KOFFI-LICENSE.txt', 'manifest.json', 'win32-x64/koffi.node']);
+  assert.deepEqual(files, ['KOFFI-LICENSE.txt', 'agent-memory-fs/manifest.json', 'agent-memory-fs/win32-x64.exe', 'manifest.json', 'win32-x64/koffi.node']);
   console.log('Pinned win32-x64 assets copied on', process.platform, process.arch);
   if (process.argv.includes('--copy-only')) process.exitCode = 0;
   else {

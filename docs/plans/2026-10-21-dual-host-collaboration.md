@@ -5,6 +5,7 @@
 日期：2026-10-21（Asia/Taipei）。
 SDK 基线：`95357bb07ba7b1b45a75ba463a170a75af435bd1`。
 下游源码核对基线：AiphaBee `5b5fc4ce`。未核对下游线上部署。
+2026-10-23 修订：按 [issue 655](https://github.com/Ancienttwo/byok-sdk/issues/655) 的身份对应决定，更新 §1、§4.1 和 §4.3；再按设备整体切换，更新 §5 D4、§6、§7 和 §8 的上线、记忆关卡与回退。
 
 ## 1. 目标与本次裁决
 
@@ -12,7 +13,7 @@ SDK 基线：`95357bb07ba7b1b45a75ba463a170a75af435bd1`。
 
 - **L：本地 Host。** Host 与 daemon 在设备上。适合离线、内网和单机自动化。
 - **H：云端 Host。** 产品服务端负责协调。daemon 在设备上。适合多设备和跨 Bot 协作。
-- AiphaBee 新的联网 Bot 默认选择 H。现有 L Bot 不自动迁移。
+- 默认只在本地运行（L）。云端调度（H）由用户为一台设备开启，对所有用户都是 opt-in（opt-in cloud scheduling; local by default）。现有 L Bot 不自动迁移。
 - 同一个 Bot 在同一时刻只有一个编排 owner。断网不触发 H 到 L 的切换。
 - 两条车道共用协议、runtime 和协作规则。不得维护两套协作状态机。
 
@@ -128,15 +129,17 @@ Host 必须在启动、重连和有界补查时扫描自己的未结算 intent�
 ### 4.1 模式绑定与切换
 
 模式绑定属于 Host 产品契约，不是新的 SDK wire 字段。
-绑定记录包含产品 scope、Bot id、`L | H`、模式 revision、目标 device 和切换状态。
+模式按设备记录，不按 Bot 记录。一台设备只运行一个 daemon；同一进程里的两个 daemon 实例也算两个（#655 R2）。用户开启云端调度时，这个 daemon 整体改为和 hosted 配对，设备上的全部 Bot 一起切到 H。
+绑定记录包含产品 scope、目标 device、`L | H`、模式 revision 和切换状态。
 模式 revision 标识编排 owner。它不冒充 SDK attempt 的 fencing 字段。
-新建的联网 Bot 默认 H；现有 Bot 的模式显式保留。
+设备默认 L；用户开启云端调度后才切到 H。现有设备的模式显式保留。
+下文的 L Bot 和 H Bot，指所在设备处于 L 或 H 的 Bot。
 
 - L Bot 只有绑定设备的 Host 能产生执行。云端 UI 可以发送幂等命令，但不能另行分派同一 Bot。
 - H Bot 的 routine 与其他触发源由产品 Host 排队。本地只处理收到的执行，不再启动同一 Bot 的 L routine。
 - 离线时 L 可以按本地有效策略运行。需要远端数据或在线授权的任务仍须拒绝或等待，不能伪造成功。
 - 离线时 H 不创建本地替代 intent。已开始的执行遵循冻结授权和本地取消规则；结果留在 durable outbox。
-- 同一设备可以承载不同模式的 Bot。各自的 enrollment、store、task namespace 明确分开，同一 Agent home 不得有两个 writer。
+- 同一设备上的 Bot 处于同一模式。设备只有一个 daemon 和一个 enrollment：在 L 时配对本机 Host，在 H 时配对 hosted Host。同一 Agent home 不得有两个 writer。
 - 第一版只允许同一协调域内的跨 Bot 委派。L/H 之间、两个独立 L Host 之间的实时委派不纳入首版，不隐式桥接。
 
 切换必须是显式操作。顺序为：旧 owner 持久冻结新 intent（durable freeze）并确认 → 排空或取消并确认终态 → 导出必要状态 → 验证目标 → 按预期 revision 条件提交新 owner → 清理旧编排入口。
@@ -160,7 +163,8 @@ Host 的 revision/fencing 必须覆盖 command、routine 和可产生执行的 o
 
 用户 session、设备 enrollment、task 授权和 provider key 分开处理。
 provider key 留在本机 OS credential store。不得为 H 把模型密钥交给云端。
-Host 将 account/workspace 映射到 SDK tenant，将产品设备绑定到 SDK enrollment。
+Host 把 account 加 workspace 的组合映射到一个 SDK tenant（#655 D-I2）。前提是一个 account 只属于一个用户：#654 v1 的成员链和 scope 只支持单用户（#654 设计 §14 D10）。如果一个 account 会有多个用户，要在 E2a 之前再确认。
+只有开启云端调度的设备才把产品设备绑定到 hosted SDK enrollment（#655 D-I1）。
 重配对、撤销和切换时核对这两组身份，不以本地目录名或 display name 证明身份。
 现有 `DaemonOverrides.deviceCredentials` 可复用，但不绕过 SDK enrollment 和 device proof。
 撤销后拒绝新提交和新连接。对已开始的本机执行，分别验证取消交付与本地停止结果。
@@ -227,17 +231,17 @@ Node 结果、Worker 结果、跨进程结果、跨物理设备结果分别给�
 恢复后重新导出并核对 digest，再允许新设备接受任务。
 若上游已完成部分实现，以 exact-head 的公开 API 和证据更新此切片，不重复实现。
 
-D4 与 D1–D3 可独立推进。仅新 Bot 的 H 试用不依赖旧记忆迁移；含旧记忆的切换必须等待 D4。
+D4 与 D1–D3 可独立推进。设备整体切换（§4.1），所以记忆关卡也按设备：设备上没有带旧记忆的 Bot 时（例如试用设备只有新 Bot），H 试用不依赖 D4；设备上任一 Bot 带旧记忆时，这台设备的切换必须等待 D4。
 
 ## 6. AiphaBee 下游实施与删除范围
 
 下游工作提交到 AiphaBee。遵守其 SDK 版本升级脚本和兼容检查，不修改 vendor SDK 源码。
 
-1. 在 `packages/byok-host` 增加 L/H 明确组合。现有 Bot 保持 L；试用的新联网 Bot 显式选 H。
-2. H 组合采用已验收的 cloud/dataplane 版本。设备只连接指定 hosted origin，不为同一 Bot 再启动 embedded 编排。
+1. 在 `packages/byok-host` 增加 L/H 明确组合。设备默认 L；用户为一台设备开启云端调度后，这台设备整体选 H。
+2. H 组合采用已验收的 cloud/dataplane 版本。H 设备的 daemon 只连接指定 hosted origin，这台设备不再为任何 Bot 启动 embedded 编排。
 3. 云端对话与 Bot 定义继续只有一个产品 owner。DO 可以继续承担协作事务；不得同时建立第二份 Postgres 对话权威。
-4. 先验收新 Bot，再执行已有 Bot 的受控切换。逐 Bot 记录配置 revision、执行结算和记忆 digest。
-5. 对已迁入 H 的 Bot，删除原本机 FIFO、routine 与委派入口的运行绑定。L 组合的实现继续服务 L Bot。
+4. 先在试用设备上验收 H：设备上只有新 Bot，没有旧记忆。再对已有设备做受控切换。一台设备的切换覆盖它的全部 Bot：逐设备记录切换 revision，并逐 Bot 记录配置 revision、执行结算和记忆 digest。设备上任一 Bot 的记忆导出或 digest 核对没通过时，整台设备不切换，全部 Bot 留在 L。
+5. 对已切到 H 的设备，删除它原本机 FIFO、routine 与委派入口的运行绑定。L 组合的实现继续服务 L 设备。
 6. 只有新路径覆盖授权、撤销、离线恢复与观测后，才删除该范围内旧的设备任务领取、回复转交与 wake 胶水。
 
 `apps/worker/src/local-execution.ts` 的加密研究 relay 不在自动删除范围。
@@ -263,6 +267,7 @@ S4c 的凭据整合需验证身份映射，不与 H 协作存储迁移混成一�
 | cancel 与 complete 竞态 | 产品取消结果与实际设备 terminal 分别可读；不把 cancel ACK 当停止证据 |
 | 撤销、跨 tenant、错 device、旧 revision | 拒绝新权威写入；旧执行的迟到证据不能修改新 owner 状态 |
 | L/H 切换且旧设备不可达 | 切换阻塞；不启动第二个 owner；不把超时当停止 |
+| 设备切换时，其中一个 Bot 的记忆导出或 digest 核对失败 | 整台设备不切换；全部 Bot 留在 L；不出现一部分 Bot 在 H 的设备 |
 | 新 owner revision 已提交，旧入口尚未完成清理时崩溃 | 重启后 durable freeze 与 revision/fencing 仍拒绝旧 owner 的 command、routine 和执行 outbox；新 owner 唯一可编排 |
 | history 压缩后换库迁移，再回退并重放旧 command | 去重处置、永久退役 intent identity 与未确认 outbox 完整保留；旧 command 不产生执行，未确认记录仅按原身份恢复 |
 | 记忆恢复中途崩溃 | home 不可执行；可恢复操作继续；完成后 digest 一致 |
@@ -285,7 +290,7 @@ dataplane 验收必须启用真实 Postgres/对象存储 fixture；skip 不能�
 - 本次只增加文档，删除文档即可回退，不涉及数据。
 - D1–D4 分开合入，未开放的 H 组合不影响 L。新 API 若需要 breaking change，单独安排版本，不塞入已冻结 patch。
 - 下游切换前保留旧模式记录和备份。提交新 owner 后，不能仅切一个开关回到旧 owner。
-- 换库、迁移与已切换 Bot 的回退使用同一持久冻结、排空与恢复流程。迁移集除业务 history/memory 外，必须包含 command 去重键及原处置、永久退役 intent identity 的不可复用证据、未确认 outbox 及原身份，并验证目标完整性后才启用新 owner。不得只恢复旧 ledger 或较旧备份而重新执行已完成 intent；缺少上述证据时保持阻塞，不能把缺失记录解释为新任务。
+- 换库、迁移与已切换设备的回退使用同一持久冻结、排空与恢复流程。一台设备回退时，它的全部 Bot 一起回退。迁移集除业务 history/memory 外，必须包含 command 去重键及原处置、永久退役 intent identity 的不可复用证据、未确认 outbox 及原身份，并验证目标完整性后才启用新 owner。不得只恢复旧 ledger 或较旧备份而重新执行已完成 intent；缺少上述证据时保持阻塞，不能把缺失记录解释为新任务。
 - 数据库故障时拒绝接纳新的协作命令。设备 outbox 达到已有上限时按现有 typed error 处理，不丢终态。
 - 在 10 倍设备与 Bot 数量下，补查只分页读取未结算 intent。禁止每次请求扫描全部历史或用每 Bot 的常驻 Worker timer。
 - H 增加服务端协调与存储成本。计费与额度仍由产品和现有存储 entitlement 决定，不新增 BYOK 推理计费。

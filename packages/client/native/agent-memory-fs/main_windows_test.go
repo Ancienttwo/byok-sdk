@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -74,5 +75,61 @@ func TestWindowsOpenAdmitsOnlyNTFS(t *testing.T) {
 				t.Fatalf("file system %q (error %v) admitted: session=%v error=%v", volume.name, volume.err, opened, failure)
 			}
 		})
+	}
+}
+
+// Local NTFS only: a remote volume is refused before its file system name is
+// read, and a failed device query also fails closed.
+func TestWindowsOpenRefusesRemoteVolume(t *testing.T) {
+	for _, volume := range []struct {
+		name   string
+		remote bool
+		err    error
+	}{{"remote", true, nil}, {"query-failed", false, errors.New("query failed")}} {
+		t.Run(volume.name, func(t *testing.T) {
+			home := newMemoryHome(t)
+			original := rootRemote
+			t.Cleanup(func() { rootRemote = original })
+			rootRemote = func(*os.Root) (bool, error) { return volume.remote, volume.err }
+			opened, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, ExpectedIdentity: identityForTest(t, home)})
+			if opened != nil || failure == nil || failure.code != "unsafe_root" {
+				t.Fatalf("volume %q (error %v) admitted: session=%v error=%v", volume.name, volume.err, opened, failure)
+			}
+		})
+	}
+}
+
+// The real device query: the temp volume is local. The same directory through
+// the SMB loopback admin share is remote, although its server reports NTFS,
+// and its open is refused.
+func TestWindowsRemoteVolumeQueryOnSMBLoopback(t *testing.T) {
+	home := newMemoryHome(t)
+	local, err := os.OpenRoot(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer local.Close()
+	if remote, err := volumeIsRemote(local); err != nil || remote {
+		t.Fatalf("local temp volume: remote=%v error=%v", remote, err)
+	}
+	volume := filepath.VolumeName(home)
+	share := `\\localhost\` + strings.TrimSuffix(volume, ":") + "$" + strings.TrimPrefix(home, volume)
+	shared, err := os.OpenRoot(share)
+	if err != nil {
+		// CI sets BYOK_REQUIRE_SMB_LOOPBACK_TEST=1, so a missing share fails there.
+		if os.Getenv("BYOK_REQUIRE_SMB_LOOPBACK_TEST") == "1" {
+			t.Fatalf("SMB loopback admin share is unavailable: %v", err)
+		}
+		t.Skipf("SMB loopback admin share is unavailable (it needs the Server service and share access): %v", err)
+	}
+	defer shared.Close()
+	if remote, err := volumeIsRemote(shared); err != nil || !remote {
+		t.Fatalf("SMB loopback share: remote=%v error=%v", remote, err)
+	}
+	name, err := volumeFileSystemName(shared)
+	t.Logf("SMB loopback share %s reports file system %q (error %v)", share, name, err)
+	opened, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: share, ExpectedIdentity: identityForTest(t, home)})
+	if opened != nil || failure == nil || failure.code != "unsafe_root" {
+		t.Fatalf("SMB loopback home admitted: session=%v error=%v", opened, failure)
 	}
 }

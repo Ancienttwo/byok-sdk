@@ -486,7 +486,9 @@ async function auditLines(canonicalHome: string): Promise<Array<Record<string, u
 
 const helperBin = builtAgentMemoryFilesystemHelperBin();
 const itHelper = helperBin !== undefined && isAgentMemoryFilesystemHelperSupported() ? it : it.skip;
-const itForeignHelper = process.platform === 'darwin' && helperBin === undefined ? it.skip : it;
+// Only the macOS helper has B; the Windows helper backend runs no intent.
+const itMacHelper = helperBin !== undefined && process.platform === 'darwin' ? it : it.skip;
+const itForeignHelper = isAgentMemoryFilesystemHelperSupported() && helperBin === undefined ? it.skip : it;
 
 // ===========================================================================
 // Live path
@@ -1668,8 +1670,8 @@ describe('WP2I-S2 backend proof and fail-closed entry', () => {
   });
 
   itForeignHelper('refuses a foreign helper rather than granting it either proof', () => {
-    const message = process.platform === 'darwin' ? 'SDK release artifact' : 'SDK Agent memory helper is not admitted on this platform';
-    expect(() => helperAgentMemoryIntentBackend('/bin/sh')).toThrow(message);
+    const message = isAgentMemoryFilesystemHelperSupported() ? 'SDK release artifact' : 'SDK Agent memory helper is not admitted on this platform';
+    expect(() => helperAgentMemoryIntentBackend(process.platform === 'win32' ? process.execPath : '/bin/sh')).toThrow(message);
   });
 
   it('retains both native Linux backend proofs', () => {
@@ -1945,10 +1947,10 @@ describe('WP2I-S2 native descriptor backend (Linux)', () => {
 });
 
 // ===========================================================================
-// macOS helper backend (only with a built helper binary)
+// SDK helper backend (only with a built helper binary; B on macOS only)
 // ===========================================================================
-describe('WP2I-S2 macOS SDK helper backend', () => {
-  itHelper('applies replace and delete through the real SDK ledger and does not repeat an acknowledged CAS', async () => {
+describe('WP2I-S2 SDK helper backend', () => {
+  itMacHelper('applies replace and delete through the real SDK ledger and does not repeat an acknowledged CAS', async () => {
     const w = await world();
     const backend = helperAgentMemoryIntentBackend(helperBin!);
     const replace = await makeIntent({ path: 'notes/host-a.md', operation: 'replace', base: EMPTY, content: 'durable helper value' });
@@ -1991,10 +1993,17 @@ describe('WP2I-S2 macOS SDK helper backend', () => {
     expect((await fs.readdir(path.join(w.canonicalHome, 'notes'))).filter((name) => name.startsWith('.byok-'))).toEqual([]);
 
     const helper = helperAgentMemoryIntentBackend(helperBin!);
-    expect(helper.strictLedgerBarrier).toBe(true);
     expect(helper.conflictProvesNoRename).toBe(true);
     const intent = await makeIntent({ path: 'notes/host-a.md', operation: 'replace', base: sha('stale'), content: 'x' });
     w.host.add(intent);
+    if (process.platform === 'win32') {
+      // No OS-crash or power-loss proof: no B, so the processor refuses before any fetch.
+      expect(helper.strictLedgerBarrier).toBe(false);
+      expect(await failureReason(w.processor({ backend: helper })(notice(intent)))).toBe('filesystem_unavailable');
+      expect(w.host.fetches).toHaveLength(0);
+      return;
+    }
+    expect(helper.strictLedgerBarrier).toBe(true);
     const result = await w.processor({ backend: helper })(notice(intent));
     expect(result.kind === 'acknowledged' && result.completion.outcome).toBe('conflict');
   });
@@ -2061,8 +2070,9 @@ describe('WP2I-S2 daemon routing', () => {
     await staleNotice(undefined, 'transport_unconfigured');
   });
 
-  const itUnproven = isAgentMemorySecureFilesystemAvailable(process.platform === 'darwin') ? it.skip : it;
-  itUnproven('with a transport on a platform with no proven backend (Windows, macOS): filesystem_unavailable before any fetch', async () => {
+  // macOS skips: its helper has B. Windows runs with or without the helper, which has no B.
+  const itUnproven = isAgentMemorySecureFilesystemAvailable(false) || process.platform === 'darwin' ? it.skip : it;
+  itUnproven('with a transport on a platform with no proven backend (Windows): filesystem_unavailable before any fetch', async () => {
     const events: string[] = [];
     const hostStorageRoot = await tempRoot('bk-s2-unused-');
     const host = new FakeHost(new AgentHomeManager({ hostStorageRoot }), events);

@@ -13,6 +13,16 @@ it('uses the official lockfile integrity for cross-host Windows x64 copy', async
   expect(lock).toContain(`"${pin.package}@${pin.version}"`); expect(lock).toContain(pin.integrity);
   expect(pin.url).toBe('https://registry.npmjs.org/@koromix/koffi-win32-x64/-/koffi-win32-x64-3.2.0.tgz');
 });
+it('lists the Windows memory helper apart from Koffi with its own signing policy', async () => {
+  const { AGENT_MEMORY_HELPER_RELEASE } = await import('../daemon/agent-memory-helper-release-pin');
+  const target = sdkNativeAssetTargets['win32-x64'];
+  expect(target.signingPolicy).toBe('unmodified-official-addon');
+  expect(target.files).toEqual(['KOFFI-LICENSE.txt', 'manifest.json', 'win32-x64/koffi.node']);
+  expect(target.agentMemoryHelper).toEqual({
+    files: ['agent-memory-fs/manifest.json', `agent-memory-fs/${AGENT_MEMORY_HELPER_RELEASE.entries['win32-x64'].file}`],
+    signingPolicy: 'product-resigning-allowed',
+  });
+});
 it('refuses relative roots and unsupported targets before downloading', async () => {
   const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
   await expect(copySdkNativeAssets({ outDir: 'relative', platform: 'win32', arch: 'x64' })).rejects.toThrow('absolute');

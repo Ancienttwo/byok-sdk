@@ -5,7 +5,7 @@
  * A product that embeds this SDK instead of running the daemon (no second
  * control plane, no `control.sock`) already owns the pieces the daemon would
  * otherwise own for it: the canonical Agent home under `AGENT_HOME_DIRECTORY`,
- * the lease that pins it, and the signed/notarized macOS helper binary. What it
+ * the lease that pins it, and the signed macOS or Windows helper binary. What it
  * cannot own is the memory authority itself — the compare-and-swap semantics,
  * the audit record, the platform gate, and the exact path policy the model is
  * allowed to name. Those must stay in one place or two implementations drift.
@@ -15,7 +15,7 @@
  *
  * - `AgentMemoryService`             — task-scoped recall/save authority.
  * - `captureAgentMemorySnapshot`     — the post-close bounded snapshot.
- * - `openAgentMemoryFilesystemHelper`— admission of the host's macOS helper.
+ * - `openAgentMemoryFilesystemHelper`— admission of the host's macOS or Windows helper.
  * - `serveAgentMemoryMcpOverStdio`   — the two memory tools over stdio.
  * - `prependAgentMemoryGuidance`     — the prompt half of the path contract.
  *
@@ -42,8 +42,8 @@
  *    snapshot and nothing that sends it anywhere.
  *
  * Platform semantics are unchanged by this entry, not re-stated in it: Linux
- * uses the native descriptor backend, macOS requires the host's external
- * helper, and Windows stays fail-closed. `isAgentMemorySecureFilesystemAvailable`
+ * uses the native descriptor backend, and macOS and Windows x64 require the
+ * host's external helper. `isAgentMemorySecureFilesystemAvailable`
  * is the single gate a host consults before offering memory at all.
  */
 
@@ -53,7 +53,7 @@ export { AgentMemoryService } from '../daemon/agent-memory';
 export { captureAgentMemorySnapshot } from '../daemon/agent-memory';
 /** The single source of truth for which relative path a model may name: `MEMORY.md` or `notes/<safe-relative>.md`. */
 export { validateAgentMemoryPath } from '../daemon/agent-memory';
-/** The sole platform gate for the memory write authority: native Linux, macOS only with the host's helper, Windows never. */
+/** The sole platform gate for the memory write authority: native Linux, macOS and Windows x64 only with the host's helper. */
 export { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
 /** Base failure for every rejected memory operation. */
 export { AgentMemoryError } from '../daemon/agent-memory';
@@ -73,7 +73,7 @@ export type { AgentMemorySaveResult } from '../daemon/agent-memory';
 /** Metadata-only signal that the audit record could not be written; the source operation still succeeded. */
 export type { AgentMemoryAuditWarning } from '../daemon/agent-memory';
 
-/** Whether this platform can admit an external filesystem helper at all (macOS only today). */
+/** Whether this platform can admit an external filesystem helper at all (macOS and Windows x64 today). */
 export { isAgentMemoryFilesystemHelperSupported } from '../daemon/agent-memory-fs-helper';
 /** Admits the host's absolute signed/notarized helper binary and returns the root-pinned filesystem for one Agent home. */
 export { openAgentMemoryFilesystemHelper } from '../daemon/agent-memory-fs-helper';
