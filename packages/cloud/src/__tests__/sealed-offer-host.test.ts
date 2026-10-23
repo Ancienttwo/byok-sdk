@@ -41,17 +41,18 @@ function seal(device: PairedDevice, instruction: string) {
   return sealInput({ tenant: TENANT_A, deviceId: device.deviceId, type: TYPE, identity: { taskId: TASK_ID }, plaintext: { instruction } });
 }
 
-function offer(harness: CloudHarness, device: PairedDevice, sealed: object) {
+/** `plain` holds more plaintext fields of the offer. */
+function offer(harness: CloudHarness, device: PairedDevice, sealed: object, plain: object = {}) {
   return harness.cloud.enqueueSealedOffer(TENANT_A, device.deviceId, {
     taskId: TASK_ID,
-    payload: { runtime: 'pi', sealing: SEALING, sealed } as never,
+    payload: { runtime: 'pi', ...plain, sealing: SEALING, sealed } as never,
   });
 }
 
 /** The first offer fails at its mailbox append, after its receipt. Only then may the same task id be offered again. */
-async function failedFirstOffer(harness: CloudHarness, device: PairedDevice, sealed: object): Promise<void> {
+async function failedFirstOffer(harness: CloudHarness, device: PairedDevice, sealed: object, plain: object = {}): Promise<void> {
   vi.spyOn(harness.core.mailbox, 'append').mockRejectedValueOnce(new Error('mailbox unavailable'));
-  await expect(offer(harness, device, sealed)).rejects.toThrow('mailbox unavailable');
+  await expect(offer(harness, device, sealed, plain)).rejects.toThrow('mailbox unavailable');
   expect(await mailbox(harness, device)).toEqual([]);
 }
 
@@ -92,6 +93,18 @@ describe('a sealed offer retry keeps the first ciphertext (#654 §9.2)', () => {
     });
     expect(await mailbox(harness, device)).toEqual([]);
     const retried = await offer(harness, device, first);
+    expect(await mailbox(harness, device)).toEqual([retried.envelope]);
+  });
+
+  it('refuses a plaintext field change under the same task id and the same sealed member, and keeps the first offer', async () => {
+    const { harness, device } = await sealedDevice();
+    const sealed = inlineMember(await seal(device, 'review the patch'));
+    await failedFirstOffer(harness, device, sealed, { workspaceHint: 'repo-a' });
+
+    await expect(offer(harness, device, sealed, { workspaceHint: 'repo-b' })).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+    expect(await mailbox(harness, device)).toEqual([]);
+    const retried = await offer(harness, device, sealed, { workspaceHint: 'repo-a' });
+    expect(retried.envelope.payload).toMatchObject({ workspaceHint: 'repo-a', sealed });
     expect(await mailbox(harness, device)).toEqual([retried.envelope]);
   });
 });
@@ -137,6 +150,10 @@ describe('a sealed offer by ciphertextRef (#654 E3b)', () => {
     ['a declared hash that names no object of this tenant', async (harness, device, ciphertext) => {
       const uploaded = await uploadCiphertext(harness, device, ciphertext);
       return { ref: { ...uploaded, contentHash: await sha256Hash(ciphertext.subarray(1)) }, uploaded };
+    }],
+    ['a declared size that is not the size of the blob', async (harness, device, ciphertext) => {
+      const uploaded = await uploadCiphertext(harness, device, ciphertext.subarray(1));
+      return { ref: { ...uploaded, size: ciphertext.byteLength }, uploaded };
     }],
     ['a declared content type that is not the type of the blob', async (harness, device, ciphertext) => {
       const uploaded = await uploadCiphertext(harness, device, ciphertext, { contentType: 'text/plain' });
