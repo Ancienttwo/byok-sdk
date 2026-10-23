@@ -367,6 +367,8 @@ describe('member chain walk', () => {
     await rejected(withDevice, device, 'rotate', await rotateSubject(device, kem, 3));
     await rejected(withDevice, device, 'rotate', await rotateSubject(device, kem, 1));
     await rejected(withDevice, device, 'rotate', await rotateSubject(device, device.bundle.signingPublicJwk, 2));
+    // A rotation must change the KEM key: the current key at the next epoch is refused.
+    await rejected(withDevice, device, 'rotate', await rotateSubject(device, device.bundle.kemPublicJwk, 2));
     // kemSig (10a) must be the member's own signature over this KEM key.
     await rejected(withDevice, device, 'rotate', { ...(await rotateSubject(device, kem, 2)), kemPublicJwk: { ...(await kemJwk()) } });
     await rejected(withDevice, device, 'rotate', { ...(await rotateSubject(device, kem, 2)), kemSig: client.bundle.kemSig });

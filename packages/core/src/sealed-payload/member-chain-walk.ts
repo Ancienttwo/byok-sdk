@@ -31,8 +31,9 @@
  *   a re-paired device is a new member (§7.5).
  * - `remove` `{ memberId }`: a current member.
  * - `rotate` `{ memberId, kemPublicJwk, kemEpoch, kemSig }`: signed by that
- *   member itself; `kemEpoch` is its current KEM epoch + 1; `kemSig` is the
- *   member's signature over the new KEM key (10a).
+ *   member itself; `kemEpoch` is its current KEM epoch + 1; the KEM key is
+ *   not the current one; `kemSig` is the member's signature over the new KEM
+ *   key (10a).
  * - `scope-policy` `{ scopeId, categories, members }`: categories in the
  *   order of `SEALED_CATEGORIES`, no repeats; members sorted, no repeats,
  *   each a current member (§7.4); the scope is not shredded.
@@ -211,6 +212,9 @@ async function applySubject(state: WalkState, entry: MemberChainEntryV1): Promis
       if (!subject.success || subject.data.memberId !== entry.signer) return false;
       const member = state.members.get(subject.data.memberId);
       if (member === undefined || subject.data.kemEpoch !== member.kemEpoch + 1) return false;
+      // A rotation to the current key keeps the old private key valid for new packages.
+      const { kemPublicJwk } = subject.data;
+      if (kemPublicJwk.x === member.kemPublicJwk.x && kemPublicJwk.y === member.kemPublicJwk.y) return false;
       if (!(await verifyMemberKem(member, subject.data))) return false;
       state.members.set(member.memberId, {
         ...member,
