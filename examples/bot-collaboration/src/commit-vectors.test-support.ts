@@ -8,6 +8,8 @@ import type { Command } from './rules/commands';
 import { TeamModeError, type TeamSnapshotBot } from './rules/team';
 import { BOT_TURN_OUTCOME_CONTRACT } from '@byok-sdk/protocol';
 import { OFFER_WAIT_MS, syncTurn, type SyncFacts, type SyncOptions, type SyncStep } from './rules/sync';
+import type { Conclusion } from './rules/delegation';
+import type { Json } from './rules/turn';
 
 /**
  * #739 D1 commit contract vectors. Each store runs the same cases: the K8 L ledger now, and the H adapter in D2.
@@ -207,8 +209,9 @@ export function commitVectors(name: string, open: (team?: SeedTeam) => CommitSub
 /**
  * #793 D2b: the sync step as a store operation. The store runs `syncTurn` for each stored Turn, in insertion order, in one
  * transaction under the same scope lock as `commit`, with the options below. It writes each returned step: a `freeze` stores
- * its intent input as it is. It writes no command record and keeps the revision. A sync is the Host's own work, so a client's
- * expected revision must not go stale because of it.
+ * its intent input as it is. The projections that the step publishes reach the store's outbox in the same transaction.
+ * It writes no command record and keeps the revision. A sync is the Host's own work, so a client's expected revision must
+ * not go stale because of it. The store reads the facts inside the sync transaction.
  */
 export interface SyncSubject extends CommitSubject {
   /** A test edit of the stored state, outside the contract. */
@@ -216,6 +219,10 @@ export interface SyncSubject extends CommitSubject {
   sync(): void | Promise<void>;
   /** The stored intent input of a Turn. */
   intent(turnId: string): SyncIntentRecord | undefined | Promise<SyncIntentRecord | undefined>;
+  /** A test edit: the store settles the intent of a Turn with this conclusion, outside the contract. */
+  concludeIntent(turnId: string, conclusion: Conclusion): void | Promise<void>;
+  /** The values of the stored outbox rows with this projection id. */
+  projection(id: string): Json[] | Promise<Json[]>;
 }
 export type SyncIntentRecord = Extract<SyncStep<unknown>, { kind: 'freeze' }>['input'];
 /** The sync options of the vectors. A Bot with an undeclared connector toolset cannot freeze. */
@@ -260,6 +267,22 @@ export function syncVectors(name: string, open: () => SyncSubject | Promise<Sync
       await subject.sync();
       const result = await subject.commit({ scope: subject.scope, commandId: 'i1', command: input('k1'), expectedRevision: revision });
       expect(result.revision).toBe(revision + 1);
+    });
+
+    it('writes the report of a concluded intent to the outbox once, at the same revision', async () => {
+      const subject = await seeded();
+      await subject.sync();
+      await subject.concludeIntent('q1', 'succeeded');
+      const revision = (await subject.state()).revision;
+      expect(await subject.projection('bot-turn:q1')).toEqual([]);
+      await subject.sync();
+      expect(await subject.projection('bot-turn:q1')).toEqual([expect.objectContaining({ owner: 'main', id: 'q1', status: 'succeeded',
+        conclusion: 'succeeded' })]);
+      const after = await subject.state();
+      expect([after.turns.q1!.status, after.turns.q1!.reported, after.revision]).toEqual(['succeeded', true, revision]);
+      const stored = await subject.stored();
+      await subject.sync();
+      expect(await subject.stored()).toBe(stored);
     });
 
     it('writes nothing when a later Turn of the same sync throws', async () => {

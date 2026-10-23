@@ -326,9 +326,10 @@ write for the store:
   its open occurrence.
 
 A store runs the step for each stored Turn, in insertion order, in one
-transaction under the same scope lock as a commit. The step is a Host pass
-that only applies evidence, so it writes no command record and keeps the
-revision. A client's expected revision does not go stale because of a sync.
+transaction under the same scope lock as a commit. It reads the facts inside
+that transaction. The projections that the step publishes reach the store's
+outbox in the same transaction. The step is a Host pass that only applies
+evidence, so it writes no command record and keeps the revision. A client's expected revision does not go stale because of a sync.
 If one Turn throws, the store writes nothing. L runs the step in its sync
 transaction through `syncTurnInLedger` (`src/commit.ts`), which keeps the K4
 writes: `enqueue`, `promoteOccurrence`, the intent cancel and the occurrence

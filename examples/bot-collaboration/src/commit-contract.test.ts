@@ -15,6 +15,11 @@ import { commitCommand, refuseRetired, type AdmittedIds, type Command, type Comm
 import { commitVectors, seedCollaboration, SYNC_OPTIONS, syncVectors, VECTOR_NOW, type CommitSubject, type SeedTeam, type SyncIntentRecord,
   type SyncSubject } from './commit-vectors.test-support';
 import { syncTurn } from './rules/sync';
+import type { Conclusion } from './rules/delegation';
+
+/** The intent fact fields that the memory store keeps. */
+const pick = (row: { conclusion?: Conclusion; cancelReason?: 'cancelled' }) =>
+  ({ ...(row.conclusion ? { conclusion: row.conclusion } : {}), ...(row.cancelReason ? { cancelReason: row.cancelReason } : {}) });
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { writeSnapshotBot } from './team';
 
@@ -49,7 +54,7 @@ function memoryStore(archive: MemoryArchive): RetentionStore & { get(namespace: 
 /** The pure rules on a plain object. A commit or a sync works on a copy and keeps it only when it returns. */
 function memorySubject(team?: SeedTeam): RetentionSubject & SyncSubject {
   let stored = { state: stateOf({}), outbox: {} as Record<string, Json>, archive: { rows: {}, retired: [] } as MemoryArchive,
-    intents: {} as Record<string, SyncIntentRecord & { cancelReason?: 'cancelled' }> };
+    intents: {} as Record<string, SyncIntentRecord & { cancelReason?: 'cancelled'; conclusion?: Conclusion }> };
   seedCollaboration(stored.state, team);
   const facts = { hasIntent: () => false, occurrenceOpen: () => false };
   return {
@@ -75,7 +80,7 @@ function memorySubject(team?: SeedTeam): RetentionSubject & SyncSubject {
     sync() {
       const next = structuredClone(stored), rows = memoryStore(next.archive);
       for (const turn of Object.values(next.state.turns)) {
-        const step = syncTurn(next.state, turn, { intent: id => next.intents[id] && { taskId: id }, executionStarted: () => false,
+        const step = syncTurn(next.state, turn, { intent: id => next.intents[id] && { taskId: id, ...pick(next.intents[id]!) }, executionStarted: () => false,
           retired: id => rows.isRetired('turn', id) ? 'turn_retired' : undefined }, SYNC_OPTIONS, (id, value) => { next.outbox[id] = value; });
         if (step?.kind === 'freeze') next.intents[turn.id] = step.input;
         else if (step?.kind === 'cancel') next.intents[turn.id]!.cancelReason = 'cancelled';
@@ -83,7 +88,9 @@ function memorySubject(team?: SeedTeam): RetentionSubject & SyncSubject {
       }
       stored = next;
     },
-    intent: id => structuredClone(stored.intents[id]),
+    intent: id => { const row = stored.intents[id]; return row && { key: row.key, source: row.source, waitUntil: row.waitUntil, execution: structuredClone(row.execution) }; },
+    concludeIntent(id, conclusion) { const next = structuredClone(stored); next.intents[id]!.conclusion = conclusion; stored = next; },
+    projection: id => stored.outbox[id] === undefined ? [] : [structuredClone(stored.outbox[id]!)],
     stored: () => JSON.stringify(stored),
     state: () => structuredClone(stored.state),
   };
@@ -113,6 +120,8 @@ function ledgerSubject(team?: SeedTeam): RetentionSubject & SyncSubject & { ledg
     change: edit => { ledger.transaction(s => { edit(stateOf(s.application)); }); },
     // The Host sync loop runs the same function for each Turn.
     sync: () => { ledger.transaction((s, rows) => { for (const turn of Object.values(stateOf(s.application).turns)) syncTurnInLedger(ledger, s, rows, turn, SYNC_OPTIONS); }); },
+    concludeIntent: (id, conclusion) => { ledger.transaction(s => { Object.assign(s.intents[hash(id)]!, { phase: 'settled', conclusion }); }); },
+    projection: id => Object.values(ledger.snapshot().outbox).flatMap(row => row.kind === 'projection' && row.id === id ? [row.value] : []),
     intent: id => {
       const row = ledger.snapshot().intents[hash(id)];
       return row && { key: row.key, source: row.source as SyncIntentRecord['source'], waitUntil: row.waitUntil, execution: row.execution };
