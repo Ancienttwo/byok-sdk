@@ -1,6 +1,7 @@
 import type { PoolClient } from 'pg';
-import { canonical, DEFAULT_RETRY, hash, routineCommands, switchVersion, versionSwitchDue, type FrozenInput, type Intent, type LedgerState,
-  type Occurrence, type Routine, type RoutineCommands, type RoutineDefinition } from '@byok-sdk/example-host-execution-core';
+import { applyPlan, auditCalendarError, canonical, DEFAULT_RETRY, hash, nextWake, recordOccurrence, routineCommands, scheduleNext, switchVersion,
+  versionSwitchDue, type FrozenInput, type Intent, type LedgerState, type Occurrence, type Routine, type RoutineCommands,
+  type RoutineDefinition } from '@byok-sdk/example-host-execution-core';
 import { BOT_ROUTINE, createDefinition, owned, routineCalendar, routineTurn, updateDefinition } from '@byok-sdk/example-bot-collaboration/routines';
 import type { CommandPorts } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { storedKey } from './layout';
@@ -78,9 +79,10 @@ const routineColumns = (routine: Routine) => [JSON.stringify(routine.definition)
  * Writes the slice diff: routine rows, the superseded flag and the conclusion of an occurrence with no intent, and the
  * `retry_until` and conclusion of loaded intents. The K4 fields with no H reader stay behind: the slice outbox,
  * `attempts`, `slotReplayCount`, `ignoredWakes`, `sequence`, and the conclusion that K4 copies onto a promoted occurrence.
- * A promotion writes its own intent row. The caller holds the scope lock.
+ * A promotion writes its own intent row. Only the scheduler's fire adds an occurrence: `recorded` is its key. The caller
+ * holds the scope lock.
  */
-export async function writeSlice(client: PoolClient, scopeKey: string, slice: RoutineSlice): Promise<void> {
+export async function writeSlice(client: PoolClient, scopeKey: string, slice: RoutineSlice, recorded?: string): Promise<void> {
   const { state, before } = slice;
   for (const id of Object.keys(before.routines)) if (!state.routines[id]) throw new Error('A routine row cannot be removed');
   for (const [id, routine] of Object.entries(state.routines)) {
@@ -102,8 +104,14 @@ export async function writeSlice(client: PoolClient, scopeKey: string, slice: Ro
   }
   for (const [key, row] of Object.entries(state.occurrences)) {
     const prior = before.occurrences[key];
-    if (!prior) throw new Error('H records occurrences only in its scheduler');
     if (row.job) throw new Error('H runs no Host job routines');
+    if (!prior) {
+      if (key !== recorded) throw new Error('H records occurrences only in its scheduler');
+      await client.query(`INSERT INTO occurrence (scope, key, ordinal, routine_id, definition_version, trigger_kind, planned_at, recorded_at, next_at)
+        SELECT $1, $2, coalesce(max(ordinal) + 1, 0), $3, $4, $5, $6, $7, $8 FROM occurrence WHERE scope = $1`,
+      [scopeKey, storedKey(key), storedKey(row.routineId), row.definitionVersion, row.trigger.kind, row.trigger.plannedAt, row.recordedAt, row.nextAt]);
+      continue;
+    }
     if (prior.intentId !== undefined || row.intentId !== undefined) continue;
     if (!!row.hook?.executionSuperseded !== !!prior.hook?.executionSuperseded || row.conclusion !== prior.conclusion) {
       await client.query(`UPDATE occurrence SET execution_superseded = $3, conclusion = $4 WHERE scope = $1 AND key = $2 AND conclusion IS NULL`,
@@ -130,6 +138,37 @@ export async function switchDueVersions(client: PoolClient, scopeKey: string, no
     if (versionSwitchDue(routine, Object.values(slice.state.occurrences), now)) switchVersion(slice.state, routine, now, routineCalendar);
   }
   await writeSlice(client, scopeKey, slice);
+}
+
+/** Routine `id` when it is active and its reserved slot is due at `now`. */
+export function dueRoutine(slice: RoutineSlice, id: string, now: number): Routine | undefined {
+  const routine = slice.state.routines[hash(id)];
+  return routine?.lifecycle === 'active' && routine.next && routine.next.availableAt <= now ? routine : undefined;
+}
+/**
+ * K4 `recordOccurrence` for the due slot of `routine` (scheduler note §2.2 step 4). The wake comes from the row that the caller
+ * holds under the scope lock, so the K4 reservation checks pass. H has no SDK wake: K4 reads only the slot key, its time and
+ * the absent payload.
+ */
+export function recordDue(slice: RoutineSlice, scope: string, routine: Routine, now: number): Occurrence {
+  const { dedupKey, availableAt } = routine.next!;
+  const occurrence = recordOccurrence(slice.state, scope, { wakeId: dedupKey, dedupKey, availableAt, deliveredAt: now, delivery: 1 }, now, routineCalendar);
+  if (!occurrence?.hook) throw new Error('A due routine slot recorded no occurrence');
+  return occurrence;
+}
+
+/**
+ * The K4 schedule upkeep of one scope's routines (scheduler note §2.6). `start`: K4 `recover` re-plans an active routine
+ * that had no slot within the horizon. Each pass: K4 `scheduleNext` sets `ok` once a `schedule_retrying` slot is within the
+ * horizon. H keeps no wake, so the K4 outbox rows that these functions write stay behind.
+ */
+export function planSlice(slice: RoutineSlice, now: number, phase: 'start' | 'pass'): void {
+  for (const routine of Object.values(slice.state.routines)) {
+    if (phase === 'start' && routine.lifecycle === 'active' && routine.status === 'no_occurrence_within_horizon' && !routine.pending) {
+      try { applyPlan(slice.state, routine, nextWake(routine.definition, now, routineCalendar, now), now); }
+      catch (error) { auditCalendarError(routine, now, error); }
+    } else if (routine.status === 'schedule_retrying') scheduleNext(slice.state, routine, now);
+  }
 }
 
 /** H runs only `bot-routine` routines (#793 §53c). Host-job and execution-template routines need a later slice. */
