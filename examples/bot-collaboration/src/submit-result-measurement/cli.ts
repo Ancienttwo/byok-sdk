@@ -15,7 +15,7 @@ import { parseArgs } from 'node:util';
 import { ClaudeAdapter, CodexAdapter, GrokAdapter, PiAdapter, type RuntimeAdapter } from '@byok-sdk/client';
 import type { DispatchSelection } from '@byok-sdk/protocol';
 import { CORPUS } from './corpus';
-import { MEASURED_RUNTIMES, plannedManifest, runCell, type MeasuredRuntime } from './harness';
+import { MEASURED_RUNTIMES, plannedManifest, RESERVED_CELL_KEYS, runCell, type MeasuredRuntime } from './harness';
 import type { RunManifest } from './records';
 
 
@@ -98,6 +98,7 @@ export async function main(argv: readonly string[], deps: CliDeps = {}): Promise
     if (!model || /[\u0000-\u001f]/u.test(model)) throw new UsageError('--model is required');
     const caseIds = values.cases ? values.cases.split(',').map(id => id.trim()) : CORPUS.map(entry => entry.id);
     for (const id of caseIds) if (!CORPUS.some(entry => entry.id === id)) throw new UsageError(`unknown case ${id}`);
+    if (new Set(caseIds).size !== caseIds.length) throw new UsageError('--cases must not repeat a case');
     const rounds = positive('rounds', values.rounds, 20);
     const maxTrials = positive('max-trials', values['max-trials'], rounds * caseIds.length);
     const runId = values['run-id'] ?? new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '').toLowerCase();
@@ -106,6 +107,7 @@ export async function main(argv: readonly string[], deps: CliDeps = {}): Promise
     for (const fact of values.cell ?? []) {
       const eq = fact.indexOf('=');
       if (eq < 1) throw new UsageError('--cell takes key=value');
+      if (RESERVED_CELL_KEYS.includes(fact.slice(0, eq))) throw new UsageError(`--cell ${fact.slice(0, eq)} is set by the runner`);
       cell[fact.slice(0, eq)] = fact.slice(eq + 1);
     }
     const selection = selectionFor(runtime, model);

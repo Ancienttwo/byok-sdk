@@ -4,7 +4,8 @@ import { expect, it } from 'vitest';
 import { CORPUS, corpusCase, preflightCorpus } from './corpus';
 import { resultDigest } from './digest';
 import { classifyTrial, extractSubmissions, findHelperBody, type CallPredicate, type ObservedEvent, type TrialObservation } from './evidence';
-import { planTrials } from './harness';
+import { readFileSync } from 'node:fs';
+import { CALIBRATION_CASE, plannedManifest, planTrials, RESERVED_CELL_KEYS, sdkBuild, trialTerminal } from './harness';
 import { redact } from './records';
 import { wilson } from './summary';
 
@@ -122,4 +123,41 @@ it('replaces local paths in every string form before a file is written', () => {
   const clean = redact(value, [[root, '<run-root>'], ['/home/someone', '<home>']]);
   expect(JSON.stringify(clean)).not.toContain('someone');
   expect(clean.reason).toBe('failed in <run-root>\\homes');
+});
+
+it('calibrates with C01 even when the counted cases exclude or reorder it', () => {
+  const plan = planTrials({ rounds: 1, caseIds: ['C06-large', 'C02-scalars'], calibrate: true });
+  expect(CALIBRATION_CASE).toBe('C01-small');
+  expect(plan.map(trial => [trial.caseId, trial.counted])).toEqual([['C01-small', false], ['C06-large', true], ['C02-scalars', true]]);
+});
+
+it('keeps the digest of a terminal that arrives in the cancellation grace', () => {
+  const document = corpusCase('C01-small').target;
+  expect(trialTerminal({ status: 'task.complete', at, reason: null, hasDocument: true, document }, true))
+    .toEqual({ status: 'task.complete', at, reason: null, errorCode: null, outcomeDigest: corpusCase('C01-small').targetDigest, afterDeadline: true });
+  expect(trialTerminal({ status: 'task.cancelled', at, reason: 'measurement deadline', hasDocument: false }, true)).toMatchObject({ outcomeDigest: null, afterDeadline: true });
+  expect(trialTerminal(null, false)).toBeNull();
+});
+
+const planned = (cell: Record<string, unknown>) => plannedManifest({
+  runId: 'test', cellId: 'cell', mode: 'dry-run', runtime: 'pi', rounds: 1, deadlineMs: 1000, maxTrials: 6,
+  capacityReasons: ['context_overflow'], calibrate: true, authorization: null, cell,
+});
+
+it('keeps generated cell facts over operator facts and reserves every generated key', () => {
+  const manifest = planned({ model: 'm', platform: 'not-this-platform', concurrency: 9, note: 'kept' });
+  expect(manifest.cell).toMatchObject({ model: 'm', platform: process.platform, concurrency: 1, note: 'kept', runtime: 'pi' });
+  const generated = Object.keys(planned({}).cell);
+  expect(generated.filter(key => !RESERVED_CELL_KEYS.includes(key))).toEqual([]);
+});
+
+it('records the SDK build identity in every cell', () => {
+  const build = planned({}).cell.sdkBuild as { commit: string | null; dirty: boolean | null; packages: Record<string, { version: string; distSha256: string | null }> };
+  expect(build).toEqual(sdkBuild());
+  for (const name of ['client', 'server', 'protocol', 'core']) {
+    const manifest = JSON.parse(readFileSync(new URL(`../../../../packages/${name}/package.json`, import.meta.url), 'utf8')) as { name: string; version: string };
+    // The suite runs after `bun run build`, so each dist entry exists and has a hash.
+    expect(build.packages[manifest.name]).toEqual({ version: manifest.version, distSha256: expect.stringMatching(/^[0-9a-f]{64}$/) });
+  }
+  if (build.commit !== null) expect(build.commit).toMatch(/^[0-9a-f]{40}$/);
 });

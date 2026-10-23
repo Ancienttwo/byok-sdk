@@ -1,11 +1,14 @@
 // The #610 measurement harness: one embedded Host (`@byok-sdk/server`), one
 // paired daemon with one runtime adapter, and the real `submit_result`
 // helper. It captures what the Host received at its HTTP boundary.
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 import {
   createDaemonWithAdapters, type AgentEgressPolicy, type Daemon, type RuntimeAdapter, type RuntimeAdapterPrepareInput,
@@ -15,11 +18,12 @@ import { BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, type AgentEvent, type DispatchSel
 import { createByokServer, type ByokServer } from '@byok-sdk/server';
 import { InMemoryDeviceCredentialStore } from '../../../../scripts/testing/device-credentials.mjs';
 import { CORPUS, CORPUS_REVISION, corpusCase, preflightCorpus } from './corpus';
+import { resultDigest } from './digest';
 import {
   calibrateLabel, classifyTrial, UNCONFIRMED_PREDICATE,
   type CallPredicate, type ObservedEvent, type StagedRecord, type TerminalObservation, type TrialObservation,
 } from './evidence';
-import { redact, type CalibrationResult, type NotStartedRow, type PlannedTrial, type RunManifest, type TrialRecord } from './records';
+import { redact, type CalibrationResult, type NotStartedRow, type PlannedTrial, type RunManifest, type TrialRecord, type TrialTerminal } from './records';
 import { renderSummaryMarkdown, summarizeRun } from './summary';
 
 export const PRODUCT_ID = 'byok-submit-result-measurement';
@@ -40,10 +44,13 @@ export type MeasuredRuntime = typeof MEASURED_RUNTIMES[number];
 
 export interface PlanInput { readonly rounds: number; readonly caseIds: readonly string[]; readonly calibrate: boolean }
 
+/** The calibration case is fixed, whatever cases a cell counts. */
+export const CALIBRATION_CASE = 'C01-small';
+
 /** C01–C06 order for each round, after one uncounted calibration trial. */
 export function planTrials(input: PlanInput): PlannedTrial[] {
   const trials: PlannedTrial[] = [];
-  if (input.calibrate) trials.push({ trialId: 'calibration-1', caseId: input.caseIds[0]!, round: 0, counted: false });
+  if (input.calibrate) trials.push({ trialId: 'calibration-1', caseId: CALIBRATION_CASE, round: 0, counted: false });
   for (let round = 1; round <= input.rounds; round++) {
     for (const caseId of input.caseIds) trials.push({ trialId: `r${String(round).padStart(2, '0')}-${caseId}`, caseId, round, counted: true });
   }
@@ -206,13 +213,49 @@ export function plannedManifest(options: Omit<RunCellOptions, 'adapters' | 'outD
   return {
     schema: 'byok.submit-result-measurement.manifest.v1', runId: options.runId, cellId: options.cellId,
     mode: options.mode, synthetic: options.mode !== 'execute', authorization: options.authorization,
-    cell: { runtime: options.runtime, dispatchSelection: options.dispatchSelection ?? null, ...cellFacts(), ...options.cell },
+    // Generated facts come last: operator facts can never replace them.
+    cell: { ...options.cell, runtime: options.runtime, dispatchSelection: options.dispatchSelection ?? null, ...cellFacts(), sdkBuild: sdkBuild() },
     corpus: corpusManifest(),
     plan: { rounds: options.rounds, order: caseIds, plannedTrials: counted, calibrationTrials: calibration, runtimeTasks: calibration + Math.min(counted, options.maxTrials) },
     deadlineMs: options.deadlineMs, budget: { maxTrials: options.maxTrials, maxSpend: options.maxSpend ?? null },
     capacityReasons: options.capacityReasons, predicate: UNCONFIRMED_PREDICATE, calibration: null,
     startedAt: null, endedAt: null, completion: 'planned', startedTrials: 0, notStartedTrials: 0,
   };
+}
+
+/**
+ * Cell keys the runner sets itself. An operator `--cell` fact may not use them.
+ * `model` comes from `--model`; the last two come from the live Host.
+ */
+export const RESERVED_CELL_KEYS: readonly string[] = Object.freeze([
+  'model', 'runtime', 'dispatchSelection', 'platform', 'osRelease', 'arch', 'node', 'bun', 'transport', 'concurrency',
+  'agentMemory', 'requiredToolsets', 'messageEgress', 'replyDelivery', 'eventSource', 'daemonLimits', 'egressPolicy',
+  'sdkBuild', 'observedRuntimes', 'activityMaxBytes',
+]);
+
+const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
+const SDK_PACKAGES = ['client', 'server', 'protocol', 'core'] as const;
+
+/**
+ * The SDK build that runs the cell: the checkout commit, whether tracked files
+ * differ from it, and each package version with the SHA-256 of its built
+ * `dist/index.js`. The dist hash identifies the bytes even when the build is
+ * older than the checkout. Unavailable values are `null`.
+ */
+export function sdkBuild(): Record<string, unknown> {
+  const git = (args: string[]) => {
+    try { return execFileSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return null; }
+  };
+  const commit = git(['rev-parse', 'HEAD']);
+  const status = commit === null ? null : git(['status', '--porcelain', '--untracked-files=no']);
+  const packages = Object.fromEntries(SDK_PACKAGES.map(name => {
+    const root = path.join(REPO_ROOT, 'packages', name);
+    const manifest = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { name: string; version: string };
+    const dist = path.join(root, 'dist', 'index.js');
+    const distSha256 = existsSync(dist) ? createHash('sha256').update(readFileSync(dist)).digest('hex') : null;
+    return [manifest.name, { version: manifest.version, distSha256 }];
+  }));
+  return { commit, dirty: status === null ? null : status.length > 0, packages };
 }
 
 function cellFacts(): Record<string, unknown> {
@@ -349,12 +392,23 @@ async function runTrial(host: Host, options: RunCellOptions, planned: PlannedTri
       finishedAt: terminal?.at ?? null,
       elapsedMs: terminal && !afterDeadline ? Date.parse(terminal.at) - Date.parse(startedAt) : null,
       deadlineMs: options.deadlineMs, submissions: classified.submissions, submissionSeen: classified.submissionSeen,
-      terminal: terminal ? { status: terminal.status, at: terminal.at, reason: terminal.reason, errorCode: null, outcomeDigest: classified.outcomeDigest, afterDeadline } : null,
+      terminal: trialTerminal(terminal, afterDeadline),
       category: classified.category, cause: classified.cause, exactTarget: classified.exactTarget, firstCallValid: classified.firstCallValid,
       replyDelivery: 'not_configured', replyDisposition: null, usage: usage.length > 0 ? usage : null,
       evidenceRef: `events/${planned.trialId}.json`,
     },
   };
+}
+
+/**
+ * The recorded terminal. Its digest comes from the observed terminal itself, so
+ * a terminal that arrives in the cancellation grace keeps its digest although
+ * classification treats it as absent.
+ */
+export function trialTerminal(terminal: TerminalObservation | null, afterDeadline: boolean): TrialTerminal | null {
+  if (terminal === null) return null;
+  const outcomeDigest = terminal.status === 'task.complete' && terminal.hasDocument ? resultDigest(terminal.document) : null;
+  return { status: terminal.status, at: terminal.at, reason: terminal.reason, errorCode: null, outcomeDigest, afterDeadline };
 }
 
 /** A halted, crashed or stopped daemon is a harness-observed infrastructure failure. A reconnect is not. */
@@ -404,7 +458,11 @@ export async function runCell(options: RunCellOptions): Promise<RunCellResult> {
           calibrationRecord = outcome.kind === 'started' ? outcome.record : outcome.row;
           continue;
         }
-        if (outcome.kind === 'started') { trials.push(outcome.record); startedCounted++; } else notStarted.push(outcome.row);
+        if (outcome.kind === 'started') { trials.push(outcome.record); startedCounted++; } else {
+          // A planned counted trial that did not start leaves the batch incomplete.
+          notStarted.push(outcome.row);
+          completion = 'incomplete';
+        }
         // Stop the cell after an operator cancel or a halted daemon; later trials could not run.
         if (outcome.kind === 'started' && outcome.record.category === 'infrastructure_abort') { completion = 'incomplete'; break; }
       }
