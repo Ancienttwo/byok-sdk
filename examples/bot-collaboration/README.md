@@ -220,6 +220,29 @@ make that row grow. Command records are dedup evidence; retention must not
 delete a record while a retry of its command can still arrive. Per-entity L
 storage and K8 retention are #798.
 
+## External history authority
+
+With the `history` option, the ContextPack history of a Bot Turn comes from an
+external authority, not from this ledger (#739 D1, #606). Before a Bot Turn
+freezes its offer, the Host reads the Bot's earlier history outside the ledger
+transaction. Then one transaction freezes the offer with those rows. The
+transaction freezes only a Turn that still has no offer.
+
+- The authority returns rows in the ContextPack row shape: `id`, `root`,
+  `source`, `request`, `hop`, `status`, optional `conclusion` and
+  `outcomeSummary`. Rows in another shape are refused.
+- The rows replace the stored Turns in that ContextPack. The current Turn
+  always comes from this ledger.
+- The collaboration state does not store the rows. The Turn keeps their hash
+  in `historyDigest`. K4 keeps the frozen instruction of the offer, as for
+  every offer.
+- Cards, questions and rejected actions stay Host state. Room seats read room
+  messages, so they read no history.
+- A read that throws or returns another shape leaves the Turn queued. The
+  timer reads again after about one second.
+
+The team still comes from this ledger in this mode.
+
 ## Group chat and Main Bot
 
 The supplied Agent template is the initial Main Bot. A team can have multiple

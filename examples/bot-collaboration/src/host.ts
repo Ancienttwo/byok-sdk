@@ -6,10 +6,10 @@ import type { ByokServer, CreateByokServerOptions, DueWake } from '@byok-sdk/ser
 import { HostExecutionCore, type ExecutionServer, type OutcomeTransaction, type MessageTransaction } from '@byok-sdk/example-host-execution-core';
 import { promoteOccurrence, type HostJobHandler, type Routine } from '@byok-sdk/example-host-execution-core';
 import { HostLedger } from '@byok-sdk/example-host-execution-core';
-import { hash, project, time, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import { canonical, hash, project, time, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
 import { enqueue } from '@byok-sdk/example-host-execution-core';
 import { addTurn, json, stateOf, type CollaborationState, type Delegation, type Turn } from './model';
-import { turnInstruction, outcomeSchema, SYSTEM_PROMPT } from './schema';
+import { contextTurns, turnInstruction, outcomeSchema, SYSTEM_PROMPT, type ContextTurn } from './schema';
 import { abandonDelegation, arbitrateCancel, BOT_REPLY_MAX_BYTES, DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   delegationDue, intentRows, minimumInstructionBytes, observeDevices, reconcileReply, REPLY_UNCERTAIN_AFTER_MS, resolveDelegation, retryReply,
   settleDelegations, type DelegationTimers } from './delegation';
@@ -61,11 +61,26 @@ export interface BotOptions {
    * so their rules use the same calendar: a `RoutineSchedule` whose `tz` is the definition time zone.
    */
   hostJobs?: Readonly<Record<string, HostJobHandler>>;
+  /**
+   * External history authority (#739 Q4). Absent: the ContextPack reads this ledger's Turns.
+   * Present: before a Bot Turn freezes its offer, the Host reads the Bot's earlier history here, oldest first,
+   * in the ContextPack row shape. The rows replace the stored Turns in that ContextPack and are not stored;
+   * the Turn keeps only their hash. Cards, questions and rejected actions stay Host state. Room seats read room messages.
+   * A read that throws or returns another shape leaves the Turn queued, and the timer tries again.
+   */
+  history?: (input: { botId: string; turnId: string }) => Promise<readonly ContextTurn[]>;
 }
+/** Phase 1 of a history-mode sync: the injected rows of each Turn that can freeze its offer next. */
+type InjectedHistory = ReadonlyMap<string, { rows: ContextTurn[]; digest: string }>;
 /** Reply readback port (§3.3). The Host acceptance record stays the body authority. */
 export type MessageServer = { tasks: Partial<Pick<ByokServer['tasks'], 'agentMessage'>> };
 export type AgentMessageInput = Parameters<NonNullable<CreateByokServerOptions['agentMessage']>['consume']>[0];
 
+/** A Turn that has no offer yet and can freeze one: not concluded or failed, and its Bot is active with its profile applied. */
+function awaitsOffer(ledger: LedgerState, state: CollaborationState, turn: Turn): boolean {
+  const bot = state.team.bots[turn.botId];
+  return !turn.conclusion && !ledger.intents[hash(turn.id)] && turn.status !== 'failed' && !!bot && !bot.archived && bot.readyRevision === bot.revision;
+}
 /** The Turn or round id of an input command. These commands never refuse; they throw. */
 function turnOf(result: CommitResult): string {
   if (result.disposition.outcome !== 'accepted' || typeof result.disposition.value !== 'string') throw new Error('Input command has no Turn id');
@@ -87,6 +102,8 @@ export class BotCollaboration {
   private readonly coalesce?: CoalescePolicy;
   /** The default principal of the owner APIs: the caller that the Host authenticated as the owner. */
   private readonly owner: Principal;
+  /** History mode: Turns whose history read failed in this pass. The timer reads them again. */
+  private unread = new Set<string>();
   constructor(readonly server: ExecutionServer & HomeServer & MessageServer & Partial<Pick<ByokServer, 'machines'>>, readonly ledger: HostLedger, private readonly options: BotOptions) {
     if (!options.botId || options.execution.payload.agentRef.agentId !== options.botId) throw new Error('Select this Bot Agent');
     options = this.options = { ...options, execution: structuredClone(options.execution),
@@ -479,7 +496,7 @@ export class BotCollaboration {
     if (seat) { seat.status = 'blocked'; seat.released = true; seat.reason = reason; }
     turn.status = 'blocked'; turn.blockedReason = reason;
   }
-  private sync(s: LedgerState): boolean {
+  private sync(s: LedgerState, injected?: InjectedHistory): boolean {
     const state = stateOf(s.application);
     // A batch sealed here is enqueued in this pass, before later Turns of its Bot.
     sealDueBatches(state, this.coalesce, this.now());
@@ -512,11 +529,14 @@ export class BotCollaboration {
           continue;
         }
         delete turn.profileFailure;
+        // Phase 2 of a history-mode sync: a Bot Turn freezes only with the history read before this transaction.
+        const history = this.options.history && turn.source !== 'room_slot' ? injected?.get(turn.id) : undefined;
+        if (this.options.history && turn.source !== 'room_slot' && !history) continue;
         let schema: ResultSchema, frozen: ReturnType<typeof turnInstruction>;
         try {
           schema = outcomeSchema(turn.botId, state, turn, Object.keys(this.models()), routines);
           frozen = turnInstruction(state, turn, { turnLimit: this.contextTurnLimit, contextMaxBytes: this.contextMaxBytes,
-            instructionMaxBytes: this.instructionMaxBytes }, routines);
+            instructionMaxBytes: this.instructionMaxBytes }, routines, history?.rows);
         } catch (error) {
           if (error instanceof BotTurnOutcomeSchemaError && error.code === 'schema-over-budget') {
             this.blockTurn(s, turn, `Outcome schema over budget after flat fallback: ${error.message}`);
@@ -541,6 +561,7 @@ export class BotCollaboration {
         else enqueue(s, this.ledger.tenant, { key: turn.id, source: turn.source === 'user' || turn.source === 'answer' ? 'user' : 'bot',
           waitUntil: this.now() + 300_000, execution: offer });
         for (const rejection of frozen.context.rejectedActions) rejection.consumedBy = turn.id;
+        if (history) turn.historyDigest = history.digest;
         delete turn.blockedReason;
         turn.status = 'processing';
         materialized = true;
@@ -663,6 +684,24 @@ export class BotCollaboration {
     }
     this.ledger.transaction(s => cleanReplyTokens(s, stateOf(s.application), this.now()));
   }
+  /** One sync transaction. In history mode, phase 1 reads the history first, outside the transaction. */
+  private async syncWithHistory(): Promise<boolean> {
+    const injected = await this.readHistory();
+    return this.ledger.transaction(s => this.sync(s, injected));
+  }
+  private async readHistory(): Promise<InjectedHistory | undefined> {
+    const read = this.options.history;
+    if (!read) return undefined;
+    const ledger = this.ledger.snapshot(), state = stateOf(ledger.application), rows = new Map<string, { rows: ContextTurn[]; digest: string }>();
+    for (const turn of Object.values(state.turns)) {
+      if (turn.source === 'room_slot' || !awaitsOffer(ledger, state, turn) || this.unread.has(turn.id)) continue;
+      try {
+        const history = contextTurns(await read({ botId: turn.botId, turnId: turn.id }));
+        rows.set(turn.id, { rows: history, digest: hash(canonical(history)) });
+      } catch { this.unread.add(turn.id); }
+    }
+    return rows;
+  }
   /** A failed pass still re-arms the timer, so other timer work keeps its times. K4 retries a failed wake call itself. */
   private async process(): Promise<void> {
     try { await this.pass(); } finally { this.armTimer(); }
@@ -672,31 +711,30 @@ export class BotCollaboration {
    * The pass does not repeat after it, and it rethrows the first drain error for the caller and the SDK hook.
    */
   private async pass(): Promise<void> {
+    this.unread.clear();
     let failure: { error: unknown } | undefined;
     let more: boolean;
     do {
       // A failed delivery keeps `delivered = false`. The timer retries it.
       await this.deliverCancels().catch(() => {});
-      const admitted = this.ledger.transaction(s => this.sync(s));
+      const admitted = await this.syncWithHistory();
       await flushHomes(this.server, this.ledger, this.now);
       try { await this.core.drain(); } catch (error) { failure ??= { error }; }
       // A Main Bot cancel applied in this drain commits with delivered = false.
       await this.deliverCancels().catch(() => {});
-      let materialized = this.ledger.transaction(s => this.sync(s));
+      let materialized = await this.syncWithHistory();
       await this.refreshDevices();
       await this.flushCards();
-      materialized = this.ledger.transaction(s => this.sync(s)) || materialized;
+      materialized = await this.syncWithHistory() || materialized;
       await this.flushReplies();
-      materialized = this.ledger.transaction(s => this.sync(s)) || materialized;
+      materialized = await this.syncWithHistory() || materialized;
       await this.flushDeliveries();
       const ledger = this.ledger.snapshot();
       // An immediate runtime terminal can create another turn on any pass.
       // Drain to a fixed point, so no application-only turn can lose its wake.
       const state = stateOf(ledger.application);
       more = admitted || materialized || Object.values(ledger.intents).some(intent => intent.phase === 'queued' && intent.cancelReason && !intent.conclusion)
-        || Object.values(state.turns).some(turn => !turn.conclusion && !ledger.intents[hash(turn.id)] && turn.status !== 'blocked'
-        && turn.status !== 'failed' && !!state.team.bots[turn.botId] && !state.team.bots[turn.botId]!.archived
-        && state.team.bots[turn.botId]?.readyRevision === state.team.bots[turn.botId]?.revision);
+        || Object.values(state.turns).some(turn => turn.status !== 'blocked' && awaitsOffer(ledger, state, turn) && !this.unread.has(turn.id));
     } while (more && !failure);
     if (failure) throw failure.error;
   }
@@ -713,7 +751,8 @@ export class BotCollaboration {
         ...state.team.homeOperations.filter(op => op.status === 'pending').map(op => Math.max(this.now() + 1000, op.retryAt ?? 0)),
         ...delegationDue(state, this.timers),
         ...Object.values(state.inputBatches ?? {}).filter(batch => batch.state === 'open').map(batch => batch.sealAt),
-        ...Object.values(state.delegations).filter(d => d.cancel && !d.cancel.delivered).map(() => this.now() + 1000)];
+        ...Object.values(state.delegations).filter(d => d.cancel && !d.cancel.delivered).map(() => this.now() + 1000),
+        ...this.unread.size ? [this.now() + 1000] : []];
       if (due.length) {
         this.timer = setTimeout(() => { void this.drain().catch(() => {}); }, Math.max(1, Math.min(60_000, Math.min(...due) - this.now())));
         this.timer.unref?.();
