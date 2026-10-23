@@ -1693,6 +1693,34 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     );
   }
 
+  /**
+   * The four sealed enqueue lanes (#654). Each follows its plaintext sibling:
+   * the legacy admission or the resume check, the gate of its sealed type, a
+   * strict parse, and the same task envelope path.
+   */
+  async function enqueueSealedTaskOffer(
+    tenant: TenantId,
+    deviceId: string,
+    type: 'task.offer_sealed' | 'task.offer_with_toolsets_sealed' | 'task.offer_for_agent_sealed' | 'task.offer_for_agent_with_egress_sealed',
+    input: { readonly taskId?: string; readonly payload: object; readonly agentMessageContext?: AgentMessageServerContext },
+  ): Promise<EnqueuedOffer> {
+    if (type === 'task.offer_sealed' || type === 'task.offer_with_toolsets_sealed') await assertLegacyAdmission(tenant, deviceId);
+    if (type === 'task.offer_for_agent_sealed') assertResumeSessionRef(input.payload);
+    await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities(type, input.payload));
+    const payload = MESSAGE_PAYLOAD_SCHEMAS[type].parse(input.payload);
+    const agentRef = 'agentRef' in payload ? payload.agentRef : undefined;
+    return enqueueTaskEnvelope(
+      tenant,
+      deviceId,
+      input.taskId,
+      agentRef,
+      (taskId, seq, messageId) => createEnvelope(type, payload as never, { id: messageId, taskId, seq }),
+      type === 'task.offer_for_agent_with_egress_sealed'
+        ? agentMessageOfferWriter(deviceId, payload as never, input.agentMessageContext)
+        : undefined,
+    );
+  }
+
   /** The sealed steer: the same gates, then the device flag. See {@link ByokCloud.steerSealedTask}. */
   async function steerSealedTask(
     tenant: TenantId,
@@ -2171,44 +2199,10 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
     submitAgentExecution,
 
-    async enqueueSealedOffer(tenant, deviceId, input) {
-      await assertLegacyAdmission(tenant, deviceId);
-      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer_sealed', input.payload));
-      return enqueueTaskEnvelope(tenant, deviceId, input.taskId, undefined, (taskId, seq, messageId) =>
-        createEnvelope('task.offer_sealed', input.payload, { id: messageId, taskId, seq }),
-      );
-    },
-
-    async enqueueSealedToolsetOffer(tenant, deviceId, input) {
-      await assertLegacyAdmission(tenant, deviceId);
-      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer_with_toolsets_sealed', input.payload));
-      return enqueueTaskEnvelope(tenant, deviceId, input.taskId, undefined, (taskId, seq, messageId) =>
-        createEnvelope('task.offer_with_toolsets_sealed', input.payload, { id: messageId, taskId, seq }),
-      );
-    },
-
-    async enqueueSealedAgentOffer(tenant, deviceId, input) {
-      assertResumeSessionRef(input.payload);
-      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer_for_agent_sealed', input.payload));
-      const payload = MESSAGE_PAYLOAD_SCHEMAS['task.offer_for_agent_sealed'].parse(input.payload);
-      return enqueueTaskEnvelope(tenant, deviceId, input.taskId, payload.agentRef, (taskId, seq, messageId) =>
-        createEnvelope('task.offer_for_agent_sealed', payload, { id: messageId, taskId, seq }),
-      );
-    },
-
-    async enqueueSealedAgentEgressOffer(tenant, deviceId, input) {
-      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer_for_agent_with_egress_sealed', input.payload));
-      const payload = MESSAGE_PAYLOAD_SCHEMAS['task.offer_for_agent_with_egress_sealed'].parse(input.payload);
-      return enqueueTaskEnvelope(
-        tenant,
-        deviceId,
-        input.taskId,
-        payload.agentRef,
-        (taskId, seq, messageId) => createEnvelope('task.offer_for_agent_with_egress_sealed', payload, { id: messageId, taskId, seq }),
-        agentMessageOfferWriter(deviceId, payload, input.agentMessageContext),
-      );
-    },
-
+    enqueueSealedOffer: (tenant, deviceId, input) => enqueueSealedTaskOffer(tenant, deviceId, 'task.offer_sealed', input),
+    enqueueSealedToolsetOffer: (tenant, deviceId, input) => enqueueSealedTaskOffer(tenant, deviceId, 'task.offer_with_toolsets_sealed', input),
+    enqueueSealedAgentOffer: (tenant, deviceId, input) => enqueueSealedTaskOffer(tenant, deviceId, 'task.offer_for_agent_sealed', input),
+    enqueueSealedAgentEgressOffer: (tenant, deviceId, input) => enqueueSealedTaskOffer(tenant, deviceId, 'task.offer_for_agent_with_egress_sealed', input),
     submitSealedAgentExecution,
 
     async enqueueAgentContentRead(tenant, deviceId, input) {
