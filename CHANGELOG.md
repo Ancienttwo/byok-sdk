@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Fix (examples)** — K4 settles a cancelled claimed task soon after its
+  device terminal arrives (#762). Before, the intent waited for the next
+  `reconcileMs` scan, because the server emits no event for that terminal.
+  While it waited, it held the FIFO of its Agent. The core now reads the device
+  terminal of each such task with backoff from 25 ms to 1 s, at most 20 reads
+  per task. A read does not write the Host ledger. A found terminal starts one
+  drain. After the last read, only the `reconcileMs` scans remain. This also
+  covers a claimed task that the core cancels at its waiting deadline.
 - **Feature (client)** — the task-free projection hook gets
   `writeHomeFile(name, body)` on its input (#738, #606 R6). One call
   atomically replaces one file at the root of the canonical Agent home under

@@ -77,6 +77,10 @@ The allowed readbacks now include `tasks.attempt` and `tasks.get`.
 At a waiting deadline, cancel first and then read the canonical attempt.
 An unclaimed cancelled attempt concludes `expired` without a device terminal.
 A claimed cancellation holds the FIFO until a device terminal, then concludes `cancelled`.
+The server emits no event when that terminal arrives. So after `tasks.cancel`, the core
+reads the device terminal with backoff from 25 ms to 1 s, at most 20 reads per task.
+A read does not write the Host ledger. A found terminal starts one drain.
+After the last read, only the `reconcileMs` scans remain.
 A claim that wins at the deadline can be interrupted. This boundary is accepted.
 See `unclaimed-expiry.test.ts` and the guide for the exact distinction.
 
