@@ -295,10 +295,12 @@ export const DispatchSelectionSchema = z.discriminatedUnion('lane', [
 export type DispatchSelection = z.infer<typeof DispatchSelectionSchema>;
 
 /**
- * #654: a loose plaintext type that has a sealed sibling refuses the sealed
- * members. Without this, the schema would strip them, and sealed content or
- * a sealing policy would pass as plaintext. A sealed message uses its own
- * `*_sealed` type. The strict plaintext types already refuse unknown keys.
+ * #654: a plaintext type that has a sealed sibling refuses the sealed
+ * members. Without this, a loose schema would strip them, and sealed content
+ * or a sealing policy would pass as plaintext. A strict schema needs it too:
+ * its unknown-key check sees only enumerable keys, so a non-enumerable
+ * `sealed` or `sealing` would be dropped. A sealed message uses its own
+ * `*_sealed` type.
  */
 const NO_SEALED_MEMBER = { sealed: z.never().optional(), sealing: z.never().optional() };
 
@@ -381,6 +383,7 @@ export type AgentMemorySelection = z.infer<typeof AgentMemorySelectionSchema>;
  */
 export const TaskOfferForAgentPayloadSchema = z
   .object({
+    ...NO_SEALED_MEMBER,
     instruction: z.union([z.string(), InstructionBlobRefSchema]),
     agentRef: AgentRefSchema,
     homeAccess: AgentHomeAccessSchema.optional(),

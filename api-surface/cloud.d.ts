@@ -246,6 +246,8 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
     taskId: z.ZodString;
     deviceId: z.ZodString;
     payload: z.ZodObject<{
+        sealed: z.ZodOptional<z.ZodNever>;
+        sealing: z.ZodOptional<z.ZodNever>;
         instruction: z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
             blobRef: z.ZodObject<{
                 blobId: z.ZodString;

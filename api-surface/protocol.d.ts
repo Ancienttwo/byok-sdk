@@ -3929,6 +3929,8 @@ export type AgentMemorySelection = z.infer<typeof AgentMemorySelectionSchema>;
  * prepared offer replaces it with its own required selection.
  */
 export declare const TaskOfferForAgentPayloadSchema: z.ZodObject<{
+    sealed: z.ZodOptional<z.ZodNever>;
+    sealing: z.ZodOptional<z.ZodNever>;
     instruction: z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
         blobRef: z.ZodObject<{
             blobId: z.ZodString;
@@ -4002,6 +4004,8 @@ export type TaskOfferForAgentPayload = z.infer<typeof TaskOfferForAgentPayloadSc
  * with an unconsumed egress declaration.
  */
 export declare const TaskOfferForAgentWithEgressPayloadSchema: z.ZodObject<{
+    sealed: z.ZodOptional<z.ZodNever>;
+    sealing: z.ZodOptional<z.ZodNever>;
     instruction: z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
         blobRef: z.ZodObject<{
             blobId: z.ZodString;
@@ -4112,6 +4116,8 @@ export type TaskOfferForAgentWithEgressPayload = z.infer<typeof TaskOfferForAgen
  * interpreted as a fresh execution by an older daemon.
  */
 export declare const TaskOfferForAgentWithEgressFreshPayloadSchema: z.ZodObject<{
+    sealed: z.ZodOptional<z.ZodNever>;
+    sealing: z.ZodOptional<z.ZodNever>;
     instruction: z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
         blobRef: z.ZodObject<{
             blobId: z.ZodString;
@@ -4235,6 +4241,8 @@ export type TaskOfferForAgentWithEgressFreshPayload = z.infer<typeof TaskOfferFo
  * and declines non-retryably on any difference; nothing here is authority.
  */
 export declare const TaskOfferPreparedPayloadSchema: z.ZodObject<{
+    sealed: z.ZodOptional<z.ZodNever>;
+    sealing: z.ZodOptional<z.ZodNever>;
     agentRef: z.ZodObject<{
         agentId: z.ZodString;
         profileRevision: z.ZodString;
