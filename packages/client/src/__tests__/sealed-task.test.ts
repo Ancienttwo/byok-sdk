@@ -7,6 +7,8 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import v8 from 'node:v8';
+import vm from 'node:vm';
 import { generateScopeKey } from '@byok-sdk/core/sealed-payload';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -60,6 +62,33 @@ describe('SealedTasks send order (#654 E3c)', () => {
     release();
     await Promise.all([first, second]);
     expect(order).toEqual(['task.await_approval_sealed', 'task.approval_resolved']);
+  });
+});
+
+describe('SealedTasks memory after a terminal (#654 E3c)', () => {
+  it('keeps no sealed terminal alive once it is handed on', async () => {
+    v8.setFlagsFromString('--expose-gc');
+    const gc = vm.runInNewContext('gc') as () => void;
+    const tasks = new SealedTasks({
+      keyring: new GatedKeyring(), tenantId: 'tenant-test', deviceId: 'dev_1',
+      blobs: { download: async () => { throw new Error('unused'); } },
+    });
+    await tasks.openOffer(createEnvelope('task.offer_sealed', {
+      instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
+    } as never, { taskId: 'finished', seq: 1 }));
+
+    const sendTerminal = async (): Promise<WeakRef<Envelope>> => {
+      const sealed = await tasks.sealOutbound(createEnvelope('task.complete', { summary: 'r'.repeat(100_000), sessionRef: 'session' }, { taskId: 'finished' }));
+      expect(sealed?.type).toBe('task.complete_sealed');
+      tasks.plainOf(sealed!);
+      return new WeakRef(sealed!);
+    };
+    const terminal = await sendTerminal();
+    await tasks.settled();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    gc();
+    expect(terminal.deref()).toBeUndefined();
+    expect(tasks.sealsOutbound(createEnvelope('task.await_approval', { summary: 'late', approvalId: 'a2' }, { taskId: 'finished' }))).toBe(true);
   });
 });
 

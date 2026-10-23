@@ -74,8 +74,8 @@ interface SealedTask {
   readonly sealing: TaskSealing;
   readonly agentRef: AgentRef | null;
   readonly steerIds: Set<string>;
-  /** Keeps this task's outbound in send order while each one is sealed. */
-  tail: Promise<unknown>;
+  /** Keeps this task's outbound in send order while each one is sealed. It holds no envelope. */
+  tail: Promise<void>;
 }
 
 const SEALED_OUTPUT_TYPE: Partial<Record<MessageType, SealedMessageType>> = Object.fromEntries(
@@ -201,7 +201,7 @@ export class SealedTasks {
   sealOutbound(envelope: Envelope): Promise<Envelope | undefined> {
     const task = this.#tasks.get(envelope.task_id!)!;
     const sealed = task.tail.then(() => this.#sealOutbound(task, envelope));
-    task.tail = sealed.catch(() => undefined);
+    task.tail = sealed.then(() => undefined, () => undefined);
     return sealed;
   }
 
