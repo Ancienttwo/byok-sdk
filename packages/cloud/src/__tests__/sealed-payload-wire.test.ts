@@ -11,7 +11,7 @@
  */
 import { readFileSync } from 'node:fs';
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import type { JsonObject } from '@byok-sdk/core';
 import {
@@ -29,6 +29,7 @@ import {
   SEALED_PAYLOAD_VERSION,
   SEALED_SPLIT_TABLE,
   SealedPayloadSchema,
+  TaskSealingSchema,
   isSealedMessageType,
   isServerToDaemonType,
   createEnvelope,
@@ -38,6 +39,13 @@ import {
   type MessageType,
 } from '@byok-sdk/protocol';
 
+import type {
+  EnqueueSealedOfferInput,
+  EnqueueSealedToolsetOfferInput,
+  SealedAgentDispatchInput,
+  SealedAgentEgressDispatchInput,
+  SealedAgentExecutionInput,
+} from '../index';
 import { handleInboundEnvelope } from '../inbound';
 import { tenantStoresFor } from '../tenant-stores';
 import { PRODUCT_ID, TENANT_A, createHarness } from './support/harness';
@@ -117,6 +125,24 @@ describe('sealed payload v1: protocol and core agree', () => {
           };
       expect(SealedPayloadSchema.safeParse(member).success, `content ${length}`).toBe(true);
     }
+  });
+
+  it('accept the long scope id that core seals', async () => {
+    const id = 's'.repeat(1024);
+    const content = await sealContent({
+      scopeKey: GOLDEN_SCOPE_KEY,
+      scope: { id, epoch: GOLDEN_SCOPE.epoch },
+      chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` },
+      sender: 'A'.repeat(43),
+      category: 'task-output',
+      binding: { ...bindingOf(corpus.find((line) => line.type === 'task.complete_sealed')!) },
+      plaintext: { summary: 'short' },
+      maxContentLength: 2 * 1024 * 1024,
+    });
+    const member = { ...content.header, ciphertext: Buffer.from(content.ciphertext).toString('base64url') };
+    expect(SealedContentHeaderV1Schema.safeParse(headerOf(member)).success).toBe(true);
+    expect(SealedPayloadSchema.safeParse(member).success).toBe(true);
+    expect(TaskSealingSchema.safeParse({ scopeId: id, epoch: GOLDEN_SCOPE.epoch, categories: ['task-output'] }).success).toBe(true);
   });
 
   it('reject the same malformed header fields', async () => {
@@ -278,6 +304,14 @@ describe('sealed payload v1: each sealed type has its own hosted entry (#654)', 
   it('has an output-only line and a sealed-input line for every lane', () => {
     expect(new Set(outputOnly.map((line) => line.type))).toEqual(new Set(Object.keys(lanes)));
     expect(new Set(laneLines.filter((line) => line.payload.sealed !== undefined).map((line) => line.type))).toEqual(new Set(Object.keys(lanes)));
+  });
+
+  it('exports the sealed lane input types from the package root', () => {
+    expectTypeOf<SealedAgentExecutionInput>().toHaveProperty('payload');
+    expectTypeOf<EnqueueSealedOfferInput>().toHaveProperty('payload');
+    expectTypeOf<EnqueueSealedToolsetOfferInput>().toHaveProperty('payload');
+    expectTypeOf<SealedAgentDispatchInput>().toHaveProperty('payload');
+    expectTypeOf<SealedAgentEgressDispatchInput>().toHaveProperty('payload');
   });
 
   it.each(outputOnly.map((line, index) => [index, line.type, line] as const))(

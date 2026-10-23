@@ -136,7 +136,7 @@ function sealedPayloadSchema<Category extends z.ZodType<SealedPayloadV1Category>
       category,
       scope: z
         .object({
-          id: z.string().min(1).max(256),
+          id: z.string().min(1),
           epoch: PositiveIntegerSchema,
           keyId: z.string().regex(/^[A-Za-z0-9_-]{22}$/u),
         })
@@ -197,7 +197,7 @@ function isCanonicalCategoryList(categories: readonly string[]): boolean {
  */
 export const TaskSealingSchema = z
   .object({
-    scopeId: z.string().min(1).max(256),
+    scopeId: z.string().min(1),
     epoch: PositiveIntegerSchema,
     categories: z
       .array(z.enum(SEALED_PAYLOAD_V1_CATEGORIES))

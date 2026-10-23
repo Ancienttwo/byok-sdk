@@ -40,6 +40,10 @@ export type {
   ApproveTaskOptions,
   EnqueueOfferInput,
   EnqueueToolsetOfferInput,
+  EnqueueSealedOfferInput,
+  EnqueueSealedToolsetOfferInput,
+  SealedAgentDispatchInput,
+  SealedAgentEgressDispatchInput,
   RejectTaskOptions,
   EnqueuedAgentControl,
   EnqueuedAgentHomeProjection,
@@ -383,7 +387,7 @@ export type {
 
 export type { DeviceTerminal } from './terminal-result';
 
-export { AgentExecutionInputSchema, type AgentExecutionInput } from './agent-execution';
+export { AgentExecutionInputSchema, type AgentExecutionInput, type SealedAgentExecutionInput } from './agent-execution';
 
 export { DEFAULT_RETENTION_POLICY, DEFAULT_MAINTENANCE_LIMIT, MAINTENANCE_STEPS, resolveRetentionPolicy } from './maintenance';
 export type { RetentionPolicy, MaintenanceInput, MaintenanceReport, MaintenanceStep, MaintenanceStepReport } from './maintenance';
