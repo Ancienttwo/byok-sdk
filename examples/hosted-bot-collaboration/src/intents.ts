@@ -32,6 +32,14 @@ export async function freezeIntent(client: PoolClient, scope: string, freeze: In
   return input;
 }
 
+/** The frozen input of a task and the Turn that froze it. The input never changes after the freeze. */
+export async function frozenIntent(client: PoolClient, scope: string, task: string): Promise<{ turnId: string; input: FrozenInput } | undefined> {
+  const found = await client.query<{ key: string; input: FrozenInput }>('SELECT key, input FROM intent WHERE scope = $1 AND task_id = $2',
+    [storedKey(scope), task]);
+  const row = found.rows[0];
+  return row && { turnId: JSON.parse(row.key) as string, input: row.input };
+}
+
 type IntentFact = NonNullable<ReturnType<SyncFacts['intent']>>;
 /**
  * The sync rule facts of these Turns, read in the sync transaction. H records no execution start before D2d,
