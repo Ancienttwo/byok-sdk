@@ -7,10 +7,11 @@ import { describe, expect, it } from 'vitest';
 import { SEALED_DECLINE_CODES, SEALED_TASK_PLAIN_CODES, isSealedTaskPlainOutput } from '../index';
 
 describe('isSealedTaskPlainOutput (#654 12d)', () => {
-  it('names the closed codes of the plaintext fail and decline', () => {
+  it('names the closed codes of the plaintext fail, decline and cancellation', () => {
     expect(SEALED_TASK_PLAIN_CODES).toEqual({
       'task.fail': { reason: ['daemon_interrupted', 'sealed_key_unavailable'] },
       'task.decline': { reason: SEALED_DECLINE_CODES },
+      'task.cancelled': { reason: [] },
     });
   });
 
@@ -39,6 +40,8 @@ describe('isSealedTaskPlainOutput (#654 12d)', () => {
     ['task.complete', { summary: '' }],
     ['task.progress', { seq: 1, events: [] }],
     ['task.artifact', { blobRef: {} }],
+    ['task.artifact', { name: 'a.txt', contentType: 'text/plain' }],
+    ['task.complete', {}],
     ['task.await_approval', { summary: 'ok?' }],
   ])('refuses %s %j', (type, payload) => {
     expect(isSealedTaskPlainOutput(type, payload)).toBe(false);
