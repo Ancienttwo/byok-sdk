@@ -25,6 +25,8 @@ export interface Turn {
   unit?: string;
   /** Input batch Turns: the user inputs that this one reply answers, in arrival order. */
   inputIds?: string[];
+  /** History mode: the hash of the injected history that this Turn's offer froze (#739 Q4b). */
+  historyDigest?: string;
   blockedReason?: string; profileFailure?: { sequence: number; revision: string; reason: string }; outcome?: Json; conclusion?: string; reported?: boolean;
 }
 export type Verdict = 'answered' | 'failed' | 'cancelled' | 'refused' | 'expired' | 'abandoned';

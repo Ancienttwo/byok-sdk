@@ -426,6 +426,11 @@ export function selectImpact(paths, context = {}) {
       for (const id of knownFamilies) if (id !== 'build-test') families.add(id);
       continue;
     }
+    // W7: agent-memory-windows.yml is removed. Its checks run in the
+    // agent-memory-helper jobs of ci.yml, so the path selects those families.
+    if (path === '.github/workflows/agent-memory-windows.yml') {
+      families.add('agent-memory-helper'); families.add('agent-memory-helper-non-darwin'); continue;
+    }
     if (rootCi.has(path) || /^scripts\/ci\/[a-z0-9-]+(?:\.test)?\.mjs$/.test(path)) { scripts = true; continue; }
     const golden = /^api-surface\/([a-z-]+)\.d\.ts$/.exec(path);
     if (golden) {

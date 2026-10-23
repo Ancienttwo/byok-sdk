@@ -61,5 +61,5 @@ it('finds a boundary break in each import form that it reads', () => {
 
 it('holds the #739 D1 pure modules under the boundary', () => {
   const files = new Set(readdirSync(RULES));
-  for (const name of ['turn', 'team', 'history', 'delegation', 'schema', 'context', 'outcome']) expect(files.has(`${name}.ts`), name).toBe(true);
+  for (const name of ['turn', 'team', 'history', 'delegation', 'schema', 'context', 'outcome', 'message', 'commit', 'commands']) expect(files.has(`${name}.ts`), name).toBe(true);
 });

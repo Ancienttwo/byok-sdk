@@ -173,13 +173,119 @@ let the accepted occurrence finish. Pause and resume retry the calendar.
 
 ## Boundaries
 
-The collaboration state has version 1. The Host rejects unsupported or
+The collaboration state has version 2. The Host rejects unsupported or
 unversioned stored state. It does not reset or migrate that state.
 
 This example has one team and one owner per ledger. Paid Pi success-rate
 measurement belongs to [WO-10b](../../docs/submit-result-measurement.md); the method defines per-runtime/model/platform cells and does not supply live data. Application history,
 versions and audit rows have no retention policy in this small example.
 
+## Commit contract
+
+Each collaboration command goes through one commit (#739 D1,
+`src/rules/commit.ts`). A commit takes a scope, a command id, an optional
+expected revision and the command. It returns the new revision, the
+disposition and the outbox rows that it wrote. One store transaction holds
+the state change, the command record and the outbox rows.
+
+- A replay of a command id with the same evidence returns the first result
+  and changes nothing. The evidence is the hash of the fields that decide the
+  command's effect.
+- The same command id with other evidence is an `identity_conflict`. The Host
+  keeps the existing error text, for example `Input identity conflict`.
+- Without an expected revision, the commit decides on the head. An explicit
+  revision that is not the head is a `stale_revision` conflict. A replay is
+  checked first, so a retry with its original revision gets its first result.
+- The revision counts committed commands only (#739 6b). Each new commit adds
+  1, also for a refused disposition. A command that throws commits nothing.
+  Host passes that only apply evidence (sync, reconcile, reply checks,
+  deliveries, device refresh) do not change the revision.
+- A keyless command has no record (#739 6a). Each call applies and adds 1 to
+  the revision, so its command id is not a dedup key. Only an explicit expected
+  revision protects a retry: the first commit moved the head, so the retry is a
+  `stale_revision` conflict.
+
+The keyed commands are owner input, received IM input, room input, answers,
+card decisions, team snapshots, and three K4 callbacks: a terminal outcome, an Agent message
+and a Bot routine occurrence. The keyless commands are `setMainBot`,
+`updateRoom`, `retryPersona`, `enablePushRoute`, `revokePushRoute`,
+`resendDelivery`, `cancelDelegation`, `abandonDelegation` and `cancelTurn`.
+`src/rules/commands.ts` decides all of them. The Host checks the principal
+and the channel before the commit, and it calls K4 cancel and delivers cancel
+facts after the commit. The routine owner APIs are K4 commands on K4 rows and
+do not commit here.
+
+In this L example the scope is the ledger tenant. Owner APIs pass no expected
+revision. K4 already deduplicates terminals (`applied`) and accepted messages (the
+message receipt), so L stores no record for those callbacks. K4 writes no
+receipt for a refused message, so L keeps a record for it: a retry gets the
+same refusal and does not change the revision. Other content for the same
+message id is refused with `message_conflict`. The D1 vectors in
+`src/commit-vectors.test-support.ts` run against a pure in-memory store and
+against the L ledger; the D2 H adapter runs the same vectors.
+
+Known L limit: K4 stores the whole Host ledger, with the collaboration state,
+in one JSON row per tenant. Turns, replies, audit rows and command records
+make that row grow. Command records are dedup evidence; retention must not
+delete a record while a retry of its command can still arrive. Per-entity L
+storage and K8 retention are #798.
+
+## External history authority
+
+With the `history` option, the ContextPack history of a Bot Turn comes from an
+external authority, not from this ledger (#739 D1, #606). Before a Bot Turn
+freezes its offer, the Host reads the Bot's earlier history outside the ledger
+transaction. Then one transaction freezes the offer with those rows. The
+transaction freezes only a Turn that still has no offer.
+
+- The authority returns rows in the ContextPack row shape: `id`, `root`,
+  `source`, `request`, `hop`, `status`, optional `conclusion` and
+  `outcomeSummary`. Rows in another shape are refused.
+- The rows replace the stored Turns in that ContextPack. The current Turn
+  always comes from this ledger.
+- The collaboration state does not store the rows. The Turn keeps their hash
+  in `historyDigest`. K4 keeps the frozen instruction of the offer, as for
+  every offer.
+- Cards, questions and rejected actions stay Host state. Room seats read room
+  messages, so they read no history.
+- A read that throws or returns another shape leaves the Turn queued. The
+  timer reads again after about one second.
+
+The team comes from this ledger, unless the `team: 'external'` option is set.
+
+## External team authority
+
+With `team: 'external'`, an external authority owns the Bots (#739 Q4c). The
+constructor creates no Main Bot. The authority sends team snapshots with
+`applyTeam({ revision, bots })`. Each Bot has `id`, `name`, `role`,
+`persona`, `model` and `mainBot`. The Host maps `model` to its own execution
+template.
+
+- The team revision is the authority's revision. It is not the collaboration
+  commit revision. It must be a safe integer of 1 or more, and each new
+  snapshot must have a higher revision.
+- A newer snapshot archives each Bot that it does not list, as `delete_bot`
+  does. A new Bot gets its first persona projection. A changed name, role,
+  persona or model queues the same projection as `update_bot`. A change of the
+  Main Bot flag only sets the flag.
+- An archived Bot cannot come back. A snapshot that lists one is refused, and
+  nothing changes.
+- The command id is the team revision. The same revision with the same Bots
+  replays, in any Bot order. The same revision with other Bots is an
+  `identity_conflict`. The replay check comes first, so an exact retry of an
+  applied older snapshot gets its first result.
+- A revision that is not newer and was not applied before refuses with
+  `stale_team`. The refusal is a commit, so it adds 1 to the collaboration
+  revision.
+- The snapshot covers the Bots only. `setMainBot`, `create_bot`, `update_bot`
+  and `delete_bot` refuse with `external_team`, and the Main Bot schema does
+  not offer those three actions. Rooms, team notes and persona retries stay
+  local.
+- The ledger stores the mode. A ledger with a local team cannot open in
+  external mode, and an external ledger cannot open without the option.
+
+With `history` and `team: 'external'` together, the device ledger holds
+neither the history nor the team authority.
 
 ## Group chat and Main Bot
 

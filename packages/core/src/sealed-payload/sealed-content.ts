@@ -22,14 +22,17 @@
  * `contentMac` is a keyed MAC over category, family, identity and plaintext. The
  * Host compares two submissions of one identity by it, without a key.
  *
- * Blob fields are not sealed here yet; their AAD rule comes with the blob wire
- * rules.
+ * A blob field is sealed by the same frame and key rule, before its outer
+ * content. Its AAD is the outer AAD without `paddedLength` and `contentMac`,
+ * plus its own `paddedLength` and the JSON Pointer `fieldPath` to its BlobRef.
  */
 import { z } from 'zod';
 
 import { canonicalizeJson, canonicalizeJsonBytes, type JsonObject } from '../attestation';
 import { CONTENT_HASH_PATTERN } from '../blob';
+import { ByokCoreError } from '../errors';
 import { isCanonicalTimestamp } from '../time';
+import { safeParseTotal } from '../total-parse';
 import { webCryptoSubtle } from '../webcrypto';
 import { MEMBER_ID_PATTERN } from './member-chain';
 import {
@@ -67,7 +70,8 @@ export type SealedDirection = (typeof SEALED_DIRECTIONS)[number];
 
 export const SEALED_NONCE_BYTES = 12;
 
-const AEAD_TAG_BYTES = 16;
+/** @internal Shared with `sealed-blob.ts`. Stripped from the published declarations. */
+export const AEAD_TAG_BYTES = 16;
 const FRAME_HEADER_BYTES = 4;
 const ALIGNED_FRAME_LIMIT = 16 * 1024;
 const FRAME_ALIGNMENT = 256;
@@ -109,8 +113,11 @@ export function sealedPaddedLength(frameLength: number): number {
   return Math.ceil(frameLength / step) * step;
 }
 
-/** Total on any number: zod runs this refinement even after the integer checks fail. */
-function isLegalPaddedLength(paddedLength: number): boolean {
+/**
+ * Total on any number: zod runs this refinement even after the integer checks fail.
+ * @internal Shared with `sealed-blob.ts`. Stripped from the published declarations.
+ */
+export function isLegalPaddedLength(paddedLength: number): boolean {
   return Number.isSafeInteger(paddedLength)
     && paddedLength >= FRAME_ALIGNMENT
     && sealedPaddedLength(paddedLength) === paddedLength;
@@ -148,7 +155,8 @@ export function decodeSealedFrame(frame: Uint8Array, paddedLength: number, maxCo
 // ---------------------------------------------------------------------------
 
 const NonEmptyStringSchema = z.string().min(1);
-const PositiveIntegerSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+/** @internal Shared with `sealed-blob.ts`. Stripped from the published declarations. */
+export const PositiveIntegerSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 
 /** What the Host may read of one sealed content. The ciphertext travels next to it. */
 export const SealedContentHeaderV1Schema = z.strictObject({
@@ -197,7 +205,8 @@ export interface SealedBinding {
   readonly notAfter: string | null;
 }
 
-const SealedBindingSchema = z
+/** @internal Shared with `sealed-blob.ts`. Stripped from the published declarations. */
+export const SealedBindingSchema = z
   .strictObject({
     tenantId: NonEmptyStringSchema,
     family: z.string().regex(FAMILY_PATTERN),
@@ -223,22 +232,35 @@ const SealedBindingSchema = z
       });
     }
   });
-type ParsedBinding = z.infer<typeof SealedBindingSchema>;
+/** @internal Shared with `sealed-blob.ts`. Stripped from the published declarations. */
+export type ParsedBinding = z.infer<typeof SealedBindingSchema>;
 
-function parseBinding(binding: SealedBinding): ParsedBinding {
-  const parsed = SealedBindingSchema.safeParse(binding);
+/** @internal Shared with `sealed-blob.ts`. Stripped from the published declarations. */
+export function parseBinding(binding: SealedBinding): ParsedBinding {
+  const parsed = safeParseTotal(SealedBindingSchema, binding);
   if (!parsed.success) throw invalidInput('Sealed content binding is invalid');
   return parsed.data;
 }
 
-function assertMaxContentLength(maxContentLength: number): void {
+/** @internal Shared with `sealed-blob.ts`. Stripped from the published declarations. */
+export function assertMaxContentLength(maxContentLength: number): void {
   if (!Number.isSafeInteger(maxContentLength) || maxContentLength < 0 || maxContentLength > MAX_CONTENT_LENGTH) {
     throw invalidInput('Sealed content limit must be a non-negative 32-bit integer');
   }
 }
 
-function aadBytes(header: SealedContentHeaderV1, binding: ParsedBinding): Uint8Array {
-  return canonicalizeJsonBytes({
+/**
+ * The header fields that do not depend on the plaintext. A blob is sealed before its outer content, so it knows only these.
+ * @internal Shared with `sealed-blob.ts`. Stripped from the published declarations.
+ */
+export type SealedAadContext = Pick<SealedContentHeaderV1, 'v' | 'suite' | 'category' | 'scope' | 'chainHead' | 'sender'>;
+
+/**
+ * The 16 AAD members that the outer content and its blobs share (§8.2, §8.1).
+ * @internal Shared with `sealed-blob.ts`. Stripped from the published declarations.
+ */
+export function bindingAad(header: SealedAadContext, binding: ParsedBinding) {
+  return {
     v: header.v,
     suite: header.suite,
     category: header.category,
@@ -257,14 +279,16 @@ function aadBytes(header: SealedContentHeaderV1, binding: ParsedBinding): Uint8A
       : { agentId: binding.agentRef.agentId, profileRevision: binding.agentRef.profileRevision },
     categories: [...binding.categories],
     notAfter: binding.notAfter,
-    paddedLength: header.paddedLength,
-    contentMac: header.contentMac,
-  });
+  };
+}
+
+function aadBytes(header: SealedContentHeaderV1, binding: ParsedBinding): Uint8Array {
+  return canonicalizeJsonBytes({ ...bindingAad(header, binding), paddedLength: header.paddedLength, contentMac: header.contentMac });
 }
 
 /** The canonical AAD bytes of a header under a binding (§8.2). */
 export function sealedContentAad(header: SealedContentHeaderV1, binding: SealedBinding): Uint8Array {
-  const parsed = SealedContentHeaderV1Schema.safeParse(header);
+  const parsed = safeParseTotal(SealedContentHeaderV1Schema, header);
   if (!parsed.success) throw invalidInput('Sealed content header is invalid');
   return aadBytes(parsed.data, parseBinding(binding));
 }
@@ -281,8 +305,13 @@ function isNonEmptyPlainObject(value: unknown): boolean {
 
 /** The plaintext text, with the RFC 8785 number rule (#786). The AAD and the MAC identity keep `canonicalizeJson`. */
 function canonicalPlaintext(plaintext: JsonObject): string {
-  if (!isNonEmptyPlainObject(plaintext)) throw invalidInput('Sealed plaintext must be a non-empty plain JSON object');
-  return canonicalizeSealedJson(plaintext);
+  try {
+    if (isNonEmptyPlainObject(plaintext)) return canonicalizeSealedJson(plaintext);
+  } catch (cause) {
+    // A throwing getter or proxy trap reaches here too, from either check; the caller sees one typed error.
+    throw new ByokCoreError('sealed_secret_invalid', 'Sealed plaintext is not canonical JSON', { cause });
+  }
+  throw invalidInput('Sealed plaintext must be a non-empty plain JSON object');
 }
 
 /** Decoded content, only when it is the canonical JSON text of a non-empty plain object. */
@@ -328,7 +357,8 @@ export async function sealedContentMac(input: {
 // Seal and open
 // ---------------------------------------------------------------------------
 
-async function aesGcm(
+/** @internal Shared with `sealed-blob.ts`. Stripped from the published declarations. */
+export async function aesGcm(
   mode: 'encrypt' | 'decrypt',
   key: Uint8Array,
   nonce: Uint8Array,
@@ -396,7 +426,7 @@ export async function sealContentWithRandomness(input: SealContentInput, randomn
   if (content.byteLength > input.maxContentLength) throw invalidInput('Sealed content exceeds its plaintext limit');
   const frame = encodeSealedFrame(content);
   const { salt, nonce } = randomness;
-  const parsed = SealedContentHeaderV1Schema.safeParse({
+  const parsed = safeParseTotal(SealedContentHeaderV1Schema, {
     v: SEALED_CONTENT_VERSION,
     suite: SEALED_CONTENT_SUITE,
     category: input.category,
@@ -457,7 +487,8 @@ export interface OpenSealedContentInput {
   readonly maxContentLength: number;
 }
 
-function failure(reason: SealedContentOpenFailure): SealedContentOpenResult {
+/** @internal Shared with `sealed-blob.ts`. Stripped from the published declarations. */
+export function failure(reason: SealedContentOpenFailure): { readonly ok: false; readonly reason: SealedContentOpenFailure } {
   return { ok: false, reason };
 }
 
@@ -474,12 +505,12 @@ function failure(reason: SealedContentOpenFailure): SealedContentOpenResult {
  */
 export async function openSealedContent(input: OpenSealedContentInput): Promise<SealedContentOpenResult> {
   assertMaxContentLength(input.maxContentLength);
-  const parsedBinding = SealedBindingSchema.safeParse(input.binding);
-  const parsedSealing = SealedScopePolicySchema.safeParse(input.sealing);
+  const parsedBinding = safeParseTotal(SealedBindingSchema, input.binding);
+  const parsedSealing = safeParseTotal(SealedScopePolicySchema, input.sealing);
   if (!parsedBinding.success || !parsedSealing.success) return failure('sealing_policy_mismatch');
   const binding = parsedBinding.data;
   const sealing = parsedSealing.data;
-  const parsed = SealedContentHeaderV1Schema.safeParse(input.header);
+  const parsed = safeParseTotal(SealedContentHeaderV1Schema, input.header);
   if (!parsed.success) return failure('sealed_open_failed');
   const header = parsed.data;
   if (
