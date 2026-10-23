@@ -61,6 +61,25 @@ it('rolls back row writes with the body, and closes the port when apply returns 
   expect(read(ledger, 'turns', 'late')).toBeUndefined();
 });
 
+it('refuses a nested transaction or compact inside apply, and keeps the outer transaction intact', () => {
+  const { ledger } = open();
+  const nested = 'cannot start a transaction within a transaction';
+  ledger.transaction((state, rows) => {
+    rows.put('turns', 'outer', 1);
+    expect(() => ledger.transaction((_state, inner) => { inner.put('turns', 'inner', 2); })).toThrow(nested);
+    expect(() => ledger.compact({ acknowledgedIntentKeys: [], now: Date.now(), tombstoneRetentionMs: MIN_TOMBSTONE_RETENTION_MS })).toThrow(nested);
+    rows.put('turns', 'after', 3);
+    state.application.kept = true;
+  });
+  expect(ledger.snapshot().application).toEqual({ kept: true });
+  expect(ledger.transaction((_state, rows) => ['outer', 'inner', 'after'].map(id => rows.get('turns', id)))).toEqual([1, undefined, 3]);
+  // A nested call that apply does not catch rolls the outer transaction back, and the ledger stays usable.
+  expect(() => ledger.transaction((_state, rows) => { rows.put('turns', 'lost', 1); ledger.transaction(() => undefined); })).toThrow(nested);
+  expect(read(ledger, 'turns', 'lost')).toBeUndefined();
+  ledger.transaction((_state, rows) => rows.put('turns', 'next', 1));
+  expect(read(ledger, 'turns', 'next')).toBe(1);
+});
+
 it('keeps tenants apart, and keeps a retired identity after a row delete and a compaction', () => {
   const { ledger, filename } = open('one');
   const other = open('two', filename).ledger;
