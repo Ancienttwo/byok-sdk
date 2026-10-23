@@ -21,6 +21,15 @@ export const E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES = 256;
 /** The most scope key packages one put accepts. */
 export const E2EE_SCOPE_KEY_PACKAGE_PUT_MAX = 256;
 
+// Device-proof operations of the three device write routes. Each route binds
+// one operation, and the proof's `resource` is the route path.
+/** Register the device's member key bundle and its device pairing MAC (§7.2 step 3). */
+export const E2EE_MEMBER_KEY_REGISTER_OPERATION = 'e2ee-member-key.register' as const;
+/** Append member chain entries. */
+export const E2EE_MEMBER_CHAIN_APPEND_OPERATION = 'e2ee-member-chain.append' as const;
+/** Put scope key packages. */
+export const E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION = 'e2ee-scope-key-package.put' as const;
+
 /**
  * Canonical unpadded base64url of exactly `bytes` bytes: the length is fixed,
  * and the unused low bits of the last character are zero, so one value has
@@ -97,6 +106,18 @@ export type E2eeScopeKeyPackage = z.infer<typeof E2eeScopeKeyPackageSchema>;
 
 /** A pairing MAC (§7.2 steps 3 and 4): HMAC-SHA-256 under `pv`, which the Host never holds. */
 export const E2eePairingMacSchema = base64UrlBytes(32);
+
+/**
+ * The device registration body. `member` is the device's own bundle, so it
+ * names the device id; `mac` is the device pairing MAC over it under `pv`.
+ */
+export const E2eeMemberKeyRegisterRequestSchema = z.strictObject({
+  member: E2eeMemberKeyBundleSchema.refine(member => member.deviceId !== undefined, {
+    message: 'a device member names its deviceId',
+  }),
+  mac: E2eePairingMacSchema,
+});
+export type E2eeMemberKeyRegisterRequest = z.infer<typeof E2eeMemberKeyRegisterRequestSchema>;
 
 /** What the client relays to the device in pairing step 4. The client member has no device id. */
 export const E2eeClientPairingMacSchema = z.strictObject({
