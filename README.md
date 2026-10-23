@@ -417,7 +417,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/keys` | Local provider credential custody | `zod` | allowed | 290208 B |
 | `@byok-sdk/keys/package.json` | Package metadata | — | forbidden | 1466 B |
 | `@byok-sdk/keys/pi-catalog` | Pinned pi-ai catalog lookup for pi_model | `zod` | allowed | 173028 B |
-| `@byok-sdk/protocol` | Wire schemas and codecs; codegen negative control | `@cfworker/json-schema`, `zod` | allowed | 145206 B |
+| `@byok-sdk/protocol` | Wire schemas and codecs; codegen negative control | `@cfworker/json-schema`, `zod` | allowed | 145239 B |
 | `@byok-sdk/protocol/constants` | Schema-free protocol values | — | forbidden | 4531 B |
 | `@byok-sdk/protocol/package.json` | Package metadata | — | forbidden | 1667 B |
 | `@byok-sdk/server` | Resident Node server | `@cfworker/json-schema`, `@hono/node-server`, `hono`, `zod` | allowed | 709689 B |

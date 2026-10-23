@@ -265,6 +265,7 @@ describe('sealed payload v1: the sealed steer and output types', () => {
       expect(corpus.some((line) => line.type === 'task.decline_sealed' && line.payload.code === code), code).toBe(false);
       expect(parse('task.decline', { reason: code, retryable: false, code }), code).toBe(true);
       expect(parse('task.decline', { reason: `${code}: free text`, retryable: false, code }), code).toBe(false);
+      expect(parse('task.decline', { reason: code, retryable: true, code }), `${code} is not retryable`).toBe(false);
       expect(parse('task.decline_sealed', { ...sealedDecline, code }), code).toBe(false);
     }
     expect(parse('task.decline', { reason: 'free text', code: 'agent_home_writer_busy' })).toBe(true);

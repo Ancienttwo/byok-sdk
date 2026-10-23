@@ -4842,8 +4842,9 @@ export type TaskClaimPayload = z.infer<typeof TaskClaimPayloadSchema>;
 export declare const TaskStartedPayloadSchema: z.ZodObject<{}, z.core.$strip>;
 export type TaskStartedPayload = z.infer<typeof TaskStartedPayloadSchema>;
 /**
- * #654: a sealed decline code names a fixed outcome and carries no content,
- * so its `reason` is the code itself. A free-text reason never goes with it.
+ * #654: a sealed decline code names a fixed, non-retryable outcome and
+ * carries no content, so its `reason` is the code itself. A free-text reason
+ * or `retryable: true` never goes with it.
  */
 export declare const TaskDeclinePayloadSchema: z.ZodObject<{
     sealed: z.ZodOptional<z.ZodNever>;

@@ -350,6 +350,34 @@ describe('sealed payload v1: each sealed type has its own hosted entry (#654)', 
     },
   );
 
+  // The four enqueue lanes take an optional task id. The fresh lane always requires one.
+  const enqueueLanes: Record<string, (harness: ReturnType<typeof createHarness>, deviceId: string, payload: never) => Promise<{ taskId: string }>> = {
+    'task.offer_sealed': (h, d, payload) => h.cloud.enqueueSealedOffer(TENANT_A, d, { payload }),
+    'task.offer_with_toolsets_sealed': (h, d, payload) => h.cloud.enqueueSealedToolsetOffer(TENANT_A, d, { payload }),
+    'task.offer_for_agent_sealed': (h, d, payload) => h.cloud.enqueueSealedAgentOffer(TENANT_A, d, { payload }),
+    'task.offer_for_agent_with_egress_sealed': (h, d, payload) =>
+      h.cloud.enqueueSealedAgentEgressOffer(TENANT_A, d, { payload, ...withContext(payload as { messageEgress?: unknown }) }),
+  };
+
+  it.each(laneLines.filter((line) => line.type in enqueueLanes).map((line) => [line.type, line.payload.sealed === undefined ? 'output only' : 'sealed input', line] as const))(
+    '%s (%s) without a taskId: a sealed instruction is refused, because it binds the task id; output-only sealing gets a minted id',
+    async (type, label, line) => {
+      const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+      const device = await harness.pairDevice(TENANT_A);
+      await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: requiredReceiverCapabilities(type, line.payload) });
+      const page = () => harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0, limit: 10 });
+
+      if (label === 'sealed input') {
+        await expect(enqueueLanes[type]!(harness, device.deviceId, line.payload as never)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+        expect((await page()).messages).toEqual([]);
+      } else {
+        const enqueued = await enqueueLanes[type]!(harness, device.deviceId, line.payload as never);
+        expect(enqueued.taskId).toMatch(/^task_/u);
+        expect((await page()).messages).toHaveLength(1);
+      }
+    },
+  );
+
   it('checks and enqueues one parsed copy, so a payload that the caller changes during the device read has no effect', async () => {
     const line = laneLines.find((candidate) => candidate.type === 'task.offer_for_agent_sealed' && candidate.payload.sealed !== undefined)!;
     const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });

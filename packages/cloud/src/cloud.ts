@@ -455,28 +455,28 @@ export interface AgentEgressDispatchInput {
  * and no lane strips a sealing policy.
  */
 export interface EnqueueSealedOfferInput {
-  /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
+  /** Required with a sealed instruction, whose AAD and content MAC bind it. Without one, cloud mints the id. */
   readonly taskId?: string;
   readonly payload: TaskOfferSealedPayload;
 }
 
 /** The sealed lane of {@link EnqueueToolsetOfferInput} (#654). */
 export interface EnqueueSealedToolsetOfferInput {
-  /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
+  /** Required with a sealed instruction, whose AAD and content MAC bind it. Without one, cloud mints the id. */
   readonly taskId?: string;
   readonly payload: TaskOfferWithToolsetsSealedPayload;
 }
 
 /** The sealed lane of {@link AgentDispatchInput} (#654). Resume-only, as the plaintext lane is. */
 export interface SealedAgentDispatchInput {
-  /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
+  /** Required with a sealed instruction, whose AAD and content MAC bind it. Without one, cloud mints the id. */
   readonly taskId?: string;
   readonly payload: TaskOfferForAgentSealedPayload & { readonly sessionRef: string };
 }
 
 /** The sealed lane of {@link AgentEgressDispatchInput} (#654). */
 export interface SealedAgentEgressDispatchInput {
-  /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
+  /** Required with a sealed instruction, whose AAD and content MAC bind it. Without one, cloud mints the id. */
   readonly taskId?: string;
   readonly payload: TaskOfferForAgentWithEgressSealedPayload;
   /** Host-only product destination/freshness authority; never serialized to the daemon. */
@@ -1743,7 +1743,10 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     type: 'task.offer_sealed' | 'task.offer_with_toolsets_sealed' | 'task.offer_for_agent_sealed' | 'task.offer_for_agent_with_egress_sealed',
     input: { readonly taskId?: string; readonly payload: object; readonly agentMessageContext?: AgentMessageServerContext },
   ): Promise<EnqueuedOffer> {
+    const { taskId } = input;
     const payload = MESSAGE_PAYLOAD_SCHEMAS[type].parse(input.payload);
+    // A sealed instruction binds the task id, so cloud cannot mint one for it.
+    if (taskId === undefined && payload.sealed !== undefined) throw new ByokCloudError('coordination_input_invalid', 'a sealed instruction needs its taskId');
     if (type === 'task.offer_sealed' || type === 'task.offer_with_toolsets_sealed') await assertLegacyAdmission(tenant, deviceId);
     if (type === 'task.offer_for_agent_sealed') assertResumeSessionRef(payload);
     await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities(type, payload));
@@ -1752,9 +1755,9 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     return enqueueTaskEnvelope(
       tenant,
       deviceId,
-      input.taskId,
+      taskId,
       agentRef,
-      (taskId, seq, messageId) => createEnvelope(type, payload as never, { id: messageId, taskId, seq }),
+      (id, seq, messageId) => createEnvelope(type, payload as never, { id: messageId, taskId: id, seq }),
       type === 'task.offer_for_agent_with_egress_sealed'
         ? agentMessageOfferWriter(deviceId, payload as never, input.agentMessageContext)
         : undefined,

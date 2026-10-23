@@ -1467,19 +1467,19 @@ export interface AgentEgressDispatchInput {
  * and no lane strips a sealing policy.
  */
 export interface EnqueueSealedOfferInput {
-    /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
+    /** Required with a sealed instruction, whose AAD and content MAC bind it. Without one, cloud mints the id. */
     readonly taskId?: string;
     readonly payload: TaskOfferSealedPayload;
 }
 /** The sealed lane of {@link EnqueueToolsetOfferInput} (#654). */
 export interface EnqueueSealedToolsetOfferInput {
-    /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
+    /** Required with a sealed instruction, whose AAD and content MAC bind it. Without one, cloud mints the id. */
     readonly taskId?: string;
     readonly payload: TaskOfferWithToolsetsSealedPayload;
 }
 /** The sealed lane of {@link AgentDispatchInput} (#654). Resume-only, as the plaintext lane is. */
 export interface SealedAgentDispatchInput {
-    /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
+    /** Required with a sealed instruction, whose AAD and content MAC bind it. Without one, cloud mints the id. */
     readonly taskId?: string;
     readonly payload: TaskOfferForAgentSealedPayload & {
         readonly sessionRef: string;
@@ -1487,7 +1487,7 @@ export interface SealedAgentDispatchInput {
 }
 /** The sealed lane of {@link AgentEgressDispatchInput} (#654). */
 export interface SealedAgentEgressDispatchInput {
-    /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
+    /** Required with a sealed instruction, whose AAD and content MAC bind it. Without one, cloud mints the id. */
     readonly taskId?: string;
     readonly payload: TaskOfferForAgentWithEgressSealedPayload;
     /** Host-only product destination/freshness authority; never serialized to the daemon. */

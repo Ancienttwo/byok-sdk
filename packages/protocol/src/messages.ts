@@ -911,12 +911,13 @@ const DeclineFields = z.object({
   code: z.enum([...HOME_DECLINE_CODES, ...SEALED_DECLINE_CODES]).optional(),
 });
 /**
- * #654: a sealed decline code names a fixed outcome and carries no content,
- * so its `reason` is the code itself. A free-text reason never goes with it.
+ * #654: a sealed decline code names a fixed, non-retryable outcome and
+ * carries no content, so its `reason` is the code itself. A free-text reason
+ * or `retryable: true` never goes with it.
  */
 export const TaskDeclinePayloadSchema = DeclineFields.refine(
-  (p) => !(SEALED_DECLINE_CODES as readonly unknown[]).includes(p.code) || p.reason === p.code,
-  { path: ['reason'], message: 'reason must be the code' },
+  (p) => !(SEALED_DECLINE_CODES as readonly unknown[]).includes(p.code) || (p.reason === p.code && p.retryable !== true),
+  { message: 'a sealed code needs reason === code, not retryable' },
 );
 export type TaskDeclinePayload = z.infer<typeof TaskDeclinePayloadSchema>;
 

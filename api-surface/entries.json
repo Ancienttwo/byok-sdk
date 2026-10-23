@@ -1859,7 +1859,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Wire schemas and codecs; codegen negative control",
-      "budgetBytes": 145206,
+      "budgetBytes": 145239,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
