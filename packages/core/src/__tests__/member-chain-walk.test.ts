@@ -162,13 +162,25 @@ describe('member key bundle', () => {
     expect(bundle.memberId).toBe(memberId);
     await expect(parseMemberKeyBundle(bundleJson(bundle))).resolves.toMatchObject({ memberId });
     await expect(parseMemberKeyBundle({ ...bundle, memberId: await deriveMemberId(kem.publicJwk) })).resolves.toBeUndefined();
+    // A wrong id with a valid kemSig by the real key: only the derivation check refuses it.
+    const wrongId = await deriveMemberId(kem.publicJwk);
+    const wrongIdKemSig = await ecdsaSign(signing.publicJwk, signing.privateKey, memberKemSigningInput(wrongId, kem.publicJwk, 1));
+    await expect(parseMemberKeyBundle({ ...bundleJson(bundle), memberId: wrongId, kemSig: wrongIdKemSig })).resolves.toBeUndefined();
   });
 
   it('rejects a bundle whose id, keys or shape is wrong', async () => {
-    const { bundle } = await newMember('device-1');
+    const member = await newMember('device-1');
+    const { bundle } = member;
     const other = await newMember();
+    // Another member's id with a kemSig over that id by this member's key, so kemSig verifies.
+    const otherIdKemSig = await ecdsaSign(
+      bundle.signingPublicJwk,
+      member.signingPrivateKey,
+      memberKemSigningInput(other.bundle.memberId, bundle.kemPublicJwk, bundle.kemEpoch),
+    );
     for (const bad of [
       { ...bundle, memberId: other.bundle.memberId },
+      { ...bundle, memberId: other.bundle.memberId, kemSig: otherIdKemSig },
       { ...bundle, kemPublicJwk: bundle.signingPublicJwk },
       { ...bundle, kemPublicJwk: { ...bundle.kemPublicJwk, x: 'A'.repeat(43), y: 'A'.repeat(43) } },
       { ...bundle, v: 2 },
@@ -306,6 +318,13 @@ describe('member chain walk', () => {
       .resolves.toEqual({ ok: false, reason: 'member_chain_link_invalid', index: 0 });
     // After genesis, a second self-signed add by a non-member is refused.
     await expect(apply(state, await next(state, other, 'add', { member: bundleJson(other.bundle) })))
+      .resolves.toEqual({ ok: false, reason: 'member_chain_signer_invalid', index: 0 });
+    // After the only member removes itself, the member set is empty but the chain has a head.
+    // Genesis is only for the empty state, so a stranger cannot add itself and take over the chain.
+    const removedAll = await applied(state, await next(state, client, 'remove', { memberId: client.bundle.memberId }));
+    expect(removedAll.members.size).toBe(0);
+    expect(removedAll.head?.seq).toBe(2);
+    await expect(apply(removedAll, await next(removedAll, other, 'add', { member: bundleJson(other.bundle) })))
       .resolves.toEqual({ ok: false, reason: 'member_chain_signer_invalid', index: 0 });
   });
 

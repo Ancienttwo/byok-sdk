@@ -8,7 +8,8 @@
  * 1. `support/member-rules-vectors.ts` runs every vector through the core
  *    modules. The Bun leg (`member-rules-bun.test.ts`) runs the same checker.
  * 2. An oracle in this file rebuilds the bytes with `node:crypto` and its own
- *    canonical JSON. It imports nothing from `sealed-payload/`, so it is
+ *    canonical JSON. The oracle code paths call nothing from `sealed-payload/`
+ *    (the generator and the property tests in this file do), so they are
  *    evidence that the golden bytes follow the decided format, not only that
  *    the code agrees with itself.
  *
