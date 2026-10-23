@@ -169,11 +169,12 @@ export class SealedTasks {
   }
 
   /**
-   * Opens a sealed steer of a sealed task and returns its text once per
+   * Opens a sealed steer of a sealed task and applies its text once per
    * `steerId` (decision 12a). The id is checked after the open, so it is the
-   * authenticated one. Anything else is dropped with a log line.
+   * authenticated one. A failed apply does not count, so a redelivery is
+   * applied. Anything else is dropped with a log line.
    */
-  async openSteer(envelope: Envelope): Promise<string | undefined> {
+  async applySteer(envelope: Envelope, apply: (text: string) => Promise<void>): Promise<void> {
     const taskId = envelope.task_id;
     const task = taskId === undefined ? undefined : this.#tasks.get(taskId);
     const drop = (why: string): undefined => {
@@ -188,7 +189,12 @@ export class SealedTasks {
     if (typeof text !== 'string' || Object.keys(rest).length > 0) return drop('sealed_open_failed');
     if (task.steerIds.has(steerId)) return drop(`steer ${steerId} was already applied`);
     task.steerIds.add(steerId);
-    return text;
+    try {
+      await apply(text);
+    } catch (error) {
+      task.steerIds.delete(steerId);
+      throw error;
+    }
   }
 
   /**

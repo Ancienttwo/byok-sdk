@@ -8236,11 +8236,12 @@ export declare class SealedTasks {
      */
     openOffer(envelope: Envelope): Promise<SealedOfferOpenResult>;
     /**
-     * Opens a sealed steer of a sealed task and returns its text once per
+     * Opens a sealed steer of a sealed task and applies its text once per
      * `steerId` (decision 12a). The id is checked after the open, so it is the
-     * authenticated one. Anything else is dropped with a log line.
+     * authenticated one. A failed apply does not count, so a redelivery is
+     * applied. Anything else is dropped with a log line.
      */
-    openSteer(envelope: Envelope): Promise<string | undefined>;
+    applySteer(envelope: Envelope, apply: (text: string) => Promise<void>): Promise<void>;
     /**
      * Seals one outbound envelope of a task that seals its output, in send
      * order. A closed plaintext form, or an envelope that is already sealed,
