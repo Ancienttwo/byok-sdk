@@ -8,8 +8,10 @@
   and the first `scope-policy` of a new scope must be signed by a member it
   lists. Any other signer fails with `member_chain_signer_invalid`. Before, any
   current member could sign both, so one device member could add itself to
-  another device's scope or shred it. Per-device scopes no longer depend on
-  every member being honest. A subject that breaks an op rule still fails with
+  another device's scope or shred it. Now a member cannot change or shred, on
+  the chain, a scope it is not in. The Host still deletes a scope's key
+  packages on any well-shaped `shred` (owner batch §50g), and the first member
+  that creates a scope id takes it. A subject that breaks an op rule still fails with
   `member_chain_subject_invalid`. `golden/member-rules-v1.json` gains a
   `scopeSigners` section; no existing vector changes. The walk is not yet in a
   published release.

@@ -9,8 +9,9 @@
  *   (from the empty state: `seq = 1`, `prev = null`);
  * - be signed by a current member (an `add`ed member that is not removed), or
  *   be the genesis entry (11a, below);
- * - for `scope-policy` and `shred`, be signed by a member of the scope (below);
- * - have the subject shape and the rule of its op (below).
+ * - have the subject shape and the rule of its op (below);
+ * - for `scope-policy` and `shred`, after the subject rules, be signed by a
+ *   member of the scope (below).
  *
  * One bad entry rejects the whole batch. The caller's state does not change.
  *
@@ -28,10 +29,18 @@
  * Scope signers (owner batch §50f A): a `scope-policy` or `shred` of an
  * existing scope must be signed by a member in that scope's current policy.
  * The first `scope-policy` of a new scope must be signed by a member in its
- * own member list. So a device member cannot add itself to another device's
- * scope or shred it, and the per-device isolation of #655 D-I4 (§7.9) does
- * not depend on the other members being honest. Another signer fails with
- * `member_chain_signer_invalid`.
+ * own member list. Another signer fails with `member_chain_signer_invalid`.
+ * So a member cannot change or shred, on the chain, a scope it is not in.
+ * The rule does not cover two cases (design §7.9):
+ *
+ * - The Host deletes a scope's key packages on any well-shaped `shred` and
+ *   does not check the signature (owner batch §50g). That deletion still
+ *   depends on the other members being honest.
+ * - The first member that creates a scope id takes it. E2d confirms a
+ *   scope's current policy before it seals to the scope.
+ *
+ * When every member of a scope's current policy has been removed, nobody can
+ * update or shred that scope again (design §7.9).
  *
  * Op rules:
  *
