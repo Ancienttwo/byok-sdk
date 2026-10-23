@@ -28,14 +28,21 @@ func TestWindowsHomeChainProbeDiagnosticsOnly(t *testing.T) {
 	for _, name := range []string{"USERNAME", "USERPROFILE", "LOCALAPPDATA", "TEMP", "TMP"} {
 		t.Logf("W2 env %s=%q", name, os.Getenv(name))
 	}
-	if output, err := exec.Command("whoami", "/priv").CombinedOutput(); err == nil {
-		for _, line := range strings.Split(string(output), "\n") {
-			if strings.Contains(line, "SeBackupPrivilege") || strings.Contains(line, "SeRestorePrivilege") {
-				t.Logf("W2 token %s", strings.Join(strings.Fields(line), " "))
-			}
+	output, err := exec.Command("whoami", "/priv").CombinedOutput()
+	for _, line := range strings.Split(string(output), "\n") {
+		if strings.Contains(line, "SeBackupPrivilege") || strings.Contains(line, "SeRestorePrivilege") {
+			t.Logf("W2 token %s", strings.Join(strings.Fields(line), " "))
 		}
-	} else {
-		t.Logf("W2 token whoami=%v", err)
+	}
+	t.Logf("W2 token whoami=%v", err)
+	// The environment comes from the parent process. The token names the
+	// profile of the account that really runs this test.
+	var token syscall.Token
+	profile := ""
+	if err := syscall.OpenProcessToken(syscall.Handle(^uintptr(0)), syscall.TOKEN_QUERY, &token); err == nil {
+		profile, err = token.GetUserProfileDirectory()
+		t.Logf("W2 token profile=%q err=%v", profile, err)
+		_ = token.Close()
 	}
 
 	temp := t.TempDir()
@@ -47,21 +54,22 @@ func TestWindowsHomeChainProbeDiagnosticsOnly(t *testing.T) {
 	makeReparsePoint(t, "junction", filepath.Join(temp, "link"), filepath.Join(temp, "real"))
 	probeChain(t, "junction-ancestor", nil, filepath.Join(temp, "link", "homes", "agent"), false)
 
-	for _, variable := range []string{"LOCALAPPDATA", "USERPROFILE"} {
-		base := os.Getenv(variable)
-		if info, err := os.Stat(base); base == "" || err != nil || !info.IsDir() {
-			t.Logf("W2 chain=existing-%s absent: %q %v", strings.ToLower(variable), base, err)
+	local := ""
+	if profile != "" {
+		local = filepath.Join(profile, "AppData", "Local")
+	}
+	for _, existing := range []struct{ label, path string }{{"existing-localappdata", local}, {"existing-profile", profile}} {
+		if info, err := os.Stat(existing.path); existing.path == "" || err != nil || !info.IsDir() {
+			t.Logf("W2 chain=%s absent: %q %v", existing.label, existing.path, err)
 			continue
 		}
-		probeChain(t, "existing-"+strings.ToLower(variable), nil, base, false)
+		probeChain(t, existing.label, nil, existing.path, false)
 	}
-	if base := os.Getenv("LOCALAPPDATA"); base != "" {
-		if info, err := os.Stat(base); err == nil && info.IsDir() {
-			product := filepath.Join(base, fmt.Sprintf("byok-w2-probe-%d", time.Now().UnixNano()))
-			t.Cleanup(func() { _ = os.RemoveAll(product) })
-			home := filepath.Join(product, "homes", "agent")
-			probeChain(t, "created-localappdata", mkdirChain(t, base, home), home, true)
-		}
+	if info, err := os.Stat(local); local != "" && err == nil && info.IsDir() {
+		product := filepath.Join(local, fmt.Sprintf("byok-w2-probe-%d", time.Now().UnixNano()))
+		t.Cleanup(func() { _ = os.RemoveAll(product) })
+		home := filepath.Join(product, "homes", "agent")
+		probeChain(t, "created-localappdata", mkdirChain(t, local, home), home, true)
 	}
 }
 
@@ -80,7 +88,12 @@ func mkdirChain(t *testing.T, base, leaf string) map[string]bool {
 		if err := os.Mkdir(cursor, 0o700); err != nil {
 			t.Fatalf("W2 fixture mkdir %s: %v", cursor, err)
 		}
-		made[cursor] = true
+		// The walk uses canonical names: a short name such as RUNNER~1 expands.
+		canonical, err := filepath.EvalSymlinks(cursor)
+		if err != nil {
+			t.Fatalf("W2 fixture canonical %s: %v", cursor, err)
+		}
+		made[canonical] = true
 	}
 	return made
 }
