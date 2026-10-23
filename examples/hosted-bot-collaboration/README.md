@@ -197,7 +197,9 @@ root ids are retired in `retired_identity`, and every moved command record answe
   in the state or in `archived_row`, where retention keeps it with no expiry, as K4 keeps its receipt. A refused message
   replays from its moved record until the record expires, as in L.
 - H keeps every intent row, settled or not. Intent row compaction, and its permanent intent tombstones, is later work.
-- The namespace and id of each archived row are checked against the K4 limits (128 and 1024 characters).
+- The namespace and id of each archived row, and of each row read (a moved command record or a tombstone), are checked
+  against the K4 limits (128 and 1024 characters), as K4 checks every row read in L.
+- A scope with no row has nothing to retain: the call returns zero counts and writes nothing, as L does on an empty ledger.
 
 ## Routines
 

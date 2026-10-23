@@ -184,12 +184,15 @@ export class HostedCollaborationStore {
   /**
    * One K8 retention call on `scope` (#793 D2g, #798), in one transaction under the scope lock: the acknowledged roots move
    * into `archived_row`, their ids are retired in `retired_identity`, and the moved command records answer replays until
-   * they expire. A refusal or a throw writes nothing.
+   * they expire. A refusal or a throw writes nothing. A scope with no row has no rows to retain, so the rule runs on the
+   * empty state, as L runs it on an empty ledger.
    */
   retain(scope: string, input: RetentionInput, limits: RetentionLimits): Promise<RetentionResult> {
     const key = storedKey(scope);
-    return this.transaction(client => this.decideIn(client, key, undefined, async state =>
-      ({ value: await decideRetention(client, key, state, input, limits), outbox: [] })), false);
+    return this.transaction(async client => {
+      if (!(await client.query('SELECT 1 FROM scope WHERE scope = $1', [key])).rowCount) return decideRetention(client, key, stateOf({}), input, limits);
+      return this.decideIn(client, key, undefined, async state => ({ value: await decideRetention(client, key, state, input, limits), outbox: [] }));
+    }, false);
   }
 
   /**

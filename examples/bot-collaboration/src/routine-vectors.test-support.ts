@@ -207,6 +207,9 @@ export function routineVectors(name: string, open: () => RoutineSubject | Promis
       await subject.lifecycle(id, 'active');
       expect(await subject.routine(id)).toMatchObject({ lifecycle: 'active', version: 1, nextAt: slotAfter(schedule, subject.now()) });
       expect(await subject.intent(turn)).toMatchObject({ retryUntil: null });
+      // A later slot that fires while the intent still runs bounds it at the fire time, as K4 `min(retryUntil ?? now, now)`.
+      await due(subject, id, 1);
+      expect(await subject.intent(turn)).toMatchObject({ retryUntil: subject.now(), conclusion: null });
     }, 60_000);
 
     it('completes a routine through cancel_routine, and keeps at most eight open routines per owner', async () => {
