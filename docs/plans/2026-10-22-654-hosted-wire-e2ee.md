@@ -6,6 +6,7 @@
 SDK 基线：`7c0bbebc720de5bebb13b7529ad161b9c19f03bb`。第一版随 [PR #685](https://github.com/Ancienttwo/byok-sdk/pull/685) 合入，基线是 `473cc4c4`。第一版引用的源码文件在两个基线之间没有变化。`docs/spec.md` 的行号已按新基线更新。第二版新增的引用都按新基线核对过。
 第二版新增：§2.0 托管 wire 地图；§6.1 的 v1 范围；§7.9 多设备；§8.1 与 §8.6 的填充帧和大内容规则；§9.3 漏列的内容摘要字段；§13.5 故障模式；§13.6 0.28.3 的首个切片；§14 的新决定与 owner 问题。§8.1 的填充帧和 §9.3 的摘要字段来自 PR #685 的两条审查意见。§8.6 的批次上限问题是第二版核对时发现的。
 下游源码核对基线：AiphaBee `5b5fc4ce`，只读核对。未核对下游线上部署。
+2026-10-23 修订：按 [issue 655](https://github.com/Ancienttwo/byok-sdk/issues/655) 的身份对应决定，更新 §7.2、§7.4、§7.9、§12.1 和 §14（新增 §14.2）。再按设备划分 scope，更新新设备加入（§7.9）和浏览器恢复（§1、§5.4、§7.8、§13.2、§13.5、§14）。
 关联：[issue 654](https://github.com/Ancienttwo/byok-sdk/issues/654)。发版台账 [issue 715](https://github.com/Ancienttwo/byok-sdk/issues/715) 把 #654 列进 0.28.3，先出设计。设备身份对应见 [issue 655](https://github.com/Ancienttwo/byok-sdk/issues/655)。H 路径见[双车道 Host 方案](2026-10-21-dual-host-collaboration.md)。托管 Host 的现行契约见 [hosted Host contract](../hosted-host-contract.md)（PR #682 合入）。
 
 ## 1. 目标、范围与建议
@@ -37,7 +38,7 @@ SDK 基线：`7c0bbebc720de5bebb13b7529ad161b9c19f03bb`。第一版随 [PR #685]
 - 幂等改为比较「明文元数据 + keyed content MAC」，不比较密文字节。
 - 删除提供两条路：加密类别用 crypto-shredding；全部类别都可用能在 Workers 上运行的 scoped row-delete。
 - Host 按 routine 发起的任务复用成员封装的 routine 模板。模板身份是 `routineId` 加 `definitionVersion`，由设备校验。
-- 浏览器成员丢失密钥（例如 Safari ITP 删除 IndexedDB）时，由持有 scope key 的设备重新批准。只有全部成员都丢失密钥时才丢数据。
+- 浏览器成员丢失密钥（例如 Safari ITP 删除 IndexedDB）时，按 scope 恢复：持有某个 scope key 的成员重新批准浏览器，为这个 scope 签署 `scope-policy` 更新，再重发 key package（§7.8）。一个 scope 只有在它的全部成员都丢失密钥时才丢数据。
 - v1 只交付 C1 和 C3，C2 按需开启。C4、输入准备和草稿等到 v2（§6.1）。
 - 加密前的明文用带长度前缀的帧。16 KiB 以内按 256 字节对齐，更大时用 Padmé。填充后超过 256 KiB 的密文放进 blob（§8.6）。
 - 加密类别里，对内容计算的摘要只能是密文的 SHA-256、keyed MAC，或者移进密文（§9.3）。
@@ -217,7 +218,7 @@ task receipt、task 行、`agent_message_admission` 行和 `agent_egress_event` 
 - Host 下发的前端代码。浏览器客户端的代码来自 Host。恶意前端可以在输入时取走明文，也可以跳过检查。这与 `docs/spec.md:114-120` 对 sealed provider secret 的说明一致。只有代码来源固定的客户端（原生应用、签名发布的 `ui-runtime` 宿主）能防这一项。
 - 主动 Host 可以扣留成员链的 `remove` 条目，让某个发送方继续用旧 epoch。§7.6 能检测这种情况，但不能阻止。
 - 撤销不能收回已导出的明文，也不能清除离线设备上的密钥。
-- 浏览器成员会丢失密钥。Safari ITP 会删除 7 天没有用户交互的站点的 IndexedDB（按 Safari 的使用天数计）。用户清除站点数据也会删除密钥。这时由仍持有 scope key 的设备重新批准浏览器（§7.8），代价是一次重新批准。只有全部设备和客户端都丢失密钥时，才会丢数据（§14 D13）。
+- 浏览器成员会丢失密钥。Safari ITP 会删除 7 天没有用户交互的站点的 IndexedDB（按 Safari 的使用天数计）。用户清除站点数据也会删除密钥。这时由仍持有 scope key 的成员重新批准浏览器，按 scope 恢复（§7.8），代价是一次重新批准。scope 按设备划分，所以没有存活的客户端时，一台设备只能恢复它自己的 scope。一个 scope 只有在它的全部成员都丢失密钥时，才会丢数据（§14 D13）。
 - Host 仍能下发任意任务，让设备读取本机数据后以明文回传。加密保护内容的存储与转发，不缩小执行权限。
 
 ## 6. 数据类别与 wire 字段（任务 2）
@@ -291,6 +292,8 @@ v1 的范围（§14 D17）：只交付 C1 和 C3，C2 按需开启。下面三�
 
 Host 没有 `pv`，所以不能替换任何一方的公钥。128 位秘密不能离线穷举。缺点是字符串长，需要二维码或复制粘贴。备选方案是双方各显示 6 位短码，由用户比对（§14 D2）。
 
+配对只用 install-session 流程，方向只有客户端到设备（#655 D-I3）。开启入口在网页上：网页建 install-session 并生成 `pv`，用户把 `<配对码>.<pv>` 交给设备。不做 device-code 方向（设备显示码，用户在浏览器批准），所以 E2 只实现上面这一个方向。只有用户开启云端调度的设备才走这一步（§12.1）。
+
 之后加入的客户端由已有成员批准。用户在已有客户端上比对新客户端显示的指纹，已有成员签署 `add(客户端)`。设备也可以用本机命令批准新客户端。
 
 设备成员包同时用 device proof 登记（新 operation，例如 `e2ee-member-key.register`）。Host 用 `authenticateDeviceProof` 把成员包绑定到设备行。#654 需求 1 的「公钥由 device proof 绑定」由这一层满足。「客户端一侧也要有签名」由成员链签名满足。
@@ -303,11 +306,13 @@ AiphaBee 自研的配对和 device grant，在 SDK 里对应 `/byok/pair` 和 `/
 - 签名输入是前缀 `byok-member-chain-v1\n` 加 core 的 canonical JSON。条目哈希是签名输入的 SHA-256。
 - Host 按 `(tenantId, seq)` 先写者胜保存条目。同一 seq 的不同条目被拒绝。
 - 成员从自己固定的锚点开始验证整条链。签名错误、`prev` 断开或签名者已被移除的条目无效。
+- `add` 和 `remove` 改变 tenant 的成员集合。一个 scope 的成员只由这个 scope 最新的 `scope-policy` 条目定义。成员只为 scope 策略里列出的成员生成 key package。
 - 加密内容的 AAD 带发送方看到的链头（§8.2）。接收方知道更新的链头时，把这份内容标为「发送方视图过期」。
 
 ### 7.4 scope key 与 key package
 
 - scope 由 Host 命名，例如对话 id、Bot id 或研究工作区。SDK 不解释它。
+- 按 #655 D-I4，Host 按设备划分 scope：一个 scope 只含一台设备和这个用户的客户端。只有目标设备和用户的客户端能解密，与今天 relay 的性质相同。代价：每个 epoch 的 key package 总数是「设备数 ×（1 + 客户端数）」；按用户划分时是「设备数 + 客户端数」。新设备只得到自己的 scope（§7.9）。浏览器丢失密钥后按 scope 恢复（§7.8）。
 - 新建 scope：一个成员生成 `SK(scope, 1)`，签署 `scope-policy` 条目（scopeId、类别、成员列表），再为每个成员生成一个 key package。
 - key package：`{ v: 1, tenantId, scopeId, epoch, keyId, recipient, sender, enc, ciphertext, sig }`。用 core 现有的 HPKE 套件封装到接收方的 KEM 公钥。info 为 `byok-sdk.scope-key.v1`。AAD 为其余字段的 canonical JSON。HPKE base mode 不认证发送方，所以再加发送方签名。
 - `keyId` 是 `HMAC(SK, "byok-scope-key-id-v1")` 的截断值。它承诺了密钥，但 Host 不能由它推出密钥。
@@ -356,16 +361,23 @@ AiphaBee 自研的配对和 device grant，在 SDK 里对应 `/byok/pair` 和 `/
 - 恢复流程与 §7.2 中批准新加入客户端的流程相同：
   1. 浏览器生成新的成员密钥，并显示指纹。
   2. 用户在设备上用本机命令，或在另一个仍有密钥的客户端上，比对指纹并批准。批准方签署 `add(新客户端)` 和 `remove(旧客户端)`。
-  3. 批准方为浏览器需要的每个 epoch 生成新的 key package。设备能做这一步：它保留自己的 key package（§14 D5），能解出旧 epoch 的 scope key。
-  4. `remove` 让每个相关 scope 在下一次封装前轮换 epoch（§7.5）。旧密钥可能被备份过，所以按移除处理。
-- 代价是一次重新批准，并且要有一个持有 scope key 的成员在线。浏览器里还没确认的待提交密文也会丢失。产品用新的 taskId 重新提交（§9.2）。
-- 全部设备和客户端都丢失密钥时，数据无法恢复（§14 D13）。
+  3. scope 的成员由各自的 `scope-policy` 定义（§7.4），链上的 `add` 不改变它。所以批准方为它持有的每个 scope 签署 `scope-policy` 更新：加入新客户端，移除旧客户端。
+  4. 批准方只为这些 scope 生成新的 key package，覆盖浏览器需要的每个 epoch。设备能为它自己的 scope 做这一步：它保留自己的 key package（§14 D5），能解出旧 epoch 的 scope key。
+  5. `remove` 让每个相关 scope 在下一次封装前轮换 epoch（§7.5）。旧密钥可能被备份过，所以按移除处理。
+- 恢复按 scope 进行。scope 按设备划分（§7.4），所以批准方的范围不同：
+  - 另一个仍有密钥的客户端是每个设备 scope 的成员。它批准时，能为全部 scope 重发 key package。
+  - 没有存活的客户端时，批准的设备只能恢复它自己的 scope。其他设备的 scope 要经拥有它的设备恢复：每台设备在线时，从已验证的链上看到 `add(新客户端)`。它先为自己的 scope 签署 `scope-policy` 更新，加入新客户端、移除旧客户端，再为这个 scope 重发 key package（fan-out）。没有这条 `scope-policy` 更新，就不重发：只看链上的 `add` 会把 scope key 交给 scope 策略之外的成员。设备签署这条更新之前要不要本机批准，待定（§14.1 问题 8）。定下之前，只承诺批准设备自己的 scope 能恢复。
+  - 离线设备的 scope 要等这台设备上线后才能恢复。
+- 代价是一次重新批准，并且每个要恢复的 scope 都要有一个持有它的成员在线。浏览器里还没确认的待提交密文也会丢失。产品用新的 taskId 重新提交（§9.2）。
+- 一个 scope 的全部成员（拥有它的设备和用户的客户端）都丢失密钥时，这个 scope 的数据无法恢复（§14 D13）。
 
 ### 7.9 多设备
 
 - 一个用户可以有多台设备和多个客户端。每台设备、每个客户端都是成员链上的一个成员，各有自己的 KEM 密钥和 key package。
-- 新设备加入有两种方式：用新的配对码和 `pv` 配对（§7.2）；或者由已有成员比对指纹后签署 `add(设备)`。之后，已有成员为它生成当前 epoch 的 key package。D5 选长期保留时，也为旧 epoch 生成，新设备能读旧内容。
-- 同一 scope 的成员都能解密这个 scope 的内容。AAD 绑定目标 `deviceId`（§8.2）。别的设备能读一份 offer，但会拒绝执行它。
+- 新设备加入有两种方式：用新的配对码和 `pv` 配对（§7.2）；或者由已有成员比对指纹后签署 `add(设备)`。
+- 新设备加入后，只为它建它自己的 scope（§7.4）：一个成员（新设备或用户的客户端）生成 `SK(scope, 1)`，签署 `scope-policy`（成员为这台设备和用户的客户端），再为每个成员生成 key package。已有成员不把其他设备 scope 的 key package 发给新设备，当前 epoch 和旧 epoch 都不发。所以新设备读不到其他设备的 offer 和历史。
+- 重新配对的设备是新成员（§7.5），所以它也只得到新的 scope。旧 scope 的内容仍由用户的客户端读取。
+- 同一 scope 的成员都能解密这个 scope 的内容。AAD 绑定目标 `deviceId`（§8.2）。别的设备能读一份 offer，但会拒绝执行它。scope 按设备划分时（§7.4），别的设备不是这个 scope 的成员，读不到它的内容。
 - 撤销一台设备只移除这一个成员。它所在的每个 scope 在下一次封装前轮换 epoch（§7.6）。其他设备第一次遇到新 epoch 时，取新的 key package。
 - v1 的 scope 只含同一个用户的设备和客户端（§14 D10）。多个用户共用一个 scope 需要发送方签名，留到以后。
 
@@ -626,7 +638,10 @@ identity receipt 是防重放的 fence，同时保存了正文，而且永不过
   3. daemon 升级并声明同名设备能力。
   4. 产品为 scope 打开策略。
 - 设备没有声明能力时，Host 在提交时拒绝加密 offer，不降级。
-- AiphaBee 研究任务：relay 保留到托管路径有 Workers 和两台设备的验收证据为止（双车道方案 D3）。relay 的概念可以一一对应：浏览器临时密钥对应客户端 KEM 密钥；设备 relay 密钥对应设备 KEM 密钥；route id 对应 scopeId；frame 元数据对应 AAD。能否删除自研的配对、grant 和 relay，由 [issue 655](https://github.com/Ancienttwo/byok-sdk/issues/655) 决定。
+- AiphaBee 研究任务：relay 保留到托管路径有 Workers 和两台设备的验收证据为止（双车道方案 D3）。relay 的概念可以一一对应：浏览器临时密钥对应客户端 KEM 密钥；设备 relay 密钥对应设备 KEM 密钥；route id 对应 scopeId；frame 元数据对应 AAD。
+- 云端调度由用户开启，默认只在本地运行（opt-in cloud scheduling; local by default）。按 #655 D-I1，只有开启云端调度的设备才做 hosted enrollment。默认设备不接触 hosted SDK，继续用产品自己的凭据。
+- 一台设备只运行一个 daemon。同一进程里的两个 daemon 实例也算两个。所以开启云端调度时，这台设备的 daemon 整体改为和 hosted 配对（#655 R2）。
+- relay 在条件满足后对开启云端调度的设备退场。默认设备能否从浏览器收研究任务：待定，保持现状。relay 继续为默认设备服务，到安排删除 relay 时再按数据决定。
 
 ### 12.2 Topology L
 
@@ -672,7 +687,7 @@ identity receipt 是防重放的 fence，同时保存了正文，而且永不过
 - 幂等：同一 taskId、同一内容重新加密后重试，结果为重复；同一 taskId、不同内容，返回 `coordination_input_invalid`；重复投递被去重。
 - 撤销：移除成员后，新 epoch 的内容对它不可读。Host 扣留 `remove` 时，签署方能检测到。
 - routine 模板：同一份模板用于同一 routine 的多次执行。换 routine、换 Agent、关掉 C3 或过了 `notAfter` 时，设备拒绝。
-- 客户端丢失密钥：浏览器清除站点数据后，经设备重新批准，能读到旧 epoch 的内容。旧客户端被移除。
+- 客户端丢失密钥：浏览器清除站点数据后，旧客户端被移除。有另一个仍有密钥的客户端时，经它重新批准，并为每个 scope 签署 `scope-policy` 更新，浏览器能读到全部设备 scope 的旧 epoch 内容。没有存活的客户端时，经一台设备重新批准，并为它的 scope 签署 `scope-policy` 更新，浏览器能读到这台设备 scope 的旧 epoch 内容。只有链上的 `add`、没有 `scope-policy` 更新时，任何成员都不为这个 scope 重发 key package。其他设备 scope 的 fan-out 定下之前（§7.8），不验收它们的恢复。
 - 未开启的类别：现有测试套件全部通过，行为不变。
 
 本 PR 没有运行这些测试。
@@ -708,8 +723,8 @@ identity receipt 是防重放的 fence，同时保存了正文，而且永不过
 | 同一身份跨 epoch 重试 | Host | MAC 不同，按冲突处理。offer 返回 `coordination_input_invalid`，其他身份用各自现有的冲突代码（§9.2） | 发送方必须重发第一次的字节 |
 | task 运行中有成员被移除 | 设备 | 封装输出前检查链，按 §7.5 轮换到新 epoch 再封装。已发出的密文不变 | 被移除方读不到之后的输出 |
 | Host 扣留成员链的 `remove` | 签署 `remove` 的成员 | 从后续内容 AAD 的链头和 epoch 发现，提示用户（§7.6） | 被撤销方可能读到扣留期间的内容 |
-| 浏览器丢失成员密钥 | 浏览器 | 由设备或另一个客户端重新批准，重发 key package（§7.8） | 一次重新批准。浏览器里未确认的待提交密文丢失 |
-| 全部成员都丢失密钥 | — | 无法恢复（D13） | 数据丢失 |
+| 浏览器丢失成员密钥 | 浏览器 | 由持有 scope key 的成员重新批准。每个要恢复的 scope 先签署 `scope-policy` 更新，再重发 key package（§7.8） | 一次重新批准。没有存活的客户端时，批准设备只恢复自己的 scope。浏览器里未确认的待提交密文丢失 |
+| 一个 scope 的全部成员都丢失密钥 | — | 无法恢复（D13） | 这个 scope 的数据丢失 |
 | 被撤销的设备一直离线 | — | 无法清除它的密钥（§5.4） | 它仍能读旧 epoch 的内容 |
 | routine 模板过了 `notAfter`，或与 offer 不符 | 设备 | 非重试 decline（§6.3） | 这次执行不运行 |
 | 产品没有声明能处理加密消息 | Host | 拒绝开启 C2 的 offer。inbound 记 `held`，原因是 `consumer_unavailable`（§10.2） | 消息不交给产品 |
@@ -758,7 +773,7 @@ S0-b 是已有测试目录里的一个新文件，预计不改 CI 映射。实�
 | D2 | 信任锚 | 配对验证秘密（128 位，随配对码携带）；6 位短码比对（需要先承诺、再揭示的交换）；只信 Host 目录 | 配对验证秘密。只信 Host 目录不满足 #654 需求 1 |
 | D3 | AiphaBee 首批类别与作者规则 | 研究 scope 开 C1、C3，按需开 C2；Bot 对话与记忆保持明文 | 采用。同时确认 Host 组装的 ContextPack 不属于端到端加密 |
 | D4 | 成员链、key package 和设备路由由谁实现 | SDK 提供存储与设备路由；Host 自己实现（provider provisioning 的先例） | SDK 实现。canary 和 conformance 才能覆盖它 |
-| D5 | key package 保留方式 | 长期保留，shred 后成员轮换 KEM 密钥；只在投递窗口内保留 | 长期保留。它支持多设备和重装后恢复 |
+| D5 | key package 保留方式 | 长期保留，shred 后成员轮换 KEM 密钥；只在投递窗口内保留 | 长期保留。浏览器丢失密钥后，靠它按 scope 恢复旧 epoch（§7.8）。scope 按设备划分后，新设备和重新配对的设备不读旧 scope（§7.9） |
 | D6 | 删除 | crypto-shredding 加 Workers 上的 scoped row-delete；明文类别也用 Host 持有的密钥做 shredding | 前者。明文行的 row-delete 可以先于 E1 交付。Workers 上的整 tenant erasure 另开 issue |
 | D7 | wire 版本 | v3 内的双向 gated addition；升到 v4 | v3 内的 gated addition |
 | D8 | 填充与大内容 | 长度前缀帧，16 KiB 以内 256 字节对齐、以上用 Padmé，超过 256 KiB 走 `ciphertextRef`；第一版的 2 的幂桶，只能内联；固定桶；不填充 | 第一项（§8.1、§8.6）。Padmé 的开销少于 6.25%，2 的幂桶最多 100%。只能内联时，最大的终态超过 2 MiB 的批次上限。加密终态的明文上限取 2 MiB |
@@ -766,8 +781,8 @@ S0-b 是已有测试目录里的一个新文件，预计不改 CI 映射。实�
 | D10 | 多用户 tenant 与发送方认证 | v1 只支持单用户 scope；每条内容加发送方签名 | v1 只支持单用户 scope |
 | D11 | `consume` 的形状 | 独立的加密输入加显式声明；同一函数加判别字段 | 独立输入加显式声明 |
 | D12 | 设备 KEM 密钥 | 新的 credential 条目；复用 provider sealing key | 新条目。两者的用途和轮换周期不同 |
-| D13 | 成员丢失密钥 | 设备或其他客户端重新批准，并重发 key package；增加恢复密钥；接受数据丢失 | 单个浏览器丢失密钥（Safari ITP、清除站点数据）时靠设备恢复（§7.8），代价是一次重新批准。这依赖 D5 的长期保留。全部设备和客户端都丢失密钥时，先接受数据丢失。恢复密钥另行设计 |
-| D14 | 发版位置 | E1–E6 进 0.28.3；E1–E6 进之后的功能版本；与 #655 的先后 | 0.28.3 只交付 S0（D18）。E1–E6 进之后的功能版本，例如 0.29.0。先定 #655 的身份对应，再删 AiphaBee 的自研 relay |
+| D13 | 成员丢失密钥 | 设备或其他客户端重新批准，并重发 key package；增加恢复密钥；接受数据丢失 | 单个浏览器丢失密钥（Safari ITP、清除站点数据）时，按 scope 由持有它的成员恢复：先签署这个 scope 的 `scope-policy` 更新，再重发 key package（§7.8）。代价是一次重新批准。这依赖 D5 的长期保留。一个 scope 的全部成员都丢失密钥时，先接受这个 scope 的数据丢失。恢复密钥另行设计 |
+| D14 | 发版位置 | E1–E6 进 0.28.3；E1–E6 进之后的功能版本；与 #655 的先后 | 0.28.3 只交付 S0（D18）。E1–E6 进之后的功能版本，例如 0.29.0。先定 #655 的身份对应，再删 AiphaBee 的自研 relay。#655 已定，见 §14.2 |
 | D15 | Host 发起的 routine 任务的 C1 | 成员封装的 routine 模板，身份为 `routineId` 加 `definitionVersion`，由设备校验；routine 任务只封装 C3 | 模板（§6.3）。模板交付之前，routine 任务只封装 C3 |
 | D16 | 加密类别里对内容的摘要 | 密文 SHA-256、keyed MAC 或移进密文三选一，加 schema 测试；保留明文摘要 | 前者（§9.3）。明文摘要让 Host 能确认猜测 |
 | D17 | v1 范围 | C1、C3，C2 按需，C4、输入准备和草稿等到 v2；一次做完 C1–C4 | 前者（§6.1）。AiphaBee 首批只需要 C1 和 C3 |
@@ -784,3 +799,17 @@ AiphaBee 已同意第一版 D1–D14 的建议（PR #685 的评论）。第二�
 5. D8：填充是否改为长度前缀帧、256 字节对齐加 Padmé，并让填充后超过 256 KiB 的密文走 blob？加密终态的明文上限是否取 2 MiB？
 6. D16：加密类别里对内容的摘要，是否一律改为密文 SHA-256、keyed MAC 或移进密文，并用 schema 测试守住？
 7. D14：E1–E6 是否进之后的功能版本，例如 0.29.0？发布条件是否为 Workers 加 Hyperdrive、两台设备和浏览器矩阵的证据？是否先定 #655？
+8. 浏览器恢复的 fan-out（§7.8）：没有存活的客户端时，其他设备从链上看到 `add(新客户端)` 后，要为自己的 scope 签署 `scope-policy` 更新，再重发 key package。设备签署这条更新是自动进行，还是每台设备都要本机批准？
+
+### 14.2 #655 身份对应的决定（2026-10-23）
+
+维护者按建议决定。前提是 opt-in cloud scheduling; local by default：云端调度由用户开启，默认只在本地运行。
+
+| 编号 | 决定 |
+| --- | --- |
+| D-I1 | 只有开启云端调度的设备才做 SDK hosted enrollment。默认设备不接触 hosted SDK，继续用产品自己的凭据（§12.1） |
+| R2 | 一台设备只运行一个 daemon，同一进程里的两个 daemon 实例也算两个。开启云端调度的设备把这个 daemon 整体改为和 hosted 配对 |
+| D-I2 | SDK tenant 对应 account 加 workspace 的组合。前提是一个 account 只属于一个用户（D10）。如果一个 account 会有多个用户，要在 E2a 之前再确认 |
+| D-I3 | 只用 install-session，只做客户端到设备一个方向，开启入口在网页上（§7.2） |
+| D-I4 | scope 按设备划分（§7.4） |
+| 默认设备的研究任务 | 待定，保持现状。relay 继续为默认设备服务，到安排删除 relay 时再按数据决定（§12.1） |

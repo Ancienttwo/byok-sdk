@@ -2180,7 +2180,8 @@ same pinned filesystem and admitted memory-path policy as memory recall/save:
 `MEMORY.md` and safe Markdown paths under `notes/`, not arbitrary home files,
 `.byok` state, credentials, or opaque unsupported note paths. Linux uses native
 pinned descriptors; macOS requires the verified SDK release helper and its
-strict volume barriers. Windows remains unavailable pending its separate proof.
+strict volume barriers. Windows x64 requires the verified SDK release helper on
+local NTFS; it makes no OS-crash or power-loss claim (see below).
 The protocol exports `AGENT_MEMORY_MAX_SNAPSHOT_FILES` (128, including MEMORY.md)
 and `AGENT_MEMORY_MAX_SNAPSHOT_BYTES` (1 MiB total UTF-8 content). Existing 256 KiB
 per-file and 512 directory-entry bounds still apply. Limit/validation failures
@@ -2232,7 +2233,8 @@ re-executed. Busy, fetch, readback, identity or I/O failures leave the cursor
 in place. The capability is advertised only on a backend whose ledger write
 provably includes a directory barrier. Linux uses its native descriptor backend.
 macOS uses the SDK release helper on a volume that accepts strict `F_FULLFSYNC`.
-Windows remains unavailable. The macOS helper uses `F_FULLFSYNC` for temporary
+Windows does not advertise: its helper backend has no strict ledger barrier
+(see below). The macOS helper uses `F_FULLFSYNC` for temporary
 files and pinned parent directories. It never falls back to ordinary `fsync`.
 Before advertising, the daemon opens the helper on the actual home volume.
 Each helper open syncs the home directory chain on that volume before a CAS.
@@ -2256,7 +2258,7 @@ Invalid values are construction errors. `off` also omits the Agent memory
 guidance: a writer instruction gets no memory prefix, and a `memory-reader`
 instruction keeps only the line that puts the result in the final reply. Under
 `auto` the guidance does not change, also when no memory MCP is admitted (for
-example macOS without the release helper, or Windows): that guidance is the
+example macOS or Windows x64 without the release helper, or Windows arm64): that guidance is the
 file-based memory that existed before the memory MCP. This switch does not
 change the wire, Agent-home initialization/leases, runtime filesystem
 authority, or the explicit hosted projection and memory intent transport
@@ -2313,7 +2315,8 @@ Single-file products copy these SDK-owned release assets at build time using
 must be new or empty; copying verifies both target binaries and their manifest
 and never overwrites existing files. Ship that directory with the product and
 set `DaemonConfig.agentMemoryHelperAssetRoot` to its absolute installed path
-only on macOS (Darwin arm64/x64); omit it on Linux and Windows. A configured
+only on macOS (Darwin arm64/x64) and Windows x64; omit it on Linux and Windows
+arm64. A configured
 root on other platforms is rejected. Failed copies remove files created by the
 call and preserve any pre-existing empty destination directory.
 An explicit invalid root fails daemon construction even without a configured
@@ -2325,7 +2328,7 @@ Explicit-root missing-file errors direct the Host to deploy the copy API output.
 No arbitrary binary path, digest override or
 PATH search is admitted. The directory is a deployment integrity boundary, not
 a signer authentication mechanism. Omitting the option retains installed SDK
-package resolution. Windows admission is unchanged.
+package resolution.
 
 Helper builds use Go
 1.26.5, `CGO_ENABLED=0`, `-buildvcs=false` and `-trimpath`. Product re-signing is
@@ -2335,7 +2338,30 @@ normalizes the header command counts and `__LINKEDIT` file and VM sizes. It
 accounts for the zero-filled command slot in unsigned Go x64 output. The
 signature must end at EOF. Wrong architecture, format, code or manifest fails
 closed. This check detects deployment errors. It does not verify signer trust.
-Windows PE digest support belongs to its separate platform slice.
+
+The release also has a Windows x64 helper, `win32-x64.exe`. Its
+`pe-content-v1` digest covers the PE32+ file except the optional-header
+CheckSum, the certificate table directory entry and the certificate table, which
+Authenticode signing writes. A certificate table must start on an 8-byte
+boundary after the headers and the raw data of every section, and must end the
+file. Each certificate must fit in the table. The content is padded with zeros
+to 8 bytes, as a signer pads it. The release manifest (version 2) records the
+digest algorithm of each entry. The target name, not the manifest, selects the
+digest function; the resolver then requires every manifest entry, with its
+algorithm, to equal the compiled pin. `copyAgentMemoryHelperAssets({ outDir, platform:
+'win32' })` copies the Windows target and the manifest.
+
+On Windows x64 the daemon resolves and opens this helper. It admits memory
+recall and save, hosted projection and the task-free export. The helper accepts
+an Agent home only on a local NTFS volume. It refuses a remote volume first,
+from the handle's device information, so an SMB share whose server reports NTFS
+also fails the open with `unsafe_root`; another file system fails the same way.
+The platform gate reads the process architecture: x64 Node under emulation on
+Windows arm64 runs the x64 helper and is admitted. Each write flushes its own
+file and directory, so one file stays atomic under a process crash. Windows runs no home-chain barrier and makes no
+OS-crash or power-loss claim. The Windows helper intent backend therefore has
+`conflictProvesNoRename: true` and `strictLedgerBarrier: false`, and the daemon
+does not advertise `agent-memory-intent.v1` on Windows.
 
 For Windows, the accepted fault model S covers process crash, OS crash and
 power loss. Its proposed support domain is local NTFS on an explicit OS
@@ -3293,9 +3319,13 @@ files. `reservedHelperKinds` plus `piSubagentHelperKinds` is exactly the set tha
 `DaemonConfig`, or to each custom adapter constructor. An explicit root is scoped
 to that adapter's owned process trees and fails closed on missing or modified
 bytes without searching installed dependencies. Omission keeps installed behavior.
-For Darwin the copier delegates to the existing memory-helper release copier;
-`agentMemoryHelperAssetRoot` remains the separate memory-helper authority. Windows
-memory remains unavailable. Native target metadata is not platform qualification;
+For Darwin the copier delegates to the existing memory-helper release copier.
+For Windows x64 it also copies the Windows memory helper and its manifest into
+`agent-memory-fs/`, listed in `sdkNativeAssetTargets['win32-x64'].agentMemoryHelper`
+with the policy `product-resigning-allowed`; the Koffi `files` keep
+`unmodified-official-addon`. `agentMemoryHelperAssetRoot` remains the separate
+memory-helper authority; on Windows x64 the returned `agent-memory-fs`
+subdirectory is a valid value for it. Native target metadata is not platform qualification;
 Windows SEA qualification requires the actual Windows CI process-ownership fixture.
 
 ### Embedded Agent-home projection completion waiting

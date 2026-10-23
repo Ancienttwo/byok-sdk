@@ -11,7 +11,7 @@ const capture = vi.hoisted(() => ({
   helper: vi.fn(() => '/sdk/release/agent-memory-fs'),
   surface: undefined as ReturnType<typeof import('../daemon/prepared-tool-surface').createPreparedToolSurfaceAssembler> | undefined,
 }));
-// Model an installed/verified macOS helper at the resolver seam. The tests do
+// Model an installed/verified macOS or Windows x64 helper at the resolver seam. The tests do
 // not open it: they assert admission before an adapter can start a memory tool.
 vi.mock('../daemon/agent-memory-helper-release', () => ({ resolveAgentMemoryFilesystemHelper: capture.helper }));
 vi.mock('../daemon/prepared-tool-surface', async importOriginal => {
@@ -22,6 +22,7 @@ vi.mock('../daemon/prepared-tool-surface', async importOriginal => {
   } };
 });
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
+import { isAgentMemoryFilesystemHelperSupported } from '../daemon/agent-memory-fs-helper';
 
 let daemon: Daemon | undefined;
 let server: TestServer | undefined;
@@ -47,9 +48,9 @@ it.each(['disabled', false, null, 1])('rejects malformed memory MCP admission %s
   expect(() => createDaemonWithAdapters(input, [])).toThrow('agentMemoryMcp must be auto or off');
 });
 
-// Supported admission backends: native Linux and the macOS resolver seam above.
-// Windows has no SDK memory backend to opt out of.
-it.skipIf(process.platform !== 'linux' && process.platform !== 'darwin').each([undefined, 'auto', 'off'] as const)(
+// Supported admission backends: native Linux and the helper resolver seam above.
+// Windows arm64 has no SDK memory backend to opt out of.
+it.skipIf(process.platform !== 'linux' && !isAgentMemoryFilesystemHelperSupported()).each([undefined, 'auto', 'off'] as const)(
   'ordinary Agent admission with memory mode %s preserves the non-MCP adapter boundary', async mode => {
     server = await TestServer.start();
     const adapter = new StubRuntimeAdapter('pi', undefined, { steer: true, resume: true, approvalInteractive: true });
@@ -86,9 +87,9 @@ it('reports the effective memory MCP admission in status', async () => {
   noHome.workspaceRoot = path.join(path.dirname(noHome.storeDir!), 'workspace');
   expect(createDaemonWithAdapters(noHome, []).status().agentMemoryMcp).toBe('unavailable');
   for (const mode of [undefined, 'auto'] as const) {
-    // Native Linux and the macOS resolver seam above admit memory; Windows has no backend.
+    // Native Linux and the helper resolver seam above admit memory; Windows arm64 has no backend.
     expect(createDaemonWithAdapters(await config(mode), []).status().agentMemoryMcp)
-      .toBe(process.platform === 'linux' || process.platform === 'darwin' ? 'admitted' : 'unavailable');
+      .toBe(process.platform === 'linux' || isAgentMemoryFilesystemHelperSupported() ? 'admitted' : 'unavailable');
   }
 });
 
@@ -104,7 +105,7 @@ it('refuses prepared memory selections when disabled, without degrading them to 
 });
 
 // Explicit transports retain their own helper requirement even with task tools off.
-it.skipIf(process.platform !== 'darwin').each(['projection', 'intents'] as const)(
+it.skipIf(!isAgentMemoryFilesystemHelperSupported()).each(['projection', 'intents'] as const)(
   'off preserves helper validation for explicit %s', async transport => {
     const input = await config('off');
     if (transport === 'projection') input.agentMemory = {};

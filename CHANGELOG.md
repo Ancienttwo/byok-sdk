@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+- **Added (client)** — the SDK release now has a Windows x64 Agent memory
+  helper, `dist/native/agent-memory-fs/win32-x64.exe` (#605). Its
+  `pe-content-v1` digest ignores what Authenticode signing writes, so a product
+  can sign the exe. `copyAgentMemoryHelperAssets` takes `platform: 'win32'` to
+  copy it, and `copySdkNativeAssets({ platform: 'win32', arch: 'x64' })` now
+  also copies it into `agent-memory-fs/`. That call now needs the helper build
+  (`build:release`). `sdkNativeAssetTargets['win32-x64']` gets an
+  `agentMemoryHelper` group with its own files and signing policy.
+- **Changed (client)** — the Agent memory helper manifest is now version 2 and
+  records the digest algorithm of each entry (#605). The resolver requires
+  every entry to equal the pin of the running SDK. So a product asset folder
+  that an older SDK copied fails with a manifest mismatch after the upgrade,
+  also on macOS, where the Darwin digests do not change. Migration: run
+  `copyAgentMemoryHelperAssets` or `copySdkNativeAssets` again with the new SDK
+  and ship the new folder.
+- **Feature (client)** — Windows x64 admits Agent memory through the SDK
+  release helper (#605). The memory MCP (`memory_recall`, `memory_save`), the
+  hosted projection (`agentMemory`) and the task-free export
+  (`agentMemoryExport`) work there, and `agentMemoryHelperAssetRoot` is valid
+  there. The Agent home must be on a local NTFS volume. Another file system or
+  a remote volume, also an SMB share whose server reports NTFS, fails with
+  `unsafe_root`. Each write flushes its file and directory, but the SDK makes
+  no OS-crash or power-loss claim on Windows. So the Windows helper intent
+  backend reports `strictLedgerBarrier: false`, and a Windows daemon does not
+  advertise `agent-memory-intent.v1`. The gate reads the process
+  architecture: an arm64 process stays unavailable, and x64 Node under
+  emulation on Windows arm64 is admitted.
+  Compatibility on Windows x64:
+  - With an Agent home and the default `agentMemoryMcp: 'auto'`, every
+    ordinary Agent task now gets the SDK memory tools, and an adapter without
+    MCP toolset support declines the task. Set `agentMemoryMcp: 'off'` to keep
+    the earlier behavior.
+  - `agentMemoryIntents` now needs a resolvable SDK helper. A product without
+    the native assets (for example a compiled product) used to start, with
+    intents not advertised. It now fails at daemon construction, although
+    Windows never advertises intents. `agentMemory` and `agentMemoryExport`
+    also fail at construction without the helper, as before, now with the
+    helper error.
 - **Feature (core)** — the new subpath `@byok-sdk/core/sealed-payload` exports
   the sealed payload v1 byte rules (#654 E1a, E1b). It seals and opens one
   category of a payload with HKDF-SHA-256 and AES-256-GCM, pads the frame, and
@@ -146,6 +184,17 @@
   export leave these files out. Existing notes with these names or links stop
   being visible to recall and export. A `MEMORY.md` with more than one hard
   link makes capture fail.
+
+- **Fix (examples)** — K4 settles a cancelled claimed task soon after its
+  device terminal arrives (#762). Before, the intent waited for the next
+  `reconcileMs` scan, because the server emits no event for that terminal.
+  While it waited, it held the FIFO of its Agent. The core now reads the device
+  terminal of each such task on its own backoff. The interval starts at 25 ms
+  and doubles up to 1 s, and it is never more than `reconcileMs`. Each task
+  gets at most 20 reads, about 15.6 s in all. A read does not write the Host
+  ledger. A found terminal ends the reads of that task and starts one drain.
+  After the last read, only the `reconcileMs` scans remain. This also covers a
+  claimed task that the core cancels at its waiting deadline.
 
 ## 0.28.3 — source candidate
 
