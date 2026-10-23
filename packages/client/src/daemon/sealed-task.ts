@@ -11,13 +11,12 @@
  */
 import { openSealedContent, sealContent, type SealedBinding, type SealedContentOpenFailure } from '@byok-sdk/core/sealed-payload';
 import {
-  SEALED_DECLINE_CODES,
   SEALED_INLINE_MAX_PADDED_LENGTH,
   SEALED_PAYLOAD_MAX_CONTENT_LENGTH,
-  SEALED_PLAIN_FAIL_REASONS,
   SEALED_SPLIT_TABLE,
   createEnvelope,
   isSealedMessageType,
+  isSealedTaskPlainOutput,
   type AgentRef,
   type BlobRef,
   type Envelope,
@@ -97,13 +96,6 @@ function pick(payload: JsonObject, fields: readonly string[]): JsonObject {
 
 function omit(payload: JsonObject, fields: readonly string[]): JsonObject {
   return Object.fromEntries(Object.entries(payload).filter(([field]) => !fields.includes(field)));
-}
-
-function isClosedPlainForm(envelope: Envelope): boolean {
-  const payload = envelope.payload as { reason?: unknown; code?: unknown };
-  if (envelope.type === 'task.fail') return (SEALED_PLAIN_FAIL_REASONS as readonly unknown[]).includes(payload.reason);
-  if (envelope.type === 'task.decline') return (SEALED_DECLINE_CODES as readonly unknown[]).includes(payload.code);
-  return false;
 }
 
 export class SealedTasks {
@@ -232,7 +224,7 @@ export class SealedTasks {
    */
   async sealRecovered(offer: Envelope, terminal: Envelope): Promise<Envelope> {
     const { sealing, agentRef } = offer.payload as { sealing?: TaskSealing; agentRef?: AgentRef };
-    if (!isSealedMessageType(offer.type) || sealing === undefined || !sealing.categories.includes('task-output') || isClosedPlainForm(terminal)) {
+    if (!isSealedMessageType(offer.type) || sealing === undefined || !sealing.categories.includes('task-output') || isSealedTaskPlainOutput(terminal.type, terminal.payload)) {
       return terminal;
     }
     const task: SealedTask = { sealing, agentRef: agentRef ?? null, steerIds: new Set(), tail: Promise.resolve() };
@@ -247,7 +239,7 @@ export class SealedTasks {
   }
 
   async #sealOutbound(task: SealedTask, envelope: Envelope): Promise<Envelope | undefined> {
-    if (SEALED_OUTPUT_TYPE[envelope.type] === undefined || isClosedPlainForm(envelope)) return envelope;
+    if (SEALED_OUTPUT_TYPE[envelope.type] === undefined || isSealedTaskPlainOutput(envelope.type, envelope.payload)) return envelope;
     const taskId = envelope.task_id!;
     const payload = envelope.payload as JsonObject;
     let sealed: Envelope | undefined;

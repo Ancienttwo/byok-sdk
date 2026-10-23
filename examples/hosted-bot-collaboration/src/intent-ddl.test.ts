@@ -9,10 +9,11 @@ describe.skipIf(POSTGRES_URL === undefined)('H intent table checks on real Postg
   beforeAll(async () => { opened = await openStore(); });
   afterAll(async () => { await opened?.close(); });
 
-  async function insert(scope: string, id: string, task: string, inputTask: string, ordinal: number) {
+  async function insert(scope: string, id: string, task: string, inputTask: string, ordinal: number, source = 'user') {
     const { pool, store } = opened!;
-    await pool.query(`INSERT INTO "${store.schema}".intent (scope, key, task_id, ordinal, agent, input, wait_until, submission)
-      VALUES ($1, $2, $3, $4, 'agent', $5::json, 1, 'reserved')`, [JSON.stringify(scope), JSON.stringify(id), task, ordinal, JSON.stringify({ taskId: inputTask })]);
+    await pool.query(`INSERT INTO "${store.schema}".intent (scope, key, task_id, ordinal, agent, source, input, wait_until, submission)
+      VALUES ($1, $2, $3, $4, 'agent', $6, $5::json, 1, 'reserved')`,
+    [JSON.stringify(scope), JSON.stringify(id), task, ordinal, JSON.stringify({ taskId: inputTask }), source]);
   }
 
   it('accepts the K4 task id of generation 0 for any Turn id, and refuses any other', async () => {
@@ -27,5 +28,13 @@ describe.skipIf(POSTGRES_URL === undefined)('H intent table checks on real Postg
       .rejects.toThrow(/intent_(stable|input)_task/);
     await expect(opened!.pool.query(`UPDATE "${opened!.store.schema}".intent SET cancel_reason = 'superseded' WHERE key = '"t1"'`))
       .rejects.toThrow(/intent_cancel_reason_check/);
+  });
+
+  it('accepts a user or bot source, and refuses a routine source before D2f (#793 D2b-2)', async () => {
+    const scope = `tenant:${randomUUID()}`;
+    await opened!.store.seed(scope, () => {});
+    await insert(scope, 'u', taskId('u', 0), taskId('u', 0), 0, 'user');
+    await insert(scope, 'b', taskId('b', 0), taskId('b', 0), 1, 'bot');
+    await expect(insert(scope, 'r', taskId('r', 0), taskId('r', 0), 2, 'routine')).rejects.toThrow(/intent_source_check/);
   });
 });

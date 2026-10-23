@@ -74,6 +74,8 @@ CREATE TABLE IF NOT EXISTS intent (
   ordinal        bigint  NOT NULL CHECK (ordinal >= 0),
   -- K4 agentKey(scope, execution): one FIFO for each scope, device and Agent.
   agent          text    NOT NULL,
+  -- K4 IntentInput.source, part of the intent identity. A routine occurrence is not an H intent before D2f.
+  source         text    NOT NULL CHECK (source IN ('user', 'bot')),
   -- The frozen AgentExecutionInput.
   input          json    NOT NULL,
   wait_until     bigint  NOT NULL CHECK (wait_until >= 0),
@@ -86,6 +88,13 @@ CREATE TABLE IF NOT EXISTS intent (
   last_error     text,
   cancel_reason  text    CHECK (cancel_reason IN ('expired', 'cancelled')),
   conclusion     text    CHECK (conclusion IN ('succeeded', 'failed', 'declined', 'cancelled', 'expired', 'superseded')),
+  -- K4 Execution.started: the SDK attempt has claimedRuntime or ownerDeviceId.
+  started        boolean NOT NULL DEFAULT false,
+  -- The last SDK attempt and the device terminal that the reconciliation read.
+  attempt        json,
+  terminal       json,
+  -- The earliest time of the next readback (readDeviceTerminal, readTaskAttempt).
+  reconcile_at   bigint  NOT NULL DEFAULT 0 CHECK (reconcile_at >= 0),
   CONSTRAINT intent_input_task CHECK ((input ->> 'taskId') = task_id),
   -- Pins task_id to K4 taskId(turn id, 0) = sha256(canonical([turn id, 0])); key is JSON.stringify(turn id).
   CONSTRAINT intent_stable_task CHECK (task_id = encode(sha256(convert_to('[' || key || ',0]', 'UTF8')), 'hex')),
@@ -97,4 +106,6 @@ CREATE TABLE IF NOT EXISTS intent (
 CREATE INDEX IF NOT EXISTS intent_unsettled ON intent (scope, agent, ordinal) WHERE conclusion IS NULL;
 -- The submit scan: unsettled, not delivered and not cancelled.
 CREATE INDEX IF NOT EXISTS intent_due ON intent (next_at) WHERE conclusion IS NULL AND submission <> 'delivered' AND cancel_reason IS NULL;
+-- The paged reconciliation scan: every tried row that has no conclusion, across scopes (#793 D2d).
+CREATE INDEX IF NOT EXISTS intent_reconcile ON intent (reconcile_at, scope, key) WHERE conclusion IS NULL AND submission <> 'reserved';
 `;

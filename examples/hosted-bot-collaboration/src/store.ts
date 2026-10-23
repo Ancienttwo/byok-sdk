@@ -1,9 +1,12 @@
 import type { Pool, PoolClient } from 'pg';
-import { canonical, type Json } from '@byok-sdk/example-host-execution-core';
-import { stateOf, type CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
-import { commitCommand, type Command, type CommandPorts } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import { canonical, type Conclusion, type ExecutionTemplate, type Json } from '@byok-sdk/example-host-execution-core';
+import { stateOf, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
+import { commitCommand, syncTurn, type Command, type CommandPorts, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
+import { syncFacts, writeSyncStep } from './intents';
+import { decideMessage, messageCommandId, type AgentMessageInput, type MessageDecision } from './messages';
+import { decideFinish, type TaskEvidence } from './reconcile';
 import { assemble, entryGroup, split, storedKey, type EntityKind, type EntryKind, type Split } from './layout';
 
 /** A stored scope row of a store version that this code does not support. Nothing was written. */
@@ -11,6 +14,11 @@ export class HostedStoreVersionError extends Error {
   constructor(readonly version: number) { super(`Unsupported hosted collaboration store version ${version}`); this.name = 'HostedStoreVersionError'; }
 }
 export type Publish = (id: string, value: Json) => void;
+export type Decision<T> = { value: T; outbox: OutboxIntent[] };
+type Decide<T> = (state: CollaborationState, publish: Publish, client: PoolClient) => Decision<T> | Promise<Decision<T>>;
+type TurnHistory = NonNullable<SyncOptions<never>['history']>;
+/** The sync options of a scope. In history mode, `history` holds the rows of each Turn that may freeze, by Turn id. */
+export type HostedSyncOptions = Omit<SyncOptions<never>, 'history'> & { history?: ReadonlyMap<string, TurnHistory> };
 /** Builds the command ports on the state of the open commit. `publish` writes a projection in the same commit. */
 export type PortsFactory = (state: CollaborationState, publish: Publish) => CommandPorts;
 
@@ -75,32 +83,81 @@ export class HostedCollaborationStore {
         'SELECT kind, owner, position::text, body::text FROM entry WHERE scope = $1 ORDER BY kind, owner, position',
         'SELECT key, ordinal::text, evidence, result::text, root FROM command WHERE scope = $1 ORDER BY key',
         'SELECT key, ordinal::text, kind, body::text FROM outbox WHERE scope = $1 ORDER BY key',
+        `SELECT key, task_id, ordinal::text, agent, source, input::text, wait_until::text, submission, tries, next_at::text, last_error,
+          cancel_reason, conclusion, started, attempt::text, terminal::text, reconcile_at::text FROM intent WHERE scope = $1 ORDER BY key`,
       ]) rows.push((await client.query({ text: query, values: [storedKey(scope)], rowMode: 'array' })).rows);
       return JSON.stringify(rows);
     }, true);
   }
 
-  private async change<T>(scope: string, commandId: string | undefined,
-    decide: (state: CollaborationState, publish: Publish) => { value: T; outbox: OutboxIntent[] }): Promise<T> {
+  /**
+   * One Host sync of a scope (#793 D2b-2): the sync rule for each stored Turn, in insertion order, in one transaction
+   * under the scope lock. It reads the intent facts in that transaction, and writes each step with the state and the
+   * projections. It writes no command record and keeps the revision. A throw writes nothing.
+   */
+  sync(scope: string, options: HostedSyncOptions): Promise<void> {
+    return this.change(scope, undefined, async (state, publish, client) => {
+      const facts = await syncFacts(client, scope, Object.keys(state.turns)), published = new Set<string>();
+      const steps: Array<[Turn, SyncStep<ExecutionTemplate>]> = [];
+      for (const turn of Object.values(state.turns)) {
+        const step = syncTurn(state, turn, facts, { ...options, history: options.history?.get(turn.id) },
+          (id, body) => { publish(id, body); published.add(id); });
+        if (step) steps.push([turn, step]);
+      }
+      for (const [turn, step] of steps) await writeSyncStep(client, scope, turn, step);
+      return { value: undefined, outbox: [...published].map(id => ({ kind: 'projection' as const, id })) };
+    });
+  }
+
+  /**
+   * The SDK `agentMessage.consume` decision for one Agent message of `scope` (#793 D2c), as K4 `consumeMessage` decides it.
+   * One transaction under the scope lock checks the frozen binding and the task's accepted reply, and commits the `message`
+   * command. A scope with no row has no task, so it is refused with nothing written. A throw writes nothing and leaves the
+   * SDK admission pending.
+   */
+  consume(scope: string, input: AgentMessageInput, ports: PortsFactory): Promise<MessageDecision> {
+    const key = storedKey(scope);
+    return this.transaction(async client => {
+      if (!(await client.query('SELECT 1 FROM scope WHERE scope = $1', [key])).rows[0]) return { outcome: 'refused', reasonCode: 'unknown_task' };
+      return this.decideIn(client, key, messageCommandId(input), (state, publish) => decideMessage(client, scope, state, publish, input, ports));
+    }, false);
+  }
+
+  /**
+   * The terminal transaction of one reconciled task of `scope` (#793 D2d), as K4 `finish`: the outcome command, the
+   * projections and the intent's conclusion commit together, under the scope lock. Returns the conclusion that it wrote,
+   * or nothing when the intent already had one. A throw writes nothing.
+   */
+  finish(scope: string, turnId: string, evidence: TaskEvidence, ports: PortsFactory): Promise<Conclusion | undefined> {
+    return this.transaction(client => this.decideIn(client, storedKey(scope), evidence.terminal.envelope.task_id,
+      (state, publish) => decideFinish(client, scope, turnId, state, publish, evidence, ports)), false);
+  }
+
+  private change<T>(scope: string, commandId: string | undefined, decide: Decide<T>): Promise<T> {
     // #793 O4: each table stores the scope as JSON text, so two scopes that UTF-8 would merge stay apart.
     const key = storedKey(scope);
     return this.transaction(async client => {
       // Upsert, then lock: a missing scope row would lock nothing, and two first commits would race.
       await client.query('INSERT INTO scope (scope, state_version, frame) VALUES ($1, $2, $3::json) ON CONFLICT (scope) DO NOTHING',
         [key, STORE_VERSION, EMPTY_FRAME]);
-      const frame = await lockScope(client, key);
-      const rows = await this.load(client, key, frame, commandId);
-      const state = stateOf({ collaboration: assemble(rows) as unknown as Json });
-      const before = split(state);
-      const published = new Map<string, Json>();
-      const { value, outbox } = decide(state, (id, body) => {
-        if (published.has(id) && canonical(published.get(id)!) !== canonical(body)) throw new Error('Projection identity conflict');
-        published.set(id, structuredClone(body));
-      });
-      await this.write(client, key, rows, before, split(state));
-      await this.writeOutbox(client, key, outbox, published);
-      return value;
+      return this.decideIn(client, key, commandId, decide);
     }, false);
+  }
+
+  /** Locks the scope row, runs `decide` on the loaded state, and writes the changed rows and the outbox. */
+  private async decideIn<T>(client: PoolClient, key: string, commandId: string | undefined, decide: Decide<T>): Promise<T> {
+    const frame = await lockScope(client, key);
+    const rows = await this.load(client, key, frame, commandId);
+    const state = stateOf({ collaboration: assemble(rows) as unknown as Json });
+    const before = split(state);
+    const published = new Map<string, Json>();
+    const { value, outbox } = await decide(state, (id, body) => {
+      if (published.has(id) && canonical(published.get(id)!) !== canonical(body)) throw new Error('Projection identity conflict');
+      published.set(id, structuredClone(body));
+    }, client);
+    await this.write(client, key, rows, before, split(state));
+    await this.writeOutbox(client, key, outbox, published);
+    return value;
   }
 
   /** Loads the scope's entities and entries, and only the one command record that a commit can replay. `scopeKey` is the stored scope key. */

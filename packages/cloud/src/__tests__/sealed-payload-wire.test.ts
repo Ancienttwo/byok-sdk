@@ -248,7 +248,7 @@ describe('sealed payload v1: the golden corpus lines are real ciphertext', () =>
   );
 });
 
-describe('sealed payload v1: a Host without sealed-payload-v1 refuses sealed input (#654)', () => {
+describe('sealed payload v1: a task without output sealing refuses sealed output (#654)', () => {
   const sealedInbound = corpus.filter((line) => !isServerToDaemonType(line.type)
     && requiredReceiverCapabilities(line.type, line.payload).includes('sealed-payload-v1'));
 
@@ -261,21 +261,46 @@ describe('sealed payload v1: a Host without sealed-payload-v1 refuses sealed inp
       .toEqual(['sealed_content_mac_mismatch', 'sealed_key_unavailable', 'sealed_open_failed', 'sealing_policy_mismatch']);
   });
 
-  it.each(sealedInbound.map((line, index) => [index, line.type, line] as const))(
-    'line %i (%s) is rejected before the envelope identity is reserved',
-    async (_index, _type, line) => {
-      const harness = createHarness();
-      const device = await harness.pairDevice(TENANT_A);
-      const stores = tenantStoresFor(
-        { kind: 'device', tenantId: TENANT_A, productId: PRODUCT_ID, deviceId: device.deviceId },
-        { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake },
-      );
-      const envelope = createEnvelope(line.type as Envelope['type'], line.payload as never, { taskId: line.task_id }) as Envelope;
+  /** A plaintext task offered to this device, claimed unless the line is a decline. */
+  async function plainTask(type: string) {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const stores = tenantStoresFor(
+      { kind: 'device', tenantId: TENANT_A, productId: PRODUCT_ID, deviceId: device.deviceId },
+      { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake },
+    );
+    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: { instruction: 'plain', runtime: 'pi' } });
+    const send = (envelopeType: string, payload: unknown) =>
+      handleInboundEnvelope(stores, device.deviceId, createEnvelope(envelopeType as Envelope['type'], payload as never, { taskId }) as Envelope);
+    if (type !== 'task.decline' && type !== 'task.decline_sealed') {
+      expect(await send('task.claim', { deviceId: device.deviceId, runtime: 'pi' })).toEqual({ outcome: 'accepted' });
+    }
+    return { harness, taskId, send };
+  }
 
+  /** The line without the Agent, harness and recovery bindings that this plain task does not have. */
+  function unbound(payload: Json): Json {
+    const { agentRef: _agentRef, harnessId: _harnessId, recovery: _recovery, ...rest } = payload;
+    return rest;
+  }
+
+  it.each(sealedInbound.filter((line) => isSealedMessageType(line.type)).map((line, index) => [index, line.type, line] as const))(
+    'line %i (%s) is rejected before the envelope identity is reserved',
+    async (_index, type, line) => {
+      const { send } = await plainTask(type);
       const refused = { outcome: 'rejected', reason: 'sealed_payload_unsupported' };
-      expect(await handleInboundEnvelope(stores, device.deviceId, envelope)).toEqual(refused);
+      expect(await send(type, unbound(line.payload))).toEqual(refused);
       // The refusal reserved no envelope identity: the same envelope is refused again, not deduplicated.
-      expect(await handleInboundEnvelope(stores, device.deviceId, envelope)).toEqual(refused);
+      expect(await send(type, unbound(line.payload))).toEqual(refused);
+    },
+  );
+
+  it.each(sealedInbound.filter((line) => line.type === 'task.decline').map((line) => [line.payload.code, line] as const))(
+    'a plaintext decline with the sealed code %s is accepted, and keeps the code as the terminal cause',
+    async (code, line) => {
+      const { harness, taskId, send } = await plainTask('task.decline');
+      expect(await send('task.decline', line.payload)).toEqual({ outcome: 'accepted' });
+      expect(await harness.cloud.readTaskAttempt(TENANT_A, taskId)).toMatchObject({ status: 'failed', terminalCause: code });
     },
   );
 });
@@ -411,7 +436,8 @@ describe('sealed payload v1: each sealed type has its own hosted entry (#654)', 
     expect(enqueued.envelope.payload).toEqual(line.payload);
   });
 
-  // E3a: the Host does not yet check or retain a ciphertextRef blob, so a sealed lane refuses it.
+  // A ciphertextRef must name a committed blob of this tenant (E3b). The corpus blob ids name no
+  // uploaded blob, so each lane refuses them. `sealed-offer-host.test.ts` covers the accepted path.
   // Each lane line with sealed input, with the ciphertextRef member of the large corpus line of its type.
   const byReference = Object.keys(lanes).map((type) => {
     const line = laneLines.find((candidate) => candidate.type === type && candidate.payload.sealed !== undefined)!;
@@ -420,7 +446,7 @@ describe('sealed payload v1: each sealed type has its own hosted entry (#654)', 
   });
 
   it.each(byReference.map((line, index) => [index, line.type, line] as const))(
-    'line %i (%s) by ciphertextRef is refused on a device with every flag, before any task or mailbox state',
+    'line %i (%s) by ciphertextRef to a blob that is not uploaded is refused on a device with every flag, before any task or mailbox state',
     async (_index, type, line) => {
       const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
       const device = await harness.pairDevice(TENANT_A);

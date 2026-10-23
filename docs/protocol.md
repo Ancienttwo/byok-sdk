@@ -1134,6 +1134,35 @@ the schema never strips a sealing policy or sealed content.
 - `paddedLength` above 256 KiB: `ciphertextRef`, a `BlobRef` without `url`
   whose `size` is `paddedLength + 16`.
 
+**Host check of a `ciphertextRef`.** A sealed hosted entry accepts a
+`ciphertextRef` only when the object with its `contentHash` is `committed` in
+the same tenant, with the declared `size` and `contentType`. Otherwise it
+fails with `coordination_input_invalid` before any task, receipt or mailbox
+write. The receiver checks that the SHA-256 of the bytes it fetches by
+`blobId` equals `contentHash`, before it opens them. The task then holds an
+object reference to the object (kind `sealed-task`, id the task id), so
+orphan GC keeps the ciphertext while the task lives. `redactTasks` releases
+the reference. It deletes the object when a stored row of the task still
+names it. Retention can prune the mailbox row of a delivered steer. Then no
+row names its object, and orphan GC deletes the object later. Tenant erasure
+also releases the reference.
+
+**Host comparison of a sealed retry.** The Host compares two sealed
+submissions of one identity by their comparison projection: the plaintext
+fields, plus `v`, `suite`, `category`, `scope`, `paddedLength` and
+`contentMac` of `sealed`. The salt, the nonce, the ciphertext, the
+`ciphertextRef`, `chainHead` and `sender` do not count. An equal projection
+is a duplicate, and the first ciphertext stays. A different projection fails
+with `coordination_input_invalid`. For an offer, the identity is the task id.
+For `task.steer_sealed`, it is the task id and the `steerId`: one `steerId`
+names one steer row in the mailbox. A sender still seals once and retries
+with the same bytes. The projection keeps a retry safe when it did not.
+The Host check holds while the mailbox keeps the row. Mailbox retention
+deletes an acknowledged row, also while its task runs. A later retry under
+the same `steerId` then appends a new row, and the Host does not see a
+conflict. So the device keeps the `steerId`s it has opened for each active
+task, and drops a steer whose `steerId` it has seen (decision 12a).
+
 `paddedLength` is the one legal padded length of the content: the next
 multiple of 256 bytes up to 16 KiB, Padmé above. The plaintext limit is 2 MiB
 of canonical JSON for each v1 category, so `paddedLength` is at most
@@ -1162,20 +1191,41 @@ takes that limit instead of the plaintext one. `task.artifact_sealed` lists
 `inline` at 2 MiB (the plaintext `task.artifact.inline` limit is 64 KB). The
 category limit of 2 MiB still bounds the whole opened content.
 
-**Plaintext output of a sealed task (decision 12d).** A task whose `sealing`
-includes `task-output` sends its `task.complete`, `task.fail`,
-`task.decline`, `task.cancelled`, `task.progress`, `task.artifact` and
-`task.await_approval` sealed. The only plaintext forms are closed:
+**Host rule for task output.** The Host reads the frozen `sealing` of the
+task from its offer. When `categories` includes `task-output`, the device
+reports every output sealed. A plaintext output is legal only when each field
+that its sealed type moves or drops is absent or holds a closed code of
+`SEALED_TASK_PLAIN_CODES`, by exact match:
 
-- `task.fail` with `reason` in `SEALED_PLAIN_FAIL_REASONS`
-  (`daemon_interrupted` for a task the daemon lost in a restart, always in
-  plaintext; `sealed_key_unavailable` when the device cannot seal), and no
-  `preparedObservation`;
-- `task.decline` with a `SEALED_DECLINE_CODES` code and `reason` equal to it;
-- `task.cancelled` with no `reason`.
+- `task.fail`: `reason` is `daemon_interrupted` or `sealed_key_unavailable`,
+  and there is no `preparedObservation`. An interrupted task always reports
+  `daemon_interrupted` in plaintext with `recovery`, so `task.fail_sealed`
+  never carries `recovery`.
+- `task.decline`: `reason` is one of the sealed decline codes, and equals
+  `code`.
+- `task.cancelled`: no `reason`.
+- `task.complete`, `task.progress`, `task.artifact` and
+  `task.await_approval` have no plaintext form.
 
-`task.complete`, `task.progress`, `task.artifact` and `task.await_approval`
-have no plaintext form for such a task. The comparison is exact equality.
+The Host refuses any other plaintext output with `sealed_output_required`.
+When the task did not seal `task-output`, it refuses every sealed output with
+`sealed_payload_unsupported`. A sealed terminal takes the status of its
+plaintext type, and the first terminal wins. `task.terminal_cause` keeps only
+a closed code: the `code` of a `task.decline_sealed`, or the code of a legal
+plaintext terminal. `readDeviceTerminal` returns the sealed terminal with its
+sealed member. `readTaskResult` gives only its plaintext fields. The cloud
+does not store a sealed artifact.
+
+A `task.progress_sealed` batch is one activity tail entry. It has `sealed` in
+place of `event`, and `eventIndex` 0, so the tail capacity counts it once. A
+`task.await_approval_sealed` is one approval timeline request with
+`approvalId` and `sealed`, and no `summary`. The Host resolves it by
+`approvalId`, the same as a plaintext request. A replay under the same source
+envelope is the same entry when its comparison projection (above) is the
+same. A sealed output is inline only: the cloud refuses a sealed output
+that carries `ciphertextRef`, because it does not retain that blob. The cloud
+advertises `sealed-payload-v1` in `EventsPollResponse.capabilities`, because
+it accepts all seven sealed output types.
 
 ## 3. Task state machine (M1 gap #2, #5, #6)
 
