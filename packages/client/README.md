@@ -32,6 +32,14 @@ The local BYOK daemon. It pairs a device, durably journals tasks, connects over
 WebSocket or long poll, dispatches to local Claude Code, Codex, or pi adapters,
 and exposes authenticated local diagnostics/control commands.
 
+With `hostedJournal: { mode: 'sqlite' }`, the journal bounds each record by
+`hostedJournal.maxRecordBytes` (default 256 KiB). An inbound envelope record
+may still reach a floor of 415083 bytes. The journal derives the floor from
+the largest inline sealed member (#654): 256 KiB + 16 bytes of ciphertext as
+base64url, plus 64 KiB for the other fields. So the daemon journals a sealed
+envelope at the inline maximum, and then declines it. Terminal and transition
+records keep `maxRecordBytes`.
+
 The package installs `byok-agent` and the SDK-reserved
 `byok-agent-message-mcp` task helper. The message helper exposes only bounded
 plain text/Markdown; authenticated task, Agent, session, device, tenant, and

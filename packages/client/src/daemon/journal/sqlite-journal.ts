@@ -32,6 +32,7 @@
 import { existsSync, mkdirSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
+import { SEALED_INLINE_MAX_PADDED_LENGTH } from '@byok-sdk/protocol';
 import {
   journalHash,
   type JournalIdentity,
@@ -75,6 +76,23 @@ export const JOURNAL_QUARANTINE_DIRNAME = 'quarantine';
  * journal into a blob store. See {@link JournalRecordTooLargeError}.
  */
 export const DEFAULT_MAX_RECORD_BYTES = 256 * 1024;
+
+/** The AES-256-GCM tag of the sealed payload v1 suite. */
+const SEALED_AEAD_TAG_BYTES = 16;
+/**
+ * Room beside the largest inline sealed member for the rest of its envelope:
+ * the envelope fields, the sealed header and the plaintext fields of the
+ * sealed type (selection, policies, `sealing`).
+ */
+const SEALED_ENVELOPE_MARGIN_BYTES = 64 * 1024;
+/**
+ * The least bound on an inbound envelope record (#654). An inline sealed
+ * member carries up to `SEALED_INLINE_MAX_PADDED_LENGTH` + 16 bytes of
+ * ciphertext as unpadded base64url. That is above the default record bound,
+ * and the daemon must journal such an envelope before it can decline it.
+ * Terminal and transition records keep `maxRecordBytes`.
+ */
+const ENVELOPE_RECORD_FLOOR_BYTES = Math.ceil(((SEALED_INLINE_MAX_PADDED_LENGTH + SEALED_AEAD_TAG_BYTES) * 4) / 3) + SEALED_ENVELOPE_MARGIN_BYTES;
 
 /** Default bound on how long a write waits for the write lock before failing. */
 export const DEFAULT_JOURNAL_BUSY_TIMEOUT_MS = 5_000;
@@ -120,7 +138,11 @@ export interface SqliteLocalTaskJournalOptions {
   readonly storeDir: string;
   /** Bound on waiting for the write lock. Default {@link DEFAULT_JOURNAL_BUSY_TIMEOUT_MS}. */
   readonly busyTimeoutMs?: number;
-  /** Per-record byte bound. Default {@link DEFAULT_MAX_RECORD_BYTES}. */
+  /**
+   * Per-record byte bound. Default {@link DEFAULT_MAX_RECORD_BYTES}. An inbound
+   * envelope record may still reach a floor derived from the inline sealed
+   * maximum (415083 bytes), so a sealed envelope can be journaled and declined.
+   */
   readonly maxRecordBytes?: number;
   /** Test seam — see {@link JournalFaultSeam}. Never supplied in production. */
   readonly faults?: JournalFaultSeam;
@@ -468,8 +490,9 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
    */
   appendEnvelope(record: ReceivedEnvelopeRecord): Promise<JournalReceipt> {
     const bytes = byteLength(record.bytes);
-    if (bytes > this.#maxRecordBytes) {
-      return Promise.reject(new JournalRecordTooLargeError('bytes', bytes, this.#maxRecordBytes));
+    const bound = Math.max(this.#maxRecordBytes, ENVELOPE_RECORD_FLOOR_BYTES);
+    if (bytes > bound) {
+      return Promise.reject(new JournalRecordTooLargeError('bytes', bytes, bound));
     }
     if (record.opensTask && record.taskId === undefined) {
       return Promise.reject(

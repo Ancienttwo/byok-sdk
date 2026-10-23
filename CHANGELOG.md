@@ -42,6 +42,14 @@
   message with `sealed_payload_unsupported`. The sealed hosted entries refuse
   a `ciphertextRef` with `coordination_input_invalid`, because the Host does
   not yet check and retain the referenced blob. Inline ciphertext works.
+- **Changed (client)** — the hosted journal admits an inbound envelope record
+  up to the larger of `hostedJournal.maxRecordBytes` and 415083 bytes (#654
+  E3a). The journal derives this floor from the largest inline sealed member:
+  256 KiB + 16 bytes of ciphertext as base64url, plus 64 KiB for the other
+  fields. Before, a sealed offer or steer at the inline maximum (about 342
+  KiB) was over the default bound of 256 KiB. The cursor stalled, and the
+  daemon sent no decline. Terminal and transition records keep
+  `maxRecordBytes`. There is no new config option.
 
 ## 0.29.0 — 2026-10-23 (published)
 
