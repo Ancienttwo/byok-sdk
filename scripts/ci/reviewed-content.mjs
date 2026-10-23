@@ -26,9 +26,82 @@ function revertUndiciMove(before, after, field) {
   return true;
 }
 
+const version = value => typeof value === 'string' && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value);
+const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+// #793 D2 (owner O8): the private hosted (H) example. Its manifest has a fixed
+// shape. It may only reuse workspaces and dependency specs that another
+// workspace manifest already declares, so it adds no package and moves no version.
+const HOSTED = Object.freeze({ dir: 'examples/hosted-bot-collaboration', name: '@byok-sdk/example-hosted-bot-collaboration' });
+const HOSTED_FIELDS = new Set(['name', 'version', 'private', 'type', 'description', 'scripts', 'dependencies', 'devDependencies']);
+const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies'];
+// #793 D2a-0: the K8 entries that the hosted example imports. There is no root
+// entry, so H never loads the K8 host (src/host.ts). The K8 rules still import
+// the K4 root, which loads HostLedger and node:sqlite.
+const K8_HOSTED_EXPORTS = Object.freeze({
+  './rules/commands': './src/rules/commands.ts',
+  './rules/commit': './src/rules/commit.ts',
+  './model': './src/model.ts',
+  './coalesce': './src/coalesce.ts',
+  './team': './src/team.ts',
+  './test-support': './src/commit-vectors.test-support.ts',
+});
+function otherWorkspaceManifests(cwd) {
+  const manifests = [];
+  for (const prefix of ['packages', 'examples']) {
+    if (!existsSync(resolve(cwd, prefix))) continue;
+    for (const name of readdirSync(resolve(cwd, prefix))) {
+      const file = resolve(cwd, prefix, name, 'package.json');
+      if (`${prefix}/${name}` !== HOSTED.dir && existsSync(file)) manifests.push(JSON.parse(readFileSync(file, 'utf8')));
+    }
+  }
+  return manifests;
+}
+function verifyHostedManifest(manifest, cwd) {
+  if (!plain(manifest) || Object.keys(manifest).some(key => !HOSTED_FIELDS.has(key))
+    || manifest.name !== HOSTED.name || manifest.private !== true || manifest.type !== 'module' || !version(manifest.version)
+    || (manifest.description !== undefined && typeof manifest.description !== 'string')
+    || !isDeepStrictEqual(manifest.scripts, { typecheck: 'tsc --noEmit', test: 'vitest run' })) {
+    throw new Error('Reviewed CI mapping required: the hosted example manifest has an unreviewed shape');
+  }
+  const others = otherWorkspaceManifests(cwd);
+  for (const field of DEPENDENCY_FIELDS) {
+    if (manifest[field] === undefined) continue;
+    if (!plain(manifest[field])) throw new Error('Reviewed CI mapping required: the hosted example manifest has an unreviewed shape');
+    for (const [name, spec] of Object.entries(manifest[field])) {
+      const reused = name.startsWith('@byok-sdk/')
+        ? spec === 'workspace:*' && others.some(other => other.name === name)
+        : others.some(other => DEPENDENCY_FIELDS.some(declared => other[declared]?.[name] === spec));
+      if (!reused) throw new Error(`Reviewed CI mapping required: the hosted example may only reuse a declared dependency spec (${name})`);
+    }
+  }
+  return manifest;
+}
+/** Admits the hosted example's own lock rows when they match its reviewed manifest. Every other lock byte stays compared. */
+function admitHostedLock(before, after, cwd) {
+  const entry = after.workspaces?.[HOSTED.dir];
+  if (entry === undefined) return;
+  const manifest = verifyHostedManifest(JSON.parse(readFileSync(resolve(cwd, HOSTED.dir, 'package.json'), 'utf8')), cwd);
+  const expected = { name: manifest.name, version: manifest.version };
+  for (const field of DEPENDENCY_FIELDS) if (manifest[field] !== undefined) expected[field] = manifest[field];
+  const row = [`${HOSTED.name}@workspace:${HOSTED.dir}`];
+  if (!isDeepStrictEqual(entry, expected) || !isDeepStrictEqual(after.packages?.[HOSTED.name], row)
+    || (before.packages?.[HOSTED.name] !== undefined && !isDeepStrictEqual(before.packages[HOSTED.name], row))) {
+    throw new Error('Reviewed CI mapping required: the hosted example lock rows differ from its manifest');
+  }
+  delete before.workspaces[HOSTED.dir]; delete after.workspaces[HOSTED.dir];
+  if (before.packages) delete before.packages[HOSTED.name];
+  delete after.packages[HOSTED.name];
+}
+
 /** Returns the workspaces whose suites must qualify a reviewed dependency move. */
 export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) {
   if (!/^[a-f0-9]{40}$/.test(base ?? '') || /^0+$/.test(base)) throw new Error('Content-sensitive impact requires exact CI_BASE');
+  if (path === `${HOSTED.dir}/package.json`) {
+    // A new file has no base content, so the reviewed shape is the whole check.
+    verifyHostedManifest(JSON.parse(readFileSync(resolve(cwd, path), 'utf8')), cwd);
+    return [];
+  }
   const beforeText = execFileSync('git', ['show', `${base}:${path}`], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   const afterText = readFileSync(resolve(cwd, path), 'utf8');
   if (path === '.gitattributes') {
@@ -57,8 +130,8 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
   const parse = path === 'bun.lock' ? parseBunLock : JSON.parse;
   const qualify = [];
   const before = parse(beforeText), after = parse(afterText);
-  const version = value => typeof value === 'string' && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value);
   if (path === 'bun.lock') {
+    admitHostedLock(before, after, cwd);
     for (const [dir, record] of Object.entries(before.workspaces)) {
       if (dir === '') continue;
       const current = after.workspaces?.[dir];
@@ -95,12 +168,13 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       after.packages.undici = before.packages.undici;
     }
   } else if (path === 'examples/bot-collaboration/package.json') {
-    if (before.private !== true || after.private !== true
-      || before.devDependencies?.['@byok-sdk/cloud'] !== undefined
-      || after.devDependencies?.['@byok-sdk/cloud'] !== 'workspace:*') {
-      throw new Error('Only the reviewed private fixture cloud edge may be added');
+    if (before.private !== true || after.private !== true) throw new Error('The bot collaboration fixture must stay private');
+    // #658: the private fixture cloud edge.
+    if (before.devDependencies?.['@byok-sdk/cloud'] === undefined && after.devDependencies?.['@byok-sdk/cloud'] === 'workspace:*') {
+      delete after.devDependencies['@byok-sdk/cloud'];
     }
-    delete after.devDependencies['@byok-sdk/cloud'];
+    // #793 D2a-0: the K8 entries for the hosted example.
+    if (before.exports === undefined && isDeepStrictEqual(after.exports, K8_HOSTED_EXPORTS)) delete after.exports;
   } else if (path === 'package.json') {
     const oldCommand = before.scripts?.['test:scripts'], newCommand = after.scripts?.['test:scripts'];
     const prefix = 'node --test --test-concurrency=1 ';

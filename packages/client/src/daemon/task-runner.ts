@@ -921,6 +921,8 @@ interface OfferRuntimeInput {
   readonly preparedMemorySelected: boolean;
   /** The memory mode of an ordinary Agent offer; the prepared lane does not read it. */
   readonly ordinaryMemoryMode: PreparedAgentMemoryMode;
+  /** Whether an ordinary Agent offer binds the memory MCP, decided once at offer time. */
+  readonly ordinaryMemoryMcp: boolean;
   readonly messageRequirement: Readonly<AgentMessageEgressRequirement> | undefined;
   readonly terminalProjection: Readonly<TerminalProjectionSelection> | undefined;
   readonly readerAttempt: boolean;
@@ -2239,26 +2241,33 @@ export class TaskRunner {
     // else. Absent for every ordinary offer, so every branch below that does
     // not mention it behaves exactly as it did before this lane existed.
     const preparation = offeredPreparation(payload);
-    const agentMemory = 'agentMemory' in payload ? payload.agentMemory : undefined;
-    if (preparation !== undefined && !PreparedAgentMemoryModeSchema.safeParse(agentMemory).success) {
+    const offeredMemory = 'agentMemory' in payload ? payload.agentMemory : undefined;
+    if (preparation !== undefined && !PreparedAgentMemoryModeSchema.safeParse(offeredMemory).success) {
       decline('agent_memory_selection_invalid: prepared offers require an explicit memory selection', false);
       return;
     }
+    // The prepared lane refused `read-if-admitted` above, so this view is exact there.
+    const agentMemory = offeredMemory === 'read-if-admitted' ? undefined : offeredMemory;
     const preparedMemorySelected = preparation !== undefined && agentMemory !== 'none';
     // An ordinary Agent offer may select its own memory (#614). Absent keeps the
     // daemon admission: a writer `read-write`, a reader `read`, and `off` none.
-    // An explicit selection is never changed to a smaller one.
-    const ordinaryMemory = preparation === undefined ? agentMemory : undefined;
+    // An explicit selection is never changed to a smaller one, except
+    // `read-if-admitted`, which runs as `read` when admitted and else `none`
+    // (#815). Admission is read once here; the runtime binding uses this answer.
+    const ordinaryMemory = preparation === undefined ? offeredMemory : undefined;
     if (ordinaryMemory === 'read-write' && readerAttempt) {
       decline('agent_memory_selection_invalid: a memory-reader Attempt reads memory only', false);
       return;
     }
-    if ((ordinaryMemory === 'read' || ordinaryMemory === 'read-write') && !this.agentMemoryMcpAdmitted()) {
+    const memoryAdmitted = this.agentMemoryMcpAdmitted();
+    if ((ordinaryMemory === 'read' || ordinaryMemory === 'read-write') && !memoryAdmitted) {
       decline('agent_memory_unavailable: this daemon does not admit the Agent memory MCP', false);
       return;
     }
-    const ordinaryMemoryMode: PreparedAgentMemoryMode = ordinaryMemory
-      ?? (this.deps.agentMemoryMcp === 'off' ? 'none' : readerAttempt ? 'read' : 'read-write');
+    const ordinaryMemoryMode: PreparedAgentMemoryMode = ordinaryMemory === 'read-if-admitted'
+      ? (memoryAdmitted ? 'read' : 'none')
+      : ordinaryMemory ?? (this.deps.agentMemoryMcp === 'off' ? 'none' : readerAttempt ? 'read' : 'read-write');
+    const ordinaryMemoryMcp = ordinaryMemoryMode !== 'none' && memoryAdmitted;
     const preparationLane = this.deps.inputPreparationLane;
     if (preparation !== undefined) {
       if (preparationLane === undefined) {
@@ -2381,7 +2390,7 @@ export class TaskRunner {
           executionScratch = scratch;
           return scratch;
         },
-        payload, agentRef, preparation, preparedMemorySelected, ordinaryMemoryMode, messageRequirement, terminalProjection,
+        payload, agentRef, preparation, preparedMemorySelected, ordinaryMemoryMode, ordinaryMemoryMcp, messageRequirement, terminalProjection,
         readerAttempt, requiredToolsets, resolvedMcp, blobAbort,
       });
       if (runtime === undefined) return;
@@ -3487,13 +3496,12 @@ export class TaskRunner {
   private async prepareOfferRuntime(phase: OfferPhaseContext, input: OfferRuntimeInput) {
     const { taskId, decline, admissionWithdrawn } = phase;
     const {
-      payload, agentRef, preparation, preparedMemorySelected, ordinaryMemoryMode, messageRequirement, terminalProjection,
+      payload, agentRef, preparation, preparedMemorySelected, ordinaryMemoryMode, ordinaryMemoryMcp, messageRequirement, terminalProjection,
       readerAttempt, requiredToolsets, resolvedMcp, blobAbort,
     } = input;
     const offered = withoutRequiredToolsets(payload);
     const requestedRuntime = payload.harnessId ?? payload.dispatchSelection?.runtimeId ?? payload.runtime;
-    const requiresAgentMemoryMcp = preparation === undefined && agentRef !== undefined
-      && ordinaryMemoryMode !== 'none' && this.agentMemoryMcpAdmitted();
+    const requiresAgentMemoryMcp = preparation === undefined && agentRef !== undefined && ordinaryMemoryMcp;
     let pick: PickResult;
     try {
       pick = await this.pickAdapter(
@@ -3571,7 +3579,7 @@ export class TaskRunner {
         return undefined;
       }
     }
-    if (requiresAgentMemoryMcp && agentRef !== undefined) {
+    if (requiresAgentMemoryMcp && agentRef !== undefined && ordinaryMemoryMode !== 'none') {
       try {
         // A `read` task, which includes every reader, is sealed `read` and its helper lists only `memory_recall`.
         taskMcpServers = this.withAgentMemoryMcp(taskMcpServers, taskId, agentRef, ordinaryMemoryMode, this.deps.agentMemoryMcpBin!, 'granted');

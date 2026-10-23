@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
+import { createEnvelope, type AgentMemorySelection, type Envelope } from '@byok-sdk/protocol';
 import { AgentHomeManager } from '../agent-home';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
@@ -247,7 +247,7 @@ async function createMemoryRunner(agentMemoryMcp: 'auto' | 'off' | undefined, mc
     }),
   });
   let seq = 1;
-  const offer = (taskId: string, options: { reader?: boolean; agentId?: string; agentMemory?: 'none' | 'read' | 'read-write' } = {}) =>
+  const offer = (taskId: string, options: { reader?: boolean; agentId?: string; agentMemory?: AgentMemorySelection } = {}) =>
     runner.handleEnvelope(createEnvelope('task.offer_for_agent', {
       instruction: `instruction for ${taskId}`,
       runtime: 'pi',
@@ -402,5 +402,37 @@ describe('per-task Agent memory selection', () => {
     expect(adapter.startCalls).toHaveLength(1);
     expect(adapter.startCalls[0]!.task.instruction).toBe('instruction for off-none');
     expect(adapter.startCalls[0]!.ctx.mcpServers?.byokagentmemory).toBeUndefined();
+  });
+});
+
+// #815: `read-if-admitted` runs as `read` when the daemon admits the memory MCP, and as `none` when it does not.
+describe('agentMemory read-if-admitted', () => {
+  it.skipIf(process.platform === 'win32')('runs exactly as read when the daemon admits memory, for a writer and a reader', async () => {
+    const { adapter, offer, declineOf } = await createMemoryRunner('auto');
+    await offer('writer-read', { agentId: 'agent-writer-read', agentMemory: 'read' });
+    await offer('writer-if', { agentId: 'agent-writer-if', agentMemory: 'read-if-admitted' });
+    await offer('reader-read', { agentId: 'agent-reader-read', reader: true, agentMemory: 'read' });
+    await offer('reader-if', { agentId: 'agent-reader-if', reader: true, agentMemory: 'read-if-admitted' });
+    for (const taskId of ['writer-if', 'reader-if']) expect(declineOf(taskId), taskId).toBeUndefined();
+    expect(adapter.startCalls).toHaveLength(4);
+    const [writerRead, writerIf, readerRead, readerIf] = adapter.startCalls;
+    for (const [read, ifAdmitted, name] of [[writerRead!, writerIf!, 'writer'], [readerRead!, readerIf!, 'reader']] as const) {
+      expect(String(ifAdmitted.task.instruction).replace('-if', ''), name).toBe(String(read.task.instruction).replace('-read', ''));
+      expect(ifAdmitted.ctx.mcpServers?.byokagentmemory?.env, name).toMatchObject({
+        BYOK_PREPARED_AGENT_MEMORY_MODE: 'read', BYOK_AGENT_MEMORY_TOOL_LIST: 'granted',
+      });
+    }
+  });
+
+  it('runs exactly as none when the daemon does not admit memory, with no decline and no adapter MCP support', async () => {
+    const { adapter, offer, declineOf } = await createMemoryRunner('off', false);
+    await offer('writer-if', { agentId: 'agent-writer-if', agentMemory: 'read-if-admitted' });
+    await offer('reader-if', { agentId: 'agent-reader-if', reader: true, agentMemory: 'read-if-admitted' });
+    for (const taskId of ['writer-if', 'reader-if']) expect(declineOf(taskId), taskId).toBeUndefined();
+    expect(adapter.startCalls).toHaveLength(2);
+    const [writer, reader] = adapter.startCalls;
+    expect(writer!.task.instruction).toBe('instruction for writer-if');
+    expect(reader!.task.instruction).toBe(prependAgentReaderResultGuidance('instruction for reader-if'));
+    for (const start of [writer!, reader!]) expect(start.ctx.mcpServers?.byokagentmemory).toBeUndefined();
   });
 });
