@@ -4,8 +4,8 @@ Private reference example for #793 (#606 D2). It is the hosted (H) adapter of th
 commit contract (`examples/bot-collaboration`, #739 D1), on Node and Postgres.
 
 Status: the commit store, the intent submitter (D2b-1), the sync step (D2b-2), the message consumer (D2c), result
-reconciliation (D2d), the device binding (D2e), retention (D2g) and routines without their scheduler (D2f-2). The command
-entry and the routine scheduler come in later slices of #793.
+reconciliation (D2d), the device binding (D2e), retention (D2g), routines (D2f-2) and their scheduler (D2f-3). The command
+entry comes in a later slice of #793.
 Do not use this example as a deployed Host yet.
 
 ## Commit store
@@ -105,6 +105,11 @@ insertion order, in one transaction under the scope lock. It writes each step as
 
 Every frozen instruction lists the scope's Bot routines, in insertion order; the store reads them itself.
 
+The sync runs to a fixed point, as the L pass drains again after a step that changed K4. While a round froze or
+promoted an intent, concluded an untried intent on `cancel`, or concluded an occurrence on `ended`, it reads the intent
+facts again and runs every Turn again. So one sync ends a Turn whose promotion settled `superseded` at once, or whose
+untried intent it cancelled. Each of those steps happens once per intent or occurrence, so the rounds end.
+
 In history mode, `options.history` maps each Turn id to that Turn's history rows, as L reads them. A Turn without
 an entry does not freeze.
 
@@ -179,7 +184,7 @@ mode revision in one write, and keeps the row as the tombstone.
   does not check the binding: `cancel_turn` for the Turn, `abandon_delegation` for the delegation, or a `team_snapshot`
   that moves the Bot to a bound device. A per-device refusal (a K8 sync fact per Turn, plus a refusal at the command
   entry) waits for owner question §55a.
-- The command entry and the routine scheduler take the same check when they are built.
+- The routine scheduler checks it before a fire (see Routines). The command entry takes the same check when it is built.
 
 ## Retention
 
@@ -203,8 +208,8 @@ root ids are retired in `retired_identity`, and every moved command record answe
 
 ## Routines
 
-D2f-2 stores K4 routines and occurrences and runs the K4 and K8 routine rules on them. The scheduler that records
-occurrences comes in D2f-3.
+H stores K4 routines and occurrences and runs the K4 and K8 routine rules on them (D2f-2). Its scheduler records the
+occurrences (D2f-3).
 
 - Each transaction loads a K4 slice under the scope lock: every routine of the scope in insertion order, and its open
   occurrences. An occurrence is open when it has no intent and no conclusion, or when its intent `occurrence:<key>` has
@@ -221,6 +226,40 @@ occurrences comes in D2f-3.
   sync, the reconciliation conclude, the terminal transaction and the owner API. K4 does this after each drain; H has
   no drain.
 - Retention refuses a routine root while its occurrence is open, as L does.
+
+### Scheduler
+
+H has no SDK wake. `HostedRoutineScheduler` finds due slots in `routine_due` and fires each one through
+`HostedCollaborationStore.fire(scope, id, now)`, in its own transaction under the scope lock:
+
+- The store re-reads the routine. One that is not active, or whose slot is not due, is skipped with nothing written.
+- The fire can create execution, so the owner Bot's device must have an active H binding, read from the same state
+  that the sync builds the routine offer from. Otherwise the fire throws `DeviceBindingError` and writes nothing, and
+  the slot stays due. When the Bot moves to a bound device, a later pass fires the slot as `catch_up`.
+- K4 `recordOccurrence` runs on the slice, with the wake built from the locked row. The K8 `occurrence` command adds
+  the routine Turn with no command record, as in L: the slot is the replay guard (`UNIQUE (scope, routine_id,
+  definition_version, planned_at)`). The occurrence row, the routine's next slot, the routine Turn and the supersede of
+  earlier work commit together. An earlier untried intent concludes `superseded`; a tried one keeps running with its
+  `retry_until` bounded by the fire time. An earlier occurrence with no intent is marked superseded, and its later
+  promotion settles at once.
+- A fire runs no version switch: its new occurrence stays open, so K4 `versionSwitchDue` is false for that routine.
+
+`run()` is one pass. It reads due rows in slot order in keyset pages, so fenced rows (`pass.fenced`) and rows that are
+backing off cannot fill the batch. A fire that throws writes nothing, is reported in `pass.failed`, and waits
+`backoffMs` (default 60 s, in memory only) before its next try. The pass also sets `ok` on a `schedule_retrying`
+routine once its slot is within the K4 horizon, as K4 `scheduleNext`.
+
+`start()` runs once when the scheduler starts, as K4 `recover`: an active routine with no slot within the horizon is
+planned again, and a staged version that is due switches.
+
+The deployment runs `run()` every `intervalMs`. The default is 5 s, and the constructor refuses an interval at or above
+the K8 late bound (`ROUTINE_LATE_AFTER_MS`, 60 s): with a longer interval every slot would fire as `catch_up`, and its
+occurrence key would differ from L's.
+
+- Each pass reads the fenced due rows again. Keyset paging stops them from starving other rows, but not that cost.
+- A promoted occurrence keeps `conclusion IS NULL` for good, so `occurrence_open` holds every promoted occurrence of a
+  routine. The slice load still scans that history for the unpromoted open rows, so a fire costs more as the routine
+  ages. A fix (a `promoted` flag, or moving unpromoted rows) is a DDL change.
 
 ## Tests
 
@@ -240,9 +279,11 @@ three and runs these suites.
 - The message consumer tests port the K4 Host-side message vectors (`host-execution-core/src/message.test.ts`).
 - The device binding tests use an SDK tenant in memory for the submit checks.
 - The K8 retention vectors (`retentionVectors`) run on the store, with H tests for message replays after retention.
-- The routine tests seed each occurrence as the D2f-3 scheduler will record it. They cover the outcome actions, the
-  owner API, promotion, the claim's `retry_until`, the version switch in each writer that concludes routine work, and
-  the `bot-routine` refusal.
+- The routine tests seed each occurrence as the scheduler records it. They cover the outcome actions, the owner API,
+  promotion, the claim's `retry_until`, the version switch in each writer that concludes routine work, and the
+  `bot-routine` refusal.
+- The scheduler tests cover on-time and late fires, the supersede in the fire, the device fence and its paging, two
+  racing fires, a fire that throws and its backoff, the interval guard, and the start and pass upkeep.
 - The reconciliation tests run a real daemon for the completed outcome, a replayed terminal and a busy decline. The
   busy decline runs on L too (K4 with the sync rule's wait), and both conclude `declined` at generation 0. An SDK
   tenant in memory covers the cancel, expiry, lease and identity cases.
