@@ -61,6 +61,7 @@ export class HostedSubmitter {
    * whose try throws is backed off when its scope can be locked, and the pass goes on with the next row.
    */
   async run(): Promise<SubmitPass> {
+    // The NOT EXISTS head filter must match K4 fifoHeads, which the claim checks again under the scope lock.
     const due = await inSchema(this.pool, this.schema, client => client.query<{ scope: string; key: string }>(
       `SELECT i.scope, i.key FROM intent i WHERE i.conclusion IS NULL AND i.submission <> 'delivered' AND i.cancel_reason IS NULL
         AND i.next_at <= $1 AND NOT EXISTS (SELECT 1 FROM intent o WHERE o.scope = i.scope AND o.agent = i.agent
