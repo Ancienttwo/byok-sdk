@@ -152,14 +152,24 @@ binds a device to H at mode revision 1. `revokeDevice(scope, deviceId, revokedAt
 mode revision in one write, and keeps the row as the tombstone.
 
 - A second bind and a second revoke change nothing. A revoked device id is never bound again (O1 option A): a
-  returning device pairs under a new id. A revoke of a device that was never bound is refused.
+  returning device pairs under a new id. A revoke of a device id that was never bound is final too: it writes a
+  tombstone row in the default mode L at revision 2 (creating the scope row if needed), so a later bind of the id is
+  refused.
 - Each write that can create execution checks the binding under the scope lock, and throws `DeviceBindingError`
   unless the device has an active binding in mode H: the freeze of a new intent (so a sync that would freeze a Turn
   for such a device throws and writes nothing), and the submit claim (the row backs off with the error).
 - Right before the SDK call, the submitter reads the binding again. A revoked or changed binding throws, so the try
   backs off with the error. It does not record an expiry.
 - The reconciliation and the message consumer do not check the binding: the result of work that started still lands
-  under its own identity. A revoke does not cancel the open intents of the device.
+  under its own identity. A revoke does not cancel the open intents of the device. One that was not delivered concludes
+  `expired` at its `wait_until`, through the claim's queued expiry or through the reconciliation, with the revoke
+  reason in `last_error`. A delivered task keeps reconciling under its own identity.
+- One device with no active H binding stalls the sync of its whole scope. The sync writes every Turn of a scope in one
+  transaction, and a freeze for that device throws, so no Turn, cancel or projection of the scope is written. An
+  accepted delegation to a Bot on an unbound or revoked device triggers it too. The owner recovers with a command that
+  does not check the binding: `cancel_turn` for the Turn, `abandon_delegation` for the delegation, or a `team_snapshot`
+  that moves the Bot to a bound device. A per-device refusal (a K8 sync fact per Turn, plus a refusal at the command
+  entry) waits for owner question §55a.
 - The command entry and the routine scheduler take the same check when they are built.
 
 ## Retention

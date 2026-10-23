@@ -163,10 +163,14 @@ export class HostedCollaborationStore {
     }, false);
   }
 
-  /** Revokes the H binding of a device of `scope` for good, and raises its mode revision. A second revoke changes nothing. */
+  /**
+   * Revokes a device id of `scope` for good, and raises its mode revision. A second revoke changes nothing. An id that was
+   * never bound, also in a new scope, gets a revoked tombstone row.
+   */
   revokeDevice(scope: string, deviceId: string, revokedAt: number): Promise<void> {
     const key = storedKey(scope);
     return this.transaction(async client => {
+      await this.upsertScope(client, key);
       await lockScope(client, key);
       await revokeDevice(client, key, deviceId, revokedAt);
     }, false);
