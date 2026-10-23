@@ -180,6 +180,35 @@ describe('sealed payload v1: the golden corpus lines are real ciphertext', () =>
       expect(elsewhere, 'the Host cannot move a sealed member to another task').toEqual({ ok: false, reason: 'sealed_open_failed' });
     },
   );
+
+  // Each identity field after the task id binds the write on its own: a Host
+  // that changes only that field, in the same task, cannot open the member.
+  const identityCases = inline.flatMap((line) => (isSealedMessageType(line.type) ? SEALED_SPLIT_TABLE[line.type].identity : [])
+    .map((field) => [line.type, field, line] as const));
+
+  it('covers every identity field of the split table', () => {
+    expect([...new Set(identityCases.map(([, field]) => field))].sort()).toEqual(['approvalId', 'artifactId', 'seq', 'steerId']);
+  });
+
+  it.each(identityCases.map(([type, field, line], index) => [index, type, field, line] as const))(
+    'case %i (%s) does not open when only %s changes',
+    async (_index, _type, field, line) => {
+      const member = line.payload.sealed as Json;
+      const binding = bindingOf(line);
+      const value = binding.identity[field];
+      expect(value, `the binding names ${field}`).toBeDefined();
+      const changed = typeof value === 'number' ? value + 1 : `${String(value).slice(0, -1)}${String(value).endsWith('9') ? '8' : '9'}`;
+      const opened = await openSealedContent({
+        header: headerOf(member),
+        ciphertext: new Uint8Array(Buffer.from(member.ciphertext as string, 'base64url')),
+        scopeKey: GOLDEN_SCOPE_KEY,
+        binding: { ...binding, identity: { ...binding.identity, [field]: changed } },
+        sealing: GOLDEN_SCOPE,
+        maxContentLength: 2 * 1024 * 1024,
+      });
+      expect(opened).toEqual({ ok: false, reason: 'sealed_open_failed' });
+    },
+  );
 });
 
 describe('sealed payload v1: a Host without sealed-payload-v1 refuses sealed input (#654)', () => {
