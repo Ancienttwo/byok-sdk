@@ -56,12 +56,12 @@ test('docs/security.md selects the dataplane job that checks its plaintext inven
   assert.deepEqual(selectImpact(['docs/hosted-host-contract.md']).families, []);
 });
 
-test('client source/deleted tests select reverse dependents but no platform family', () => {
+test('client source/deleted tests select reverse dependents and only the dataplane family', () => {
   for (const path of ['packages/client/src/daemon/task-runner.ts', 'packages/client/src/__tests__/deleted.test.ts', 'api-surface/client.d.ts']) {
     const impact = selectImpact([path]);
     assert.ok(impact.dirs.includes('packages/client'));
     assert.ok(impact.dirs.includes('examples/host-execution-core'));
-    assert.deepEqual(impact.families, [], path);
+    assert.deepEqual(impact.families, ['dataplane'], path);
   }
 });
 
@@ -91,8 +91,8 @@ test('a platform family is selected only by a path it owns', () => {
 });
 
 test('shared Windows filesystem helpers select their real Windows consumers', () => {
-  assert.deepEqual(selectImpact(['packages/client/src/util/secure-dir.ts']).families, ['windows-git-workspace', 'windows-service-smoke']);
-  assert.deepEqual(selectImpact(['packages/client/src/util/atomic-write.ts']).families, ['ipc-smoke', 'windows-git-workspace']);
+  assert.deepEqual(selectImpact(['packages/client/src/util/secure-dir.ts']).families, ['dataplane', 'windows-git-workspace', 'windows-service-smoke']);
+  assert.deepEqual(selectImpact(['packages/client/src/util/atomic-write.ts']).families, ['dataplane', 'ipc-smoke', 'windows-git-workspace']);
 });
 
 test('Hermes adapter, fake and custody launcher paths select the Windows Hermes suites', () => {
@@ -299,11 +299,17 @@ test('vendored pi-subagents 0.60.0 factory files select only the client closure 
   const vendor = 'packages/client/vendor/pi-subagents/0.60.0';
   for (const path of [`${vendor}/index.ts`, `${vendor}/PROVENANCE.md`, `${vendor}/source-manifest.json`,
     `${vendor}/src/extension/index.ts`]) {
-    assert.deepEqual(selectImpact([path]), { dirs: client, files: [path], families: [], reason: 'impacted' });
+    assert.deepEqual(selectImpact([path]), { dirs: client, files: [path], families: ['dataplane'], reason: 'impacted' });
   }
   for (const path of ['packages/client/vendor/pi-subagents/0.61.0/index.ts', `${vendor}/src/extension/notes.md`,
     `${vendor}/src/extension/data.json`, `${vendor}/LICENSE`, `${vendor}/package.json`, `${vendor}/index.js`,
     'packages/client/vendor/other/0.60.0/index.ts']) {
     assert.throws(() => selectImpact([path]), /reviewed CI mapping required/i, path);
+  }
+});
+
+test('#793 O5: a direct hosted example path selects only that example and the dataplane family', () => {
+  for (const path of ['examples/hosted-bot-collaboration/src/k8-entry.test.ts', 'examples/hosted-bot-collaboration/vitest.config.ts']) {
+    assert.deepEqual(selectImpact([path]), { dirs: ['examples/hosted-bot-collaboration'], files: [path], families: ['dataplane'], reason: 'impacted' });
   }
 });
