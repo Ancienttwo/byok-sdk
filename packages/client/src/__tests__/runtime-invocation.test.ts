@@ -5,7 +5,11 @@ import { resolveRuntimeInvocation, type RuntimeInvocationHost } from '../adapter
 // Bytes npm's cmd-shim 8.0.0 writes for a `#!/usr/bin/env node` bin.
 const npmNodeShim = (entry: string) => '@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\r\nIF EXIST "%dp0%\\node.exe" (\r\n  SET "_prog=%dp0%\\node.exe"\r\n) ELSE (\r\n  SET "_prog=node"\r\n  SET PATHEXT=%PATHEXT:;.JS;=;%\r\n)\r\n\r\n'
   + `endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\${entry}" %*\r\n`;
-// The same generator for `#!/usr/bin/env node --max-old-space-size=99`, and for `#!/bin/sh`.
+// cmd-shim 9.0.2 (npm 12) moves the PATHEXT change to the last line.
+const npm12NodeShim = (entry: string) => npmNodeShim(entry)
+  .replace('  SET PATHEXT=%PATHEXT:;.JS;=;%\r\n', '')
+  .replace('title %COMSPEC% & "%_prog%"', 'title %COMSPEC% & set PATHEXT=%PATHEXT:;.JS;=;% & "%_prog%"');
+// cmd-shim 8.0.0 for `#!/usr/bin/env node --max-old-space-size=99`, and for `#!/bin/sh`.
 const npmNodeArgsShim = npmNodeShim('node_modules\\x\\cli.js').replace('"%_prog%"  ', '"%_prog%" --max-old-space-size=99 ');
 const npmShShim = '@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\r\nIF EXIST "%dp0%\\/bin/sh.exe" (\r\n  SET "_prog=%dp0%\\/bin/sh.exe"\r\n) ELSE (\r\n  SET "_prog=/bin/sh"\r\n  SET PATHEXT=%PATHEXT:;.JS;=;%\r\n)\r\n\r\n'
   + 'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\x\\cli.sh" %*\r\n';
@@ -26,8 +30,12 @@ function windows(files: Record<string, string>, env: Record<string, string> = { 
   return { host, looked };
 }
 
+// A prepare rejection reason leaves the device, so the message names no local path.
 function thrownCode(run: () => unknown): unknown {
-  try { run(); } catch (error) { return { code: (error as NodeJS.ErrnoException).code, kind: classifyDetectError(error).kind }; }
+  try { run(); } catch (error) {
+    expect((error as Error).message).not.toMatch(/[A-Za-z]:\\/);
+    return { code: (error as NodeJS.ErrnoException).code, kind: classifyDetectError(error).kind };
+  }
   return 'no error';
 }
 
@@ -42,6 +50,14 @@ describe('resolveRuntimeInvocation', () => {
 
   it('runs the entry of an npm node shim on PATH with node from PATH', () => {
     const { host } = windows({ 'C:\\npm\\claude.cmd': npmNodeShim(CLAUDE_ENTRY), 'C:\\node\\node.exe': '' });
+    expect(resolveRuntimeInvocation('claude', host)).toEqual({
+      command: 'C:\\node\\node.exe',
+      args: [`C:\\npm\\${CLAUDE_ENTRY}`],
+    });
+  });
+
+  it('accepts the npm 12 shim form', () => {
+    const { host } = windows({ 'C:\\npm\\claude.cmd': npm12NodeShim(CLAUDE_ENTRY), 'C:\\node\\node.exe': '' });
     expect(resolveRuntimeInvocation('claude', host)).toEqual({
       command: 'C:\\node\\node.exe',
       args: [`C:\\npm\\${CLAUDE_ENTRY}`],

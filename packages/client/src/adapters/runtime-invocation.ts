@@ -49,11 +49,11 @@ export function resolveRuntimeInvocation(command: string, host: RuntimeInvocatio
   if (NATIVE.has(extension)) return { command: file, args: [] };
   if (!BATCH.has(extension)) return { command, args: [] };
   const entry = extension === '.cmd' ? npmNodeShimEntry(host.readFile(file)) : undefined;
-  if (entry === undefined) throw spawnError('ENOEXEC', `${file} needs cmd.exe; only native executables and npm node shims run without a shell`);
+  if (entry === undefined) throw spawnError('ENOEXEC', 'the runtime command is a batch file that is not an npm node shim; only cmd.exe can run it');
   const shimDir = path.win32.dirname(file);
   const localNode = path.win32.join(shimDir, 'node.exe');
   const node = host.isFile(localNode) ? localNode : findWindowsCommand('node', host, ['.com', '.exe']);
-  if (node === undefined) throw spawnError('ENOENT', `node was not found for npm shim ${file}`);
+  if (node === undefined) throw spawnError('ENOENT', 'node was not found for the runtime command npm shim');
   return { command: node, args: [path.win32.join(shimDir, entry)] };
 }
 
@@ -83,20 +83,27 @@ function findWindowsCommand(command: string, host: RuntimeInvocationHost, extens
   return undefined;
 }
 
-/** npm's cmd-shim output for a `#!/usr/bin/env node` bin with no extra arguments. */
-function npmNodeShim(entry: string): string {
+/**
+ * npm's cmd-shim output for a `#!/usr/bin/env node` bin with no extra
+ * arguments. cmd-shim 4.1.0 to 9.0.1 (npm 11 bundles 8.0.0) strips `.JS` from
+ * PATHEXT in the ELSE branch; 9.0.2 (npm 12) does it on the last line.
+ */
+function npmNodeShims(entry: string): string[] {
+  const head = ['@ECHO off', 'GOTO start', ':find_dp0', 'SET dp0=%~dp0', 'EXIT /b', ':start', 'SETLOCAL', 'CALL :find_dp0', '',
+    'IF EXIST "%dp0%\\node.exe" (', '  SET "_prog=%dp0%\\node.exe"', ') ELSE (', '  SET "_prog=node"'];
+  const pathext = 'set PATHEXT=%PATHEXT:;.JS;=;% & ';
+  const run = 'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & ';
+  const exec = `"%_prog%"  "%dp0%\\${entry}" %*`;
   return [
-    '@ECHO off', 'GOTO start', ':find_dp0', 'SET dp0=%~dp0', 'EXIT /b', ':start', 'SETLOCAL', 'CALL :find_dp0', '',
-    'IF EXIST "%dp0%\\node.exe" (', '  SET "_prog=%dp0%\\node.exe"', ') ELSE (', '  SET "_prog=node"',
-    '  SET PATHEXT=%PATHEXT:;.JS;=;%', ')', '',
-    `endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\${entry}" %*`, '',
-  ].join('\r\n');
+    [...head, '  SET PATHEXT=%PATHEXT:;.JS;=;%', ')', '', run + exec, ''],
+    [...head, ')', '', run + pathext + exec, ''],
+  ].map(lines => lines.join('\r\n'));
 }
 
 /** The shim's entry, relative to the shim directory, only when the file is exactly npm's node shim. */
 function npmNodeShimEntry(text: string): string | undefined {
   const entry = /"%dp0%\\([^"%\r\n]+)" %\*\r\n$/.exec(text)?.[1];
-  return entry !== undefined && text === npmNodeShim(entry) ? entry : undefined;
+  return entry !== undefined && npmNodeShims(entry).includes(text) ? entry : undefined;
 }
 
 function spawnError(code: 'ENOENT' | 'ENOEXEC', message: string): NodeJS.ErrnoException {
