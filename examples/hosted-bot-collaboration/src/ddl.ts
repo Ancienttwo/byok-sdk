@@ -12,7 +12,7 @@ const names = (values: readonly string[]) => values.map(value => `'${value}'`).j
 /**
  * The example's own tables (#793 D2a). The SDK tables stay under the SDK migrations. The statements are
  * unqualified: the store runs them with `search_path` set to its own schema.
- * Keys hold `JSON.stringify(id)` (#793 O4). Bodies are `json`, so the stored text keeps its bytes (#793 O1).
+ * Scopes and keys hold `JSON.stringify(value)` (#793 O4). Bodies are `json`, so the stored text keeps its bytes (#793 O1).
  * `ordinal` is the insertion order of a row in its kind (#793 O2). It is set once and never changes.
  */
 export const DDL = `
