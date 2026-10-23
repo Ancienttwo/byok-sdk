@@ -197,7 +197,8 @@ describe('steerTask (GAP-2)', () => {
 
     await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: ['sealed-payload-v1'] });
     // The plaintext lane never strips a sealed member or a steer id.
-    for (const payload of [{ ...sealedSteer, text: 'plaintext' }, { text: 'plaintext', steerId: sealedSteer.steerId }]) {
+    const sealing = { scopeId: 'scope-golden-device-1', epoch: 2, categories: ['task-input'] };
+    for (const payload of [{ ...sealedSteer, text: 'plaintext' }, { text: 'plaintext', steerId: sealedSteer.steerId }, { text: 'plaintext', sealing }]) {
       await expect(harness.cloud.steerTask(TENANT_A, task.taskId, payload as never)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
     }
     await expect(harness.cloud.steerSealedTask(TENANT_A, task.taskId, { ...sealedSteer, text: 'plaintext' } as never), 'no plaintext next to the sealed member').rejects.toThrow();
