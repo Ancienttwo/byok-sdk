@@ -136,10 +136,10 @@ export class HostedSubmitter {
    * is the guard for that case.
    */
   private async mayStillSubmit(claim: Claim): Promise<boolean> {
-    if (this.now() >= claim.waitUntil) return false;
     const found = await inSchema(this.pool, this.schema, client => client.query<{ open: boolean }>(
       'SELECT conclusion IS NULL AND cancel_reason IS NULL AS open FROM intent WHERE scope = $1 AND key = $2', [claim.scopeKey, claim.key]), true);
-    return found.rows[0]?.open === true;
+    // The clock is read after the round trip, so a read that crosses the deadline stops the submit.
+    return found.rows[0]?.open === true && this.now() < claim.waitUntil;
   }
 
   /** Step 1: under the scope lock, expire an untried row, or take the lease and raise `tries`. */

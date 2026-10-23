@@ -161,6 +161,21 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('H submitter on real Postgres and a real SDK 
     expect(await offers(input.taskId)).toBe(0);
   });
 
+  it('does not submit when the read before the SDK call crosses wait_until (#793 D2b-2)', async () => {
+    const scope = `tenant:${randomUUID()}`, input = await freeze(scope, randomUUID(), clock + 10), { port, submitted } = sdkPort();
+    // The deadline passes during the database round trip of the check before the SDK call.
+    const pool = opened!.pool, slowRead = { connect: async () => {
+      const client = await pool.connect();
+      return new Proxy(client, { get: (target, name) => name === 'query'
+        ? (query: unknown, values?: unknown[]) => { if (String(query).includes('AS open')) clock += 10; return target.query(query as string, values); }
+        : typeof Reflect.get(target, name) === 'function' ? Reflect.get(target, name).bind(target) : Reflect.get(target, name) });
+    } } as unknown as pg.Pool;
+    const slow = new HostedSubmitter(slowRead, opened!.store.schema, { port: () => port, now: () => clock, leaseMs: 1000, backoffMs: 500 });
+    expect(await slow.run()).toEqual({ tried: 1, failed: [] });
+    expect(await row(scope, input.taskId)).toMatchObject({ submission: 'uncertain', tries: 1, cancel_reason: 'expired', conclusion: null });
+    expect(submitted).toEqual([]);
+  });
+
   it('submits only the FIFO head of an agent, and the next intent waits until the head concludes', async () => {
     const scope = `tenant:${randomUUID()}`, first = await freeze(scope), second = await freeze(scope), { port, submitted } = sdkPort();
     await submitter(port).run();
