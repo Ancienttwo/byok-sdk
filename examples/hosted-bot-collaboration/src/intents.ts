@@ -1,32 +1,56 @@
 import type { Pool, PoolClient } from 'pg';
 import { agentKey, canonical, fifoHeads, queuedExpiry, submitFrozen, taskId,
   type ExecutionTemplate, type FrozenInput, type FrozenSubmitPort } from '@byok-sdk/example-host-execution-core';
+import type { Turn } from '@byok-sdk/example-bot-collaboration/model';
+import type { SyncFacts, SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';
 import { storedKey } from './layout';
 import { inSchema, lockScope } from './store';
 
-/** What a Turn freezes (#793 D2b). D2b-2 calls `freezeIntent` in the sync transaction of the Turn. */
-export interface IntentFreeze { turnId: string; execution: ExecutionTemplate; waitUntil: number }
+/** What a Turn freezes: the `freeze` step input of the sync rule. `key` is the Turn id. */
+export interface IntentFreeze { key: string; source: 'user' | 'bot'; waitUntil: number; execution: ExecutionTemplate }
 
 /**
- * Saves one intent with its frozen input and its stable task id, `taskId(turnId, 0)`. The caller holds the scope
- * lock. A second freeze of the same Turn with the same input changes nothing; another input throws.
+ * Saves one intent with its frozen input and its stable task id, `taskId(key, 0)`. The caller holds the scope lock.
+ * A second freeze of the same Turn with the same identity changes nothing; another identity throws, as in K4 `enqueue`.
  */
 export async function freezeIntent(client: PoolClient, scope: string, freeze: IntentFreeze): Promise<FrozenInput> {
-  const scopeKey = storedKey(scope), key = storedKey(freeze.turnId);
-  const input: FrozenInput = { ...structuredClone(freeze.execution), taskId: taskId(freeze.turnId, 0) };
-  const prior = await client.query<{ input: string; wait_until: string }>(
-    'SELECT input::text AS input, wait_until::text FROM intent WHERE scope = $1 AND key = $2', [scopeKey, key]);
+  const scopeKey = storedKey(scope), key = storedKey(freeze.key);
+  const input: FrozenInput = { ...structuredClone(freeze.execution), taskId: taskId(freeze.key, 0) };
+  const prior = await client.query<{ source: string; input: string; wait_until: string }>(
+    'SELECT source, input::text AS input, wait_until::text FROM intent WHERE scope = $1 AND key = $2', [scopeKey, key]);
   if (prior.rows[0]) {
-    if (canonical(JSON.parse(prior.rows[0].input)) !== canonical(input) || Number(prior.rows[0].wait_until) !== freeze.waitUntil) {
+    const row = prior.rows[0];
+    if (row.source !== freeze.source || canonical(JSON.parse(row.input)) !== canonical(input) || Number(row.wait_until) !== freeze.waitUntil) {
       throw new Error('Intent identity conflict');
     }
     return input;
   }
-  await client.query(`INSERT INTO intent (scope, key, task_id, ordinal, agent, input, wait_until, submission)
-    SELECT $1, $2, $3, coalesce(max(ordinal) + 1, 0), $4, $5::json, $6, 'reserved' FROM intent WHERE scope = $1`,
-  [scopeKey, key, input.taskId, agentKey(scope, freeze.execution), JSON.stringify(input), freeze.waitUntil]);
+  await client.query(`INSERT INTO intent (scope, key, task_id, ordinal, agent, source, input, wait_until, submission)
+    SELECT $1, $2, $3, coalesce(max(ordinal) + 1, 0), $4, $5, $6::json, $7, 'reserved' FROM intent WHERE scope = $1`,
+  [scopeKey, key, input.taskId, agentKey(scope, freeze.execution), freeze.source, JSON.stringify(input), freeze.waitUntil]);
   return input;
+}
+
+type IntentFact = NonNullable<ReturnType<SyncFacts['intent']>>;
+/**
+ * The sync rule facts of these Turns, read in the sync transaction. H records no execution start before D2d,
+ * and retires no Turn id before D2g.
+ */
+export async function syncFacts(client: PoolClient, scope: string, turnIds: readonly string[]): Promise<SyncFacts> {
+  const found = await client.query<{ key: string; task_id: string; conclusion: IntentFact['conclusion'] | null; cancel_reason: IntentFact['cancelReason'] | null }>(
+    'SELECT key, task_id, conclusion, cancel_reason FROM intent WHERE scope = $1 AND key = ANY($2::text[])', [storedKey(scope), turnIds.map(storedKey)]);
+  const facts = new Map(found.rows.map(row => [row.key, { taskId: row.task_id, ...(row.conclusion ? { conclusion: row.conclusion } : {}),
+    ...(row.cancel_reason ? { cancelReason: row.cancel_reason } : {}) } satisfies IntentFact]));
+  return { intent: turnId => facts.get(storedKey(turnId)), executionStarted: () => false, retired: () => undefined };
+}
+
+/** Writes the intent side of one sync step, as L writes it to K4. The caller holds the scope lock. */
+export async function writeSyncStep(client: PoolClient, scope: string, turn: Turn, step: SyncStep<ExecutionTemplate>): Promise<void> {
+  if (step.kind === 'freeze') await freezeIntent(client, scope, step.input);
+  else if (step.kind === 'cancel') {
+    await client.query(`UPDATE intent SET cancel_reason = 'cancelled' WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(turn.id)]);
+  } else if (step.kind === 'routine' || turn.source === 'routine') throw new Error('H has no routine Turns before #793 D2f');
 }
 
 export interface SubmitterOptions {
@@ -100,10 +124,22 @@ export class HostedSubmitter {
     if (claim === 'expired') return true;
     const scope = JSON.parse(scopeKey) as string;
     let outcome: 'delivered' | 'stopped' | { error: unknown };
-    try { outcome = await submitFrozen(this.options.port(scope), claim.input, () => this.now() < claim.waitUntil); }
+    try { outcome = await submitFrozen(this.options.port(scope), claim.input, () => this.mayStillSubmit(claim)); }
     catch (error) { outcome = { error }; }
     await this.settleTry(claim, outcome);
     return true;
+  }
+
+  /**
+   * The K4 check right before the SDK call: the wait is open, and the row has no conclusion and no cancel reason.
+   * It reads outside the scope lock, so a sync cancel after this read can still reach the SDK. D2d's attempt check
+   * is the guard for that case.
+   */
+  private async mayStillSubmit(claim: Claim): Promise<boolean> {
+    const found = await inSchema(this.pool, this.schema, client => client.query<{ open: boolean }>(
+      'SELECT conclusion IS NULL AND cancel_reason IS NULL AS open FROM intent WHERE scope = $1 AND key = $2', [claim.scopeKey, claim.key]), true);
+    // The clock is read after the round trip, so a read that crosses the deadline stops the submit.
+    return found.rows[0]?.open === true && this.now() < claim.waitUntil;
   }
 
   /** Step 1: under the scope lock, expire an untried row, or take the lease and raise `tries`. */
@@ -142,7 +178,8 @@ export class HostedSubmitter {
       const fence = `WHERE scope = $1 AND key = $2 AND tries = $3 AND submission <> 'delivered'`;
       const values = [claim.scopeKey, claim.key, claim.tries];
       if (outcome === 'delivered') await client.query(`UPDATE intent SET submission = 'delivered', last_error = NULL ${fence}`, values);
-      else if (outcome === 'stopped') await client.query(`UPDATE intent SET cancel_reason = 'expired' ${fence}`, values);
+      // A sync cancel during the try keeps its reason.
+      else if (outcome === 'stopped') await client.query(`UPDATE intent SET cancel_reason = 'expired' ${fence} AND cancel_reason IS NULL`, values);
       else {
         const message = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
         await client.query(`UPDATE intent SET last_error = $4, next_at = $5 ${fence}`,

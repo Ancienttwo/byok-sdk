@@ -40,6 +40,13 @@ base64url, plus 64 KiB for the other fields. So the daemon journals a sealed
 envelope at the inline maximum, and then declines it. Terminal and transition
 records keep `maxRecordBytes`.
 
+An inbound envelope above the bound is not stored and does not stall the
+cursor (#826). The daemon declines an offer once with
+`reason: 'inbound_envelope_too_large'` and `retryable: false`, and journals the
+offer's digest and length instead of its bytes. It drops any other envelope with
+a warning. A dropped `task.cancel` leaves the local task running until it ends.
+Send a large instruction as a blob reference instead.
+
 The package installs `byok-agent` and the SDK-reserved
 `byok-agent-message-mcp` task helper. The message helper exposes only bounded
 plain text/Markdown; authenticated task, Agent, session, device, tenant, and
