@@ -183,7 +183,8 @@ after its tombstone expired. The check runs before the archived Bot check, so a
 retired Turn of an archived Bot also fails with `result_retired`. The archived
 Bot check cancels only a Turn that has no conclusion. A retired room seat Turn
 also releases its seat as `failed`, with reason `result_retired`, so its round
-moves on. A due reply check of a compacted chain intent takes
+moves on. At Host start, a business reply receipt of a compacted Turn stays,
+also for a routine Turn after its tombstone expired. A due reply check of a compacted chain intent takes
 the failed readback path. The Host keeps processing other work.
 
 ### Retention

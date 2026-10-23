@@ -21,7 +21,7 @@ import { BOT_ROUTINE, botRoutines, concludeRoutineTurn, createDefinition, owned,
   updateDefinition } from './routines';
 
 import { applyManagement, updateBot, writeSnapshotBot } from './team';
-import { botCompactVeto } from './compaction';
+import { botCompactVeto, turnIntentRetired } from './compaction';
 import { teamSnapshot, TeamModeError, type TeamSnapshot } from './rules/team';
 import { advanceRooms, type Mentions } from './rooms';
 import type { RoomFields } from '@byok-sdk/protocol';
@@ -520,13 +520,10 @@ export class BotCollaboration {
       const intent = s.intents[hash(turn.id)];
       const bot = state.team.bots[turn.botId];
       // #816: K4 compacted the intent before this sync saw its result. #798: retention archived this Turn id.
-      // Either identity can never run again. A routine Turn's tombstone expires with its slot, but K4 removed its occurrence
-      // with the intent, and a routine Turn is written with its occurrence. So a routine Turn without its occurrence is retired too.
-      // K8 does not know a K4 conclusion, so the Turn fails, and every reader of `turn.conclusion` can settle.
-      // This runs before the archive check: the work may have run, so the Turn is not `cancelled`.
+      // Either identity can never run again. K8 does not know a K4 conclusion, so the Turn fails, and every reader of
+      // `turn.conclusion` can settle. This runs before the archive check: the work may have run, so the Turn is not `cancelled`.
       const retired = intent || turn.conclusion ? undefined
-        : this.ledger.hasTombstone('intent', turn.id, this.now()) || turn.source === 'routine' && !s.occurrences[routineOccurrence(turn)]
-          ? 'result_retired' : rows.isRetired('turn', turn.id) ? 'turn_retired' : undefined;
+        : turnIntentRetired(this.ledger, s, turn, this.now()) ? 'result_retired' : rows.isRetired('turn', turn.id) ? 'turn_retired' : undefined;
       if (retired) {
         turn.status = 'failed'; turn.conclusion = 'failed';
         // The seat facts no longer see the intent, so release the seat here, as for a failed conclusion. Its round moves on.
