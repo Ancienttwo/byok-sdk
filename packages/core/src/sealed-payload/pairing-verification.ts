@@ -9,7 +9,7 @@
  * Text form: RFC 4648 base32 of the 16 bytes, without padding. That is 26
  * characters. The encoder writes upper case. The decoder also accepts lower
  * case, because a person may type the string. The two unused low bits of the
- * last character must be zero, so one value has one canonical text form.
+ * last character must be zero, so one value has one upper-case text form.
  *
  * The parser splits on the LAST `.`, because base32 has no `.` and a pairing
  * code may contain one. It requires `pv`: the daemon decides from its own
@@ -25,7 +25,9 @@ export const PAIRING_VERIFICATION_SECRET_BYTES = 16;
 export const PAIRING_VERIFICATION_TEXT_LENGTH = 26;
 
 const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-const PV_TEXT_PATTERN = /^[A-Z2-7]{26}$/u;
+// Checked on the raw text, before upper-casing: Unicode case mapping turns
+// some non-ASCII characters into ASCII letters (`ſ` to `S`, `ﬀ` to `FF`).
+const PV_TEXT_PATTERN = /^[A-Za-z2-7]{26}$/u;
 
 /** 128 fresh CSPRNG bits. */
 export function generatePairingVerificationSecret(): Bytes {
@@ -52,10 +54,10 @@ export function encodePairingVerificationSecret(pv: Uint8Array): string {
 }
 
 export function decodePairingVerificationSecret(text: string): Bytes {
-  const upper = text.toUpperCase();
-  if (!PV_TEXT_PATTERN.test(upper)) {
+  if (!PV_TEXT_PATTERN.test(text)) {
     throw invalidInput(`Pairing verification secret must be ${PAIRING_VERIFICATION_TEXT_LENGTH} base32 characters`);
   }
+  const upper = text.toUpperCase();
   const out = new Uint8Array(PAIRING_VERIFICATION_SECRET_BYTES);
   let buffer = 0;
   let bits = 0;

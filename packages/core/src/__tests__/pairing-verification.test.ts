@@ -74,6 +74,9 @@ describe('pairing verification secret', () => {
       // The last character carries 3 data bits and 2 bits that must be zero.
       `${text.slice(0, 25)}B`,
       `${text.slice(0, 25)}5`,
+      // Unicode case mapping must not turn these into ASCII letters.
+      `\u017f${text.slice(1)}`,
+      `\ufb00${text.slice(2)}`,
     ]) {
       expectInvalid(() => decodePairingVerificationSecret(bad));
     }
