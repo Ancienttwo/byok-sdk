@@ -16,12 +16,17 @@ import { commitVectors, seedCollaboration, SYNC_OPTIONS, syncVectors, VECTOR_NOW
   type SyncSubject } from './commit-vectors.test-support';
 import { syncTurn } from './rules/sync';
 import type { Conclusion } from './rules/delegation';
+import { template } from '@byok-sdk/example-host-execution-core/test-support';
+import { writeSnapshotBot } from './team';
 
 /** The intent fact fields that the memory store keeps. */
 const pick = (row: { conclusion?: Conclusion; cancelReason?: 'cancelled' }) =>
   ({ ...(row.conclusion ? { conclusion: row.conclusion } : {}), ...(row.cancelReason ? { cancelReason: row.cancelReason } : {}) });
-import { template } from '@byok-sdk/example-host-execution-core/test-support';
-import { writeSnapshotBot } from './team';
+/** The memory outbox has the K4 projection identity rule, for commit and sync alike. */
+const publishTo = (outbox: Record<string, Json>) => (id: string, value: Json) => {
+  if (outbox[id] !== undefined && canonical(outbox[id]) !== canonical(value)) throw new Error('Projection identity conflict');
+  outbox[id] = value;
+};
 
 const roots: string[] = [], ledgers: HostLedger[] = [];
 // Windows cannot delete an open SQLite file, so each ledger closes first.
@@ -63,10 +68,7 @@ function memorySubject(team?: SeedTeam): RetentionSubject & SyncSubject {
       const next = structuredClone(stored), rows = memoryStore(next.archive);
       let admitted: AdmittedIds | undefined;
       const result = commitCommand(next.state, request, { scope: 'memory', recordCallbacks: true,
-        archived: id => rows.get('commands', id) as CommandRecord | undefined, admitted: ids => { admitted = ids; } }, ports(next.state, (id, value) => {
-        if (next.outbox[id] !== undefined && canonical(next.outbox[id]) !== canonical(value)) throw new Error('Projection identity conflict');
-        next.outbox[id] = value;
-      }));
+        archived: id => rows.get('commands', id) as CommandRecord | undefined, admitted: ids => { admitted = ids; } }, ports(next.state, publishTo(next.outbox)));
       refuseRetired(admitted, rows.isRetired);
       stored = next;
       return result;
@@ -81,7 +83,7 @@ function memorySubject(team?: SeedTeam): RetentionSubject & SyncSubject {
       const next = structuredClone(stored), rows = memoryStore(next.archive);
       for (const turn of Object.values(next.state.turns)) {
         const step = syncTurn(next.state, turn, { intent: id => next.intents[id] && { taskId: id, ...pick(next.intents[id]!) }, executionStarted: () => false,
-          retired: id => rows.isRetired('turn', id) ? 'turn_retired' : undefined }, SYNC_OPTIONS, (id, value) => { next.outbox[id] = value; });
+          retired: id => rows.isRetired('turn', id) ? 'turn_retired' : undefined }, SYNC_OPTIONS, publishTo(next.outbox));
         if (step?.kind === 'freeze') next.intents[turn.id] = step.input;
         else if (step?.kind === 'cancel') next.intents[turn.id]!.cancelReason = 'cancelled';
         else if (step?.kind === 'routine') throw new Error('The memory subject has no routines');

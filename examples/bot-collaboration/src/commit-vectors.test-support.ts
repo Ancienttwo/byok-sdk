@@ -210,8 +210,10 @@ export function commitVectors(name: string, open: (team?: SeedTeam) => CommitSub
  * #793 D2b: the sync step as a store operation. The store runs `syncTurn` for each stored Turn, in insertion order, in one
  * transaction under the same scope lock as `commit`, with the options below. It writes each returned step: a `freeze` stores
  * its intent input as it is. The projections that the step publishes reach the store's outbox in the same transaction.
+ * A projection with the same id and the same body adds nothing; another body for that id throws `Projection identity conflict`.
  * It writes no command record and keeps the revision. A sync is the Host's own work, so a client's expected revision must
- * not go stale because of it. The store reads the facts inside the sync transaction.
+ * not go stale because of it. The store reads the facts inside the sync transaction. A Host sync can run other steps in the
+ * same transaction before and after the per-Turn steps, as L does; this contract defines only the per-Turn step.
  */
 export interface SyncSubject extends CommitSubject {
   /** A test edit of the stored state, outside the contract. */
