@@ -5976,7 +5976,10 @@ export declare const TaskOfferForAgentWithEgressSealedPayloadSchema: z.ZodObject
     }, z.core.$strict>>;
 }, z.core.$strict>;
 export type TaskOfferForAgentWithEgressSealedPayload = z.infer<typeof TaskOfferForAgentWithEgressSealedPayloadSchema>;
-/** server -> daemon: `task.offer_for_agent_with_egress_fresh` of a sealed task. */
+/**
+ * server -> daemon: `task.offer_for_agent_with_egress_fresh` of a sealed task.
+ * Only this type takes `routineRef`: a routine occurrence is an execution.
+ */
 export declare const TaskOfferForAgentWithEgressFreshSealedPayloadSchema: z.ZodObject<{
     agentRef: z.ZodObject<{
         agentId: z.ZodString;
@@ -6111,6 +6114,11 @@ export declare const TaskOfferForAgentWithEgressFreshSealedPayloadSchema: z.ZodO
             size: z.ZodNumber;
             contentType: z.ZodString;
         }, z.core.$strict>>;
+    }, z.core.$strict>>;
+    routineRef: z.ZodOptional<z.ZodObject<{
+        routineId: z.ZodString;
+        definitionVersion: z.ZodNumber;
+        notAfter: z.ZodString;
     }, z.core.$strict>>;
 }, z.core.$strict>;
 export type TaskOfferForAgentWithEgressFreshSealedPayload = z.infer<typeof TaskOfferForAgentWithEgressFreshSealedPayloadSchema>;
@@ -7310,10 +7318,27 @@ export declare const TaskSealingSchema: z.ZodObject<{
 }, z.core.$strict>;
 export type TaskSealing = z.infer<typeof TaskSealingSchema>;
 /**
+ * The routine template of a sealed execution (design §6.3). The offer's
+ * `sealed` member is then the template, family `routine.template`, which the
+ * member sealed once for every occurrence. The device rebuilds its binding
+ * from these fields: identity `{ routineId, definitionVersion }`, no device,
+ * the offer's `agentRef` and `sealing.categories`, and `notAfter`. They travel
+ * in plaintext because the AAD binds them. `definitionVersion` is an integer,
+ * because the binding tells `4` and `"4"` apart. The device, not the Host,
+ * checks `notAfter` against its clock.
+ */
+export declare const RoutineRefSchema: z.ZodObject<{
+    routineId: z.ZodString;
+    definitionVersion: z.ZodNumber;
+    notAfter: z.ZodString;
+}, z.core.$strict>;
+/**
  * The rule of a sealed offer, for `superRefine`: `sealed` is present exactly
  * when the task's `sealing` includes `task-input`, and then `instruction` is
  * absent and `sealed.scope` is the task's scope at the task's epoch. When the
- * task seals only its output, `instruction` is plaintext and required.
+ * task seals only its output, `instruction` is plaintext and required. A
+ * `routineRef` names a routine template, which is sealed task input, so it
+ * needs a task that seals `task-input`.
  *
  * Whether a task's later messages must be sealed is the Host's and the
  * device's check: they know the task's `sealing`, this payload does not.
@@ -7322,6 +7347,7 @@ export declare function sealedOfferRule(payload: {
     readonly instruction?: unknown;
     readonly sealing: TaskSealing;
     readonly sealed?: SealedPayload;
+    readonly routineRef?: unknown;
 }, ctx: z.RefinementCtx): void;
 // ==== @byok-sdk/protocol dist/sealed-split-table.d.ts ====
 /**

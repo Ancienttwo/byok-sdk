@@ -207,22 +207,57 @@ export const TaskSealingSchema = z
   .strict();
 export type TaskSealing = z.infer<typeof TaskSealingSchema>;
 
+/**
+ * A canonical UTC instant, `YYYY-MM-DDTHH:mm:ss.sssZ` and a real calendar
+ * instant. This is the form core binds as `notAfter` in the AAD
+ * (`@byok-sdk/core` `isCanonicalTimestamp`), so a device can rebuild the AAD
+ * from the wire value byte for byte.
+ */
+const CanonicalInstantSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u)
+  .refine((value) => {
+    const instant = Date.parse(value);
+    return Number.isFinite(instant) && new Date(instant).toISOString() === value;
+  }, 'must be a canonical UTC instant');
+
+/**
+ * The routine template of a sealed execution (design §6.3). The offer's
+ * `sealed` member is then the template, family `routine.template`, which the
+ * member sealed once for every occurrence. The device rebuilds its binding
+ * from these fields: identity `{ routineId, definitionVersion }`, no device,
+ * the offer's `agentRef` and `sealing.categories`, and `notAfter`. They travel
+ * in plaintext because the AAD binds them. `definitionVersion` is an integer,
+ * because the binding tells `4` and `"4"` apart. The device, not the Host,
+ * checks `notAfter` against its clock.
+ */
+export const RoutineRefSchema = z
+  .object({
+    routineId: z.string().min(1),
+    definitionVersion: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    notAfter: CanonicalInstantSchema,
+  })
+  .strict();
+
 
 /**
  * The rule of a sealed offer, for `superRefine`: `sealed` is present exactly
  * when the task's `sealing` includes `task-input`, and then `instruction` is
  * absent and `sealed.scope` is the task's scope at the task's epoch. When the
- * task seals only its output, `instruction` is plaintext and required.
+ * task seals only its output, `instruction` is plaintext and required. A
+ * `routineRef` names a routine template, which is sealed task input, so it
+ * needs a task that seals `task-input`.
  *
  * Whether a task's later messages must be sealed is the Host's and the
  * device's check: they know the task's `sealing`, this payload does not.
  */
 export function sealedOfferRule(
-  payload: { readonly instruction?: unknown; readonly sealing: TaskSealing; readonly sealed?: SealedPayload },
+  payload: { readonly instruction?: unknown; readonly sealing: TaskSealing; readonly sealed?: SealedPayload; readonly routineRef?: unknown },
   ctx: z.RefinementCtx,
 ): void {
-  const { instruction, sealing, sealed } = payload;
+  const { instruction, sealing, sealed, routineRef } = payload;
   if (!sealing.categories.includes('task-input')) {
+    if (routineRef !== undefined) ctx.addIssue({ code: 'custom', path: ['routineRef'], message: 'a routine template is sealed task input, so routineRef needs a task that seals task-input' });
     if (sealed !== undefined) ctx.addIssue({ code: 'custom', path: ['sealed'], message: 'a task that does not seal task-input carries no sealed member' });
     if (instruction === undefined) ctx.addIssue({ code: 'custom', path: ['instruction'], message: 'a task that does not seal task-input carries a plaintext instruction' });
     return;
