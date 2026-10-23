@@ -1,16 +1,17 @@
 /**
  * #654 E3a: this daemon does not open sealed content, and it does not
  * advertise `sealed-payload-v1`. A Host that skips the gate can still send it
- * a sealed offer or steer, whose moved fields are only placeholders. The
- * daemon must never run or inject a placeholder: it declines the offer
- * non-retryably and drops the steer. The payloads are the golden corpus lines.
+ * a sealed offer type or a sealed steer. The daemon never runs such an offer,
+ * even when the task seals only its output and the instruction is plaintext:
+ * it declines non-retryably. It drops the steer. The payloads are the golden
+ * corpus lines.
  */
 import { testScratchOwner } from './fixtures/execution-scratch';
 import { promises as fs, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope, type Envelope, type TaskOfferPayload, type TaskSteerPayload } from '@byok-sdk/protocol';
+import { createEnvelope, type Envelope, type MessageType } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
@@ -20,10 +21,19 @@ import { testIngressBudget } from './fixtures/activity-ingress';
 const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
-  .map((raw) => JSON.parse(raw) as { type: string; payload: Record<string, unknown> });
-const sealedOffer = corpus.find((line) => line.type === 'task.offer' && line.payload.sealed !== undefined)!.payload as TaskOfferPayload;
-const outputOnlySealing = corpus.find((line) => line.payload.sealing !== undefined && line.payload.sealed === undefined)!.payload.sealing;
-const sealedSteer = corpus.find((line) => line.type === 'task.steer' && line.payload.sealed !== undefined)!.payload as TaskSteerPayload;
+  .map((raw) => JSON.parse(raw) as { type: MessageType; task_id: string; payload: Record<string, unknown> });
+const SEALED_OFFER_TYPES = [
+  'task.offer_sealed',
+  'task.offer_with_toolsets_sealed',
+  'task.offer_for_agent_sealed',
+  'task.offer_for_agent_with_egress_sealed',
+  'task.offer_for_agent_with_egress_fresh_sealed',
+] as const;
+const sealedOffers = SEALED_OFFER_TYPES.flatMap((type) => [
+  ['sealed input', corpus.find((line) => line.type === type && line.payload.sealed !== undefined)!],
+  ['sealed output only', corpus.find((line) => line.type === type && line.payload.sealed === undefined)!],
+] as const);
+const sealedSteer = corpus.find((line) => line.type === 'task.steer_sealed')!.payload;
 
 const dirs: Array<{ dir: string; store: SessionWorkspaceStore }> = [];
 afterEach(async () => {
@@ -52,28 +62,32 @@ async function runnerWith(adapter: StubRuntimeAdapter, sent: Envelope[]): Promis
 }
 
 describe('sealed payload refusal on a daemon without sealed-payload-v1 (#654)', () => {
-  it.each([
-    ['a sealed offer', sealedOffer],
-    ['an offer that seals only task output', { instruction: 'Run the watchlist routine', runtime: 'pi', sealing: outputOnlySealing } as TaskOfferPayload],
-  ])('declines %s non-retryably and never starts a session', async (_label, payload) => {
-    const adapter = new StubRuntimeAdapter('pi');
-    const sent: Envelope[] = [];
-    const runner = await runnerWith(adapter, sent);
+  it.each(sealedOffers.map(([label, line]) => [line.type, label, line] as const))(
+    'declines %s (%s) non-retryably and never starts a session',
+    async (_type, _label, line) => {
+      const adapter = new StubRuntimeAdapter('pi');
+      const sent: Envelope[] = [];
+      const runner = await runnerWith(adapter, sent);
+      const offer = createEnvelope(line.type as (typeof SEALED_OFFER_TYPES)[number], line.payload as never, { taskId: 'sealed-task', seq: 1 });
 
-    await runner.handleEnvelope(createEnvelope('task.offer', payload, { taskId: 'sealed-task', seq: 1 }));
+      await runner.handleEnvelope(offer);
+      await runner.handleEnvelope(offer);
 
-    const declines = sent.filter((envelope) => envelope.type === 'task.decline');
-    expect(declines).toHaveLength(1);
-    expect(declines[0]).toMatchObject({
-      type: 'task.decline',
-      payload: { reason: expect.stringMatching(/^sealed_payload_unsupported:/u), retryable: false },
-    });
-    expect(declines[0]!.payload).not.toHaveProperty('code');
-    expect(sent.filter((envelope) => envelope.type === 'task.claim')).toHaveLength(0);
-    expect(adapter.startCalls).toHaveLength(0);
-  });
+      const declines = sent.filter((envelope) => envelope.type === 'task.decline');
+      expect(declines, 'one decline, also for a redelivered offer').toHaveLength(1);
+      expect(declines[0]).toMatchObject({
+        type: 'task.decline',
+        task_id: 'sealed-task',
+        payload: { reason: expect.stringMatching(/^sealed_payload_unsupported:/u), retryable: false },
+      });
+      expect(declines[0]!.payload).not.toHaveProperty('code');
+      if (line.payload.agentRef !== undefined) expect(declines[0]!.payload).toMatchObject({ agentRef: line.payload.agentRef });
+      expect(sent.filter((envelope) => envelope.type === 'task.claim')).toHaveLength(0);
+      expect(adapter.startCalls).toHaveLength(0);
+    },
+  );
 
-  it('drops a sealed steer and never injects its placeholder', async () => {
+  it('drops a sealed steer and keeps steering the task in plaintext', async () => {
     const adapter = new StubRuntimeAdapter('pi');
     const sent: Envelope[] = [];
     const runner = await runnerWith(adapter, sent);
@@ -82,7 +96,7 @@ describe('sealed payload refusal on a daemon without sealed-payload-v1 (#654)', 
       await runner.handleEnvelope(createEnvelope('task.offer', { instruction: 'plain task', runtime: 'pi' }, { taskId: 'plain-task', seq: 1 }));
       const session = adapter.sessions[0]!;
 
-      await runner.handleEnvelope(createEnvelope('task.steer', sealedSteer, { taskId: 'plain-task', seq: 2 }));
+      await runner.handleEnvelope(createEnvelope('task.steer_sealed', sealedSteer as never, { taskId: 'plain-task', seq: 2 }));
       expect(session.steerCalls).toEqual([]);
       expect(diagnostic).toHaveBeenCalledWith(expect.stringContaining('sealed task.steer'));
 

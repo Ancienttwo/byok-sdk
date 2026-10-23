@@ -1,8 +1,11 @@
 /**
  * Sealed payload v1 on the hosted wire (#654 design §8.1, §8.3, §8.6).
  *
- * A sealed member replaces the fields that one data category moves out of a
- * payload. The Host reads only its outer fields. It checks the shape here:
+ * Each sealed message type (`task.complete_sealed`, …) is its plaintext type
+ * without the fields one data category moves into the ciphertext, plus a
+ * sealed member. The type, not a field, is gated, so a decoder that does not
+ * know `sealed-payload-v1` refuses the whole message. The Host reads only the
+ * sealed member's outer fields. It checks the shape here:
  * version, suite, encodings, a legal padded length, and exactly one of inline
  * `ciphertext` and `ciphertextRef`. Inline is the only legal form up to
  * {@link SEALED_INLINE_MAX_PADDED_LENGTH}; above it, the ciphertext is a blob.
@@ -16,7 +19,9 @@
 import { z } from 'zod';
 
 import { BlobRefSchema, CONTENT_HASH_RE } from './blob';
-import type { MessageType } from './messages';
+
+export { SEALED_SPLIT_TABLE, isSealedMessageType } from './sealed-split-table';
+export type { SealedDigestRule, SealedMessageType, SealedSplitEntry } from './sealed-split-table';
 
 export const SEALED_PAYLOAD_VERSION = 1;
 /** The only suite v1 admits. A new suite is a new constant and a new capability, never a parser branch. */
@@ -202,159 +207,32 @@ export const TaskSealingSchema = z
   .strict();
 export type TaskSealing = z.infer<typeof TaskSealingSchema>;
 
-/** What a moved field holds on the wire: its placeholder, or `absent` for an optional field. */
-export type SealedPlaceholder = '' | 'empty-array' | 'absent';
 
 /**
- * How a sealed message type treats one digest field (D16, design §9.3).
- *
- * - `ciphertext-sha256`: the SHA-256 of the sealed bytes, for a Host that
- *   checks the bytes it stores (a ciphertext blob).
- * - `keyed-mac`: a keyed MAC under the scope's MAC key; the Host forwards it.
- * - `sealed`: the field moves into the ciphertext with its parent.
- * - `plain`: a digest that no sealed content derives, kept in plaintext.
- * - `forbidden`: a sealed message must not carry it in v1.
- */
-export type SealedDigestRule = 'ciphertext-sha256' | 'keyed-mac' | 'sealed' | 'plain' | 'forbidden';
-
-/** One message type in the split table. */
-export interface SealedSplitEntry {
-  readonly category: SealedPayloadV1Category;
-  /**
-   * Payload fields that, after the envelope `task_id`, name this write in the
-   * AAD and the content MAC (§8.2, §9.1). A sealed message must carry them.
-   */
-  readonly identity: readonly string[];
-  /**
-   * Top-level payload fields the category moves into the ciphertext. A
-   * required field stays on the wire with its placeholder (`''` or `[]`), so
-   * a payload that drops `sealed` still has the released shape; an optional
-   * field is absent. The receiver replaces each with its opened value.
-   */
-  readonly moved: { readonly [field: string]: SealedPlaceholder };
-  /**
-   * Every payload path whose name contains `digest`, `hash` or `revision`
-   * (case-insensitive), with its rule. A schema test keeps this complete.
-   */
-  readonly digests: { readonly [path: string]: SealedDigestRule };
-  /** Top-level fields a sealed message must not carry (the `forbidden` digests' parents). */
-  readonly forbidden: readonly string[];
-}
-
-const OFFER_DIGESTS = {
-  'instruction.blobRef.contentHash': 'sealed',
-  'dispatchSelection.providerProfile.profileRevision': 'plain',
-  'dispatchSelection.providerProfile.profileHash': 'plain',
-} as const satisfies SealedSplitEntry['digests'];
-const AGENT_OFFER_DIGESTS = { ...OFFER_DIGESTS, 'agentRef.profileRevision': 'plain' } as const satisfies SealedSplitEntry['digests'];
-const EGRESS_OFFER_DIGESTS = { ...AGENT_OFFER_DIGESTS, 'egressPolicy.policyRevision': 'plain' } as const satisfies SealedSplitEntry['digests'];
-/** The Host wrote the projection it names, so its hash tells the Host nothing new. */
-const TERMINAL_DIGESTS = {
-  'agentRef.profileRevision': 'plain',
-  'agentHomeProjection.profileRevision': 'plain',
-  'agentHomeProjection.projectionHash': 'plain',
-} as const satisfies SealedSplitEntry['digests'];
-
-const taskInput = (digests: SealedSplitEntry['digests']): SealedSplitEntry =>
-  ({ category: 'task-input', identity: [], moved: { instruction: '' }, digests, forbidden: [] });
-
-/**
- * The split table (design §8.3): for each message type that v1 may seal, the
- * category, the moved fields, and the rule of each digest field. It is the
- * one authority; the schemas, the Host's comparison projection and the
- * receiver's merge read it. A type that is not here is never sealed.
- *
- * Blob bytes have no sealing rule yet, so a sealed message carries no
- * plaintext blob reference: `artifactRefs` and the artifact `blobRef` are
- * forbidden until that rule exists. A sealed artifact is inline content.
- */
-export const SEALED_SPLIT_TABLE = Object.freeze({
-  'task.offer': taskInput(OFFER_DIGESTS),
-  'task.offer_with_toolsets': taskInput(OFFER_DIGESTS),
-  'task.offer_for_agent': taskInput(AGENT_OFFER_DIGESTS),
-  'task.offer_for_agent_with_egress': taskInput(EGRESS_OFFER_DIGESTS),
-  'task.offer_for_agent_with_egress_fresh': taskInput(EGRESS_OFFER_DIGESTS),
-  'task.steer': { category: 'task-input', identity: [], moved: { text: '' }, digests: {}, forbidden: [] },
-  'task.complete': {
-    category: 'task-output',
-    identity: [],
-    moved: { summary: '', finalMessage: 'absent', document: 'absent' },
-    digests: {
-      ...TERMINAL_DIGESTS,
-      'artifactRefs[].contentHash': 'forbidden',
-      'preparedObservation.requestDigest': 'forbidden',
-    },
-    forbidden: ['preparedObservation', 'artifactRefs'],
-  },
-  'task.fail': {
-    category: 'task-output',
-    identity: [],
-    moved: { reason: '' },
-    digests: { ...TERMINAL_DIGESTS, 'preparedObservation.requestDigest': 'forbidden' },
-    forbidden: ['preparedObservation'],
-  },
-  'task.decline': { category: 'task-output', identity: [], moved: { reason: '' }, digests: { 'agentRef.profileRevision': 'plain' }, forbidden: [] },
-  'task.cancelled': { category: 'task-output', identity: [], moved: { reason: 'absent' }, digests: TERMINAL_DIGESTS, forbidden: [] },
-  'task.progress': { category: 'task-output', identity: ['seq'], moved: { events: 'empty-array' }, digests: { 'events[].spill.blob.contentHash': 'sealed' }, forbidden: [] },
-  'task.artifact': { category: 'task-output', identity: ['name'], moved: { inline: 'absent' }, digests: { 'blobRef.contentHash': 'forbidden' }, forbidden: ['blobRef'] },
-  'task.await_approval': { category: 'task-output', identity: ['approvalId'], moved: { summary: '' }, digests: {}, forbidden: [] },
-} as const satisfies { readonly [type in MessageType]?: SealedSplitEntry });
-
-export type SealedMessageType = keyof typeof SEALED_SPLIT_TABLE;
-
-export function isSealedMessageType(type: string): type is SealedMessageType {
-  return Object.hasOwn(SEALED_SPLIT_TABLE, type);
-}
-
-function holdsPlaceholder(value: unknown, placeholder: SealedPlaceholder): boolean {
-  if (placeholder === 'absent') return value === undefined;
-  if (placeholder === 'empty-array') return Array.isArray(value) && value.length === 0;
-  return value === placeholder;
-}
-
-/**
- * The payload rule of one sealed message type, for `superRefine`. It reads
- * the split table:
- *
- * - With `sealed`: the identity fields are present, every moved field holds
- *   its placeholder, and no forbidden field is present.
- * - On an offer: `sealing` names the task's categories. `sealed` is present
- *   exactly when they include `task-input`, and its scope is the task's scope
- *   at the task's epoch. `sealed` never travels without `sealing`.
+ * The rule of a sealed offer, for `superRefine`: `sealed` is present exactly
+ * when the task's `sealing` includes `task-input`, and then `instruction` is
+ * absent and `sealed.scope` is the task's scope at the task's epoch. When the
+ * task seals only its output, `instruction` is plaintext and required.
  *
  * Whether a task's later messages must be sealed is the Host's and the
  * device's check: they know the task's `sealing`, this payload does not.
  */
-export function sealedPayloadRule(type: SealedMessageType) {
-  const entry: SealedSplitEntry = SEALED_SPLIT_TABLE[type];
-  return (payload: { readonly sealed?: SealedPayload; readonly sealing?: TaskSealing }, ctx: z.RefinementCtx): void => {
-    const fields = payload as { readonly [field: string]: unknown };
-    const { sealed, sealing } = payload;
-    if (entry.category === 'task-input' && 'instruction' in entry.moved) {
-      const sealsInput = sealing?.categories.includes('task-input') === true;
-      if (sealsInput !== (sealed !== undefined)) {
-        ctx.addIssue({ code: 'custom', path: ['sealed'], message: 'an offer carries sealed exactly when its sealing includes task-input' });
-        return;
-      }
-      if (sealed !== undefined && (sealed.scope.id !== sealing!.scopeId || sealed.scope.epoch !== sealing!.epoch)) {
-        ctx.addIssue({ code: 'custom', path: ['sealed', 'scope'], message: 'the offer task-input must be sealed under the task scope at the task epoch' });
-      }
-    }
-    if (sealed === undefined) return;
-    for (const [field, placeholder] of Object.entries(entry.moved)) {
-      if (!holdsPlaceholder(fields[field], placeholder)) {
-        ctx.addIssue({
-          code: 'custom',
-          path: [field],
-          message: placeholder === 'absent' ? `a sealed ${type} must not carry ${field}` : `a sealed ${type} carries the ${field} placeholder only`,
-        });
-      }
-    }
-    for (const field of entry.identity) {
-      if (fields[field] === undefined) ctx.addIssue({ code: 'custom', path: [field], message: `a sealed ${type} must carry its identity field ${field}` });
-    }
-    for (const field of entry.forbidden) {
-      if (fields[field] !== undefined) ctx.addIssue({ code: 'custom', path: [field], message: `a sealed ${type} must not carry ${field}` });
-    }
-  };
+export function sealedOfferRule(
+  payload: { readonly instruction?: unknown; readonly sealing: TaskSealing; readonly sealed?: SealedPayload },
+  ctx: z.RefinementCtx,
+): void {
+  const { instruction, sealing, sealed } = payload;
+  if (!sealing.categories.includes('task-input')) {
+    if (sealed !== undefined) ctx.addIssue({ code: 'custom', path: ['sealed'], message: 'a task that does not seal task-input carries no sealed member' });
+    if (instruction === undefined) ctx.addIssue({ code: 'custom', path: ['instruction'], message: 'a task that does not seal task-input carries a plaintext instruction' });
+    return;
+  }
+  if (sealed === undefined) {
+    ctx.addIssue({ code: 'custom', path: ['sealed'], message: 'a task that seals task-input carries the sealed instruction' });
+    return;
+  }
+  if (instruction !== undefined) ctx.addIssue({ code: 'custom', path: ['instruction'], message: 'a sealed instruction never travels in plaintext too' });
+  if (sealed.scope.id !== sealing.scopeId || sealed.scope.epoch !== sealing.epoch) {
+    ctx.addIssue({ code: 'custom', path: ['sealed', 'scope'], message: 'the offer task-input must be sealed under the task scope at the task epoch' });
+  }
 }

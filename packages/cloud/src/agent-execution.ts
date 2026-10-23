@@ -1,5 +1,28 @@
 import { z } from 'zod';
-import { AgentMessageServerContextSchema, TaskOfferForAgentWithEgressFreshPayloadSchema } from '@byok-sdk/protocol';
+import {
+  AgentMessageServerContextSchema,
+  TaskOfferForAgentWithEgressFreshPayloadSchema,
+  MESSAGE_PAYLOAD_SCHEMAS,
+} from '@byok-sdk/protocol';
+
+/** One execution target: a built-in `runtime` or a device-advertised `harnessId`, never both. */
+function executionTargetRule(
+  payload: { readonly runtime?: unknown; readonly harnessId?: unknown; readonly dispatchSelection?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const hasRuntime = payload.runtime !== undefined;
+  const hasHarness = payload.harnessId !== undefined;
+  if (!hasRuntime && !hasHarness) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'runtime or harnessId is required', path: ['runtime'] });
+  }
+  if (hasHarness && (hasRuntime || payload.dispatchSelection !== undefined)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'harnessId conflicts with built-in runtime selection',
+      path: ['harnessId'],
+    });
+  }
+}
 
 /**
  * Persist this validated input before dispatch; the Host owns Turn/generation and outbox.
@@ -12,22 +35,20 @@ import { AgentMessageServerContextSchema, TaskOfferForAgentWithEgressFreshPayloa
 export const AgentExecutionInputSchema = z.object({
   taskId: z.string().min(1),
   deviceId: z.string().min(1),
-  payload: TaskOfferForAgentWithEgressFreshPayloadSchema.required({ terminalProjection: true }).superRefine(
-    (payload, ctx) => {
-      const hasRuntime = payload.runtime !== undefined;
-      const hasHarness = payload.harnessId !== undefined;
-      if (!hasRuntime && !hasHarness) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'runtime or harnessId is required', path: ['runtime'] });
-      }
-      if (hasHarness && (hasRuntime || payload.dispatchSelection !== undefined)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'harnessId conflicts with built-in runtime selection',
-          path: ['harnessId'],
-        });
-      }
-    },
-  ),
+  payload: TaskOfferForAgentWithEgressFreshPayloadSchema.required({ terminalProjection: true }).superRefine(executionTargetRule),
   agentMessageContext: AgentMessageServerContextSchema.optional(),
 }).strict();
-export type AgentExecutionInput = z.infer<typeof AgentExecutionInputSchema>;
+
+/**
+ * The sealed lane of the same execution (#654): the payload names `sealing`,
+ * and carries the sealed instruction when the task seals its input. The same
+ * rules apply. `submitAgentExecution` picks this schema when the payload has
+ * `sealing` or `sealed`, so a sealing policy is never stripped.
+ */
+export const SealedAgentExecutionInputSchema = z.object({
+  taskId: z.string().min(1),
+  deviceId: z.string().min(1),
+  payload: MESSAGE_PAYLOAD_SCHEMAS['task.offer_for_agent_with_egress_fresh_sealed'].required({ terminalProjection: true }).superRefine(executionTargetRule),
+  agentMessageContext: AgentMessageServerContextSchema.optional(),
+}).strict();
+export type AgentExecutionInput = z.infer<typeof AgentExecutionInputSchema> | z.infer<typeof SealedAgentExecutionInputSchema>;

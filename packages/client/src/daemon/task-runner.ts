@@ -2176,15 +2176,6 @@ export class TaskRunner {
         await this.handleCancel(envelope.task_id, envelope.payload.reason);
         return;
       case 'task.steer':
-        if (envelope.payload.sealed !== undefined) {
-          // #654: this daemon does not open sealed content and does not
-          // advertise `sealed-payload-v1`. `text` is only the placeholder, so
-          // it is never injected. Acked without retry, like an unsupported steer.
-          console.error(
-            `[byok/client] inbound sealed task.steer for task ${envelope.task_id} rejected: this daemon does not open sealed task input — acked without retry; this envelope should have been gated server-side`,
-          );
-          return;
-        }
         await this.handleSteer(envelope.task_id, envelope.payload.text);
         return;
       case 'task.approve':
@@ -2195,6 +2186,22 @@ export class TaskRunner {
         return;
       case 'agent.message.disposition':
         await this.handleAgentMessageDisposition(envelope.task_id, envelope.payload);
+        return;
+      // #654: this daemon does not open sealed content and does not advertise
+      // `sealed-payload-v1`. A sealed type reaches it only from a Host that
+      // skipped the gate. A sealed offer is declined, not dropped, so the
+      // task does not wait for a timeout; a sealed steer is dropped.
+      case 'task.offer_sealed':
+      case 'task.offer_with_toolsets_sealed':
+      case 'task.offer_for_agent_sealed':
+      case 'task.offer_for_agent_with_egress_sealed':
+      case 'task.offer_for_agent_with_egress_fresh_sealed':
+        this.declineSealedOffer(envelope.task_id, 'agentRef' in envelope.payload ? envelope.payload.agentRef : undefined);
+        return;
+      case 'task.steer_sealed':
+        console.error(
+          `[byok/client] inbound sealed task.steer for task ${envelope.task_id} rejected: this daemon does not open sealed task input — acked without retry; this envelope should have been gated server-side`,
+        );
         return;
       default:
         return; // conn.* and daemon->server-only types are handled elsewhere / not applicable
@@ -2240,13 +2247,6 @@ export class TaskRunner {
     const decline = (reason: string, retryable: boolean, code?: TaskDeclinePayload['code']): void => {
       this.decline(taskId, reason, retryable, agentRef, code);
     };
-    // #654: this daemon does not open sealed content and does not advertise
-    // `sealed-payload-v1`. A sealed offer reaches it only from a Host that
-    // skipped the gate. Its `instruction` is a placeholder, so it never runs.
-    if (('sealing' in payload && payload.sealing !== undefined) || ('sealed' in payload && payload.sealed !== undefined)) {
-      decline('sealed_payload_unsupported: this daemon does not open sealed task input', false);
-      return;
-    }
     const sessionRef = offeredSessionRef(payload);
     const homeAccess = offeredHomeAccess(payload);
     const readerAttempt = homeAccess === 'memory-reader';
@@ -5093,6 +5093,13 @@ export class TaskRunner {
   }
 
   /** Pre-claim, fail-closed rejection (protocol §3.2) — never claims first. */
+  /** Declines a sealed offer once, non-retryably, with a plaintext reason and no sealed decline code (those need the server flag). */
+  private declineSealedOffer(taskId: string, agentRef: AgentRef | undefined): void {
+    if (this.tasks.has(taskId) || this.startupOwnership.has(taskId) || this.inFlightOffers.has(taskId) || this.finishedTaskIds.has(taskId) || this.strictDeclinedTaskIds.has(taskId)) return;
+    this.addStrictDeclinedTaskId(taskId);
+    this.decline(taskId, 'sealed_payload_unsupported: this daemon does not open sealed task input', false, agentRef);
+  }
+
   private decline(taskId: string, reason: string, retryable: boolean, agentRef?: AgentRef, code?: TaskDeclinePayload['code']): void {
     this.deps.send(createEnvelope(
       'task.decline',

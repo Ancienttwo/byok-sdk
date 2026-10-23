@@ -100,6 +100,22 @@ export const EnvelopeSchema = z.discriminatedUnion('type', [
   envelopeShape('agent.message.draft', REQUIRED_TASK_ID, OPTIONAL_SEQ),
   envelopeShape('agent.message.publish', REQUIRED_TASK_ID, OPTIONAL_SEQ),
   envelopeShape('agent.content.receipt', OPTIONAL_TASK_ID, OPTIONAL_SEQ),
+
+  // Sealed payload v1 (#654). Appended last, so every released branch keeps
+  // its position in the union.
+  envelopeShape('task.offer_sealed', REQUIRED_TASK_ID, REQUIRED_SEQ),
+  envelopeShape('task.offer_with_toolsets_sealed', REQUIRED_TASK_ID, REQUIRED_SEQ),
+  envelopeShape('task.offer_for_agent_sealed', REQUIRED_TASK_ID, REQUIRED_SEQ),
+  envelopeShape('task.offer_for_agent_with_egress_sealed', REQUIRED_TASK_ID, REQUIRED_SEQ),
+  envelopeShape('task.offer_for_agent_with_egress_fresh_sealed', REQUIRED_TASK_ID, REQUIRED_SEQ),
+  envelopeShape('task.steer_sealed', REQUIRED_TASK_ID, REQUIRED_SEQ),
+  envelopeShape('task.complete_sealed', REQUIRED_TASK_ID, OPTIONAL_SEQ),
+  envelopeShape('task.fail_sealed', REQUIRED_TASK_ID, OPTIONAL_SEQ),
+  envelopeShape('task.decline_sealed', REQUIRED_TASK_ID, OPTIONAL_SEQ),
+  envelopeShape('task.cancelled_sealed', REQUIRED_TASK_ID, OPTIONAL_SEQ),
+  envelopeShape('task.progress_sealed', REQUIRED_TASK_ID, OPTIONAL_SEQ),
+  envelopeShape('task.artifact_sealed', REQUIRED_TASK_ID, OPTIONAL_SEQ),
+  envelopeShape('task.await_approval_sealed', REQUIRED_TASK_ID, OPTIONAL_SEQ),
 ]);
 
 export type Envelope = z.infer<typeof EnvelopeSchema>;

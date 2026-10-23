@@ -13,10 +13,12 @@ import {
   EnvelopeValidationError,
   MESSAGE_TYPES,
   PROTOCOL_VERSION,
+  SEALED_PAYLOAD_CAPABILITY,
   WIRE_ADDITIONS,
   createEnvelope,
   decodeEnvelope,
   encodeEnvelope,
+  isSealedMessageType,
   isServerToDaemonType,
   parseMessage,
   requiredReceiverCapabilities,
@@ -460,6 +462,10 @@ describe('compat: published 0.26.1 (byok-protocol-previous) is a rejection oracl
     (_n, _type, line) => {
       if (line.type === 'agent.message.draft') {
         expect(requiredReceiverCapabilities(line.type, line.payload)).toEqual(['agent-message-draft']);
+        expect(() => previousRelease.decodeEnvelope(line.raw)).toThrow(previousRelease.UnknownMessageTypeError);
+      } else if (isSealedMessageType(line.type)) {
+        // #654: a sealed type is new in v3 and gated as a whole type.
+        expect(requiredReceiverCapabilities(line.type, line.payload)[0]).toBe(SEALED_PAYLOAD_CAPABILITY);
         expect(() => previousRelease.decodeEnvelope(line.raw)).toThrow(previousRelease.UnknownMessageTypeError);
       } else {
         expect(() => previousRelease.decodeEnvelope(line.raw)).toThrow(previousRelease.EnvelopeValidationError);

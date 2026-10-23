@@ -29,7 +29,7 @@ import {
   createEnvelope,
   type RuntimeCapabilities,
   type RuntimeId,
-  type TaskSteerPayload,
+  type TaskSteerSealedPayload,
 } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { isCloudError } from '../errors';
@@ -181,10 +181,10 @@ describe('steerTask (GAP-2)', () => {
     });
   });
 
-  it('delivers a sealed steer with its sealed member, and only to a device that advertised sealed-payload-v1 (#654)', async () => {
+  it('delivers a sealed steer as task.steer_sealed, and only to a device that advertised sealed-payload-v1 (#654)', async () => {
     const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url), 'utf8');
-    const sealedSteer = corpus.trimEnd().split('\n').map((raw) => JSON.parse(raw) as { type: string; payload: TaskSteerPayload })
-      .find((line) => line.type === 'task.steer' && line.payload.sealed !== undefined)!.payload;
+    const sealedSteer = corpus.trimEnd().split('\n').map((raw) => JSON.parse(raw) as { type: string; payload: TaskSteerSealedPayload })
+      .find((line) => line.type === 'task.steer_sealed')!.payload;
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     const task = await running(harness, device, { runtime: 'pi', capabilities: { steer: true } });
@@ -196,10 +196,12 @@ describe('steerTask (GAP-2)', () => {
     expect((await poll(harness, device, task.seq)).events).toEqual([]);
 
     await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: ['sealed-payload-v1'] });
+    await expect(harness.cloud.steerTask(TENANT_A, task.taskId, { ...sealedSteer, text: 'plaintext' } as never), 'no plaintext next to the sealed member').rejects.toThrow();
+    expect((await poll(harness, device, task.seq)).events).toEqual([]);
     await harness.cloud.steerTask(TENANT_A, task.taskId, sealedSteer);
     const page = await poll(harness, device, task.seq);
     expect(page.events).toHaveLength(1);
-    expect(page.events[0]).toMatchObject({ type: 'task.steer', task_id: task.taskId, payload: sealedSteer });
+    expect(page.events[0]).toMatchObject({ type: 'task.steer_sealed', task_id: task.taskId, payload: sealedSteer });
   });
 
   it('refuses a claim that reported steer: false, and allocates no mailbox row', async () => {
