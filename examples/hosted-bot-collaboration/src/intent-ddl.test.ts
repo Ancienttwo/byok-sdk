@@ -1,0 +1,29 @@
+import { randomUUID } from 'node:crypto';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { taskId } from '@byok-sdk/example-host-execution-core';
+import { openStore, POSTGRES_URL } from './postgres.test-support';
+
+let opened: Awaited<ReturnType<typeof openStore>> | undefined;
+
+describe.skipIf(POSTGRES_URL === undefined)('H intent table checks on real Postgres (#793 D2b-1)', () => {
+  beforeAll(async () => { opened = await openStore(); });
+  afterAll(async () => { await opened?.close(); });
+
+  async function insert(scope: string, id: string, task: string, inputTask: string, ordinal: number) {
+    const { pool, store } = opened!;
+    await pool.query(`INSERT INTO "${store.schema}".intent (scope, key, task_id, ordinal, agent, input, wait_until, submission)
+      VALUES ($1, $2, $3, $4, 'agent', $5::json, 1, 'reserved')`, [JSON.stringify(scope), JSON.stringify(id), task, ordinal, JSON.stringify({ taskId: inputTask })]);
+  }
+
+  it('accepts the K4 task id of generation 0 for any Turn id, and refuses any other', async () => {
+    const scope = `tenant:${randomUUID()}`;
+    await opened!.store.seed(scope, () => {});
+    const ids = ['t1', '10', '__proto__', 'constructor', '\ud800', '\udc00', 'a\u0000b', 'é', '😀', '"quoted"\\', 'x'.repeat(2000)];
+    for (const [ordinal, id] of ids.entries()) await insert(scope, id, taskId(id, 0), taskId(id, 0), ordinal);
+    await expect(insert(scope, 'g1', taskId('g1', 1), taskId('g1', 1), 100)).rejects.toThrow(/intent_stable_task/);
+    await expect(insert(scope, 'other', taskId('t2', 0), taskId('t2', 0), 101)).rejects.toThrow(/intent_stable_task/);
+    await expect(insert(scope, 't3', taskId('t3', 0), 'another', 102)).rejects.toThrow(/intent_input_task/);
+    await expect(opened!.pool.query(`UPDATE "${opened!.store.schema}".intent SET task_id = $1 WHERE key = '"t1"'`, [taskId('t2', 0)]))
+      .rejects.toThrow(/intent_(stable|input)_task/);
+  });
+});

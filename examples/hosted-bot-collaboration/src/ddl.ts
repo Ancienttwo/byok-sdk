@@ -87,6 +87,8 @@ CREATE TABLE IF NOT EXISTS intent (
   cancel_reason  text    CHECK (cancel_reason IN ('expired', 'cancelled')),
   conclusion     text    CHECK (conclusion IN ('succeeded', 'failed', 'declined', 'cancelled', 'expired', 'superseded')),
   CONSTRAINT intent_input_task CHECK ((input ->> 'taskId') = task_id),
+  -- Pins task_id to K4 taskId(turn id, 0) = sha256(canonical([turn id, 0])); key is JSON.stringify(turn id).
+  CONSTRAINT intent_stable_task CHECK (task_id = encode(sha256(convert_to('[' || key || ',0]', 'UTF8')), 'hex')),
   PRIMARY KEY (scope, key),
   UNIQUE (scope, task_id),
   UNIQUE (scope, ordinal)
