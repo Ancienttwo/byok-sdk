@@ -5,8 +5,8 @@ import { afterAll, expect, it } from 'vitest';
 import { canonical, hash, HostLedger, project, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
 import { stateOf, type CollaborationState } from './model';
 import { admitUserInput } from './coalesce';
-import { commitInLedger } from './commit';
-import { commitCommand, type CommandPorts } from './rules/commands';
+import { CommitConflict, commitInLedger, type CommitRequest } from './commit';
+import { commitCommand, type Command, type CommandPorts } from './rules/commands';
 import { commitVectors, seedCollaboration, VECTOR_NOW, type CommitSubject } from './commit-vectors.test-support';
 
 const roots: string[] = [], ledgers: HostLedger[] = [];
@@ -73,4 +73,19 @@ it('L: records owner commands only; K4 deduplicates the callbacks', () => {
   const state = stateOf(subject.ledger.snapshot().application);
   expect(state.revision).toBe(2);
   expect(Object.keys(state.commands ?? {})).toEqual(['i1']);
+});
+
+it('L: keeps a record for a refused message only; K4 deduplicates an accepted one by its receipt', () => {
+  const subject = ledgerSubject();
+  const message = (turnId: string, taskId: string, body: string): CommitRequest<Command> => ({ scope: subject.scope, commandId: `${taskId}:m1`,
+    command: { kind: 'message', turnId, message: { taskId, payload: { body, messageId: 'm1', contentHash: `sha256:${body}`, contentType: 'text/markdown' } } } });
+  const refused = subject.commit(message('absent', 'task-9', 'a'));
+  expect(refused).toEqual({ revision: 1, disposition: { outcome: 'refused', reasonCode: 'binding_mismatch' }, outbox: [] });
+  // A transport retry replays the refusal and does not move the revision.
+  expect(subject.commit(message('absent', 'task-9', 'a'))).toEqual(refused);
+  expect(() => subject.commit(message('absent', 'task-9', 'b'))).toThrow(new CommitConflict('identity_conflict', 'message_conflict'));
+  expect(subject.commit(message('t1', 'task-1', 'a'))).toEqual({ revision: 2, disposition: { outcome: 'accepted' }, outbox: [] });
+  const state = stateOf(subject.ledger.snapshot().application);
+  expect(state.revision).toBe(2);
+  expect(Object.keys(state.commands ?? {})).toEqual(['task-9:m1']);
 });

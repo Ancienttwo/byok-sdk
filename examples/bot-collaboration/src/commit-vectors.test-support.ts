@@ -110,6 +110,17 @@ export function commitVectors(name: string, open: () => CommitSubject): void {
       expect(subject.commit(request(subject, 'm1', command, 1)).revision).toBe(2);
     });
 
+    it('keys each record by its own command id, also for `constructor` and `__proto__`', () => {
+      const subject = open();
+      for (const [index, id] of ['constructor', 'toString', '__proto__'].entries()) {
+        const first = subject.commit(request(subject, id, input(`k${index}`)));
+        expect(first.revision).toBe(index + 1);
+        const stored = subject.stored();
+        expect(subject.commit(request(subject, id, input(`k${index}`)))).toEqual(first);
+        expect(subject.stored()).toBe(stored);
+      }
+    });
+
     it('returns the outbox rows that the commit wrote', () => {
       const subject = open(), card = hash(['task-1', 'confirmable_action', 0]);
       const result = subject.commit(request(subject, 'task-1', { kind: 'outcome', turnId: 't1', taskId: 'task-1',

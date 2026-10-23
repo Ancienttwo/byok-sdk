@@ -80,7 +80,10 @@ export interface CommandPorts {
     resend(deliveryId: string): string;
   };
 }
-/** `recordCallbacks` is false when the caller deduplicates the K4 callbacks durably, as K4 does in L. */
+/**
+ * `recordCallbacks` is false when the caller deduplicates the K4 callbacks durably, as K4 does in L.
+ * K4 dedups terminals and occurrences, and accepted messages by their receipt. A refused message still gets a record.
+ */
 export interface CommandStore { scope: string; recordCallbacks: boolean }
 
 const CALLBACKS = new Set<Command['kind']>(['outcome', 'message', 'occurrence']);
@@ -256,8 +259,11 @@ function cancelTurn(state: CommandState, turnId: string, ports: CommandPorts, pu
 /** One command through the commit contract. The caller runs it inside one store transaction. A keyless command gets no record. */
 export function commitCommand(state: CommandState, request: CommitRequest<Command>, store: CommandStore, ports: CommandPorts): CommitResult {
   const command = request.command;
-  const keyed = !isKeyless(command) && (store.recordCallbacks || !CALLBACKS.has(command.kind)) ? command : undefined;
-  return commit(state, request, { scope: store.scope,
-    ...(keyed ? { record: { evidence: commandEvidence(keyed), conflict: () => conflictMessage(state, keyed) } } : {}) },
+  if (isKeyless(command)) return commit(state, request, { scope: store.scope }, out => decideCommand(state, command, ports, out));
+  const deduplicated = !store.recordCallbacks && CALLBACKS.has(command.kind);
+  // K4 writes a message receipt only for an acceptance, so a refused message keeps its record here.
+  const record = !deduplicated || command.kind === 'message' ? { evidence: commandEvidence(command), conflict: () => conflictMessage(state, command),
+    ...(deduplicated ? { keep: (disposition: Disposition) => disposition.outcome === 'refused' } : {}) } : undefined;
+  return commit(state, request, { scope: store.scope, ...(record ? { record } : {}) },
   out => decideCommand(state, command, ports, out));
 }

@@ -35,13 +35,15 @@ export interface RecordOptions {
   evidence: Json;
   /** The message of an identity conflict. */
   conflict: () => string;
+  /** Which new records to keep. Absent: keep each one. A caller that deduplicates some dispositions itself keeps the rest. */
+  keep?: (disposition: Disposition) => boolean;
 }
 export interface CommitOptions {
   /** The scope that this store owns. */
   scope: string;
   /**
    * Absent: the commit has no record and no replay. This is so for a keyless command, which applies at each call,
-   * and for a callback that the caller already deduplicates durably, as K4 does for terminals and messages.
+   * and for a callback that the caller already deduplicates durably, as K4 does for terminals.
    */
   record?: RecordOptions;
 }
@@ -55,7 +57,8 @@ export function commit<C>(state: CommitState, request: CommitRequest<C>, options
   if (request.scope !== options.scope) throw new CommitConflict('scope_mismatch', 'Commit scope mismatch');
   if (typeof request.commandId !== 'string' || !request.commandId) throw new Error('Invalid command id');
   const record = options.record, evidence = record && hash(canonical(record.evidence));
-  const prior = evidence ? state.commands?.[request.commandId] : undefined;
+  // Own properties only: a command id such as `constructor` or `__proto__` is a valid opaque id.
+  const prior = evidence && state.commands && Object.hasOwn(state.commands, request.commandId) ? state.commands[request.commandId] : undefined;
   if (prior) {
     if (prior.evidence !== evidence) throw new CommitConflict('identity_conflict', record!.conflict());
     return structuredClone(prior.result);
@@ -69,6 +72,9 @@ export function commit<C>(state: CommitState, request: CommitRequest<C>, options
   const disposition = decide(intent => { outbox.push(intent); });
   const result: CommitResult = { revision: head + 1, disposition, outbox };
   state.revision = result.revision;
-  if (evidence) (state.commands ??= {})[request.commandId] = { evidence, result: structuredClone(result) };
+  if (evidence && (record!.keep?.(disposition) ?? true)) {
+    Object.defineProperty(state.commands ??= {}, request.commandId,
+      { value: { evidence, result: structuredClone(result) }, enumerable: true, writable: true, configurable: true });
+  }
   return result;
 }
