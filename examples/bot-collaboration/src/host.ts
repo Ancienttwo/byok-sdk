@@ -14,7 +14,7 @@ import { contextTurns, turnInstruction, outcomeSchema, SYSTEM_PROMPT, type Conte
 import { BOT_REPLY_MAX_BYTES, DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   delegationDue, intentRows, minimumInstructionBytes, observeDevices, reconcileReply, REPLY_UNCERTAIN_AFTER_MS, resolveDelegation, retryReply,
   settleDelegations, type DelegationTimers } from './delegation';
-import { commitCommand, type Command, type CommandPorts, type KeylessCommand } from './rules/commands';
+import { commitCommand, retiredIdentity, type Command, type CommandPorts, type KeylessCommand } from './rules/commands';
 import { CommitConflict, commitInLedger, retainInLedger, type CommitResult } from './commit';
 import type { RetentionInput, RetentionResult } from './retention';
 import { BOT_ROUTINE, botRoutines, concludeRoutineTurn, createDefinition, owned, routineCalendar, routineOccurrence, routineTurn,
@@ -523,7 +523,7 @@ export class BotCollaboration {
       // Either identity can never run again. K8 does not know a K4 conclusion, so the Turn fails, and every reader of
       // `turn.conclusion` can settle. This runs before the archive check: the work may have run, so the Turn is not `cancelled`.
       const retired = intent || turn.conclusion ? undefined
-        : turnIntentRetired(this.ledger, s, turn, this.now()) ? 'result_retired' : rows.isRetired('turn', turn.id) ? 'turn_retired' : undefined;
+        : turnIntentRetired(this.ledger, s, turn, this.now()) ? 'result_retired' : retiredIdentity('turn', turn.id, (namespace, id) => rows.isRetired(namespace, id)) ? 'turn_retired' : undefined;
       if (retired) {
         turn.status = 'failed'; turn.conclusion = 'failed';
         // The seat facts no longer see the intent, so release the seat here, as for a failed conclusion. Its round moves on.

@@ -107,8 +107,16 @@ export class RetiredIdentityError extends Error {
 export function refuseRetired(ids: AdmittedIds | undefined, isRetired: (namespace: RetiredNamespace, id: string) => boolean): void {
   if (!ids) return;
   for (const namespace of ['turn', 'input', 'round'] as const) {
-    for (const id of ids[namespace]) if (isRetired(namespace, id)) throw new RetiredIdentityError(namespace, id);
+    for (const id of ids[namespace]) if (retiredIdentity(namespace, id, isRetired)) throw new RetiredIdentityError(namespace, id);
   }
+}
+/**
+ * A user input that does not coalesce becomes a Turn with the input's id, and a batch Turn takes its first input's id.
+ * The coalescing policy can change between retention and a retry, so a Turn id and an input id are one identity space:
+ * each is checked against both namespaces.
+ */
+export function retiredIdentity(namespace: RetiredNamespace, id: string, isRetired: (namespace: RetiredNamespace, id: string) => boolean): boolean {
+  return namespace === 'round' ? isRetired('round', id) : isRetired('turn', id) || isRetired('input', id);
 }
 export interface CommandStore {
   scope: string; recordCallbacks: boolean;

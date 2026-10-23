@@ -2,7 +2,7 @@ export { BotCollaboration } from './host';
 export { botCompactVeto } from './compaction';
 export { RetentionRefused, retainRoots } from './retention';
 export type { RetentionFacts, RetentionInput, RetentionRefusedCode, RetentionLimits, RetentionResult, RetentionStore } from './retention';
-export { refuseRetired, RetiredIdentityError, type AdmittedIds, type RetiredNamespace } from './rules/commands';
+export { refuseRetired, retiredIdentity, RetiredIdentityError, type AdmittedIds, type RetiredNamespace } from './rules/commands';
 export type { AgentMessageInput, BotOptions, MessageServer } from './host';
 export { classifyInbound, inboundKey } from './channel';
 export type { ChannelOptions, ChannelPort, Conversation, Delivery, DeliveryState, InboundClass, InboundMessage, Principal, PushRoute, ReplyRoute } from './channel';
