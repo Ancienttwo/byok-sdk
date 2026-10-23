@@ -402,7 +402,10 @@ export class ConnectionManager {
 
   /**
    * POSTs the outbox through long-poll in chunks of at most
-   * `MAX_MESSAGES_PER_BATCH` (finding P1) — the server hard-caps a single
+   * `MAX_MESSAGES_PER_BATCH` envelopes and `MESSAGES_SEND_MAX_BODY_BYTES` of
+   * encoded body (one envelope always goes; the cloud answers 413 above the
+   * byte cap, and sealed envelopes reach about 350 KB each). Finding P1:
+   * the server hard-caps a single
    * `/byok/messages` batch there (`MessagesSendRequestSchema`, protocol
    * §8.2) and 400s the WHOLE request if it's exceeded, which — before this
    * fix — meant more than that queued during an outage produced an oversize
