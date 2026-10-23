@@ -1,7 +1,7 @@
 // ==== @byok-sdk/cloud dist/activity.d.ts ====
 import type { CollectExpiredInput, CollectExpiredResult } from '@byok-sdk/core';
 import { type TenantId } from '@byok-sdk/core';
-import { type AgentEventOrUnknown } from '@byok-sdk/protocol';
+import { type AgentEventOrUnknown, type SealedPayload } from '@byok-sdk/protocol';
 import { z } from 'zod';
 export declare const DEFAULT_ACTIVITY_CAPACITY = 50;
 export declare const ActivityAppendRequestSchema: z.ZodObject<{
@@ -187,6 +187,49 @@ export declare const TimelineEventSchema: z.ZodObject<{
     }, z.core.$loose>]>;
 }, z.core.$strip>;
 export type TimelineEvent = Readonly<z.infer<typeof TimelineEventSchema>>;
+/**
+ * One sealed batch in the tail (#654 12e). A sealed member covers the whole
+ * batch, so the tail keeps one entry for it, and the tail capacity counts
+ * batches. `eventIndex` is always 0, so the order key of a batch is the same
+ * as for its first plaintext event. A member opens `sealed`.
+ */
+export declare const SealedActivityBatchSchema: z.ZodObject<{
+    taskId: z.ZodString;
+    sourceEnvelopeId: z.ZodString;
+    batchSeq: z.ZodNumber;
+    eventIndex: z.ZodLiteral<0>;
+    sourceDropped: z.ZodOptional<z.ZodNumber>;
+    receivedAt: z.ZodISODateTime;
+    sealed: z.ZodObject<{
+        v: z.ZodLiteral<1>;
+        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+        category: z.ZodLiteral<"task-output">;
+        scope: z.ZodObject<{
+            id: z.ZodString;
+            epoch: z.ZodNumber;
+            keyId: z.ZodString;
+        }, z.core.$strict>;
+        chainHead: z.ZodObject<{
+            seq: z.ZodNumber;
+            hash: z.ZodString;
+        }, z.core.$strict>;
+        sender: z.ZodString;
+        salt: z.ZodString;
+        nonce: z.ZodString;
+        paddedLength: z.ZodNumber;
+        contentMac: z.ZodString;
+        ciphertext: z.ZodOptional<z.ZodString>;
+        ciphertextRef: z.ZodOptional<z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+}, z.core.$strip>;
+export type SealedActivityBatch = Readonly<z.infer<typeof SealedActivityBatchSchema>>;
+/** One tail entry: a plaintext event, or a sealed batch. */
+export type ActivityTailEntry = TimelineEvent | SealedActivityBatch;
 export interface ActivityCursor {
     readonly batchSeq: number;
     readonly eventIndex: number;
@@ -194,21 +237,26 @@ export interface ActivityCursor {
 export interface ActivityTail {
     readonly tenantId: TenantId;
     readonly taskId: string;
-    readonly entries: readonly TimelineEvent[];
+    readonly entries: readonly ActivityTailEntry[];
     readonly cursor?: ActivityCursor;
     readonly dropped: number;
     readonly capacity: number;
     readonly expiresAt: string;
 }
-export interface ActivityAppendInput {
+interface ActivityAppendFields {
     readonly taskId: string;
     readonly sourceEnvelopeId: string;
     readonly batchSeq: number;
-    readonly events: readonly AgentEventOrUnknown[];
     readonly dropped: number;
     readonly ttlMs: number;
     readonly capacity?: number;
 }
+/** One batch to append: plaintext events, or one sealed member that covers the batch. */
+export type ActivityAppendInput = (ActivityAppendFields & {
+    readonly events: readonly AgentEventOrUnknown[];
+}) | (ActivityAppendFields & {
+    readonly sealed: SealedPayload;
+});
 export interface ActivityStore {
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
     /**
@@ -221,17 +269,18 @@ export interface ActivityStore {
     read(tenant: TenantId, taskId: string): Promise<ActivityTail | undefined>;
 }
 export declare function validateActivityAppend(input: ActivityAppendInput): number;
-export declare function projectTimelineEvents(input: ActivityAppendInput, receivedAt: string): readonly TimelineEvent[];
+export declare function projectTimelineEvents(input: ActivityAppendInput, receivedAt: string): readonly ActivityTailEntry[];
 /**
  * Whether one live tail already contains this source envelope's canonical
  * batch. `conflict` includes a partially retained source: its missing events
  * are not evidence that a different batch may reuse the same source identity.
  */
-export declare function activitySourceBatchState(entries: readonly TimelineEvent[], input: ActivityAppendInput): 'absent' | 'same' | 'conflict';
-export declare function parseTimelineEvents(value: unknown): readonly TimelineEvent[];
-export declare function compareTimelineEvents(left: TimelineEvent, right: TimelineEvent): number;
-export declare function activityCursor(entries: readonly TimelineEvent[]): ActivityCursor | undefined;
+export declare function activitySourceBatchState(entries: readonly ActivityTailEntry[], input: ActivityAppendInput): 'absent' | 'same' | 'conflict';
+export declare function parseTimelineEvents(value: unknown): readonly ActivityTailEntry[];
+export declare function compareTimelineEvents(left: ActivityTailEntry, right: ActivityTailEntry): number;
+export declare function activityCursor(entries: readonly ActivityTailEntry[]): ActivityCursor | undefined;
 export declare function activityTailKey(tenant: TenantId, taskId: string): string;
+export {};
 // ==== @byok-sdk/cloud dist/agent-execution.d.ts ====
 import { z } from 'zod';
 /**
@@ -736,6 +785,35 @@ export declare const ApprovalTimelineEventSchema: z.ZodUnion<readonly [z.ZodObje
     summary: z.ZodString;
     approvalId: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>, z.ZodObject<{
+    type: z.ZodLiteral<"approval_requested">;
+    approvalId: z.ZodString;
+    sealed: z.ZodObject<{
+        v: z.ZodLiteral<1>;
+        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+        category: z.ZodLiteral<"task-output">;
+        scope: z.ZodObject<{
+            id: z.ZodString;
+            epoch: z.ZodNumber;
+            keyId: z.ZodString;
+        }, z.core.$strict>;
+        chainHead: z.ZodObject<{
+            seq: z.ZodNumber;
+            hash: z.ZodString;
+        }, z.core.$strict>;
+        sender: z.ZodString;
+        salt: z.ZodString;
+        nonce: z.ZodString;
+        paddedLength: z.ZodNumber;
+        contentMac: z.ZodString;
+        ciphertext: z.ZodOptional<z.ZodString>;
+        ciphertextRef: z.ZodOptional<z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
     type: z.ZodLiteral<"approval_resolved">;
     approvalId: z.ZodOptional<z.ZodString>;
     decision: z.ZodEnum<{
@@ -759,6 +837,12 @@ export declare const ApprovalTimelineEventSchema: z.ZodUnion<readonly [z.ZodObje
     at: z.ZodISODateTime;
 }, z.core.$strict>]>;
 export type ApprovalTimelineEvent = Readonly<z.infer<typeof ApprovalTimelineEventSchema>>;
+/**
+ * True when two observations of one source envelope are the same event. A
+ * sealed request compares by its comparison projection, so a retry that
+ * sealed the same summary again is the same request (§9.2).
+ */
+export declare function sameApprovalTimelineEvent(left: ApprovalTimelineEvent, right: ApprovalTimelineEvent): boolean;
 export declare const ApprovalObservationSchema: z.ZodObject<{
     taskId: z.ZodString;
     sourceEnvelopeId: z.ZodString;
@@ -768,6 +852,35 @@ export declare const ApprovalObservationSchema: z.ZodObject<{
         type: z.ZodLiteral<"approval_requested">;
         summary: z.ZodString;
         approvalId: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>, z.ZodObject<{
+        type: z.ZodLiteral<"approval_requested">;
+        approvalId: z.ZodString;
+        sealed: z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-output">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>;
     }, z.core.$strict>, z.ZodObject<{
         type: z.ZodLiteral<"approval_resolved">;
         approvalId: z.ZodOptional<z.ZodString>;
@@ -2087,14 +2200,13 @@ export declare function assertBoardLabels(channel: string, title: string, limits
  */
 export declare function assertTaskAttemptListLimit(limit: number, active?: true): void;
 export declare function validateActivityEvents(events: readonly AgentEventOrUnknown[], dropped: number, bounds: ActivityBounds): void;
-export declare function validateActivityBatch(input: Omit<ActivityAppendInput, 'ttlMs' | 'capacity'>, bounds: ActivityBounds): void;
-export declare function appendActivityEvents(activity: TenantBoundActivity, input: {
-    readonly taskId: string;
-    readonly sourceEnvelopeId: string;
-    readonly batchSeq: number;
-    readonly events: readonly AgentEventOrUnknown[];
-    readonly dropped: number;
-}, bounds: ActivityBounds): Promise<ActivityTail>;
+type ActivityBatch = ActivityAppendInput extends infer Input ? Input extends ActivityAppendInput ? Omit<Input, 'ttlMs' | 'capacity'> : never : never;
+/**
+ * A plaintext batch is checked against the event and byte bounds. A sealed
+ * batch hides its events; the inbound gate admits it inline only.
+ */
+export declare function validateActivityBatch(input: ActivityBatch, bounds: ActivityBounds): void;
+export declare function appendActivityEvents(activity: TenantBoundActivity, input: ActivityBatch, bounds: ActivityBounds): Promise<ActivityTail>;
 // ==== @byok-sdk/cloud dist/crypto/port.d.ts ====
 /**
  * The crypto seam.
@@ -2805,7 +2917,7 @@ export { projectTerminalResult } from './terminal-result';
 export type { TerminalResult } from './terminal-result';
 export { tenantStoresFor } from './tenant-stores';
 export type { TenantBoundActivity, TenantBoundApprovalTimeline, TenantBoundBoard, CloudRootStores, TenantBoundBlobs, TenantBoundDedup, TenantBoundDevices, TenantBoundMailbox, TenantBoundPresence, TenantBoundQuota, TenantBoundRateLimiter, TenantBoundReceipts, TenantBoundTaskAttempts, TenantStores, } from './tenant-stores';
-export { ApprovalObservationSchema, ApprovalTimelineEventSchema, APPROVAL_SUMMARY_MAX_BYTES, DEFAULT_APPROVAL_TIMELINE_CAPACITY, DEFAULT_APPROVAL_TIMELINE_TTL_MS, approvalTimelineCursor, parseApprovalObservations, validateApprovalTimelineAppend, validateApprovalTimelineResolve, } from './approval-timeline';
+export { ApprovalObservationSchema, ApprovalTimelineEventSchema, APPROVAL_SUMMARY_MAX_BYTES, DEFAULT_APPROVAL_TIMELINE_CAPACITY, DEFAULT_APPROVAL_TIMELINE_TTL_MS, approvalTimelineCursor, parseApprovalObservations, sameApprovalTimelineEvent, validateApprovalTimelineAppend, validateApprovalTimelineResolve, } from './approval-timeline';
 export type { ApprovalObservation, ApprovalTimelineAppendInput, ApprovalTimelineEvent, ApprovalTimelineResolvePendingInput, ApprovalTimelineResolvePendingResult, ApprovalTimelineStore, ApprovalTimelineTail, } from './approval-timeline';
 export { StaleApprovalError, pendingApproval } from './approval-control';
 export type { PendingApproval } from './approval-control';
@@ -2813,8 +2925,8 @@ export { SteerRejectedError } from './steer-control';
 export type { SteerRejectionCode } from './steer-control';
 export { assertTaskAttemptListLimit, DEFAULT_ACTIVITY_BOUNDS, DEFAULT_ACTIVITY_CAPACITY, DEFAULT_ACTIVITY_TTL_MS, DEFAULT_BOARD_CHANNEL_MAX_BYTES, DEFAULT_BOARD_TITLE_MAX_BYTES, DEFAULT_PRESENCE_DETAIL_MAX_BYTES, DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS, DEFAULT_PRESENCE_TTL_MS, } from './coordination';
 export type { ActivityBounds } from './coordination';
-export { TimelineEventSchema, ActivityAppendRequestSchema, activityCursor, activitySourceBatchState, parseTimelineEvents, projectTimelineEvents, validateActivityAppend, } from './activity';
-export type { ActivityAppendInput, ActivityCursor, ActivityStore, ActivityTail, TimelineEvent, } from './activity';
+export { TimelineEventSchema, SealedActivityBatchSchema, ActivityAppendRequestSchema, activityCursor, activitySourceBatchState, parseTimelineEvents, projectTimelineEvents, validateActivityAppend, } from './activity';
+export type { ActivityAppendInput, ActivityCursor, ActivityStore, ActivityTail, ActivityTailEntry, SealedActivityBatch, TimelineEvent, } from './activity';
 export { BoardFeedClient, BoardFeedRetryableError, BoardFeedStoppedError } from './coordination-client';
 export type { BoardFeedClientOptions, BoardFeedItem, BoardFeedMode, BoardFeedPage, BoardFeedRead, } from './coordination-client';
 export { TRUTH_BATCH_MAX_RECORDS, TRUTH_INLINE_CONTENT_TYPE, TRUTH_LABEL_MAX_LENGTH, TRUTH_MANIFEST_MAX_LIMIT, TRUTH_RECORD_CAPABILITY, TRUTH_RECORD_KEY_MAX_LENGTH, TRUTH_REQUEST_ID_MAX_LENGTH, TruthBodyInputSchema, TruthCommitResponseSchema, TruthRecordKeySchema, TruthRecordMetadataSchema, TruthWriteRequestSchema, truthManifestMetadata, truthRecordMetadata, } from './truth/contract';
