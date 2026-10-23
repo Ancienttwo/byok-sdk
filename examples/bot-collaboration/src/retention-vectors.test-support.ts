@@ -42,7 +42,7 @@ function room(state: CollaborationState, round: { closed: boolean }, seat: { rel
 }
 function delivery(state: CollaborationState, row: 'pending' | 'unknown'): void {
   state.replies['r1:task'] = { turnId: 'r1', messageId: 'm', contentHash: 'h', contentType: 'text/markdown', acceptedAt: 0 };
-  state.channel = { inbounds: {}, pushRoutes: {}, deliveries: { x: { id: 'x', taskId: 'r1:task', messageId: 'm', body: 'b', conversation: { kind: 'direct', id: 'main' },
+  state.channel = { inbounds: {}, pushRoutes: {}, deliveries: { x: { id: 'x', taskId: 'r1:task', turnId: 'r1', messageId: 'm', body: 'b', conversation: { kind: 'direct', id: 'main' },
     channel: 'fake', route: { kind: 'push', pushRouteId: 'p' }, state: row, attempts: 0 } } };
 }
 
@@ -139,6 +139,23 @@ export function retentionVectors(name: string, open: () => RetentionSubject | Pr
       // The newest root is in the window too.
       const subject = await opened();
       await refused(subject, () => retain(subject, ['r2']), error => expect((error as Error).message).toBe('Retention refused: The root is in the ContextPack window of its Bot'));
+    });
+
+    it('keeps a seat speech delivery with its round root, though it has no reply record', async () => {
+      const subject = await opened();
+      await subject.change(state => {
+        room(state, { closed: true }, { released: true });
+        state.turns.seat = { ...state.turns.r1!, id: 'seat', root: 'seat', source: 'room_slot' };
+        state.channel = { inbounds: {}, pushRoutes: {}, deliveries: { s: { id: 's', taskId: 'seat:task', turnId: 'seat', messageId: 'speech:seat', body: 'b',
+          conversation: { kind: 'direct', id: 'main' }, channel: 'fake', route: { kind: 'push', pushRouteId: 'p' }, state: 'pending', attempts: 0 } } };
+        settledRoot(state, 'r3');
+      });
+      await refused(subject, () => retain(subject, ['r1']), error => expect((error as Error).message).toBe('Retention refused: A delivery of the root is not settled'));
+      await subject.change(state => { state.channel!.deliveries.s!.state = 'accepted'; });
+      expect(await retain(subject, ['r1'])).toMatchObject({ archivedRoots: 1 });
+      const state = await subject.state();
+      expect(state.turns.seat).toBeUndefined();
+      expect(state.channel!.deliveries.s).toBeUndefined();
     });
 
     it('replays a moved command record, and refuses a retired Turn id at admission until the end', async () => {

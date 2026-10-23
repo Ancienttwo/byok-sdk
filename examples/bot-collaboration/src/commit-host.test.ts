@@ -1,9 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
-import { hash } from '@byok-sdk/example-host-execution-core';
+import { tenantId } from '@byok-sdk/core';
+import { hash, MIN_TOMBSTONE_RETENTION_MS } from '@byok-sdk/example-host-execution-core';
 import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration, type AgentMessageInput } from './host';
 import { botCompactVeto } from './compaction';
+import { stateOf } from './model';
 
 let fixture: TestHost | undefined, bot: BotCollaboration | undefined;
 afterEach(async () => { await bot?.close(); await fixture?.close(); bot = fixture = undefined; });
@@ -40,6 +42,28 @@ it('L: counts each owner command and each first K4 callback once; K4 replays com
   await bot.recover();
   expect(bot.snapshot().revision).toBe(3);
   expect(Object.keys(bot.snapshot().commands ?? {})).toEqual([hash(['input', 'main', 'k1'])]);
+});
+
+it('L: replays a refused message from its moved record, and refuses other content for its id as a conflict (#798)', async () => {
+  const { fixture, bot } = await open();
+  const turnId = await bot.input('k1', 'Hello');
+  await vi.waitFor(async () => { await bot.drain(); expect(fixture.adapter.sessions.has(bot.core.intent(turnId)!.taskId)).toBe(true); });
+  const intent = bot.core.intent(turnId)!, message = (body: string): AgentMessageInput => ({ tenant: tenantId(fixture.ledger.tenant),
+    taskId: intent.taskId, deviceId: fixture.deviceId, context: intent.execution.agentMessageContext!, payload: { agentRef: intent.execution.payload.agentRef,
+      sessionRef: randomUUID(), contract: 'conversation-turn/v1', messageId: 'm1', cursor: 1, contentType: 'text/markdown', body,
+      contentHash: `sha256:${createHash('sha256').update(body).digest('hex')}`, byteCount: Buffer.byteLength(body) } });
+  // K8 refuses a message for a Turn that is not in its state. K4 writes no receipt for a refusal, so K8 keeps a record.
+  fixture.ledger.transaction(s => { delete stateOf(s.application).turns[turnId]; });
+  expect(await bot.consumeMessage(message('Answer'))).toEqual({ outcome: 'refused', reasonCode: 'binding_mismatch' });
+  const record = `${intent.taskId}:m1`;
+  expect(bot.snapshot().commands?.[record]).toBeDefined();
+  expect(await bot.retain({ acknowledgedRoots: [], now: Date.now(), retentionMs: MIN_TOMBSTONE_RETENTION_MS })).toMatchObject({ archivedCommands: 1 });
+  expect(bot.snapshot().commands?.[record]).toBeUndefined();
+  const revision = bot.snapshot().revision;
+  expect(await bot.consumeMessage(message('Answer'))).toEqual({ outcome: 'refused', reasonCode: 'binding_mismatch' });
+  expect(await bot.consumeMessage(message('Other'))).toEqual({ outcome: 'refused', reasonCode: 'message_conflict' });
+  expect(bot.snapshot().revision).toBe(revision);
+  expect(bot.snapshot().commands?.[record]).toBeUndefined();
 });
 
 it('L: counts one commit for each keyless owner call, with no record; a throw and the Host passes commit nothing (#739 6a, 6b)', async () => {

@@ -13,7 +13,8 @@ import { contextTurns, SYSTEM_PROMPT, type ContextTurn } from './schema';
 import { DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   delegationDue, intentRows, minimumInstructionBytes, observeDevices, reconcileReply, REPLY_UNCERTAIN_AFTER_MS, resolveDelegation, retryReply,
   settleDelegations, type DelegationTimers } from './delegation';
-import { commitCommand, type Command, type CommandPorts, type KeylessCommand } from './rules/commands';
+import { commitCommand, type Command, type CommandPorts, type CommandStore, type KeylessCommand } from './rules/commands';
+import type { CommandRecord } from './rules/commit';
 import { CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, type CommitResult } from './commit';
 import type { RetentionInput, RetentionResult } from './retention';
 import { BOT_ROUTINE, botRoutines, createDefinition, owned, routineCalendar, routineTurn,
@@ -314,9 +315,10 @@ export class BotCollaboration {
   }
   /** A keyless owner command (#739 6a). Its id is new at each call, because the store keeps no record of it. */
   private commitKeyless(command: KeylessCommand): CommitResult { return this.commitOwner(randomUUID(), command); }
-  private commitCallback(state: CollaborationState, commandId: string, command: Command, ports: Omit<CommandPorts, 'now'>): CommitResult {
-    return commitCommand(state, { scope: this.ledger.tenant, commandId, command }, { scope: this.ledger.tenant, recordCallbacks: false },
-      { now: this.now, ...ports });
+  private commitCallback(state: CollaborationState, commandId: string, command: Command, ports: Omit<CommandPorts, 'now'>,
+    archived?: CommandStore['archived']): CommitResult {
+    return commitCommand(state, { scope: this.ledger.tenant, commandId, command },
+      { scope: this.ledger.tenant, recordCallbacks: false, ...(archived ? { archived } : {}) }, { now: this.now, ...ports });
   }
 
   /**
@@ -335,7 +337,9 @@ export class BotCollaboration {
     try {
       ({ disposition } = this.commitCallback(state, `${input.taskId}:${input.payload.messageId}`,
         { kind: 'message', turnId: tx.intent.key, message: { taskId: input.taskId, payload: input.payload } },
-        { publish: tx.publish, ...this.deliverPort(state, input.taskId) }));
+        { publish: tx.publish, ...this.deliverPort(state, input.taskId) },
+        // A refused message keeps a command record, and retention can move it into K4 rows (#798).
+        id => tx.rows.get('commands', id) as CommandRecord | undefined));
     } catch (cause) {
       // Other content for the id of a refused message: the same refusal that K4 gives for an accepted one.
       if (cause instanceof CommitConflict && cause.code === 'identity_conflict') return { outcome: 'refused', reasonCode: 'message_conflict' };

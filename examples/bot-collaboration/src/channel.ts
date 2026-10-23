@@ -12,8 +12,9 @@ export interface PushRoute {
   optedInBy: string; optedInAt: number; revokedAt?: number;
 }
 export type DeliveryState = 'pending' | 'sending' | 'accepted' | 'rejected' | 'unknown';
+/** `turnId` is the Turn that queued the delivery. Retention keeps the delivery with that Turn's root. */
 export interface Delivery {
-  id: string; taskId: string; messageId: string; body: string;
+  id: string; taskId: string; turnId: string; messageId: string; body: string;
   conversation: Conversation; channel: string;
   route: { kind: 'reply'; inboundId: string } | { kind: 'push'; pushRouteId: string };
   state: DeliveryState; attempts: number; nextAttemptAt?: number;

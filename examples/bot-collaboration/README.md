@@ -198,7 +198,8 @@ does that on the Host's explicit acknowledgement. It never runs on its own.
   budget, delegations and their batches and units, replies, schemas, cards,
   questions, the rejections that its Turns consumed, its input batch and
   inputs, its rounds with their seats, seat Turns and `team.roots` row, its
-  inbounds and their deliveries. A seat Turn belongs to its round's root, but
+  inbounds, and the deliveries that its Turns queued (each delivery stores
+  its `turnId`). A seat Turn belongs to its round's root, but
   its projection shows its seat id as `root`. Acknowledging a seat id throws
   `RetentionRefused` with code `seat_root` and the round's root in
   `roundRoot`. Acknowledge that root instead.
@@ -311,7 +312,8 @@ In this L example the scope is the ledger tenant. Owner APIs pass no expected
 revision. K4 already deduplicates terminals (`applied`) and accepted messages (the
 message receipt), so L stores no record for those callbacks. K4 writes no
 receipt for a refused message, so L keeps a record for it: a retry gets the
-same refusal and does not change the revision. Other content for the same
+same refusal and does not change the revision. When retention moves that
+record, the message hook reads it from the K4 rows of its own transaction. Other content for the same
 message id is refused with `message_conflict`. The D1 vectors in
 `src/commit-vectors.test-support.ts` run against a pure in-memory store and
 against the L ledger; the D2 H adapter runs the same vectors.
