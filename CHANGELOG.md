@@ -13,6 +13,20 @@
   duplicate offer. The Host does not check `notAfter`; the device does. No
   daemon advertises `sealed-payload-v1` yet, so no device receives the field.
 
+- **Changed (core)** — the member chain walk limits who may sign a scope
+  change (#654, owner batch §50f A). A `scope-policy` or `shred` of an
+  existing scope must be signed by a member in that scope's current policy,
+  and the first `scope-policy` of a new scope must be signed by a member it
+  lists. Any other signer fails with `member_chain_signer_invalid`. Before, any
+  current member could sign both, so one device member could add itself to
+  another device's scope or shred it. Now a member cannot change or shred, on
+  the chain, a scope it is not in. The Host still deletes a scope's key
+  packages on any well-shaped `shred` (owner batch §50g), and the first member
+  that creates a scope id takes it. A subject that breaks an op rule still fails with
+  `member_chain_subject_invalid`. `golden/member-rules-v1.json` gains a
+  `scopeSigners` section; no existing vector changes. The walk is not yet in a
+  published release.
+
 - **Feature (protocol, server, cloud, client)** — an ordinary Agent offer can
   select `agentMemory: 'read-if-admitted'` (#815). It runs exactly as `read`
   when the daemon admits the memory MCP, and exactly as `none` when it does
@@ -124,6 +138,11 @@
   `activitySourceBatchState` and `activityCursor` take `ActivityTailEntry[]`.
   `ApprovalTimelineEventSchema` and `ApprovalObservationSchema` accept the
   sealed request member.
+- **Feature (cloud)** — the Host refuses `agent.message.draft` for a task
+  whose offer has any `sealing`, with `agent_message_draft_invalid`, because
+  a draft is plaintext (#654 E4a). The docs state that a sealed task must not
+  go to `@byok-sdk/cloud-do`, which reads its content in plaintext. No public
+  type changes.
 
 ## 0.29.0 — 2026-10-23 (published)
 

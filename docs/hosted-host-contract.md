@@ -250,6 +250,9 @@ The product keeps these rules:
    Delivery is at least once, also in parallel and after a restart (`packages/cloud/src/cloud.ts:293-302`).
    After a throw, the SDK calls `consume` again for the same pending reservation
    (`packages/cloud/src/inbound.ts:269-275`, `packages/cloud/src/inbound.ts:283-287`).
+   The comment in `deploy/sql/0017_agent_message_admission.sql:5-7` says that retries never invoke the consumer again or synthesize a terminal result.
+   The part that says retries never invoke the consumer again is out of date; the code above is the rule.
+   A retry still synthesizes no terminal result. The migration file is checksummed, so its comment does not change.
 2. Commit the product effect before you return. If the commit is not certain, throw.
 3. The first disposition wins (`packages/cloud-dataplane/src/stores/task-attempts.ts:282-290`, `deploy/sql/0017_agent_message_admission.sql:3-4`).
    So `held` cannot become `accepted` through the SDK.
