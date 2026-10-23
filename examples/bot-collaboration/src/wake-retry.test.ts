@@ -90,7 +90,9 @@ it('retries a failed routine wake call from the K4 timer with backoff', async ()
   await vi.advanceTimersByTimeAsync(1);
   expect(probe.attempts).toBe(3);
   probe.fail = false;
-  await vi.advanceTimersByTimeAsync(2000);
+  await vi.advanceTimersByTimeAsync(1999);
+  expect(probe.attempts).toBe(3);
+  await vi.advanceTimersByTimeAsync(1);
   expect(probe.attempts).toBe(4);
   expect(outbox()).toEqual([]);
   expect(await pending()).toEqual([routineOf(bot, hash(['failing', 'create_routine', 0])).next!.dedupKey]);
