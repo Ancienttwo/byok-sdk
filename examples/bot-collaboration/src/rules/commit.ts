@@ -15,6 +15,7 @@ export interface CommitResult { revision: number; disposition: Disposition; outb
 export interface CommitRequest<C> {
   /** An opaque key. In K8 it is the ledger tenant: one product account and workspace. */
   scope: string;
+  /** A keyless command gets no record, so its id is not a dedup key. */
   commandId: string;
   /** Absent: decide on the head. Present and not the head: a `stale_revision` conflict. */
   expectedRevision?: number;
@@ -28,29 +29,35 @@ export type CommitConflictCode = 'scope_mismatch' | 'identity_conflict' | 'stale
 export class CommitConflict extends Error {
   constructor(readonly code: CommitConflictCode, message: string) { super(message); this.name = 'CommitConflict'; }
 }
+/** The command record of a keyed command. */
+export interface RecordOptions {
+  /** The fields that decide the command's effect. Only their hash is stored. */
+  evidence: Json;
+  /** The message of an identity conflict. */
+  conflict: () => string;
+}
 export interface CommitOptions {
   /** The scope that this store owns. */
   scope: string;
-  /** The fields that decide the command's effect. Only their hash is stored. */
-  evidence: Json;
-  /** False when the caller already deduplicates this command durably, as K4 does for terminals and messages. */
-  record: boolean;
-  /** The message of an identity conflict. */
-  conflict: () => string;
+  /**
+   * Absent: the commit has no record and no replay. This is so for a keyless command, which applies at each call,
+   * and for a callback that the caller already deduplicates durably, as K4 does for terminals and messages.
+   */
+  record?: RecordOptions;
 }
 export function revisionOf(state: CommitState): number { return state.revision ?? 0; }
 /**
  * Replay first, then the revision check: a retry with its original expected revision gets its original result.
- * Every new commit adds 1 to the revision, also for a refused disposition.
+ * Every new commit adds 1 to the revision, also for a refused disposition. A commit without a record is always new.
  */
 export function commit<C>(state: CommitState, request: CommitRequest<C>, options: CommitOptions,
   decide: (out: (intent: OutboxIntent) => void) => Disposition): CommitResult {
   if (request.scope !== options.scope) throw new CommitConflict('scope_mismatch', 'Commit scope mismatch');
   if (typeof request.commandId !== 'string' || !request.commandId) throw new Error('Invalid command id');
-  const evidence = hash(canonical(options.evidence));
-  const prior = options.record ? state.commands?.[request.commandId] : undefined;
+  const record = options.record, evidence = record && hash(canonical(record.evidence));
+  const prior = evidence ? state.commands?.[request.commandId] : undefined;
   if (prior) {
-    if (prior.evidence !== evidence) throw new CommitConflict('identity_conflict', options.conflict());
+    if (prior.evidence !== evidence) throw new CommitConflict('identity_conflict', record!.conflict());
     return structuredClone(prior.result);
   }
   const head = revisionOf(state), expected = request.expectedRevision;
@@ -62,6 +69,6 @@ export function commit<C>(state: CommitState, request: CommitRequest<C>, options
   const disposition = decide(intent => { outbox.push(intent); });
   const result: CommitResult = { revision: head + 1, disposition, outbox };
   state.revision = result.revision;
-  if (options.record) (state.commands ??= {})[request.commandId] = { evidence, result: structuredClone(result) };
+  if (evidence) (state.commands ??= {})[request.commandId] = { evidence, result: structuredClone(result) };
   return result;
 }

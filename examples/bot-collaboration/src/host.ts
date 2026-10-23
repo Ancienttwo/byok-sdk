@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { admitBotToolsets, ownReadOnlyToolsets } from './toolset-policy';
 import { promoteReplyReceipts } from './reply-receipts';
 import type { ResultSchema, UpdateRoutineAction } from '@byok-sdk/protocol';
@@ -8,23 +9,23 @@ import { promoteOccurrence, type HostJobHandler, type Routine } from '@byok-sdk/
 import { HostLedger } from '@byok-sdk/example-host-execution-core';
 import { canonical, hash, project, time, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
 import { enqueue } from '@byok-sdk/example-host-execution-core';
-import { addTurn, json, stateOf, type CollaborationState, type Delegation, type Turn } from './model';
+import { addTurn, json, stateOf, type CollaborationState, type Turn } from './model';
 import { contextTurns, turnInstruction, outcomeSchema, SYSTEM_PROMPT, type ContextTurn } from './schema';
-import { abandonDelegation, arbitrateCancel, BOT_REPLY_MAX_BYTES, DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
+import { BOT_REPLY_MAX_BYTES, DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   delegationDue, intentRows, minimumInstructionBytes, observeDevices, reconcileReply, REPLY_UNCERTAIN_AFTER_MS, resolveDelegation, retryReply,
   settleDelegations, type DelegationTimers } from './delegation';
-import { commitCommand, type Command, type CommandPorts } from './rules/commands';
+import { commitCommand, type Command, type CommandPorts, type KeylessCommand } from './rules/commands';
 import { CommitConflict, commitInLedger, type CommitResult } from './commit';
 import { BOT_ROUTINE, botRoutines, concludeRoutineTurn, createDefinition, owned, routineCalendar, routineOccurrence, routineTurn,
   updateDefinition } from './routines';
 
-import { activeBot, applyManagement, roomFields, updateBot } from './team';
-import { advanceRooms, roomVisibility, type Mentions } from './rooms';
+import { applyManagement, updateBot } from './team';
+import { advanceRooms, type Mentions } from './rooms';
 import type { RoomFields } from '@byok-sdk/protocol';
 
 import { CurrentRequestTooLargeError, HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS } from './history';
 import { flushHomes, type HomeServer } from './home-projections';
-import { admitUserInput, coalescePolicy, projectInputBatches, sealBatchForCancel, sealDueBatches, type CoalescePolicy } from './coalesce';
+import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, type CoalescePolicy } from './coalesce';
 import { classifyInbound, inboundKey, isOwner, verified, type ChannelOptions, type Conversation, type InboundClass, type InboundMessage, type Principal, type PrincipalArg } from './channel';
 import { acceptDeliveryEcho, readbackDelivery, recoverDelivery, settleDelivery, startDelivery, unknownDelivery } from './delivery';
 import { cleanReplyTokens, deliveryRoute, echoCandidates, enablePush, queueDelivery, refuseRoute, rememberInbound, resendUnknown, revokePush } from './delivery-routing';
@@ -80,6 +81,11 @@ export type AgentMessageInput = Parameters<NonNullable<CreateByokServerOptions['
 function awaitsOffer(ledger: LedgerState, state: CollaborationState, turn: Turn): boolean {
   const bot = state.team.bots[turn.botId];
   return !turn.conclusion && !ledger.intents[hash(turn.id)] && turn.status !== 'failed' && !!bot && !bot.archived && bot.readyRevision === bot.revision;
+}
+/** The value of an accepted disposition. Keyless commands refuse by throwing, so they always accept. */
+function valueOf<T>(result: CommitResult): T {
+  if (result.disposition.outcome !== 'accepted') throw new Error('Unexpected refused command');
+  return result.disposition.value as T;
 }
 /** The Turn or round id of an input command. These commands never refuse; they throw. */
 function turnOf(result: CommitResult): string {
@@ -217,21 +223,13 @@ export class BotCollaboration {
     return this.exclusive(async () => {
       const principal = this.ownerOnly(by, 'enablePushRoute', conversation.id);
       if (!this.options.channel) throw new Error('Channel is not configured');
-      return this.ledger.transaction(s => {
-        const state = stateOf(s.application);
-        if (typeof conversation.id !== 'string' || !conversation.id.trim()) throw new Error('Invalid conversation');
-        if (conversation.kind === 'direct') {
-          if (!Object.hasOwn(state.team.bots, conversation.id)) throw new Error('Bot not found');
-          activeBot(state.team, conversation.id);
-        } else if (conversation.kind !== 'group' || !Object.hasOwn(state.team.rooms, conversation.id)) throw new Error('Room not found');
-        return enablePush(state, conversation, channel, target, principal.id, this.now()).id;
-      });
+      return valueOf<string>(this.commitKeyless({ kind: 'enable_push_route', conversation, channel, target, owner: principal.id }));
     });
   }
   revokePushRoute(id: string, ...by: PrincipalArg): Promise<void> {
     return this.exclusive(async () => {
       this.ownerOnly(by, 'revokePushRoute', id);
-      this.ledger.transaction(s => revokePush(stateOf(s.application), id, this.now()));
+      this.commitKeyless({ kind: 'revoke_push_route', routeId: id });
       await this.process();
     });
   }
@@ -239,9 +237,9 @@ export class BotCollaboration {
     return this.exclusive(async () => {
       this.ownerOnly(by, 'resendDelivery', id);
       if (!this.options.channel) throw new Error('Channel is not configured');
-      const next = this.ledger.transaction(s => resendUnknown(stateOf(s.application), id, this.now()));
+      const next = valueOf<string>(this.commitKeyless({ kind: 'resend_delivery', deliveryId: id }));
       await this.process();
-      return next.id;
+      return next;
     });
   }
   /** Adapter data can be unverified, so one row is at most 1024 characters. */
@@ -285,10 +283,18 @@ export class BotCollaboration {
   private commitOwner(commandId: string, command: Command, extra?: (s: LedgerState, state: CollaborationState) => Partial<CommandPorts>): CommitResult {
     return commitInLedger(this.ledger, { scope: this.ledger.tenant, commandId, command }, s => {
       const state = stateOf(s.application);
-      return { now: this.now, publish: (key, value) => project(s, key, value),
-        admitInput: fields => admitUserInput(state, fields, this.coalesce, this.now()), ...extra?.(s, state) };
+      return { now: this.now, publish: (key, value) => project(s, key, value), intents: intentRows(s),
+        admitInput: fields => admitUserInput(state, fields, this.coalesce, this.now()),
+        updatePersona: (botId, persona) => updateBot(state, { botId, persona }, this.models(), this.options.readOnlyToolsets),
+        routes: {
+          enable: (conversation, channel, target, owner) => enablePush(state, conversation, channel, target, owner, this.now()).id,
+          revoke: routeId => revokePush(state, routeId, this.now()),
+          resend: deliveryId => resendUnknown(state, deliveryId, this.now()).id,
+        }, ...extra?.(s, state) };
     });
   }
+  /** A keyless owner command (#739 6a). Its id is new at each call, because the store keeps no record of it. */
+  private commitKeyless(command: KeylessCommand): CommitResult { return this.commitOwner(randomUUID(), command); }
   private commitCallback(state: CollaborationState, commandId: string, command: Command, ports: Omit<CommandPorts, 'now'>): CommitResult {
     return commitCommand(state, { scope: this.ledger.tenant, commandId, command }, { scope: this.ledger.tenant, recordCallbacks: false },
       { now: this.now, ...ports });
@@ -318,23 +324,19 @@ export class BotCollaboration {
   cancelDelegation(id: string, ...by: PrincipalArg): Promise<void> {
     return this.exclusive(() => {
       this.ownerOnly(by, 'cancelDelegation', id);
-      return this.settleChain(id, (s, state, d) => arbitrateCancel(s, state, d, this.now(), (key, value) => project(s, key, value)));
+      return this.settleChain(this.commitKeyless({ kind: 'cancel_delegation', delegationId: id }));
     });
   }
   /** Owner API ("End", §8.3): close a held reply or an uncertain delegation with `abandoned`. */
   abandonDelegation(id: string, ...by: PrincipalArg): Promise<void> {
     return this.exclusive(() => {
       this.ownerOnly(by, 'abandonDelegation', id);
-      return this.settleChain(id, (s, state, d) => abandonDelegation(s, state, d, this.now(), (key, value) => project(s, key, value)));
+      return this.settleChain(this.commitKeyless({ kind: 'abandon_delegation', delegationId: id }));
     });
   }
-  private async settleChain(id: string, decide: (s: LedgerState, state: CollaborationState, d: Delegation) => boolean): Promise<void> {
-    const deliver = this.ledger.transaction(s => {
-      const state = stateOf(s.application), d = state.delegations[id];
-      if (!d) throw new Error('Delegation not found');
-      return decide(s, state, d);
-    });
-    if (deliver) await this.deliverCancels();
+  /** A committed cancel fact is delivered after the commit. */
+  private async settleChain(result: CommitResult): Promise<void> {
+    if (valueOf<{ deliver: boolean }>(result).deliver) await this.deliverCancels();
     await this.process();
   }
   /**
@@ -352,23 +354,13 @@ export class BotCollaboration {
   /** Owner API. Advance the desired revision after a rejected persona delivery. */
   async retryPersona(botId: string): Promise<void> {
     await this.exclusive(async () => {
-      this.ledger.transaction(s => {
-        const state = stateOf(s.application), bot = activeBot(state.team, botId);
-        const failed = state.team.homeOperations.find(op => op.botId === botId
-          && op.request.payload.agentRef.profileRevision === bot.revision && op.status === 'failed');
-        if (!failed) throw new Error('No failed persona delivery for the current revision');
-        updateBot(state, { botId, persona: bot.persona }, this.models(), this.options.readOnlyToolsets);
-        for (const turn of Object.values(state.turns)) {
-          if (turn.botId === botId && !s.intents[hash(turn.id)]) delete turn.profileFailure;
-        }
-        project(s, `persona-retry:${bot.id}:${bot.revision}`, json({ owner: bot.id, revision: bot.revision, status: 'pending' }));
-      });
+      this.commitKeyless({ kind: 'retry_persona', botId });
       await this.process();
     });
   }
   async setMainBot(botId: string, mainBot: boolean): Promise<void> {
     await this.exclusive(async () => {
-      this.ledger.transaction(s => { activeBot(stateOf(s.application).team, botId).mainBot = mainBot; });
+      this.commitKeyless({ kind: 'set_main_bot', botId, mainBot });
       await this.process();
     });
   }
@@ -388,15 +380,7 @@ export class BotCollaboration {
   }
   async updateRoom(roomId: string, update: Partial<RoomFields>): Promise<void> {
     await this.exclusive(async () => {
-      this.ledger.transaction(s => {
-        const team = stateOf(s.application).team, room = team.rooms[roomId];
-        if (!room) throw new Error('Room not found');
-        const fields = { ...room, ...update };
-        if (!update.admin && !fields.members.includes(fields.admin ?? '')) delete fields.admin;
-        const next = roomFields(team, fields);
-        next.visibleFrom = roomVisibility(room, next.members);
-        Object.assign(room, next); if (!next.admin) delete room.admin;
-      });
+      this.commitKeyless({ kind: 'update_room', roomId, update });
       await this.process();
     });
   }
@@ -448,27 +432,10 @@ export class BotCollaboration {
   cancelTurn(id: string, ...by: PrincipalArg): Promise<void> {
     return this.exclusive(async () => {
       this.ownerOnly(by, 'cancelTurn', id);
-      const turn = this.snapshot().turns[id];
-      // A chain Turn cancels its whole delegation, so one verdict covers it (§8.8).
-      if (turn?.delegationId && !this.snapshot().delegations[turn.delegationId]!.verdict) {
-        return this.settleChain(turn.delegationId, (s, state, d) => arbitrateCancel(s, state, d, this.now(), (key, value) => project(s, key, value)));
-      }
-      let target = id;
-      const admitted = this.ledger.transaction(s => {
-        const state = stateOf(s.application);
-        target = sealBatchForCancel(state, id);
-        const turn = state.turns[target];
-        if (!turn) throw new Error('Turn not found');
-        if (s.intents[hash(target)]) return true;
-        if (!turn.conclusion) {
-          turn.status = 'failed'; turn.conclusion = 'cancelled';
-          delete turn.blockedReason;
-          project(s, `bot-turn:${target}`, json({ owner: turn.botId, ...turn }));
-          turn.reported = true;
-        }
-        return false;
-      });
-      if (admitted) await this.core.cancel(target);
+      const result = this.commitKeyless({ kind: 'cancel_turn', turnId: id });
+      const value = valueOf<{ deliver: boolean } | { target: string; admitted: boolean }>(result);
+      if ('deliver' in value) return this.settleChain(result);
+      if (value.admitted) await this.core.cancel(value.target);
       await this.process();
     });
   }

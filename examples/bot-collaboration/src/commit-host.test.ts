@@ -40,3 +40,21 @@ it('L: counts each owner command and each first K4 callback once; K4 replays com
   expect(bot.snapshot().revision).toBe(3);
   expect(Object.keys(bot.snapshot().commands ?? {})).toEqual([hash(['input', 'main', 'k1'])]);
 });
+
+it('L: counts one commit for each keyless owner call, with no record; a throw and the Host passes commit nothing (#739 6a, 6b)', async () => {
+  const { bot } = await open();
+  await bot.setMainBot('main', true);
+  await bot.setMainBot('main', true);
+  expect(bot.snapshot().revision).toBe(2);
+  await expect(bot.revokePushRoute('absent')).rejects.toThrow('Push route not found');
+  await bot.drain();
+  await bot.recover();
+  expect(bot.snapshot().revision).toBe(2);
+  const turnId = await bot.input('k1', 'Hello');
+  await bot.cancelTurn(turnId);
+  expect(bot.snapshot().revision).toBe(4);
+  await vi.waitFor(async () => { await bot.drain(); expect(bot.snapshot().turns[turnId]!.conclusion).toBe('cancelled'); });
+  await bot.recover();
+  expect(bot.snapshot().revision).toBe(4);
+  expect(Object.keys(bot.snapshot().commands ?? {})).toEqual([hash(['input', 'main', 'k1'])]);
+});
