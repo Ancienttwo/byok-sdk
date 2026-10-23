@@ -361,7 +361,17 @@ Deletion paths:
 - `eraseAgentMemoryProjection(tenant, agentId)` revokes consent and erases the hosted Agent memory projection of one Agent
   (`packages/cloud/src/cloud.ts:1782-1795`).
 - `discardDeadLetter` deletes one expired mailbox row (see above).
-- `createPostgresTenantErasure` is the only path that deletes task receipts
+- `redactTasks(tenant, { taskIds })` removes the content of terminal tasks and keeps their rows
+  (`packages/cloud/src/task-redaction.ts`, `packages/cloud-dataplane/src/stores/task-redaction.ts`).
+  It replaces the bodies of the task receipts, the admission row and the acked and expired outbox rows with a tombstone.
+  The tombstone holds the SHA-256 and the byte length of the body, and the envelope type.
+  It clears the free-text `task` columns, deletes the activity, approval and draft rows,
+  and deletes the objects that the bodies name when no reference or upload holds them.
+  A replay of the same body still matches, and new content is still a conflict.
+  Content reads of the task then throw `task_content_redacted`.
+  It refuses a task that is not terminal or that has a pending outbox row; the Host retries later.
+  It needs the `taskRedactionStore` option. `createPostgresTaskRedactionStore` ships from `./runtime`, so it runs on Workers.
+- `createPostgresTenantErasure` is the only path that deletes task receipt rows
   (`task-offer:`, `task-offer-delivered:`, `task:` and `agent-message-offer:`), `task` rows and `agent_message_admission` rows.
   It deletes the whole tenant (`packages/cloud-dataplane/src/tenant-erasure.ts:25-59`).
 - The only other receipt delete removes a `pairing-completion:v1:` receipt when a pairing code is issued again
@@ -374,9 +384,10 @@ Deletion paths:
   The Host must authorize it and stop product writes first (`packages/cloud-dataplane/README.md:223-224`).
 
 **Gap: retention and scoped deletion.** Task receipts and admission rows have no TTL.
-No call deletes them by task, device, Agent or time.
-An offer that the device never acked also stays, as a dead letter, until an operator discards it or erases the tenant.
-Today the product must erase the whole tenant from Node to delete the task content of one user.
+`redactTasks` removes their content by task, but no call removes it by device, Agent or time.
+`redactTasks` does not cover reliable egress rows (they have no task key), truth records, or receipts without a task key
+(`agent-input-preparation-*`, `agent-home-projection-*`, `agent-content-*`).
+It cannot reach backups, replicas or logs.
 This document states current behavior. It does not promise a design or a release.
 
 ## 7. Gaps
