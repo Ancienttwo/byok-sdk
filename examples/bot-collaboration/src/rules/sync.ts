@@ -103,6 +103,9 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
   const retired = turn.conclusion ? undefined : facts.retired(turn.id);
   if (retired) {
     turn.status = 'failed'; turn.conclusion = 'failed';
+    // The seat facts no longer see the intent, so release the seat here, as for a failed conclusion. Its round moves on.
+    const seat = state.team.seats[turn.id];
+    if (seat && !seat.released) { seat.status = 'failed'; seat.released = true; seat.reason = retired; }
     state.audit.push(`Turn ${retired === 'result_retired' ? 'result retired before sync' : 'identity retired'}: ${turn.id}`);
     publish(`bot-turn:${turn.id}`, json({ owner: turn.botId, ...turn, reason: retired }));
     turn.reported = true;

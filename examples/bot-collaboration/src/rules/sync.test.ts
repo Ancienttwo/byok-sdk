@@ -65,8 +65,10 @@ describe('syncTurn', () => {
 
   it('fails a retired Turn with the reason, an audit line and one report', () => {
     for (const [reason, line] of [['result_retired', 'Turn result retired before sync: t1'], ['turn_retired', 'Turn identity retired: t1']] as const) {
-      const s = state(), row = turn(s, { status: 'queued' }), out = published();
+      const s = state(), row = turn(s, { status: 'queued', source: 'room_slot' }), out = published();
+      s.team.seats.t1 = { id: 't1', roundId: 'round', botId: 'main', status: 'queued', released: false, late: false };
       expect(syncTurn(s, row, facts(undefined, false, reason), OPTIONS, out.publish)).toBeUndefined();
+      expect(s.team.seats.t1).toMatchObject({ status: 'failed', released: true, reason });
       expect([row.status, row.conclusion, row.reported, s.audit]).toEqual(['failed', 'failed', true, [line]]);
       expect(out.rows).toEqual([['bot-turn:t1', expect.objectContaining({ reason })]]);
     }
