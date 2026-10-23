@@ -109,7 +109,10 @@ ledger.transaction((state, rows) => {
 ```
 
 The port reads and writes rows by namespace and stable id in the `host_application_row` table.
-`get` returns a copy, `put` replaces a row and `delete` reports whether a row existed. `retire`
+`get` returns a copy, `put` replaces a row and `delete` reports whether a row existed.
+`put(namespace, id, value, expiresAt)` marks a row as removable from `expiresAt` on, and
+`expire(namespace, now)` removes those rows of one namespace. Until that call, an expired row still
+answers `get`; a `put` without `expiresAt` makes the row permanent again. `retire`
 records a permanent identity tombstone, and `isRetired` reads it. The port has no way to clear a
 tombstone, and `compact` never removes one. The rows commit or roll back with the body. The port
 reads and writes only this ledger's tenant. It closes when `apply` returns or throws, so a kept

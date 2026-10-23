@@ -1,4 +1,4 @@
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import type { MemoryIntentRow } from './memory';
 import { hash, taskId, time, type Json, type LedgerState, type Occurrence } from './model';
 
@@ -40,15 +40,20 @@ export class CompactVetoError extends Error {
  */
 export interface ApplicationRows {
   get(namespace: string, id: string): Json | undefined;
-  put(namespace: string, id: string, value: Json): void;
+  /** `expiresAt`: `expire` may remove the row from that time on. Absent: the row never expires. */
+  put(namespace: string, id: string, value: Json, expiresAt?: number): void;
   /** Returns whether a row existed. */
   delete(namespace: string, id: string): boolean;
+  /** Removes the rows of a namespace whose `expiresAt` is `now` or earlier. Returns their count. */
+  expire(namespace: string, now: number): number;
   retire(namespace: string, id: string): void;
   isRetired(namespace: string, id: string): boolean;
 }
 const ROW_NAMESPACE_MAX = 128, ROW_ID_MAX = 1024;
-function rowKey(namespace: unknown, id: unknown): void {
+function rowNamespace(namespace: unknown): void {
   if (typeof namespace !== 'string' || !namespace || namespace.length > ROW_NAMESPACE_MAX) throw new Error('Invalid application row namespace');
+}
+function rowId(id: unknown): void {
   if (typeof id !== 'string' || !id || id.length > ROW_ID_MAX) throw new Error('Invalid application row id');
 }
 
@@ -130,8 +135,9 @@ export class HostLedger {
       CREATE INDEX IF NOT EXISTS host_retired_memory_approval ON host_retired_memory_intent (tenant, approval);
       CREATE INDEX IF NOT EXISTS host_retired_memory_expiry ON host_retired_memory_intent (tenant, expires_at);
       CREATE TABLE IF NOT EXISTS host_application_row (
-        tenant TEXT NOT NULL, namespace TEXT NOT NULL, id TEXT NOT NULL, body TEXT NOT NULL,
-        PRIMARY KEY (tenant, namespace, id));`);
+        tenant TEXT NOT NULL, namespace TEXT NOT NULL, id TEXT NOT NULL, body TEXT NOT NULL, expires_at INTEGER,
+        PRIMARY KEY (tenant, namespace, id));
+      CREATE INDEX IF NOT EXISTS host_application_row_expiry ON host_application_row (tenant, namespace, expires_at);`);
     this.db.prepare('INSERT OR IGNORE INTO host_ledger VALUES (?, ?)').run(tenant, JSON.stringify(empty()));
   }
   snapshot(): LedgerState {
@@ -178,39 +184,55 @@ export class HostLedger {
     if (added) for (const listener of [...this.outboxListeners]) { try { listener(); } catch { /* Hints cannot roll back committed state. */ } }
     return result;
   }
+  private rowStatements?: Record<'get' | 'put' | 'delete' | 'expire' | 'retire' | 'retired', StatementSync>;
   /** A port for one transaction. All SQL stays here; the caller gets no database handle. */
   private rows(): { rows: ApplicationRows; close(): void } {
     let open = true;
-    const tenant = this.tenant, db = this.db;
-    const check = (namespace: string, id: string) => {
+    const tenant = this.tenant;
+    // Prepared once per ledger: one retention call can write thousands of rows in one transaction.
+    const sql = this.rowStatements ??= {
+      get: this.db.prepare('SELECT body FROM host_application_row WHERE tenant=? AND namespace=? AND id=?'),
+      put: this.db.prepare(`INSERT INTO host_application_row (tenant,namespace,id,body,expires_at) VALUES (?,?,?,?,?)
+        ON CONFLICT (tenant,namespace,id) DO UPDATE SET body=excluded.body, expires_at=excluded.expires_at`),
+      delete: this.db.prepare('DELETE FROM host_application_row WHERE tenant=? AND namespace=? AND id=?'),
+      expire: this.db.prepare('DELETE FROM host_application_row WHERE tenant=? AND namespace=? AND expires_at<=?'),
+      retire: this.db.prepare(`INSERT INTO host_retired_identity (tenant,kind,identity,expires_at) VALUES (?,'row',?,NULL)
+        ON CONFLICT (tenant,kind,identity) DO UPDATE SET expires_at=NULL`),
+      retired: this.db.prepare("SELECT 1 FROM host_retired_identity WHERE tenant=? AND kind='row' AND identity=?"),
+    };
+    const check = (namespace: string, ...id: [string] | []) => {
       if (!open) throw new Error('The application row port is closed');
-      rowKey(namespace, id);
+      rowNamespace(namespace);
+      if (id.length) rowId(id[0]);
     };
     const rows: ApplicationRows = Object.freeze({
       get(namespace: string, id: string) {
         check(namespace, id);
-        const row = db.prepare('SELECT body FROM host_application_row WHERE tenant=? AND namespace=? AND id=?').get(tenant, namespace, id);
+        const row = sql.get.get(tenant, namespace, id);
         return typeof row?.body === 'string' ? JSON.parse(row.body) as Json : undefined;
       },
-      put(namespace: string, id: string, value: Json) {
+      put(namespace: string, id: string, value: Json, expiresAt?: number) {
         check(namespace, id);
+        if (expiresAt !== undefined) time(expiresAt);
         const body = JSON.stringify(value);
         if (typeof body !== 'string') throw new Error('An application row must be JSON');
-        db.prepare(`INSERT INTO host_application_row (tenant,namespace,id,body) VALUES (?,?,?,?)
-          ON CONFLICT (tenant,namespace,id) DO UPDATE SET body=excluded.body`).run(tenant, namespace, id, body);
+        sql.put.run(tenant, namespace, id, body, expiresAt ?? null);
       },
       delete(namespace: string, id: string) {
         check(namespace, id);
-        return Number(db.prepare('DELETE FROM host_application_row WHERE tenant=? AND namespace=? AND id=?').run(tenant, namespace, id).changes) > 0;
+        return Number(sql.delete.run(tenant, namespace, id).changes) > 0;
+      },
+      expire(namespace: string, now: number) {
+        check(namespace);
+        return Number(sql.expire.run(tenant, namespace, time(now)).changes);
       },
       retire(namespace: string, id: string) {
         check(namespace, id);
-        db.prepare("INSERT INTO host_retired_identity (tenant,kind,identity,expires_at) VALUES (?,'row',?,NULL) ON CONFLICT (tenant,kind,identity) DO UPDATE SET expires_at=NULL")
-          .run(tenant, hash([namespace, id]));
+        sql.retire.run(tenant, hash([namespace, id]));
       },
       isRetired(namespace: string, id: string) {
         check(namespace, id);
-        return !!db.prepare("SELECT 1 FROM host_retired_identity WHERE tenant=? AND kind='row' AND identity=?").get(tenant, hash([namespace, id]));
+        return !!sql.retired.get(tenant, hash([namespace, id]));
       },
     });
     return { rows, close: () => { open = false; } };

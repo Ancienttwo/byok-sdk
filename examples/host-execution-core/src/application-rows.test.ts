@@ -48,7 +48,7 @@ it('rolls back row writes with the body, and closes the port when apply returns 
   expect(ledger.transaction((_state, rows) => rows.isRetired('turns', 'a'))).toBe(false);
   expect(() => kept!.get('turns', 'a')).toThrow('The application row port is closed');
   ledger.transaction((_state, rows) => { kept = rows; });
-  for (const use of [() => kept!.put('turns', 'a', 1), () => kept!.delete('turns', 'a'), () => kept!.retire('turns', 'a'), () => kept!.isRetired('turns', 'a')]) {
+  for (const use of [() => kept!.put('turns', 'a', 1), () => kept!.delete('turns', 'a'), () => kept!.expire('turns', 1), () => kept!.retire('turns', 'a'), () => kept!.isRetired('turns', 'a')]) {
     expect(use).toThrow('The application row port is closed');
   }
   // An asynchronous apply is refused, and a write after its first await meets a closed port.
@@ -78,6 +78,27 @@ it('keeps tenants apart, and keeps a retired identity after a row delete and a c
   expect(ledger.transaction((_state, rows) => rows.isRetired('turns', 'a'))).toBe(true);
   // A row tombstone is not an intent tombstone.
   expect(ledger.hasTombstone('intent', 'a', 0)).toBe(false);
+});
+
+it('expires rows of one namespace at their time, and keeps rows without an expiry', () => {
+  const { ledger } = open();
+  ledger.transaction((_state, rows) => {
+    rows.put('commands', 'old', 1, 100); rows.put('commands', 'new', 2, 200); rows.put('commands', 'kept', 3);
+    rows.put('turns', 'old', 4, 100);
+  });
+  expect(ledger.transaction((_state, rows) => rows.expire('commands', 99))).toBe(0);
+  expect(ledger.transaction((_state, rows) => rows.expire('commands', 100))).toBe(1);
+  expect(ledger.transaction((_state, rows) => [rows.get('commands', 'old'), rows.get('commands', 'new'), rows.get('commands', 'kept'), rows.get('turns', 'old')]))
+    .toEqual([undefined, 2, 3, 4]);
+  // A put without an expiry clears the old one.
+  ledger.transaction((_state, rows) => rows.put('commands', 'new', 5));
+  expect(ledger.transaction((_state, rows) => rows.expire('commands', 1_000_000))).toBe(0);
+  expect(read(ledger, 'commands', 'new')).toBe(5);
+  for (const expiresAt of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    expect(() => ledger.transaction((_state, rows) => rows.put('commands', 'bad', 1, expiresAt))).toThrow('Time must be a nonnegative safe integer');
+  }
+  expect(() => ledger.transaction((_state, rows) => rows.expire('', 1))).toThrow('Invalid application row namespace');
+  expect(() => ledger.transaction((_state, rows) => rows.expire('commands', -1))).toThrow('Time must be a nonnegative safe integer');
 });
 
 it('refuses an invalid namespace, id or value and writes nothing', () => {
