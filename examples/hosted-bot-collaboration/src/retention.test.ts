@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { hash, MIN_TOMBSTONE_RETENTION_MS, taskId } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
-import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
+import { stateOf, type CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
+import { retainRoots } from '@byok-sdk/example-bot-collaboration/retention';
 import { RETENTION_NOW, retentionVectors, type RetentionSubject } from '@byok-sdk/example-bot-collaboration/retention-vectors';
 import { seedCollaboration, SYNC_OPTIONS } from '@byok-sdk/example-bot-collaboration/test-support';
 import { freezeIntent } from './intents';
@@ -115,6 +116,32 @@ describe.skipIf(POSTGRES_URL === undefined)('H retention on real Postgres (#793 
     expect(await consumer().consume({ ...input, payload: { ...input.payload, contentHash: 'sha256:other' } }))
       .toEqual({ outcome: 'refused', reasonCode: 'message_conflict' });
     expect(await h.stored()).toBe(stored);
+  });
+
+  it('refuses a command id or a Turn id over the K4 row id limit, as L does, and writes nothing (847-review L1)', async () => {
+    const h = await hosted(), long = 'x'.repeat(1025);
+    let stored = await h.stored();
+    await expect(h.commit({ scope: h.scope, commandId: long, command: { kind: 'input', botId: 'main', key: 'k1', request: 'Hello', sender: 'owner' } }))
+      .rejects.toThrow('Invalid application row id');
+    expect(await h.stored()).toBe(stored);
+    expect(await h.retain(retention(), LIMITS)).toMatchObject({ archivedCommands: 0 });
+    // The sync reads the tombstone of each Turn id, as K4 `isRetired` in the L sync.
+    await h.change(state => {
+      state.turns[long] = { id: long, root: long, botId: 'main', source: 'user', request: 'Long', hop: 0, status: 'queued', authority: 'owner' };
+    });
+    stored = await h.stored();
+    await expect(store().sync(h.scope, { ...SYNC_OPTIONS, history: undefined })).rejects.toThrow('Invalid application row id');
+    expect(await h.stored()).toBe(stored);
+  });
+
+  it('retains on a scope with no row as L retains on an empty ledger, and writes nothing (847-review L4)', async () => {
+    const scope = `tenant:${randomUUID()}`;
+    const empty = retainRoots(stateOf({}), retention(), LIMITS, { hasIntent: () => false, occurrenceOpen: () => false },
+      { put: () => {}, expire: () => 0, retire: () => {}, isRetired: () => false });
+    expect(empty).toMatchObject({ archivedRoots: 0, alreadyArchivedRoots: 0, archivedRows: 0, archivedCommands: 0, expiredCommands: 0 });
+    expect(await store().retain(scope, retention(), LIMITS)).toEqual(empty);
+    await expect(store().retain(scope, retention(RETENTION_NOW, ['r1']), LIMITS)).rejects.toThrow('Acknowledged root not found');
+    expect((await opened!.pool.query(`SELECT 1 FROM ${table('scope')} WHERE scope = $1`, [storedKey(scope)])).rows).toEqual([]);
   });
 
   it('fails a queued Turn whose id retention retired, and freezes no intent for it, as the L sync does', async () => {

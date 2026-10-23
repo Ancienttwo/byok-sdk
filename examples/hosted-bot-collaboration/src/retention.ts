@@ -40,6 +40,7 @@ async function tombstones(client: PoolClient, scopeKey: string, ids: Array<[Reti
   const asked = new Set(ids.map(([namespace, id]) => hash([namespace, id])));
   const retired = await retiredHashes(client, scopeKey, [...asked]);
   return (namespace: string, id: string): boolean => {
+    checkRow(namespace, id);
     const identity = hash([namespace, id]);
     if (!asked.has(identity)) throw new Error('A tombstone was read that the store did not load');
     return retired.has(identity);
@@ -65,7 +66,8 @@ export async function commitStored(client: PoolClient, scope: string, state: Col
     ? await archivedRow(client, scopeKey, 'commands', request.commandId) as CommandRecord | undefined : undefined;
   let admitted: AdmittedIds | undefined;
   const result = commitCommand(state, request, { scope, recordCallbacks: true,
-    ...(archived ? { archived: (id: string) => id === request.commandId ? archived : undefined } : {}),
+    // As K4 `rows.get` in L: a keyed command that is not in the state checks its row id here, and an over-limit id throws.
+    archived: (id: string) => { checkRow('commands', id); return id === request.commandId ? archived : undefined; },
     admitted: ids => { admitted = ids; } }, ports);
   if (admitted) {
     const ids = admitted as AdmittedIds;
