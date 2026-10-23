@@ -199,8 +199,8 @@
   any other `.cmd` or `.bat`. A shim whose node is not found, and a command
   that is not found, give `not-found`. A refusal names no local path, and both
   adapters decline the offer as not retryable. macOS and Linux do not change.
-  The root `@byok-sdk/client` entry grows by 4012 bytes, and the
-  `@byok-sdk/client/testing` entry grows by 3949 bytes.
+  The root `@byok-sdk/client` entry grows by 4562 bytes, and the
+  `@byok-sdk/client/testing` entry grows by 4499 bytes.
 
 ## 0.28.3 — source candidate
 
