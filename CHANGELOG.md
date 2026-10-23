@@ -83,6 +83,24 @@
   redacted task. Only task redaction and tenant erasure release the
   reference, so the ciphertext of a sealed task stays stored as long as its
   offer receipt does.
+- **Feature (protocol, cloud, server)** — the Host accepts the sealed
+  terminals and the sealed artifact (#654 E3b-2). A task whose offer sealed
+  `task-output` must report its output sealed. Its plaintext terminal may
+  carry only a closed code from the new `SEALED_TASK_PLAIN_CODES`: a
+  `task.fail` with `daemon_interrupted` or `sealed_key_unavailable`, a
+  `task.decline` whose `reason` is its sealed decline `code`, or a
+  `task.cancelled` with no reason. `isSealedTaskPlainOutput` checks that rule
+  by exact match. A task without output sealing reports no sealed output. A
+  sealed terminal takes every gate of its plaintext type, and
+  `task.fail_sealed` with `recovery` is refused. `task.terminal_cause` keeps
+  only a closed code for a sealed terminal. `readDeviceTerminal` returns the
+  sealed terminal with its sealed member, and `readTaskResult` projects only
+  its plaintext fields. A sealed artifact is accepted and not stored. The
+  server relay settles a task on a sealed terminal. Sealed progress and
+  approval are still refused, and the cloud does not advertise
+  `sealed-payload-v1` yet. Compatibility: `INBOUND_REFUSAL_REASONS` gets
+  `sealed_output_required`, and `DeviceTerminal.envelope` can be one of the
+  four sealed terminal types.
 
 ## 0.29.0 — 2026-10-23 (published)
 

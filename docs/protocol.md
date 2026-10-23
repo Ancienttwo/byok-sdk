@@ -1180,6 +1180,31 @@ or `sealing_policy_mismatch` in `code`. These codes go only on the plaintext
 `task.decline_sealed` refuses them: a device that cannot open or use the
 scope key often cannot seal a reply either, so one outcome has one encoding.
 
+**Host rule for task output.** The Host reads the frozen `sealing` of the
+task from its offer. When `categories` includes `task-output`, the device
+reports every output sealed. A plaintext output is legal only when each field
+that its sealed type moves or drops is absent or holds a closed code of
+`SEALED_TASK_PLAIN_CODES`, by exact match:
+
+- `task.fail`: `reason` is `daemon_interrupted` or `sealed_key_unavailable`,
+  and there is no `preparedObservation`. An interrupted task always reports
+  `daemon_interrupted` in plaintext with `recovery`, so `task.fail_sealed`
+  never carries `recovery`.
+- `task.decline`: `reason` is one of the sealed decline codes, and equals
+  `code`.
+- `task.cancelled`: no `reason`.
+- `task.complete`, `task.progress`, `task.artifact` and
+  `task.await_approval` have no plaintext form.
+
+The Host refuses any other plaintext output with `sealed_output_required`.
+When the task did not seal `task-output`, it refuses every sealed output with
+`sealed_payload_unsupported`. A sealed terminal takes the status of its
+plaintext type, and the first terminal wins. `task.terminal_cause` keeps only
+a closed code: the `code` of a `task.decline_sealed`, or the code of a legal
+plaintext terminal. `readDeviceTerminal` returns the sealed terminal with its
+sealed member. `readTaskResult` gives only its plaintext fields. The cloud
+does not store a sealed artifact.
+
 ## 3. Task state machine (M1 gap #2, #5, #6)
 
 ```mermaid
