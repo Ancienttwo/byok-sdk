@@ -31,6 +31,7 @@ import { z } from 'zod';
 import { canonicalizeJson, canonicalizeJsonBytes, type JsonObject } from '../attestation';
 import { CONTENT_HASH_PATTERN } from '../blob';
 import { isCanonicalTimestamp } from '../time';
+import { safeParseTotal } from '../total-parse';
 import { webCryptoSubtle } from '../webcrypto';
 import { MEMBER_ID_PATTERN } from './member-chain';
 import {
@@ -235,7 +236,7 @@ export type ParsedBinding = z.infer<typeof SealedBindingSchema>;
 
 /** @internal Shared with `sealed-blob.ts`. Stripped from the published declarations. */
 export function parseBinding(binding: SealedBinding): ParsedBinding {
-  const parsed = SealedBindingSchema.safeParse(binding);
+  const parsed = safeParseTotal(SealedBindingSchema, binding);
   if (!parsed.success) throw invalidInput('Sealed content binding is invalid');
   return parsed.data;
 }
@@ -286,7 +287,7 @@ function aadBytes(header: SealedContentHeaderV1, binding: ParsedBinding): Uint8A
 
 /** The canonical AAD bytes of a header under a binding (§8.2). */
 export function sealedContentAad(header: SealedContentHeaderV1, binding: SealedBinding): Uint8Array {
-  const parsed = SealedContentHeaderV1Schema.safeParse(header);
+  const parsed = safeParseTotal(SealedContentHeaderV1Schema, header);
   if (!parsed.success) throw invalidInput('Sealed content header is invalid');
   return aadBytes(parsed.data, parseBinding(binding));
 }
@@ -419,7 +420,7 @@ export async function sealContentWithRandomness(input: SealContentInput, randomn
   if (content.byteLength > input.maxContentLength) throw invalidInput('Sealed content exceeds its plaintext limit');
   const frame = encodeSealedFrame(content);
   const { salt, nonce } = randomness;
-  const parsed = SealedContentHeaderV1Schema.safeParse({
+  const parsed = safeParseTotal(SealedContentHeaderV1Schema, {
     v: SEALED_CONTENT_VERSION,
     suite: SEALED_CONTENT_SUITE,
     category: input.category,
@@ -498,12 +499,12 @@ export function failure(reason: SealedContentOpenFailure): { readonly ok: false;
  */
 export async function openSealedContent(input: OpenSealedContentInput): Promise<SealedContentOpenResult> {
   assertMaxContentLength(input.maxContentLength);
-  const parsedBinding = SealedBindingSchema.safeParse(input.binding);
-  const parsedSealing = SealedScopePolicySchema.safeParse(input.sealing);
+  const parsedBinding = safeParseTotal(SealedBindingSchema, input.binding);
+  const parsedSealing = safeParseTotal(SealedScopePolicySchema, input.sealing);
   if (!parsedBinding.success || !parsedSealing.success) return failure('sealing_policy_mismatch');
   const binding = parsedBinding.data;
   const sealing = parsedSealing.data;
-  const parsed = SealedContentHeaderV1Schema.safeParse(input.header);
+  const parsed = safeParseTotal(SealedContentHeaderV1Schema, input.header);
   if (!parsed.success) return failure('sealed_open_failed');
   const header = parsed.data;
   if (

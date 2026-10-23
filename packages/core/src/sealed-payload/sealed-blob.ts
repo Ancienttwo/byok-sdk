@@ -15,7 +15,8 @@
 import { z } from 'zod';
 
 import { canonicalizeJsonBytes } from '../attestation';
-import { copy, decodeBase64Url, encodeBase64Url, invalidInput, randomBytes, base64UrlBytes, type Bytes } from './primitives';
+import { safeParseTotal } from '../total-parse';
+import { base64UrlBytes, copy, decodeBase64Url, encodeBase64Url, invalidInput, randomBytes, type Bytes } from './primitives';
 import { SEALED_SALT_BYTES, deriveScopeKeyId, deriveSealedContentKey } from './scope-key';
 import {
   AEAD_TAG_BYTES,
@@ -75,7 +76,7 @@ function assertBlobFieldPath(fieldPath: string): void {
  * The canonical AAD bytes of a blob sealed under an outer header (§8.1).
  */
 export function sealedBlobAad(header: SealedContentHeaderV1, binding: SealedBinding, paddedLength: number, fieldPath: string): Uint8Array {
-  const parsed = SealedContentHeaderV1Schema.safeParse(header);
+  const parsed = safeParseTotal(SealedContentHeaderV1Schema, header);
   if (!parsed.success || !isLegalPaddedLength(paddedLength)) throw invalidInput('Sealed blob header input is invalid');
   assertBlobFieldPath(fieldPath);
   return blobAadBytes(parsed.data, parseBinding(binding), paddedLength, fieldPath);
@@ -126,7 +127,7 @@ export async function sealBlobWithRandomness(input: SealBlobInput, randomness: S
   }
   if (input.bytes.byteLength > input.maxContentLength) throw invalidInput('Sealed blob exceeds its plaintext limit');
   const frame = encodeSealedFrame(input.bytes);
-  const context = SealedContentHeaderV1Schema.pick({ v: true, suite: true, category: true, scope: true, chainHead: true, sender: true }).safeParse({
+  const context = safeParseTotal(SealedContentHeaderV1Schema.pick({ v: true, suite: true, category: true, scope: true, chainHead: true, sender: true }), {
     v: SEALED_CONTENT_VERSION,
     suite: SEALED_CONTENT_SUITE,
     category: input.category,
@@ -134,7 +135,7 @@ export async function sealBlobWithRandomness(input: SealBlobInput, randomness: S
     chainHead: { seq: input.chainHead.seq, hash: input.chainHead.hash },
     sender: input.sender,
   });
-  const params = SealedBlobParamsV1Schema.safeParse({
+  const params = safeParseTotal(SealedBlobParamsV1Schema, {
     salt: encodeBase64Url(randomness.salt),
     nonce: encodeBase64Url(randomness.nonce),
     paddedLength: frame.byteLength,
@@ -178,12 +179,12 @@ export type SealedBlobOpenResult =
  */
 export async function openSealedBlob(input: OpenSealedBlobInput): Promise<SealedBlobOpenResult> {
   assertMaxContentLength(input.maxContentLength);
-  const parsedBinding = SealedBindingSchema.safeParse(input.binding);
-  const header = SealedContentHeaderV1Schema.safeParse(input.header);
+  const parsedBinding = safeParseTotal(SealedBindingSchema, input.binding);
+  const header = safeParseTotal(SealedContentHeaderV1Schema, input.header);
   if (!parsedBinding.success || (header.success && !parsedBinding.data.categories.includes(header.data.category))) {
     return failure('sealing_policy_mismatch');
   }
-  const params = SealedBlobParamsV1Schema.safeParse(input.params);
+  const params = safeParseTotal(SealedBlobParamsV1Schema, input.params);
   if (!header.success || !params.success || typeof input.fieldPath !== 'string' || !BLOB_FIELD_PATH_PATTERN.test(input.fieldPath)) {
     return failure('sealed_open_failed');
   }
