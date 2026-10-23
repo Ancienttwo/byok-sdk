@@ -9,11 +9,10 @@ import { applyTurnOutcome, type OutcomePorts, type OutcomeState } from './outcom
 import { acceptMessage, type MessageFields } from './message';
 import { commit, type CommitRequest, type CommitResult, type CommitState, type Disposition, type OutboxIntent } from './commit';
 
-/**
- * The collaboration commands and their decisions as pure rules (#739 D1). `commitCommand` runs one command
- * through the commit contract. Owner commands and the K4 callbacks use the same function.
- * The Host gives ports for its own helpers. A port that a command needs and that is absent is a Host error.
- */
+// The collaboration commands and their decisions as pure rules (#739 D1). `commitCommand` runs one command
+// through the commit contract. Owner commands and the K4 callbacks use the same function.
+// The Host gives ports for its own helpers. A port that a command needs and that is absent is a Host error.
+
 /** Commands with a caller key or a K4 key. The store records them, so a retry replays the first result. */
 export type KeyedCommand =
   /** Owner input to a Bot. The Turn id comes from the Bot and the caller key. */
