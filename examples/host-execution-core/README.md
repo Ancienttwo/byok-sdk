@@ -58,6 +58,10 @@ The scanner reads the canonical device terminal and applies the opaque outcome o
 The same transaction writes the intent conclusion and its result projection.
 An uploader retries projections with stable IDs.
 Wake dispatch failure rejects the hook so the SDK retains a retry trigger.
+The outbox keeps the failed wake call with `lastError`. A process timer of that row drains
+after 1 s, 2 s, 4 s and so on, up to 60 s, for at most 10 timed drains (about 5 min).
+Each drain retries all failed wake calls. After the last timed drain, only later drains,
+wake deliveries or `recover()` retry the row. The row and its `lastError` stay until it is sent.
 A failed direct call can already have committed its ledger entry. Retry the same input or call `recover`.
 
 SIGKILL recovery opens the same Host and SDK databases.

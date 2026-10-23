@@ -21,6 +21,10 @@ export type ExecutionServer = {
 const CANCEL_PROBE_TICKS = 20;
 const CANCEL_PROBE_FIRST_MS = 25;
 const CANCEL_PROBE_MAX_MS = 1000;
+// A failed wake call gets this many timed drains, about 5 min in all. Later, only other drains retry it.
+const WAKE_RETRY_LIMIT = 10;
+const WAKE_RETRY_FIRST_MS = 1000;
+const WAKE_RETRY_MAX_MS = 60_000;
 /** Routine commands in the caller's transaction. A refused command throws before it changes any state. */
 export interface RoutineCommands {
   /** The rules of `addRoutine`. */
@@ -94,6 +98,8 @@ export class HostExecutionCore {
   private readonly outboxAbort = new AbortController();
   private readonly outboxContext = new AsyncLocalStorage<boolean>();
   private scheduleRetryTimer?: ReturnType<typeof setTimeout>;
+  /** Outbox key of a failed wake call to its used timed retries and its pending timer. Rearming keeps the count. */
+  private readonly wakeRetries = new Map<string, { used: number; timer?: ReturnType<typeof setTimeout> }>();
   private readonly hostJobs: Map<string, HostJobHandler>;
   private readonly occurrenceHooks: Map<string, OccurrenceHook>;
   private readonly jobAbort = new AbortController();
@@ -130,6 +136,7 @@ export class HostExecutionCore {
             const fallback = await this.flushWakes(result.failedKeys);
             result.failures.push(...fallback.failures);
           }
+          this.armWakeRetry();
           throw new AggregateError(result.failures, 'Memory reconciliation wake failed');
         }
       });
@@ -313,6 +320,7 @@ export class HostExecutionCore {
     })().finally(() => {
       this.draining = undefined;
       this.armScheduleRetry();
+      this.armWakeRetry();
       this.armLiveScan();
       this.armCancelProbe();
       if (this.again && !this.stopped) return this.drain();
@@ -322,6 +330,7 @@ export class HostExecutionCore {
   async close(): Promise<void> {
     this.stopped = true; this.stopMemoryUpdates?.(); this.stopMemoryLedgerBinding?.(); this.stopOutboxUpdates?.();
     clearTimeout(this.scheduleRetryTimer); clearTimeout(this.liveScanTimer); clearTimeout(this.cancelProbeTimer);
+    for (const retry of this.wakeRetries.values()) clearTimeout(retry.timer);
     this.outboxAbort.abort(); this.jobAbort.abort();
     await this.eventIterator?.return?.();
     await Promise.all([this.draining, this.memoryWaking, this.eventPump, this.cancelProbing,
@@ -511,6 +520,26 @@ export class HostExecutionCore {
       .filter(routine => versionSwitchDue(routine, Object.values(state.occurrences), this.now()));
     if (!due(this.ledger.snapshot()).length) return;
     this.ledger.transaction(state => { for (const routine of due(state)) switchVersion(state, routine, this.now(), this.nextTime); });
+  }
+  /**
+   * The outbox keeps a failed wake call with `lastError`. Each such row gets its own timer with backoff;
+   * a timer runs one drain, which retries every failed row. A row at the limit waits for other drains.
+   */
+  private armWakeRetry(): void {
+    if (this.stopped) return;
+    const failed = new Set(Object.entries(this.ledger.snapshot().outbox)
+      .filter(([, row]) => (row.kind === 'schedule' || row.kind === 'cancel-wake') && row.lastError !== undefined).map(([key]) => key));
+    for (const [key, retry] of this.wakeRetries) if (!failed.has(key)) { clearTimeout(retry.timer); this.wakeRetries.delete(key); }
+    for (const key of failed) {
+      const retry = this.wakeRetries.get(key) ?? { used: 0 };
+      this.wakeRetries.set(key, retry);
+      if (retry.timer || retry.used >= WAKE_RETRY_LIMIT) continue;
+      retry.timer = setTimeout(() => {
+        retry.timer = undefined; retry.used++;
+        if (!this.stopped) void this.drain().catch(() => {});
+      }, Math.min(WAKE_RETRY_FIRST_MS * 2 ** retry.used, WAKE_RETRY_MAX_MS));
+      retry.timer.unref?.();
+    }
   }
   private armScheduleRetry(): void {
     clearTimeout(this.scheduleRetryTimer);

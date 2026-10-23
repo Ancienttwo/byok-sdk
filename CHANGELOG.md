@@ -187,6 +187,16 @@
   After the last read, only the `reconcileMs` scans remain. This also covers a
   claimed task that the core cancels at its waiting deadline.
 
+- **Fix (examples)** — K4 retries a failed SDK wake call from its own timer
+  (#766). Before, a K4-only Host retried the row only on the next drain, so an
+  idle device could leave a routine stopped. Each `schedule` or `cancel-wake`
+  outbox row with `lastError` gets a process timer. The timer drains after
+  1 s, 2 s, 4 s and so on, up to 60 s, for at most 10 timed drains (about
+  5 min). After that, only later drains retry the row, and the row and its
+  `lastError` stay. `close()` clears the timers. K8 now uses this timer and no
+  longer adds its own 60-second wake retry, so a K8 Host retries sooner and
+  stops timed wake retries after about 5 min.
+
 ## 0.28.3 — source candidate
 
 The owner selected 0.28.3 as one more one-release exception to the default
