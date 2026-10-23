@@ -2,11 +2,11 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import type { ByokServer, ByokServerEvent, CreateByokServerOptions, DueWake } from '@byok-sdk/server';
 import { MemoryBlockedError, type HostMemoryPage, type MemoryBinding } from './memory';
 import { HostLedger, OutboxFullError, type ApplicationRows } from './ledger';
-import { canonical, hash, project, taskId, time, validateInput, validateJson, validateRetry, type HostJobHandler, type HostOccurrenceRun, type Attempt,
+import { canonical, hash, project, taskId, time, validateJson, type HostJobHandler, type HostOccurrenceRun, type Attempt,
   type Intent, type IntentInput, type Json, type LedgerState, type Occurrence, type Routine, type RoutineDefinition, type Terminal } from './model';
 import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
-import { applyPlan, auditCalendarError, auditIgnoredWake, createRoutine, deferSchedule, nextWake, promote, recordOccurrence, scheduleNext, setLifecycle,
-  stageVersion, switchVersion, versionSwitchDue, WAKE_HORIZON_MS } from './routines';
+import { applyPlan, auditCalendarError, auditIgnoredWake, createRoutine, deferSchedule, nextWake, occurrenceRun, promote, recordOccurrence, scheduleNext,
+  setLifecycle, stageVersion, switchVersion, validateRoutineDefinition, versionSwitchDue, WAKE_HORIZON_MS } from './routines';
 import { cancelWake, enqueue, fifoHeads, queuedExpiry, settle } from './transitions';
 import { frozenDelivered, submitFrozen, type FrozenSubmitPort } from './submit';
 
@@ -208,26 +208,7 @@ export class HostExecutionCore {
     await this.drain();
   }
   private validateDefinition(definition: RoutineDefinition): void {
-    if (!definition.id.trim() || definition.id.startsWith('host-scan:') || !Number.isSafeInteger(definition.version) || definition.version < 1
-      || definition.waitMs < 1) throw new Error('Invalid routine definition');
-    time(definition.waitMs); time(definition.lateAfterMs);
-    time(this.now() + definition.waitMs);
-    if (definition.retry !== undefined) validateRetry(definition.retry);
-    if (definition.endAt !== undefined) time(definition.endAt);
-    if ([definition.execution, definition.hostJob, definition.hostOccurrence].filter(kind => kind !== undefined).length !== 1) {
-      throw new Error('Supply exactly one of execution, hostJob or hostOccurrence');
-    }
-    if (definition.hostJob) {
-      if (!definition.hostJob.type?.trim() || typeof this.hostJobs.get(definition.hostJob.type) !== 'function') throw new Error('Host job handler not registered');
-      validateJson(definition.hostJob.input);
-    } else if (definition.hostOccurrence) {
-      if (!definition.hostOccurrence.type?.trim() || typeof this.occurrenceHooks.get(definition.hostOccurrence.type) !== 'function') {
-        throw new Error('Occurrence hook not registered');
-      }
-      validateJson(definition.hostOccurrence.input);
-    } else {
-      validateInput({ key: definition.id, source: 'routine', execution: definition.execution!, waitUntil: this.now() + definition.waitMs, retry: definition.retry });
-    }
+    validateRoutineDefinition(definition, this.now(), { hostJobs: this.hostJobs, occurrenceHooks: this.occurrenceHooks });
   }
   /** The one path for routine commands. Each command validates and plans before it writes, so a caught refusal changes nothing. */
   private routineCommands(state: LedgerState): RoutineCommands {
@@ -278,13 +259,12 @@ export class HostExecutionCore {
   };
   /** The hook shares the occurrence commit: both persist, or neither does. */
   private runOccurrenceHook(state: LedgerState, occurrence: Occurrence): void {
-    const { type, input } = state.routines[hash(occurrence.routineId)]!.definition.hostOccurrence!;
-    const hook = this.occurrenceHooks.get(type);
+    const run = occurrenceRun(state.routines[hash(occurrence.routineId)]!, occurrence);
+    const hook = this.occurrenceHooks.get(run.type);
     if (typeof hook !== 'function') throw new Error('Occurrence hook not registered');
     let open = true;
     try {
-      const result: unknown = hook({ type, input: structuredClone(input), occurrenceKey: occurrence.key, routineId: occurrence.routineId,
-        definitionVersion: occurrence.definitionVersion, trigger: structuredClone(occurrence.trigger) }, {
+      const result: unknown = hook(run, {
         application: state.application,
         publish: (id, value) => {
           if (!open) throw new Error('Occurrence transaction is closed');
