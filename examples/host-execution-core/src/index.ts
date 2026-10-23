@@ -13,7 +13,9 @@ export { HostMemoryPage, memoryRevision, EMPTY_MEMORY_REVISION, RESIDENT_MEMORY_
 export type { MemoryApproval, MemoryBinding, MemoryOptions, MemoryContextPack } from './memory';
 export { hash, canonical, project, time } from './model';
 export type { LedgerState, IgnoredWakeAudit } from './model';
-export { enqueue } from './transitions';
+export { enqueue, agentKey, fifoHeads, queuedExpiry } from './transitions';
+export { sameFrozenOffer, submitFrozen } from './submit';
+export type { FrozenSubmitPort, FrozenInput, FrozenOffer } from './submit';
 export { WAKE_HORIZON_MS, IGNORED_WAKE_AUDIT_LIMIT, parseRoutineWakeKey, versionSwitchDue, promoteOccurrence, concludeOccurrence } from './routines';
 
 export type { MemoryRestoreInput, MemoryRestoreResult, MemoryRestoreFileResult } from './memory-restore';
