@@ -2545,9 +2545,11 @@ export interface AgentMemoryFileObservation {
  *
  * Still unobservable (thrown): a home whose pinned identity no longer matches
  * or that is gone; a symlink, non-directory or unopenable parent component; a
- * symlink or non-regular leaf; any other open/read/stat I/O error; and a file
- * that changed while it was hashed (transient). With an external `filesystem`
- * backend the observation is that backend's bounded UTF-8 `read`.
+ * symlink or non-regular leaf, or a leaf with more than one hard link; a
+ * name below notes that differs only in letter case from another; any other
+ * open/read/stat I/O error; and a file that changed while it was hashed
+ * (transient). With an external `filesystem` backend the observation is that
+ * backend's bounded UTF-8 `read`.
  */
 export declare function observeAgentMemoryHomeFile(binding: AgentMemoryHomeBinding, relativePath: string): Promise<AgentMemoryFileObservation>;
 export interface AgentMemoryHomeCompareAndSwap {
