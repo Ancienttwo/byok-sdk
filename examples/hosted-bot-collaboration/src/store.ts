@@ -88,11 +88,8 @@ export class HostedCollaborationStore {
       // Upsert, then lock: a missing scope row would lock nothing, and two first commits would race.
       await client.query('INSERT INTO scope (scope, state_version, frame) VALUES ($1, $2, $3::json) ON CONFLICT (scope) DO NOTHING',
         [key, STORE_VERSION, EMPTY_FRAME]);
-      const head = await client.query<{ state_version: number; frame: string }>(
-        'SELECT state_version, frame::text AS frame FROM scope WHERE scope = $1 FOR UPDATE', [key]);
-      const version = head.rows[0]!.state_version;
-      if (!SUPPORTED_STORE_VERSIONS.has(version)) throw new HostedStoreVersionError(version);
-      const rows = await this.load(client, key, head.rows[0]!.frame, commandId);
+      const frame = await lockScope(client, key);
+      const rows = await this.load(client, key, frame, commandId);
       const state = stateOf({ collaboration: assemble(rows) as unknown as Json });
       const before = split(state);
       const published = new Map<string, Json>();
@@ -190,21 +187,39 @@ export class HostedCollaborationStore {
     }
   }
 
-  private async transaction<T>(work: (client: PoolClient) => Promise<T>, readOnly: boolean): Promise<T> {
-    const client = await this.pool.connect();
-    let broken: Error | undefined;
-    try {
-      await client.query(readOnly ? 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY' : 'BEGIN');
-      await client.query(`SET LOCAL search_path TO "${this.schema}"`);
-      const value = await work(client);
-      await client.query('COMMIT');
-      return value;
-    } catch (error) {
-      // A client whose rollback failed is broken: release it with the error, so the pool drops it.
-      broken = await client.query('ROLLBACK').then(() => undefined, (failure: unknown) => failure instanceof Error ? failure : new Error(String(failure)));
-      throw error;
-    } finally {
-      client.release(broken);
-    }
+  private transaction<T>(work: (client: PoolClient) => Promise<T>, readOnly: boolean): Promise<T> {
+    return inSchema(this.pool, this.schema, work, readOnly);
   }
+}
+
+/** Runs `work` in one transaction with `search_path` set to `schema`. A throw rolls back every row. */
+export async function inSchema<T>(pool: Pool, schema: string, work: (client: PoolClient) => Promise<T>, readOnly = false): Promise<T> {
+  if (!SCHEMA.test(schema)) throw new Error('Invalid hosted collaboration schema name');
+  const client = await pool.connect();
+  let broken: Error | undefined;
+  try {
+    await client.query(readOnly ? 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY' : 'BEGIN');
+    await client.query(`SET LOCAL search_path TO "${schema}"`);
+    const value = await work(client);
+    await client.query('COMMIT');
+    return value;
+  } catch (error) {
+    // A client whose rollback failed is broken: release it with the error, so the pool drops it.
+    broken = await client.query('ROLLBACK').then(() => undefined, (failure: unknown) => failure instanceof Error ? failure : new Error(String(failure)));
+    throw error;
+  } finally {
+    client.release(broken);
+  }
+}
+
+/**
+ * Locks an existing scope row for the rest of the transaction and returns its frame. Every writer of a scope
+ * takes this lock first. A scope row of an unknown store version is refused before any write.
+ */
+export async function lockScope(client: PoolClient, scopeKey: string): Promise<string> {
+  const head = await client.query<{ state_version: number; frame: string }>(
+    'SELECT state_version, frame::text AS frame FROM scope WHERE scope = $1 FOR UPDATE', [scopeKey]);
+  if (!head.rows[0]) throw new Error('Unknown hosted collaboration scope');
+  if (!SUPPORTED_STORE_VERSIONS.has(head.rows[0].state_version)) throw new HostedStoreVersionError(head.rows[0].state_version);
+  return head.rows[0].frame;
 }

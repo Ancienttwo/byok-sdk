@@ -140,7 +140,7 @@ it('sends a due delivery and keeps the timer at 60 seconds while a routine wake 
   ledger.transaction(s => {
     const channel = stateOf(s.application).channel ??= { inbounds: {}, pushRoutes: {}, deliveries: {} };
     channel.pushRoutes.push = { kind: 'push', id: 'push', conversation, channel: 'fake', target: 'chat', optedInBy: 'owner', optedInAt: now };
-    channel.deliveries.due = { id: 'due', taskId: 'task', messageId: 'message', body: 'Report', conversation, channel: 'fake',
+    channel.deliveries.due = { id: 'due', taskId: 'task', turnId: 'turn', messageId: 'message', body: 'Report', conversation, channel: 'fake',
       route: { kind: 'push', pushRouteId: 'push' }, state: 'pending', attempts: 0, nextAttemptAt: now };
   });
   const before = probe.attempts;

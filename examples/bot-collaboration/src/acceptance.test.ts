@@ -126,11 +126,12 @@ it('applies routine policy before questions and delegation, and publishes cards 
   expect(projections.slice(0, 2)).toEqual(['card', 'question']);
 });
 
-it('uses state version 2 and rejects version 1, unsupported or unversioned saved state without resetting it', () => {
-  expect(stateOf({}).version).toBe(2);
+it('uses state version 3 and rejects version 1, version 2, unsupported or unversioned saved state without resetting it', () => {
+  expect(stateOf({}).version).toBe(3);
   const savedStates: Array<[Json, string]> = [
     [{ version: 1, sequence: 7 }, 'Bot collaboration state version 1 is not supported. Bot routines moved to K4 routines.'],
-    [{ version: 3, sequence: 7 }, 'Unsupported Bot collaboration state version'], [{ sequence: 7 }, 'Unsupported Bot collaboration state version']];
+    [{ version: 2, sequence: 7 }, 'Bot collaboration state version 2 is not supported. Retention moved settled rows out of the state.'],
+    [{ version: 4, sequence: 7 }, 'Unsupported Bot collaboration state version'], [{ sequence: 7 }, 'Unsupported Bot collaboration state version']];
   for (const [saved, message] of savedStates) {
     const application: Record<string, Json> = { collaboration: saved };
     expect(() => stateOf(application)).toThrow(message);

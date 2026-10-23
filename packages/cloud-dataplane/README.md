@@ -268,6 +268,41 @@ host-owned dead-letter replay path to rebind frozen envelope bytes to the new
 mailbox sequence; core remains protocol-free. Nothing depends back on it; no ambient AWS
 credential-provider chain is installed.
 
+## E2EE member state
+
+`PostgresE2eeMemberStore` is the store behind the E2EE member calls of
+`ByokCloud` (#654 E2c): `appendMemberChainEntries`, `readMemberChain`,
+`putScopeKeyPackages`, `readScopeKeyPackages`, `readMemberKeyRegistration` and
+`relayClientPairingMac`. It ships from `./runtime`. Pass it as the
+`e2eeMemberStore` option; without it, those calls throw
+`e2ee_member_store_unavailable`.
+
+```ts
+import { PostgresE2eeMemberStore } from '@byok-sdk/cloud-dataplane/runtime';
+
+const cloud = createByokCloud({
+  // ...the usual stores...
+  e2eeMemberStore: new PostgresE2eeMemberStore(pool, clock),
+});
+```
+
+Migration `0027_e2ee_member.sql` adds five tables. The store keeps each signed
+value as the canonical JSON the writer sent, so a replay compares by bytes. It
+holds no key and verifies no signature; members do.
+
+- `e2ee_member_chain_entry`: first writer wins per `(tenant_id, seq)`. An
+  append must start at the stored head plus one.
+- `e2ee_scope_epoch`: the first package of a scope epoch fixes its `keyId`.
+  A package with another `keyId` is refused; a package with the same `keyId`
+  replaces its recipient's row (a KEM re-wrap).
+- `e2ee_scope_key_package`, `e2ee_member_key` and `e2ee_pairing_mac`: the
+  packages, the device registrations and the pairing MACs. A MAC is returned
+  only before its expiry; the next write replaces it, so there is no sweep.
+
+Device revocation and machine supersession delete the device's registration,
+MACs and the packages addressed to its member in the device transaction.
+Tenant erasure deletes all five tables.
+
 ## Task redaction
 
 `createPostgresTaskRedactionStore` is the store behind `ByokCloud.redactTasks`

@@ -50,6 +50,16 @@ export const CLOUD_ERROR_CODES = {
   task_content_redacted: 'task_content_redacted',
   /** `redactTasks` was called on a deployment that has no `taskRedactionStore`. */
   task_redaction_unavailable: 'task_redaction_unavailable',
+  /** An E2EE member call on a deployment that has no `e2eeMemberStore`. */
+  e2ee_member_store_unavailable: 'e2ee_member_store_unavailable',
+  /** A different member chain entry is stored at that seq, or the first new entry does not follow the head. Read the chain again. */
+  e2ee_member_chain_conflict: 'e2ee_member_chain_conflict',
+  /** The first package of that scope epoch fixed another `keyId`. */
+  e2ee_scope_key_conflict: 'e2ee_scope_key_conflict',
+  /** The device has not registered a member key bundle. */
+  e2ee_member_not_registered: 'e2ee_member_not_registered',
+  /** A stored E2EE member row is not the value its schema requires. Whatever wrote it broke the store contract. */
+  e2ee_member_state_unreadable: 'e2ee_member_state_unreadable',
   /** Explicit legacy dispatch target is unknown or revoked in this tenant. */
   device_not_found: 'device_not_found',
   /**

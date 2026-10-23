@@ -9,6 +9,12 @@ export function activeBot<B extends { readonly archived: boolean }>(team: { read
 export function requireMain(team: { readonly bots: Readonly<Record<string, { readonly archived: boolean; readonly mainBot: boolean }>> }, actor: string): void {
   if (!activeBot(team, actor).mainBot) throw new Error('Main Bot role required');
 }
+/** A Bot execution may name only the connector toolsets that the Host declared read-only. */
+export function admitBotToolsets(execution: { readonly payload: { readonly requiredToolsets?: readonly string[] } }, readOnlyToolsets: readonly string[] = []): void {
+  for (const id of execution.payload.requiredToolsets ?? []) {
+    if (!readOnlyToolsets.includes(id)) throw new Error(`Bot executions cannot have connector toolsets not declared read-only by the Host: ${id}`);
+  }
+}
 
 /** One Bot of an external team snapshot (#739 Q4c, T1). The Host maps `model` to its own execution template. */
 export interface TeamSnapshotBot { id: string; name: string; role: string; persona: string; model: string; mainBot: boolean }
