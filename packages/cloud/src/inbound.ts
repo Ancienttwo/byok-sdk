@@ -588,10 +588,10 @@ async function applyInboundGate(
   }
 
   if (!(DAEMON_TO_SERVER_TYPES as readonly MessageType[]).includes(envelope.type)) return refuse('type_not_allowed');
-  // This Host does not store sealed activity or approval observations yet,
-  // and it does not retain a ciphertext blob that a sealed output names.
-  if (envelope.type === 'task.progress_sealed' || envelope.type === 'task.await_approval_sealed'
-    || (envelope.payload as { sealed?: { ciphertextRef?: unknown } }).sealed?.ciphertextRef !== undefined) {
+  // A sealed output is inline only. Progress and approval rows expire and
+  // release nothing (12e), and this gate does not retain the blob of a
+  // sealed terminal or artifact.
+  if ((envelope.payload as { sealed?: { ciphertextRef?: unknown } }).sealed?.ciphertextRef !== undefined) {
     return refuse('sealed_payload_unsupported');
   }
 
@@ -733,24 +733,16 @@ async function applyInboundGate(
   }
   // A redacted task keeps no new content. A late progress or approval report
   // is complete as received, the same as one stored and then redacted.
-  if (REDACTABLE_REPORT_TYPES.includes(envelope.type) && TERMINAL_TASK_STATUSES.includes(attempt.status)
+  if (REDACTABLE_REPORT_TYPES.includes(plainTypeOf(envelope.type)) && TERMINAL_TASK_STATUSES.includes(attempt.status)
     && await stores.receipts.get(taskRedactionReceiptKey(taskId)) !== undefined) {
     return completeInboundEnvelope(stores, deviceId, envelope.id, attempt.agentRef);
   }
   const sealingRefusal = await sealedOutputRefusal(stores, deviceId, taskId, attempt.agentRef, envelope);
   if (sealingRefusal !== undefined) return sealingRefusal;
-  if (envelope.type === 'task.progress' && envelope.payload.events.length > 0) {
+  const activityBatch = activityBatchOf(taskId, envelope);
+  if (activityBatch !== undefined) {
     try {
-      validateActivityBatch(
-        {
-          taskId,
-          sourceEnvelopeId: envelope.id,
-          batchSeq: envelope.payload.seq,
-          events: envelope.payload.events,
-          dropped: 0,
-        },
-        activityBounds,
-      );
+      validateActivityBatch(activityBatch, activityBounds);
     } catch (caught) {
       if (isCloudError(caught, 'activity_batch_too_large')) return refuse('activity_batch_too_large');
       if (isCloudError(caught, 'coordination_input_invalid')) return refuse('activity_batch_invalid');
@@ -844,21 +836,13 @@ async function applyLifecycle(
       await recordTerminal(stores, taskId, envelope);
       return;
     case 'task.progress':
-      if (envelope.payload.events.length > 0) {
-        await appendActivityEvents(
-          stores.activity,
-          {
-            taskId,
-            sourceEnvelopeId: envelope.id,
-            batchSeq: envelope.payload.seq,
-            events: envelope.payload.events,
-            dropped: 0,
-          },
-          activityBounds,
-        );
-      }
+    case 'task.progress_sealed': {
+      const batch = activityBatchOf(taskId, envelope);
+      if (batch !== undefined) await appendActivityEvents(stores.activity, batch, activityBounds);
       return;
+    }
     case 'task.await_approval':
+    case 'task.await_approval_sealed':
       await stores.approvals.append(approvalTimelineAppendInput(taskId, envelope)!);
       return;
     case 'task.approval_resolved':
@@ -884,6 +868,16 @@ async function applyLifecycle(
   }
 }
 
+/** The activity batch of a progress report; an empty plaintext batch has none. */
+function activityBatchOf(taskId: string, envelope: Envelope): Parameters<typeof appendActivityEvents>[1] | undefined {
+  const source = { taskId, sourceEnvelopeId: envelope.id, dropped: 0 };
+  if (envelope.type === 'task.progress_sealed') return { ...source, batchSeq: envelope.payload.seq, sealed: envelope.payload.sealed };
+  if (envelope.type === 'task.progress' && envelope.payload.events.length > 0) {
+    return { ...source, batchSeq: envelope.payload.seq, events: envelope.payload.events };
+  }
+  return undefined;
+}
+
 function approvalTimelineAppendInput(
   taskId: string,
   envelope: Envelope,
@@ -900,6 +894,12 @@ function approvalTimelineAppendInput(
             ? {}
             : { approvalId: envelope.payload.approvalId }),
         },
+      };
+    case 'task.await_approval_sealed':
+      return {
+        taskId,
+        sourceEnvelopeId: envelope.id,
+        event: { type: 'approval_requested', approvalId: envelope.payload.approvalId, sealed: envelope.payload.sealed },
       };
     case 'task.approval_resolved':
       return {
