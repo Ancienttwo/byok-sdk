@@ -61,8 +61,9 @@ test('a deploy/sql migration selects cloud-dataplane, its Postgres suites and th
     assert.match(readFileSync(new URL(reader, root), 'utf8'), /deploy\/sql/, reader);
   }
   for (const path of ['deploy/sql/0026_agent_message_draft.sql', 'deploy/sql/0027_e2ee_member.sql']) {
+    // The hosted example depends on cloud-dataplane (#793 D2b-1), so the graph also selects it.
     assert.deepEqual(selectImpact([path]), {
-      dirs: ['packages/cloud-dataplane'], files: [path], families: ['dataplane', 'release-pack-migrate'], reason: 'impacted',
+      dirs: ['examples/hosted-bot-collaboration', 'packages/cloud-dataplane'], files: [path], families: ['dataplane', 'release-pack-migrate'], reason: 'impacted',
     });
   }
   for (const path of ['deploy/sql/README.md', 'deploy/sql/0027.sql', 'deploy/sql/0027_e2ee.sh', 'deploy/sql/sub/0027_e2ee.sql']) {
@@ -73,8 +74,9 @@ test('a deploy/sql migration selects cloud-dataplane, its Postgres suites and th
 test('the control-plane SQL invariants select the cloud-dataplane suites that run them (#654)', () => {
   const path = 'tests/sql/control_plane_invariants.sql';
   assert.match(readFileSync(new URL('packages/cloud-dataplane/src/__tests__/invariants.test.ts', root), 'utf8'), /tests\/sql\/control_plane_invariants\.sql/);
+  // The hosted example depends on cloud-dataplane (#793 D2b-1), so the graph also selects it.
   assert.deepEqual(selectImpact([path]), {
-    dirs: ['packages/cloud-dataplane'], files: [path], families: ['dataplane'], reason: 'impacted',
+    dirs: ['examples/hosted-bot-collaboration', 'packages/cloud-dataplane'], files: [path], families: ['dataplane'], reason: 'impacted',
   });
   assert.throws(() => selectImpact(['tests/sql/other.sql']), /reviewed CI mapping required/i);
 });
