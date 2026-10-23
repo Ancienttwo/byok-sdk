@@ -27,6 +27,8 @@ const NOW = Date.UTC(2026, 0, 1);
 /** The first slot of a routine created at `NOW`, and the next one. */
 const FIRST = slotAfter(NOW - 1), SECOND = slotAfter(FIRST);
 const SYNC = { ...SYNC_OPTIONS, now: NOW, history: undefined };
+/** The fixture records each occurrence this long after its slot, so a time from the record differs from one from the slot. */
+const RECORD_DELAY_MS = 1_000;
 
 
 const routineRow = async (scope: string, id: string) => (await query<{ ordinal: string; definition: RoutineDefinition; pending: RoutineDefinition | null;
@@ -78,8 +80,8 @@ describe.skipIf(POSTGRES_URL === undefined)('H routines on real Postgres (#793 D
   async function fired(scope: string, id: string, plannedAt: number, version = 1) {
     const trigger = { kind: 'scheduled' as const, plannedAt }, key = hash([id, version, trigger]), next = slotAfter(plannedAt);
     await query(`INSERT INTO ${table('occurrence')} (scope, key, ordinal, routine_id, definition_version, trigger_kind, planned_at, recorded_at, next_at)
-      SELECT $1, $2, coalesce(max(ordinal) + 1, 0), $3, $4, 'scheduled', $5, $5, $6 FROM ${table('occurrence')} WHERE scope = $1`,
-    [storedKey(scope), storedKey(key), storedKey(id), version, plannedAt, next]);
+      SELECT $1, $2, coalesce(max(ordinal) + 1, 0), $3, $4, 'scheduled', $5, $6, $7 FROM ${table('occurrence')} WHERE scope = $1`,
+    [storedKey(scope), storedKey(key), storedKey(id), version, plannedAt, plannedAt + RECORD_DELAY_MS, next]);
     await query(`UPDATE ${table('routine')} SET next_at = $3 WHERE scope = $1 AND id = $2`, [storedKey(scope), storedKey(id), next]);
     await store().seed(scope, state => routineTurn(state, { type: 'bot-routine', input: { owner: 'main', authority: 'owner', prompt: PROMPT },
       occurrenceKey: key, routineId: id, definitionVersion: version, trigger }));
@@ -126,11 +128,37 @@ describe.skipIf(POSTGRES_URL === undefined)('H routines on real Postgres (#793 D
     const { key, turn } = await fired(scope, id, FIRST);
     await store().sync(scope, SYNC);
     const row = (await intentRow(scope, turn))!;
-    expect(row).toMatchObject({ source: 'routine', wait_until: String(FIRST + ROUTINE_WAIT_MS), retry_until: String(SECOND), tries: 0, conclusion: null });
+    expect(row).toMatchObject({ source: 'routine', wait_until: String(FIRST + RECORD_DELAY_MS + ROUTINE_WAIT_MS), retry_until: String(SECOND), tries: 0,
+      conclusion: null });
     expect(row.input).not.toHaveProperty('retry');
     expect((row.input as { payload: { instruction: string } }).payload.instruction).toContain(PROMPT);
     expect(await occurrenceRow(scope, key)).toEqual({ execution_superseded: false, conclusion: null });
     expect((await store().read(scope)).turns[turn]).toMatchObject({ status: 'processing', source: 'routine' });
+  });
+
+  it('removes the successor retry_until of a promoted intent when its routine pauses, as K4 setLifecycle does', async () => {
+    const scope = await scoped(), id = await created(scope);
+    const { turn } = await fired(scope, id, FIRST);
+    await store().sync(scope, SYNC);
+    expect(await intentRow(scope, turn)).toMatchObject({ retry_until: String(SECOND), conclusion: null });
+    await store().setRoutineLifecycle(scope, 'main', id, 'paused', FIRST);
+    expect(await intentRow(scope, turn)).toMatchObject({ retry_until: null, conclusion: null });
+  });
+
+  it('updates and cancels a routine through outcome actions with the store\'s own ports', async () => {
+    const scope = await scoped(), id = await created(scope);
+    await store().seed(scope, state => {
+      for (const turnId of ['t2', 't3']) {
+        state.turns[turnId] = { id: turnId, root: turnId, botId: 'main', source: 'user', request: 'Change the plan', hop: 0, status: 'queued', authority: 'owner' };
+      }
+    });
+    // The sync freezes both Turns with an outcome schema that lists the routine.
+    await store().sync(scope, SYNC);
+    expect(await store().finish(scope, 't2', completed('t2', { update_routine: [{ routineId: id, prompt: 'Version 2' }] }), ports)).toBe('succeeded');
+    expect(await routineRow(scope, id)).toMatchObject({ pending: null, lifecycle: 'active', next_at: String(FIRST),
+      definition: { version: 2, hostOccurrence: { input: { prompt: 'Version 2' } } } });
+    expect(await store().finish(scope, 't3', completed('t3', { cancel_routine: [{ routineId: id }] }), ports)).toBe('succeeded');
+    expect(await routineRow(scope, id)).toMatchObject({ lifecycle: 'completed', next_at: null });
   });
 
   it('promotes the routine Turn of a paused routine with no retry_until', async () => {
@@ -224,7 +252,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H routines on real Postgres (#793 D
       expect(await routineRow(scope, id)).toMatchObject({ definition: { version: 2 }, pending: null, next_at: String(slotAfter(now)) });
 
     it('the claim expiry', async () => {
-      const { scope, id, turn } = await staged(), now = FIRST + ROUTINE_WAIT_MS;
+      const { scope, id, turn } = await staged(), now = FIRST + RECORD_DELAY_MS + ROUTINE_WAIT_MS;
       await new HostedSubmitter(opened!.pool, store().schema, { port: () => { throw new Error('No SDK call'); }, now: () => now }).run();
       expect(await intentRow(scope, turn)).toMatchObject({ conclusion: 'expired' });
       await switched(scope, id, now);
