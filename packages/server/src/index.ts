@@ -501,6 +501,16 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
 
   // An in-flight exclusion only; persisted task and receipt stores own identity.
   const dispatching = new Set<string>();
+  /**
+   * #654: this server builds plaintext offers from named fields only, so a
+   * `sealing` or `sealed` key passed through a type cast would be dropped and
+   * the task would run in plaintext. Refuse it, as the cloud plaintext lanes do.
+   */
+  function refuseSealedFields(input: unknown): void {
+    if (input !== null && typeof input === 'object' && ('sealing' in input || 'sealed' in input)) {
+      throw new ByokCloudError('coordination_input_invalid', 'this server has no sealed dispatch; sealing and sealed are refused');
+    }
+  }
   async function dispatchWithIdentity(input: DispatchInput): Promise<TaskHandle> {
     const submission = { ...input };
     const taskId = submission.taskId;
@@ -515,6 +525,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
   async function dispatchInternal(
     input: DispatchInput,
   ): Promise<TaskHandle> {
+    refuseSealedFields(input);
     const sessionRef = 'sessionRef' in input ? input.sessionRef : undefined;
     const agentRef = input.agentRef === undefined ? undefined : AgentRefSchema.parse(input.agentRef);
     const egressPolicy =
@@ -786,6 +797,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
 
     executions: {
       async submit(input) {
+        refuseSealedFields((input as { payload?: unknown } | undefined)?.payload);
         const submission = AgentExecutionInputSchema.parse(input);
         if (submission.payload.agentMemory === 'read-write' && submission.payload.homeAccess === 'memory-reader') {
           throw new Error('agentMemory read-write requires a writer; a memory-reader Attempt reads memory only');
