@@ -2,7 +2,12 @@ import { readTaskAgentMessageDraft, type AgentMessageDraftCursor, type AgentMess
 import { runMaintenanceSteps, type MaintenanceInput, type MaintenanceReport } from './maintenance';
 import type { DeviceAssertionReplayAuthority } from '@byok-sdk/core';
 import { readTaskAgentMessage, type TaskAgentMessage } from './task-agent-message';
-import { AgentExecutionInputSchema, SealedAgentExecutionInputSchema, type AgentExecutionInput } from './agent-execution';
+import {
+  AgentExecutionInputSchema,
+  SealedAgentExecutionInputSchema,
+  type AgentExecutionInput,
+  type SealedAgentExecutionInput,
+} from './agent-execution';
 import { uuidFromSha256, taskOfferMessageId } from './offer-identity';
 import { HarnessIdSchema, requiredReceiverCapabilities } from '@byok-sdk/protocol';
 /**
@@ -372,22 +377,17 @@ export type PublicRouteLimiter = (
   request: Request,
 ) => boolean | Promise<boolean>;
 
-/**
- * #654: an offer payload that carries `sealing` or `sealed` travels as the
- * sealed offer type of its lane (`task.offer_sealed`, …), gated on the
- * device's `sealed-payload-v1`. A plaintext lane never strips them.
- */
 export interface EnqueueOfferInput {
   /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
   readonly taskId?: string;
-  readonly payload: TaskOfferPayload | TaskOfferSealedPayload;
+  readonly payload: TaskOfferPayload;
 }
 
 export interface EnqueueToolsetOfferInput {
   /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
   readonly taskId?: string;
   /** Strict control payload containing logical ids only; executable MCP definitions are not part of this type. */
-  readonly payload: TaskOfferWithToolsetsPayload | TaskOfferWithToolsetsSealedPayload;
+  readonly payload: TaskOfferWithToolsetsPayload;
 }
 
 /**
@@ -404,7 +404,7 @@ export interface AgentDispatchInput {
    * optional; this host lane does not: a fresh Agent execution is admitted only
    * through {@link ByokCloud.submitAgentExecution}.
    */
-  readonly payload: (TaskOfferForAgentPayload | TaskOfferForAgentSealedPayload) & { readonly sessionRef: string };
+  readonly payload: TaskOfferForAgentPayload & { readonly sessionRef: string };
 }
 
 /**
@@ -430,9 +430,68 @@ export interface PreparedDispatchInput {
 export interface AgentEgressDispatchInput {
   /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
   readonly taskId?: string;
-  readonly payload: TaskOfferForAgentWithEgressPayload | TaskOfferForAgentWithEgressSealedPayload;
+  readonly payload: TaskOfferForAgentWithEgressPayload;
   /** Host-only product destination/freshness authority; never serialized to the daemon. */
   readonly agentMessageContext?: AgentMessageServerContext;
+}
+
+/**
+ * Sealed offer inputs (#654). Each sealed wire type has its own entry, as
+ * {@link PreparedDispatchInput} does: a plaintext lane refuses `sealing` and
+ * `sealed`, so a caller cannot reach the plaintext lane by a missing field,
+ * and no lane strips a sealing policy.
+ */
+export interface EnqueueSealedOfferInput {
+  /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
+  readonly taskId?: string;
+  readonly payload: TaskOfferSealedPayload;
+}
+
+/** The sealed lane of {@link EnqueueToolsetOfferInput} (#654). */
+export interface EnqueueSealedToolsetOfferInput {
+  /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
+  readonly taskId?: string;
+  readonly payload: TaskOfferWithToolsetsSealedPayload;
+}
+
+/** The sealed lane of {@link AgentDispatchInput} (#654). Resume-only, as the plaintext lane is. */
+export interface SealedAgentDispatchInput {
+  /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
+  readonly taskId?: string;
+  readonly payload: TaskOfferForAgentSealedPayload & { readonly sessionRef: string };
+}
+
+/** The sealed lane of {@link AgentEgressDispatchInput} (#654). */
+export interface SealedAgentEgressDispatchInput {
+  /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
+  readonly taskId?: string;
+  readonly payload: TaskOfferForAgentWithEgressSealedPayload;
+  /** Host-only product destination/freshness authority; never serialized to the daemon. */
+  readonly agentMessageContext?: AgentMessageServerContext;
+}
+
+/**
+ * A plaintext lane refuses the sealed fields (#654), before any device read,
+ * attempt, receipt or mailbox write. The plaintext payload schemas drop
+ * unknown keys, so without this a sealing policy would be lost silently.
+ */
+function refuseSealedFields(payload: unknown, fields: readonly string[], sealedEntry: string): void {
+  if (payload === null || typeof payload !== 'object') return;
+  const present = fields.filter((field) => field in payload);
+  if (present.length > 0) {
+    throw new ByokCloudError('coordination_input_invalid', `${present.join(', ')} belongs to the sealed lane; use ${sealedEntry}`);
+  }
+}
+
+/** Resume-only Agent lanes refuse a payload without an exact `sessionRef`. */
+function assertResumeSessionRef(payload: { readonly sessionRef?: unknown }): void {
+  const sessionRef: unknown = payload.sessionRef;
+  if (typeof sessionRef !== 'string' || sessionRef.length === 0) {
+    throw new ByokCloudError(
+      'coordination_input_invalid',
+      'Agent resume offer requires an exact sessionRef; use submitAgentExecution for fresh execution',
+    );
+  }
 }
 
 /** A task-free, independently capability-gated Agent content read. */
@@ -511,12 +570,6 @@ export type TaskOfferReadback = {
   }
 }[TaskOfferType];
 
-/** An offer payload that names a sealing policy or a sealed member goes on the sealed lane (#654). */
-function isSealedOfferPayload(payload: unknown): boolean {
-  if (payload === null || typeof payload !== 'object') return false;
-  return ('sealing' in payload && payload.sealing !== undefined) || ('sealed' in payload && payload.sealed !== undefined);
-}
-
 export interface EnqueuedOffer {
   readonly taskId: string;
   /** The per-(tenant, device) delivery seq — the daemon's redelivery cursor position for this envelope. */
@@ -584,6 +637,18 @@ export interface ByokCloud {
    * A delivered taskId conflicts; recover through exact offer readback.
    */
   submitAgentExecution(tenant: TenantId, input: AgentExecutionInput): Promise<EnqueuedOffer>;
+  /**
+   * Sealed offer lanes (#654). Each sends the sealed wire type of its
+   * plaintext sibling with the same rules, and needs every flag that
+   * `requiredReceiverCapabilities` names for it, `sealed-payload-v1` first.
+   * The plaintext siblings refuse `sealing` and `sealed` with
+   * `coordination_input_invalid`.
+   */
+  enqueueSealedOffer(tenant: TenantId, deviceId: string, input: EnqueueSealedOfferInput): Promise<EnqueuedOffer>;
+  enqueueSealedToolsetOffer(tenant: TenantId, deviceId: string, input: EnqueueSealedToolsetOfferInput): Promise<EnqueuedOffer>;
+  enqueueSealedAgentOffer(tenant: TenantId, deviceId: string, input: SealedAgentDispatchInput): Promise<EnqueuedOffer>;
+  enqueueSealedAgentEgressOffer(tenant: TenantId, deviceId: string, input: SealedAgentEgressDispatchInput): Promise<EnqueuedOffer>;
+  submitSealedAgentExecution(tenant: TenantId, input: SealedAgentExecutionInput): Promise<EnqueuedOffer>;
   /** Host control plane: request one policy-bound content read without a task fallback. */
   enqueueAgentContentRead(
     tenant: TenantId,
@@ -742,10 +807,7 @@ export interface ByokCloud {
    *      {@link SteerRejectedError} `task_not_running`;
    *   4. the claim snapshot does not positively say `steer: true` ->
    *      {@link SteerRejectedError} `steer_unsupported_runtime`, including when
-   *      there is no snapshot at all;
-   *   5. a sealed steer (`{ steerId, sealed }`, #654) travels as
-   *      `task.steer_sealed`, and a device that did not durably advertise
-   *      `sealed-payload-v1` refuses it with `agent_capability_missing`.
+   *      there is no snapshot at all.
    *
    * Delivery is the same best-effort notification every control message has:
    * the enqueued envelope is durable, and whether the runtime acted on it is
@@ -754,7 +816,18 @@ export interface ByokCloud {
   steerTask(
     tenant: TenantId,
     taskId: string,
-    payload: TaskSteerPayload | TaskSteerSealedPayload,
+    payload: TaskSteerPayload,
+  ): Promise<EnqueuedAgentControl>;
+  /**
+   * The sealed lane of {@link steerTask} (#654): `task.steer_sealed`, with the
+   * same gates in the same order, and then the device's durable
+   * `sealed-payload-v1` (`agent_capability_missing`). `steerTask` refuses
+   * `sealed` and `steerId`.
+   */
+  steerSealedTask(
+    tenant: TenantId,
+    taskId: string,
+    payload: TaskSteerSealedPayload,
   ): Promise<EnqueuedAgentControl>;
   readTaskAttempt(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
   /** Read the original executable offer; missing/corrupt authority never becomes a guessed payload. */
@@ -1610,8 +1683,33 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   async function steerTask(
     tenant: TenantId,
     taskId: string,
-    payload: TaskSteerPayload | TaskSteerSealedPayload,
+    payload: TaskSteerPayload,
   ): Promise<EnqueuedAgentControl> {
+    refuseSealedFields(payload, ['sealed', 'steerId'], 'steerSealedTask');
+    const ownerDeviceId = await runningSteerTarget(tenant, taskId);
+    const messageId = options.crypto.randomUuid();
+    return enqueueAgentControlEnvelope(tenant, ownerDeviceId, messageId, (seq) =>
+      createEnvelope('task.steer', { text: payload.text }, { id: messageId, taskId, seq }),
+    );
+  }
+
+  /** The sealed steer: the same gates, then the device flag. See {@link ByokCloud.steerSealedTask}. */
+  async function steerSealedTask(
+    tenant: TenantId,
+    taskId: string,
+    payload: TaskSteerSealedPayload,
+  ): Promise<EnqueuedAgentControl> {
+    const sealed = MESSAGE_PAYLOAD_SCHEMAS['task.steer_sealed'].parse(payload);
+    const ownerDeviceId = await runningSteerTarget(tenant, taskId);
+    await assertAgentCapabilities(tenant, ownerDeviceId, requiredReceiverCapabilities('task.steer_sealed', sealed));
+    const messageId = options.crypto.randomUuid();
+    return enqueueAgentControlEnvelope(tenant, ownerDeviceId, messageId, (seq) =>
+      createEnvelope('task.steer_sealed', sealed, { id: messageId, taskId, seq }),
+    );
+  }
+
+  /** The steer gates 1 to 4; returns the device that owns the running task. */
+  async function runningSteerTarget(tenant: TenantId, taskId: string): Promise<string> {
     const stores = tenantStoresFor(controlPlane(tenant), root);
     const attempt = await stores.tasks.get(taskId);
     if (attempt === undefined) {
@@ -1637,19 +1735,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         attempt.claimedRuntime,
       );
     }
-    const messageId = options.crypto.randomUuid();
-    // A sealed member or steer id selects the sealed lane, whose strict schema
-    // also refuses a plaintext `text` next to the sealed one.
-    if (!('sealed' in payload) && !('steerId' in payload)) {
-      return enqueueAgentControlEnvelope(tenant, ownerDeviceId, messageId, (seq) =>
-        createEnvelope('task.steer', { text: payload.text }, { id: messageId, taskId, seq }),
-      );
-    }
-    const sealed = MESSAGE_PAYLOAD_SCHEMAS['task.steer_sealed'].parse(payload);
-    await assertAgentCapabilities(tenant, ownerDeviceId, requiredReceiverCapabilities('task.steer_sealed', sealed));
-    return enqueueAgentControlEnvelope(tenant, ownerDeviceId, messageId, (seq) =>
-      createEnvelope('task.steer_sealed', sealed, { id: messageId, taskId, seq }),
-    );
+    return ownerDeviceId;
   }
 
   async function getAgentHomeProjectionStatus(
@@ -1963,9 +2049,22 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   async function submitAgentExecution(
     tenant: TenantId, input: AgentExecutionInput,
   ): Promise<EnqueuedOffer> {
-    const sealedType = isSealedOfferPayload((input as { payload?: unknown } | undefined)?.payload);
-    const validated = (sealedType ? SealedAgentExecutionInputSchema : AgentExecutionInputSchema).parse(input);
-    const type = sealedType ? 'task.offer_for_agent_with_egress_fresh_sealed' : 'task.offer_for_agent_with_egress_fresh';
+    refuseSealedFields((input as { payload?: unknown } | undefined)?.payload, ['sealing', 'sealed'], 'submitSealedAgentExecution');
+    return submitExecution(tenant, 'task.offer_for_agent_with_egress_fresh', AgentExecutionInputSchema.parse(input));
+  }
+
+  async function submitSealedAgentExecution(
+    tenant: TenantId, input: SealedAgentExecutionInput,
+  ): Promise<EnqueuedOffer> {
+    return submitExecution(tenant, 'task.offer_for_agent_with_egress_fresh_sealed', SealedAgentExecutionInputSchema.parse(input));
+  }
+
+  /** One fresh Agent execution on the plaintext or the sealed lane; `validated` is the lane's parsed input. */
+  async function submitExecution(
+    tenant: TenantId,
+    type: 'task.offer_for_agent_with_egress_fresh' | 'task.offer_for_agent_with_egress_fresh_sealed',
+    validated: AgentExecutionInput | SealedAgentExecutionInput,
+  ): Promise<EnqueuedOffer> {
     const { deviceId, payload } = validated;
     if (payload.messageEgress !== undefined && typeof options.agentMessage?.consume !== 'function') {
       throw new Error('Agent execution with messageEgress requires a registered Agent message consumer.');
@@ -2008,20 +2107,18 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     },
 
     async enqueueOffer(tenant, deviceId, input) {
+      refuseSealedFields(input.payload, ['sealing', 'sealed'], 'enqueueSealedOffer');
       await assertLegacyAdmission(tenant, deviceId);
-      const type = isSealedOfferPayload(input.payload) ? 'task.offer_sealed' : 'task.offer';
-      if (type === 'task.offer_sealed') await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities(type, input.payload));
       return enqueueTaskEnvelope(tenant, deviceId, input.taskId, undefined, (taskId, seq, messageId) =>
-        createEnvelope(type, input.payload as never, { id: messageId, taskId, seq }),
+        createEnvelope('task.offer', input.payload, { id: messageId, taskId, seq }),
       );
     },
 
     async enqueueToolsetOffer(tenant, deviceId, input) {
+      refuseSealedFields(input.payload, ['sealing', 'sealed'], 'enqueueSealedToolsetOffer');
       await assertLegacyAdmission(tenant, deviceId);
-      const type = isSealedOfferPayload(input.payload) ? 'task.offer_with_toolsets_sealed' : 'task.offer_with_toolsets';
-      if (type === 'task.offer_with_toolsets_sealed') await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities(type, input.payload));
       return enqueueTaskEnvelope(tenant, deviceId, input.taskId, undefined, (taskId, seq, messageId) =>
-        createEnvelope(type, input.payload as never, { id: messageId, taskId, seq }),
+        createEnvelope('task.offer_with_toolsets', input.payload, { id: messageId, taskId, seq }),
       );
     },
 
@@ -2031,21 +2128,15 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       // `submitAgentExecution`. Checked first, before capability admission and
       // any attempt, receipt or mailbox write, so a JS caller always gets the
       // same code whatever the target device's state.
-      const sessionRef: unknown = input.payload.sessionRef;
-      if (typeof sessionRef !== 'string' || sessionRef.length === 0) {
-        throw new ByokCloudError(
-          'coordination_input_invalid',
-          'Agent resume offer requires an exact sessionRef; use submitAgentExecution for fresh execution',
-        );
-      }
-      const type = isSealedOfferPayload(input.payload) ? 'task.offer_for_agent_sealed' : 'task.offer_for_agent';
-      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities(type, input.payload));
+      refuseSealedFields(input.payload, ['sealing', 'sealed'], 'enqueueSealedAgentOffer');
+      assertResumeSessionRef(input.payload);
+      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer_for_agent', input.payload));
       // Parse the strict control payload before reserving a mailbox sequence.
       // A malformed/oversized AgentRef therefore cannot leave a durable
       // delivery row behind.
-      const payload = (type === 'task.offer_for_agent' ? TaskOfferForAgentPayloadSchema : MESSAGE_PAYLOAD_SCHEMAS[type]).parse(input.payload);
+      const payload = TaskOfferForAgentPayloadSchema.parse(input.payload);
       return enqueueTaskEnvelope(tenant, deviceId, input.taskId, payload.agentRef, (taskId, seq, messageId) =>
-        createEnvelope(type, payload as never, { id: messageId, taskId, seq }),
+        createEnvelope('task.offer_for_agent', payload, { id: messageId, taskId, seq }),
       );
     },
 
@@ -2064,21 +2155,61 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     },
 
     async enqueueAgentEgressOffer(tenant, deviceId, input) {
-      const type = isSealedOfferPayload(input.payload) ? 'task.offer_for_agent_with_egress_sealed' : 'task.offer_for_agent_with_egress';
-      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities(type, input.payload));
-      const payload = (type === 'task.offer_for_agent_with_egress' ? TaskOfferForAgentWithEgressPayloadSchema : MESSAGE_PAYLOAD_SCHEMAS[type]).parse(input.payload);
+      refuseSealedFields(input.payload, ['sealing', 'sealed'], 'enqueueSealedAgentEgressOffer');
+      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer_for_agent_with_egress', input.payload));
+      const payload = TaskOfferForAgentWithEgressPayloadSchema.parse(input.payload);
       const enqueued = await enqueueTaskEnvelope(
         tenant,
         deviceId,
         input.taskId,
         payload.agentRef,
-        (taskId, seq, messageId) => createEnvelope(type, payload as never, { id: messageId, taskId, seq }),
+        (taskId, seq, messageId) => createEnvelope('task.offer_for_agent_with_egress', payload, { id: messageId, taskId, seq }),
         agentMessageOfferWriter(deviceId, payload, input.agentMessageContext),
       );
       return enqueued;
     },
 
     submitAgentExecution,
+
+    async enqueueSealedOffer(tenant, deviceId, input) {
+      await assertLegacyAdmission(tenant, deviceId);
+      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer_sealed', input.payload));
+      return enqueueTaskEnvelope(tenant, deviceId, input.taskId, undefined, (taskId, seq, messageId) =>
+        createEnvelope('task.offer_sealed', input.payload, { id: messageId, taskId, seq }),
+      );
+    },
+
+    async enqueueSealedToolsetOffer(tenant, deviceId, input) {
+      await assertLegacyAdmission(tenant, deviceId);
+      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer_with_toolsets_sealed', input.payload));
+      return enqueueTaskEnvelope(tenant, deviceId, input.taskId, undefined, (taskId, seq, messageId) =>
+        createEnvelope('task.offer_with_toolsets_sealed', input.payload, { id: messageId, taskId, seq }),
+      );
+    },
+
+    async enqueueSealedAgentOffer(tenant, deviceId, input) {
+      assertResumeSessionRef(input.payload);
+      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer_for_agent_sealed', input.payload));
+      const payload = MESSAGE_PAYLOAD_SCHEMAS['task.offer_for_agent_sealed'].parse(input.payload);
+      return enqueueTaskEnvelope(tenant, deviceId, input.taskId, payload.agentRef, (taskId, seq, messageId) =>
+        createEnvelope('task.offer_for_agent_sealed', payload, { id: messageId, taskId, seq }),
+      );
+    },
+
+    async enqueueSealedAgentEgressOffer(tenant, deviceId, input) {
+      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer_for_agent_with_egress_sealed', input.payload));
+      const payload = MESSAGE_PAYLOAD_SCHEMAS['task.offer_for_agent_with_egress_sealed'].parse(input.payload);
+      return enqueueTaskEnvelope(
+        tenant,
+        deviceId,
+        input.taskId,
+        payload.agentRef,
+        (taskId, seq, messageId) => createEnvelope('task.offer_for_agent_with_egress_sealed', payload, { id: messageId, taskId, seq }),
+        agentMessageOfferWriter(deviceId, payload, input.agentMessageContext),
+      );
+    },
+
+    submitSealedAgentExecution,
 
     async enqueueAgentContentRead(tenant, deviceId, input) {
       const payload = AgentContentReadPayloadSchema.parse(input.payload);
@@ -2308,6 +2439,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     },
 
     steerTask,
+    steerSealedTask,
 
     async cancelTask(tenant, taskId, reason) {
       const stores = tenantStoresFor(controlPlane(tenant), root);

@@ -1074,14 +1074,16 @@ plaintext types do not change.
 | `task.decline_sealed` | `task.decline` | `task-output` | | `reason` | |
 | `task.cancelled_sealed` | `task.cancelled` | `task-output` | | `reason` | |
 | `task.progress_sealed` | `task.progress` | `task-output` | `seq` | `events` | |
-| `task.artifact_sealed` | `task.artifact` | `task-output` | `name` | `inline` | `blobRef` |
+| `task.artifact_sealed` | `task.artifact` | `task-output` | `artifactId` (UUID, required) | `inline` | `blobRef` |
 | `task.await_approval_sealed` | `task.await_approval` | `task-output` | `approvalId` (required) | `summary` | |
 
 A sealed type is its plaintext type without the moved and dropped fields, plus
 `sealed`. The receiver opens `sealed`, merges the opened object back, and
 validates the result as the plaintext type. The opened object carries only
 moved fields. The identity fields name the write in the AAD and the content
-MAC, after the envelope `task_id`. A sealed message carries no plaintext blob
+MAC, after the envelope `task_id`. `steerId` and `artifactId` are new required
+fields of the sealed types only. Two artifacts of one task can share a `name`,
+so `name` is not the artifact identity. A sealed message carries no plaintext blob
 reference, because blob bytes have no sealing rule yet. `SEALED_SPLIT_TABLE`
 is the one authority for this table.
 

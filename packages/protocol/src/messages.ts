@@ -1427,9 +1427,13 @@ export const TaskProgressSealedPayloadSchema = TaskProgressPayloadSchema.omit({ 
   .strict();
 export type TaskProgressSealedPayload = z.infer<typeof TaskProgressSealedPayloadSchema>;
 
-/** daemon -> server: an inline artifact of a sealed task. `inline` is sealed; a blob artifact is not carried in v1. */
+/**
+ * daemon -> server: an inline artifact of a sealed task. `inline` is sealed; a
+ * blob artifact is not carried in v1. `artifactId` names the write in the AAD
+ * and the content MAC, because two artifacts of one task may share a `name`.
+ */
 export const TaskArtifactSealedPayloadSchema = TaskArtifactPayloadSchema.omit({ inline: true, blobRef: true })
-  .extend({ sealed: SealedTaskOutputSchema })
+  .extend({ artifactId: z.uuid(), sealed: SealedTaskOutputSchema })
   .strict();
 export type TaskArtifactSealedPayload = z.infer<typeof TaskArtifactSealedPayloadSchema>;
 

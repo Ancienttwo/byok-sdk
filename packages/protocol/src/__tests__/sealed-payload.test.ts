@@ -235,7 +235,9 @@ describe('sealed payload v1: the sealed steer and output types', () => {
     expect(parse('task.artifact_sealed', artifact)).toBe(true);
     expect(parse('task.artifact_sealed', { ...artifact, inline: 'x' })).toBe(false);
     expect(parse('task.artifact_sealed', { ...artifact, blobRef }), 'blob bytes have no sealing rule yet').toBe(false);
-    expect(parse('task.artifact_sealed', { ...artifact, name: undefined }), 'identity').toBe(false);
+    expect(parse('task.artifact_sealed', { ...artifact, name: undefined }), 'name stays required').toBe(false);
+    expect(parse('task.artifact_sealed', { ...artifact, artifactId: undefined }), 'identity').toBe(false);
+    expect(parse('task.artifact_sealed', { ...artifact, artifactId: 'report.md' }), 'identity is a UUID').toBe(false);
 
     const cancelled = sealedLine('task.cancelled_sealed');
     expect(parse('task.cancelled_sealed', cancelled)).toBe(true);

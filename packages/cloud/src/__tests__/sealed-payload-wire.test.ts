@@ -11,7 +11,7 @@
  */
 import { readFileSync } from 'node:fs';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { JsonObject } from '@byok-sdk/core';
 import {
@@ -214,24 +214,41 @@ describe('sealed payload v1: a Host without sealed-payload-v1 refuses sealed inp
   );
 });
 
-describe('sealed payload v1: each hosted offer lane keeps the sealing policy (#654)', () => {
+describe('sealed payload v1: each sealed type has its own hosted entry (#654)', () => {
   type Lane = (harness: ReturnType<typeof createHarness>, deviceId: string, payload: never) => Promise<{ envelope: Envelope }>;
   const CONTEXT = { destinationBinding: 'conversation/654/turn/1' };
-  const lanes: Record<string, Lane> = {
-    'task.offer_sealed': (h, d, payload) => h.cloud.enqueueOffer(TENANT_A, d, { taskId: 'sealed-lane', payload }),
-    'task.offer_with_toolsets_sealed': (h, d, payload) => h.cloud.enqueueToolsetOffer(TENANT_A, d, { taskId: 'sealed-lane', payload }),
-    'task.offer_for_agent_sealed': (h, d, payload) => h.cloud.enqueueAgentOffer(TENANT_A, d, { taskId: 'sealed-lane', payload }),
-    'task.offer_for_agent_with_egress_sealed': (h, d, payload: { messageEgress?: unknown }) =>
-      h.cloud.enqueueAgentEgressOffer(TENANT_A, d, { taskId: 'sealed-lane', payload: payload as never, ...(payload.messageEgress === undefined ? {} : { agentMessageContext: CONTEXT }) }),
-    'task.offer_for_agent_with_egress_fresh_sealed': (h, d, payload: { messageEgress?: unknown }) =>
-      h.cloud.submitAgentExecution(TENANT_A, { taskId: 'sealed-lane', deviceId: d, payload: payload as never, ...(payload.messageEgress === undefined ? {} : { agentMessageContext: CONTEXT }) }),
+  const withContext = (payload: { messageEgress?: unknown }) => (payload.messageEgress === undefined ? {} : { agentMessageContext: CONTEXT });
+  /** Each sealed offer type: its sealed entry and its plaintext sibling. */
+  const lanes: Record<string, { sealed: Lane; plain: Lane }> = {
+    'task.offer_sealed': {
+      sealed: (h, d, payload) => h.cloud.enqueueSealedOffer(TENANT_A, d, { taskId: 'sealed-lane', payload }),
+      plain: (h, d, payload) => h.cloud.enqueueOffer(TENANT_A, d, { taskId: 'sealed-lane', payload }),
+    },
+    'task.offer_with_toolsets_sealed': {
+      sealed: (h, d, payload) => h.cloud.enqueueSealedToolsetOffer(TENANT_A, d, { taskId: 'sealed-lane', payload }),
+      plain: (h, d, payload) => h.cloud.enqueueToolsetOffer(TENANT_A, d, { taskId: 'sealed-lane', payload }),
+    },
+    'task.offer_for_agent_sealed': {
+      sealed: (h, d, payload) => h.cloud.enqueueSealedAgentOffer(TENANT_A, d, { taskId: 'sealed-lane', payload }),
+      plain: (h, d, payload) => h.cloud.enqueueAgentOffer(TENANT_A, d, { taskId: 'sealed-lane', payload }),
+    },
+    'task.offer_for_agent_with_egress_sealed': {
+      sealed: (h, d, payload) => h.cloud.enqueueSealedAgentEgressOffer(TENANT_A, d, { taskId: 'sealed-lane', payload, ...withContext(payload) }),
+      plain: (h, d, payload) => h.cloud.enqueueAgentEgressOffer(TENANT_A, d, { taskId: 'sealed-lane', payload, ...withContext(payload) }),
+    },
+    'task.offer_for_agent_with_egress_fresh_sealed': {
+      sealed: (h, d, payload) => h.cloud.submitSealedAgentExecution(TENANT_A, { taskId: 'sealed-lane', deviceId: d, payload, ...withContext(payload) }),
+      plain: (h, d, payload) => h.cloud.submitAgentExecution(TENANT_A, { taskId: 'sealed-lane', deviceId: d, payload, ...withContext(payload) }),
+    },
   };
-  // A task that seals only its output keeps a plaintext instruction: the lane must not drop its sealing.
-  const outputOnly = corpus.filter((line) => line.type in lanes && line.payload.sealed === undefined
+  const laneLines = corpus.filter((line) => line.type in lanes
     && (line.type !== 'task.offer_for_agent_with_egress_fresh_sealed' || line.payload.terminalProjection !== undefined));
+  // A task that seals only its output keeps a plaintext instruction.
+  const outputOnly = laneLines.filter((line) => line.payload.sealed === undefined);
 
-  it('has an output-only line for every lane', () => {
+  it('has an output-only line and a sealed-input line for every lane', () => {
     expect(new Set(outputOnly.map((line) => line.type))).toEqual(new Set(Object.keys(lanes)));
+    expect(new Set(laneLines.filter((line) => line.payload.sealed !== undefined).map((line) => line.type))).toEqual(new Set(Object.keys(lanes)));
   });
 
   it.each(outputOnly.map((line, index) => [index, line.type, line] as const))(
@@ -241,11 +258,27 @@ describe('sealed payload v1: each hosted offer lane keeps the sealing policy (#6
       const device = await harness.pairDevice(TENANT_A);
       const flags = requiredReceiverCapabilities(type, line.payload);
       await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: flags.filter((flag) => flag !== 'sealed-payload-v1') });
-      await expect(lanes[type]!(harness, device.deviceId, line.payload as never)).rejects.toMatchObject({ code: 'agent_capability_missing' });
+      await expect(lanes[type]!.sealed(harness, device.deviceId, line.payload as never)).rejects.toMatchObject({ code: 'agent_capability_missing' });
 
       await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: flags });
-      const enqueued = await lanes[type]!(harness, device.deviceId, line.payload as never);
+      const enqueued = await lanes[type]!.sealed(harness, device.deviceId, line.payload as never);
       expect(enqueued.envelope).toMatchObject({ type, payload: { sealing: line.payload.sealing, instruction: line.payload.instruction } });
+    },
+  );
+
+  it.each(laneLines.map((line, index) => [index, line.type, line] as const))(
+    'the plaintext sibling of line %i (%s) refuses its sealed fields before any device read or state',
+    async (_index, type, line) => {
+      const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+      const device = await harness.pairDevice(TENANT_A);
+      await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: requiredReceiverCapabilities(type, line.payload) });
+      const reads = vi.spyOn(harness.stores.devices, 'get');
+
+      await expect(lanes[type]!.plain(harness, device.deviceId, line.payload as never)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+      expect(reads).toHaveBeenCalledTimes(0);
+      expect(await harness.cloud.readTaskAttempt(TENANT_A, 'sealed-lane')).toBeUndefined();
+      const page = await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0, limit: 10 });
+      expect(page.messages).toEqual([]);
     },
   );
 });

@@ -117,7 +117,7 @@ export const SEALED_SPLIT_TABLE = Object.freeze({
     plainType: 'task.progress', category: 'task-output', identity: ['seq'], moved: ['events'], forbidden: [], digests: { 'events[].spill.blob.contentHash': 'sealed' },
   },
   'task.artifact_sealed': {
-    plainType: 'task.artifact', category: 'task-output', identity: ['name'], moved: ['inline'], forbidden: ['blobRef'], digests: { 'blobRef.contentHash': 'forbidden' },
+    plainType: 'task.artifact', category: 'task-output', identity: ['artifactId'], moved: ['inline'], forbidden: ['blobRef'], digests: { 'blobRef.contentHash': 'forbidden' },
   },
   'task.await_approval_sealed': {
     plainType: 'task.await_approval', category: 'task-output', identity: ['approvalId'], moved: ['summary'], forbidden: [], digests: {},

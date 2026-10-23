@@ -29,7 +29,7 @@ type Enqueue = (harness: CloudHarness, deviceId: string, payload: never) => Prom
  * still see no `gated` attempt and no pending mailbox row when the steer is
  * refused.
  */
-async function steerRunningTask(harness: CloudHarness, deviceId: string, payload: never): Promise<unknown> {
+async function steerSealedRunningTask(harness: CloudHarness, deviceId: string, payload: never): Promise<unknown> {
   const offer = await harness.cloud.enqueueOffer(TENANT_A, deviceId, { taskId: 'steer-target', payload: offerPayload('steer me') });
   const stores = tenantStoresFor(
     { kind: 'device', tenantId: TENANT_A, productId: PRODUCT_ID, deviceId },
@@ -43,7 +43,7 @@ async function steerRunningTask(harness: CloudHarness, deviceId: string, payload
   }
   await harness.core.mailbox.recordDelivery(TENANT_A, { deviceId, deliveredSeq: offer.seq });
   await harness.core.mailbox.advanceCursor(TENANT_A, { deviceId, ackedSeq: offer.seq });
-  return harness.cloud.steerTask(TENANT_A, offer.taskId, payload);
+  return harness.cloud.steerSealedTask(TENANT_A, offer.taskId, payload);
 }
 
 const FRESH = 'task.offer_for_agent_with_egress_fresh' satisfies MessageType;
@@ -71,13 +71,19 @@ const ENQUEUE: Partial<Record<MessageType, Enqueue>> = {
   'agent.input.preparation': (h, d, payload) => h.cloud.enqueueInputPreparation(TENANT_A, d, payload),
   'provider.provisioning.available': (h, d, payload) => h.cloud.enqueueProviderProvisioningNotice(TENANT_A, d, payload),
   'agent.memory.intent.available': (h, d, payload) => h.cloud.enqueueAgentMemoryIntentNotice(TENANT_A, d, payload),
-  // #654: each sealed offer type goes through the hosted entry of its lane.
-  'task.offer_sealed': (h, d, payload) => h.cloud.enqueueOffer(TENANT_A, d, { taskId: 'gated', payload }),
-  'task.offer_with_toolsets_sealed': (h, d, payload) => h.cloud.enqueueToolsetOffer(TENANT_A, d, { taskId: 'gated', payload }),
-  'task.offer_for_agent_sealed': (h, d, payload) => h.cloud.enqueueAgentOffer(TENANT_A, d, { taskId: 'gated', payload }),
-  'task.offer_for_agent_with_egress_sealed': (h, d, payload) => h.cloud.enqueueAgentEgressOffer(TENANT_A, d, { taskId: 'gated', payload }),
-  [FRESH_SEALED]: submitFresh,
-  'task.steer_sealed': steerRunningTask,
+  // #654: each sealed type has its own hosted entry.
+  'task.offer_sealed': (h, d, payload) => h.cloud.enqueueSealedOffer(TENANT_A, d, { taskId: 'gated', payload }),
+  'task.offer_with_toolsets_sealed': (h, d, payload) => h.cloud.enqueueSealedToolsetOffer(TENANT_A, d, { taskId: 'gated', payload }),
+  'task.offer_for_agent_sealed': (h, d, payload) => h.cloud.enqueueSealedAgentOffer(TENANT_A, d, { taskId: 'gated', payload }),
+  'task.offer_for_agent_with_egress_sealed': (h, d, payload) => h.cloud.enqueueSealedAgentEgressOffer(TENANT_A, d, { taskId: 'gated', payload }),
+  [FRESH_SEALED]: (h, d, payload: { messageEgress?: unknown }) =>
+    h.cloud.submitSealedAgentExecution(TENANT_A, {
+      taskId: 'gated',
+      deviceId: d,
+      payload: payload as never,
+      ...(payload.messageEgress === undefined ? {} : { agentMessageContext: CONTEXT }),
+    }),
+  'task.steer_sealed': steerSealedRunningTask,
 };
 
 const corpusPath = fileURLToPath(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url));
@@ -93,7 +99,7 @@ const gatedLines = readFileSync(corpusPath, 'utf8')
 /** Whether the line's surface has a hosted entry that accepts its payload. */
 const submitExpressible = (entry: (typeof gatedLines)[number]): boolean => {
   if (entry.type === FRESH) return AgentExecutionInputSchema.shape.payload.safeParse(entry.payload).success;
-  // #654: the sealed fresh lane has the same hosted entry and the same rules.
+  // #654: the sealed fresh lane has the same rules in its own hosted entry.
   if (entry.type === FRESH_SEALED) return SealedAgentExecutionInputSchema.shape.payload.safeParse(entry.payload).success;
   return true;
 };

@@ -181,7 +181,7 @@ describe('steerTask (GAP-2)', () => {
     });
   });
 
-  it('delivers a sealed steer as task.steer_sealed, and only to a device that advertised sealed-payload-v1 (#654)', async () => {
+  it('steerSealedTask delivers task.steer_sealed only to a device that advertised sealed-payload-v1, and steerTask refuses sealed fields (#654)', async () => {
     const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url), 'utf8');
     const sealedSteer = corpus.trimEnd().split('\n').map((raw) => JSON.parse(raw) as { type: string; payload: TaskSteerSealedPayload })
       .find((line) => line.type === 'task.steer_sealed')!.payload;
@@ -189,16 +189,20 @@ describe('steerTask (GAP-2)', () => {
     const device = await harness.pairDevice(TENANT_A);
     const task = await running(harness, device, { runtime: 'pi', capabilities: { steer: true } });
 
-    await expect(harness.cloud.steerTask(TENANT_A, task.taskId, sealedSteer)).rejects.toMatchObject({
+    await expect(harness.cloud.steerSealedTask(TENANT_A, task.taskId, sealedSteer)).rejects.toMatchObject({
       code: 'agent_capability_missing',
       message: expect.stringContaining('sealed-payload-v1'),
     });
     expect((await poll(harness, device, task.seq)).events).toEqual([]);
 
     await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: ['sealed-payload-v1'] });
-    await expect(harness.cloud.steerTask(TENANT_A, task.taskId, { ...sealedSteer, text: 'plaintext' } as never), 'no plaintext next to the sealed member').rejects.toThrow();
+    // The plaintext lane never strips a sealed member or a steer id.
+    for (const payload of [{ ...sealedSteer, text: 'plaintext' }, { text: 'plaintext', steerId: sealedSteer.steerId }]) {
+      await expect(harness.cloud.steerTask(TENANT_A, task.taskId, payload as never)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+    }
+    await expect(harness.cloud.steerSealedTask(TENANT_A, task.taskId, { ...sealedSteer, text: 'plaintext' } as never), 'no plaintext next to the sealed member').rejects.toThrow();
     expect((await poll(harness, device, task.seq)).events).toEqual([]);
-    await harness.cloud.steerTask(TENANT_A, task.taskId, sealedSteer);
+    await harness.cloud.steerSealedTask(TENANT_A, task.taskId, sealedSteer);
     const page = await poll(harness, device, task.seq);
     expect(page.events).toHaveLength(1);
     expect(page.events[0]).toMatchObject({ type: 'task.steer_sealed', task_id: task.taskId, payload: sealedSteer });

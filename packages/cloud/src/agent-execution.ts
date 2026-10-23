@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import {
   AgentMessageServerContextSchema,
-  TaskOfferForAgentWithEgressFreshPayloadSchema,
   MESSAGE_PAYLOAD_SCHEMAS,
+  TaskOfferForAgentWithEgressFreshPayloadSchema,
 } from '@byok-sdk/protocol';
 
 /** One execution target: a built-in `runtime` or a device-advertised `harnessId`, never both. */
@@ -38,17 +38,19 @@ export const AgentExecutionInputSchema = z.object({
   payload: TaskOfferForAgentWithEgressFreshPayloadSchema.required({ terminalProjection: true }).superRefine(executionTargetRule),
   agentMessageContext: AgentMessageServerContextSchema.optional(),
 }).strict();
+export type AgentExecutionInput = z.infer<typeof AgentExecutionInputSchema>;
 
 /**
- * The sealed lane of the same execution (#654): the payload names `sealing`,
- * and carries the sealed instruction when the task seals its input. The same
- * rules apply. `submitAgentExecution` picks this schema when the payload has
- * `sealing` or `sealed`, so a sealing policy is never stripped.
+ * The sealed counterpart (#654): the payload is a
+ * `task.offer_for_agent_with_egress_fresh_sealed` payload with the same
+ * rules. Submit it through `submitSealedAgentExecution`.
  */
 export const SealedAgentExecutionInputSchema = z.object({
   taskId: z.string().min(1),
   deviceId: z.string().min(1),
-  payload: MESSAGE_PAYLOAD_SCHEMAS['task.offer_for_agent_with_egress_fresh_sealed'].required({ terminalProjection: true }).superRefine(executionTargetRule),
+  payload: MESSAGE_PAYLOAD_SCHEMAS['task.offer_for_agent_with_egress_fresh_sealed']
+    .required({ terminalProjection: true })
+    .superRefine(executionTargetRule),
   agentMessageContext: AgentMessageServerContextSchema.optional(),
 }).strict();
-export type AgentExecutionInput = z.infer<typeof AgentExecutionInputSchema> | z.infer<typeof SealedAgentExecutionInputSchema>;
+export type SealedAgentExecutionInput = z.infer<typeof SealedAgentExecutionInputSchema>;

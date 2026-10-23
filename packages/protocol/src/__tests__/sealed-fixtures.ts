@@ -41,6 +41,7 @@ export function minimalSealedPayload(type: SealedMessageType, plain: (type: Mess
   return {
     ...payload,
     ...(type === 'task.await_approval_sealed' ? { approvalId: 'appr-1' } : {}),
+    ...(type === 'task.artifact_sealed' ? { artifactId: '00000000-0000-4000-8000-000000000002' } : {}),
     sealed: sealedMemberFixture('task-output'),
   };
 }
