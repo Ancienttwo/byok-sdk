@@ -414,7 +414,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/core` | Shared contracts and validation | `zod` | allowed | 126523 B |
 | `@byok-sdk/core/package.json` | Package metadata | — | forbidden | 1403 B |
 | `@byok-sdk/core/sealed-payload` | Sealed payload v1 byte rules | `zod` | allowed | 190719 B |
-| `@byok-sdk/keys` | Local provider credential custody | `zod` | allowed | 296083 B |
+| `@byok-sdk/keys` | Local provider credential custody | `zod` | allowed | 288693 B |
 | `@byok-sdk/keys/package.json` | Package metadata | — | forbidden | 1466 B |
 | `@byok-sdk/keys/pi-catalog` | Pinned pi-ai catalog lookup for pi_model | `zod` | allowed | 173028 B |
 | `@byok-sdk/protocol` | Wire schemas and codecs; codegen negative control | `@cfworker/json-schema`, `zod` | allowed | 148861 B |
