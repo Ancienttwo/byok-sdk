@@ -7,7 +7,7 @@ import { createDaemonWithAdapters, type AgentEgressPolicy } from '@byok-sdk/clie
 import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
 import { BotStubAdapter, waitForReady } from '../../basic/goal-btw.test-support';
 import { HostExecutionCore, type HostOptions, type ExecutionServer } from './core';
-import { HostLedger } from './ledger';
+import { HostLedger, type HostLedgerOptions } from './ledger';
 import type { ExecutionTemplate, IntentInput, AgentRoutineDefinition } from './model';
 
 export const policy: AgentEgressPolicy = {
@@ -33,11 +33,13 @@ export async function openHost(options: HostOptions & {
    * live core would take server.events hints and conclude intents without the caller's hooks.
    */
   externalCore?: true;
+  /** Options of every ledger that the fixture opens, for example the K8 compact veto. */
+  ledgerOptions?: HostLedgerOptions;
 } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'hc-'));
   const productId = 'host-core-test';
   const ledgerPath = path.join(root, 'host.sqlite');
-  let ledger = new HostLedger(ledgerPath, `product:${productId}`);
+  let ledger = new HostLedger(ledgerPath, `product:${productId}`, options.ledgerOptions);
   let core: HostExecutionCore | undefined;
   const fixtureCore = () => {
     if (!core) throw new Error('openHost({ externalCore }) creates no fixture core');
@@ -75,7 +77,7 @@ export async function openHost(options: HostOptions & {
         execution: template(deviceId), waitMs: 60_000, lateAfterMs: 1000, ...rest };
     },
     async restartCore() {
-      await fixtureCore().close(); ledger.close(); ledger = new HostLedger(ledgerPath, `product:${productId}`);
+      await fixtureCore().close(); ledger.close(); ledger = new HostLedger(ledgerPath, `product:${productId}`, options.ledgerOptions);
       core = new HostExecutionCore(options.wrapServer?.(server) ?? server, ledger, options); await core.recover();
     },
     async offline() { await daemon.stop(); },

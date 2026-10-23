@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { hash } from '@byok-sdk/example-host-execution-core';
 import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration, type AgentMessageInput } from './host';
+import { botCompactVeto } from './compaction';
 
 let fixture: TestHost | undefined, bot: BotCollaboration | undefined;
 afterEach(async () => { await bot?.close(); await fixture?.close(); bot = fixture = undefined; });
@@ -10,7 +11,7 @@ afterEach(async () => { await bot?.close(); await fixture?.close(); bot = fixtur
 /** Real SQLite HostLedger, embedded server, HTTP and daemon. K4 drives the outcome and message callbacks. */
 async function open() {
   const received: AgentMessageInput[] = [];
-  fixture = await openHost({ externalCore: true, consume: (wake, signal) => bot!.consume(wake, signal),
+  fixture = await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot!.consume(wake, signal),
     agentMessage: { consume: input => { received.push(input); return bot!.consumeMessage(input); } } });
   const base = template(fixture.deviceId);
   bot = new BotCollaboration(fixture.server, fixture.ledger, { botId: 'main', connector: async () => null, execution: { ...base,

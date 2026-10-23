@@ -9,6 +9,7 @@ import { json, stateOf } from './model';
 import { botRoutines, createDefinition, owned, routineOccurrence, updateDefinition } from './routines';
 import { DAILY, deliverRoutine, routineOf, routineRow, seedRoutine } from './routines.test-support';
 import { outcomeSchema } from './schema';
+import { botCompactVeto } from './compaction';
 
 const action = (prompt: string, schedule = DAILY) => ({ localId: 'new_routine_1', schedule, prompt });
 const hostJob = (id: string, schedule = DAILY): HostJobRoutineDefinition => ({ id, version: 1, timeZone: schedule.tz, rule: json(schedule),
@@ -23,7 +24,7 @@ afterEach(async () => { await bot?.close(); await fixture?.close(); bot = undefi
 const schedule: RoutineScheduleFields = { minute: 0, hour: (new Date().getUTCHours() + 12) % 24, tz: 'UTC' };
 async function setup(rest: Partial<BotOptions> = {}): Promise<BotCollaboration> {
   clock = Date.now();
-  fixture = await openHost({ externalCore: true, consume: (wake, signal) => bot!.consume(wake, signal) });
+  fixture = await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot!.consume(wake, signal) });
   bot = new BotCollaboration(fixture.server, fixture.ledger, { botId: 'main', execution: template(fixture.deviceId), connector: async () => null,
     now: () => clock, ...rest });
   return bot;

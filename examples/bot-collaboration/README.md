@@ -17,7 +17,9 @@ bun run --cwd examples/bot-collaboration test
 ```
 
 `src/host.test.ts` shows the embedded setup. Create one `BotCollaboration`
-per tenant and ledger. Give it a valid Agent execution template and a Host
+per tenant and ledger. Open that ledger with the K8 compact veto:
+`new HostLedger(file, tenant, { compactVeto: botCompactVeto })`. The
+constructor refuses a ledger without it ([Compaction](#compaction)). Give it a valid Agent execution template and a Host
 connector. Route the embedded server's `wake.consume` to `bot.consume`.
 Route its `agentMessage.consume` to `bot.consumeMessage`.
 Call `bot.recover()` after startup. Call `bot.close()` before closing the SDK
@@ -149,6 +151,31 @@ occurrence through its intent key, and a concluded occurrence through its
 occurrence key. `botRoutines` reads the Bot routine views from the K4 rows.
 Other K4 routines of the Host, for example Host jobs from `BotOptions.hostJobs`,
 are not Bot routines.
+
+### Compaction
+
+A Turn id is its K4 intent key. K8 reads the intent of a Turn after K4 settles
+it: the next pass copies the conclusion into the Turn, and delegation, room and
+reply checks read it later. So `botCompactVeto` refuses an acknowledged key
+while one of these holds:
+
+- its Turn is not concluded, or its conclusion is not reported;
+- a delegation without a verdict has the Turn in `chainTurnIds` or as
+  `cancel.targetTurnId`, or any delegation has it as `lateTurnId`;
+- its room seat is not released;
+- one of its reply receipts is not settled: K4 does not hold the receipt for
+  message replay, or a delegated reply body has no verdict yet.
+
+K4 runs the veto inside `compact`'s own transaction. A refusal throws
+`CompactVetoError` and changes nothing. Retry the key after a later pass.
+A key without a Turn, for example a Host job, is not a K8 key.
+
+The veto guards each `HostLedger` instance that has it. Another instance on
+the same file without the veto can still compact a Turn intent early. Then the
+next pass fails that Turn with conclusion `failed`, because K8 did not see the
+K4 result. It writes an audit line and reports the Turn once, with
+`reason: 'result_retired'`. A due reply check of a compacted chain intent takes
+the failed readback path. The Host keeps processing other work.
 
 `CollaborationState.version` is 2. Version 1 kept the routines in K8 state.
 The Host refuses a version 1 ledger and changes nothing. Restore a ledger

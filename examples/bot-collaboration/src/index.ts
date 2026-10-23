@@ -1,4 +1,5 @@
 export { BotCollaboration } from './host';
+export { botCompactVeto } from './compaction';
 export type { AgentMessageInput, BotOptions, MessageServer } from './host';
 export { classifyInbound, inboundKey } from './channel';
 export type { ChannelOptions, ChannelPort, Conversation, Delivery, DeliveryState, InboundClass, InboundMessage, Principal, PushRoute, ReplyRoute } from './channel';

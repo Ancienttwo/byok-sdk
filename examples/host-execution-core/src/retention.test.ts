@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { HostLedger, MIN_TOMBSTONE_RETENTION_MS, RetiredIntentIdentityError } from './index';
+import { CompactVetoError, HostLedger, MIN_TOMBSTONE_RETENTION_MS, RetiredIntentIdentityError } from './index';
 import { HostExecutionCore, type ExecutionServer } from './core';
 import { hash, project, taskId, type IntentInput } from './model';
 import { enqueue, settle } from './transitions';
@@ -78,6 +78,46 @@ it('rejects unsettled/unacknowledged/unknown selections and rolls back earlier s
     expect(() => ledger.compact({ ...policy, acknowledgedIntentKeys: ['done', key] })).toThrow();
     expect(ledger.snapshot()).toEqual(before); expect(ledger.hasTombstone('intent', 'done', policy.now)).toBe(false);
   }
+});
+
+it('runs the registered compact veto in the compaction transaction for every caller', () => {
+  const root = mkdtempSync(join(tmpdir(), 'k4-veto-')); roots.push(root);
+  const seen: string[] = [];
+  const ledger = new HostLedger(join(root, 'host.sqlite'), 'test', { compactVeto: (state, key) => {
+    seen.push(key);
+    return key === 'kept' || key.startsWith('occurrence:') ? 'Still in use' : undefined;
+  } });
+  ledgers.push(ledger);
+  seed(ledger, 'done'); seed(ledger, 'kept'); seed(ledger, 'other');
+  const before = ledger.snapshot();
+  const refused = (() => { try { ledger.compact({ ...policy, acknowledgedIntentKeys: ['done', 'kept'] }); } catch (error) { return error; } })();
+  expect(refused).toBeInstanceOf(CompactVetoError);
+  expect(refused).toMatchObject({ code: 'compact_vetoed', intentKey: 'kept', message: 'Compaction refused: Still in use' });
+  expect(ledger.snapshot()).toEqual(before); expect(ledger.hasTombstone('intent', 'done', policy.now)).toBe(false);
+  // An acknowledged occurrence asks for its derived intent identity, before K4 checks the occurrence.
+  expect(() => ledger.compact({ ...policy, acknowledgedIntentKeys: [], acknowledgedOccurrenceKeys: ['o1'] })).toThrow(CompactVetoError);
+  expect(seen.at(-1)).toBe('occurrence:o1');
+  expect(ledger.compact({ ...policy, acknowledgedIntentKeys: ['done'] })).toMatchObject({ compactedIntents: 1 });
+  // An already compacted key has no intent, so the veto does not see it again.
+  seen.length = 0;
+  expect(ledger.compact({ ...policy, acknowledgedIntentKeys: ['done', 'other'] })).toMatchObject({ compactedIntents: 1, alreadyCompactedIntents: 1 });
+  expect(seen).toEqual(['other']);
+  expect(ledger.compactVeto).toBeTypeOf('function');
+  expect(() => new HostLedger(':memory:', 'test', { compactVeto: 'no' as never })).toThrow('The compact veto must be a function');
+});
+
+it('refuses a compact veto that changes the ledger or returns no reason', () => {
+  const root = mkdtempSync(join(tmpdir(), 'k4-veto-')); roots.push(root);
+  let veto: (state: { application: Record<string, unknown> }) => unknown = () => undefined;
+  const ledger = new HostLedger(join(root, 'host.sqlite'), 'test', { compactVeto: state => veto(state) as string | undefined });
+  ledgers.push(ledger);
+  seed(ledger, 'done');
+  const before = ledger.snapshot();
+  veto = state => { state.application.changed = true; return undefined; };
+  expect(() => ledger.compact({ ...policy, acknowledgedIntentKeys: ['done'] })).toThrow('A compact veto must not change the ledger');
+  veto = () => '';
+  expect(() => ledger.compact({ ...policy, acknowledgedIntentKeys: ['done'] })).toThrow('A compact veto returns a reason or undefined');
+  expect(ledger.snapshot()).toEqual(before); expect(ledger.hasTombstone('intent', 'done', policy.now)).toBe(false);
 });
 
 it('rolls back SQL failures and refuses malformed occurrence associations', () => {

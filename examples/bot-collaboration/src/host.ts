@@ -20,6 +20,7 @@ import { BOT_ROUTINE, botRoutines, concludeRoutineTurn, createDefinition, owned,
   updateDefinition } from './routines';
 
 import { applyManagement, updateBot, writeSnapshotBot } from './team';
+import { botCompactVeto } from './compaction';
 import { teamSnapshot, TeamModeError, type TeamSnapshot } from './rules/team';
 import { advanceRooms, type Mentions } from './rooms';
 import type { RoomFields } from '@byok-sdk/protocol';
@@ -120,6 +121,8 @@ export class BotCollaboration {
   private unread = new Set<string>();
   constructor(readonly server: ExecutionServer & HomeServer & MessageServer & Partial<Pick<ByokServer, 'machines'>>, readonly ledger: HostLedger, private readonly options: BotOptions) {
     if (!options.botId || options.execution.payload.agentRef.agentId !== options.botId) throw new Error('Select this Bot Agent');
+    // #816: every compaction of this ledger must ask K8 first.
+    if (ledger.compactVeto !== botCompactVeto) throw new Error('Open the Host ledger with { compactVeto: botCompactVeto }');
     options = this.options = { ...options, execution: structuredClone(options.execution),
       ...(options.models === undefined ? {} : { models: structuredClone(options.models) }),
       readOnlyToolsets: ownReadOnlyToolsets(options.readOnlyToolsets) };
@@ -514,6 +517,15 @@ export class BotCollaboration {
       if (!intent && (turn.conclusion || turn.source === 'room_slot' && state.team.seats[turn.id]?.status === 'blocked')) continue;
       if (intent && bot?.archived && !s.executions[intent.taskId]?.started && !intent.conclusion) intent.cancelReason = 'cancelled';
       if (!intent) {
+        if (this.ledger.hasTombstone('intent', turn.id, this.now())) {
+          // #816: K4 compacted the intent before this sync saw its result. The identity can never run again.
+          // K8 does not know the K4 conclusion, so the Turn fails, and every reader of `turn.conclusion` can settle.
+          turn.status = 'failed'; turn.conclusion = 'failed';
+          state.audit.push(`Turn result retired before sync: ${turn.id}`);
+          project(s, `bot-turn:${turn.id}`, json({ owner: turn.botId, ...turn, reason: 'result_retired' }));
+          turn.reported = true;
+          continue;
+        }
         if (!bot || bot.readyRevision !== bot.revision) {
           const failed = state.team.homeOperations.find(op => op.botId === turn.botId
             && op.request.payload.agentRef.profileRevision === bot?.revision && op.status === 'failed');
@@ -597,16 +609,17 @@ export class BotCollaboration {
   private async flushReplies(): Promise<void> {
     for (const d of Object.values(this.snapshot().delegations)) {
       if (d.verdict || d.nextCheckAt === undefined || d.nextCheckAt > this.now()) continue;
-      const intent = this.core.intent(d.chainTurnIds.at(-1)!)!;
-      let readback: Awaited<ReturnType<NonNullable<MessageServer['tasks']['agentMessage']>>> | undefined, failed = false;
-      try {
+      // A compacted chain intent has no readback evidence. It takes the failed readback path and cannot stop the pass.
+      const intent = this.core.intent(d.chainTurnIds.at(-1)!);
+      let readback: Awaited<ReturnType<NonNullable<MessageServer['tasks']['agentMessage']>>> | undefined, failed = !intent;
+      if (intent) try {
         if (!this.server.tasks.agentMessage) throw new Error('Agent message readback API required');
         readback = await this.server.tasks.agentMessage(intent.taskId, intent.execution.deviceId, intent.execution.payload.agentRef);
       } catch { failed = true; }
       this.ledger.transaction(s => {
         const state = stateOf(s.application), row = state.delegations[d.id]!;
         const emit = (key: string, value: Json) => project(s, key, value);
-        if (state.replies[intent.taskId]?.body !== undefined) resolveDelegation(state, row, 'answered', this.now(), emit, undefined, intent.taskId);
+        if (intent && state.replies[intent.taskId]?.body !== undefined) resolveDelegation(state, row, 'answered', this.now(), emit, undefined, intent.taskId);
         else if (failed) retryReply(state, row, this.now(), emit, this.timers.uncertainAfterMs);
         else reconcileReply(state, row, readback, this.now(), emit, this.timers.uncertainAfterMs);
       });
