@@ -38,7 +38,7 @@ SDK 基线：`7c0bbebc720de5bebb13b7529ad161b9c19f03bb`。第一版随 [PR #685]
 - 幂等改为比较「明文元数据 + keyed content MAC」，不比较密文字节。
 - 删除提供两条路：加密类别用 crypto-shredding；全部类别都可用能在 Workers 上运行的 scoped row-delete。
 - Host 按 routine 发起的任务复用成员封装的 routine 模板。模板身份是 `routineId` 加 `definitionVersion`，由设备校验。
-- 浏览器成员丢失密钥（例如 Safari ITP 删除 IndexedDB）时，按 scope 恢复：持有某个 scope key 的成员重新批准浏览器，并为这个 scope 重发 key package（§7.8）。一个 scope 只有在它的全部成员都丢失密钥时才丢数据。
+- 浏览器成员丢失密钥（例如 Safari ITP 删除 IndexedDB）时，按 scope 恢复：持有某个 scope key 的成员重新批准浏览器，为这个 scope 签署 `scope-policy` 更新，再重发 key package（§7.8）。一个 scope 只有在它的全部成员都丢失密钥时才丢数据。
 - v1 只交付 C1 和 C3，C2 按需开启。C4、输入准备和草稿等到 v2（§6.1）。
 - 加密前的明文用带长度前缀的帧。16 KiB 以内按 256 字节对齐，更大时用 Padmé。填充后超过 256 KiB 的密文放进 blob（§8.6）。
 - 加密类别里，对内容计算的摘要只能是密文的 SHA-256、keyed MAC，或者移进密文（§9.3）。
@@ -306,6 +306,7 @@ AiphaBee 自研的配对和 device grant，在 SDK 里对应 `/byok/pair` 和 `/
 - 签名输入是前缀 `byok-member-chain-v1\n` 加 core 的 canonical JSON。条目哈希是签名输入的 SHA-256。
 - Host 按 `(tenantId, seq)` 先写者胜保存条目。同一 seq 的不同条目被拒绝。
 - 成员从自己固定的锚点开始验证整条链。签名错误、`prev` 断开或签名者已被移除的条目无效。
+- `add` 和 `remove` 改变 tenant 的成员集合。一个 scope 的成员只由这个 scope 最新的 `scope-policy` 条目定义。成员只为 scope 策略里列出的成员生成 key package。
 - 加密内容的 AAD 带发送方看到的链头（§8.2）。接收方知道更新的链头时，把这份内容标为「发送方视图过期」。
 
 ### 7.4 scope key 与 key package
@@ -686,7 +687,7 @@ identity receipt 是防重放的 fence，同时保存了正文，而且永不过
 - 幂等：同一 taskId、同一内容重新加密后重试，结果为重复；同一 taskId、不同内容，返回 `coordination_input_invalid`；重复投递被去重。
 - 撤销：移除成员后，新 epoch 的内容对它不可读。Host 扣留 `remove` 时，签署方能检测到。
 - routine 模板：同一份模板用于同一 routine 的多次执行。换 routine、换 Agent、关掉 C3 或过了 `notAfter` 时，设备拒绝。
-- 客户端丢失密钥：浏览器清除站点数据后，旧客户端被移除。有另一个仍有密钥的客户端时，经它重新批准，浏览器能读到全部设备 scope 的旧 epoch 内容。没有存活的客户端时，经一台设备重新批准，浏览器能读到这台设备 scope 的旧 epoch 内容。其他设备 scope 的 fan-out 定下之前（§7.8），不验收它们的恢复。
+- 客户端丢失密钥：浏览器清除站点数据后，旧客户端被移除。有另一个仍有密钥的客户端时，经它重新批准，并为每个 scope 签署 `scope-policy` 更新，浏览器能读到全部设备 scope 的旧 epoch 内容。没有存活的客户端时，经一台设备重新批准，并为它的 scope 签署 `scope-policy` 更新，浏览器能读到这台设备 scope 的旧 epoch 内容。只有链上的 `add`、没有 `scope-policy` 更新时，任何成员都不为这个 scope 重发 key package。其他设备 scope 的 fan-out 定下之前（§7.8），不验收它们的恢复。
 - 未开启的类别：现有测试套件全部通过，行为不变。
 
 本 PR 没有运行这些测试。
@@ -722,7 +723,7 @@ identity receipt 是防重放的 fence，同时保存了正文，而且永不过
 | 同一身份跨 epoch 重试 | Host | MAC 不同，按冲突处理。offer 返回 `coordination_input_invalid`，其他身份用各自现有的冲突代码（§9.2） | 发送方必须重发第一次的字节 |
 | task 运行中有成员被移除 | 设备 | 封装输出前检查链，按 §7.5 轮换到新 epoch 再封装。已发出的密文不变 | 被移除方读不到之后的输出 |
 | Host 扣留成员链的 `remove` | 签署 `remove` 的成员 | 从后续内容 AAD 的链头和 epoch 发现，提示用户（§7.6） | 被撤销方可能读到扣留期间的内容 |
-| 浏览器丢失成员密钥 | 浏览器 | 由持有 scope key 的成员重新批准，按 scope 重发 key package（§7.8） | 一次重新批准。没有存活的客户端时，批准设备只恢复自己的 scope。浏览器里未确认的待提交密文丢失 |
+| 浏览器丢失成员密钥 | 浏览器 | 由持有 scope key 的成员重新批准。每个要恢复的 scope 先签署 `scope-policy` 更新，再重发 key package（§7.8） | 一次重新批准。没有存活的客户端时，批准设备只恢复自己的 scope。浏览器里未确认的待提交密文丢失 |
 | 一个 scope 的全部成员都丢失密钥 | — | 无法恢复（D13） | 这个 scope 的数据丢失 |
 | 被撤销的设备一直离线 | — | 无法清除它的密钥（§5.4） | 它仍能读旧 epoch 的内容 |
 | routine 模板过了 `notAfter`，或与 offer 不符 | 设备 | 非重试 decline（§6.3） | 这次执行不运行 |
@@ -780,7 +781,7 @@ S0-b 是已有测试目录里的一个新文件，预计不改 CI 映射。实�
 | D10 | 多用户 tenant 与发送方认证 | v1 只支持单用户 scope；每条内容加发送方签名 | v1 只支持单用户 scope |
 | D11 | `consume` 的形状 | 独立的加密输入加显式声明；同一函数加判别字段 | 独立输入加显式声明 |
 | D12 | 设备 KEM 密钥 | 新的 credential 条目；复用 provider sealing key | 新条目。两者的用途和轮换周期不同 |
-| D13 | 成员丢失密钥 | 设备或其他客户端重新批准，并重发 key package；增加恢复密钥；接受数据丢失 | 单个浏览器丢失密钥（Safari ITP、清除站点数据）时，按 scope 由持有它的成员恢复（§7.8），代价是一次重新批准。这依赖 D5 的长期保留。一个 scope 的全部成员都丢失密钥时，先接受这个 scope 的数据丢失。恢复密钥另行设计 |
+| D13 | 成员丢失密钥 | 设备或其他客户端重新批准，并重发 key package；增加恢复密钥；接受数据丢失 | 单个浏览器丢失密钥（Safari ITP、清除站点数据）时，按 scope 由持有它的成员恢复：先签署这个 scope 的 `scope-policy` 更新，再重发 key package（§7.8）。代价是一次重新批准。这依赖 D5 的长期保留。一个 scope 的全部成员都丢失密钥时，先接受这个 scope 的数据丢失。恢复密钥另行设计 |
 | D14 | 发版位置 | E1–E6 进 0.28.3；E1–E6 进之后的功能版本；与 #655 的先后 | 0.28.3 只交付 S0（D18）。E1–E6 进之后的功能版本，例如 0.29.0。先定 #655 的身份对应，再删 AiphaBee 的自研 relay。#655 已定，见 §14.2 |
 | D15 | Host 发起的 routine 任务的 C1 | 成员封装的 routine 模板，身份为 `routineId` 加 `definitionVersion`，由设备校验；routine 任务只封装 C3 | 模板（§6.3）。模板交付之前，routine 任务只封装 C3 |
 | D16 | 加密类别里对内容的摘要 | 密文 SHA-256、keyed MAC 或移进密文三选一，加 schema 测试；保留明文摘要 | 前者（§9.3）。明文摘要让 Host 能确认猜测 |
