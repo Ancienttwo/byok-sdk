@@ -1,0 +1,122 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { afterEach, describe, expect, it } from 'vitest';
+import { createMutableClock, tenantId } from '@byok-sdk/core';
+import { createWebCrypto } from '@byok-sdk/cloud';
+import { runE2eeMemberStoreConformance } from '../../../conformance/src/cloud/e2ee-member';
+import { isSqliteAvailable } from '../sqlite-support';
+import { createSqliteEmbeddedStores, type SqliteEmbeddedStores } from '../stores/sqlite';
+
+const describeSqlite = isSqliteAvailable() ? describe : describe.skip;
+const TENANT = tenantId('sqlite-e2ee');
+const EXPIRES = '2099-01-01T00:00:00.000Z';
+const open = (path: string) => createSqliteEmbeddedStores({ path }, { clock: createMutableClock(), crypto: createWebCrypto() });
+
+if (isSqliteAvailable()) {
+  runE2eeMemberStoreConformance('sqlite', {
+    create() {
+      const stores = open(':memory:');
+      return { store: stores.e2eeMember, dispose: () => stores.close() };
+    },
+  });
+}
+
+async function seed(stores: SqliteEmbeddedStores, deviceId: string, machineId?: string): Promise<string> {
+  await stores.cloud.devices.register(TENANT, {
+    productId: 'product', deviceId, deviceName: deviceId, devicePublicKey: `${deviceId}-key`, proofKeyId: 'identity', proofKeyEpoch: 0,
+    ...(machineId === undefined ? {} : { machineId }),
+  });
+  const memberId = `member-${deviceId}`;
+  expect(await stores.e2eeMember.registerMember(TENANT, { deviceId, memberId, bundle: `{"m":"${memberId}"}`, deviceMac: 'mac', macExpiresAt: EXPIRES }))
+    .toBe('registered');
+  expect(await stores.e2eeMember.putClientPairingMac(TENANT, { deviceId, body: '{"mac":"client"}', expiresAt: EXPIRES })).toBe('stored');
+  expect(await stores.e2eeMember.putScopeKeyPackages(TENANT, [{ scopeId: 'scope', epoch: 1, recipient: memberId, keyId: 'key', sender: memberId, package: '{}' }]))
+    .toEqual({ outcome: 'stored', stored: 1 });
+  return memberId;
+}
+
+async function memberState(stores: SqliteEmbeddedStores, deviceId: string, memberId: string) {
+  return {
+    registration: (await stores.e2eeMember.readMemberRegistration(TENANT, { deviceId, now: '2026-10-24T00:00:00.000Z' })) !== undefined,
+    clientMac: (await stores.e2eeMember.readClientPairingMac(TENANT, { deviceId, now: '2026-10-24T00:00:00.000Z' })) !== undefined,
+    packages: (await stores.e2eeMember.readScopeKeyPackages(TENANT, { scopeId: 'scope', recipient: memberId })).length,
+  };
+}
+
+describeSqlite('SQLite E2EE member state', () => {
+  const directories: string[] = [];
+  const tempPath = () => {
+    const directory = mkdtempSync(join(tmpdir(), 'byok-sqlite-e2ee-'));
+    directories.push(directory);
+    return join(directory, 'server.sqlite');
+  };
+  afterEach(() => {
+    for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+  });
+
+  it('keeps the chain, registrations and packages across a restart', async () => {
+    const path = tempPath();
+    const first = open(path);
+    const memberId = await seed(first, 'device-1');
+    expect(await first.e2eeMember.appendChainEntries(TENANT, [{ seq: 1, entry: '{"seq":1}' }])).toMatchObject({ outcome: 'appended' });
+    await first.close();
+
+    const second = open(path);
+    try {
+      expect(await second.e2eeMember.readChainEntries(TENANT, { afterSeq: 0, limit: 256 })).toEqual([{ seq: 1, entry: '{"seq":1}' }]);
+      // Pairing MACs live for one pairing window in memory, like pairing codes.
+      expect(await memberState(second, 'device-1', memberId)).toEqual({ registration: true, clientMac: false, packages: 1 });
+    } finally {
+      await second.close();
+    }
+  });
+
+  it('adds the tables to an existing database without a version change', async () => {
+    const path = tempPath();
+    await open(path).close();
+    const raw = new DatabaseSync(path);
+    for (const table of ['e2ee_scope_key_package', 'e2ee_scope_epoch', 'e2ee_member_key', 'e2ee_member_chain_entry']) raw.exec(`DROP TABLE ${table}`);
+    const version = raw.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get();
+    raw.close();
+
+    const reopened = open(path);
+    try {
+      expect(await reopened.e2eeMember.appendChainEntries(TENANT, [{ seq: 1, entry: '{}' }])).toMatchObject({ outcome: 'appended' });
+    } finally {
+      await reopened.close();
+    }
+    const check = new DatabaseSync(path);
+    expect(check.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()).toEqual(version);
+    check.close();
+  });
+
+  it('refuses a same-named table of another shape', async () => {
+    const path = tempPath();
+    await open(path).close();
+    const raw = new DatabaseSync(path);
+    raw.exec('DROP TABLE e2ee_member_key');
+    raw.exec('CREATE TABLE e2ee_member_key (tenant_id TEXT, device_id TEXT)');
+    raw.close();
+    expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID' }));
+  });
+
+  it('deletes a device member state on revoke and on machine supersession, and keeps the rest', async () => {
+    const stores = open(':memory:');
+    try {
+      const revoked = await seed(stores, 'revoked-device');
+      const kept = await seed(stores, 'kept-device');
+      const old = await seed(stores, 'old-device', 'c'.repeat(64));
+      await stores.cloud.devices.revoke(TENANT, 'revoked-device');
+      const fresh = await seed(stores, 'new-device', 'c'.repeat(64));
+
+      expect(await memberState(stores, 'revoked-device', revoked)).toEqual({ registration: false, clientMac: false, packages: 0 });
+      expect(await memberState(stores, 'old-device', old)).toEqual({ registration: false, clientMac: false, packages: 0 });
+      expect(await memberState(stores, 'kept-device', kept)).toEqual({ registration: true, clientMac: true, packages: 1 });
+      expect(await memberState(stores, 'new-device', fresh)).toEqual({ registration: true, clientMac: true, packages: 1 });
+    } finally {
+      await stores.close();
+    }
+  });
+});

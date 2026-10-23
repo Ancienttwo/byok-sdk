@@ -61,6 +61,7 @@ export {
 } from './agent-memory-projection';
 export type { PostgresAgentMemoryProjectionStoreOptions } from './agent-memory-projection';
 export { PostgresTaskRedactionStore, createPostgresTaskRedactionStore } from './task-redaction';
+export { PostgresE2eeMemberStore } from './e2ee-member';
 export type { PostgresTaskRedactionStoreOptions } from './task-redaction';
 export { PostgresDeviceAssertionReplayAuthority } from './device-assertion-replay';
 export {

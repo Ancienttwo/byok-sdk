@@ -109,6 +109,17 @@ export type {
   TaskRedactionTaskResult,
 } from './task-redaction';
 
+export type {
+  E2eeMemberChainAppendResult,
+  E2eeMemberChainRow,
+  E2eeMemberRegisterResult,
+  E2eeMemberRegistrationInput,
+  E2eeMemberRegistrationRow,
+  E2eeMemberStore,
+  E2eeScopeKeyPackagePutResult,
+  E2eeScopeKeyPackageRow,
+} from './e2ee-member';
+
 // Capability declaration (ADR-010)
 export {
   CLOUD_CAPABILITIES,
@@ -360,6 +371,7 @@ export {
   InMemoryCloudBlobStore,
   InMemoryActivityStore,
   InMemoryAgentMessageDraftStore,
+  InMemoryE2eeMemberStore,
   InMemoryDeviceDirectory,
   InMemoryInboundDedupStore,
   InMemoryNonceStore,

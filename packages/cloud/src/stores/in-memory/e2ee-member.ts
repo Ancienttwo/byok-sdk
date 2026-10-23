@@ -1,0 +1,145 @@
+import type { TenantId } from '@byok-sdk/core';
+import type {
+  E2eeMemberChainAppendResult,
+  E2eeMemberChainRow,
+  E2eeMemberRegisterResult,
+  E2eeMemberRegistrationInput,
+  E2eeMemberRegistrationRow,
+  E2eeMemberStore,
+  E2eeScopeKeyPackagePutResult,
+  E2eeScopeKeyPackageRow,
+} from '../../e2ee-member';
+
+interface Expiring {
+  readonly body: string;
+  readonly expiresAt: string;
+}
+
+interface TenantState {
+  readonly chain: Map<number, string>;
+  /** `[scopeId, epoch]` JSON -> keyId. */
+  readonly epochKeyIds: Map<string, string>;
+  /** `[scopeId, epoch, recipient]` JSON -> row. */
+  readonly packages: Map<string, E2eeScopeKeyPackageRow>;
+  /** deviceId -> registration. */
+  readonly registrations: Map<string, { readonly memberId: string; readonly bundle: string }>;
+  readonly deviceMacs: Map<string, Expiring>;
+  readonly clientMacs: Map<string, Expiring>;
+}
+
+/**
+ * Reference E2EE member store. Each method checks and writes in one
+ * synchronous step, so no other call interleaves with it.
+ */
+export class InMemoryE2eeMemberStore implements E2eeMemberStore {
+  readonly #tenants = new Map<TenantId, TenantState>();
+
+  #state(tenant: TenantId): TenantState {
+    let state = this.#tenants.get(tenant);
+    if (state === undefined) {
+      state = {
+        chain: new Map(),
+        epochKeyIds: new Map(),
+        packages: new Map(),
+        registrations: new Map(),
+        deviceMacs: new Map(),
+        clientMacs: new Map(),
+      };
+      this.#tenants.set(tenant, state);
+    }
+    return state;
+  }
+
+  async appendChainEntries(tenant: TenantId, rows: readonly E2eeMemberChainRow[]): Promise<E2eeMemberChainAppendResult> {
+    const { chain } = this.#state(tenant);
+    const headSeq = chain.size;
+    let replayed = 0;
+    for (const row of rows) {
+      if (row.seq > headSeq) break;
+      if (chain.get(row.seq) !== row.entry) return { outcome: 'conflict', seq: row.seq };
+      replayed += 1;
+    }
+    const fresh = rows.slice(replayed);
+    if (fresh.length > 0 && fresh[0]!.seq !== headSeq + 1) return { outcome: 'gap', seq: fresh[0]!.seq, headSeq };
+    for (const row of fresh) chain.set(row.seq, row.entry);
+    return { outcome: 'appended', appended: fresh.length, replayed };
+  }
+
+  async readChainEntries(tenant: TenantId, input: { readonly afterSeq: number; readonly limit: number }): Promise<readonly E2eeMemberChainRow[]> {
+    const { chain } = this.#state(tenant);
+    const rows: E2eeMemberChainRow[] = [];
+    for (let seq = input.afterSeq + 1; seq <= chain.size && rows.length < input.limit; seq += 1) {
+      rows.push({ seq, entry: chain.get(seq)! });
+    }
+    return rows;
+  }
+
+  async putScopeKeyPackages(tenant: TenantId, rows: readonly E2eeScopeKeyPackageRow[]): Promise<E2eeScopeKeyPackagePutResult> {
+    const state = this.#state(tenant);
+    for (const row of rows) {
+      const keyId = state.epochKeyIds.get(JSON.stringify([row.scopeId, row.epoch]));
+      if (keyId !== undefined && keyId !== row.keyId) {
+        return { outcome: 'key_id_conflict', scopeId: row.scopeId, epoch: row.epoch, keyId };
+      }
+    }
+    for (const row of rows) {
+      state.epochKeyIds.set(JSON.stringify([row.scopeId, row.epoch]), row.keyId);
+      state.packages.set(JSON.stringify([row.scopeId, row.epoch, row.recipient]), { ...row });
+    }
+    return { outcome: 'stored', stored: rows.length };
+  }
+
+  async readScopeKeyPackages(
+    tenant: TenantId,
+    input: { readonly scopeId: string; readonly epoch?: number; readonly recipient?: string },
+  ): Promise<readonly E2eeScopeKeyPackageRow[]> {
+    return [...this.#state(tenant).packages.values()]
+      .filter(row => row.scopeId === input.scopeId
+        && (input.epoch === undefined || row.epoch === input.epoch)
+        && (input.recipient === undefined || row.recipient === input.recipient))
+      .sort((a, b) => a.epoch - b.epoch || (a.recipient < b.recipient ? -1 : a.recipient > b.recipient ? 1 : 0))
+      .map(row => ({ ...row }));
+  }
+
+  async registerMember(tenant: TenantId, input: E2eeMemberRegistrationInput): Promise<E2eeMemberRegisterResult> {
+    const state = this.#state(tenant);
+    const existing = state.registrations.get(input.deviceId);
+    if (existing !== undefined && existing.bundle !== input.bundle) return 'device_conflict';
+    if (existing === undefined
+      && [...state.registrations.values()].some(registration => registration.memberId === input.memberId)) {
+      return 'member_conflict';
+    }
+    if (existing === undefined) state.registrations.set(input.deviceId, { memberId: input.memberId, bundle: input.bundle });
+    state.deviceMacs.set(input.deviceId, { body: input.deviceMac, expiresAt: input.macExpiresAt });
+    return existing === undefined ? 'registered' : 'replayed';
+  }
+
+  async readMemberRegistration(
+    tenant: TenantId,
+    input: { readonly deviceId: string; readonly now: string },
+  ): Promise<E2eeMemberRegistrationRow | undefined> {
+    const state = this.#state(tenant);
+    const registration = state.registrations.get(input.deviceId);
+    if (registration === undefined) return undefined;
+    const mac = live(state.deviceMacs.get(input.deviceId), input.now);
+    return mac === undefined ? { ...registration } : { ...registration, deviceMac: mac };
+  }
+
+  async putClientPairingMac(
+    tenant: TenantId,
+    input: { readonly deviceId: string; readonly body: string; readonly expiresAt: string },
+  ): Promise<'stored' | 'not_registered'> {
+    const state = this.#state(tenant);
+    if (!state.registrations.has(input.deviceId)) return 'not_registered';
+    state.clientMacs.set(input.deviceId, { body: input.body, expiresAt: input.expiresAt });
+    return 'stored';
+  }
+
+  async readClientPairingMac(tenant: TenantId, input: { readonly deviceId: string; readonly now: string }): Promise<string | undefined> {
+    return live(this.#state(tenant).clientMacs.get(input.deviceId), input.now);
+  }
+}
+
+function live(value: Expiring | undefined, now: string): string | undefined {
+  return value !== undefined && Date.parse(now) < Date.parse(value.expiresAt) ? value.body : undefined;
+}

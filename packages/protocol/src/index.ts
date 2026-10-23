@@ -522,5 +522,19 @@ export { CUSTOM_HARNESS_CAPABILITY } from './version';
 
 export { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from './input-preparation';
 
+export {
+  E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES,
+  E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES,
+  E2EE_MEMBER_CHAIN_OPS,
+  E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES,
+  E2EE_SCOPE_KEY_PACKAGE_PUT_MAX,
+  E2eeClientPairingMacSchema,
+  E2eeMemberChainEntrySchema,
+  E2eeMemberKeyBundleSchema,
+  E2eePairingMacSchema,
+  E2eeScopeKeyPackageSchema,
+} from './e2ee-member';
+export type { E2eeClientPairingMac, E2eeMemberChainEntry, E2eeMemberKeyBundle, E2eeScopeKeyPackage } from './e2ee-member';
+
 export * from './bot-turn-outcome';
 export { resultOutcomeMaxBytes } from './result-schema';

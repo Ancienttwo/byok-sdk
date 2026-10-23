@@ -1,5 +1,6 @@
 import { InMemoryAgentMessageDraftStore } from './agent-message-draft';
 export { InMemoryAgentMessageDraftStore } from './agent-message-draft';
+export { InMemoryE2eeMemberStore } from './e2ee-member';
 /**
  * The in-memory reference implementation of every cloud-local port.
  *

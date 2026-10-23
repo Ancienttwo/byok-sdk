@@ -176,6 +176,18 @@ async function seedEveryTenantTable(pool: Pool, tenant: TenantId, suffix: string
      VALUES ($1, 'task', $2, '{"agentId":"draft-agent","profileRevision":"1"}'::jsonb, 1, 'draft', 5, 'open', $3, $3)`,
     [tenant, device, now],
   );
+  await pool.query(`INSERT INTO e2ee_member_chain_entry (tenant_id, seq, entry) VALUES ($1, 1, '{}')`, [tenant]);
+  await pool.query(`INSERT INTO e2ee_member_key (tenant_id, device_id, member_id, bundle) VALUES ($1, $2, 'member', '{}')`, [tenant, device]);
+  await pool.query(`INSERT INTO e2ee_scope_epoch (tenant_id, scope_id, epoch, key_id) VALUES ($1, 'scope', 1, 'key')`, [tenant]);
+  await pool.query(
+    `INSERT INTO e2ee_scope_key_package (tenant_id, scope_id, epoch, recipient, key_id, sender, package)
+     VALUES ($1, 'scope', 1, 'member', 'key', 'member', '{}')`,
+    [tenant],
+  );
+  await pool.query(
+    `INSERT INTO e2ee_pairing_mac (tenant_id, device_id, kind, body, expires_at) VALUES ($1, $2, 'device', 'mac', $3)`,
+    [tenant, device, now],
+  );
   await pool.query(`INSERT INTO device_request_receipts (tenant_id, key, body, recorded_at) VALUES ($1, 'receipt', '{}', $2)`, [tenant, now]);
   await pool.query(`INSERT INTO device_stream (tenant_id, device_id) VALUES ($1, $2)`, [tenant, device]);
   await pool.query(

@@ -363,6 +363,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     core: composition.core,
     cloud: composition.cloud,
     blobContentProxy: composition.blobContentProxy,
+    e2eeMemberStore: composition.e2eeMember,
     crypto: composition.crypto,
     tokenSigner,
     clock: composition.clock,
