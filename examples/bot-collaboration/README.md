@@ -159,7 +159,8 @@ it: the next pass copies the conclusion into the Turn, and delegation, room and
 reply checks read it later. So `botCompactVeto` refuses an acknowledged key
 while one of these holds:
 
-- its Turn is not concluded, or its conclusion is not reported;
+- its Turn is not concluded, or the Turn still has its K4 intent and its
+  conclusion is not reported;
 - a delegation without a verdict has the Turn in `chainTurnIds` or as
   `cancel.targetTurnId`, or any delegation has it as `lateTurnId`;
 - its room seat is not released;

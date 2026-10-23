@@ -1,4 +1,4 @@
-import type { CompactVeto } from '@byok-sdk/example-host-execution-core';
+import { hash, type CompactVeto } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState } from './model';
 
 /**
@@ -13,7 +13,8 @@ export const botCompactVeto: CompactVeto = (ledger, key) => {
   if (state.version !== 2) return 'Unsupported Bot collaboration state version';
   const turn = Object.hasOwn(state.turns, key) ? state.turns[key]! : undefined;
   if (!turn) return undefined;
-  if (!turn.conclusion || !turn.reported) return 'The Turn is not concluded and reported';
+  // A Turn without an intent, for example one that ended before promotion, has no K4 result left to report.
+  if (!turn.conclusion || ledger.intents[hash(key)] && !turn.reported) return 'The Turn is not concluded and reported';
   for (const d of Object.values(state.delegations)) {
     if (d.lateTurnId === key || !d.verdict && (d.chainTurnIds.includes(key) || d.cancel?.targetTurnId === key)) {
       return 'An unresolved delegation references the Turn';

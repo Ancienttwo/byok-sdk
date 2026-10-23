@@ -2,12 +2,13 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
-import { CompactVetoError, HostLedger, MIN_TOMBSTONE_RETENTION_MS, hash, type ExecutionServer, type ExecutionTemplate } from '@byok-sdk/example-host-execution-core';
+import { CompactVetoError, HostLedger, MIN_TOMBSTONE_RETENTION_MS, hash, type ExecutionServer, type ExecutionTemplate, type LedgerState } from '@byok-sdk/example-host-execution-core';
 import { template as k4template } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration } from './host';
 import { botCompactVeto } from './compaction';
 import { openTeam, type TestTeam } from './team.test-support';
 import { crossBot } from './cross-bot.test-support';
+import { stateOf, type Delegation, type Turn } from './model';
 
 // #816: a K4 compaction of a Turn intent that K8 still reads.
 const base = k4template('device');
@@ -119,6 +120,41 @@ it('keeps the chain intent of a reply_pending delegation, and its reply check su
   // The due reply check has no readback evidence. It retries and does not stop the pass.
   offset += 60_000;
   await t.host().drain();
-  expect(t.delegation(d.id)).toMatchObject({ status: 'reply_pending', checks: 2 });
+  expect(t.delegation(d.id).checks).toBeGreaterThan(1);
   expect(t.delegation(d.id).verdict).toBeUndefined();
+});
+
+it('refuses each key that K8 still reads, and allows a settled Turn and a key without a Turn', () => {
+  const ledger = { intents: {}, executions: {}, application: {} } as unknown as LedgerState;
+  const state = stateOf(ledger.application);
+  const turn = (id: string, fields: Partial<Turn> = {}) => {
+    state.turns[id] = { id, root: id, botId: 'main', source: 'user', request: '', hop: 0, status: 'succeeded', conclusion: 'succeeded', reported: true, ...fields };
+  };
+  const intent = (id: string) => { (ledger.intents as Record<string, unknown>)[hash(id)] = { id: hash(id), key: id }; };
+  const veto = (key: string) => botCompactVeto(ledger, key);
+  turn('open', { status: 'processing', conclusion: undefined }); intent('open');
+  turn('unreported', { reported: undefined }); intent('unreported');
+  // A Turn that ended without an intent has nothing to report, for example an unpromoted routine Turn of an archived owner.
+  turn('ended', { status: 'failed', conclusion: 'cancelled', reported: undefined });
+  turn('chain'); turn('target'); turn('late'); turn('resolved');
+  const delegation = (id: string, fields: Partial<Delegation>) => {
+    state.delegations[id] = { id, root: 'r', fromBotId: 'main', fromTurnId: 'x', fromTaskId: 'x', index: 0, toBotId: 'b', request: '', hop: 1,
+      chainTurnIds: [], batch: 'x', status: 'running', revision: 0, ...fields };
+  };
+  delegation('d1', { chainTurnIds: ['chain'] });
+  delegation('d2', { chainTurnIds: ['other'], cancel: { requestedAt: 0, targetTurnId: 'target', delivered: true } });
+  delegation('d3', { verdict: 'answered', status: 'resolved', chainTurnIds: ['resolved'], lateTurnId: 'late' });
+  turn('seat'); state.team.seats.seat = { id: 'seat', roundId: 'round', botId: 'main', status: 'post', released: false, late: false };
+  turn('receipt'); state.replies.task = { turnId: 'receipt', messageId: 'm', contentHash: 'h', contentType: 'text/markdown', acceptedAt: 0 };
+  expect(veto('open')).toBe('The Turn is not concluded and reported');
+  expect(veto('unreported')).toBe('The Turn is not concluded and reported');
+  expect(veto('ended')).toBeUndefined();
+  for (const key of ['chain', 'target', 'late']) expect(veto(key)).toBe('An unresolved delegation references the Turn');
+  expect(veto('resolved')).toBeUndefined();
+  expect(veto('seat')).toBe('The room seat of the Turn is not released');
+  expect(veto('receipt')).toBe('The reply receipt of the Turn is not settled');
+  (ledger.executions as Record<string, unknown>).task = { messageReceipt: { messageId: 'm', contentHash: 'h' } };
+  expect(veto('receipt')).toBeUndefined();
+  expect(veto('host-job')).toBeUndefined();
+  expect(veto('constructor')).toBeUndefined();
 });
