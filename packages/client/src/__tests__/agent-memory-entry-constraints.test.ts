@@ -206,16 +206,17 @@ describe('the embedded agent-memory public surface', () => {
     }
   });
 
-  it('keeps the daemon-only Windows fail-closed gate exactly as the daemon uses it', () => {
-    // Platform semantics are inherited, not restated: `win32` never has a
-    // secure backend, with or without a host-configured helper.
+  it('keeps the daemon platform gate exactly as the daemon uses it', () => {
+    // Platform semantics are inherited, not restated: `win32` has a secure
+    // backend only on x64 and only with a host-configured helper.
     const gate = GRAPH.sources.get('daemon/agent-memory.ts') ?? '';
     expect(gate).toContain("process.platform === 'linux'");
     expect(gate).toContain("process.platform === 'darwin'");
-    expect(gate).not.toContain("process.platform === 'win32'");
+    expect(gate).toContain("(process.platform === 'win32' && process.arch === 'x64')");
     expect(typeof agentMemoryEntry.isAgentMemorySecureFilesystemAvailable(false)).toBe('boolean');
     if (process.platform === 'win32') {
-      expect(agentMemoryEntry.isAgentMemorySecureFilesystemAvailable(true)).toBe(false);
+      expect(agentMemoryEntry.isAgentMemorySecureFilesystemAvailable(false)).toBe(false);
+      expect(agentMemoryEntry.isAgentMemorySecureFilesystemAvailable(true)).toBe(process.arch === 'x64');
     }
   });
 

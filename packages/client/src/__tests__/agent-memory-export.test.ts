@@ -15,7 +15,8 @@ const AGENT: AgentRef = { agentId: 'export-synthetic', profileRevision: '3' };
 const sha = (value: string) => `sha256:${createHash('sha256').update(value).digest('hex')}`;
 const roots: string[] = [];
 const helperBin = builtAgentMemoryFilesystemHelperBin();
-const supported = process.platform === 'linux' || (process.platform === 'darwin' && helperBin !== undefined);
+// The fixture returns a helper only on a helper platform (macOS, Windows x64).
+const supported = process.platform === 'linux' || helperBin !== undefined;
 if (process.env.BYOK_REQUIRE_MEMORY_EXPORT_TESTS === '1' && !supported) throw new Error('memory export native backend qualification is required');
 afterEach(async () => {
   vi.restoreAllMocks();

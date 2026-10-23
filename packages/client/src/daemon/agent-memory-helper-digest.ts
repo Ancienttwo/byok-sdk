@@ -68,3 +68,55 @@ export function agentMemoryHelperDigest(bytes: Buffer, arch: string): string {
   return createHash('sha256').update('mach-o-content-v1\0').update(header)
     .update(Buffer.concat(commands)).update(bytes.subarray(bodyStart, signatureStart)).digest('hex');
 }
+
+/**
+ * pe-content-v1: PE32+ x64 only.
+ * Hash the complete file except the CheckSum field, the certificate table
+ * directory entry and the certificate table, which Authenticode signing
+ * writes. A table must start on an 8-byte boundary after the headers and the
+ * raw data of every section, and must end the file, so it cannot hide code.
+ * The content is padded with zeros to 8 bytes, as a signer pads it.
+ * This detects deployment errors. It does not establish signer trust.
+ */
+export function agentMemoryHelperPeDigest(bytes: Buffer): string {
+  const fail = (): never => { throw new Error('Invalid Agent memory helper PE image'); };
+  if (bytes.length < 64 || bytes.readUInt16LE(0) !== 0x5a4d) fail();
+  const coff = bytes.readUInt32LE(0x3c) + 4;
+  if (coff + 20 > bytes.length || bytes.readUInt32LE(coff - 4) !== 0x4550) fail();
+  const sections = bytes.readUInt16LE(coff + 2);
+  const optional = coff + 20;
+  const sectionTable = optional + bytes.readUInt16LE(coff + 16);
+  if (bytes.readUInt16LE(coff) !== 0x8664 || sectionTable < optional + 152 || sectionTable + sections * 40 > bytes.length
+    || bytes.readUInt16LE(optional) !== 0x20b || bytes.readUInt32LE(optional + 108) < 5) fail();
+  const headers = bytes.readUInt32LE(optional + 60);
+  if (headers < sectionTable + sections * 40) fail();
+  let dataEnd = headers;
+  for (let index = 0; index < sections; index++) {
+    const section = sectionTable + index * 40;
+    dataEnd = Math.max(dataEnd, bytes.readUInt32LE(section + 20) + bytes.readUInt32LE(section + 16));
+  }
+  if (dataEnd > bytes.length) fail();
+  const checksum = optional + 64;
+  const certificates = optional + 144;
+  const tableStart = bytes.readUInt32LE(certificates);
+  const tableSize = bytes.readUInt32LE(certificates + 4);
+  let contentEnd = bytes.length;
+  if (tableStart !== 0 || tableSize !== 0) {
+    if (tableStart % 8 !== 0 || tableStart < dataEnd || tableStart + tableSize !== bytes.length) fail();
+    // Each WIN_CERTIFICATE fits in the table; entries are 8-byte aligned.
+    for (let offset = tableStart; offset < bytes.length; offset += Math.ceil(bytes.readUInt32LE(offset) / 8) * 8) {
+      if (offset + 8 > bytes.length || bytes.readUInt32LE(offset) < 8 || offset + bytes.readUInt32LE(offset) > bytes.length) fail();
+    }
+    contentEnd = tableStart;
+  }
+  return createHash('sha256').update('pe-content-v1\0').update(bytes.subarray(0, checksum))
+    .update(bytes.subarray(checksum + 4, certificates)).update(bytes.subarray(certificates + 8, contentEnd))
+    .update(Buffer.alloc((8 - contentEnd % 8) % 8)).digest('hex');
+}
+
+/** The pinned digest of one release target. The target, never the manifest, selects the algorithm. */
+export function agentMemoryHelperTargetDigest(target: string, bytes: Buffer): string {
+  if (target === 'win32-x64') return agentMemoryHelperPeDigest(bytes);
+  if (target === 'darwin-arm64' || target === 'darwin-x64') return agentMemoryHelperDigest(bytes, target.slice(7));
+  throw new Error('Unknown Agent memory helper target');
+}

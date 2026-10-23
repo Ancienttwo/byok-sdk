@@ -4,7 +4,7 @@ import { copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFile
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { verifyAgentMemoryHelperSourceDigest } from './agent-memory-helper-source.mjs';
+import { agentMemoryHelperTargets, verifyAgentMemoryHelperSourceDigest } from './agent-memory-helper-source.mjs';
 
 const source = fileURLToPath(new URL('../native/agent-memory-fs/', import.meta.url));
 const manifest = JSON.parse(readFileSync(new URL('../dist/native/agent-memory-fs/manifest.json', import.meta.url), 'utf8'));
@@ -15,17 +15,17 @@ try {
   for (const root of roots) {
     for (const name of readdirSync(source).filter(name => name.endsWith('.go') || name === 'go.mod')) copyFileSync(path.join(source, name), path.join(root, name));
   }
-  for (const [arch, goarch] of [['arm64', 'arm64'], ['x64', 'amd64']]) {
+  const { agentMemoryHelperTargetDigest } = await import('../src/daemon/agent-memory-helper-digest.ts');
+  for (const { name, goos, goarch, file, digestAlgorithm } of agentMemoryHelperTargets) {
     const builds = roots.map(root => {
       const target = path.join(root, 'helper');
-      execFileSync('go', ['build', ...flags, '-o', target, '.'], { cwd: root, env: { ...process.env, GOTOOLCHAIN: 'go1.26.5', GOOS: 'darwin', GOARCH: goarch, CGO_ENABLED: '0' } });
+      execFileSync('go', ['build', ...flags, '-o', target, '.'], { cwd: root, env: { ...process.env, GOTOOLCHAIN: 'go1.26.5', GOOS: goos, GOARCH: goarch, CGO_ENABLED: '0' } });
       return readFileSync(target);
     });
-    assert.deepEqual(builds[0], builds[1], `${arch}: absolute build paths changed bytes`);
-    assert.deepEqual(builds[0], readFileSync(new URL(`../dist/native/agent-memory-fs/darwin-${arch}`, import.meta.url)), `${arch}: release differs from clean build`);
-    const { agentMemoryHelperDigest } = await import('../src/daemon/agent-memory-helper-digest.ts');
-    assert.equal(agentMemoryHelperDigest(builds[0], arch), manifest.entries[`darwin-${arch}`].digest, `${arch}: manifest digest differs from clean build`);
-    console.log(`${arch}: two independent source paths and the release artifact have identical bytes`);
+    assert.deepEqual(builds[0], builds[1], `${name}: absolute build paths changed bytes`);
+    assert.deepEqual(builds[0], readFileSync(new URL(`../dist/native/agent-memory-fs/${file}`, import.meta.url)), `${name}: release differs from clean build`);
+    assert.deepEqual(manifest.entries[name], { file, digestAlgorithm, digest: agentMemoryHelperTargetDigest(name, builds[0]) }, `${name}: manifest entry differs from clean build`);
+    console.log(`${name}: two independent source paths and the release artifact have identical bytes`);
   }
 } finally { for (const root of roots) rmSync(root, { recursive: true, force: true }); }
 

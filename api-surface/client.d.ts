@@ -1410,7 +1410,7 @@ export declare function createAgentHomeProjectionConsumer(apply: AgentHomeProjec
  * A product that embeds this SDK instead of running the daemon (no second
  * control plane, no `control.sock`) already owns the pieces the daemon would
  * otherwise own for it: the canonical Agent home under `AGENT_HOME_DIRECTORY`,
- * the lease that pins it, and the signed/notarized macOS helper binary. What it
+ * the lease that pins it, and the signed macOS or Windows helper binary. What it
  * cannot own is the memory authority itself — the compare-and-swap semantics,
  * the audit record, the platform gate, and the exact path policy the model is
  * allowed to name. Those must stay in one place or two implementations drift.
@@ -1420,7 +1420,7 @@ export declare function createAgentHomeProjectionConsumer(apply: AgentHomeProjec
  *
  * - `AgentMemoryService`             — task-scoped recall/save authority.
  * - `captureAgentMemorySnapshot`     — the post-close bounded snapshot.
- * - `openAgentMemoryFilesystemHelper`— admission of the host's macOS helper.
+ * - `openAgentMemoryFilesystemHelper`— admission of the host's macOS or Windows helper.
  * - `serveAgentMemoryMcpOverStdio`   — the two memory tools over stdio.
  * - `prependAgentMemoryGuidance`     — the prompt half of the path contract.
  *
@@ -1447,8 +1447,8 @@ export declare function createAgentHomeProjectionConsumer(apply: AgentHomeProjec
  *    snapshot and nothing that sends it anywhere.
  *
  * Platform semantics are unchanged by this entry, not re-stated in it: Linux
- * uses the native descriptor backend, macOS requires the host's external
- * helper, and Windows stays fail-closed. `isAgentMemorySecureFilesystemAvailable`
+ * uses the native descriptor backend, and macOS and Windows x64 require the
+ * host's external helper. `isAgentMemorySecureFilesystemAvailable`
  * is the single gate a host consults before offering memory at all.
  */
 /** Per-task memory authority: `recall`/`save` under sha256 compare-and-swap, bound to one exact active Agent task context. */
@@ -1457,7 +1457,7 @@ export { AgentMemoryService } from '../daemon/agent-memory';
 export { captureAgentMemorySnapshot } from '../daemon/agent-memory';
 /** The single source of truth for which relative path a model may name: `MEMORY.md` or `notes/<safe-relative>.md`. */
 export { validateAgentMemoryPath } from '../daemon/agent-memory';
-/** The sole platform gate for the memory write authority: native Linux, macOS only with the host's helper, Windows never. */
+/** The sole platform gate for the memory write authority: native Linux, macOS and Windows x64 only with the host's helper. */
 export { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
 /** Base failure for every rejected memory operation. */
 export { AgentMemoryError } from '../daemon/agent-memory';
@@ -1475,7 +1475,7 @@ export type { AgentMemoryRecallResult } from '../daemon/agent-memory';
 export type { AgentMemorySaveResult } from '../daemon/agent-memory';
 /** Metadata-only signal that the audit record could not be written; the source operation still succeeded. */
 export type { AgentMemoryAuditWarning } from '../daemon/agent-memory';
-/** Whether this platform can admit an external filesystem helper at all (macOS only today). */
+/** Whether this platform can admit an external filesystem helper at all (macOS and Windows x64 today). */
 export { isAgentMemoryFilesystemHelperSupported } from '../daemon/agent-memory-fs-helper';
 /** Admits the host's absolute signed/notarized helper binary and returns the root-pinned filesystem for one Agent home. */
 export { openAgentMemoryFilesystemHelper } from '../daemon/agent-memory-fs-helper';
@@ -2186,13 +2186,15 @@ export declare function openAgentMemoryFilesystemHelper(input: Readonly<{
 /** Resolve SDK release assets only: package-installed by default, or a complete SDK-copied product directory. No PATH or caller digest. */
 export declare function resolveAgentMemoryFilesystemHelper(assetRoot?: string): string;
 export declare function verifyAgentMemoryFilesystemHelper(helperBin: string, assetRoot?: string): string;
-/** Build-time copy of the SDK release manifest and both Darwin targets into a new or empty product asset directory. */
+/** Build-time copy of the SDK release manifest and the targets of one platform into a new or empty product asset directory. */
 export interface CopyAgentMemoryHelperAssetsOptions {
     readonly outDir: string;
+    /** `darwin` (default) copies both Darwin targets; `win32` copies the Windows x64 target. */
+    readonly platform?: 'darwin' | 'win32';
 }
 /**
  * Run against an installed SDK release, then ship these files with the product.
- * The manifest and Mach-O digest detect deployment errors, not signer trust.
+ * The manifest and the Mach-O or PE digest detect deployment errors, not signer trust.
  * Product re-signing remains supported. Returns sorted paths relative to outDir.
  */
 export declare function copyAgentMemoryHelperAssets(options: CopyAgentMemoryHelperAssetsOptions): Promise<readonly string[]>;
@@ -2285,7 +2287,8 @@ export interface AgentMemoryIntentBackend {
      * A successful write proves durable bytes, metadata and name changes.
      * Linux requires temp fsync, rename and directory fsync. Windows requires
      * model S proof for ledger, memory replace/delete and new parent directories
-     * under process crash, OS crash and power loss. File flush alone is not B.
+     * under process crash, OS crash and power loss. File flush alone is not B,
+     * so the Windows helper backend reports `false`.
      */
     readonly strictLedgerBarrier: boolean;
 }
@@ -2295,7 +2298,11 @@ export interface AgentMemoryIntentBackend {
  * ledger writes use the strict directory-fsync variant.
  */
 export declare const NATIVE_AGENT_MEMORY_INTENT_BACKEND: AgentMemoryIntentBackend;
-/** SDK release helper: verified Mach-O code, strict barriers, pre-rename CAS. */
+/**
+ * SDK release helper: verified Mach-O or PE code and pre-rename CAS. Only the
+ * macOS helper has the strict barrier proof. Windows has no OS-crash or
+ * power-loss proof, so it never advertises intents.
+ */
 export declare function helperAgentMemoryIntentBackend(helperBin: string, assetRoot?: string): AgentMemoryIntentBackend;
 export interface AgentMemoryIntentProcessorOptions {
     readonly tenantId: string;
@@ -2505,9 +2512,9 @@ export interface AgentMemoryHostedProjection {
 export declare function validateAgentMemoryPath(value: unknown): string;
 /**
  * The sole platform gate for the Agent-memory write authority. Linux retains
- * the native procfs descriptor backend. macOS requires the SDK release
- * helper that passed its native proof and deployment digest check. Windows remains unavailable rather
- * than selecting an unproved fallback.
+ * the native procfs descriptor backend. macOS and Windows x64 require the SDK
+ * release helper that passed its native proof and deployment digest check.
+ * Other platforms remain unavailable rather than selecting an unproved fallback.
  */
 export declare function isAgentMemorySecureFilesystemAvailable(externalHelperConfigured?: boolean): boolean;
 export interface AgentMemoryAuditWarning {
@@ -4266,7 +4273,7 @@ export interface DaemonConfig {
     agentMemoryMcp?: 'auto' | 'off';
     /** Optional, one-way hosted projection. Without all guards it has zero network activity. */
     agentMemory?: AgentMemoryHostedProjection;
-    /** Explicit raw local Host export opt-in. No control/wire endpoint, upload, or projection callback. Requires agentHome and the admitted Linux/macOS memory backend. */
+    /** Explicit raw local Host export opt-in. No control/wire endpoint, upload, or projection callback. Requires agentHome and the admitted Linux, macOS or Windows x64 memory backend. */
     agentMemoryExport?: true;
     /** Absolute directory copied by copyAgentMemoryHelperAssets. Only SDK release assets are admitted; not a helper executable or digest override. */
     agentMemoryHelperAssetRoot?: string;
@@ -4555,7 +4562,8 @@ export interface DaemonConfig {
      * secure memory filesystem is available AND that backend's ledger write is
      * a proven durable barrier (temp sync, rename, directory sync). Linux uses
      * native descriptors. macOS uses the verified SDK helper after a strict
-     * full-sync volume probe. Windows does not advertise. A notice that arrives without the capability is NOT
+     * full-sync volume probe. Windows does not advertise: its helper has no
+     * OS-crash or power-loss proof. A notice that arrives without the capability is NOT
      * acknowledged: it fails `transport_unconfigured` or
      * `filesystem_unavailable` before any fetch. There is no control-socket
      * method for intents; the only entry is the mailbox notice.
@@ -4712,7 +4720,7 @@ export interface DaemonStatus {
      * each task. `off`: `DaemonConfig.agentMemoryMcp` is `off`; no Agent task
      * gets the memory MCP or the memory guidance. `unavailable`: `auto`, but
      * this daemon has no Agent home or no secure memory filesystem (for example
-     * macOS without the SDK release helper, or Windows).
+     * macOS or Windows x64 without the SDK release helper, or Windows arm64).
      */
     agentMemoryMcp: 'admitted' | 'off' | 'unavailable';
 }
@@ -13016,6 +13024,10 @@ export declare const sdkNativeAssetTargets: Readonly<{
         integrity: "sha512-09p81HVKDsLXkyMRrLQzsFtCjdcFgbRW765roAu5iChHj4gfWVrGDdvtBldc1BulIEgH1/gRwa2E4vEtW3/hlw==";
         files: readonly string[];
         signingPolicy: "unmodified-official-addon";
+        agentMemoryHelper: Readonly<{
+            files: readonly string[];
+            signingPolicy: "product-resigning-allowed";
+        }>;
     }>;
     darwin: Readonly<{
         files: readonly string[];
@@ -13027,7 +13039,7 @@ export interface CopySdkNativeAssetsOptions {
     readonly platform: 'win32' | 'darwin';
     readonly arch: 'x64' | 'arm64';
 }
-/** Build-time only. Fetches the integrity-pinned official Windows archive on any build host; never executes it. Darwin delegates to the existing release-helper copier. */
+/** Build-time only. Fetches the integrity-pinned official Windows archive on any build host; never executes it. Both platforms copy the Agent memory helper through the release-helper copier. */
 export declare function copySdkNativeAssets(options: CopySdkNativeAssetsOptions): Promise<readonly string[]>;
 export { loadSdkKoffiAsset } from './sdk-native-assets-runtime';
 /** Machine-readable build inputs. Target presence is not runtime/platform qualification. */
@@ -13045,6 +13057,10 @@ export declare const sdkDistributionManifest: Readonly<{
             integrity: "sha512-09p81HVKDsLXkyMRrLQzsFtCjdcFgbRW765roAu5iChHj4gfWVrGDdvtBldc1BulIEgH1/gRwa2E4vEtW3/hlw==";
             files: readonly string[];
             signingPolicy: "unmodified-official-addon";
+            agentMemoryHelper: Readonly<{
+                files: readonly string[];
+                signingPolicy: "product-resigning-allowed";
+            }>;
         }>;
         darwin: Readonly<{
             files: readonly string[];
