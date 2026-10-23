@@ -274,6 +274,35 @@ describe('steerTask (GAP-2)', () => {
     expect((await harness.core.objects.get(TENANT_A, ref.contentHash as ContentHash))?.refCount).toBe(1);
   });
 
+  it('steerSealedTask holds no reference to the new blob of a by-reference retry or conflict (#654 E3b)', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const task = await running(harness, device, { runtime: 'pi', capabilities: { steer: true } });
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: ['sealed-payload-v1'] });
+    const steerId = randomUUID();
+    const byReference = async (text: string) => {
+      const content = await sealInput({
+        tenant: TENANT_A, deviceId: device.deviceId, family: 'task.steer_sealed', identity: { taskId: task.taskId, steerId }, plaintext: { text },
+      });
+      return referenceMember(content, await uploadCiphertext(harness, device, content.ciphertext));
+    };
+    const refCount = async (sealed: { ciphertextRef: { contentHash: string } }) =>
+      (await harness.core.objects.get(TENANT_A, sealed.ciphertextRef.contentHash as ContentHash))?.refCount;
+    const text = 'x'.repeat(BY_REFERENCE_TEXT_LENGTH);
+    const first = await byReference(text);
+    const again = await byReference(text);
+    const other = await byReference('y'.repeat(BY_REFERENCE_TEXT_LENGTH));
+
+    await harness.cloud.steerSealedTask(TENANT_A, task.taskId, { steerId, sealed: first });
+    await harness.cloud.steerSealedTask(TENANT_A, task.taskId, { steerId, sealed: again });
+    await expect(harness.cloud.steerSealedTask(TENANT_A, task.taskId, { steerId, sealed: other })).rejects.toMatchObject({
+      code: 'coordination_input_invalid',
+    });
+
+    expect((await poll(harness, device, task.seq)).events.map((event) => event.payload)).toEqual([{ steerId, sealed: first }]);
+    expect([await refCount(first), await refCount(again), await refCount(other)]).toEqual([1, 0, 0]);
+  });
+
   it('refuses a claim that reported steer: false, and allocates no mailbox row', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);

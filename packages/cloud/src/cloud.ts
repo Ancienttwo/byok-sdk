@@ -1810,6 +1810,16 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     const enqueued = await enqueueAgentControlEnvelope(tenant, ownerDeviceId, messageId, (seq) =>
       createEnvelope('task.steer_sealed', sealed, { id: messageId, taskId, seq }),
     );
+    // A retry that names a new blob is a duplicate or a conflict. The stored
+    // row keeps its own blob, so the task does not hold the new one.
+    const proposedRef = sealedCiphertextRef(sealed);
+    if (proposedRef !== undefined && sealedCiphertextRef(enqueued.envelope.payload)?.contentHash !== proposedRef.contentHash) {
+      await options.core.objects.removeReference(tenant, {
+        hash: proposedRef.contentHash as ContentHash,
+        refKind: SEALED_TASK_REFERENCE_KIND,
+        refId: taskId,
+      });
+    }
     if (enqueued.envelope.type !== 'task.steer_sealed' || !sameSealedProjection(enqueued.envelope.payload, sealed)) {
       throw new ByokCloudError('coordination_input_invalid', `Task ${taskId} already has a different steer ${sealed.steerId}.`);
     }

@@ -50,6 +50,12 @@
   mailbox row. Compatibility: `CloudBlobStore` gets the required method
   `uploadedContentHash(tenant, blobId)`. A Host that implements its own
   `CloudBlobStore` must add it. The memory, SQLite and R2 stores implement it.
+  `TaskRedactionStoreInput` gets the required field `releaseObjectReferences`.
+  A Host with its own `TaskRedactionStore` must remove those references
+  before it deletes the task's objects. A store that ignores the field still
+  compiles, but it keeps the sealed ciphertext of a redacted task. Only
+  `redactTasks` releases the reference, so the ciphertext of a sealed task
+  that is not redacted stays stored, as its offer receipt does.
 
 ## 0.29.0 — 2026-10-23 (published)
 
