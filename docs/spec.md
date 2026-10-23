@@ -2350,12 +2350,13 @@ from the handle's device information, so an SMB share whose server reports NTFS
 also fails the open with `unsafe_root`; another file system fails the same way.
 The platform gate reads the process architecture: x64 Node under emulation on
 Windows arm64 runs the x64 helper and is admitted. Each write flushes its own
-file and directory, so one file stays atomic under a process crash. Windows runs no home-chain barrier and makes no
-OS-crash or power-loss claim. The Windows helper intent backend therefore has
-`conflictProvesNoRename: true` and `strictLedgerBarrier: false`, and the daemon
-does not advertise `agent-memory-intent.v1` on Windows.
+file and directory, so one file stays atomic under a process crash. Windows
+runs no home-chain barrier and makes no OS-crash or power-loss claim. The
+Windows helper intent backend therefore has `conflictProvesNoRename: true` and
+`strictLedgerBarrier: false`, and the daemon does not advertise
+`agent-memory-intent.v1` on Windows.
 
-For Windows, the accepted fault model S covers process crash, OS crash and
+For Windows B, the accepted fault model S covers process crash, OS crash and
 power loss. Its proposed support domain is local NTFS on an explicit OS
 build with a normal user token and storage that honors full flush requests.
 SMB, synced directories and other file systems are excluded. Admission needs
@@ -2364,8 +2365,9 @@ name changes and new parent directories survive that fault set. The order is
 durable applying, CAS, durable memory result, durable terminal, matching Host
 complete/readback, durable ackedAt, then cursor advance. A barrier error blocks
 the next step. Corrupt ledger recovery must fail closed. A file flush or
-visible readback alone does not prove that order. Windows remains BLOCKED
-and B remains false until the proof and recovery experiments pass. Linux
+visible readback alone does not prove that order. Windows B and
+`agent-memory-intent.v1` remain BLOCKED until the proof and recovery
+experiments pass. Windows x64 recall and save do not need B. Linux
 checks do not complete Q14's Windows requirement. The acceptance contract is
 `docs/plans/2026-10-19-windows-ntfs-ledger-barrier-decision.md` sections 3 and 7.
 Wire and failure detail: `docs/protocol.md` §2.4.

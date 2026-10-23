@@ -1,8 +1,8 @@
 // Open checks with the real helper and junction fixtures, under both Node and
 // Bun. The runtime supplies the root identity, as the TS caller does. A
 // junction home is refused, and a junction inside the home refuses the write.
-// The TS gate stays closed. These checks prove neither model S recovery nor
-// successful flush operations.
+// The TS gate admits Windows x64 without B. These checks prove neither model S
+// recovery nor successful flush operations.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
