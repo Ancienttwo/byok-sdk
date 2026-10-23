@@ -20,7 +20,7 @@ import { BOT_ROUTINE, botRoutines, concludeRoutineTurn, createDefinition, owned,
   updateDefinition } from './routines';
 
 import { applyManagement, updateBot, writeSnapshotBot } from './team';
-import { botCompactVeto } from './compaction';
+import { botCompactVeto, turnIntentRetired } from './compaction';
 import { teamSnapshot, TeamModeError, type TeamSnapshot } from './rules/team';
 import { advanceRooms, type Mentions } from './rooms';
 import type { RoomFields } from '@byok-sdk/protocol';
@@ -512,12 +512,9 @@ export class BotCollaboration {
       const intent = s.intents[hash(turn.id)];
       const bot = state.team.bots[turn.botId];
       // #816: K4 compacted the intent before this sync saw its result. The identity can never run again.
-      // A routine Turn's tombstone expires with its slot, but K4 removed its occurrence with the intent, and a routine
-      // Turn is written with its occurrence. So a routine Turn without its occurrence is retired too.
       // K8 does not know the K4 conclusion, so the Turn fails, and every reader of `turn.conclusion` can settle.
       // This runs before the archive check: the work may have run, so the Turn is not `cancelled`.
-      if (!intent && !turn.conclusion
-        && (this.ledger.hasTombstone('intent', turn.id, this.now()) || turn.source === 'routine' && !s.occurrences[routineOccurrence(turn)])) {
+      if (!intent && !turn.conclusion && turnIntentRetired(this.ledger, s, turn, this.now())) {
         turn.status = 'failed'; turn.conclusion = 'failed';
         // The seat facts no longer see the intent, so release the seat here, as for a failed conclusion. Its round moves on.
         const seat = state.team.seats[turn.id];
