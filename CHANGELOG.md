@@ -55,13 +55,6 @@
   does not carry sealed content yet. The root `@byok-sdk/core` entry does not
   change. The subpath closure is 170822 bytes, and its bundle imports
   `ByokCoreError` from the root, so both entries throw one error class.
-- **Fix (client)** — on Windows, the Claude and Codex adapters detect and
-  start a CLI that npm installed (#763). npm installs both as `.cmd` shims, and
-  Node cannot start a `.cmd` without a shell. The adapters still use no shell.
-  They find the command in PATH and PATHEXT order, run a native `.exe`
-  directly, and run the JavaScript entry of an npm node shim with node. Any
-  other `.cmd` or `.bat` is refused as `not-executable`. macOS and Linux do not
-  change.
 - **Feature (client)** — the task-free projection hook gets
   `writeHomeFile(name, body)` on its input (#738, #606 R6). One call
   atomically replaces one file at the root of the canonical Agent home under
@@ -193,6 +186,14 @@
   ledger. A found terminal ends the reads of that task and starts one drain.
   After the last read, only the `reconcileMs` scans remain. This also covers a
   claimed task that the core cancels at its waiting deadline.
+- **Fix (client)** — on Windows, the Claude and Codex adapters detect and
+  start a CLI that npm installed (#763). npm installs both as `.cmd` shims, and
+  Node cannot start a `.cmd` without a shell. The adapters still use no shell.
+  They find the command in PATH and PATHEXT order, run a native `.exe`
+  directly, and run the JavaScript entry of an npm node shim with node. Any
+  other `.cmd` or `.bat` is refused as `not-executable`. macOS and Linux do not
+  change. The root `@byok-sdk/client` entry grows by 4012 bytes, and the
+  `@byok-sdk/client/testing` entry grows by 3949 bytes.
 
 ## 0.28.3 — source candidate
 
