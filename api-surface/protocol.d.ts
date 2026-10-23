@@ -1904,6 +1904,113 @@ export declare const AGENT_MEMORY_MAX_SNAPSHOT_BYTES: number;
 export declare const AGENT_MEMORY_MAX_SNAPSHOT_FILES = 128;
 /** The frozen wire runtime ids. Any other adapter id is a custom harness (`harnessId`). */
 export declare const RUNTIME_IDS: readonly ["pi", "claude", "codex"];
+// ==== @byok-sdk/protocol dist/e2ee-member.d.ts ====
+/**
+ * Member keys, the member chain and scope key packages as the Host stores
+ * them (#654 design §7.2–§7.4, E2c).
+ *
+ * The Host checks shapes only. It never hashes an entry or verifies a
+ * signature: members walk the chain themselves (§7.3), so a Host check adds
+ * no trust. `@byok-sdk/core/sealed-payload` creates and verifies these values.
+ * Protocol does not depend on core, so this module repeats core's shape
+ * rules; a cross-package test in `@byok-sdk/cloud` keeps the two equal.
+ */
+import { z } from 'zod';
+/** The most chain entries one append accepts. */
+export declare const E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES = 64;
+/** The largest canonical JSON entry, in UTF-8 bytes. */
+export declare const E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES = 65536;
+/** The most chain entries one read returns. */
+export declare const E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES = 256;
+/** The most scope key packages one put accepts. */
+export declare const E2EE_SCOPE_KEY_PACKAGE_PUT_MAX = 256;
+/** A member's public key bundle. A device member names its SDK device id; a client member has none. */
+export declare const E2eeMemberKeyBundleSchema: z.ZodObject<{
+    v: z.ZodLiteral<1>;
+    memberId: z.ZodString;
+    signingPublicJwk: z.ZodObject<{
+        kty: z.ZodLiteral<"EC">;
+        crv: z.ZodLiteral<"P-256">;
+        x: z.ZodString;
+        y: z.ZodString;
+    }, z.core.$strict>;
+    kemPublicJwk: z.ZodObject<{
+        kty: z.ZodLiteral<"EC">;
+        crv: z.ZodLiteral<"P-256">;
+        x: z.ZodString;
+        y: z.ZodString;
+    }, z.core.$strict>;
+    kemEpoch: z.ZodNumber;
+    kemSig: z.ZodString;
+    deviceId: z.ZodOptional<z.ZodString>;
+}, z.core.$strict>;
+export type E2eeMemberKeyBundle = z.infer<typeof E2eeMemberKeyBundleSchema>;
+export declare const E2EE_MEMBER_CHAIN_OPS: readonly ['add', 'remove', 'rotate', 'scope-policy', 'shred'];
+/**
+ * One signed member chain entry. `subject` must be a JSON object; the Host
+ * stores the entry as canonical JSON, which refuses any value outside JSON.
+ */
+export declare const E2eeMemberChainEntrySchema: z.ZodObject<{
+    v: z.ZodLiteral<1>;
+    tenantId: z.ZodString;
+    seq: z.ZodNumber;
+    prev: z.ZodUnion<readonly [z.ZodNull, z.ZodString]>;
+    op: z.ZodEnum<{
+        add: "add";
+        remove: "remove";
+        rotate: "rotate";
+        "scope-policy": "scope-policy";
+        shred: "shred";
+    }>;
+    subject: z.ZodCustom<Readonly<Record<string, unknown>>, Readonly<Record<string, unknown>>>;
+    signer: z.ZodString;
+    sig: z.ZodString;
+}, z.core.$strict>;
+export type E2eeMemberChainEntry = z.infer<typeof E2eeMemberChainEntrySchema>;
+/** One scope key wrapped to one member (§7.4). */
+export declare const E2eeScopeKeyPackageSchema: z.ZodObject<{
+    v: z.ZodLiteral<1>;
+    tenantId: z.ZodString;
+    scopeId: z.ZodString;
+    epoch: z.ZodNumber;
+    keyId: z.ZodString;
+    recipient: z.ZodString;
+    sender: z.ZodString;
+    enc: z.ZodString;
+    ciphertext: z.ZodString;
+    sig: z.ZodString;
+}, z.core.$strict>;
+export type E2eeScopeKeyPackage = z.infer<typeof E2eeScopeKeyPackageSchema>;
+/** A pairing MAC (§7.2 steps 3 and 4): HMAC-SHA-256 under `pv`, which the Host never holds. */
+export declare const E2eePairingMacSchema: z.ZodString;
+/** What the client relays to the device in pairing step 4. The client member has no device id. */
+export declare const E2eeClientPairingMacSchema: z.ZodObject<{
+    mac: z.ZodString;
+    member: z.ZodObject<{
+        v: z.ZodLiteral<1>;
+        memberId: z.ZodString;
+        signingPublicJwk: z.ZodObject<{
+            kty: z.ZodLiteral<"EC">;
+            crv: z.ZodLiteral<"P-256">;
+            x: z.ZodString;
+            y: z.ZodString;
+        }, z.core.$strict>;
+        kemPublicJwk: z.ZodObject<{
+            kty: z.ZodLiteral<"EC">;
+            crv: z.ZodLiteral<"P-256">;
+            x: z.ZodString;
+            y: z.ZodString;
+        }, z.core.$strict>;
+        kemEpoch: z.ZodNumber;
+        kemSig: z.ZodString;
+        deviceId: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>;
+    chainHead: z.ZodObject<{
+        seq: z.ZodNumber;
+        hash: z.ZodString;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+export type E2eeClientPairingMac = z.infer<typeof E2eeClientPairingMacSchema>;
 // ==== @byok-sdk/protocol dist/envelope.d.ts ====
 import { z } from 'zod';
 import { MESSAGE_PAYLOAD_SCHEMAS, type MessageType } from './messages';
@@ -2760,6 +2867,8 @@ export type { TaskOfferType } from './messages';
 export type { HarnessId, HarnessInfo } from './messages';
 export { CUSTOM_HARNESS_CAPABILITY } from './version';
 export { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from './input-preparation';
+export { E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES, E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES, E2EE_MEMBER_CHAIN_OPS, E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, E2eeClientPairingMacSchema, E2eeMemberChainEntrySchema, E2eeMemberKeyBundleSchema, E2eePairingMacSchema, E2eeScopeKeyPackageSchema, } from './e2ee-member';
+export type { E2eeClientPairingMac, E2eeMemberChainEntry, E2eeMemberKeyBundle, E2eeScopeKeyPackage } from './e2ee-member';
 export * from './bot-turn-outcome';
 export { resultOutcomeMaxBytes } from './result-schema';
 // ==== @byok-sdk/protocol dist/input-preparation.d.ts ====
