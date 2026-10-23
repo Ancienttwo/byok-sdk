@@ -1,6 +1,7 @@
 import type { Pool, PoolClient } from 'pg';
 import { agentKey, canonical, fifoHeads, queuedExpiry, submitFrozen, taskId,
   type ExecutionTemplate, type FrozenInput, type FrozenSubmitPort } from '@byok-sdk/example-host-execution-core';
+import { SUPPORTED_STORE_VERSIONS } from './ddl';
 import { storedKey } from './layout';
 import { inSchema, lockScope } from './store';
 
@@ -62,11 +63,14 @@ export class HostedSubmitter {
    */
   async run(): Promise<SubmitPass> {
     // The NOT EXISTS head filter must match K4 fifoHeads, which the claim checks again under the scope lock.
+    // A scope of a store version this code does not support is left out before the limit: its rows cannot be
+    // claimed or written, so they must not fill a pass ahead of the healthy scopes.
     const due = await inSchema(this.pool, this.schema, client => client.query<{ scope: string; key: string }>(
-      `SELECT i.scope, i.key FROM intent i WHERE i.conclusion IS NULL AND i.submission <> 'delivered' AND i.cancel_reason IS NULL
+      `SELECT i.scope, i.key FROM intent i JOIN scope s ON s.scope = i.scope
+        WHERE s.state_version = ANY($3::integer[]) AND i.conclusion IS NULL AND i.submission <> 'delivered' AND i.cancel_reason IS NULL
         AND i.next_at <= $1 AND NOT EXISTS (SELECT 1 FROM intent o WHERE o.scope = i.scope AND o.agent = i.agent
           AND o.conclusion IS NULL AND o.ordinal < i.ordinal)
-        ORDER BY i.next_at, i.scope, i.ordinal LIMIT $2`, [this.now(), this.options.batch ?? 100]), true);
+        ORDER BY i.next_at, i.scope, i.ordinal LIMIT $2`, [this.now(), this.options.batch ?? 100, [...SUPPORTED_STORE_VERSIONS]]), true);
     const pass: SubmitPass = { tried: 0, failed: [] };
     for (const row of due.rows) {
       try { if (await this.try(row.scope, row.key)) pass.tried++; }

@@ -206,12 +206,33 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('H submitter on real Postgres and a real SDK 
   it('goes on with the pass when one row cannot be tried, and writes nothing to that row', async () => {
     const bad = `tenant:a-${randomUUID()}`, good = `tenant:z-${randomUUID()}`, { port } = sdkPort();
     const refused = await freeze(bad), input = await freeze(good);
+    // The scan reads the row while its scope is supported. The version changes before the claim takes the lock.
+    const name = `race_${randomUUID().slice(0, 8)}`;
+    const pool = new pg.Pool({ connectionString: POSTGRES_URL, max: 4, application_name: name });
+    const blocker = await opened!.pool.connect();
+    try {
+      await blocker.query('BEGIN');
+      await blocker.query(`SELECT 1 FROM "${opened!.store.schema}".scope WHERE scope = $1 FOR UPDATE`, [storedKey(bad)]);
+      const running = new HostedSubmitter(pool, opened!.store.schema, { port: () => port, now: () => clock, leaseMs: 1000, backoffMs: 500 }).run();
+      await vi.waitFor(async () => expect(Number((await opened!.pool.query(
+        `SELECT count(*) AS n FROM pg_stat_activity WHERE application_name = $1 AND wait_event_type = 'Lock'`, [name])).rows[0].n)).toBe(1));
+      await blocker.query(`UPDATE "${opened!.store.schema}".scope SET state_version = 3 WHERE scope = $1`, [storedKey(bad)]);
+      await blocker.query('COMMIT');
+      const pass = await running;
+      expect(pass.tried).toBe(1);
+      expect(pass.failed).toMatchObject([{ scope: bad, error: { name: 'HostedStoreVersionError' } }]);
+      expect(await row(bad, refused.taskId)).toMatchObject({ submission: 'reserved', tries: 0, last_error: null });
+      expect((await row(good, input.taskId)).submission).toBe('delivered');
+    } finally { blocker.release(); await pool.end(); }
+  });
+
+  it('leaves a scope of an unknown store version out of the scan, so it cannot fill a batch of 1', async () => {
+    const bad = `tenant:a-${randomUUID()}`, good = `tenant:z-${randomUUID()}`, { port } = sdkPort();
+    const refused = await freeze(bad), input = await freeze(good);
     await opened!.pool.query(`UPDATE "${opened!.store.schema}".scope SET state_version = 3 WHERE scope = $1`, [storedKey(bad)]);
-    const pass = await submitter(port).run();
-    expect(pass.tried).toBe(1);
-    expect(pass.failed).toMatchObject([{ scope: bad, error: { name: 'HostedStoreVersionError' } }]);
-    expect(await row(bad, refused.taskId)).toMatchObject({ submission: 'reserved', tries: 0, last_error: null });
+    for (let pass = 0; pass < 2; pass++) await submitter(port, { batch: 1 }).run();
     expect((await row(good, input.taskId)).submission).toBe('delivered');
+    expect(await row(bad, refused.taskId)).toMatchObject({ submission: 'reserved', tries: 0, last_error: null });
   });
 
   it('gives one SDK mailbox row when a stale submitter and a newer one both reach the SDK', async () => {
