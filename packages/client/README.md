@@ -354,6 +354,26 @@ revision/hash; the terminal outcome remains `idempotent`. This permits repair
 of locally lost derived files without giving the SDK product path or schema
 knowledge. Stale and same-revision/different-hash requests do not invoke it.
 
+The hook input has `writeHomeFile(name, body)` for files at the home root:
+
+```ts
+createAgentHomeProjectionConsumer(async ({ projection, writeHomeFile }) => {
+  const profile = parseProductProfile(projection); // Host-owned validation
+  await writeHomeFile('AGENTS.md', profile.instructions);
+  await writeHomeFile('CLAUDE.md', profile.instructions);
+});
+```
+
+Each call atomically replaces one file. `name` is one portable file name, and
+`.byok`, `MEMORY.md` and `notes` are refused. Call it only while the hook runs:
+the SDK waits for every call before it records the projection. There is no
+transaction over several files. After a process crash, each file has its old or
+its new bytes. On POSIX, a successful call has flushed the file and its
+directory. On Windows, it has flushed the file only, so the SDK makes no promise
+for an OS crash or a power loss. A delivery of the same revision and hash
+repairs a file write that such a loss undid. A process crash can leave a
+`<name>.<pid>-<n>.tmp` file in the home. The SDK does not remove it.
+
 Startup materializes and write-probes the canonical root before publishing
 `agent-home-contract`. `agentHome` and `gitWorkspace` are mutually exclusive;
 strict Agent execution has one workspace authority and never falls back to a
