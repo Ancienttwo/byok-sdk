@@ -90,8 +90,9 @@ function setup(withStore = true) {
     capabilities: fullCapabilityDeclaration(),
     ...(withStore ? { e2eeMemberStore: store } : {}),
   });
-  const registerDevice = (tenant: TenantId, deviceId: string) => base.stores.devices.register(tenant, {
+  const registerDevice = (tenant: TenantId, deviceId: string, machineId?: string) => base.stores.devices.register(tenant, {
     productId: 'product', deviceId, deviceName: deviceId, devicePublicKey: `${deviceId}-key`, proofKeyId: 'identity', proofKeyEpoch: 0,
+    ...(machineId === undefined ? {} : { machineId }),
   });
   return { cloud, store, clock, base, registerDevice };
 }
@@ -253,6 +254,39 @@ describe('E2EE member control plane', () => {
     expect(second.deviceId).not.toBe(first.deviceId);
     expect(await harness.stores.devices.get(TENANT_A, first.deviceId)).toBeUndefined();
   });
+
+  // The in-memory device directory deletes no E2EE state. Its revoke and its
+  // machine supersession both delete the device row, so the active-device
+  // guard alone keeps the old device's registration and MACs unreachable.
+  const machineId = 'e'.repeat(64);
+  const removals: ReadonlyArray<readonly [string, (env: ReturnType<typeof setup>) => Promise<unknown>]> = [
+    ['revoke', env => env.base.stores.devices.revoke(TENANT_A, 'device-1')],
+    ['machine supersession', env => env.registerDevice(TENANT_A, 'device-2', machineId)],
+  ];
+  for (const [event, remove] of removals) {
+    it(`serves and writes no member state for a device removed by ${event} on the memory backend`, async () => {
+      const env = setup();
+      const { cloud, store, clock, registerDevice } = env;
+      const client = await newMember();
+      const device = await newMember('device-1');
+      await registerDevice(TENANT_A, 'device-1', machineId);
+      await store.registerMember(TENANT_A, {
+        deviceId: 'device-1', memberId: device.bundle.memberId, bundle: canonicalizeJson(device.bundle as unknown as JsonValue),
+        deviceMac: 'device-mac', macExpiresAt: new Date(clock.now().getTime() + PAIRING_CODE_TTL_MS).toISOString(),
+      });
+      const relay = { mac: 'A'.repeat(42) + 'E', member: client.bundle, chainHead: { seq: 2, hash: `sha256:${'0'.repeat(64)}` } };
+      await cloud.relayClientPairingMac(TENANT_A, 'device-1', relay);
+      expect(await cloud.readMemberKeyRegistration(TENANT_A, 'device-1')).toEqual({ member: device.bundle, deviceMac: 'device-mac' });
+
+      await remove(env);
+
+      expect(await env.base.stores.devices.get(TENANT_A, 'device-1')).toBeUndefined();
+      expect(await cloud.readMemberKeyRegistration(TENANT_A, 'device-1')).toBeUndefined();
+      expect(await code(cloud.relayClientPairingMac(TENANT_A, 'device-1', { ...relay, mac: 'A'.repeat(42) + 'I' }))).toBe('device_not_found');
+      expect(await store.readClientPairingMac(TENANT_A, { deviceId: 'device-1', now: clock.now().toISOString() }))
+        .toBe(canonicalizeJson(relay as unknown as JsonValue));
+    });
+  }
 
   it('relays a client MAC only to a registered active device, for one pairing window', async () => {
     const { cloud, store, clock, registerDevice } = setup();
