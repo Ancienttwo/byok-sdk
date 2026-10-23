@@ -8,17 +8,17 @@ export const AGENT_MEMORY_HELPER_RELEASE = {
     "-buildvcs=false",
     "-trimpath"
   ],
-  "sourceDigest": "e39988d883a3925d884e387cf92b5e7585d612ec07b7cc9dce607656a55e8ce2",
+  "sourceDigest": "335ef82d2fe3b85fb19e4fae2aa7b27715481bf1448adf2bbd777beee29a4efe",
   "signingPolicy": "product-resigning-allowed",
   "digestAlgorithm": "mach-o-content-v1",
   "entries": {
     "darwin-arm64": {
       "file": "darwin-arm64",
-      "digest": "aa1164acafc96650d5c209c66f70938f15243b5d675bb50c89ccbdda38aa760a"
+      "digest": "191336f45577b0ab2416ebe564db336ff4bf2ccf662cd8b1bcbb3ece16f5cfa3"
     },
     "darwin-x64": {
       "file": "darwin-x64",
-      "digest": "6b0d1204d4c269639efcd88054628b126be41cebd1bf3637d010fe9c5d074574"
+      "digest": "f0f253b9f3eb75b594d11d324baef771f2e34905a930c1cc79b70be0d30854b3"
     }
   }
 } as const;

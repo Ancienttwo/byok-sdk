@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import * as protocol from '@byok-sdk/protocol';
 import { stateOf } from './model';
 import { outcomeSchema } from './schema';
-import { createRoutine } from './routines';
+import { routineViews } from './routines.test-support';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -26,12 +26,10 @@ it.each(['not-subset', 'over-budget'] as const)('reports %s as a Host defect wit
 });
 
 it('keeps both schema and outcome bounds at the eight-routine limit, with self delegation only', () => {
-  const state = stateOf({});
-  for (let index = 0; index < 8; index++) createRoutine(state, 'main', `seed-${index}`, 0,
-    { localId: 'new_routine_1', schedule: { minute: 0, hour: 9, tz: 'UTC' }, prompt: 'report' }, Date.UTC(2026, 9, 19, 8));
-  const schema = outcomeSchema('main', state);
+  const routines = routineViews('main', 8, 'report');
+  const schema = outcomeSchema('main', stateOf({}), undefined, ['default'], routines);
   expect(Buffer.byteLength(JSON.stringify(schema))).toBeLessThanOrEqual(protocol.RESULT_SCHEMA_MAX_BYTES);
   expect(protocol.resultOutcomeMaxBytes(schema)).toBeLessThanOrEqual(protocol.RESULT_OUTCOME_MAX_BYTES);
   expect(schema.properties!.delegate!.items!.properties!.to!.enum).toEqual(['main']);
-  expect(schema.properties!.update_routine!.items!.properties!.routineId!.enum).toEqual(Object.keys(state.routines));
+  expect(schema.properties!.update_routine!.items!.properties!.routineId!.enum).toEqual(routines.map(routine => routine.id));
 });

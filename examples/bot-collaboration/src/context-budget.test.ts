@@ -10,7 +10,8 @@ import { BotCollaboration, type BotOptions } from './host';
 import { stateOf } from './model';
 import { contextPack } from './schema';
 import { roomFields } from './team';
-import { createRoutine, updateRoutine } from './routines';
+import { botRoutines, createDefinition, updateDefinition } from './routines';
+import { deliverRoutine, routineOf, routineRow, seedRoutine } from './routines.test-support';
 
 let root: string | undefined;
 let ledger: HostLedger | undefined;
@@ -34,9 +35,10 @@ it('selects a declared recent window, summarizes outcomes and includes only curr
   for (let n = 0; n < 20; n++) state.turns[`turn-${n}`] = { id: `turn-${n}`, root: 'root', botId: 'main', source: 'user', request: `request-${n}`,
     hop: 0, status: 'succeeded', outcome: { delegate: [{ to: 'main', request: 'full-document-must-stay-out' }] } };
   state.rejected.push({ botId: 'main', taskId: 'old', action: 'delegate', reason: 'seen', consumedBy: 'old-turn' }, { botId: 'main', taskId: 'new', action: 'delegate', reason: 'unseen' });
-  const routine = createRoutine(state, 'main', 'seed', 0, { localId: 'new_routine_1', schedule: { minute: 0, hour: 9, tz: 'UTC' }, prompt: 'old-definition' }, Date.UTC(2026, 9, 19, 8));
-  updateRoutine(state, 'main', { routineId: routine.id, prompt: 'current-definition' }, Date.UTC(2026, 9, 19, 8));
-  const context = contextPack(state, 3);
+  // An idle routine switches to its update at once, so the K4 row holds only the current definition.
+  const routine = routineRow(createDefinition([], 'main', 'seed', 0, { localId: 'new_routine_1', schedule: { minute: 0, hour: 9, tz: 'UTC' }, prompt: 'old-definition' }, 'bot'));
+  routine.definition = updateDefinition([routine], 'main', { routineId: routine.definition.id, prompt: 'current-definition' });
+  const context = contextPack(state, 3, undefined, undefined, undefined, undefined, undefined, botRoutines([routine]));
   expect(context.historyWindow).toEqual({ turnLimit: 3, omittedTurns: 17,
     omittedCards: 0, omittedQuestions: 0, omittedPendingCards: 0, omittedPendingQuestions: 0,
     maxBytes: 32768, omittedMessages: 0, omittedRejections: 0, currentRequestBytes: 0, metadataOverBudget: false, notice: 'Earlier history was omitted.' });
@@ -188,19 +190,17 @@ it('cancels a blocked turn before admission without an intent or repeat publicat
 it('settles a blocked routine occurrence on cancellation so a pending version can activate', async () => {
   vi.useFakeTimers();
   await setup({ contextMaxBytes: 512 });
-  const id = ledger!.transaction(s => createRoutine(stateOf(s.application), 'main', 'blocked-routine', 0,
-    { localId: 'new_routine_1', schedule: { minute: 0, hour: 9, tz: 'UTC' }, prompt: '😀'.repeat(500) }, Date.now()).id);
+  const id = await seedRoutine(bot!, 'blocked-routine', '😀'.repeat(500));
   await bot!.drain();
-  const slot = bot!.snapshot().routines[id]!.armed!;
-  vi.setSystemTime(slot.at);
-  await bot!.consume({ wakeId: 'blocked-slot', dedupKey: slot.key, availableAt: slot.at, deliveredAt: slot.at, delivery: 1 }, new AbortController().signal);
+  vi.setSystemTime(routineOf(bot!, id).next!.availableAt);
+  await deliverRoutine(bot!, id);
   const turn = Object.values(bot!.snapshot().turns)[0]!;
   expect(turn.status).toBe('blocked');
   await bot!.updateRoutine({ routineId: id, prompt: 'short' });
-  expect(bot!.snapshot().routines[id]!.pending).toBe(2);
+  expect(routineOf(bot!, id).pending!.version).toBe(2);
   await bot!.cancelTurn(turn.id);
-  expect(bot!.snapshot().occurrences[slot.key]!.settled).toBe(true);
-  expect(bot!.snapshot().routines[id]).toMatchObject({ current: 2, pending: null, inflight: [] });
+  expect(Object.values(ledger!.snapshot().occurrences)[0]!.conclusion).toBe('cancelled');
+  expect(botRoutines([routineOf(bot!, id)])[0]).toMatchObject({ current: 2, pending: null });
   expect(bot!.core.intent(turn.id)).toBeUndefined();
 });
 

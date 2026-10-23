@@ -252,16 +252,16 @@ jobs:
     if: ${{ contains(fromJSON(needs.select.outputs.families), 'agent-memory-helper-linux') }}
     name: agent memory helper non-Darwin volume checks (${{ matrix.os }}, fixed Go)
     runs-on: ${{ matrix.os }}
-    # windows-latest runs the Windows-only Go tests on NTFS as the runner's
-    # administrator: the directory barrier, injected barrier failures, reparse
-    # swaps after the home is pinned, and the model P process kills.
-    # openSession stays closed on Windows, so a pass grants no admission and
-    # no B. The standard-user run stays in agent-memory-windows.yml.
-    # See docs/plans/2026-10-22-605-windows-memory.md.
+    # Each Windows leg runs the Go tests on NTFS twice: as the runner's
+    # administrator, and as a new standard user. Node and Bun also check the
+    # root identity that the TS caller sends to open. windows-latest is
+    # Server 2025 and windows-2022 is Server 2022, so the evidence covers two
+    # Windows builds. The helper admits a Windows open, but the TS gate stays
+    # closed and B stays false. See docs/plans/2026-10-22-605-windows-memory.md.
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, windows-2022]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -271,11 +271,88 @@ jobs:
         with:
           go-version-file: packages/client/native/agent-memory-fs/go.mod
 
+      - name: Setup fixed Node
+        if: runner.os == 'Windows'
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+
+      - name: Setup Bun
+        if: runner.os == 'Windows'
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        if: runner.os == 'Windows'
+        run: bun ci
+
       - name: Test Go helper and non-Darwin volume identity
         working-directory: packages/client/native/agent-memory-fs
         run: go test -v ./...
         env:
           GOTOOLCHAIN: go1.26.5
+
+      - name: Check Node and Bun root identity against the helper handle
+        if: runner.os == 'Windows'
+        working-directory: packages/client/native/agent-memory-fs
+        shell: pwsh
+        env:
+          GOTOOLCHAIN: go1.26.5
+        run: |
+          foreach ($runtime in 'node', 'bun') {
+            $env:BYOK_TEST_AGENT_MEMORY_JS_RUNTIME = (Get-Command $runtime).Source
+            $output = go test -v -count=1 -run '^TestWindowsRuntimeIdentityMatchesNativeHandle$' . 2>&1 | Out-String
+            Write-Output $output
+            if ($LASTEXITCODE -ne 0) { throw "$runtime identity check failed" }
+            # A skip or a renamed test also exits 0.
+            if ($output -notmatch '--- PASS: TestWindowsRuntimeIdentityMatchesNativeHandle \(') { throw "$runtime identity check did not pass" }
+          }
+
+      - name: Test Go helper as a standard user
+        if: runner.os == 'Windows'
+        working-directory: packages/client/native/agent-memory-fs
+        shell: pwsh
+        env:
+          GOTOOLCHAIN: go1.26.5
+        run: |
+          go test -c -o "$env:RUNNER_TEMP/agent-memory-fs-tests.exe" .
+          if ($LASTEXITCODE -ne 0) { throw 'test binary build failed' }
+          # The runner token is an administrator. A new local account in Users
+          # runs the same test binary. A standard user can create symlinks only
+          # when Developer Mode is on, so the symlink subtests run only in the
+          # administrator step. Their names end in -symlink, and -test.skip
+          # leaves them out here. Junctions need no privilege and stay in this run.
+          $user = 'byokntfs'
+          # net user prompts for confirmation above 14 characters.
+          $password = 'Aa1!' + [guid]::NewGuid().ToString('N').Substring(0, 10)
+          net user $user $password /add | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'standard user creation failed' }
+          $work = Join-Path $env:RUNNER_TEMP 'standard-user'
+          New-Item -ItemType Directory -Force (Join-Path $work 'tmp') | Out-Null
+          Copy-Item "$env:RUNNER_TEMP/agent-memory-fs-tests.exe" $work
+          icacls $work /grant "${user}:(OI)(CI)F" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'work directory grant failed' }
+          @(
+            '@echo off'
+            "set TMP=$work\tmp"
+            "set TEMP=$work\tmp"
+            "whoami /all > `"$work\token.txt`""
+            "`"$work\agent-memory-fs-tests.exe`" -test.v -test.count=1 -test.skip `"/-symlink`$`" > `"$work\go.txt`" 2>&1"
+            'exit /b %ERRORLEVEL%'
+          ) | Set-Content -Encoding ascii (Join-Path $work 'run.cmd')
+          $credential = [pscredential]::new($user, (ConvertTo-SecureString $password -AsPlainText -Force))
+          $process = Start-Process -FilePath (Join-Path $work 'run.cmd') -Credential $credential -WorkingDirectory $work -Wait -PassThru
+          Get-Content (Join-Path $work 'token.txt')
+          Get-Content (Join-Path $work 'go.txt')
+          $token = Get-Content -Raw (Join-Path $work 'token.txt')
+          if ($token -notmatch "\\$user\b") { throw 'tests did not run as the standard user' }
+          if ($token -match 'S-1-5-32-544') { throw 'standard user token holds Administrators' }
+          if ($process.ExitCode -ne 0) { throw "standard-user tests failed: exit $($process.ExitCode)" }
+          $output = Get-Content -Raw (Join-Path $work 'go.txt')
+          if ($output -match '--- FAIL') { throw 'standard-user tests reported a failure' }
+          # A renamed test would match nothing and still exit 0.
+          foreach ($name in 'TestVersionAndOpenProtocol', 'TestWindowsOpenWithJunctionFixtures', 'TestWindowsReparseParentSwapCannotTouchOutsideSentinel', 'TestWindowsMemoryResultBarrierFailsClosedOnNTFS', 'TestWindowsProcessKillAtEachBarrierPointOnNTFS', 'TestWindowsProcessKillAtRandomTimesOnNTFS') {
+            if ($output -notmatch "--- PASS: $name \(") { throw "standard-user run did not pass $name" }
+          }
 
   # The Go helper is admitted only on macOS. Keep its toolchain and the
   # TypeScript-to-Go integration test in one independent job so the admission
