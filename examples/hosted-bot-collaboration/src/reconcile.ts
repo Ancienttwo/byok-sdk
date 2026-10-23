@@ -8,6 +8,7 @@ import { SUPPORTED_STORE_VERSIONS } from './ddl';
 import { syncFacts } from './intents';
 import { commitStored } from './retention';
 import { storedKey } from './layout';
+import { loadSlice, outcomeRoutinePorts, switchDueVersions, writeSlice } from './routines';
 import { inSchema, lockScope, type Decision, type HostedCollaborationStore, type PortsFactory, type Publish } from './store';
 
 /** The SDK calls of one tenant that the reconciliation uses, as L binds them to its `ByokServer` tasks. */
@@ -151,7 +152,10 @@ export class HostedReconciler {
     return this.locked(scopeKey, async (client, now) => {
       const done = await client.query(`UPDATE intent SET conclusion = $3 WHERE scope = $1 AND key = $2 AND conclusion IS NULL
         AND ($4::bigint IS NULL OR next_at <= $4)`, [scopeKey, key, conclusion, attemptReadAt ?? null]);
-      if (done.rowCount) return true;
+      if (done.rowCount) {
+        await switchDueVersions(client, scopeKey, now);
+        return true;
+      }
       await this.delay(client, scopeKey, key, now);
       return false;
     });
@@ -183,6 +187,8 @@ function verified(input: FrozenInput, attempt: TaskAttempt | undefined): TaskAtt
  * K4 `finish` in the store's terminal transaction, under the scope lock. A concluded row changes nothing. A completed
  * task commits the K8 `outcome` command under the command id `taskId`, as L does, so a replayed terminal gets the first
  * result from the command record. Returns the conclusion that this transaction wrote.
+ * The store owns the routine ports: the outcome's routine actions run the K4 rules on the scope's routines before the
+ * conclusion, as K4 runs `applyOutcome` before `settle` (#793 D2f). Then a staged version that is due switches.
  */
 export async function decideFinish(client: PoolClient, scope: string, turnId: string, state: CollaborationState, publish: Publish,
   { terminal, attempt }: TaskEvidence, ports: PortsFactory): Promise<Decision<Conclusion | undefined>> {
@@ -195,18 +201,21 @@ export async function decideFinish(client: PoolClient, scope: string, turnId: st
   const envelope = terminal.envelope;
   if (envelope.task_id !== row.task_id) throw new Error('Terminal identity conflict');
   let conclusion: Conclusion, outbox: OutboxIntent[] = [];
+  const base = ports(state, publish), now = base.now();
   if (attempt.cancellation || envelope.type === 'task.cancelled') conclusion = 'cancelled';
   else if (envelope.type === 'task.complete') {
     // The intent rows before this row concludes, as L reads its ledger before the terminal transaction writes.
     const committed = await syncFacts(client, scope, Object.keys(state.turns));
-    const base = ports(state, publish), head = revisionOf(state);
+    const slice = await loadSlice(client, scopeKey), head = revisionOf(state);
     const result = await commitStored(client, scope, state, { scope, commandId: row.task_id,
       command: { kind: 'outcome', turnId, taskId: row.task_id, document: envelope.payload.document as Json } },
-    { ...base, ...(base.outcome ? { outcome: { ...base.outcome, committed } } : {}) });
+    { ...base, ...(base.outcome ? { outcome: { ...base.outcome, committed, ...outcomeRoutinePorts(slice, now, row.task_id) } } : {}) });
+    await writeSlice(client, scopeKey, slice);
     outbox = result.revision === head + 1 ? result.outbox : [];
     conclusion = 'succeeded';
   } else conclusion = envelope.type === 'task.decline' ? 'declined' : 'failed';
   await client.query('UPDATE intent SET terminal = $3::json, attempt = $4::json, conclusion = $5 WHERE scope = $1 AND key = $2',
     [scopeKey, key, JSON.stringify(terminal), JSON.stringify(attempt), conclusion]);
+  await switchDueVersions(client, scopeKey, now);
   return { value: conclusion, outbox };
 }

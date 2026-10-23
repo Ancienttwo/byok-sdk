@@ -7,6 +7,7 @@ import { commitCommand, refuseRetired, retiredIdentity, type AdmittedIds, type C
   type RetiredNamespace } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import type { CommandRecord, CommitRequest, CommitResult } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { storedKey } from './layout';
+import { loadSlice } from './routines';
 
 type AcceptedReply = CollaborationState['replies'][string];
 
@@ -92,6 +93,8 @@ export async function decideRetention(client: PoolClient, scopeKey: string, stat
   const loaded = await tombstones(client, scopeKey, roots.map(root => ['root', root]));
   const intents = new Set((await client.query<{ key: string }>('SELECT key FROM intent WHERE scope = $1 AND key = ANY($2::text[])',
     [scopeKey, Object.keys(state.turns).map(storedKey)])).rows.map(row => row.key));
+  // The occurrences that are not concluded: K8 refuses a routine root while its occurrence is open (#793 D2f).
+  const openOccurrences = new Set(Object.keys((await loadSlice(client, scopeKey)).state.occurrences));
   const puts = new Map<string, { namespace: string; id: string; value: Json; expiresAt: number | null }>(), retired = new Set<string>();
   const store: RetentionStore = {
     put(namespace, id, value, expiresAt) {
@@ -107,7 +110,7 @@ export async function decideRetention(client: PoolClient, scopeKey: string, stat
   };
   const result = retainRoots(state, input, limits, {
     hasIntent: turnId => intents.has(storedKey(turnId)),
-    occurrenceOpen: () => { throw new Error('H has no routine Turns before #793 D2f'); },
+    occurrenceOpen: turnId => openOccurrences.has(turnId.slice('occurrence:'.length)),
   }, store);
   for (const row of puts.values()) {
     const body = JSON.stringify(row.value);
