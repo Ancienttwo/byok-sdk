@@ -53,10 +53,11 @@ tombstone 是一个 JSON 对象。它只由原正文推出，所以同一正文�
 | --- | --- | --- |
 | offer fence（`cloud.ts` 的 `enqueueTaskEnvelope`） | 整串比较，相同正文也冲突 | 存的值等于新正文，或等于新正文的 tombstone，都算相同。不同正文仍返回 `coordination_input_invalid` |
 | agent-message offer fence（`cloud.ts` 的 `agentMessageOfferWriter`） | 整串比较 | 同上。不同正文仍返回 `agent_content_request_mismatch` |
-| admission 的 reserve、read、finalize（Postgres 和 in-memory） | 整串比较，重放变成 `rejected` | 调用方多传一个 `payloadTombstone`。store 比较 `payload_body` 等于正文或等于它的 tombstone |
+| admission 的 reserve、read、finalize | 整串比较 | 不改。binding receipt 与 admission 在同一事务里换成 tombstone，设备的重放在 binding 检查处就被拒绝，到不了 admission |
+| Host 的 `readAgentMessageDisposition` | 比较不上，返回 `undefined` | 返回 `undefined` 前读 admission。正文是 tombstone 时抛 `task_content_redacted` |
 | `recordTerminal` | 抛普通 `Error`，路由返回 500 | 认出 tombstone 后直接返回。task 已经是终态 |
 | claim gate、recovery gate | `JSON.parse(...).payload.x` 抛 `TypeError` | 认出 tombstone 后拒绝，用现有原因 `claim_offer_mismatch`、`recovery_offer_mismatch` |
-| `agent.message.publish` 重放 | binding 没有 `context`，返回现有的 `agent_message_binding_mismatch` | 不改 |
+| `agent.message.publish` 重放 | 读 tombstone 的 `agentRef` 时抛 `TypeError`，路由返回 500 | 认出 tombstone 后拒绝，用现有原因 `agent_message_binding_mismatch`。不调用 consumer，不进 admission |
 | 已 redact 的终态 task 收到 `task.progress`、`task.await_approval`、`task.approval_resolved` | 重新写入 activity 或 approval 行 | 有审计 receipt 时不写入，按已处理完成。只在 task 已是终态时多读一次 receipt |
 | `cancelTask` | `decodeEnvelope` 读 tombstone 失败 | 取消 envelope 是 tombstone 时，跳过 seq 检查，返回 attempt |
 | `readTaskOffer`、`readDeviceTerminal`、`readTaskResult`、`readTaskAgentMessage`、`readTaskAgentMessageDraft` | 抛各种错误 | 抛新的 `ByokCloudError('task_content_redacted')` |

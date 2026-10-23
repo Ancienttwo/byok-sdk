@@ -115,14 +115,14 @@ export function parseTaskRedactionInput(input: { readonly taskIds: readonly stri
       `redactTasks takes 1 to ${String(TASK_REDACTION_MAX_TASKS)} task ids.`,
     );
   }
-  const unique = new Set<string>();
+  const unique: string[] = [];
   for (const taskId of taskIds) {
-    if (typeof taskId !== 'string' || taskId.length === 0 || taskId.length > TASK_ID_MAX_LENGTH || unique.has(taskId)) {
+    if (typeof taskId !== 'string' || taskId.length === 0 || taskId.length > TASK_ID_MAX_LENGTH || unique.includes(taskId)) {
       throw new ByokCloudError('coordination_input_invalid', 'redactTasks task ids must be distinct, non-empty strings.');
     }
-    unique.add(taskId);
+    unique.push(taskId);
   }
-  return [...unique];
+  return unique;
 }
 
 export function taskRedactionCodec(crypto: Pick<CloudCrypto, 'sha256'>): TaskRedactionCodec {
@@ -141,9 +141,9 @@ export function taskRedactionCodec(crypto: Pick<CloudCrypto, 'sha256'>): TaskRed
     },
     isTombstone: isTaskRedactionTombstone,
     blobHashes(body) {
-      const hashes = new Set<string>();
+      const hashes: string[] = [];
       collectBlobHashes(parseJson(body), hashes);
-      return [...hashes].map((hash) => contentHash(hash));
+      return hashes.map((hash) => contentHash(hash));
     },
   };
 }
@@ -165,7 +165,7 @@ function parseJson(body: string): unknown {
 }
 
 /** A BlobRef is the one object shape that carries both `blobId` and `contentHash`. */
-function collectBlobHashes(value: unknown, hashes: Set<string>): void {
+function collectBlobHashes(value: unknown, hashes: string[]): void {
   if (Array.isArray(value)) {
     for (const item of value) collectBlobHashes(item, hashes);
     return;
@@ -173,7 +173,7 @@ function collectBlobHashes(value: unknown, hashes: Set<string>): void {
   if (value === null || typeof value !== 'object') return;
   const record = value as Record<string, unknown>;
   if (typeof record.blobId === 'string' && typeof record.contentHash === 'string' && SHA256.test(record.contentHash)) {
-    hashes.add(record.contentHash);
+    if (!hashes.includes(record.contentHash)) hashes.push(record.contentHash);
   }
   for (const item of Object.values(record)) collectBlobHashes(item, hashes);
 }

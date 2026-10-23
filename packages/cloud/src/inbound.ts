@@ -233,6 +233,7 @@ export async function handleAgentMessagePublish(
   ) return refuse('device_not_eligible');
   if (attempt === undefined || attempt.deviceId !== deviceId) return refuse('task_not_found_for_device');
   if (binding === undefined) return refuse('agent_message_offer_binding_missing');
+  if (isTaskRedactionTombstone(binding.body)) return refuse('agent_message_binding_mismatch');
   if (attempt.agentRef === undefined || !sameAgentRef(attempt.agentRef, payload.agentRef)) {
     return refuse('agent_message_attempt_mismatch');
   }
@@ -683,7 +684,7 @@ async function applyInboundGate(
   }
   // A redacted task keeps no new content. A late progress or approval report
   // is complete as received, the same as one stored and then redacted.
-  if (REDACTABLE_REPORT_TYPES.has(envelope.type) && TERMINAL_TASK_STATUSES.has(attempt.status)
+  if (REDACTABLE_REPORT_TYPES.includes(envelope.type) && TERMINAL_TASK_STATUSES.includes(attempt.status)
     && await stores.receipts.get(taskRedactionReceiptKey(taskId)) !== undefined) {
     return completeInboundEnvelope(stores, deviceId, envelope.id, attempt.agentRef);
   }
@@ -721,8 +722,8 @@ async function applyInboundGate(
   return completeInboundEnvelope(stores, deviceId, envelope.id, attempt?.agentRef);
 }
 
-const REDACTABLE_REPORT_TYPES: ReadonlySet<string> = new Set(['task.progress', 'task.await_approval', 'task.approval_resolved']);
-const TERMINAL_TASK_STATUSES: ReadonlySet<string> = new Set(['complete', 'failed', 'cancelled']);
+const REDACTABLE_REPORT_TYPES: readonly string[] = ['task.progress', 'task.await_approval', 'task.approval_resolved'];
+const TERMINAL_TASK_STATUSES: readonly string[] = ['complete', 'failed', 'cancelled'];
 
 /** Marks an envelope complete only after all of its authoritative facts converged. */
 async function completeInboundEnvelope(
