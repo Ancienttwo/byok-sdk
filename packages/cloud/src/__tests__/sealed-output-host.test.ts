@@ -20,6 +20,7 @@ import {
 } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { handleInboundEnvelope } from '../inbound';
+import { hashOfferBytes, taskOfferMessageId } from '../offer-identity';
 import { taskRedactionReceiptKey } from '../task-redaction';
 import { tenantStoresFor } from '../tenant-stores';
 import { PRODUCT_ID, TENANT_A, createHarness, type CloudHarness, type PairedDevice } from './support/harness';
@@ -320,6 +321,9 @@ describe('the output rule of the frozen sealing (#654 12d)', () => {
       artifactId: '00000000-0000-4000-8000-000000000601', name: 'a.txt', contentType: 'text/plain', inline: 'aGk',
     }],
     ['an approval request', 'task.await_approval', { approvalId: 'approval-2', summary: 'run rm?' }],
+    ['an artifact with no content', 'task.artifact', {
+      artifactId: '00000000-0000-4000-8000-000000000602', name: 'a.txt', contentType: 'text/plain',
+    }],
   ];
 
   it.each(refusedPlain)('refuses %s in plaintext, before the envelope identity is reserved', async (_name, type, payload) => {
@@ -344,6 +348,19 @@ describe('the output rule of the frozen sealing (#654 12d)', () => {
     expect(attempt).toMatchObject({ status });
     expect(attempt?.terminalCause).toBe(cause);
   });
+
+  it.each([['claimed', true], ['unclaimed', false]] as const)(
+    'accepts a %s interruption in plaintext with recovery, and keeps daemon_interrupted as the terminal cause',
+    async (_name, claim) => {
+      const task = await offeredTask(OUTPUT_SEALING, claim);
+      const offerId = await taskOfferMessageId(TENANT_A, task.taskId, task.device.deviceId, undefined, hashOfferBytes);
+      const payload = { reason: 'daemon_interrupted', retryable: false, recovery: { kind: 'daemon_interrupted', offerId } };
+      expect(await task.send('task.fail', payload)).toEqual({ outcome: 'accepted' });
+      expect(await task.harness.cloud.readTaskAttempt(TENANT_A, task.taskId)).toMatchObject({
+        status: 'failed', terminalCause: 'daemon_interrupted',
+      });
+    },
+  );
 
   it('accepts a plaintext decline with a sealed decline code', async () => {
     const task = await offeredTask(OUTPUT_SEALING, false);
