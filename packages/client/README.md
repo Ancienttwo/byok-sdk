@@ -585,7 +585,9 @@ On macOS the Agent home must be on a local volume. The helper reads the
 example an SMB, NFS or AFP mount, fails the helper open with `unsafe_root`.
 A failed query fails the same way. Memory recall and save, projection and
 export then fail, and the daemon does not advertise memory intents. Move such a
-home to a local volume.
+home to a local volume. A mount below the home, for example a network volume
+over `notes`, fails each memory operation that reaches it with `unsafe_path`.
+Move such a mount out of the home.
 
 Runtime dependencies, code-generation evidence and size budgets are recorded in the [entry dependency contract](../../README.md#entry-dependencies).
 
