@@ -24,6 +24,21 @@
   advertise `agent-memory-intent.v1`. The gate reads the process
   architecture: an arm64 process stays unavailable, and x64 Node under
   emulation on Windows arm64 is admitted.
+- **Feature (core)** — the new subpath `@byok-sdk/core/sealed-payload` exports
+  the sealed payload v1 byte rules (#654 E1a, E1b). It seals and opens one
+  category of a payload with HKDF-SHA-256 and AES-256-GCM, pads the frame, and
+  binds the tenant, scope, chain head, sender, message identity and the task's
+  sealing categories in the AAD. It derives scope key ids, and seals and opens
+  signed scope key packages with core's HPKE suite. It derives member ids, and
+  signs and verifies one member chain entry. `openSealedContent` takes the
+  task's `sealing` scope and returns the authenticated header. Only the
+  `routine.template` family binds no device; every other family must bind one.
+  A signing private key that does not pair with the given public key throws
+  `sealed_secret_invalid`. The receivers return a typed failure for hostile
+  input and do not throw. Fixed vectors run on Node, Bun and workerd. The wire
+  does not carry sealed content yet. The root `@byok-sdk/core` entry does not
+  change. The subpath closure is 170822 bytes, and its bundle imports
+  `ByokCoreError` from the root, so both entries throw one error class.
 - **Feature (client)** — the task-free projection hook gets
   `writeHomeFile(name, body)` on its input (#738, #606 R6). One call
   atomically replaces one file at the root of the canonical Agent home under
