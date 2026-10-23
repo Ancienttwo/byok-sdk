@@ -33,12 +33,16 @@ test('docs and known CI contracts select light checks, not release families', ()
   }
 });
 
-test('ci.yml selects the dataplane job that checks the workflow (#749)', () => {
-  const constraints = 'packages/cloud-dataplane/src/__tests__/constraints.test.ts';
-  assert.match(readFileSync(new URL(constraints, root), 'utf8'), /\.github\/workflows\/ci\.yml/);
-  assert.deepEqual(selectImpact(['.github/workflows/ci.yml']), {
-    dirs: [], files: ['.github/workflows/ci.yml'], families: ['dataplane'], reason: 'impacted',
-  });
+test('ci.yml selects every routine family and the client suites that read it (W7)', () => {
+  for (const reader of [
+    'packages/cloud-dataplane/src/__tests__/constraints.test.ts',
+    'packages/client/src/__tests__/agent-memory-helper-ci-p1-regression.test.ts',
+    'packages/client/src/__tests__/support/test-bun-bin.pin.test.ts',
+  ]) assert.match(readFileSync(new URL(reader, root), 'utf8'), /\.github\/workflows\/ci\.yml/, reader);
+  const impact = selectImpact(['.github/workflows/ci.yml']);
+  assert.deepEqual(impact.families, knownFamilies.filter(id => id !== 'build-test').sort());
+  assert.ok(impact.dirs.includes('packages/client'));
+  assert.equal(impact.reason, 'impacted');
   assert.deepEqual(selectImpact(['.github/workflows/release.yml']).families, []);
   assert.deepEqual(selectImpact(['scripts/ci/select-impact.mjs']).families, []);
 });
