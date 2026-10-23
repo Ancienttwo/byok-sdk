@@ -15,13 +15,16 @@ import {
   E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES,
   E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES,
   E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES,
+  E2EE_SCOPE_ID_MAX_LENGTH,
   E2EE_SCOPE_KEY_PACKAGE_PUT_MAX,
   E2eeClientPairingMacSchema,
   E2eeMemberChainEntrySchema,
   E2eeMemberKeyBundleSchema,
   E2eeMemberKeyRegisterRequestSchema,
   E2eeScopeKeyPackageSchema,
+  requiredReceiverCapabilities,
   type E2eeClientPairingMac,
+  type E2eeKeyPackageAvailablePayload,
   type E2eeMemberChainEntry,
   type E2eeMemberKeyBundle,
   type E2eeScopeKeyPackage,
@@ -136,13 +139,6 @@ export interface E2eeMemberStore {
   ): Promise<string | undefined>;
 }
 
-/**
- * The longest scope id, in UTF-16 code units, as for other opaque Host ids.
- * Core sets no maximum, so the bound lives here, not in the protocol shape
- * the parity test compares; it keeps every backend's index key in range.
- */
-const E2EE_SCOPE_ID_MAX_LENGTH = 512;
-
 function invalid(message: string): ByokCloudError {
   return new ByokCloudError('coordination_input_invalid', message);
 }
@@ -204,6 +200,8 @@ export interface E2eeMemberContext {
   readonly tenant: TenantId;
   readonly devices: DeviceDirectory;
   readonly now: () => Date;
+  /** Enqueue `e2ee.key_package.available` for one device; it refuses a device without the gate capability. */
+  readonly enqueueKeyPackageNotice: (deviceId: string, payload: E2eeKeyPackageAvailablePayload) => Promise<unknown>;
 }
 
 export async function appendMemberChainEntries(
@@ -251,7 +249,7 @@ export async function readMemberChain(
 export async function putScopeKeyPackages(
   ctx: E2eeMemberContext,
   input: { readonly packages: readonly E2eeScopeKeyPackage[] },
-): Promise<{ readonly stored: number }> {
+): Promise<{ readonly stored: number; readonly skippedDeviceIds: readonly string[] }> {
   const list = boundedList(() => input.packages, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, 'Scope key packages');
   const rows = list.map((input, index) => {
     const { text, value } = canonicalParse(E2eeScopeKeyPackageSchema, input, `Scope key package ${index}`);
@@ -285,7 +283,34 @@ export async function putScopeKeyPackages(
       `Scope ${result.scopeId} epoch ${result.epoch} already has keyId ${result.keyId}.`,
     );
   }
-  return { stored: result.stored };
+  return { stored: result.stored, skippedDeviceIds: await notifyRecipientDevices(ctx, rows) };
+}
+
+/**
+ * After the commit, notify each recipient that is a registered device (§7.4,
+ * notice-and-fetch). A replayed put notifies again, because a crash between
+ * the commit and the notice must not lose it; the derived mailbox message id
+ * makes a repeat return the same row. A device without the gate capability
+ * gets no notice and is returned, so the Host can show it; it fetches the
+ * package after an upgrade. A recipient with no device registration, such as
+ * a browser member, has no mailbox. `rows` holds one row per scope epoch and
+ * recipient, so each device gets one notice per scope epoch.
+ */
+async function notifyRecipientDevices(ctx: E2eeMemberContext, rows: readonly E2eeScopeKeyPackageRow[]): Promise<string[]> {
+  const required = requiredReceiverCapabilities('e2ee.key_package.available', {});
+  const now = ctx.now().toISOString();
+  const skipped: string[] = [];
+  for (const device of await ctx.devices.list(ctx.tenant)) {
+    const registration = await ctx.store.readMemberRegistration(ctx.tenant, { deviceId: device.deviceId, now });
+    const notices = rows.filter(row => row.recipient === registration?.memberId);
+    if (notices.length === 0) continue;
+    if (!required.every(capability => device.capabilities?.includes(capability) === true)) {
+      skipped.push(device.deviceId);
+      continue;
+    }
+    for (const row of notices) await ctx.enqueueKeyPackageNotice(device.deviceId, { scopeId: row.scopeId, epoch: row.epoch });
+  }
+  return skipped.sort(compareCodePoints);
 }
 
 function scopeQuery(fields: { readonly scopeId?: unknown; readonly epoch?: unknown }): { readonly scopeId: string; readonly epoch?: number } {

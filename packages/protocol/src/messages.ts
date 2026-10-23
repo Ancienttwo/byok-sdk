@@ -33,6 +33,7 @@ import {
   AgentHomeProjectionValueSchema,
 } from './agent-home-projection';
 import { ProviderProvisioningAvailablePayloadSchema } from './provider-provisioning';
+import { E2eeKeyPackageAvailablePayloadSchema } from './e2ee-member';
 import {
   InputPreparationAccountingPolicyRefSchema,
   InputPreparationArtifactSummarySchema,
@@ -1560,6 +1561,7 @@ export const MESSAGE_PAYLOAD_SCHEMAS = {
   'task.progress_sealed': TaskProgressSealedPayloadSchema as typeof TaskProgressSealedPayloadSchema,
   'task.artifact_sealed': TaskArtifactSealedPayloadSchema as typeof TaskArtifactSealedPayloadSchema,
   'task.await_approval_sealed': TaskAwaitApprovalSealedPayloadSchema as typeof TaskAwaitApprovalSealedPayloadSchema,
+  'e2ee.key_package.available': E2eeKeyPackageAvailablePayloadSchema as typeof E2eeKeyPackageAvailablePayloadSchema,
 } as const;
 
 export type MessageType = keyof typeof MESSAGE_PAYLOAD_SCHEMAS;
@@ -1596,6 +1598,7 @@ export const SERVER_TO_DAEMON_TYPES = [
   'task.offer_for_agent_with_egress_sealed',
   'task.offer_for_agent_with_egress_fresh_sealed',
   'task.steer_sealed',
+  'e2ee.key_package.available',
 ] as const satisfies readonly MessageType[];
 
 /**
