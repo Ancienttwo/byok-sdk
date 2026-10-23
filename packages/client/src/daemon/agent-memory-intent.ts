@@ -166,7 +166,8 @@ export interface AgentMemoryIntentBackend {
    * A successful write proves durable bytes, metadata and name changes.
    * Linux requires temp fsync, rename and directory fsync. Windows requires
    * model S proof for ledger, memory replace/delete and new parent directories
-   * under process crash, OS crash and power loss. File flush alone is not B.
+   * under process crash, OS crash and power loss. File flush alone is not B,
+   * so the Windows helper backend reports `false`.
    */
   readonly strictLedgerBarrier: boolean;
 }
@@ -181,7 +182,11 @@ export const NATIVE_AGENT_MEMORY_INTENT_BACKEND: AgentMemoryIntentBackend = Obje
   strictLedgerBarrier: true,
 });
 
-/** SDK release helper: verified Mach-O code, strict barriers, pre-rename CAS. */
+/**
+ * SDK release helper: verified Mach-O or PE code and pre-rename CAS. Only the
+ * macOS helper has the strict barrier proof. Windows has no OS-crash or
+ * power-loss proof, so it never advertises intents.
+ */
 export function helperAgentMemoryIntentBackend(helperBin: string, assetRoot?: string): AgentMemoryIntentBackend {
   const verifiedBin = verifyAgentMemoryFilesystemHelper(helperBin, assetRoot);
   return Object.freeze({
@@ -192,7 +197,7 @@ export function helperAgentMemoryIntentBackend(helperBin: string, assetRoot?: st
       homeIdentity: lease.homeIdentity,
     }),
     conflictProvesNoRename: true,
-    strictLedgerBarrier: true,
+    strictLedgerBarrier: process.platform !== 'win32',
   });
 }
 

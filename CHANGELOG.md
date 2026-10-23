@@ -9,8 +9,7 @@
   copy it, and `copySdkNativeAssets({ platform: 'win32', arch: 'x64' })` now
   also copies it into `agent-memory-fs/`. That call now needs the helper build
   (`build:release`). `sdkNativeAssetTargets['win32-x64']` gets an
-  `agentMemoryHelper` group with its own files and signing policy. The SDK
-  still does not admit Agent memory on Windows.
+  `agentMemoryHelper` group with its own files and signing policy.
 - **Changed (client)** — the Agent memory helper manifest is now version 2 and
   records the digest algorithm of each entry (#605). The resolver requires
   every entry to equal the pin of the running SDK. So a product asset folder
@@ -18,6 +17,29 @@
   also on macOS, where the Darwin digests do not change. Migration: run
   `copyAgentMemoryHelperAssets` or `copySdkNativeAssets` again with the new SDK
   and ship the new folder.
+- **Feature (client)** — Windows x64 admits Agent memory through the SDK
+  release helper (#605). The memory MCP (`memory_recall`, `memory_save`), the
+  hosted projection (`agentMemory`) and the task-free export
+  (`agentMemoryExport`) work there, and `agentMemoryHelperAssetRoot` is valid
+  there. The Agent home must be on a local NTFS volume. Another file system or
+  a remote volume, also an SMB share whose server reports NTFS, fails with
+  `unsafe_root`. Each write flushes its file and directory, but the SDK makes
+  no OS-crash or power-loss claim on Windows. So the Windows helper intent
+  backend reports `strictLedgerBarrier: false`, and a Windows daemon does not
+  advertise `agent-memory-intent.v1`. The gate reads the process
+  architecture: an arm64 process stays unavailable, and x64 Node under
+  emulation on Windows arm64 is admitted.
+  Compatibility on Windows x64:
+  - With an Agent home and the default `agentMemoryMcp: 'auto'`, every
+    ordinary Agent task now gets the SDK memory tools, and an adapter without
+    MCP toolset support declines the task. Set `agentMemoryMcp: 'off'` to keep
+    the earlier behavior.
+  - `agentMemoryIntents` now needs a resolvable SDK helper. A product without
+    the native assets (for example a compiled product) used to start, with
+    intents not advertised. It now fails at daemon construction, although
+    Windows never advertises intents. `agentMemory` and `agentMemoryExport`
+    also fail at construction without the helper, as before, now with the
+    helper error.
 - **Feature (core)** — the new subpath `@byok-sdk/core/sealed-payload` exports
   the sealed payload v1 byte rules (#654 E1a, E1b). It seals and opens one
   category of a payload with HKDF-SHA-256 and AES-256-GCM, pads the frame, and

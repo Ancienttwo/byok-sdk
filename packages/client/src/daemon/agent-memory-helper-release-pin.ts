@@ -8,7 +8,7 @@ export const AGENT_MEMORY_HELPER_RELEASE = {
     "-buildvcs=false",
     "-trimpath"
   ],
-  "sourceDigest": "f492544a4a290aea6dbf75e6dd03518c0106c62289ec4b94c02a633989143f63",
+  "sourceDigest": "d027ebee3c4145d7b433ad6220924f419c2275fe0086b9ad319b5770bfd56e1f",
   "signingPolicy": "product-resigning-allowed",
   "entries": {
     "darwin-arm64": {
@@ -24,7 +24,7 @@ export const AGENT_MEMORY_HELPER_RELEASE = {
     "win32-x64": {
       "file": "win32-x64.exe",
       "digestAlgorithm": "pe-content-v1",
-      "digest": "c7348e0a687d6ef9d4c2730f995afa941818fedc4da04a469d72fa0cf46cde90"
+      "digest": "c61b6c78b05e86f2fe772723de915e484ee8b4d3bc919ff105604697de22b5ab"
     }
   }
 } as const;

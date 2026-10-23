@@ -81,8 +81,9 @@ await copyAgentMemoryHelperAssets({ outDir: 'release/memory-assets' });
 // agentMemoryHelperAssetRoot: '/Applications/MyProduct.app/Contents/Resources/memory-assets'
 ```
 
-Set `agentMemoryHelperAssetRoot` only on macOS (Darwin arm64/x64); omit it on
-Linux and Windows. An explicit root on those platforms is rejected.
+Set `agentMemoryHelperAssetRoot` only on macOS (Darwin arm64/x64) and Windows x64;
+omit it on Linux and Windows arm64. An explicit root on those platforms is rejected.
+For Windows x64, copy with `copyAgentMemoryHelperAssets({ outDir, platform: 'win32' })`.
 The destination must be new or empty. Failed copies remove files created by
 that call so the destination can be retried. Ship both binaries and `manifest.json`;
 product code signing may re-sign the selected binary. The SDK verifies target
@@ -94,7 +95,8 @@ or corrupt root fails closed. Missing explicit assets report a product deploymen
 error directing the Host to `copyAgentMemoryHelperAssets`. This checks deployment
 integrity, not signer identity. No helper path or digest
 override is exposed. Without this option, installed SDK asset resolution stays
-in effect. Windows memory remains unavailable.
+in effect. On Windows x64 the helper admits recall, save, projection and export.
+It does not advertise Host-approved memory intents (`agentMemoryIntents`).
 
 Pi uses the same re-entry: each Pi launch starts
 `<executable> [<entry>] __byok_sdk_helper <pi-rpc|pi-prepared|pi-durable>`.
@@ -484,8 +486,8 @@ With an Agent home and `unavailable`, the Host sees this:
 The daemon reports `unavailable` for one of these reasons:
 
 - `DaemonConfig.agentHome` is not set.
-- Windows: the SDK has no Agent memory backend on Windows yet (#605).
-- macOS: the SDK release helper is missing or does not verify. Without
+- Windows arm64: the SDK has no Agent memory backend there.
+- macOS or Windows x64: the SDK release helper is missing or does not verify. Without
   `agentMemoryHelperAssetRoot`, the daemon looks for the helper in the installed
   `@byok-sdk/client` package (`dist/native/agent-memory-fs`). A single-file
   bundle or SEA that ships without `node_modules` cannot resolve that package. A
@@ -503,15 +505,20 @@ What the Host can do:
 - To start one ordinary Agent task without memory, send `agentMemory: 'none'`
   on its offer. The task then gets no memory MCP and no memory guidance.
 - If file-based memory is acceptable, keep `auto`.
-- To admit the memory MCP in a macOS single-file product, call
-  `copyAgentMemoryHelperAssets({ outDir })` at build time, or use the
-  `agent-memory-fs` subdirectory that `copySdkNativeAssets` returns. Ship that
-  directory and set `agentMemoryHelperAssetRoot` to its absolute installed path.
-  Set the root only on macOS: a root on Linux or Windows fails construction.
+- To admit the memory MCP in a macOS or Windows x64 single-file product, call
+  `copyAgentMemoryHelperAssets({ outDir })` (with `platform: 'win32'` for
+  Windows) at build time, or use the `agent-memory-fs` subdirectory that
+  `copySdkNativeAssets` returns. Ship that directory and set
+  `agentMemoryHelperAssetRoot` to its absolute installed path. Set the root only
+  on macOS and Windows x64: a root on Linux or Windows arm64 fails construction.
   With an explicit root, a missing or changed helper fails construction; it does
   not become a silent `unavailable`.
 - On Linux, run the daemon where `/proc/self/fd` exists. On Windows, the memory
-  MCP cannot be admitted in this release.
+  MCP needs an x64 process and a local NTFS volume for the Agent home. Another
+  file system or a remote volume, also an SMB share whose server reports NTFS,
+  fails the helper open with `unsafe_root`. The gate reads the process
+  architecture: x64 Node under emulation on Windows arm64 runs the x64 helper
+  and is admitted.
 - After the memory MCP is admitted, each ordinary Agent task needs an adapter
   with MCP toolset support. Without it, the daemon declines the task with
   `runtime "<id>" cannot project required MCP toolsets`.
@@ -564,10 +571,14 @@ Platform behavior is inherited from the daemon path, not restated: Linux uses
 the native descriptor-relative backend. macOS uses the SDK release helper.
 The daemon resolves the binary and checks its Mach-O content digest. Product
 re-signing is allowed. The helper requires strict `F_FULLFSYNC` on the home
-volume. Windows stays fail-closed. The ordinary `bun run build` needs no Go.
-Run `bun run build:release` with Go 1.26.5 to build both macOS architectures
-under `dist/native/agent-memory-fs` and verify their source and reproducibility.
-Without these verified assets, a macOS daemon does not offer memory tools.
+volume. Windows x64 uses the same helper (`pe-content-v1` digest, Authenticode
+re-signing allowed) on local NTFS only. Each Windows write flushes its file and its
+directory. The SDK does not claim that a write survives an OS crash or power
+loss on Windows, so a Windows daemon does not advertise memory intents. The
+ordinary `bun run build` needs no Go. Run `bun run build:release` with Go 1.26.5
+to build both macOS architectures and Windows x64 under
+`dist/native/agent-memory-fs` and verify their source and reproducibility.
+Without these verified assets, a macOS or Windows daemon does not offer memory tools.
 
 Runtime dependencies, code-generation evidence and size budgets are recorded in the [entry dependency contract](../../README.md#entry-dependencies).
 
@@ -1020,8 +1031,9 @@ preserves the established memory-helper configuration API. For Windows x64 the
 copier also writes `agent-memory-fs/manifest.json` and
 `agent-memory-fs/win32-x64.exe` from the SDK release; the build host needs the
 helper build (`build:release`). `sdkNativeAssetTargets['win32-x64'].agentMemoryHelper`
-lists these files with their own signing policy. Windows memory is still
-unavailable. Windows native asset qualification currently targets x64 only.
+lists these files with their own signing policy. Use the returned
+`agent-memory-fs` subdirectory as `agentMemoryHelperAssetRoot` on Windows x64 too.
+Windows native asset qualification currently targets x64 only.
 
 The Windows addon must retain the official pinned bytes. The enclosing executable
 and installer may be product-signed, but changing/signing the addon itself changes
