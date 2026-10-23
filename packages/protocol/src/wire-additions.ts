@@ -26,10 +26,11 @@
  *
  * Senders derive their admission flags from {@link requiredReceiverCapabilities}
  * and nowhere else, so a gate cannot exist in one place and be missing in
- * another. This module imports no runtime code (types only) so it stays free
- * of zod.
+ * another. This module imports no runtime code except the plain-data split
+ * table, so it stays free of zod.
  */
 import type { MessageType } from './messages';
+import { SEALED_SPLIT_TABLE, type SealedMessageType } from './sealed-split-table';
 import type { CapabilityFlag } from './version';
 
 type HttpWireSurface =
@@ -66,7 +67,32 @@ const EGRESS_OFFER_FIELDS = (surface: MessageType): readonly WireAddition[] => [
   ...AGENT_OFFER_FIELDS(surface),
 ];
 
-export const WIRE_ADDITIONS: readonly WireAddition[] = Object.freeze([
+/**
+ * Sealed payload v1 (#654). Each sealed message type is gated as a whole on
+ * `sealed-payload-v1`: a server-to-daemon type on the device flag, a
+ * daemon-to-server type on the server flag. A decoder that does not know the
+ * type refuses it. A sealed type also takes every row of its plaintext type,
+ * except the rows of the fields it moves or drops, so sealing never removes a
+ * gate that the same plaintext fields would need. The four sealed failure
+ * codes on the plaintext `task.decline` are value gates.
+ */
+function sealedRows(plainRows: readonly WireAddition[]): WireAddition[] {
+  return (Object.keys(SEALED_SPLIT_TABLE) as SealedMessageType[]).flatMap((surface) => {
+    const { plainType, moved, forbidden } = SEALED_SPLIT_TABLE[surface];
+    const dropped: readonly string[] = [...moved, ...forbidden];
+    const advertisedBy = SEALED_SPLIT_TABLE[surface].category === 'task-input' ? 'device' : 'server';
+    const inherited = plainRows.flatMap((row): WireAddition[] => {
+      if (row.kind !== 'envelope' || row.surface !== plainType) return [];
+      if (row.field !== undefined && dropped.includes(row.field.split(/[.[]/u)[0]!)) return [];
+      return [{ ...row, surface }];
+    });
+    return [{ kind: 'envelope', rule: 'gated', surface, capability: 'sealed-payload-v1', advertisedBy }, ...inherited];
+  });
+}
+const SEALED_DECLINE_CODE = (value: string): WireAddition =>
+  ({ kind: 'envelope', rule: 'gated', surface: 'task.decline', field: 'code', value, capability: 'sealed-payload-v1', advertisedBy: 'server' });
+
+const PLAIN_ROWS: readonly WireAddition[] = [
   // Server to daemon: offers.
   { kind: 'envelope', rule: 'gated', surface: 'task.offer', field: 'harnessId', capability: 'custom-harness', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface: 'task.offer_with_toolsets', field: 'harnessId', capability: 'custom-harness', advertisedBy: 'device' },
@@ -115,6 +141,15 @@ export const WIRE_ADDITIONS: readonly WireAddition[] = Object.freeze([
   // Daemon to server.
   { kind: 'envelope', rule: 'gated', surface: 'agent.message.draft', capability: 'agent-message-draft', advertisedBy: 'server' },
   { kind: 'envelope', rule: 'gated', surface: 'task.approval_resolved', capability: 'approval_resolved', advertisedBy: 'server' },
+];
+
+export const WIRE_ADDITIONS: readonly WireAddition[] = Object.freeze([
+  ...PLAIN_ROWS,
+  ...sealedRows(PLAIN_ROWS),
+  SEALED_DECLINE_CODE('sealed_key_unavailable'),
+  SEALED_DECLINE_CODE('sealed_open_failed'),
+  SEALED_DECLINE_CODE('sealed_content_mac_mismatch'),
+  SEALED_DECLINE_CODE('sealing_policy_mismatch'),
 ] satisfies readonly WireAddition[]);
 
 /**

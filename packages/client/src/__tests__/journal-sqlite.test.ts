@@ -279,7 +279,8 @@ describe.skipIf(!isSqliteAvailable())('SqliteLocalTaskJournal', () => {
       const storeDir = await tmpStore();
       const journal = build(storeDir, { maxRecordBytes: 512 });
 
-      const huge = 'x'.repeat(2_000);
+      // An envelope record may reach the sealed envelope floor (#654), so this one is above it.
+      const huge = 'x'.repeat(512 * 1024);
       await expect(
         journal.appendEnvelope(envelopeRecord({ bytes: huge, bytesHash: journalHash(huge) })),
       ).rejects.toBeInstanceOf(JournalRecordTooLargeError);

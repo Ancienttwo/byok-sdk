@@ -49,8 +49,11 @@ const EVENTUAL_STATE_BUDGET_MS = 4_000;
  * `task.offer_prepared` names a preparation record on a daemon configured with
  * no `inputPreparation` section at all, so it declines
  * `preparation_lane_unconfigured` before any adapter is picked.
+ * Each sealed offer type (#654) seals only the task output here, so its
+ * instruction stays plaintext; this daemon does not advertise
+ * `sealed-payload-v1` and declines it `sealed_payload_unsupported`.
  */
-const declinedByThisFixture = new Set(['task.offer_with_toolsets', 'task.offer_prepared']);
+const declinedByThisFixture = new Set(['task.offer_with_toolsets', 'task.offer_prepared', ...offerTypes.filter((type) => type.endsWith('_sealed'))]);
 const agentRef = { agentId: 'journal-family-agent', profileRevision: 'r1' };
 let daemon: Daemon | undefined;
 let server: TestServer;
@@ -104,8 +107,9 @@ async function setup(type: string) {
       instruction: 'journal lifecycle', runtime: 'pi',
       ...(type.includes('for_agent') ? { agentRef } : {}),
       ...(type.includes('with_egress') ? { egressPolicy: DEFAULT_AGENT_EGRESS_POLICY } : {}),
-      ...(type === 'task.offer_for_agent_with_egress' ? { sessionRef: 'resume-session' } : {}),
-      ...(type === 'task.offer_with_toolsets' ? { requiredToolsets: ['test-missing'] } : {}),
+      ...(type === 'task.offer_for_agent_with_egress' || type === 'task.offer_for_agent_with_egress_sealed' ? { sessionRef: 'resume-session' } : {}),
+      ...(type === 'task.offer_with_toolsets' || type === 'task.offer_with_toolsets_sealed' ? { requiredToolsets: ['test-missing'] } : {}),
+      ...(type.endsWith('_sealed') ? { sealing: { scopeId: 'journal-family-scope', epoch: 1, categories: ['task-output'] } } : {}),
     };
   const seq = server.nextSeq();
   const envelope: Envelope = EnvelopeSchema.parse({ v: PROTOCOL_VERSION, id: randomUUID(), ts: new Date().toISOString(), type, task_id: 'task-147', seq, payload });

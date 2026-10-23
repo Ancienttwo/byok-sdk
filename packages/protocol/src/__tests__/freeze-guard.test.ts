@@ -14,6 +14,8 @@ import {
   type MessageType,
   type CreateEnvelopeOptions,
 } from '../index';
+import { isSealedMessageType } from '../sealed-payload';
+import { minimalSealedPayload } from './sealed-fixtures';
 
 /**
  * FREEZE GUARD — local invariants of the frozen wire, major 3 (docs/protocol.md
@@ -93,6 +95,19 @@ function codecRequirednessMatrix(): CodecRequirednessMatrix {
     'task.fail': { taskId: 'required', seq: 'optional' },
     'task.cancelled': { taskId: 'required', seq: 'optional' },
     'task.approval_resolved': { taskId: 'required', seq: 'optional' },
+    'task.offer_sealed': { taskId: 'required', seq: 'required' },
+    'task.offer_with_toolsets_sealed': { taskId: 'required', seq: 'required' },
+    'task.offer_for_agent_sealed': { taskId: 'required', seq: 'required' },
+    'task.offer_for_agent_with_egress_sealed': { taskId: 'required', seq: 'required' },
+    'task.offer_for_agent_with_egress_fresh_sealed': { taskId: 'required', seq: 'required' },
+    'task.steer_sealed': { taskId: 'required', seq: 'required' },
+    'task.complete_sealed': { taskId: 'required', seq: 'optional' },
+    'task.fail_sealed': { taskId: 'required', seq: 'optional' },
+    'task.decline_sealed': { taskId: 'required', seq: 'optional' },
+    'task.cancelled_sealed': { taskId: 'required', seq: 'optional' },
+    'task.progress_sealed': { taskId: 'required', seq: 'optional' },
+    'task.artifact_sealed': { taskId: 'required', seq: 'optional' },
+    'task.await_approval_sealed': { taskId: 'required', seq: 'optional' },
   };
 }
 
@@ -203,6 +218,58 @@ type CodecRequirednessMatrix = {
   'task.approval_resolved': {
     taskId: FieldRequiredness<'task.approval_resolved', 'taskId'>;
     seq: FieldRequiredness<'task.approval_resolved', 'seq'>;
+  };
+  'task.offer_sealed': {
+    taskId: FieldRequiredness<'task.offer_sealed', 'taskId'>;
+    seq: FieldRequiredness<'task.offer_sealed', 'seq'>;
+  };
+  'task.offer_with_toolsets_sealed': {
+    taskId: FieldRequiredness<'task.offer_with_toolsets_sealed', 'taskId'>;
+    seq: FieldRequiredness<'task.offer_with_toolsets_sealed', 'seq'>;
+  };
+  'task.offer_for_agent_sealed': {
+    taskId: FieldRequiredness<'task.offer_for_agent_sealed', 'taskId'>;
+    seq: FieldRequiredness<'task.offer_for_agent_sealed', 'seq'>;
+  };
+  'task.offer_for_agent_with_egress_sealed': {
+    taskId: FieldRequiredness<'task.offer_for_agent_with_egress_sealed', 'taskId'>;
+    seq: FieldRequiredness<'task.offer_for_agent_with_egress_sealed', 'seq'>;
+  };
+  'task.offer_for_agent_with_egress_fresh_sealed': {
+    taskId: FieldRequiredness<'task.offer_for_agent_with_egress_fresh_sealed', 'taskId'>;
+    seq: FieldRequiredness<'task.offer_for_agent_with_egress_fresh_sealed', 'seq'>;
+  };
+  'task.steer_sealed': {
+    taskId: FieldRequiredness<'task.steer_sealed', 'taskId'>;
+    seq: FieldRequiredness<'task.steer_sealed', 'seq'>;
+  };
+  'task.complete_sealed': {
+    taskId: FieldRequiredness<'task.complete_sealed', 'taskId'>;
+    seq: FieldRequiredness<'task.complete_sealed', 'seq'>;
+  };
+  'task.fail_sealed': {
+    taskId: FieldRequiredness<'task.fail_sealed', 'taskId'>;
+    seq: FieldRequiredness<'task.fail_sealed', 'seq'>;
+  };
+  'task.decline_sealed': {
+    taskId: FieldRequiredness<'task.decline_sealed', 'taskId'>;
+    seq: FieldRequiredness<'task.decline_sealed', 'seq'>;
+  };
+  'task.cancelled_sealed': {
+    taskId: FieldRequiredness<'task.cancelled_sealed', 'taskId'>;
+    seq: FieldRequiredness<'task.cancelled_sealed', 'seq'>;
+  };
+  'task.progress_sealed': {
+    taskId: FieldRequiredness<'task.progress_sealed', 'taskId'>;
+    seq: FieldRequiredness<'task.progress_sealed', 'seq'>;
+  };
+  'task.artifact_sealed': {
+    taskId: FieldRequiredness<'task.artifact_sealed', 'taskId'>;
+    seq: FieldRequiredness<'task.artifact_sealed', 'seq'>;
+  };
+  'task.await_approval_sealed': {
+    taskId: FieldRequiredness<'task.await_approval_sealed', 'taskId'>;
+    seq: FieldRequiredness<'task.await_approval_sealed', 'seq'>;
   };
 };
 
@@ -555,6 +622,7 @@ function minimalPayloadForProbe(type: MessageType): unknown {
     case 'task.approval_resolved':
       return { approvalId: 'appr-1', decision: 'approve', resolvedBy: 'local', at: '2026-01-01T00:00:00.000Z' };
     default: {
+      if (isSealedMessageType(type)) return minimalSealedPayload(type, minimalPayloadForProbe);
       const exhaustive: never = type;
       throw new Error(`no minimal payload fixture for message type: ${String(exhaustive)}`);
     }

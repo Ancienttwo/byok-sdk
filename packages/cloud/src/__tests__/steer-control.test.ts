@@ -21,12 +21,15 @@
  * no mailbox row, so a mistargeted operator click cannot leave a `task.steer`
  * behind for a runtime that would choke on it later.
  */
+import { readFileSync } from 'node:fs';
+
 import type { TenantId } from '@byok-sdk/core';
 import {
   PROTOCOL_VERSION,
   createEnvelope,
   type RuntimeCapabilities,
   type RuntimeId,
+  type TaskSteerSealedPayload,
 } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { isCloudError } from '../errors';
@@ -176,6 +179,47 @@ describe('steerTask (GAP-2)', () => {
       task_id: task.taskId,
       payload: { text: 'go left' },
     });
+  });
+
+  it('steerSealedTask delivers task.steer_sealed only to a device that advertised sealed-payload-v1, and steerTask refuses sealed fields (#654)', async () => {
+    const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url), 'utf8');
+    const sealedSteer = corpus.trimEnd().split('\n').map((raw) => JSON.parse(raw) as { type: string; payload: TaskSteerSealedPayload })
+      .find((line) => line.type === 'task.steer_sealed')!.payload;
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const task = await running(harness, device, { runtime: 'pi', capabilities: { steer: true } });
+
+    await expect(harness.cloud.steerSealedTask(TENANT_A, task.taskId, sealedSteer)).rejects.toMatchObject({
+      code: 'agent_capability_missing',
+      message: expect.stringContaining('sealed-payload-v1'),
+    });
+    expect((await poll(harness, device, task.seq)).events).toEqual([]);
+
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: ['sealed-payload-v1'] });
+    // The plaintext lane never strips a sealed member or a steer id.
+    const sealing = { scopeId: 'scope-golden-device-1', epoch: 2, categories: ['task-input'] };
+    for (const payload of [{ ...sealedSteer, text: 'plaintext' }, { text: 'plaintext', steerId: sealedSteer.steerId }, { text: 'plaintext', sealing }]) {
+      await expect(harness.cloud.steerTask(TENANT_A, task.taskId, payload as never)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+    }
+    await expect(harness.cloud.steerSealedTask(TENANT_A, task.taskId, { ...sealedSteer, text: 'plaintext' } as never), 'no plaintext next to the sealed member').rejects.toThrow();
+    expect((await poll(harness, device, task.seq)).events).toEqual([]);
+    await harness.cloud.steerSealedTask(TENANT_A, task.taskId, sealedSteer);
+    const page = await poll(harness, device, task.seq);
+    expect(page.events).toHaveLength(1);
+    expect(page.events[0]).toMatchObject({ type: 'task.steer_sealed', task_id: task.taskId, payload: sealedSteer });
+  });
+
+  it('steerSealedTask refuses a sealed steer by ciphertextRef until the Host retains the blob, and writes no mailbox row (#654)', async () => {
+    const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url), 'utf8');
+    const byReference = corpus.trimEnd().split('\n').map((raw) => JSON.parse(raw) as { type: string; payload: TaskSteerSealedPayload })
+      .find((line) => line.type === 'task.steer_sealed' && 'ciphertextRef' in line.payload.sealed)!.payload;
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const task = await running(harness, device, { runtime: 'pi', capabilities: { steer: true } });
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: ['sealed-payload-v1'] });
+
+    await expect(harness.cloud.steerSealedTask(TENANT_A, task.taskId, byReference)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+    expect((await poll(harness, device, task.seq)).events).toEqual([]);
   });
 
   it('refuses a claim that reported steer: false, and allocates no mailbox row', async () => {
