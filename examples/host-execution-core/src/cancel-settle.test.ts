@@ -59,3 +59,31 @@ it('probes a cancelled task terminal without Host ledger writes until the termin
     await vi.waitFor(() => expect(host!.core.intent('quiet')?.conclusion).toBe('cancelled'), { timeout: 5000 });
   } finally { release(); }
 });
+
+it('keeps probing after failed terminal reads and settles soon after the reads recover', async () => {
+  let failing = false;
+  let failures = 0;
+  host = await openHost({ reconcileMs: 60_000, wrapServer: server => ({ ...server, tasks: { ...server.tasks,
+    deviceTerminal: async id => {
+      if (failing) { failures++; throw new Error('terminal read unavailable'); }
+      return server.tasks.deviceTerminal(id);
+    },
+  } }) });
+  const intent = await host.core.enqueue(host.intent('flaky'));
+  const session = await running('flaky');
+  await vi.waitFor(async () => expect(await host!.server.tasks.attempt(intent.taskId)).toMatchObject({ claimedRuntime: 'pi' }), { timeout: 5000 });
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  vi.spyOn(session, 'interrupt').mockImplementation(async () => { session.interrupted = true; await gate; });
+  try {
+    await host.core.cancel('flaky');
+    await host.core.drain();
+    failing = true;
+    await vi.waitFor(() => expect(failures).toBeGreaterThanOrEqual(3), { timeout: 5000 });
+    failing = false;
+    release();
+    await vi.waitFor(async () => expect(await host!.server.tasks.deviceTerminal(intent.taskId)).toMatchObject({ envelope: { type: 'task.cancelled' } }), { timeout: 5000 });
+    // No test drain here: only the core's own timers and hints may settle the intent.
+    await vi.waitFor(() => expect(host!.core.intent('flaky')?.conclusion).toBe('cancelled'), { timeout: 5000 });
+  } finally { release(); }
+});
