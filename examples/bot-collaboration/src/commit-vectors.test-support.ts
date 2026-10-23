@@ -6,6 +6,8 @@ import { outcomeSchema } from './schema';
 import { CommitConflict, type CommitRequest, type CommitResult } from './rules/commit';
 import type { Command } from './rules/commands';
 import { TeamModeError, type TeamSnapshotBot } from './rules/team';
+import { BOT_TURN_OUTCOME_CONTRACT } from '@byok-sdk/protocol';
+import { OFFER_WAIT_MS, syncTurn, type SyncFacts, type SyncOptions, type SyncStep } from './rules/sync';
 
 /**
  * #739 D1 commit contract vectors. Each store runs the same cases: the K8 L ledger now, and the H adapter in D2.
@@ -198,6 +200,80 @@ export function commitVectors(name: string, open: (team?: SeedTeam) => CommitSub
       const result = await subject.commit(request(subject, 'task-1', { kind: 'outcome', turnId: 't1', taskId: 'task-1',
         document: { confirmable_action: [{ action: 'send_message', summary: 'Send', draft: { text: 'hello' } }] } }));
       expect(result).toEqual({ revision: 1, disposition: { outcome: 'accepted' }, outbox: [{ kind: 'projection', id: `card:${card}` }] });
+    });
+  });
+}
+
+/**
+ * #793 D2b: the sync step as a store operation. The store runs `syncTurn` for each stored Turn, in insertion order, in one
+ * transaction under the same scope lock as `commit`, with the options below. It writes each returned step: a `freeze` stores
+ * its intent input as it is. It writes no command record and keeps the revision. A sync is the Host's own work, so a client's
+ * expected revision must not go stale because of it.
+ */
+export interface SyncSubject extends CommitSubject {
+  /** A test edit of the stored state, outside the contract. */
+  change(edit: (state: CollaborationState) => void): void | Promise<void>;
+  sync(): void | Promise<void>;
+  /** The stored intent input of a Turn. */
+  intent(turnId: string): SyncIntentRecord | undefined | Promise<SyncIntentRecord | undefined>;
+}
+export type SyncIntentRecord = Extract<SyncStep<unknown>, { kind: 'freeze' }>['input'];
+/** The sync options of the vectors. A Bot with an undeclared connector toolset cannot freeze. */
+export const SYNC_OPTIONS: SyncOptions<never> = { now: VECTOR_NOW, models: ['default'], readOnlyToolsets: [],
+  limits: { turnLimit: 12, contextMaxBytes: 32_768, instructionMaxBytes: 65_536 }, historyMode: false, routines: [] };
+/** `t1` is concluded and reported. `q1` (a user Turn) and `q2` (a continuation) wait for an offer. */
+function seedSync(state: CollaborationState): void {
+  Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
+  state.turns.q1 = { id: 'q1', root: 'q1', botId: 'main', source: 'user', request: 'First', hop: 0, status: 'queued', authority: 'owner' };
+  state.turns.q2 = { id: 'q2', root: 'q1', botId: 'main', source: 'continuation', request: 'Next', hop: 0, status: 'queued', authority: 'owner' };
+}
+const NO_FACTS: SyncFacts = { intent: () => undefined, executionStarted: () => false, retired: () => undefined };
+export function syncVectors(name: string, open: () => SyncSubject | Promise<SyncSubject>): void {
+  describe(`sync contract: ${name}`, () => {
+    const seeded = async () => { const subject = await open(); await subject.change(seedSync); return subject; };
+
+    it('stores the frozen intent input as the rule returns it, with no command record and no revision change', async () => {
+      const subject = await seeded(), before = await subject.state();
+      const expected = structuredClone(before), step = syncTurn(expected, expected.turns.q1!, NO_FACTS, SYNC_OPTIONS, () => {});
+      await subject.sync();
+      const after = await subject.state();
+      expect(step).toMatchObject({ kind: 'freeze' });
+      expect(await subject.intent('q1')).toEqual((step as Extract<typeof step, { kind: 'freeze' }>).input);
+      expect(await subject.intent('q1')).toMatchObject({ key: 'q1', source: 'user', waitUntil: VECTOR_NOW + OFFER_WAIT_MS,
+        execution: { payload: { terminalProjection: { mode: 'result-document', contract: BOT_TURN_OUTCOME_CONTRACT, schema: after.schemas.q1 } } } });
+      expect(await subject.intent('q2')).toMatchObject({ key: 'q2', source: 'bot' });
+      expect(await subject.intent('t1')).toBeUndefined();
+      expect([after.turns.q1!.status, after.turns.q2!.status]).toEqual(['processing', 'processing']);
+      expect([after.revision, after.commands]).toEqual([before.revision, before.commands]);
+    });
+
+    it('changes no stored byte at a second sync', async () => {
+      const subject = await seeded();
+      await subject.sync();
+      const stored = await subject.stored();
+      await subject.sync();
+      expect(await subject.stored()).toBe(stored);
+    });
+
+    it('keeps the expected revision of a client valid across a sync', async () => {
+      const subject = await seeded(), revision = (await subject.state()).revision ?? 0;
+      await subject.sync();
+      const result = await subject.commit({ scope: subject.scope, commandId: 'i1', command: input('k1'), expectedRevision: revision });
+      expect(result.revision).toBe(revision + 1);
+    });
+
+    it('writes nothing when a later Turn of the same sync throws', async () => {
+      const subject = await seeded();
+      await subject.change(state => {
+        const base = template('device', 'b2');
+        state.team.bots.b2 = { ...state.team.bots.main!, id: 'b2', name: 'B2', mainBot: false,
+          execution: { ...base, payload: { ...base.payload, requiredToolsets: ['github'] } } };
+        state.turns.q3 = { id: 'q3', root: 'q3', botId: 'b2', source: 'user', request: 'Tools', hop: 0, status: 'queued', authority: 'owner' };
+      });
+      const before = await subject.stored();
+      await expect(settle(() => subject.sync())).rejects.toThrow('not declared read-only by the Host: github');
+      expect(await subject.stored()).toBe(before);
+      expect(await subject.intent('q1')).toBeUndefined();
     });
   });
 }
