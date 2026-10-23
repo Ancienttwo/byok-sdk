@@ -31,6 +31,9 @@ const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.e
 
 /** A schema-valid `task-output` sealed member from the corpus. The Host reads only its outer fields. */
 const OUTPUT_MEMBER = corpus.find((line) => line.type === 'task.complete_sealed')!.payload.sealed!;
+/** A `task-output` member above the inline limit, which names its ciphertext blob. */
+const BY_REFERENCE_MEMBER = corpus.find((line) => line.type === 'task.complete_sealed'
+  && (line.payload.sealed as { ciphertextRef?: unknown }).ciphertextRef !== undefined)!.payload.sealed!;
 
 /** The plaintext fields of each sealed output type, with no Agent, harness or recovery binding. */
 const SEALED_OUTPUTS = {
@@ -169,6 +172,17 @@ describe('a sealed terminal of an output-sealed task (#654 E3b-2)', () => {
     expect(await task.harness.cloud.readTaskAttempt(TENANT_A, task.taskId)).toMatchObject({ status: 'running' });
   });
 
+  it.each(Object.keys(SEALED_OUTPUTS) as SealedOutputType[])(
+    'refuses %s by ciphertextRef, because this Host does not retain the blob, before the envelope identity is reserved',
+    async (type) => {
+      const task = await offeredTask(OUTPUT_SEALING, type !== 'task.decline_sealed');
+      const payload = { ...SEALED_OUTPUTS[type], sealed: BY_REFERENCE_MEMBER };
+      expect(await task.send(type, payload)).toEqual(refused('sealed_payload_unsupported'));
+      expect(await task.send(type, payload)).toEqual(refused('sealed_payload_unsupported'));
+      expect(await task.harness.cloud.readDeviceTerminal(TENANT_A, task.taskId)).toBeUndefined();
+    },
+  );
+
   it.each(['task.progress_sealed', 'task.await_approval_sealed'] as const)(
     'refuses %s, which this Host does not store yet',
     async (type) => {
@@ -176,6 +190,50 @@ describe('a sealed terminal of an output-sealed task (#654 E3b-2)', () => {
       expect(await task.send(type, SEALED_OUTPUTS[type])).toEqual(refused('sealed_payload_unsupported'));
     },
   );
+});
+
+describe('every sealed offer lane freezes the output sealing that the gate reads (#654 E3b-2)', () => {
+  const CONTEXT = { destinationBinding: 'conversation/654/turn/1' };
+  const withContext = (payload: { messageEgress?: unknown }) => (payload.messageEgress === undefined ? {} : { agentMessageContext: CONTEXT });
+  type Lane = (harness: CloudHarness, deviceId: string, taskId: string, payload: never) => Promise<unknown>;
+  const lanes: Record<string, Lane> = {
+    'task.offer_sealed': (h, d, taskId, payload) => h.cloud.enqueueSealedOffer(TENANT_A, d, { taskId, payload }),
+    'task.offer_with_toolsets_sealed': (h, d, taskId, payload) => h.cloud.enqueueSealedToolsetOffer(TENANT_A, d, { taskId, payload }),
+    'task.offer_for_agent_sealed': (h, d, taskId, payload) => h.cloud.enqueueSealedAgentOffer(TENANT_A, d, { taskId, payload }),
+    'task.offer_for_agent_with_egress_sealed': (h, d, taskId, payload) =>
+      h.cloud.enqueueSealedAgentEgressOffer(TENANT_A, d, { taskId, payload, ...withContext(payload) }),
+    'task.offer_for_agent_with_egress_fresh_sealed': (h, d, taskId, payload) =>
+      h.cloud.submitSealedAgentExecution(TENANT_A, { taskId, deviceId: d, payload, ...withContext(payload) }),
+  };
+  const outputOnly = Object.keys(lanes).map((type) => corpus.find((line) => line.type === type && line.payload.sealed === undefined
+    && (type !== 'task.offer_for_agent_with_egress_fresh_sealed' || (line.payload as { terminalProjection?: unknown }).terminalProjection !== undefined))!);
+
+  it.each(outputOnly.map((line) => [line.type, line] as const))('%s: a claimed task accepts a sealed completion', async (type, line) => {
+    const payload = line.payload as { agentRef?: unknown; runtime?: string; harnessId?: string; sealing: { categories: string[] } };
+    expect(payload.sealing.categories).toContain('task-output');
+    const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+    const device = await harness.pairDevice(TENANT_A);
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: requiredReceiverCapabilities(type, payload) });
+    const taskId = `sealed-lane-${type}`;
+    await lanes[type]!(harness, device.deviceId, taskId, payload as never);
+    const stores = tenantStoresFor(
+      { kind: 'device', tenantId: TENANT_A as TenantId, productId: PRODUCT_ID, deviceId: device.deviceId },
+      { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake },
+    );
+    const send = (envelopeType: MessageType, body: object) =>
+      handleInboundEnvelope(stores, device.deviceId, createEnvelope(envelopeType as Envelope['type'], body as never, { taskId }) as Envelope);
+    const echo = {
+      ...(payload.agentRef === undefined ? {} : { agentRef: payload.agentRef }),
+      ...(payload.harnessId === undefined ? {} : { harnessId: payload.harnessId }),
+    };
+    expect(await send('task.claim', {
+      deviceId: device.deviceId, ...(payload.runtime === undefined ? {} : { runtime: payload.runtime }), ...echo,
+    })).toEqual({ outcome: 'accepted' });
+
+    expect(await send('task.complete', { summary: 'plain', sessionRef: 'session-plain', ...echo })).toEqual(refused('sealed_output_required'));
+    expect(await send('task.complete_sealed', { ...SEALED_OUTPUTS['task.complete_sealed'], ...echo })).toEqual({ outcome: 'accepted' });
+    expect(await harness.cloud.readTaskAttempt(TENANT_A, taskId)).toMatchObject({ status: 'complete' });
+  });
 });
 
 describe('a sealed terminal takes the gates of its plaintext type (#654 §8.5)', () => {

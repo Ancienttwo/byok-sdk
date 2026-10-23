@@ -96,9 +96,9 @@
   only a closed code for a sealed terminal. `readDeviceTerminal` returns the
   sealed terminal with its sealed member, and `readTaskResult` projects only
   its plaintext fields. A sealed artifact is accepted and not stored. The
-  server relay settles a task on a sealed terminal. Sealed progress and
-  approval are still refused, and the cloud does not advertise
-  `sealed-payload-v1` yet. Compatibility: `INBOUND_REFUSAL_REASONS` gets
+  server relay settles a task on a sealed terminal. A sealed output by
+  `ciphertextRef`, sealed progress and sealed approval are still refused, and
+  the cloud does not advertise `sealed-payload-v1` yet. Compatibility: `INBOUND_REFUSAL_REASONS` gets
   `sealed_output_required`, and `DeviceTerminal.envelope` can be one of the
   four sealed terminal types.
 

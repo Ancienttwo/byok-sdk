@@ -588,8 +588,10 @@ async function applyInboundGate(
   }
 
   if (!(DAEMON_TO_SERVER_TYPES as readonly MessageType[]).includes(envelope.type)) return refuse('type_not_allowed');
-  // This Host does not store sealed activity or approval observations yet.
-  if (envelope.type === 'task.progress_sealed' || envelope.type === 'task.await_approval_sealed') {
+  // This Host does not store sealed activity or approval observations yet,
+  // and it does not retain a ciphertext blob that a sealed output names.
+  if (envelope.type === 'task.progress_sealed' || envelope.type === 'task.await_approval_sealed'
+    || (envelope.payload as { sealed?: { ciphertextRef?: unknown } }).sealed?.ciphertextRef !== undefined) {
     return refuse('sealed_payload_unsupported');
   }
 

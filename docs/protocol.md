@@ -1203,7 +1203,9 @@ plaintext type, and the first terminal wins. `task.terminal_cause` keeps only
 a closed code: the `code` of a `task.decline_sealed`, or the code of a legal
 plaintext terminal. `readDeviceTerminal` returns the sealed terminal with its
 sealed member. `readTaskResult` gives only its plaintext fields. The cloud
-does not store a sealed artifact.
+does not store a sealed artifact. The cloud refuses a sealed output that
+carries `ciphertextRef`, because it does not retain that blob, and it refuses
+sealed progress and sealed approval, which it does not store.
 
 ## 3. Task state machine (M1 gap #2, #5, #6)
 
