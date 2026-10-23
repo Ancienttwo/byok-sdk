@@ -8,29 +8,42 @@ import {
 } from '@byok-sdk/core/sealed-payload';
 import { describe, expect, it } from 'vitest';
 
-import {
-  DEVICE_MEMBER_KEM_SECRET_NAME,
-  DEVICE_MEMBER_SIGNING_SECRET_NAME,
-  DeviceMemberKeyStore,
-} from './device-member-key';
+import { DEVICE_MEMBER_SECRET_NAME, DeviceMemberKeyStore, type DeviceMemberKeys } from './device-member-key';
 import { DEVICE_SEALING_SECRET_NAME, DeviceSealingKeyStore } from './device-sealing-key';
 import { InMemorySecretStore } from './secret-store';
 import { assertSecretName } from './secret-name';
 
 const ENROLLMENT = { tenantId: 'tenant-1', deviceId: 'device-1' };
+const BASE64URL_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 
-async function storedJson(secrets: InMemorySecretStore, name: string): Promise<{ jwk: { d: string }; epoch?: number }> {
-  return JSON.parse((await secrets.get(name))!);
+interface StoredJwk { x: string; y: string; d: string }
+interface StoredRecord { signingJwk: StoredJwk; kemEpoch: number; kemJwk: StoredJwk }
+
+async function storedRecord(secrets: InMemorySecretStore): Promise<StoredRecord> {
+  return JSON.parse((await secrets.get(DEVICE_MEMBER_SECRET_NAME))!);
+}
+
+/** Records every value written, so a test can check what each caller got against one real write. */
+class RecordingSecretStore extends InMemorySecretStore {
+  readonly writes: StoredRecord[] = [];
+
+  override async set(name: string, secret: string): Promise<void> {
+    await super.set(name, secret);
+    this.writes.push(JSON.parse(secret));
+  }
+}
+
+function expectFromOneWrite(keys: DeviceMemberKeys, writes: readonly StoredRecord[]): void {
+  const write = writes.find((record) => record.signingJwk.x === keys.signing.publicJwk.x && record.kemJwk.x === keys.kem.publicJwk.x);
+  expect(write, 'the signing key and the KEM key come from one write').toBeDefined();
+  expect(write!.kemEpoch).toBe(keys.kem.epoch);
 }
 
 describe('DeviceMemberKeyStore', () => {
-  it('uses two secret names the shared rule accepts, apart from the provider sealing key (D12)', () => {
-    expect(DEVICE_MEMBER_SIGNING_SECRET_NAME).toBe('device-member-signing-p256-v1');
-    expect(DEVICE_MEMBER_KEM_SECRET_NAME).toBe('device-member-kem-p256-v1');
-    for (const name of [DEVICE_MEMBER_SIGNING_SECRET_NAME, DEVICE_MEMBER_KEM_SECRET_NAME]) {
-      expect(assertSecretName(name)).toBe(name);
-      expect(name).not.toBe(DEVICE_SEALING_SECRET_NAME);
-    }
+  it('uses one secret name the shared rule accepts, apart from the provider sealing key (D12)', () => {
+    expect(DEVICE_MEMBER_SECRET_NAME).toBe('device-member-p256-v1');
+    expect(assertSecretName(DEVICE_MEMBER_SECRET_NAME)).toBe(DEVICE_MEMBER_SECRET_NAME);
+    expect(DEVICE_MEMBER_SECRET_NAME).not.toBe(DEVICE_SEALING_SECRET_NAME);
   });
 
   it('creates once, persists in the credential store, and loads the same keys afterwards', async () => {
@@ -43,19 +56,15 @@ describe('DeviceMemberKeyStore', () => {
     expect(created.kem.privateKey.extractable).toBe(false);
     expect(Object.keys(created.signing.publicJwk).sort()).toEqual(['crv', 'kty', 'x', 'y']);
     expect(created.kem.publicJwk).not.toEqual(created.signing.publicJwk);
-    const signing = await secrets.get(DEVICE_MEMBER_SIGNING_SECRET_NAME);
-    const kem = await secrets.get(DEVICE_MEMBER_KEM_SECRET_NAME);
-    for (const stored of [signing, kem]) {
-      expect(stored).toBeDefined();
-      expect(stored).not.toMatch(/[\r\n]/u);
-    }
+    const stored = await secrets.get(DEVICE_MEMBER_SECRET_NAME);
+    expect(stored).toBeDefined();
+    expect(stored).not.toMatch(/[\r\n]/u);
 
     const loaded = await new DeviceMemberKeyStore({ secretStore: secrets }).loadOrCreate(ENROLLMENT);
     expect(loaded.memberId).toBe(created.memberId);
     expect(loaded.kem.publicJwk).toEqual(created.kem.publicJwk);
     expect(loaded.kem.epoch).toBe(1);
-    await expect(secrets.get(DEVICE_MEMBER_SIGNING_SECRET_NAME)).resolves.toBe(signing);
-    await expect(secrets.get(DEVICE_MEMBER_KEM_SECRET_NAME)).resolves.toBe(kem);
+    await expect(secrets.get(DEVICE_MEMBER_SECRET_NAME)).resolves.toBe(stored);
   });
 
   it('does not touch the provider sealing key entry', async () => {
@@ -103,15 +112,15 @@ describe('DeviceMemberKeyStore', () => {
     const secrets = new InMemorySecretStore();
     const store = new DeviceMemberKeyStore({ secretStore: secrets });
     const first = await store.loadOrCreate(ENROLLMENT);
-    const signingBefore = await secrets.get(DEVICE_MEMBER_SIGNING_SECRET_NAME);
-    const kemBefore = await storedJson(secrets, DEVICE_MEMBER_KEM_SECRET_NAME);
+    const before = await storedRecord(secrets);
 
     const rotated = await store.rotateKem(ENROLLMENT);
     expect(rotated.memberId).toBe(first.memberId);
     expect(rotated.kem.epoch).toBe(2);
     expect(rotated.kem.publicJwk).not.toEqual(first.kem.publicJwk);
-    await expect(secrets.get(DEVICE_MEMBER_SIGNING_SECRET_NAME)).resolves.toBe(signingBefore);
-    expect(await secrets.get(DEVICE_MEMBER_KEM_SECRET_NAME)).not.toContain(kemBefore.jwk.d);
+    const after = await storedRecord(secrets);
+    expect(after.signingJwk).toEqual(before.signingJwk);
+    expect(JSON.stringify(after)).not.toContain(before.kemJwk.d);
 
     const reloaded = await new DeviceMemberKeyStore({ secretStore: secrets }).loadOrCreate(ENROLLMENT);
     expect(reloaded.kem.epoch).toBe(2);
@@ -130,65 +139,75 @@ describe('DeviceMemberKeyStore', () => {
     expect(repaired.kem.epoch).toBe(1);
     expect(repaired.kem.publicJwk).not.toEqual(first.kem.publicJwk);
 
-    const rotatedForNew = await new DeviceMemberKeyStore({ secretStore: secrets }).rotateKem({ tenantId: 'tenant-2', deviceId: 'device-3' });
+    const rotatedForNew = await store.rotateKem({ tenantId: 'tenant-2', deviceId: 'device-3' });
     expect(rotatedForNew.kem.epoch).toBe(1);
     expect(rotatedForNew.memberId).not.toBe(repaired.memberId);
   });
 
-  it('never gives a new signing key an existing KEM key', async () => {
-    const secrets = new InMemorySecretStore();
-    const store = new DeviceMemberKeyStore({ secretStore: secrets });
-    const first = await store.loadOrCreate(ENROLLMENT);
-    await secrets.delete(DEVICE_MEMBER_SIGNING_SECRET_NAME);
-    const next = await store.loadOrCreate(ENROLLMENT);
-    expect(next.memberId).not.toBe(first.memberId);
-    expect(next.kem.publicJwk).not.toEqual(first.kem.publicJwk);
-    expect(next.kem.epoch).toBe(1);
-  });
-
-  it('creates a missing KEM key for an existing member at epoch 1', async () => {
-    const secrets = new InMemorySecretStore();
-    const store = new DeviceMemberKeyStore({ secretStore: secrets });
-    const first = await store.loadOrCreate(ENROLLMENT);
-    await secrets.delete(DEVICE_MEMBER_KEM_SECRET_NAME);
-    const next = await store.loadOrCreate(ENROLLMENT);
-    expect(next.memberId).toBe(first.memberId);
-    expect(next.kem.epoch).toBe(1);
-    expect(next.kem.publicJwk).not.toEqual(first.kem.publicJwk);
+  it('gives each concurrent caller a signing key and a KEM key from one write', async () => {
+    const secrets = new RecordingSecretStore();
+    const created = await Promise.all([1, 2, 3].map(() => new DeviceMemberKeyStore({ secretStore: secrets }).loadOrCreate(ENROLLMENT)));
+    const rotated = await Promise.all([1, 2, 3].map(() => new DeviceMemberKeyStore({ secretStore: secrets }).rotateKem(ENROLLMENT)));
+    expect(secrets.writes.length).toBeGreaterThan(1);
+    for (const keys of [...created, ...rotated]) expectFromOneWrite(keys, secrets.writes);
   });
 
   it('fails closed on a malformed stored record and never regenerates it', async () => {
-    const malformed = [
+    const secrets = new InMemorySecretStore();
+    const store = new DeviceMemberKeyStore({ secretStore: secrets });
+    const valid = await (async () => {
+      await store.loadOrCreate(ENROLLMENT);
+      return storedRecord(secrets);
+    })();
+    for (const bad of [
       'not json',
       JSON.stringify({ v: 1 }),
-      JSON.stringify({ v: 2, tenantId: 'tenant-1', deviceId: 'device-1', epoch: 1, jwk: {} }),
-    ];
-    for (const name of [DEVICE_MEMBER_SIGNING_SECRET_NAME, DEVICE_MEMBER_KEM_SECRET_NAME]) {
-      for (const bad of malformed) {
-        const secrets = new InMemorySecretStore();
-        const store = new DeviceMemberKeyStore({ secretStore: secrets });
-        await store.loadOrCreate(ENROLLMENT);
-        await secrets.set(name, bad);
-        await expect(store.loadOrCreate(ENROLLMENT)).rejects.toMatchObject({ code: 'DEVICE_MEMBER_KEY_INVALID' });
-        await expect(store.rotateKem(ENROLLMENT)).rejects.toMatchObject({ code: 'DEVICE_MEMBER_KEY_INVALID' });
-        await expect(secrets.get(name)).resolves.toBe(bad);
-      }
+      JSON.stringify({ ...valid, v: 2 }),
+      JSON.stringify({ ...valid, kemEpoch: 0 }),
+      JSON.stringify({ ...valid, kemJwk: undefined }),
+      JSON.stringify({ ...valid, extra: true }),
+    ]) {
+      await secrets.set(DEVICE_MEMBER_SECRET_NAME, bad);
+      await expect(store.loadOrCreate(ENROLLMENT)).rejects.toMatchObject({ code: 'DEVICE_MEMBER_KEY_INVALID' });
+      await expect(store.rotateKem(ENROLLMENT)).rejects.toMatchObject({ code: 'DEVICE_MEMBER_KEY_INVALID' });
+      await expect(store.loadOrCreate({ tenantId: 'tenant-1', deviceId: 'device-2' })).rejects.toMatchObject({
+        code: 'DEVICE_MEMBER_KEY_INVALID',
+      });
+      await expect(secrets.get(DEVICE_MEMBER_SECRET_NAME)).resolves.toBe(bad);
+    }
+  });
+
+  it('fails closed on a private scalar in noncanonical base64url', async () => {
+    for (const key of ['signingJwk', 'kemJwk'] as const) {
+      const secrets = new InMemorySecretStore();
+      const store = new DeviceMemberKeyStore({ secretStore: secrets });
+      await store.loadOrCreate(ENROLLMENT);
+      const record = await storedRecord(secrets);
+      const { d } = record[key];
+      // 32 bytes leave the 2 low bits of the last character unused; setting one
+      // keeps the bytes a lenient decoder returns, but is not the canonical text.
+      const noncanonical = d.slice(0, -1) + BASE64URL_ALPHABET[BASE64URL_ALPHABET.indexOf(d.at(-1)!) ^ 1];
+      expect(Buffer.from(noncanonical, 'base64url').equals(Buffer.from(d, 'base64url'))).toBe(true);
+      const tampered = JSON.stringify({ ...record, [key]: { ...record[key], d: noncanonical } });
+      await secrets.set(DEVICE_MEMBER_SECRET_NAME, tampered);
+      await expect(store.loadOrCreate(ENROLLMENT)).rejects.toMatchObject({ code: 'DEVICE_MEMBER_KEY_INVALID' });
+      await expect(secrets.get(DEVICE_MEMBER_SECRET_NAME)).resolves.toBe(tampered);
     }
   });
 
   it('fails closed when a private scalar does not belong to the stored public point', async () => {
-    for (const name of [DEVICE_MEMBER_SIGNING_SECRET_NAME, DEVICE_MEMBER_KEM_SECRET_NAME]) {
+    for (const key of ['signingJwk', 'kemJwk'] as const) {
       const secrets = new InMemorySecretStore();
       const store = new DeviceMemberKeyStore({ secretStore: secrets });
       await store.loadOrCreate(ENROLLMENT);
       const other = new InMemorySecretStore();
       await new DeviceMemberKeyStore({ secretStore: other }).loadOrCreate(ENROLLMENT);
-      const record = await storedJson(secrets, name);
-      const otherRecord = await storedJson(other, name);
-      const mixed = JSON.stringify({ ...record, jwk: { ...record.jwk, d: otherRecord.jwk.d } });
-      await secrets.set(name, mixed);
+      const record = await storedRecord(secrets);
+      const otherRecord = await storedRecord(other);
+      const mixed = JSON.stringify({ ...record, [key]: { ...record[key], d: otherRecord[key].d } });
+      await secrets.set(DEVICE_MEMBER_SECRET_NAME, mixed);
       await expect(store.loadOrCreate(ENROLLMENT)).rejects.toMatchObject({ code: 'DEVICE_MEMBER_KEY_INVALID' });
-      await expect(secrets.get(name)).resolves.toBe(mixed);
+      await expect(secrets.get(DEVICE_MEMBER_SECRET_NAME)).resolves.toBe(mixed);
     }
   });
 });

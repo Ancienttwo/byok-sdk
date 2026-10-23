@@ -1,7 +1,6 @@
 import {
   SealingPublicJwkSchema,
   canonicalizeJson,
-  type JsonObject,
   type SealingPublicJwk,
   type WebCryptoKey,
 } from '@byok-sdk/core';
@@ -16,23 +15,29 @@ import type { SecretStore } from './secret-store';
 /**
  * Device member keys for hosted wire end-to-end encryption (#654 design §7.1).
  *
- * A device member holds two P-256 keys. Each key is a separate credential
- * entry, because each key has its own lifetime:
+ * A device member holds two P-256 keys:
  *
  * - The signing key (ECDSA) is the member identity. The member id derives
  *   from its public key, so it never rotates. A new enrollment is a new
  *   member with a new signing key (§7.5).
  * - The KEM key (ECDH) receives scope key packages. It rotates by epoch
- *   without a change to the member id (§7.5). It is a new entry, separate from
- *   the provider sealing key (D12), because the two keys have different uses
- *   and rotation cycles.
+ *   without a change to the member id (§7.5).
+ *
+ * Both keys live in ONE new credential entry, separate from the provider
+ * sealing key (D12), because the two uses and rotation cycles differ. One
+ * entry makes every write and every read one coherent snapshot: a caller never
+ * gets the signing key of one write and the KEM key of another.
+ *
+ * The store expects one writer. Like `DeviceSealingKeyStore`, it has no
+ * cross-process lock: the daemon that uses it holds the daemon owner lock for
+ * its store directory. With two concurrent writers, the last write wins, and
+ * an earlier caller can hold keys that the credential store no longer has.
  *
  * This module is internal until the daemon slice uses it. It is not exported
  * from the package root.
  */
-export const DEVICE_MEMBER_SIGNING_SECRET_NAME = 'device-member-signing-p256-v1';
-export const DEVICE_MEMBER_KEM_SECRET_NAME = 'device-member-kem-p256-v1';
-export type DeviceMemberSecretName = typeof DEVICE_MEMBER_SIGNING_SECRET_NAME | typeof DEVICE_MEMBER_KEM_SECRET_NAME;
+export const DEVICE_MEMBER_SECRET_NAME = 'device-member-p256-v1';
+export type DeviceMemberSecretName = typeof DEVICE_MEMBER_SECRET_NAME;
 
 export interface DeviceMemberKeys {
   /** `deriveMemberId(signing.publicJwk)`. It stays the same across KEM rotations. */
@@ -44,25 +49,35 @@ export interface DeviceMemberKeys {
   readonly kem: { readonly epoch: number; readonly publicJwk: SealingPublicJwk; readonly privateKey: WebCryptoKey };
 }
 
-const Base64Url32 = z.string().regex(/^[A-Za-z0-9_-]{43}$/u);
+/**
+ * Exactly 32 bytes in canonical unpadded base64url. The re-encode check
+ * rejects a last character whose unused low bits are not zero; a lenient
+ * decoder would read such a string as the same scalar.
+ */
+const CanonicalBase64Url32 = z.string().refine((value) => {
+  if (!/^[A-Za-z0-9_-]{43}$/u.test(value)) return false;
+  const bytes = Buffer.from(value, 'base64url');
+  return bytes.length === 32 && bytes.toString('base64url') === value;
+}, 'must be 32 bytes in canonical base64url');
+
 const PrivateJwkSchema = z.strictObject({
   kty: z.literal('EC'),
   crv: z.literal('P-256'),
-  x: Base64Url32,
-  y: Base64Url32,
-  d: Base64Url32,
+  x: CanonicalBase64Url32,
+  y: CanonicalBase64Url32,
+  d: CanonicalBase64Url32,
 });
-const enrollmentShape = { tenantId: z.string().min(1).max(200), deviceId: z.string().min(1).max(200) };
 
-const StoredSigningKeySchema = z.strictObject({ v: z.literal(1), ...enrollmentShape, jwk: PrivateJwkSchema });
-const StoredKemKeySchema = z.strictObject({
+/** The stored record: one canonical JSON line, holding both private scalars. */
+const StoredMemberKeysSchema = z.strictObject({
   v: z.literal(1),
-  ...enrollmentShape,
-  epoch: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-  jwk: PrivateJwkSchema,
+  tenantId: z.string().min(1).max(200),
+  deviceId: z.string().min(1).max(200),
+  signingJwk: PrivateJwkSchema,
+  kemEpoch: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  kemJwk: PrivateJwkSchema,
 });
-type StoredSigningKey = z.infer<typeof StoredSigningKeySchema>;
-type StoredKemKey = z.infer<typeof StoredKemKeySchema>;
+type StoredMemberKeys = z.infer<typeof StoredMemberKeysSchema>;
 type PrivateJwk = z.infer<typeof PrivateJwkSchema>;
 
 interface Subtle {
@@ -89,12 +104,8 @@ const ECDH_P256 = { name: 'ECDH', namedCurve: 'P-256' } as const;
 function invalidStoredKey(): ByokKeysError {
   return new ByokKeysError(
     'DEVICE_MEMBER_KEY_INVALID',
-    'A stored device member key is malformed; it is not replaced automatically — re-pair or rotate it explicitly',
+    'The stored device member keys are malformed; they are not replaced automatically — re-pair or rotate them explicitly',
   );
-}
-
-function sameEnrollment(stored: { tenantId: string; deviceId: string } | undefined, enrollment: DeviceSealingEnrollment): boolean {
-  return stored !== undefined && stored.tenantId === enrollment.tenantId && stored.deviceId === enrollment.deviceId;
 }
 
 /**
@@ -102,11 +113,10 @@ function sameEnrollment(stored: { tenantId: string; deviceId: string } | undefin
  * store (through {@link SecretStore}; never a plain file).
  *
  * - `loadOrCreate` returns the stored keys when they belong to the current
- *   enrollment. A missing key, or a key bound to a different enrollment, is
- *   replaced by a new key. A new signing key means a new member, and its KEM
- *   epoch starts at 1.
- * - `rotateKem` replaces only the KEM key, at the next epoch. The previous KEM
- *   private key is overwritten, and so deleted. The member id stays the same.
+ *   enrollment. Missing keys, or keys bound to a different enrollment, are
+ *   replaced by a new member: a new signing key and a new KEM key at epoch 1.
+ * - `rotateKem` writes a new KEM key at the next epoch and keeps the signing
+ *   key. The previous KEM private key is overwritten, and so deleted.
  * - A malformed stored record fails closed. It is never silently regenerated,
  *   because a new signing key would silently create a new member.
  */
@@ -114,44 +124,31 @@ export class DeviceMemberKeyStore {
   readonly #secrets: SecretStore<DeviceMemberSecretName>;
 
   constructor(options: { secretStore: SecretStore<DeviceMemberSecretName> }) {
-    assertSecretName(DEVICE_MEMBER_SIGNING_SECRET_NAME);
-    assertSecretName(DEVICE_MEMBER_KEM_SECRET_NAME);
+    assertSecretName(DEVICE_MEMBER_SECRET_NAME);
     this.#secrets = options.secretStore;
   }
 
   async loadOrCreate(enrollment: DeviceSealingEnrollment): Promise<DeviceMemberKeys> {
-    const { signing, kem } = await this.#current(enrollment);
-    return materialize(signing, kem ?? (await this.#writeKem(enrollment, 1)));
+    const stored = await this.#readForEnrollment(enrollment);
+    return materialize(stored ?? (await this.#write(enrollment, await generateSigningJwk(), 1)));
   }
 
   async rotateKem(enrollment: DeviceSealingEnrollment): Promise<DeviceMemberKeys> {
-    const { signing, kem } = await this.#current(enrollment);
-    return materialize(signing, await this.#writeKem(enrollment, (kem?.epoch ?? 0) + 1));
+    const stored = await this.#readForEnrollment(enrollment);
+    if (stored === undefined) return materialize(await this.#write(enrollment, await generateSigningJwk(), 1));
+    return materialize(await this.#write(enrollment, stored.signingJwk, stored.kemEpoch + 1));
   }
 
-  /**
-   * The member's signing key, created when absent, and its current KEM key.
-   * The KEM key counts only when it belongs to the same enrollment and the
-   * signing key was not just created: a new member never inherits a KEM key.
-   */
-  async #current(enrollment: DeviceSealingEnrollment): Promise<{ signing: StoredSigningKey; kem: StoredKemKey | undefined }> {
-    const storedSigning = await this.#read(DEVICE_MEMBER_SIGNING_SECRET_NAME, StoredSigningKeySchema);
-    const storedKem = await this.#read(DEVICE_MEMBER_KEM_SECRET_NAME, StoredKemKeySchema);
-    if (sameEnrollment(storedSigning, enrollment)) {
-      return { signing: storedSigning!, kem: sameEnrollment(storedKem, enrollment) ? storedKem : undefined };
-    }
-    const jwk = await generatePrivateJwk(ECDSA_P256, ['sign', 'verify']);
-    const signing = await this.#write(DEVICE_MEMBER_SIGNING_SECRET_NAME, StoredSigningKeySchema, { v: 1 as const, ...enrollment, jwk });
-    return { signing, kem: undefined };
+  /** The stored record when it belongs to `enrollment`. A malformed record throws. */
+  async #readForEnrollment(enrollment: DeviceSealingEnrollment): Promise<StoredMemberKeys | undefined> {
+    const stored = await this.#read();
+    return stored !== undefined && stored.tenantId === enrollment.tenantId && stored.deviceId === enrollment.deviceId
+      ? stored
+      : undefined;
   }
 
-  async #writeKem(enrollment: DeviceSealingEnrollment, epoch: number): Promise<StoredKemKey> {
-    const jwk = await generatePrivateJwk(ECDH_P256, ['deriveBits']);
-    return this.#write(DEVICE_MEMBER_KEM_SECRET_NAME, StoredKemKeySchema, { v: 1 as const, ...enrollment, epoch, jwk });
-  }
-
-  async #read<T>(name: DeviceMemberSecretName, schema: z.ZodType<T>): Promise<T | undefined> {
-    const raw = await this.#secrets.get(name);
+  async #read(): Promise<StoredMemberKeys | undefined> {
+    const raw = await this.#secrets.get(DEVICE_MEMBER_SECRET_NAME);
     if (raw === undefined) return undefined;
     let json: unknown;
     try {
@@ -159,21 +156,32 @@ export class DeviceMemberKeyStore {
     } catch {
       throw invalidStoredKey();
     }
-    const parsed = schema.safeParse(json);
+    const parsed = StoredMemberKeysSchema.safeParse(json);
     if (!parsed.success) throw invalidStoredKey();
     return parsed.data;
   }
 
-  async #write<T extends JsonObject>(name: DeviceMemberSecretName, schema: z.ZodType<T>, value: T): Promise<T> {
-    const record = schema.safeParse(value);
+  async #write(enrollment: DeviceSealingEnrollment, signingJwk: PrivateJwk, kemEpoch: number): Promise<StoredMemberKeys> {
+    const record = StoredMemberKeysSchema.safeParse({
+      v: 1,
+      tenantId: enrollment.tenantId,
+      deviceId: enrollment.deviceId,
+      signingJwk,
+      kemEpoch,
+      kemJwk: await generatePrivateJwk(ECDH_P256, ['deriveBits']),
+    });
     if (!record.success) throw invalidStoredKey();
-    await this.#secrets.set(name, canonicalizeJson(record.data));
+    await this.#secrets.set(DEVICE_MEMBER_SECRET_NAME, canonicalizeJson(record.data));
     // Read back: if another process replaced the entry concurrently, the
-    // stored key — not the one generated here — is the device's key.
-    const stored = await this.#read(name, schema);
+    // stored keys — not the ones generated here — are the device's keys.
+    const stored = await this.#read();
     if (stored === undefined) throw invalidStoredKey();
     return stored;
   }
+}
+
+function generateSigningJwk(): Promise<PrivateJwk> {
+  return generatePrivateJwk(ECDSA_P256, ['sign', 'verify']);
 }
 
 async function generatePrivateJwk(algorithm: object, usages: string[]): Promise<PrivateJwk> {
@@ -234,13 +242,13 @@ async function importKemKey(jwk: PrivateJwk): Promise<{ publicJwk: SealingPublic
   }
 }
 
-async function materialize(signing: StoredSigningKey, kem: StoredKemKey): Promise<DeviceMemberKeys> {
-  const signingKey = await importSigningKey(signing.jwk);
-  const kemKey = await importKemKey(kem.jwk);
+async function materialize(stored: StoredMemberKeys): Promise<DeviceMemberKeys> {
+  const signing = await importSigningKey(stored.signingJwk);
+  const kem = await importKemKey(stored.kemJwk);
   return {
-    memberId: await deriveMemberId(signingKey.publicJwk),
-    enrollment: { tenantId: signing.tenantId, deviceId: signing.deviceId },
-    signing: signingKey,
-    kem: { epoch: kem.epoch, ...kemKey },
+    memberId: await deriveMemberId(signing.publicJwk),
+    enrollment: { tenantId: stored.tenantId, deviceId: stored.deviceId },
+    signing,
+    kem: { epoch: stored.kemEpoch, ...kem },
   };
 }
