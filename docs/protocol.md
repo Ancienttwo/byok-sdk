@@ -1203,9 +1203,18 @@ plaintext type, and the first terminal wins. `task.terminal_cause` keeps only
 a closed code: the `code` of a `task.decline_sealed`, or the code of a legal
 plaintext terminal. `readDeviceTerminal` returns the sealed terminal with its
 sealed member. `readTaskResult` gives only its plaintext fields. The cloud
-does not store a sealed artifact. The cloud refuses a sealed output that
-carries `ciphertextRef`, because it does not retain that blob, and it refuses
-sealed progress and sealed approval, which it does not store.
+does not store a sealed artifact.
+
+A `task.progress_sealed` batch is one activity tail entry. It has `sealed` in
+place of `event`, and `eventIndex` 0, so the tail capacity counts it once. A
+`task.await_approval_sealed` is one approval timeline request with
+`approvalId` and `sealed`, and no `summary`. The Host resolves it by
+`approvalId`, the same as a plaintext request. A replay under the same source
+envelope is the same entry when its comparison projection (above) is the
+same. A sealed output is inline only: the cloud refuses a sealed output
+that carries `ciphertextRef`, because it does not retain that blob. The cloud
+advertises `sealed-payload-v1` in `EventsPollResponse.capabilities`, because
+it accepts all seven sealed output types.
 
 ## 3. Task state machine (M1 gap #2, #5, #6)
 
