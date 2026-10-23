@@ -8,6 +8,8 @@ import {
   isServerToDaemonType,
   type MessageType,
 } from '../index';
+import { isSealedMessageType } from '../sealed-payload';
+import { minimalSealedPayload } from './sealed-fixtures';
 
 /**
  * M1 gap #1: envelope `task_id` is required for every `task.*` type (they
@@ -225,6 +227,7 @@ function minimalPayload(type: MessageType): unknown {
     case 'task.approval_resolved':
       return { approvalId: 'appr-1', decision: 'approve', resolvedBy: 'local', at: new Date().toISOString() };
     default: {
+      if (isSealedMessageType(type)) return minimalSealedPayload(type, minimalPayload);
       const exhaustive: never = type;
       throw new Error(`no minimal payload fixture for message type: ${exhaustive}`);
     }

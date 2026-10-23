@@ -4225,7 +4225,12 @@ export interface HostedJournalConfig {
     mode: 'sqlite';
     /** Bound on waiting for the journal's write lock, ms. Defaults to the journal's own bound. */
     busyTimeoutMs?: number;
-    /** Per-record byte bound. Defaults to the journal's own bound; oversized records are refused, never truncated. */
+    /**
+     * Per-record byte bound. Defaults to the journal's own bound; oversized records are refused, never truncated.
+     * An inbound envelope record may still reach a floor derived from the inline sealed maximum (415083 bytes),
+     * so a sealed envelope is journaled and declined, not stalled (#654). The floor covers the inline maximum plus
+     * 64 KiB of plaintext metadata. Larger metadata stalls the cursor, the same way as a large plain offer (#826).
+     */
     maxRecordBytes?: number;
 }
 export interface DaemonConfig {
@@ -6775,7 +6780,14 @@ export interface SqliteLocalTaskJournalOptions {
     readonly storeDir: string;
     /** Bound on waiting for the write lock. Default {@link DEFAULT_JOURNAL_BUSY_TIMEOUT_MS}. */
     readonly busyTimeoutMs?: number;
-    /** Per-record byte bound. Default {@link DEFAULT_MAX_RECORD_BYTES}. */
+    /**
+     * Per-record byte bound. Default {@link DEFAULT_MAX_RECORD_BYTES}. An inbound
+     * envelope record may still reach a floor derived from the inline sealed
+     * maximum (415083 bytes), so a sealed envelope can be journaled and declined.
+     * The floor covers the inline maximum plus 64 KiB of plaintext metadata.
+     * Larger metadata stalls the cursor, the same way as a large plain offer
+     * (#826).
+     */
     readonly maxRecordBytes?: number;
     /** Test seam — see {@link JournalFaultSeam}. Never supplied in production. */
     readonly faults?: JournalFaultSeam;
@@ -9728,6 +9740,14 @@ export declare class TaskRunner {
      * session about it succeeded.
      */
     private handleReject;
+    /**
+     * Declines a sealed offer once, non-retryably. This daemon holds no scope
+     * key. To a server with `sealed-payload-v1` it sends the closed code
+     * `sealed_key_unavailable` as both `reason` and `code` (#654 decisions 12c
+     * and 12d). The code is a value gate on that flag, so without it the
+     * decline has a plaintext reason and no code.
+     */
+    private declineSealedOffer;
     /** Pre-claim, fail-closed rejection (protocol §3.2) — never claims first. */
     private decline;
     private fail;

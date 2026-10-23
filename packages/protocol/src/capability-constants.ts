@@ -60,6 +60,14 @@ export const AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY = 'agent-memory-read-if-ad
 export const AGENT_INPUT_PREPARATION_CAPABILITY =
   `agent-input-preparation-v${INPUT_PREPARATION_WIRE_VERSION}` as const;
 
+/**
+ * Sealed payload v1 (#654). A device advertises it before a Host may send it
+ * a sealed offer or steer; a server advertises it before a device may send it
+ * sealed task output or a sealed decline code. Both gates read
+ * `WIRE_ADDITIONS`.
+ */
+export const SEALED_PAYLOAD_CAPABILITY = 'sealed-payload-v1' as const;
+
 /** Single value authority shared by schema validation and schema-free consumers. */
 export const PREPARED_AGENT_MEMORY_MODES = ['none', 'read', 'read-write'] as const;
 

@@ -66,6 +66,14 @@ test('CI policy and runbook changes take the contract-only lane', () => {
   assert.deepEqual(plan.dirs, []); assert.deepEqual(plan.families, []);
   assert.equal(plan.reason, 'root-ci-scripts');
 });
+test('a migration PR plans the targeted cloud-dataplane suite, the dataplane job and the packed migrate job (#654)', () => {
+  const plan = planCi({ event: 'pull_request', sha, paths: ['deploy/sql/0027_e2ee_member.sql', 'tests/sql/control_plane_invariants.sql'] });
+  assert.equal(plan.mode, 'targeted');
+  assert.deepEqual(plan.dirs, ['packages/cloud-dataplane']);
+  assert.deepEqual(plan.families, ['dataplane', 'release-pack-migrate']);
+  assert.ok(needsBuild(plan));
+  assert.ok(!plan.families.includes('build-test'));
+});
 test('a ci.yml change runs every routine family and the client suite, never the complete suite (W7)', () => {
   const plan = planCi({ event: 'pull_request', sha, paths: ['.github/workflows/ci.yml'] });
   assert.ok(plan.dirs.includes('packages/client'));

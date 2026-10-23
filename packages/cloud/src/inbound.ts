@@ -51,6 +51,8 @@ import {
   decodeEnvelope,
   encodeEnvelope,
   PROTOCOL_VERSION,
+  SEALED_PAYLOAD_CAPABILITY,
+  requiredReceiverCapabilities,
   type AgentRef,
   type AgentContentReceiptPayload,
   type AgentContentReadPayload,
@@ -96,6 +98,7 @@ export const INBOUND_REFUSAL_REASONS = [
   // envelope-level
   'protocol_version_unsupported',
   'type_not_allowed',
+  'sealed_payload_unsupported',
   'task_id_missing',
   'device_not_eligible',
   // conn.hello capability snapshot
@@ -547,6 +550,12 @@ async function applyInboundGate(
   }
 
   if (!(DAEMON_TO_SERVER_TYPES as readonly MessageType[]).includes(envelope.type)) return refuse('type_not_allowed');
+  // #654: this kernel does not advertise `sealed-payload-v1` yet, so a sealed
+  // message here broke the gate. Its moved fields are placeholders; storing
+  // them as content would lose the sealed member. Refuse before any state.
+  if (requiredReceiverCapabilities(envelope.type, envelope.payload).includes(SEALED_PAYLOAD_CAPABILITY)) {
+    return refuse('sealed_payload_unsupported');
+  }
 
   if (envelope.type === 'agent.message.draft') {
     const parsed = AgentMessageDraftPayloadSchema.safeParse(envelope.payload);

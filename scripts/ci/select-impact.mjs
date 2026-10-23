@@ -432,6 +432,16 @@ export function selectImpact(paths, context = {}) {
     // #654: the dataplane job runs hosted-plaintext-inventory.test.ts, which
     // checks the inventory table in this doc against real Postgres and S3.
     if (path === 'docs/security.md') { families.add('dataplane'); continue; }
+    // #654 E2c: `deploy/sql` is the only authored copy of the Postgres
+    // migrations. cloud-dataplane builds it into `dist/sql`, its suites migrate
+    // from it, and the packed tarball must carry it and migrate a database.
+    if (/^deploy\/sql\/\d{4}_[a-z0-9_]+\.sql$/.test(path)) {
+      dirs.add('packages/cloud-dataplane');
+      families.add('dataplane'); families.add('release-pack-migrate');
+      continue;
+    }
+    // The cloud-dataplane invariant suites run this file after migrating.
+    if (path === 'tests/sql/control_plane_invariants.sql') { dirs.add('packages/cloud-dataplane'); continue; }
     if (rootDocs.has(path) || /^(docs|tasks|deploy\/runbooks)\/.+\.md$/.test(path)) continue;
     // W7: a ci.yml change can change any family job, so it selects every
     // routine family. The client suite also runs: two of its tests read this

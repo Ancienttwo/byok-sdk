@@ -31,6 +31,41 @@
   and save, the hosted projection and the task-free export where they reach
   it. Move such a mount out of the home. Linux uses its own backend and has no
   volume rule.
+- **Feature (protocol, cloud)** — wire v3 gets the rules of sealed payload v1,
+  behind the new capability `sealed-payload-v1` (#654 E3a). `PROTOCOL_VERSION`
+  stays 3. There are 13 new sealed message types, one for each sealed plain
+  type: the five offers, `task.steer_sealed`, and seven daemon outputs from
+  `task.complete_sealed` to `task.await_approval_sealed`. Each type is gated as
+  a whole on the flag, and it also has every gate of its plain type, except
+  gates on the fields that it seals. The split table `SEALED_SPLIT_TABLE`
+  names the identity, the sealed fields and the digest rules of each type.
+  `task.steer_sealed` has a `steerId`, and `task.artifact_sealed` has an
+  `artifactId`. A sealed message has no plaintext blob reference yet.
+  `task.decline` accepts four sealed decline codes. Cloud gets six sealed
+  hosted entries, from `enqueueSealedOffer` to `steerSealedTask`. Cloud does
+  not advertise the flag yet.
+- **Changed (protocol, cloud, server)** — the plaintext hosted entries now
+  refuse `sealing` and `sealed` with `coordination_input_invalid` (#654 E3a).
+  Before, the plain payload schema dropped these keys, and the task ran in
+  plaintext. `steerTask` also refuses `steerId`. The reference server
+  `dispatch()` and `executions.submit` refuse `sealing` and `sealed` the same
+  way. The wire schema also refuses them: each plaintext type that has a
+  sealed sibling fails to parse when it carries `sealing` or `sealed`, so a
+  direct protocol caller cannot send a sealed task as plaintext.
+- **Changed (client, cloud)** — until the sealed receivers exist, the daemon
+  declines a sealed offer non-retryably (`sealed_payload_unsupported`) and
+  drops a sealed steer (#654 E3a). Cloud inbound refuses a sealed daemon
+  message with `sealed_payload_unsupported`. The sealed hosted entries refuse
+  a `ciphertextRef` with `coordination_input_invalid`, because the Host does
+  not yet check and retain the referenced blob. Inline ciphertext works.
+- **Changed (client)** — the hosted journal admits an inbound envelope record
+  up to the larger of `hostedJournal.maxRecordBytes` and 415083 bytes (#654
+  E3a). The journal derives this floor from the largest inline sealed member:
+  256 KiB + 16 bytes of ciphertext as base64url, plus 64 KiB for the other
+  fields. Before, a sealed offer or steer at the inline maximum (about 342
+  KiB) was over the default bound of 256 KiB. The cursor stalled, and the
+  daemon sent no decline. Terminal and transition records keep
+  `maxRecordBytes`. There is no new config option.
 
 ## 0.29.0 — 2026-10-23 (published)
 

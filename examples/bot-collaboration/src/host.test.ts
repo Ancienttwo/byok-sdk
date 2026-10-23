@@ -321,8 +321,8 @@ it('replays the same connector key after an external effect and a failed SQLite 
   await finish(root, { confirmable_action: [{ action: 'send_message', summary: 'Send', draft: { text: 'hello' } }] });
   const card = Object.values(bot.snapshot().cards)[0]!;
   const transaction = fixture.ledger.transaction.bind(fixture.ledger);
-  const fault = vi.spyOn(fixture.ledger, 'transaction').mockImplementation(apply => transaction(state => {
-    const value = apply(state);
+  const fault = vi.spyOn(fixture.ledger, 'transaction').mockImplementation(apply => transaction((state, rows) => {
+    const value = apply(state, rows);
     if (stateOf(state.application).cards[card.id]?.result !== undefined) throw new Error('result commit lost');
     return value;
   }));
