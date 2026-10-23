@@ -1157,6 +1157,11 @@ with `coordination_input_invalid`. For an offer, the identity is the task id.
 For `task.steer_sealed`, it is the task id and the `steerId`: one `steerId`
 names one steer row in the mailbox. A sender still seals once and retries
 with the same bytes. The projection keeps a retry safe when it did not.
+The Host check holds while the mailbox keeps the row. Mailbox retention
+deletes an acknowledged row, also while its task runs. A later retry under
+the same `steerId` then appends a new row, and the Host does not see a
+conflict. So the device keeps the `steerId`s it has opened for each active
+task, and drops a steer whose `steerId` it has seen (decision 12a).
 
 `paddedLength` is the one legal padded length of the content: the next
 multiple of 256 bytes up to 16 KiB, Padmé above. The plaintext limit is 2 MiB
