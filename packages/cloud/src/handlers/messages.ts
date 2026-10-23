@@ -28,6 +28,7 @@
 import type { Context } from 'hono';
 import { STORAGE_ERROR_HTTP_STATUS, isCoreError } from '@byok-sdk/core';
 import {
+  MESSAGES_SEND_MAX_BODY_BYTES,
   MessagesSendRequestSchema,
   type AgentContentReceiptPayload,
   type AgentMessageDispositionPayload,
@@ -84,8 +85,6 @@ const WIRE_REFUSAL_REASONS = {
   sealed_payload_unsupported: 'unsupported',
   hello_protocol_version_unsupported: 'unsupported',
 } satisfies Record<InboundRefusalReason, import('@byok-sdk/protocol').OutboundRefusalReason>;
-
-const MESSAGES_JSON_BODY_MAX_BYTES = 2 * 1024 * 1024;
 
 export interface MessagesRouteDeps extends DeviceRouteDeps {
   readonly clock: import('@byok-sdk/core').Clock;
@@ -152,7 +151,7 @@ function batchHandler(deps: MessagesRouteDeps) {
     if (authenticated === undefined) return c.json({ error: 'unauthorized' }, 401);
     const { device, stores } = authenticated;
 
-    const body = await readBoundedJsonBody(c, MESSAGES_JSON_BODY_MAX_BYTES);
+    const body = await readBoundedJsonBody(c, MESSAGES_SEND_MAX_BODY_BYTES);
     if (body.tooLarge) return c.json({ error: 'request body too large' }, 413);
     const parsed = MessagesSendRequestSchema.safeParse(body.body);
     if (!parsed.success) return c.json({ error: 'messages must be an array of envelopes' }, 400);
