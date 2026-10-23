@@ -498,6 +498,11 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
                 contentType: z.ZodString;
             }, z.core.$strict>>;
         }, z.core.$strict>>;
+        routineRef: z.ZodOptional<z.ZodObject<{
+            routineId: z.ZodString;
+            definitionVersion: z.ZodNumber;
+            notAfter: z.ZodString;
+        }, z.core.$strict>>;
     }, z.core.$strict>;
     agentMessageContext: z.ZodOptional<z.ZodObject<{
         destinationBinding: z.ZodString;

@@ -63,7 +63,7 @@ const GOLDEN_CATEGORIES = ['task-input', 'task-output'] as const;
 const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
-  .map((raw) => JSON.parse(raw) as { type: MessageType; task_id: string; payload: Json });
+  .map((raw) => JSON.parse(raw) as { type: MessageType; task_id: string; ts: string; payload: Json });
 
 function bindingOf(line: (typeof corpus)[number]): SealedBinding {
   if (!isSealedMessageType(line.type)) throw new Error(`${line.type} is not sealed`);
@@ -76,6 +76,8 @@ function bindingOf(line: (typeof corpus)[number]): SealedBinding {
     : corpus.find((candidate) => candidate.task_id === line.task_id && candidate.payload.sealing !== undefined);
   if (offer === undefined) throw new Error(`no sealed offer for ${line.task_id}`);
   const agentRef = offer.payload.agentRef as SealedBinding['agentRef'] | undefined;
+  const routineRef = line.payload.routineRef as RoutineRef | undefined;
+  if (routineRef !== undefined) return templateBinding(routineRef, agentRef!);
   return {
     tenantId: GOLDEN_TENANT,
     family: SEALED_SPLIT_TABLE[line.type].plainType,
@@ -85,6 +87,26 @@ function bindingOf(line: (typeof corpus)[number]): SealedBinding {
     agentRef: agentRef == null ? null : { agentId: agentRef.agentId, profileRevision: agentRef.profileRevision },
     categories: [...GOLDEN_CATEGORIES],
     notAfter: null,
+  };
+}
+
+type RoutineRef = { routineId: string; definitionVersion: number; notAfter: string };
+
+/**
+ * The binding of a routine template (#654 E3d), rebuilt from the offer's
+ * plaintext `routineRef`, `agentRef` and `sealing.categories`. It names no
+ * task and no device, so one template opens for every occurrence.
+ */
+function templateBinding(routineRef: RoutineRef, agentRef: NonNullable<SealedBinding['agentRef']>): SealedBinding {
+  return {
+    tenantId: GOLDEN_TENANT,
+    family: 'routine.template',
+    direction: 'server-to-daemon',
+    identity: { routineId: routineRef.routineId, definitionVersion: routineRef.definitionVersion },
+    deviceId: null,
+    agentRef: { agentId: agentRef.agentId, profileRevision: agentRef.profileRevision },
+    categories: [...GOLDEN_CATEGORIES],
+    notAfter: routineRef.notAfter,
   };
 }
 
@@ -177,7 +199,11 @@ describe('sealed payload v1: the golden corpus lines are real ciphertext', () =>
     expect(new Set(inline.map((line) => line.type))).toEqual(new Set(Object.keys(SEALED_SPLIT_TABLE)));
   });
 
-  it.each(inline.map((line, index) => [index, line.type, line] as const))(
+  // A routine template is bound by its routineRef, not by the split table.
+  // The routine describe below opens those lines.
+  const splitTableLines = inline.filter((line) => line.payload.routineRef === undefined);
+
+  it.each(splitTableLines.map((line, index) => [index, line.type, line] as const))(
     'line %i (%s) opens under the binding the split table names',
     async (_index, _type, line) => {
       const member = line.payload.sealed as Json;
@@ -246,6 +272,57 @@ describe('sealed payload v1: the golden corpus lines are real ciphertext', () =>
       expect(opened).toEqual({ ok: false, reason: 'sealed_open_failed' });
     },
   );
+});
+
+describe('sealed payload v1: a routine template opens under the binding its routineRef names (#654 E3d)', () => {
+  const routineLines = corpus.filter((line) => line.payload.routineRef !== undefined);
+  const open = (line: (typeof corpus)[number], binding: SealedBinding) => {
+    const member = line.payload.sealed as Json;
+    return openSealedContent({
+      header: headerOf(member),
+      ciphertext: new Uint8Array(Buffer.from(member.ciphertext as string, 'base64url')),
+      scopeKey: GOLDEN_SCOPE_KEY,
+      binding,
+      sealing: GOLDEN_SCOPE,
+      maxContentLength: 2 * 1024 * 1024,
+    });
+  };
+
+  it('has two occurrences of one template, and an expired template', () => {
+    const [first, second, expired] = routineLines;
+    expect(routineLines).toHaveLength(3);
+    expect(second!.task_id).not.toBe(first!.task_id);
+    expect(second!.payload.sealed, 'the next occurrence carries the same template bytes').toEqual(first!.payload.sealed);
+    expect(second!.payload.routineRef).toEqual(first!.payload.routineRef);
+    const { notAfter } = expired!.payload.routineRef as RoutineRef;
+    expect(Date.parse(notAfter)).toBeLessThan(Date.parse(expired!.ts));
+  });
+
+  it.each(routineLines.map((line) => [line.task_id, line] as const))('%s opens with its instruction only', async (_taskId, line) => {
+    const opened = await open(line, bindingOf(line));
+    expect(opened).toMatchObject({ ok: true, plaintext: { instruction: 'Write the daily digest.' } });
+    if (opened.ok) expect(Object.keys(opened.plaintext)).toEqual(['instruction']);
+  });
+
+  it.each(routineLines.map((line) => [line.task_id, line] as const))('%s does not open when one bound field changes', async (_taskId, line) => {
+    const binding = bindingOf(line);
+    const routineRef = line.payload.routineRef as RoutineRef;
+    const changed: Record<string, SealedBinding> = {
+      'the task binding of the offer': {
+        ...binding, family: SEALED_SPLIT_TABLE['task.offer_for_agent_with_egress_fresh_sealed'].plainType,
+        identity: { taskId: line.task_id }, deviceId: GOLDEN_DEVICE, notAfter: null,
+      },
+      'a string definitionVersion': { ...binding, identity: { ...binding.identity, definitionVersion: String(routineRef.definitionVersion) } },
+      'another definitionVersion': { ...binding, identity: { ...binding.identity, definitionVersion: routineRef.definitionVersion + 1 } },
+      'another routine': { ...binding, identity: { ...binding.identity, routineId: `${routineRef.routineId}-other` } },
+      'another notAfter': { ...binding, notAfter: new Date(Date.parse(routineRef.notAfter) + 1).toISOString() },
+      'another Agent': { ...binding, agentRef: { ...binding.agentRef!, profileRevision: 'profile-other' } },
+      'fewer categories': { ...binding, categories: ['task-input'] },
+    };
+    for (const [name, other] of Object.entries(changed)) {
+      expect(await open(line, other), name).toEqual({ ok: false, reason: 'sealed_open_failed' });
+    }
+  });
 });
 
 describe('sealed payload v1: a Host without sealed-payload-v1 refuses sealed input (#654)', () => {
