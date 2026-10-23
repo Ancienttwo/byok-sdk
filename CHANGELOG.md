@@ -29,6 +29,17 @@
   advertise `agent-memory-intent.v1`. The gate reads the process
   architecture: an arm64 process stays unavailable, and x64 Node under
   emulation on Windows arm64 is admitted.
+  Compatibility on Windows x64:
+  - With an Agent home and the default `agentMemoryMcp: 'auto'`, every
+    ordinary Agent task now gets the SDK memory tools, and an adapter without
+    MCP toolset support declines the task. Set `agentMemoryMcp: 'off'` to keep
+    the earlier behavior.
+  - `agentMemoryIntents` now needs a resolvable SDK helper. A product without
+    the native assets (for example a compiled product) used to start, with
+    intents not advertised. It now fails at daemon construction, although
+    Windows never advertises intents. `agentMemory` and `agentMemoryExport`
+    also fail at construction without the helper, as before, now with the
+    helper error.
 - **Feature (core)** — the new subpath `@byok-sdk/core/sealed-payload` exports
   the sealed payload v1 byte rules (#654 E1a, E1b). It seals and opens one
   category of a payload with HKDF-SHA-256 and AES-256-GCM, pads the frame, and
