@@ -15,6 +15,7 @@ import {
   E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES,
   E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES,
   E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES,
+  E2EE_SCOPE_ID_MAX_LENGTH,
   E2EE_SCOPE_KEY_PACKAGE_PUT_MAX,
   E2eeClientPairingMacSchema,
   E2eeMemberChainEntrySchema,
@@ -137,13 +138,6 @@ export interface E2eeMemberStore {
     input: { readonly deviceId: string; readonly now: string },
   ): Promise<string | undefined>;
 }
-
-/**
- * The longest scope id, in UTF-16 code units, as for other opaque Host ids.
- * Core sets no maximum, so the bound lives here, not in the protocol shape
- * the parity test compares; it keeps every backend's index key in range.
- */
-const E2EE_SCOPE_ID_MAX_LENGTH = 512;
 
 function invalid(message: string): ByokCloudError {
   return new ByokCloudError('coordination_input_invalid', message);

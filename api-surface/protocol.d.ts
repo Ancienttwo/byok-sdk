@@ -1928,6 +1928,13 @@ export declare const E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES = 65536;
 export declare const E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES = 256;
 /** The most scope key packages one put accepts. */
 export declare const E2EE_SCOPE_KEY_PACKAGE_PUT_MAX = 256;
+/**
+ * The longest scope id, in UTF-16 code units, as for other opaque Host ids.
+ * Core sets no maximum, so the scope key package shape (which the parity test
+ * compares with core) leaves it out, and the Host checks it on every put and
+ * read. The key package notice is Host-built wire, so its schema carries it.
+ */
+export declare const E2EE_SCOPE_ID_MAX_LENGTH = 512;
 /** Register the device's member key bundle and its device pairing MAC (§7.2 step 3). */
 export declare const E2EE_MEMBER_KEY_REGISTER_OPERATION: 'e2ee-member-key.register';
 /** Append member chain entries. */
@@ -2924,7 +2931,7 @@ export type { TaskOfferType } from './messages';
 export type { HarnessId, HarnessInfo } from './messages';
 export { CUSTOM_HARNESS_CAPABILITY } from './version';
 export { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from './input-preparation';
-export { E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES, E2EE_MEMBER_CHAIN_APPEND_OPERATION, E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES, E2EE_MEMBER_CHAIN_OPS, E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES, E2EE_MEMBER_KEY_REGISTER_OPERATION, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, E2eeClientPairingMacSchema, E2eeMemberChainEntrySchema, E2eeMemberKeyBundleSchema, E2eeMemberKeyRegisterRequestSchema, E2eeKeyPackageAvailablePayloadSchema, E2eePairingMacSchema, E2eeScopeKeyPackageSchema, } from './e2ee-member';
+export { E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES, E2EE_MEMBER_CHAIN_APPEND_OPERATION, E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES, E2EE_MEMBER_CHAIN_OPS, E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES, E2EE_MEMBER_KEY_REGISTER_OPERATION, E2EE_SCOPE_ID_MAX_LENGTH, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, E2eeClientPairingMacSchema, E2eeMemberChainEntrySchema, E2eeMemberKeyBundleSchema, E2eeMemberKeyRegisterRequestSchema, E2eeKeyPackageAvailablePayloadSchema, E2eePairingMacSchema, E2eeScopeKeyPackageSchema, } from './e2ee-member';
 export type { E2eeClientPairingMac, E2eeKeyPackageAvailablePayload, E2eeMemberChainEntry, E2eeMemberKeyBundle, E2eeMemberKeyRegisterRequest, E2eeScopeKeyPackage, } from './e2ee-member';
 export * from './bot-turn-outcome';
 export { resultOutcomeMaxBytes } from './result-schema';

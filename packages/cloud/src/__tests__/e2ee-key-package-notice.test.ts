@@ -123,6 +123,19 @@ describe('e2ee.key_package.available after a key package put', () => {
     expect(first).toHaveLength(1);
   });
 
+  it('notifies a device on a replayed put once it advertises sealed-payload-v1', async () => {
+    const env = setup();
+    const sender = await newMember();
+    const upgraded = await env.device(TENANT_A, 'device-upgraded', ['agent-home-contract']);
+    const packages = [await keyPackage(TENANT_A, sender, upgraded, 1)];
+
+    expect(await env.cloud.putScopeKeyPackages(TENANT_A, { packages })).toEqual({ stored: 1, skippedDeviceIds: ['device-upgraded'] });
+    expect(await env.notices(TENANT_A, 'device-upgraded')).toEqual([]);
+    await env.base.stores.devices.recordCapabilities(TENANT_A, { deviceId: 'device-upgraded', capabilities: [SEALED_PAYLOAD_CAPABILITY] });
+    expect(await env.cloud.putScopeKeyPackages(TENANT_A, { packages })).toEqual({ stored: 1, skippedDeviceIds: [] });
+    expect((await env.notices(TENANT_A, 'device-upgraded')).map(row => row.envelope.payload)).toEqual([{ scopeId: 'scope-1', epoch: 1 }]);
+  });
+
   it('notifies only the devices of the put tenant', async () => {
     const env = setup();
     const sender = await newMember();
@@ -148,11 +161,13 @@ describe('enqueueScopeKeyPackageNotice', () => {
     expect(await env.notices(TENANT_A, 'device-sealed')).toHaveLength(1);
   });
 
-  it('refuses an extra payload field before admission, and a device without the capability before the mailbox', async () => {
+  it('refuses an extra payload field or a scopeId over 512 characters before admission, and a device without the capability before the mailbox', async () => {
     const env = setup();
     await env.device(TENANT_A, 'device-old', []);
     const extra = env.cloud.enqueueScopeKeyPackageNotice(TENANT_A, 'device-old', { scopeId: 'scope-1', epoch: 1, keyId: 'x' } as never);
     await expect(extra).rejects.toBeInstanceOf(ZodError);
+    await expect(env.cloud.enqueueScopeKeyPackageNotice(TENANT_A, 'device-old', { scopeId: 'x'.repeat(513), epoch: 1 }))
+      .rejects.toBeInstanceOf(ZodError);
     await expect(env.cloud.enqueueScopeKeyPackageNotice(TENANT_A, 'device-old', { scopeId: 'scope-1', epoch: 1 }))
       .rejects.toMatchObject({ code: 'agent_capability_missing', message: expect.stringContaining(SEALED_PAYLOAD_CAPABILITY) });
     expect(await env.notices(TENANT_A, 'device-old')).toEqual([]);

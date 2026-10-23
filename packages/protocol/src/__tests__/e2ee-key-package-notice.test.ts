@@ -1,6 +1,7 @@
 /** The E2EE key package notice (#654 E2c-3): its payload, its envelope fields and its gate. */
 import { describe, expect, it } from 'vitest';
 import {
+  E2EE_SCOPE_ID_MAX_LENGTH,
   E2eeKeyPackageAvailablePayloadSchema,
   EnvelopeSchema,
   MESSAGE_PAYLOAD_SCHEMAS,
@@ -48,6 +49,13 @@ describe('e2ee.key_package.available notice', () => {
     expect(parse({ scopeId: 's' })).toBe(false);
     expect(parse({ scopeId: '', epoch: 1 })).toBe(false);
     for (const epoch of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, '1']) expect(parse({ scopeId: 's', epoch })).toBe(false);
+  });
+
+  it('bounds scopeId at 512 characters', () => {
+    expect(E2EE_SCOPE_ID_MAX_LENGTH).toBe(512);
+    const parse = (scopeId: string) => E2eeKeyPackageAvailablePayloadSchema.safeParse({ scopeId, epoch: 1 }).success;
+    expect(parse('x'.repeat(512))).toBe(true);
+    expect(parse('x'.repeat(513))).toBe(false);
   });
 
   it.each([

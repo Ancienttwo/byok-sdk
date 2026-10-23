@@ -1246,7 +1246,7 @@ gated as a whole type by the device capability `sealed-payload-v1`
 and its payload (`E2eeKeyPackageAvailablePayloadSchema`) is strict:
 
 ```text
-{ scopeId,  // nonempty string
+{ scopeId,  // string of 1 to 512 UTF-16 code units (E2EE_SCOPE_ID_MAX_LENGTH)
   epoch }   // positive safe integer
 ```
 
@@ -1269,6 +1269,9 @@ fetches the packages addressed to its member from
   { scopeId, epoch })` sends one notice. It validates the strict payload
   first, then refuses (`agent_capability_missing`, no mailbox row) a device
   whose durable capabilities lack `sealed-payload-v1`.
+- **Partial failure.** Devices are notified one after another. If one
+  device's mailbox append fails, the put throws and the later devices get no
+  notice; a retry of the same put stores nothing new and sends them all again.
 - **Release rule.** No release may ship a daemon that advertises
   `sealed-payload-v1` unless that release's protocol has this type and the
   daemon handles it. Otherwise a daemon that advertised the flag gets a type
