@@ -175,6 +175,16 @@ describe.skipIf(SKIP_DATAPLANE)(`task redaction on Postgres — ${SKIP_REASON}`,
       expect(await device.send(createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, runtime: 'codex' }, { taskId: taskA })))
         .toMatchObject({ status: 200, body: { accepted: 0, rejected: 1 } });
       expect(host.consumed.filter((body) => body.includes(canaryA.core))).toHaveLength(1);
+      // D had no terminal receipt. A late device terminal finds the fence and stores nothing.
+      for (const type of ['task.decline', 'task.cancelled'] as const) {
+        expect(await device.send(createEnvelope(type, { reason: `late ${canaryD.text}`, agentRef: AGENT_REF }, { taskId: taskD })))
+          .toMatchObject({ status: 200, body: { accepted: 1 } });
+      }
+      expect(await errorCode(host.cloud.readTerminalReceipt(TENANT_1, taskD))).toBe('task_content_redacted');
+      expect(await errorCode(host.cloud.readDeviceTerminal(TENANT_1, taskD))).toBe('task_content_redacted');
+      await expect(host.cloud.readTaskAttempt(TENANT_1, taskD)).resolves.toMatchObject({ status: 'cancelled' });
+      await expect(host.cloud.readTaskResult(TENANT_1, taskD)).resolves.toMatchObject({ state: 'cancelled' });
+      expect(await hitsFor(scope.pool, storage, canaryD, consoleCalls())).toEqual({});
       // Host resubmits answer as before.
       expect(await errorCode(resubmit())).toBe(resubmitBefore);
       expect(await errorCode(changed())).toBe(changedBefore);
@@ -183,6 +193,52 @@ describe.skipIf(SKIP_DATAPLANE)(`task redaction on Postgres — ${SKIP_REASON}`,
       expect(await rowsMarkedBy(scope.pool, marksB)).toEqual(rowsB);
     } finally {
       vi.restoreAllMocks();
+      await scope.dispose();
+    }
+  }, 120_000);
+
+  it('retries safely after a failure between the object step and the row step', async () => {
+    const scope = await createDataplaneScope();
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const storage = await createObjectStorageScope();
+      let failRowStep = true;
+      // The first tombstone call is the first write of the row step, so this fails after the objects are gone.
+      const host = await composeRedactionHost(scope.pool, storage, (store) => ({
+        redactTask: (input) => store.redactTask(failRowStep
+          ? { ...input, codec: { ...input.codec, tombstone: async () => { throw new Error('row step failed'); } } }
+          : input),
+      }));
+      const device = await pairDevice(host, TENANT_1);
+      const canary = createCanary('r');
+      const run = await runTask(host, device, `task-r-${randomUUID()}`, canary);
+      const objectKey = `tenants/${TENANT_1}/objects/sha256/${run.artifactHex}`;
+      const objectsBefore = await readObjects(storage);
+      const contentRows = await rowsMarkedBy(scope.pool, [canary.core]);
+      expect(objectsBefore.has(objectKey)).toBe(true);
+      expect(contentRows.length).toBeGreaterThan(3);
+
+      await expect(host.cloud.redactTasks(TENANT_1, { taskIds: [run.taskId] })).rejects.toThrow('row step failed');
+      // The object is gone. The row step rolled back: every content row is as before and no fence or audit row exists.
+      const objectsAfter = await readObjects(storage);
+      expect([...objectsBefore.keys()].filter((key) => !objectsAfter.has(key))).toEqual([objectKey]);
+      expect(await rowsMarkedBy(scope.pool, [canary.core])).toEqual(contentRows);
+      expect(await rowsMarkedBy(scope.pool, [`task-redaction:${run.taskId}`])).toEqual([]);
+      await expect(host.cloud.readTaskResult(TENANT_1, run.taskId)).resolves.toMatchObject({ state: 'complete' });
+
+      failRowStep = false;
+      expect((await host.cloud.redactTasks(TENANT_1, { taskIds: [run.taskId] })).tasks).toEqual([{
+        taskId: run.taskId,
+        outcome: 'redacted',
+        counts: { receiptsRedacted: 3, admissionsRedacted: 1, outboxRedacted: 2, ephemeralRowsDeleted: 1, objectsDeleted: 0 },
+      }]);
+      expect(await hitsFor(scope.pool, storage, canary, [])).toEqual({});
+      const audit = await scope.pool.query<{ body: string }>(
+        'SELECT body FROM device_request_receipts WHERE tenant_id = $1 AND key = $2',
+        [TENANT_1, `task-redaction:${run.taskId}`],
+      );
+      expect(JSON.parse(audit.rows[0]!.body)).toMatchObject({ counts: { objectsDeleted: 0 } });
+    } finally {
       await scope.dispose();
     }
   }, 120_000);

@@ -82,10 +82,11 @@ function receiptRedactionStore(base: ReturnType<typeof createInMemoryByokCloud>)
   const store: TaskRedactionStore = {
     async redactTask(input) {
       calls.push(input);
+      await record(input.tenantId, { key: input.terminalReceiptKey, body: input.codec.absent });
       let receiptsRedacted = 0;
       for (const key of input.receiptKeys) {
         const receipt = await get(input.tenantId, key);
-        if (receipt === undefined || tombstones.has(slot(input.tenantId, key))) continue;
+        if (receipt === undefined || input.codec.isTombstone(receipt.body) || tombstones.has(slot(input.tenantId, key))) continue;
         tombstones.set(slot(input.tenantId, key), (await input.codec.tombstone(receipt.body)).body);
         receiptsRedacted += 1;
       }
@@ -294,11 +295,13 @@ describe('ByokCloud.redactTasks', () => {
       { taskId: 'task-1', outcome: 'redacted', counts: expect.objectContaining({ receiptsRedacted: 3 }) },
       { taskId: 'task-missing', outcome: 'not_found' },
     ]);
-    expect(fixture.calls.map(({ tenantId, taskId, receiptKeys, auditReceiptKey }) => ({ tenantId, taskId, receiptKeys, auditReceiptKey })))
+    expect(fixture.calls.map(({ tenantId, taskId, receiptKeys, terminalReceiptKey, auditReceiptKey }) =>
+      ({ tenantId, taskId, receiptKeys, terminalReceiptKey, auditReceiptKey })))
       .toEqual([{
         tenantId: TENANT_A,
         taskId: 'task-1',
         receiptKeys: [`task-offer:${offer!.messageId}`, 'task:task-1:terminal', `agent-message-offer:${device.deviceId}:task-1`],
+        terminalReceiptKey: 'task:task-1:terminal',
         auditReceiptKey: 'task-redaction:task-1',
       }]);
     await expect(fixture.cloud.redactTasks(TENANT_A, { taskIds: ['task-1'] })).resolves.toMatchObject({
@@ -316,6 +319,7 @@ describe('ByokCloud.redactTasks', () => {
 
     for (const read of [
       () => fixture.cloud.readTaskOffer(TENANT_A, 'task-1'),
+      () => fixture.cloud.readTerminalReceipt(TENANT_A, 'task-1'),
       () => fixture.cloud.readDeviceTerminal(TENANT_A, 'task-1'),
       () => fixture.cloud.readTaskResult(TENANT_A, 'task-1'),
       () => fixture.cloud.readTaskAgentMessage(TENANT_A, device.deviceId, 'task-1', AGENT_REF),
@@ -324,9 +328,26 @@ describe('ByokCloud.redactTasks', () => {
       expect(await rejection(read())).toBe('task_content_redacted');
     }
     await expect(fixture.cloud.readTaskAttempt(TENANT_A, 'task-1')).resolves.toMatchObject({ status: 'complete' });
-    const raw = await fixture.cloud.readTerminalReceipt(TENANT_A, 'task-1');
-    expect(isTaskRedactionTombstone(raw!.body)).toBe(true);
-    expect(raw!.body).not.toContain(SECRET);
+  });
+
+  it('fences the terminal of a task cancelled before a claim, so a late device terminal stores nothing', async () => {
+    const fixture = createFixture();
+    const device = await fixture.pair(TENANT_A);
+    await fixture.cloud.submitAgentExecution(TENANT_A, executionInput('task-1', device.deviceId));
+    await fixture.cloud.cancelTask(TENANT_A, 'task-1', `reason ${SECRET}`);
+    expect(await fixture.cloud.readTerminalReceipt(TENANT_A, 'task-1')).toBeUndefined();
+    await fixture.cloud.redactTasks(TENANT_A, { taskIds: ['task-1'] });
+
+    const decline = createEnvelope('task.decline', { reason: `late ${SECRET}`, agentRef: AGENT_REF }, { taskId: 'task-1' });
+    const cancelled = createEnvelope('task.cancelled', { reason: `late ${SECRET}`, agentRef: AGENT_REF }, { taskId: 'task-1' });
+    expect(await fixture.send(device, decline, cancelled)).toMatchObject({ status: 200, body: { accepted: 2 } });
+    const stored = await fixture.base.stores.receipts.get(TENANT_A, 'task:task-1:terminal');
+    expect(stored?.body).toBe(codec.absent);
+    expect(isTaskRedactionTombstone(codec.absent)).toBe(true);
+    expect(await rejection(fixture.cloud.readTerminalReceipt(TENANT_A, 'task-1'))).toBe('task_content_redacted');
+    expect(await rejection(fixture.cloud.readDeviceTerminal(TENANT_A, 'task-1'))).toBe('task_content_redacted');
+    await expect(fixture.cloud.readTaskAttempt(TENANT_A, 'task-1')).resolves.toMatchObject({ status: 'cancelled' });
+    await expect(fixture.cloud.readTaskResult(TENANT_A, 'task-1')).resolves.toMatchObject({ state: 'cancelled' });
   });
 
   it('keeps device replays and Host resubmits inside the fences', async () => {

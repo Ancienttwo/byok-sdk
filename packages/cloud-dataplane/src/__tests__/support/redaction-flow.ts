@@ -17,6 +17,7 @@ import {
   createWebCrypto,
   fullCapabilityDeclaration,
   type ByokCloud,
+  type TaskRedactionStore,
 } from '@byok-sdk/cloud';
 import {
   BYOK_BLOBS_PATH,
@@ -82,7 +83,12 @@ export interface RedactionHost {
 }
 
 /** A Host over the dataplane stores, with the redaction store configured. */
-export async function composeRedactionHost(pool: Pool, objectStorage: ObjectStorageScope): Promise<RedactionHost> {
+/** `wrapStore` lets a test put a fault in front of the real redaction store. */
+export async function composeRedactionHost(
+  pool: Pool,
+  objectStorage: ObjectStorageScope,
+  wrapStore: (store: TaskRedactionStore) => TaskRedactionStore = (store) => store,
+): Promise<RedactionHost> {
   const clock = createMutableClock();
   const crypto = createWebCrypto();
   const core = createPostgresCoreStores({ pool, clock, objectStorage: objectStorage.config });
@@ -108,7 +114,7 @@ export async function composeRedactionHost(pool: Pool, objectStorage: ObjectStor
         return { outcome: 'accepted' };
       },
     },
-    taskRedactionStore: createPostgresTaskRedactionStore({ pool, clock, objectStorage: objectStorage.config }),
+    taskRedactionStore: wrapStore(createPostgresTaskRedactionStore({ pool, clock, objectStorage: objectStorage.config })),
   });
   return { cloud, core, consumed };
 }
