@@ -97,6 +97,39 @@ export function validateRoutineDefinition(definition: RoutineDefinition, { now, 
   }
 }
 
+/** Routine commands in the caller's transaction. A refused command throws before it changes any state. */
+export interface RoutineCommands {
+  /** The rules of `addRoutine`. */
+  create(definition: RoutineDefinition): void;
+  /** The rules of `updateRoutine`. */
+  update(definition: RoutineDefinition): void;
+  /** The rules of `lifecycle()`. */
+  lifecycle(id: string, lifecycle: Routine['lifecycle']): void;
+  /** Copies of the routine rows, including changes earlier in this transaction. */
+  list(): Routine[];
+}
+/** The inputs of `routineCommands`: the Host clock and calendar, and the registered handlers a definition may name. */
+export interface RoutineCommandOptions extends Omit<RoutineValidation, 'now'> { now: () => number; nextTime: NextOccurrence }
+/** The one path for routine commands. Each command validates and plans before it writes, so a caught refusal changes nothing. */
+export function routineCommands(state: LedgerState, options: RoutineCommandOptions): RoutineCommands {
+  const { now, nextTime } = options;
+  const validate = (definition: RoutineDefinition) => validateRoutineDefinition(definition,
+    { now: now(), hostJobs: options.hostJobs, occurrenceHooks: options.occurrenceHooks });
+  return {
+    create: definition => {
+      validate(definition);
+      createRoutine(state, definition, now(), nextTime);
+    },
+    update: definition => {
+      validate(definition);
+      nextWake(definition, now(), nextTime, now()); // Refuse a calendar error before staging.
+      stageVersion(state, definition, now(), nextTime);
+    },
+    lifecycle: (id, lifecycle) => setLifecycle(state, id, lifecycle, now(), nextTime),
+    list: () => structuredClone(Object.values(state.routines)),
+  };
+}
+
 /** Creates a validated routine. The same definition is idempotent; another definition for the ID throws before any change. */
 export function createRoutine(state: LedgerState, definition: RoutineDefinition, now: number, nextTime: NextOccurrence): void {
   const plan = nextWake(definition, now - 1, nextTime, now);

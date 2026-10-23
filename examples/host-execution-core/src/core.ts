@@ -5,8 +5,8 @@ import { HostLedger, OutboxFullError, type ApplicationRows } from './ledger';
 import { canonical, hash, project, taskId, time, validateJson, type HostJobHandler, type HostOccurrenceRun, type Attempt,
   type Intent, type IntentInput, type Json, type LedgerState, type Occurrence, type Routine, type RoutineDefinition, type Terminal } from './model';
 import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
-import { applyPlan, auditCalendarError, auditIgnoredWake, createRoutine, deferSchedule, nextWake, occurrenceRun, promote, recordOccurrence, scheduleNext,
-  setLifecycle, stageVersion, switchVersion, validateRoutineDefinition, versionSwitchDue, WAKE_HORIZON_MS } from './routines';
+import { applyPlan, auditCalendarError, auditIgnoredWake, deferSchedule, nextWake, occurrenceRun, promote, recordOccurrence, routineCommands, scheduleNext,
+  switchVersion, versionSwitchDue, WAKE_HORIZON_MS, type RoutineCommands } from './routines';
 import { cancelWake, enqueue, fifoHeads, queuedExpiry, settle } from './transitions';
 import { frozenDelivered, submitFrozen, type FrozenSubmitPort } from './submit';
 
@@ -26,17 +26,6 @@ const CANCEL_PROBE_MAX_MS = 1000;
 const WAKE_RETRY_LIMIT = 10;
 const WAKE_RETRY_FIRST_MS = 1000;
 const WAKE_RETRY_MAX_MS = 60_000;
-/** Routine commands in the caller's transaction. A refused command throws before it changes any state. */
-export interface RoutineCommands {
-  /** The rules of `addRoutine`. */
-  create(definition: RoutineDefinition): void;
-  /** The rules of `updateRoutine`. */
-  update(definition: RoutineDefinition): void;
-  /** The rules of `lifecycle()`. */
-  lifecycle(id: string, lifecycle: Routine['lifecycle']): void;
-  /** Copies of the routine rows, including changes earlier in this transaction. */
-  list(): Routine[];
-}
 export interface OutcomeTransaction {
   readonly intent: Readonly<Intent>;
   readonly terminal: Terminal;
@@ -207,24 +196,9 @@ export class HostExecutionCore {
     this.ledger.transaction(state => this.routineCommands(state).update(definition));
     await this.drain();
   }
-  private validateDefinition(definition: RoutineDefinition): void {
-    validateRoutineDefinition(definition, { now: this.now(), hostJobs: this.hostJobs, occurrenceHooks: this.occurrenceHooks });
-  }
-  /** The one path for routine commands. Each command validates and plans before it writes, so a caught refusal changes nothing. */
+  /** The one path for routine commands. */
   private routineCommands(state: LedgerState): RoutineCommands {
-    return {
-      create: definition => {
-        this.validateDefinition(definition);
-        createRoutine(state, definition, this.now(), this.nextTime);
-      },
-      update: definition => {
-        this.validateDefinition(definition);
-        nextWake(definition, this.now(), this.nextTime, this.now()); // Refuse a calendar error before staging.
-        stageVersion(state, definition, this.now(), this.nextTime);
-      },
-      lifecycle: (id, lifecycle) => setLifecycle(state, id, lifecycle, this.now(), this.nextTime),
-      list: () => structuredClone(Object.values(state.routines)),
-    };
+    return routineCommands(state, { now: this.now, nextTime: this.nextTime, hostJobs: this.hostJobs, occurrenceHooks: this.occurrenceHooks });
   }
   async lifecycle(id: string, lifecycle: Routine['lifecycle']): Promise<void> {
     this.assertOpen();
