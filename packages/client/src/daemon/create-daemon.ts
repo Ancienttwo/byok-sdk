@@ -2414,6 +2414,20 @@ export function buildDaemonWithAdapters(
       });
     };
 
+    // #654: a task waits on its approval request. One that cannot be sealed
+    // (no sealing key, or over the inline frame) never reaches the Host, so
+    // the device denies it locally and the task goes on or ends.
+    const denyUnsentApproval = (envelope: Envelope): void => {
+      const { approvalId } = envelope.payload as { approvalId?: string };
+      if (envelope.type !== 'task.await_approval' || approvalId === undefined) return;
+      console.error(`[byok/client] approval ${approvalId} of sealed task ${envelope.task_id} was not sent; denied locally`);
+      try {
+        approvalRegistry.resolve(approvalId, 'reject', 'the approval request could not be sealed for the Host');
+      } catch {
+        // Already resolved, for example by the approval timeout.
+      }
+    };
+
     // The journal owns terminal bytes; the transport owns one delivery queue.
     // A local write failure must never bypass durability and send different truth.
     // #654: a task that seals its output sends each outbound sealed, in order.
@@ -2429,8 +2443,11 @@ export function buildDaemonWithAdapters(
           return;
         }
         void sealedTaskOutput.sealOutbound(envelope).then(
-          (sealed) => { if (sealed !== undefined) connection?.send(sealed); },
-          (error: unknown) => console.error(`[byok/client] ${envelope.type} for sealed task ${envelope.task_id} not sent`, error),
+          (sealed) => { if (sealed !== undefined) connection?.send(sealed); else denyUnsentApproval(envelope); },
+          (error: unknown) => {
+            console.error(`[byok/client] ${envelope.type} for sealed task ${envelope.task_id} not sent`, error);
+            denyUnsentApproval(envelope);
+          },
         );
         return;
       }

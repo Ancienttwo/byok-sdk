@@ -405,6 +405,42 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     expect(JSON.stringify(taskEnvelopes('key-lost'))).not.toContain('lost output');
   });
 
+  it('denies locally an approval request it cannot send, so the task goes on', async () => {
+    const keyring = new TestKeyring();
+    const { server, adapter, deviceId } = await start({ keyring });
+    server.send(await sealedOffer(keyring, 'unsent-approval', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      // Its sealed frame is over the inline maximum, so the Host never sees it.
+      adapter.sessions[0]!.emit({ type: 'needs_approval', summary: `approve ${'a'.repeat(300 * 1024)}` });
+      await vi.waitFor(() => expect(adapter.sessions[0]!.resolveApprovalCalls).toEqual([{ approved: false, reason: expect.any(String) }]), BUDGET_MS);
+    } finally {
+      diagnostic.mockRestore();
+    }
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await server.waitFor((envelope) => envelope.type === 'task.complete_sealed' && envelope.task_id === 'unsent-approval', BUDGET_MS);
+    const types = taskEnvelopes('unsent-approval').map((envelope) => envelope.type);
+    expect(types).not.toContain('task.await_approval_sealed');
+    expect(types).not.toContain('task.await_approval');
+  });
+
+  it('denies locally an approval request it has no sealing key for', async () => {
+    const keyring = new TestKeyring();
+    const { server, adapter, deviceId } = await start({ keyring });
+    server.send(await sealedOffer(keyring, 'keyless-approval', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    keyring.sealing = false;
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      adapter.sessions[0]!.emit({ type: 'needs_approval', summary: 'secret approval summary' });
+      await vi.waitFor(() => expect(adapter.sessions[0]!.resolveApprovalCalls).toEqual([{ approved: false, reason: expect.any(String) }]), BUDGET_MS);
+    } finally {
+      diagnostic.mockRestore();
+    }
+    expect(JSON.stringify(taskEnvelopes('keyless-approval'))).not.toContain('secret approval summary');
+  });
+
   it('settles a terminal whose sealed frame is over the inline maximum with a small sealed failure', async () => {
     const keyring = new TestKeyring();
     const { server, adapter, deviceId } = await start({ keyring });
