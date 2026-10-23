@@ -181,7 +181,9 @@ Turn's intent tombstone expires with its slot. K4 removes the occurrence with
 the intent, so the pass also fails a routine Turn whose occurrence is gone,
 after its tombstone expired. The check runs before the archived Bot check, so a
 retired Turn of an archived Bot also fails with `result_retired`. The archived
-Bot check cancels only a Turn that has no conclusion. A due reply check of a compacted chain intent takes
+Bot check cancels only a Turn that has no conclusion. A retired room seat Turn
+also releases its seat as `failed`, with reason `result_retired`, so its round
+moves on. A due reply check of a compacted chain intent takes
 the failed readback path. The Host keeps processing other work.
 
 `CollaborationState.version` is 2. Version 1 kept the routines in K8 state.
