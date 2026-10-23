@@ -130,11 +130,27 @@ describe.skipIf(POSTGRES_URL === undefined)('H routine scheduler on real Postgre
     expect(pass.fenced[0]!.error).toBeInstanceOf(DeviceBindingError);
     expect(await store().dump(fenced)).toBe(before);
     expect(await routineRow(healthy, healthyId)).toMatchObject({ next_at: String(SECOND) });
-    // A bound device lets the next pass fire the slot, now late.
-    await query(`UPDATE ${table('device_binding')} SET revoked_at = NULL, mode_revision = 3 WHERE scope = $1`, [storedKey(fenced)]);
+    // A revoke is final, so the owner moves the Bot to a new bound device. The next pass fires the slot, now late.
+    await store().seed(fenced, state => { state.team.bots.main!.execution = template('device2', 'main'); });
+    await store().bindDevice(fenced, 'device2');
     clock = FIRST + ROUTINE_LATE_AFTER_MS + 1;
     expect(await scheduler().run()).toMatchObject({ fired: 1, fenced: [] });
     expect(await occurrences(fenced)).toMatchObject([{ trigger_kind: 'catch_up', planned_at: String(FIRST) }]);
+  });
+
+  it('keeps a staged version through a fire, which reserves no later old slot, and switches it when the occurrence concludes', async () => {
+    const scope = await scoped(), id = await created(scope), key = occurrenceKey(id, 'scheduled', FIRST);
+    // The slot is due and has not fired, so K4 stages the version.
+    await store().updateRoutine(scope, 'main', { routineId: id, prompt: 'Version 2' }, FIRST);
+    expect(await routineRow(scope, id)).toMatchObject({ definition: { version: 1 }, pending: { version: 2 }, next_at: String(FIRST) });
+    clock = FIRST;
+    expect(await scheduler().run()).toMatchObject({ fired: 1 });
+    expect(await occurrences(scope)).toMatchObject([{ key: storedKey(key), next_at: null, conclusion: null }]);
+    expect(await routineRow(scope, id)).toMatchObject({ definition: { version: 1 }, pending: { version: 2 }, next_at: null });
+    await store().commit(scope, { scope, commandId: 'cancel', command: { kind: 'cancel_turn', turnId: `occurrence:${key}` } }, ports);
+    await store().sync(scope, { ...SYNC, now: FIRST });
+    expect(await occurrences(scope)).toMatchObject([{ key: storedKey(key), conclusion: 'cancelled' }]);
+    expect(await routineRow(scope, id)).toMatchObject({ definition: { version: 2 }, pending: null, next_at: String(SECOND) });
   });
 
   it('records one occurrence when two fires race on one slot', async () => {
