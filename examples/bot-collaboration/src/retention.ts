@@ -89,7 +89,7 @@ function members(state: CollaborationState, root: string): Members {
   const seats = rounds.flatMap(round => round.seats), roots = new Set([root, ...seats]);
   const turns = values(state.turns).filter(turn => roots.has(turn.root)), ids = new Set(turns.map(turn => turn.id));
   const delegations = values(state.delegations).filter(d => roots.has(d.root)).map(d => d.id), chained = new Set(delegations);
-  const replies = Object.entries(state.replies).filter(([, reply]) => ids.has(reply.turnId)).map(([taskId]) => taskId), tasks = new Set(replies);
+  const replies = Object.entries(state.replies).filter(([, reply]) => ids.has(reply.turnId)).map(([taskId]) => taskId);
   const batch = own(state.inputBatches, root);
   return {
     turns, roots, delegations, replies, rounds: rounds.map(round => round.id), seats,
@@ -99,7 +99,7 @@ function members(state: CollaborationState, root: string): Members {
     questions: values(state.questions).filter(question => ids.has(question.turnId)).map(question => question.id),
     ...(batch ? { batch: batch.id } : {}), inputs: batch ? [...batch.inputIds] : [],
     inbounds: values(state.channel?.inbounds).filter(row => roots.has(row.root)).map(row => row.id),
-    deliveries: values(state.channel?.deliveries).filter(row => tasks.has(row.taskId)).map(row => row.id),
+    deliveries: values(state.channel?.deliveries).filter(row => ids.has(row.turnId)).map(row => row.id),
   };
 }
 /** The first reason that the root is still in use, or `undefined`. */

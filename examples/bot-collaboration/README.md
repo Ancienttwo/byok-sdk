@@ -198,7 +198,8 @@ does that on the Host's explicit acknowledgement. It never runs on its own.
   budget, delegations and their batches and units, replies, schemas, cards,
   questions, the rejections that its Turns consumed, its input batch and
   inputs, its rounds with their seats, seat Turns and `team.roots` row, its
-  inbounds and their deliveries. A seat Turn belongs to its round's root, but
+  inbounds, and the deliveries that its Turns queued (each delivery stores
+  its `turnId`). A seat Turn belongs to its round's root, but
   its projection shows its seat id as `root`. Acknowledging a seat id throws
   `RetentionRefused` with code `seat_root` and the round's root in
   `roundRoot`. Acknowledge that root instead.

@@ -143,7 +143,7 @@ it('keeps persisted pending deliveries dormant when the channel is not configure
     db.transaction(s => {
       const state = stateOf(s.application);
       const route = enablePush(state, conversation, 'fake', 'target', 'owner', 100);
-      state.channel!.deliveries.dormant = { id: 'dormant', taskId: 'finished-task', messageId: 'final', body: 'final', channel: 'fake',
+      state.channel!.deliveries.dormant = { id: 'dormant', taskId: 'finished-task', turnId: 'finished-turn', messageId: 'final', body: 'final', channel: 'fake',
         conversation, route: { kind: 'push', pushRouteId: route.id }, state: 'pending', attempts: 0 };
     });
     const timers = vi.getTimerCount();
