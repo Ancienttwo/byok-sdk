@@ -108,4 +108,18 @@ CREATE INDEX IF NOT EXISTS intent_unsettled ON intent (scope, agent, ordinal) WH
 CREATE INDEX IF NOT EXISTS intent_due ON intent (next_at) WHERE conclusion IS NULL AND submission <> 'delivered' AND cancel_reason IS NULL;
 -- The paged reconciliation scan: every tried row that has no conclusion, across scopes (#793 D2d).
 CREATE INDEX IF NOT EXISTS intent_reconcile ON intent (reconcile_at, scope, key) WHERE conclusion IS NULL AND submission <> 'reserved';
+CREATE TABLE IF NOT EXISTS device_binding (
+  scope          text    NOT NULL REFERENCES scope (scope),
+  -- JSON.stringify(device id).
+  device         text    NOT NULL,
+  ordinal        bigint  NOT NULL CHECK (ordinal >= 0),
+  -- §4.1 record shape. Until the switch slice exists, D2e writes only 'H'.
+  mode           text    NOT NULL CHECK (mode IN ('L', 'H')),
+  -- The owner revision. Every write that can create execution checks it.
+  mode_revision  bigint  NOT NULL CHECK (mode_revision >= 1),
+  -- Set once by revoke, in the same write that raises mode_revision. The row is kept as the tombstone.
+  revoked_at     bigint  CHECK (revoked_at >= 0),
+  PRIMARY KEY (scope, device),
+  UNIQUE (scope, ordinal)
+);
 `;

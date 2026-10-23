@@ -3,6 +3,7 @@ import { canonical, type Conclusion, type ExecutionTemplate, type Json } from '@
 import { stateOf, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
 import { commitCommand, syncTurn, type Command, type CommandPorts, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
+import { bindDevice, revokeDevice } from './binding';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
 import { syncFacts, writeSyncStep } from './intents';
 import { decideMessage, messageCommandId, type AgentMessageInput, type MessageDecision } from './messages';
@@ -85,6 +86,7 @@ export class HostedCollaborationStore {
         'SELECT key, ordinal::text, kind, body::text FROM outbox WHERE scope = $1 ORDER BY key',
         `SELECT key, task_id, ordinal::text, agent, source, input::text, wait_until::text, submission, tries, next_at::text, last_error,
           cancel_reason, conclusion, started, attempt::text, terminal::text, reconcile_at::text FROM intent WHERE scope = $1 ORDER BY key`,
+        'SELECT device, ordinal::text, mode, mode_revision::text, revoked_at::text FROM device_binding WHERE scope = $1 ORDER BY device',
       ]) rows.push((await client.query({ text: query, values: [storedKey(scope)], rowMode: 'array' })).rows);
       return JSON.stringify(rows);
     }, true);
@@ -133,15 +135,41 @@ export class HostedCollaborationStore {
       (state, publish) => decideFinish(client, scope, turnId, state, publish, evidence, ports)), false);
   }
 
+  /**
+   * Binds a device of `scope` to H (#793 D2e) and returns its mode revision. A second bind changes nothing. A revoked
+   * device id throws `DeviceBindingError` (#793 O1 option A).
+   */
+  bindDevice(scope: string, deviceId: string): Promise<number> {
+    const key = storedKey(scope);
+    return this.transaction(async client => {
+      await this.upsertScope(client, key);
+      await lockScope(client, key);
+      return bindDevice(client, key, deviceId);
+    }, false);
+  }
+
+  /** Revokes the H binding of a device of `scope` for good, and raises its mode revision. A second revoke changes nothing. */
+  revokeDevice(scope: string, deviceId: string, revokedAt: number): Promise<void> {
+    const key = storedKey(scope);
+    return this.transaction(async client => {
+      await lockScope(client, key);
+      await revokeDevice(client, key, deviceId, revokedAt);
+    }, false);
+  }
+
   private change<T>(scope: string, commandId: string | undefined, decide: Decide<T>): Promise<T> {
     // #793 O4: each table stores the scope as JSON text, so two scopes that UTF-8 would merge stay apart.
     const key = storedKey(scope);
     return this.transaction(async client => {
-      // Upsert, then lock: a missing scope row would lock nothing, and two first commits would race.
-      await client.query('INSERT INTO scope (scope, state_version, frame) VALUES ($1, $2, $3::json) ON CONFLICT (scope) DO NOTHING',
-        [key, STORE_VERSION, EMPTY_FRAME]);
+      await this.upsertScope(client, key);
       return this.decideIn(client, key, commandId, decide);
     }, false);
+  }
+
+  /** Upsert, then lock: a missing scope row would lock nothing, and two first writes would race. */
+  private async upsertScope(client: PoolClient, key: string): Promise<void> {
+    await client.query('INSERT INTO scope (scope, state_version, frame) VALUES ($1, $2, $3::json) ON CONFLICT (scope) DO NOTHING',
+      [key, STORE_VERSION, EMPTY_FRAME]);
   }
 
   /** Locks the scope row, runs `decide` on the loaded state, and writes the changed rows and the outbox. */

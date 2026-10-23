@@ -30,6 +30,7 @@ function submitter(port: FrozenSubmitPort, options: Partial<SubmitterOptions> = 
 }
 async function freeze(scope: string, turnId = randomUUID(), waitUntil = clock + 60_000) {
   await opened!.store.seed(scope, () => {});
+  await opened!.store.bindDevice(scope, host!.deviceId);
   return inSchema(opened!.pool, opened!.store.schema, async client => {
     await lockScope(client, storedKey(scope));
     return freezeIntent(client, scope, { key: turnId, source: 'user', execution: template(host!.deviceId), waitUntil });
