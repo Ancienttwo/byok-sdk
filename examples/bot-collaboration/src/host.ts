@@ -13,12 +13,13 @@ import { turnInstruction, outcomeSchema, SYSTEM_PROMPT } from './schema';
 import { abandonDelegation, arbitrateCancel, BOT_REPLY_MAX_BYTES, DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   delegationDue, intentRows, minimumInstructionBytes, observeDevices, reconcileReply, REPLY_UNCERTAIN_AFTER_MS, resolveDelegation, retryReply,
   settleDelegations, type DelegationTimers } from './delegation';
-import { applyTurnOutcome } from './rules/outcome';
+import { commitCommand, type Command, type CommandPorts } from './rules/commands';
+import { CommitConflict, commitInLedger, type CommitResult } from './commit';
 import { BOT_ROUTINE, botRoutines, concludeRoutineTurn, createDefinition, owned, routineCalendar, routineOccurrence, routineTurn,
   updateDefinition } from './routines';
 
 import { activeBot, applyManagement, roomFields, updateBot } from './team';
-import { advanceRooms, roomInput, roomVisibility, type Mentions } from './rooms';
+import { advanceRooms, roomVisibility, type Mentions } from './rooms';
 import type { RoomFields } from '@byok-sdk/protocol';
 
 import { CurrentRequestTooLargeError, HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS } from './history';
@@ -65,6 +66,11 @@ export interface BotOptions {
 export type MessageServer = { tasks: Partial<Pick<ByokServer['tasks'], 'agentMessage'>> };
 export type AgentMessageInput = Parameters<NonNullable<CreateByokServerOptions['agentMessage']>['consume']>[0];
 
+/** The Turn or round id of an input command. These commands never refuse; they throw. */
+function turnOf(result: CommitResult): string {
+  if (result.disposition.outcome !== 'accepted' || typeof result.disposition.value !== 'string') throw new Error('Input command has no Turn id');
+  return result.disposition.value;
+}
 /** Copy-and-own Host example. Use one instance per ledger tenant. */
 export class BotCollaboration {
   readonly core: HostExecutionCore;
@@ -117,7 +123,11 @@ export class BotCollaboration {
     if (this.timers.cancelGraceMs < 1 || this.timers.uncertainAfterMs < 1) throw new Error('Invalid delegation timers');
     this.core = new HostExecutionCore(server, ledger, { now: this.now, reconcileMs: 100, nextOccurrence: routineCalendar,
       ...(options.hostJobs ? { hostJobs: options.hostJobs } : {}),
-      occurrenceHooks: { [BOT_ROUTINE]: (run, tx) => routineTurn(stateOf(tx.application), run) },
+      occurrenceHooks: { [BOT_ROUTINE]: (run, tx) => {
+        const state = stateOf(tx.application);
+        this.commitCallback(state, run.occurrenceKey, { kind: 'occurrence', key: run.occurrenceKey },
+          { publish: tx.publish, occurrence: () => routineTurn(state, run) });
+      } },
       applyMessage: (input, tx) => this.applyMessage(input, tx),
       applyOutcome: (document, tx) => this.applyOutcome(document, tx) });
     ledger.transaction(s => {
@@ -143,16 +153,11 @@ export class BotCollaboration {
    * Only the owner starts a 1:1 execution (R2).
    */
   input(key: string, request: string, botId = this.options.botId, ...by: PrincipalArg): Promise<string> {
-    const id = hash(['user', botId, key]);
     return this.exclusive(async () => {
       const principal = this.ownerOnly(by, 'input', botId);
-      const turnId = this.ledger.transaction(s => {
-        const state = stateOf(s.application);
-        activeBot(state.team, botId);
-        return admitUserInput(state, { id, key, botId, request, sender: principal.id, authority: 'owner' }, this.coalesce, this.now());
-      });
+      const result = this.commitOwner(hash(['input', botId, key]), { kind: 'input', botId, key, request, sender: principal.id });
       await this.process();
-      return turnId;
+      return turnOf(result);
     });
   }
   /**
@@ -174,19 +179,14 @@ export class BotCollaboration {
     }
     if (kind === 'owner_input' || kind === 'room_input') return this.exclusive(async () => {
       const principal = kind === 'owner_input' ? this.ownerOnly([sender], 'input', conversation.id) : this.verifiedOnly(sender, 'roomInput', conversation.id);
-      const id = this.ledger.transaction(s => {
-        const state = stateOf(s.application), key = inboundKey(message);
-        let root: string;
-        if (kind === 'owner_input') {
-          activeBot(state.team, conversation.id);
-          root = admitUserInput(state, { id: hash(['user', conversation.id, key]), key, botId: conversation.id,
-            request: message.text, sender: principal.id, authority: 'owner' }, this.coalesce, this.now());
-        } else root = roomInput(state, key, conversation.id, message.text, message.mentions, principal.id);
-        if (this.options.channel) rememberInbound(state, message, root);
-        return root;
-      });
+      const key = inboundKey(message);
+      const command: Command = kind === 'owner_input'
+        ? { kind: 'receive', inbound: kind, key, botId: conversation.id, request: message.text, sender: principal.id }
+        : { kind: 'receive', inbound: kind, key, roomId: conversation.id, text: message.text, mentions: message.mentions, from: principal.id };
+      const result = this.commitOwner(hash(['receive', key]), command,
+        (_s, state) => this.options.channel ? { remember: root => rememberInbound(state, message, root) } : {});
       await this.process();
-      return { kind, id };
+      return { kind, id: turnOf(result) };
     });
     if (kind === 'bot_background') {
       return { kind, id: await this.roomInput(inboundKey(message), conversation.id, message.text, message.mentions, sender) };
@@ -246,18 +246,35 @@ export class BotCollaboration {
   }
   private applyOutcome(document: unknown, tx: OutcomeTransaction): void {
     const state = stateOf(tx.application), taskId = tx.intent.taskId;
-    applyTurnOutcome(state, tx.intent.key, taskId, document, {
-      now: this.now, publish: tx.publish,
-      // The terminal transaction has not written yet, so a ledger snapshot is the committed state.
-      committed: { intent: key => intentRows(this.ledger.snapshot()).intent(key) },
-      manage: (turn, outcome, managed) => applyManagement(state, turn.botId, taskId, outcome, this.models(), managed, this.options.readOnlyToolsets),
-      createRoutine: (turn, action, index) => tx.routines.create(createDefinition(tx.routines.list(), turn.botId, taskId, index, action, turn.authority ?? 'bot')),
-      updateRoutine: (turn, action) => tx.routines.update(updateDefinition(tx.routines.list(), turn.botId, action)),
-      cancelRoutine: (turn, action) => tx.routines.lifecycle(owned(tx.routines.list(), turn.botId, action.routineId).definition.id, 'completed'),
-      ...(this.options.channel ? { deliver: (turn: Turn, key: string, text: string) => {
-        queueDelivery(this.ledger.snapshot(), state, turn, taskId, key, text, this.now());
-      } } : {}),
+    this.commitCallback(state, taskId, { kind: 'outcome', turnId: tx.intent.key, taskId, document: document as Json }, {
+      publish: tx.publish,
+      ...this.deliverPort(state, taskId),
+      outcome: {
+        // The terminal transaction has not written yet, so a ledger snapshot is the committed state.
+        committed: { intent: key => intentRows(this.ledger.snapshot()).intent(key) },
+        manage: (turn, outcome, managed) => applyManagement(state, turn.botId, taskId, outcome, this.models(), managed, this.options.readOnlyToolsets),
+        createRoutine: (turn, action, index) => tx.routines.create(createDefinition(tx.routines.list(), turn.botId, taskId, index, action, turn.authority ?? 'bot')),
+        updateRoutine: (turn, action) => tx.routines.update(updateDefinition(tx.routines.list(), turn.botId, action)),
+        cancelRoutine: (turn, action) => tx.routines.lifecycle(owned(tx.routines.list(), turn.botId, action.routineId).definition.id, 'completed'),
+      },
     });
+  }
+  /** The channel outbox port of a K4 callback. Delivery code reads the committed ledger. */
+  private deliverPort(state: CollaborationState, taskId: string): Pick<CommandPorts, 'deliver'> {
+    if (!this.options.channel) return {};
+    return { deliver: (turn, key, text) => queueDelivery(this.ledger.snapshot(), state, turn, taskId, key, text, this.now())?.id };
+  }
+  /** An owner command in its own ledger transaction. K4 callbacks use `commitCallback` inside the K4 transaction. */
+  private commitOwner(commandId: string, command: Command, extra?: (s: LedgerState, state: CollaborationState) => Partial<CommandPorts>): CommitResult {
+    return commitInLedger(this.ledger, { scope: this.ledger.tenant, commandId, command }, s => {
+      const state = stateOf(s.application);
+      return { now: this.now, publish: (key, value) => project(s, key, value),
+        admitInput: fields => admitUserInput(state, fields, this.coalesce, this.now()), ...extra?.(s, state) };
+    });
+  }
+  private commitCallback(state: CollaborationState, commandId: string, command: Command, ports: Omit<CommandPorts, 'now'>): CommitResult {
+    return commitCommand(state, { scope: this.ledger.tenant, commandId, command }, { scope: this.ledger.tenant, recordCallbacks: false },
+      { now: this.now, ...ports });
   }
 
   /**
@@ -272,24 +289,17 @@ export class BotCollaboration {
   }
   private applyMessage(input: AgentMessageInput, tx: MessageTransaction): { outcome: 'accepted' | 'refused'; reasonCode?: string } {
     const state = stateOf(tx.application);
-    const refuse = (reasonCode: string) => ({ outcome: 'refused' as const, reasonCode });
-    const turn = state.turns[tx.intent.key];
-    if (!turn) return refuse('binding_mismatch');
-    const delegation = turn.delegationId ? state.delegations[turn.delegationId] : undefined;
-    if (delegation?.verdict) {
-      state.audit.push(`Delegation message after verdict: ${delegation.id} ${input.taskId}`);
-      return refuse('delegation_resolved');
+    let disposition;
+    try {
+      ({ disposition } = this.commitCallback(state, `${input.taskId}:${input.payload.messageId}`,
+        { kind: 'message', turnId: tx.intent.key, message: { taskId: input.taskId, payload: input.payload } },
+        { publish: tx.publish, ...this.deliverPort(state, input.taskId) }));
+    } catch (cause) {
+      // Other content for the id of a refused message: the same refusal that K4 gives for an accepted one.
+      if (cause instanceof CommitConflict && cause.code === 'identity_conflict') return { outcome: 'refused', reasonCode: 'message_conflict' };
+      throw cause;
     }
-    // Cancel and first acceptance meet in this transaction boundary (§8.8).
-    if (delegation?.cancel?.targetTurnId === turn.id) {
-      state.audit.push(`Delegation message after cancel: ${delegation.id} ${input.taskId}`);
-      return refuse('delegation_cancelled');
-    }
-    if (delegation && Buffer.byteLength(input.payload.body, 'utf8') > BOT_REPLY_MAX_BYTES) return refuse('reply_too_large');
-    state.replies[input.taskId] = { turnId: turn.id, messageId: input.payload.messageId, contentHash: input.payload.contentHash,
-      contentType: input.payload.contentType, acceptedAt: this.now(), ...(delegation ? { body: input.payload.body } : {}) };
-    if (this.options.channel) queueDelivery(this.ledger.snapshot(), state, turn, input.taskId, input.payload.messageId, input.payload.body, this.now());
-    return { outcome: 'accepted' as const };
+    return disposition.outcome === 'accepted' ? { outcome: 'accepted' } : { outcome: 'refused', reasonCode: disposition.reasonCode };
   }
   /**
    * Owner API ("Cancel", §8.8), from A's delegation chip or from B's `bot_request` Turn.
@@ -359,7 +369,9 @@ export class BotCollaboration {
       const principal = by.length ? this.verifiedOnly(by[0], 'roomInput', roomId) : undefined;
       // R5: a bot message is room background. Its mention entities select no seat.
       const called = principal?.kind === 'bot' ? [] : mentions;
-      this.ledger.transaction(s => { id = roomInput(stateOf(s.application), key, roomId, text, called, principal?.id); });
+      const result = this.commitOwner(hash(['room_input', roomId, key]),
+        { kind: 'room_input', key, roomId, text, mentions: called, ...(principal ? { from: principal.id } : {}) });
+      id = turnOf(result);
       await this.process();
     });
     return id;
@@ -381,19 +393,7 @@ export class BotCollaboration {
   async answer(id: string, answer: string, ...by: PrincipalArg): Promise<void> {
     await this.exclusive(async () => {
       this.ownerOnly(by, 'answer', id);
-      this.ledger.transaction(s => {
-        const state = stateOf(s.application), question = state.questions[id];
-        if (!question) throw new Error('Question not found');
-        if (question.answer !== undefined) {
-          if (question.answer !== answer) throw new Error('Answer identity conflict');
-          return;
-        }
-        if (!answer.trim() || question.value.answerKind === 'single_choice' && !question.value.options.some(o => o.id === answer)) throw new Error('Invalid answer');
-        question.answer = answer;
-        const turnId = hash(['answer', id]);
-        addTurn(state, { id: turnId, root: turnId, source: 'answer', request: JSON.stringify({ question: question.value, answer }),
-          botId: state.turns[question.turnId]!.botId, hop: 0, authority: 'owner' });
-      });
+      this.commitOwner(hash(['answer', id]), { kind: 'answer', questionId: id, answer });
       await this.process();
     });
   }
@@ -401,14 +401,15 @@ export class BotCollaboration {
   async decide(id: string, decision: 'confirmed' | 'rejected', ...by: PrincipalArg): Promise<void> {
     await this.exclusive(async () => {
       this.ownerOnly(by, 'decide', id);
-      const error = this.ledger.transaction(s => {
-        const state = stateOf(s.application), card = state.cards[id];
-        if (!card) throw new Error('Card not found');
-        if (card.state === 'pending' && this.now() >= card.expiresAt) card.state = 'expired';
-        if (card.state === 'expired') return 'Card expired';
-        if (card.state !== 'pending') return card.state === decision ? undefined : `Card already ${card.state}`;
-        card.state = decision;
-      });
+      let error: string | undefined;
+      try {
+        const { disposition } = this.commitOwner(hash(['decide', id]), { kind: 'decide', cardId: id, decision });
+        if (disposition.outcome === 'refused') error = disposition.reason;
+      } catch (cause) {
+        // A different decision for a decided card throws after the process pass, as a refused decision does.
+        if (!(cause instanceof CommitConflict) || cause.code !== 'identity_conflict') throw cause;
+        error = cause.message;
+      }
       await this.process();
       if (error) throw new Error(error);
     });
