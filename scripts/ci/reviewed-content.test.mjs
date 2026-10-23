@@ -370,6 +370,7 @@ test('#793: the hosted example manifest and lock rows are admitted only with the
     [{ ...manifest, private: false }, 'a public manifest'],
     [{ ...manifest, bin: { x: 'x.js' } }, 'an unreviewed field'],
     [{ ...manifest, scripts: { ...manifest.scripts, postinstall: 'x' } }, 'an unreviewed script'],
+    [{ ...manifest, description: { text: 'x' } }, 'a description that is not a string'],
   ]) {
     f.write(path, candidate);
     assert.throws(() => selectImpact([path], f), /Reviewed CI mapping required/, reason);
@@ -405,6 +406,7 @@ test('#793: the K8 manifest admits only the reviewed hosted entries, and stays p
     [{ ...manifest, exports, scripts: { test: 'echo bypass' } }, 'another field'],
     [{ ...manifest, exports: { ...exports, './model': './src/index.ts' } }, 'an entry retargeted to another file'],
     [{ ...manifest, exports: Object.fromEntries(Object.entries(exports).filter(([key]) => key !== './team')) }, 'a subset of the entries'],
+    [{ ...manifest, exports, devDependencies: { '@byok-sdk/cloud': '^0.28.0' } }, 'a cloud edge retargeted to a registry spec'],
   ]) {
     f.write(path, candidate);
     assert.throws(() => selectImpact([path], f), /more than/, reason);
@@ -417,4 +419,20 @@ test('#793: the K8 manifest admits only the reviewed hosted entries, and stays p
   f.base = git('rev-parse', 'HEAD').trim();
   f.write(path, { ...manifest, exports });
   assert.throws(() => selectImpact([path], f), /more than/, 'a base that already has exports');
+});
+
+test('#658: the K8 cloud edge is admitted only as a workspace spec', t => {
+  const f = fixture(t);
+  const path = 'examples/bot-collaboration/package.json';
+  const manifest = { name: '@byok-sdk/example-bot-collaboration', private: true, version: '0.0.1', devDependencies: {} };
+  f.write(path, manifest);
+  const git = (...args) => execFileSync('git', args, { cwd: f.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'K8 without the cloud edge');
+  f.base = git('rev-parse', 'HEAD').trim();
+  f.write(path, { ...manifest, devDependencies: { '@byok-sdk/cloud': 'workspace:*' } });
+  assert.ok(selectImpact([path], f).dirs.includes('examples/bot-collaboration'));
+  for (const spec of ['^0.28.0', 'workspace:^', 'file:../../packages/cloud']) {
+    f.write(path, { ...manifest, devDependencies: { '@byok-sdk/cloud': spec } });
+    assert.throws(() => selectImpact([path], f), /more than/, spec);
+  }
 });
