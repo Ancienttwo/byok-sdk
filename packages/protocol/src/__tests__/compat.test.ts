@@ -545,6 +545,9 @@ function requiredCoverage(root: SchemaNode, prefix: string, exempt: (path: strin
   const visit = (node: SchemaNode, path: string): void => {
     // An exempt subtree is not enumerated, so neither are definitions only it reaches.
     if (exempt(path)) return;
+    // A field that accepts no value (`z.never()`, for example a sealed member
+    // on a plaintext type) cannot appear in a valid line, so it needs no line.
+    if (Object.keys(node).length === 1 && JSON.stringify(node.not) === '{}') return;
     required.paths.add(path);
     if (node.$ref !== undefined) {
       const { name, node: target } = definition(root, node.$ref);

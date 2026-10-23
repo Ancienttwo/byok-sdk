@@ -1105,7 +1105,9 @@ categories }`. `categories` is a non-empty, ordered subset of `task-input` and
 exactly when `categories` includes `task-input`. Then it carries no
 `instruction`, and `sealed.scope` is `{ id: scopeId, epoch }`. An offer that
 seals only `task-output` keeps its `instruction` in plaintext. It is still a
-sealed offer type, so a device without the flag never receives it.
+sealed offer type, so a device without the flag never receives it. A
+plaintext type that has a sealed sibling refuses `sealing` and `sealed`, so
+the schema never strips a sealing policy or sealed content.
 
 **Sealed member.** `sealed` has the outer fields of a sealed content: `v` (1),
 `suite` (`byok-sealed-v1.hkdf-sha256.aes-256-gcm`), `category`, `scope`

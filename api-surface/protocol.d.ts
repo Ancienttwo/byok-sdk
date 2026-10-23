@@ -3775,6 +3775,8 @@ export type DispatchSelection = z.infer<typeof DispatchSelectionSchema>;
  * envelope's `task_id` (M1 gap #7 — single source of truth for routing).
  */
 export declare const TaskOfferPayloadSchema: z.ZodObject<{
+    sealed: z.ZodOptional<z.ZodNever>;
+    sealing: z.ZodOptional<z.ZodNever>;
     instruction: z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
         blobRef: z.ZodObject<{
             blobId: z.ZodString;
@@ -3836,6 +3838,8 @@ export declare const RequiredToolsetsSchema: z.ZodArray<z.ZodString>;
  * strict because every field here affects execution authority.
  */
 export declare const TaskOfferWithToolsetsPayloadSchema: z.ZodObject<{
+    sealed: z.ZodOptional<z.ZodNever>;
+    sealing: z.ZodOptional<z.ZodNever>;
     instruction: z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
         blobRef: z.ZodObject<{
             blobId: z.ZodString;
@@ -4766,6 +4770,8 @@ export declare const TaskCancelPayloadSchema: z.ZodObject<{
 export type TaskCancelPayload = z.infer<typeof TaskCancelPayloadSchema>;
 /** server -> daemon: inject steering text into a running task. */
 export declare const TaskSteerPayloadSchema: z.ZodObject<{
+    sealed: z.ZodOptional<z.ZodNever>;
+    sealing: z.ZodOptional<z.ZodNever>;
     text: z.ZodString;
 }, z.core.$strip>;
 export type TaskSteerPayload = z.infer<typeof TaskSteerPayloadSchema>;
@@ -4851,6 +4857,8 @@ export type TaskStartedPayload = z.infer<typeof TaskStartedPayloadSchema>;
  * terminal-state consumer into "Failed or Declined, handle both".
  */
 export declare const TaskDeclinePayloadSchema: z.ZodObject<{
+    sealed: z.ZodOptional<z.ZodNever>;
+    sealing: z.ZodOptional<z.ZodNever>;
     reason: z.ZodString;
     retryable: z.ZodOptional<z.ZodBoolean>;
     agentRef: z.ZodOptional<z.ZodObject<{
@@ -4879,6 +4887,8 @@ export type TaskDeclinePayload = z.infer<typeof TaskDeclinePayloadSchema>;
  * unknowns instead of choking on them.
  */
 export declare const TaskProgressPayloadSchema: z.ZodObject<{
+    sealed: z.ZodOptional<z.ZodNever>;
+    sealing: z.ZodOptional<z.ZodNever>;
     seq: z.ZodNumber;
     events: z.ZodArray<z.ZodUnion<readonly [z.ZodDiscriminatedUnion<[z.ZodObject<{
         type: z.ZodLiteral<"progress">;
@@ -4968,6 +4978,8 @@ export declare const TaskProgressPayloadSchema: z.ZodObject<{
 export type TaskProgressPayload = z.infer<typeof TaskProgressPayloadSchema>;
 /** daemon -> server: an artifact produced by the task, inline or by blob ref. */
 export declare const TaskArtifactPayloadSchema: z.ZodObject<{
+    sealed: z.ZodOptional<z.ZodNever>;
+    sealing: z.ZodOptional<z.ZodNever>;
     name: z.ZodString;
     contentType: z.ZodString;
     inline: z.ZodOptional<z.ZodString>;
@@ -4997,6 +5009,8 @@ export type TaskArtifactPayload = z.infer<typeof TaskArtifactPayloadSchema>;
  * pending" — the same behavior every server had before this field existed.
  */
 export declare const TaskAwaitApprovalPayloadSchema: z.ZodObject<{
+    sealed: z.ZodOptional<z.ZodNever>;
+    sealing: z.ZodOptional<z.ZodNever>;
     summary: z.ZodString;
     approvalId: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
@@ -5212,6 +5226,8 @@ export type TerminalAgentHomeMemoryChange = z.infer<typeof TerminalAgentHomeMemo
  * `RESULT_OUTCOME_MAX_BYTES`).
  */
 export declare const TaskCompletePayloadSchema: z.ZodObject<{
+    sealed: z.ZodOptional<z.ZodNever>;
+    sealing: z.ZodOptional<z.ZodNever>;
     harnessId: z.ZodOptional<z.ZodString>;
     summary: z.ZodString;
     finalMessage: z.ZodOptional<z.ZodString>;
@@ -5266,6 +5282,8 @@ export declare const TaskCompletePayloadSchema: z.ZodObject<{
 export type TaskCompletePayload = z.infer<typeof TaskCompletePayloadSchema>;
 /** daemon -> server: task failed. */
 export declare const TaskFailPayloadSchema: z.ZodObject<{
+    sealed: z.ZodOptional<z.ZodNever>;
+    sealing: z.ZodOptional<z.ZodNever>;
     recovery: z.ZodOptional<z.ZodObject<{
         kind: z.ZodLiteral<"daemon_interrupted">;
         offerId: z.ZodUUID;
@@ -5333,6 +5351,8 @@ export type TaskFailPayload = z.infer<typeof TaskFailPayloadSchema>;
  * trigger that moves `Claimed`/`Running`/`AwaitApproval -> Cancelled`.
  */
 export declare const TaskCancelledPayloadSchema: z.ZodObject<{
+    sealed: z.ZodOptional<z.ZodNever>;
+    sealing: z.ZodOptional<z.ZodNever>;
     harnessId: z.ZodOptional<z.ZodString>;
     reason: z.ZodOptional<z.ZodString>;
     usage: z.ZodOptional<z.ZodObject<{
@@ -6007,6 +6027,7 @@ export type TaskSteerSealedPayload = z.infer<typeof TaskSteerSealedPayloadSchema
  * `preparedObservation` are not carried in v1.
  */
 export declare const TaskCompleteSealedPayloadSchema: z.ZodObject<{
+    sealing: z.ZodOptional<z.ZodNever>;
     harnessId: z.ZodOptional<z.ZodString>;
     sessionRef: z.ZodString;
     usage: z.ZodOptional<z.ZodObject<{
@@ -6072,6 +6093,7 @@ export declare const TaskCompleteSealedPayloadSchema: z.ZodObject<{
 export type TaskCompleteSealedPayload = z.infer<typeof TaskCompleteSealedPayloadSchema>;
 /** daemon -> server: `task.fail` of a sealed task. `reason` is sealed; `preparedObservation` is not carried in v1. */
 export declare const TaskFailSealedPayloadSchema: z.ZodObject<{
+    sealing: z.ZodOptional<z.ZodNever>;
     recovery: z.ZodOptional<z.ZodObject<{
         kind: z.ZodLiteral<"daemon_interrupted">;
         offerId: z.ZodUUID;
@@ -6145,6 +6167,7 @@ export type TaskFailSealedPayload = z.infer<typeof TaskFailSealedPayloadSchema>;
  * plaintext `task.decline` with a closed sealed failure code instead.
  */
 export declare const TaskDeclineSealedPayloadSchema: z.ZodObject<{
+    sealing: z.ZodOptional<z.ZodNever>;
     retryable: z.ZodOptional<z.ZodBoolean>;
     agentRef: z.ZodOptional<z.ZodObject<{
         agentId: z.ZodString;
@@ -6188,6 +6211,7 @@ export declare const TaskDeclineSealedPayloadSchema: z.ZodObject<{
 export type TaskDeclineSealedPayload = z.infer<typeof TaskDeclineSealedPayloadSchema>;
 /** daemon -> server: `task.cancelled` of a sealed task. `reason` is sealed. */
 export declare const TaskCancelledSealedPayloadSchema: z.ZodObject<{
+    sealing: z.ZodOptional<z.ZodNever>;
     harnessId: z.ZodOptional<z.ZodString>;
     usage: z.ZodOptional<z.ZodObject<{
         runtime: z.ZodEnum<{
@@ -6252,6 +6276,7 @@ export declare const TaskCancelledSealedPayloadSchema: z.ZodObject<{
 export type TaskCancelledSealedPayload = z.infer<typeof TaskCancelledSealedPayloadSchema>;
 /** daemon -> server: `task.progress` of a sealed task. `events` is sealed; `seq` names the batch. */
 export declare const TaskProgressSealedPayloadSchema: z.ZodObject<{
+    sealing: z.ZodOptional<z.ZodNever>;
     seq: z.ZodNumber;
     sealed: z.ZodObject<{
         v: z.ZodLiteral<1>;
@@ -6287,6 +6312,7 @@ export type TaskProgressSealedPayload = z.infer<typeof TaskProgressSealedPayload
  * and the content MAC, because two artifacts of one task may share a `name`.
  */
 export declare const TaskArtifactSealedPayloadSchema: z.ZodObject<{
+    sealing: z.ZodOptional<z.ZodNever>;
     name: z.ZodString;
     contentType: z.ZodString;
     artifactId: z.ZodUUID;
@@ -6320,6 +6346,7 @@ export declare const TaskArtifactSealedPayloadSchema: z.ZodObject<{
 export type TaskArtifactSealedPayload = z.infer<typeof TaskArtifactSealedPayloadSchema>;
 /** daemon -> server: `task.await_approval` of a sealed task. `summary` is sealed; `approvalId` is required. */
 export declare const TaskAwaitApprovalSealedPayloadSchema: z.ZodObject<{
+    sealing: z.ZodOptional<z.ZodNever>;
     approvalId: z.ZodString;
     sealed: z.ZodObject<{
         v: z.ZodLiteral<1>;
