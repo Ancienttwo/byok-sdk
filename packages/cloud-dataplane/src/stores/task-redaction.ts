@@ -6,9 +6,9 @@
  * 1. Read the task's bodies without a lock and delete every object they name,
  *    under the orphan-GC guards (no reference, no reserved upload).
  * 2. In one transaction that holds the task row lock (the lock admission and
- *    cancellation also take), replace each body with the cloud tombstone,
- *    clear the free-text task columns, delete the ephemeral rows and write the
- *    audit receipt.
+ *    cancellation also take), fence an absent terminal receipt, replace each
+ *    body with the cloud tombstone, clear the free-text task columns, delete
+ *    the ephemeral rows and write the audit receipt.
  *
  * Objects go first. If the call stops between the steps, the bodies are still
  * there, so a retry finds the same hashes and an object already gone is
@@ -110,6 +110,15 @@ export class PostgresTaskRedactionStore implements TaskRedactionStore {
         return refusal;
       }
 
+      // Fence an absent terminal key first (a task cancelled before a claim
+      // has none). A device terminal that commits before this insert is read
+      // and replaced below; one that arrives later finds the fence and stores nothing.
+      await client.query(
+        `INSERT INTO device_request_receipts (tenant_id, key, body, recorded_at)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (tenant_id, key) DO NOTHING`,
+        [tenant, input.terminalReceiptKey, codec.absent, this.#clock.now()],
+      );
       let receiptsRedacted = 0;
       for (const row of await readReceipts(client, tenant, input.receiptKeys, true)) {
         if (codec.isTombstone(row.body)) continue;

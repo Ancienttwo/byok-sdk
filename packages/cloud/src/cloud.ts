@@ -774,7 +774,7 @@ export interface ByokCloud {
   listTaskAttempts(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
   /** Store-aggregated task counts, with host cancellation separated from coarse status. */
   countTaskAttempts(tenant: TenantId): Promise<import('./stores/ports').TaskAttemptCounts>;
-  /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). */
+  /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). Throws `task_content_redacted` after {@link ByokCloud.redactTasks}. */
   readTerminalReceipt(tenant: TenantId, taskId: string): Promise<RequestReceipt | undefined>;
   /** Actual device terminal only; cancellation intent never creates this observation. */
   readDeviceTerminal(tenant: TenantId, taskId: string): Promise<DeviceTerminal | undefined>;
@@ -1835,6 +1835,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         tenantId: tenant,
         taskId,
         receiptKeys: [`task-offer:${messageId}`, terminalReceiptKey(taskId), `agent-message-offer:${attempt.deviceId}:${taskId}`],
+        terminalReceiptKey: terminalReceiptKey(taskId),
         auditReceiptKey: taskRedactionReceiptKey(taskId),
         codec,
       }));
@@ -2400,8 +2401,10 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       return tenantStoresFor(controlPlane(tenant), root).tasks.countByStatus();
     },
 
-    readTerminalReceipt(tenant, taskId) {
-      return tenantStoresFor(controlPlane(tenant), root).receipts.get(terminalReceiptKey(taskId));
+    async readTerminalReceipt(tenant, taskId) {
+      const receipt = await tenantStoresFor(controlPlane(tenant), root).receipts.get(terminalReceiptKey(taskId));
+      if (receipt !== undefined) assertTaskContentPresent(taskId, receipt.body);
+      return receipt;
     },
 
     async readDeviceTerminal(tenant, taskId) {

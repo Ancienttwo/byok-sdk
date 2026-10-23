@@ -56,6 +56,11 @@ export interface TaskRedactionResult {
 export interface TaskRedactionCodec {
   /** The body-free replacement. One body always gives the same tombstone. */
   tombstone(body: string): Promise<{ readonly body: string; readonly bodyHash: ContentHash; readonly byteSize: bigint }>;
+  /**
+   * The tombstone for a body that was never stored. A store writes it under an
+   * absent terminal receipt key, so a late device terminal stores nothing.
+   */
+  readonly absent: string;
   isTombstone(body: string): boolean;
   /** The object hashes of every BlobRef in `body`. A body that is not JSON names none. */
   blobHashes(body: string): readonly ContentHash[];
@@ -66,6 +71,8 @@ export interface TaskRedactionStoreInput {
   readonly taskId: string;
   /** Every receipt key that holds this task's content. Cloud derives them; the store does not. */
   readonly receiptKeys: readonly string[];
+  /** The device terminal receipt key. It is one of `receiptKeys`. When it is absent, the store writes `codec.absent` there. */
+  readonly terminalReceiptKey: string;
   /** The identity receipt that records this redaction. */
   readonly auditReceiptKey: string;
   readonly codec: TaskRedactionCodec;
@@ -139,6 +146,7 @@ export function taskRedactionCodec(crypto: Pick<CloudCrypto, 'sha256'>): TaskRed
       const bytes = new TextEncoder().encode(tombstone);
       return { body: tombstone, bodyHash: contentHash(await crypto.sha256(bytes)), byteSize: BigInt(bytes.byteLength) };
     },
+    absent: JSON.stringify({ byokRedacted: 1, absent: true }),
     isTombstone: isTaskRedactionTombstone,
     blobHashes(body) {
       const hashes: string[] = [];
