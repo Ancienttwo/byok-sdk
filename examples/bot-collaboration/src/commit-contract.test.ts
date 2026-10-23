@@ -9,8 +9,12 @@ import { commitInLedger } from './commit';
 import { commitCommand, type CommandPorts } from './rules/commands';
 import { commitVectors, seedCollaboration, VECTOR_NOW, type CommitSubject } from './commit-vectors.test-support';
 
-const roots: string[] = [];
-afterAll(() => { for (const root of roots) rmSync(root, { recursive: true, force: true }); });
+const roots: string[] = [], ledgers: HostLedger[] = [];
+// Windows cannot delete an open SQLite file, so each ledger closes first.
+afterAll(() => {
+  for (const ledger of ledgers) ledger.close();
+  for (const root of roots) rmSync(root, { recursive: true, force: true });
+});
 
 function ports(state: CollaborationState, publish: CommandPorts['publish']): CommandPorts {
   return { now: () => VECTOR_NOW, publish, admitInput: fields => admitUserInput(state, fields, undefined, VECTOR_NOW),
@@ -40,6 +44,7 @@ function ledgerSubject(): CommitSubject & { ledger: HostLedger } {
   const root = mkdtempSync(join(tmpdir(), 'k8-commit-'));
   roots.push(root);
   const ledger = new HostLedger(join(root, 'host.sqlite'), 'product:commit');
+  ledgers.push(ledger);
   ledger.transaction(s => { seedCollaboration(stateOf(s.application)); });
   return {
     scope: ledger.tenant, ledger,
