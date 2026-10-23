@@ -1262,6 +1262,15 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
   top-level field gets 400. The chain append and the package put run the
   same checks as the Host control plane calls `appendMemberChainEntries` and
   `putScopeKeyPackages`.
+- **Proof replay.** A device proof is not single-use on the three writes.
+  Anyone who captures a proof and its body can send them again while the
+  proof's `issuedAt` is within the Host clock skew (60 s by default). A
+  replayed registration extends the pairing MAC expiry, or puts back an older
+  MAC for the same bundle. A replayed package put can overwrite a newer
+  package for the same scope epoch, `keyId` and recipient. A replayed chain
+  append changes nothing. The owner accepted this window for now (owner batch
+  §41a A). Before E2d-5, `requestId` becomes single-use on the three writes,
+  as on the truth put.
 - **Reads.** A device route checks the bearer against the device row, so a
   revoked or superseded device gets 401. The package read returns only the
   packages addressed to the device's registered member; a query names no
