@@ -94,12 +94,19 @@ result cannot overwrite that committed result. A crash after the
 external effect but before result commit can call it again with that id.
 No exactly-once external effect is claimed.
 
-The system rules are in `src/schema.ts`. K4 carries them in the instruction.
+The system rules are in `src/rules/schema.ts`. K4 carries them in the instruction.
 They require an acknowledgement and self delegation for long work. Final text
 uses messageEgress. Progress uses messageDraft or typed activity. A failed,
 cancelled, or missing-outcome continuation has a failed owner projection.
 The Host publishes final turns with `owner`, source, status, and conclusion.
 It does not turn an outcome document into a second chat message.
+
+`src/rules/` holds the collaboration rules as pure functions (#606, #739 D1):
+room seats, input coalescing, Turns, delegation, the result schema, the
+ContextPack and the order of outcome actions. They take rows and K4 intent
+facts, do no I/O and import no ledger type. The ContextPack functions take the
+Bot's history as an argument. This example reads that history from the device
+ledger. The other `src/` files are the K8 adapter around these rules.
 
 ## Routine invariants
 

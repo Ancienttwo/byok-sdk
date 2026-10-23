@@ -1,5 +1,6 @@
 import type { BotTurnOutcome } from '@byok-sdk/protocol';
 import { canonical, hash } from '@byok-sdk/example-host-execution-core';
+import { HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS, historyWindow } from './history';
 
 /**
  * Room seat arbitration as pure rules (#606 R1). Each function changes only the room slice that the
@@ -7,6 +8,8 @@ import { canonical, hash } from '@byok-sdk/example-host-execution-core';
  * execution facts of each seat, queues the returned seat Turns and cancels the returned work.
  */
 export const ROOM_GRACE_MS = 240_000;
+export const ROOM_CONTEXT_BYTES = HISTORY_MAX_BYTES;
+export const ROOM_CONTEXT_MESSAGES = HISTORY_MAX_ITEMS;
 export type Mentions = readonly string[] | 'all';
 export interface Room {
   id: string; name: string; members: string[]; admin?: string; mode: 'mention'; announcement: string;
@@ -177,4 +180,16 @@ export function advanceRooms(team: RoomsState, facts: Readonly<Record<string, Se
       request: JSON.stringify({ roomId: round.roomId, roundId: round.id, request: message?.text, requestFrom: message?.from }) });
   }
   return result;
+}
+/** The room view of a seat Turn's ContextPack: the messages that the seat Bot can see, newest last. */
+export function roomContext(team: Pick<RoomsState, 'rooms' | 'rounds' | 'seats'>, turn: { id: string }, turnLimit = ROOM_CONTEXT_MESSAGES) {
+  const seat = team.seats[turn.id];
+  if (!seat) throw new Error('Room seat not found');
+  const round = team.rounds[seat.roundId]!, room = team.rooms[round.roomId]!;
+  const visible = room.messages.slice(room.visibleFrom?.[seat.botId] ?? room.messages.length);
+  const messages = visible.slice(-turnLimit);
+  return { historyWindow: historyWindow('messages', visible.length - messages.length, turnLimit),
+    room: { id: room.id, name: room.name, members: room.members, announcement: room.announcement,
+      visibility: 'after_join' as const, messages },
+    round: { id: round.id, limit: round.limit, counts: round.counts }, seat: { id: seat.id, deadline: seat.deadline } };
 }

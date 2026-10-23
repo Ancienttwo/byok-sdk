@@ -354,7 +354,9 @@ jobs:
             'exit /b %ERRORLEVEL%'
           ) | Set-Content -Encoding ascii (Join-Path $work 'run.cmd')
           $credential = [pscredential]::new($user, (ConvertTo-SecureString $password -AsPlainText -Force))
-          $process = Start-Process -FilePath (Join-Path $work 'run.cmd') -Credential $credential -WorkingDirectory $work -Wait -PassThru
+          # -LoadUserProfile gives the account a real profile, so the W2 home
+          # chain probe also walks a user-owned LOCALAPPDATA chain.
+          $process = Start-Process -FilePath (Join-Path $work 'run.cmd') -Credential $credential -WorkingDirectory $work -LoadUserProfile -Wait -PassThru
           Get-Content (Join-Path $work 'token.txt')
           Get-Content (Join-Path $work 'go.txt')
           $token = Get-Content -Raw (Join-Path $work 'token.txt')
@@ -477,6 +479,10 @@ jobs:
         run: |
           node packages/client/scripts/agent-memory-runtime-smoke.mjs
           bun packages/client/scripts/agent-memory-runtime-smoke.mjs
+
+      # Node runs the same flow in agent-memory-intent.test.ts (W4).
+      - name: Run the intent processor over the real helper under Bun
+        run: bun packages/client/scripts/agent-memory-intent-helper-smoke.mjs
 
       # npm-release-pack verifies the Windows pack.
       - name: Verify the installed release artifacts and re-signing policy

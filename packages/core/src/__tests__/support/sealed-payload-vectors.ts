@@ -8,7 +8,7 @@
  * probe run the same checks. A mismatch throws; the returned counts let each
  * caller prove that no section was skipped.
  */
-import { canonicalizeJson, type JsonObject } from '../../attestation';
+import type { JsonObject } from '../../attestation';
 import {
   deriveMemberId,
   memberChainEntryHash,
@@ -42,6 +42,7 @@ import {
   type SealedContentOpenFailure,
   type SealedScopePolicy,
 } from '../../sealed-payload/sealed-content';
+import { canonicalizeSealedJson } from '../../sealed-payload/sealed-json';
 import { decodeBase64Url, encodeBase64Url } from '../../sealed-provider-secret';
 import type { WebCryptoKey } from '../../webcrypto';
 
@@ -141,8 +142,20 @@ export interface KeyPackageVector {
   readonly expect: 'ok' | Extract<ScopeKeyPackageOpenResult, { ok: false }>['reason'];
 }
 
+/**
+ * One RFC 8785 Appendix B sample (#786): the IEEE 754 bits of a double and its
+ * canonical text, or `null` when the value has no JSON form.
+ */
+export interface NumberVector {
+  readonly ieee: string;
+  readonly json: string | null;
+}
+
 export interface SealedPayloadVectors {
   readonly note: string;
+  readonly numbers: readonly NumberVector[];
+  /** Number texts that JSON parses but that are not canonical. A receiver refuses a plaintext that holds one. */
+  readonly nonCanonicalNumbers: readonly string[];
   readonly padding: readonly { readonly frameLength: number; readonly paddedLength: number }[];
   readonly frames: readonly { readonly content: string; readonly frame: string }[];
   readonly scopeKey: {
@@ -161,6 +174,8 @@ export interface SealedPayloadVectors {
 }
 
 export interface VectorCheckCounts {
+  readonly numbers: number;
+  readonly nonCanonicalNumbers: number;
   readonly padding: number;
   readonly frames: number;
   readonly contentKeys: number;
@@ -206,8 +221,8 @@ export async function importVectorPrivateKey(pair: VectorKeyPair, use: 'sign' | 
 }
 
 function expectEqual(label: string, actual: unknown, expected: unknown): void {
-  const a = typeof actual === 'string' ? actual : canonicalizeJson(actual as JsonObject);
-  const b = typeof expected === 'string' ? expected : canonicalizeJson(expected as JsonObject);
+  const a = typeof actual === 'string' ? actual : canonicalizeSealedJson(actual as JsonObject);
+  const b = typeof expected === 'string' ? expected : canonicalizeSealedJson(expected as JsonObject);
   if (a !== b) throw new Error(`${label}: expected ${b.slice(0, 200)}, got ${a.slice(0, 200)}`);
 }
 
@@ -364,6 +379,29 @@ async function expectOpenFailure(label: string, input: OpenSealedContentInput, e
 // Sections
 // ---------------------------------------------------------------------------
 
+function ieeeDouble(bits: string): number {
+  const view = new DataView(new ArrayBuffer(8));
+  view.setBigUint64(0, BigInt(`0x${bits}`), false);
+  return view.getFloat64(0, false);
+}
+
+function checkNumbers(vectors: SealedPayloadVectors): void {
+  for (const { ieee, json } of vectors.numbers) {
+    const value = ieeeDouble(ieee);
+    let text: string | null;
+    try {
+      text = canonicalizeSealedJson(value);
+    } catch {
+      text = null;
+    }
+    if (text !== json) throw new Error(`number ${ieee}: expected ${String(json)}, got ${String(text)}`);
+    if (json !== null) expectEqual(`number ${ieee} reparsed`, canonicalizeSealedJson(JSON.parse(json) as number), json);
+  }
+  for (const text of vectors.nonCanonicalNumbers) {
+    if (canonicalizeSealedJson(JSON.parse(text) as number) === text) throw new Error(`number text ${text} is canonical`);
+  }
+}
+
 async function checkScopeKey(vectors: SealedPayloadVectors): Promise<Uint8Array> {
   const scopeKey = fromHex(vectors.scopeKey.key);
   expectEqual('keyId', await deriveScopeKeyId(scopeKey), vectors.scopeKey.keyId);
@@ -416,7 +454,7 @@ async function checkSealed(vectors: SealedPayloadVectors, scopeKey: Uint8Array):
     expectEqual(`${label} verified header`, opened.header, vector.header);
 
     const otherMemberId = vectors.members.find((candidate) => candidate.memberId !== vector.sender)!.memberId;
-    const contentLength = new TextEncoder().encode(canonicalizeJson(plaintext)).byteLength;
+    const contentLength = new TextEncoder().encode(canonicalizeSealedJson(plaintext)).byteLength;
     for (const rejection of [
       ...headerRejections(vector.header, vector.binding, otherMemberId),
       ...bindingRejections(vector.category, vector.binding),
@@ -523,6 +561,7 @@ async function checkKeyPackages(vectors: SealedPayloadVectors, scopeKey: Uint8Ar
 
 /** Run every vector check. Throws on the first mismatch. */
 export async function checkSealedPayloadVectors(vectors: SealedPayloadVectors): Promise<VectorCheckCounts> {
+  checkNumbers(vectors);
   for (const { frameLength, paddedLength } of vectors.padding) {
     expectEqual(`padded length of ${frameLength}`, String(sealedPaddedLength(frameLength)), String(paddedLength));
   }
@@ -542,6 +581,8 @@ export async function checkSealedPayloadVectors(vectors: SealedPayloadVectors): 
   await checkChainFailures(vectors);
   await checkKeyPackages(vectors, scopeKey);
   return {
+    numbers: vectors.numbers.length,
+    nonCanonicalNumbers: vectors.nonCanonicalNumbers.length,
     padding: vectors.padding.length,
     frames: vectors.frames.length,
     contentKeys: vectors.scopeKey.contentKeys.length,

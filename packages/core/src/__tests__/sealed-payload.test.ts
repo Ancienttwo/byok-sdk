@@ -14,13 +14,14 @@ import {
   type UnsignedMemberChainEntryV1,
 } from '../sealed-payload/member-chain';
 import type { P256PublicJwk } from '../sealed-payload/primitives';
-import { generateScopeKey, openScopeKeyPackage, sealScopeKeyPackage } from '../sealed-payload/scope-key';
+import { deriveSealedContentKey, generateScopeKey, openScopeKeyPackage, sealScopeKeyPackage } from '../sealed-payload/scope-key';
 import {
   decodeSealedFrame,
   encodeSealedFrame,
   openSealedContent,
   sealContent,
   sealContentWithRandomness,
+  sealedContentAad,
   sealedPaddedLength,
   type SealContentInput,
   type SealedBinding,
@@ -127,10 +128,38 @@ describe('sealContent', () => {
     }
   });
 
+  it('seals and opens any finite number by the RFC 8785 number rule (#786)', async () => {
+    const plaintext = { ratio: 0.1, cost: -1.5e-7, large: 2 ** 53, huge: 1e21, tiny: 5e-324, zero: -0, parts: [1.25, 3] };
+    const sealed = await sealContent(sealInput({ plaintext }));
+    const opened = await openSealedContent({ ...sealed, scopeKey: sealInput().scopeKey, binding: BINDING, sealing: SEALING, maxContentLength: 1024 });
+    expect(opened).toEqual({ ok: true, plaintext: { ...plaintext, zero: 0 }, header: sealed.header });
+    expect(opened.ok && Object.is(opened.plaintext['zero'], 0)).toBe(true);
+  });
+
+  it('refuses a frame whose number text is not the canonical form', async () => {
+    const salt = new Uint8Array(32).fill(5);
+    const nonce = new Uint8Array(12).fill(6);
+    const { header } = await sealContentWithRandomness(sealInput({ plaintext: { n: 1 } }), { salt, nonce });
+    const contentKey = await crypto.subtle.importKey('raw', await deriveSealedContentKey(sealInput().scopeKey, salt), 'AES-GCM', false, ['encrypt']);
+    const openText = async (text: string) => {
+      const frame = encodeSealedFrame(new TextEncoder().encode(text));
+      const params = { name: 'AES-GCM', iv: nonce, additionalData: new Uint8Array(sealedContentAad(header, BINDING)) };
+      const ciphertext = new Uint8Array(await crypto.subtle.encrypt(params, contentKey, frame));
+      return openSealedContent({ header, ciphertext, scopeKey: sealInput().scopeKey, binding: BINDING, sealing: SEALING, maxContentLength: 1024 });
+    };
+    expect(await openText('{"n":1}')).toEqual({ ok: true, plaintext: { n: 1 }, header });
+    for (const text of ['{"n":1.0}', '{"n":1e0}', '{"n":1E0}', '{"n":-0}', '{"n":10e-1}', '{"n":1.000000000000000000001}']) {
+      expect(await openText(text)).toEqual({ ok: false, reason: 'sealed_open_failed' });
+    }
+  });
+
   it('rejects caller input that has no v1 meaning', async () => {
     await expectInvalid(sealContent(sealInput({ category: 'agent-message' })));
     await expectInvalid(sealContent(sealInput({ plaintext: {} })));
-    await expectInvalid(sealContent(sealInput({ plaintext: { value: 1.5 } })));
+    await expectInvalid(sealContent(sealInput({ plaintext: { value: Number.NaN } })));
+    await expectInvalid(sealContent(sealInput({ plaintext: { value: Number.POSITIVE_INFINITY } })));
+    await expectInvalid(sealContent(sealInput({ plaintext: { value: [1, Number.NEGATIVE_INFINITY] } })));
+    await expectInvalid(sealContent(sealInput({ plaintext: { value: [1, , 3] as never } })));
     await expectInvalid(sealContent(sealInput({ plaintext: new Map() as never })));
     await expectInvalid(sealContent(sealInput({ maxContentLength: 4 })));
     await expectInvalid(sealContent(sealInput({ maxContentLength: -1 })));

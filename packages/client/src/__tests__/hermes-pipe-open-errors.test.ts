@@ -11,9 +11,19 @@ const kernel = vi.hoisted(() => ({ lastError: 0, opens: 0 }));
 vi.mock('koffi', () => ({
   default: {
     load: () => ({
-      func: (_convention: string, name: string) => (): number => {
+      func: (_convention: string, name: string) => (...args: unknown[]): number => {
         if (name === 'CreateFileW') { kernel.opens += 1; return -1; }
         if (name === 'GetLastError') return kernel.lastError;
+        // The pipe name comes first. As the real call: with no output size it returns the size it
+        // needs; else it writes the lower case. toLowerCase is enough for the ASCII temp homes here.
+        if (name === 'LCMapStringEx') {
+          const [, , source, units, target, size] = args as [string, number, Buffer, number, Buffer | null, number];
+          const lower = Buffer.from(source.toString('utf16le', 0, units * 2).toLowerCase(), 'utf16le');
+          if (size === 0) return lower.length / 2;
+          if (target === null || size < lower.length / 2) return 0;
+          lower.copy(target);
+          return lower.length / 2;
+        }
         throw new Error(`unexpected kernel32 call ${name}`);
       },
     }),
