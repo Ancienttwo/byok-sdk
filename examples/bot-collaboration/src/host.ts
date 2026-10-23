@@ -526,9 +526,11 @@ export class BotCollaboration {
       if (intent && bot?.archived && !s.executions[intent.taskId]?.started && !intent.conclusion) intent.cancelReason = 'cancelled';
       if (!intent) {
         // #816: K4 compacted the intent before this sync saw its result. #798: retention archived this Turn id.
-        // Either identity can never run again. K8 does not know a K4 conclusion, so the Turn fails, and every reader of
-        // `turn.conclusion` can settle.
-        const retired = this.ledger.hasTombstone('intent', turn.id, this.now()) ? 'result_retired' : rows.isRetired('turn', turn.id) ? 'turn_retired' : undefined;
+        // Either identity can never run again. A routine Turn's tombstone expires with its slot, but K4 removed its occurrence
+        // with the intent, and a routine Turn is written with its occurrence. So a routine Turn without its occurrence is retired too.
+        // K8 does not know a K4 conclusion, so the Turn fails, and every reader of `turn.conclusion` can settle.
+        const retired = this.ledger.hasTombstone('intent', turn.id, this.now()) || turn.source === 'routine' && !s.occurrences[routineOccurrence(turn)]
+          ? 'result_retired' : rows.isRetired('turn', turn.id) ? 'turn_retired' : undefined;
         if (retired) {
           turn.status = 'failed'; turn.conclusion = 'failed';
           state.audit.push(`Turn ${retired === 'result_retired' ? 'result retired before sync' : 'identity retired'}: ${turn.id}`);
