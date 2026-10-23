@@ -1142,8 +1142,10 @@ write. The receiver checks that the SHA-256 of the bytes it fetches by
 `blobId` equals `contentHash`, before it opens them. The task then holds an
 object reference to the object (kind `sealed-task`, id the task id), so
 orphan GC keeps the ciphertext while the task lives. `redactTasks` releases
-the reference and deletes the object with the rest of the task content.
-Tenant erasure also releases it.
+the reference. It deletes the object when a stored row of the task still
+names it. Retention can prune the mailbox row of a delivered steer. Then no
+row names its object, and orphan GC deletes the object later. Tenant erasure
+also releases the reference.
 
 **Host comparison of a sealed retry.** The Host compares two sealed
 submissions of one identity by their comparison projection: the plaintext
