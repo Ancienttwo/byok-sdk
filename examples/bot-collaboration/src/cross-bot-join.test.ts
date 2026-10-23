@@ -13,8 +13,8 @@ const UNCERTAIN_AFTER_MS = 30 * 60_000;
 function watchBudget(root: string) {
   const transaction = fixture.ledger.transaction.bind(fixture.ledger);
   const committed: number[] = [];
-  vi.spyOn(fixture.ledger, 'transaction').mockImplementation(apply => transaction(s => {
-    const value = apply(s);
+  vi.spyOn(fixture.ledger, 'transaction').mockImplementation(apply => transaction((s, rows) => {
+    const value = apply(s, rows);
     const budget = stateOf(s.application).budgets[root];
     if (budget) committed.push(budget.delegation + (budget.reserved ?? 0));
     return value;

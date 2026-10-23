@@ -28,7 +28,8 @@ The crash test sends SIGKILL to a child Host during wake delivery.
 | --- | --- |
 | `src/core.ts` | FIFO dispatch, exact recovery, cancellation, retry, outcome application, occurrence hooks and outbox scans. |
 | `src/ledger.ts` | A separate Host SQLite ledger with synchronous transactions. |
-| `src/model.ts`, `src/transitions.ts` | Durable records, stable identities and atomic state changes. |
+| `src/model.ts`, `src/transitions.ts` | Durable records, stable identities, atomic state changes, and the FIFO head and queued expiry rules. |
+| `src/submit.ts` | The frozen-offer submit protocol: readback first, the frozen offer check and the stop hook. Shared with the hosted lane. |
 | `src/routines.ts` | Occurrence deduplication, next-slot commit, coalescing, lifecycle, version switches and Host occurrence transitions. |
 | `src/schedule.ts` | The default UTC interval calendar and the shared calendar callback type. |
 | `src/index.ts` | The example's copy-and-own entrypoint. This is not a published SDK package. |
@@ -97,6 +98,27 @@ Every transaction reads and rewrites the whole JSON ledger. History cleanup is e
 `HostLedger.compact`, described below; it never runs automatically. Uncompacted settled intents,
 executions with terminal documents, occurrences, slot dedup keys, outcome markers, terminal memory
 intents and calendar audits remain in that JSON body. This is not a large-dataset storage design.
+
+An application can keep settled rows out of the body with the row port of the same transaction:
+
+```ts
+ledger.transaction((state, rows) => {
+  rows.put('turns', turnId, row);
+  rows.retire('turns', turnId);
+  delete (state.application.turns as Record<string, unknown>)[turnId];
+});
+```
+
+The port reads and writes rows by namespace and stable id in the `host_application_row` table.
+`get` returns a copy, `put` replaces a row and `delete` reports whether a row existed.
+`put(namespace, id, value, expiresAt)` marks a row as removable from `expiresAt` on, and
+`expire(namespace, now)` removes those rows of one namespace. Until that call, an expired row still
+answers `get`; a `put` without `expiresAt` makes the row permanent again. `retire`
+records a permanent identity tombstone, and `isRetired` reads it. The port has no way to clear a
+tombstone, and `compact` never removes one. The rows commit or roll back with the body. The port
+reads and writes only this ledger's tenant. It closes when `apply` returns or throws, so a kept
+reference or a write after an `await` throws. The caller never gets the database handle: all SQL,
+the transaction end and the retired-identity tables stay in K4.
 
 Ignored routine wakes are visible in `ledger.snapshot().ignoredWakes`. The optional
 array retains the newest `IGNORED_WAKE_AUDIT_LIMIT` (128) observations in delivery
@@ -374,6 +396,15 @@ an already compacted key is harmless and reports `alreadyCompactedIntents` while
 exists; duplicate keys count once. A routine occurrence key is unknown again after its row expires.
 An empty selection explicitly expires eligible tombstones without selecting additional history.
 
+An application that keeps its own rows by intent key can register one veto when it opens the
+ledger: `new HostLedger(file, tenant, { compactVeto })`. `compact` calls it in its own transaction,
+before it removes anything, once for each selected intent key that still has an intent and once for
+the derived `occurrence:` key of each selected occurrence. A veto returns a reason to refuse that
+key, or `undefined` to allow it. A refusal throws the exported `CompactVetoError` with stable
+`code: 'compact_vetoed'` and the refused `intentKey`, and the whole batch rolls back. A veto must
+not change the state; a change also rolls the batch back. The veto guards each compaction through
+that `HostLedger` instance. Another instance opened without it does not run it.
+
 One SQLite transaction deletes the selected intent's execution generations, terminal documents,
 settled occurrence, slot and application markers, and writes replacement tombstones. No outbox row,
 business `application` value, routine or calendar audit is deleted. Memory rows are deleted only
@@ -415,7 +446,7 @@ projections, routines and audits can still grow independently; compact does not 
 disk-size bound or run VACUUM.
 
 Opening an existing version-1 ledger adds the tables without changing its JSON format. Back up and
-restore the **whole SQLite database atomically**, including the identity and retired memory tables
+restore the **whole SQLite database atomically**, including the identity, retired memory and application row tables
 (and SQLite's WAL state through a supported backup mechanism). Restoring JSON alone or running an
 older copy of the core loses the retirement guard. Do not downgrade to an earlier version after using
 this API: an older writer ignores the new tables and can reuse retired identities, routine keys and

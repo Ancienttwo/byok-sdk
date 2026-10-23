@@ -187,8 +187,8 @@ it('keeps spent + reserved <= 12 inside every ledger transaction of a delegation
   const transaction = fixture.ledger.transaction.bind(fixture.ledger);
   let checked = 0;
   const violations: unknown[] = [];
-  vi.spyOn(fixture.ledger, 'transaction').mockImplementation(apply => transaction(s => {
-    const value = apply(s);
+  vi.spyOn(fixture.ledger, 'transaction').mockImplementation(apply => transaction((s, rows) => {
+    const value = apply(s, rows);
     for (const budget of Object.values(stateOf(s.application).budgets)) {
       if (budget.delegation + (budget.reserved ?? 0) > ROOT_BOT_BUDGET) violations.push(structuredClone(budget));
     }

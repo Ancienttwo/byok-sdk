@@ -11,6 +11,7 @@ import { policy, template } from '@byok-sdk/example-host-execution-core/test-sup
 import { BotCollaboration, type AgentMessageInput, type BotOptions } from './host';
 import { createBotPersonaProjection } from './persona';
 import { enrollSecondDevice } from './second-device.test-support';
+import { botCompactVeto } from './compaction';
 
 /**
  * Real embedded server, HTTP, daemon, persona writes, and submit_result helper.
@@ -26,7 +27,7 @@ export async function openTeam(options: { now?: () => number; holdProjection?: (
   holdMessage?: (input: AgentMessageInput, stage: 'before' | 'after') => Promise<void>; bot?: Pick<BotOptions, 'team' | 'history'> } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'k8b-'));
   const productId = 'k8b-test';
-  let ledger = new HostLedger(join(root, 'host.sqlite'), `product:${productId}`);
+  let ledger = new HostLedger(join(root, 'host.sqlite'), `product:${productId}`, { compactVeto: botCompactVeto });
   let host!: BotCollaboration;
   const received: AgentMessageInput[] = [];
   const server = createByokServer({ productId, storage: { kind: 'sqlite', path: join(root, 'server.sqlite') },
@@ -80,7 +81,7 @@ export async function openTeam(options: { now?: () => number; holdProjection?: (
     async online() { http = await listen(address.port); await waitForReady(daemon); },
     async reopen() {
       await host.close(); ledger.close();
-      ledger = new HostLedger(join(root, 'host.sqlite'), `product:${productId}`);
+      ledger = new HostLedger(join(root, 'host.sqlite'), `product:${productId}`, { compactVeto: botCompactVeto });
       host = new BotCollaboration(port, ledger, botOptions); await host.recover();
     },
     async close() {

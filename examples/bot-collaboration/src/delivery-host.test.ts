@@ -12,6 +12,7 @@ import { inboundKey, type ChannelPort, type InboundMessage } from './channel';
 import { channelContract } from './channel-contract';
 import { stateOf } from './model';
 import { routineOf, seedRoutine } from './routines.test-support';
+import { botCompactVeto } from './compaction';
 
 class DraftAdapter extends BotStubAdapter {
   override readonly descriptor = freezeRuntimeAdapterDescriptor({ ...new BotStubAdapter().descriptor,
@@ -50,7 +51,7 @@ async function openDeliveryHost(port: ChannelPort, rest: Partial<BotOptions> = {
   const received: AgentMessageInput[] = [];
   let now = Date.now();
   const adapter = new DraftAdapter();
-  const fixture: TestHost = await openHost({ externalCore: true, adapter, consume: (wake, signal) => bot.consume(wake, signal),
+  const fixture: TestHost = await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, adapter, consume: (wake, signal) => bot.consume(wake, signal),
     agentMessage: { consume: async input => { received.push(input); return bot.consumeMessage(input); } } });
   const base = template(fixture.deviceId);
   const options: BotOptions = { botId: 'main', execution: { ...base,
@@ -109,7 +110,7 @@ async function openDeliveryHost(port: ChannelPort, rest: Partial<BotOptions> = {
     async reopen(path = join(fixture.root, 'host.sqlite')) {
       await bot.close();
       reopened?.close();
-      reopened = new HostLedger(path, fixture.ledger.tenant);
+      reopened = new HostLedger(path, fixture.ledger.tenant, { compactVeto: botCompactVeto });
       bot = new BotCollaboration(fixture.server, reopened, options);
       await bot.recover();
     },

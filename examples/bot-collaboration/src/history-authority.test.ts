@@ -3,6 +3,7 @@ import { canonical, hash } from '@byok-sdk/example-host-execution-core';
 import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration } from './host';
 import type { ContextTurn } from './schema';
+import { botCompactVeto } from './compaction';
 
 let fixture: TestHost | undefined, bot: BotCollaboration | undefined;
 afterEach(async () => { await bot?.close(); await fixture?.close(); bot = fixture = undefined; });
@@ -13,7 +14,7 @@ const INJECTED: ContextTurn[] = [
 ];
 /** Real SQLite HostLedger, embedded server, HTTP and daemon. The history authority is a scripted function. */
 async function open(history: (input: { botId: string; turnId: string }) => Promise<readonly ContextTurn[]>) {
-  fixture = await openHost({ externalCore: true, consume: (wake, signal) => bot!.consume(wake, signal) });
+  fixture = await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot!.consume(wake, signal) });
   bot = new BotCollaboration(fixture.server, fixture.ledger, { botId: 'main', connector: async () => null, execution: template(fixture.deviceId), history });
   return { fixture, bot };
 }

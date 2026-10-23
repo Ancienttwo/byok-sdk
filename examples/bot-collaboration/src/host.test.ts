@@ -7,13 +7,14 @@ import { contextPack } from './schema';
 import { stateOf } from './model';
 import { botRoutines } from './routines';
 import { deliverRoutine, routineOf, seedRoutine } from './routines.test-support';
+import { botCompactVeto } from './compaction';
 
 let fixture: TestHost;
 let bot: BotCollaboration;
 let extra: HostLedger | undefined;
 afterEach(async () => { await bot?.close(); extra?.close(); extra = undefined; await fixture?.close(); vi.useRealTimers(); vi.restoreAllMocks(); });
 async function setup(rest: Partial<BotOptions> = {}, wrap?: (server: ExecutionServer) => ExecutionServer) {
-  fixture = await openHost({ externalCore: true,
+  fixture = await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto },
     consume: (wake, signal) => bot.consume(wake, signal),
     agentMessage: { consume: async () => ({ outcome: 'accepted' }) },
   });
@@ -57,7 +58,7 @@ it('runs submit_result -> self delegation -> confirmation -> connector -> action
   await finish(result.id);
   await bot.decide(card.id, 'confirmed');
   await bot.close();
-  extra = new HostLedger(`${fixture.root}/host.sqlite`, fixture.ledger.tenant);
+  extra = new HostLedger(`${fixture.root}/host.sqlite`, fixture.ledger.tenant, { compactVeto: botCompactVeto });
   bot = new BotCollaboration(fixture.server, extra, options);
   await bot.recover();
   expect(connector).toHaveBeenCalledTimes(1);
@@ -207,7 +208,7 @@ it('replays a committed confirmation with the same connector key after restart',
   // Crash boundary: confirmation committed, connector result not committed.
   fixture.ledger.transaction(s => { stateOf(s.application).cards[card.id]!.state = 'confirmed'; });
   options.connector = async id => { keys.push(id); return { externalId: id }; };
-  extra = new HostLedger(`${fixture.root}/host.sqlite`, fixture.ledger.tenant);
+  extra = new HostLedger(`${fixture.root}/host.sqlite`, fixture.ledger.tenant, { compactVeto: botCompactVeto });
   bot = new BotCollaboration(fixture.server, extra, options);
   await bot.recover();
   const result = Object.values(bot.snapshot().turns).find(t => t.source === 'action_result')!;
@@ -320,8 +321,8 @@ it('replays the same connector key after an external effect and a failed SQLite 
   await finish(root, { confirmable_action: [{ action: 'send_message', summary: 'Send', draft: { text: 'hello' } }] });
   const card = Object.values(bot.snapshot().cards)[0]!;
   const transaction = fixture.ledger.transaction.bind(fixture.ledger);
-  const fault = vi.spyOn(fixture.ledger, 'transaction').mockImplementation(apply => transaction(state => {
-    const value = apply(state);
+  const fault = vi.spyOn(fixture.ledger, 'transaction').mockImplementation(apply => transaction((state, rows) => {
+    const value = apply(state, rows);
     if (stateOf(state.application).cards[card.id]?.result !== undefined) throw new Error('result commit lost');
     return value;
   }));
@@ -331,7 +332,7 @@ it('replays the same connector key after an external effect and a failed SQLite 
   expect(bot.snapshot().cards[card.id]).toMatchObject({ state: 'confirmed' });
   expect(bot.snapshot().cards[card.id]!.result).toBeUndefined();
   await bot.close();
-  extra = new HostLedger(`${fixture.root}/host.sqlite`, fixture.ledger.tenant);
+  extra = new HostLedger(`${fixture.root}/host.sqlite`, fixture.ledger.tenant, { compactVeto: botCompactVeto });
   bot = new BotCollaboration(fixture.server, extra, options);
   await bot.recover();
   expect(calls).toEqual([card.id, card.id]);
@@ -383,7 +384,7 @@ it('recovers one self continuation from a durable pre-submit failure with the sa
   expect(fixture.ledger.snapshot().applied[bot.core.intent(root)!.taskId]).toBe(true);
   await vi.waitFor(() => expect(fixture.daemon.status().activeTaskCount).toBe(0), { timeout: 5000 });
   await bot.close();
-  extra = new HostLedger(`${fixture.root}/host.sqlite`, fixture.ledger.tenant);
+  extra = new HostLedger(`${fixture.root}/host.sqlite`, fixture.ledger.tenant, { compactVeto: botCompactVeto });
   bot = new BotCollaboration(fixture.server, extra, options);
   await bot.recover();
   await running(child.id);
