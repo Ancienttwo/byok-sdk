@@ -62,17 +62,18 @@ describe.skipIf(POSTGRES_URL === undefined)('H store on real Postgres (#793 D2a)
   it('refuses a scope row of an unknown store version under the lock, and writes nothing', async () => {
     const h = await hosted();
     await h.commit({ scope: h.scope, commandId: 'i1', command: input('k1') });
-    await opened!.pool.query(`UPDATE "${store().schema}".scope SET state_version = 3 WHERE scope = $1`, [h.scope]);
+    await opened!.pool.query(`UPDATE "${store().schema}".scope SET state_version = 3 WHERE scope = $1`, [JSON.stringify(h.scope)]);
     const before = await h.stored();
     await expect(h.commit({ scope: h.scope, commandId: 'i2', command: input('k2') })).rejects.toBeInstanceOf(HostedStoreVersionError);
     await expect(h.commit({ scope: h.scope, commandId: 'i1', command: input('k1') })).rejects.toThrow('Unsupported hosted collaboration store version 3');
+    await expect(h.state()).rejects.toBeInstanceOf(HostedStoreVersionError);
     expect(await h.stored()).toBe(before);
   });
 
   it('refuses a projection that another value already holds, and leaves every row unchanged', async () => {
     const h = await hosted(), card = hash(['task-1', 'confirmable_action', 0]);
     await opened!.pool.query(`INSERT INTO "${store().schema}".outbox (scope, key, ordinal, kind, body) VALUES ($1, $2, 0, 'projection', '{"other":true}')`,
-      [h.scope, JSON.stringify(`card:${card}`)]);
+      [JSON.stringify(h.scope), JSON.stringify(`card:${card}`)]);
     const before = await h.stored();
     await expect(h.commit({ scope: h.scope, commandId: 'task-1', command: outcome })).rejects.toThrow('Projection identity conflict');
     expect(await h.stored()).toBe(before);
@@ -82,7 +83,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H store on real Postgres (#793 D2a)
   it('stores the outbox row of a projection once, and a replay writes nothing', async () => {
     const h = await hosted(), card = hash(['task-1', 'confirmable_action', 0]);
     const first = await h.commit({ scope: h.scope, commandId: 'task-1', command: outcome });
-    const rows = await opened!.pool.query(`SELECT key, ordinal::text, kind, body::text FROM "${store().schema}".outbox WHERE scope = $1`, [h.scope]);
+    const rows = await opened!.pool.query(`SELECT key, ordinal::text, kind, body::text FROM "${store().schema}".outbox WHERE scope = $1`, [JSON.stringify(h.scope)]);
     expect(rows.rows).toEqual([{ key: JSON.stringify(`card:${card}`), ordinal: '0', kind: 'projection', body: expect.stringContaining('"hello"') }]);
     const stored = await h.stored();
     expect(await h.commit({ scope: h.scope, commandId: 'task-1', command: outcome })).toEqual(first);
@@ -94,6 +95,24 @@ describe.skipIf(POSTGRES_URL === undefined)('H store on real Postgres (#793 D2a)
     await h.commit({ scope: h.scope, commandId: '\ud800', command: input('k1') });
     await h.commit({ scope: h.scope, commandId: '\udc00', command: input('k2') });
     expect(Object.keys((await h.state()).commands ?? {})).toEqual(['\ud800', '\udc00']);
+  });
+
+  it('keeps two scopes that UTF-8 would merge apart, and accepts a NUL in a scope (#793 O4)', async () => {
+    const scopes = ['t:\ud800', 't:\udc00', 't:\u0000x'];
+    for (const [index, scope] of scopes.entries()) await store().seed(scope, state => { state.audit.push(`scope ${index}`); });
+    for (const [index, scope] of scopes.entries()) expect((await store().read(scope)).audit).toEqual([`scope ${index}`]);
+    const rows = await opened!.pool.query(`SELECT scope FROM "${store().schema}".scope WHERE scope = ANY($1)`, [scopes.map(scope => JSON.stringify(scope))]);
+    expect(rows.rows.map(row => row.scope).sort()).toEqual(scopes.map(scope => JSON.stringify(scope)).sort());
+  });
+
+  it('writes an entity whose only change is its key order', async () => {
+    const h = await hosted();
+    await store().seed(h.scope, state => {
+      const turn = state.turns.t1!;
+      state.turns.t1 = Object.fromEntries(Object.entries(turn).reverse()) as typeof turn;
+    });
+    const keys = Object.keys((await h.state()).turns.t1!);
+    expect(keys).toEqual(Object.keys((await memorySubject().state()).turns.t1!).reverse());
   });
 
   it('runs two first writes of a new scope one at a time, with no unique violation', async () => {

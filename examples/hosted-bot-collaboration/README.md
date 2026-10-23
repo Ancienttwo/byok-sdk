@@ -17,7 +17,7 @@ transaction. The transaction holds the state change, the command record and the 
 - H has no K4 ledger, so the store also records the terminal and message callbacks.
 - The caller passes the scope that the authenticated product user owns. A request for another scope is
   a `scope_mismatch` conflict.
-- A scope row of an unknown store version is refused before any write.
+- A scope row of an unknown store version is refused before any write. `read()` refuses it too.
 
 ## Tables
 
@@ -32,11 +32,20 @@ schema. The SDK tables stay under the SDK migrations. This example never writes 
 | `command` | command record: the dedup evidence and the first result |
 | `outbox` | projection or delivery that a commit wrote |
 
-Each key is `JSON.stringify(id)`. Each body is `json` text, so the stored bytes keep their key order.
-`ordinal` keeps the insertion order of each kind.
+Each scope and each key is stored as `JSON.stringify(value)`, so two values that UTF-8 would merge stay
+apart, and a NUL is safe. Each body is `json` text, so the stored bytes keep their key order. `ordinal`
+keeps the insertion order of each kind.
 
-Known limit: a commit loads every row of its scope, but only the one command record that it can replay.
-Retention, after #798, bounds the scope rows.
+## Accepted limits
+
+- A commit loads every row of its scope, except the command records: it loads only the one record that
+  it can replay. Retention, after #798, bounds the scope rows.
+- When a list gets shorter, the positions of its later elements are renumbered. No K8 list gets shorter
+  today. Retention needs a base offset, so that positions never change.
+- The `kind` CHECK lists come from the layout at the first `migrate()`. `CREATE TABLE IF NOT EXISTS`
+  keeps the old CHECK, so a new kind needs an explicit `ALTER` in a later migration.
+- One commit must not delete a map key and add it back. The store keeps the old ordinal, but a JavaScript
+  object moves the key to the end. K8 never deletes a map entry today.
 
 ## Database
 
