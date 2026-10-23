@@ -268,7 +268,8 @@ export type EventsPollResponse = z.infer<typeof EventsPollResponseSchema>;
  */
 export const MAX_MESSAGES_PER_BATCH = 256;
 
-export const MessagesSendRequestSchema = z.object({
+/** Annotated so declaration emit names `EnvelopeSchema` instead of copying it. Type-only. */
+export const MessagesSendRequestSchema: z.ZodObject<{ messages: z.ZodArray<typeof EnvelopeSchema> }, z.core.$strip> = z.object({
   messages: z.array(EnvelopeSchema).max(MAX_MESSAGES_PER_BATCH),
 });
 export type MessagesSendRequest = z.infer<typeof MessagesSendRequestSchema>;
