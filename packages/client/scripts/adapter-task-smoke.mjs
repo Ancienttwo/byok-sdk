@@ -102,22 +102,18 @@ async function waitFor(predicate, label, ms = timeoutMs) {
 }
 
 // #763: npm installs claude and codex as shims only (on Windows: a .cmd, a
-// .ps1 and an extensionless sh script; no .exe). Install one fixture package
-// with the real npm so the shims are npm's own bytes. No vendor package and no
-// model call: the entry prints a version and exits 0 for any other argument.
+// .ps1 and an extensionless sh script; no .exe). Install fixture packages with
+// the real npm so the shims are npm's own bytes. No vendor package and no
+// model call.
 const npmShimVersion = 'byok-npm-shim-fixture 1.0.0';
 
-async function installNpmShimFixture(workDir) {
-  const packageDir = path.join(workDir, 'npm-shim-fixture');
-  const prefix = path.join(workDir, 'npm-prefix');
+/** Installs one package of `files`, with `bin`, and returns the directory of its shims. */
+async function installNpmPackage(workDir, name, files, bin) {
+  const packageDir = path.join(workDir, name);
+  const prefix = path.join(workDir, `${name}-prefix`);
   await fs.mkdir(packageDir, { recursive: true });
-  await fs.writeFile(path.join(packageDir, 'package.json'), JSON.stringify({
-    name: 'byok-npm-shim-fixture',
-    version: '1.0.0',
-    bin: { claude: 'cli.js', codex: 'cli.js' },
-  }));
-  await fs.writeFile(path.join(packageDir, 'cli.js'),
-    `#!/usr/bin/env node\nif (process.argv[2] === '--version') console.log(${JSON.stringify(npmShimVersion)});\n`);
+  await fs.writeFile(path.join(packageDir, 'package.json'), JSON.stringify({ name, version: '1.0.0', bin }));
+  for (const [file, body] of Object.entries(files)) await fs.writeFile(path.join(packageDir, file), body);
   // On Windows npm itself is a .cmd shim. Run the npm CLI that ships next to
   // this Node instead; `bun run` points npm_execpath at bun, not npm.
   const npmCli = process.platform === 'win32'
@@ -128,7 +124,7 @@ async function installNpmShimFixture(workDir) {
     npmCli, 'install', '--global', '--install-links', '--prefix', prefix,
     '--cache', path.join(workDir, 'npm-cache'), '--no-audit', '--no-fund', '--no-update-notifier', packageDir,
   ], { encoding: 'utf8' });
-  assert(installed.status === 0, `npm shim fixture install failed: ${installed.error ?? installed.stderr}`);
+  assert(installed.status === 0, `npm ${name} install failed: ${installed.error ?? installed.stderr}`);
   return process.platform === 'win32' ? prefix : path.join(prefix, 'bin');
 }
 
@@ -201,27 +197,19 @@ try {
     fs.mkdir(workspaceRoot, { recursive: true, mode: 0o700 }),
   ]);
 
-  const npmShimBin = await installNpmShimFixture(workDir);
-
-  // Windows execFile probes need a native executable; a spawn-only Node
-  // wrapper cannot cover Codex.prepare's independent detection. Forward to
-  // real Node so import.meta.url and the descendant fixtures remain valid.
-  let codexCommand = path.join(fixtureDir, 'fake-codex.mjs');
-  if (process.platform === 'win32') {
-    const launcherSource = path.join(workDir, 'codex-launcher.mjs');
-    const nodeBin = process.execPath;
-    await fs.writeFile(launcherSource, `
-      import { spawn } from 'node:child_process';
-      const child = spawn(${JSON.stringify(nodeBin)}, [${JSON.stringify(codexCommand)}, ...process.argv.slice(2)], { stdio: 'inherit' });
-      child.once('error', error => { console.error(error); process.exit(1); });
-      child.once('close', code => process.exit(code ?? 1));
-    `);
-    codexCommand = path.join(workDir, 'codex-launcher.exe');
-    const built = spawnSync(process.env.BYOK_TEST_BUN_BIN ?? 'bun',
-      ['build', '--compile', launcherSource, '--outfile', codexCommand],
-      { encoding: 'utf8' });
-    assert(built.status === 0, `native Codex launcher build failed: ${built.error ?? built.stderr}`);
-  }
+  // The detection fixture prints a version and exits 0 for any other argument.
+  const npmShimBin = await installNpmPackage(workDir, 'byok-npm-shim-fixture', {
+    'cli.js': `#!/usr/bin/env node\nif (process.argv[2] === '--version') console.log(${JSON.stringify(npmShimVersion)});\n`,
+  }, { claude: 'cli.js', codex: 'cli.js' });
+  // The task loop runs Claude and Codex through npm shims on every OS. Each bin
+  // entry imports the fake CLI, so detection and launch both use the adapter's
+  // own command resolution, with no spawnFn and no stand-in detect.
+  const runtimeShimBin = await installNpmPackage(workDir, 'byok-npm-runtime-fixture', Object.fromEntries(
+    ['claude', 'codex'].map((runtime) => [`${runtime}.mjs`,
+      `#!/usr/bin/env node\nawait import(${JSON.stringify(pathToFileURL(path.join(fixtureDir, `fake-${runtime}.mjs`)).href)});\n`]),
+  ), { claude: 'claude.mjs', codex: 'codex.mjs' });
+  const runtimeShim = (runtime) => path.join(runtimeShimBin, process.platform === 'win32' ? `${runtime}.cmd` : runtime);
+  console.log(`claude and codex task runs use npm shims: ${runtimeShim('claude')}, ${runtimeShim('codex')}`);
 
   // Do not let a developer's ambient credential/config variables reach a fake
   // runtime. Keep only the platform values needed to execute Node and create
@@ -287,6 +275,7 @@ try {
     process.platform === 'win32'
       ? spawn(process.execPath, [command, ...args], options)
       : spawn(command, args, options);
+  // Pi has no npm shim path here: Windows still cannot execFile its .mjs fixture.
   const lifecycleAdapter = (adapter) =>
     process.platform === 'win32'
       ? {
@@ -297,16 +286,8 @@ try {
       : adapter;
   let piSpawnCount = 0;
   const adapters = [
-    lifecycleAdapter(new client.ClaudeAdapter({
-      resolveBin: () => ({ command: fake('claude'), source: 'path' }),
-      spawnFn: spawnFixture,
-    })),
-    lifecycleAdapter(new client.CodexAdapter({
-      resolveBin: () => ({ command: codexCommand, source: 'path' }),
-      // Native launcher is already executable; do not feed its .exe to Node.
-      spawnFn: (command, args, options) =>
-        process.platform === 'win32' ? spawn(command, args, options) : spawnFixture(command, args, options),
-    })),
+    new client.ClaudeAdapter({ resolveBin: () => ({ command: runtimeShim('claude'), source: 'path' }) }),
+    new client.CodexAdapter({ resolveBin: () => ({ command: runtimeShim('codex'), source: 'path' }) }),
     lifecycleAdapter(new client.PiAdapter({
       resolveBin: () => ({ command: fake('pi'), source: 'path' }),
       spawnFn: (command, args, options) => {
