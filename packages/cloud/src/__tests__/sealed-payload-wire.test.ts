@@ -205,6 +205,16 @@ describe('sealed payload v1: the golden corpus lines are real ciphertext', () =>
         maxContentLength: 2 * 1024 * 1024,
       });
       expect(elsewhere, 'the Host cannot move a sealed member to another task').toEqual({ ok: false, reason: 'sealed_open_failed' });
+
+      const underWireType = await openSealedContent({
+        header: headerOf(member),
+        ciphertext,
+        scopeKey: GOLDEN_SCOPE_KEY,
+        binding: { ...bindingOf(line), family: line.type },
+        sealing: GOLDEN_SCOPE,
+        maxContentLength: 2 * 1024 * 1024,
+      });
+      expect(underWireType, 'the family is the plaintext type, not the sealed wire type').toEqual({ ok: false, reason: 'sealed_open_failed' });
     },
   );
 

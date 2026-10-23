@@ -1081,7 +1081,9 @@ A sealed type is its plaintext type without the moved and dropped fields, plus
 `sealed`. The receiver opens `sealed`, merges the opened object back, and
 validates the result as the plaintext type. The opened object carries only
 moved fields. The identity fields name the write in the AAD and the content
-MAC, after the envelope `task_id`. `steerId` and `artifactId` are new required
+MAC, after the envelope `task_id`. The AAD and the content MAC bind the
+plaintext type (`SEALED_SPLIT_TABLE[type].plainType`, for example
+`task.offer_for_agent`) as the family, not the sealed wire type. `steerId` and `artifactId` are new required
 fields of the sealed types only. Two artifacts of one task can share a `name`,
 so `name` is not the artifact identity. A sealed message carries no plaintext blob
 reference, because blob bytes have no sealing rule yet. `SEALED_SPLIT_TABLE`
