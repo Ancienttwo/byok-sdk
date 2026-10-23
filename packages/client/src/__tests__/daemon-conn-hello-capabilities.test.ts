@@ -4,13 +4,14 @@ import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter } from '../types';
 import { TestServer } from './fixtures/test-server';
+import { fakeHermesCommand } from './fixtures/fake-hermes-command';
 import { AGENT_MEMORY_INTENT_CAPABILITY, createEnvelope } from '@byok-sdk/protocol';
 import { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
 import * as memoryRuntime from '../daemon/agent-memory';
@@ -49,6 +50,23 @@ async function tmpDir(prefix: string): Promise<string> {
 describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilities addition)', () => {
   let server: TestServer;
   let daemon: Daemon | undefined;
+  // Windows spawns no script without a shell: each fixture runs behind a
+  // compiled launcher there (the Hermes fixture launcher; POSIX keeps the script).
+  let piCommand: string;
+  let claudeCommand: string;
+  let codexCommand: string;
+
+  beforeAll(async () => {
+    const launchers = await tmpDir('byok-conn-hello-launchers-');
+    const launcher = async (script: string, name: string) => {
+      const directory = path.join(launchers, name);
+      await fs.mkdir(directory);
+      return fakeHermesCommand(script, directory);
+    };
+    piCommand = await launcher(PI_FIXTURE, 'pi');
+    claudeCommand = await launcher(CLAUDE_FIXTURE, 'claude');
+    codexCommand = await launcher(CODEX_FIXTURE, 'codex');
+  }, 60_000);
 
   beforeEach(async () => {
     server = await TestServer.start();
@@ -60,9 +78,9 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
   });
 
   it('advertises truthful, per-runtime capabilities for all three bundled runtimes', async () => {
-    const pi = new PiAdapter({ resolveBin: () => ({ command: PI_FIXTURE, source: 'env' }) });
-    const claude = new ClaudeAdapter({ resolveBin: () => ({ command: CLAUDE_FIXTURE, source: 'path' }) });
-    const codex = new CodexAdapter({ resolveBin: () => ({ command: CODEX_FIXTURE, source: 'path' }) });
+    const pi = new PiAdapter({ resolveBin: () => ({ command: piCommand, source: 'env' }) });
+    const claude = new ClaudeAdapter({ resolveBin: () => ({ command: claudeCommand, source: 'path' }) });
+    const codex = new CodexAdapter({ resolveBin: () => ({ command: codexCommand, source: 'path' }) });
 
     const workspaceRoot = await tmpDir('byok-conn-hello-workspace-');
     const storeDir = await tmpDir('byok-conn-hello-store-');
