@@ -4228,7 +4228,8 @@ export interface HostedJournalConfig {
     /**
      * Per-record byte bound. Defaults to the journal's own bound; oversized records are refused, never truncated.
      * An inbound envelope record may still reach a floor derived from the inline sealed maximum (415083 bytes),
-     * so a sealed envelope is journaled and declined, not stalled (#654).
+     * so a sealed envelope is journaled and declined, not stalled (#654). The floor covers the inline maximum plus
+     * 64 KiB of plaintext metadata. Larger metadata stalls the cursor, the same way as a large plain offer (#826).
      */
     maxRecordBytes?: number;
 }
@@ -6783,6 +6784,9 @@ export interface SqliteLocalTaskJournalOptions {
      * Per-record byte bound. Default {@link DEFAULT_MAX_RECORD_BYTES}. An inbound
      * envelope record may still reach a floor derived from the inline sealed
      * maximum (415083 bytes), so a sealed envelope can be journaled and declined.
+     * The floor covers the inline maximum plus 64 KiB of plaintext metadata.
+     * Larger metadata stalls the cursor, the same way as a large plain offer
+     * (#826).
      */
     readonly maxRecordBytes?: number;
     /** Test seam — see {@link JournalFaultSeam}. Never supplied in production. */
