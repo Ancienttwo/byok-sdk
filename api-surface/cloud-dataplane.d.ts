@@ -319,8 +319,8 @@ export declare function createByokPool(options: ByokPoolOptions): Pool;
  */
 export { createByokPool } from './pool';
 export type { ByokPoolOptions } from './pool';
-export { PostgresDeviceDirectory, PostgresInboundDedupStore, PostgresNonceStore, PostgresPairingCodeStore, PostgresProofRequestReceiptStore, PostgresRequestReceiptStore, PostgresTaskAttemptStore, PostgresTaskCancellationStore, PostgresActivityStore, PostgresAgentMessageDraftStore, PostgresApprovalTimelineStore, PostgresDeviceAssertionReplayAuthority, PostgresAgentMemoryProjectionStore, createPostgresAgentMemoryProjectionStore, createPostgresCloudStores, POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED, PostgresMailboxProtocolUnsupportedError, } from './stores/index';
-export type { PostgresCloudStoreOptions, PostgresCloudStores, PostgresObjectStorageOptions, PostgresAgentMemoryProjectionStoreOptions, } from './stores/index';
+export { PostgresDeviceDirectory, PostgresInboundDedupStore, PostgresNonceStore, PostgresPairingCodeStore, PostgresProofRequestReceiptStore, PostgresRequestReceiptStore, PostgresTaskAttemptStore, PostgresTaskCancellationStore, PostgresActivityStore, PostgresAgentMessageDraftStore, PostgresApprovalTimelineStore, PostgresDeviceAssertionReplayAuthority, PostgresAgentMemoryProjectionStore, createPostgresAgentMemoryProjectionStore, PostgresTaskRedactionStore, createPostgresTaskRedactionStore, createPostgresCloudStores, POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED, PostgresMailboxProtocolUnsupportedError, } from './stores/index';
+export type { PostgresCloudStoreOptions, PostgresCloudStores, PostgresObjectStorageOptions, PostgresAgentMemoryProjectionStoreOptions, PostgresTaskRedactionStoreOptions, } from './stores/index';
 export { DEFAULT_MAX_ATTEMPTS, DEFAULT_PRESIGN_TTL_SECONDS, DEFAULT_RETRY_DELAY_MS, MAX_PRESIGN_TTL_SECONDS, MIN_PRESIGN_TTL_SECONDS, ObjectStoreRequestError, R2_BLOB_ERROR_CODES, R2BlobStoreError, R2CloudBlobStore, R2ObjectMaintenanceStore, } from './stores/index';
 export type { ObjectStoreFetch, R2BlobErrorCode, R2BlobStoreOptions } from './stores/index';
 export type { R2DeleteResult, R2ListedObject, R2ObjectMaintenance, R2ObjectMaintenanceOptions, R2ObjectPage, } from './stores/index';
@@ -908,6 +908,8 @@ export { PostgresAgentEgressStore } from './agent-egress';
 export { POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED, PostgresMailboxProtocolUnsupportedError, } from './mailbox-protocol';
 export { PostgresAgentMemoryProjectionStore, createPostgresAgentMemoryProjectionStore, } from './agent-memory-projection';
 export type { PostgresAgentMemoryProjectionStoreOptions } from './agent-memory-projection';
+export { PostgresTaskRedactionStore, createPostgresTaskRedactionStore } from './task-redaction';
+export type { PostgresTaskRedactionStoreOptions } from './task-redaction';
 export { PostgresDeviceAssertionReplayAuthority } from './device-assertion-replay';
 export { DEFAULT_MAX_ATTEMPTS, DEFAULT_PRESIGN_TTL_SECONDS, DEFAULT_RETRY_DELAY_MS, MAX_PRESIGN_TTL_SECONDS, MIN_PRESIGN_TTL_SECONDS, ObjectStoreRequestError, R2_BLOB_ERROR_CODES, R2BlobStoreError, R2CloudBlobStore, R2ObjectMaintenanceStore, } from './r2-blobs';
 export type { ObjectStoreFetch, R2BlobErrorCode, R2BlobStoreOptions } from './r2-blobs';
@@ -1461,6 +1463,43 @@ export declare class PostgresTaskCancellationStore implements TaskCancellationSt
     constructor(pool: Pool, clock: Clock);
     request(tenant: TenantId, input: TaskCancellationRequest): Promise<TaskCancellationMutation | undefined>;
 }
+// ==== @byok-sdk/cloud-dataplane dist/stores/task-redaction.d.ts ====
+/**
+ * Postgres authority for `ByokCloud.redactTasks` (#654 E5a).
+ *
+ * One call handles one terminal task in two steps:
+ *
+ * 1. Read the task's bodies without a lock and delete every object they name,
+ *    unless another receipt body or a pending mailbox row of the tenant also
+ *    names it, and only under the orphan-GC guards (no reference, no reserved
+ *    upload).
+ * 2. In one transaction that holds the task row lock (the lock admission and
+ *    cancellation also take), fence an absent terminal receipt, replace each
+ *    body with the cloud tombstone, clear the free-text task columns, delete
+ *    the ephemeral rows and write the audit receipt.
+ *
+ * Objects go first. If the call stops between the steps, the bodies are still
+ * there, so a retry finds the same hashes and an object already gone is
+ * `absent`. Rows stay, so mailbox cursors, the dead-letter floor and every
+ * receipt fence keep their meaning. Only `pg` and `fetch` are used, so the
+ * store runs on Workers through `./runtime`.
+ */
+import type { Clock } from '@byok-sdk/core';
+import type { TaskRedactionStore, TaskRedactionStoreInput, TaskRedactionTaskResult } from '@byok-sdk/cloud';
+import type { Pool } from 'pg';
+import type { PostgresObjectStorageOptions } from './index';
+export interface PostgresTaskRedactionStoreOptions {
+    readonly pool: Pool;
+    readonly clock: Clock;
+    /** The bucket the blob composition writes to. */
+    readonly objectStorage: PostgresObjectStorageOptions;
+}
+export declare class PostgresTaskRedactionStore implements TaskRedactionStore {
+    #private;
+    constructor(options: PostgresTaskRedactionStoreOptions);
+    redactTask(input: TaskRedactionStoreInput): Promise<TaskRedactionTaskResult>;
+}
+export declare function createPostgresTaskRedactionStore(options: PostgresTaskRedactionStoreOptions): TaskRedactionStore;
 // ==== @byok-sdk/cloud-dataplane dist/tenant-erasure.d.ts ====
 import { type Clock, type TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';

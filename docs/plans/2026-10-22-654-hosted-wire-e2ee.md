@@ -605,6 +605,10 @@ identity receipt 是防重放的 fence，同时保存了正文，而且永不过
 - 运行环境：必须能在 `cloud-dataplane/runtime` 上运行。它按批次执行，可以续跑，每个请求管理自己的连接池。它不能像 tenant erasure 那样只支持 Node。
 - 先例：`AgentMemoryProjectionStore.erase` 已经删除正文并保留 epoch fence（`packages/cloud-dataplane/src/stores/agent-memory-projection.ts:237-238`）。新操作沿用这个模式。
 - 不覆盖：备份、副本和已经写出的日志。它们要等各自的保留期结束。
+- E5a 实现与本节的偏差（PR #782，待维护者确认）：
+  - outbox：E5a 直接把 `acked` 和 `expired` 行的正文换成 tombstone，行保留。原因：不改写时，canary 扫描在保留期结束前不能到零；`discardDeadLetter` 只在 Node 上运行，所以 Workers 上不能处理丢失设备的 task。行保留，所以 `recoverableFrom` 下限和 message-id 唯一键不变。有 `pending` 行时仍返回可重试的拒绝。
+  - 草稿、activity 和 approval 行：E5a 直接删除，不等 TTL。
+  - 摘要：明文 SHA-256 让能读数据库的人确认一个猜测的正文。`docs/security.md` 记录这个代价。
 
 ### 11.4 对比
 

@@ -471,6 +471,60 @@ those biases. Do not pool repeated cells or claim runtime superiority from small
 samples. Even 20/20 on a case has substantial uncertainty; no observed failures
 is not proof of zero failure risk.
 
+## Runner
+
+[`examples/bot-collaboration/src/submit-result-measurement/`](../examples/bot-collaboration/src/submit-result-measurement/)
+runs this method for one cell.
+It starts an embedded Host, one paired daemon and one runtime adapter.
+The runtime uses the real SDK `submit_result` helper.
+
+```bash
+bun run build
+bun examples/bot-collaboration/src/submit-result-measurement/cli.ts --runtime codex --model <model-id>
+```
+
+The default is a dry run.
+It prints the plan and the runtime task count.
+It starts no daemon, no runtime and no provider call.
+A real run needs `--execute`, `--authorization <ref>`, `--deadline-ms <ms>`,
+`--max-spend <label>` and `--out <dir>`.
+The runner never reads a credential.
+The runtime uses its own login or environment.
+
+The runner writes `manifest.json`, `trials.jsonl`, `not-started.jsonl`,
+`calibration.json`, `summary.json`, `summary.md` and `events/<trial>.json`.
+It replaces home and run-root paths with placeholders.
+Review the files before you share them.
+
+These facts apply to the runner on this SDK revision.
+
+- One uncounted calibration trial (C01) runs first.
+  It confirms the call label from a helper body (Source 2).
+  The label is fixed before the first counted trial.
+  If the calibration confirms no label, the cell records no `missing`.
+- The runner reads Source 1 at the adapter boundary.
+  It wraps the adapter with a pass-through view of the public `RuntimeAdapter` contract.
+  For an Agent-bound task, the daemon sends `task.progress` on the latest-value lane.
+  That lane keeps only the last event of each batch.
+  The Host therefore does not receive every `tool_use` and `tool_result`.
+  The manifest records `eventSource: adapter-boundary`.
+- The Host capture gives the claim, the runtime start and the terminal.
+- `missing` also needs a `turn_end` event.
+  A runtime that fails before `turn_end` with no call is `terminal_failure`.
+- The runner records `infrastructure_abort` only for a failure that it sees itself:
+  an operator cancel (SIGINT) or a halted, crashed or stopped daemon.
+  A provider or auth error inside the runtime arrives as a `task.fail` reason.
+  The runner keeps it as `terminal_failure` with the raw reason.
+- The deadline starts at the offer.
+  At the deadline the runner cancels the task and records `timeout`.
+- Model selection: Claude and Codex receive the model as the subscription
+  dispatch selection. Grok receives it as the adapter `model` option.
+  Pi uses the model of its own configuration, because a Pi BYOK selection needs
+  a credential-custody launcher. The cell records the operator label.
+- The runner supports the baseline cells only, without `messageEgress`.
+- The tests run the runner against a fake runtime only.
+  A synthetic run is marked `synthetic` and measures no model behavior.
+
 ## Updating acceptance
 
 Add one OPEN row per runtime/model/platform cell to the K8 validation record when
