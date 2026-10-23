@@ -171,7 +171,7 @@ describe('board coordination surface', () => {
     const activity = await harness.cloud.readActivity(TENANT_A, 'projected');
     expect(activity?.entries).toHaveLength(2);
     expect(activity?.dropped).toBe(1);
-    expect(activity?.entries.map((entry) => entry.event.type)).toEqual([
+    expect(activity?.entries.map((entry) => ('event' in entry ? entry.event.type : 'sealed'))).toEqual([
       'progress',
       'turn_end',
     ]);
