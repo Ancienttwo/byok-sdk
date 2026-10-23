@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { hash } from '@byok-sdk/example-host-execution-core';
 import type { Command } from '@byok-sdk/example-bot-collaboration/rules/commands';
-import type { CommitRequest } from '@byok-sdk/example-bot-collaboration/rules/commit';
+import type { CommandRecord, CommitRequest } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { commitVectors, seedCollaboration, type CommitSubject, type SeedTeam } from '@byok-sdk/example-bot-collaboration/test-support';
 import { HostedStoreVersionError } from './store';
 import { memorySubject, vectorPorts } from './memory-subject.test-support';
@@ -113,6 +113,18 @@ describe.skipIf(POSTGRES_URL === undefined)('H store on real Postgres (#793 D2a)
     });
     const keys = Object.keys((await h.state()).turns.t1!);
     expect(keys).toEqual(Object.keys((await memorySubject().state()).turns.t1!).reverse());
+  });
+
+  it('keeps the root of a command record, and no root where the record has none (#793 25a)', async () => {
+    const h = await hosted();
+    const result = { revision: 1, disposition: { outcome: 'accepted' as const }, outbox: [] };
+    await store().seed(h.scope, state => {
+      state.commands = { plain: { evidence: 'sha256:a', result }, owned: { evidence: 'sha256:b', result, root: 'turn:t1' } as CommandRecord };
+    });
+    expect(JSON.stringify((await h.state()).commands)).toBe(JSON.stringify({
+      plain: { evidence: 'sha256:a', result }, owned: { evidence: 'sha256:b', result, root: 'turn:t1' } }));
+    const rows = await opened!.pool.query(`SELECT key, root FROM "${store().schema}".command WHERE scope = $1 ORDER BY key`, [JSON.stringify(h.scope)]);
+    expect(rows.rows).toEqual([{ key: '"owned"', root: 'turn:t1' }, { key: '"plain"', root: null }]);
   });
 
   it('runs two first writes of a new scope one at a time, with no unique violation', async () => {

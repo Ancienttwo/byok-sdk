@@ -31,7 +31,9 @@ export const idOf = (key: string): string => {
   return id;
 };
 
-export interface StoredCommand { evidence: string; result: string }
+/** `root` is the #798 retention root of the record, when the record has one. */
+export interface StoredCommand { evidence: string; result: string; root?: string }
+const COMMAND_FIELDS = new Set(['evidence', 'result', 'root']);
 /** The rows of one state. Each map keeps the iteration order of the state. */
 export interface Split {
   frame: string;
@@ -84,8 +86,11 @@ export function split(state: CollaborationState): Split {
   if (commands !== undefined) {
     if (!plain(commands)) throw new Error('Invalid command records');
     for (const [id, record] of Object.entries(commands)) {
-      if (!plain(record) || typeof record.evidence !== 'string' || !plain(record.result)) throw new Error('Invalid command record');
-      out.commands.set(storedKey(id), { evidence: record.evidence, result: JSON.stringify(record.result) });
+      if (!plain(record) || typeof record.evidence !== 'string' || !plain(record.result)
+        || (record.root !== undefined && typeof record.root !== 'string') || Object.keys(record).some(name => !COMMAND_FIELDS.has(name))) {
+        throw new Error('Invalid command record');
+      }
+      out.commands.set(storedKey(id), { evidence: record.evidence, result: JSON.stringify(record.result), ...(record.root === undefined ? {} : { root: record.root }) });
     }
     root.commands = {};
   }
@@ -122,7 +127,9 @@ export function assemble(rows: Split): CollaborationState {
   if (rows.commands.size) {
     const commands = own(root, 'commands');
     if (!plain(commands)) throw new Error('Stored command records have no map in the frame');
-    for (const [key, { evidence, result }] of rows.commands) define(commands, idOf(key), { evidence, result: JSON.parse(result) });
+    for (const [key, { evidence, result, root: owner }] of rows.commands) {
+      define(commands, idOf(key), { evidence, result: JSON.parse(result), ...(owner === undefined ? {} : { root: owner }) });
+    }
   }
   return root as unknown as CollaborationState;
 }

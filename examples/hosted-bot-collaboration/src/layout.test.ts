@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { stateOf, type CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
+import type { CommandRecord } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { seedCollaboration } from '@byok-sdk/example-bot-collaboration/test-support';
 import { assemble, FRAME_MAX_BYTES, split } from './layout';
 
@@ -18,7 +19,9 @@ function rich(): CollaborationState {
   state.audit.push('one', 'two');
   state.rejected.push({ botId: 'main', taskId: 'x', action: 'a', reason: 'r' });
   state.channel = { inbounds: {}, pushRoutes: {}, deliveries: {} };
-  state.commands = { i1: { evidence: 'sha256:x', result: { revision: 1, disposition: { outcome: 'accepted' }, outbox: [] } } };
+  state.commands = { i1: { evidence: 'sha256:x', result: { revision: 1, disposition: { outcome: 'accepted' }, outbox: [] } },
+    // #823 adds `root` to the record type; the row layout must keep it (#793 25a).
+    i2: { evidence: 'sha256:y', result: { revision: 2, disposition: { outcome: 'accepted' }, outbox: [] }, root: 'turn:t1' } as CommandRecord };
   state.inputs = {};
   return state;
 }
@@ -40,7 +43,16 @@ describe('H row layout (#793 D2a)', () => {
     expect(frame.team.external).toEqual({ revision: 1 });
     expect([...rows.entities.get('turn')!.keys()]).toEqual(['"2"', '"10"', '"t1"', '"b"', '"__proto__"', '"\\ud800"']);
     expect(rows.entries.get('room_message\u0000"r1"')!.bodies).toHaveLength(2);
+    expect(rows.commands.get('"i1"')).not.toHaveProperty('root');
+    expect(rows.commands.get('"i2"')!.root).toBe('turn:t1');
   });
+
+  it.each([['a root that is not a string', { root: 1 }], ['a field that has no column', { owner: 'x' }]])(
+    'refuses a command record with %s', (_case, extra) => {
+      const state = rich();
+      Object.assign(state.commands!.i1!, extra);
+      expect(() => split(state)).toThrow('Invalid command record');
+    });
 
   it('refuses a state field that has no row layout once it grows', () => {
     const state = rich() as CollaborationState & { history?: string[] };

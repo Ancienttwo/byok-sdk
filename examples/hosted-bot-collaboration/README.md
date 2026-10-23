@@ -29,7 +29,7 @@ schema. The SDK tables stay under the SDK migrations. This example never writes 
 | `scope` | scope: the store version and the frame (the state without its rows) |
 | `entity` | map entry of the state (Turn, card, Bot, room, delivery, ...), keyed by its id |
 | `entry` | element of a list (audit, rejected, team note, home operation, room message), keyed by position |
-| `command` | command record: the dedup evidence and the first result |
+| `command` | command record: the dedup evidence, the first result and the retention root (nullable) |
 | `outbox` | projection or delivery that a commit wrote |
 
 Each scope and each key is stored as `JSON.stringify(value)`, so two values that UTF-8 would merge stay

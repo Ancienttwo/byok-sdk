@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS command (
   ordinal   bigint NOT NULL CHECK (ordinal >= 0),
   evidence  text   NOT NULL,
   result    json   NOT NULL,
+  root      text,
   PRIMARY KEY (scope, key),
   UNIQUE (scope, ordinal)
 );

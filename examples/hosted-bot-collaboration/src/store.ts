@@ -73,7 +73,7 @@ export class HostedCollaborationStore {
         'SELECT state_version, frame::text FROM scope WHERE scope = $1',
         'SELECT kind, key, ordinal::text, body::text FROM entity WHERE scope = $1 ORDER BY kind, key',
         'SELECT kind, owner, position::text, body::text FROM entry WHERE scope = $1 ORDER BY kind, owner, position',
-        'SELECT key, ordinal::text, evidence, result::text FROM command WHERE scope = $1 ORDER BY key',
+        'SELECT key, ordinal::text, evidence, result::text, root FROM command WHERE scope = $1 ORDER BY key',
         'SELECT key, ordinal::text, kind, body::text FROM outbox WHERE scope = $1 ORDER BY key',
       ]) rows.push((await client.query({ text: query, values: [storedKey(scope)], rowMode: 'array' })).rows);
       return JSON.stringify(rows);
@@ -126,11 +126,13 @@ export class HostedCollaborationStore {
       if (Number(row.position) !== bodies.length) throw new Error(`Stored ${row.kind} positions have a gap`);
       bodies.push(row.body);
     }
-    const commands = await client.query<{ key: string; evidence: string; result: string }>(commandId === undefined
-      ? 'SELECT key, evidence, result::text FROM command WHERE scope = $1 ORDER BY ordinal'
-      : 'SELECT key, evidence, result::text FROM command WHERE scope = $1 AND key = $2',
+    const commands = await client.query<{ key: string; evidence: string; result: string; root: string | null }>(commandId === undefined
+      ? 'SELECT key, evidence, result::text, root FROM command WHERE scope = $1 ORDER BY ordinal'
+      : 'SELECT key, evidence, result::text, root FROM command WHERE scope = $1 AND key = $2',
     commandId === undefined ? [scopeKey] : [scopeKey, storedKey(commandId)]);
-    for (const row of commands.rows) rows.commands.set(row.key, { evidence: row.evidence, result: row.result });
+    for (const row of commands.rows) {
+      rows.commands.set(row.key, { evidence: row.evidence, result: row.result, ...(row.root === null ? {} : { root: row.root }) });
+    }
     return rows;
   }
 
@@ -158,10 +160,10 @@ export class HostedCollaborationStore {
     }
     for (const [key, record] of after.commands) {
       const prior = before.commands.get(key);
-      if (prior && prior.evidence === record.evidence && prior.result === record.result) continue;
+      if (prior && prior.evidence === record.evidence && prior.result === record.result && prior.root === record.root) continue;
       if (prior) throw new Error('A command record cannot change');
-      await client.query(`INSERT INTO command (scope, key, ordinal, evidence, result)
-        SELECT $1, $2, coalesce(max(ordinal) + 1, 0), $3, $4::json FROM command WHERE scope = $1`, [scopeKey, key, record.evidence, record.result]);
+      await client.query(`INSERT INTO command (scope, key, ordinal, evidence, result, root)
+        SELECT $1, $2, coalesce(max(ordinal) + 1, 0), $3, $4::json, $5 FROM command WHERE scope = $1`, [scopeKey, key, record.evidence, record.result, record.root ?? null]);
     }
   }
 
