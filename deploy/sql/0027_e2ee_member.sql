@@ -2,13 +2,13 @@
 -- as the canonical JSON text the writer sent, so a replay compares by bytes.
 -- It holds no key and verifies no signature: members do (design §7.3).
 -- Migrations are forward-only. Roll back the application; these tables stay.
+-- Every instant comes from the injected clock, so no column defaults to now().
 
 -- First writer wins per (tenant_id, seq). The store appends only at head + 1.
 CREATE TABLE e2ee_member_chain_entry (
   tenant_id text NOT NULL,
   seq bigint NOT NULL CHECK (seq > 0),
   entry text NOT NULL,
-  created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (tenant_id, seq)
 );
 
@@ -18,7 +18,6 @@ CREATE TABLE e2ee_member_key (
   device_id text NOT NULL,
   member_id text NOT NULL,
   bundle text NOT NULL,
-  registered_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (tenant_id, device_id),
   UNIQUE (tenant_id, member_id)
 );
@@ -30,7 +29,6 @@ CREATE TABLE e2ee_scope_epoch (
   scope_id text NOT NULL,
   epoch bigint NOT NULL CHECK (epoch > 0),
   key_id text NOT NULL,
-  created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (tenant_id, scope_id, epoch)
 );
 
@@ -42,7 +40,7 @@ CREATE TABLE e2ee_scope_key_package (
   key_id text NOT NULL,
   sender text NOT NULL,
   package text NOT NULL,
-  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL,
   PRIMARY KEY (tenant_id, scope_id, epoch, recipient),
   FOREIGN KEY (tenant_id, scope_id, epoch) REFERENCES e2ee_scope_epoch (tenant_id, scope_id, epoch)
 );

@@ -315,6 +315,7 @@ DO $$
 DECLARE
   spec record;
   missing_columns text;
+  defaulted_columns text;
   key_columns text[];
 BEGIN
   FOR spec IN
@@ -322,7 +323,7 @@ BEGIN
       ('e2ee_member_chain_entry', ARRAY['tenant_id', 'seq', 'entry'], ARRAY['tenant_id', 'seq']),
       ('e2ee_member_key', ARRAY['tenant_id', 'device_id', 'member_id', 'bundle'], ARRAY['tenant_id', 'device_id']),
       ('e2ee_scope_epoch', ARRAY['tenant_id', 'scope_id', 'epoch', 'key_id'], ARRAY['tenant_id', 'scope_id', 'epoch']),
-      ('e2ee_scope_key_package', ARRAY['tenant_id', 'scope_id', 'epoch', 'recipient', 'key_id', 'sender', 'package'],
+      ('e2ee_scope_key_package', ARRAY['tenant_id', 'scope_id', 'epoch', 'recipient', 'key_id', 'sender', 'package', 'updated_at'],
         ARRAY['tenant_id', 'scope_id', 'epoch', 'recipient']),
       ('e2ee_pairing_mac', ARRAY['tenant_id', 'device_id', 'kind', 'body', 'expires_at'], ARRAY['tenant_id', 'device_id', 'kind'])
     ) AS t(table_name, required_columns, primary_key)
@@ -405,6 +406,20 @@ BEGIN
        AND NOT x.indisunique
   ) THEN
     RAISE EXCEPTION 'e2ee_scope_key_package needs its non-unique (tenant_id, recipient) index for device cleanup';
+  END IF;
+
+  -- The store writes every value, instants from the injected clock, so a
+  -- default (such as now()) would be a second, silent source.
+  SELECT string_agg(t.relname || '.' || a.attname, ', ' ORDER BY t.relname, a.attname)
+    INTO defaulted_columns
+    FROM pg_attrdef d
+    JOIN pg_class t ON t.oid = d.adrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = d.adnum
+   WHERE n.nspname = current_schema()
+     AND t.relname IN ('e2ee_member_chain_entry', 'e2ee_member_key', 'e2ee_scope_epoch', 'e2ee_scope_key_package', 'e2ee_pairing_mac');
+  IF defaulted_columns IS NOT NULL THEN
+    RAISE EXCEPTION 'E2EE member columns must have no default, found %', defaulted_columns;
   END IF;
 END $$;
 

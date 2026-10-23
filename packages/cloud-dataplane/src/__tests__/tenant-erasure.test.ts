@@ -180,9 +180,9 @@ async function seedEveryTenantTable(pool: Pool, tenant: TenantId, suffix: string
   await pool.query(`INSERT INTO e2ee_member_key (tenant_id, device_id, member_id, bundle) VALUES ($1, $2, 'member', '{}')`, [tenant, device]);
   await pool.query(`INSERT INTO e2ee_scope_epoch (tenant_id, scope_id, epoch, key_id) VALUES ($1, 'scope', 1, 'key')`, [tenant]);
   await pool.query(
-    `INSERT INTO e2ee_scope_key_package (tenant_id, scope_id, epoch, recipient, key_id, sender, package)
-     VALUES ($1, 'scope', 1, 'member', 'key', 'member', '{}')`,
-    [tenant],
+    `INSERT INTO e2ee_scope_key_package (tenant_id, scope_id, epoch, recipient, key_id, sender, package, updated_at)
+     VALUES ($1, 'scope', 1, 'member', 'key', 'member', '{}', $2)`,
+    [tenant, now],
   );
   await pool.query(
     `INSERT INTO e2ee_pairing_mac (tenant_id, device_id, kind, body, expires_at) VALUES ($1, $2, 'device', 'mac', $3)`,
