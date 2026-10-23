@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Feature (client)** — the task-free projection hook gets
+  `writeHomeFile(name, body)` on its input (#738, #606 R6). One call
+  atomically replaces one file at the root of the canonical Agent home under
+  the writer lease. `name` is one portable file name. `.byok`, `MEMORY.md` and
+  `notes` belong to the SDK and are refused. The SDK waits for every call
+  before it writes its projection record, and it refuses a call after the hook
+  settles. Each call is atomic for one file only, and several calls are not one
+  transaction. After a process crash, each file has its old or its new bytes.
+  On POSIX, a successful call has flushed the file and its directory. On
+  Windows, it has flushed the file only: there is no promise for an OS crash
+  or a power loss, and a delivery of the same revision and hash repairs a lost
+  file. A process crash can leave a `<name>.<pid>-<n>.tmp` file in the home.
+  The SDK does not remove it. `agent-home-write-file.test.ts` kills a child
+  process at five points of a three-file apply and checks each file and the
+  redelivery. The root `@byok-sdk/client` entry grows by 1399 bytes.
 - **Feature (protocol, server, cloud, client)** — an ordinary Agent offer can
   select the Agent memory of its one task with the optional
   `agentMemory: 'none' | 'read' | 'read-write'` (#614). The values are those of
@@ -62,6 +77,32 @@
   `OutcomeTransaction.routines` runs `create`, `update` and `lifecycle` in the
   outcome commit with the `addRoutine`, `updateRoutine` and `lifecycle()`
   rules; a refused command changes nothing. `LedgerState.version` stays 1.
+- **Breaking (examples)** — K8 Bot routines are K4 routines (#737). Each Bot
+  routine is a `hostOccurrence` definition with the `bot-routine` hook, and K4
+  owns its versions, slots, occurrences and wakes. The hook writes the routine
+  Turn in the occurrence commit, and the Host promotes it with
+  `promoteOccurrence`. `CollaborationState.version` is 2 and has no
+  `routines`, `occurrences` or `operations`. The Host refuses a version 1
+  ledger with a clear error and writes no migration. Documented behavior
+  changes: the overlap rule is the K4 rule, so the limit of two unsettled
+  occurrences and the `capacity` decision are gone; a routine Turn id is
+  `occurrence:<occurrence key>`; its five-minute wait counts from the
+  occurrence record, not from the enqueue; K4 rejects a wake that differs
+  from its reservation; a failed SDK wake call stays in the K4 outbox and
+  rejects the Host call, and the K8 process timer retries it after 60
+  seconds; K4 keeps no old routine versions. The K8 index no longer exports `Definition`, `Occurrence` and
+  `Routine`, and `snapshot()` has no routines. Read the Bot routine views
+  with `botRoutines(Object.values(ledger.snapshot().routines))`.
+  `BotOptions.hostJobs` runs Host job routines on the same core.
+- **Changed (client)** — the Agent memory Go helper can now open a home on
+  Windows (#605). The SDK does not use this yet. The TypeScript gate still
+  refuses Windows, and the package has no Windows helper asset. On Windows the
+  helper accepts only an NTFS volume. It does not flush the directories above
+  the home. So a Windows write is atomic under a process crash and flushes its
+  own file and directory, but it is not durable after an OS crash or a power
+  loss. B stays false. CI now runs the helper tests on Windows Server 2025 and
+  Windows Server 2022, as the administrator and as a standard user. It also
+  checks the root identity that Node and Bun compute.
 
 ## 0.28.3 — source candidate
 

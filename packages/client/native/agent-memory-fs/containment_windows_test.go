@@ -14,12 +14,11 @@ import (
 )
 
 // Windows reparse points replace a name after the session pinned the home:
-// the parent and leaf cases of TestRootParentAndLeafSymlinkSwapsCannotTouchOutsideSentinel
-// in main_test.go, which is !windows. Go 1.23 and later report a junction as
-// ModeIrregular and a symlink as ModeSymlink. openSession stays closed on
-// Windows, so these tests build the session themselves and cannot check a home
-// swap before open. A pass is not admission, a full reparse matrix or model S
-// proof, and it does not grant B.
+// the junction forms of the parent and leaf cases of
+// TestRootParentAndLeafSymlinkSwapsCannotTouchOutsideSentinel in main_test.go.
+// Go 1.23 and later report a junction as ModeIrregular and a symlink as
+// ModeSymlink. TestWindowsOpenWithJunctionFixtures checks a junction home
+// before open. A pass is not model S proof, and it does not grant B.
 
 // errorSharingViolation is ERROR_SHARING_VIOLATION, which package syscall does
 // not name.

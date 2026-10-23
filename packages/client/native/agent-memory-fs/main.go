@@ -310,13 +310,6 @@ func (s *session) currentIdentity() (rootIdentity, error) {
 }
 
 func openSession(req openRequest) (*session, *protocolError) {
-	if runtime.GOOS == "windows" {
-		// Cross-builds prove the handle identity implementation compiles, but a
-		// Windows containment and model S recovery proof are both required.
-		// Model S covers process crash, OS crash and power loss. A successful
-		// flush observation or denial matrix is not that proof.
-		return nil, failure("unsupported_platform", "secure filesystem is not admitted on this platform")
-	}
 	if !validRequestID(req.ID) || req.Protocol != protocolVersion || req.Op != "open" || !validRootIdentity(req.ExpectedIdentity) {
 		return nil, failure("invalid_request", "request is invalid")
 	}
@@ -347,6 +340,9 @@ func openSession(req openRequest) (*session, *protocolError) {
 	if err != nil || !post.IsDir() || post.Mode()&os.ModeSymlink != 0 || !os.SameFile(before, post) {
 		return nil, failure("unsafe_root", "root is unavailable or unsafe")
 	}
+	if err := checkRootVolume(root); err != nil {
+		return nil, failure("unsafe_root", "root is unavailable or unsafe")
+	}
 	actual, err := identityForRoot(root, after)
 	if err != nil {
 		return nil, failure("unsafe_root", "root is unavailable or unsafe")
@@ -354,8 +350,13 @@ func openSession(req openRequest) (*session, *protocolError) {
 	if actual != req.ExpectedIdentity {
 		return nil, failure("root_identity_mismatch", "root identity does not match")
 	}
-	if err := syncHomeChain(req.Root, root); err != nil {
-		return nil, failure("io_failure", "home directory barrier failed")
+	// Windows has no home-chain barrier while its intent backend keeps B false.
+	// It promises single-file atomicity under a process crash and the strict
+	// flushes of each write, not durability after an OS crash or power loss.
+	if runtime.GOOS != "windows" {
+		if err := syncHomeChain(req.Root, root); err != nil {
+			return nil, failure("io_failure", "home directory barrier failed")
+		}
 	}
 	// Recheck the name after the chain barrier and before publishing authority.
 	post, err = os.Lstat(req.Root)

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -54,7 +55,6 @@ func TestWindowsRuntimeIdentityMatchesNativeHandle(t *testing.T) {
 // Diagnostic only: API failures are logged, not asserted as test failures.
 // A passing test does not show that a flush API is available or successful.
 // These calls prove neither containment nor model S recovery and do not grant B.
-// Production Windows admission stays closed.
 func TestWindowsDirectoryFlushDiagnosticsOnly(t *testing.T) {
 	directory := t.TempDir()
 	name, err := syscall.UTF16PtrFromString(directory)
@@ -86,52 +86,69 @@ func TestWindowsDirectoryFlushDiagnosticsOnly(t *testing.T) {
 	t.Logf("DIAGNOSTIC ONLY; NO ACCEPTANCE ASSERTION: NtFlushBuffersFileEx flags=0 NTSTATUS=%#x IO_STATUS=%#x Information=%d", uint32(status), ioStatus.Status, ioStatus.Information)
 }
 
-// Platform-refusal check only: openSession returns unsupported_platform before
-// it reads any path. Junction fixtures do not exercise traversal or containment.
-// Fixture setup failures still fail this check. No storage barrier is tested.
-func TestWindowsPlatformRefusalWithJunctionFixtures(t *testing.T) {
-	outside := t.TempDir()
-	sentinel := filepath.Join(outside, "sentinel.txt")
-	if err := os.WriteFile(sentinel, []byte("outside sentinel"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+// Junction fixtures that exist before open. A junction home is refused. A
+// junction ancestor is resolved, and the identity binds the real home. A
+// junction inside the home fails every operation that reaches it. No operation
+// may change the outside directory. No storage barrier is tested.
+func TestWindowsOpenWithJunctionFixtures(t *testing.T) {
 	for _, placement := range []string{"ordinary", "root-junction", "ancestor-junction", "notes-junction", "state-junction"} {
 		t.Run(placement, func(t *testing.T) {
+			outside := t.TempDir()
+			writeFixture(t, filepath.Join(outside, "sentinel.md"), "outside")
 			parent := t.TempDir()
 			home := filepath.Join(parent, "home")
 			if err := os.Mkdir(home, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			link := ""
+			root, expected, reached := home, identityForTest(t, home), ""
 			switch placement {
 			case "root-junction":
-				if err := os.Remove(home); err != nil {
-					t.Fatal(err)
-				}
-				link = home
+				// A followed junction would match its target's identity.
+				root, expected = filepath.Join(parent, "linked-home"), identityForTest(t, outside)
+				makeReparsePoint(t, "junction", root, outside)
 			case "ancestor-junction":
-				link = filepath.Join(parent, "ancestor")
-				home = filepath.Join(link, "home")
+				linked := filepath.Join(t.TempDir(), "linked-parent")
+				makeReparsePoint(t, "junction", linked, parent)
+				root = filepath.Join(linked, "home")
 			case "notes-junction":
-				link = filepath.Join(home, "notes")
+				makeReparsePoint(t, "junction", filepath.Join(home, "notes"), outside)
+				reached = "notes"
 			case "state-junction":
-				link = filepath.Join(home, ".byok")
+				makeReparsePoint(t, "junction", filepath.Join(home, ".byok"), outside)
+				reached = ".byok"
 			}
-			if link != "" {
-				if output, err := exec.Command("cmd", "/c", "mklink", "/J", link, outside).CombinedOutput(); err != nil {
-					t.Fatalf("required junction setup failed: %v (%s)", err, output)
+			active, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: root, ExpectedIdentity: expected})
+			if placement == "root-junction" {
+				if active != nil || failure == nil || failure.code != "unsafe_root" {
+					t.Fatalf("junction home admitted: session=%v error=%v", active, failure)
 				}
-				defer os.Remove(link) // Remove the junction, never its target.
+				requireOutsideUnchanged(t, outside, "sentinel.md", "outside")
+				return
 			}
-			opened, err := openSession(openRequest{ID: "denial", Protocol: protocolVersion, Op: "open", Root: home,
-				ExpectedIdentity: rootIdentity{Kind: "windows", VolumeSerial: "0", FileIndex: "0"}})
-			if opened != nil || err == nil || err.code != "unsupported_platform" {
-				t.Fatalf("unproved Windows authority admitted: session=%v error=%v", opened, err)
+			if failure != nil {
+				t.Fatalf("open: %#v", failure)
 			}
-			content, readErr := os.ReadFile(sentinel)
-			if readErr != nil || string(content) != "outside sentinel" {
-				t.Fatalf("outside sentinel changed: %q %v", content, readErr)
+			defer active.root.Close()
+			if reached == "" {
+				if _, failure := active.replace(replaceRequest{ID: "replace", Protocol: protocolVersion, Op: "replace", Path: "MEMORY.md",
+					ExpectedRevision: emptyFileState().Revision, ContentBase64: base64.RawStdEncoding.EncodeToString([]byte("inside")), MaxBytes: maxFileBytes}); failure != nil {
+					t.Fatalf("replace: %#v", failure)
+				}
+				if data, err := os.ReadFile(filepath.Join(home, "MEMORY.md")); err != nil || string(data) != "inside" {
+					t.Fatalf("write did not land in the home: %q, %v", data, err)
+				}
+			} else {
+				for _, operation := range []string{"read", "replace", "delete", "append", "walk"} {
+					target := reached + "/sentinel.md"
+					if operation == "walk" {
+						target = reached
+					}
+					if failure := pinnedOperation(active, operation, target, stateForBytes([]byte("outside")).Revision); failure == nil || failure.code != "unsafe_path" {
+						t.Fatalf("%s through %s: %#v", operation, reached, failure)
+					}
+				}
 			}
+			requireOutsideUnchanged(t, outside, "sentinel.md", "outside")
 		})
 	}
 }

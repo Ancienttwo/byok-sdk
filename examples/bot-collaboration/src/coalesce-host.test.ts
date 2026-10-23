@@ -2,8 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { hash } from '@byok-sdk/example-host-execution-core';
 import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration, type BotOptions } from './host';
-import { stateOf } from './model';
-import { createRoutine } from './routines';
+import { deliverRoutine, seedRoutine } from './routines.test-support';
 
 let fixture: TestHost;
 let bot: BotCollaboration;
@@ -99,10 +98,8 @@ it('seals the open batch before answer, action_result, routine and continuation 
   await finish(setupTurn, { ask_user: { question: 'Continue?', answerKind: 'text' },
     confirmable_action: [{ action: 'send_message', summary: 'Send', draft: { text: 'hello' } }] });
   const question = Object.values(bot.snapshot().questions)[0]!, card = Object.values(bot.snapshot().cards)[0]!;
-  const routineId = fixture.ledger.transaction(s => createRoutine(stateOf(s.application), 'main', 'seed', 0,
-    { localId: 'new_routine_1', schedule: { hour: 9, minute: 0, tz: 'UTC' }, prompt: 'Daily report' }, Date.now()).id);
+  const routineId = await seedRoutine(bot, 'seed', 'Daily report');
   await bot.drain();
-  const slot = bot.snapshot().routines[routineId]!.armed!;
   const first = await bot.input('busy', 'Long task');
   await running(first);
   const [u1, u2, u3, u4] = ['u1', 'u2', 'u3', 'u4'].map(key => idOf(key)) as [string, string, string, string];
@@ -111,7 +108,7 @@ it('seals the open batch before answer, action_result, routine and continuation 
   await bot.input('u2', 'before the decision');
   await bot.decide(card.id, 'rejected');
   await bot.input('u3', 'before the routine');
-  await bot.consume({ wakeId: 'manual', dedupKey: slot.key, availableAt: slot.at, deliveredAt: Date.now(), delivery: 1 }, new AbortController().signal);
+  await deliverRoutine(bot, routineId, Date.now());
   await bot.input('u4', 'before the continuation');
   await finish(first, { delegate: [{ to: 'main', request: 'Continue the long task' }] });
   const turns = Object.values(bot.snapshot().turns);

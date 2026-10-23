@@ -1073,6 +1073,31 @@ export interface AgentHomeProjectionApplyInput extends AgentHomeProjectionInput 
     readonly requestId: string;
     readonly projectionHash: string;
     readonly projection: unknown;
+    /**
+     * Atomically replace one file at the root of the canonical Agent home with
+     * `body`. A string body is written as UTF-8. `name` is one portable file
+     * name: no path separator, no `:<>"|?*`, no control character, no trailing
+     * dot or space and no Windows device name. `.byok`, `MEMORY.md` and `notes`
+     * belong to the SDK and are refused in any letter case.
+     *
+     * The call is valid only while this hook runs. The SDK waits for every call
+     * before it records the projection, and refuses a call after the hook
+     * settles. A write that fails also fails the projection, even when the hook
+     * catches the error. A refused call writes nothing.
+     *
+     * Each call is atomic for its own file only. There is no transaction over
+     * several files. After a process crash, the file has its old bytes or its
+     * new bytes, never a mix. The call replaces the directory entry of `name`,
+     * so it never writes through a link at `name`. On POSIX, the file has mode
+     * 0600, and a successful return means that the file and its directory are
+     * flushed to storage. On Windows, a successful return means only that the
+     * file is flushed. Node has no directory flush on Windows, so after an OS
+     * crash or a power loss the new name can be lost while the SDK projection
+     * record stays. Only a delivery of the same revision and hash calls this
+     * hook again and repairs the file. A process crash can leave a
+     * `<name>.<pid>-<n>.tmp` file in the home. The SDK does not remove it.
+     */
+    readonly writeHomeFile: (name: string, body: string | Uint8Array) => Promise<void>;
 }
 /**
  * Optional downstream projection hook. The SDK supplies the canonical home;
@@ -1092,6 +1117,7 @@ export interface AgentHomeProjection {
      * Task-free opaque desired-state consumer. It must atomically and
      * idempotently ensure its own durable bytes because exact revision/hash
      * requests may replay after local derived-file loss or transport failure.
+     * `input.writeHomeFile` writes one file at the home root in this way.
      */
     apply?(input: AgentHomeProjectionApplyInput): void | Promise<void>;
 }
