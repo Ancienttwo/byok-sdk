@@ -30,10 +30,10 @@
   architecture: an arm64 process stays unavailable, and x64 Node under
   emulation on Windows arm64 is admitted.
   Compatibility on Windows x64:
-  - With an Agent home and the default `agentMemoryMcp: 'auto'`, every
-    ordinary Agent task now gets the SDK memory tools, and an adapter without
-    MCP toolset support declines the task. Set `agentMemoryMcp: 'off'` to keep
-    the earlier behavior.
+  - With an Agent home and the default `agentMemoryMcp: 'auto'`, when the SDK
+    helper resolves, every ordinary Agent task now gets the SDK memory tools,
+    and an adapter without MCP toolset support declines the task. Set
+    `agentMemoryMcp: 'off'` to keep the earlier behavior.
   - `agentMemoryIntents` now needs a resolvable SDK helper. A product without
     the native assets (for example a compiled product) used to start, with
     intents not advertised. It now fails at daemon construction, although
