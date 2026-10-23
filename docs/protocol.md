@@ -1054,32 +1054,56 @@ Sealed payload v1 lets a member seal task input and task output, so that the
 Host stores only ciphertext for these categories. The design is
 [docs/plans/2026-10-22-654-hosted-wire-e2ee.md](plans/2026-10-22-654-hosted-wire-e2ee.md).
 `@byok-sdk/core/sealed-payload` seals and opens the bytes.
-`packages/protocol/src/sealed-payload.ts` holds the wire rules. This section
-states the wire rules only. The Host stores, the daemon and the read
-interfaces come in later slices.
+`packages/protocol/src/sealed-payload.ts` and `sealed-split-table.ts` hold the
+wire rules. This section states the wire rules only. The Host stores, the
+daemon and the read interfaces come in later slices.
 
-**Capability.** `sealed-payload-v1` gates both directions (`WIRE_ADDITIONS`):
+**Sealed message types.** Each sealed message is a new message type. The
+plaintext types do not change.
 
-- Server to daemon: `sealing` and `sealed` on `task.offer`,
-  `task.offer_with_toolsets`, `task.offer_for_agent`,
-  `task.offer_for_agent_with_egress` and
-  `task.offer_for_agent_with_egress_fresh`, and `sealed` on `task.steer`. The
-  device advertises the flag.
-- Daemon to server: `sealed` on `task.complete`, `task.fail`, `task.decline`,
-  `task.cancelled`, `task.progress`, `task.artifact` and `task.await_approval`,
-  and the four sealed `task.decline` codes below. The server advertises the
-  flag. These payloads drop unknown fields, so an older Host would drop
-  `sealed` and keep the placeholder. The gate is the only boundary.
+| Sealed type | Plaintext type | Category | Identity | Moved into `sealed` | Dropped in v1 |
+| --- | --- | --- | --- | --- | --- |
+| `task.offer_sealed` | `task.offer` | `task-input` | | `instruction` | |
+| `task.offer_with_toolsets_sealed` | `task.offer_with_toolsets` | `task-input` | | `instruction` | |
+| `task.offer_for_agent_sealed` | `task.offer_for_agent` | `task-input` | | `instruction` | |
+| `task.offer_for_agent_with_egress_sealed` | `task.offer_for_agent_with_egress` | `task-input` | | `instruction` | |
+| `task.offer_for_agent_with_egress_fresh_sealed` | `task.offer_for_agent_with_egress_fresh` | `task-input` | | `instruction` | |
+| `task.steer_sealed` | `task.steer` | `task-input` | `steerId` | `text` | |
+| `task.complete_sealed` | `task.complete` | `task-output` | | `summary`, `finalMessage`, `document` | `artifactRefs`, `preparedObservation` |
+| `task.fail_sealed` | `task.fail` | `task-output` | | `reason` | `preparedObservation` |
+| `task.decline_sealed` | `task.decline` | `task-output` | | `reason` | |
+| `task.cancelled_sealed` | `task.cancelled` | `task-output` | | `reason` | |
+| `task.progress_sealed` | `task.progress` | `task-output` | `seq` | `events` | |
+| `task.artifact_sealed` | `task.artifact` | `task-output` | `name` | `inline` | `blobRef` |
+| `task.await_approval_sealed` | `task.await_approval` | `task-output` | `approvalId` (required) | `summary` | |
+
+A sealed type is its plaintext type without the moved and dropped fields, plus
+`sealed`. The receiver opens `sealed`, merges the opened object back, and
+validates the result as the plaintext type. The opened object carries only
+moved fields. The identity fields name the write in the AAD and the content
+MAC, after the envelope `task_id`. A sealed message carries no plaintext blob
+reference, because blob bytes have no sealing rule yet. `SEALED_SPLIT_TABLE`
+is the one authority for this table.
+
+**Capability.** Each sealed type is gated as a whole on `sealed-payload-v1`
+(`WIRE_ADDITIONS`). The device advertises the flag for the offers and the
+steer. The server advertises it for the task output. A decoder that does not
+know a sealed type refuses it with `UnknownMessageTypeError`. A sealed type
+also takes every gate of its plaintext type, except the gates of the moved and
+dropped fields. For example, `task.offer_for_agent_sealed` also needs
+`agent-home-contract`, and `harnessId` on `task.offer_sealed` also needs
+`custom-harness`. Sealing never removes a gate.
 
 `PROTOCOL_VERSION` stays 3. `task.offer_prepared`, input preparation, Agent
 messages, egress, drafts and memory projections are not sealed in v1.
 
-**Sealing policy.** An offer may carry `sealing: { scopeId, epoch,
+**Sealing policy.** A sealed offer carries `sealing: { scopeId, epoch,
 categories }`. `categories` is a non-empty, ordered subset of `task-input` and
 `task-output`. The policy is frozen for the task. The offer carries `sealed`
-exactly when `categories` includes `task-input`. Its `sealed.scope` is then
-`{ id: scopeId, epoch }`. An offer that seals only `task-output` keeps its
-instruction in plaintext.
+exactly when `categories` includes `task-input`. Then it carries no
+`instruction`, and `sealed.scope` is `{ id: scopeId, epoch }`. An offer that
+seals only `task-output` keeps its `instruction` in plaintext. It is still a
+sealed offer type, so a device without the flag never receives it.
 
 **Sealed member.** `sealed` has the outer fields of a sealed content: `v` (1),
 `suite` (`byok-sealed-v1.hkdf-sha256.aes-256-gcm`), `category`, `scope`
@@ -1094,37 +1118,23 @@ instruction in plaintext.
 `paddedLength` is the one legal padded length of the content: the next
 multiple of 256 bytes up to 16 KiB, Padmé above. The plaintext limit is 2 MiB
 of canonical JSON for each v1 category, so `paddedLength` is at most
-`pad(4 + 2 MiB)`. A message type fixes its category: offers and steer carry
-`task-input`, the other types carry `task-output`. The schema rejects every
-other value, an unknown `v` or `suite`, and every malformed field.
+`pad(4 + 2 MiB)`. A message type fixes its category, as the table shows. The
+schema rejects every other value, an unknown `v` or `suite`, and every
+malformed field.
 
-**Split table.** `SEALED_SPLIT_TABLE` is the one authority for each sealed
-message type. It names:
-
-- the moved fields. A required field keeps a placeholder on the wire: `''` for
-  `instruction`, `text`, `summary` and `reason`, and `[]` for `events`. An
-  optional moved field (`finalMessage`, `document`, the `task.cancelled`
-  `reason`, the artifact `inline`) is absent. The receiver replaces each moved
-  field with its opened value. The placeholder keeps the released payload
-  shape: a released decoder that drops `sealed` still reads the payload.
-- the identity fields. After the envelope `task_id`, they name the write in
-  the AAD and the content MAC: `seq` for `task.progress`, `name` for
-  `task.artifact`, and `approvalId` for `task.await_approval`. A sealed
-  message must carry them.
-- the fields a sealed message must not carry: `preparedObservation` on
-  `task.complete` and `task.fail`, `artifactRefs` on `task.complete`, and
-  `blobRef` on `task.artifact`. Blob bytes have no sealing rule yet, so a
-  sealed message carries no plaintext blob reference.
-- the rule of each digest field (D16): `ciphertext-sha256`, `keyed-mac`,
-  `sealed` (moved with its parent), `plain` (not derived from sealed content)
-  or `forbidden`. A schema test requires a rule for every field of a sealed
-  message type whose name contains `digest`, `hash` or `revision`.
+**Digest fields (D16).** The split table gives each field of the plaintext
+type whose name contains `digest`, `hash` or `revision` one rule:
+`ciphertext-sha256`, `keyed-mac`, `sealed` (moved with its parent), `plain`
+(not derived from sealed content) or `forbidden`. A schema test requires a
+rule for every such field, and checks the rule against the sealed type.
 
 **Fail closed.** A receiver never falls back to plaintext. A device that
 refuses sealed task input declines non-retryably with one of the closed codes
 `sealed_key_unavailable`, `sealed_open_failed`, `sealed_content_mac_mismatch`
-or `sealing_policy_mismatch` in `task.decline.code`. These codes are
-plaintext, because a device without the scope key cannot seal a reason.
+or `sealing_policy_mismatch` in `code`. On the plaintext `task.decline`, each
+code is a value gate on the server flag. A device without the scope key
+cannot seal a reason, so it sends the plaintext `task.decline`. A device that
+can seal the reason may send `task.decline_sealed` with the same code.
 
 ## 3. Task state machine (M1 gap #2, #5, #6)
 
