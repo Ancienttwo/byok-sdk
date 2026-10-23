@@ -2,14 +2,6 @@
 
 ## Unreleased
 
-- **Fix (examples)** — K4 settles a cancelled claimed task soon after its
-  device terminal arrives (#762). Before, the intent waited for the next
-  `reconcileMs` scan, because the server emits no event for that terminal.
-  While it waited, it held the FIFO of its Agent. The core now reads the device
-  terminal of each such task with backoff from 25 ms to 1 s, at most 20 reads
-  per task. A read does not write the Host ledger. A found terminal starts one
-  drain. After the last read, only the `reconcileMs` scans remain. This also
-  covers a claimed task that the core cancels at its waiting deadline.
 - **Feature (core)** — the new subpath `@byok-sdk/core/sealed-payload` exports
   the sealed payload v1 byte rules (#654 E1a, E1b). It seals and opens one
   category of a payload with HKDF-SHA-256 and AES-256-GCM, pads the frame, and
@@ -145,6 +137,17 @@
   export leave these files out. Existing notes with these names or links stop
   being visible to recall and export. A `MEMORY.md` with more than one hard
   link makes capture fail.
+
+- **Fix (examples)** — K4 settles a cancelled claimed task soon after its
+  device terminal arrives (#762). Before, the intent waited for the next
+  `reconcileMs` scan, because the server emits no event for that terminal.
+  While it waited, it held the FIFO of its Agent. The core now reads the device
+  terminal of each such task on its own backoff. The interval starts at 25 ms
+  and doubles up to 1 s, and it is never more than `reconcileMs`. Each task
+  gets at most 20 reads, about 15.6 s in all. A read does not write the Host
+  ledger. A found terminal ends the reads of that task and starts one drain.
+  After the last read, only the `reconcileMs` scans remain. This also covers a
+  claimed task that the core cancels at its waiting deadline.
 
 ## 0.28.3 — source candidate
 

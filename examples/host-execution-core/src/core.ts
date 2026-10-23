@@ -17,7 +17,7 @@ export type ExecutionServer = {
   events?: ByokServer['events'];
 };
 // The server emits no event when the device terminal of a Host-cancelled task arrives.
-// Each task gets this many read-only terminal probes, then only the `reconcileMs` scans.
+// Each task gets this many read-only terminal probes, about 15.6 s in all, then only the `reconcileMs` scans.
 const CANCEL_PROBE_TICKS = 20;
 const CANCEL_PROBE_FIRST_MS = 25;
 const CANCEL_PROBE_MAX_MS = 1000;
@@ -84,8 +84,8 @@ export class HostExecutionCore {
   private eventsActive = false;
   private readonly liveTasks = new Set<string>();
   private liveScanTimer?: ReturnType<typeof setTimeout>;
-  /** Task ID to used probe ticks. Rearming keeps the count, so the bound is real. */
-  private readonly cancelProbes = new Map<string, number>();
+  /** Task ID to used probe ticks and the next probe time (`performance.now()`). Rearming keeps both, so the bound is real. */
+  private readonly cancelProbes = new Map<string, { used: number; at: number }>();
   private cancelProbeTimer?: ReturnType<typeof setTimeout>;
   private cancelProbing?: Promise<void>;
   private stopOutboxUpdates?: () => void;
@@ -378,7 +378,7 @@ export class HostExecutionCore {
   }
   /**
    * A cancelled inflight intent has had `tasks.cancel` and waits for its device terminal.
-   * Probe that terminal with backoff. A probe never writes the ledger; only a found terminal drains.
+   * Probe that terminal with a backoff per task. A probe never writes the ledger; only a found terminal drains.
    */
   private armCancelProbe(): void {
     clearTimeout(this.cancelProbeTimer);
@@ -387,23 +387,29 @@ export class HostExecutionCore {
     const waiting = new Set(Object.values(state.intents)
       .filter(intent => !intent.conclusion && intent.cancelReason && intent.phase === 'inflight').map(intent => intent.taskId));
     for (const taskId of this.cancelProbes.keys()) if (!waiting.has(taskId)) this.cancelProbes.delete(taskId);
-    for (const taskId of waiting) if (!this.cancelProbes.has(taskId)) this.cancelProbes.set(taskId, 0);
-    const ticks = [...this.cancelProbes.values()].filter(used => used < CANCEL_PROBE_TICKS);
-    if (!ticks.length) return;
-    const delay = Math.min(CANCEL_PROBE_FIRST_MS * 2 ** Math.min(...ticks), CANCEL_PROBE_MAX_MS, this.reconcileMs);
+    for (const taskId of waiting) if (!this.cancelProbes.has(taskId)) this.cancelProbes.set(taskId, { used: 0, at: performance.now() + this.cancelProbeDelay(0) });
+    const open = [...this.cancelProbes.values()].filter(probe => probe.used < CANCEL_PROBE_TICKS);
+    if (!open.length) return;
     this.cancelProbeTimer = setTimeout(() => {
-      this.cancelProbing = this.probeCancelled().finally(() => { this.cancelProbing = undefined; this.armCancelProbe(); });
-    }, delay);
+      // A failed ledger read stops probing until the next drain; the reconcileMs scans remain.
+      this.cancelProbing = this.probeCancelled().finally(() => { this.cancelProbing = undefined; this.armCancelProbe(); }).catch(() => {});
+    }, Math.max(0, Math.min(...open.map(probe => probe.at)) - performance.now()));
     this.cancelProbeTimer.unref?.();
+  }
+  private cancelProbeDelay(used: number): number {
+    return Math.min(CANCEL_PROBE_FIRST_MS * 2 ** used, CANCEL_PROBE_MAX_MS, this.reconcileMs);
   }
   private async probeCancelled(): Promise<void> {
     let found = false;
-    for (const [taskId, used] of this.cancelProbes) {
+    for (const [taskId, probe] of this.cancelProbes) {
       if (this.stopped) return;
-      if (used >= CANCEL_PROBE_TICKS) continue;
-      this.cancelProbes.set(taskId, used + 1);
-      try { found = !!await this.server.tasks.deviceTerminal(taskId) || found; }
-      catch { /* A failed read uses its tick; the reconcileMs scans remain. */ }
+      if (probe.used >= CANCEL_PROBE_TICKS || probe.at > performance.now()) continue;
+      probe.used++;
+      probe.at = performance.now() + this.cancelProbeDelay(probe.used);
+      try {
+        // One found terminal ends this task's probes. If that drain fails, the normal scans retry it.
+        if (await this.server.tasks.deviceTerminal(taskId)) { probe.used = CANCEL_PROBE_TICKS; found = true; }
+      } catch { /* A failed read uses its tick. */ }
     }
     if (found && !this.stopped) void this.drain().catch(() => {});
   }
