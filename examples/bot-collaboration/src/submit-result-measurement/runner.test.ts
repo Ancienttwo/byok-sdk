@@ -3,13 +3,21 @@
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { CodexAdapter } from '@byok-sdk/client';
 import { afterEach, expect, it } from 'vitest';
 import { main } from './cli';
 import { FAKE_CAPACITY_REASON, FakeMeasurementAdapter, type FakeBehavior } from './fake-runtime.test-support';
 import type { NotStartedRow, RunManifest, TrialRecord } from './records';
 
+// The client's fake codex app-server: a real MCP stdio client of the session's result helper.
+const FAKE_CODEX = fileURLToPath(new URL('../../../../packages/client/src/__tests__/fixtures/fake-codex.mjs', import.meta.url));
+const savedSubmitResult = process.env.FAKE_CODEX_SUBMIT_RESULT;
 const roots: string[] = [];
-afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
+afterEach(async () => {
+  for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
+  if (savedSubmitResult === undefined) delete process.env.FAKE_CODEX_SUBMIT_RESULT; else process.env.FAKE_CODEX_SUBMIT_RESULT = savedSubmitResult;
+});
 
 async function tempDir(prefix: string) {
   const root = await mkdtemp(path.join(os.tmpdir(), prefix));
@@ -120,4 +128,21 @@ it('stops at max-trials and marks the cell incomplete', async () => {
   const { run } = await execute([], ['--cases', 'C01-small,C02-scalars', '--max-trials', '1', '--deadline-ms', '60000']);
   expect(run.manifest).toMatchObject({ completion: 'incomplete', startedTrials: 1, plan: { plannedTrials: 2, runtimeTasks: 2 } });
   expect(run.summary.cell).toMatchObject({ planned: 2, started: 1 });
+}, 120_000);
+
+// Windows is skipped as in the client's submit_result CLI smoke: the fake codex is a shebang script.
+it.skipIf(process.platform === 'win32')('observes a real CodexAdapter through the adapter-boundary wrapper and confirms the Codex label', async () => {
+  process.env.FAKE_CODEX_SUBMIT_RESULT = JSON.stringify({ text: 'measurement-ok' });
+  const out = await tempDir('m610-codex-');
+  const code = await main(['--runtime', 'codex', '--model', 'fake-codex-model', '--run-id', 'codex', '--rounds', '1', '--cases', 'C01-small',
+    '--execute', '--authorization', 'synthetic-test', '--max-spend', '0', '--deadline-ms', '60000', '--out', out], {
+    adapters: () => [new CodexAdapter({ resolveBin: () => ({ command: FAKE_CODEX, source: 'path' }) })], stdout: () => {},
+  });
+  expect(code).toBe(0);
+  const { manifest, trials } = await readRun(out);
+  const label = { tool: 'mcp_tool_call', mcp: { server: 'byokagentresult', tool: 'submit_result' } };
+  expect(manifest).toMatchObject({ completion: 'complete', predicate: { confirmed: true, label }, calibration: { category: 'valid', label } });
+  expect(manifest.cell).toMatchObject({ runtime: 'codex', dispatchSelection: { lane: 'subscription', runtimeId: 'codex', providerId: null, modelId: 'fake-codex-model' } });
+  expect(trials).toEqual([expect.objectContaining({ caseId: 'C01-small', category: 'valid', exactTarget: true, firstCallValid: true })]);
+  expect(trials[0]!.submissions).toEqual([expect.objectContaining({ validation: 'staged', label })]);
 }, 120_000);
