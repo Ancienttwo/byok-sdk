@@ -32,34 +32,6 @@ describe('Hermes gateway control pipe name', () => {
     expect(servesHermesHome(identity, 'c:\\root\\profiles\\byok-a')).toBe(process.platform === 'win32');
     expect(servesHermesHome(identity, 'C:\\Root\\profiles\\byok-b')).toBe(false);
   });
-
-  // #712: letters whose lower case is longer than one UTF-16 unit (U+0130) or depends on the
-  // next letter (a final U+03A3). Hermes 0b10b9f hashes os.path.normcase(home)
-  // (gateway/control_socket.py:40-41). On Windows, CPython 3.11 to 3.14 (Hermes needs >=3.11,<3.15)
-  // ntpath.normcase is `_winapi.LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_LOWERCASE, s.replace('/', '\\'))`.
-  it.runIf(process.platform === 'win32')('names the pipe Hermes names when a home has U+0130 or a final U+03A3', async () => {
-    const koffi = await loadKoffi() as {
-      load(path: string): { func(convention: string, name: string, result: string, args: string[]): (...args: unknown[]) => number };
-    };
-    // LCMapStringEx(lpLocaleName, dwMapFlags, lpSrcStr, cchSrc, lpDestStr, cchDest, lpVersionInformation, lpReserved, sortHandle)
-    const lcMapStringEx = koffi.load('kernel32.dll').func('__stdcall', 'LCMapStringEx', 'int',
-      ['str16', 'uint32_t', 'void *', 'int', 'void *', 'int', 'void *', 'void *', 'intptr_t']);
-    const LCMAP_LOWERCASE = 0x100;
-    const normcase = (home: string): string => {
-      const source = Buffer.from(home.replaceAll('/', '\\'), 'utf16le');
-      const target = Buffer.alloc(source.length * 2);
-      // LOCALE_NAME_INVARIANT is the empty string.
-      const written = lcMapStringEx('', LCMAP_LOWERCASE, source, source.length / 2, target, target.length / 2, null, null, 0);
-      expect(written).toBeGreaterThan(0);
-      return target.subarray(0, written * 2).toString('utf16le');
-    };
-    const escaped = (text: string): string => text.replace(/[^\x20-\x7e]/gu, (letter) => `\\u{${letter.codePointAt(0)!.toString(16)}}`);
-    for (const home of ['C:\\Users\\\u0130lker\\hermes', 'C:\\Users\\\u039A\u03A9\u03A3\\hermes']) {
-      const lowered = normcase(home);
-      const hermes = `\\\\.\\pipe\\hermes-gateway-${createHash('sha256').update(lowered, 'utf8').digest('hex').slice(0, 16)}`;
-      expect(hermesGatewayPipeName(home), `Windows normcase: ${escaped(lowered)}; JS toLowerCase: ${escaped(home.toLowerCase())}`).toBe(hermes);
-    }
-  });
 });
 
 describe('Hermes gateway ownership on Windows', () => {
@@ -105,9 +77,37 @@ describe('Hermes gateway ownership on Windows', () => {
 });
 
 describe.runIf(process.platform === 'win32')('Hermes gateway pipe client on Windows', () => {
-  /** A pipe server in this process, so the kernel names this pid as its server. */
-  async function serve(answer: (request: string) => string): Promise<{ home: string; received: string[] }> {
-    const home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'bp-')));
+  /**
+   * Hermes's pipe name for a real home: `sha256(os.path.normcase(home))[:16]` (Hermes 0b10b9f,
+   * gateway/control_socket.py:40-41). On Windows, CPython 3.11 to 3.14 (Hermes needs >=3.11,<3.15)
+   * ntpath.normcase is `_winapi.LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_LOWERCASE, s.replace('/', '\\'))`.
+   */
+  async function hermesPipeName(home: string): Promise<{ name: string; key: string }> {
+    const koffi = await loadKoffi() as {
+      load(path: string): { func(convention: string, name: string, result: string, args: string[]): (...args: unknown[]) => number };
+    };
+    // LCMapStringEx(lpLocaleName, dwMapFlags, lpSrcStr, cchSrc, lpDestStr, cchDest, lpVersionInformation, lpReserved, sortHandle)
+    const lcMapStringEx = koffi.load('kernel32.dll').func('__stdcall', 'LCMapStringEx', 'int',
+      ['str16', 'uint32_t', 'void *', 'int', 'void *', 'int', 'void *', 'void *', 'intptr_t']);
+    const LCMAP_LOWERCASE = 0x100;
+    const source = Buffer.from(home.replaceAll('/', '\\'), 'utf16le');
+    const target = Buffer.alloc(source.length * 2);
+    // LOCALE_NAME_INVARIANT is the empty string.
+    const written = lcMapStringEx('', LCMAP_LOWERCASE, source, source.length / 2, target, target.length / 2, null, null, 0);
+    expect(written).toBeGreaterThan(0);
+    const key = target.subarray(0, written * 2).toString('utf16le');
+    return { name: `\\\\.\\pipe\\hermes-gateway-${createHash('sha256').update(key, 'utf8').digest('hex').slice(0, 16)}`, key };
+  }
+
+  /**
+   * A pipe server in this process, so the kernel names this pid as its server. With `leaf`, the
+   * home is the real directory `leaf` in a new temp directory, and the server takes the name
+   * Hermes gives that home.
+   */
+  async function serve(answer: (request: string) => string, leaf?: string): Promise<{ home: string; key?: string; received: string[] }> {
+    const base = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'bp-')));
+    const home = leaf === undefined ? base : await fs.mkdir(path.join(base, leaf)).then(() => fs.realpath(path.join(base, leaf)));
+    const hermes = leaf === undefined ? { name: hermesGatewayPipeName(home), key: undefined } : await hermesPipeName(home);
     const received: string[] = [];
     const server = net.createServer((socket) => {
       let buffer = '';
@@ -118,14 +118,26 @@ describe.runIf(process.platform === 'win32')('Hermes gateway pipe client on Wind
       });
       socket.on('error', () => {});
     });
-    await new Promise<void>((resolve, reject) => server.once('error', reject).listen(hermesGatewayPipeName(home), resolve));
+    await new Promise<void>((resolve, reject) => server.once('error', reject).listen(hermes.name, resolve));
     cleanup.push(async () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
-      await fs.rm(home, { recursive: true, force: true });
+      await fs.rm(base, { recursive: true, force: true });
     });
-    return { home, received };
+    return { home, key: hermes.key, received };
   }
   const ready = (pid: number, home: string) => `${JSON.stringify({ ok: true, result: { pid, state: 'ready', served_profiles: [{ home }] } })}\n`;
+  const escaped = (text: string): string => text.replace(/[^\x20-\x7e]/gu, (letter) => `\\u{${letter.codePointAt(0)!.toString(16)}}`);
+
+  // #712: letters whose lower case is longer than one UTF-16 unit (U+0130) or depends on the
+  // next letter (a final U+03A3). The SDK must dial the pipe that Hermes serves for such a home.
+  for (const leaf of ['\u0130lker', '\u039A\u03A9\u03A3']) {
+    it(`dials the pipe Hermes names for a home ending in ${escaped(leaf)}`, async () => {
+      const { home, key } = await serve(() => ready(process.pid, 'C:\\served'), leaf);
+      expect(await identifyHermesGateway(home, { owned: (pid) => pid === process.pid }),
+        `Windows normcase: ${escaped(key ?? '')}; JS toLowerCase: ${escaped(home.toLowerCase())}`)
+        .toEqual({ pid: process.pid, state: 'ready', servedHomes: ['C:\\served'] });
+    });
+  }
 
   it('writes nothing to a server the caller does not own and reports the kernel pid', async () => {
     const { home, received } = await serve(() => ready(process.pid, 'x'));
