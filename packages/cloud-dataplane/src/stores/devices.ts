@@ -89,13 +89,29 @@ const SELECT_COLUMNS =
  *
  * Every statement below is index-covered by its table's primary key, except
  * `device_assertion_replay`, whose PK leads with `tenant_id` and is swept by
- * expiry — a tenant-prefixed scan over live assertions, so no new index.
+ * expiry — a tenant-prefixed scan over live assertions, so no new index — and
+ * `e2ee_scope_key_package`, which deletes through its `(tenant_id, recipient)`
+ * index.
  */
 const DEVICE_STATE_DELETES = [
   'DELETE FROM device_presence WHERE tenant_id = $1 AND device_id = ANY($2::text[])',
   'DELETE FROM auth_nonce WHERE tenant_id = $1 AND device_id = ANY($2::text[])',
   'DELETE FROM inbound_dedup WHERE tenant_id = $1 AND device_id = ANY($2::text[])',
   'DELETE FROM device_assertion_replay WHERE tenant_id = $1 AND device_id = ANY($2::text[])',
+  // #654 E2c: the device's member state. Packages go first, while the
+  // registration still names the device's member. Security does not rest on
+  // this cleanup: the remaining members rotate (design §7.6). The package
+  // rows are locked in the order a put locks them, (scope_id, epoch,
+  // recipient) in code point order, so a racing put cannot deadlock.
+  `DELETE FROM e2ee_scope_key_package p USING (
+     SELECT scope_id, epoch, recipient FROM e2ee_scope_key_package
+      WHERE tenant_id = $1 AND recipient IN (
+        SELECT member_id FROM e2ee_member_key WHERE tenant_id = $1 AND device_id = ANY($2::text[]))
+      ORDER BY scope_id COLLATE "C", epoch, recipient COLLATE "C"
+      FOR UPDATE) locked
+    WHERE p.tenant_id = $1 AND p.scope_id = locked.scope_id AND p.epoch = locked.epoch AND p.recipient = locked.recipient`,
+  'DELETE FROM e2ee_pairing_mac WHERE tenant_id = $1 AND device_id = ANY($2::text[])',
+  'DELETE FROM e2ee_member_key WHERE tenant_id = $1 AND device_id = ANY($2::text[])',
 ] as const;
 
 /**

@@ -7,7 +7,7 @@ const reply: Delivery['route'] = { kind: 'reply', inboundId: 'inbound-key' };
 const accepted: SendResult = { result: 'accepted', platformMessageId: 'platform-1' };
 const retryable: SendResult = { result: 'rejected', code: '429', retryable: true };
 function delivery(fields: Partial<Delivery> = {}): Delivery {
-  return { id: deliveryId('task', 'message', reply), taskId: 'task', messageId: 'message', body: 'Final reply',
+  return { id: deliveryId('task', 'message', reply), taskId: 'task', turnId: 'turn', messageId: 'message', body: 'Final reply',
     conversation: { kind: 'direct', id: 'main' }, channel: 'fake', route: reply, state: 'pending', attempts: 0, ...fields };
 }
 

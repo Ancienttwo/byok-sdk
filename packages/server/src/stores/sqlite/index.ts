@@ -49,6 +49,7 @@ import {
   type BlobWriteResult,
   type CloudCrypto,
   type CloudStores,
+  type E2eeMemberStore,
   type RequestReceipt,
   type RequestReceiptStore,
   type TaskAttempt,
@@ -82,6 +83,7 @@ import type { WakeStore } from '../../wakes/store';
 import { WakeHookMissingError, type WakeConsumer } from '../../wakes/types';
 
 import { SqliteDeviceDirectory, DEVICE_SCHEMA } from './device-directory';
+import { E2EE_MEMBER_PROJECTIONS, E2EE_MEMBER_SCHEMA, SqliteE2eeMemberStore } from './e2ee-member';
 
 const RECEIPT_SCHEMA = `
 CREATE TABLE request_receipt (
@@ -188,6 +190,7 @@ export interface SqliteEmbeddedStores {
   readonly core: CoreStores;
   readonly cloud: CloudStores;
   readonly blobContentProxy: BlobContentProxy;
+  readonly e2eeMember: E2eeMemberStore;
   wakes(tenant: TenantId): WakeStore;
   close(): Promise<void>;
 }
@@ -298,6 +301,8 @@ class SqliteCoordinator {
           throw new WakeHookMissingError();
         }
         this.db.exec('CREATE INDEX IF NOT EXISTS task_attempt_status_idx ON task_attempt (tenant_id, status, cancellation_requested_at, task_id)');
+        this.db.exec(E2EE_MEMBER_SCHEMA);
+        for (const projection of E2EE_MEMBER_PROJECTIONS) assertProjection(projection);
         assertProjection('tenant_id, device_id, product_id, machine_id, device_name, device_public_key, proof_key_id, proof_key_epoch, capabilities_json, harnesses_json FROM device_directory');
         const receiptColumns = this.db.prepare('PRAGMA table_info(request_receipt)').all() as unknown as
           { name: string; type: string; notnull: number; pk: number }[];
@@ -1414,6 +1419,7 @@ export function createSqliteEmbeddedStores(
     core,
     cloud,
     blobContentProxy,
+    e2eeMember: new SqliteE2eeMemberStore(coordinator, dependencies.clock),
     wakes: tenant => new SqliteWakeStore(coordinator, tenant),
     close: () => coordinator.close(),
   };

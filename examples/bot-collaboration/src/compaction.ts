@@ -20,7 +20,7 @@ export const botCompactVeto: CompactVeto = (ledger, key) => {
   // Read only: `stateOf` would create the collaboration row inside the compaction.
   const state = ledger.application.collaboration as unknown as CollaborationState | undefined;
   if (state === undefined) return undefined;
-  if (state.version !== 2) return 'Unsupported Bot collaboration state version';
+  if (state.version !== 3) return 'Unsupported Bot collaboration state version';
   const turn = Object.hasOwn(state.turns, key) ? state.turns[key]! : undefined;
   if (!turn) return undefined;
   // A Turn without an intent, for example one that ended before promotion, has no K4 result left to report.

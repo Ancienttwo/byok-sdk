@@ -12,9 +12,12 @@ export { addBatchTurns, addTurn, json } from './rules/turn';
 export type { Budget, Card, Question, Rejection, ReplyEntry, Turn, TurnFields, Verdict } from './rules/turn';
 export type { AcceptedReply, Batch, Delegation, DelegationCancel, Unit } from './rules/delegation';
 
-/** Version 2 has no routine state. Bot routines are K4 routines with the `bot-routine` occurrence hook. */
+/**
+ * Version 3 (#798): retention moves settled rows out of this state into K4 application rows, so a version 2 writer
+ * would read archived evidence as absent. Bot routines are K4 routines with the `bot-routine` occurrence hook.
+ */
 export interface CollaborationState {
-  version: 2; team: TeamState; turns: Record<string, Turn>; budgets: Record<string, Budget>;
+  version: 3; team: TeamState; turns: Record<string, Turn>; budgets: Record<string, Budget>;
   delegations: Record<string, Delegation>; batches: Record<string, Batch>; units: Record<string, Unit>;
   replies: Record<string, AcceptedReply>;
   schemas: Record<string, ResultSchema>; questions: Record<string, Question>; cards: Record<string, Card>;
@@ -31,13 +34,16 @@ export interface CollaborationState {
 }
 export function stateOf(application: Record<string, Json>): CollaborationState {
   if (application.collaboration === undefined) application.collaboration = json({
-    version: 2, team: emptyTeam(), turns: {}, budgets: {}, delegations: {}, batches: {}, units: {}, replies: {}, schemas: {}, questions: {}, cards: {},
+    version: 3, team: emptyTeam(), turns: {}, budgets: {}, delegations: {}, batches: {}, units: {}, replies: {}, schemas: {}, questions: {}, cards: {},
     rejected: [], audit: [], sequence: 0,
   });
   const version = (application.collaboration as unknown as { version?: unknown } | null)?.version;
   // No migration: version 1 kept Bot routines in this state, and K4 owns them now.
   if (version === 1) throw new Error('Bot collaboration state version 1 is not supported. Bot routines moved to K4 routines. '
     + 'Restore a ledger backup made before this change, or start a new ledger.');
-  if (version !== 2) throw new Error('Unsupported Bot collaboration state version');
+  // No migration: a version 2 writer cannot read archived rows, so the two versions never share a ledger.
+  if (version === 2) throw new Error('Bot collaboration state version 2 is not supported. Retention moved settled rows out of the state. '
+    + 'Restore a ledger backup made before this change, or start a new ledger.');
+  if (version !== 3) throw new Error('Unsupported Bot collaboration state version');
   return application.collaboration as unknown as CollaborationState;
 }

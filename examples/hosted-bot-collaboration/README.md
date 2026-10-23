@@ -3,9 +3,9 @@
 Private reference example for #793 (#606 D2). It is the hosted (H) adapter of the K8 collaboration
 commit contract (`examples/bot-collaboration`, #739 D1), on Node and Postgres.
 
-Status: the commit store only. The SDK submit path, the message consumer, result reconciliation, the
-command entry, the routine scheduler and retention come in later slices of #793. Do not use this
-example as a deployed Host yet.
+Status: the commit store and the intent submitter (D2b-1). The Turn freeze in the sync step (D2b-2), the
+message consumer, result reconciliation, the command entry, the routine scheduler and retention come in
+later slices of #793. Do not use this example as a deployed Host yet.
 
 ## Commit store
 
@@ -19,6 +19,27 @@ transaction. The transaction holds the state change, the command record and the 
   a `scope_mismatch` conflict.
 - A scope row of an unknown store version is refused before any write. `read()` refuses it too.
 
+## Intent submitter
+
+`freezeIntent` saves one intent for a Turn: the frozen SDK input and the stable task id `taskId(turnId, 0)`
+of K4. The caller holds the scope lock. D2b-2 calls it in the Turn's sync transaction.
+
+`HostedSubmitter.run()` takes the due rows and runs the K4 rules on them: the FIFO head (`fifoHeads`), the
+queued expiry (`queuedExpiry`) and the frozen submit (`submitFrozen`).
+
+- A try first raises `tries` and takes a lease, under the scope lock. Then it calls the SDK.
+- Every write after the SDK call is fenced: `WHERE tries = $mine AND submission <> 'delivered'`. A stale
+  submitter cannot overwrite a newer try, and a delivered row never changes back.
+- A row that was never tried expires at `wait_until`. A tried row past `wait_until` is never submitted
+  again. It gets `cancel_reason = 'expired'` and no conclusion, because an SDK attempt can still exist.
+  Reconciliation (D2d) checks the attempt first.
+- A delivered head holds its agent's queue until it has a conclusion. The scan returns only FIFO heads, so the
+  followers of a queue never fill a pass ahead of a due head.
+- A row whose try throws outside the SDK call is backed off, and the pass goes on. `run()` reports it in
+  `failed`. A scope of an unknown store version is not written at all.
+- The SDK input never changes, and the task id never changes. After a lost response, a readback finds the
+  offer, and no second submit runs.
+
 ## Tables
 
 `src/ddl.ts` holds the DDL. The statements are unqualified, and `migrate()` runs them in the store's own
@@ -31,6 +52,7 @@ schema. The SDK tables stay under the SDK migrations. This example never writes 
 | `entry` | element of a list (audit, rejected, team note, home operation, room message), keyed by position |
 | `command` | command record: the dedup evidence, the first result and the retention root (nullable) |
 | `outbox` | projection or delivery that a commit wrote |
+| `intent` | Turn intent: the frozen SDK input, the stable task id, the FIFO order and the submit state |
 
 Each scope and each key is stored as `JSON.stringify(value)`, so two values that UTF-8 would merge stay
 apart, and a NUL is safe. Each body is `json` text, so the stored bytes keep their key order. `ordinal`
@@ -57,11 +79,17 @@ SDK call.
 
 ```sh
 docker compose -f docker-compose.test.yml up -d --wait
-BYOK_TEST_POSTGRES_URL=postgres://byok:byok@127.0.0.1:5433/byok_test bun run --cwd examples/hosted-bot-collaboration test
+BYOK_TEST_POSTGRES_URL=postgres://byok:byok@127.0.0.1:5433/byok_test BYOK_TEST_S3_ENDPOINT=http://127.0.0.1:9100 \
+  bun run --cwd examples/hosted-bot-collaboration test
 ```
 
-Without `BYOK_TEST_POSTGRES_URL`, the Postgres suites skip. With `BYOK_REQUIRE_DATAPLANE=1`, a missing URL
-is a failure. The CI `dataplane` job sets both and runs these suites.
+Without `BYOK_TEST_POSTGRES_URL`, the Postgres suites skip. The submitter suite also needs
+`BYOK_TEST_S3_ENDPOINT` (`http://127.0.0.1:9100` with the compose file), because the SDK composition takes an
+object store. With `BYOK_REQUIRE_DATAPLANE=1`, a missing value is a failure. The CI `dataplane` job sets all
+three and runs these suites.
 
 - The D1 commit vectors run on the store and on a reference subject (the pure rules in memory).
+- The submitter tests use the hosted SDK composition (`createByokCloud` over `createPostgresCloudStores`, with
+  the SDK migrations in its own schema), served over loopback HTTP, and a real daemon paired through the
+  public pairing route. The intents are frozen directly, because D2b ships no product entry.
 - After each step of two command scripts, the store's state bytes equal the reference subject's state bytes.
