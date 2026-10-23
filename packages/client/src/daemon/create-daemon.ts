@@ -2167,7 +2167,6 @@ export function buildDaemonWithAdapters(
       const bytes = encodeEnvelope(envelope);
       await activeJournal!.recordTerminal({ taskId: task.taskId, terminalType: 'failed', bytes, payloadHash: journalHash(bytes),
         truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString(),
-        ...(isSealedMessageType(envelope.type) ? { sealed: true } : {}),
         recovery: { disposition: interrupted ? 'interrupted' : 'abandoned', reason } });
     };
     if (activeJournal && journalIdentity) {
@@ -2375,8 +2374,7 @@ export function buildDaemonWithAdapters(
         const bytes = plainBytes ?? encodeEnvelope(envelope);
         try {
           await activeJournal.recordTerminal({ taskId, terminalType: terminalKindOf(envelope.type)!, bytes,
-            payloadHash: journalHash(bytes), truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString(),
-            ...(isSealedMessageType(envelope.type) ? { sealed: true } : {}) });
+            payloadHash: journalHash(bytes), truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });
           // Read the first immutable winner, not an attempted replacement candidate.
           const durableTerminal = (await activeJournal.listPendingTerminals(journalIdentity)).find((row) => row.taskId === taskId);
           if (!durableTerminal || durableTerminal.truthState !== 'pending') return;
@@ -2403,8 +2401,7 @@ export function buildDaemonWithAdapters(
           const failure = sealedTasks === undefined ? plainFailure : await sealedTasks.sealRecovered(offer, plainFailure);
           const failureBytes = encodeEnvelope(failure);
           await activeJournal.recordTerminal({ taskId, terminalType: 'failed', bytes: failureBytes,
-            payloadHash: journalHash(failureBytes), truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString(),
-            ...(isSealedMessageType(failure.type) ? { sealed: true } : {}) });
+            payloadHash: journalHash(failureBytes), truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });
           const durableFailure = (await activeJournal.listPendingTerminals(journalIdentity)).find((row) => row.taskId === taskId);
           if (!durableFailure || durableFailure.truthState !== 'pending') return;
           const decoded = decodeEnvelope(durableFailure.bytes);
@@ -2457,9 +2454,10 @@ export function buildDaemonWithAdapters(
       }
       if (!activeJournal || !journalIdentity) throw new Error('durable journal unavailable');
       const { agentRef } = envelope.payload as { agentRef?: AgentRef };
-      // A sealed offer this device cannot hold is one it cannot open. The
+      // A sealed offer this device cannot hold is one it cannot open; a device
+      // with no keyring declines every sealed offer for want of a key. The
       // closed code is a value gate on the server's `sealed-payload-v1`.
-      const code = 'sealed_open_failed';
+      const code = sealedTasks === undefined ? 'sealed_key_unavailable' : 'sealed_open_failed';
       const serverCapabilities = connection?.getServerCapabilities() ?? [];
       const closedCode = isSealedMessageType(envelope.type)
         && requiredReceiverCapabilities('task.decline', { reason: code, code }).every((flag) => serverCapabilities.includes(flag));

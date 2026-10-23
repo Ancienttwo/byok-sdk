@@ -82,6 +82,12 @@ const SEALED_OUTPUT_TYPE: Partial<Record<MessageType, SealedMessageType>> = Obje
     .map((type) => [SEALED_SPLIT_TABLE[type].plainType, type]),
 );
 
+/** The terminal types; each must reach the wire in some form, or the task never settles. */
+const TERMINAL_TYPES: ReadonlySet<MessageType> = new Set(['task.complete', 'task.fail', 'task.cancelled', 'task.decline']);
+
+/** A ciphertext upload failed. Transient: the caller may seal again later. */
+class SealedUploadError extends Error {}
+
 /** Fields a `task.fail` keeps when a task that cannot seal reports `sealed_key_unavailable`. */
 const UNSEALABLE_FAIL_FIELDS = ['harnessId', 'usage', 'agentRef', 'agentHomeProjection', 'agentHomeMemoryChange'] as const;
 
@@ -201,8 +207,11 @@ export class SealedTasks {
    * table's `inline` limit, named by a fresh `artifactId`. `undefined` when no
    * sealing key is available.
    */
-  sealArtifact(taskId: string, artifact: { readonly name: string; readonly contentType: string; readonly inline: string }): Promise<Envelope | undefined> {
-    return this.#seal(taskId, this.#tasks.get(taskId)!, 'task.artifact', { ...artifact, artifactId: crypto.randomUUID() });
+  async sealArtifact(taskId: string, artifact: { readonly name: string; readonly contentType: string; readonly inline: string }): Promise<Envelope | undefined> {
+    const sealed = await this.#seal(taskId, this.#tasks.get(taskId)!, 'task.artifact', { ...artifact, artifactId: crypto.randomUUID() });
+    // Local view only: a plaintext artifact this large has no valid wire form.
+    if (sealed !== undefined) this.#plainBySealedId.set(sealed.id, { ...sealed, type: 'task.artifact', payload: artifact } as Envelope);
+    return sealed;
   }
 
   /**
@@ -229,7 +238,19 @@ export class SealedTasks {
 
   async #sealOutbound(task: SealedTask, envelope: Envelope): Promise<Envelope | undefined> {
     if (isSealedMessageType(envelope.type) || isClosedPlainForm(envelope)) return envelope;
-    const sealed = await this.#seal(envelope.task_id!, task, envelope.type, envelope.payload as JsonObject);
+    const taskId = envelope.task_id!;
+    const payload = envelope.payload as JsonObject;
+    let sealed: Envelope | undefined;
+    try {
+      sealed = await this.#seal(taskId, task, envelope.type, payload);
+    } catch (error) {
+      if (error instanceof SealedUploadError || !TERMINAL_TYPES.has(envelope.type)) throw error;
+      // A terminal that cannot be sealed as it is (over the plaintext limit,
+      // or not a valid sealed message) would hold the task's terminal commit
+      // forever. Settle it with a small sealed failure instead.
+      console.error(`[byok/client] ${envelope.type} for sealed task ${taskId} replaced by a sealed failure: ${error instanceof Error ? error.message : String(error)}`);
+      sealed = await this.#seal(taskId, task, 'task.fail', { reason: 'terminal_result_unsealable', retryable: false, ...pick(payload, UNSEALABLE_FAIL_FIELDS) });
+    }
     if (sealed === undefined) return this.#unsealable(envelope);
     this.#plainBySealedId.set(sealed.id, envelope);
     return sealed;
@@ -257,11 +278,19 @@ export class SealedTasks {
     });
     const sealed = header.paddedLength <= SEALED_INLINE_MAX_PADDED_LENGTH
       ? { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') }
-      : { ...header, ciphertextRef: omit(await this.options.blobs.upload(ciphertext) as unknown as JsonObject, ['url']) };
+      : { ...header, ciphertextRef: omit(await this.#upload(ciphertext) as unknown as JsonObject, ['url']) };
     return createEnvelope(type, { ...kept, sealed } as never, { taskId });
   }
 
-  /** The closed plaintext form of a terminal that cannot be sealed (decision 12d). */
+  async #upload(ciphertext: Uint8Array): Promise<BlobRef> {
+    try {
+      return await this.options.blobs.upload(ciphertext);
+    } catch (error) {
+      throw new SealedUploadError(`ciphertext upload failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /** The closed plaintext form of a terminal that has no sealing key (decision 12d). */
   #unsealable(envelope: Envelope): Envelope | undefined {
     const taskId = envelope.task_id!;
     const payload = envelope.payload as JsonObject;

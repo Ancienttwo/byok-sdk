@@ -263,6 +263,48 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     }
   });
 
+  it('seals an approval request, a cancel and a runtime failure', async () => {
+    const keyring = new TestKeyring();
+    const { server, adapter, deviceId } = await start({ keyring });
+    server.send(await sealedOffer(keyring, 'approval', server.nextSeq(), deviceId, 'run'));
+    server.send(await sealedOffer(keyring, 'failing', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(2), BUDGET_MS);
+    const session = (taskIndex: number) => adapter.sessions[taskIndex]!;
+
+    session(0).emit({ type: 'needs_approval', summary: 'secret approval summary' });
+    const approval = await server.waitFor((envelope) => envelope.type === 'task.await_approval_sealed', BUDGET_MS);
+    expect(approval.payload).toMatchObject({ approvalId: expect.any(String) });
+    expect(await openOutput(keyring, approval, deviceId)).toEqual({ summary: 'secret approval summary' });
+    server.send(createEnvelope('task.cancel', { reason: 'user stopped it' }, { taskId: approval.task_id!, seq: server.nextSeq() }));
+    const cancelled = await server.waitFor((envelope) => envelope.type === 'task.cancelled_sealed', BUDGET_MS);
+    expect(cancelled.task_id).toBe(approval.task_id);
+    expect(await openOutput(keyring, cancelled, deviceId)).toEqual({ reason: expect.any(String) });
+
+    session(1).fail(new Error('secret runtime failure'));
+    const failed = await server.waitFor((envelope) => envelope.type === 'task.fail_sealed', BUDGET_MS);
+    expect(await openOutput(keyring, failed, deviceId)).toEqual({ reason: expect.any(String) });
+
+    const wire = JSON.stringify(server.received);
+    expect(wire).not.toContain('secret approval summary');
+    expect(server.received.map((envelope) => envelope.type)).not.toEqual(expect.arrayContaining(['task.await_approval']));
+  });
+
+  it('settles a terminal over the sealed plaintext limit with a small sealed failure', async () => {
+    const keyring = new TestKeyring();
+    const { server, adapter, deviceId } = await start({ keyring });
+    server.send(await sealedOffer(keyring, 'huge', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      adapter.sessions[0]!.emit({ type: 'progress', text: 'p'.repeat(SEALED_PAYLOAD_MAX_CONTENT_LENGTH + 1024) });
+      adapter.sessions[0]!.emit({ type: 'turn_end' });
+      const failed = await server.waitFor((envelope) => envelope.type === 'task.fail_sealed' && envelope.task_id === 'huge', 15_000);
+      expect(await openOutput(keyring, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
+    } finally {
+      diagnostic.mockRestore();
+    }
+  }, 30_000);
+
   it('reports sealed_key_unavailable in plaintext when the sealing key is gone at the terminal', async () => {
     const keyring = new TestKeyring();
     const { server, adapter, deviceId } = await start({ keyring });

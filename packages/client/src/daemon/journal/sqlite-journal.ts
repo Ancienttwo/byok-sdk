@@ -32,7 +32,7 @@
 import { existsSync, mkdirSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
-import { SEALED_INLINE_MAX_PADDED_LENGTH } from '@byok-sdk/protocol';
+import { SEALED_INLINE_MAX_PADDED_LENGTH, isSealedMessageType } from '@byok-sdk/protocol';
 import {
   journalHash,
   type JournalIdentity,
@@ -96,6 +96,16 @@ const SEALED_ENVELOPE_MARGIN_BYTES = 64 * 1024;
  * transition records keep `maxRecordBytes`.
  */
 const ENVELOPE_RECORD_FLOOR_BYTES = Math.ceil(((SEALED_INLINE_MAX_PADDED_LENGTH + SEALED_AEAD_TAG_BYTES) * 4) / 3) + SEALED_ENVELOPE_MARGIN_BYTES;
+
+/** Whether canonical envelope bytes are a sealed message type (#654); read only for a record above `maxRecordBytes`. */
+function isSealedEnvelope(bytes: string): boolean {
+  try {
+    const { type } = JSON.parse(bytes) as { type?: unknown };
+    return typeof type === 'string' && isSealedMessageType(type);
+  } catch {
+    return false;
+  }
+}
 
 /** Default bound on how long a write waits for the write lock before failing. */
 export const DEFAULT_JOURNAL_BUSY_TIMEOUT_MS = 5_000;
@@ -716,7 +726,7 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
    */
   recordTerminal(record: LocalTerminalRecord): Promise<void> {
     return this.#enqueue('recordTerminal', () => {
-      this.#assertTerminalBytes(record.bytes, record.payloadHash, record.sealed === true);
+      this.#assertTerminalBytes(record.bytes, record.payloadHash);
       this.#transaction(() => {
         this.#requireTask(record.taskId, 'recordTerminal');
         const existing = this.#db.prepare('SELECT * FROM journal_terminal WHERE task_id = ?')
@@ -741,14 +751,14 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
     });
   }
 
-  #assertTerminalBytes(bytes: string, payloadHash: string, sealed = false): void {
+  #assertTerminalBytes(bytes: string, payloadHash: string): void {
     if (typeof bytes !== 'string' || journalHash(bytes) !== payloadHash) {
       throw new Error('terminal bytes do not match their canonical hash');
     }
-    const bound = sealed ? Math.max(this.#maxRecordBytes, ENVELOPE_RECORD_FLOOR_BYTES) : this.#maxRecordBytes;
-    if (byteLength(bytes) > bound) {
-      throw new JournalRecordTooLargeError('terminal bytes', byteLength(bytes), bound);
-    }
+    const length = byteLength(bytes);
+    if (length <= this.#maxRecordBytes) return;
+    const bound = isSealedEnvelope(bytes) ? Math.max(this.#maxRecordBytes, ENVELOPE_RECORD_FLOOR_BYTES) : this.#maxRecordBytes;
+    if (length > bound) throw new JournalRecordTooLargeError('terminal bytes', length, bound);
   }
 
   #insertTerminal(record: LocalTerminalRecord): void {
