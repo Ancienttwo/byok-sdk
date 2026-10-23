@@ -4267,6 +4267,7 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     payload: z.ZodObject<{
         name: z.ZodString;
         contentType: z.ZodString;
+        artifactId: z.ZodUUID;
         sealed: z.ZodObject<{
             v: z.ZodLiteral<1>;
             suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
@@ -6862,6 +6863,7 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
         payload: z.ZodObject<{
             name: z.ZodString;
             contentType: z.ZodString;
+            artifactId: z.ZodUUID;
             sealed: z.ZodObject<{
                 v: z.ZodLiteral<1>;
                 suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
@@ -11082,10 +11084,15 @@ export declare const TaskProgressSealedPayloadSchema: z.ZodObject<{
     }, z.core.$strict>;
 }, z.core.$strict>;
 export type TaskProgressSealedPayload = z.infer<typeof TaskProgressSealedPayloadSchema>;
-/** daemon -> server: an inline artifact of a sealed task. `inline` is sealed; a blob artifact is not carried in v1. */
+/**
+ * daemon -> server: an inline artifact of a sealed task. `inline` is sealed; a
+ * blob artifact is not carried in v1. `artifactId` names the write in the AAD
+ * and the content MAC, because two artifacts of one task may share a `name`.
+ */
 export declare const TaskArtifactSealedPayloadSchema: z.ZodObject<{
     name: z.ZodString;
     contentType: z.ZodString;
+    artifactId: z.ZodUUID;
     sealed: z.ZodObject<{
         v: z.ZodLiteral<1>;
         suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
@@ -14142,6 +14149,7 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
     readonly 'task.artifact_sealed': z.ZodObject<{
         name: z.ZodString;
         contentType: z.ZodString;
+        artifactId: z.ZodUUID;
         sealed: z.ZodObject<{
             v: z.ZodLiteral<1>;
             suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
@@ -15090,7 +15098,7 @@ export declare const SEALED_SPLIT_TABLE: Readonly<{
     readonly 'task.artifact_sealed': {
         readonly plainType: 'task.artifact';
         readonly category: 'task-output';
-        readonly identity: readonly ["name"];
+        readonly identity: readonly ["artifactId"];
         readonly moved: readonly ["inline"];
         readonly forbidden: readonly ["blobRef"];
         readonly digests: {

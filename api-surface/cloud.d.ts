@@ -351,11 +351,11 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
         freshnessCursor: z.ZodOptional<z.ZodString>;
     }, z.core.$strict>>;
 }, z.core.$strict>;
+export type AgentExecutionInput = z.infer<typeof AgentExecutionInputSchema>;
 /**
- * The sealed lane of the same execution (#654): the payload names `sealing`,
- * and carries the sealed instruction when the task seals its input. The same
- * rules apply. `submitAgentExecution` picks this schema when the payload has
- * `sealing` or `sealed`, so a sealing policy is never stripped.
+ * The sealed counterpart (#654): the payload is a
+ * `task.offer_for_agent_with_egress_fresh_sealed` payload with the same
+ * rules. Submit it through `submitSealedAgentExecution`.
  */
 export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
     taskId: z.ZodString;
@@ -500,7 +500,7 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
         freshnessCursor: z.ZodOptional<z.ZodString>;
     }, z.core.$strict>>;
 }, z.core.$strict>;
-export type AgentExecutionInput = z.infer<typeof AgentExecutionInputSchema> | z.infer<typeof SealedAgentExecutionInputSchema>;
+export type SealedAgentExecutionInput = z.infer<typeof SealedAgentExecutionInputSchema>;
 // ==== @byok-sdk/cloud dist/agent-home-projections.d.ts ====
 /**
  * Durable task-free Agent-home projection facts.
@@ -1241,7 +1241,7 @@ import { type AgentMessageDraftCursor, type AgentMessageDraftReadback } from './
 import { type MaintenanceInput, type MaintenanceReport } from './maintenance';
 import type { DeviceAssertionReplayAuthority } from '@byok-sdk/core';
 import { type TaskAgentMessage } from './task-agent-message';
-import { type AgentExecutionInput } from './agent-execution';
+import { type AgentExecutionInput, type SealedAgentExecutionInput } from './agent-execution';
 /**
  * `createByokCloud` — the hosted device surface, assembled.
  *
@@ -1402,21 +1402,16 @@ export type LimitedPublicRoute = {
 };
 /** `true` admits the request; `false` answers 429 before the handler or any store runs. */
 export type PublicRouteLimiter = (route: LimitedPublicRoute, request: Request) => boolean | Promise<boolean>;
-/**
- * #654: an offer payload that carries `sealing` or `sealed` travels as the
- * sealed offer type of its lane (`task.offer_sealed`, …), gated on the
- * device's `sealed-payload-v1`. A plaintext lane never strips them.
- */
 export interface EnqueueOfferInput {
     /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
     readonly taskId?: string;
-    readonly payload: TaskOfferPayload | TaskOfferSealedPayload;
+    readonly payload: TaskOfferPayload;
 }
 export interface EnqueueToolsetOfferInput {
     /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
     readonly taskId?: string;
     /** Strict control payload containing logical ids only; executable MCP definitions are not part of this type. */
-    readonly payload: TaskOfferWithToolsetsPayload | TaskOfferWithToolsetsSealedPayload;
+    readonly payload: TaskOfferWithToolsetsPayload;
 }
 /**
  * Strict Agent dispatch input. The device path is intentionally a separate
@@ -1432,7 +1427,7 @@ export interface AgentDispatchInput {
      * optional; this host lane does not: a fresh Agent execution is admitted only
      * through {@link ByokCloud.submitAgentExecution}.
      */
-    readonly payload: (TaskOfferForAgentPayload | TaskOfferForAgentSealedPayload) & {
+    readonly payload: TaskOfferForAgentPayload & {
         readonly sessionRef: string;
     };
 }
@@ -1458,7 +1453,40 @@ export interface PreparedDispatchInput {
 export interface AgentEgressDispatchInput {
     /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
     readonly taskId?: string;
-    readonly payload: TaskOfferForAgentWithEgressPayload | TaskOfferForAgentWithEgressSealedPayload;
+    readonly payload: TaskOfferForAgentWithEgressPayload;
+    /** Host-only product destination/freshness authority; never serialized to the daemon. */
+    readonly agentMessageContext?: AgentMessageServerContext;
+}
+/**
+ * Sealed offer inputs (#654). Each sealed wire type has its own entry, as
+ * {@link PreparedDispatchInput} does: a plaintext lane refuses `sealing` and
+ * `sealed`, so a caller cannot reach the plaintext lane by a missing field,
+ * and no lane strips a sealing policy.
+ */
+export interface EnqueueSealedOfferInput {
+    /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
+    readonly taskId?: string;
+    readonly payload: TaskOfferSealedPayload;
+}
+/** The sealed lane of {@link EnqueueToolsetOfferInput} (#654). */
+export interface EnqueueSealedToolsetOfferInput {
+    /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
+    readonly taskId?: string;
+    readonly payload: TaskOfferWithToolsetsSealedPayload;
+}
+/** The sealed lane of {@link AgentDispatchInput} (#654). Resume-only, as the plaintext lane is. */
+export interface SealedAgentDispatchInput {
+    /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
+    readonly taskId?: string;
+    readonly payload: TaskOfferForAgentSealedPayload & {
+        readonly sessionRef: string;
+    };
+}
+/** The sealed lane of {@link AgentEgressDispatchInput} (#654). */
+export interface SealedAgentEgressDispatchInput {
+    /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
+    readonly taskId?: string;
+    readonly payload: TaskOfferForAgentWithEgressSealedPayload;
     /** Host-only product destination/freshness authority; never serialized to the daemon. */
     readonly agentMessageContext?: AgentMessageServerContext;
 }
@@ -1591,6 +1619,18 @@ export interface ByokCloud {
      * A delivered taskId conflicts; recover through exact offer readback.
      */
     submitAgentExecution(tenant: TenantId, input: AgentExecutionInput): Promise<EnqueuedOffer>;
+    /**
+     * Sealed offer lanes (#654). Each sends the sealed wire type of its
+     * plaintext sibling with the same rules, and needs every flag that
+     * `requiredReceiverCapabilities` names for it, `sealed-payload-v1` first.
+     * The plaintext siblings refuse `sealing` and `sealed` with
+     * `coordination_input_invalid`.
+     */
+    enqueueSealedOffer(tenant: TenantId, deviceId: string, input: EnqueueSealedOfferInput): Promise<EnqueuedOffer>;
+    enqueueSealedToolsetOffer(tenant: TenantId, deviceId: string, input: EnqueueSealedToolsetOfferInput): Promise<EnqueuedOffer>;
+    enqueueSealedAgentOffer(tenant: TenantId, deviceId: string, input: SealedAgentDispatchInput): Promise<EnqueuedOffer>;
+    enqueueSealedAgentEgressOffer(tenant: TenantId, deviceId: string, input: SealedAgentEgressDispatchInput): Promise<EnqueuedOffer>;
+    submitSealedAgentExecution(tenant: TenantId, input: SealedAgentExecutionInput): Promise<EnqueuedOffer>;
     /** Host control plane: request one policy-bound content read without a task fallback. */
     enqueueAgentContentRead(tenant: TenantId, deviceId: string, input: AgentContentReadInput): Promise<EnqueuedAgentControl>;
     /** Durable, task-free projection request for precisely one admitted device. */
@@ -1705,16 +1745,20 @@ export interface ByokCloud {
      *      {@link SteerRejectedError} `task_not_running`;
      *   4. the claim snapshot does not positively say `steer: true` ->
      *      {@link SteerRejectedError} `steer_unsupported_runtime`, including when
-     *      there is no snapshot at all;
-     *   5. a sealed steer (`{ steerId, sealed }`, #654) travels as
-     *      `task.steer_sealed`, and a device that did not durably advertise
-     *      `sealed-payload-v1` refuses it with `agent_capability_missing`.
+     *      there is no snapshot at all.
      *
      * Delivery is the same best-effort notification every control message has:
      * the enqueued envelope is durable, and whether the runtime acted on it is
      * observable only through that task's own later messages.
      */
-    steerTask(tenant: TenantId, taskId: string, payload: TaskSteerPayload | TaskSteerSealedPayload): Promise<EnqueuedAgentControl>;
+    steerTask(tenant: TenantId, taskId: string, payload: TaskSteerPayload): Promise<EnqueuedAgentControl>;
+    /**
+     * The sealed lane of {@link steerTask} (#654): `task.steer_sealed`, with the
+     * same gates in the same order, and then the device's durable
+     * `sealed-payload-v1` (`agent_capability_missing`). `steerTask` refuses
+     * `sealed` and `steerId`.
+     */
+    steerSealedTask(tenant: TenantId, taskId: string, payload: TaskSteerSealedPayload): Promise<EnqueuedAgentControl>;
     readTaskAttempt(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
     /** Read the original executable offer; missing/corrupt authority never becomes a guessed payload. */
     readTaskOffer(tenant: TenantId, taskId: string): Promise<TaskOfferReadback | undefined>;
