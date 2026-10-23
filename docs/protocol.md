@@ -1227,6 +1227,12 @@ that carries `ciphertextRef`, because it does not retain that blob. The cloud
 advertises `sealed-payload-v1` in `EventsPollResponse.capabilities`, because
 it accepts all seven sealed output types.
 
+**Drafts and `cloud-do`.** An `agent.message.draft` is plaintext. So the Host
+refuses a draft for a task whose offer has any `sealing`, with
+`agent_message_draft_invalid`. A sealed task must not go to
+`@byok-sdk/cloud-do`: it runs the model with platform keys, so it reads the
+instruction and the output in plaintext.
+
 ## 3. Task state machine (M1 gap #2, #5, #6)
 
 ```mermaid
