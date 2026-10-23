@@ -14,7 +14,7 @@ import type { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import { isCloudError } from '@byok-sdk/cloud';
 import { tenantId } from '@byok-sdk/core';
-import { createEnvelope } from '@byok-sdk/protocol';
+import { byokBlobUrlPath, createEnvelope } from '@byok-sdk/protocol';
 import { migrate } from '../migrate';
 import { createDataplaneScope, createObjectStorageScope, SKIP_DATAPLANE, SKIP_REASON } from './support/dataplane';
 import { readObjects, readTenantRows, record, scanObjects, scanPostgres, type Hits } from './support/plaintext-scan';
@@ -193,6 +193,36 @@ describe.skipIf(SKIP_DATAPLANE)(`task redaction on Postgres — ${SKIP_REASON}`,
       expect(await rowsMarkedBy(scope.pool, marksB)).toEqual(rowsB);
     } finally {
       vi.restoreAllMocks();
+      await scope.dispose();
+    }
+  }, 120_000);
+
+  it('keeps an object that another task still names and deletes the object only the redacted task names', async () => {
+    const scope = await createDataplaneScope();
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const storage = await createObjectStorageScope();
+      const host = await composeRedactionHost(scope.pool, storage);
+      const device = await pairDevice(host, TENANT_1);
+      const shared = `shared artifact ${randomUUID()}\n`;
+      const canaryA = createCanary('sa');
+      const canaryC = createCanary('sc');
+      const runA = await runTask(host, device, `task-a-${randomUUID()}`, canaryA, [shared, `artifact ${canaryA.text}\n`]);
+      // Task C names the same object through A's BlobRef.
+      const runC = await runTask(host, device, `task-c-${randomUUID()}`, canaryC, [runA.artifacts![0]!]);
+      const objectsBefore = await readObjects(storage);
+
+      expect((await host.cloud.redactTasks(TENANT_1, { taskIds: [runA.taskId] })).tasks)
+        .toMatchObject([{ taskId: runA.taskId, outcome: 'redacted', counts: { objectsDeleted: 1 } }]);
+      const objectsAfter = await readObjects(storage);
+      expect([...objectsBefore.keys()].filter((key) => !objectsAfter.has(key)))
+        .toEqual([`tenants/${TENANT_1}/objects/sha256/${runA.artifacts![1]!.hex}`]);
+      // Task C still downloads the shared object.
+      const response = await device.deviceFetch(byokBlobUrlPath(runC.artifacts![0]!.blobId), { method: 'GET' });
+      expect(response.status).toBe(200);
+      const { downloadUrl } = (await response.json()) as { downloadUrl: string };
+      expect(await (await globalThis.fetch(downloadUrl)).text()).toBe(shared);
+    } finally {
       await scope.dispose();
     }
   }, 120_000);

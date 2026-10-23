@@ -233,8 +233,15 @@ export function completeEnvelope(taskId: string, text: string, artifactRefs: rea
 export interface TaskRun {
   readonly taskId: string;
   readonly messageId: string;
-  /** The artifact's content hash as lowercase hex. */
+  /** The first artifact's content hash as lowercase hex. */
   readonly artifactHex: string;
+  readonly artifacts?: readonly UploadedArtifact[];
+}
+
+export interface UploadedArtifact {
+  readonly blobId: string;
+  readonly ref: unknown;
+  readonly hex: string;
 }
 
 /** Offer, claim, start, progress and one Agent message. The task is still running. */
@@ -253,11 +260,9 @@ export async function startTask(host: RedactionHost, device: Device, taskId: str
   return { taskId, messageId, artifactHex: '' };
 }
 
-/** Upload an artifact and send the terminal that names it. The disposition row stays unacked. */
-export async function completeTask(host: RedactionHost, device: Device, run: TaskRun, canary: Canary): Promise<TaskRun> {
-  const crypto = createWebCrypto();
-  const artifact = Buffer.from(`artifact ${canary.text}\n`, 'utf8');
-  const artifactHash = await crypto.sha256(artifact);
+async function uploadArtifact(device: Device, text: string): Promise<UploadedArtifact> {
+  const artifact = Buffer.from(text, 'utf8');
+  const artifactHash = await createWebCrypto().sha256(artifact);
   const reservation = randomUUID();
   const created = await device.deviceFetch(BYOK_BLOBS_PATH, {
     method: 'POST',
@@ -273,15 +278,39 @@ export async function completeTask(host: RedactionHost, device: Device, run: Tas
     headers: { 'idempotency-key': reservation },
   });
   expect(finalized.status, await finalized.text()).toBe(204);
-  await expectAccepted(device.send(completeEnvelope(run.taskId, canary.text, [
-    { blobId, contentHash: artifactHash, size: artifact.byteLength, contentType: 'text/plain' },
-  ])));
-  await expect(host.cloud.readTaskAttempt(device.tenant, run.taskId)).resolves.toMatchObject({ status: 'complete' });
-  return { ...run, artifactHex: artifactHash.slice('sha256:'.length) };
+  return {
+    blobId,
+    ref: { blobId, contentHash: artifactHash, size: artifact.byteLength, contentType: 'text/plain' },
+    hex: artifactHash.slice('sha256:'.length),
+  };
 }
 
-export async function runTask(host: RedactionHost, device: Device, taskId: string, canary: Canary): Promise<TaskRun> {
-  const run = await completeTask(host, device, await startTask(host, device, taskId, canary), canary);
+/**
+ * Send the terminal that names the artifacts. A text is uploaded first; an
+ * uploaded artifact is named again as it is. The disposition row stays unacked.
+ */
+export async function completeTask(
+  host: RedactionHost,
+  device: Device,
+  run: TaskRun,
+  canary: Canary,
+  artifactInputs: readonly (string | UploadedArtifact)[] = [`artifact ${canary.text}\n`],
+): Promise<TaskRun> {
+  const artifacts: UploadedArtifact[] = [];
+  for (const input of artifactInputs) artifacts.push(typeof input === 'string' ? await uploadArtifact(device, input) : input);
+  await expectAccepted(device.send(completeEnvelope(run.taskId, canary.text, artifacts.map((artifact) => artifact.ref))));
+  await expect(host.cloud.readTaskAttempt(device.tenant, run.taskId)).resolves.toMatchObject({ status: 'complete' });
+  return { ...run, artifactHex: artifacts[0]!.hex, artifacts };
+}
+
+export async function runTask(
+  host: RedactionHost,
+  device: Device,
+  taskId: string,
+  canary: Canary,
+  artifactInputs?: readonly (string | UploadedArtifact)[],
+): Promise<TaskRun> {
+  const run = await completeTask(host, device, await startTask(host, device, taskId, canary), canary, artifactInputs);
   await device.poll();
   return run;
 }
