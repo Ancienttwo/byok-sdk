@@ -1,6 +1,7 @@
 import { enqueue, hash, project, promoteOccurrence, type ApplicationRows, type HostLedger, type LedgerState } from '@byok-sdk/example-host-execution-core';
 import { stateOf, type Turn } from './model';
 import { intentFacts } from './delegation';
+import { turnIntentRetired } from './compaction';
 import { concludeRoutineTurn, routineOccurrence, type BotRoutine } from './routines';
 import { syncTurn, type SyncFacts, type SyncOptions } from './rules/sync';
 import { commitCommand, refuseRetired, type AdmittedIds, type Command, type CommandPorts } from './rules/commands';
@@ -43,10 +44,7 @@ export function syncTurnInLedger(ledger: HostLedger, s: LedgerState, rows: Appli
   const facts: SyncFacts = {
     intent: intentFacts(s).intent,
     executionStarted: id => { const row = s.intents[hash(id)]; return !!row && !!s.executions[row.taskId]?.started; },
-    // A routine Turn's intent tombstone expires with its slot, but K4 removed its occurrence with the intent, and a routine
-    // Turn is written with its occurrence. So a routine Turn without its occurrence is retired too.
-    retired: id => ledger.hasTombstone('intent', id, options.now) || turn.source === 'routine' && !s.occurrences[routineOccurrence(turn)]
-      ? 'result_retired' : rows.isRetired('turn', id) ? 'turn_retired' : undefined,
+    retired: id => turnIntentRetired(ledger, s, turn, options.now) ? 'result_retired' : rows.isRetired('turn', id) ? 'turn_retired' : undefined,
   };
   const step = syncTurn(stateOf(s.application), turn, facts, options, (key, value) => project(s, key, value));
   switch (step?.kind) {
