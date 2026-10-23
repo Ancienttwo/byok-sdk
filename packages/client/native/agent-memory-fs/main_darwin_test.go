@@ -64,8 +64,19 @@ func TestDarwinOpenRefusesRealNonLocalMount(t *testing.T) {
 		t.Skipf("non-local mount %s is unavailable: %v", autofsMount, err)
 	}
 	defer root.Close()
-	if err := checkRootVolume(root); err == nil {
-		t.Fatalf("%s passed the local volume check", autofsMount)
+	file, err := root.Open(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stat syscall.Statfs_t
+	err = syscall.Fstatfs(int(file.Fd()), &stat)
+	file.Close()
+	if err != nil || stat.Flags&mntLocal != 0 {
+		t.Fatalf("%s is not a non-local mount: flags=%#x error=%v", autofsMount, stat.Flags, err)
+	}
+	// Only the MNT_LOCAL branch returns this error.
+	if err := checkRootVolume(root); err == nil || err.Error() != "root volume is not local" {
+		t.Fatalf("%s volume check: %v", autofsMount, err)
 	}
 	opened, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: autofsMount, ExpectedIdentity: identityForTest(t, autofsMount)})
 	if opened != nil || failure == nil || failure.code != "unsafe_root" {
