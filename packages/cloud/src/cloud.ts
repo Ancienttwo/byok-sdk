@@ -1860,6 +1860,8 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     await retainSealedCiphertext(tenant, taskId, sealed);
     // One steer id names one steer: a retry finds the same mailbox row. A
     // retry that seals the same text again keeps the first ciphertext (§9.2).
+    // Mailbox retention deletes an acknowledged row while the task runs, so a
+    // later retry appends again. The device drops a steer id it has seen (12a).
     const messageId = uuidFromSha256(await options.crypto.sha256(
       new TextEncoder().encode(JSON.stringify({ domain: 'byok:task-steer-sealed', tenant, taskId, steerId: sealed.steerId })),
     ));
