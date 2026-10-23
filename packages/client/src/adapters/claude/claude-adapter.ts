@@ -153,11 +153,18 @@ export class ClaudeAdapter implements RuntimeAdapter {
     } catch (error) {
       return { kind: 'reject', reason: error instanceof Error ? error.message : String(error), retryable: false };
     }
-    let invocation: RuntimeInvocation;
+    let bin: ResolvedBin;
     try {
-      invocation = resolveRuntimeInvocation(this.resolveBin().command);
+      bin = this.resolveBin();
     } catch (error) {
       return { kind: 'reject', reason: error instanceof Error ? error.message : String(error), retryable: true };
+    }
+    let invocation: RuntimeInvocation;
+    try {
+      invocation = resolveRuntimeInvocation(bin.command);
+    } catch (error) {
+      // As Codex: the reason names the detect kind only, never a local path.
+      return { kind: 'reject', reason: `claude installation refused: ${classifyDetectError(error).kind}`, retryable: false };
     }
     return {
       kind: 'prepared',

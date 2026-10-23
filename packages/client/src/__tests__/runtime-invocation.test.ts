@@ -16,15 +16,17 @@ const npmShShim = '@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT
 
 const CLAUDE_ENTRY = 'node_modules\\@anthropic-ai\\claude-code\\cli.js';
 
-function windows(files: Record<string, string>, env: Record<string, string> = { Path: 'C:\\empty;C:\\npm;C:\\node' }) {
+function windows(files: Record<string, string | Error>, env: Record<string, string> = { Path: 'C:\\empty;C:\\npm;C:\\node' }) {
   const looked: string[] = [];
   const host: RuntimeInvocationHost = {
     platform: 'win32',
     env,
     isFile: file => { looked.push(file); return file in files; },
     readFile: file => {
-      if (!(file in files)) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
-      return files[file]!;
+      const body = files[file];
+      if (body instanceof Error) throw body;
+      if (body === undefined) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+      return body;
     },
   };
   return { host, looked };
@@ -85,12 +87,28 @@ describe('resolveRuntimeInvocation', () => {
     expect(resolveRuntimeInvocation('claude', sameDir.host).command).toBe('C:\\node\\node.exe');
   });
 
-  it('never searches the current directory and ignores the extensionless sh shim and the .ps1 shim', () => {
+  it('reports not-found, instead of letting the spawn search the current directory, and ignores the sh and .ps1 shims', () => {
     const { host, looked } = windows({ 'claude.cmd': npmNodeShim(CLAUDE_ENTRY), 'C:\\npm\\claude': '', 'C:\\npm\\claude.ps1': '' });
-    expect(resolveRuntimeInvocation('claude', host)).toEqual({ command: 'claude', args: [] });
+    expect(thrownCode(() => resolveRuntimeInvocation('claude', host))).toEqual({ code: 'ENOENT', kind: 'not-found' });
     expect(looked).not.toContain('claude.cmd');
     expect(looked).not.toContain('C:\\npm\\claude');
     expect(looked).not.toContain('C:\\npm\\claude.ps1');
+  });
+
+  it('reports a missing full path as not-found', () => {
+    const { host } = windows({});
+    expect(thrownCode(() => resolveRuntimeInvocation('D:\\tools\\claude.cmd', host))).toEqual({ code: 'ENOENT', kind: 'not-found' });
+  });
+
+  it('still finds a native .exe when PATHEXT omits it', () => {
+    const { host } = windows({ 'C:\\npm\\claude.exe': '' }, { PATH: 'C:\\npm', PATHEXT: '.CMD' });
+    expect(resolveRuntimeInvocation('claude', host)).toEqual({ command: 'C:\\npm\\claude.exe', args: [] });
+  });
+
+  it('keeps the code of a failed shim read and drops its local path', () => {
+    const denied = Object.assign(new Error("EACCES: permission denied, open 'C:\\Users\\someone\\npm\\claude.cmd'"), { code: 'EACCES' });
+    const { host } = windows({ 'C:\\npm\\claude.cmd': denied });
+    expect(thrownCode(() => resolveRuntimeInvocation('claude', host))).toEqual({ code: 'EACCES', kind: 'not-executable' });
   });
 
   it('passes an unknown extension through unchanged', () => {

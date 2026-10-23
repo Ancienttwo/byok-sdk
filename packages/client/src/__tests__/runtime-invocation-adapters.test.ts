@@ -18,6 +18,8 @@ const fixtures = {
 // adapter's own arguments. Every platform can run this form.
 vi.mock('../adapters/runtime-invocation', () => ({
   resolveRuntimeInvocation: vi.fn((command: string) => {
+    // A raw Node read error: its message names the local shim path.
+    if (command === 'unreadable-shim') throw Object.assign(new Error("EACCES: permission denied, open 'C:\\Users\\someone\\npm\\claude.cmd'"), { code: 'EACCES' });
     const runtime = /^npm-shim:(claude|codex)$/.exec(command)?.[1] as keyof typeof fixtures | undefined;
     if (runtime === undefined) throw new Error(`unexpected command ${command}`);
     return { command: process.execPath, args: [fixtures[runtime]] };
@@ -67,5 +69,13 @@ describe('adapters detect and launch through one resolved invocation (#763)', ()
     expect(calls[0]!.command).toBe(process.execPath);
     expect(calls[0]!.args[0]).toBe(fixtures.codex);
     expect(calls[0]!.args).toContain('app-server');
+  });
+
+  it('rejects a resolver failure the same way in both adapters, without a local path', async () => {
+    const resolveBin = () => ({ command: 'unreadable-shim', source: 'path' as const });
+    for (const [adapter, runtime] of [[new ClaudeAdapter({ resolveBin }), 'claude'], [new CodexAdapter({ resolveBin }), 'codex']] as const) {
+      expect(await adapter.prepare({ offer: { instruction: 'x' } } as never))
+        .toEqual({ kind: 'reject', reason: `${runtime} installation refused: not-executable`, retryable: false });
+    }
   });
 });

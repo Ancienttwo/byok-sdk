@@ -38,17 +38,19 @@ const BATCH = new Set(['.bat', '.cmd']);
  * selects: `node.exe` next to the shim, else `node` from PATH. It does not use
  * `process.execPath`: a single-file daemon build is not a node binary. Any
  * other batch file fails with ENOEXEC, never through a shell. A command that
- * is not found, or has another extension, is returned unchanged, so the spawn
- * reports what it reported before. Other platforms are unchanged.
+ * is not found fails with ENOENT, so the spawn never searches its own current
+ * directory. A found file with another extension is returned unchanged. Every
+ * error names no local path: a prepare rejection reason leaves the device.
+ * Other platforms are unchanged.
  */
 export function resolveRuntimeInvocation(command: string, host: RuntimeInvocationHost = nodeHost()): RuntimeInvocation {
   if (host.platform !== 'win32') return { command, args: [] };
   const file = findWindowsCommand(command, host, runnableExtensions(host.env));
-  if (file === undefined) return { command, args: [] };
+  if (file === undefined) throw spawnError('ENOENT', 'the runtime command was not found');
   const extension = path.win32.extname(file).toLowerCase();
   if (NATIVE.has(extension)) return { command: file, args: [] };
   if (!BATCH.has(extension)) return { command, args: [] };
-  const entry = extension === '.cmd' ? npmNodeShimEntry(host.readFile(file)) : undefined;
+  const entry = extension === '.cmd' ? npmNodeShimEntry(readShim(host, file)) : undefined;
   if (entry === undefined) throw spawnError('ENOEXEC', 'the runtime command is a batch file that is not an npm node shim; only cmd.exe can run it');
   const shimDir = path.win32.dirname(file);
   const localNode = path.win32.join(shimDir, 'node.exe');
@@ -62,10 +64,24 @@ function envValue(env: RuntimeInvocationHost['env'], name: string): string | und
   return key === undefined ? undefined : env[key];
 }
 
-/** PATHEXT order, kept to the extensions this resolver can decide on. */
+/**
+ * PATHEXT order, kept to the extensions this resolver can decide on. `.com`
+ * and `.exe` stay last when PATHEXT omits them, as a shell-less spawn tries them.
+ */
 function runnableExtensions(env: RuntimeInvocationHost['env']): string[] {
   const listed = (envValue(env, 'PATHEXT') || '.COM;.EXE;.BAT;.CMD').split(';').map(ext => ext.trim().toLowerCase());
-  return listed.filter(ext => NATIVE.has(ext) || BATCH.has(ext));
+  const runnable = listed.filter(ext => NATIVE.has(ext) || BATCH.has(ext));
+  return [...new Set([...runnable, ...NATIVE])];
+}
+
+/** A read failure keeps its code and drops the path that Node puts in its message. */
+function readShim(host: RuntimeInvocationHost, file: string): string {
+  try {
+    return host.readFile(file);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException | undefined)?.code;
+    throw spawnError(typeof code === 'string' ? code : 'EIO', 'the runtime command npm shim could not be read');
+  }
 }
 
 function findWindowsCommand(command: string, host: RuntimeInvocationHost, extensions: readonly string[]): string | undefined {
@@ -106,6 +122,6 @@ function npmNodeShimEntry(text: string): string | undefined {
   return entry !== undefined && npmNodeShims(entry).includes(text) ? entry : undefined;
 }
 
-function spawnError(code: 'ENOENT' | 'ENOEXEC', message: string): NodeJS.ErrnoException {
+function spawnError(code: string, message: string): NodeJS.ErrnoException {
   return Object.assign(new Error(message), { code });
 }

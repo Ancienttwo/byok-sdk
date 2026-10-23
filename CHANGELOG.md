@@ -187,12 +187,19 @@
   After the last read, only the `reconcileMs` scans remain. This also covers a
   claimed task that the core cancels at its waiting deadline.
 - **Fix (client)** — on Windows, the Claude and Codex adapters detect and
-  start a CLI that npm installed (#763). npm installs both as `.cmd` shims, and
-  Node cannot start a `.cmd` without a shell. The adapters still use no shell.
-  They find the command in PATH and PATHEXT order, run a native `.exe`
-  directly, and run the JavaScript entry of an npm node shim with node. Any
-  other `.cmd` or `.bat` is refused as `not-executable`. macOS and Linux do not
-  change. The root `@byok-sdk/client` entry grows by 4012 bytes, and the
+  start a CLI that npm installed with cmd-shim 4.1.0 or later, which npm 8
+  and later bundle (#763). npm installs both CLIs as `.cmd` shims, and Node
+  cannot start a `.cmd` without a shell. The adapters still use no shell. They
+  find the command in PATH order, then PATHEXT order, and never in the current
+  directory. They run a native `.exe` or `.com` directly. For an npm shim of a
+  `#!/usr/bin/env node` bin with no extra node arguments, they run its
+  JavaScript entry with `node.exe` next to the shim, else `node` on PATH. Other
+  shims are refused as `not-executable`: shims from cmd-shim before 4.1.0,
+  pnpm or yarn shims, shims with extra node arguments, `#!/bin/sh` shims and
+  any other `.cmd` or `.bat`. A shim whose node is not found, and a command
+  that is not found, give `not-found`. A refusal names no local path, and both
+  adapters decline the offer as not retryable. macOS and Linux do not change.
+  The root `@byok-sdk/client` entry grows by 4012 bytes, and the
   `@byok-sdk/client/testing` entry grows by 3949 bytes.
 
 ## 0.28.3 — source candidate
