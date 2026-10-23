@@ -19,8 +19,6 @@
  * design writes their inputs with `||`. Here each input is a domain tag and
  * the canonical JSON of named fields, so field boundaries are unambiguous and
  * a device MAC never verifies as a client MAC.
- *
- * This module is internal: the subpath index does not export it.
  */
 import { z } from 'zod';
 

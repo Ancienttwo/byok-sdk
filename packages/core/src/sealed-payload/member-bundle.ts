@@ -12,8 +12,6 @@
  *
  * An `add` chain entry carries the bundle. The pairing MACs bind it. In a
  * later slice, the device registers it with device proof.
- *
- * This module is internal: the subpath index does not export it.
  */
 import { z } from 'zod';
 

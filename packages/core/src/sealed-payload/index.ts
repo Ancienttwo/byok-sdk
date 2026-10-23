@@ -48,3 +48,33 @@ export type {
   MemberChainOp,
   UnsignedMemberChainEntryV1,
 } from './member-chain';
+export { MEMBER_KEY_BUNDLE_VERSION, createMemberKeyBundle, parseMemberKeyBundle, verifyMemberKem } from './member-bundle';
+export type { CreateMemberKeyBundleInput, MemberKeyBundleV1 } from './member-bundle';
+export { MEMBER_FINGERPRINT_DOMAIN, memberApprovalCode, memberFingerprint } from './member-fingerprint';
+export type { MemberFingerprintInput } from './member-fingerprint';
+export {
+  CLIENT_PAIRING_MAC_DOMAIN,
+  DEVICE_PAIRING_MAC_DOMAIN,
+  PAIRING_VERIFICATION_SECRET_BYTES,
+  computeClientPairingMac,
+  computeDevicePairingMac,
+  decodePairingVerificationSecret,
+  encodePairingVerificationSecret,
+  formatPairingInput,
+  generatePairingVerificationSecret,
+  parsePairingInput,
+  verifyClientPairingMac,
+  verifyDevicePairingMac,
+} from './pairing-verification';
+export type { ClientPairingMacInput, DevicePairingMacInput, PairingInput } from './pairing-verification';
+export { applyMemberChainEntries, emptyMemberChainState, memberChainScopeRecipients, verifyMemberChainFromAnchor } from './member-chain-walk';
+export type {
+  MemberChainAnchorFailure,
+  MemberChainAnchorResult,
+  MemberChainHead,
+  MemberChainScope,
+  MemberChainState,
+  MemberChainWalkFailure,
+  MemberChainWalkResult,
+  VerifyMemberChainFromAnchorInput,
+} from './member-chain-walk';

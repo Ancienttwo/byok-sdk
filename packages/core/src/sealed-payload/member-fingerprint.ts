@@ -18,8 +18,6 @@
  * approver signs `add` only after both sides confirm the same code, and the
  * new member pins the approver's signing key only after it confirms (11b).
  * A device's local approval command shows the same code.
- *
- * This module is internal: the subpath index does not export it.
  */
 import { canonicalizeJsonBytes } from '../attestation';
 import { deriveMemberId } from './member-chain';

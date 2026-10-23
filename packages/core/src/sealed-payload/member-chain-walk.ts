@@ -39,8 +39,6 @@
  *   each a current member (§7.4); the scope is not shredded.
  * - `shred` `{ scopeId }`: a scope with a policy that is not shredded. After
  *   it, no `scope-policy` for that scope is valid (§11.2).
- *
- * This module is internal: the subpath index does not export it.
  */
 import { z } from 'zod';
 
