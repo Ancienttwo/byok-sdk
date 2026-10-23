@@ -2,13 +2,15 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { WAKE_MAX_FUTURE_MS } from '@byok-sdk/server';
 import { ROUTINE_HORIZON_MS } from '@byok-sdk/core';
 import { validateResultOutcome, type RoutineScheduleFields } from '@byok-sdk/protocol';
-import { hash, MIN_TOMBSTONE_RETENTION_MS, WAKE_HORIZON_MS, type HostJobHandler, type HostJobRoutineDefinition } from '@byok-sdk/example-host-execution-core';
+import { join } from 'node:path';
+import { hash, HostLedger, MIN_TOMBSTONE_RETENTION_MS, WAKE_HORIZON_MS, type HostJobHandler, type HostJobRoutineDefinition } from '@byok-sdk/example-host-execution-core';
 import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration, type BotOptions } from './host';
 import { json, stateOf } from './model';
 import { botRoutines, createDefinition, owned, routineOccurrence, updateDefinition } from './routines';
 import { DAILY, deliverRoutine, routineOf, routineRow, seedRoutine } from './routines.test-support';
 import { outcomeSchema } from './schema';
+import { botCompactVeto } from './compaction';
 
 const action = (prompt: string, schedule = DAILY) => ({ localId: 'new_routine_1', schedule, prompt });
 const hostJob = (id: string, schedule = DAILY): HostJobRoutineDefinition => ({ id, version: 1, timeZone: schedule.tz, rule: json(schedule),
@@ -23,7 +25,7 @@ afterEach(async () => { await bot?.close(); await fixture?.close(); bot = undefi
 const schedule: RoutineScheduleFields = { minute: 0, hour: (new Date().getUTCHours() + 12) % 24, tz: 'UTC' };
 async function setup(rest: Partial<BotOptions> = {}): Promise<BotCollaboration> {
   clock = Date.now();
-  fixture = await openHost({ externalCore: true, consume: (wake, signal) => bot!.consume(wake, signal) });
+  fixture = await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot!.consume(wake, signal) });
   bot = new BotCollaboration(fixture.server, fixture.ledger, { botId: 'main', execution: template(fixture.deviceId), connector: async () => null,
     now: () => clock, ...rest });
   return bot;
@@ -277,4 +279,32 @@ it('refuses a version 1 ledger with a clear error and leaves it unchanged', asyn
   expect(() => new BotCollaboration(fixture!.server, fixture!.ledger, options))
     .toThrow('Bot collaboration state version 1 is not supported. Bot routines moved to K4 routines.');
   expect(fixture!.ledger.snapshot().application.collaboration).toEqual(saved);
+});
+
+it('fails a promoted routine Turn whose intent a writer without the veto compacted, after the tombstone expired', async () => {
+  await setup();
+  const id = await seedRoutine(bot!, 'task-1', 'report', schedule);
+  await due(id);
+  const [turn] = turns();
+  expect(fixture!.ledger.snapshot().intents[hash(turn!.id)]).toBeDefined();
+  await bot!.core.cancel(turn!.id);
+  await bot!.core.flushProjections(async () => {});
+  const other = new HostLedger(join(fixture!.root, 'host.sqlite'), fixture!.ledger.tenant);
+  try {
+    expect(other.compact({ acknowledgedIntentKeys: [turn!.id], now: clock, tombstoneRetentionMs: MIN_TOMBSTONE_RETENTION_MS }))
+      .toMatchObject({ compactedIntents: 1 });
+  } finally { other.close(); }
+  expect(fixture!.ledger.snapshot().occurrences[routineOccurrence(turn!)]).toBeUndefined();
+  clock += MIN_TOMBSTONE_RETENTION_MS + 1;
+  expect(fixture!.ledger.hasTombstone('intent', turn!.id, clock)).toBe(false);
+  await bot!.drain();
+  await bot!.drain();
+  // The K4 rows of this Turn are gone, so it fails once, with an audit line and one report, and new work runs.
+  const state = bot!.snapshot();
+  expect(state.turns[turn!.id]).toMatchObject({ status: 'failed', conclusion: 'failed', reported: true });
+  expect(state.audit.filter(line => line === `Turn result retired before sync: ${turn!.id}`)).toHaveLength(1);
+  const reports = Object.values(fixture!.ledger.snapshot().outbox).filter(row => row.kind === 'projection' && row.id === `bot-turn:${turn!.id}`);
+  expect(reports).toEqual([expect.objectContaining({ value: expect.objectContaining({ conclusion: 'failed', reason: 'result_retired' }) })]);
+  const next = await bot!.input('k2', 'next');
+  expect(fixture!.ledger.snapshot().intents[hash(next)]).toBeDefined();
 });

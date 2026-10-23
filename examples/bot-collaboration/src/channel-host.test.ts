@@ -3,13 +3,14 @@ import { hash } from '@byok-sdk/example-host-execution-core';
 import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration, type BotOptions } from './host';
 import { inboundKey, type InboundMessage, type Principal } from './channel';
+import { botCompactVeto } from './compaction';
 
 let fixture: TestHost;
 let bot: BotCollaboration;
 afterEach(async () => { await bot?.close(); await fixture?.close(); });
 /** Real embedded server, HTTP, daemon and submit_result helper. */
 async function setup(rest: Partial<BotOptions> = {}): Promise<BotOptions> {
-  fixture = await openHost({ externalCore: true, consume: (wake, signal) => bot.consume(wake, signal), agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+  fixture = await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot.consume(wake, signal), agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
   const base = template(fixture.deviceId);
   const options: BotOptions = { botId: 'main', execution: { ...base,
     agentMessageContext: { destinationBinding: 'owner', freshnessCursor: 'channel' }, payload: { ...base.payload,

@@ -6,7 +6,7 @@ let fixture: TestHost | undefined;
 let bot: BotCollaboration | undefined;
 afterEach(async () => { await bot?.close(); bot = undefined; await fixture?.close(); fixture = undefined; });
 it('allows a Host-declared read-only toolset on a chat turn and owns its policy/template snapshot', async () => {
-  fixture = await openHost();
+  fixture = await openHost({ ledgerOptions: { compactVeto: botCompactVeto } });
   const execution = template(fixture.deviceId);
   execution.payload.requiredToolsets = ['market.read'];
   const policy = ['market.read'];
@@ -19,7 +19,7 @@ it('allows a Host-declared read-only toolset on a chat turn and owns its policy/
 });
 
 it('rejects undeclared toolsets in model templates and persisted Bot executions', async () => {
-  fixture = await openHost();
+  fixture = await openHost({ ledgerOptions: { compactVeto: botCompactVeto } });
   const execution = template(fixture.deviceId);
   const unsafe = structuredClone(execution); unsafe.payload.requiredToolsets = ['market.trade'];
   const options = { botId: 'main', execution, connector: async () => ({}), readOnlyToolsets: ['market.read'] };
@@ -33,6 +33,7 @@ it('rejects undeclared toolsets in model templates and persisted Bot executions'
 import { createBot, updateBot } from './team';
 import { stateOf } from './model';
 import { ownReadOnlyToolsets } from './toolset-policy';
+import { botCompactVeto } from './compaction';
 it('shares default-deny admission across create and update without changing state on refusal', () => {
   const execution = template('device'); execution.payload.requiredToolsets = ['market.read'];
   const models = { quotes: execution };
@@ -60,7 +61,7 @@ it('rejects malformed JavaScript allowlists instead of iterating strings', () =>
 
 
 it('refuses recovery of outstanding frozen toolsets after the Bot changes models, but keeps settled history readable', async () => {
-  fixture = await openHost();
+  fixture = await openHost({ ledgerOptions: { compactVeto: botCompactVeto } });
   await fixture.offline();
   const execution = template(fixture.deviceId);
   execution.payload.requiredToolsets = ['market.read'];
@@ -92,7 +93,7 @@ it('refuses recovery of outstanding frozen toolsets after the Bot changes models
 });
 
 it('refuses an initial template with required toolsets when the Host declares no allowlist', async () => {
-  fixture = await openHost();
+  fixture = await openHost({ ledgerOptions: { compactVeto: botCompactVeto } });
   const execution = template(fixture.deviceId);
   execution.payload.requiredToolsets = ['market.read'];
   expect(() => new BotCollaboration(fixture!.server, fixture!.ledger, { botId: 'main', execution, connector: async () => ({}) }))
@@ -102,7 +103,7 @@ it('refuses an initial template with required toolsets when the Host declares no
 });
 
 it('checks only non-archived Bot templates on reopen', async () => {
-  fixture = await openHost();
+  fixture = await openHost({ ledgerOptions: { compactVeto: botCompactVeto } });
   const options = { botId: 'main', execution: template(fixture.deviceId), connector: async () => ({}), readOnlyToolsets: ['market.read'] };
   bot = new BotCollaboration(fixture.server, fixture.ledger, options);
   const main = bot.snapshot().team.bots.main!;

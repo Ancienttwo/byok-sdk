@@ -1,9 +1,15 @@
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import type { MemoryIntentRow } from './memory';
-import { hash, taskId, time, type LedgerState, type Occurrence } from './model';
+import { hash, taskId, time, type Json, type LedgerState, type Occurrence } from './model';
 
 export interface ProjectionOutboxLimits { maxCount?: number; maxBytes?: number }
-export interface HostLedgerOptions { projectionOutboxLimits?: ProjectionOutboxLimits }
+/**
+ * Refuses the compaction of one intent identity with a reason, or allows it with `undefined`.
+ * `compact` calls it in its own transaction, before it removes anything, with the state before the compaction.
+ * It must not change the state. An application registers it once, so a plain `compact` call cannot skip it.
+ */
+export type CompactVeto = (state: Readonly<LedgerState>, intentKey: string) => string | undefined;
+export interface HostLedgerOptions { projectionOutboxLimits?: ProjectionOutboxLimits; compactVeto?: CompactVeto }
 export interface ProjectionOutboxUsage { count: number; bytes: number }
 /** Capacity refusal contains no projection identity or payload. */
 export class OutboxFullError extends Error {
@@ -19,6 +25,36 @@ function projectionUsage(state: LedgerState): ProjectionOutboxUsage {
     bytes += Buffer.byteLength(JSON.stringify([key, { kind: row.kind, id: row.id, value: row.value }]), 'utf8');
   }
   return { count, bytes };
+}
+
+/** The registered veto refused one identity. The whole compaction rolls back. */
+export class CompactVetoError extends Error {
+  readonly code = 'compact_vetoed' as const;
+  constructor(readonly intentKey: string, reason: string) { super(`Compaction refused: ${reason}`); this.name = 'CompactVetoError'; }
+}
+
+/**
+ * Application rows by stable identity, in the same transaction as the ledger body (#798).
+ * The port is open only while `apply` runs. It reads and writes only this tenant's rows.
+ * A retired identity stays retired: the port has no way to clear it.
+ */
+export interface ApplicationRows {
+  get(namespace: string, id: string): Json | undefined;
+  /** `expiresAt`: `expire` may remove the row from that time on. Absent: the row never expires. */
+  put(namespace: string, id: string, value: Json, expiresAt?: number): void;
+  /** Returns whether a row existed. */
+  delete(namespace: string, id: string): boolean;
+  /** Removes the rows of a namespace whose `expiresAt` is `now` or earlier. Returns their count. */
+  expire(namespace: string, now: number): number;
+  retire(namespace: string, id: string): void;
+  isRetired(namespace: string, id: string): boolean;
+}
+const ROW_NAMESPACE_MAX = 128, ROW_ID_MAX = 1024;
+function rowNamespace(namespace: unknown): void {
+  if (typeof namespace !== 'string' || !namespace || namespace.length > ROW_NAMESPACE_MAX) throw new Error('Invalid application row namespace');
+}
+function rowId(id: unknown): void {
+  if (typeof id !== 'string' || !id || id.length > ROW_ID_MAX) throw new Error('Invalid application row id');
 }
 
 export const MIN_TOMBSTONE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -70,7 +106,13 @@ export class HostLedger {
     return () => { this.outboxListeners.delete(listener); };
   }
   private readonly projectionLimits?: Readonly<ProjectionOutboxLimits>;
+  /** An application checks this identity to prove that its veto guards every compaction. */
+  readonly compactVeto?: CompactVeto;
   constructor(filename: string, readonly tenant: string, options: HostLedgerOptions = {}) {
+    if (options.compactVeto !== undefined) {
+      if (typeof options.compactVeto !== 'function') throw new Error('The compact veto must be a function');
+      this.compactVeto = options.compactVeto;
+    }
     if (options.projectionOutboxLimits !== undefined) {
       const { maxCount, maxBytes } = options.projectionOutboxLimits;
       if (maxCount === undefined && maxBytes === undefined) throw new Error('Supply a projection outbox limit');
@@ -91,7 +133,11 @@ export class HostLedger {
         tenant TEXT NOT NULL, intent_id TEXT NOT NULL, approval TEXT NOT NULL, body TEXT NOT NULL, expires_at INTEGER NOT NULL,
         PRIMARY KEY (tenant, intent_id));
       CREATE INDEX IF NOT EXISTS host_retired_memory_approval ON host_retired_memory_intent (tenant, approval);
-      CREATE INDEX IF NOT EXISTS host_retired_memory_expiry ON host_retired_memory_intent (tenant, expires_at);`);
+      CREATE INDEX IF NOT EXISTS host_retired_memory_expiry ON host_retired_memory_intent (tenant, expires_at);
+      CREATE TABLE IF NOT EXISTS host_application_row (
+        tenant TEXT NOT NULL, namespace TEXT NOT NULL, id TEXT NOT NULL, body TEXT NOT NULL, expires_at INTEGER,
+        PRIMARY KEY (tenant, namespace, id));
+      CREATE INDEX IF NOT EXISTS host_application_row_expiry ON host_application_row (tenant, namespace, expires_at);`);
     this.db.prepare('INSERT OR IGNORE INTO host_ledger VALUES (?, ?)').run(tenant, JSON.stringify(empty()));
   }
   snapshot(): LedgerState {
@@ -102,7 +148,7 @@ export class HostLedger {
     return state;
   }
   projectionOutboxUsage(): ProjectionOutboxUsage { return projectionUsage(this.snapshot()); }
-  transaction<T>(apply: (state: LedgerState) => T): T {
+  transaction<T>(apply: (state: LedgerState, rows: ApplicationRows) => T): T {
     this.db.exec('BEGIN IMMEDIATE');
     let result: T;
     let added = false;
@@ -111,7 +157,8 @@ export class HostLedger {
       const existing = new Set(Object.keys(state.intents));
       const prior = new Set(Object.keys(state.outbox));
       const before = this.projectionLimits && projectionUsage(state);
-      result = apply(state);
+      const port = this.rows();
+      try { result = apply(state, port.rows); } finally { port.close(); }
       if (result && typeof (result as { then?: unknown }).then === 'function') throw new Error('Host transactions must be synchronous');
       // Also covers callers of the exported pure enqueue/recordOccurrence transitions.
       const retired = this.db.prepare("SELECT 1 FROM host_retired_identity WHERE tenant=? AND kind='intent' AND identity=?");
@@ -136,6 +183,59 @@ export class HostLedger {
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
     if (added) for (const listener of [...this.outboxListeners]) { try { listener(); } catch { /* Hints cannot roll back committed state. */ } }
     return result;
+  }
+  private rowStatements?: Record<'get' | 'put' | 'delete' | 'expire' | 'retire' | 'retired', StatementSync>;
+  /** A port for one transaction. All SQL stays here; the caller gets no database handle. */
+  private rows(): { rows: ApplicationRows; close(): void } {
+    let open = true;
+    const tenant = this.tenant;
+    // Prepared once per ledger: one retention call can write thousands of rows in one transaction.
+    const sql = this.rowStatements ??= {
+      get: this.db.prepare('SELECT body FROM host_application_row WHERE tenant=? AND namespace=? AND id=?'),
+      put: this.db.prepare(`INSERT INTO host_application_row (tenant,namespace,id,body,expires_at) VALUES (?,?,?,?,?)
+        ON CONFLICT (tenant,namespace,id) DO UPDATE SET body=excluded.body, expires_at=excluded.expires_at`),
+      delete: this.db.prepare('DELETE FROM host_application_row WHERE tenant=? AND namespace=? AND id=?'),
+      expire: this.db.prepare('DELETE FROM host_application_row WHERE tenant=? AND namespace=? AND expires_at<=?'),
+      retire: this.db.prepare(`INSERT INTO host_retired_identity (tenant,kind,identity,expires_at) VALUES (?,'row',?,NULL)
+        ON CONFLICT (tenant,kind,identity) DO UPDATE SET expires_at=NULL`),
+      retired: this.db.prepare("SELECT 1 FROM host_retired_identity WHERE tenant=? AND kind='row' AND identity=?"),
+    };
+    const check = (namespace: string, ...id: [string] | []) => {
+      if (!open) throw new Error('The application row port is closed');
+      rowNamespace(namespace);
+      if (id.length) rowId(id[0]);
+    };
+    const rows: ApplicationRows = Object.freeze({
+      get(namespace: string, id: string) {
+        check(namespace, id);
+        const row = sql.get.get(tenant, namespace, id);
+        return typeof row?.body === 'string' ? JSON.parse(row.body) as Json : undefined;
+      },
+      put(namespace: string, id: string, value: Json, expiresAt?: number) {
+        check(namespace, id);
+        if (expiresAt !== undefined) time(expiresAt);
+        const body = JSON.stringify(value);
+        if (typeof body !== 'string') throw new Error('An application row must be JSON');
+        sql.put.run(tenant, namespace, id, body, expiresAt ?? null);
+      },
+      delete(namespace: string, id: string) {
+        check(namespace, id);
+        return Number(sql.delete.run(tenant, namespace, id).changes) > 0;
+      },
+      expire(namespace: string, now: number) {
+        check(namespace);
+        return Number(sql.expire.run(tenant, namespace, time(now)).changes);
+      },
+      retire(namespace: string, id: string) {
+        check(namespace, id);
+        sql.retire.run(tenant, hash([namespace, id]));
+      },
+      isRetired(namespace: string, id: string) {
+        check(namespace, id);
+        return !!sql.retired.get(tenant, hash([namespace, id]));
+      },
+    });
+    return { rows, close: () => { open = false; } };
   }
   /** Replay evidence is time-bounded. Caller intent identities are permanent; routine occurrence identities expire with their slot. */
   hasTombstone(kind: TombstoneKind, identity: string, now: number): boolean {
@@ -166,8 +266,19 @@ export class HostLedger {
     const memoryIds = [...new Set(options.acknowledgedMemoryIntentIds ?? [])];
     if (memoryIds.some(id => typeof id !== 'string' || !id.trim())) throw new Error('Invalid acknowledged memory intent ID');
     return this.transaction(state => {
+      const body = JSON.stringify(state);
       const result: CompactionResult = { compactedIntents: 0, alreadyCompactedIntents: 0, executions: 0, occurrences: 0,
-        memoryIntents: 0, alreadyCompactedMemoryIntents: 0, expiredTombstones: 0, beforeBytes: Buffer.byteLength(JSON.stringify(state)), afterBytes: 0 };
+        memoryIntents: 0, alreadyCompactedMemoryIntents: 0, expiredTombstones: 0, beforeBytes: Buffer.byteLength(body), afterBytes: 0 };
+      if (this.compactVeto) {
+        // An acknowledged occurrence retires the derived intent identity of its occurrence too.
+        for (const key of [...keys.filter(key => state.intents[hash(key)]), ...occurrenceKeys.map(key => `occurrence:${key}`)]) {
+          const reason: unknown = this.compactVeto(state, key);
+          if (reason === undefined) continue;
+          if (typeof reason !== 'string' || !reason) throw new Error('A compact veto returns a reason or undefined');
+          throw new CompactVetoError(key, reason);
+        }
+        if (JSON.stringify(state) !== body) throw new Error('A compact veto must not change the ledger');
+      }
       const retire = this.db.prepare(`INSERT INTO host_retired_identity (tenant,kind,identity,expires_at)
         VALUES (?,?,?,?) ON CONFLICT (tenant,kind,identity) DO UPDATE SET
         expires_at=CASE WHEN expires_at IS NULL THEN NULL ELSE max(expires_at,excluded.expires_at) END`);

@@ -10,6 +10,7 @@ import type { ChannelPort } from './channel';
 import { BotCollaboration, type BotOptions } from './host';
 import { stateOf } from './model';
 import { routineOf, seedRoutine } from './routines.test-support';
+import { botCompactVeto } from './compaction';
 
 let root: string;
 let ledger: HostLedger;
@@ -23,7 +24,7 @@ afterEach(async () => {
 async function setup(wrap: (server: ExecutionServer) => ExecutionServer, options: Partial<BotOptions> = {}) {
   vi.useFakeTimers(); vi.setSystemTime(Date.UTC(2026, 9, 19, 8));
   root = await mkdtemp(path.join(tmpdir(), 'bot-retry-'));
-  ledger = new HostLedger(path.join(root, 'host.sqlite'), 'wake-retry');
+  ledger = new HostLedger(path.join(root, 'host.sqlite'), 'wake-retry', { compactVeto: botCompactVeto });
   server = createByokServer({ productId: 'wake-retry', storage: { kind: 'sqlite', path: path.join(root, 'server.sqlite') },
     wake: { consume: async () => {} } });
   bot = new BotCollaboration(wrap(server), ledger, { botId: 'main', execution: template('device'), connector: async () => null, ...options });

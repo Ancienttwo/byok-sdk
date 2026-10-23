@@ -6,6 +6,7 @@ import { BotCollaboration } from './host';
 import { addTurn, stateOf } from './model';
 import { inboundKey, type InboundMessage } from './channel';
 import { cleanReplyTokens, deliveryRoute, enablePush, queueDelivery, refuseRoute, rememberInbound, resendUnknown, revokePush } from './delivery-routing';
+import { botCompactVeto } from './compaction';
 
 const ledgers: HostLedger[] = [];
 afterEach(() => { for (const ledger of ledgers.splice(0)) ledger.close(); });
@@ -136,7 +137,7 @@ it('rejects prototype keys as route or delivery identities', () => {
 it('keeps persisted pending deliveries dormant when the channel is not configured', async () => {
   vi.useFakeTimers();
   const server = createByokServer({ productId: 'm3-disabled' });
-  const db = new HostLedger(':memory:', 'product:m3-disabled');
+  const db = new HostLedger(':memory:', 'product:m3-disabled', { compactVeto: botCompactVeto });
   const bot = new BotCollaboration(server, db, { botId: 'main', execution: template('unused-device'), connector: async () => null });
   try {
     db.transaction(s => {

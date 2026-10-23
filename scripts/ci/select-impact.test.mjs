@@ -56,6 +56,29 @@ test('docs/security.md selects the dataplane job that checks its plaintext inven
   assert.deepEqual(selectImpact(['docs/hosted-host-contract.md']).families, []);
 });
 
+test('a deploy/sql migration selects cloud-dataplane, its Postgres suites and the packed-tarball migrate job (#654)', () => {
+  for (const reader of ['packages/cloud-dataplane/scripts/copy-migrations.mjs', 'scripts/release/pg-migrate-smoke.mjs']) {
+    assert.match(readFileSync(new URL(reader, root), 'utf8'), /deploy\/sql/, reader);
+  }
+  for (const path of ['deploy/sql/0026_agent_message_draft.sql', 'deploy/sql/0027_e2ee_member.sql']) {
+    assert.deepEqual(selectImpact([path]), {
+      dirs: ['packages/cloud-dataplane'], files: [path], families: ['dataplane', 'release-pack-migrate'], reason: 'impacted',
+    });
+  }
+  for (const path of ['deploy/sql/README.md', 'deploy/sql/0027.sql', 'deploy/sql/0027_e2ee.sh', 'deploy/sql/sub/0027_e2ee.sql']) {
+    assert.throws(() => selectImpact([path]), /reviewed CI mapping required/i, path);
+  }
+});
+
+test('the control-plane SQL invariants select the cloud-dataplane suites that run them (#654)', () => {
+  const path = 'tests/sql/control_plane_invariants.sql';
+  assert.match(readFileSync(new URL('packages/cloud-dataplane/src/__tests__/invariants.test.ts', root), 'utf8'), /tests\/sql\/control_plane_invariants\.sql/);
+  assert.deepEqual(selectImpact([path]), {
+    dirs: ['packages/cloud-dataplane'], files: [path], families: ['dataplane'], reason: 'impacted',
+  });
+  assert.throws(() => selectImpact(['tests/sql/other.sql']), /reviewed CI mapping required/i);
+});
+
 test('client source/deleted tests select reverse dependents and only the dataplane family', () => {
   for (const path of ['packages/client/src/daemon/task-runner.ts', 'packages/client/src/__tests__/deleted.test.ts', 'api-surface/client.d.ts']) {
     const impact = selectImpact([path]);
