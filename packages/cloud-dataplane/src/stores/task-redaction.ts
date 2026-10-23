@@ -89,7 +89,7 @@ export class PostgresTaskRedactionStore implements TaskRedactionStore {
     const hashes = new Set(bodies.filter((body) => !codec.isTombstone(body)).flatMap((body) => codec.blobHashes(body)));
     let objectsDeleted = 0;
     for (const hash of hashes) {
-      if (await this.#deleteObject(tenant, hash)) objectsDeleted += 1;
+      if (await this.#deleteObject(tenant, hash, input.receiptKeys)) objectsDeleted += 1;
     }
     return this.#redactRows(input, objectsDeleted);
   }
@@ -196,26 +196,31 @@ export class PostgresTaskRedactionStore implements TaskRedactionStore {
 
   /**
    * Delete one object under the orphan-GC guards: no `object_reference`, no
-   * reserved upload, `ref_count = 0`. The age floor of orphan GC is not used,
-   * because a terminal task's own bodies name the object. The mark and the
-   * physical delete are separate transactions, as in `PostgresObjectStore`,
-   * so the tenant's upload gate is not held during the network call.
+   * reserved upload, `ref_count = 0`. It also keeps an object that another
+   * receipt body or a pending mailbox row of the tenant names; orphan GC deletes
+   * it later. The age floor of orphan GC is not used, because a terminal task's
+   * own bodies name the object. The mark and the physical delete are separate
+   * transactions, as in `PostgresObjectStore`, so the tenant's upload gate is
+   * not held during the network call.
    */
-  async #deleteObject(tenant: TenantId, hash: ContentHash): Promise<boolean> {
+  async #deleteObject(tenant: TenantId, hash: ContentHash, ownKeys: readonly string[]): Promise<boolean> {
     const now = this.#clock.now().toISOString();
     const unreferenced = `NOT EXISTS (SELECT 1 FROM object_reference r WHERE r.tenant_id = m.tenant_id AND r.hash = m.hash)
       AND NOT EXISTS (SELECT 1 FROM storage_reservation s
-                       WHERE s.tenant_id = m.tenant_id AND s.content_hash = m.hash AND s.state = 'reserved')`;
+                       WHERE s.tenant_id = m.tenant_id AND s.content_hash = m.hash AND s.state = 'reserved')
+      AND NOT EXISTS (SELECT 1 FROM device_request_receipts d
+                       WHERE d.tenant_id = m.tenant_id AND d.key <> ALL($3::text[]) AND strpos(d.body, m.hash) > 0)
+      AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.tenant_id = m.tenant_id AND o.state = 'pending' AND strpos(o.body, m.hash) > 0)`;
     await inTransaction(this.#pool, async (client) => {
       await client.query('SELECT 1 FROM storage_entitlement WHERE tenant_id = $1 FOR UPDATE', [tenant]);
       await client.query(
         `UPDATE object_manifest m
             SET gc_accounted_bytes = CASE WHEN m.state = 'committed' THEN m.byte_size ELSE 0 END,
                 gc_accounted_object = (m.state = 'committed'),
-                state = 'delete_pending', delete_pending_at = $3, updated_at = $3
+                state = 'delete_pending', delete_pending_at = $4, updated_at = $4
           WHERE m.tenant_id = $1 AND m.hash = $2 AND m.state IN ('pending', 'committed') AND m.ref_count = 0
             AND ${unreferenced}`,
-        [tenant, hash, now],
+        [tenant, hash, [...ownKeys], now],
       );
     });
     return inTransaction(this.#pool, async (client) => {
@@ -225,7 +230,7 @@ export class PostgresTaskRedactionStore implements TaskRedactionStore {
             AND m.gc_accounted_bytes IS NOT NULL AND m.gc_accounted_object IS NOT NULL
             AND ${unreferenced}
           FOR UPDATE OF m`,
-        [tenant, hash],
+        [tenant, hash, [...ownKeys]],
       );
       if (locked.rowCount !== 1) return false;
       await this.#objects.deleteObject(tenant, hash);
