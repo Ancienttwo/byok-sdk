@@ -294,9 +294,13 @@ stay, so receipt fences, mailbox cursors and the dead-letter floor keep their
 meaning. It clears the free-text `task` columns, deletes the activity, approval
 and draft rows, and deletes each object that the bodies name when no reference
 or reserved upload holds it. Use the same `objectStorage` (and `keyPrefix`) as
-the blob composition. The objects go first and the rows next, so a retry after
-any failure is safe. A `task-redaction:<taskId>` receipt records the counts.
-Backups, replicas and logs are not reached.
+the blob composition. When the task has no terminal receipt, the store writes a
+tombstone under that key, so a late device terminal stores nothing. The objects
+go first and the rows next, so a retry after any failure is safe; until the
+retry, the bodies can name deleted objects. A `task-redaction:<taskId>` receipt
+records the counts. A late progress or approval report can add a row after the
+call; call it again to delete that row. Backups, replicas and logs are not
+reached.
 
 ## Migrations
 

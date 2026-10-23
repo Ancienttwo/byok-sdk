@@ -1472,9 +1472,9 @@ export declare class PostgresTaskCancellationStore implements TaskCancellationSt
  * 1. Read the task's bodies without a lock and delete every object they name,
  *    under the orphan-GC guards (no reference, no reserved upload).
  * 2. In one transaction that holds the task row lock (the lock admission and
- *    cancellation also take), replace each body with the cloud tombstone,
- *    clear the free-text task columns, delete the ephemeral rows and write the
- *    audit receipt.
+ *    cancellation also take), fence an absent terminal receipt, replace each
+ *    body with the cloud tombstone, clear the free-text task columns, delete
+ *    the ephemeral rows and write the audit receipt.
  *
  * Objects go first. If the call stops between the steps, the bodies are still
  * there, so a retry finds the same hashes and an object already gone is

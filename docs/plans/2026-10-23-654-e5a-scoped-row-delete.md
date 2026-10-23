@@ -61,7 +61,9 @@ tombstone 是一个 JSON 对象。它只由原正文推出，所以同一正文�
 | 已 redact 的终态 task 收到 `task.progress`、`task.await_approval`、`task.approval_resolved` | 重新写入 activity 或 approval 行 | 有审计 receipt 时不写入，按已处理完成。只在 task 已是终态时多读一次 receipt |
 | `cancelTask` | `decodeEnvelope` 读 tombstone 失败 | 取消 envelope 是 tombstone 时，跳过 seq 检查，返回 attempt |
 | `readTaskOffer`、`readDeviceTerminal`、`readTaskResult`、`readTaskAgentMessage`、`readTaskAgentMessageDraft` | 抛各种错误 | 抛新的 `ByokCloudError('task_content_redacted')` |
-| `readTerminalReceipt` | 返回原始 receipt | 不改。它本来返回原始行，现在返回 tombstone |
+| `readTerminalReceipt` | 返回原始 receipt | 正文是 tombstone 时抛 `task_content_redacted`，与其他读接口一致 |
+| 没有终态 receipt 的 task（例如 claim 前被取消）收到迟到的 `task.decline` 或 `task.cancelled` | 新建一条明文终态 receipt | 写阶段在终态 key 不存在时写入 `codec.absent` tombstone（`ON CONFLICT DO NOTHING`）。迟到的终态按重放处理，不写任何内容 |
+| `listDeadLetters` | 返回 tombstone 正文 | 不改。正文已无内容；重放被拒绝，`discardDeadLetter` 可以删除该行 |
 | `readTaskAttempt` | 正常 | 不改。status 仍可读 |
 | dead-letter 重放（`cleanup.ts`） | tombstone 不是 envelope，抛 `cleanup_invalid_input` | 不改。拒绝重放是正确结果 |
 
@@ -104,9 +106,15 @@ type TaskRedactionTaskResult =
 Postgres store 分两步：
 
 1. 读阶段，不加锁：读 task 行，检查前提，读各个正文，找出 BlobRef 的 hash。按 orphan GC 的条件，逐个 hash 删除 R2 对象并结算 `storage_usage`。
-2. 写阶段，一个事务：`SELECT ... FROM task ... FOR UPDATE`，与 admission 和 cancellation 用同一个锁。再检查一次前提。把还不是 tombstone 的正文换成 tombstone。置 NULL 两个自由文本列。删除 activity、approval 和 draft 行。写审计 receipt。提交。
+2. 写阶段，一个事务：`SELECT ... FROM task ... FOR UPDATE`，与 admission 和 cancellation 用同一个锁。再检查一次前提。终态 key 不存在时，先写入 `codec.absent` tombstone，再读 receipt。顺序不能反：反过来时，设备终态可能在读和写之间提交，留下明文。把还不是 tombstone 的正文换成 tombstone。置 NULL 两个自由文本列。删除 activity、approval 和 draft 行。写审计 receipt。提交。
 
 先删对象，再写 tombstone。中途失败时，正文还在，重试会重新找到 hash；对象已删时返回 `absent`。
+
+两步之间的缺口（写进 `docs/security.md`）：
+
+- 第一步删了对象，第二步失败或拒绝时，正文里的 `artifactRefs` 指向已删的对象。重试完成 redaction，审计记录 `objectsDeleted: 0`。
+- 两步之间写入的正文，其对象留给 orphan GC。
+- 入站门控不加锁读审计 receipt。redaction 进行中到达的 progress 或 approval 报告可能在第二步之后写入一行。再调用一次 `redactTasks` 会删除这行。彻底关闭需要给 `ActivityStore` 和 `ApprovalTimelineStore` 加 `delete`，这是公开 port 的改动，等维护者决定。
 
 审计 receipt：key 是 `task-redaction:<taskId>`，正文是 `{ redactedAt, counts }`，不含正文。它是 identity 类，在 `receipt-retention.ts` 登记。第一次写入为准。
 
@@ -148,6 +156,8 @@ store 是 `PostgresTaskRedactionStore`，从 `@byok-sdk/cloud-dataplane/runtime`
   - redaction 后调用 `cancelTask`。
 - Workers：`wrangler dev` 下的 fixture Worker 通过 `@byok-sdk/cloud-dataplane/runtime` 和 Hyperdrive 运行 `redactTasks`。Node 写入数据，并扫描结果。门控沿用 `BYOK_TEST_WORKER_DATAPLANE`，dataplane job 已设置 `BYOK_REQUIRE_WORKER_DATAPLANE=1`。
 - S0 的扫描函数移到 `__tests__/support/plaintext-scan.ts`，两个测试共用。S0 的断言不变。
+- 终态 fence：task D 在 redaction 后收到带 canary 的 `task.decline` 和 `task.cancelled`，canary 仍零命中，`readTerminalReceipt` 和 `readDeviceTerminal` 抛 `task_content_redacted`，`readTaskResult` 仍是 `cancelled`。
+- 两步之间失败：第二步的 tombstone 回调抛错。对象已删，内容行不变，没有 fence 和审计行。重试返回 `redacted`，`objectsDeleted` 为 0，canary 零命中。
 
 ## 6. 要维护者确认
 

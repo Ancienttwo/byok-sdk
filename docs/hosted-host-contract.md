@@ -368,8 +368,13 @@ Deletion paths:
   It clears the free-text `task` columns, deletes the activity, approval and draft rows,
   and deletes the objects that the bodies name when no reference or upload holds them.
   A replay of the same body still matches, and new content is still a conflict.
-  Content reads of the task then throw `task_content_redacted`.
+  When the task has no terminal receipt, it writes a tombstone there, so a late device terminal stores nothing.
+  Content reads of the task, `readTerminalReceipt` included, then throw `task_content_redacted`.
+  `listDeadLetters` returns a redacted row with the tombstone as its body.
   It refuses a task that is not terminal or that has a pending outbox row; the Host retries later.
+  A failed or refused call can leave the objects deleted and the bodies in place; call it again.
+  A late progress or approval report can add a row after a call; a second call deletes it.
+  The limits are in [security.md](security.md) (Deletion paths).
   It needs the `taskRedactionStore` option. `createPostgresTaskRedactionStore` ships from `./runtime`, so it runs on Workers.
 - `createPostgresTenantErasure` is the only path that deletes task receipt rows
   (`task-offer:`, `task-offer-delivered:`, `task:` and `agent-message-offer:`), `task` rows and `agent_message_admission` rows.

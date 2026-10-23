@@ -1587,7 +1587,7 @@ export interface ByokCloud {
     listTaskAttempts(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
     /** Store-aggregated task counts, with host cancellation separated from coarse status. */
     countTaskAttempts(tenant: TenantId): Promise<import('./stores/ports').TaskAttemptCounts>;
-    /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). */
+    /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). Throws `task_content_redacted` after {@link ByokCloud.redactTasks}. */
     readTerminalReceipt(tenant: TenantId, taskId: string): Promise<RequestReceipt | undefined>;
     /** Actual device terminal only; cancellation intent never creates this observation. */
     readDeviceTerminal(tenant: TenantId, taskId: string): Promise<DeviceTerminal | undefined>;
@@ -3896,6 +3896,11 @@ export interface TaskRedactionCodec {
         readonly bodyHash: ContentHash;
         readonly byteSize: bigint;
     }>;
+    /**
+     * The tombstone for a body that was never stored. A store writes it under an
+     * absent terminal receipt key, so a late device terminal stores nothing.
+     */
+    readonly absent: string;
     isTombstone(body: string): boolean;
     /** The object hashes of every BlobRef in `body`. A body that is not JSON names none. */
     blobHashes(body: string): readonly ContentHash[];
@@ -3905,6 +3910,8 @@ export interface TaskRedactionStoreInput {
     readonly taskId: string;
     /** Every receipt key that holds this task's content. Cloud derives them; the store does not. */
     readonly receiptKeys: readonly string[];
+    /** The device terminal receipt key. It is one of `receiptKeys`. When it is absent, the store writes `codec.absent` there. */
+    readonly terminalReceiptKey: string;
     /** The identity receipt that records this redaction. */
     readonly auditReceiptKey: string;
     readonly codec: TaskRedactionCodec;
