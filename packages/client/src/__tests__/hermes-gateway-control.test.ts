@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { hermesGatewayPipeName, identifyHermesGateway, servesHermesHome } from '../adapters/hermes/gateway-identity';
 import { mayStopForeignHermesGateway } from '../adapters/hermes/gateway-ownership';
+import { loadKoffi } from '../adapters/win32-job-object';
 import { descendsFrom, parseWindowsProcessTable, type WindowsProcessEntry } from '../adapters/hermes/windows-process-table';
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -22,6 +23,44 @@ describe('Hermes gateway control pipe name', () => {
       'C:\\USERS\\RUNNERADMIN\\APPDATA\\LOCAL\\TEMP\\BH-UR5BSI',
     ]) expect(hermesGatewayPipeName(home)).toBe('\\\\.\\pipe\\hermes-gateway-0fcd86a0de1913e4');
     expect(hermesGatewayPipeName('D:\\a\\_temp\\profiles\\byok-空間')).toBe('\\\\.\\pipe\\hermes-gateway-e781593f5d5140d8');
+  });
+
+  // #712: non-ASCII letters with case. Hermes 0b10b9f, gateway/control_socket.py:40-41:
+  //   sha256(os.path.normcase(str(Path(home).expanduser().resolve(strict=False))).encode("utf-8")).hexdigest()[:16]
+  // The reference is that expression without expanduser/resolve (the input is already the real path),
+  // with ntpath.normcase, from CPython 3.11 on macOS. There ntpath.normcase uses its fallback,
+  // `s.replace('/', '\\').lower()`. On Windows, CPython 3.11 to 3.14 (Hermes needs >=3.11,<3.15) uses
+  // `_winapi.LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_LOWERCASE, s.replace('/', '\\'))`.
+  // The next test runs that Windows call on the Windows CI job.
+  const umlautHomes = [
+    'C:\\Users\\\u00C4nna\\profiles\\byok-\u00E4\u00C4',
+    'C:/Users/\u00C4nna/profiles/byok-\u00E4\u00C4',
+    'C:\\USERS\\\u00C4NNA\\PROFILES\\BYOK-\u00C4\u00C4',
+    'c:\\users\\\u00E4nna\\profiles\\byok-\u00E4\u00E4',
+  ];
+  const umlautNormcase = 'c:\\users\\\u00E4nna\\profiles\\byok-\u00E4\u00E4';
+
+  it('matches Hermes windows_pipe_name when a home has non-ASCII letters with case', () => {
+    for (const home of umlautHomes) expect(hermesGatewayPipeName(home)).toBe('\\\\.\\pipe\\hermes-gateway-23862bf6ca910e5b');
+  });
+
+  it.runIf(process.platform === 'win32')('lowers the non-ASCII letters as Windows ntpath.normcase does', async () => {
+    const koffi = await loadKoffi() as {
+      load(path: string): { func(convention: string, name: string, result: string, args: string[]): (...args: unknown[]) => number };
+    };
+    // LCMapStringEx(lpLocaleName, dwMapFlags, lpSrcStr, cchSrc, lpDestStr, cchDest, lpVersionInformation, lpReserved, sortHandle)
+    const lcMapStringEx = koffi.load('kernel32.dll').func('__stdcall', 'LCMapStringEx', 'int',
+      ['str16', 'uint32_t', 'void *', 'int', 'void *', 'int', 'void *', 'void *', 'intptr_t']);
+    const LCMAP_LOWERCASE = 0x100;
+    const normcase = (home: string): string => {
+      const source = Buffer.from(home.replaceAll('/', '\\'), 'utf16le');
+      const target = Buffer.alloc(source.length * 2);
+      // LOCALE_NAME_INVARIANT is the empty string.
+      const written = lcMapStringEx('', LCMAP_LOWERCASE, source, source.length / 2, target, target.length / 2, null, null, 0);
+      expect(written).toBeGreaterThan(0);
+      return target.subarray(0, written * 2).toString('utf16le');
+    };
+    for (const home of umlautHomes) expect(normcase(home)).toBe(umlautNormcase);
   });
 
   it('compares served homes without case only on Windows', () => {
