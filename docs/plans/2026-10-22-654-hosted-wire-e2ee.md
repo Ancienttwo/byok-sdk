@@ -378,6 +378,7 @@ AiphaBee 自研的配对和 device grant，在 SDK 里对应 `/byok/pair` 和 `/
 - 新设备加入后，只为它建它自己的 scope（§7.4）：一个成员（新设备或用户的客户端）生成 `SK(scope, 1)`，签署 `scope-policy`（成员为这台设备和用户的客户端），再为每个成员生成 key package。已有成员不把其他设备 scope 的 key package 发给新设备，当前 epoch 和旧 epoch 都不发。所以新设备读不到其他设备的 offer 和历史。
 - 重新配对的设备是新成员（§7.5），所以它也只得到新的 scope。旧 scope 的内容仍由用户的客户端读取。
 - 同一 scope 的成员都能解密这个 scope 的内容。AAD 绑定目标 `deviceId`（§8.2）。别的设备能读一份 offer，但会拒绝执行它。scope 按设备划分时（§7.4），别的设备不是这个 scope 的成员，读不到它的内容。
+- 谁能改一个 scope（owner batch §50f A）：已有 scope 的 `scope-policy` 和 `shred` 只能由这个 scope 当前策略里的成员签署；新 scope 的第一条 `scope-policy` 只能由它的成员列表里的成员签署。其他签名者的条目在走链时无效（`member_chain_signer_invalid`）。所以一台设备不能把自己加进别的设备的 scope，也不能 shred 它，按设备划分 scope（D-I4）不依赖其他成员诚实。
 - 撤销一台设备只移除这一个成员。它所在的每个 scope 在下一次封装前轮换 epoch（§7.6）。其他设备第一次遇到新 epoch 时，取新的 key package。
 - v1 的 scope 只含同一个用户的设备和客户端（§14 D10）。多个用户共用一个 scope 需要发送方签名，留到以后。
 
