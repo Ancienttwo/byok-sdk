@@ -2353,7 +2353,7 @@ export declare function relayClientPairingMac(ctx: E2eeMemberContext, deviceId: 
 /**
  * A device registers its own member key bundle with the device pairing MAC
  * (§7.2 step 3). The bundle must name the proven device. The MAC is kept for
- * one pairing window; an identical retry replaces it.
+ * one pairing window; a retry with the same bundle replaces the MAC and its expiry.
  */
 export declare function registerDeviceMemberKey(ctx: E2eeMemberContext, deviceId: string, input: unknown): Promise<{
     readonly memberId: string;

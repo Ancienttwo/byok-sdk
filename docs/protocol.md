@@ -1183,16 +1183,20 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
 
 - **Registration.** `member` is the device's own member key bundle, so its
   `deviceId` must be the proven device; `mac` is the device pairing MAC
-  (§7.2 step 3). The first registration of a device wins. An identical retry
-  succeeds and replaces the MAC. The MAC is kept for one pairing window
-  (`PAIRING_CODE_TTL_MS`).
-- **Writes.** The chain append and the package put run the same checks as
-  the Host control plane calls `appendMemberChainEntries` and
+  (§7.2 step 3). The first registration of a device wins. A retry with the
+  same bundle succeeds, also with a different `mac`, and replaces the stored
+  MAC and its expiry. The MAC is kept for one pairing window
+  (`PAIRING_CODE_TTL_MS`) from the last registration.
+- **Writes.** Each write body holds only the fields in the table; any other
+  top-level field gets 400. The chain append and the package put run the
+  same checks as the Host control plane calls `appendMemberChainEntries` and
   `putScopeKeyPackages`.
 - **Reads.** A device route checks the bearer against the device row, so a
   revoked or superseded device gets 401. The package read returns only the
   packages addressed to the device's registered member; a query names no
-  recipient. A query accepts only the names in the table, each once.
+  recipient. A query accepts only the names in the table, each once. The
+  package read checks its query before the registration, so a bad query gets
+  400 also from an unregistered device.
 - **Errors.** Every error body is `{ error }`:
 
   | Status | `error` |

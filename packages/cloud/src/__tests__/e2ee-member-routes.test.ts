@@ -210,6 +210,24 @@ describe('E2EE member device routes', () => {
     expect(await answer(await env.read(device, '/byok/e2ee/key-packages'))).toEqual({ status: 400, body: { error: 'coordination_input_invalid' } });
     expect(await answer(await env.read(unregistered, '/byok/e2ee/key-packages?scopeId=scope-1')))
       .toEqual({ status: 409, body: { error: 'e2ee_member_not_registered' } });
+    expect(await answer(await env.read(unregistered, '/byok/e2ee/key-packages'))).toEqual({ status: 400, body: { error: 'coordination_input_invalid' } });
+  });
+
+  it('refuses an unknown top-level field on the chain append and the package put, and stores nothing', async () => {
+    const env = setup();
+    const device = await env.pair(TENANT_A);
+    const member = await newMember(device.deviceId);
+    const other = await newMember();
+    const entries = await chain(TENANT_A, other, 1);
+    const pkg = await keyPackage(TENANT_A, other, member, 1);
+    expect((await env.write(device, '/byok/e2ee/member-key', E2EE_MEMBER_KEY_REGISTER_OPERATION, { member: member.bundle, mac: MAC })).status).toBe(200);
+
+    expect(await answer(await env.write(device, '/byok/e2ee/chain', E2EE_MEMBER_CHAIN_APPEND_OPERATION, { entries, extra: 1 })))
+      .toEqual({ status: 400, body: { error: 'coordination_input_invalid' } });
+    expect(await answer(await env.write(device, '/byok/e2ee/key-packages', E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, { packages: [pkg], extra: 1 })))
+      .toEqual({ status: 400, body: { error: 'coordination_input_invalid' } });
+    expect(await answer(await env.read(device, '/byok/e2ee/chain'))).toEqual({ status: 200, body: { entries: [] } });
+    expect(await answer(await env.read(device, '/byok/e2ee/key-packages?scopeId=scope-1'))).toEqual({ status: 200, body: { packages: [] } });
   });
 
   it('reads the relayed client MAC, and refuses every read once the device is revoked', async () => {

@@ -21,7 +21,7 @@ import {
 import type { Context } from 'hono';
 import type { DeviceProofAuthDeps } from '../auth/device-proof';
 import * as e2eeMember from '../e2ee-member';
-import { isCloudError, type CloudErrorCode } from '../errors';
+import { ByokCloudError, isCloudError, type CloudErrorCode } from '../errors';
 import { authenticateProofRequest, readProofRequestBody } from './device-proof-request';
 import { authenticateDevice, type DeviceRouteDeps } from './shared';
 
@@ -69,16 +69,24 @@ export function e2eeMemberKeyRegisterHandler(deps: E2eeMemberRouteDeps) {
   return proofWriteHandler(deps, E2EE_MEMBER_KEY_REGISTER_OPERATION, BYOK_E2EE_MEMBER_KEY_PATH, e2eeMember.registerDeviceMemberKey);
 }
 
+/** A list write body holds its one field and no other, as the registration schema is strict. */
+function onlyField(body: unknown, field: string): never {
+  if (typeof body === 'object' && body !== null && Object.keys(body).some(key => key !== field)) {
+    throw new ByokCloudError('coordination_input_invalid', `The request body may hold only ${field}.`);
+  }
+  return body as never;
+}
+
 /** `POST /byok/e2ee/chain`: the device appends member chain entries, `{ entries }`. */
 export function e2eeMemberChainAppendHandler(deps: E2eeMemberRouteDeps) {
   return proofWriteHandler(deps, E2EE_MEMBER_CHAIN_APPEND_OPERATION, BYOK_E2EE_CHAIN_PATH, (context, _deviceId, body) =>
-    e2eeMember.appendMemberChainEntries(context, body as never));
+    e2eeMember.appendMemberChainEntries(context, onlyField(body, 'entries')));
 }
 
 /** `POST /byok/e2ee/key-packages`: the device puts scope key packages, `{ packages }`. */
 export function e2eeScopeKeyPackagePutHandler(deps: E2eeMemberRouteDeps) {
   return proofWriteHandler(deps, E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, BYOK_E2EE_KEY_PACKAGES_PATH, (context, _deviceId, body) =>
-    e2eeMember.putScopeKeyPackages(context, body as never));
+    e2eeMember.putScopeKeyPackages(context, onlyField(body, 'packages')));
 }
 
 type DeviceRead = (context: e2eeMember.E2eeMemberContext, deviceId: string, query: Readonly<Record<string, number | string>>) => Promise<object | undefined>;
