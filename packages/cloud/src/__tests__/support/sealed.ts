@@ -4,6 +4,7 @@
  * does. Test data only.
  */
 import type { TenantId } from '@byok-sdk/core';
+import { SEALED_SPLIT_TABLE, type SealedMessageType } from '@byok-sdk/protocol';
 import { sealContent, type SealedContent } from '@byok-sdk/core/sealed-payload';
 import type { CloudHarness, PairedDevice } from './harness';
 
@@ -17,12 +18,13 @@ export const BY_REFERENCE_TEXT_LENGTH = 300 * 1024;
 export interface SealedInput {
   readonly tenant: TenantId;
   readonly deviceId: string;
-  readonly family: string;
+  /** The sealed wire type. The binding family is its plaintext type. */
+  readonly type: SealedMessageType;
   readonly identity: Readonly<Record<string, string>>;
   readonly plaintext: Readonly<Record<string, string>>;
 }
 
-/** One `task-input` member of `family`, sealed now. */
+/** One `task-input` member of `type`, sealed now. */
 export async function sealInput(input: SealedInput): Promise<SealedContent> {
   return sealContent({
     scopeKey: SCOPE_KEY,
@@ -32,7 +34,7 @@ export async function sealInput(input: SealedInput): Promise<SealedContent> {
     category: 'task-input',
     binding: {
       tenantId: input.tenant,
-      family: input.family,
+      family: SEALED_SPLIT_TABLE[input.type].plainType,
       direction: 'server-to-daemon',
       identity: input.identity,
       deviceId: input.deviceId,

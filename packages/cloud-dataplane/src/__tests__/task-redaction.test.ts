@@ -247,7 +247,7 @@ describe.skipIf(SKIP_DATAPLANE)(`task redaction on Postgres — ${SKIP_REASON}`,
         category: 'task-input',
         binding: {
           tenantId: TENANT_1,
-          family: 'task.offer_sealed',
+          family: 'task.offer',
           direction: 'server-to-daemon',
           identity: { taskId },
           deviceId: device.deviceId,

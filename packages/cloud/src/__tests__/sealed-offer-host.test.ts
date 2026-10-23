@@ -27,18 +27,18 @@ import {
 } from './support/sealed';
 
 const TASK_ID = 'sealed-host-task';
-const FAMILY = 'task.offer_sealed';
+const TYPE = 'task.offer_sealed';
 
 async function sealedDevice(): Promise<{ harness: CloudHarness; device: PairedDevice }> {
   const harness = createHarness();
   const device = await harness.pairDevice(TENANT_A);
-  const capabilities = requiredReceiverCapabilities(FAMILY, { sealing: SEALING, sealed: {} });
+  const capabilities = requiredReceiverCapabilities(TYPE, { sealing: SEALING, sealed: {} });
   await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities });
   return { harness, device };
 }
 
 function seal(device: PairedDevice, instruction: string) {
-  return sealInput({ tenant: TENANT_A, deviceId: device.deviceId, family: FAMILY, identity: { taskId: TASK_ID }, plaintext: { instruction } });
+  return sealInput({ tenant: TENANT_A, deviceId: device.deviceId, type: TYPE, identity: { taskId: TASK_ID }, plaintext: { instruction } });
 }
 
 function offer(harness: CloudHarness, device: PairedDevice, sealed: object) {

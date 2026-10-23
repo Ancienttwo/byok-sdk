@@ -229,7 +229,7 @@ describe('steerTask (GAP-2)', () => {
     const task = await running(harness, device, { runtime: 'pi', capabilities: { steer: true } });
     await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: ['sealed-payload-v1'] });
     const seal = (steerId: string, text: string) => sealInput({
-      tenant: TENANT_A, deviceId: device.deviceId, family: 'task.steer_sealed', identity: { taskId: task.taskId, steerId }, plaintext: { text },
+      tenant: TENANT_A, deviceId: device.deviceId, type: 'task.steer_sealed', identity: { taskId: task.taskId, steerId }, plaintext: { text },
     });
     const steerId = randomUUID();
     const first = await seal(steerId, 'go left');
@@ -261,7 +261,7 @@ describe('steerTask (GAP-2)', () => {
     const content = await sealInput({
       tenant: TENANT_A,
       deviceId: device.deviceId,
-      family: 'task.steer_sealed',
+      type: 'task.steer_sealed',
       identity: { taskId: task.taskId, steerId },
       plaintext: { text: 'x'.repeat(BY_REFERENCE_TEXT_LENGTH) },
     });
@@ -282,7 +282,7 @@ describe('steerTask (GAP-2)', () => {
     const steerId = randomUUID();
     const byReference = async (text: string) => {
       const content = await sealInput({
-        tenant: TENANT_A, deviceId: device.deviceId, family: 'task.steer_sealed', identity: { taskId: task.taskId, steerId }, plaintext: { text },
+        tenant: TENANT_A, deviceId: device.deviceId, type: 'task.steer_sealed', identity: { taskId: task.taskId, steerId }, plaintext: { text },
       });
       return referenceMember(content, await uploadCiphertext(harness, device, content.ciphertext));
     };
