@@ -1,98 +1,94 @@
-import { checkRoutineSchedule, nextRoutineOccurrence } from '@byok-sdk/core';
-import type { DueWake } from '@byok-sdk/server';
-import type { CreateRoutineAction, UpdateRoutineAction } from '@byok-sdk/protocol';
-import { hash } from '@byok-sdk/example-host-execution-core';
-import { parseRoutineWakeKey } from '@byok-sdk/example-host-execution-core';
-import type { Authority, CollaborationState, Definition, Routine, Slot } from './model';
+import { checkRoutineSchedule, nextRoutineOccurrence, type RoutineSchedule } from '@byok-sdk/core';
+import type { CreateRoutineAction, RoutineScheduleFields, UpdateRoutineAction } from '@byok-sdk/protocol';
+import { concludeOccurrence, hash, type HostOccurrenceRoutineDefinition, type HostOccurrenceRun, type LedgerState, type NextOccurrence,
+  type Routine } from '@byok-sdk/example-host-execution-core';
+import { addTurn, json, type Authority, type CollaborationState, type Turn } from './model';
 
-export function operation(state: CollaborationState, routine: Routine, kind: 'schedule' | 'cancel', slot: Slot): void {
-  state.operations.push({ sequence: ++state.sequence, routineId: routine.id, generation: routine.generation, kind, slot, state: 'pending' });
+// Bot policy over K4 routines. K4 owns the routine rows, versions, slots, occurrences and wakes.
+
+/** The K4 occurrence hook of Bot routines. Other K4 routines of the Host are not Bot routines. */
+export const BOT_ROUTINE = 'bot-routine';
+/** A routine Turn expires this long after K4 records its occurrence. */
+export const ROUTINE_WAIT_MS = 300_000;
+/** A delivery later than this after its planned time is a catch-up. */
+export const ROUTINE_LATE_AFTER_MS = 60_000;
+/** A routine Turn id is its K4 intent key: `occurrence:<occurrence key>`. */
+const ROUTINE_TURN = 'occurrence:';
+
+/** Fixed at creation. Owner and authority never change between versions. */
+export type BotRoutineInput = { owner: string; authority: Authority; prompt: string };
+/** The ContextPack view of one Bot routine. */
+export interface BotRoutine {
+  id: string; owner: string; current: number; pending: number | null; lifecycle: Routine['lifecycle']; status: Routine['status'];
+  definition: { version: number; schedule: RoutineScheduleFields; prompt: string; target: string };
+  lastError?: { at: number; message: string; wakeKey?: string };
 }
-export function arm(state: CollaborationState, routine: Routine, after: number, now: number, wakeKey?: string): void {
-  try {
-    const at = nextRoutineOccurrence(routine.versions[routine.current]!.schedule, after);
-    routine.armed = at === null ? null : { version: routine.current, at, key: `${routine.id}:${routine.current}:${at}` };
-    routine.status = at === null ? 'no_occurrence_within_horizon' : 'ok';
-    if (routine.armed) operation(state, routine, 'schedule', routine.armed);
-  } catch (error) {
-    routine.armed = null; routine.status = 'calendar_error';
-    routine.errors.push({ at: now, wakeKey, message: String(error instanceof Error ? error.message : error).slice(0, 1024) });
+
+/** The K4 calendar of the Bot Host core. A rule is a `RoutineSchedule` whose `tz` is the definition time zone. */
+export const routineCalendar: NextOccurrence = (definition, after) => {
+  const schedule = definition.rule;
+  if (!schedule || typeof schedule !== 'object' || Array.isArray(schedule) || schedule.tz !== definition.timeZone) {
+    throw new Error('A routine rule is a RoutineSchedule in the definition time zone');
   }
+  return nextRoutineOccurrence(schedule as unknown as RoutineSchedule, after);
+};
+function fields(routine: Routine): BotRoutineInput | undefined {
+  const spec = routine.definition.hostOccurrence;
+  return spec?.type === BOT_ROUTINE ? spec.input as BotRoutineInput : undefined;
 }
-function check(definition: Definition): void {
-  const check = checkRoutineSchedule(definition.schedule);
+function definition(id: string, version: number, schedule: RoutineScheduleFields, input: BotRoutineInput): HostOccurrenceRoutineDefinition {
+  const check = checkRoutineSchedule(schedule);
   if (!check.ok) throw new Error(`${check.code}: ${check.message}`);
-  if ('daysOfWeek' in definition.schedule) definition.schedule = { ...definition.schedule, daysOfWeek: [...new Set(definition.schedule.daysOfWeek)] };
+  const rule = 'daysOfWeek' in schedule ? { ...schedule, daysOfWeek: [...new Set(schedule.daysOfWeek)] } : schedule;
+  return { id, version, timeZone: schedule.tz, rule: json(rule), waitMs: ROUTINE_WAIT_MS, lateAfterMs: ROUTINE_LATE_AFTER_MS,
+    hostOccurrence: { type: BOT_ROUTINE, input } };
 }
-export function createRoutine(state: CollaborationState, owner: string, taskId: string, index: number, action: CreateRoutineAction, now: number,
-  authority?: Authority): Routine {
+/** The Bot routines among the Host's K4 routine rows. */
+export function botRoutines(routines: Iterable<Routine>): BotRoutine[] {
+  const views: BotRoutine[] = [];
+  for (const routine of routines) {
+    const input = fields(routine);
+    if (!input) continue;
+    const { id, version, rule } = routine.definition;
+    views.push({ id, owner: input.owner, current: version, pending: routine.pending?.version ?? null, lifecycle: routine.lifecycle, status: routine.status,
+      definition: { version, schedule: rule as unknown as RoutineScheduleFields, prompt: input.prompt, target: input.owner },
+      ...(routine.calendarErrors?.length ? { lastError: routine.calendarErrors.at(-1)! } : {}) });
+  }
+  return views;
+}
+/** The definition for `RoutineCommands.create`. Each owner has at most 8 routines that are not completed. */
+export function createDefinition(routines: readonly Routine[], owner: string, taskId: string, index: number, action: CreateRoutineAction,
+  authority: Authority): HostOccurrenceRoutineDefinition {
   if (action.target !== undefined) throw new Error('An ordinary Bot cannot supply target');
-  if (Object.values(state.routines).filter(r => r.owner === owner && r.lifecycle !== 'completed').length >= 8) throw new Error('Routine limit is 8');
-  const definition = { version: 1, schedule: action.schedule, prompt: action.prompt, target: owner };
-  check(definition);
-  const id = hash([taskId, 'create_routine', index]);
-  const routine: Routine = { id, owner, current: 1, pending: null, generation: 1, versions: { 1: definition }, lifecycle: 'active',
-    armed: null, inflight: [], status: 'ok', errors: [], ...(authority ? { authority } : {}) };
-  state.routines[id] = routine;
-  arm(state, routine, now, now);
+  if (routines.filter(routine => fields(routine)?.owner === owner && routine.lifecycle !== 'completed').length >= 8) throw new Error('Routine limit is 8');
+  return definition(hash([taskId, 'create_routine', index]), 1, action.schedule, { owner, authority, prompt: action.prompt });
+}
+export function owned(routines: readonly Routine[], owner: string, id: string): Routine {
+  const routine = routines.find(row => row.definition.id === id);
+  if (!routine || fields(routine)?.owner !== owner || routine.lifecycle === 'completed') throw new Error('Routine is unavailable to this Bot');
   return routine;
 }
-export function owned(state: CollaborationState, owner: string, id: string): Routine {
-  const routine = state.routines[id];
-  if (!routine || routine.owner !== owner || routine.lifecycle === 'completed') throw new Error('Routine is unavailable to this Bot');
-  return routine;
-}
-export function switchVersion(state: CollaborationState, routine: Routine, now: number): void {
-  if (routine.armed) operation(state, routine, 'cancel', routine.armed);
-  if (routine.pending !== null) routine.current = routine.pending;
-  routine.pending = null; routine.generation++;
-  arm(state, routine, now, now);
-}
-export function updateRoutine(state: CollaborationState, owner: string, action: UpdateRoutineAction, now: number): void {
-  const routine = owned(state, owner, action.routineId);
+/** The next version for `RoutineCommands.update`. It builds on `pending` when one is staged. */
+export function updateDefinition(routines: readonly Routine[], owner: string, action: UpdateRoutineAction): HostOccurrenceRoutineDefinition {
+  const routine = owned(routines, owner, action.routineId);
   if (action.schedule === undefined && action.prompt === undefined) throw new Error('An update must change schedule or prompt');
-  const version = Math.max(...Object.keys(routine.versions).map(Number)) + 1;
-  const prior = routine.versions[routine.pending ?? routine.current]!;
-  const definition: Definition = { ...prior, version, schedule: action.schedule ?? prior.schedule, prompt: action.prompt ?? prior.prompt };
-  check(definition);
-  routine.versions[version] = definition; routine.pending = version;
-  // A due undelivered armed slot is old work too. Do not replace its snapshot.
-  if (!routine.inflight.length && !(routine.armed && routine.armed.at <= now) && routine.lifecycle === 'active') switchVersion(state, routine, now);
+  const prior = routine.pending ?? routine.definition, input = prior.hostOccurrence!.input as BotRoutineInput;
+  return definition(prior.id, prior.version + 1, action.schedule ?? prior.rule as unknown as RoutineScheduleFields,
+    { ...input, prompt: action.prompt ?? input.prompt });
 }
-export function lifecycle(state: CollaborationState, routine: Routine, value: Routine['lifecycle'], now: number): void {
-  if (routine.lifecycle === value) return;
-  if (routine.lifecycle === 'completed') throw new Error('A completed routine cannot resume');
-  if (routine.armed) operation(state, routine, 'cancel', routine.armed);
-  routine.armed = null; routine.lifecycle = value; routine.generation++;
-  if (value === 'active') {
-    if (routine.pending !== null && !routine.inflight.length) switchVersion(state, routine, now);
-    else arm(state, routine, now, now);
-  }
+/** The `bot-routine` occurrence hook. It writes the routine Turn in the occurrence commit. `sync` promotes it. */
+export function routineTurn(state: CollaborationState, run: HostOccurrenceRun): void {
+  const input = run.input as BotRoutineInput, id = `${ROUTINE_TURN}${run.occurrenceKey}`;
+  addTurn(state, { id, root: id, source: 'routine', request: input.prompt, botId: input.owner, hop: 0, authority: input.authority });
 }
-export function consumeRoutine(state: CollaborationState, wake: DueWake, now: number, addTurn: (id: string, request: string, routine: Routine) => void): void {
-  const parsed = parseRoutineWakeKey(wake.dedupKey);
-  if (!parsed) { state.audit.push(`Invalid routine wake: ${wake.dedupKey.slice(0, 256)}`); return; }
-  if (wake.availableAt !== parsed.at) {
-    state.audit.push(`Wake time differs from reservation: ${wake.dedupKey}`);
-    return;
-  }
-  if (state.occurrences[wake.dedupKey]) return;
-  const routine = state.routines[parsed.id];
-  const decision = !routine || routine.lifecycle !== 'active' ? 'skipped'
-    : routine.armed?.key !== wake.dedupKey ? 'superseded' : routine.inflight.length >= 2 ? 'capacity' : 'run';
-  const row = state.occurrences[wake.dedupKey] = { key: wake.dedupKey, routineId: parsed.id, version: parsed.version, at: parsed.at,
-    deliveredAt: wake.deliveredAt, decision, trigger: wake.deliveredAt - parsed.at > 60_000 ? 'catch_up' as const : 'scheduled' as const,
-    settled: decision !== 'run' };
-  if (!routine || decision === 'skipped' || decision === 'superseded') return;
-  routine.armed = null;
-  if (decision === 'run') {
-    const definition = structuredClone(routine.versions[parsed.version]!);
-    const turnId = hash(['routine', wake.dedupKey]);
-    Object.assign(row, { definition, turnId });
-    routine.inflight.push(wake.dedupKey);
-    addTurn(turnId, definition.prompt, routine);
-  }
-  // Pending updates drain accepted work. They never refill the old chain.
-  if (routine.pending === null) arm(state, routine, Math.max(wake.deliveredAt, parsed.at), now, wake.dedupKey);
-  else if (!routine.inflight.length) switchVersion(state, routine, now);
+export function routineOccurrence(turn: Turn): string { return turn.id.slice(ROUTINE_TURN.length); }
+/**
+ * A routine Turn that ends without an intent concludes its open occurrence.
+ * Then a staged version can switch, and `compact` can remove the row.
+ */
+export function concludeRoutineTurn(s: LedgerState, turn: Turn): boolean {
+  const key = routineOccurrence(turn), occurrence = s.occurrences[key];
+  if (!occurrence?.hook || occurrence.intentId || occurrence.conclusion) return false;
+  concludeOccurrence(s, key, 'cancelled');
+  return true;
 }

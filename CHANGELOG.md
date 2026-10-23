@@ -86,6 +86,32 @@
   Host does not deliver that revision again; the next persona update writes the
   file. A new `persona.test.ts` checks the write, a same-revision repair and a
   refused digest.
+- **Breaking (examples)** — K8 Bot routines are K4 routines (#737). Each Bot
+  routine is a `hostOccurrence` definition with the `bot-routine` hook, and K4
+  owns its versions, slots, occurrences and wakes. The hook writes the routine
+  Turn in the occurrence commit, and the Host promotes it with
+  `promoteOccurrence`. `CollaborationState.version` is 2 and has no
+  `routines`, `occurrences` or `operations`. The Host refuses a version 1
+  ledger with a clear error and writes no migration. Documented behavior
+  changes: the overlap rule is the K4 rule, so the limit of two unsettled
+  occurrences and the `capacity` decision are gone; a routine Turn id is
+  `occurrence:<occurrence key>`; its five-minute wait counts from the
+  occurrence record, not from the enqueue; K4 rejects a wake that differs
+  from its reservation; a failed SDK wake call stays in the K4 outbox and
+  rejects the Host call, and the K8 process timer retries it after 60
+  seconds; K4 keeps no old routine versions. The K8 index no longer exports `Definition`, `Occurrence` and
+  `Routine`, and `snapshot()` has no routines. Read the Bot routine views
+  with `botRoutines(Object.values(ledger.snapshot().routines))`.
+  `BotOptions.hostJobs` runs Host job routines on the same core.
+- **Changed (client)** — the Agent memory Go helper can now open a home on
+  Windows (#605). The SDK does not use this yet. The TypeScript gate still
+  refuses Windows, and the package has no Windows helper asset. On Windows the
+  helper accepts only an NTFS volume. It does not flush the directories above
+  the home. So a Windows write is atomic under a process crash and flushes its
+  own file and directory, but it is not durable after an OS crash or a power
+  loss. B stays false. CI now runs the helper tests on Windows Server 2025 and
+  Windows Server 2022, as the administrator and as a standard user. It also
+  checks the root identity that Node and Bun compute.
 
 ## 0.28.3 — source candidate
 

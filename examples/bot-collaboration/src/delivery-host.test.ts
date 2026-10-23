@@ -11,7 +11,7 @@ import { BotCollaboration, type AgentMessageInput, type BotOptions } from './hos
 import { inboundKey, type ChannelPort, type InboundMessage } from './channel';
 import { channelContract } from './channel-contract';
 import { stateOf } from './model';
-import { createRoutine } from './routines';
+import { routineOf, seedRoutine } from './routines.test-support';
 
 class DraftAdapter extends BotStubAdapter {
   override readonly descriptor = freezeRuntimeAdapterDescriptor({ ...new BotStubAdapter().descriptor,
@@ -206,11 +206,9 @@ it('does not send a routine output without an opted-in push route', async () => 
   const send = vi.fn<ChannelPort['send']>(async () => ({ result: 'accepted', platformMessageId: 'routine' }));
   h = await openDeliveryHost({ send });
   // Trigger a real routine wake through its scheduled server entry.
-  h.ledger().transaction(s => createRoutine(stateOf(s.application), 'main', 'daily', 0,
-    { localId: 'new_routine_1', schedule: { hour: 9, minute: 0, tz: 'UTC' }, prompt: 'Report daily' }, h!.options.now!()));
+  const id = await seedRoutine(h.bot, 'daily', 'Report daily', { hour: 9, minute: 0, tz: 'UTC' });
   await h.bot.drain();
-  const routine = Object.values(h.bot.snapshot().routines)[0]!;
-  const wake = (await h.fixture.server.wakes.pending()).find(row => row.dedupKey === routine.armed!.key)!;
+  const wake = (await h.fixture.server.wakes.pending()).find(row => row.dedupKey === routineOf(h!.bot, id).next!.dedupKey)!;
   expect(wake).toBeDefined();
   await h.bot.consume({ wakeId: wake.wakeId, dedupKey: wake.dedupKey, availableAt: wake.availableAt,
     deliveredAt: wake.availableAt, delivery: 1 }, new AbortController().signal);

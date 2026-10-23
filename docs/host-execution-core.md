@@ -366,7 +366,7 @@ The example mirrors the current definition and at most one pending version. `upd
 It does not implement command transport or the service's version workflow.
 
 The owner decisions of 2026-10-22 for #606 (O1, O2 and O8) move same-routine-ID version changes into K4.
-The Host service keeps the version history. K8 keeps its own routine model until #737 moves it onto K4.
+The Host service keeps the version history. Since #737, K8 Bot routines are K4 `hostOccurrence` routines.
 
 Store only `active`, `paused` and `completed` lifecycle values.
 Pause prevents new occurrences and cancels the planned wake.
