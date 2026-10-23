@@ -395,6 +395,23 @@ declined with a `platform_unsupported:` reason and `retryable: true`.
 `@byok-sdk/client/testing` exports `fakeRuntimeAdapter(id, behavior)`, whose
 descriptor is the real adapter's default descriptor.
 
+On Windows, Claude and Codex find their command as cmd.exe does: PATH order,
+then PATHEXT order (#763). They never search the current directory: a command
+that is not on PATH gives `not-found`, and the spawn does not search either. A
+native `.exe` or `.com` runs directly. npm installs both CLIs as `.cmd` shims,
+and Windows cannot start a `.cmd` without cmd.exe. The adapters do not use a
+shell, so cmd.exe never interprets a task argument. For an npm shim (cmd-shim
+4.1.0 or later, npm 8 or later) of a `#!/usr/bin/env node` bin with no extra
+node arguments, the adapter runs the shim's JavaScript entry with the node that
+the shim selects: `node.exe` next to the shim, else `node` on PATH.
+`BYOK_CLAUDE_BIN` and `BYOK_CODEX_BIN` can name a full `.cmd` path. Older npm
+shims, pnpm and yarn shims, shims with node arguments, `#!/bin/sh` shims and
+any other `.cmd` or `.bat` are refused as `not-executable`. A refusal names no
+local path. Detection and launch use the same resolution. Evidence:
+`adapter-task-smoke.mjs` installs fixture packages with the real npm on each
+OS. It detects both runtimes through PATH and through the override variable,
+and it runs and cancels their tasks through the shims.
+
 ## What the qualification suite proves
 
 `packages/client/src/__tests__/adapter-capability-conformance.test.ts` runs the

@@ -7,19 +7,20 @@ composition over Postgres and R2.
 
 ## Release status
 
-The source candidate is **0.28.3** for all nine packages. It is not
+The source candidate is **0.29.0** for all nine packages. It is not
 published. See the
-[candidate notes](docs/releases/v0.28.3.md) and
+[candidate notes](docs/releases/v0.29.0.md) and
 [release process](docs/releases/README.md).
 
-The current stable release is **0.28.2** for all nine packages. From 0.28.2,
+The current stable release is **0.28.3** for all nine packages. From 0.28.2,
 keys uses the release train version instead of its own version line. See the
-[release notes](docs/releases/v0.28.2.md).
-Public npm metadata read on 2026-10-22 at 15:58 UTC reports `latest` **0.28.2**
-for all nine packages. The registry lists 0.28.1 / keys 0.13.1 (2026-10-21,
-UTC) and 0.28.0 / keys 0.13.0 (2026-10-20, UTC) as the earlier published
-versions. This read confirms registry availability, not isolated-install
-qualification.
+[release notes](docs/releases/v0.28.3.md).
+
+Public npm metadata read on 2026-10-23 at 02:58 UTC reports `latest` **0.28.3**
+for all nine packages. The registry lists 0.28.2 (2026-10-22, UTC),
+0.28.1 / keys 0.13.1 (2026-10-21, UTC) and 0.28.0 / keys 0.13.0 (2026-10-20,
+UTC) as the earlier published versions. This read confirms registry
+availability, not isolated-install qualification.
 
 Historically, all nine **0.27.0** / keys **0.12.0** packages were published from
 `v0.27.0` (`cd977261`), and complete registry readback and isolated installation
@@ -34,7 +35,7 @@ changes server, cloud, client and keys APIs.
 and the Host upgrade and migration steps.
 
 Versioned install examples below name the unpublished source candidate.
-Use the stable 0.28.2 until this candidate is published.
+Use the stable 0.28.3 until this candidate is published.
 The historical `rc` publication is **0.27.0-rc.2** / keys **0.12.0-rc.2**; see its
 [publication record](docs/releases/v0.27.0-rc.2-publication.md).
 
@@ -150,7 +151,7 @@ Hono/HTTP façade over the shared `cloud` kernel, `client` is the local
 daemon, and `keys` keeps provider credentials on the device.
 
 ```sh
-npm install @byok-sdk/client@0.28.3 @byok-sdk/server@0.28.3 @byok-sdk/keys@0.28.3
+npm install @byok-sdk/client@0.29.0 @byok-sdk/server@0.29.0 @byok-sdk/keys@0.29.0
 ```
 
 Also installed: `@byok-sdk/cloud`, `@byok-sdk/core`, `@byok-sdk/protocol`.
@@ -168,7 +169,7 @@ Durable Objects, and `ui-runtime` for the Live Activity Timeline. On a
 Node/VPS host without Durable Objects, leave out `@byok-sdk/cloud-do`.
 
 ```sh
-npm install @byok-sdk/cloud@0.28.3 @byok-sdk/cloud-dataplane@0.28.3 @byok-sdk/cloud-do@0.28.3 @byok-sdk/ui-runtime@0.28.3
+npm install @byok-sdk/cloud@0.29.0 @byok-sdk/cloud-dataplane@0.29.0 @byok-sdk/cloud-do@0.29.0 @byok-sdk/ui-runtime@0.29.0
 ```
 
 Also installed: `@byok-sdk/core`, `@byok-sdk/protocol`.
@@ -181,7 +182,7 @@ Objects (no `nodejs_compat`): `cloud-do` for the session runtime and
 [the cloud-do README](packages/cloud-do/README.md) for the subclass and binding.
 
 ```sh
-npm install @byok-sdk/cloud-do@0.28.3 @byok-sdk/protocol@0.28.3
+npm install @byok-sdk/cloud-do@0.29.0 @byok-sdk/protocol@0.29.0
 npm install --save-dev @cloudflare/workers-types
 ```
 
@@ -351,7 +352,7 @@ It is intentionally outside the dispatch packages and their entire dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys@0.28.3
+npm install @byok-sdk/keys@0.29.0
 ```
 
 ## Host connector composition
@@ -367,7 +368,7 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK and the independently installable `@byok-sdk/keys@0.28.3`
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.29.0`
 require Node.js 24.22.1 or newer. MIT licensed.
 
 ## Entry dependencies
@@ -395,14 +396,14 @@ Third-party dependencies and code-generation evidence follow static dependency e
 
 | Import / command | Purpose | Third-party dependencies | Zod | Budget |
 | --- | --- | --- | --- | ---: |
-| `@byok-sdk/client` | Local daemon composition | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2087959 B |
+| `@byok-sdk/client` | Local daemon composition | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2092521 B |
 | `@byok-sdk/client/adapters` | Runtime adapters; private hosts load lazily | — | forbidden | 415785 B |
 | `@byok-sdk/client/agent-memory` | Embedded Agent memory service | — | forbidden | 73311 B |
 | `@byok-sdk/client/assertion-client` | Task/device assertions; core includes protected Zod probes | `zod` | allowed | 171848 B |
 | `@byok-sdk/client/mcp-server` | Tools-only MCP server | — | forbidden | 17719 B |
 | `@byok-sdk/client/mcp-server/http` | Tools-only MCP Streamable HTTP framing | — | forbidden | 36534 B |
 | `@byok-sdk/client/package.json` | Package metadata | — | forbidden | 5029 B |
-| `@byok-sdk/client/testing` | Runtime adapter test doubles; no daemon | — | forbidden | 373975 B |
+| `@byok-sdk/client/testing` | Runtime adapter test doubles; no daemon | — | forbidden | 378474 B |
 | `@byok-sdk/client#byok-acp-runtime` | Private ACP runtime stack (Grok) | `@agentclientprotocol/sdk`, `zod` | allowed | 83751 B |
 | `@byok-sdk/client#byok-hermes-session` | Private Hermes session runtime; loaded only when starting an execution | — | forbidden | 19343 B |
 | `@byok-sdk/client#byok-pi-runtime-host` | Private Pi runtime host | `@cfworker/json-schema`, `@earendil-works/chord`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, `@earendil-works/pi-codemode`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-durable`, `@earendil-works/pi-mcp`, `@earendil-works/pi-tui`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `@mozilla/readability`, `balanced-match`, `boolbase`, `brace-expansion`, `chalk`, `cross-spawn`, `css-select`, `css-what`, `cssom`, `diff`, `dom-serializer`, `domelementtype`, `domhandler`, `domutils`, `entities`, `eventsource`, `eventsource-parser`, `get-east-asian-width`, `graceful-fs`, `grok-mermaid`, `highlight.js`, `hosted-git-info`, `htmlparser2`, `ignore`, `isexe`, `linkedom`, `lru-cache`, `marked`, `minimatch`, `nth-check`, `openai`, `p-limit`, `partial-json`, `path-key`, `pkce-challenge`, `proper-lockfile`, `retry`, `semver`, `shebang-command`, `shebang-regex`, `signal-exit`, `turndown`, `typebox`, `uhyphen`, `undici`, `which`, `yaml`, `yocto-queue`, `zod` | allowed | 5441036 B |

@@ -15,7 +15,17 @@
   and save, the hosted projection and the task-free export where they reach
   it. Move such a mount out of the home. Linux uses its own backend and has no
   volume rule.
-- **Added (client)** — the SDK release now has a Windows x64 Agent memory
+
+## 0.29.0 — source candidate
+
+0.29.0 is a MINOR release under the default pre-1.0 policy, with no
+exception. It adds public API and behavior, and it has breaking changes in
+client and keys. The owner labelled #723, #751 and #767 as breaking. This
+candidate is not published. See the [release notes](docs/releases/v0.29.0.md)
+for scope and outstanding qualification. All nine public manifests and their
+lock records move to 0.29.0.
+
+- **Feature (client)** — the SDK release now has a Windows x64 Agent memory
   helper, `dist/native/agent-memory-fs/win32-x64.exe` (#605). Its
   `pe-content-v1` digest ignores what Authenticode signing writes, so a product
   can sign the exe. `copyAgentMemoryHelperAssets` takes `platform: 'win32'` to
@@ -73,10 +83,12 @@
   atomically replaces one file at the root of the canonical Agent home under
   the writer lease. `name` is one portable file name. `.byok`, `MEMORY.md`,
   `notes` and `<file>.<pid>-<n>.tmp` temp file names belong to the SDK and are
-  refused. The SDK waits for every call
-  before it writes its projection record, and it refuses a call after the hook
-  settles. Each call is atomic for one file only, and several calls are not one
-  transaction. After a process crash, each file has its old or its new bytes.
+  refused in any letter case. A refused call writes nothing. A write that
+  fails also fails the projection, even when the hook catches the error. The
+  SDK waits for every call before it writes its projection record, and it
+  refuses a call after the hook settles. Each call is atomic for one file
+  only, and several calls are not one transaction. After a process crash,
+  each file has its old or its new bytes.
   On POSIX, a successful call has flushed the file and its directory. On
   Windows, it has flushed the file only: there is no promise for an OS crash
   or a power loss, and a delivery of the same revision and hash repairs a lost
@@ -100,12 +112,16 @@
   hosted cloud refuse the field to a device without it, before the task
   exists. `ByokServer.dispatch` takes `agentMemory` only with an explicit
   `agentRef`; `executions.submit` takes it in its payload. Both refuse
-  `read-write` for a `memory-reader` before the task exists.
+  `read-write` for a `memory-reader` before the task exists. The daemon
+  declines a `memory-reader` that selects `read-write` with
+  `agent_memory_selection_invalid`, and an `agentMemory` that it does not admit
+  with `agent_memory_unavailable`. Hosted cloud `enqueueAgentOffer`,
+  `enqueueAgentEgressOffer` and `submitAgentExecution` carry the field.
 - **Feature (client)** — `@byok-sdk/client` exports
   `AGENT_MEMORY_MCP_SERVER_NAME`, the reserved name of the SDK memory MCP
   server (#614). Host tests and diagnostics can use it instead of the literal
   name.
-- **Changed (keys)** — `PiModelConfigSchema` accepts a `pi_model` without
+- **Breaking (keys)** — `PiModelConfigSchema` accepts a `pi_model` without
   `thinkingLevelMap`, as the prepared model wire already does. A declared map
   must still map all seven levels. Without a map, Pi applies its own handling
   of each level. For a reasoning model the schema then accepts `off` through
@@ -114,7 +130,8 @@
   pinned entries that have no map, for example MiniMax M2.7 and M3 and Z.AI
   GLM-4.7 and GLM-5-turbo: 184 of 1,022 entries, up from 83. An entry with a
   partial map is still refused. `PiModelConfig['thinkingLevelMap']` is optional
-  in the type (#636).
+  in the type (#636). TypeScript code that reads the map as a required field
+  does not compile. Check for an absent map first.
   Downgrade: 0.28.3 and earlier refuse a `pi_model` without a map. Before a
   downgrade, give each such profile a complete map or delete it. If you do
   not, the SQLite store of those releases fails `list()` and each read of that
@@ -132,7 +149,7 @@
   switch at update, at lifecycle changes, after each scan and after a memory
   change. A Host job that keeps failing blocks the switch until its handler
   succeeds. `LedgerState.version` stays 1. A core without `updateRoutine`
-  ignores `pending`.
+  ignores `pending` and continues to schedule the current version.
 - **Feature (examples)** — a K4 routine can write Host state in its occurrence
   commit (#736). A `hostOccurrence` definition names a hook that the Host
   registers in `HostOptions.occurrenceHooks`. The hook runs synchronously in
@@ -141,9 +158,14 @@
   occurrence back. The occurrence stays unsettled until the Host calls the
   exported `promoteOccurrence`, which adds intent `occurrence:<key>` to the
   FIFO, or `concludeOccurrence`. A newer slot makes a later promotion settle as
-  `superseded`. `compact` removes concluded Host occurrences.
-  `OutcomeTransaction.routines` runs `create`, `update` and `lifecycle` in the
-  outcome commit with the `addRoutine`, `updateRoutine` and `lifecycle()`
+  `superseded`. `compact` removes concluded Host occurrences. After
+  `promoteOccurrence` or `concludeOccurrence`, the Host must call `drain()`.
+  The core then sends the intent and checks a version switch. An occurrence
+  that the Host does not promote or conclude blocks the version switch. A new
+  version cannot change the hook type. A hook can run two times after a crash,
+  so keep a hook free of external I/O.
+  `OutcomeTransaction.routines` runs `create`, `update`, `lifecycle` and `list`
+  in the outcome commit with the `addRoutine`, `updateRoutine` and `lifecycle()`
   rules; a refused command changes nothing. `LedgerState.version` stays 1.
 - **Feature (examples)** — the K8 `createBotPersonaProjection` consumer writes
   `AGENTS.md` with `writeHomeFile` and runs on Windows (#738). It no longer
@@ -153,34 +175,44 @@
   loss can bring back the old persona after an `applied` readback, and this
   Host does not deliver that revision again; the next persona update writes the
   file. A new `persona.test.ts` checks the write, a same-revision repair and a
-  refused digest.
+  refused digest. An older release can leave a `.bot-persona.tmp` file in the
+  home after a crash. The new consumer does not remove it, so delete it by
+  hand.
 - **Breaking (examples)** — K8 Bot routines are K4 routines (#737). Each Bot
   routine is a `hostOccurrence` definition with the `bot-routine` hook, and K4
   owns its versions, slots, occurrences and wakes. The hook writes the routine
   Turn in the occurrence commit, and the Host promotes it with
   `promoteOccurrence`. `CollaborationState.version` is 2 and has no
   `routines`, `occurrences` or `operations`. The Host refuses a version 1
-  ledger with a clear error and writes no migration. Documented behavior
+  ledger with a clear error and writes no migration. Earlier K8 releases
+  refuse a version 2 ledger. Back up the ledger before you upgrade. To roll
+  back, restore that backup or start a new ledger. Documented behavior
   changes: the overlap rule is the K4 rule, so the limit of two unsettled
   occurrences and the `capacity` decision are gone; a routine Turn id is
   `occurrence:<occurrence key>`; its five-minute wait counts from the
   occurrence record, not from the enqueue; K4 rejects a wake that differs
   from its reservation; a failed SDK wake call stays in the K4 outbox and
   rejects the Host call, and the K8 process timer retries it after 60
-  seconds; K4 keeps no old routine versions. The K8 index no longer exports `Definition`, `Occurrence` and
-  `Routine`, and `snapshot()` has no routines. Read the Bot routine views
-  with `botRoutines(Object.values(ledger.snapshot().routines))`.
+  seconds; K4 keeps no old routine versions; K4 records a wake that does not
+  parse in `ignoredWakes` with `unknown_key`, and K8 writes no
+  `Invalid routine wake` audit line; the `bot-turn:<id>` projection key
+  changes with the Turn id. The K8 index no longer exports `Definition`,
+  `Occurrence` and `Routine`, and `snapshot()` has no routines. Read the Bot
+  routine views with `botRoutines(Object.values(ledger.snapshot().routines))`.
   `BotOptions.hostJobs` runs Host job routines on the same core.
+  `outcomeSchema`, `turnContext`, `turnInstruction` and `contextPack` take a
+  trailing `routines` argument. Its default is `[]`.
 - **Changed (client)** — the Agent memory Go helper can now open a home on
-  Windows (#605). The SDK does not use this yet. The TypeScript gate still
-  refuses Windows, and the package has no Windows helper asset. On Windows the
-  helper accepts only an NTFS volume. It does not flush the directories above
+  Windows (#605). The Windows helper asset (#759) and the gate that admits it
+  (#761) are in the entries at the top of this section. On Windows the helper
+  accepts only a local NTFS volume. It does not flush the directories above
   the home. So a Windows write is atomic under a process crash and flushes its
   own file and directory, but it is not durable after an OS crash or a power
-  loss. B stays false. CI now runs the helper tests on Windows Server 2025 and
-  Windows Server 2022, as the administrator and as a standard user. It also
-  checks the root identity that Node and Bun compute.
-- **Changed (client)** — Agent memory names are now the same on every
+  loss. The SDK does not claim directory durability on Windows. CI now runs
+  the helper tests on Windows Server 2025 and Windows Server 2022, as the
+  administrator and as a standard user. It also checks the root identity that
+  Node and Bun compute.
+- **Breaking (client)** — Agent memory names are now the same on every
   platform (#605). A memory path may not use a Windows device name, such as
   `notes/con.md`, or a segment that ends in `.`. Below `notes`, two names in
   one directory may not differ only in ASCII letter case. Recall, save, intents
@@ -188,8 +220,15 @@
   export leave these files out. Existing notes with these names or links stop
   being visible to recall and export. A `MEMORY.md` with more than one hard
   link makes capture fail.
-
-- **Fix (examples)** — K4 settles a cancelled claimed task soon after its
+- **Fixed (examples)** — K4 accepts a fresh execution template that names a
+  custom harness with `harnessId` and no `runtime` (#760). `enqueue`,
+  `addRoutine` and `updateRoutine` use the same check. A template must name
+  exactly one of `runtime` and `harnessId`. K4 parses the value with the
+  protocol `RuntimeIdSchema` or `HarnessIdSchema`. K4 refuses a template with
+  both fields, or with a value that does not parse, before the ledger changes.
+  Before this change, K4 accepted any non-empty `runtime`, and a `runtime`
+  with a `harnessId`.
+- **Fixed (examples)** — K4 settles a cancelled claimed task soon after its
   device terminal arrives (#762). Before, the intent waited for the next
   `reconcileMs` scan, because the server emits no event for that terminal.
   While it waited, it held the FIFO of its Agent. The core now reads the device
@@ -199,7 +238,7 @@
   ledger. A found terminal ends the reads of that task and starts one drain.
   After the last read, only the `reconcileMs` scans remain. This also covers a
   claimed task that the core cancels at its waiting deadline.
-- **Changed (client)** — on macOS the Agent memory helper admits an Agent home
+- **Breaking (client)** — on macOS the Agent memory helper admits an Agent home
   only on a local volume (#765). It reads the `fstatfs` flags of the pinned
   home handle. A volume without `MNT_LOCAL`, for example an SMB, NFS or AFP
   mount, fails the helper open with `unsafe_root`. A failed query fails the
@@ -208,8 +247,7 @@
   export fail there, and the daemon no longer advertises
   `agent-memory-intent.v1`. Move the home to a local volume. Linux has no
   volume rule.
-
-- **Fix (examples)** — K4 retries a failed SDK wake call from its own timer
+- **Fixed (examples)** — K4 retries a failed SDK wake call from its own timer
   (#766). Before, a K4-only Host retried the row only on the next drain, so an
   idle device could leave a routine stopped. Each `schedule` or `cancel-wake`
   outbox row with `lastError` gets a process timer. The timer drains after
@@ -218,17 +256,35 @@
   `lastError` stay. `close()` clears the timers. K8 now uses this timer and no
   longer adds its own 60-second wake retry, so a K8 Host retries sooner and
   stops timed wake retries after about 5 min.
+- **Fixed (client)** — on Windows, the Claude and Codex adapters detect and
+  start a CLI that npm installed with cmd-shim 4.1.0 or later, which npm 8
+  and later bundle (#763). npm installs both CLIs as `.cmd` shims, and Node
+  cannot start a `.cmd` without a shell. The adapters still use no shell. They
+  find the command in PATH order, then PATHEXT order, and never in the current
+  directory. They run a native `.exe` or `.com` directly. For an npm shim of a
+  `#!/usr/bin/env node` bin with no extra node arguments, they run its
+  JavaScript entry with `node.exe` next to the shim, else `node` on PATH. Other
+  shims are refused as `not-executable`: shims from cmd-shim before 4.1.0,
+  pnpm or yarn shims, shims with extra node arguments, `#!/bin/sh` shims and
+  any other `.cmd` or `.bat`. A shim whose node is not found, and a command
+  that is not found, give `not-found`. A refusal names no local path, and both
+  adapters decline the offer as not retryable. macOS and Linux do not change.
+  The root `@byok-sdk/client` entry grows by 4562 bytes, and the
+  `@byok-sdk/client/testing` entry grows by 4499 bytes.
 
-## 0.28.3 — source candidate
+## 0.28.3 — 2026-10-22 (published)
 
 The owner selected 0.28.3 as one more one-release exception to the default
-pre-1.0 MINOR policy, after the 0.28.1 and 0.28.2 exceptions. The candidate
+pre-1.0 MINOR policy, after the 0.28.1 and 0.28.2 exceptions. The release
 adds public API and behavior: the Grok `compatInstructions` option, the `mcp`
 field on durable Pi tool events and `HermesAdapter.prepare()` on Windows. The
-0.29.0 schedule does not change. This candidate is not published. See the
-[release notes](docs/releases/v0.28.3.md) for scope and outstanding
-qualification. All nine public manifests and their lock records move to
-0.28.3.
+npm registry lists all nine public packages at 0.28.3. The registry
+publication times fall on 2026-10-22 (UTC). The registry read on 2026-10-23
+at 02:58 UTC reports 0.28.3 as `latest` for all nine. The tag `v0.28.3` and
+its GitHub Release point to `9ca1f3ea`. See the
+[release notes](docs/releases/v0.28.3.md) for scope and the qualification
+limits that were recorded at preparation. All nine public manifests and their
+lock records move to 0.28.3.
 
 - **Docs (cloud-dataplane)** — `docs/security.md` has a new "Hosted surface
   threat model" section (#654). For each data category (C1 to C4 and routing
@@ -430,13 +486,14 @@ qualification. All nine public manifests and their lock records move to
   duplicate. In one daemon run, `observer.onInboundCommitted` now fires only
   once for each record (#698).
 
-## 0.28.2 — 2026-10-22 (published)
+## 0.28.2 — 2026-10-22 (published; superseded by 0.28.3)
 
 The owner selected 0.28.2 as a second one-release exception to the default
 pre-1.0 MINOR policy for additive changes. The npm registry lists all nine
 public packages at 0.28.2, keys included. The registry publication times fall
-on 2026-10-22 (UTC). The registry read on 2026-10-22 at 15:58 UTC reports
-0.28.2 as `latest` for all nine. See the
+on 2026-10-22 (UTC). The registry read on 2026-10-22 at 15:58 UTC reported
+0.28.2 as `latest` for all nine. The read on 2026-10-23 at 02:58 UTC reports
+0.28.3 as `latest`. See the
 [release notes](docs/releases/v0.28.2.md) for scope and the qualification
 limits that were recorded at preparation. All nine public manifests and their
 lock records move to 0.28.2; keys leaves its own version line to join the
@@ -621,7 +678,7 @@ The owner selected 0.28.1 as a one-release exception to the default pre-1.0
 MINOR policy for additive changes. The npm registry lists all eight aligned
 packages at 0.28.1 and keys at 0.13.1. The registry publication times fall on
 2026-10-21 (UTC). The registry read on 2026-10-21 at 18:13 UTC reported both
-as `latest`. The read on 2026-10-22 at 15:58 UTC reports 0.28.2 as `latest`.
+as `latest`. The read on 2026-10-22 at 15:58 UTC reported 0.28.2 as `latest`.
 See the [release notes](docs/releases/v0.28.1.md)
 for scope and the qualification limits that were recorded at preparation.
 The eight aligned manifests and lock records move to 0.28.1; keys moves to
