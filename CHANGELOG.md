@@ -6,16 +6,15 @@
   change (#654, owner batch §50f A). A `scope-policy` or `shred` of an
   existing scope must be signed by a member in that scope's current policy,
   and the first `scope-policy` of a new scope must be signed by a member it
-  lists. Any other signer fails with `member_chain_signer_invalid`. Before, any
-  current member could sign both, so one device member could add itself to
+  lists. Any other signer fails with `member_chain_signer_invalid`. Before,
+  any current member could sign both, so one device member could add itself to
   another device's scope or shred it. Now a member cannot change or shred, on
   the chain, a scope it is not in. The Host still deletes a scope's key
   packages on any well-shaped `shred` (owner batch §50g), and the first member
-  that creates a scope id takes it. A subject that breaks an op rule still fails with
-  `member_chain_subject_invalid`. `golden/member-rules-v1.json` gains a
-  `scopeSigners` section; no existing vector changes. The walk is not yet in a
-  published release.
-
+  that creates a scope id takes it. A subject that breaks an op rule still
+  fails with `member_chain_subject_invalid`. `golden/member-rules-v1.json`
+  gains a `scopeSigners` section; no existing vector changes. The walk is not
+  yet in a published release.
 - **Feature (protocol, server, cloud, client)** — an ordinary Agent offer can
   select `agentMemory: 'read-if-admitted'` (#815). It runs exactly as `read`
   when the daemon admits the memory MCP, and exactly as `none` when it does
@@ -135,6 +134,34 @@
   a draft is plaintext (#654 E4a). The docs state that a sealed task must not
   go to `@byok-sdk/cloud-do`, which reads its content in plaintext. No public
   type changes.
+- **Feature (protocol, cloud)** — devices can register their E2EE member key
+  and read and write the member state over HTTP (#654 E2c-2). Three writes
+  need a device proof: `POST /byok/e2ee/member-key`, `POST /byok/e2ee/chain`
+  and `POST /byok/e2ee/key-packages`. Three reads need the device bearer:
+  `GET /byok/e2ee/chain`, `GET /byok/e2ee/key-packages` (only the packages
+  for the device's own member) and `GET /byok/e2ee/pairing-mac`. Each write
+  runs the same checks as the Host control plane. The routes mount only when
+  the hosted capability declaration has the new `e2ee.member` and the
+  composition supplies an `e2eeMemberStore`. A declaration of `e2ee.member`
+  without a store fails at construction with `capability_over_declared`.
+  `fullCapabilityDeclaration()` includes it only with `includeE2eeMember`.
+  The option `maxE2eeRequestBytes` caps a request body (default 4 MiB + 64
+  KiB). The new error code `e2ee_member_key_conflict` reports a second bundle
+  for a device or a member id that another device registered. protocol
+  exports the three proof operations and `E2eeMemberKeyRegisterRequestSchema`.
+  The reference server does not declare `e2ee.member`. A device proof on
+  these writes is not single use: a captured proof and body can be sent
+  again within the clock skew window.
+- **Feature (protocol, cloud)** — the Host tells a device that it has a new
+  scope key package (#654 E2c-3). The new server-to-daemon envelope
+  `e2ee.key_package.available` carries `{ scopeId, epoch }` and is gated on
+  `sealed-payload-v1`, which the device advertises. `putScopeKeyPackages` and
+  the device put route now return `{ stored, skippedDeviceIds }`: a recipient
+  device without the flag gets no notice, its packages are stored, and it is
+  listed in `skippedDeviceIds`. The new control-plane method
+  `enqueueScopeKeyPackageNotice` sends one notice. protocol exports
+  `E2eeKeyPackageAvailablePayloadSchema` and `E2EE_SCOPE_ID_MAX_LENGTH` (512).
+  `EnvelopeSchema` gets one more member.
 - **Feature (cloud, cloud-dataplane)** — the new `ByokCloud.redactTasks`
   replaces the stored content of terminal tasks with body-free tombstones
   (#654 E5a). One call takes 1 to `TASK_REDACTION_MAX_TASKS` (100)
