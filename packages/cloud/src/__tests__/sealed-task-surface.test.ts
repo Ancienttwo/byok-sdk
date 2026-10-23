@@ -36,11 +36,15 @@ const CONTEXT = { destinationBinding: 'conversation/654/turn/1' };
 
 let taskCount = 0;
 
-function deviceSender(harness: CloudHarness, deviceId: string, taskId: string) {
-  const stores = tenantStoresFor(
+function deviceStores(harness: CloudHarness, deviceId: string) {
+  return tenantStoresFor(
     { kind: 'device', tenantId: TENANT_A as TenantId, productId: PRODUCT_ID, deviceId },
     { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake },
   );
+}
+
+function deviceSender(harness: CloudHarness, deviceId: string, taskId: string) {
+  const stores = deviceStores(harness, deviceId);
   return (type: MessageType, payload: object) =>
     handleInboundEnvelope(stores, deviceId, createEnvelope(type as Envelope['type'], payload as never, { taskId }) as Envelope);
 }
@@ -58,7 +62,12 @@ async function egressTask(lane: 'plain' | 'sealed' | 'fresh', payload: Record<st
   if (lane === 'sealed') await harness.cloud.enqueueSealedAgentEgressOffer(TENANT_A, device.deviceId, { taskId, payload: payload as never, agentMessageContext: CONTEXT });
   if (lane === 'fresh') await harness.cloud.submitSealedAgentExecution(TENANT_A, { taskId, deviceId: device.deviceId, payload: payload as never, agentMessageContext: CONTEXT });
   const agentRef = payload.agentRef as { agentId: string; profileRevision: string };
-  return { harness, taskId, agentRef, send: deviceSender(harness, device.deviceId, taskId) };
+  const stores = deviceStores(harness, device.deviceId);
+  return {
+    harness, taskId, agentRef,
+    send: deviceSender(harness, device.deviceId, taskId),
+    deliver: (envelope: Envelope) => handleInboundEnvelope(stores, device.deviceId, envelope),
+  };
 }
 
 describe('a sealed task streams no draft (#654 E4a)', () => {
@@ -78,9 +87,10 @@ describe('a sealed task streams no draft (#654 E4a)', () => {
   ] as const)('%s with output sealing refuses a draft before the envelope identity is reserved', async (type, lane) => {
     const line = egressLine(type, ['task-output']);
     const task = await egressTask(lane, line.payload, line.type);
-    const draft = { agentRef: task.agentRef, revision: 1, offset: 0, text: 'hello' };
-    expect(await task.send('agent.message.draft', draft)).toEqual(refused);
-    expect(await task.send('agent.message.draft', draft)).toEqual(refused);
+    const draft = createEnvelope('agent.message.draft', { agentRef: task.agentRef, revision: 1, offset: 0, text: 'hello' }, { taskId: task.taskId });
+    // The same envelope twice: a reserved identity would answer the replay as a duplicate.
+    expect(await task.deliver(draft)).toEqual(refused);
+    expect(await task.deliver(draft)).toEqual(refused);
     expect(await task.harness.stores.agentMessageDraft.read(TENANT_A, task.taskId)).toBeUndefined();
   });
 
@@ -124,20 +134,23 @@ describe('the Host read surface of a sealed task (#654 E4a)', () => {
     }
 
     const offer = await harness.cloud.readTaskOffer(TENANT_A, taskId);
-    expect(offer).toMatchObject({ type: 'task.offer_sealed', payload: { runtime: 'pi', sealing: SEALING, sealed: instruction } });
-    expect(offer?.payload).not.toHaveProperty('instruction');
+    expect(offer?.type).toBe('task.offer_sealed');
+    expect(offer?.payload).toEqual({ runtime: 'pi', sealing: SEALING, sealed: instruction });
 
-    const attempt = await harness.cloud.readTaskAttempt(TENANT_A, taskId);
-    expect(attempt).toMatchObject({ status: 'complete' });
-    expect(attempt?.terminalCause).toBeUndefined();
+    expect(await harness.cloud.readTaskAttempt(TENANT_A, taskId)).toEqual({
+      tenantId: TENANT_A, taskId, deviceId: device.deviceId, ownerDeviceId: device.deviceId, claimedRuntime: 'pi',
+      status: 'complete', updatedAt: expect.any(String),
+    });
 
     expect((await harness.cloud.readDeviceTerminal(TENANT_A, taskId))?.envelope.payload)
       .toEqual({ sessionRef: 'session-sealed', sealed: OUTPUT_MEMBER });
     expect(await harness.cloud.readTaskResult(TENANT_A, taskId))
       .toEqual({ taskId, state: 'complete', sessionRef: 'session-sealed', recordedAt: expect.any(String) });
 
-    const activity = await harness.cloud.readActivity(TENANT_A, taskId);
-    expect(activity?.entries.map((entry) => ('sealed' in entry ? entry.sealed : entry))).toEqual([OUTPUT_MEMBER]);
+    expect((await harness.cloud.readActivity(TENANT_A, taskId))?.entries).toEqual([{
+      taskId, sourceEnvelopeId: expect.any(String), batchSeq: 1, eventIndex: 0, sourceDropped: 0,
+      receivedAt: expect.any(String), sealed: OUTPUT_MEMBER,
+    }]);
 
     const approvals = await harness.cloud.readApprovalTimeline(TENANT_A, taskId);
     expect(approvals?.entries.map(({ event }) => event)).toEqual([

@@ -747,9 +747,10 @@ It decodes each mailbox row again before delivery (`packages/cloud/src/handlers/
 The stores keep each payload as they get it.
 Issue [#654](https://github.com/Ancienttwo/byok-sdk/issues/654) asks for end-to-end encryption by data category.
 The design draft is [`docs/plans/2026-10-22-654-hosted-wire-e2ee.md`](plans/2026-10-22-654-hosted-wire-e2ee.md).
-A task whose offer has `sealing` keeps its sealed categories, task input and task output, as ciphertext ([protocol §2.5](protocol.md#25-sealed-payload-v1-654-gated-addition)).
-The Host then stores and reads back only the sealed member and the closed plaintext codes, and refuses a draft for the task.
-The table below is for a task without `sealing`.
+A task whose offer has `sealing` keeps each category named in `sealing.categories` (task input, task output, or both) as ciphertext ([protocol §2.5](protocol.md#25-sealed-payload-v1-654-gated-addition)).
+For those categories the Host stores and reads back only the sealed member and the closed plaintext codes.
+Agent messages, egress, memory projections and routing metadata are not sealed in v1, so their rows below apply to a sealed task too.
+The Host refuses a draft for a sealed task.
 
 `@byok-sdk/cloud-do` is not on this surface.
 It is a session host in a Durable Object (`packages/cloud-do/README.md:3-5`).

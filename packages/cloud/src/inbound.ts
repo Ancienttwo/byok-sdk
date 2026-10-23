@@ -619,7 +619,7 @@ async function applyInboundGate(
     if (binding === undefined
       || await stores.tasks.readTaskAgentMessage({ taskId: envelope.task_id, deviceId }) !== undefined
       || await stores.receipts.get(terminalReceiptKey(envelope.task_id)) !== undefined
-      || await frozenOfferSealing(stores, deviceId, envelope.task_id, parsed.data.agentRef) !== undefined) {
+      || await frozenOfferSealing(stores, deviceId, envelope.task_id, binding.attempt.agentRef) !== undefined) {
       return refuse('agent_message_draft_invalid');
     }
     await stores.agentMessageDraft.apply({ ...parsed.data, taskId: envelope.task_id, deviceId,
