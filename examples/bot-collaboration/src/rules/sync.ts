@@ -41,8 +41,8 @@ export interface SyncFacts extends Pick<IntentFacts, 'intent'> {
    */
   executionStarted(turnId: string): boolean;
   /**
-   * The Turn's identity can never run again. `result_retired`: the store compacted the intent before this sync saw its result.
-   * `turn_retired`: retention retired the Turn id.
+   * The Turn's identity can never run again. `result_retired`: the store compacted the intent before this sync saw its result,
+   * or the occurrence of a routine Turn. `turn_retired`: retention retired the Turn id.
    */
   retired(turnId: string): 'result_retired' | 'turn_retired' | undefined;
 }

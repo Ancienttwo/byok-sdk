@@ -43,7 +43,10 @@ export function syncTurnInLedger(ledger: HostLedger, s: LedgerState, rows: Appli
   const facts: SyncFacts = {
     intent: intentFacts(s).intent,
     executionStarted: id => { const row = s.intents[hash(id)]; return !!row && !!s.executions[row.taskId]?.started; },
-    retired: id => ledger.hasTombstone('intent', id, options.now) ? 'result_retired' : rows.isRetired('turn', id) ? 'turn_retired' : undefined,
+    // A routine Turn's intent tombstone expires with its slot, but K4 removed its occurrence with the intent, and a routine
+    // Turn is written with its occurrence. So a routine Turn without its occurrence is retired too.
+    retired: id => ledger.hasTombstone('intent', id, options.now) || turn.source === 'routine' && !s.occurrences[routineOccurrence(turn)]
+      ? 'result_retired' : rows.isRetired('turn', id) ? 'turn_retired' : undefined,
   };
   const step = syncTurn(stateOf(s.application), turn, facts, options, (key, value) => project(s, key, value));
   switch (step?.kind) {
