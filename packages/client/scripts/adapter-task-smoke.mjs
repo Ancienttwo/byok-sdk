@@ -101,6 +101,69 @@ async function waitFor(predicate, label, ms = timeoutMs) {
   }
 }
 
+// #763: npm installs claude and codex as shims only (on Windows: a .cmd, a
+// .ps1 and an extensionless sh script; no .exe). Install fixture packages with
+// the real npm so the shims are npm's own bytes. No vendor package and no
+// model call.
+const npmShimVersion = 'byok-npm-shim-fixture 1.0.0';
+
+/** Installs one package of `files`, with `bin`, and returns the directory of its shims. */
+async function installNpmPackage(workDir, name, files, bin) {
+  const packageDir = path.join(workDir, name);
+  const prefix = path.join(workDir, `${name}-prefix`);
+  await fs.mkdir(packageDir, { recursive: true });
+  await fs.writeFile(path.join(packageDir, 'package.json'), JSON.stringify({ name, version: '1.0.0', bin }));
+  for (const [file, body] of Object.entries(files)) await fs.writeFile(path.join(packageDir, file), body);
+  // On Windows npm itself is a .cmd shim. Run the npm CLI that ships next to
+  // this Node instead; `bun run` points npm_execpath at bun, not npm.
+  const npmCli = process.platform === 'win32'
+    ? path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')
+    : path.join(path.dirname(await fs.realpath(process.execPath)), '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js');
+  await assertFile(npmCli, 'npm CLI');
+  const installed = spawnSync(process.execPath, [
+    npmCli, 'install', '--global', '--install-links', '--prefix', prefix,
+    '--cache', path.join(workDir, 'npm-cache'), '--no-audit', '--no-fund', '--no-update-notifier', packageDir,
+  ], { encoding: 'utf8' });
+  assert(installed.status === 0, `npm ${name} install failed: ${installed.error ?? installed.stderr}`);
+  return process.platform === 'win32' ? prefix : path.join(prefix, 'bin');
+}
+
+/** Windows diagnostics only: the raw spawn error a shell-less execFile gets. */
+function rawExecFileCode(command) {
+  const result = spawnSync(command, ['--version'], { encoding: 'utf8' });
+  return result.error?.code ?? `exit ${result.status}`;
+}
+
+async function smokeNpmShimDetection(client, shimBin, hostPath) {
+  const adapters = { claude: client.ClaudeAdapter, codex: client.CodexAdapter };
+  const overrides = { claude: 'BYOK_CLAUDE_BIN', codex: 'BYOK_CODEX_BIN' };
+  const shimFile = (runtime) => path.join(shimBin, process.platform === 'win32' ? `${runtime}.cmd` : runtime);
+  const failures = [];
+  for (const runtime of ['claude', 'codex']) {
+    process.env.PATH = `${shimBin}${path.delimiter}${hostPath}`;
+    if (process.platform === 'win32') {
+      console.log(`npm shim ${runtime}: raw execFile by name -> ${rawExecFileCode(runtime)}; by .cmd path -> ${rawExecFileCode(shimFile(runtime))}`);
+    }
+    const viaPath = await new adapters[runtime]().detect();
+    if (viaPath.kind !== 'available' || viaPath.version !== npmShimVersion) {
+      failures.push(`${runtime} npm shim on PATH: ${JSON.stringify(viaPath)}`);
+    }
+    process.env.PATH = hostPath;
+    process.env[overrides[runtime]] = shimFile(runtime);
+    try {
+      const viaOverride = await new adapters[runtime]().detect();
+      if (viaOverride.kind !== 'available' || viaOverride.version !== npmShimVersion) {
+        failures.push(`${runtime} npm shim as ${overrides[runtime]}: ${JSON.stringify(viaOverride)}`);
+      }
+    } finally {
+      delete process.env[overrides[runtime]];
+    }
+  }
+  process.env.PATH = hostPath;
+  assert(failures.length === 0, `npm shim detection failed:\n  ${failures.join('\n  ')}`);
+  console.log('PASS npm shims: claude and codex detected through PATH and through the override variable');
+}
+
 let failed = false;
 let workDir;
 let scratchRoot;
@@ -134,25 +197,19 @@ try {
     fs.mkdir(workspaceRoot, { recursive: true, mode: 0o700 }),
   ]);
 
-  // Windows execFile probes need a native executable; a spawn-only Node
-  // wrapper cannot cover Codex.prepare's independent detection. Forward to
-  // real Node so import.meta.url and the descendant fixtures remain valid.
-  let codexCommand = path.join(fixtureDir, 'fake-codex.mjs');
-  if (process.platform === 'win32') {
-    const launcherSource = path.join(workDir, 'codex-launcher.mjs');
-    const nodeBin = process.execPath;
-    await fs.writeFile(launcherSource, `
-      import { spawn } from 'node:child_process';
-      const child = spawn(${JSON.stringify(nodeBin)}, [${JSON.stringify(codexCommand)}, ...process.argv.slice(2)], { stdio: 'inherit' });
-      child.once('error', error => { console.error(error); process.exit(1); });
-      child.once('close', code => process.exit(code ?? 1));
-    `);
-    codexCommand = path.join(workDir, 'codex-launcher.exe');
-    const built = spawnSync(process.env.BYOK_TEST_BUN_BIN ?? 'bun',
-      ['build', '--compile', launcherSource, '--outfile', codexCommand],
-      { encoding: 'utf8' });
-    assert(built.status === 0, `native Codex launcher build failed: ${built.error ?? built.stderr}`);
-  }
+  // The detection fixture prints a version and exits 0 for any other argument.
+  const npmShimBin = await installNpmPackage(workDir, 'byok-npm-shim-fixture', {
+    'cli.js': `#!/usr/bin/env node\nif (process.argv[2] === '--version') console.log(${JSON.stringify(npmShimVersion)});\n`,
+  }, { claude: 'cli.js', codex: 'cli.js' });
+  // The task loop runs Claude and Codex through npm shims on every OS. Each bin
+  // entry imports the fake CLI, so detection and launch both use the adapter's
+  // own command resolution, with no spawnFn and no stand-in detect.
+  const runtimeShimBin = await installNpmPackage(workDir, 'byok-npm-runtime-fixture', Object.fromEntries(
+    ['claude', 'codex'].map((runtime) => [`${runtime}.mjs`,
+      `#!/usr/bin/env node\nawait import(${JSON.stringify(pathToFileURL(path.join(fixtureDir, `fake-${runtime}.mjs`)).href)});\n`]),
+  ), { claude: 'claude.mjs', codex: 'codex.mjs' });
+  const runtimeShim = (runtime) => path.join(runtimeShimBin, process.platform === 'win32' ? `${runtime}.cmd` : runtime);
+  console.log(`claude and codex task runs use npm shims: ${runtimeShim('claude')}, ${runtimeShim('codex')}`);
 
   // Do not let a developer's ambient credential/config variables reach a fake
   // runtime. Keep only the platform values needed to execute Node and create
@@ -196,6 +253,7 @@ try {
     import('@hono/node-server'),
     import(pathToFileURL(clientDistIndex).href),
   ]);
+  await smokeNpmShimDetection(client, npmShimBin, hostPath);
 
   const productId = `byok-adapter-task-smoke-${process.pid}`;
   // The server is a self-hosted façade over the `@byok-sdk/cloud` kernel and
@@ -217,6 +275,7 @@ try {
     process.platform === 'win32'
       ? spawn(process.execPath, [command, ...args], options)
       : spawn(command, args, options);
+  // Pi has no npm shim path here: Windows still cannot execFile its .mjs fixture.
   const lifecycleAdapter = (adapter) =>
     process.platform === 'win32'
       ? {
@@ -227,16 +286,8 @@ try {
       : adapter;
   let piSpawnCount = 0;
   const adapters = [
-    lifecycleAdapter(new client.ClaudeAdapter({
-      resolveBin: () => ({ command: fake('claude'), source: 'path' }),
-      spawnFn: spawnFixture,
-    })),
-    lifecycleAdapter(new client.CodexAdapter({
-      resolveBin: () => ({ command: codexCommand, source: 'path' }),
-      // Native launcher is already executable; do not feed its .exe to Node.
-      spawnFn: (command, args, options) =>
-        process.platform === 'win32' ? spawn(command, args, options) : spawnFixture(command, args, options),
-    })),
+    new client.ClaudeAdapter({ resolveBin: () => ({ command: runtimeShim('claude'), source: 'path' }) }),
+    new client.CodexAdapter({ resolveBin: () => ({ command: runtimeShim('codex'), source: 'path' }) }),
     lifecycleAdapter(new client.PiAdapter({
       resolveBin: () => ({ command: fake('pi'), source: 'path' }),
       spawnFn: (command, args, options) => {

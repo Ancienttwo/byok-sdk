@@ -23,6 +23,7 @@ import {
 import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure, isRuntimeStartupDisposalFailure } from '../../runtime-failure';
 import { buildRuntimeEnv } from '../../daemon/environment';
 import { resolveClaudeBin, type ResolvedBin } from './resolve-bin';
+import { resolveRuntimeInvocation, type RuntimeInvocation } from '../runtime-invocation';
 import { createClaudeControlChannel } from './control-channel';
 import { ClaudeNativeInteractionBridge, CLAUDE_NATIVE_INTERACTION_CAPABILITIES } from './native-interactions';
 import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions';
@@ -134,11 +135,11 @@ export class ClaudeAdapter implements RuntimeAdapter {
 
   async detect(): Promise<RuntimeDetectResult> {
     try {
-      const bin = this.resolveBin();
-      const probe = await probeRuntimeVersion(bin.command, DETECT_TIMEOUT_MS);
+      const invocation = resolveRuntimeInvocation(this.resolveBin().command);
+      const probe = await probeRuntimeVersion(invocation.command, DETECT_TIMEOUT_MS, invocation.args);
       if (probe.kind !== 'available') return probe;
       const version = probe.stdout.trim();
-      const authPresent = await this.probeAuthPresent(bin.command);
+      const authPresent = await this.probeAuthPresent(invocation);
       return { kind: 'available', version, authPresent };
     } catch (error) {
       return classifyDetectError(error);
@@ -158,10 +159,17 @@ export class ClaudeAdapter implements RuntimeAdapter {
     } catch (error) {
       return { kind: 'reject', reason: error instanceof Error ? error.message : String(error), retryable: true };
     }
+    let invocation: RuntimeInvocation;
+    try {
+      invocation = resolveRuntimeInvocation(bin.command);
+    } catch (error) {
+      // As Codex: the reason names the detect kind only, never a local path.
+      return { kind: 'reject', reason: `claude installation refused: ${classifyDetectError(error).kind}`, retryable: false };
+    }
     return {
       kind: 'prepared',
       operation: {
-        start: (startInput) => this.startPrepared(startInput, modelId, bin),
+        start: (startInput) => this.startPrepared(startInput, modelId, invocation),
       },
     };
   }
@@ -169,7 +177,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
   private async startPrepared(
     startInput: RuntimeOperationStartInput,
     modelId: string | undefined,
-    bin: ResolvedBin,
+    invocation: RuntimeInvocation,
   ): Promise<Session> {
     const signal = startInput.signal;
     const cancellationFailure = () => new RuntimeExecutionFailure({
@@ -303,8 +311,8 @@ export class ClaudeAdapter implements RuntimeAdapter {
       }, resumeSessionId);
       try {
         client = new ClaudeProcessClient({
-          command: bin.command,
-          args,
+          command: invocation.command,
+          args: [...invocation.args, ...args],
           cwd: manifestCwd,
           env: { ...startInput.env, ...startInput.scratch.env },
           nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn,
@@ -429,9 +437,9 @@ export class ClaudeAdapter implements RuntimeAdapter {
    * `false` — this never affects `present`, which is solely about whether
    * `--version` itself succeeded.
    */
-  private async probeAuthPresent(command: string): Promise<boolean> {
+  private async probeAuthPresent(invocation: RuntimeInvocation): Promise<boolean> {
     try {
-      const { stdout } = await execFileAsync(command, ['auth', 'status', '--json'], {
+      const { stdout } = await execFileAsync(invocation.command, [...invocation.args, 'auth', 'status', '--json'], {
         timeout: DETECT_TIMEOUT_MS,
         env: buildRuntimeEnv({ ambient: process.env }),
       });
