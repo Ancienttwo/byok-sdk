@@ -15,7 +15,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { isCloudError } from '@byok-sdk/cloud';
 import { tenantId, type ContentHash } from '@byok-sdk/core';
 import { sealContent } from '@byok-sdk/core/sealed-payload';
-import { byokBlobUrlPath, createEnvelope } from '@byok-sdk/protocol';
+import { byokBlobUrlPath, createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { migrate } from '../migrate';
 import { createDataplaneScope, createObjectStorageScope, SKIP_DATAPLANE, SKIP_REASON } from './support/dataplane';
 import { readObjects, readTenantRows, record, scanObjects, scanPostgres, type Hits } from './support/plaintext-scan';
@@ -65,6 +65,47 @@ async function hitsFor(
   expect(await scanPostgres(pool, canary.needles, hits)).toBeGreaterThan(0);
   await scanObjects(storage, TENANT_1, canary.needles, hits);
   return Object.fromEntries([...hits].map(([location, forms]) => [location, [...forms].sort()]));
+}
+
+/** Only the input is sealed, so a plaintext terminal stays legal. */
+const SEALING = { scopeId: 'scope-redaction', epoch: 1, categories: ['task-input'] } as const;
+/** Text this long seals above the inline limit, so the member names its ciphertext blob. */
+const BY_REFERENCE_TEXT = 'x'.repeat(300 * 1024);
+
+/** One `task-input` member of `family` for `device`, sealed now. */
+function sealFor(
+  deviceId: string,
+  family: 'task.offer' | 'task.steer',
+  identity: Readonly<Record<string, string>>,
+  plaintext: Readonly<Record<string, string>>,
+) {
+  return sealContent({
+    scopeKey: new Uint8Array(32).fill(7),
+    scope: { id: SEALING.scopeId, epoch: SEALING.epoch },
+    chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` },
+    sender: 'A'.repeat(43),
+    category: 'task-input',
+    binding: {
+      tenantId: TENANT_1,
+      family,
+      direction: 'server-to-daemon',
+      identity,
+      deviceId,
+      agentRef: null,
+      categories: [...SEALING.categories],
+      notAfter: null,
+    },
+    plaintext,
+    maxContentLength: 2 * 1024 * 1024,
+  });
+}
+
+/** Sends each envelope from `device`, and requires that the Host accepts it. */
+async function sendAll(device: Awaited<ReturnType<typeof pairDevice>>, envelopes: readonly Envelope[]): Promise<void> {
+  for (const envelope of envelopes) {
+    const sent = await device.send(envelope);
+    expect(sent, JSON.stringify(sent.body)).toMatchObject({ status: 200, body: { accepted: 1 } });
+  }
 }
 
 async function errorCode(promise: Promise<unknown>): Promise<string | undefined> {
@@ -237,46 +278,69 @@ describe.skipIf(SKIP_DATAPLANE)(`task redaction on Postgres — ${SKIP_REASON}`,
       const host = await composeRedactionHost(scope.pool, storage);
       const device = await pairDevice(host, TENANT_1, ['sealed-payload-v1']);
       const taskId = `task-sealed-${randomUUID()}`;
-      // Only the input is sealed, so the plaintext terminal below stays legal.
-      const sealing = { scopeId: 'scope-redaction', epoch: 1, categories: ['task-input'] } as const;
-      const content = await sealContent({
-        scopeKey: new Uint8Array(32).fill(7),
-        scope: { id: sealing.scopeId, epoch: sealing.epoch },
-        chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` },
-        sender: 'A'.repeat(43),
-        category: 'task-input',
-        binding: {
-          tenantId: TENANT_1,
-          family: 'task.offer',
-          direction: 'server-to-daemon',
-          identity: { taskId },
-          deviceId: device.deviceId,
-          agentRef: null,
-          categories: [...sealing.categories],
-          notAfter: null,
-        },
-        // Above the inline limit, so the member names its ciphertext blob.
-        plaintext: { instruction: 'x'.repeat(300 * 1024) },
-        maxContentLength: 2 * 1024 * 1024,
-      });
+      const content = await sealFor(device.deviceId, 'task.offer', { taskId }, { instruction: BY_REFERENCE_TEXT });
       const blob = await uploadObject(device, content.ciphertext, 'application/octet-stream');
       const hash = (blob.ref as { contentHash: ContentHash }).contentHash;
       const key = `tenants/${TENANT_1}/objects/sha256/${blob.hex}`;
 
       await host.cloud.enqueueSealedOffer(TENANT_1, device.deviceId, {
         taskId,
-        payload: { runtime: 'pi', sealing, sealed: { ...content.header, ciphertextRef: blob.ref } } as never,
+        payload: { runtime: 'pi', sealing: SEALING, sealed: { ...content.header, ciphertextRef: blob.ref } } as never,
       });
       expect((await host.core.objects.get(TENANT_1, hash))?.refCount).toBe(1);
       expect((await device.poll()).map((event) => [event.type, event.task_id])).toEqual([['task.offer_sealed', taskId]]);
-      for (const envelope of [
+      await sendAll(device, [
         createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId }),
         createEnvelope('task.started', {}, { taskId }),
         createEnvelope('task.complete', { summary: 'done', sessionRef: 'session-sealed' }, { taskId }),
-      ]) {
-        const sent = await device.send(envelope);
-        expect(sent, JSON.stringify(sent.body)).toMatchObject({ status: 200, body: { accepted: 1 } });
-      }
+      ]);
+      await device.poll();
+      expect((await readObjects(storage)).has(key)).toBe(true);
+
+      expect((await host.cloud.redactTasks(TENANT_1, { taskIds: [taskId] })).tasks)
+        .toMatchObject([{ taskId, outcome: 'redacted', counts: { objectsDeleted: 1 } }]);
+      expect((await readObjects(storage)).has(key)).toBe(false);
+      expect(await host.core.objects.get(TENANT_1, hash)).toMatchObject({ refCount: 0, state: 'deleted' });
+    } finally {
+      await scope.dispose();
+    }
+  }, 120_000);
+
+  it('releases the reference that a sealed steer holds to its ciphertext blob, and deletes that blob (#654 E3b)', async () => {
+    const scope = await createDataplaneScope();
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const storage = await createObjectStorageScope();
+      const host = await composeRedactionHost(scope.pool, storage);
+      const device = await pairDevice(host, TENANT_1, ['sealed-payload-v1']);
+      const taskId = `task-sealed-steer-${randomUUID()}`;
+      const offer = await sealFor(device.deviceId, 'task.offer', { taskId }, { instruction: 'steer me' });
+      await host.cloud.enqueueSealedOffer(TENANT_1, device.deviceId, {
+        taskId,
+        payload: {
+          runtime: 'pi',
+          sealing: SEALING,
+          sealed: { ...offer.header, category: 'task-input', ciphertext: Buffer.from(offer.ciphertext).toString('base64url') },
+        } as never,
+      });
+      expect((await device.poll()).map((event) => [event.type, event.task_id])).toEqual([['task.offer_sealed', taskId]]);
+      await sendAll(device, [
+        createEnvelope('task.claim', { deviceId: device.deviceId, runtime: 'pi', capabilities: { steer: true } }, { taskId }),
+        createEnvelope('task.started', {}, { taskId }),
+      ]);
+
+      const steerId = randomUUID();
+      const steer = await sealFor(device.deviceId, 'task.steer', { taskId, steerId }, { text: BY_REFERENCE_TEXT });
+      const blob = await uploadObject(device, steer.ciphertext, 'application/octet-stream');
+      const hash = (blob.ref as { contentHash: ContentHash }).contentHash;
+      const key = `tenants/${TENANT_1}/objects/sha256/${blob.hex}`;
+      await host.cloud.steerSealedTask(TENANT_1, taskId, {
+        steerId,
+        sealed: { ...steer.header, category: 'task-input', ciphertextRef: blob.ref } as never,
+      });
+      expect((await host.core.objects.get(TENANT_1, hash))?.refCount).toBe(1);
+      expect((await device.poll()).map((event) => [event.type, event.task_id])).toEqual([['task.steer_sealed', taskId]]);
+      await sendAll(device, [createEnvelope('task.complete', { summary: 'done', sessionRef: 'session-sealed-steer' }, { taskId })]);
       await device.poll();
       expect((await readObjects(storage)).has(key)).toBe(true);
 
