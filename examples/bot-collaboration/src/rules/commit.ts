@@ -21,8 +21,11 @@ export interface CommitRequest<C> {
   expectedRevision?: number;
   command: C;
 }
-/** Dedup evidence. Retention must keep a record while a retry of its command can still arrive. */
-export interface CommandRecord { evidence: string; result: CommitResult }
+/**
+ * Dedup evidence. Retention moves a record out of the state and keeps it readable for its retention window.
+ * `root`: the root that the command's effect belongs to. The record moves with that root.
+ */
+export interface CommandRecord { evidence: string; result: CommitResult; root?: string }
 /** Both fields are optional: a state without them is at revision 0 and has no record. */
 export interface CommitState { revision?: number; commands?: Record<string, CommandRecord> }
 export type CommitConflictCode = 'scope_mismatch' | 'identity_conflict' | 'stale_revision';
@@ -37,6 +40,8 @@ export interface RecordOptions {
   conflict: () => string;
   /** Which new records to keep. Absent: keep each one. A caller that deduplicates some dispositions itself keeps the rest. */
   keep?: (disposition: Disposition) => boolean;
+  /** Read after `decide`: the root of the command's effect, stored on the record. */
+  root?: () => string | undefined;
 }
 export interface CommitOptions {
   /** The scope that this store owns. */
@@ -46,6 +51,8 @@ export interface CommitOptions {
    * and for a callback that the caller already deduplicates durably, as K4 does for terminals.
    */
   record?: RecordOptions;
+  /** A record that retention moved out of the state (#798). The store reads it by command id. */
+  archived?: (commandId: string) => CommandRecord | undefined;
 }
 export function revisionOf(state: CommitState): number { return state.revision ?? 0; }
 /**
@@ -58,7 +65,8 @@ export function commit<C>(state: CommitState, request: CommitRequest<C>, options
   if (typeof request.commandId !== 'string' || !request.commandId) throw new Error('Invalid command id');
   const record = options.record, evidence = record && hash(canonical(record.evidence));
   // Own properties only: a command id such as `constructor` or `__proto__` is a valid opaque id.
-  const prior = evidence && state.commands && Object.hasOwn(state.commands, request.commandId) ? state.commands[request.commandId] : undefined;
+  const prior = !evidence ? undefined : state.commands && Object.hasOwn(state.commands, request.commandId) ? state.commands[request.commandId]
+    : options.archived?.(request.commandId);
   if (prior) {
     if (prior.evidence !== evidence) throw new CommitConflict('identity_conflict', record!.conflict());
     return structuredClone(prior.result);
@@ -73,8 +81,9 @@ export function commit<C>(state: CommitState, request: CommitRequest<C>, options
   const result: CommitResult = { revision: head + 1, disposition, outbox };
   state.revision = result.revision;
   if (evidence && (record!.keep?.(disposition) ?? true)) {
+    const root = record!.root?.();
     Object.defineProperty(state.commands ??= {}, request.commandId,
-      { value: { evidence, result: structuredClone(result) }, enumerable: true, writable: true, configurable: true });
+      { value: { evidence, result: structuredClone(result), ...(root === undefined ? {} : { root }) }, enumerable: true, writable: true, configurable: true });
   }
   return result;
 }
