@@ -2127,6 +2127,157 @@ export { deriveScopeKeyId, generateScopeKey, openScopeKeyPackage, sealScopeKeyPa
 export type { OpenScopeKeyPackageInput, ScopeKeyPackageOpenResult, ScopeKeyPackageV1, SealScopeKeyPackageInput, } from './scope-key';
 export { MEMBER_CHAIN_OPS, deriveMemberId, memberChainEntryHash, signMemberChainEntry, verifyMemberChainEntry, } from './member-chain';
 export type { MemberChainEntryV1, MemberChainEntryVerifyResult, MemberChainOp, UnsignedMemberChainEntryV1, } from './member-chain';
+export { MEMBER_KEY_BUNDLE_VERSION, createMemberKeyBundle, parseMemberKeyBundle, verifyMemberKem } from './member-bundle';
+export type { CreateMemberKeyBundleInput, MemberKeyBundleV1 } from './member-bundle';
+export { MEMBER_FINGERPRINT_DOMAIN, memberApprovalCode, memberFingerprint } from './member-fingerprint';
+export type { MemberFingerprintInput } from './member-fingerprint';
+export { CLIENT_PAIRING_MAC_DOMAIN, DEVICE_PAIRING_MAC_DOMAIN, PAIRING_VERIFICATION_SECRET_BYTES, computeClientPairingMac, computeDevicePairingMac, decodePairingVerificationSecret, encodePairingVerificationSecret, formatPairingInput, generatePairingVerificationSecret, parsePairingInput, verifyClientPairingMac, verifyDevicePairingMac, } from './pairing-verification';
+export type { ClientPairingMacInput, DevicePairingMacInput, PairingInput } from './pairing-verification';
+export { applyMemberChainEntries, emptyMemberChainState, memberChainScopeRecipients, verifyMemberChainFromAnchor } from './member-chain-walk';
+export type { MemberChainAnchorFailure, MemberChainAnchorResult, MemberChainHead, MemberChainScope, MemberChainState, MemberChainWalkFailure, MemberChainWalkResult, VerifyMemberChainFromAnchorInput, } from './member-chain-walk';
+// ==== @byok-sdk/core dist/sealed-payload/member-bundle.d.ts ====
+/**
+ * The member key bundle (#654 design §7.1, §7.2, E2b; owner decision 10a).
+ *
+ * A bundle is the public half of one member: its id, its ECDSA P-256 signing
+ * key, its P-256 KEM key, the KEM epoch, and `kemSig`. A device member also
+ * names its SDK device id. A client member does not.
+ *
+ * `kemSig` is the member's own signature over its KEM key and epoch. The
+ * fingerprint covers only the signing key, so a KEM rotation keeps the member
+ * id and the fingerprint. The self-signature binds the KEM key to the member:
+ * a Host that swaps the KEM key breaks the signature.
+ *
+ * An `add` chain entry carries the bundle. The pairing MACs bind it. In a
+ * later slice, the device registers it with device proof.
+ */
+import { z } from 'zod';
+import type { WebCryptoKey } from '../webcrypto';
+import { type Bytes, type P256PublicJwk } from './primitives';
+export declare const MEMBER_KEY_BUNDLE_VERSION = 1;
+/** Prepended to the canonical KEM statement, so `kemSig` never verifies as another signed object. */
+export declare const MEMBER_KEM_DOMAIN_PREFIX = "byok-member-kem-v1\n";
+export interface MemberKeyBundleV1 {
+    readonly v: typeof MEMBER_KEY_BUNDLE_VERSION;
+    readonly memberId: string;
+    readonly signingPublicJwk: P256PublicJwk;
+    readonly kemPublicJwk: P256PublicJwk;
+    readonly kemEpoch: number;
+    /** ECDSA P-256 / SHA-256 by the signing key over the KEM statement, base64url of the 64-byte P1363 form. */
+    readonly kemSig: string;
+    /** The SDK device id of a device member. A client member has none. */
+    readonly deviceId?: string;
+}
+export declare const KemEpochSchema: z.ZodNumber;
+export declare const KemSigSchema: z.ZodString;
+/** `MEMBER_KEM_DOMAIN_PREFIX || canonicalJson({ memberId, kemPublicKey: { x, y }, kemEpoch })`. */
+export declare function memberKemSigningInput(memberId: string, kemPublicJwk: P256PublicJwk, kemEpoch: number): Bytes;
+export interface CreateMemberKeyBundleInput {
+    readonly signingPublicJwk: P256PublicJwk;
+    readonly signingPrivateKey: WebCryptoKey;
+    readonly kemPublicJwk: P256PublicJwk;
+    readonly kemEpoch: number;
+    readonly deviceId?: string;
+}
+/** Build a bundle: derive the member id and sign the KEM statement. Bad input throws `sealed_secret_invalid`. */
+export declare function createMemberKeyBundle(input: CreateMemberKeyBundleInput): Promise<MemberKeyBundleV1>;
+/** Both keys are points on P-256, and the KEM key is not the signing key. */
+export declare function isValidMemberKemKey(kemPublicJwk: P256PublicJwk, signingPublicJwk: P256PublicJwk): Promise<boolean>;
+/** The KEM key is valid for the member, and `kemSig` is the member's signature over it. Never throws. */
+export declare function verifyMemberKem(member: {
+    readonly memberId: string;
+    readonly signingPublicJwk: P256PublicJwk;
+}, kem: {
+    readonly kemPublicJwk: P256PublicJwk;
+    readonly kemEpoch: number;
+    readonly kemSig: string;
+}): Promise<boolean>;
+/**
+ * Parse a received bundle. It is valid when its shape is strict, `memberId`
+ * is the id of `signingPublicJwk` (which also checks that key is on the
+ * curve), the KEM key is a different point on the curve, and `kemSig`
+ * verifies. Returns `undefined` for anything else; it never throws for
+ * hostile input.
+ */
+export declare function parseMemberKeyBundle(value: unknown): Promise<MemberKeyBundleV1 | undefined>;
+// ==== @byok-sdk/core dist/sealed-payload/member-chain-walk.d.ts ====
+import { type MemberKeyBundleV1 } from './member-bundle';
+import { type P256PublicJwk } from './primitives';
+import { type SealedCategory } from './sealed-content';
+export interface MemberChainScope {
+    readonly categories: readonly SealedCategory[];
+    /** Member ids from the latest `scope-policy` entry, sorted. Some may be removed since. */
+    readonly members: readonly string[];
+    /** `seq` of that entry. */
+    readonly policySeq: number;
+}
+export interface MemberChainHead {
+    readonly seq: number;
+    readonly hash: string;
+}
+export interface MemberChainState {
+    readonly tenantId: string;
+    /** `null` before the genesis entry. */
+    readonly head: MemberChainHead | null;
+    /** Current members by member id, with their current KEM key. */
+    readonly members: ReadonlyMap<string, MemberKeyBundleV1>;
+    readonly removed: ReadonlySet<string>;
+    readonly scopes: ReadonlyMap<string, MemberChainScope>;
+    readonly shredded: ReadonlySet<string>;
+}
+export type MemberChainWalkFailure = 'member_chain_entry_invalid' | 'member_chain_link_invalid' | 'member_chain_signer_invalid' | 'member_chain_signature_invalid' | 'member_chain_subject_invalid';
+export type MemberChainWalkResult = {
+    readonly ok: true;
+    readonly state: MemberChainState;
+} | {
+    readonly ok: false;
+    readonly reason: MemberChainWalkFailure;
+    readonly index: number;
+};
+/** The state before the genesis entry of `tenantId`'s chain. */
+export declare function emptyMemberChainState(tenantId: string): MemberChainState;
+/** The latest policy's members that are still current: the members that get key packages for the scope. */
+export declare function memberChainScopeRecipients(state: MemberChainState, scopeId: string): readonly MemberKeyBundleV1[];
+/** Apply `entries` in order after `state`. Never throws for hostile entries. */
+export declare function applyMemberChainEntries(state: MemberChainState, entries: readonly unknown[]): Promise<MemberChainWalkResult>;
+export type MemberChainAnchorFailure = MemberChainWalkFailure | 'member_chain_anchor_missing' | 'member_chain_head_mismatch';
+export type MemberChainAnchorResult = {
+    readonly ok: true;
+    readonly state: MemberChainState;
+    /** `seq` of the anchor entry: the `add` of this member, signed by the pinned approver. */
+    readonly anchorSeq: number;
+} | {
+    readonly ok: false;
+    readonly reason: MemberChainAnchorFailure;
+    readonly index?: number;
+};
+export interface VerifyMemberChainFromAnchorInput {
+    readonly tenantId: string;
+    /** The whole chain, from the genesis entry (seq 1). */
+    readonly entries: readonly unknown[];
+    /** This member's own bundle, exactly as it was approved. */
+    readonly self: MemberKeyBundleV1;
+    /** The approver's signing key, pinned out of band: by the pv MAC or by the two-way fingerprint (10a). */
+    readonly approverSigningPublicJwk: P256PublicJwk;
+    /**
+     * A chain head the approver authenticated out of band, for example the
+     * head in the client pairing MAC. When given, it must be the anchor entry.
+     */
+    readonly authenticatedHead?: MemberChainHead;
+}
+/**
+ * Verify a chain as a member that joined after the genesis entry (11b):
+ *
+ * 1. The member pins the approver's signing key K out of band.
+ * 2. Entry E is an `add` whose `member` is byte-identical to `self` (KEM key
+ *    included) and whose signer is `memberId(K)`, verified with K.
+ * 3. The walk from genesis reaches E, so E is on the chain path.
+ * 4. The entries after E verify forward by signature.
+ *
+ * The first E counts; `self` can be added only once. Never throws for
+ * hostile entries.
+ */
+export declare function verifyMemberChainFromAnchor(input: VerifyMemberChainFromAnchorInput): Promise<MemberChainAnchorResult>;
 // ==== @byok-sdk/core dist/sealed-payload/member-chain.d.ts ====
 import { type JsonObject } from '../attestation';
 import type { WebCryptoKey } from '../webcrypto';
@@ -2186,6 +2337,73 @@ export type MemberChainEntryVerifyResult = {
  * `member_chain_signature_invalid`. Nothing here throws for hostile input.
  */
 export declare function verifyMemberChainEntry(entry: unknown, signerPublicJwk: P256PublicJwk): Promise<MemberChainEntryVerifyResult>;
+// ==== @byok-sdk/core dist/sealed-payload/member-fingerprint.d.ts ====
+import { type P256PublicJwk } from './primitives';
+export declare const MEMBER_FINGERPRINT_DOMAIN = "byok-member-fingerprint-v1\n";
+export interface MemberFingerprintInput {
+    readonly tenantId: string;
+    readonly signingPublicJwk: P256PublicJwk;
+}
+/** The 25-digit fingerprint of one member, as 5 groups of 5 digits joined by single spaces. */
+export declare function memberFingerprint(input: MemberFingerprintInput): Promise<string>;
+/**
+ * The 50-digit two-way approval code of two members of one tenant: their
+ * fingerprints ordered by member id, as 10 groups of 5 digits joined by
+ * single spaces. The order of the arguments does not matter.
+ */
+export declare function memberApprovalCode(tenantId: string, first: P256PublicJwk, second: P256PublicJwk): Promise<string>;
+// ==== @byok-sdk/core dist/sealed-payload/pairing-verification.d.ts ====
+import type { MemberKeyBundleV1 } from './member-bundle';
+import { type Bytes } from './primitives';
+export declare const PAIRING_VERIFICATION_SECRET_BYTES = 16;
+export declare const PAIRING_VERIFICATION_TEXT_LENGTH = 26;
+/** 128 fresh CSPRNG bits. */
+export declare function generatePairingVerificationSecret(): Bytes;
+export declare function encodePairingVerificationSecret(pv: Uint8Array): string;
+export declare function decodePairingVerificationSecret(text: string): Bytes;
+/** `<pairingCode>.<pv>`, the string the client shows and the user gives to the device. */
+export declare function formatPairingInput(pairingCode: string, pv: Uint8Array): string;
+export interface PairingInput {
+    /** The only part the device sends to the Host. */
+    readonly pairingCode: string;
+    /** Kept on the device; never sent to the Host. */
+    readonly pv: Bytes;
+}
+/** Split `<pairingCode>.<pv>` on the last `.`. Both parts are required. */
+export declare function parsePairingInput(text: string): PairingInput;
+/** Domain tag of the MAC the device sends: step 3, `HMAC(pv, device bundle, tenantId, deviceId)`. */
+export declare const DEVICE_PAIRING_MAC_DOMAIN = "byok-pairing-device-mac-v1\n";
+/** Domain tag of the MAC the client sends: step 4, `HMAC(pv, client bundle, chain head)`. */
+export declare const CLIENT_PAIRING_MAC_DOMAIN = "byok-pairing-client-mac-v1\n";
+export interface DevicePairingMacInput {
+    readonly tenantId: string;
+    readonly deviceId: string;
+    /** The device's own bundle. Its `deviceId` must equal `deviceId`. */
+    readonly member: MemberKeyBundleV1;
+}
+export interface ClientPairingMacInput {
+    /** The client's own bundle. A client bundle has no `deviceId`. */
+    readonly member: MemberKeyBundleV1;
+    /** The chain head after the client signed `add(device)`. */
+    readonly chainHead: {
+        readonly seq: number;
+        readonly hash: string;
+    };
+}
+export declare function computeDevicePairingMac(pv: Uint8Array, input: DevicePairingMacInput): Promise<string>;
+export declare function computeClientPairingMac(pv: Uint8Array, input: ClientPairingMacInput): Promise<string>;
+/**
+ * Check a received device MAC. Parse the received bundle with
+ * `parseMemberKeyBundle` first. Returns `false` for a wrong or malformed MAC,
+ * or a bundle that does not name `deviceId`. Only a malformed `pv` throws.
+ */
+export declare function verifyDevicePairingMac(pv: Uint8Array, input: DevicePairingMacInput, mac: unknown): Promise<boolean>;
+/**
+ * Check a received client MAC. Parse the received bundle with
+ * `parseMemberKeyBundle` first. Returns `false` for a wrong or malformed MAC,
+ * a device bundle, or a malformed chain head. Only a malformed `pv` throws.
+ */
+export declare function verifyClientPairingMac(pv: Uint8Array, input: ClientPairingMacInput, mac: unknown): Promise<boolean>;
 // ==== @byok-sdk/core dist/sealed-payload/primitives.d.ts ====
 /**
  * Byte helpers shared by the sealed-payload modules (#654 E1a).

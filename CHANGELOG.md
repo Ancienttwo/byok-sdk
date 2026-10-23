@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Feature (protocol, server, cloud, client)** — an ordinary Agent offer can
+  select `agentMemory: 'read-if-admitted'` (#815). It runs exactly as `read`
+  when the daemon admits the memory MCP, and exactly as `none` when it does
+  not. It never gets `agent_memory_unavailable`, for a writer or a
+  `memory-reader`. A Host that cannot see the admission can now ask for
+  read-only memory without a decline. Prepared offers do not accept the value.
+  `none`, `read`, `read-write` and an absent field do not change. The value is
+  a gated wire addition: every daemon with an Agent home advertises the new
+  device capability `agent-memory-read-if-admitted`
+  (`AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY`), and server and hosted cloud
+  refuse the value to a device without it, before the task exists. The new
+  `AgentMemorySelectionSchema` and `AgentMemorySelection` describe the
+  ordinary values. The daemon now reads its memory admission once per offer
+  and binds the memory MCP from that answer. The terminal does not report
+  which mode ran.
+
 - **Changed (client)** — on macOS the Agent memory helper refuses a directory
   or a file below the Agent home that is on another device than its parent
   directory (#781). Before, the local-volume rule (#765) checked only the home
