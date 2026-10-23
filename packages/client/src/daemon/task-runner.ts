@@ -2176,6 +2176,15 @@ export class TaskRunner {
         await this.handleCancel(envelope.task_id, envelope.payload.reason);
         return;
       case 'task.steer':
+        if (envelope.payload.sealed !== undefined) {
+          // #654: this daemon does not open sealed content and does not
+          // advertise `sealed-payload-v1`. `text` is only the placeholder, so
+          // it is never injected. Acked without retry, like an unsupported steer.
+          console.error(
+            `[byok/client] inbound sealed task.steer for task ${envelope.task_id} rejected: this daemon does not open sealed task input — acked without retry; this envelope should have been gated server-side`,
+          );
+          return;
+        }
         await this.handleSteer(envelope.task_id, envelope.payload.text);
         return;
       case 'task.approve':
@@ -2231,6 +2240,13 @@ export class TaskRunner {
     const decline = (reason: string, retryable: boolean, code?: TaskDeclinePayload['code']): void => {
       this.decline(taskId, reason, retryable, agentRef, code);
     };
+    // #654: this daemon does not open sealed content and does not advertise
+    // `sealed-payload-v1`. A sealed offer reaches it only from a Host that
+    // skipped the gate. Its `instruction` is a placeholder, so it never runs.
+    if (('sealing' in payload && payload.sealing !== undefined) || ('sealed' in payload && payload.sealed !== undefined)) {
+      decline('sealed_payload_unsupported: this daemon does not open sealed task input', false);
+      return;
+    }
     const sessionRef = offeredSessionRef(payload);
     const homeAccess = offeredHomeAccess(payload);
     const readerAttempt = homeAccess === 'memory-reader';

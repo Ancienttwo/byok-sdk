@@ -21,12 +21,15 @@
  * no mailbox row, so a mistargeted operator click cannot leave a `task.steer`
  * behind for a runtime that would choke on it later.
  */
+import { readFileSync } from 'node:fs';
+
 import type { TenantId } from '@byok-sdk/core';
 import {
   PROTOCOL_VERSION,
   createEnvelope,
   type RuntimeCapabilities,
   type RuntimeId,
+  type TaskSteerPayload,
 } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { isCloudError } from '../errors';
@@ -176,6 +179,27 @@ describe('steerTask (GAP-2)', () => {
       task_id: task.taskId,
       payload: { text: 'go left' },
     });
+  });
+
+  it('delivers a sealed steer with its sealed member, and only to a device that advertised sealed-payload-v1 (#654)', async () => {
+    const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url), 'utf8');
+    const sealedSteer = corpus.trimEnd().split('\n').map((raw) => JSON.parse(raw) as { type: string; payload: TaskSteerPayload })
+      .find((line) => line.type === 'task.steer' && line.payload.sealed !== undefined)!.payload;
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const task = await running(harness, device, { runtime: 'pi', capabilities: { steer: true } });
+
+    await expect(harness.cloud.steerTask(TENANT_A, task.taskId, sealedSteer)).rejects.toMatchObject({
+      code: 'agent_capability_missing',
+      message: expect.stringContaining('sealed-payload-v1'),
+    });
+    expect((await poll(harness, device, task.seq)).events).toEqual([]);
+
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: ['sealed-payload-v1'] });
+    await harness.cloud.steerTask(TENANT_A, task.taskId, sealedSteer);
+    const page = await poll(harness, device, task.seq);
+    expect(page.events).toHaveLength(1);
+    expect(page.events[0]).toMatchObject({ type: 'task.steer', task_id: task.taskId, payload: sealedSteer });
   });
 
   it('refuses a claim that reported steer: false, and allocates no mailbox row', async () => {

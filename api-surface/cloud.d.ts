@@ -309,6 +309,40 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
             maxTokens: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strip>>;
+        sealing: z.ZodOptional<z.ZodObject<{
+            scopeId: z.ZodString;
+            epoch: z.ZodNumber;
+            categories: z.ZodArray<z.ZodEnum<{
+                "task-input": "task-input";
+                "task-output": "task-output";
+            }>>;
+        }, z.core.$strict>>;
+        sealed: z.ZodOptional<z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-input">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
             activity: z.ZodObject<{
@@ -1536,9 +1570,9 @@ export interface ByokCloud {
      * Host control plane: inject steering text into a RUNNING task, by enqueueing
      * `task.steer` to the device that claimed it.
      *
-     * Gated on the claim-time capability snapshot and on nothing else — see
-     * `steer-control.ts` for why that is the only admissible input and why an
-     * absent snapshot refuses. Gate order mirrors the reference server
+     * The runtime gate reads the claim-time capability snapshot and nothing
+     * else — see `steer-control.ts` for why that is the only admissible input
+     * and why an absent snapshot refuses. Gate order mirrors the reference server
      * (`ConnectionHub.steerTask`, `packages/server/src/hub.ts`), and every gate is
      * evaluated in full before a mailbox row is allocated, so a refused call has
      * zero side effects:
@@ -1551,7 +1585,11 @@ export interface ByokCloud {
      *      {@link SteerRejectedError} `task_not_running`;
      *   4. the claim snapshot does not positively say `steer: true` ->
      *      {@link SteerRejectedError} `steer_unsupported_runtime`, including when
-     *      there is no snapshot at all.
+     *      there is no snapshot at all;
+     *   5. a sealed steer (#654) to a device that did not durably advertise
+     *      `sealed-payload-v1` -> `agent_capability_missing`. This reads
+     *      `WIRE_ADDITIONS`, the same gate as every offer; a plaintext steer
+     *      needs no device flag.
      *
      * Delivery is the same best-effort notification every control message has:
      * the enqueued envelope is durable, and whether the runtime acted on it is
@@ -2210,7 +2248,7 @@ export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected' | 'rate_limit
  * and may be refined without a protocol revision. `rate_limited` is a separate outcome,
  * not a refusal reason.
  */
-export declare const INBOUND_REFUSAL_REASONS: readonly ['protocol_version_unsupported', 'type_not_allowed', 'task_id_missing', 'device_not_eligible', 'hello_device_mismatch', 'hello_harnesses_without_capability', 'hello_protocol_version_unsupported', 'hello_product_mismatch', 'hello_capabilities_not_recorded', 'agent_message_draft_invalid', 'agent_message_attempt_mismatch', 'agent_message_offer_binding_missing', 'agent_message_binding_corrupt', 'agent_message_binding_mismatch', 'agent_message_too_large', 'agent_message_already_deduplicated', 'agent_message_reservation_conflict', 'agent_message_admission_unconfirmed', 'egress_conflict', 'content_receipt_event_request_mismatch', 'content_receipt_request_unknown', 'content_receipt_request_mismatch', 'content_receipt_conflict', 'task_not_found_for_device', 'task_owned_by_other_device', 'agent_identity_mismatch', 'terminal_harness_mismatch', 'claim_device_mismatch', 'claim_harness_and_runtime_conflict', 'claim_harness_mismatch', 'claim_harness_unavailable', 'claim_offer_mismatch', 'claim_not_won', 'recovery_report_invalid', 'recovery_offer_mismatch', 'activity_batch_too_large', 'activity_batch_invalid', 'approval_event_invalid'];
+export declare const INBOUND_REFUSAL_REASONS: readonly ['protocol_version_unsupported', 'type_not_allowed', 'sealed_payload_unsupported', 'task_id_missing', 'device_not_eligible', 'hello_device_mismatch', 'hello_harnesses_without_capability', 'hello_protocol_version_unsupported', 'hello_product_mismatch', 'hello_capabilities_not_recorded', 'agent_message_draft_invalid', 'agent_message_attempt_mismatch', 'agent_message_offer_binding_missing', 'agent_message_binding_corrupt', 'agent_message_binding_mismatch', 'agent_message_too_large', 'agent_message_already_deduplicated', 'agent_message_reservation_conflict', 'agent_message_admission_unconfirmed', 'egress_conflict', 'content_receipt_event_request_mismatch', 'content_receipt_request_unknown', 'content_receipt_request_mismatch', 'content_receipt_conflict', 'task_not_found_for_device', 'task_owned_by_other_device', 'agent_identity_mismatch', 'terminal_harness_mismatch', 'claim_device_mismatch', 'claim_harness_and_runtime_conflict', 'claim_harness_mismatch', 'claim_harness_unavailable', 'claim_offer_mismatch', 'claim_not_won', 'recovery_report_invalid', 'recovery_offer_mismatch', 'activity_batch_too_large', 'activity_batch_invalid', 'approval_event_invalid'];
 export type InboundRefusalReason = (typeof INBOUND_REFUSAL_REASONS)[number];
 /** The only way to build a rejection: the reason is required and closed. */
 interface Refused {

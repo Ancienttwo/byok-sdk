@@ -711,9 +711,9 @@ export interface ByokCloud {
    * Host control plane: inject steering text into a RUNNING task, by enqueueing
    * `task.steer` to the device that claimed it.
    *
-   * Gated on the claim-time capability snapshot and on nothing else — see
-   * `steer-control.ts` for why that is the only admissible input and why an
-   * absent snapshot refuses. Gate order mirrors the reference server
+   * The runtime gate reads the claim-time capability snapshot and nothing
+   * else — see `steer-control.ts` for why that is the only admissible input
+   * and why an absent snapshot refuses. Gate order mirrors the reference server
    * (`ConnectionHub.steerTask`, `packages/server/src/hub.ts`), and every gate is
    * evaluated in full before a mailbox row is allocated, so a refused call has
    * zero side effects:
@@ -726,7 +726,11 @@ export interface ByokCloud {
    *      {@link SteerRejectedError} `task_not_running`;
    *   4. the claim snapshot does not positively say `steer: true` ->
    *      {@link SteerRejectedError} `steer_unsupported_runtime`, including when
-   *      there is no snapshot at all.
+   *      there is no snapshot at all;
+   *   5. a sealed steer (#654) to a device that did not durably advertise
+   *      `sealed-payload-v1` -> `agent_capability_missing`. This reads
+   *      `WIRE_ADDITIONS`, the same gate as every offer; a plaintext steer
+   *      needs no device flag.
    *
    * Delivery is the same best-effort notification every control message has:
    * the enqueued envelope is durable, and whether the runtime acted on it is
@@ -1133,7 +1137,18 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     const taskId = requestedTaskId ?? `task_${options.crypto.randomUuid()}`;
     const messageId = await taskOfferMessageId(tenant, taskId, deviceId, agentRef, bytes => options.crypto.sha256(bytes));
     const proposed = buildEnvelope(taskId, 0, messageId);
-    const selection = proposed.payload as { harnessId?: string; runtime?: string; dispatchSelection?: unknown };
+    const selection = proposed.payload as {
+      harnessId?: string;
+      runtime?: string;
+      dispatchSelection?: unknown;
+      sealing?: unknown;
+      sealed?: unknown;
+    };
+    // #654: every offer type gates `sealing` and `sealed` on the device flag.
+    // The plain offers have no other capability read, so this is their gate.
+    if (selection.sealing !== undefined || selection.sealed !== undefined) {
+      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities(proposed.type, proposed.payload));
+    }
     if (selection.harnessId !== undefined) {
       HarnessIdSchema.parse(selection.harnessId);
       if (selection.runtime !== undefined || selection.dispatchSelection !== undefined) throw new ByokCloudError('coordination_input_invalid', 'harnessId conflicts with built-in runtime selection');
@@ -1618,9 +1633,16 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         attempt.claimedRuntime,
       );
     }
+    // A sealed steer (#654) keeps `text: ''` as its placeholder; dropping
+    // `sealed` would deliver an empty steer, so it travels or the call fails.
+    const steer: TaskSteerPayload = payload.sealed === undefined
+      ? { text: payload.text }
+      : { text: payload.text, sealed: payload.sealed };
+    const required = requiredReceiverCapabilities('task.steer', steer);
+    if (required.length > 0) await assertAgentCapabilities(tenant, ownerDeviceId, required);
     const messageId = options.crypto.randomUuid();
     return enqueueAgentControlEnvelope(tenant, ownerDeviceId, messageId, (seq) =>
-      createEnvelope('task.steer', { text: payload.text }, { id: messageId, taskId, seq }),
+      createEnvelope('task.steer', steer, { id: messageId, taskId, seq }),
     );
   }
 

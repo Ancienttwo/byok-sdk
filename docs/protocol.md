@@ -1048,6 +1048,84 @@ replays its stored completion without comparing the notice's `profileRevision`
 (no memory write, no second CAS). Cloud records no intent receipt: approval, release,
 completion and readback are Host authority on Host routes.
 
+### 2.5 Sealed payload v1 (#654, gated addition)
+
+Sealed payload v1 lets a member seal task input and task output, so that the
+Host stores only ciphertext for these categories. The design is
+[docs/plans/2026-10-22-654-hosted-wire-e2ee.md](plans/2026-10-22-654-hosted-wire-e2ee.md).
+`@byok-sdk/core/sealed-payload` seals and opens the bytes.
+`packages/protocol/src/sealed-payload.ts` holds the wire rules. This section
+states the wire rules only. The Host stores, the daemon and the read
+interfaces come in later slices.
+
+**Capability.** `sealed-payload-v1` gates both directions (`WIRE_ADDITIONS`):
+
+- Server to daemon: `sealing` and `sealed` on `task.offer`,
+  `task.offer_with_toolsets`, `task.offer_for_agent`,
+  `task.offer_for_agent_with_egress` and
+  `task.offer_for_agent_with_egress_fresh`, and `sealed` on `task.steer`. The
+  device advertises the flag.
+- Daemon to server: `sealed` on `task.complete`, `task.fail`, `task.decline`,
+  `task.cancelled`, `task.progress`, `task.artifact` and `task.await_approval`,
+  and the four sealed `task.decline` codes below. The server advertises the
+  flag. These payloads drop unknown fields, so an older Host would drop
+  `sealed` and keep the placeholder. The gate is the only boundary.
+
+`PROTOCOL_VERSION` stays 3. `task.offer_prepared`, input preparation, Agent
+messages, egress, drafts and memory projections are not sealed in v1.
+
+**Sealing policy.** An offer may carry `sealing: { scopeId, epoch,
+categories }`. `categories` is a non-empty, ordered subset of `task-input` and
+`task-output`. The policy is frozen for the task. The offer carries `sealed`
+exactly when `categories` includes `task-input`. Its `sealed.scope` is then
+`{ id: scopeId, epoch }`. An offer that seals only `task-output` keeps its
+instruction in plaintext.
+
+**Sealed member.** `sealed` has the outer fields of a sealed content: `v` (1),
+`suite` (`byok-sealed-v1.hkdf-sha256.aes-256-gcm`), `category`, `scope`
+(`id`, `epoch`, `keyId`), `chainHead`, `sender`, `salt`, `nonce`,
+`paddedLength` and `contentMac`. It carries the ciphertext in one form only:
+
+- `paddedLength` up to 256 KiB: inline `ciphertext`, canonical unpadded
+  base64url of `paddedLength + 16` bytes.
+- `paddedLength` above 256 KiB: `ciphertextRef`, a `BlobRef` without `url`
+  whose `size` is `paddedLength + 16`.
+
+`paddedLength` is the one legal padded length of the content: the next
+multiple of 256 bytes up to 16 KiB, Padmé above. The plaintext limit is 2 MiB
+of canonical JSON for each v1 category, so `paddedLength` is at most
+`pad(4 + 2 MiB)`. A message type fixes its category: offers and steer carry
+`task-input`, the other types carry `task-output`. The schema rejects every
+other value, an unknown `v` or `suite`, and every malformed field.
+
+**Split table.** `SEALED_SPLIT_TABLE` is the one authority for each sealed
+message type. It names:
+
+- the moved fields. A required field keeps a placeholder on the wire: `''` for
+  `instruction`, `text`, `summary` and `reason`, and `[]` for `events`. An
+  optional moved field (`finalMessage`, `document`, the `task.cancelled`
+  `reason`, the artifact `inline`) is absent. The receiver replaces each moved
+  field with its opened value. The placeholder keeps the released payload
+  shape: a released decoder that drops `sealed` still reads the payload.
+- the identity fields. After the envelope `task_id`, they name the write in
+  the AAD and the content MAC: `seq` for `task.progress`, `name` for
+  `task.artifact`, and `approvalId` for `task.await_approval`. A sealed
+  message must carry them.
+- the fields a sealed message must not carry: `preparedObservation` on
+  `task.complete` and `task.fail`, `artifactRefs` on `task.complete`, and
+  `blobRef` on `task.artifact`. Blob bytes have no sealing rule yet, so a
+  sealed message carries no plaintext blob reference.
+- the rule of each digest field (D16): `ciphertext-sha256`, `keyed-mac`,
+  `sealed` (moved with its parent), `plain` (not derived from sealed content)
+  or `forbidden`. A schema test requires a rule for every field of a sealed
+  message type whose name contains `digest`, `hash` or `revision`.
+
+**Fail closed.** A receiver never falls back to plaintext. A device that
+refuses sealed task input declines non-retryably with one of the closed codes
+`sealed_key_unavailable`, `sealed_open_failed`, `sealed_content_mac_mismatch`
+or `sealing_policy_mismatch` in `task.decline.code`. These codes are
+plaintext, because a device without the scope key cannot seal a reason.
+
 ## 3. Task state machine (M1 gap #2, #5, #6)
 
 ```mermaid

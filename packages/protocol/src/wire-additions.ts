@@ -66,6 +66,22 @@ const EGRESS_OFFER_FIELDS = (surface: MessageType): readonly WireAddition[] => [
   ...AGENT_OFFER_FIELDS(surface),
 ];
 
+/**
+ * Sealed payload v1 (#654). A server-to-daemon message with `sealing` or
+ * `sealed` needs the device flag; a daemon-to-server message with `sealed`, or
+ * a decline with a sealed failure code, needs the server flag. A non-strict
+ * receiver would drop `sealed` and keep the placeholder, so the gate is the
+ * only boundary.
+ */
+const SEALED_OFFER_FIELDS = (surface: MessageType): readonly WireAddition[] => [
+  { kind: 'envelope', rule: 'gated', surface, field: 'sealing', capability: 'sealed-payload-v1', advertisedBy: 'device' },
+  { kind: 'envelope', rule: 'gated', surface, field: 'sealed', capability: 'sealed-payload-v1', advertisedBy: 'device' },
+];
+const SEALED_OUTPUT = (surface: MessageType): WireAddition =>
+  ({ kind: 'envelope', rule: 'gated', surface, field: 'sealed', capability: 'sealed-payload-v1', advertisedBy: 'server' });
+const SEALED_DECLINE_CODE = (value: string): WireAddition =>
+  ({ kind: 'envelope', rule: 'gated', surface: 'task.decline', field: 'code', value, capability: 'sealed-payload-v1', advertisedBy: 'server' });
+
 export const WIRE_ADDITIONS: readonly WireAddition[] = Object.freeze([
   // Server to daemon: offers.
   { kind: 'envelope', rule: 'gated', surface: 'task.offer', field: 'harnessId', capability: 'custom-harness', advertisedBy: 'device' },
@@ -112,6 +128,25 @@ export const WIRE_ADDITIONS: readonly WireAddition[] = Object.freeze([
   // Daemon to server.
   { kind: 'envelope', rule: 'gated', surface: 'agent.message.draft', capability: 'agent-message-draft', advertisedBy: 'server' },
   { kind: 'envelope', rule: 'gated', surface: 'task.approval_resolved', capability: 'approval_resolved', advertisedBy: 'server' },
+  // Sealed payload v1 (#654). Server to daemon: task input.
+  ...SEALED_OFFER_FIELDS('task.offer'),
+  ...SEALED_OFFER_FIELDS('task.offer_with_toolsets'),
+  ...SEALED_OFFER_FIELDS('task.offer_for_agent'),
+  ...SEALED_OFFER_FIELDS('task.offer_for_agent_with_egress'),
+  ...SEALED_OFFER_FIELDS('task.offer_for_agent_with_egress_fresh'),
+  { kind: 'envelope', rule: 'gated', surface: 'task.steer', field: 'sealed', capability: 'sealed-payload-v1', advertisedBy: 'device' },
+  // Daemon to server: task output and the receiver's sealed failure codes.
+  SEALED_OUTPUT('task.complete'),
+  SEALED_OUTPUT('task.fail'),
+  SEALED_OUTPUT('task.decline'),
+  SEALED_OUTPUT('task.cancelled'),
+  SEALED_OUTPUT('task.progress'),
+  SEALED_OUTPUT('task.artifact'),
+  SEALED_OUTPUT('task.await_approval'),
+  SEALED_DECLINE_CODE('sealed_key_unavailable'),
+  SEALED_DECLINE_CODE('sealed_open_failed'),
+  SEALED_DECLINE_CODE('sealed_content_mac_mismatch'),
+  SEALED_DECLINE_CODE('sealing_policy_mismatch'),
 ] satisfies readonly WireAddition[]);
 
 /**

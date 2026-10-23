@@ -1,10 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { WIRE_ADDITIONS, isServerToDaemonType, requiredReceiverCapabilities, type MessageType } from '@byok-sdk/protocol';
+import { WIRE_ADDITIONS, createEnvelope, isServerToDaemonType, requiredReceiverCapabilities, type MessageType } from '@byok-sdk/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import { ZodError } from 'zod';
 import { AgentExecutionInputSchema } from '../agent-execution';
-import { TENANT_A, createHarness, type CloudHarness } from './support/harness';
+import { handleInboundEnvelope } from '../inbound';
+import { tenantStoresFor } from '../tenant-stores';
+import { PRODUCT_ID, TENANT_A, createHarness, offerPayload, type CloudHarness } from './support/harness';
 
 /**
  * #386: hosted admission reads `WIRE_ADDITIONS`, the table the protocol compat
@@ -20,6 +22,28 @@ import { TENANT_A, createHarness, type CloudHarness } from './support/harness';
  */
 
 type Enqueue = (harness: CloudHarness, deviceId: string, payload: never) => Promise<unknown>;
+
+/**
+ * `task.steer` goes only to a running task. This sets one up on another task
+ * id, acknowledges its offer, and then steers it, so the checks below still
+ * see no `gated` attempt and no pending mailbox row when the steer is refused.
+ */
+async function steerRunningTask(harness: CloudHarness, deviceId: string, payload: never): Promise<unknown> {
+  const offer = await harness.cloud.enqueueOffer(TENANT_A, deviceId, { taskId: 'steer-target', payload: offerPayload('steer me') });
+  const stores = tenantStoresFor(
+    { kind: 'device', tenantId: TENANT_A, productId: PRODUCT_ID, deviceId },
+    { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake },
+  );
+  for (const envelope of [
+    createEnvelope('task.claim', { deviceId, runtime: 'pi', capabilities: { steer: true } }, { taskId: offer.taskId }),
+    createEnvelope('task.started', {}, { taskId: offer.taskId }),
+  ]) {
+    expect((await handleInboundEnvelope(stores, deviceId, envelope)).outcome).toBe('accepted');
+  }
+  await harness.core.mailbox.recordDelivery(TENANT_A, { deviceId, deliveredSeq: offer.seq });
+  await harness.core.mailbox.advanceCursor(TENANT_A, { deviceId, ackedSeq: offer.seq });
+  return harness.cloud.steerTask(TENANT_A, offer.taskId, payload);
+}
 
 const FRESH = 'task.offer_for_agent_with_egress_fresh' satisfies MessageType;
 /** Host input, not wire data: passed only when the payload selects `messageEgress`. */
@@ -43,6 +67,7 @@ const ENQUEUE: Partial<Record<MessageType, Enqueue>> = {
   'agent.input.preparation': (h, d, payload) => h.cloud.enqueueInputPreparation(TENANT_A, d, payload),
   'provider.provisioning.available': (h, d, payload) => h.cloud.enqueueProviderProvisioningNotice(TENANT_A, d, payload),
   'agent.memory.intent.available': (h, d, payload) => h.cloud.enqueueAgentMemoryIntentNotice(TENANT_A, d, payload),
+  'task.steer': steerRunningTask,
 };
 
 const corpusPath = fileURLToPath(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url));
