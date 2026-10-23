@@ -37,6 +37,16 @@ func identityForRoot(root *os.Root, _ fs.FileInfo) (rootIdentity, error) {
 	}, nil
 }
 
+// linkCount reads the hard link count from the open handle. Go's Windows
+// FileInfo has no link count.
+func linkCount(file *os.File, _ fs.FileInfo) (uint64, error) {
+	var information syscall.ByHandleFileInformation
+	if err := syscall.GetFileInformationByHandle(syscall.Handle(file.Fd()), &information); err != nil {
+		return 0, err
+	}
+	return uint64(information.NumberOfLinks), nil
+}
+
 // checkRootVolume admits NTFS only. There the volume serial and the 64-bit
 // file index identify one directory. ReFS file IDs have 128 bits, so the
 // 64-bit index is not unique, and a FAT file ID changes when its directory
