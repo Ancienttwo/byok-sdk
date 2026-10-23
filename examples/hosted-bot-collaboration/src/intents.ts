@@ -15,6 +15,8 @@ export interface IntentFreeze { key: string; source: 'user' | 'bot'; waitUntil: 
  * A second freeze of the same Turn with the same identity changes nothing; another identity throws, as in K4 `enqueue`.
  */
 export async function freezeIntent(client: PoolClient, scope: string, freeze: IntentFreeze): Promise<FrozenInput> {
+  // H never retries a task (#793 D2d option A), so it cannot honor a K4 retry policy. It refuses one instead of dropping it.
+  if ((freeze as IntentFreeze & { retry?: unknown }).retry !== undefined) throw new Error('H intents have no retry policy');
   const scopeKey = storedKey(scope), key = storedKey(freeze.key);
   const input: FrozenInput = { ...structuredClone(freeze.execution), taskId: taskId(freeze.key, 0) };
   const prior = await client.query<{ source: string; input: string; wait_until: string }>(
@@ -63,7 +65,7 @@ export async function writeSyncStep(client: PoolClient, scope: string, turn: Tur
     // A row that was never tried has no SDK call, because the claim runs under this lock. It concludes now, as K4
     // queuedExpiry concludes a cancelled queued intent. A tried row waits for the reconciliation to check its attempt.
     await client.query(`UPDATE intent SET cancel_reason = 'cancelled', conclusion = CASE WHEN tries = 0 THEN 'cancelled' ELSE conclusion END
-      WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(turn.id)]);
+      WHERE scope = $1 AND key = $2 AND conclusion IS NULL`, [storedKey(scope), storedKey(turn.id)]);
   } else if (step.kind === 'routine' || turn.source === 'routine') throw new Error('H has no routine Turns before #793 D2f');
 }
 

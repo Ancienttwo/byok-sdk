@@ -3,13 +3,16 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { enqueue, HostLedger, project, taskId, type FrozenInput } from '@byok-sdk/example-host-execution-core';
+import { DEFAULT_RETRY, enqueue, HostLedger, project, taskId, type FrozenInput } from '@byok-sdk/example-host-execution-core';
+import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { stateOf, type CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { syncTurn } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { seedCollaboration, SYNC_OPTIONS, syncVectors, type SyncIntentRecord, type SyncSubject } from '@byok-sdk/example-bot-collaboration/test-support';
+import { freezeIntent, type IntentFreeze } from './intents';
 import { storedKey } from './layout';
 import { vectorPorts } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
+import { inSchema, lockScope } from './store';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;
@@ -109,6 +112,31 @@ describe.skipIf(POSTGRES_URL === undefined)('H sync step on real Postgres (#793 
     const stored = await h.stored();
     await h.sync();
     expect(await h.stored()).toBe(stored);
+  });
+
+  it('keeps the started intent of an archived Bot open, as L does, and cancels only the never-tried one (#793 D2d)', async () => {
+    const h = await hosted();
+    await h.change(queueTurns);
+    await h.sync();
+    // The reconciliation saw a claim of q1: L reads the same fact from the K4 execution (K8 commit.ts executionStarted).
+    await opened!.pool.query(`UPDATE ${table('intent')} SET submission = 'delivered', tries = 1, started = true WHERE scope = $1 AND key = $2`,
+      [storedKey(h.scope), storedKey('q1')]);
+    await h.change(state => { state.team.bots.main!.archived = true; });
+    await h.sync();
+    expect(await intentRow(h.scope, 'q1')).toMatchObject({ cancel_reason: null, conclusion: null });
+    expect(await intentRow(h.scope, 'q2')).toMatchObject({ cancel_reason: 'cancelled', conclusion: 'cancelled' });
+    const state = await h.state();
+    expect([state.turns.q1!.status, state.turns.q1!.conclusion]).toEqual(['processing', undefined]);
+  });
+
+  it('refuses a freeze input with a K4 retry policy, and writes nothing (#793 D2d option A)', async () => {
+    const h = await hosted();
+    const before = await h.stored();
+    await expect(inSchema(opened!.pool, store().schema, async client => {
+      await lockScope(client, storedKey(h.scope));
+      return freezeIntent(client, h.scope, { key: 'r1', source: 'user', waitUntil: 1, execution: template('device'), retry: DEFAULT_RETRY } as IntentFreeze);
+    })).rejects.toThrow('H intents have no retry policy');
+    expect(await h.stored()).toBe(before);
   });
 
   it('in history mode, freezes a Turn only with its own history rows', async () => {

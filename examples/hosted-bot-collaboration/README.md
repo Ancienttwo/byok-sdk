@@ -23,7 +23,8 @@ transaction. The transaction holds the state change, the command record and the 
 
 `freezeIntent` saves one intent for a Turn: its source, the frozen SDK input and the stable task id
 `taskId(turnId, 0)` of K4. The caller holds the scope lock. A second freeze with the same source, input and
-wait changes nothing. Another one throws `Intent identity conflict`, as K4 `enqueue` does.
+wait changes nothing. Another one throws `Intent identity conflict`, as K4 `enqueue` does. A freeze with a K4 `retry` policy throws,
+because H never retries a task (D2d option A) and must not drop the policy.
 
 `HostedSubmitter.run()` takes the due rows and runs the K4 rules on them: the FIFO head (`fifoHeads`), the
 queued expiry (`queuedExpiry`) and the frozen submit (`submitFrozen`).
