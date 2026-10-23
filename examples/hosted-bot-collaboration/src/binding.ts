@@ -39,13 +39,17 @@ export async function bindDevice(client: PoolClient, scopeKey: string, deviceId:
 }
 
 /**
- * Revokes a device's binding: `revoked_at` and a raised mode revision, in one write. A second revoke changes nothing.
- * A device that was never bound is refused, because there is no binding to keep as a tombstone. The caller holds the
- * scope lock.
+ * Revokes a device id for good (#793 O1 option A): `revoked_at` and a raised mode revision, in one write. A second revoke
+ * changes nothing. A device id that was never bound gets a tombstone row in the default mode L at revision 2, so a later
+ * bind of that id is refused too. The caller holds the scope lock.
  */
 export async function revokeDevice(client: PoolClient, scopeKey: string, deviceId: string, revokedAt: number): Promise<void> {
   const found = await client.query('SELECT 1 FROM device_binding WHERE scope = $1 AND device = $2', [scopeKey, storedKey(deviceId)]);
-  if (!found.rows[0]) throw new DeviceBindingError(deviceId, 'unbound');
+  if (!found.rows[0]) {
+    await client.query(`INSERT INTO device_binding (scope, device, ordinal, mode, mode_revision, revoked_at)
+      SELECT $1, $2, coalesce(max(ordinal) + 1, 0), 'L', 2, $3 FROM device_binding WHERE scope = $1`, [scopeKey, storedKey(deviceId), revokedAt]);
+    return;
+  }
   await client.query(`UPDATE device_binding SET revoked_at = $3, mode_revision = mode_revision + 1
     WHERE scope = $1 AND device = $2 AND revoked_at IS NULL`, [scopeKey, storedKey(deviceId), revokedAt]);
 }

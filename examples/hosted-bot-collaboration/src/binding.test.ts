@@ -60,9 +60,22 @@ describe.skipIf(POSTGRES_URL === undefined)('H device binding on real Postgres (
     await store().revokeDevice(scope, 'device', 9);
     await expect(store().bindDevice(scope, 'device')).rejects.toEqual(refusal('revoked'));
     expect(await store().dump(scope)).toBe(revoked);
-    // A device that was never bound has no binding to keep as a tombstone, so its revoke is refused.
-    await expect(store().revokeDevice(scope, 'other', 5)).rejects.toEqual(refusal('unbound'));
-    expect(await store().dump(scope)).toBe(revoked);
+    // A revoke of a device id that was never bound is final too: it leaves a tombstone in the default mode L.
+    await store().revokeDevice(scope, 'other', 7);
+    expect(await binding(scope, 'other')).toEqual({ mode: 'L', mode_revision: '2', revoked_at: '7' });
+    const tombstone = await store().dump(scope);
+    await store().revokeDevice(scope, 'other', 9);
+    await expect(store().bindDevice(scope, 'other')).rejects.toEqual(refusal('revoked'));
+    expect(await store().dump(scope)).toBe(tombstone);
+  });
+
+  it('revokes a device id in a scope that has no row yet, and refuses a later bind of that id', async () => {
+    const scope = `tenant:${randomUUID()}`;
+    await store().revokeDevice(scope, 'device', 5);
+    expect(await binding(scope, 'device')).toEqual({ mode: 'L', mode_revision: '2', revoked_at: '5' });
+    await expect(store().bindDevice(scope, 'device')).rejects.toEqual(refusal('revoked'));
+    // Another device of the scope still binds, at the next ordinal.
+    expect(await store().bindDevice(scope, 'other')).toBe(1);
   });
 
   it.each(['unbound', 'revoked', 'mode'] as const)('refuses a sync freeze for a device that is %s, and writes nothing', async reason => {
@@ -111,6 +124,19 @@ describe.skipIf(POSTGRES_URL === undefined)('H device binding on real Postgres (
     expect(sdk.submitted).toEqual([]);
     expect(await row(scope)).toEqual({ submission: 'uncertain', tries: 1, next_at: String(clock + 500),
       last_error: 'Device has no active H binding: revoked', cancel_reason: null, conclusion: null });
+  });
+
+  it('does not submit when the mode revision changes between the claim and the SDK call without a revoke', async () => {
+    const { scope } = await frozen(), sdk = fakePort();
+    // No writer changes only the revision yet (a mode switch will). The check before the SDK call compares it with the claim.
+    sdk.hooks.offer = async () => {
+      sdk.hooks.offer = undefined;
+      await opened!.pool.query(`UPDATE ${table('device_binding')} SET mode_revision = mode_revision + 1 WHERE scope = $1`, [storedKey(scope)]);
+    };
+    expect(await submitter(sdk.port).run()).toEqual({ tried: 1, failed: [] });
+    expect(sdk.submitted).toEqual([]);
+    expect(await row(scope)).toEqual({ submission: 'uncertain', tries: 1, next_at: String(clock + 500),
+      last_error: 'Device has no active H binding: revision', cancel_reason: null, conclusion: null });
   });
 
   it('submits the intent of a bound device', async () => {
