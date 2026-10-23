@@ -15,11 +15,17 @@ export function sameFrozenOffer(offer: FrozenOffer, input: FrozenInput): boolean
     && canonical(offer.payload) === canonical(input.payload);
 }
 
-/** Reads the offer of the frozen task back. A different recorded offer throws; `delivered: false` is not a proof of no append. */
+/** The recorded offer of the task is not the frozen input. The submit must stop, and an operator must look at it. */
+export class FrozenOfferMismatchError extends Error {
+  readonly code = 'frozen_offer_mismatch';
+  constructor() { super('Offer differs from the frozen input'); this.name = 'FrozenOfferMismatchError'; }
+}
+
+/** Reads the offer of the frozen task back. A different recorded offer throws `FrozenOfferMismatchError`; `delivered: false` is not a proof of no append. */
 export async function frozenDelivered(port: Pick<FrozenSubmitPort, 'offer'>, input: FrozenInput): Promise<boolean> {
   const offer = await port.offer(input.taskId);
   if (!offer) return false;
-  if (!sameFrozenOffer(offer, input)) throw new Error('Offer differs from the frozen input');
+  if (!sameFrozenOffer(offer, input)) throw new FrozenOfferMismatchError();
   return offer.delivered;
 }
 

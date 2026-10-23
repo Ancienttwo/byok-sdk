@@ -14,7 +14,7 @@ export type { MemoryApproval, MemoryBinding, MemoryOptions, MemoryContextPack } 
 export { hash, canonical, project, time } from './model';
 export type { LedgerState, IgnoredWakeAudit } from './model';
 export { enqueue, agentKey, fifoHeads, queuedExpiry } from './transitions';
-export { sameFrozenOffer, submitFrozen } from './submit';
+export { FrozenOfferMismatchError, sameFrozenOffer, submitFrozen } from './submit';
 export type { FrozenSubmitPort, FrozenInput, FrozenOffer } from './submit';
 export { WAKE_HORIZON_MS, IGNORED_WAKE_AUDIT_LIMIT, parseRoutineWakeKey, versionSwitchDue, promoteOccurrence, concludeOccurrence } from './routines';
 

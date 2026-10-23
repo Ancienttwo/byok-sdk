@@ -28,7 +28,8 @@ The crash test sends SIGKILL to a child Host during wake delivery.
 | --- | --- |
 | `src/core.ts` | FIFO dispatch, exact recovery, cancellation, retry, outcome application, occurrence hooks and outbox scans. |
 | `src/ledger.ts` | A separate Host SQLite ledger with synchronous transactions. |
-| `src/model.ts`, `src/transitions.ts` | Durable records, stable identities and atomic state changes. |
+| `src/model.ts`, `src/transitions.ts` | Durable records, stable identities, atomic state changes, and the FIFO head and queued expiry rules. |
+| `src/submit.ts` | The frozen-offer submit protocol: readback first, the frozen offer check and the stop hook. Shared with the hosted lane. |
 | `src/routines.ts` | Occurrence deduplication, next-slot commit, coalescing, lifecycle, version switches and Host occurrence transitions. |
 | `src/schedule.ts` | The default UTC interval calendar and the shared calendar callback type. |
 | `src/index.ts` | The example's copy-and-own entrypoint. This is not a published SDK package. |

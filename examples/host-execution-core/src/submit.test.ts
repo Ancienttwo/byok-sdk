@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { HostExecutionCore, HostLedger, submitFrozen, type ExecutionServer, type FrozenInput, type FrozenOffer, type FrozenSubmitPort } from './index';
+import { FrozenOfferMismatchError, HostExecutionCore, HostLedger, submitFrozen, type ExecutionServer, type FrozenInput, type FrozenOffer, type FrozenSubmitPort } from './index';
 
 const input: FrozenInput = {
   taskId: 'task-1',
@@ -57,7 +57,7 @@ describe('submitFrozen (#793 D2b)', () => {
     expect(p.submit.mock.calls[0]![0].taskId).toBe('task-1');
   });
 
-  it('never submits an undelivered readback after waitUntil', async () => {
+  it('stops with no submit when beforeSubmit refuses an undelivered readback', async () => {
     const waitUntil = 1000, now = 1000;
     for (const offers of [[undefined], [readback(false)]]) {
       const p = port(offers);
@@ -73,7 +73,9 @@ describe('submitFrozen (#793 D2b)', () => {
     ['payload', { payload: { ...structuredClone(input.payload), instruction: 'Another turn.' } }],
   ])('refuses a readback with another %s and never submits', async (_field, change) => {
     const p = port([readback(true, change as Partial<FrozenOffer>)]);
-    await expect(submitFrozen(p, input, open)).rejects.toThrow('Offer differs from the frozen input');
+    const refused = submitFrozen(p, input, open);
+    await expect(refused).rejects.toBeInstanceOf(FrozenOfferMismatchError);
+    await expect(refused).rejects.toMatchObject({ code: 'frozen_offer_mismatch', message: 'Offer differs from the frozen input' });
     expect(p.submit).not.toHaveBeenCalled();
   });
 
@@ -99,7 +101,7 @@ describe('submitFrozen (#793 D2b)', () => {
 
   it('refuses a throw whose readback holds another offer', async () => {
     const p = port([undefined, readback(true, { deviceId: 'device-2' })], lost);
-    await expect(submitFrozen(p, input, open)).rejects.toThrow('Offer differs from the frozen input');
+    await expect(submitFrozen(p, input, open)).rejects.toBeInstanceOf(FrozenOfferMismatchError);
     expect(p.submit).toHaveBeenCalledTimes(1);
   });
 });
