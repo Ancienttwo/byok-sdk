@@ -19,6 +19,12 @@ transaction. The transaction holds the state change, the command record and the 
 - The caller passes the scope that the authenticated product user owns. A request for another scope is
   a `scope_mismatch` conflict.
 - A scope row of an unknown store version is refused before any write. `read()` refuses it too.
+- A command reads the intent facts (K8 `CommandPorts.intents`) from the intent rows, under the scope lock, as L reads its
+  K4 intents in the commit transaction. A caller's ports cannot supply them.
+- A new `cancel_turn` of a Turn with a frozen intent runs the K4 cancel in the same transaction, in L's order (K8
+  `host.ts` `cancelTurn`): the commit, then `cancel_reason = 'cancelled'` on the open intent, then the version switch
+  check. An untried row also concludes `cancelled` (K4 `queuedExpiry`), because the submit claim runs under the same
+  lock. A tried row waits for the reconciliation to check its attempt. The next sync ends the Turn.
 
 ## Intent submitter
 
@@ -282,6 +288,8 @@ three and runs these suites.
 - The routine tests seed each occurrence as the scheduler records it. They cover the outcome actions, the owner API,
   promotion, the claim's `retry_until`, the version switch in each writer that concludes routine work, and the
   `bot-routine` refusal.
+- The D2f-1 routine vectors (`routineVectors`) run on the store, with the scheduler fire and a submitter pass on an SDK
+  tenant in memory.
 - The scheduler tests cover on-time and late fires, the supersede in the fire, the device fence and its paging, two
   racing fires, a fire that throws and its backoff, the interval guard, and the start and pass upkeep.
 - The reconciliation tests run a real daemon for the completed outcome, a replayed terminal and a busy decline. The

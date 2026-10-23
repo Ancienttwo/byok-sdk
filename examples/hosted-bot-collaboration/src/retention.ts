@@ -6,6 +6,7 @@ import { retainRoots, type RetentionInput, type RetentionLimits, type RetentionR
 import { commitCommand, refuseRetired, retiredIdentity, type AdmittedIds, type Command, type CommandPorts,
   type RetiredNamespace } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import type { CommandRecord, CommitRequest, CommitResult } from '@byok-sdk/example-bot-collaboration/rules/commit';
+import { commandIntentFacts } from './intents';
 import { storedKey } from './layout';
 import { loadSlice } from './routines';
 
@@ -61,15 +62,17 @@ export async function retiredTurns(client: PoolClient, scopeKey: string, turnIds
  * retention moved still answers a replay, and an id that retention retired is refused at admission. A throw rolls back.
  */
 export async function commitStored(client: PoolClient, scope: string, state: CollaborationState, request: CommitRequest<Command>,
-  ports: CommandPorts): Promise<CommitResult> {
+  ports: Omit<CommandPorts, 'intents'>): Promise<CommitResult> {
   const scopeKey = storedKey(scope);
+  // The intent facts come from the intent rows in this transaction, never from the caller (#793 D2f-4).
+  const intents = await commandIntentFacts(client, scope, Object.keys(state.turns));
   const archived = typeof request.commandId === 'string' && request.commandId
     ? await archivedRow(client, scopeKey, 'commands', request.commandId) as CommandRecord | undefined : undefined;
   let admitted: AdmittedIds | undefined;
   const result = commitCommand(state, request, { scope, recordCallbacks: true,
     // As K4 `rows.get` in L: a keyed command that is not in the state checks its row id here, and an over-limit id throws.
     archived: (id: string) => { checkRow('commands', id); return id === request.commandId ? archived : undefined; },
-    admitted: ids => { admitted = ids; } }, ports);
+    admitted: ids => { admitted = ids; } }, { ...ports, intents });
   if (admitted) {
     const ids = admitted as AdmittedIds;
     const isRetired = await tombstones(client, scopeKey, (['turn', 'input', 'round'] as const).flatMap(namespace =>

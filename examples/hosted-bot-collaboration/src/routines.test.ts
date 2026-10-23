@@ -40,8 +40,8 @@ const intentRow = async (scope: string, key: string) => (await query<{ source: s
   tries: number; conclusion: string | null }>(`SELECT source, input, wait_until::text, retry_until::text, tries, conclusion FROM ${table('intent')}
   WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(key)]))[0];
 
-/** The command ports of the tests. `cancel_turn` reads the intent rows through `intents`. */
-const ports: PortsFactory = (state, publish) => ({ ...vectorPorts(state, publish), now: () => NOW, intents: { intent: () => undefined } });
+/** The command ports of the tests, on the test clock. */
+const ports: PortsFactory = (state, publish) => ({ ...vectorPorts(state, publish), now: () => NOW });
 /** A device terminal that completes the task of Turn `turnId` with `document`. */
 function completed(turnId: string, document: Json): TaskEvidence {
   const task = taskId(turnId, 0);
@@ -282,6 +282,12 @@ describe.skipIf(POSTGRES_URL === undefined)('H routines on real Postgres (#793 D
         port: () => ({ offer: none, attempt: none, deviceTerminal: none, cancel: none }) }).run();
       expect(await intentRow(scope, turn)).toMatchObject({ conclusion: 'cancelled' });
       await switched(scope, id, now);
+    });
+    it('the owner cancel of a promoted untried Turn (#793 D2f-4)', async () => {
+      const { scope, id, turn } = await staged();
+      await store().commit(scope, { scope, commandId: 'cancel', command: { kind: 'cancel_turn', turnId: turn } }, ports);
+      expect(await intentRow(scope, turn)).toMatchObject({ tries: 0, conclusion: 'cancelled' });
+      await switched(scope, id, NOW);
     });
     it('the terminal transaction', async () => {
       const { scope, id, turn } = await staged();

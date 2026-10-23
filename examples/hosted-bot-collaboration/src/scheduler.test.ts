@@ -27,7 +27,7 @@ const NOW = Date.UTC(2026, 0, 1);
 /** The first slot of a routine created at `NOW`, and the next two. */
 const FIRST = slotAfter(NOW - 1), SECOND = slotAfter(FIRST), THIRD = slotAfter(SECOND);
 const SYNC = { ...SYNC_OPTIONS, now: NOW, history: undefined };
-const ports: PortsFactory = (state, publish) => ({ ...vectorPorts(state, publish), now: () => NOW, intents: { intent: () => undefined } });
+const ports: PortsFactory = (state, publish) => ({ ...vectorPorts(state, publish), now: () => NOW });
 const occurrenceKey = (id: string, kind: 'scheduled' | 'catch_up', plannedAt: number, version = 1) => hash([id, version, { kind, plannedAt }]);
 
 const routineRow = async (scope: string, id: string) => (await query<{ definition: RoutineDefinition; pending: RoutineDefinition | null; status: string;

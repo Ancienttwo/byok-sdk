@@ -12,7 +12,7 @@ import { freezeIntent, type IntentFreeze } from './intents';
 import { storedKey } from './layout';
 import { vectorPorts } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
-import { inSchema, lockScope } from './store';
+import { inSchema, lockScope, type PortsFactory } from './store';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;
@@ -161,6 +161,46 @@ describe.skipIf(POSTGRES_URL === undefined)('H sync step on real Postgres (#793 
     await h.sync();
     expect(await intentRow(h.scope, 'q1')).toMatchObject({ cancel_reason: 'cancelled', conclusion: 'cancelled' });
     expect((await h.state()).turns.q1).toMatchObject({ status: 'failed', conclusion: 'cancelled', reported: true });
+  });
+
+  describe('cancel_turn of a Turn with a frozen intent runs the K4 cancel in its commit, as L does (#793 D2f-4)', () => {
+    const cancel = (h: SyncSubject, turnId: string, ports?: PortsFactory) => ports
+      ? store().commit(h.scope, { scope: h.scope, commandId: `cancel-${turnId}`, command: { kind: 'cancel_turn', turnId } }, ports)
+      : h.commit({ scope: h.scope, commandId: `cancel-${turnId}`, command: { kind: 'cancel_turn', turnId } });
+    async function frozen() {
+      const h = await hosted();
+      await h.change(queueTurns);
+      await h.sync();
+      expect(await intentRow(h.scope, 'q1')).toMatchObject({ cancel_reason: null, conclusion: null });
+      return h;
+    }
+
+    it('concludes an untried intent cancelled in the commit, and the next sync ends its Turn', async () => {
+      const h = await frozen();
+      await cancel(h, 'q1');
+      expect(await intentRow(h.scope, 'q1')).toMatchObject({ cancel_reason: 'cancelled', conclusion: 'cancelled' });
+      expect((await h.state()).turns.q1).toMatchObject({ status: 'processing' });
+      await h.sync();
+      expect((await h.state()).turns.q1).toMatchObject({ status: 'failed', conclusion: 'cancelled', reported: true });
+    });
+
+    it('keeps a tried intent open with its cancel reason, for the reconciliation to check its attempt', async () => {
+      const h = await frozen();
+      await opened!.pool.query(`UPDATE ${table('intent')} SET tries = 1, submission = 'uncertain' WHERE scope = $1 AND key = $2`,
+        [storedKey(h.scope), storedKey('q1')]);
+      await cancel(h, 'q1');
+      expect(await intentRow(h.scope, 'q1')).toMatchObject({ cancel_reason: 'cancelled', conclusion: null });
+      expect((await h.state()).turns.q1).toMatchObject({ status: 'processing' });
+    });
+
+    it('reads the intent facts from the store, and ignores intent facts in the caller ports', async () => {
+      const h = await frozen();
+      const stubbed = ((state, publish) => ({ ...vectorPorts(state, publish), intents: { intent: () => undefined } })) as PortsFactory;
+      await cancel(h, 'q1', stubbed);
+      // With the stub, K8 would conclude the Turn itself and leave its intent running.
+      expect(await intentRow(h.scope, 'q1')).toMatchObject({ cancel_reason: 'cancelled', conclusion: 'cancelled' });
+      expect((await h.state()).turns.q1).toMatchObject({ status: 'processing' });
+    });
   });
 
   it('refuses a routine Turn that has no occurrence row, and writes nothing (#793 D2f)', async () => {
