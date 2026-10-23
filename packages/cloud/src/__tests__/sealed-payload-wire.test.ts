@@ -1,0 +1,435 @@
+/**
+ * The wire's sealed member and core's sealed content agree (#654 E3a).
+ *
+ * `@byok-sdk/protocol` repeats the header rules because it does not depend on
+ * core. This package depends on both, so it proves the two equal: what core
+ * seals, the wire schema accepts; what the wire schema accepts, core reads as
+ * a header; a field that one rejects, the other rejects too. It also opens
+ * every inline sealed line of the v3 golden corpus with the corpus scope key,
+ * so those lines are real ciphertext under the binding a receiver rebuilds
+ * from the split table.
+ */
+import { readFileSync } from 'node:fs';
+
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
+
+import type { JsonObject } from '@byok-sdk/core';
+import {
+  SEALED_CATEGORIES,
+  SEALED_CONTENT_SUITE,
+  SEALED_CONTENT_VERSION,
+  SealedContentHeaderV1Schema,
+  openSealedContent,
+  sealContent,
+  type SealedBinding,
+} from '@byok-sdk/core/sealed-payload';
+import {
+  SEALED_PAYLOAD_CATEGORIES,
+  SEALED_PAYLOAD_SUITE,
+  SEALED_PAYLOAD_VERSION,
+  SEALED_SPLIT_TABLE,
+  SealedPayloadSchema,
+  TaskSealingSchema,
+  isSealedMessageType,
+  isServerToDaemonType,
+  createEnvelope,
+  requiredReceiverCapabilities,
+  sealedPayloadPaddedLength,
+  type Envelope,
+  type MessageType,
+} from '@byok-sdk/protocol';
+
+import { SealedAgentExecutionInputSchema } from '../index';
+import type {
+  EnqueueSealedOfferInput,
+  EnqueueSealedToolsetOfferInput,
+  SealedAgentDispatchInput,
+  SealedAgentEgressDispatchInput,
+  SealedAgentExecutionInput,
+} from '../index';
+import { handleInboundEnvelope } from '../inbound';
+import { tenantStoresFor } from '../tenant-stores';
+import { PRODUCT_ID, TENANT_A, createHarness } from './support/harness';
+
+type Json = { [key: string]: unknown };
+
+/** The fixed inputs the golden sealed lines were sealed with. Test data only. */
+const GOLDEN_SCOPE_KEY = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+const GOLDEN_TENANT = 'tenant-golden';
+const GOLDEN_DEVICE = 'device-golden-1';
+const GOLDEN_SCOPE = { scopeId: 'scope-golden-device-1', epoch: 2 };
+const GOLDEN_CATEGORIES = ['task-input', 'task-output'] as const;
+
+const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url), 'utf8')
+  .trimEnd()
+  .split('\n')
+  .map((raw) => JSON.parse(raw) as { type: MessageType; task_id: string; payload: Json });
+
+function bindingOf(line: (typeof corpus)[number]): SealedBinding {
+  if (!isSealedMessageType(line.type)) throw new Error(`${line.type} is not sealed`);
+  const identity: Record<string, string | number> = { taskId: line.task_id };
+  for (const field of SEALED_SPLIT_TABLE[line.type].identity) identity[field] = line.payload[field] as string | number;
+  // The receiver binds the Agent from the task it knows: the offer itself, or
+  // for a later message the task's offer, never that message's payload.
+  const offer = line.payload.sealing !== undefined
+    ? line
+    : corpus.find((candidate) => candidate.task_id === line.task_id && candidate.payload.sealing !== undefined);
+  if (offer === undefined) throw new Error(`no sealed offer for ${line.task_id}`);
+  const agentRef = offer.payload.agentRef as SealedBinding['agentRef'] | undefined;
+  return {
+    tenantId: GOLDEN_TENANT,
+    family: SEALED_SPLIT_TABLE[line.type].plainType,
+    direction: isServerToDaemonType(line.type) ? 'server-to-daemon' : 'daemon-to-server',
+    identity,
+    deviceId: GOLDEN_DEVICE,
+    agentRef: agentRef == null ? null : { agentId: agentRef.agentId, profileRevision: agentRef.profileRevision },
+    categories: [...GOLDEN_CATEGORIES],
+    notAfter: null,
+  };
+}
+
+function headerOf(member: Json): Json {
+  const { ciphertext: _inline, ciphertextRef: _ref, ...header } = member;
+  return header;
+}
+
+async function sealed(plaintext: JsonObject) {
+  return sealContent({
+    scopeKey: GOLDEN_SCOPE_KEY,
+    scope: { id: GOLDEN_SCOPE.scopeId, epoch: GOLDEN_SCOPE.epoch },
+    chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` },
+    sender: 'A'.repeat(43),
+    category: 'task-output',
+    binding: { ...bindingOf(corpus.find((line) => line.type === 'task.complete_sealed')!) },
+    plaintext,
+    maxContentLength: 2 * 1024 * 1024,
+  });
+}
+
+describe('sealed payload v1: protocol and core agree', () => {
+  it('share the version, suite, categories and padded length', () => {
+    expect(SEALED_PAYLOAD_VERSION).toBe(SEALED_CONTENT_VERSION);
+    expect(SEALED_PAYLOAD_SUITE).toBe(SEALED_CONTENT_SUITE);
+    expect(SEALED_PAYLOAD_CATEGORIES).toEqual(SEALED_CATEGORIES);
+  });
+
+  it('accept what core seals, inline and by reference, at every padding step', async () => {
+    for (const length of [0, 1, 200, 16 * 1024, 16 * 1024 + 1, 256 * 1024 - 64, 256 * 1024 + 1]) {
+      const content = await sealed({ summary: 'x'.repeat(length) });
+      expect(content.header.paddedLength).toBe(sealedPayloadPaddedLength(4 + `{"summary":"${'x'.repeat(length)}"}`.length));
+      const inline = content.header.paddedLength <= 256 * 1024;
+      const member = inline
+        ? { ...content.header, ciphertext: Buffer.from(content.ciphertext).toString('base64url') }
+        : {
+            ...content.header,
+            ciphertextRef: { blobId: 'blob-1', contentHash: `sha256:${'0'.repeat(64)}`, size: content.ciphertext.byteLength, contentType: 'application/octet-stream' },
+          };
+      expect(SealedPayloadSchema.safeParse(member).success, `content ${length}`).toBe(true);
+    }
+  });
+
+  it('accept the long scope id that core seals', async () => {
+    const id = 's'.repeat(1024);
+    const content = await sealContent({
+      scopeKey: GOLDEN_SCOPE_KEY,
+      scope: { id, epoch: GOLDEN_SCOPE.epoch },
+      chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` },
+      sender: 'A'.repeat(43),
+      category: 'task-output',
+      binding: { ...bindingOf(corpus.find((line) => line.type === 'task.complete_sealed')!) },
+      plaintext: { summary: 'short' },
+      maxContentLength: 2 * 1024 * 1024,
+    });
+    const member = { ...content.header, ciphertext: Buffer.from(content.ciphertext).toString('base64url') };
+    expect(SealedContentHeaderV1Schema.safeParse(headerOf(member)).success).toBe(true);
+    expect(SealedPayloadSchema.safeParse(member).success).toBe(true);
+    expect(TaskSealingSchema.safeParse({ scopeId: id, epoch: GOLDEN_SCOPE.epoch, categories: ['task-output'] }).success).toBe(true);
+  });
+
+  it('reject the same malformed header fields', async () => {
+    const content = await sealed({ summary: 'short' });
+    const member = { ...content.header, ciphertext: Buffer.from(content.ciphertext).toString('base64url') };
+    expect(SealedContentHeaderV1Schema.safeParse(headerOf(member)).success).toBe(true);
+    const mutations: [string, Json][] = [
+      ['v', { v: 2 }],
+      ['suite', { suite: 'x' }],
+      ['category', { category: 'task' }],
+      ['scope.epoch', { scope: { ...content.header.scope, epoch: 0 } }],
+      ['scope.keyId', { scope: { ...content.header.scope, keyId: 'x' } }],
+      ['chainHead.hash', { chainHead: { ...content.header.chainHead, hash: 'sha256:00' } }],
+      ['sender', { sender: 'x' }],
+      ['salt', { salt: 'AA' }],
+      ['nonce', { nonce: `${content.header.nonce}AA` }],
+      ['paddedLength', { paddedLength: 257 }],
+      ['contentMac', { contentMac: 'hmac-sha256:00' }],
+    ];
+    for (const [field, change] of mutations) {
+      expect(SealedPayloadSchema.safeParse({ ...member, ...change }).success, `protocol ${field}`).toBe(false);
+      expect(SealedContentHeaderV1Schema.safeParse(headerOf({ ...member, ...change })).success, `core ${field}`).toBe(false);
+    }
+  });
+});
+
+describe('sealed payload v1: the golden corpus lines are real ciphertext', () => {
+  const inline = corpus.filter((line) => (line.payload.sealed as Json | undefined)?.ciphertext !== undefined);
+
+  it('covers every sealed message type', () => {
+    expect(new Set(inline.map((line) => line.type))).toEqual(new Set(Object.keys(SEALED_SPLIT_TABLE)));
+  });
+
+  it.each(inline.map((line, index) => [index, line.type, line] as const))(
+    'line %i (%s) opens under the binding the split table names',
+    async (_index, _type, line) => {
+      const member = line.payload.sealed as Json;
+      const ciphertext = new Uint8Array(Buffer.from(member.ciphertext as string, 'base64url'));
+      const opened = await openSealedContent({
+        header: headerOf(member),
+        ciphertext,
+        scopeKey: GOLDEN_SCOPE_KEY,
+        binding: bindingOf(line),
+        sealing: GOLDEN_SCOPE,
+        maxContentLength: 2 * 1024 * 1024,
+      });
+      expect(opened.ok).toBe(true);
+      const type = line.type;
+      if (!opened.ok || !isSealedMessageType(type)) return;
+      const moved: readonly string[] = SEALED_SPLIT_TABLE[type].moved;
+      expect(Object.keys(opened.plaintext).filter((field) => !moved.includes(field)), 'only moved fields are sealed').toEqual([]);
+
+      const elsewhere = await openSealedContent({
+        header: headerOf(member),
+        ciphertext,
+        scopeKey: GOLDEN_SCOPE_KEY,
+        binding: { ...bindingOf(line), identity: { taskId: `${line.task_id}-other` } },
+        sealing: GOLDEN_SCOPE,
+        maxContentLength: 2 * 1024 * 1024,
+      });
+      expect(elsewhere, 'the Host cannot move a sealed member to another task').toEqual({ ok: false, reason: 'sealed_open_failed' });
+
+      const underWireType = await openSealedContent({
+        header: headerOf(member),
+        ciphertext,
+        scopeKey: GOLDEN_SCOPE_KEY,
+        binding: { ...bindingOf(line), family: line.type },
+        sealing: GOLDEN_SCOPE,
+        maxContentLength: 2 * 1024 * 1024,
+      });
+      expect(underWireType, 'the family is the plaintext type, not the sealed wire type').toEqual({ ok: false, reason: 'sealed_open_failed' });
+    },
+  );
+
+  // Each identity field after the task id binds the write on its own: a Host
+  // that changes only that field, in the same task, cannot open the member.
+  const identityCases = inline.flatMap((line) => (isSealedMessageType(line.type) ? SEALED_SPLIT_TABLE[line.type].identity : [])
+    .map((field) => [line.type, field, line] as const));
+
+  it('covers every identity field of the split table', () => {
+    expect([...new Set(identityCases.map(([, field]) => field))].sort()).toEqual(['approvalId', 'artifactId', 'seq', 'steerId']);
+  });
+
+  it.each(identityCases.map(([type, field, line], index) => [index, type, field, line] as const))(
+    'case %i (%s) does not open when only %s changes',
+    async (_index, _type, field, line) => {
+      const member = line.payload.sealed as Json;
+      const binding = bindingOf(line);
+      const value = binding.identity[field];
+      expect(value, `the binding names ${field}`).toBeDefined();
+      const changed = typeof value === 'number' ? value + 1 : `${String(value).slice(0, -1)}${String(value).endsWith('9') ? '8' : '9'}`;
+      const opened = await openSealedContent({
+        header: headerOf(member),
+        ciphertext: new Uint8Array(Buffer.from(member.ciphertext as string, 'base64url')),
+        scopeKey: GOLDEN_SCOPE_KEY,
+        binding: { ...binding, identity: { ...binding.identity, [field]: changed } },
+        sealing: GOLDEN_SCOPE,
+        maxContentLength: 2 * 1024 * 1024,
+      });
+      expect(opened).toEqual({ ok: false, reason: 'sealed_open_failed' });
+    },
+  );
+});
+
+describe('sealed payload v1: a Host without sealed-payload-v1 refuses sealed input (#654)', () => {
+  const sealedInbound = corpus.filter((line) => !isServerToDaemonType(line.type)
+    && requiredReceiverCapabilities(line.type, line.payload).includes('sealed-payload-v1'));
+
+  it('covers every daemon-to-server sealed type and every sealed decline code', () => {
+    expect(new Set(sealedInbound.map((line) => line.type).filter(isSealedMessageType))).toEqual(
+      new Set(Object.keys(SEALED_SPLIT_TABLE).filter((type) => isSealedMessageType(type) && !isServerToDaemonType(type))),
+    );
+    // The plaintext task.decline lines are the sealed failure codes.
+    expect(sealedInbound.filter((line) => line.type === 'task.decline').map((line) => line.payload.code).sort())
+      .toEqual(['sealed_content_mac_mismatch', 'sealed_key_unavailable', 'sealed_open_failed', 'sealing_policy_mismatch']);
+  });
+
+  it.each(sealedInbound.map((line, index) => [index, line.type, line] as const))(
+    'line %i (%s) is rejected before the envelope identity is reserved',
+    async (_index, _type, line) => {
+      const harness = createHarness();
+      const device = await harness.pairDevice(TENANT_A);
+      const stores = tenantStoresFor(
+        { kind: 'device', tenantId: TENANT_A, productId: PRODUCT_ID, deviceId: device.deviceId },
+        { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake },
+      );
+      const envelope = createEnvelope(line.type as Envelope['type'], line.payload as never, { taskId: line.task_id }) as Envelope;
+
+      const refused = { outcome: 'rejected', reason: 'sealed_payload_unsupported' };
+      expect(await handleInboundEnvelope(stores, device.deviceId, envelope)).toEqual(refused);
+      // The refusal reserved no envelope identity: the same envelope is refused again, not deduplicated.
+      expect(await handleInboundEnvelope(stores, device.deviceId, envelope)).toEqual(refused);
+    },
+  );
+});
+
+describe('sealed payload v1: each sealed type has its own hosted entry (#654)', () => {
+  type Lane = (harness: ReturnType<typeof createHarness>, deviceId: string, payload: never) => Promise<{ envelope: Envelope }>;
+  const CONTEXT = { destinationBinding: 'conversation/654/turn/1' };
+  const withContext = (payload: { messageEgress?: unknown }) => (payload.messageEgress === undefined ? {} : { agentMessageContext: CONTEXT });
+  /** Each sealed offer type: its sealed entry and its plaintext sibling. */
+  const lanes: Record<string, { sealed: Lane; plain: Lane }> = {
+    'task.offer_sealed': {
+      sealed: (h, d, payload) => h.cloud.enqueueSealedOffer(TENANT_A, d, { taskId: 'sealed-lane', payload }),
+      plain: (h, d, payload) => h.cloud.enqueueOffer(TENANT_A, d, { taskId: 'sealed-lane', payload }),
+    },
+    'task.offer_with_toolsets_sealed': {
+      sealed: (h, d, payload) => h.cloud.enqueueSealedToolsetOffer(TENANT_A, d, { taskId: 'sealed-lane', payload }),
+      plain: (h, d, payload) => h.cloud.enqueueToolsetOffer(TENANT_A, d, { taskId: 'sealed-lane', payload }),
+    },
+    'task.offer_for_agent_sealed': {
+      sealed: (h, d, payload) => h.cloud.enqueueSealedAgentOffer(TENANT_A, d, { taskId: 'sealed-lane', payload }),
+      plain: (h, d, payload) => h.cloud.enqueueAgentOffer(TENANT_A, d, { taskId: 'sealed-lane', payload }),
+    },
+    'task.offer_for_agent_with_egress_sealed': {
+      sealed: (h, d, payload) => h.cloud.enqueueSealedAgentEgressOffer(TENANT_A, d, { taskId: 'sealed-lane', payload, ...withContext(payload) }),
+      plain: (h, d, payload) => h.cloud.enqueueAgentEgressOffer(TENANT_A, d, { taskId: 'sealed-lane', payload, ...withContext(payload) }),
+    },
+    'task.offer_for_agent_with_egress_fresh_sealed': {
+      sealed: (h, d, payload) => h.cloud.submitSealedAgentExecution(TENANT_A, { taskId: 'sealed-lane', deviceId: d, payload, ...withContext(payload) }),
+      plain: (h, d, payload) => h.cloud.submitAgentExecution(TENANT_A, { taskId: 'sealed-lane', deviceId: d, payload, ...withContext(payload) }),
+    },
+  };
+  const laneLines = corpus.filter((line) => line.type in lanes
+    && (line.type !== 'task.offer_for_agent_with_egress_fresh_sealed' || line.payload.terminalProjection !== undefined));
+  // A task that seals only its output keeps a plaintext instruction.
+  const outputOnly = laneLines.filter((line) => line.payload.sealed === undefined);
+
+  it('has an output-only line and a sealed-input line for every lane', () => {
+    expect(new Set(outputOnly.map((line) => line.type))).toEqual(new Set(Object.keys(lanes)));
+    expect(new Set(laneLines.filter((line) => line.payload.sealed !== undefined).map((line) => line.type))).toEqual(new Set(Object.keys(lanes)));
+  });
+
+  it('exports the sealed lane inputs and the sealed execution schema from the package root', () => {
+    const fresh = laneLines.find((line) => line.type === 'task.offer_for_agent_with_egress_fresh_sealed')!;
+    const input: SealedAgentExecutionInput = SealedAgentExecutionInputSchema.parse({
+      taskId: 'sealed-root', deviceId: 'device-root', payload: fresh.payload, ...withContext(fresh.payload as never),
+    });
+    expect(input.payload.sealing).toEqual(fresh.payload.sealing);
+    expectTypeOf<EnqueueSealedOfferInput>().toHaveProperty('payload');
+    expectTypeOf<EnqueueSealedToolsetOfferInput>().toHaveProperty('payload');
+    expectTypeOf<SealedAgentDispatchInput>().toHaveProperty('payload');
+    expectTypeOf<SealedAgentEgressDispatchInput>().toHaveProperty('payload');
+  });
+
+  it.each(outputOnly.map((line, index) => [index, line.type, line] as const))(
+    'line %i (%s) is enqueued as its sealed type with its sealing, and only to a device with every flag',
+    async (_index, type, line) => {
+      const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+      const device = await harness.pairDevice(TENANT_A);
+      const flags = requiredReceiverCapabilities(type, line.payload);
+      await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: flags.filter((flag) => flag !== 'sealed-payload-v1') });
+      await expect(lanes[type]!.sealed(harness, device.deviceId, line.payload as never)).rejects.toMatchObject({ code: 'agent_capability_missing' });
+
+      await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: flags });
+      const enqueued = await lanes[type]!.sealed(harness, device.deviceId, line.payload as never);
+      expect(enqueued.envelope).toMatchObject({ type, payload: { sealing: line.payload.sealing, instruction: line.payload.instruction } });
+    },
+  );
+
+  it.each(laneLines.map((line, index) => [index, line.type, line] as const))(
+    'the plaintext sibling of line %i (%s) refuses its sealed fields before any device read or state',
+    async (_index, type, line) => {
+      const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+      const device = await harness.pairDevice(TENANT_A);
+      await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: requiredReceiverCapabilities(type, line.payload) });
+      const reads = vi.spyOn(harness.stores.devices, 'get');
+
+      await expect(lanes[type]!.plain(harness, device.deviceId, line.payload as never)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+      expect(reads).toHaveBeenCalledTimes(0);
+      expect(await harness.cloud.readTaskAttempt(TENANT_A, 'sealed-lane')).toBeUndefined();
+      const page = await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0, limit: 10 });
+      expect(page.messages).toEqual([]);
+    },
+  );
+
+  // The four enqueue lanes take an optional task id. The fresh lane always requires one.
+  const enqueueLanes: Record<string, (harness: ReturnType<typeof createHarness>, deviceId: string, payload: never, taskId?: string) => Promise<{ taskId: string }>> = {
+    'task.offer_sealed': (h, d, payload, taskId) => h.cloud.enqueueSealedOffer(TENANT_A, d, { taskId, payload }),
+    'task.offer_with_toolsets_sealed': (h, d, payload, taskId) => h.cloud.enqueueSealedToolsetOffer(TENANT_A, d, { taskId, payload }),
+    'task.offer_for_agent_sealed': (h, d, payload, taskId) => h.cloud.enqueueSealedAgentOffer(TENANT_A, d, { taskId, payload }),
+    'task.offer_for_agent_with_egress_sealed': (h, d, payload, taskId) =>
+      h.cloud.enqueueSealedAgentEgressOffer(TENANT_A, d, { taskId, payload, ...withContext(payload as { messageEgress?: unknown }) }),
+  };
+
+  it.each(laneLines.filter((line) => line.type in enqueueLanes).map((line) => [line.type, line.payload.sealed === undefined ? 'output only' : 'sealed input', line] as const))(
+    '%s (%s) without a taskId: a sealed instruction is refused, because it binds the task id; output-only sealing gets a minted id',
+    async (type, label, line) => {
+      const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+      const device = await harness.pairDevice(TENANT_A);
+      await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: requiredReceiverCapabilities(type, line.payload) });
+      const page = () => harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0, limit: 10 });
+
+      if (label === 'sealed input') {
+        await expect(enqueueLanes[type]!(harness, device.deviceId, line.payload as never)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+        // A JavaScript caller may pass a value that is not a task id.
+        for (const taskId of [null, '']) {
+          await expect(enqueueLanes[type]!(harness, device.deviceId, line.payload as never, taskId as never)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+        }
+        expect((await page()).messages).toEqual([]);
+      } else {
+        const enqueued = await enqueueLanes[type]!(harness, device.deviceId, line.payload as never);
+        expect(enqueued.taskId).toMatch(/^task_/u);
+        expect((await page()).messages).toHaveLength(1);
+      }
+    },
+  );
+
+  it('checks and enqueues one parsed copy, so a payload that the caller changes during the device read has no effect', async () => {
+    const line = laneLines.find((candidate) => candidate.type === 'task.offer_for_agent_sealed' && candidate.payload.sealed !== undefined)!;
+    const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+    const device = await harness.pairDevice(TENANT_A);
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: requiredReceiverCapabilities(line.type, line.payload) });
+    const payload: Json = structuredClone(line.payload);
+    const read = harness.stores.devices.get.bind(harness.stores.devices);
+    vi.spyOn(harness.stores.devices, 'get').mockImplementation(async (...args) => {
+      // A non-resume offer with a selection would need dispatch-selection, which this device lacks.
+      delete payload.sessionRef;
+      payload.dispatchSelection = { lane: 'subscription', runtimeId: 'codex' };
+      return read(...args);
+    });
+
+    const enqueued = await lanes[line.type]!.sealed(harness, device.deviceId, payload as never);
+
+    expect(enqueued.envelope.payload).toEqual(line.payload);
+  });
+
+  // E3a: the Host does not yet check or retain a ciphertextRef blob, so a sealed lane refuses it.
+  // Each lane line with sealed input, with the ciphertextRef member of the large corpus line of its type.
+  const byReference = Object.keys(lanes).map((type) => {
+    const line = laneLines.find((candidate) => candidate.type === type && candidate.payload.sealed !== undefined)!;
+    const large = corpus.find((candidate) => candidate.type === type && (candidate.payload.sealed as Json | undefined)?.ciphertextRef !== undefined)!;
+    return { ...line, payload: { ...line.payload, sealed: large.payload.sealed } };
+  });
+
+  it.each(byReference.map((line, index) => [index, line.type, line] as const))(
+    'line %i (%s) by ciphertextRef is refused on a device with every flag, before any task or mailbox state',
+    async (_index, type, line) => {
+      const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+      const device = await harness.pairDevice(TENANT_A);
+      await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: requiredReceiverCapabilities(type, line.payload) });
+
+      await expect(lanes[type]!.sealed(harness, device.deviceId, line.payload as never)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+      expect(await harness.cloud.readTaskAttempt(TENANT_A, 'sealed-lane')).toBeUndefined();
+      const page = await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0, limit: 10 });
+      expect(page.messages).toEqual([]);
+    },
+  );
+});

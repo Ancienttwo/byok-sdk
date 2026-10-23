@@ -14,10 +14,12 @@ import {
   EnvelopeValidationError,
   MESSAGE_TYPES,
   PROTOCOL_VERSION,
+  SEALED_PAYLOAD_CAPABILITY,
   WIRE_ADDITIONS,
   createEnvelope,
   decodeEnvelope,
   encodeEnvelope,
+  isSealedMessageType,
   isServerToDaemonType,
   parseMessage,
   requiredReceiverCapabilities,
@@ -476,6 +478,10 @@ describe('compat: published 0.26.1 (byok-protocol-previous) is a rejection oracl
       if (line.type === 'agent.message.draft') {
         expect(requiredReceiverCapabilities(line.type, line.payload)).toEqual(['agent-message-draft']);
         expect(() => previousRelease.decodeEnvelope(line.raw)).toThrow(previousRelease.UnknownMessageTypeError);
+      } else if (isSealedMessageType(line.type)) {
+        // #654: a sealed type is new in v3 and gated as a whole type.
+        expect(requiredReceiverCapabilities(line.type, line.payload)[0]).toBe(SEALED_PAYLOAD_CAPABILITY);
+        expect(() => previousRelease.decodeEnvelope(line.raw)).toThrow(previousRelease.UnknownMessageTypeError);
       } else {
         expect(() => previousRelease.decodeEnvelope(line.raw)).toThrow(previousRelease.EnvelopeValidationError);
       }
@@ -554,6 +560,9 @@ function requiredCoverage(root: SchemaNode, prefix: string, exempt: (path: strin
   const visit = (node: SchemaNode, path: string): void => {
     // An exempt subtree is not enumerated, so neither are definitions only it reaches.
     if (exempt(path)) return;
+    // A field that accepts no value (`z.never()`, for example a sealed member
+    // on a plaintext type) cannot appear in a valid line, so it needs no line.
+    if (Object.keys(node).length === 1 && JSON.stringify(node.not) === '{}') return;
     required.paths.add(path);
     if (node.$ref !== undefined) {
       const { name, node: target } = definition(root, node.$ref);

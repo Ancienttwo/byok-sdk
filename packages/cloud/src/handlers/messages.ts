@@ -81,6 +81,7 @@ const WIRE_REFUSAL_REASONS = {
   claim_not_won: 'state_conflict',
   protocol_version_unsupported: 'unsupported',
   type_not_allowed: 'unsupported',
+  sealed_payload_unsupported: 'unsupported',
   hello_protocol_version_unsupported: 'unsupported',
 } satisfies Record<InboundRefusalReason, import('@byok-sdk/protocol').OutboundRefusalReason>;
 

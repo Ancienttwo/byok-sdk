@@ -7,6 +7,34 @@ export type { WireAddition } from './wire-additions';
 
 export { BlobRefSchema, CONTENT_HASH_RE } from './blob';
 export type { BlobRef } from './blob';
+export {
+  SEALED_DECLINE_CODES,
+  SEALED_INLINE_MAX_PADDED_LENGTH,
+  SEALED_PAYLOAD_CATEGORIES,
+  SEALED_PAYLOAD_MAX_CONTENT_LENGTH,
+  SEALED_PAYLOAD_MAX_PADDED_LENGTH,
+  SEALED_PAYLOAD_SUITE,
+  SEALED_PAYLOAD_V1_CATEGORIES,
+  SEALED_PAYLOAD_VERSION,
+  SEALED_SPLIT_TABLE,
+  SealedPayloadSchema,
+  SealedTaskInputSchema,
+  SealedTaskOutputSchema,
+  TaskSealingSchema,
+  isSealedMessageType,
+  sealedBase64UrlByteLength,
+  sealedPayloadPaddedLength,
+} from './sealed-payload';
+export type {
+  SealedDeclineCode,
+  SealedDigestRule,
+  SealedMessageType,
+  SealedPayload,
+  SealedPayloadCategory,
+  SealedPayloadV1Category,
+  SealedSplitEntry,
+  TaskSealing,
+} from './sealed-payload';
 
 
 export {
@@ -374,6 +402,19 @@ export type {
   TaskOfferForAgentWithEgressPayload,
   TaskOfferForAgentWithEgressFreshPayload,
   TaskOfferPreparedPayload,
+  TaskOfferSealedPayload,
+  TaskOfferWithToolsetsSealedPayload,
+  TaskOfferForAgentSealedPayload,
+  TaskOfferForAgentWithEgressSealedPayload,
+  TaskOfferForAgentWithEgressFreshSealedPayload,
+  TaskSteerSealedPayload,
+  TaskCompleteSealedPayload,
+  TaskFailSealedPayload,
+  TaskDeclineSealedPayload,
+  TaskCancelledSealedPayload,
+  TaskProgressSealedPayload,
+  TaskArtifactSealedPayload,
+  TaskAwaitApprovalSealedPayload,
   AgentEgressReliablePayload,
   AgentEgressAckPayload,
   AgentMessagePublishPayload,
