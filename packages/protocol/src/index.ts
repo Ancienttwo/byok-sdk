@@ -17,11 +17,13 @@ export {
   SEALED_PAYLOAD_V1_CATEGORIES,
   SEALED_PAYLOAD_VERSION,
   SEALED_SPLIT_TABLE,
+  SEALED_TASK_PLAIN_CODES,
   SealedPayloadSchema,
   SealedTaskInputSchema,
   SealedTaskOutputSchema,
   TaskSealingSchema,
   isSealedMessageType,
+  isSealedTaskPlainOutput,
   sealedBase64UrlByteLength,
   sealedPayloadPaddedLength,
 } from './sealed-payload';

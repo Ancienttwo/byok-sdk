@@ -194,7 +194,9 @@ export class TaskEventRelay implements ByokCloudObserver {
     if (taskId === undefined) return;
     if (envelope.type === 'agent.message.draft' || envelope.type === 'agent.message.publish'
       || envelope.type === 'task.complete' || envelope.type === 'task.fail'
-      || envelope.type === 'task.cancelled' || envelope.type === 'task.decline') this.onAgentMessageDraft(taskId);
+      || envelope.type === 'task.cancelled' || envelope.type === 'task.decline'
+      || envelope.type === 'task.complete_sealed' || envelope.type === 'task.fail_sealed'
+      || envelope.type === 'task.cancelled_sealed' || envelope.type === 'task.decline_sealed') this.onAgentMessageDraft(taskId);
     const state = this.#tasks.get(taskId);
     if (state === undefined) return;
 
@@ -261,15 +263,19 @@ export class TaskEventRelay implements ByokCloudObserver {
         this.#transition(state, taskId, 'Running', at);
         return;
       case 'task.decline':
+      case 'task.decline_sealed':
         this.#transition(state, taskId, 'Failed', at);
         return;
       case 'task.complete':
+      case 'task.complete_sealed':
         this.#transition(state, taskId, 'Complete', at);
         return;
       case 'task.fail':
+      case 'task.fail_sealed':
         this.#transition(state, taskId, 'Failed', at);
         return;
       case 'task.cancelled':
+      case 'task.cancelled_sealed':
         this.#transition(state, taskId, 'Cancelled', at);
         return;
       default:
