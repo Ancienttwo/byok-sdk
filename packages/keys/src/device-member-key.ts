@@ -7,6 +7,7 @@ import {
 import { deriveMemberId } from '@byok-sdk/core/sealed-payload';
 import { z } from 'zod';
 
+import { CanonicalBase64Url32 } from './canonical-base64url';
 import type { DeviceSealingEnrollment } from './device-sealing-key';
 import { ByokKeysError } from './errors';
 import { assertSecretName } from './secret-name';
@@ -62,17 +63,6 @@ export interface DeviceMemberKemKey {
   readonly publicJwk: SealingPublicJwk;
   readonly privateKey: WebCryptoKey;
 }
-
-/**
- * Exactly 32 bytes in canonical unpadded base64url. The re-encode check
- * rejects a last character whose unused low bits are not zero; a lenient
- * decoder would read such a string as the same scalar.
- */
-const CanonicalBase64Url32 = z.string().refine((value) => {
-  if (!/^[A-Za-z0-9_-]{43}$/u.test(value)) return false;
-  const bytes = Buffer.from(value, 'base64url');
-  return bytes.length === 32 && bytes.toString('base64url') === value;
-}, 'must be 32 bytes in canonical base64url');
 
 const PrivateJwkSchema = z.strictObject({
   kty: z.literal('EC'),
