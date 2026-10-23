@@ -31,7 +31,7 @@ import {
   decodeSealedFrame,
   encodeSealedFrame,
   openSealedContent,
-  sealContent,
+  sealContentWithRandomness,
   sealedContentAad,
   sealedContentMac,
   sealedPaddedLength,
@@ -40,6 +40,7 @@ import {
   type SealedCategory,
   type SealedContentHeaderV1,
   type SealedContentOpenFailure,
+  type SealedScopePolicy,
 } from '../../sealed-payload/sealed-content';
 import { decodeBase64Url, encodeBase64Url } from '../../sealed-provider-secret';
 import type { WebCryptoKey } from '../../webcrypto';
@@ -72,6 +73,8 @@ export interface SealedVector {
   readonly sender: string;
   readonly category: SealedCategory;
   readonly binding: SealedBinding;
+  /** The task's `sealing` scope the receiver opens under. */
+  readonly sealing: SealedScopePolicy;
   readonly plaintext?: JsonObject;
   readonly plaintextFill?: PlaintextFill;
   readonly maxContentLength: number;
@@ -91,9 +94,35 @@ export interface CraftedOpenVector {
   readonly defect: 'content-mac' | 'padding-byte' | 'padded-length' | 'length-overflow' | 'non-canonical-json';
   readonly header: SealedContentHeaderV1;
   readonly binding: SealedBinding;
+  readonly sealing: SealedScopePolicy;
   readonly ciphertext: string;
   readonly maxContentLength: number;
   readonly expect: SealedContentOpenFailure;
+}
+
+/**
+ * A valid sealed content that the receiver refuses before the AEAD: the held
+ * key is another key, or the task policy (binding or `sealing`, which the Host
+ * writes) does not admit it. A binding or `sealing` here may be malformed.
+ */
+export interface PolicyOpenVector {
+  readonly name: string;
+  readonly defect: 'key-id' | 'category-not-sealed' | 'scope-id' | 'epoch-below' | 'categories-order' | 'not-after-format';
+  readonly header: SealedContentHeaderV1;
+  readonly binding: SealedBinding;
+  readonly sealing: SealedScopePolicy;
+  readonly ciphertext: string;
+  readonly maxContentLength: number;
+  readonly expect: SealedContentOpenFailure;
+}
+
+/** A member chain entry that fails verification under the key of `signer`. */
+export interface ChainFailureVector {
+  readonly name: string;
+  readonly defect: 'signature' | 'tenant' | 'prev-rule' | 'signer-key';
+  readonly signer: string;
+  readonly entry: MemberChainEntryV1;
+  readonly expect: 'member_chain_entry_invalid' | 'member_chain_signature_invalid';
 }
 
 export interface ChainVector {
@@ -125,7 +154,9 @@ export interface SealedPayloadVectors {
   readonly members: readonly VectorMember[];
   readonly sealed: readonly SealedVector[];
   readonly craftedOpenFailures: readonly CraftedOpenVector[];
+  readonly policyOpenFailures: readonly PolicyOpenVector[];
   readonly chain: readonly ChainVector[];
+  readonly chainFailures: readonly ChainFailureVector[];
   readonly keyPackages: readonly KeyPackageVector[];
 }
 
@@ -137,7 +168,9 @@ export interface VectorCheckCounts {
   readonly sealed: number;
   readonly sealedRejections: number;
   readonly craftedOpenFailures: number;
+  readonly policyOpenFailures: number;
   readonly chain: number;
+  readonly chainFailures: number;
   readonly keyPackages: number;
 }
 
@@ -196,6 +229,7 @@ interface Rejection {
   readonly label: string;
   readonly header?: unknown;
   readonly binding?: SealedBinding;
+  readonly sealing?: SealedScopePolicy;
   readonly ciphertext?: Uint8Array;
   readonly scopeKey?: Uint8Array;
   readonly maxContentLength?: number;
@@ -221,7 +255,11 @@ function headerRejections(header: SealedContentHeaderV1, binding: SealedBinding,
     failed('extra field', { ...header, ciphertextRef: 'blob-1' }),
     failed('missing field', { ...header, contentMac: undefined }),
     failed('not an object', null),
-    failed('scope id', { ...header, scope: { ...header.scope, id: changed(header.scope.id) } }),
+    {
+      label: 'header scope id',
+      header: { ...header, scope: { ...header.scope, id: changed(header.scope.id) } },
+      expect: 'sealing_policy_mismatch',
+    },
     failed('scope epoch', { ...header, scope: { ...header.scope, epoch: header.scope.epoch + 1 } }),
     failed('chain head seq', { ...header, chainHead: { ...header.chainHead, seq: header.chainHead.seq + 1 } }),
     failed('chain head hash', { ...header, chainHead: { ...header.chainHead, hash: `sha256:${'0'.repeat(64)}` } }),
@@ -247,7 +285,6 @@ function bindingRejections(category: SealedCategory, binding: SealedBinding): Re
   const otherCategory = SEALED_CATEGORIES.find((candidate) => candidate !== category)!;
   const rejections: Rejection[] = [
     failed('tenant', { ...binding, tenantId: changed(binding.tenantId) as string }),
-    failed('family', { ...binding, family: 'task.other_family' }),
     failed('direction', { ...binding, direction: binding.direction === 'server-to-daemon' ? 'daemon-to-server' : 'server-to-daemon' }),
     failed('identity value', { ...binding, identity: { ...binding.identity, [firstField!]: changed(binding.identity[firstField!]!) } }),
     failed('identity extra field', { ...binding, identity: { ...binding.identity, extraField: 'x' } }),
@@ -257,21 +294,49 @@ function bindingRejections(category: SealedCategory, binding: SealedBinding): Re
         ? { agentId: 'agent-other', profileRevision: 'rev-other' }
         : { ...binding.agentRef, profileRevision: changed(binding.agentRef.profileRevision) as string },
     }),
-    binding.deviceId === null
-      ? failed('device instead of expiry', { ...binding, deviceId: 'device-1', notAfter: null })
-      : failed('device', { ...binding, deviceId: changed(binding.deviceId) as string }),
     {
       label: 'binding category not sealed',
       binding: { ...binding, categories: [otherCategory] },
       expect: 'sealing_policy_mismatch',
     },
   ];
+  const policy = (label: string, value: unknown): Rejection => ({ label: `binding ${label}`, binding: value as SealedBinding, expect: 'sealing_policy_mismatch' });
+  // Only `routine.template` binds no device, so a routine template has no
+  // other family and no device that still parses: both changes are policy.
+  if (binding.deviceId === null) {
+    rejections.push(
+      policy('family that binds a device', { ...binding, family: 'task.other_family' }),
+      policy('template with a device instead of expiry', { ...binding, deviceId: 'device-1', notAfter: null }),
+    );
+  } else {
+    rejections.push(
+      failed('family', { ...binding, family: 'task.other_family' }),
+      failed('device', { ...binding, deviceId: changed(binding.deviceId) as string }),
+      policy('no device for a device-bound family', { ...binding, deviceId: null, notAfter: '2026-12-31T00:00:00.000Z' }),
+    );
+  }
+  rejections.push(
+    policy('categories not canonical', { ...binding, categories: [...binding.categories, binding.categories[0]!] }),
+    policy('expiry not canonical', { ...binding, family: 'routine.template', deviceId: null, notAfter: '2026-12-31T00:00:00Z' }),
+    policy('device and expiry together', { ...binding, deviceId: 'device-1', notAfter: '2026-12-31T00:00:00.000Z' }),
+    policy('not an object', null),
+  );
   if (binding.notAfter !== null) rejections.push(failed('expiry', { ...binding, notAfter: '2099-01-01T00:00:00.000Z' }));
   if (extraCategory !== undefined) {
     const categories = SEALED_CATEGORIES.filter((candidate) => binding.categories.includes(candidate) || candidate === extraCategory);
     rejections.push(failed('categories', { ...binding, categories }));
   }
   return rejections;
+}
+
+function sealingRejections(sealing: SealedScopePolicy): Rejection[] {
+  const policy = (label: string, value: unknown): Rejection => ({ label: `sealing ${label}`, sealing: value as SealedScopePolicy, expect: 'sealing_policy_mismatch' });
+  return [
+    policy('scope id', { ...sealing, scopeId: changed(sealing.scopeId) }),
+    policy('epoch above the header', { ...sealing, epoch: sealing.epoch + 1 }),
+    policy('epoch zero', { ...sealing, epoch: 0 }),
+    policy('extra field', { ...sealing, categories: [] }),
+  ];
 }
 
 function ciphertextRejections(ciphertext: Uint8Array, scopeKey: Uint8Array, contentLength: number): Rejection[] {
@@ -314,7 +379,7 @@ async function checkSealed(vectors: SealedPayloadVectors, scopeKey: Uint8Array):
   for (const vector of vectors.sealed) {
     const label = `sealed ${vector.name}`;
     const plaintext = vectorPlaintext(vector);
-    const sealed = await sealContent(
+    const sealed = await sealContentWithRandomness(
       {
         scopeKey,
         scope: vector.scope,
@@ -342,24 +407,28 @@ async function checkSealed(vectors: SealedPayloadVectors, scopeKey: Uint8Array):
       ciphertext: sealed.ciphertext,
       scopeKey,
       binding: vector.binding,
+      sealing: vector.sealing,
       maxContentLength: vector.maxContentLength,
     };
     const opened = await openSealedContent(base);
     if (!opened.ok) throw new Error(`${label}: open failed with ${opened.reason}`);
     expectEqual(`${label} plaintext`, opened.plaintext, plaintext);
+    expectEqual(`${label} verified header`, opened.header, vector.header);
 
     const otherMemberId = vectors.members.find((candidate) => candidate.memberId !== vector.sender)!.memberId;
     const contentLength = new TextEncoder().encode(canonicalizeJson(plaintext)).byteLength;
     for (const rejection of [
       ...headerRejections(vector.header, vector.binding, otherMemberId),
       ...bindingRejections(vector.category, vector.binding),
+      ...sealingRejections(vector.sealing),
       ...ciphertextRejections(sealed.ciphertext, scopeKey, contentLength),
     ]) {
       await expectOpenFailure(`${label} ${rejection.label}`, {
         header: 'header' in rejection ? rejection.header : base.header,
         ciphertext: rejection.ciphertext ?? base.ciphertext,
         scopeKey: rejection.scopeKey ?? base.scopeKey,
-        binding: rejection.binding ?? base.binding,
+        binding: 'binding' in rejection ? rejection.binding as SealedBinding : base.binding,
+        sealing: rejection.sealing ?? base.sealing,
         maxContentLength: rejection.maxContentLength ?? base.maxContentLength,
       }, rejection.expect);
       rejections += 1;
@@ -368,15 +437,25 @@ async function checkSealed(vectors: SealedPayloadVectors, scopeKey: Uint8Array):
   return rejections;
 }
 
-async function checkCrafted(vectors: SealedPayloadVectors, scopeKey: Uint8Array): Promise<void> {
-  for (const vector of vectors.craftedOpenFailures) {
-    await expectOpenFailure(`crafted ${vector.name}`, {
+async function checkOpenFailures(vectors: SealedPayloadVectors, scopeKey: Uint8Array): Promise<void> {
+  for (const vector of [...vectors.craftedOpenFailures, ...vectors.policyOpenFailures]) {
+    await expectOpenFailure(`open failure ${vector.name}`, {
       header: vector.header,
       ciphertext: fromHex(vector.ciphertext),
       scopeKey,
       binding: vector.binding,
+      sealing: vector.sealing,
       maxContentLength: vector.maxContentLength,
     }, vector.expect);
+  }
+}
+
+async function checkChainFailures(vectors: SealedPayloadVectors): Promise<void> {
+  for (const vector of vectors.chainFailures) {
+    const result = await verifyMemberChainEntry(vector.entry, publicJwk(member(vectors, vector.signer).signing));
+    if (result.ok || result.reason !== vector.expect) {
+      throw new Error(`chain failure ${vector.name}: expected ${vector.expect}, got ${result.ok ? 'ok' : result.reason}`);
+    }
   }
 }
 
@@ -458,8 +537,9 @@ export async function checkSealedPayloadVectors(vectors: SealedPayloadVectors): 
   }
   const scopeKey = await checkScopeKey(vectors);
   const sealedRejections = await checkSealed(vectors, scopeKey);
-  await checkCrafted(vectors, scopeKey);
+  await checkOpenFailures(vectors, scopeKey);
   await checkChain(vectors);
+  await checkChainFailures(vectors);
   await checkKeyPackages(vectors, scopeKey);
   return {
     padding: vectors.padding.length,
@@ -469,7 +549,9 @@ export async function checkSealedPayloadVectors(vectors: SealedPayloadVectors): 
     sealed: vectors.sealed.length,
     sealedRejections,
     craftedOpenFailures: vectors.craftedOpenFailures.length,
+    policyOpenFailures: vectors.policyOpenFailures.length,
     chain: vectors.chain.length,
+    chainFailures: vectors.chainFailures.length,
     keyPackages: vectors.keyPackages.length,
   };
 }

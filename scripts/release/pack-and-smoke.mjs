@@ -479,6 +479,14 @@ try {
         `const migrations = migrationsDir();\n` +
         `assert.equal(statSync(migrations).isDirectory(), true, migrations);\n` +
         `assert.deepEqual(readdirSync(migrations).sort(), ${JSON.stringify([...migrationFiles].sort())});\n` +
+        // The sealed-payload subpath bundle imports `ByokCoreError` from the
+        // package root by name. Only the installed tarball proves that this
+        // self-reference resolves, and that both entries share one error class.
+        `const sealedPayload = await import('@byok-sdk/core/sealed-payload');\n` +
+        `const { isCoreError } = await import('@byok-sdk/core');\n` +
+        `const sealedError = await sealedPayload.openSealedContent({ maxContentLength: -1 }).catch((error) => error);\n` +
+        `assert.equal(isCoreError(sealedError, 'sealed_secret_invalid'), true, String(sealedError));\n` +
+        `console.log('[release-pack] @byok-sdk/core/sealed-payload imports and throws the root ByokCoreError');\n` +
         `console.log('[release-pack] isolated imports OK');\n`,
     );
     run(nodeBin, ['smoke.mjs'], smokeDir);
