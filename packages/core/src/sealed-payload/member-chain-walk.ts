@@ -45,6 +45,7 @@
 import { z } from 'zod';
 
 import { canonicalizeJson, type JsonObject } from '../attestation';
+import { safeParseTotal } from '../total-parse';
 import {
   KemEpochSchema,
   KemSigSchema,
@@ -109,6 +110,8 @@ const ScopePolicySubjectSchema = z.strictObject({
 });
 const ShredSubjectSchema = z.strictObject({ scopeId: ScopeIdSchema });
 const SignerSchema = z.object({ signer: MemberIdSchema });
+const GenesisSchema = z.object({ op: z.literal('add'), subject: AddSubjectSchema });
+const HeadSchema = z.object({ seq: z.number(), hash: z.string() });
 
 /** The state before the genesis entry of `tenantId`'s chain. */
 export function emptyMemberChainState(tenantId: string): MemberChainState {
@@ -134,10 +137,8 @@ export async function applyMemberChainEntries(state: MemberChainState, entries: 
 /** The genesis signer: the subject of a self-signed `add`, only from the empty state (11a). */
 async function genesisSigner(state: WalkState, raw: unknown, signer: string): Promise<MemberKeyBundleV1 | undefined> {
   if (state.head !== null || state.members.size > 0) return undefined;
-  const entry = raw as { op?: unknown; subject?: unknown };
-  if (entry.op !== 'add') return undefined;
-  const subject = AddSubjectSchema.safeParse(entry.subject);
-  const member = subject.success ? await parseMemberKeyBundle(subject.data.member) : undefined;
+  const entry = safeParseTotal(GenesisSchema, raw);
+  const member = entry.success ? await parseMemberKeyBundle(entry.data.subject.member) : undefined;
   return member !== undefined && member.memberId === signer ? member : undefined;
 }
 
@@ -173,7 +174,7 @@ async function walk(
   };
   let marked: number | undefined;
   for (const [index, raw] of entries.entries()) {
-    const signer = SignerSchema.safeParse(raw);
+    const signer = safeParseTotal(SignerSchema, raw);
     if (!signer.success) return { ok: false, reason: 'member_chain_entry_invalid', index };
     const signerBundle = next.members.get(signer.data.signer) ?? (await genesisSigner(next, raw, signer.data.signer));
     if (signerBundle === undefined) return { ok: false, reason: 'member_chain_signer_invalid', index };
@@ -194,21 +195,21 @@ async function walk(
 async function applySubject(state: WalkState, entry: MemberChainEntryV1): Promise<boolean> {
   switch (entry.op) {
     case 'add': {
-      const subject = AddSubjectSchema.safeParse(entry.subject);
+      const subject = safeParseTotal(AddSubjectSchema, entry.subject);
       const member = subject.success ? await parseMemberKeyBundle(subject.data.member) : undefined;
       if (member === undefined || state.members.has(member.memberId) || state.removed.has(member.memberId)) return false;
       state.members.set(member.memberId, member);
       return true;
     }
     case 'remove': {
-      const subject = RemoveSubjectSchema.safeParse(entry.subject);
+      const subject = safeParseTotal(RemoveSubjectSchema, entry.subject);
       if (!subject.success || !state.members.has(subject.data.memberId) || state.members.size === 1) return false;
       state.members.delete(subject.data.memberId);
       state.removed.add(subject.data.memberId);
       return true;
     }
     case 'rotate': {
-      const subject = RotateSubjectSchema.safeParse(entry.subject);
+      const subject = safeParseTotal(RotateSubjectSchema, entry.subject);
       if (!subject.success || subject.data.memberId !== entry.signer) return false;
       const member = state.members.get(subject.data.memberId);
       if (member === undefined || subject.data.kemEpoch !== member.kemEpoch + 1) return false;
@@ -225,7 +226,7 @@ async function applySubject(state: WalkState, entry: MemberChainEntryV1): Promis
       return true;
     }
     case 'scope-policy': {
-      const subject = ScopePolicySubjectSchema.safeParse(entry.subject);
+      const subject = safeParseTotal(ScopePolicySubjectSchema, entry.subject);
       if (!subject.success || state.shredded.has(subject.data.scopeId)) return false;
       const { categories, members } = subject.data;
       if (!strictlyIncreasing(categories.map((category) => SEALED_CATEGORIES.indexOf(category)))) return false;
@@ -234,7 +235,7 @@ async function applySubject(state: WalkState, entry: MemberChainEntryV1): Promis
       return true;
     }
     case 'shred': {
-      const subject = ShredSubjectSchema.safeParse(entry.subject);
+      const subject = safeParseTotal(ShredSubjectSchema, entry.subject);
       if (!subject.success || !state.scopes.has(subject.data.scopeId)) return false;
       state.scopes.delete(subject.data.scopeId);
       state.shredded.add(subject.data.scopeId);
@@ -310,11 +311,11 @@ export async function verifyMemberChainFromAnchor(input: VerifyMemberChainFromAn
   if (outcome.marked === undefined) return { ok: false, reason: 'member_chain_anchor_missing' };
   const anchor = await verifyMemberChainEntry(input.entries[outcome.marked], input.approverSigningPublicJwk);
   if (!anchor.ok) return { ok: false, reason: 'member_chain_anchor_missing', index: outcome.marked };
-  if (
-    input.authenticatedHead !== undefined
-    && (input.authenticatedHead.seq !== anchor.entry.seq || input.authenticatedHead.hash !== anchor.hash)
-  ) {
-    return { ok: false, reason: 'member_chain_head_mismatch', index: outcome.marked };
+  if (input.authenticatedHead !== undefined) {
+    const head = safeParseTotal(HeadSchema, input.authenticatedHead);
+    if (!head.success || head.data.seq !== anchor.entry.seq || head.data.hash !== anchor.hash) {
+      return { ok: false, reason: 'member_chain_head_mismatch', index: outcome.marked };
+    }
   }
   return { ok: true, state: outcome.state, anchorSeq: anchor.entry.seq };
 }

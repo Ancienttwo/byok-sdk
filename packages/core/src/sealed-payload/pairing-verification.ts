@@ -24,8 +24,10 @@ import { z } from 'zod';
 
 import { canonicalizeJsonBytes } from '../attestation';
 import { CONTENT_HASH_PATTERN } from '../blob';
+import { safeParseTotal } from '../total-parse';
 import { webCryptoSubtle, type WebCryptoKey } from '../webcrypto';
 import type { MemberKeyBundleV1 } from './member-bundle';
+import { MemberKeyBundleV1Schema } from './member-bundle';
 import {
   base64UrlBytes,
   concat,
@@ -141,37 +143,26 @@ const ChainHeadSchema = z.strictObject({
 });
 
 function devicePairingMacInput(input: DevicePairingMacInput): Bytes {
-  if (input.tenantId.length === 0 || input.deviceId.length === 0 || input.member.deviceId !== input.deviceId) {
+  const member = safeParseTotal(MemberKeyBundleV1Schema, input.member);
+  if (input.tenantId.length === 0 || input.deviceId.length === 0 || !member.success || member.data.deviceId !== input.deviceId) {
     throw invalidInput('Device pairing MAC input must name the device member\'s own device id');
   }
   return concat(
     utf8(DEVICE_PAIRING_MAC_DOMAIN),
-    canonicalizeJsonBytes({ tenantId: input.tenantId, deviceId: input.deviceId, member: bundleJson(input.member) }),
+    canonicalizeJsonBytes({ tenantId: input.tenantId, deviceId: input.deviceId, member: member.data }),
   );
 }
 
 function clientPairingMacInput(input: ClientPairingMacInput): Bytes {
-  const head = ChainHeadSchema.safeParse(input.chainHead);
-  if (input.member.deviceId !== undefined || !head.success) {
+  const member = safeParseTotal(MemberKeyBundleV1Schema, input.member);
+  const head = safeParseTotal(ChainHeadSchema, input.chainHead);
+  if (!member.success || member.data.deviceId !== undefined || !head.success) {
     throw invalidInput('Client pairing MAC input must hold a client member and a chain head');
   }
   return concat(
     utf8(CLIENT_PAIRING_MAC_DOMAIN),
-    canonicalizeJsonBytes({ member: bundleJson(input.member), chainHead: { seq: head.data.seq, hash: head.data.hash } }),
+    canonicalizeJsonBytes({ member: member.data, chainHead: { seq: head.data.seq, hash: head.data.hash } }),
   );
-}
-
-function bundleJson(member: MemberKeyBundleV1) {
-  const jwk = (key: MemberKeyBundleV1['signingPublicJwk']) => ({ kty: key.kty, crv: key.crv, x: key.x, y: key.y });
-  return {
-    v: member.v,
-    memberId: member.memberId,
-    signingPublicJwk: jwk(member.signingPublicJwk),
-    kemPublicJwk: jwk(member.kemPublicJwk),
-    kemEpoch: member.kemEpoch,
-    kemSig: member.kemSig,
-    ...(member.deviceId === undefined ? {} : { deviceId: member.deviceId }),
-  };
 }
 
 function checkPv(pv: Uint8Array): void {
@@ -221,7 +212,7 @@ interface HmacVerifySubtle {
 }
 
 async function hmacVerify(key: Uint8Array, buildData: () => Bytes, mac: unknown): Promise<boolean> {
-  const parsed = PairingMacSchema.safeParse(mac);
+  const parsed = safeParseTotal(PairingMacSchema, mac);
   if (!parsed.success) return false;
   let data: Bytes;
   try {
