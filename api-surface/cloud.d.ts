@@ -3014,6 +3014,7 @@ export declare class InMemoryCloudBlobStore implements CloudBlobStore {
         uploadUrl: string;
     }>;
     observeUpload(tenant: TenantId, blobId: string, reservation: StorageReservation): Promise<BlobObservation | undefined>;
+    uploadedContentHash(tenant: TenantId, blobId: string): Promise<string | undefined>;
     getDownloadUrl(tenant: TenantId, blobId: string): Promise<string | undefined>;
 }
 /** The optional half: the bytes this composition has nowhere else to put. */
@@ -3935,6 +3936,13 @@ export interface CloudBlobStore {
     observeUpload(tenant: TenantId, blobId: string, reservation: StorageReservation): Promise<BlobObservation | undefined>;
     /** A presigned GET URL for a blob THIS tenant owns that has finished uploading; `undefined` otherwise — including for another tenant's blob. */
     getDownloadUrl(tenant: TenantId, blobId: string): Promise<string | undefined>;
+    /**
+     * The content hash that `blobId` names for THIS tenant; `undefined` for an
+     * unknown or foreign id, which answer alike. It binds a
+     * `ciphertextRef.blobId` to its object (#654). Cloud then requires a
+     * committed object manifest for the hash in this tenant.
+     */
+    uploadedContentHash(tenant: TenantId, blobId: string): Promise<string | undefined>;
 }
 /**
  * The byte-proxying half: an OPTIONAL composition input, not a port.
@@ -4115,6 +4123,15 @@ export interface TaskRedactionStoreInput {
     readonly receiptKeys: readonly string[];
     /** The device terminal receipt key. It is one of `receiptKeys`. When it is absent, the store writes `codec.absent` there. */
     readonly terminalReceiptKey: string;
+    /**
+     * The object references this task holds (#654: its sealed ciphertext
+     * blobs). The store removes them inside the redaction, after its refusal
+     * checks, so the objects that the bodies name can then be deleted.
+     */
+    readonly releaseObjectReferences: readonly {
+        readonly refKind: string;
+        readonly refId: string;
+    }[];
     /** The identity receipt that records this redaction. */
     readonly auditReceiptKey: string;
     readonly codec: TaskRedactionCodec;

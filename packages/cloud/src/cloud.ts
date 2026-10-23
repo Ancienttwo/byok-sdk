@@ -9,7 +9,8 @@ import {
   type SealedAgentExecutionInput,
 } from './agent-execution';
 import { uuidFromSha256, taskOfferMessageId } from './offer-identity';
-import { HarnessIdSchema, requiredReceiverCapabilities } from '@byok-sdk/protocol';
+import { firstSealedPayload, sameSealedProjection } from './sealed-comparison';
+import { HarnessIdSchema, isSealedMessageType, requiredReceiverCapabilities } from '@byok-sdk/protocol';
 /**
  * `createByokCloud` — the hosted device surface, assembled.
  *
@@ -35,6 +36,7 @@ import {
   type BoardPage,
   type CapabilityDeclaration,
   type Clock,
+  type ContentHash,
   type ControlPlanePrincipal,
   type CoreStores,
   type PresenceHint,
@@ -76,6 +78,7 @@ import {
   createEnvelope,
   decodeEnvelope,
   encodeEnvelope,
+  type BlobRef,
   type Envelope,
   type TaskOfferType,
   isTaskOfferType,
@@ -496,18 +499,12 @@ function refuseSealedFields(payload: unknown, fields: readonly string[], sealedE
   }
 }
 
-/**
- * #654 E3a: a sealed lane refuses a `ciphertextRef` after its gates and before
- * any task, receipt or mailbox write.
- * The Host does not yet check that the blob is committed with the declared
- * hash and size, or hold an object reference to it (E3b), so a durable offer
- * could point at a missing or collectable blob.
- */
-function refuseCiphertextRef(payload: unknown): void {
-  // Object() maps null and undefined to an empty object.
-  if (Object(Object(payload).sealed).ciphertextRef !== undefined) {
-    throw new ByokCloudError('coordination_input_invalid', 'a sealed ciphertextRef is not accepted yet');
-  }
+/** The object reference kind of a sealed ciphertext blob that a task names (#654). Its id is the task id. */
+const SEALED_TASK_REFERENCE_KIND = 'sealed-task';
+
+/** The ciphertext blob that a sealed member names, if any. */
+function sealedCiphertextRef(payload: object): BlobRef | undefined {
+  return Object(Object(payload).sealed).ciphertextRef as BlobRef | undefined;
 }
 
 /** Resume-only Agent lanes refuse a payload without an exact `sessionRef`. */
@@ -1262,6 +1259,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     const taskId = requestedTaskId ?? `task_${options.crypto.randomUuid()}`;
     const messageId = await taskOfferMessageId(tenant, taskId, deviceId, agentRef, bytes => options.crypto.sha256(bytes));
     const proposed = buildEnvelope(taskId, 0, messageId);
+    await assertSealedCiphertext(tenant, proposed.payload);
     const selection = proposed.payload as { harnessId?: string; runtime?: string; dispatchSelection?: unknown };
     if (selection.harnessId !== undefined) {
       HarnessIdSchema.parse(selection.harnessId);
@@ -1322,13 +1320,25 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       key: offerReceiptKey,
       body: proposedBody,
     });
+    // A sealed retry may seal the same content again. When its comparison
+    // projection matches, the first ciphertext stays the offer (§9.2).
+    let build = buildEnvelope;
+    let offerPayload: object = proposed.payload;
     if (!recorded.created && !(await sameTaskBody(recorded.receipt.body, proposedBody, options.crypto))) {
-      throw new ByokCloudError(
-        'coordination_input_invalid',
-        `Task ${taskId} already has a different executable offer body.`,
-      );
+      const first = isSealedMessageType(proposed.type)
+        ? firstSealedPayload(recorded.receipt.body, { deviceId, type: proposed.type, payload: proposed.payload })
+        : undefined;
+      if (first === undefined) {
+        throw new ByokCloudError(
+          'coordination_input_invalid',
+          `Task ${taskId} already has a different executable offer body.`,
+        );
+      }
+      build = (id, seq, message) => ({ ...buildEnvelope(id, seq, message), payload: first }) as Envelope;
+      offerPayload = first;
     }
 
+    await retainSealedCiphertext(tenant, taskId, offerPayload);
     await beforeMailbox?.(stores, taskId);
     // The attempt is already open, so a refused append must name it: a Host
     // that let cloud allocate the id has no other way to retry or cancel it.
@@ -1340,7 +1350,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         // Core stays protocol-free: the mailbox reserves the one authoritative
         // delivery number, then asks this producer to build opaque bytes while
         // allocation and insertion are still serialized per device.
-        const envelope = buildEnvelope(taskId, seq, messageId);
+        const envelope = build(taskId, seq, messageId);
         const body = encodeEnvelope(envelope);
         const bytes = new TextEncoder().encode(body);
         return {
@@ -1359,7 +1369,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         `Mailbox stored offer seq ${String(envelope.seq)} at row ${message.seq}; the daemon's redelivery cursor would be wrong.`,
       );
     }
-    if (!sameOfferEnvelope(buildEnvelope(taskId, message.seq, messageId), envelope)) {
+    if (!sameOfferEnvelope(build(taskId, message.seq, messageId), envelope)) {
       throw new ByokCloudError(
         'coordination_input_invalid',
         `Task ${taskId} already has a different executable offer body.`,
@@ -1373,6 +1383,29 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       );
     }
     return { taskId, seq: message.seq, envelope, attempt: openedBeforeAppend };
+  }
+
+  /**
+   * A sealed member above the inline limit names its ciphertext blob (#654).
+   * The blob must be a committed object of this tenant with the declared
+   * hash, size and content type. This check writes nothing, so a lane runs it
+   * before any task, receipt or mailbox write.
+   */
+  async function assertSealedCiphertext(tenant: TenantId, payload: object): Promise<void> {
+    const ref = sealedCiphertextRef(payload);
+    if (ref === undefined) return;
+    const hash = await options.cloud.blobs.uploadedContentHash(tenant, ref.blobId);
+    const object = hash === ref.contentHash ? await options.core.objects.get(tenant, ref.contentHash as ContentHash) : undefined;
+    if (object?.state !== 'committed' || object.byteSize !== BigInt(ref.size) || object.contentType !== ref.contentType) {
+      throw new ByokCloudError('coordination_input_invalid', 'A sealed ciphertextRef must name a committed blob of this tenant with its hash, size and content type.');
+    }
+  }
+
+  /** The task holds its ciphertext blob, so orphan GC keeps it while the task lives. `redactTasks` releases it. */
+  async function retainSealedCiphertext(tenant: TenantId, taskId: string, payload: object): Promise<void> {
+    const ref = sealedCiphertextRef(payload);
+    if (ref === undefined) return;
+    await options.core.objects.addReference(tenant, { hash: ref.contentHash as ContentHash, refKind: SEALED_TASK_REFERENCE_KIND, refId: taskId });
   }
 
   async function assertAgentCapabilities(
@@ -1744,7 +1777,6 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     if (type === 'task.offer_sealed' || type === 'task.offer_with_toolsets_sealed') await assertLegacyAdmission(tenant, deviceId);
     if (type === 'task.offer_for_agent_sealed') assertResumeSessionRef(input.payload);
     await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities(type, input.payload));
-    refuseCiphertextRef(input.payload);
     const payload = MESSAGE_PAYLOAD_SCHEMAS[type].parse(input.payload);
     const agentRef = 'agentRef' in payload ? payload.agentRef : undefined;
     return enqueueTaskEnvelope(
@@ -1768,11 +1800,20 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     const sealed = MESSAGE_PAYLOAD_SCHEMAS['task.steer_sealed'].parse(payload);
     const ownerDeviceId = await runningSteerTarget(tenant, taskId);
     await assertAgentCapabilities(tenant, ownerDeviceId, requiredReceiverCapabilities('task.steer_sealed', sealed));
-    refuseCiphertextRef(sealed);
-    const messageId = options.crypto.randomUuid();
-    return enqueueAgentControlEnvelope(tenant, ownerDeviceId, messageId, (seq) =>
+    await assertSealedCiphertext(tenant, sealed);
+    await retainSealedCiphertext(tenant, taskId, sealed);
+    // One steer id names one steer: a retry finds the same mailbox row. A
+    // retry that seals the same text again keeps the first ciphertext (§9.2).
+    const messageId = uuidFromSha256(await options.crypto.sha256(
+      new TextEncoder().encode(JSON.stringify({ domain: 'byok:task-steer-sealed', tenant, taskId, steerId: sealed.steerId })),
+    ));
+    const enqueued = await enqueueAgentControlEnvelope(tenant, ownerDeviceId, messageId, (seq) =>
       createEnvelope('task.steer_sealed', sealed, { id: messageId, taskId, seq }),
     );
+    if (enqueued.envelope.type !== 'task.steer_sealed' || !sameSealedProjection(enqueued.envelope.payload, sealed)) {
+      throw new ByokCloudError('coordination_input_invalid', `Task ${taskId} already has a different steer ${sealed.steerId}.`);
+    }
+    return enqueued;
   }
 
   /** The steer gates 1 to 4; returns the device that owns the running task. */
@@ -1996,6 +2037,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         taskId,
         receiptKeys: [`task-offer:${messageId}`, terminalReceiptKey(taskId), `agent-message-offer:${attempt.deviceId}:${taskId}`],
         terminalReceiptKey: terminalReceiptKey(taskId),
+        releaseObjectReferences: [{ refKind: SEALED_TASK_REFERENCE_KIND, refId: taskId }],
         auditReceiptKey: taskRedactionReceiptKey(taskId),
         codec,
       }));
@@ -2175,7 +2217,6 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       );
     }
     await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities(type, payload));
-    refuseCiphertextRef(payload);
     const enqueued = await enqueueTaskEnvelope(
       tenant,
       deviceId,

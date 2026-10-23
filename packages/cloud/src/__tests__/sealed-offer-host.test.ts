@@ -1,0 +1,161 @@
+/**
+ * #654 E3b: the Host side of a sealed offer.
+ *
+ * - A retry that seals the same content again is a duplicate by its
+ *   comparison projection (§9.2). The first ciphertext stays the offer.
+ * - A `ciphertextRef` must name a committed blob of this tenant with the
+ *   declared hash, size and content type. The task then holds an object
+ *   reference to it, so orphan GC keeps it while the task lives.
+ *
+ * Every blob here goes through the device blob routes. No store is mocked.
+ */
+import type { ContentHash } from '@byok-sdk/core';
+import { decodeEnvelope, requiredReceiverCapabilities } from '@byok-sdk/protocol';
+import { describe, expect, it, vi } from 'vitest';
+import { TENANT_A, TENANT_B, createHarness, type CloudHarness, type PairedDevice } from './support/harness';
+import {
+  BY_REFERENCE_TEXT_LENGTH,
+  CIPHERTEXT_CONTENT_TYPE,
+  SEALING,
+  inlineMember,
+  referenceMember,
+  sealInput,
+  sha256Hash,
+  uploadCiphertext,
+  type CiphertextRef,
+} from './support/sealed';
+
+const TASK_ID = 'sealed-host-task';
+const FAMILY = 'task.offer_sealed';
+
+async function sealedDevice(): Promise<{ harness: CloudHarness; device: PairedDevice }> {
+  const harness = createHarness();
+  const device = await harness.pairDevice(TENANT_A);
+  const capabilities = requiredReceiverCapabilities(FAMILY, { sealing: SEALING, sealed: {} });
+  await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities });
+  return { harness, device };
+}
+
+function seal(device: PairedDevice, instruction: string) {
+  return sealInput({ tenant: TENANT_A, deviceId: device.deviceId, family: FAMILY, identity: { taskId: TASK_ID }, plaintext: { instruction } });
+}
+
+function offer(harness: CloudHarness, device: PairedDevice, sealed: object) {
+  return harness.cloud.enqueueSealedOffer(TENANT_A, device.deviceId, {
+    taskId: TASK_ID,
+    payload: { runtime: 'pi', sealing: SEALING, sealed } as never,
+  });
+}
+
+/** The first offer fails at its mailbox append, after its receipt. Only then may the same task id be offered again. */
+async function failedFirstOffer(harness: CloudHarness, device: PairedDevice, sealed: object): Promise<void> {
+  vi.spyOn(harness.core.mailbox, 'append').mockRejectedValueOnce(new Error('mailbox unavailable'));
+  await expect(offer(harness, device, sealed)).rejects.toThrow('mailbox unavailable');
+  expect(await mailbox(harness, device)).toEqual([]);
+}
+
+async function mailbox(harness: CloudHarness, device: PairedDevice) {
+  const page = await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0, limit: 10 });
+  return page.messages.map((message) => decodeEnvelope(message.body));
+}
+
+async function refCount(harness: CloudHarness, ref: CiphertextRef): Promise<number | undefined> {
+  return (await harness.core.objects.get(TENANT_A, ref.contentHash as ContentHash))?.refCount;
+}
+
+describe('a sealed offer retry keeps the first ciphertext (#654 §9.2)', () => {
+  it('returns the first envelope when the retry seals the same content again, and appends one mailbox row', async () => {
+    const { harness, device } = await sealedDevice();
+    const first = await seal(device, 'review the patch');
+    const again = await seal(device, 'review the patch');
+    expect(again.header.salt).not.toBe(first.header.salt);
+    expect(again.header.contentMac).toBe(first.header.contentMac);
+
+    await failedFirstOffer(harness, device, inlineMember(first));
+    const retried = await offer(harness, device, inlineMember(again));
+
+    expect(retried.envelope.payload).toMatchObject({ sealed: inlineMember(first) });
+    expect(await mailbox(harness, device)).toEqual([retried.envelope]);
+    await expect(offer(harness, device, inlineMember(again)), 'a delivered offer is not offered again').rejects.toMatchObject({
+      code: 'coordination_input_invalid',
+    });
+  });
+
+  it('refuses other content under the same task id, and keeps the first offer', async () => {
+    const { harness, device } = await sealedDevice();
+    const first = inlineMember(await seal(device, 'review the patch'));
+    await failedFirstOffer(harness, device, first);
+
+    await expect(offer(harness, device, inlineMember(await seal(device, 'delete the branch')))).rejects.toMatchObject({
+      code: 'coordination_input_invalid',
+    });
+    expect(await mailbox(harness, device)).toEqual([]);
+    const retried = await offer(harness, device, first);
+    expect(await mailbox(harness, device)).toEqual([retried.envelope]);
+  });
+});
+
+describe('a sealed offer by ciphertextRef (#654 E3b)', () => {
+  it('accepts a committed blob with the declared hash, size and content type, and holds one reference to it', async () => {
+    const { harness, device } = await sealedDevice();
+    const content = await seal(device, 'x'.repeat(BY_REFERENCE_TEXT_LENGTH));
+    const ref = await uploadCiphertext(harness, device, content.ciphertext);
+    expect(await refCount(harness, ref)).toBe(0);
+
+    const enqueued = await offer(harness, device, referenceMember(content, ref));
+
+    expect(enqueued.envelope.payload).toMatchObject({ sealed: { ciphertextRef: ref } });
+    expect(await mailbox(harness, device)).toEqual([enqueued.envelope]);
+    expect(await refCount(harness, ref)).toBe(1);
+  });
+
+  it('keeps the first blob on a retry that sealed again into a new blob, and holds no reference to the new blob', async () => {
+    const { harness, device } = await sealedDevice();
+    const text = 'x'.repeat(BY_REFERENCE_TEXT_LENGTH);
+    const first = await seal(device, text);
+    const again = await seal(device, text);
+    const firstRef = await uploadCiphertext(harness, device, first.ciphertext);
+    const againRef = await uploadCiphertext(harness, device, again.ciphertext);
+
+    await failedFirstOffer(harness, device, referenceMember(first, firstRef));
+    expect(await refCount(harness, firstRef)).toBe(1);
+    const retried = await offer(harness, device, referenceMember(again, againRef));
+
+    expect(retried.envelope.payload).toMatchObject({ sealed: referenceMember(first, firstRef) });
+    expect(await mailbox(harness, device)).toEqual([retried.envelope]);
+    expect(await refCount(harness, firstRef)).toBe(1);
+    expect(await refCount(harness, againRef)).toBe(0);
+  });
+
+  type Refusal = (harness: CloudHarness, device: PairedDevice, ciphertext: Uint8Array) => Promise<{ ref: CiphertextRef; uploaded?: CiphertextRef }>;
+  const refusals: readonly (readonly [string, Refusal])[] = [
+    ['a blob that is not finalized', async (harness, device, ciphertext) => ({ ref: await uploadCiphertext(harness, device, ciphertext, { finalize: false }) })],
+    ['a blob of another tenant', async (harness, _device, ciphertext) => ({
+      ref: await uploadCiphertext(harness, await harness.pairDevice(TENANT_B), ciphertext),
+    })],
+    ['a declared hash that is not the hash of the blob', async (harness, device, ciphertext) => {
+      const uploaded = await uploadCiphertext(harness, device, ciphertext);
+      return { ref: { ...uploaded, contentHash: await sha256Hash(ciphertext.subarray(1)) }, uploaded };
+    }],
+    ['a blob id of another blob, next to the hash of this ciphertext', async (harness, device, ciphertext) => {
+      const uploaded = await uploadCiphertext(harness, device, ciphertext);
+      const other = await uploadCiphertext(harness, device, ciphertext.map((byte) => byte ^ 0xff));
+      return { ref: { ...uploaded, blobId: other.blobId }, uploaded };
+    }],
+    ['a declared content type that is not the type of the blob', async (harness, device, ciphertext) => {
+      const uploaded = await uploadCiphertext(harness, device, ciphertext, { contentType: 'text/plain' });
+      return { ref: { ...uploaded, contentType: CIPHERTEXT_CONTENT_TYPE }, uploaded };
+    }],
+  ];
+
+  it.each(refusals)('refuses %s before any task, mailbox or reference state', async (_name, prepare) => {
+    const { harness, device } = await sealedDevice();
+    const content = await seal(device, 'x'.repeat(BY_REFERENCE_TEXT_LENGTH));
+    const { ref, uploaded } = await prepare(harness, device, content.ciphertext);
+
+    await expect(offer(harness, device, referenceMember(content, ref))).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+    expect(await harness.cloud.readTaskAttempt(TENANT_A, TASK_ID)).toBeUndefined();
+    expect(await mailbox(harness, device)).toEqual([]);
+    if (uploaded !== undefined) expect(await refCount(harness, uploaded)).toBe(0);
+  });
+});

@@ -114,6 +114,24 @@ export function runBlobConformance(factory: CloudCompositionFactory): void {
       });
     });
 
+    it('names the declared content hash for its own blob id, and learns nothing from a foreign one', async () => {
+      // #654: it binds a sealed ciphertext reference to its object.
+      // A foreign id gets no answer, or its own text back when the id is the hash.
+      await withCloudComposition(factory, async ({ stores }) => {
+        const declaration = await declarationFor('sealed ciphertext');
+        const grant = await stores.blobs.createUpload(
+          TENANT_A,
+          reservationFor(TENANT_A, declaration, 'res-hash'),
+        );
+
+        expect(await stores.blobs.uploadedContentHash(TENANT_A, grant.blobId)).toBe(declaration.contentHash);
+        const foreign = await stores.blobs.uploadedContentHash(TENANT_B, grant.blobId);
+        const unknown = await stores.blobs.uploadedContentHash(TENANT_B, 'not-a-blob-id');
+        expect(foreign === undefined || foreign === grant.blobId).toBe(true);
+        expect(unknown).toBeUndefined();
+      });
+    });
+
     it('gives two declarations in one tenant two grants', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
         const firstDeclaration = await declarationFor('first');

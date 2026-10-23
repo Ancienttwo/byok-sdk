@@ -13,7 +13,8 @@ import { format } from 'node:util';
 import type { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import { isCloudError } from '@byok-sdk/cloud';
-import { tenantId } from '@byok-sdk/core';
+import { tenantId, type ContentHash } from '@byok-sdk/core';
+import { sealContent } from '@byok-sdk/core/sealed-payload';
 import { byokBlobUrlPath, createEnvelope } from '@byok-sdk/protocol';
 import { migrate } from '../migrate';
 import { createDataplaneScope, createObjectStorageScope, SKIP_DATAPLANE, SKIP_REASON } from './support/dataplane';
@@ -30,6 +31,7 @@ import {
   publishEnvelope,
   runTask,
   startTask,
+  uploadObject,
   type Canary,
 } from './support/redaction-flow';
 import { fileURLToPath } from 'node:url';
@@ -222,6 +224,66 @@ describe.skipIf(SKIP_DATAPLANE)(`task redaction on Postgres — ${SKIP_REASON}`,
       expect(response.status).toBe(200);
       const { downloadUrl } = (await response.json()) as { downloadUrl: string };
       expect(await (await globalThis.fetch(downloadUrl)).text()).toBe(shared);
+    } finally {
+      await scope.dispose();
+    }
+  }, 120_000);
+
+  it('releases the reference that a sealed task holds to its ciphertext blob, and deletes that blob (#654 E3b)', async () => {
+    const scope = await createDataplaneScope();
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const storage = await createObjectStorageScope();
+      const host = await composeRedactionHost(scope.pool, storage);
+      const device = await pairDevice(host, TENANT_1, ['sealed-payload-v1']);
+      const taskId = `task-sealed-${randomUUID()}`;
+      // Only the input is sealed, so the plaintext terminal below stays legal.
+      const sealing = { scopeId: 'scope-redaction', epoch: 1, categories: ['task-input'] } as const;
+      const content = await sealContent({
+        scopeKey: new Uint8Array(32).fill(7),
+        scope: { id: sealing.scopeId, epoch: sealing.epoch },
+        chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` },
+        sender: 'A'.repeat(43),
+        category: 'task-input',
+        binding: {
+          tenantId: TENANT_1,
+          family: 'task.offer_sealed',
+          direction: 'server-to-daemon',
+          identity: { taskId },
+          deviceId: device.deviceId,
+          agentRef: null,
+          categories: [...sealing.categories],
+          notAfter: null,
+        },
+        // Above the inline limit, so the member names its ciphertext blob.
+        plaintext: { instruction: 'x'.repeat(300 * 1024) },
+        maxContentLength: 2 * 1024 * 1024,
+      });
+      const blob = await uploadObject(device, content.ciphertext, 'application/octet-stream');
+      const hash = (blob.ref as { contentHash: ContentHash }).contentHash;
+      const key = `tenants/${TENANT_1}/objects/sha256/${blob.hex}`;
+
+      await host.cloud.enqueueSealedOffer(TENANT_1, device.deviceId, {
+        taskId,
+        payload: { runtime: 'pi', sealing, sealed: { ...content.header, ciphertextRef: blob.ref } } as never,
+      });
+      expect((await host.core.objects.get(TENANT_1, hash))?.refCount).toBe(1);
+      expect((await device.poll()).map((event) => [event.type, event.task_id])).toEqual([['task.offer_sealed', taskId]]);
+      for (const envelope of [
+        createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId }),
+        createEnvelope('task.started', {}, { taskId }),
+        createEnvelope('task.complete', { summary: 'done', sessionRef: 'session-sealed' }, { taskId }),
+      ]) {
+        const sent = await device.send(envelope);
+        expect(sent, JSON.stringify(sent.body)).toMatchObject({ status: 200, body: { accepted: 1 } });
+      }
+      await device.poll();
+      expect((await readObjects(storage)).has(key)).toBe(true);
+
+      expect((await host.cloud.redactTasks(TENANT_1, { taskIds: [taskId] })).tasks)
+        .toMatchObject([{ taskId, outcome: 'redacted', counts: { objectsDeleted: 1 } }]);
+      expect((await readObjects(storage)).has(key)).toBe(false);
+      expect(await host.core.objects.get(TENANT_1, hash)).toMatchObject({ refCount: 0, state: 'deleted' });
     } finally {
       await scope.dispose();
     }

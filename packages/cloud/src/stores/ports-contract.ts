@@ -46,7 +46,7 @@ export const CLOUD_PORT_METHODS: Readonly<Record<CloudStoreName, readonly string
   // Three methods, not six: the byte-proxy trio moved to `BlobContentProxy`,
   // which is a composition input rather than a port and therefore has no row
   // in this table (docs/researches/s4a-dataplane-design.md §6).
-  blobs: ['createUpload', 'observeUpload', 'getDownloadUrl'],
+  blobs: ['createUpload', 'observeUpload', 'getDownloadUrl', 'uploadedContentHash'],
   rateLimiter: ['consume'],
 };
 

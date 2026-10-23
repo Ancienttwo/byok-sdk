@@ -1117,6 +1117,26 @@ sealed offer type, so a device without the flag never receives it.
 - `paddedLength` above 256 KiB: `ciphertextRef`, a `BlobRef` without `url`
   whose `size` is `paddedLength + 16`.
 
+**Host check of a `ciphertextRef`.** A sealed hosted entry accepts a
+`ciphertextRef` only when its `blobId` names a blob of the same tenant with
+the declared `contentHash`, and that object is `committed` with the declared
+`size` and `contentType`. Otherwise it fails with `coordination_input_invalid`
+before any task, receipt or mailbox write. The task then holds an object
+reference to the blob (kind `sealed-task`, id the task id), so orphan GC keeps
+the ciphertext while the task lives. `redactTasks` releases the reference and
+deletes the object with the rest of the task content.
+
+**Host comparison of a sealed retry.** The Host compares two sealed
+submissions of one identity by their comparison projection: the plaintext
+fields, plus `v`, `suite`, `category`, `scope`, `paddedLength` and
+`contentMac` of `sealed`. The salt, the nonce, the ciphertext, the
+`ciphertextRef`, `chainHead` and `sender` do not count. An equal projection
+is a duplicate, and the first ciphertext stays. A different projection fails
+with `coordination_input_invalid`. For an offer, the identity is the task id.
+For `task.steer_sealed`, it is the task id and the `steerId`: one `steerId`
+names one steer row in the mailbox. A sender still seals once and retries
+with the same bytes. The projection keeps a retry safe when it did not.
+
 `paddedLength` is the one legal padded length of the content: the next
 multiple of 256 bytes up to 16 KiB, Padmé above. The plaintext limit is 2 MiB
 of canonical JSON for each v1 category, so `paddedLength` is at most

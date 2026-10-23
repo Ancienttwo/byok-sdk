@@ -39,6 +39,17 @@
   message with `sealed_payload_unsupported`. The sealed hosted entries refuse
   a `ciphertextRef` with `coordination_input_invalid`, because the Host does
   not yet check and retain the referenced blob. Inline ciphertext works.
+- **Feature (cloud, server, cloud-dataplane)** — the sealed hosted entries
+  accept a `ciphertextRef` (#654 E3b). The blob must be a committed object of
+  the tenant with the declared hash, size and content type. The task holds an
+  object reference to it, and `redactTasks` releases that reference before it
+  deletes the task's objects. A sealed offer retry and a `task.steer_sealed`
+  retry now compare by the comparison projection: a retry that sealed the
+  same content again is a duplicate, and the first ciphertext stays. A steer
+  id now names one steer: before, each `steerSealedTask` call appended a new
+  mailbox row. Compatibility: `CloudBlobStore` gets the required method
+  `uploadedContentHash(tenant, blobId)`. A Host that implements its own
+  `CloudBlobStore` must add it. The memory, SQLite and R2 stores implement it.
 
 ## 0.29.0 — 2026-10-23 (published)
 

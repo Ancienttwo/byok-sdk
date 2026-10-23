@@ -350,7 +350,8 @@ describe('sealed payload v1: each sealed type has its own hosted entry (#654)', 
     },
   );
 
-  // E3a: the Host does not yet check or retain a ciphertextRef blob, so a sealed lane refuses it.
+  // A ciphertextRef must name a committed blob of this tenant (E3b). The corpus blob ids name no
+  // uploaded blob, so each lane refuses them. `sealed-offer-host.test.ts` covers the accepted path.
   // Each lane line with sealed input, with the ciphertextRef member of the large corpus line of its type.
   const byReference = Object.keys(lanes).map((type) => {
     const line = laneLines.find((candidate) => candidate.type === type && candidate.payload.sealed !== undefined)!;
@@ -359,7 +360,7 @@ describe('sealed payload v1: each sealed type has its own hosted entry (#654)', 
   });
 
   it.each(byReference.map((line, index) => [index, line.type, line] as const))(
-    'line %i (%s) by ciphertextRef is refused on a device with every flag, before any task or mailbox state',
+    'line %i (%s) by ciphertextRef to a blob that is not uploaded is refused on a device with every flag, before any task or mailbox state',
     async (_index, type, line) => {
       const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
       const device = await harness.pairDevice(TENANT_A);

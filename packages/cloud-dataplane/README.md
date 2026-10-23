@@ -130,6 +130,11 @@ on explicit finalize, behind an unconditional `HEAD` that compares what the stor
 actually holds against what was declared — a signed length proves what one
 client sent, not what is at the key now.
 
+`uploadedContentHash` names the content hash of a blob id for cloud's sealed
+`ciphertextRef` check (#654). Here the blob id is the content hash, so the
+method returns the id when it has the hash form. Cloud then requires a
+`committed` manifest row of the tenant with the declared size and type.
+
 Two consequences worth stating outright:
 
 - **This composition supplies no `BlobContentProxy`.** The two
