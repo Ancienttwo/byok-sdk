@@ -201,12 +201,14 @@
   `agentKey`. K4 behavior does not change.
 - **Feature (examples)** — the new private package
   `examples/hosted-bot-collaboration` runs the K8 commit contract on Postgres
-  (#793 D2a, D2b). `HostedCollaborationStore` keeps the scope, entities,
+  (#793 D2a, D2b, D2c). `HostedCollaborationStore` keeps the scope, entities,
   entries, commands and outbox in the tables of `DDL` (`src/ddl.ts`), in a
   separate schema. It refuses an unknown store version. `HostedSubmitter`
   and the `intent` table submit the frozen intents with the K4 rules. The
   store sync runs the K8 sync rule and freezes the intent of a ready Turn in
-  the same transaction. Nothing is deployed, so the tables change in place
+  the same transaction. `hostedMessageConsumer` gives the `agentMessage`
+  option of `createByokCloud` and decides each Agent message with the K4
+  message rules. Nothing is deployed, so the tables change in place
   with no migration.
 - **Breaking (examples)** — K8 needs the K4 compaction veto (#816).
   `BotCollaboration` refuses a Host ledger that was opened without
