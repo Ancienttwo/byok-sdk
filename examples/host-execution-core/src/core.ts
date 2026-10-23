@@ -208,7 +208,7 @@ export class HostExecutionCore {
     await this.drain();
   }
   private validateDefinition(definition: RoutineDefinition): void {
-    validateRoutineDefinition(definition, this.now(), { hostJobs: this.hostJobs, occurrenceHooks: this.occurrenceHooks });
+    validateRoutineDefinition(definition, { now: this.now(), hostJobs: this.hostJobs, occurrenceHooks: this.occurrenceHooks });
   }
   /** The one path for routine commands. Each command validates and plans before it writes, so a caught refusal changes nothing. */
   private routineCommands(state: LedgerState): RoutineCommands {

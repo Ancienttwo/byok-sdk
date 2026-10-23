@@ -18,6 +18,6 @@ export { FrozenOfferMismatchError, sameFrozenOffer, submitFrozen } from './submi
 export type { FrozenSubmitPort, FrozenInput, FrozenOffer } from './submit';
 export { WAKE_HORIZON_MS, IGNORED_WAKE_AUDIT_LIMIT, parseRoutineWakeKey, versionSwitchDue, promoteOccurrence, concludeOccurrence, recordOccurrence, createRoutine,
   stageVersion, setLifecycle, switchVersion, nextWake, validateRoutineDefinition, occurrenceRun } from './routines';
-export type { RoutineHandlers } from './routines';
+export type { RoutineValidation } from './routines';
 
 export type { MemoryRestoreInput, MemoryRestoreResult, MemoryRestoreFileResult } from './memory-restore';

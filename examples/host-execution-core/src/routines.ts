@@ -71,10 +71,10 @@ export function applyPlan(state: LedgerState, routine: Routine, plan: WakePlan, 
   scheduleNext(state, routine, now);
 }
 
-/** The registered handlers a definition may name: a Host job type or an occurrence hook type, each mapped to its function. */
-export interface RoutineHandlers { hostJobs: ReadonlyMap<string, unknown>; occurrenceHooks: ReadonlyMap<string, unknown> }
+/** The Host time, and the registered handlers a definition may name: Host job types and occurrence hook types, each mapped to its function. */
+export interface RoutineValidation { now: number; hostJobs: ReadonlyMap<string, unknown>; occurrenceHooks: ReadonlyMap<string, unknown> }
 /** Refuses a routine definition that the Host cannot run at `now`. Pure: it reads no ledger. */
-export function validateRoutineDefinition(definition: RoutineDefinition, now: number, handlers: RoutineHandlers): void {
+export function validateRoutineDefinition(definition: RoutineDefinition, { now, hostJobs, occurrenceHooks }: RoutineValidation): void {
   if (!definition.id.trim() || definition.id.startsWith('host-scan:') || !Number.isSafeInteger(definition.version) || definition.version < 1
     || definition.waitMs < 1) throw new Error('Invalid routine definition');
   time(definition.waitMs); time(definition.lateAfterMs);
@@ -85,10 +85,10 @@ export function validateRoutineDefinition(definition: RoutineDefinition, now: nu
     throw new Error('Supply exactly one of execution, hostJob or hostOccurrence');
   }
   if (definition.hostJob) {
-    if (!definition.hostJob.type?.trim() || typeof handlers.hostJobs.get(definition.hostJob.type) !== 'function') throw new Error('Host job handler not registered');
+    if (!definition.hostJob.type?.trim() || typeof hostJobs.get(definition.hostJob.type) !== 'function') throw new Error('Host job handler not registered');
     validateJson(definition.hostJob.input);
   } else if (definition.hostOccurrence) {
-    if (!definition.hostOccurrence.type?.trim() || typeof handlers.occurrenceHooks.get(definition.hostOccurrence.type) !== 'function') {
+    if (!definition.hostOccurrence.type?.trim() || typeof occurrenceHooks.get(definition.hostOccurrence.type) !== 'function') {
       throw new Error('Occurrence hook not registered');
     }
     validateJson(definition.hostOccurrence.input);
