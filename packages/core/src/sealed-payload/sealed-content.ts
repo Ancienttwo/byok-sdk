@@ -29,7 +29,6 @@ import { z } from 'zod';
 
 import { canonicalizeJson, canonicalizeJsonBytes, type JsonObject } from '../attestation';
 import { CONTENT_HASH_PATTERN } from '../blob';
-import { ByokCoreError } from '../errors';
 import { isCanonicalTimestamp } from '../time';
 import { webCryptoSubtle } from '../webcrypto';
 import { MEMBER_ID_PATTERN } from './member-chain';
@@ -52,6 +51,7 @@ import {
   deriveSealedContentKey,
   deriveSealedMacKey,
 } from './scope-key';
+import { canonicalizeSealedJson } from './sealed-json';
 
 export const SEALED_CONTENT_VERSION = 1;
 
@@ -279,13 +279,10 @@ function isNonEmptyPlainObject(value: unknown): boolean {
   return (prototype === Object.prototype || prototype === null) && Object.keys(value).length > 0;
 }
 
+/** The plaintext text, with the RFC 8785 number rule (#786). The AAD and the MAC identity keep `canonicalizeJson`. */
 function canonicalPlaintext(plaintext: JsonObject): string {
   if (!isNonEmptyPlainObject(plaintext)) throw invalidInput('Sealed plaintext must be a non-empty plain JSON object');
-  try {
-    return canonicalizeJson(plaintext);
-  } catch (cause) {
-    throw new ByokCoreError('sealed_secret_invalid', 'Sealed plaintext is not canonical JSON', { cause });
-  }
+  return canonicalizeSealedJson(plaintext);
 }
 
 /** Decoded content, only when it is the canonical JSON text of a non-empty plain object. */
@@ -295,7 +292,7 @@ function parseCanonicalPlaintext(content: Uint8Array): { readonly value: JsonObj
   try {
     text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(content);
     value = JSON.parse(text);
-    if (!isNonEmptyPlainObject(value) || canonicalizeJson(value as JsonObject) !== text) return undefined;
+    if (!isNonEmptyPlainObject(value) || canonicalizeSealedJson(value as JsonObject) !== text) return undefined;
   } catch {
     return undefined;
   }
