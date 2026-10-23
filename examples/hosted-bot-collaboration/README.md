@@ -4,8 +4,8 @@ Private reference example for #793 (#606 D2). It is the hosted (H) adapter of th
 commit contract (`examples/bot-collaboration`, #739 D1), on Node and Postgres.
 
 Status: the commit store, the intent submitter (D2b-1), the sync step (D2b-2), the message consumer (D2c), result
-reconciliation (D2d), the device binding (D2e) and retention (D2g). The command entry and the routine scheduler come in
-later slices of #793.
+reconciliation (D2d), the device binding (D2e), retention (D2g) and routines without their scheduler (D2f-2). The command
+entry and the routine scheduler come in later slices of #793.
 Do not use this example as a deployed Host yet.
 
 ## Commit store
@@ -33,7 +33,9 @@ queued expiry (`queuedExpiry`) and the frozen submit (`submitFrozen`).
 - A try first raises `tries` and takes a lease, under the scope lock. Then it calls the SDK.
 - Every write after the SDK call is fenced: `WHERE tries = $mine AND submission <> 'delivered'`. A stale
   submitter cannot overwrite a newer try, and a delivered row never changes back.
-- A row that was never tried expires at `wait_until`. A tried row past `wait_until` is never submitted
+- A row that was never tried expires at `wait_until`. A routine row that was never tried also stops at its
+  `retry_until` (`superseded`), as K4 `begin` does. A tried row keeps its submit to `wait_until`, because K4 `submit`
+  does not read `retryUntil`. A tried row past `wait_until` is never submitted
   again. It gets `cancel_reason = 'expired'` and no conclusion, because an SDK attempt can still exist.
   Reconciliation (D2d) checks the attempt first. A sync cancel that lands during the try keeps its reason.
 - Right before the SDK call, a try reads the row again, as K4 does. It stops when the row has a conclusion or a
@@ -62,6 +64,8 @@ schema. The SDK tables stay under the SDK migrations. This example never writes 
 | `device_binding` | device of a scope: its mode (`L` or `H`), its mode revision and its revoke time |
 | `retired_identity` | K8 identity that retention retired for good: `hash([namespace, id])` |
 | `archived_row` | row that retention moved out of the state, by namespace and id; a command record has an expiry |
+| `routine` | K4 routine of a Bot: its definition, staged version, lifecycle, status and next slot |
+| `occurrence` | K4 occurrence of a routine slot; its conclusion only when it has no intent |
 
 Each scope and each key is stored as `JSON.stringify(value)`, so two values that UTF-8 would merge stay
 apart, and a NUL is safe. Each body is `json` text, so the stored bytes keep their key order. `ordinal`
@@ -93,8 +97,13 @@ insertion order, in one transaction under the scope lock. It writes each step as
 - `cancel`: the open intent of an archived Bot gets `cancel_reason = 'cancelled'`. A row that no submit tried also gets
   the conclusion `cancelled`, as K4 `queuedExpiry` concludes a cancelled queued intent: the submit claim runs under the
   same lock, so no SDK attempt can exist. A tried row waits for the reconciliation.
-- `ended`: nothing for a Turn that is not a routine Turn.
-- A routine Turn throws, because H has no routine occurrences before D2f.
+- `routine`: K4 `promoteOccurrence` runs on the routine slice. The intent row takes the step's execution and the K4
+  times: `wait_until` from the occurrence record, `retry_until` from the next slot, and `superseded` at once when a
+  newer slot marked the occurrence. It takes no K4 retry policy. The freeze checks the device binding.
+- `ended`: a routine Turn that ends before promotion concludes its occurrence `cancelled` (K8 `concludeRoutineTurn`).
+  Nothing for another Turn.
+
+Every frozen instruction lists the scope's Bot routines, in insertion order; the store reads them itself.
 
 In history mode, `options.history` maps each Turn id to that Turn's history rows, as L reads them. A Turn without
 an entry does not freeze.
@@ -190,6 +199,27 @@ root ids are retired in `retired_identity`, and every moved command record answe
 - H keeps every intent row, settled or not. Intent row compaction, and its permanent intent tombstones, is later work.
 - The namespace and id of each archived row are checked against the K4 limits (128 and 1024 characters).
 
+## Routines
+
+D2f-2 stores K4 routines and occurrences and runs the K4 and K8 routine rules on them. The scheduler that records
+occurrences comes in D2f-3.
+
+- Each transaction loads a K4 slice under the scope lock: every routine of the scope in insertion order, and its open
+  occurrences. An occurrence is open when it has no intent and no conclusion, or when its intent `occurrence:<key>` has
+  no conclusion. H runs the K4 rules on the slice and writes back what changed. It drops the K4 fields that it does not
+  store: the wake outbox, `attempts`, `slotReplayCount`, `ignoredWakes` and the conclusion copied onto a promoted
+  occurrence.
+- The terminal transaction runs a Turn's `create_routine`, `update_routine` and `cancel_routine` actions with the
+  store's own ports, before the conclusion, as K4 runs `applyOutcome` before `settle`. They use the K8 Bot policy and K4
+  `routineCommands` with the K8 calendar.
+- `updateRoutine(scope, botId, action, now)` and `setRoutineLifecycle(scope, botId, id, lifecycle, now)` are the owner
+  API for the Main Bot's routines, as in L. The caller names the acting Bot, and it must be the Main Bot.
+- H runs only `bot-routine` routines. A Host-job or execution-template routine is refused.
+- Each transaction that can conclude routine work then switches a staged version that is due: the claim expiry, the
+  sync, the reconciliation conclude, the terminal transaction and the owner API. K4 does this after each drain; H has
+  no drain.
+- Retention refuses a routine root while its occurrence is open, as L does.
+
 ## Tests
 
 ```sh
@@ -208,6 +238,9 @@ three and runs these suites.
 - The message consumer tests port the K4 Host-side message vectors (`host-execution-core/src/message.test.ts`).
 - The device binding tests use an SDK tenant in memory for the submit checks.
 - The K8 retention vectors (`retentionVectors`) run on the store, with H tests for message replays after retention.
+- The routine tests seed each occurrence as the D2f-3 scheduler will record it. They cover the outcome actions, the
+  owner API, promotion, the claim's `retry_until`, the version switch in each writer that concludes routine work, and
+  the `bot-routine` refusal.
 - The reconciliation tests run a real daemon for the completed outcome, a replayed terminal and a busy decline. The
   busy decline runs on L too (K4 with the sync rule's wait), and both conclude `declined` at generation 0. An SDK
   tenant in memory covers the cancel, expiry, lease and identity cases.
