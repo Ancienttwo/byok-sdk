@@ -17,7 +17,7 @@ const ENROLLMENT = { tenantId: 'tenant-1', deviceId: 'device-1' };
 const BASE64URL_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 
 interface StoredJwk { x: string; y: string; d: string }
-interface StoredRecord { signingJwk: StoredJwk; kemEpoch: number; kemJwk: StoredJwk }
+interface StoredRecord { signingJwk: StoredJwk; kemEpoch: number; kemJwk: StoredJwk; nextKem?: { epoch: number; jwk: StoredJwk } }
 
 async function storedRecord(secrets: InMemorySecretStore): Promise<StoredRecord> {
   return JSON.parse((await secrets.get(DEVICE_MEMBER_SECRET_NAME))!);
@@ -34,8 +34,11 @@ class RecordingSecretStore extends InMemorySecretStore {
 }
 
 function expectFromOneWrite(keys: DeviceMemberKeys, writes: readonly StoredRecord[]): void {
-  const write = writes.find((record) => record.signingJwk.x === keys.signing.publicJwk.x && record.kemJwk.x === keys.kem.publicJwk.x);
-  expect(write, 'the signing key and the KEM key come from one write').toBeDefined();
+  const write = writes.find((record) =>
+    record.signingJwk.x === keys.signing.publicJwk.x
+    && record.kemJwk.x === keys.kem.publicJwk.x
+    && record.nextKem?.jwk.x === keys.nextKem?.publicJwk.x);
+  expect(write, 'every key a caller gets comes from one write').toBeDefined();
   expect(write!.kemEpoch).toBe(keys.kem.epoch);
 }
 
@@ -72,7 +75,8 @@ describe('DeviceMemberKeyStore', () => {
     const sealing = await new DeviceSealingKeyStore({ secretStore: secrets }).loadOrCreate(ENROLLMENT);
     const before = await secrets.get(DEVICE_SEALING_SECRET_NAME);
     const member = await new DeviceMemberKeyStore({ secretStore: secrets }).loadOrCreate(ENROLLMENT);
-    await new DeviceMemberKeyStore({ secretStore: secrets }).rotateKem(ENROLLMENT);
+    const begun = await new DeviceMemberKeyStore({ secretStore: secrets }).beginKemRotation(ENROLLMENT);
+    await new DeviceMemberKeyStore({ secretStore: secrets }).finishKemRotation(ENROLLMENT, begun.nextKem!.epoch);
     await expect(secrets.get(DEVICE_SEALING_SECRET_NAME)).resolves.toBe(before);
     expect(member.kem.publicJwk).not.toEqual(sealing.publicJwk);
   });
@@ -108,46 +112,141 @@ describe('DeviceMemberKeyStore', () => {
     expect(opened.ok && Array.from(opened.scopeKey)).toEqual(Array.from(scopeKey));
   });
 
-  it('rotateKem replaces only the KEM key, advances its epoch, and keeps the member id (§7.5)', async () => {
+  it('begins a KEM rotation beside the current key and keeps the member id (§7.5)', async () => {
+    const secrets = new InMemorySecretStore();
+    const store = new DeviceMemberKeyStore({ secretStore: secrets });
+    const first = await store.loadOrCreate(ENROLLMENT);
+    expect(first.nextKem).toBeUndefined();
+    const before = await storedRecord(secrets);
+
+    const begun = await store.beginKemRotation(ENROLLMENT);
+    expect(begun.memberId).toBe(first.memberId);
+    expect(begun.kem.epoch).toBe(1);
+    expect(begun.kem.publicJwk).toEqual(first.kem.publicJwk);
+    expect(begun.nextKem?.epoch).toBe(2);
+    expect(begun.nextKem?.publicJwk).not.toEqual(first.kem.publicJwk);
+    expect(begun.nextKem?.privateKey.extractable).toBe(false);
+    const after = await storedRecord(secrets);
+    expect(after.signingJwk).toEqual(before.signingJwk);
+    expect(after.kemJwk).toEqual(before.kemJwk);
+  });
+
+  it('resumes a pending rotation after a restart and generates no other key', async () => {
+    const secrets = new InMemorySecretStore();
+    await new DeviceMemberKeyStore({ secretStore: secrets }).loadOrCreate(ENROLLMENT);
+    const begun = await new DeviceMemberKeyStore({ secretStore: secrets }).beginKemRotation(ENROLLMENT);
+    const stored = await secrets.get(DEVICE_MEMBER_SECRET_NAME);
+
+    // A new process: the old and the next key are both still there.
+    const reloaded = await new DeviceMemberKeyStore({ secretStore: secrets }).loadOrCreate(ENROLLMENT);
+    expect(reloaded.kem.publicJwk).toEqual(begun.kem.publicJwk);
+    expect(reloaded.nextKem?.publicJwk).toEqual(begun.nextKem?.publicJwk);
+    const resumed = await new DeviceMemberKeyStore({ secretStore: secrets }).beginKemRotation(ENROLLMENT);
+    expect(resumed.nextKem?.publicJwk).toEqual(begun.nextKem?.publicJwk);
+    await expect(secrets.get(DEVICE_MEMBER_SECRET_NAME)).resolves.toBe(stored);
+  });
+
+  it('keeps the old KEM key able to open old packages until the rotation finishes', async () => {
+    const secrets = new InMemorySecretStore();
+    const store = new DeviceMemberKeyStore({ secretStore: secrets });
+    const device = await store.loadOrCreate(ENROLLMENT);
+    const sender = await new DeviceMemberKeyStore({ secretStore: new InMemorySecretStore() }).loadOrCreate({
+      tenantId: 'tenant-1',
+      deviceId: 'device-2',
+    });
+    const seal = (kemPublicJwk: DeviceMemberKeys['kem']['publicJwk'], epoch: number) =>
+      sealScopeKeyPackage({
+        scopeKey: generateScopeKey(),
+        tenantId: 'tenant-1',
+        scopeId: 'scope-1',
+        epoch,
+        recipient: { memberId: device.memberId, kemPublicJwk },
+        sender: { signingPublicJwk: sender.signing.publicJwk, signingPrivateKey: sender.signing.privateKey },
+      });
+    const open = (pkg: unknown, kem: DeviceMemberKeys['kem'], epoch: number) =>
+      openScopeKeyPackage({
+        package: pkg,
+        expected: { tenantId: 'tenant-1', scopeId: 'scope-1', epoch },
+        recipient: { memberId: device.memberId, kemPublicJwk: kem.publicJwk, kemPrivateKey: kem.privateKey },
+        senderSigningPublicJwk: sender.signing.publicJwk,
+      });
+    const oldPackage = await seal(device.kem.publicJwk, 1);
+
+    const begun = await new DeviceMemberKeyStore({ secretStore: secrets }).beginKemRotation(ENROLLMENT);
+    await expect(open(oldPackage, begun.kem, 1)).resolves.toMatchObject({ ok: true });
+    const newPackage = await seal(begun.nextKem!.publicJwk, 2);
+    await expect(open(newPackage, begun.nextKem!, 2)).resolves.toMatchObject({ ok: true });
+  });
+
+  it('finishes a rotation: the next key becomes current and the old private key is deleted', async () => {
     const secrets = new InMemorySecretStore();
     const store = new DeviceMemberKeyStore({ secretStore: secrets });
     const first = await store.loadOrCreate(ENROLLMENT);
     const before = await storedRecord(secrets);
+    const begun = await store.beginKemRotation(ENROLLMENT);
 
-    const rotated = await store.rotateKem(ENROLLMENT);
-    expect(rotated.memberId).toBe(first.memberId);
-    expect(rotated.kem.epoch).toBe(2);
-    expect(rotated.kem.publicJwk).not.toEqual(first.kem.publicJwk);
+    const finished = await store.finishKemRotation(ENROLLMENT, 2);
+    expect(finished.memberId).toBe(first.memberId);
+    expect(finished.kem.epoch).toBe(2);
+    expect(finished.kem.publicJwk).toEqual(begun.nextKem?.publicJwk);
+    expect(finished.nextKem).toBeUndefined();
     const after = await storedRecord(secrets);
     expect(after.signingJwk).toEqual(before.signingJwk);
+    expect(after.nextKem).toBeUndefined();
     expect(JSON.stringify(after)).not.toContain(before.kemJwk.d);
 
-    const reloaded = await new DeviceMemberKeyStore({ secretStore: secrets }).loadOrCreate(ENROLLMENT);
-    expect(reloaded.kem.epoch).toBe(2);
-    expect(reloaded.kem.publicJwk).toEqual(rotated.kem.publicJwk);
+    // A repeat call is a no-op; the next rotation goes to epoch 3.
+    const stored = await secrets.get(DEVICE_MEMBER_SECRET_NAME);
+    await expect(store.finishKemRotation(ENROLLMENT, 2)).resolves.toMatchObject({ kem: { epoch: 2 } });
+    await expect(secrets.get(DEVICE_MEMBER_SECRET_NAME)).resolves.toBe(stored);
+    await expect(store.beginKemRotation(ENROLLMENT)).resolves.toMatchObject({ kem: { epoch: 2 }, nextKem: { epoch: 3 } });
+  });
+
+  it('refuses to finish a rotation that is not pending and changes nothing', async () => {
+    const secrets = new InMemorySecretStore();
+    const store = new DeviceMemberKeyStore({ secretStore: secrets });
+    await expect(store.finishKemRotation(ENROLLMENT, 1)).rejects.toMatchObject({ code: 'DEVICE_MEMBER_KEY_ROTATION_MISMATCH' });
+    await expect(secrets.get(DEVICE_MEMBER_SECRET_NAME)).resolves.toBeUndefined();
+
+    await store.loadOrCreate(ENROLLMENT);
+    const idle = await secrets.get(DEVICE_MEMBER_SECRET_NAME);
+    await expect(store.finishKemRotation(ENROLLMENT, 2)).rejects.toMatchObject({ code: 'DEVICE_MEMBER_KEY_ROTATION_MISMATCH' });
+    await expect(secrets.get(DEVICE_MEMBER_SECRET_NAME)).resolves.toBe(idle);
+
+    await store.beginKemRotation(ENROLLMENT);
+    const pending = await secrets.get(DEVICE_MEMBER_SECRET_NAME);
+    for (const epoch of [1, 3]) {
+      await expect(store.finishKemRotation(ENROLLMENT, epoch)).rejects.toMatchObject({ code: 'DEVICE_MEMBER_KEY_ROTATION_MISMATCH' });
+    }
+    await expect(store.finishKemRotation({ tenantId: 'tenant-1', deviceId: 'device-2' }, 2)).rejects.toMatchObject({
+      code: 'DEVICE_MEMBER_KEY_ROTATION_MISMATCH',
+    });
+    await expect(secrets.get(DEVICE_MEMBER_SECRET_NAME)).resolves.toBe(pending);
   });
 
   it('makes a new member for a new enrollment: new signing key, new KEM key at epoch 1', async () => {
     const secrets = new InMemorySecretStore();
     const store = new DeviceMemberKeyStore({ secretStore: secrets });
     const first = await store.loadOrCreate(ENROLLMENT);
-    await store.rotateKem(ENROLLMENT);
+    await store.beginKemRotation(ENROLLMENT);
 
     const repaired = await store.loadOrCreate({ tenantId: 'tenant-1', deviceId: 'device-2' });
     expect(repaired.memberId).not.toBe(first.memberId);
     expect(repaired.enrollment).toEqual({ tenantId: 'tenant-1', deviceId: 'device-2' });
     expect(repaired.kem.epoch).toBe(1);
     expect(repaired.kem.publicJwk).not.toEqual(first.kem.publicJwk);
+    expect(repaired.nextKem).toBeUndefined();
 
-    const rotatedForNew = await store.rotateKem({ tenantId: 'tenant-2', deviceId: 'device-3' });
+    const rotatedForNew = await store.beginKemRotation({ tenantId: 'tenant-2', deviceId: 'device-3' });
     expect(rotatedForNew.kem.epoch).toBe(1);
+    expect(rotatedForNew.nextKem?.epoch).toBe(2);
     expect(rotatedForNew.memberId).not.toBe(repaired.memberId);
   });
 
   it('gives each concurrent caller a signing key and a KEM key from one write', async () => {
     const secrets = new RecordingSecretStore();
     const created = await Promise.all([1, 2, 3].map(() => new DeviceMemberKeyStore({ secretStore: secrets }).loadOrCreate(ENROLLMENT)));
-    const rotated = await Promise.all([1, 2, 3].map(() => new DeviceMemberKeyStore({ secretStore: secrets }).rotateKem(ENROLLMENT)));
+    const rotated = await Promise.all([1, 2, 3].map(() => new DeviceMemberKeyStore({ secretStore: secrets }).beginKemRotation(ENROLLMENT)));
     expect(secrets.writes.length).toBeGreaterThan(1);
     for (const keys of [...created, ...rotated]) expectFromOneWrite(keys, secrets.writes);
   });
@@ -166,10 +265,14 @@ describe('DeviceMemberKeyStore', () => {
       JSON.stringify({ ...valid, kemEpoch: 0 }),
       JSON.stringify({ ...valid, kemJwk: undefined }),
       JSON.stringify({ ...valid, extra: true }),
+      // A pending rotation must be exactly one epoch ahead.
+      JSON.stringify({ ...valid, nextKem: { epoch: valid.kemEpoch + 2, jwk: valid.kemJwk } }),
+      JSON.stringify({ ...valid, nextKem: { epoch: valid.kemEpoch, jwk: valid.kemJwk } }),
     ]) {
       await secrets.set(DEVICE_MEMBER_SECRET_NAME, bad);
       await expect(store.loadOrCreate(ENROLLMENT)).rejects.toMatchObject({ code: 'DEVICE_MEMBER_KEY_INVALID' });
-      await expect(store.rotateKem(ENROLLMENT)).rejects.toMatchObject({ code: 'DEVICE_MEMBER_KEY_INVALID' });
+      await expect(store.beginKemRotation(ENROLLMENT)).rejects.toMatchObject({ code: 'DEVICE_MEMBER_KEY_INVALID' });
+      await expect(store.finishKemRotation(ENROLLMENT, 2)).rejects.toMatchObject({ code: 'DEVICE_MEMBER_KEY_INVALID' });
       await expect(store.loadOrCreate({ tenantId: 'tenant-1', deviceId: 'device-2' })).rejects.toMatchObject({
         code: 'DEVICE_MEMBER_KEY_INVALID',
       });

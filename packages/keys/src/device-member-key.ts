@@ -23,6 +23,12 @@ import type { SecretStore } from './secret-store';
  * - The KEM key (ECDH) receives scope key packages. It rotates by epoch
  *   without a change to the member id (§7.5).
  *
+ * KEM rotation has two steps, in the order of §7.5: register the new public
+ * key, re-wrap the held scope keys to it, then delete the old private key.
+ * `beginKemRotation` stores the next KEM key beside the current one. The old
+ * key stays until `finishKemRotation`, so a crash in between loses nothing,
+ * and the next process resumes the same rotation.
+ *
  * Both keys live in ONE new credential entry, separate from the provider
  * sealing key (D12), because the two uses and rotation cycles differ. One
  * entry makes every write and every read one coherent snapshot: a caller never
@@ -46,7 +52,15 @@ export interface DeviceMemberKeys {
   /** Signs member chain entries and scope key packages. `privateKey` is non-extractable. */
   readonly signing: { readonly publicJwk: SealingPublicJwk; readonly privateKey: WebCryptoKey };
   /** Opens scope key packages. `privateKey` is non-extractable. `epoch` starts at 1 for each member. */
-  readonly kem: { readonly epoch: number; readonly publicJwk: SealingPublicJwk; readonly privateKey: WebCryptoKey };
+  readonly kem: DeviceMemberKemKey;
+  /** The KEM key of a rotation that has begun and not finished, at `kem.epoch + 1`. */
+  readonly nextKem?: DeviceMemberKemKey;
+}
+
+export interface DeviceMemberKemKey {
+  readonly epoch: number;
+  readonly publicJwk: SealingPublicJwk;
+  readonly privateKey: WebCryptoKey;
 }
 
 /**
@@ -68,15 +82,22 @@ const PrivateJwkSchema = z.strictObject({
   d: CanonicalBase64Url32,
 });
 
-/** The stored record: one canonical JSON line, holding both private scalars. */
-const StoredMemberKeysSchema = z.strictObject({
-  v: z.literal(1),
-  tenantId: z.string().min(1).max(200),
-  deviceId: z.string().min(1).max(200),
-  signingJwk: PrivateJwkSchema,
-  kemEpoch: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-  kemJwk: PrivateJwkSchema,
-});
+const KemEpochSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+
+/** The stored record: one canonical JSON line, holding every private scalar. */
+const StoredMemberKeysSchema = z
+  .strictObject({
+    v: z.literal(1),
+    tenantId: z.string().min(1).max(200),
+    deviceId: z.string().min(1).max(200),
+    signingJwk: PrivateJwkSchema,
+    kemEpoch: KemEpochSchema,
+    kemJwk: PrivateJwkSchema,
+    nextKem: z.strictObject({ epoch: KemEpochSchema, jwk: PrivateJwkSchema }).optional(),
+  })
+  .refine((record) => record.nextKem === undefined || record.nextKem.epoch === record.kemEpoch + 1, {
+    message: 'nextKem.epoch must be kemEpoch + 1',
+  });
 type StoredMemberKeys = z.infer<typeof StoredMemberKeysSchema>;
 type PrivateJwk = z.infer<typeof PrivateJwkSchema>;
 
@@ -101,6 +122,13 @@ const ECDSA_P256 = { name: 'ECDSA', namedCurve: 'P-256' } as const;
 const ECDSA_SHA256 = { name: 'ECDSA', hash: 'SHA-256' } as const;
 const ECDH_P256 = { name: 'ECDH', namedCurve: 'P-256' } as const;
 
+function rotationMismatch(epoch: number): ByokKeysError {
+  return new ByokKeysError(
+    'DEVICE_MEMBER_KEY_ROTATION_MISMATCH',
+    `No KEM rotation to epoch ${epoch} is pending for this enrollment`,
+  );
+}
+
 function invalidStoredKey(): ByokKeysError {
   return new ByokKeysError(
     'DEVICE_MEMBER_KEY_INVALID',
@@ -115,8 +143,12 @@ function invalidStoredKey(): ByokKeysError {
  * - `loadOrCreate` returns the stored keys when they belong to the current
  *   enrollment. Missing keys, or keys bound to a different enrollment, are
  *   replaced by a new member: a new signing key and a new KEM key at epoch 1.
- * - `rotateKem` writes a new KEM key at the next epoch and keeps the signing
- *   key. The previous KEM private key is overwritten, and so deleted.
+ * - `beginKemRotation` stores a new KEM key at the next epoch beside the
+ *   current one. When a rotation is already pending, it returns that rotation
+ *   and generates nothing.
+ * - `finishKemRotation(epoch)` makes the pending key current and deletes the
+ *   old private key. The caller calls it only after the `rotate` entry is
+ *   registered and every held scope key is re-wrapped to the new key.
  * - A malformed stored record fails closed. It is never silently regenerated,
  *   because a new signing key would silently create a new member.
  */
@@ -133,10 +165,32 @@ export class DeviceMemberKeyStore {
     return materialize(stored ?? (await this.#write(enrollment, await generateSigningJwk(), 1)));
   }
 
-  async rotateKem(enrollment: DeviceSealingEnrollment): Promise<DeviceMemberKeys> {
+  async beginKemRotation(enrollment: DeviceSealingEnrollment): Promise<DeviceMemberKeys> {
+    const stored = (await this.#readForEnrollment(enrollment)) ?? (await this.#write(enrollment, await generateSigningJwk(), 1));
+    if (stored.nextKem !== undefined) return materialize(stored);
+    return materialize(
+      await this.#store({
+        ...stored,
+        nextKem: { epoch: stored.kemEpoch + 1, jwk: await generatePrivateJwk(ECDH_P256, ['deriveBits']) },
+      }),
+    );
+  }
+
+  /**
+   * Finish the rotation to `epoch`. A repeat call after the rotation finished
+   * returns the current keys. Any other epoch throws
+   * `DEVICE_MEMBER_KEY_ROTATION_MISMATCH` and changes nothing.
+   */
+  async finishKemRotation(enrollment: DeviceSealingEnrollment, epoch: number): Promise<DeviceMemberKeys> {
     const stored = await this.#readForEnrollment(enrollment);
-    if (stored === undefined) return materialize(await this.#write(enrollment, await generateSigningJwk(), 1));
-    return materialize(await this.#write(enrollment, stored.signingJwk, stored.kemEpoch + 1));
+    if (stored === undefined) throw rotationMismatch(epoch);
+    if (stored.nextKem === undefined) {
+      if (stored.kemEpoch === epoch) return materialize(stored);
+      throw rotationMismatch(epoch);
+    }
+    if (stored.nextKem.epoch !== epoch) throw rotationMismatch(epoch);
+    const { nextKem, ...rest } = stored;
+    return materialize(await this.#store({ ...rest, kemEpoch: nextKem.epoch, kemJwk: nextKem.jwk }));
   }
 
   /** The stored record when it belongs to `enrollment`. A malformed record throws. */
@@ -161,8 +215,9 @@ export class DeviceMemberKeyStore {
     return parsed.data;
   }
 
+  /** Write a new member: `signingJwk` and a fresh KEM key at `kemEpoch`, with no pending rotation. */
   async #write(enrollment: DeviceSealingEnrollment, signingJwk: PrivateJwk, kemEpoch: number): Promise<StoredMemberKeys> {
-    const record = StoredMemberKeysSchema.safeParse({
+    return this.#store({
       v: 1,
       tenantId: enrollment.tenantId,
       deviceId: enrollment.deviceId,
@@ -170,6 +225,10 @@ export class DeviceMemberKeyStore {
       kemEpoch,
       kemJwk: await generatePrivateJwk(ECDH_P256, ['deriveBits']),
     });
+  }
+
+  async #store(value: StoredMemberKeys): Promise<StoredMemberKeys> {
+    const record = StoredMemberKeysSchema.safeParse(value);
     if (!record.success) throw invalidStoredKey();
     await this.#secrets.set(DEVICE_MEMBER_SECRET_NAME, canonicalizeJson(record.data));
     // Read back: if another process replaced the entry concurrently, the
@@ -227,7 +286,7 @@ async function importSigningKey(jwk: PrivateJwk): Promise<DeviceMemberKeys['sign
  * matches the stored public point with an ECDH round trip against a fresh
  * ephemeral key.
  */
-async function importKemKey(jwk: PrivateJwk): Promise<{ publicJwk: SealingPublicJwk; privateKey: WebCryptoKey }> {
+async function importKemKey(jwk: PrivateJwk): Promise<Omit<DeviceMemberKemKey, 'epoch'>> {
   const publicJwk = publicJwkOf(jwk);
   try {
     const privateKey = await subtle().importKey('jwk', { ...jwk, ext: false }, ECDH_P256, false, ['deriveBits']);
@@ -244,11 +303,13 @@ async function importKemKey(jwk: PrivateJwk): Promise<{ publicJwk: SealingPublic
 
 async function materialize(stored: StoredMemberKeys): Promise<DeviceMemberKeys> {
   const signing = await importSigningKey(stored.signingJwk);
-  const kem = await importKemKey(stored.kemJwk);
-  return {
+  const kem = { epoch: stored.kemEpoch, ...(await importKemKey(stored.kemJwk)) };
+  const base = {
     memberId: await deriveMemberId(signing.publicJwk),
     enrollment: { tenantId: stored.tenantId, deviceId: stored.deviceId },
     signing,
-    kem: { epoch: stored.kemEpoch, ...kem },
+    kem,
   };
+  if (stored.nextKem === undefined) return base;
+  return { ...base, nextKem: { epoch: stored.nextKem.epoch, ...(await importKemKey(stored.nextKem.jwk)) } };
 }
