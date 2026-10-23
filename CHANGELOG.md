@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.29.0 — source candidate
+
+0.29.0 is a MINOR release under the default pre-1.0 policy, with no
+exception. It adds public API and behavior, and it has breaking changes in
+client and keys. The owner labelled #723, #751 and #767 as breaking. This
+candidate is not published. See the [release notes](docs/releases/v0.29.0.md)
+for scope and outstanding qualification. All nine public manifests and their
+lock records move to 0.29.0.
+
 - **Feature (client)** — the SDK release now has a Windows x64 Agent memory
   helper, `dist/native/agent-memory-fs/win32-x64.exe` (#605). Its
   `pe-content-v1` digest ignores what Authenticode signing writes, so a product
@@ -98,7 +107,7 @@
   `AGENT_MEMORY_MCP_SERVER_NAME`, the reserved name of the SDK memory MCP
   server (#614). Host tests and diagnostics can use it instead of the literal
   name.
-- **Changed (keys)** — `PiModelConfigSchema` accepts a `pi_model` without
+- **Breaking (keys)** — `PiModelConfigSchema` accepts a `pi_model` without
   `thinkingLevelMap`, as the prepared model wire already does. A declared map
   must still map all seven levels. Without a map, Pi applies its own handling
   of each level. For a reasoning model the schema then accepts `off` through
@@ -188,7 +197,7 @@
   durability on Windows. CI now runs the helper tests on Windows Server 2025 and
   Windows Server 2022, as the administrator and as a standard user. It also
   checks the root identity that Node and Bun compute.
-- **Changed (client)** — Agent memory names are now the same on every
+- **Breaking (client)** — Agent memory names are now the same on every
   platform (#605). A memory path may not use a Windows device name, such as
   `notes/con.md`, or a segment that ends in `.`. Below `notes`, two names in
   one directory may not differ only in ASCII letter case. Recall, save, intents
@@ -214,7 +223,7 @@
   ledger. A found terminal ends the reads of that task and starts one drain.
   After the last read, only the `reconcileMs` scans remain. This also covers a
   claimed task that the core cancels at its waiting deadline.
-- **Changed (client)** — on macOS the Agent memory helper admits an Agent home
+- **Breaking (client)** — on macOS the Agent memory helper admits an Agent home
   only on a local volume (#765). It reads the `fstatfs` flags of the pinned
   home handle. A volume without `MNT_LOCAL`, for example an SMB, NFS or AFP
   mount, fails the helper open with `unsafe_root`. A failed query fails the
