@@ -8248,6 +8248,7 @@ export declare class SealedTasks {
      * (`undefined`).
      */
     sealOutbound(envelope: Envelope): Promise<Envelope | undefined>;
+    settled(): Promise<void>;
     /**
      * A sealed task's artifact (decision 12b): inline content only, up to the
      * table's `inline` limit, named by a fresh `artifactId`. `undefined` when no

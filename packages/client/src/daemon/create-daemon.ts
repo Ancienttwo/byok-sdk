@@ -1757,6 +1757,10 @@ export function buildDaemonWithAdapters(
 
   let connection: ConnectionManager | undefined;
   let blobLifecycleAbort: AbortController | undefined;
+  // #654: sealed output uploads its ciphertext through its own blob client,
+  // which shutdown aborts only after the terminal commit barrier.
+  let sealedUploadAbort: AbortController | undefined;
+  let sealedOutputSettled: (() => Promise<void>) | undefined;
   let inputPreparationStatusAbort: AbortController | undefined;
   let lifecycle: DaemonLifecycle = { phase: 'stopped' };
   // A successful start owns tenant-bound egress and journal composition. A
@@ -2337,15 +2341,19 @@ export function buildDaemonWithAdapters(
     capabilities.push('custom-harness');
     if (sealedPayload !== undefined) {
       capabilities.push(SEALED_PAYLOAD_CAPABILITY);
-      sealedTasks = new SealedTasks({
+      sealedUploadAbort = new AbortController();
+      const sealedUploads = new BlobClient(config.serverUrl, auth, { signal: sealedUploadAbort.signal });
+      const opened = new SealedTasks({
         keyring: sealedPayload.keyring,
         tenantId: record.tenantId,
         deviceId: record.deviceId,
         blobs: {
           download: (ref) => blobClient.downloadBlob(ref, { signal: blobLifecycleAbort?.signal }),
-          upload: (ciphertext) => blobClient.uploadArtifact(ciphertext, 'application/octet-stream', { signal: blobLifecycleAbort?.signal }),
+          upload: (ciphertext) => sealedUploads.uploadArtifact(ciphertext, 'application/octet-stream'),
         },
       });
+      sealedTasks = opened;
+      sealedOutputSettled = () => opened.settled();
     }
     // Contract §8.1 / §8.3: the device-level capability string is NOT computed
     // here. It is the one flag whose answer depends on a deployment fact this
@@ -3398,7 +3406,13 @@ export function buildDaemonWithAdapters(
     // — before the drain wait below, which is what decides the connection is
     // idle — is what keeps that fail from being written into an outbox nobody
     // is draining any more. Exactly a no-op when no journal is configured.
+    // #654: a sealed outbound is handed over before it is sealed. `settled()`
+    // resolves once each one reached the outbox or the terminal commit queue
+    // (its sender's handler runs first). Wait for it, with or without a
+    // journal, before the drain below decides the connection is idle.
+    await attempt(() => sealedOutputSettled?.(), false);
     const journalTailSettled = journal ? await attempt(() => terminalCommits.stop(), true) : true;
+    sealedUploadAbort?.abort();
     // stop() cleared the maintenance timer synchronously above. Await the pass
     // that may already have been inside SQLite only here, immediately before
     // closing the owned journal, so task interruption is not held behind a
