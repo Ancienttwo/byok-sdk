@@ -60,6 +60,7 @@ function otherWorkspaceManifests(cwd) {
 function verifyHostedManifest(manifest, cwd) {
   if (!plain(manifest) || Object.keys(manifest).some(key => !HOSTED_FIELDS.has(key))
     || manifest.name !== HOSTED.name || manifest.private !== true || manifest.type !== 'module' || !version(manifest.version)
+    || (manifest.description !== undefined && typeof manifest.description !== 'string')
     || !isDeepStrictEqual(manifest.scripts, { typecheck: 'tsc --noEmit', test: 'vitest run' })) {
     throw new Error('Reviewed CI mapping required: the hosted example manifest has an unreviewed shape');
   }
