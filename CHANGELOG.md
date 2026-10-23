@@ -28,11 +28,14 @@
   `task.decline` accepts four sealed decline codes. Cloud gets six sealed
   hosted entries, from `enqueueSealedOffer` to `steerSealedTask`. Cloud does
   not advertise the flag yet.
-- **Changed (cloud, server)** — the plaintext hosted entries now refuse
-  `sealing` and `sealed` with `coordination_input_invalid` (#654 E3a). Before,
-  the plain payload schema dropped these keys, and the task ran in plaintext.
-  `steerTask` also refuses `steerId`. The reference server `dispatch()` and
-  `executions.submit` refuse `sealing` and `sealed` the same way.
+- **Changed (protocol, cloud, server)** — the plaintext hosted entries now
+  refuse `sealing` and `sealed` with `coordination_input_invalid` (#654 E3a).
+  Before, the plain payload schema dropped these keys, and the task ran in
+  plaintext. `steerTask` also refuses `steerId`. The reference server
+  `dispatch()` and `executions.submit` refuse `sealing` and `sealed` the same
+  way. The wire schema also refuses them: each plaintext type that has a
+  sealed sibling fails to parse when it carries `sealing` or `sealed`, so a
+  direct protocol caller cannot send a sealed task as plaintext.
 - **Changed (client, cloud)** — until the sealed receivers exist, the daemon
   declines a sealed offer non-retryably (`sealed_payload_unsupported`) and
   drops a sealed steer (#654 E3a). Cloud inbound refuses a sealed daemon

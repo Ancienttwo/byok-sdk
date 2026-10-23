@@ -295,12 +295,21 @@ export const DispatchSelectionSchema = z.discriminatedUnion('lane', [
 export type DispatchSelection = z.infer<typeof DispatchSelectionSchema>;
 
 /**
+ * #654: a loose plaintext type that has a sealed sibling refuses the sealed
+ * members. Without this, the schema would strip them, and sealed content or
+ * a sealing policy would pass as plaintext. A sealed message uses its own
+ * `*_sealed` type. The strict plaintext types already refuse unknown keys.
+ */
+const NO_SEALED_MEMBER = { sealed: z.never().optional(), sealing: z.never().optional() };
+
+/**
  * server -> daemon: offer a task for a device to claim.
  *
  * `taskId` used to be duplicated here; it is now carried only by the
  * envelope's `task_id` (M1 gap #7 — single source of truth for routing).
  */
 export const TaskOfferPayloadSchema = z.object({
+  ...NO_SEALED_MEMBER,
   instruction: z.union([z.string(), InstructionBlobRefSchema]),
   runtime: RuntimeIdSchema.optional(),
   harnessId: HarnessIdSchema.optional(),
@@ -808,6 +817,7 @@ export type TaskCancelPayload = z.infer<typeof TaskCancelPayloadSchema>;
 
 /** server -> daemon: inject steering text into a running task. */
 export const TaskSteerPayloadSchema = z.object({
+  ...NO_SEALED_MEMBER,
   text: z.string(),
 });
 export type TaskSteerPayload = z.infer<typeof TaskSteerPayloadSchema>;
@@ -893,6 +903,7 @@ export type TaskStartedPayload = z.infer<typeof TaskStartedPayloadSchema>;
  * terminal-state consumer into "Failed or Declined, handle both".
  */
 export const TaskDeclinePayloadSchema = z.object({
+  ...NO_SEALED_MEMBER,
   reason: z.string(),
   retryable: z.boolean().optional(),
   agentRef: AgentRefSchema.optional(),
@@ -912,6 +923,7 @@ export type TaskDeclinePayload = z.infer<typeof TaskDeclinePayloadSchema>;
  * unknowns instead of choking on them.
  */
 export const TaskProgressPayloadSchema = z.object({
+  ...NO_SEALED_MEMBER,
   seq: z.number().int(),
   events: z.array(AgentEventOrUnknownSchema),
 });
@@ -919,6 +931,7 @@ export type TaskProgressPayload = z.infer<typeof TaskProgressPayloadSchema>;
 
 /** daemon -> server: an artifact produced by the task, inline or by blob ref. */
 export const TaskArtifactPayloadSchema = z.object({
+  ...NO_SEALED_MEMBER,
   name: z.string(),
   contentType: z.string(),
   inline: z
@@ -948,6 +961,7 @@ export type TaskArtifactPayload = z.infer<typeof TaskArtifactPayloadSchema>;
  * pending" — the same behavior every server had before this field existed.
  */
 export const TaskAwaitApprovalPayloadSchema = z.object({
+  ...NO_SEALED_MEMBER,
   summary: z.string(),
   approvalId: z.string().optional(),
 });
@@ -1208,6 +1222,7 @@ export type TerminalAgentHomeMemoryChange = z.infer<typeof TerminalAgentHomeMemo
  * `RESULT_OUTCOME_MAX_BYTES`).
  */
 export const TaskCompletePayloadSchema = z.object({
+  ...NO_SEALED_MEMBER,
   harnessId: HarnessIdSchema.optional(),
   summary: z.string(),
   /**
@@ -1238,6 +1253,7 @@ export type TaskCompletePayload = z.infer<typeof TaskCompletePayloadSchema>;
 
 /** daemon -> server: task failed. */
 export const TaskFailPayloadSchema = z.object({
+  ...NO_SEALED_MEMBER,
   /** Local interruption observation bound to the immutable offer; does not assert a cloud claim. */
   recovery: z.object({ kind: z.literal('daemon_interrupted'), offerId: z.uuid() }).strict().optional(),
   harnessId: HarnessIdSchema.optional(),
@@ -1272,6 +1288,7 @@ export type TaskFailPayload = z.infer<typeof TaskFailPayloadSchema>;
  * trigger that moves `Claimed`/`Running`/`AwaitApproval -> Cancelled`.
  */
 export const TaskCancelledPayloadSchema = z.object({
+  ...NO_SEALED_MEMBER,
   harnessId: HarnessIdSchema.optional(),
   reason: z.string().optional(),
   usage: TerminalInferenceUsageSchema.optional(),

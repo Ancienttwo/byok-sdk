@@ -11,6 +11,7 @@ import { z } from 'zod';
 import {
   MESSAGE_PAYLOAD_SCHEMAS,
   MESSAGE_TYPES,
+  createEnvelope,
   SEALED_DECLINE_CODES,
   SEALED_INLINE_MAX_PADDED_LENGTH,
   SEALED_PAYLOAD_MAX_CONTENT_LENGTH,
@@ -264,13 +265,36 @@ describe('sealed payload v1: the sealed steer and output types', () => {
   });
 });
 
-describe('sealed payload v1: plaintext types are unchanged', () => {
-  it('no plaintext type that a sealed type seals has a sealed or sealing field', () => {
-    for (const type of new Set(SEALED_TYPES.map((sealed) => SEALED_SPLIT_TABLE[sealed].plainType))) {
-      const properties = Object.keys(payloadJsonSchema(type).properties as Json);
-      expect(properties, type).not.toContain('sealed');
-      expect(properties, type).not.toContain('sealing');
+describe('sealed payload v1: plaintext types never carry sealed content', () => {
+  const plainTypes = [...new Set(SEALED_TYPES.map((sealed) => SEALED_SPLIT_TABLE[sealed].plainType))];
+
+  it('no plaintext type that a sealed type seals accepts a sealed or sealing field', () => {
+    for (const type of plainTypes) {
+      const schema = payloadJsonSchema(type);
+      const properties = schema.properties as Json;
+      for (const field of ['sealed', 'sealing']) {
+        // A loose type names the field as one that holds no value. A strict type refuses every unknown key.
+        if (field in properties) expect(properties[field], `${type}.${field}`).toEqual({ not: {} });
+        else expect(schema.additionalProperties, `${type}.${field}`).toBe(false);
+      }
     }
+  });
+
+  it('refuses a sealed member or a sealing policy under each plaintext type, and never strips it (#654)', () => {
+    const sealedOffer = sealedLines.find((line) => line.type === 'task.offer_sealed')!.payload;
+    for (const type of plainTypes) {
+      const plain = corpus.find((line) => line.type === type && line.payload.sealed === undefined)!;
+      for (const field of ['sealed', 'sealing'] as const) {
+        const parsed = MESSAGE_PAYLOAD_SCHEMAS[type].safeParse({ ...plain.payload, [field]: sealedOffer[field] });
+        expect(parsed.success, `${type}.${field}`).toBe(false);
+      }
+    }
+  });
+
+  it('refuses an output-only sealed offer tagged as task.offer, so it cannot run as plaintext', () => {
+    const outputOnly = corpus.find((line) => line.type === 'task.offer_sealed' && line.payload.sealed === undefined)!;
+    expect(MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse(outputOnly.payload).success).toBe(false);
+    expect(() => createEnvelope('task.offer', outputOnly.payload as never, { taskId: 'task-downgrade', seq: 1 })).toThrow();
   });
 });
 
