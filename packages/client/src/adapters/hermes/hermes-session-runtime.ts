@@ -12,7 +12,7 @@ import { AsyncQueue } from '../../util/async-queue';
 import { HermesProjection } from './projection';
 
 /** Windows-only gateway helpers. They load with this entry, so the root entries do not carry them. */
-export { exchangeHermesPipe } from './gateway-pipe-win32';
+export { exchangeHermesPipe, windowsNormcase } from './gateway-pipe-win32';
 export { descendsOnWindows } from './windows-process-table';
 
 /** Runtime identities are owned by the calling entry, never copied into this lazy bundle. */

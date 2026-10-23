@@ -22,6 +22,7 @@ const INVALID_HANDLE = -1;
 /** The only open failure that means no pipe has the name. */
 const ERROR_FILE_NOT_FOUND = 2;
 const POLL_MS = 10;
+const LCMAP_LOWERCASE = 0x100;
 const MAX_ANSWER_BYTES = 256 * 1024;
 
 type Handle = number;
@@ -34,6 +35,7 @@ interface PipeBindings {
   peek(pipe: Handle, buffer: null, size: number, read: null, available: Out, left: null): number;
   read(file: Handle, data: Buffer, size: number, read: Out, overlapped: null): number;
   close(handle: Handle): number;
+  lower(locale: string, flags: number, source: Buffer, units: number, target: Buffer | null, size: number, version: null, reserved: null, sort: number): number;
 }
 interface KoffiModule {
   load(path: string): { func(convention: string, name: string, result: unknown, args: unknown[]): (...args: never[]) => unknown };
@@ -65,7 +67,25 @@ function loadPipeBindings(koffi: KoffiModule): PipeBindings {
     peek: bind('PeekNamedPipe', 'int', ['intptr_t', 'void *', 'uint32_t', 'void *', dword, 'void *']),
     read: bind('ReadFile', 'int', ['intptr_t', 'void *', 'uint32_t', dword, 'void *']),
     close: bind('CloseHandle', 'int', ['intptr_t']),
+    lower: bind('LCMapStringEx', 'int', ['str16', 'uint32_t', 'void *', 'int', 'void *', 'int', 'void *', 'void *', 'intptr_t']),
   };
+}
+
+/**
+ * `os.path.normcase` of CPython 3.11 to 3.14 on Windows: backslashes, then
+ * `LCMapStringEx` with the invariant locale (the empty name) and
+ * `LCMAP_LOWERCASE`. Hermes names its pipe from this string. It differs from
+ * `toLowerCase`: U+0130 stays, and a final U+03A3 becomes U+03C3.
+ */
+export function windowsNormcase(path: string, koffi: unknown): string {
+  const api = bindings(koffi as KoffiModule);
+  const source = Buffer.from(path.replaceAll('/', '\\'), 'utf16le');
+  const units = api.lower('', LCMAP_LOWERCASE, source, source.length / 2, null, 0, null, null, 0);
+  const target = Buffer.alloc(units * 2);
+  if (units === 0 || api.lower('', LCMAP_LOWERCASE, source, source.length / 2, target, units, null, null, 0) !== units) {
+    throw new Error('Windows path case mapping failed');
+  }
+  return target.toString('utf16le');
 }
 
 export interface HermesPipeAnswer {
