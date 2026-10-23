@@ -1,33 +1,32 @@
 import { randomUUID } from 'node:crypto';
-import { admitBotToolsets, ownReadOnlyToolsets } from './toolset-policy';
+import { ownReadOnlyToolsets } from './toolset-policy';
+import { admitBotToolsets } from './rules/team';
 import { promoteReplyReceipts } from './reply-receipts';
-import type { ResultSchema, UpdateRoutineAction } from '@byok-sdk/protocol';
-import { BOT_TURN_OUTCOME_CONTRACT, BotTurnOutcomeSchemaError } from '@byok-sdk/protocol';
+import type { UpdateRoutineAction } from '@byok-sdk/protocol';
 import type { ByokServer, CreateByokServerOptions, DueWake } from '@byok-sdk/server';
 import { HostExecutionCore, type ExecutionServer, type OutcomeTransaction, type MessageTransaction } from '@byok-sdk/example-host-execution-core';
-import { promoteOccurrence, type HostJobHandler, type Routine } from '@byok-sdk/example-host-execution-core';
+import type { HostJobHandler, Routine } from '@byok-sdk/example-host-execution-core';
 import { HostLedger } from '@byok-sdk/example-host-execution-core';
 import { canonical, hash, project, time, type ApplicationRows, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
-import { enqueue } from '@byok-sdk/example-host-execution-core';
 import { addTurn, json, stateOf, type CollaborationState, type Turn } from './model';
-import { contextTurns, turnInstruction, outcomeSchema, SYSTEM_PROMPT, type ContextTurn } from './schema';
-import { BOT_REPLY_MAX_BYTES, DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
+import { contextTurns, SYSTEM_PROMPT, type ContextTurn } from './schema';
+import { DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   delegationDue, intentRows, minimumInstructionBytes, observeDevices, reconcileReply, REPLY_UNCERTAIN_AFTER_MS, resolveDelegation, retryReply,
   settleDelegations, type DelegationTimers } from './delegation';
-import { commitCommand, retiredIdentity, type Command, type CommandPorts, type CommandStore, type KeylessCommand } from './rules/commands';
+import { commitCommand, type Command, type CommandPorts, type CommandStore, type KeylessCommand } from './rules/commands';
 import type { CommandRecord } from './rules/commit';
-import { CommitConflict, commitInLedger, retainInLedger, type CommitResult } from './commit';
+import { CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, type CommitResult } from './commit';
 import type { RetentionInput, RetentionResult } from './retention';
-import { BOT_ROUTINE, botRoutines, concludeRoutineTurn, createDefinition, owned, routineCalendar, routineOccurrence, routineTurn,
+import { BOT_ROUTINE, botRoutines, createDefinition, owned, routineCalendar, routineTurn,
   updateDefinition } from './routines';
 
 import { applyManagement, updateBot, writeSnapshotBot } from './team';
-import { botCompactVeto, turnIntentRetired } from './compaction';
+import { botCompactVeto } from './compaction';
 import { teamSnapshot, TeamModeError, type TeamSnapshot } from './rules/team';
 import { advanceRooms, type Mentions } from './rooms';
 import type { RoomFields } from '@byok-sdk/protocol';
 
-import { CurrentRequestTooLargeError, HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS } from './history';
+import { HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS } from './history';
 import { flushHomes, type HomeServer } from './home-projections';
 import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, type CoalescePolicy } from './coalesce';
 import { classifyInbound, inboundKey, isOwner, verified, type ChannelOptions, type Conversation, type InboundClass, type InboundMessage, type Principal, type PrincipalArg } from './channel';
@@ -500,14 +499,6 @@ export class BotCollaboration {
       try { await this.core.recover(); } finally { await this.process(); }
     });
   }
-  private blockTurn(state: LedgerState, turn: Turn, reason: string): void {
-    if (turn.blockedReason !== reason) project(state, `blocked:${turn.id}`, {
-      owner: turn.botId, turnId: turn.id, reason,
-    });
-    const seat = stateOf(state.application).team.seats[turn.id];
-    if (seat) { seat.status = 'blocked'; seat.released = true; seat.reason = reason; }
-    turn.status = 'blocked'; turn.blockedReason = reason;
-  }
   private sync(s: LedgerState, rows: ApplicationRows, injected?: InjectedHistory): boolean {
     const state = stateOf(s.application);
     // A batch sealed here is enqueued in this pass, before later Turns of its Bot.
@@ -520,90 +511,10 @@ export class BotCollaboration {
     const routines = botRoutines(Object.values(s.routines));
     // Seats never manage or delegate (§5), so no seat Turn carries owner authority.
     advanceRooms(s, state, this.now(), (id, botId, request) => addTurn(state, { id, root: id, source: 'room_slot', request, botId, hop: 0, authority: 'bot' }));
+    const limits = { turnLimit: this.contextTurnLimit, contextMaxBytes: this.contextMaxBytes, instructionMaxBytes: this.instructionMaxBytes };
     for (const turn of Object.values(state.turns)) {
-      const intent = s.intents[hash(turn.id)];
-      const bot = state.team.bots[turn.botId];
-      // #816: K4 compacted the intent before this sync saw its result. #798: retention archived this Turn id.
-      // Either identity can never run again. K8 does not know a K4 conclusion, so the Turn fails, and every reader of
-      // `turn.conclusion` can settle. This runs before the archive check: the work may have run, so the Turn is not `cancelled`.
-      const retired = intent || turn.conclusion ? undefined
-        : turnIntentRetired(this.ledger, s, turn, this.now()) ? 'result_retired' : retiredIdentity('turn', turn.id, (namespace, id) => rows.isRetired(namespace, id)) ? 'turn_retired' : undefined;
-      if (retired) {
-        turn.status = 'failed'; turn.conclusion = 'failed';
-        // The seat facts no longer see the intent, so release the seat here, as for a failed conclusion. Its round moves on.
-        const seat = state.team.seats[turn.id];
-        if (seat && !seat.released) { seat.status = 'failed'; seat.released = true; seat.reason = retired; }
-        state.audit.push(`Turn ${retired === 'result_retired' ? 'result retired before sync' : 'identity retired'}: ${turn.id}`);
-        project(s, `bot-turn:${turn.id}`, json({ owner: turn.botId, ...turn, reason: retired }));
-        turn.reported = true;
-        continue;
-      }
-      // An archived Bot never starts this Turn. A concluded Turn keeps its conclusion.
-      if (!intent && !turn.conclusion && bot?.archived) { turn.status = 'failed'; turn.conclusion = 'cancelled'; }
-      // A concluded occurrence can make a staged version due, so the next pass drains K4 again.
-      if (!intent && turn.conclusion && turn.source === 'routine') materialized = concludeRoutineTurn(s, turn) || materialized;
-      if (!intent && (turn.conclusion || turn.source === 'room_slot' && state.team.seats[turn.id]?.status === 'blocked')) continue;
-      if (intent && bot?.archived && !s.executions[intent.taskId]?.started && !intent.conclusion) intent.cancelReason = 'cancelled';
-      if (!intent) {
-        if (!bot || bot.readyRevision !== bot.revision) {
-          const failed = state.team.homeOperations.find(op => op.botId === turn.botId
-            && op.request.payload.agentRef.profileRevision === bot?.revision && op.status === 'failed');
-          if (failed) {
-            turn.profileFailure = { sequence: failed.sequence, revision: failed.request.payload.agentRef.profileRevision,
-              reason: failed.error ?? 'Persona delivery failed' };
-            project(s, `persona-turn-failed:${turn.id}:${failed.sequence}`, json({ owner: turn.botId, turnId: turn.id,
-              status: 'blocked', recoverable: true, ...turn.profileFailure }));
-          }
-          continue;
-        }
-        delete turn.profileFailure;
-        // Phase 2 of a history-mode sync: a Bot Turn freezes only with the history read before this transaction.
-        const history = this.options.history && turn.source !== 'room_slot' ? injected?.get(turn.id) : undefined;
-        if (this.options.history && turn.source !== 'room_slot' && !history) continue;
-        let schema: ResultSchema, frozen: ReturnType<typeof turnInstruction>;
-        try {
-          schema = outcomeSchema(turn.botId, state, turn, Object.keys(this.models()), routines);
-          frozen = turnInstruction(state, turn, { turnLimit: this.contextTurnLimit, contextMaxBytes: this.contextMaxBytes,
-            instructionMaxBytes: this.instructionMaxBytes }, routines, history?.rows);
-        } catch (error) {
-          if (error instanceof BotTurnOutcomeSchemaError && error.code === 'schema-over-budget') {
-            this.blockTurn(s, turn, `Outcome schema over budget after flat fallback: ${error.message}`);
-          } else if (error instanceof CurrentRequestTooLargeError) this.blockTurn(s, turn, error.message);
-          else throw error;
-          continue;
-        }
-        state.schemas[turn.id] = schema;
-        const base = bot.execution;
-        admitBotToolsets(base, this.options.readOnlyToolsets);
-        const { messageEgress: egress, ...roomPayload } = base.payload;
-        // A delegated reply is capped at BOT_REPLY_MAX_BYTES, and its cursor is B's Turn.
-        const chain = turn.delegationId && egress ? {
-          agentMessageContext: { ...base.agentMessageContext!, freshnessCursor: turn.id },
-          payload: { ...base.payload, messageEgress: { ...egress, maxBytes: Math.min(egress.maxBytes, BOT_REPLY_MAX_BYTES) } },
-        } : undefined;
-        const execution = turn.source === 'room_slot' ? { ...base, agentMessageContext: undefined, payload: roomPayload } : { ...base, ...chain };
-        const offer = { ...execution, payload: { ...execution.payload, instruction: frozen.instruction,
-          terminalProjection: { mode: 'result-document' as const, contract: BOT_TURN_OUTCOME_CONTRACT, schema } } };
-        // A routine Turn joins the FIFO as its occurrence intent. Its wait counts from the occurrence record.
-        if (turn.source === 'routine') promoteOccurrence(s, this.ledger.tenant, routineOccurrence(turn), offer);
-        else enqueue(s, this.ledger.tenant, { key: turn.id, source: turn.source === 'user' || turn.source === 'answer' ? 'user' : 'bot',
-          waitUntil: this.now() + 300_000, execution: offer });
-        for (const rejection of frozen.context.rejectedActions) rejection.consumedBy = turn.id;
-        if (history) turn.historyDigest = history.digest;
-        delete turn.blockedReason;
-        turn.status = 'processing';
-        materialized = true;
-      } else if (intent.conclusion) {
-        if (intent.conclusion !== 'succeeded' && !s.executions[intent.taskId]!.started) {
-          for (const rejection of state.rejected) if (rejection.consumedBy === turn.id) delete rejection.consumedBy;
-        }
-        turn.status = intent.conclusion === 'succeeded' ? 'succeeded' : 'failed';
-        turn.conclusion = intent.conclusion;
-        if (!turn.reported) {
-          project(s, `bot-turn:${turn.id}`, json({ owner: turn.botId, ...turn }));
-          turn.reported = true;
-        }
-      }
+      materialized = syncTurnInLedger(this.ledger, s, rows, turn, { now: this.now(), models: Object.keys(this.models()),
+        readOnlyToolsets: this.options.readOnlyToolsets ?? [], limits, historyMode: !!this.options.history, history: injected?.get(turn.id), routines }) || materialized;
     }
     settleDelegations(s, state, this.now(), (key, value) => project(s, key, value), this.timers);
     for (const card of Object.values(state.cards)) {

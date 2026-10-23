@@ -1,6 +1,5 @@
 import { expect, it } from 'vitest';
 import { stateOf } from './model';
-import { turnInstruction } from './schema';
 import * as rules from './rules/context';
 
 const limits = { turnLimit: 100, contextMaxBytes: 32_768, instructionMaxBytes: 65_536 };
@@ -17,5 +16,5 @@ it('freezes the same instruction from the device ledger as from the same Bot his
     { botId: 'other', taskId: 'b', action: 'delegate', reason: 'hop_limit' }, { botId: 'main', taskId: 'c', action: 'delegate', reason: 'x', consumedBy: 'm2' });
   const { turns: _turns, cards: _cards, questions: _questions, rejected: _rejected, ...authority } = state;
   const injected: rules.ContextHistory = { turns: [state.turns.m1!, state.turns.m2!, state.turns.m3!], cards: [], questions: [], rejected: [state.rejected[0]!] };
-  expect(turnInstruction(state, state.turns.m3!, limits)).toEqual(rules.turnInstruction(authority, injected, state.turns.m3!, limits));
+  expect(rules.botTurnInstruction(state, state.turns.m3!, limits)).toEqual(rules.turnInstruction(authority, injected, state.turns.m3!, limits));
 });

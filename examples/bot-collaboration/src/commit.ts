@@ -1,12 +1,17 @@
-import { hash, type HostLedger, type LedgerState } from '@byok-sdk/example-host-execution-core';
-import { stateOf } from './model';
-import { commitCommand, refuseRetired, type AdmittedIds, type Command, type CommandPorts } from './rules/commands';
+import { enqueue, hash, project, promoteOccurrence, type ApplicationRows, type HostLedger, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import { stateOf, type Turn } from './model';
+import { intentFacts } from './delegation';
+import { turnIntentRetired } from './compaction';
+import { concludeRoutineTurn, routineOccurrence, type BotRoutine } from './routines';
+import { syncTurn, type SyncFacts, type SyncOptions } from './rules/sync';
+import { commitCommand, refuseRetired, retiredIdentity, type AdmittedIds, type Command, type CommandPorts } from './rules/commands';
 import type { CommandRecord, CommitRequest, CommitResult } from './rules/commit';
 import { retainRoots, type RetentionInput, type RetentionLimits, type RetentionResult } from './retention';
 
 // The L store of the commit contract (#739 D1): one K4 ledger transaction holds the state change,
 // the command record and the outbox rows. K4 deduplicates terminals and messages, so L records no callback.
 // Retention (#798) moves settled rows into K4 application rows of the same transaction.
+// A sync step (#793 D2b) writes in the transaction of the Host sync. It records no command and keeps the revision.
 export { CommitConflict, revisionOf, type CommitRequest, type CommitResult, type Disposition, type OutboxIntent } from './rules/commit';
 export type { Command, CommandPorts } from './rules/commands';
 
@@ -29,4 +34,25 @@ export function retainInLedger(ledger: HostLedger, input: RetentionInput, limits
     hasIntent: turnId => !!s.intents[hash(turnId)],
     occurrenceOpen: turnId => { const occurrence = s.occurrences[turnId.slice('occurrence:'.length)]; return !!occurrence && !occurrence.conclusion; },
   }, rows));
+}
+/**
+ * One sync step of one Turn in the L ledger, inside the caller's transaction. The Host sync loop calls it for each Turn.
+ * The K4 writes stay here: `enqueue`, `promoteOccurrence`, the intent cancel and the occurrence conclusion.
+ * Returns true when the step queued work or concluded an occurrence, so that K4 drains again.
+ */
+export function syncTurnInLedger(ledger: HostLedger, s: LedgerState, rows: ApplicationRows, turn: Turn, options: SyncOptions<BotRoutine>): boolean {
+  const facts: SyncFacts = {
+    intent: intentFacts(s).intent,
+    executionStarted: id => { const row = s.intents[hash(id)]; return !!row && !!s.executions[row.taskId]?.started; },
+    retired: id => turnIntentRetired(ledger, s, turn, options.now) ? 'result_retired' : retiredIdentity('turn', id, (namespace, row) => rows.isRetired(namespace, row)) ? 'turn_retired' : undefined,
+  };
+  const step = syncTurn(stateOf(s.application), turn, facts, options, (key, value) => project(s, key, value));
+  switch (step?.kind) {
+    case 'freeze': enqueue(s, ledger.tenant, step.input); return true;
+    case 'routine': promoteOccurrence(s, ledger.tenant, routineOccurrence(turn), step.execution); return true;
+    case 'cancel': s.intents[hash(turn.id)]!.cancelReason = 'cancelled'; return false;
+    // A concluded occurrence can make a staged version due, so the next pass drains K4 again.
+    case 'ended': return turn.source === 'routine' && concludeRoutineTurn(s, turn);
+    default: return false;
+  }
 }

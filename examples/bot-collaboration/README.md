@@ -318,6 +318,40 @@ message id is refused with `message_conflict`. The D1 vectors in
 `src/commit-vectors.test-support.ts` run against a pure in-memory store and
 against the L ledger; the D2 H adapter runs the same vectors.
 
+### Sync step
+
+A sync step freezes the offer of a Turn without an intent, and settles the
+Turn of a concluded intent (#793 D2b). `syncTurn` in `src/rules/sync.ts`
+decides it for one Turn. `src/rules/commands.ts` exports it with the
+commands. The rule changes the state, publishes projections and returns the
+write for the store:
+
+- `freeze`: store this intent input (`key`, `source`, `waitUntil`,
+  `execution`). The rule sets `waitUntil` to `now` plus 5 minutes.
+- `routine`: a routine Turn joins the FIFO as its occurrence intent.
+- `cancel`: the Bot is archived. Cancel the intent, which has not started.
+- `ended`: the Turn has no intent and is concluded. A routine Turn concludes
+  its open occurrence.
+
+A store runs the step for each stored Turn, in insertion order, in one
+transaction under the same scope lock as a commit. It reads the facts inside
+that transaction. The projections that the step publishes reach the store's
+outbox in the same transaction. A projection with the same id and the same
+body adds nothing. Another body for that id throws `Projection identity
+conflict`. The step is a Host pass that only applies evidence, so it writes
+no command record and keeps the revision. A client's expected revision does
+not go stale because of a sync. If one Turn throws, the store writes nothing.
+L runs the step in its sync transaction through `syncTurnInLedger`
+(`src/commit.ts`), which keeps the K4 writes: `enqueue`, `promoteOccurrence`,
+the intent cancel and the occurrence conclusion. The L sync transaction also
+runs other Host steps before and after the per-Turn steps. Before them, it
+seals due input batches, expires pending cards and advances rooms. After
+them, it settles delegations, reports card decisions and adds their action
+result Turns, cleans reply tokens and projects input batches. This contract
+defines only the per-Turn step. The `syncVectors` in
+`src/commit-vectors.test-support.ts` hold these rules for the in-memory store
+and for L.
+
 Known L limit: K4 stores the whole Host ledger, with the collaboration state,
 in one JSON row per tenant. Turns, replies, audit rows and command records
 make that row grow. Command records are dedup evidence; retention must not

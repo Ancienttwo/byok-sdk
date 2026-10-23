@@ -6,15 +6,27 @@ import { canonical, hash, HostLedger, project, type Json, type LedgerState } fro
 import { stateOf, type CollaborationState } from './model';
 import { admitUserInput } from './coalesce';
 import { coalescePolicy } from './rules/coalesce';
-import { CommitConflict, commitInLedger, retainInLedger, type CommitRequest } from './commit';
+import { CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, type CommitRequest } from './commit';
 import { retainRoots, type RetentionStore } from './retention';
 import { retentionVectors, type RetentionSubject } from './retention-vectors.test-support';
 import type { CommandRecord } from './rules/commit';
 import { DatabaseSync } from 'node:sqlite';
 import { commitCommand, refuseRetired, RetiredIdentityError, type AdmittedIds, type Command, type CommandPorts } from './rules/commands';
-import { commitVectors, seedCollaboration, VECTOR_NOW, type CommitSubject, type SeedTeam } from './commit-vectors.test-support';
+import { commitVectors, seedCollaboration, SYNC_OPTIONS, syncVectors, VECTOR_NOW, type CommitSubject, type SeedTeam, type SyncIntentRecord,
+  type SyncSubject } from './commit-vectors.test-support';
+import { syncTurn } from './rules/sync';
+import type { Conclusion } from './rules/delegation';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { writeSnapshotBot } from './team';
+
+/** The intent fact fields that the memory store keeps. */
+const pick = (row: { conclusion?: Conclusion; cancelReason?: 'cancelled' }) =>
+  ({ ...(row.conclusion ? { conclusion: row.conclusion } : {}), ...(row.cancelReason ? { cancelReason: row.cancelReason } : {}) });
+/** The memory outbox has the K4 projection identity rule, for commit and sync alike. */
+const publishTo = (outbox: Record<string, Json>) => (id: string, value: Json) => {
+  if (outbox[id] !== undefined && canonical(outbox[id]) !== canonical(value)) throw new Error('Projection identity conflict');
+  outbox[id] = value;
+};
 
 const roots: string[] = [], ledgers: HostLedger[] = [];
 // Windows cannot delete an open SQLite file, so each ledger closes first.
@@ -44,9 +56,10 @@ function memoryStore(archive: MemoryArchive): RetentionStore & { get(namespace: 
     isRetired: (namespace, id) => archive.retired.includes(key(namespace, id)),
   };
 }
-/** The pure rules on a plain object. A commit works on a copy and keeps it only when it returns. */
-function memorySubject(team?: SeedTeam): RetentionSubject {
-  let stored = { state: stateOf({}), outbox: {} as Record<string, Json>, archive: { rows: {}, retired: [] } as MemoryArchive };
+/** The pure rules on a plain object. A commit or a sync works on a copy and keeps it only when it returns. */
+function memorySubject(team?: SeedTeam): RetentionSubject & SyncSubject {
+  let stored = { state: stateOf({}), outbox: {} as Record<string, Json>, archive: { rows: {}, retired: [] } as MemoryArchive,
+    intents: {} as Record<string, SyncIntentRecord & { cancelReason?: 'cancelled'; conclusion?: Conclusion }> };
   seedCollaboration(stored.state, team);
   const facts = { hasIntent: () => false, occurrenceOpen: () => false };
   return {
@@ -55,10 +68,7 @@ function memorySubject(team?: SeedTeam): RetentionSubject {
       const next = structuredClone(stored), rows = memoryStore(next.archive);
       let admitted: AdmittedIds | undefined;
       const result = commitCommand(next.state, request, { scope: 'memory', recordCallbacks: true,
-        archived: id => rows.get('commands', id) as CommandRecord | undefined, admitted: ids => { admitted = ids; } }, ports(next.state, (id, value) => {
-        if (next.outbox[id] !== undefined && canonical(next.outbox[id]) !== canonical(value)) throw new Error('Projection identity conflict');
-        next.outbox[id] = value;
-      }));
+        archived: id => rows.get('commands', id) as CommandRecord | undefined, admitted: ids => { admitted = ids; } }, ports(next.state, publishTo(next.outbox)));
       refuseRetired(admitted, rows.isRetired);
       stored = next;
       return result;
@@ -69,6 +79,20 @@ function memorySubject(team?: SeedTeam): RetentionSubject {
       return result;
     },
     change(edit) { const next = structuredClone(stored); edit(next.state); stored = next; },
+    sync() {
+      const next = structuredClone(stored), rows = memoryStore(next.archive);
+      for (const turn of Object.values(next.state.turns)) {
+        const step = syncTurn(next.state, turn, { intent: id => next.intents[id] && { taskId: id, ...pick(next.intents[id]!) }, executionStarted: () => false,
+          retired: id => rows.isRetired('turn', id) ? 'turn_retired' : undefined }, SYNC_OPTIONS, publishTo(next.outbox));
+        if (step?.kind === 'freeze') next.intents[turn.id] = step.input;
+        else if (step?.kind === 'cancel') next.intents[turn.id]!.cancelReason = 'cancelled';
+        else if (step?.kind === 'routine') throw new Error('The memory subject has no routines');
+      }
+      stored = next;
+    },
+    intent: id => { const row = stored.intents[id]; return row && { key: row.key, source: row.source, waitUntil: row.waitUntil, execution: structuredClone(row.execution) }; },
+    concludeIntent(id, conclusion) { const next = structuredClone(stored); next.intents[id]!.conclusion = conclusion; stored = next; },
+    projection: id => stored.outbox[id] === undefined ? [] : [structuredClone(stored.outbox[id]!)],
     stored: () => JSON.stringify(stored),
     state: () => structuredClone(stored.state),
   };
@@ -85,7 +109,7 @@ function tables(file: string, tenant: string): string {
   } finally { db.close(); }
 }
 /** The K8 L store: a real SQLite HostLedger. */
-function ledgerSubject(team?: SeedTeam): RetentionSubject & { ledger: HostLedger } {
+function ledgerSubject(team?: SeedTeam): RetentionSubject & SyncSubject & { ledger: HostLedger } {
   const root = mkdtempSync(join(tmpdir(), 'k8-commit-'));
   roots.push(root);
   const file = join(root, 'host.sqlite'), ledger = new HostLedger(file, 'product:commit');
@@ -96,6 +120,14 @@ function ledgerSubject(team?: SeedTeam): RetentionSubject & { ledger: HostLedger
     commit: request => commitInLedger(ledger, request, (s: LedgerState) => ports(stateOf(s.application), (id, value) => project(s, id, value))),
     retain: (input, limits) => retainInLedger(ledger, input, limits),
     change: edit => { ledger.transaction(s => { edit(stateOf(s.application)); }); },
+    // The Host sync loop runs the same function for each Turn.
+    sync: () => { ledger.transaction((s, rows) => { for (const turn of Object.values(stateOf(s.application).turns)) syncTurnInLedger(ledger, s, rows, turn, SYNC_OPTIONS); }); },
+    concludeIntent: (id, conclusion) => { ledger.transaction(s => { Object.assign(s.intents[hash(id)]!, { phase: 'settled', conclusion }); }); },
+    projection: id => Object.values(ledger.snapshot().outbox).flatMap(row => row.kind === 'projection' && row.id === id ? [row.value] : []),
+    intent: id => {
+      const row = ledger.snapshot().intents[hash(id)];
+      return row && { key: row.key, source: row.source as SyncIntentRecord['source'], waitUntil: row.waitUntil, execution: row.execution };
+    },
     stored: () => tables(file, ledger.tenant),
     state: () => stateOf(ledger.snapshot().application),
   };
@@ -104,6 +136,8 @@ commitVectors('pure rules in memory', memorySubject);
 commitVectors('L HostLedger', ledgerSubject);
 retentionVectors('pure rules in memory', memorySubject);
 retentionVectors('L HostLedger', ledgerSubject);
+syncVectors('pure rules in memory', () => memorySubject());
+syncVectors('L HostLedger', () => ledgerSubject());
 
 it('L: a projection identity conflict in a decision leaves the ledger unchanged', () => {
   const subject = ledgerSubject(), card = hash(['task-1', 'confirmable_action', 0]);
