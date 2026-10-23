@@ -24,10 +24,6 @@ func identityForRoot(_ *os.Root, info fs.FileInfo) (rootIdentity, error) {
 	}, nil
 }
 
-// checkRootVolume has no file system rule on Unix: dev and ino identify the
-// root on every volume.
-func checkRootVolume(*os.Root) error { return nil }
-
 // linkCount reads the hard link count from the Stat result of an open file.
 func linkCount(_ *os.File, info fs.FileInfo) (uint64, error) {
 	stat, ok := info.Sys().(*syscall.Stat_t)

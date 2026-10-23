@@ -2236,6 +2236,14 @@ Windows remains unavailable. The macOS helper uses `F_FULLFSYNC` for temporary
 files and pinned parent directories. It never falls back to ordinary `fsync`.
 Before advertising, the daemon opens the helper on the actual home volume.
 Each helper open syncs the home directory chain on that volume before a CAS.
+The macOS helper admits an Agent home only on a local volume. After the
+same-file checks, each open reads the `fstatfs` flags of the pinned root
+handle, not the path. A volume without `MNT_LOCAL`, for example an SMB, NFS or
+AFP mount, fails the open with `unsafe_root` before any chain barrier. A failed
+query also fails the open. On a remote mount, `F_FULLFSYNC` and rename
+durability depend on the server. On such a home each memory recall or save,
+the hosted projection and the task-free export fail, and the daemon does not
+advertise `agent-memory-intent.v1`. Linux has no volume rule.
 Shared home initialization syncs each new directory's parent on POSIX. A retry
 repeats the parent barrier for existing entries.
 

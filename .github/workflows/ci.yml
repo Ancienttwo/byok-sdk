@@ -400,6 +400,8 @@ jobs:
 
       - name: Test Go helper
         working-directory: packages/client/native/agent-memory-fs
+        env:
+          BYOK_REQUIRE_DARWIN_NONLOCAL_VOLUME: '1'
         run: GOTOOLCHAIN=go1.26.5 go test -race ./...
 
       - name: Build Go helper

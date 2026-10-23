@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Changed (client)** — on macOS the Agent memory helper admits an Agent home
+  only on a local volume (#765). It reads the `fstatfs` flags of the pinned
+  home handle. A volume without `MNT_LOCAL`, for example an SMB, NFS or AFP
+  mount, fails the helper open with `unsafe_root`. A failed query fails the
+  same way. Compatibility: a home that is already on a network volume is now
+  refused. Memory recall and save, the hosted projection and the task-free
+  export fail there, and the daemon no longer advertises
+  `agent-memory-intent.v1`. Move the home to a local volume. Linux has no
+  volume rule.
 - **Feature (client)** — the task-free projection hook gets
   `writeHomeFile(name, body)` on its input (#738, #606 R6). One call
   atomically replaces one file at the root of the canonical Agent home under
