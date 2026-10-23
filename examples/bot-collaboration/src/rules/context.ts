@@ -14,7 +14,35 @@ import { ownerMainTurn, ROOM_SYSTEM_PROMPT, SYSTEM_PROMPT, type ContextRoutine, 
  * and its rejected actions that no Turn consumed.
  */
 export interface ContextHistory {
-  readonly turns: readonly Turn[]; readonly cards: readonly Card[]; readonly questions: readonly Question[]; readonly rejected: readonly Rejection[];
+  readonly turns: readonly (Turn | ContextTurn)[]; readonly cards: readonly Card[]; readonly questions: readonly Question[];
+  readonly rejected: readonly Rejection[];
+}
+/** One history row of a ContextPack. An external history authority gives its rows in this shape (#739 Q4a). */
+export interface ContextTurn {
+  id: string; root: string; source: Turn['source']; request: string; hop: number; status: Turn['status'];
+  conclusion?: string; outcomeSummary: string[];
+}
+const SOURCES = new Set<string>(['user', 'continuation', 'answer', 'action_result', 'routine', 'room_slot', 'bot_request', 'bot_reply']);
+const STATUSES = new Set<string>(['queued', 'processing', 'succeeded', 'failed', 'blocked', 'delivered']);
+/** Checks rows from an external authority. A row in another shape refuses the whole history. */
+export function contextTurns(value: unknown): ContextTurn[] {
+  const fail = (): never => { throw new Error('Invalid injected history'); };
+  if (!Array.isArray(value)) fail();
+  return (value as unknown[]).map(row => {
+    const r = (row ?? fail()) as Record<string, unknown>;
+    const text = (key: string) => typeof r[key] === 'string' ? r[key] as string : fail();
+    if (!SOURCES.has(text('source')) || !STATUSES.has(text('status')) || !Number.isSafeInteger(r.hop) || (r.hop as number) < 0
+      || r.conclusion !== undefined && typeof r.conclusion !== 'string'
+      || !Array.isArray(r.outcomeSummary) || r.outcomeSummary.some(key => typeof key !== 'string')) fail();
+    return { id: text('id'), root: text('root'), source: r.source as Turn['source'], request: text('request'), hop: r.hop as number,
+      status: r.status as Turn['status'], ...(r.conclusion === undefined ? {} : { conclusion: r.conclusion as string }),
+      outcomeSummary: [...r.outcomeSummary as string[]] };
+  });
+}
+function contextTurn(turn: Turn | ContextTurn): ContextTurn & { conclusion: string | undefined } {
+  return { id: turn.id, root: turn.root, source: turn.source, request: turn.request, hop: turn.hop, status: turn.status, conclusion: turn.conclusion,
+    outcomeSummary: 'outcomeSummary' in turn ? [...turn.outcomeSummary]
+      : turn.outcome && typeof turn.outcome === 'object' && !Array.isArray(turn.outcome) ? Object.keys(turn.outcome) : [] };
 }
 /** `crossRequest` is the framed Request section of a Cross-Bot Turn; its background is trimmed too (§3.7). */
 export function turnContext<R extends ContextRoutine>(state: ContextState, history: ContextHistory, turn: Turn, turnLimit = HISTORY_MAX_ITEMS,
@@ -80,11 +108,7 @@ export function contextPack<T extends object = Record<never, never>, R = Context
     rejectedActions: history.rejected.filter(row => !row.consumedBy).slice(-turnLimit),
     questions: selectedQuestions, cards: selectedCards,
     routines: [...routines],
-    turns: selected.map(turn => ({
-      id: turn.id, root: turn.root, source: turn.source, request: turn.request,
-      hop: turn.hop, status: turn.status, conclusion: turn.conclusion,
-      outcomeSummary: turn.outcome && typeof turn.outcome === 'object' && !Array.isArray(turn.outcome) ? Object.keys(turn.outcome) : [],
-    })),
+    turns: selected.map(contextTurn),
   };
   return fitHistory(context, context.turns, 'omittedTurns', fit.request ?? (separateRequest ? current!.request : ''), !separateRequest && !!current,
     fit.background && [...fit.background, context.routines]);
