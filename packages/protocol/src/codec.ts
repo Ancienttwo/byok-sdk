@@ -114,6 +114,19 @@ interface EnvelopeShapeOptions {
   'task.fail': { taskId: string; seq?: number };
   'task.cancelled': { taskId: string; seq?: number };
   'task.approval_resolved': { taskId: string; seq?: number };
+  'task.offer_sealed': { taskId: string; seq: number };
+  'task.offer_with_toolsets_sealed': { taskId: string; seq: number };
+  'task.offer_for_agent_sealed': { taskId: string; seq: number };
+  'task.offer_for_agent_with_egress_sealed': { taskId: string; seq: number };
+  'task.offer_for_agent_with_egress_fresh_sealed': { taskId: string; seq: number };
+  'task.steer_sealed': { taskId: string; seq: number };
+  'task.complete_sealed': { taskId: string; seq?: number };
+  'task.fail_sealed': { taskId: string; seq?: number };
+  'task.decline_sealed': { taskId: string; seq?: number };
+  'task.cancelled_sealed': { taskId: string; seq?: number };
+  'task.progress_sealed': { taskId: string; seq?: number };
+  'task.artifact_sealed': { taskId: string; seq?: number };
+  'task.await_approval_sealed': { taskId: string; seq?: number };
 }
 
 interface EnvelopeCommonOptions {

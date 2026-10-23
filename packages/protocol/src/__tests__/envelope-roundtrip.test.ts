@@ -1,6 +1,8 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   MESSAGE_TYPES,
+  SEALED_SPLIT_TABLE,
   createEnvelope,
   decodeEnvelope,
   encodeEnvelope,
@@ -628,6 +630,17 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
       contentHash: 'sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824',
       outcome: 'accepted', receiptId: '10000000-0000-4000-8000-000000000002',
     }, { taskId: 'task-1', seq: 1 }));
+  });
+
+  // #654: each sealed type round-trips its first golden line, which carries
+  // real ciphertext under a fixed test scope key.
+  const goldenLines = readFileSync(new URL('./golden/v3.envelopes.ndjson', import.meta.url), 'utf8')
+    .trimEnd().split('\n').map((raw) => JSON.parse(raw) as Envelope);
+  it.each(Object.keys(SEALED_SPLIT_TABLE) as Array<keyof typeof SEALED_SPLIT_TABLE>)('%s', (type) => {
+    testedTypes.push(type);
+    const line = goldenLines.find((envelope) => envelope.type === type);
+    expect(line).toBeDefined();
+    roundTrip(type, line!);
   });
 
   it('covers every declared message type', () => {

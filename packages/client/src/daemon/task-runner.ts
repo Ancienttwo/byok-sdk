@@ -2189,6 +2189,22 @@ export class TaskRunner {
       case 'agent.message.disposition':
         await this.handleAgentMessageDisposition(envelope.task_id, envelope.payload);
         return;
+      // #654: this daemon does not open sealed content and does not advertise
+      // `sealed-payload-v1`. A sealed type reaches it only from a Host that
+      // skipped the gate. A sealed offer is declined, not dropped, so the
+      // task does not wait for a timeout; a sealed steer is dropped.
+      case 'task.offer_sealed':
+      case 'task.offer_with_toolsets_sealed':
+      case 'task.offer_for_agent_sealed':
+      case 'task.offer_for_agent_with_egress_sealed':
+      case 'task.offer_for_agent_with_egress_fresh_sealed':
+        this.declineSealedOffer(envelope.task_id, 'agentRef' in envelope.payload ? envelope.payload.agentRef : undefined);
+        return;
+      case 'task.steer_sealed':
+        console.error(
+          `[byok/client] inbound sealed task.steer for task ${envelope.task_id} rejected: this daemon does not open sealed task input — acked without retry; this envelope should have been gated server-side`,
+        );
+        return;
       default:
         return; // conn.* and daemon->server-only types are handled elsewhere / not applicable
     }
@@ -5082,6 +5098,25 @@ export class TaskRunner {
         ...this.agentTerminalPayload(active),
       }, { taskId });
     });
+  }
+
+  /**
+   * Declines a sealed offer once, non-retryably. This daemon holds no scope
+   * key. To a server with `sealed-payload-v1` it sends the closed code
+   * `sealed_key_unavailable` as both `reason` and `code` (#654 decisions 12c
+   * and 12d). The code is a value gate on that flag, so without it the
+   * decline has a plaintext reason and no code.
+   */
+  private declineSealedOffer(taskId: string, agentRef: AgentRef | undefined): void {
+    if (this.tasks.has(taskId) || this.startupOwnership.has(taskId) || this.inFlightOffers.has(taskId) || this.finishedTaskIds.has(taskId) || this.strictDeclinedTaskIds.has(taskId)) return;
+    this.addStrictDeclinedTaskId(taskId);
+    const code = 'sealed_key_unavailable';
+    const capabilities = this.deps.getServerCapabilities?.() ?? [];
+    if (requiredReceiverCapabilities('task.decline', { reason: code, code }).every((flag) => capabilities.includes(flag))) {
+      this.decline(taskId, code, false, agentRef, code);
+    } else {
+      this.decline(taskId, 'sealed_payload_unsupported: this daemon does not open sealed task input', false, agentRef);
+    }
   }
 
   /** Pre-claim, fail-closed rejection (protocol §3.2) — never claims first. */

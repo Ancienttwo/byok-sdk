@@ -385,7 +385,7 @@ AiphaBee 自研的配对和 device grant，在 SDK 里对应 `/byok/pair` 和 `/
 
 ### 8.1 封装对象
 
-被加密的字段从 payload 里移走，换成一个 `sealed` 成员：
+每个加密消息用一个新的 message type，例如 `task.complete_sealed`（维护者 2026-10-23 选定的形状 A）。它是明文 type 去掉被加密的字段，再加一个 `sealed` 成员。明文 type 不变。`sealed` 成员如下：
 
 ```json
 {
@@ -403,7 +403,7 @@ AiphaBee 自研的配对和 device grant，在 SDK 里对应 `/byok/pair` 和 `/
 }
 ```
 
-- 明文是移走字段组成的对象的 canonical JSON，例如 `{ "instruction": "..." }`。
+- 明文是被加密字段组成的对象的 canonical JSON，例如 `{ "instruction": "..." }`。
 - 明文的数字按 RFC 8785 序列化：有限的数字按 ECMAScript `Number.prototype.toString` 写出，NaN 和 Infinity 被拒绝。小数和超过 2^53 的整数因此可以封装（#786，owner 2026-10-23 的决定）。这条规则只用于明文。AAD、MAC 里的身份、成员链条目和 key package 仍用 attestation 的 canonical JSON，只接受安全整数。
 - 内容密钥为 `HKDF-SHA-256(SK, salt, "byok-sdk.sealed.v1.enc")`。每条内容用新 salt，所以每个内容密钥只用一次。
 - 加密前先组帧：`frame = u32be(contentLength) || content || 0x00 × (paddedLength − 4 − contentLength)`。`content` 是明文对象的 canonical JSON 的 UTF-8 字节；blob 时是原始字节。`paddedLength` 是帧长，算法见 §8.6。
@@ -424,9 +424,9 @@ AAD 不含 envelope 的 `id`、`seq` 和 `ts`。dead-letter 重放会用新 `seq
 
 ### 8.3 字段划分与接收端校验
 
-- `packages/protocol` 新增一张划分表，列出每个消息类型在每个类别下移走哪些字段。它和 `WIRE_ADDITIONS` 一样是唯一权威。
+- `packages/protocol` 新增一张划分表（`SEALED_SPLIT_TABLE`）。每个加密 type 一行：对应的明文 type、类别、身份字段、加密的字段、v1 不带的字段，以及每个摘要字段的规则。它和 `WIRE_ADDITIONS` 一样是唯一权威。
 - Host 只校验 `sealed` 的外形：字段、编码、长度，`ciphertext` 与 `ciphertextRef` 恰好有一个，以及 `paddedLength` 与密文长度是否一致。`POST /byok/messages` 和 `GET /byok/events` 都按 payload schema 解析（§2.0），所以这个外形校验要进 schema 本身。
-- 接收端解密后，把明文字段并回 payload（键集合必须不相交），再用现有 schema 校验。#654 需求 3 的「内容校验挪到接收端」由此完成。
+- 接收端解密后，把解密得到的字段并回 payload，再用明文 type 的现有 schema 校验。加密 type 的 schema 里没有这些字段，所以两个键集合不相交。解密得到的对象只能含划分表列出的加密字段。#654 需求 3 的「内容校验挪到接收端」由此完成。
 - 接收端失败时一律拒绝，不回退明文：
   - 缺 key package：`sealed_key_unavailable`。
   - AEAD 失败、帧检查失败（§8.1），或 `ciphertextRef` 的 blob 缺失：`sealed_open_failed`。
@@ -439,8 +439,11 @@ AAD 不含 envelope 的 `id`、`seq` 和 `ts`。dead-letter 重放会用新 `seq
 
 按 freeze rule 的路径 2（gated addition），两个方向都要声明：
 
+- 门按整个 type 设，不按字段设。不认识这个 type 的解码器整条拒绝（`UnknownMessageTypeError`），不会悄悄丢掉 `sealed`。
 - server → daemon：offer、steer、输入准备、key package 通知，以及回显 `contentMac` 的 Agent 消息 disposition。门是设备能力 `sealed-payload-v1`。Host 在建 task、写 receipt 和写 mailbox 之前检查它。
-- daemon → server：终态、进度、artifact、审批、Agent 消息、egress 和记忆投影。门是 Host 能力 `sealed-payload-v1`，`advertisedBy: 'server'`（`packages/protocol/src/wire-additions.ts:47` 已支持）。这些 payload 会丢弃未知字段。旧 Host 会悄悄丢掉 `sealed`，所以设备必须先看到 Host 的声明。
+- daemon → server：终态、进度、artifact、审批、Agent 消息、egress 和记忆投影。门是 Host 能力 `sealed-payload-v1`，`advertisedBy: 'server'`（`packages/protocol/src/wire-additions.ts:47` 已支持）。设备必须先看到 Host 的声明。
+- 加密 type 继承明文 type 的全部门，被加密或不带的字段的门除外。例如 `task.offer_for_agent_sealed` 还要 `agent-home-contract`。加密不能去掉任何门。
+- 设备的四个封闭失败代码放在明文 `task.decline` 的 `code` 上，各是一个值门，由 Host 声明。
 
 设备拿到带 `sealing` 的 task 而 Host 没有声明能力时，设备在 claim 前 decline，不发送明文。
 
@@ -455,7 +458,7 @@ AAD 不含 envelope 的 `id`、`seq` 和 `ts`。dead-letter 重放会用新 `seq
 - 策略：`egressPolicy`、`messageEgress`、`terminalProjection`、`sealing`。
 - 其他：`approvalId`、`decision`、`usage`、封闭的原因代码、`sealed` 的外层字段和时间。
 
-Host 用这些字段运行现有的 claim、所有权、能力、去重、取消和配额逻辑。`inbound.ts` 的分支结构不变。
+Host 用这些字段运行现有的 claim、所有权、能力、去重、取消和配额逻辑。加密 type 进 `SERVER_TO_DAEMON_TYPES`、`DAEMON_TO_SERVER_TYPES` 和 `inbound.ts` 的分支。每个加密 type 走它的明文 type 的同一套逻辑，只是不读被加密的字段。E3a 先拒绝所有加密的 daemon → server 消息，E3b 再接上这些分支。
 
 这份清单比 #654 需求 2 列出的范围多。多出的执行选择和策略字段由 Host 自己写出，Host 本来就知道。`sessionRef` 是设备生成的不透明 id。`usage` 是设备上报的 token 计数，属于遥测，会透露工作量的大小（§5.4）。
 

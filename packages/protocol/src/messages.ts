@@ -2,6 +2,13 @@ import { PreparedAgentMemoryModeSchema } from './input-preparation';
 import { z } from 'zod';
 import { RUNTIME_IDS } from './constants';
 import { BlobRefSchema } from './blob';
+import {
+  SEALED_DECLINE_CODES,
+  SealedTaskInputSchema,
+  SealedTaskOutputSchema,
+  TaskSealingSchema,
+  sealedOfferRule,
+} from './sealed-payload';
 import { AgentEventOrUnknownSchema } from './agent-event';
 import {
   AgentContentActorSchema,
@@ -288,12 +295,23 @@ export const DispatchSelectionSchema = z.discriminatedUnion('lane', [
 export type DispatchSelection = z.infer<typeof DispatchSelectionSchema>;
 
 /**
+ * #654: a plaintext type that has a sealed sibling refuses the sealed
+ * members. Without this, a loose schema would strip them, and sealed content
+ * or a sealing policy would pass as plaintext. A strict schema needs it too:
+ * its unknown-key check sees only enumerable keys, so a non-enumerable
+ * `sealed` or `sealing` would be dropped. A sealed message uses its own
+ * `*_sealed` type.
+ */
+const NO_SEALED_MEMBER = { sealed: z.never().optional(), sealing: z.never().optional() };
+
+/**
  * server -> daemon: offer a task for a device to claim.
  *
  * `taskId` used to be duplicated here; it is now carried only by the
  * envelope's `task_id` (M1 gap #7 — single source of truth for routing).
  */
 export const TaskOfferPayloadSchema = z.object({
+  ...NO_SEALED_MEMBER,
   instruction: z.union([z.string(), InstructionBlobRefSchema]),
   runtime: RuntimeIdSchema.optional(),
   harnessId: HarnessIdSchema.optional(),
@@ -365,6 +383,7 @@ export type AgentMemorySelection = z.infer<typeof AgentMemorySelectionSchema>;
  */
 export const TaskOfferForAgentPayloadSchema = z
   .object({
+    ...NO_SEALED_MEMBER,
     instruction: z.union([z.string(), InstructionBlobRefSchema]),
     agentRef: AgentRefSchema,
     homeAccess: AgentHomeAccessSchema.optional(),
@@ -810,6 +829,7 @@ export type TaskCancelPayload = z.infer<typeof TaskCancelPayloadSchema>;
 
 /** server -> daemon: inject steering text into a running task. */
 export const TaskSteerPayloadSchema = z.object({
+  ...NO_SEALED_MEMBER,
   text: z.string(),
 });
 export type TaskSteerPayload = z.infer<typeof TaskSteerPayloadSchema>;
@@ -894,12 +914,23 @@ export type TaskStartedPayload = z.infer<typeof TaskStartedPayloadSchema>;
  * makes sense), and keeping the state machine minimal avoids forking every
  * terminal-state consumer into "Failed or Declined, handle both".
  */
-export const TaskDeclinePayloadSchema = z.object({
+const HOME_DECLINE_CODES = ['agent_home_writer_busy', 'agent_home_reader_busy'] as const;
+const DeclineFields = z.object({
+  ...NO_SEALED_MEMBER,
   reason: z.string(),
   retryable: z.boolean().optional(),
   agentRef: AgentRefSchema.optional(),
-  code: z.enum(['agent_home_writer_busy', 'agent_home_reader_busy']).optional(),
+  code: z.enum([...HOME_DECLINE_CODES, ...SEALED_DECLINE_CODES]).optional(),
 });
+/**
+ * #654: a sealed decline code names a fixed, non-retryable outcome and
+ * carries no content, so its `reason` is the code itself. A free-text reason
+ * or `retryable: true` never goes with it.
+ */
+export const TaskDeclinePayloadSchema = DeclineFields.refine(
+  (p) => !(SEALED_DECLINE_CODES as readonly unknown[]).includes(p.code) || (p.reason === p.code && p.retryable !== true),
+  { message: 'a sealed code needs reason === code, not retryable' },
+);
 export type TaskDeclinePayload = z.infer<typeof TaskDeclinePayloadSchema>;
 
 /**
@@ -914,6 +945,7 @@ export type TaskDeclinePayload = z.infer<typeof TaskDeclinePayloadSchema>;
  * unknowns instead of choking on them.
  */
 export const TaskProgressPayloadSchema = z.object({
+  ...NO_SEALED_MEMBER,
   seq: z.number().int(),
   events: z.array(AgentEventOrUnknownSchema),
 });
@@ -921,6 +953,7 @@ export type TaskProgressPayload = z.infer<typeof TaskProgressPayloadSchema>;
 
 /** daemon -> server: an artifact produced by the task, inline or by blob ref. */
 export const TaskArtifactPayloadSchema = z.object({
+  ...NO_SEALED_MEMBER,
   name: z.string(),
   contentType: z.string(),
   inline: z
@@ -950,6 +983,7 @@ export type TaskArtifactPayload = z.infer<typeof TaskArtifactPayloadSchema>;
  * pending" — the same behavior every server had before this field existed.
  */
 export const TaskAwaitApprovalPayloadSchema = z.object({
+  ...NO_SEALED_MEMBER,
   summary: z.string(),
   approvalId: z.string().optional(),
 });
@@ -1210,6 +1244,7 @@ export type TerminalAgentHomeMemoryChange = z.infer<typeof TerminalAgentHomeMemo
  * `RESULT_OUTCOME_MAX_BYTES`).
  */
 export const TaskCompletePayloadSchema = z.object({
+  ...NO_SEALED_MEMBER,
   harnessId: HarnessIdSchema.optional(),
   summary: z.string(),
   /**
@@ -1240,6 +1275,7 @@ export type TaskCompletePayload = z.infer<typeof TaskCompletePayloadSchema>;
 
 /** daemon -> server: task failed. */
 export const TaskFailPayloadSchema = z.object({
+  ...NO_SEALED_MEMBER,
   /** Local interruption observation bound to the immutable offer; does not assert a cloud claim. */
   recovery: z.object({ kind: z.literal('daemon_interrupted'), offerId: z.uuid() }).strict().optional(),
   harnessId: HarnessIdSchema.optional(),
@@ -1274,6 +1310,7 @@ export type TaskFailPayload = z.infer<typeof TaskFailPayloadSchema>;
  * trigger that moves `Claimed`/`Running`/`AwaitApproval -> Cancelled`.
  */
 export const TaskCancelledPayloadSchema = z.object({
+  ...NO_SEALED_MEMBER,
   harnessId: HarnessIdSchema.optional(),
   reason: z.string().optional(),
   usage: TerminalInferenceUsageSchema.optional(),
@@ -1328,6 +1365,124 @@ export const TaskApprovalResolvedPayloadSchema = z.object({
 export type TaskApprovalResolvedPayload = z.infer<typeof TaskApprovalResolvedPayloadSchema>;
 
 // ---------------------------------------------------------------------------
+// Sealed payload v1 (#654): sealed message types
+//
+// Each sealed type is its plaintext type without the fields one category
+// moves into the ciphertext, plus `sealed`. The type is gated on
+// `sealed-payload-v1` (`wire-additions.ts`), so a decoder without the flag
+// refuses the whole message. `SEALED_SPLIT_TABLE` (`sealed-payload.ts`) names
+// the moved fields. Every sealed type is strict: it carries content, so an
+// unknown field must fail the parse.
+// ---------------------------------------------------------------------------
+
+/**
+ * The fields every sealed offer adds: the task's frozen `sealing`, and the
+ * sealed instruction when the task seals task input. A task that seals only
+ * its output keeps `instruction` in plaintext.
+ */
+const SEALED_OFFER_FIELDS = {
+  instruction: z.union([z.string(), InstructionBlobRefSchema]).optional(),
+  sealing: TaskSealingSchema,
+  sealed: SealedTaskInputSchema.optional(),
+};
+
+/** server -> daemon: `task.offer` of a sealed task. */
+export const TaskOfferSealedPayloadSchema = TaskOfferPayloadSchema.extend(SEALED_OFFER_FIELDS).strict().superRefine(sealedOfferRule);
+export type TaskOfferSealedPayload = z.infer<typeof TaskOfferSealedPayloadSchema>;
+
+/** server -> daemon: `task.offer_with_toolsets` of a sealed task. */
+export const TaskOfferWithToolsetsSealedPayloadSchema = TaskOfferWithToolsetsPayloadSchema.extend(SEALED_OFFER_FIELDS)
+  .strict()
+  .superRefine(sealedOfferRule);
+export type TaskOfferWithToolsetsSealedPayload = z.infer<typeof TaskOfferWithToolsetsSealedPayloadSchema>;
+
+/** server -> daemon: `task.offer_for_agent` of a sealed task. */
+export const TaskOfferForAgentSealedPayloadSchema = TaskOfferForAgentPayloadSchema.extend(SEALED_OFFER_FIELDS)
+  .strict()
+  .superRefine(sealedOfferRule);
+export type TaskOfferForAgentSealedPayload = z.infer<typeof TaskOfferForAgentSealedPayloadSchema>;
+
+/** server -> daemon: `task.offer_for_agent_with_egress` of a sealed task. */
+export const TaskOfferForAgentWithEgressSealedPayloadSchema = TaskOfferForAgentWithEgressPayloadSchema.extend(SEALED_OFFER_FIELDS)
+  .strict()
+  .superRefine(sealedOfferRule);
+export type TaskOfferForAgentWithEgressSealedPayload = z.infer<typeof TaskOfferForAgentWithEgressSealedPayloadSchema>;
+
+/** server -> daemon: `task.offer_for_agent_with_egress_fresh` of a sealed task. */
+export const TaskOfferForAgentWithEgressFreshSealedPayloadSchema = TaskOfferForAgentWithEgressFreshPayloadSchema.extend(SEALED_OFFER_FIELDS)
+  .strict()
+  .superRefine(sealedOfferRule);
+export type TaskOfferForAgentWithEgressFreshSealedPayload = z.infer<typeof TaskOfferForAgentWithEgressFreshSealedPayloadSchema>;
+
+/**
+ * server -> daemon: sealed steering text. `steerId` names this steer in the
+ * AAD and the content MAC, so the Host cannot replay an earlier steer of the
+ * same task as a new one.
+ */
+export const TaskSteerSealedPayloadSchema = z.object({ steerId: z.uuid(), sealed: SealedTaskInputSchema }).strict();
+export type TaskSteerSealedPayload = z.infer<typeof TaskSteerSealedPayloadSchema>;
+
+/**
+ * daemon -> server: `task.complete` of a sealed task. `summary`,
+ * `finalMessage` and `document` are sealed. `artifactRefs` and
+ * `preparedObservation` are not carried in v1.
+ */
+export const TaskCompleteSealedPayloadSchema = TaskCompletePayloadSchema.omit({
+  summary: true,
+  finalMessage: true,
+  document: true,
+  artifactRefs: true,
+  preparedObservation: true,
+})
+  .extend({ sealed: SealedTaskOutputSchema })
+  .strict();
+export type TaskCompleteSealedPayload = z.infer<typeof TaskCompleteSealedPayloadSchema>;
+
+/** daemon -> server: `task.fail` of a sealed task. `reason` is sealed; `preparedObservation` is not carried in v1. */
+export const TaskFailSealedPayloadSchema = TaskFailPayloadSchema.omit({ reason: true, preparedObservation: true })
+  .extend({ sealed: SealedTaskOutputSchema })
+  .strict();
+export type TaskFailSealedPayload = z.infer<typeof TaskFailSealedPayloadSchema>;
+
+/**
+ * daemon -> server: `task.decline` of a sealed task with a sealed `reason`.
+ * The sealed decline codes go only on the plaintext `task.decline`: a device
+ * that cannot open or use the scope key often cannot seal a reply either.
+ */
+export const TaskDeclineSealedPayloadSchema = DeclineFields.omit({ reason: true })
+  .extend({ code: z.enum(HOME_DECLINE_CODES).optional(), sealed: SealedTaskOutputSchema })
+  .strict();
+export type TaskDeclineSealedPayload = z.infer<typeof TaskDeclineSealedPayloadSchema>;
+
+/** daemon -> server: `task.cancelled` of a sealed task. `reason` is sealed. */
+export const TaskCancelledSealedPayloadSchema = TaskCancelledPayloadSchema.omit({ reason: true })
+  .extend({ sealed: SealedTaskOutputSchema })
+  .strict();
+export type TaskCancelledSealedPayload = z.infer<typeof TaskCancelledSealedPayloadSchema>;
+
+/** daemon -> server: `task.progress` of a sealed task. `events` is sealed; `seq` names the batch. */
+export const TaskProgressSealedPayloadSchema = TaskProgressPayloadSchema.omit({ events: true })
+  .extend({ sealed: SealedTaskOutputSchema })
+  .strict();
+export type TaskProgressSealedPayload = z.infer<typeof TaskProgressSealedPayloadSchema>;
+
+/**
+ * daemon -> server: an inline artifact of a sealed task. `inline` is sealed; a
+ * blob artifact is not carried in v1. `artifactId` names the write in the AAD
+ * and the content MAC, because two artifacts of one task may share a `name`.
+ */
+export const TaskArtifactSealedPayloadSchema = TaskArtifactPayloadSchema.omit({ inline: true, blobRef: true })
+  .extend({ artifactId: z.uuid(), sealed: SealedTaskOutputSchema })
+  .strict();
+export type TaskArtifactSealedPayload = z.infer<typeof TaskArtifactSealedPayloadSchema>;
+
+/** daemon -> server: `task.await_approval` of a sealed task. `summary` is sealed; `approvalId` is required. */
+export const TaskAwaitApprovalSealedPayloadSchema = TaskAwaitApprovalPayloadSchema.omit({ summary: true })
+  .extend({ approvalId: z.string().min(1), sealed: SealedTaskOutputSchema })
+  .strict();
+export type TaskAwaitApprovalSealedPayload = z.infer<typeof TaskAwaitApprovalSealedPayloadSchema>;
+
+// ---------------------------------------------------------------------------
 // registry — single source of truth mapping message type -> payload schema
 // ---------------------------------------------------------------------------
 
@@ -1346,6 +1501,11 @@ const TASK_OFFER_PAYLOAD_SCHEMAS = {
   'task.offer_for_agent_with_egress': TaskOfferForAgentWithEgressPayloadSchema as typeof TaskOfferForAgentWithEgressPayloadSchema,
   'task.offer_for_agent_with_egress_fresh': TaskOfferForAgentWithEgressFreshPayloadSchema as typeof TaskOfferForAgentWithEgressFreshPayloadSchema,
   'task.offer_prepared': TaskOfferPreparedPayloadSchema as typeof TaskOfferPreparedPayloadSchema,
+  'task.offer_sealed': TaskOfferSealedPayloadSchema as typeof TaskOfferSealedPayloadSchema,
+  'task.offer_with_toolsets_sealed': TaskOfferWithToolsetsSealedPayloadSchema as typeof TaskOfferWithToolsetsSealedPayloadSchema,
+  'task.offer_for_agent_sealed': TaskOfferForAgentSealedPayloadSchema as typeof TaskOfferForAgentSealedPayloadSchema,
+  'task.offer_for_agent_with_egress_sealed': TaskOfferForAgentWithEgressSealedPayloadSchema as typeof TaskOfferForAgentWithEgressSealedPayloadSchema,
+  'task.offer_for_agent_with_egress_fresh_sealed': TaskOfferForAgentWithEgressFreshSealedPayloadSchema as typeof TaskOfferForAgentWithEgressFreshSealedPayloadSchema,
 } as const;
 
 export type TaskOfferType = keyof typeof TASK_OFFER_PAYLOAD_SCHEMAS;
@@ -1387,6 +1547,14 @@ export const MESSAGE_PAYLOAD_SCHEMAS = {
   'task.fail': TaskFailPayloadSchema as typeof TaskFailPayloadSchema,
   'task.cancelled': TaskCancelledPayloadSchema as typeof TaskCancelledPayloadSchema,
   'task.approval_resolved': TaskApprovalResolvedPayloadSchema as typeof TaskApprovalResolvedPayloadSchema,
+  'task.steer_sealed': TaskSteerSealedPayloadSchema as typeof TaskSteerSealedPayloadSchema,
+  'task.complete_sealed': TaskCompleteSealedPayloadSchema as typeof TaskCompleteSealedPayloadSchema,
+  'task.fail_sealed': TaskFailSealedPayloadSchema as typeof TaskFailSealedPayloadSchema,
+  'task.decline_sealed': TaskDeclineSealedPayloadSchema as typeof TaskDeclineSealedPayloadSchema,
+  'task.cancelled_sealed': TaskCancelledSealedPayloadSchema as typeof TaskCancelledSealedPayloadSchema,
+  'task.progress_sealed': TaskProgressSealedPayloadSchema as typeof TaskProgressSealedPayloadSchema,
+  'task.artifact_sealed': TaskArtifactSealedPayloadSchema as typeof TaskArtifactSealedPayloadSchema,
+  'task.await_approval_sealed': TaskAwaitApprovalSealedPayloadSchema as typeof TaskAwaitApprovalSealedPayloadSchema,
 } as const;
 
 export type MessageType = keyof typeof MESSAGE_PAYLOAD_SCHEMAS;
@@ -1417,6 +1585,12 @@ export const SERVER_TO_DAEMON_TYPES = [
   'task.reject',
   'task.cancel',
   'task.steer',
+  'task.offer_sealed',
+  'task.offer_with_toolsets_sealed',
+  'task.offer_for_agent_sealed',
+  'task.offer_for_agent_with_egress_sealed',
+  'task.offer_for_agent_with_egress_fresh_sealed',
+  'task.steer_sealed',
 ] as const satisfies readonly MessageType[];
 
 /**
@@ -1446,4 +1620,11 @@ export const DAEMON_TO_SERVER_TYPES = [
   'agent.message.draft',
   'agent.message.publish',
   'agent.content.receipt',
+  'task.complete_sealed',
+  'task.fail_sealed',
+  'task.decline_sealed',
+  'task.cancelled_sealed',
+  'task.progress_sealed',
+  'task.artifact_sealed',
+  'task.await_approval_sealed',
 ] as const satisfies readonly MessageType[];
