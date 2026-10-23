@@ -66,9 +66,10 @@ test('CI policy and runbook changes take the contract-only lane', () => {
   assert.deepEqual(plan.dirs, []); assert.deepEqual(plan.families, []);
   assert.equal(plan.reason, 'root-ci-scripts');
 });
-test('a ci.yml change also runs the dataplane job that checks the workflow (#749)', () => {
+test('a ci.yml change runs every routine family and the client suite, never the complete suite (W7)', () => {
   const plan = planCi({ event: 'pull_request', sha, paths: ['.github/workflows/ci.yml'] });
-  assert.deepEqual(plan.dirs, []); assert.deepEqual(plan.families, ['dataplane']);
+  assert.ok(plan.dirs.includes('packages/client'));
+  assert.deepEqual(plan.families, knownFamilies.filter(id => id !== 'build-test').sort());
   assert.equal(plan.reason, 'impacted');
 });
 

@@ -16,13 +16,17 @@
   it. Move such a mount out of the home. Linux uses its own backend and has no
   volume rule.
 
-## 0.29.0 — source candidate
+## 0.29.0 — 2026-10-23 (published)
 
 0.29.0 is a MINOR release under the default pre-1.0 policy, with no
 exception. It adds public API and behavior, and it has breaking changes in
-client and keys. The owner labelled #723, #751 and #767 as breaking. This
-candidate is not published. See the [release notes](docs/releases/v0.29.0.md)
-for scope and outstanding qualification. All nine public manifests and their
+client and keys. The owner labelled #723, #744, #751 and #767 as breaking.
+The npm registry lists all nine public packages at 0.29.0. The registry
+publication times fall on 2026-10-23 (UTC). The registry read on 2026-10-23
+at 10:20 UTC reports 0.29.0 as `latest` for all nine. The tag `v0.29.0` and
+its GitHub Release point to `df0c91d2`. See the
+[release notes](docs/releases/v0.29.0.md) for scope and the qualification
+limits that were recorded at preparation. All nine public manifests and their
 lock records move to 0.29.0.
 
 - **Feature (client)** — the SDK release now has a Windows x64 Agent memory
@@ -78,7 +82,7 @@ lock records move to 0.29.0.
   does not carry sealed content yet. The root `@byok-sdk/core` entry does not
   change. The subpath closure is 170822 bytes, and its bundle imports
   `ByokCoreError` from the root, so both entries throw one error class.
-- **Feature (client)** — the task-free projection hook gets
+- **Breaking (client)** — the task-free projection hook gets
   `writeHomeFile(name, body)` on its input (#738, #606 R6). One call
   atomically replaces one file at the root of the canonical Agent home under
   the writer lease. `name` is one portable file name. `.byok`, `MEMORY.md`,
@@ -96,7 +100,10 @@ lock records move to 0.29.0.
   an ended process left for the same name. `agent-home-write-file.test.ts`
   kills a child process at five points of a three-file apply and checks each
   file, the redelivery and the temp file cleanup. The root `@byok-sdk/client`
-  entry grows by 2139 bytes.
+  entry grows by 2139 bytes. `AgentHomeProjectionApplyInput` has the new
+  required member `writeHomeFile`. Code that builds this input itself, for
+  example a test double, must add the member to compile. A Host that only
+  implements the hook needs no change.
 - **Feature (protocol, server, cloud, client)** — an ordinary Agent offer can
   select the Agent memory of its one task with the optional
   `agentMemory: 'none' | 'read' | 'read-write'` (#614). The values are those of
@@ -272,7 +279,7 @@ lock records move to 0.29.0.
   The root `@byok-sdk/client` entry grows by 4562 bytes, and the
   `@byok-sdk/client/testing` entry grows by 4499 bytes.
 
-## 0.28.3 — 2026-10-22 (published)
+## 0.28.3 — 2026-10-22 (published; superseded by 0.29.0)
 
 The owner selected 0.28.3 as one more one-release exception to the default
 pre-1.0 MINOR policy, after the 0.28.1 and 0.28.2 exceptions. The release
@@ -280,7 +287,8 @@ adds public API and behavior: the Grok `compatInstructions` option, the `mcp`
 field on durable Pi tool events and `HermesAdapter.prepare()` on Windows. The
 npm registry lists all nine public packages at 0.28.3. The registry
 publication times fall on 2026-10-22 (UTC). The registry read on 2026-10-23
-at 02:58 UTC reports 0.28.3 as `latest` for all nine. The tag `v0.28.3` and
+at 02:58 UTC reported 0.28.3 as `latest` for all nine. The read on 2026-10-23
+at 10:20 UTC reports 0.29.0 as `latest`. The tag `v0.28.3` and
 its GitHub Release point to `9ca1f3ea`. See the
 [release notes](docs/releases/v0.28.3.md) for scope and the qualification
 limits that were recorded at preparation. All nine public manifests and their
@@ -492,7 +500,7 @@ The owner selected 0.28.2 as a second one-release exception to the default
 pre-1.0 MINOR policy for additive changes. The npm registry lists all nine
 public packages at 0.28.2, keys included. The registry publication times fall
 on 2026-10-22 (UTC). The registry read on 2026-10-22 at 15:58 UTC reported
-0.28.2 as `latest` for all nine. The read on 2026-10-23 at 02:58 UTC reports
+0.28.2 as `latest` for all nine. The read on 2026-10-23 at 02:58 UTC reported
 0.28.3 as `latest`. See the
 [release notes](docs/releases/v0.28.2.md) for scope and the qualification
 limits that were recorded at preparation. All nine public manifests and their

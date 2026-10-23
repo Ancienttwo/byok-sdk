@@ -247,9 +247,9 @@ jobs:
           BYOK_REQUIRE_MEMORY_RESTORE_LINUX: '1'
         run: bun run --filter @byok-sdk/example-host-execution-core test -- src/memory-restore.test.ts src/memory-linux.test.ts
 
-  agent-memory-helper-linux:
+  agent-memory-helper-non-darwin:
     needs: select
-    if: ${{ contains(fromJSON(needs.select.outputs.families), 'agent-memory-helper-linux') }}
+    if: ${{ contains(fromJSON(needs.select.outputs.families), 'agent-memory-helper-non-darwin') }}
     name: agent memory helper non-Darwin volume checks (${{ matrix.os }}, fixed Go)
     runs-on: ${{ matrix.os }}
     # Each Windows leg runs the Go tests on NTFS twice: as the runner's
@@ -1663,7 +1663,7 @@ jobs:
   ci-required:
     name: CI required
     if: ${{ always() }}
-    needs: ["select", "targeted", "build-test", "agent-memory-export-linux", "agent-memory-helper-linux", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-git-workspace", "packageability-smoke", "npm-release-pack", "release-pack-migrate", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit"]
+    needs: ["select", "targeted", "build-test", "agent-memory-export-linux", "agent-memory-helper-non-darwin", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-git-workspace", "packageability-smoke", "npm-release-pack", "release-pack-migrate", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit"]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
