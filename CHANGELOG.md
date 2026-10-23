@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Fix (client)** — on Windows, the Claude and Codex adapters detect and
+  start a CLI that npm installed (#763). npm installs both as `.cmd` shims, and
+  Node cannot start a `.cmd` without a shell. The adapters still use no shell.
+  They find the command in PATH and PATHEXT order, run a native `.exe`
+  directly, and run the JavaScript entry of an npm node shim with node. Any
+  other `.cmd` or `.bat` is refused as `not-executable`. macOS and Linux do not
+  change.
 - **Feature (client)** — the task-free projection hook gets
   `writeHomeFile(name, body)` on its input (#738, #606 R6). One call
   atomically replaces one file at the root of the canonical Agent home under
