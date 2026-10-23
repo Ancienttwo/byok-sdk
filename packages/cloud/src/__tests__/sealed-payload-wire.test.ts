@@ -39,6 +39,7 @@ import {
   type MessageType,
 } from '@byok-sdk/protocol';
 
+import { SealedAgentExecutionInputSchema } from '../index';
 import type {
   EnqueueSealedOfferInput,
   EnqueueSealedToolsetOfferInput,
@@ -306,8 +307,12 @@ describe('sealed payload v1: each sealed type has its own hosted entry (#654)', 
     expect(new Set(laneLines.filter((line) => line.payload.sealed !== undefined).map((line) => line.type))).toEqual(new Set(Object.keys(lanes)));
   });
 
-  it('exports the sealed lane input types from the package root', () => {
-    expectTypeOf<SealedAgentExecutionInput>().toHaveProperty('payload');
+  it('exports the sealed lane inputs and the sealed execution schema from the package root', () => {
+    const fresh = laneLines.find((line) => line.type === 'task.offer_for_agent_with_egress_fresh_sealed')!;
+    const input: SealedAgentExecutionInput = SealedAgentExecutionInputSchema.parse({
+      taskId: 'sealed-root', deviceId: 'device-root', payload: fresh.payload, ...withContext(fresh.payload as never),
+    });
+    expect(input.payload.sealing).toEqual(fresh.payload.sealing);
     expectTypeOf<EnqueueSealedOfferInput>().toHaveProperty('payload');
     expectTypeOf<EnqueueSealedToolsetOfferInput>().toHaveProperty('payload');
     expectTypeOf<SealedAgentDispatchInput>().toHaveProperty('payload');

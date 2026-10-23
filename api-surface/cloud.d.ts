@@ -2593,7 +2593,7 @@ export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, B
 export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlobContentProxy, InMemoryCloudBlobStore, InMemoryActivityStore, InMemoryAgentMessageDraftStore, InMemoryDeviceDirectory, InMemoryInboundDedupStore, InMemoryNonceStore, InMemoryPairingCodeStore, InMemoryRequestReceiptStore, InMemoryAgentEgressStore, InMemoryProofRequestReceiptStore, InMemoryTaskAttemptStore, InMemoryTaskCancellationStore, NONCE_TTL_MS, createInMemoryBlobs, createInMemoryCloudStores, createInMemoryBlobBytes, InMemoryBlobBytes, } from './stores/in-memory/index';
 export type { InMemoryBlobStoreOptions, InMemoryBlobs, InMemoryCloudComposition, } from './stores/in-memory/index';
 export type { DeviceTerminal } from './terminal-result';
-export { AgentExecutionInputSchema, type AgentExecutionInput, type SealedAgentExecutionInput } from './agent-execution';
+export { AgentExecutionInputSchema, SealedAgentExecutionInputSchema, type AgentExecutionInput, type SealedAgentExecutionInput, } from './agent-execution';
 export { DEFAULT_RETENTION_POLICY, DEFAULT_MAINTENANCE_LIMIT, MAINTENANCE_STEPS, resolveRetentionPolicy } from './maintenance';
 export type { RetentionPolicy, MaintenanceInput, MaintenanceReport, MaintenanceStep, MaintenanceStepReport } from './maintenance';
 export { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES, receiptRetentionClass } from './receipt-retention';
