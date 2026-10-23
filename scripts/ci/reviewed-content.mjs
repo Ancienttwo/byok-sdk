@@ -52,6 +52,12 @@ const K8_RETENTION_EXPORTS = Object.freeze({
   './retention': './src/retention.ts',
   './retention-vectors': './src/retention-vectors.test-support.ts',
 });
+// #793 D2f-1: the K8 Bot routine policy and its shared vectors, added to the
+// hosted and retention entries. src/routines.ts does not load the K8 host.
+const K8_ROUTINE_EXPORTS = Object.freeze({
+  './routines': './src/routines.ts',
+  './routine-vectors': './src/routine-vectors.test-support.ts',
+});
 function otherWorkspaceManifests(cwd) {
   const manifests = [];
   for (const prefix of ['packages', 'examples']) {
@@ -183,6 +189,11 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     if (before.exports === undefined && isDeepStrictEqual(after.exports, K8_HOSTED_EXPORTS)) delete after.exports;
     // #793 D2g: the retention entries, only on top of exactly the hosted entries.
     if (isDeepStrictEqual(before.exports, K8_HOSTED_EXPORTS) && isDeepStrictEqual(after.exports, { ...K8_HOSTED_EXPORTS, ...K8_RETENTION_EXPORTS })) {
+      after.exports = before.exports;
+    }
+    // #793 D2f-1: the routine entries, only on top of exactly the hosted and retention entries.
+    const retained = { ...K8_HOSTED_EXPORTS, ...K8_RETENTION_EXPORTS };
+    if (isDeepStrictEqual(before.exports, retained) && isDeepStrictEqual(after.exports, { ...retained, ...K8_ROUTINE_EXPORTS })) {
       after.exports = before.exports;
     }
   } else if (path === 'package.json') {
