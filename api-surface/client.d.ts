@@ -1077,8 +1077,9 @@ export interface AgentHomeProjectionApplyInput extends AgentHomeProjectionInput 
      * Atomically replace one file at the root of the canonical Agent home with
      * `body`. A string body is written as UTF-8. `name` is one portable file
      * name: no path separator, no `:<>"|?*`, no control character, no trailing
-     * dot or space and no Windows device name. `.byok`, `MEMORY.md` and `notes`
-     * belong to the SDK and are refused in any letter case.
+     * dot or space, no Windows device name and no `<file>.<pid>-<n>.tmp` temp
+     * file name. `.byok`, `MEMORY.md` and `notes` belong to the SDK and are
+     * refused in any letter case.
      *
      * The call is valid only while this hook runs. The SDK waits for every call
      * before it records the projection, and refuses a call after the hook
@@ -1095,7 +1096,9 @@ export interface AgentHomeProjectionApplyInput extends AgentHomeProjectionInput 
      * crash or a power loss the new name can be lost while the SDK projection
      * record stays. Only a delivery of the same revision and hash calls this
      * hook again and repairs the file. A process crash can leave a
-     * `<name>.<pid>-<n>.tmp` file in the home. The SDK does not remove it.
+     * `<name>.<pid>-<n>.tmp` file in the home. Before it writes, a call removes
+     * each such file of the same name whose process has ended. The SDK owns
+     * file names of that form.
      */
     readonly writeHomeFile: (name: string, body: string | Uint8Array) => Promise<void>;
 }
@@ -2549,9 +2552,11 @@ export interface AgentMemoryFileObservation {
  *
  * Still unobservable (thrown): a home whose pinned identity no longer matches
  * or that is gone; a symlink, non-directory or unopenable parent component; a
- * symlink or non-regular leaf; any other open/read/stat I/O error; and a file
- * that changed while it was hashed (transient). With an external `filesystem`
- * backend the observation is that backend's bounded UTF-8 `read`.
+ * symlink or non-regular leaf, or a leaf with more than one hard link; a
+ * name below notes that differs only in letter case from another; any other
+ * open/read/stat I/O error; and a file that changed while it was hashed
+ * (transient). With an external `filesystem` backend the observation is that
+ * backend's bounded UTF-8 `read`.
  */
 export declare function observeAgentMemoryHomeFile(binding: AgentMemoryHomeBinding, relativePath: string): Promise<AgentMemoryFileObservation>;
 export interface AgentMemoryHomeCompareAndSwap {

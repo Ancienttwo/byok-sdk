@@ -2150,8 +2150,11 @@ only. Node has no Windows directory flush, and the NTFS barrier is not proven
 (`B=false`), so the SDK makes no promise for an OS crash or a power loss there:
 the ordering record can survive while the new file name is lost. Only a
 delivery of the same revision and hash calls the hook again and repairs the
-file. A process crash can leave a `<name>.<pid>-<n>.tmp` file in the home; the
-SDK does not remove it.
+file. A process crash can leave a `<name>.<pid>-<n>.tmp` file in the home.
+Before it writes, a call removes each such file of the same name whose process
+has ended (signal 0 reports no such process). The temp file of a live process
+stays, because it can belong to a running write. The SDK owns file names of
+that form, and the call refuses such a `name` in any letter case.
 
 Local Host memory export is a separate, explicitly enabled in-process API.
 `DaemonConfig.agentMemoryExport: true` exposes

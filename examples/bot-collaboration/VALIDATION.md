@@ -9,6 +9,18 @@ The separate PRD text is in Draft PR
 `origin/main@b5a456f0`. It changes no code or tests.
 This document records repository evidence. It does not claim a production pass.
 
+## Windows persona consumer / issue #738 (2026-10-23)
+
+`createBotPersonaProjection` now writes `AGENTS.md` with the SDK
+`writeHomeFile` (#738, slice R6 of #606). It does not open or flush a directory.
+`scripts/ci/run-windows-bot-tests.mjs` therefore excludes no suite: the 14
+persona suites of the #611 list below run on Windows with unchanged assertions.
+The Windows contract is the owner decision O6: each file is atomic under a
+process crash and the file is flushed. There is no promise for an OS crash or a
+power loss (see README). The Windows evidence is the
+`built adapter lifecycle smoke (windows-latest)` job of the PR that makes this
+change. Local results do not establish Windows support.
+
 ## Windows CI qualification / issue #611 (2026-10-21)
 
 Baseline: main `80a340836fe38abec718e2980d39d91b33964ac4`.
@@ -24,8 +36,9 @@ typecheck, API surface and version authority are checked separately. Windows
 execution and main-green acceptance remain pending until the PR's job and
 subsequent main run pass; local results do not establish Windows support.
 
-### Explicit Windows exclusions
+### Explicit Windows exclusions (removed by #738)
 
+#738 removed these exclusions. The text below records the #611 state.
 Each excluded file is printed with its reason in the Windows job log. These
 14 suites call `openTeam`, whose actual `createBotPersonaProjection` consumer
 opens and fsyncs a directory. That persistence contract is POSIX-only (see

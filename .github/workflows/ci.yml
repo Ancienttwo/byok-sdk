@@ -562,8 +562,8 @@ jobs:
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
 
-      # Explicit per-suite exclusions are logged for the documented POSIX-only
-      # persona consumer. All other K8 suites run with unchanged assertions.
+      # #738: every K8 suite runs, with the real persona fixture suites. The
+      # persona consumer writes AGENTS.md with the SDK writeHomeFile.
       - name: K8 Windows portable Bot qualification
         if: matrix.os == 'windows-latest'
         run: node scripts/ci/run-windows-bot-tests.mjs
