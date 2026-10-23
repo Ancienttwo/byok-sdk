@@ -9,10 +9,15 @@
   copy it, and `copySdkNativeAssets({ platform: 'win32', arch: 'x64' })` now
   also copies it into `agent-memory-fs/`. That call now needs the helper build
   (`build:release`). `sdkNativeAssetTargets['win32-x64']` gets an
-  `agentMemoryHelper` group with its own files and signing policy. The helper manifest is now version 2 and records the digest
-  algorithm of each entry. Product assets copied from an older release fail
-  with a manifest mismatch; copy them again. The SDK still does not admit Agent
-  memory on Windows.
+  `agentMemoryHelper` group with its own files and signing policy. The SDK
+  still does not admit Agent memory on Windows.
+- **Changed (client)** — the Agent memory helper manifest is now version 2 and
+  records the digest algorithm of each entry (#605). The resolver requires
+  every entry to equal the pin of the running SDK. So a product asset folder
+  that an older SDK copied fails with a manifest mismatch after the upgrade,
+  also on macOS, where the Darwin digests do not change. Migration: run
+  `copyAgentMemoryHelperAssets` or `copySdkNativeAssets` again with the new SDK
+  and ship the new folder.
 
 - **Feature (protocol, server, cloud, client)** — an ordinary Agent offer can
   select the Agent memory of its one task with the optional

@@ -2299,8 +2299,9 @@ Authenticode signing writes. A certificate table must start on an 8-byte
 boundary after the headers and the raw data of every section, and must end the
 file. Each certificate must fit in the table. The content is padded with zeros
 to 8 bytes, as a signer pads it. The release manifest (version 2) records the
-digest algorithm of each entry. The compiled pin, not the manifest, selects the
-algorithm for a target. `copyAgentMemoryHelperAssets({ outDir, platform:
+digest algorithm of each entry. The target name, not the manifest, selects the
+digest function; the resolver then requires every manifest entry, with its
+algorithm, to equal the compiled pin. `copyAgentMemoryHelperAssets({ outDir, platform:
 'win32' })` copies the Windows target and the manifest. Runtime admission on
 Windows is unchanged: the helper is not resolved there.
 

@@ -70,6 +70,14 @@ describe.skipIf(!hasAgentMemoryHelperBuild())('SDK Agent memory helper release c
     const certificate = Buffer.alloc(24); certificate.writeUInt32LE(20, 0);
     expect(agentMemoryHelperPeDigest(signedLike(certificate))).toBe(digest);
     expect(agentMemoryHelperPeDigest(signedLike(certificate, sectionEnd + 8))).not.toBe(digest);
+    // A content length that is not a multiple of 8: the signer pads it with zeros before the table.
+    const odd = Buffer.concat([bytes, Buffer.alloc(3)]);
+    const oddSigned = Buffer.concat([odd, Buffer.alloc(5), certificate]);
+    oddSigned.writeUInt32LE(0x1234, optional + 64);
+    oddSigned.writeUInt32LE(odd.length + 5, optional + 144);
+    oddSigned.writeUInt32LE(certificate.length, optional + 148);
+    expect(agentMemoryHelperPeDigest(oddSigned)).toBe(agentMemoryHelperPeDigest(odd));
+    expect(agentMemoryHelperPeDigest(odd)).not.toBe(digest);
     for (const invalid of [
       signedLike(certificate, sectionEnd + 4),
       signedLike(certificate, sectionEnd, certificate.length - 8),
