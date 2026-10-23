@@ -78,19 +78,19 @@ it('completes a routine whose wake cancel fails, and sends the cancel on a later
   expect(await server.wakes.pending()).toEqual([]);
 });
 
-it('retries a failed routine wake call from the process timer after 60 seconds', async () => {
+it('retries a failed routine wake call from the K4 timer with backoff', async () => {
   const probe = failingSchedule('failing');
   await setup(probe.wrap);
-  // One call in the K4 command, one in the K8 pass. The failed pass still arms the timer.
+  // One call in the K4 command, one in the K8 pass. The failed K4 command arms the K4 retry timer.
   await expect(seedRoutine(bot, 'failing', 'failing')).rejects.toThrow('Wake dispatch failed');
   await expect(bot.drain()).rejects.toThrow('Wake dispatch failed');
   expect(probe.attempts).toBe(2);
-  await vi.advanceTimersByTimeAsync(59_999);
+  await vi.advanceTimersByTimeAsync(999);
   expect(probe.attempts).toBe(2);
   await vi.advanceTimersByTimeAsync(1);
   expect(probe.attempts).toBe(3);
   probe.fail = false;
-  await vi.advanceTimersByTimeAsync(60_000);
+  await vi.advanceTimersByTimeAsync(2000);
   expect(probe.attempts).toBe(4);
   expect(outbox()).toEqual([]);
   expect(await pending()).toEqual([routineOf(bot, hash(['failing', 'create_routine', 0])).next!.dedupKey]);
