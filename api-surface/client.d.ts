@@ -8215,11 +8215,13 @@ export declare class SealedTasks {
     constructor(options: SealedTasksOptions);
     /** Whether this task's output is sealed. */
     sealsOutput(taskId: string | undefined): boolean;
+    /** Whether this task's input is sealed, so a plaintext steer is a downgrade (§6.2). */
+    sealsInput(taskId: string | undefined): boolean;
     /**
-     * Whether this outbound goes through {@link sealOutbound}: an output type of
-     * a task that seals its output, or one already sealed. Other types, such as
-     * `task.claim`, carry no task content and are sent as they are. Checked
-     * synchronously at send time.
+     * Whether this outbound goes through {@link sealOutbound}: every outbound
+     * of a task that seals its output, so one task's sends keep their order.
+     * Only its output types are sealed; `task.claim` and the rest pass as they
+     * are. Checked synchronously at send time.
      */
     sealsOutbound(envelope: Envelope): boolean;
     /**

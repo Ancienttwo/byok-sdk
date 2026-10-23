@@ -2192,6 +2192,11 @@ export class TaskRunner {
         await this.handleCancel(envelope.task_id, envelope.payload.reason);
         return;
       case 'task.steer':
+        // #654 §6.2: a task that seals its input takes no plaintext steer.
+        if (this.deps.sealedTasks?.sealsInput(envelope.task_id)) {
+          console.error(`[byok/client] plaintext task.steer for task ${envelope.task_id} dropped: the task seals its input`);
+          return;
+        }
         await this.handleSteer(envelope.task_id, envelope.payload.text);
         return;
       case 'task.approve':

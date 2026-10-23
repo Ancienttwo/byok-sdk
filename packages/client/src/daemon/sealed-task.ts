@@ -118,14 +118,19 @@ export class SealedTasks {
     return taskId !== undefined && this.#tasks.get(taskId)?.sealing.categories.includes('task-output') === true;
   }
 
+  /** Whether this task's input is sealed, so a plaintext steer is a downgrade (§6.2). */
+  sealsInput(taskId: string | undefined): boolean {
+    return taskId !== undefined && this.#tasks.get(taskId)?.sealing.categories.includes('task-input') === true;
+  }
+
   /**
-   * Whether this outbound goes through {@link sealOutbound}: an output type of
-   * a task that seals its output, or one already sealed. Other types, such as
-   * `task.claim`, carry no task content and are sent as they are. Checked
-   * synchronously at send time.
+   * Whether this outbound goes through {@link sealOutbound}: every outbound
+   * of a task that seals its output, so one task's sends keep their order.
+   * Only its output types are sealed; `task.claim` and the rest pass as they
+   * are. Checked synchronously at send time.
    */
   sealsOutbound(envelope: Envelope): boolean {
-    return this.sealsOutput(envelope.task_id) && (SEALED_OUTPUT_TYPE[envelope.type] !== undefined || isSealedMessageType(envelope.type));
+    return this.sealsOutput(envelope.task_id);
   }
 
   /**
@@ -139,7 +144,7 @@ export class SealedTasks {
     const entry = SEALED_SPLIT_TABLE[envelope.type];
     const { sealing, sealed, ...plain } = envelope.payload as JsonObject & { sealing: TaskSealing; sealed?: JsonObject };
     const agentRef = (plain.agentRef as AgentRef | undefined) ?? null;
-    if (sealing.categories.includes('task-output') && await this.options.keyring.sealingKey(sealing.scopeId, sealing.epoch) === undefined) {
+    if (sealing.categories.includes('task-output') && await this.#sealingKey(sealing) === undefined) {
       return { ok: false, code: 'sealed_key_unavailable' };
     }
     let payload = plain;
@@ -237,7 +242,7 @@ export class SealedTasks {
   }
 
   async #sealOutbound(task: SealedTask, envelope: Envelope): Promise<Envelope | undefined> {
-    if (isSealedMessageType(envelope.type) || isClosedPlainForm(envelope)) return envelope;
+    if (SEALED_OUTPUT_TYPE[envelope.type] === undefined || isClosedPlainForm(envelope)) return envelope;
     const taskId = envelope.task_id!;
     const payload = envelope.payload as JsonObject;
     let sealed: Envelope | undefined;
@@ -262,7 +267,7 @@ export class SealedTasks {
     const entry = SEALED_SPLIT_TABLE[type];
     const present = entry.forbidden.filter((field) => payload[field] !== undefined);
     if (present.length > 0) throw new Error(`${plainType} of sealed task ${taskId} carries ${present.join(', ')}, which ${type} does not carry`);
-    const key = await this.options.keyring.sealingKey(task.sealing.scopeId, task.sealing.epoch);
+    const key = await this.#sealingKey(task.sealing);
     if (key === undefined) return undefined;
     const kept = omit(payload, entry.moved);
     const identity = { taskId, ...pick(kept, entry.identity) } as SealedBinding['identity'];
@@ -280,6 +285,20 @@ export class SealedTasks {
       ? { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') }
       : { ...header, ciphertextRef: omit(await this.#upload(ciphertext) as unknown as JsonObject, ['url']) };
     return createEnvelope(type, { ...kept, sealed } as never, { taskId });
+  }
+
+  #sealingKey(sealing: TaskSealing): Promise<SealingKey | undefined> {
+    return this.#keyring(() => this.options.keyring.sealingKey(sealing.scopeId, sealing.epoch));
+  }
+
+  /** A keyring that fails holds no usable key: the caller fails closed as for a missing key. */
+  async #keyring<T>(read: () => Promise<T | undefined>): Promise<T | undefined> {
+    try {
+      return await read();
+    } catch (error) {
+      console.error(`[byok/client] scope keyring failed: ${error instanceof Error ? error.name : typeof error}`);
+      return undefined;
+    }
   }
 
   async #upload(ciphertext: Uint8Array): Promise<BlobRef> {
@@ -335,7 +354,7 @@ export class SealedTasks {
   ): Promise<{ ok: true; plaintext: JsonObject } | { ok: false; code: SealedContentOpenFailure }> {
     const { ciphertext, ciphertextRef, ...header } = sealed as JsonObject & { ciphertext?: string; ciphertextRef?: BlobRef };
     const scope = header.scope as { id: string; epoch: number };
-    const scopeKey = await this.options.keyring.openingKey({ id: scope.id, epoch: scope.epoch });
+    const scopeKey = await this.#keyring(() => this.options.keyring.openingKey({ id: scope.id, epoch: scope.epoch }));
     if (scopeKey === undefined) return { ok: false, code: 'sealed_key_unavailable' };
     let bytes: Uint8Array;
     try {

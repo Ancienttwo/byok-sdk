@@ -51,10 +51,13 @@ const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.e
 class TestKeyring implements SealedScopeKeyring {
   readonly scopeKey = generateScopeKey();
   sealing = true;
+  failing = false;
   async openingKey(scope: { readonly id: string; readonly epoch: number }) {
+    if (this.failing) throw new Error('keyring store unavailable');
     return scope.id === SCOPE && scope.epoch === EPOCH ? this.scopeKey : undefined;
   }
   async sealingKey(scopeId: string, minEpoch: number) {
+    if (this.failing) throw new Error('keyring store unavailable');
     return this.sealing && scopeId === SCOPE && minEpoch <= EPOCH
       ? { scopeKey: this.scopeKey, epoch: EPOCH, sender: SENDER, chainHead: CHAIN_HEAD }
       : undefined;
@@ -109,12 +112,17 @@ async function sealedMember(keyring: TestKeyring, plaintext: Record<string, unkn
   return { header, ciphertext };
 }
 
-async function sealedOffer(keyring: TestKeyring, taskId: string, seq: number, deviceId: string, instruction: unknown, sealing = BOTH): Promise<Envelope> {
+async function sealedOffer(
+  keyring: TestKeyring, taskId: string, seq: number, deviceId: string, instruction: unknown, sealing = BOTH,
+  options: { plain?: Record<string, unknown>; boundSealing?: TaskSealing } = {},
+): Promise<Envelope> {
+  const plain = options.plain ?? {};
   if (!sealing.categories.includes('task-input')) {
-    return createEnvelope('task.offer_sealed', { instruction, sealing } as never, { taskId, seq });
+    return createEnvelope('task.offer_sealed', { ...plain, instruction, sealing } as never, { taskId, seq });
   }
-  const { header, ciphertext } = await sealedMember(keyring, { instruction }, binding('task.offer', 'server-to-daemon', { taskId }, deviceId, sealing));
-  return createEnvelope('task.offer_sealed', { sealing, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never, { taskId, seq });
+  const bound = binding('task.offer', 'server-to-daemon', { taskId }, deviceId, options.boundSealing ?? sealing);
+  const { header, ciphertext } = await sealedMember(keyring, { instruction }, bound);
+  return createEnvelope('task.offer_sealed', { ...plain, sealing, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never, { taskId, seq });
 }
 
 /** Opens a sealed output as a member would, with the binding the receiver builds. */
@@ -201,6 +209,10 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
       keyring.sealing = false;
       return offer;
     }],
+    ['sealed_key_unavailable', 'a keyring that throws', async (keyring: TestKeyring, offer: Envelope) => {
+      keyring.failing = true;
+      return offer;
+    }],
     ['sealed_open_failed', 'a tampered ciphertext', async (_keyring: TestKeyring, offer: Envelope) => {
       const sealed = (offer.payload as { sealed: { ciphertext: string } }).sealed;
       const bytes = Buffer.from(sealed.ciphertext, 'base64url');
@@ -240,6 +252,67 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'no-flag', BUDGET_MS);
     expect(decline.payload).toEqual({ reason: 'sealed_payload_unsupported: the server does not accept sealed task output', retryable: false });
     expect(adapter.startCalls).toHaveLength(0);
+  });
+
+  it('declines a sealing policy that drops task-output after the Host sealed it, with sealed_open_failed', async () => {
+    const keyring = new TestKeyring();
+    const { server, adapter, deviceId } = await start({ keyring });
+    const inputOnly: TaskSealing = { scopeId: SCOPE, epoch: EPOCH, categories: ['task-input'] };
+    server.send(await sealedOffer(keyring, 'downgraded', server.nextSeq(), deviceId, 'never runs', inputOnly, { boundSealing: BOTH }));
+
+    const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'downgraded', BUDGET_MS);
+    expect(decline.payload).toEqual({ reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false });
+    expect(adapter.startCalls).toHaveLength(0);
+  });
+
+  it('seals the decline of a plain gate after the open', async () => {
+    const keyring = new TestKeyring();
+    const { server, adapter, deviceId } = await start({ keyring });
+    server.send(await sealedOffer(keyring, 'gated', server.nextSeq(), deviceId, 'never runs', BOTH, { plain: { harnessId: 'acme-harness' } }));
+
+    const decline = await server.waitFor((envelope) => envelope.type === 'task.decline_sealed' && envelope.task_id === 'gated', BUDGET_MS);
+    expect(await openOutput(keyring, decline, deviceId)).toEqual({ reason: expect.any(String) });
+    expect(taskEnvelopes('gated').map((envelope) => envelope.type)).toEqual(['task.decline_sealed']);
+    expect(adapter.startCalls).toHaveLength(0);
+  });
+
+  it('drops a plaintext steer to a task that seals its input, and applies one to an output-only task', async () => {
+    const keyring = new TestKeyring();
+    const { server, adapter, deviceId } = await start({ keyring });
+    server.send(await sealedOffer(keyring, 'sealed-input', server.nextSeq(), deviceId, 'run sealed-input'));
+    server.send(await sealedOffer(keyring, 'output-only-steer', server.nextSeq(), deviceId, 'run output-only-steer', OUTPUT_ONLY));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(2), BUDGET_MS);
+    // The two offers may start in either order; each start call records its instruction.
+    const sessionOf = (taskId: string) => adapter.sessions[adapter.startCalls.findIndex((call) => call.task.instruction === `run ${taskId}`)]!;
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      server.send(createEnvelope('task.steer', { text: 'host injected' }, { taskId: 'sealed-input', seq: server.nextSeq() }));
+      server.send(createEnvelope('task.steer', { text: 'go left' }, { taskId: 'output-only-steer', seq: server.nextSeq() }));
+      await vi.waitFor(() => expect(sessionOf('output-only-steer')!.steerCalls).toEqual(['go left']), BUDGET_MS);
+      expect(diagnostic).toHaveBeenCalledWith(expect.stringContaining('plaintext task.steer for task sealed-input dropped'));
+      expect(sessionOf('sealed-input')!.steerCalls).toEqual([]);
+    } finally {
+      diagnostic.mockRestore();
+    }
+  });
+
+  it('drops a sealed steer to an output-only task', async () => {
+    const keyring = new TestKeyring();
+    const { server, adapter, deviceId } = await start({ keyring });
+    server.send(await sealedOffer(keyring, 'output-only-sealed-steer', server.nextSeq(), deviceId, 'run', OUTPUT_ONLY));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    const steerId = randomUUID();
+    const { header, ciphertext } = await sealedMember(keyring, { text: 'go left' },
+      binding('task.steer', 'server-to-daemon', { taskId: 'output-only-sealed-steer', steerId }, deviceId, BOTH));
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      server.send(createEnvelope('task.steer_sealed', { steerId, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never,
+        { taskId: 'output-only-sealed-steer', seq: server.nextSeq() }));
+      await vi.waitFor(() => expect(diagnostic).toHaveBeenCalledWith(expect.stringContaining('the task does not seal task input')), BUDGET_MS);
+      expect(adapter.sessions[0]!.steerCalls).toEqual([]);
+    } finally {
+      diagnostic.mockRestore();
+    }
   });
 
   it('applies a sealed steer once per steerId', async () => {
@@ -361,6 +434,28 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     expect(taskEnvelopes('artifact').map((envelope) => envelope.type)).not.toContain('task.artifact');
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await server.waitFor((envelope) => envelope.type === 'task.complete_sealed', BUDGET_MS);
+  });
+
+  it('reports an artifact above the sealed inline limit as a sealed error and sends no artifact', async () => {
+    const keyring = new TestKeyring();
+    const { server, adapter, deviceId } = await start({ keyring });
+    server.send(await sealedOffer(keyring, 'too-big', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    await fs.writeFile(path.join(adapter.startCalls[0]!.ctx.workspaceDir, 'huge.bin'), randomBytes(1600 * 1024));
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      adapter.sessions[0]!.emit({ type: 'artifact', name: 'huge.bin', contentType: 'application/octet-stream' });
+      adapter.sessions[0]!.emit({ type: 'turn_end' });
+      await server.waitFor((envelope) => envelope.type === 'task.complete_sealed' && envelope.task_id === 'too-big', BUDGET_MS);
+    } finally {
+      diagnostic.mockRestore();
+    }
+    const types = taskEnvelopes('too-big').map((envelope) => envelope.type);
+    expect(types).not.toContain('task.artifact_sealed');
+    expect(types).not.toContain('task.artifact');
+    const events = await Promise.all(taskEnvelopes('too-big').filter((envelope) => envelope.type === 'task.progress_sealed')
+      .map(async (envelope) => JSON.stringify((await openOutput(keyring, envelope, deviceId)).events)));
+    expect(events.join('')).toContain('over the sealed inline limit');
   });
 
   it('uploads a large sealed output as an octet-stream ciphertext blob', async () => {
