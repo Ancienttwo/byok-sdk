@@ -5,17 +5,11 @@ import type { CollaborationState } from './model';
 import type { BotProfile, Room, TeamState } from './team-model';
 import { roomVisibility } from './rules/rooms';
 
-export const NEW_BOTS = ['new_bot_1', 'new_bot_2', 'new_bot_3'] as const;
-export const NEW_ROOMS = ['new_room_1'] as const;
+import { NEW_BOTS, NEW_ROOMS } from './rules/schema';
+import { activeBot, requireMain } from './rules/team';
+
+export { activeBot, NEW_BOTS, NEW_ROOMS, requireMain };
 export const TEAM_NOTE_LIMIT = 20;
-export function activeBot(team: TeamState, id: string): BotProfile {
-  const bot = team.bots[id];
-  if (!bot || bot.archived) throw new Error('Bot is archived or absent');
-  return bot;
-}
-export function requireMain(team: TeamState, actor: string): void {
-  if (!activeBot(team, actor).mainBot) throw new Error('Main Bot role required');
-}
 export function projectionRequestId(value: unknown): string {
   const digest = hash(value);
   return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-4${digest.slice(13, 16)}-a${digest.slice(17, 20)}-${digest.slice(20, 32)}`;

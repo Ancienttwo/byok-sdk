@@ -2010,6 +2010,105 @@ describe('WP2I-S2 SDK helper backend', () => {
 });
 
 // ===========================================================================
+// The processor over the real SDK helper on every helper platform (#605 W4)
+// ===========================================================================
+
+/**
+ * The verified helper backend. On Windows the test claims B: the helper has no
+ * OS-crash or power-loss proof, so production never runs intents there. This
+ * seam proves the processor logic over the real Windows helper ledger, not B.
+ */
+function processorHelperBackend(): AgentMemoryIntentBackend {
+  const helper = helperAgentMemoryIntentBackend(helperBin!);
+  return process.platform === 'win32' ? { ...helper, strictLedgerBarrier: true } : helper;
+}
+
+function fileIndex(file: string): bigint {
+  return statSync(file, { bigint: true }).ino;
+}
+
+describe('WP2I-S2 processor over the real SDK helper (W4)', () => {
+  itHelper('a new home: replace, a redelivered notice settles the existing row with no second CAS, then delete', async () => {
+    const w = await world();
+    const backend = processorHelperBackend();
+    expect(existsSync(w.canonicalHome)).toBe(false);
+    const replace = await makeIntent({ path: 'notes/new.md', operation: 'replace', base: EMPTY, content: 'first value' });
+    w.host.add(replace);
+    const applied = await w.processor({ backend })(notice(replace));
+    expect(applied.kind === 'acknowledged' && applied.completion.outcome).toBe('applied');
+    expect(await w.readMemory('notes/new.md')).toBe('first value');
+    const index = fileIndex(w.memoryFile('notes/new.md'));
+    const replayed = await w.processor({ backend })(notice(replace));
+    if (applied.kind !== 'acknowledged' || replayed.kind !== 'acknowledged') throw new Error('unreachable');
+    expect(replayed.readback.disposition).toBe('idempotent');
+    expect(replayed.completion).toEqual(applied.completion);
+    expect(fileIndex(w.memoryFile('notes/new.md'))).toBe(index);
+    if (replace.targetRevision === null) throw new Error('replace requires a target revision');
+    const remove = await makeIntent({ path: 'notes/new.md', operation: 'delete', base: replace.targetRevision });
+    w.host.add(remove);
+    const removed = await w.processor({ backend })(notice(remove));
+    expect(removed.kind === 'acknowledged' && removed.completion.outcome).toBe('applied');
+    expect(await w.readMemory('notes/new.md')).toBeUndefined();
+    expect((await w.ledger())?.map((record) => [record.intentId, record.state, record.ackedAt !== null])).toEqual([
+      [replace.intentId, 'applied', true],
+      [remove.intentId, 'applied', true],
+    ]);
+    expect(w.host.completes.map((completion) => completion.outcome)).toEqual(['applied', 'applied', 'applied']);
+  });
+
+  itHelper('an existing home with notes and ledger records: a replace keeps the earlier records', async () => {
+    const w = await world();
+    const backend = processorHelperBackend();
+    await w.homes.prepare(AGENT).then((binding) => binding.lease.release());
+    await w.writeMemory('MEMORY.md', 'index');
+    await w.writeMemory('notes/old.md', 'old');
+    const earlier = [seed(1, { ackedAt: '2026-09-28T00:00:01.000Z' }), seed(2, { ackedAt: '2026-09-28T00:00:02.000Z' })];
+    await w.seedLedger(earlier);
+    const replace = await makeIntent({ path: 'notes/old.md', operation: 'replace', base: sha('old'), content: 'new' });
+    w.host.add(replace);
+    const result = await w.processor({ backend })(notice(replace));
+    expect(result.kind === 'acknowledged' && result.completion.outcome).toBe('applied');
+    expect(await w.readMemory('notes/old.md')).toBe('new');
+    expect(await w.readMemory('MEMORY.md')).toBe('index');
+    expect((await w.ledger())?.map((record) => record.intentId)).toEqual([...earlier.map((record) => record.intentId), replace.intentId]);
+  });
+
+  itHelper('a lost complete response: the next notice settles the terminal row and completes it again, with one CAS', async () => {
+    const w = await world();
+    const backend = processorHelperBackend();
+    const replace = await makeIntent({ path: 'notes/lost.md', operation: 'replace', base: EMPTY, content: 'value' });
+    w.host.add(replace);
+    w.host.loseCompleteResponses = 1;
+    expect(await failureReason(w.processor({ backend })(notice(replace)))).toBe('complete_failed');
+    expect(await w.record(replace.intentId)).toMatchObject({ state: 'applied', ackedAt: null });
+    const index = fileIndex(w.memoryFile('notes/lost.md'));
+    const result = await w.processor({ backend })(notice(replace));
+    expect(result.kind === 'acknowledged' && result.completion.outcome).toBe('applied');
+    expect(fileIndex(w.memoryFile('notes/lost.md'))).toBe(index);
+    expect(await w.record(replace.intentId)).toMatchObject({ state: 'applied', ackedAt: expect.any(String) });
+    expect(w.host.completes).toHaveLength(2);
+    expect(w.host.completes[1]).toEqual(w.host.completes[0]);
+  });
+
+  itHelper('a full ledger of acknowledged records prunes the oldest one for a new record', async () => {
+    const w = await world();
+    const backend = processorHelperBackend();
+    await w.homes.prepare(AGENT).then((binding) => binding.lease.release());
+    const acknowledged = Array.from({ length: AGENT_MEMORY_INTENT_LEDGER_CAPACITY }, (_, index) =>
+      seed(index, { ackedAt: new Date(Date.UTC(2026, 8, 28, 0, 0, 0, index)).toISOString() }));
+    await w.seedLedger(acknowledged);
+    const replace = await makeIntent({ path: 'notes/pruned.md', operation: 'replace', base: EMPTY, content: 'kept' });
+    w.host.add(replace);
+    const result = await w.processor({ backend })(notice(replace));
+    expect(result.kind === 'acknowledged' && result.completion.outcome).toBe('applied');
+    const ledger = await w.ledger();
+    expect(ledger).toHaveLength(AGENT_MEMORY_INTENT_LEDGER_CAPACITY);
+    expect(ledger?.[0]?.intentId).toBe(acknowledged[1]!.intentId);
+    expect(ledger?.at(-1)).toMatchObject({ intentId: replace.intentId, state: 'applied', ackedAt: expect.any(String) });
+  }, 30_000);
+});
+
+// ===========================================================================
 // Daemon composition: stale notices fail closed before any fetch
 // ===========================================================================
 

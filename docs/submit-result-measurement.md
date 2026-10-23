@@ -498,7 +498,8 @@ Review the files before you share them.
 
 These facts apply to the runner on this SDK revision.
 
-- One uncounted calibration trial (C01) runs first.
+- One uncounted calibration trial runs first.
+  It always uses C01, also when `--cases` excludes or reorders C01.
   It confirms the call label from a helper body (Source 2).
   The label is fixed before the first counted trial.
   If the calibration confirms no label, the cell records no `missing`.
@@ -515,6 +516,13 @@ These facts apply to the runner on this SDK revision.
   an operator cancel (SIGINT) or a halted, crashed or stopped daemon.
   A provider or auth error inside the runtime arrives as a `task.fail` reason.
   The runner keeps it as `terminal_failure` with the raw reason.
+- A counted trial that does not start goes to the `not_started` table.
+  The batch is then `incomplete`.
+- The cell records `sdkBuild`: the checkout commit, a `dirty` flag, and each SDK
+  package version with the SHA-256 of its built `dist/index.js`.
+- The runner sets the generated cell facts itself.
+  A `--cell` fact with a reserved key, for example `model` or `platform`, is refused.
+  `--cases` must not repeat a case.
 - The deadline starts at the offer.
   At the deadline the runner cancels the task and records `timeout`.
 - Model selection: Claude and Codex receive the model as the subscription

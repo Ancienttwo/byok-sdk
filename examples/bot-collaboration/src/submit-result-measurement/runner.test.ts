@@ -76,6 +76,17 @@ it('a real run refuses to start without an authorization, a deadline, a spend li
   expect(errors.join('\n')).toContain('--execute requires --authorization, --deadline-ms, --max-spend, --out');
 });
 
+it('refuses repeated cases and operator facts that would replace generated facts', async () => {
+  for (const extra of [['--cases', 'C01-small,C01-small'], ['--cell', 'model=other'], ['--cell', 'platform=other'], ['--cell', 'sdkBuild=x']]) {
+    const errors: string[] = [];
+    const code = await main(['--runtime', 'pi', '--model', 'test', ...extra], {
+      adapters: () => { throw new Error('a refused run must not build an adapter'); }, stdout: () => {}, stderr: line => errors.push(line),
+    });
+    expect(code).toBe(2);
+    expect(errors.join('\n')).toMatch(extra[0] === '--cases' ? /must not repeat a case/ : /is set by the runner/);
+  }
+});
+
 it('classifies every case from Host-captured evidence after a calibration confirms the call label', async () => {
   const { code, out, adapter, run } = await execute(
     ['exact', 'exact', 'reject-then-correct', 'wrong', 'reject-only', 'no-call', 'capacity'],
@@ -122,6 +133,8 @@ it('without a confirmed label, records no missing; it records a decline as not s
   expect(byCase['C04-union']).toMatchObject({ category: 'timeout', elapsedMs: null, submissionSeen: false });
   expect(notStarted).toEqual([expect.objectContaining({ caseId: 'C03-array', stage: 'decline', reason: 'fake runtime declined' })]);
   expect(summary.cell).toMatchObject({ planned: 4, started: 3, notStarted: 1, latencyMs: { censoredTimeouts: 1 } });
+  // A counted trial that did not start leaves the batch incomplete.
+  expect(manifest).toMatchObject({ completion: 'incomplete', startedTrials: 3, notStartedTrials: 1 });
 }, 180_000);
 
 it('stops at max-trials and marks the cell incomplete', async () => {
