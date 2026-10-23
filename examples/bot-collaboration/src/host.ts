@@ -1,7 +1,7 @@
 import { admitBotToolsets, ownReadOnlyToolsets } from './toolset-policy';
 import { promoteReplyReceipts } from './reply-receipts';
-import type { BotTurnOutcome, ResultSchema, UpdateRoutineAction } from '@byok-sdk/protocol';
-import { BOT_TURN_OUTCOME_CONTRACT, BotTurnOutcomeSchemaError, validateResultOutcome } from '@byok-sdk/protocol';
+import type { ResultSchema, UpdateRoutineAction } from '@byok-sdk/protocol';
+import { BOT_TURN_OUTCOME_CONTRACT, BotTurnOutcomeSchemaError } from '@byok-sdk/protocol';
 import type { ByokServer, CreateByokServerOptions, DueWake } from '@byok-sdk/server';
 import { HostExecutionCore, type ExecutionServer, type OutcomeTransaction, type MessageTransaction } from '@byok-sdk/example-host-execution-core';
 import { promoteOccurrence, type HostJobHandler, type Routine } from '@byok-sdk/example-host-execution-core';
@@ -10,14 +10,15 @@ import { hash, project, time, type ExecutionTemplate, type Json, type LedgerStat
 import { enqueue } from '@byok-sdk/example-host-execution-core';
 import { addTurn, json, stateOf, type CollaborationState, type Delegation, type Turn } from './model';
 import { turnInstruction, outcomeSchema, SYSTEM_PROMPT } from './schema';
-import { abandonDelegation, applyDelegate, arbitrateCancel, BOT_REPLY_MAX_BYTES, DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
-  delegationDue, endChain, minimumInstructionBytes, observeDevices, observeStart, reconcileReply, REPLY_UNCERTAIN_AFTER_MS, resolveDelegation, retryReply,
+import { abandonDelegation, arbitrateCancel, BOT_REPLY_MAX_BYTES, DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
+  delegationDue, intentRows, minimumInstructionBytes, observeDevices, reconcileReply, REPLY_UNCERTAIN_AFTER_MS, resolveDelegation, retryReply,
   settleDelegations, type DelegationTimers } from './delegation';
+import { applyTurnOutcome } from './rules/outcome';
 import { BOT_ROUTINE, botRoutines, concludeRoutineTurn, createDefinition, owned, routineCalendar, routineOccurrence, routineTurn,
   updateDefinition } from './routines';
 
-import { activeBot, applyManagement, requireMain, roomFields, updateBot } from './team';
-import { advanceRooms, applySpeech, memberPresent, roomInput, roomVisibility, type Mentions } from './rooms';
+import { activeBot, applyManagement, roomFields, updateBot } from './team';
+import { advanceRooms, roomInput, roomVisibility, type Mentions } from './rooms';
 import type { RoomFields } from '@byok-sdk/protocol';
 
 import { CurrentRequestTooLargeError, HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS } from './history';
@@ -244,78 +245,19 @@ export class BotCollaboration {
     throw new Error(`not_owner: ${action} needs the owner principal`);
   }
   private applyOutcome(document: unknown, tx: OutcomeTransaction): void {
-    const state = stateOf(tx.application);
-    const turn = state.turns[tx.intent.key];
-    if (!turn) throw new Error('Missing Bot turn');
-    const schema = state.schemas[turn.id];
-    if (!schema || !validateResultOutcome(schema, document).ok) throw new Error('Outcome differs from the frozen schema');
-    const delegation = turn.delegationId ? state.delegations[turn.delegationId] : undefined;
-    // A cancelled or resolved chain never applies B's staged outcome (§8.3, §8.8).
-    if (delegation && (delegation.verdict || delegation.cancel)) { state.audit.push(`Outcome audit only: ${tx.intent.taskId}`); return; }
-    const outcome = document as BotTurnOutcome;
-    turn.outcome = json(document);
-    const accept = (action: string, work: () => void) => {
-      try { work(); } catch (error) {
-        state.rejected.push({ botId: turn.botId, taskId: tx.intent.taskId, action, reason: String(error instanceof Error ? error.message : error) });
-      }
-    };
-    const bot = state.team.bots[turn.botId];
-    const seat = state.team.seats[turn.id];
-    if (!bot || bot.archived || seat && (!memberPresent(state.team, seat) || ['removed', 'busy', 'blocked'].includes(seat.status))) {
-      state.audit.push(`Outcome audit only: ${tx.intent.taskId}`); return;
-    }
-    if (seat) {
-      applySpeech(state, turn, outcome, tx.intent.taskId, this.now(), accept);
-      if (this.options.channel && state.team.seats[turn.id]?.status === 'post' && outcome.speech?.kind === 'post') {
-        queueDelivery(this.ledger.snapshot(), state, turn, tx.intent.taskId, `speech:${turn.id}`, outcome.speech.text, this.now());
-      }
-    }
-    const managed = (kind: string, work: () => void) => accept(kind, () => {
-      // Also deny management from room offers frozen before this policy change.
-      if (seat) throw new Error('Room seats cannot manage the team');
-      // Another Bot's request never drives management, at any depth (§6.1).
-      if (turn.authority !== 'owner') throw new Error('Management needs owner authority');
-      work();
+    const state = stateOf(tx.application), taskId = tx.intent.taskId;
+    applyTurnOutcome(state, tx.intent.key, taskId, document, {
+      now: this.now, publish: tx.publish,
+      // The terminal transaction has not written yet, so a ledger snapshot is the committed state.
+      committed: { intent: key => intentRows(this.ledger.snapshot()).intent(key) },
+      manage: (turn, outcome, managed) => applyManagement(state, turn.botId, taskId, outcome, this.models(), managed, this.options.readOnlyToolsets),
+      createRoutine: (turn, action, index) => tx.routines.create(createDefinition(tx.routines.list(), turn.botId, taskId, index, action, turn.authority ?? 'bot')),
+      updateRoutine: (turn, action) => tx.routines.update(updateDefinition(tx.routines.list(), turn.botId, action)),
+      cancelRoutine: (turn, action) => tx.routines.lifecycle(owned(tx.routines.list(), turn.botId, action.routineId).definition.id, 'completed'),
+      ...(this.options.channel ? { deliver: (turn: Turn, key: string, text: string) => {
+        queueDelivery(this.ledger.snapshot(), state, turn, taskId, key, text, this.now());
+      } } : {}),
     });
-    applyManagement(state, turn.botId, tx.intent.taskId, outcome, this.models(), managed, this.options.readOnlyToolsets);
-    // Main Bot cancel (§8.8): after management, before the routine actions, in the same arbitration as cancelDelegation.
-    // Only this Turn's intent changes in the terminal transaction, so the committed intents are current for the target.
-    outcome.cancel_delegation?.forEach(action => managed('cancel_delegation', () => {
-      requireMain(state.team, turn.botId);
-      const d = state.delegations[action.delegationId];
-      if (!d) throw new Error('Delegation not found');
-      if (d.verdict) throw new Error('already_resolved');
-      arbitrateCancel(this.ledger.snapshot(), state, d, this.now(), tx.publish, 'main_bot_cancelled');
-    }));
-    // K4 routine commands refuse before any write, so a rejected action changes no routine.
-    outcome.create_routine?.forEach((action, index) => accept('create_routine', () => {
-      tx.routines.create(createDefinition(tx.routines.list(), turn.botId, tx.intent.taskId, index, action, turn.authority ?? 'bot'));
-    }));
-    outcome.update_routine?.forEach(action => accept('update_routine', () => tx.routines.update(updateDefinition(tx.routines.list(), turn.botId, action))));
-    outcome.cancel_routine?.forEach(action => accept('cancel_routine', () => {
-      tx.routines.lifecycle(owned(tx.routines.list(), turn.botId, action.routineId).definition.id, 'completed');
-    }));
-    outcome.confirmable_action?.forEach((action, index) => {
-      const id = hash([tx.intent.taskId, 'confirmable_action', index]);
-      state.cards[id] = { id, turnId: turn.id, action: { action: action.action, summary: action.summary, draft: json(action.draft) },
-        state: 'pending', expiresAt: this.now() + 86_400_000 };
-      tx.publish(`card:${id}`, json(state.cards[id]));
-      if (this.options.channel) queueDelivery(this.ledger.snapshot(), state, turn, tx.intent.taskId, `card:${id}`, action.summary, this.now());
-    });
-    if (outcome.ask_user) accept('ask_user', () => {
-      const question = outcome.ask_user!;
-      if (question.answerKind === 'single_choice' && new Set(question.options.map(o => o.id)).size !== question.options.length) throw new Error('Duplicate option id');
-      const id = hash([tx.intent.taskId, 'ask_user']);
-      state.questions[id] = { id, turnId: turn.id, value: question };
-      tx.publish(`question:${id}`, json(state.questions[id]));
-      if (this.options.channel) queueDelivery(this.ledger.snapshot(), state, turn, tx.intent.taskId, `question:${id}`, question.question, this.now());
-    });
-    const { successor } = applyDelegate(state, turn, tx.intent.taskId, outcome, !!seat, this.now(), tx.publish, accept);
-    if (turn.delegationId) {
-      // A device terminal proves that this chain Turn ran.
-      observeStart(state, turn, this.now(), tx.publish);
-      if (!successor) endChain(state, turn, tx.intent.taskId, !!outcome.delegate?.some(action => action.to === turn.botId), this.now(), tx.publish);
-    }
   }
 
   /**

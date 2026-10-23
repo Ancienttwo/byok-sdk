@@ -1,0 +1,91 @@
+import type { Card, Question, Rejection, Turn } from './turn';
+import { roomContext } from './rooms';
+import { HISTORY_MAX_ITEMS, HISTORY_MAX_BYTES, historyWindow, fitHistory } from './history';
+import { crossBotRequest, delegationBlock, instructionOverhead, isCrossBot, openDelegationsContext } from './delegation';
+import { ownerMainTurn, ROOM_SYSTEM_PROMPT, SYSTEM_PROMPT, type ContextRoutine, type ContextState } from './schema';
+
+/**
+ * The frozen ContextPack and instruction as pure rules (#739 D1). The caller gives the history; no function
+ * here reads stored Turn rows. A Host can read the history from the device ledger or from an external authority.
+ */
+/**
+ * One Bot's history, oldest first. `turns` holds the current Turn; the Turn id selects it.
+ * For a frozen Bot Turn, give only this Bot's rows: its Turns, the cards and questions of its Turns,
+ * and its rejected actions that no Turn consumed.
+ */
+export interface ContextHistory {
+  readonly turns: readonly Turn[]; readonly cards: readonly Card[]; readonly questions: readonly Question[]; readonly rejected: readonly Rejection[];
+}
+/** `crossRequest` is the framed Request section of a Cross-Bot Turn; its background is trimmed too (§3.7). */
+export function turnContext<R extends ContextRoutine>(state: ContextState, history: ContextHistory, turn: Turn, turnLimit = HISTORY_MAX_ITEMS,
+  maxBytes = HISTORY_MAX_BYTES, crossRequest?: string, routines: readonly R[] = []) {
+  const team = state.team;
+  const ownRejections = history.rejected;
+  const shared = { teamNotes: crossRequest === undefined ? team.notes : [...team.notes],
+    roster: Object.values(team.bots).filter(b => !b.archived).map(b => ({ id: b.id, name: b.name, role: b.role, mainBot: b.mainBot })),
+    rejectedActions: ownRejections.slice(-turnLimit), rooms: Object.values(team.rooms).map(({ messages: _messages, visibleFrom: _visibility, ...room }) => room),
+    ...(turn.source === 'bot_request' ? { delegation: delegationBlock(state, turn) } : {}),
+    ...(ownerMainTurn(state, turn.botId, turn) ? { openDelegations: openDelegationsContext(state) } : {}) };
+  if (turn.source === 'room_slot') {
+    const result = { ...shared, ...roomContext(team, turn, turnLimit) };
+    result.historyWindow.maxBytes = maxBytes;
+    result.historyWindow.omittedRejections = ownRejections.length - shared.rejectedActions.length;
+    return fitHistory(result, result.room.messages, 'omittedMessages', turn.request);
+  }
+  return contextPack(history, turnLimit, turn.id, maxBytes, true, shared,
+    crossRequest === undefined ? {} : { request: crossRequest, background: [shared.rooms, shared.teamNotes] }, routines.filter(row => row.owner === turn.botId));
+}
+export interface InstructionLimits { turnLimit: number; contextMaxBytes: number; instructionMaxBytes: number }
+/** The frozen instruction. A Cross-Bot Turn fits `instructionMaxBytes` as a whole. */
+export function turnInstruction<R extends ContextRoutine>(state: ContextState, history: ContextHistory, turn: Turn, limits: InstructionLimits,
+  routines: readonly R[] = []) {
+  const prompt = turn.source === 'room_slot' ? ROOM_SYSTEM_PROMPT : SYSTEM_PROMPT;
+  const cross = isCrossBot(turn);
+  const request = cross ? crossBotRequest(state, turn) : turn.request;
+  const context = turnContext(state, history, turn, limits.turnLimit,
+    cross ? limits.instructionMaxBytes - instructionOverhead(prompt) : limits.contextMaxBytes, cross ? request : undefined, routines);
+  return { context, instruction: `${prompt}\n\nRequest:\n${request}\n\nContextPack:\n${JSON.stringify(context)}` };
+}
+export const DEFAULT_CONTEXT_MAX_BYTES = HISTORY_MAX_BYTES;
+export const DEFAULT_CONTEXT_TURN_LIMIT = 12;
+
+/** Snapshot views include the candidate. Frozen turn views keep it in Request. */
+export function contextPack<T extends object = Record<never, never>, R = ContextRoutine>(history: ContextHistory, turnLimit = DEFAULT_CONTEXT_TURN_LIMIT,
+  currentTurnId?: string, maxBytes = DEFAULT_CONTEXT_MAX_BYTES, separateRequest = false, shared: T = {} as T,
+  fit: { request?: string; background?: unknown[][] } = {}, routines: readonly R[] = []) {
+  if (!Number.isSafeInteger(turnLimit) || turnLimit < 1) throw new Error('Invalid ContextPack turn limit');
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new Error('Invalid ContextPack byte budget');
+  const turns = history.turns;
+  const current = currentTurnId === undefined ? turns.at(-1) : turns.find(turn => turn.id === currentTurnId);
+  if (currentTurnId !== undefined && !current) throw new Error('Missing ContextPack candidate');
+  const earlier = turns.filter(turn => turn.id !== current?.id);
+  const selected = separateRequest ? earlier.slice(-turnLimit)
+    : current ? [...(turnLimit === 1 ? [] : earlier.slice(1 - turnLimit)), current] : [];
+  const cards = [...history.cards], questions = [...history.questions];
+  const pendingCard = (card: typeof cards[number]) => card.state === 'pending';
+  const pendingQuestion = (question: typeof questions[number]) => question.answer === undefined;
+  // Pending work has priority. Each category retains the K8a recent-12 bound.
+  const recent = <T>(rows: T[], pending: (row: T) => boolean) => [
+    ...rows.filter(row => !pending(row)), ...rows.filter(pending),
+  ].slice(-Math.min(turnLimit, DEFAULT_CONTEXT_TURN_LIMIT));
+  const selectedCards = recent(cards, pendingCard), selectedQuestions = recent(questions, pendingQuestion);
+  const context = {
+    ...shared,
+    historyWindow: { ...historyWindow('turns', (separateRequest ? earlier.length : turns.length) - selected.length, turnLimit, maxBytes),
+      omittedCards: cards.length - selectedCards.length, omittedQuestions: questions.length - selectedQuestions.length,
+      omittedPendingCards: cards.filter(pendingCard).length - selectedCards.filter(pendingCard).length,
+      omittedPendingQuestions: questions.filter(pendingQuestion).length - selectedQuestions.filter(pendingQuestion).length,
+      omittedRejections: history.rejected.filter(row => !row.consumedBy).length - Math.min(turnLimit, history.rejected.filter(row => !row.consumedBy).length),
+    },
+    rejectedActions: history.rejected.filter(row => !row.consumedBy).slice(-turnLimit),
+    questions: selectedQuestions, cards: selectedCards,
+    routines: [...routines],
+    turns: selected.map(turn => ({
+      id: turn.id, root: turn.root, source: turn.source, request: turn.request,
+      hop: turn.hop, status: turn.status, conclusion: turn.conclusion,
+      outcomeSummary: turn.outcome && typeof turn.outcome === 'object' && !Array.isArray(turn.outcome) ? Object.keys(turn.outcome) : [],
+    })),
+  };
+  return fitHistory(context, context.turns, 'omittedTurns', fit.request ?? (separateRequest ? current!.request : ''), !separateRequest && !!current,
+    fit.background && [...fit.background, context.routines]);
+}

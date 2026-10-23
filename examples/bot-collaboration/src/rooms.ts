@@ -1,14 +1,11 @@
 import type { BotTurnOutcome } from '@byok-sdk/protocol';
 import { hash, type LedgerState } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState, Turn } from './model';
-import type { TeamState } from './team-model';
-import { HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS, historyWindow } from './history';
 import * as rules from './rules/rooms';
 
-// K8 adapter for the pure room rules in `rules/rooms.ts`, and the room view of a seat Turn's ContextPack.
-export { ROOM_GRACE_MS, memberPresent, roomVisibility, type Mentions } from './rules/rooms';
-export const ROOM_CONTEXT_BYTES = HISTORY_MAX_BYTES;
-export const ROOM_CONTEXT_MESSAGES = HISTORY_MAX_ITEMS;
+// K8 adapter for the pure room rules in `rules/rooms.ts`.
+export { ROOM_GRACE_MS, memberPresent, roomContext, roomVisibility, type Mentions } from './rules/rooms';
+export { ROOM_CONTEXT_BYTES, ROOM_CONTEXT_MESSAGES } from './rules/rooms';
 export function roomInput(state: CollaborationState, key: string, roomId: string, text: string, mentions: rules.Mentions, from?: string): string {
   return rules.roomInput(state.team, key, roomId, text, mentions, from);
 }
@@ -34,15 +31,4 @@ export function advanceRooms(s: LedgerState, state: CollaborationState, now: num
     else if (turn) { turn.status = 'failed'; turn.conclusion = conclusion; }
   }
   for (const turn of turns) add(turn.id, turn.botId, turn.request);
-}
-export function roomContext(team: TeamState, turn: Turn, turnLimit = ROOM_CONTEXT_MESSAGES) {
-  const seat = team.seats[turn.id];
-  if (!seat) throw new Error('Room seat not found');
-  const round = team.rounds[seat.roundId]!, room = team.rooms[round.roomId]!;
-  const visible = room.messages.slice(room.visibleFrom?.[seat.botId] ?? room.messages.length);
-  const messages = visible.slice(-turnLimit);
-  return { historyWindow: historyWindow('messages', visible.length - messages.length, turnLimit),
-    room: { id: room.id, name: room.name, members: room.members, announcement: room.announcement,
-      visibility: 'after_join' as const, messages },
-    round: { id: round.id, limit: round.limit, counts: round.counts }, seat: { id: seat.id, deadline: seat.deadline } };
 }
