@@ -511,23 +511,26 @@ export class BotCollaboration {
     for (const turn of Object.values(state.turns)) {
       const intent = s.intents[hash(turn.id)];
       const bot = state.team.bots[turn.botId];
-      if (!intent && bot?.archived) { turn.status = 'failed'; turn.conclusion = 'cancelled'; }
+      // #816: K4 compacted the intent before this sync saw its result. The identity can never run again.
+      // A routine Turn's tombstone expires with its slot, but K4 removed its occurrence with the intent, and a routine
+      // Turn is written with its occurrence. So a routine Turn without its occurrence is retired too.
+      // K8 does not know the K4 conclusion, so the Turn fails, and every reader of `turn.conclusion` can settle.
+      // This runs before the archive check: the work may have run, so the Turn is not `cancelled`.
+      if (!intent && !turn.conclusion
+        && (this.ledger.hasTombstone('intent', turn.id, this.now()) || turn.source === 'routine' && !s.occurrences[routineOccurrence(turn)])) {
+        turn.status = 'failed'; turn.conclusion = 'failed';
+        state.audit.push(`Turn result retired before sync: ${turn.id}`);
+        project(s, `bot-turn:${turn.id}`, json({ owner: turn.botId, ...turn, reason: 'result_retired' }));
+        turn.reported = true;
+        continue;
+      }
+      // An archived Bot never starts this Turn. A concluded Turn keeps its conclusion.
+      if (!intent && !turn.conclusion && bot?.archived) { turn.status = 'failed'; turn.conclusion = 'cancelled'; }
       // A concluded occurrence can make a staged version due, so the next pass drains K4 again.
       if (!intent && turn.conclusion && turn.source === 'routine') materialized = concludeRoutineTurn(s, turn) || materialized;
       if (!intent && (turn.conclusion || turn.source === 'room_slot' && state.team.seats[turn.id]?.status === 'blocked')) continue;
       if (intent && bot?.archived && !s.executions[intent.taskId]?.started && !intent.conclusion) intent.cancelReason = 'cancelled';
       if (!intent) {
-        // #816: K4 compacted the intent before this sync saw its result. The identity can never run again.
-        // A routine Turn's tombstone expires with its slot, but K4 removed its occurrence with the intent, and a routine
-        // Turn is written with its occurrence. So a routine Turn without its occurrence is retired too.
-        // K8 does not know the K4 conclusion, so the Turn fails, and every reader of `turn.conclusion` can settle.
-        if (this.ledger.hasTombstone('intent', turn.id, this.now()) || turn.source === 'routine' && !s.occurrences[routineOccurrence(turn)]) {
-          turn.status = 'failed'; turn.conclusion = 'failed';
-          state.audit.push(`Turn result retired before sync: ${turn.id}`);
-          project(s, `bot-turn:${turn.id}`, json({ owner: turn.botId, ...turn, reason: 'result_retired' }));
-          turn.reported = true;
-          continue;
-        }
         if (!bot || bot.readyRevision !== bot.revision) {
           const failed = state.team.homeOperations.find(op => op.botId === turn.botId
             && op.request.payload.agentRef.profileRevision === bot?.revision && op.status === 'failed');

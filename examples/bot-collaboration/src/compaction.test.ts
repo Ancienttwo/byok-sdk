@@ -9,6 +9,7 @@ import { botCompactVeto } from './compaction';
 import { openTeam, type TestTeam } from './team.test-support';
 import { crossBot } from './cross-bot.test-support';
 import { stateOf, type Delegation, type Turn } from './model';
+import { archiveBot } from './rules/team';
 
 // #816: a K4 compaction of a Turn intent that K8 still reads.
 const base = k4template('device');
@@ -84,6 +85,24 @@ it('fails a Turn whose intent a writer without the veto retired, and the Host ke
   expect(reports).toEqual([expect.objectContaining({ value: expect.objectContaining({ conclusion: 'failed', reason: 'result_retired' }) })]);
   const next = await bot.input('k2', 'next');
   expect(ledger.snapshot().intents[hash(next)]).toBeDefined();
+});
+
+it('fails a retired Turn of a Bot archived before the next pass, and does not report it as cancelled', async () => {
+  let now = 1_000_000;
+  const { ledger, bot, unguarded } = open(() => now);
+  const turnId = await bot.input('k1', 'hello');
+  await bot.core.cancel(turnId);
+  await bot.core.flushProjections(async () => {});
+  expect(unguarded().compact({ acknowledgedIntentKeys: [turnId], ...retention(now) })).toMatchObject({ compactedIntents: 1 });
+  // The archive only marks the Bot, as `delete_bot` does.
+  ledger.transaction(s => { archiveBot(stateOf(s.application).team, 'main'); });
+  now += 1000;
+  await bot.drain();
+  const state = bot.snapshot();
+  expect(state.turns[turnId]).toMatchObject({ status: 'failed', conclusion: 'failed', reported: true });
+  expect(state.audit).toContain(`Turn result retired before sync: ${turnId}`);
+  const reports = Object.values(ledger.snapshot().outbox).filter(row => row.kind === 'projection' && row.id === `bot-turn:${turnId}`);
+  expect(reports).toEqual([expect.objectContaining({ value: expect.objectContaining({ conclusion: 'failed', reason: 'result_retired' }) })]);
 });
 
 it('refuses a ledger opened without the K8 compact veto', () => {
