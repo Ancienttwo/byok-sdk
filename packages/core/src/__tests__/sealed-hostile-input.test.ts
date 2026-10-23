@@ -310,6 +310,20 @@ describe('member chain entries whose subject throws on the second inspection', (
       await expect(call(secondInspectionThrows())).resolves.toMatchObject({ ok: false });
     });
   }
+
+  // A signed non-genesis entry whose `subject` getter returns the signed value once, then throws.
+  const subjectReadOnce = (entry: MemberChainEntryV1): object => {
+    let reads = 0;
+    return Object.defineProperty({ ...entry }, 'subject', { get: () => (reads++ === 0 ? entry.subject : trap()), enumerable: true });
+  };
+  it('applyMemberChainEntries: reads a signed subject once', async () => {
+    const afterGenesis = await applyMemberChainEntries(emptyMemberChainState('tenant-1'), [genesis]);
+    if (!afterGenesis.ok) throw new Error('the genesis fixture must apply');
+    await expect(applyMemberChainEntries(afterGenesis.state, [subjectReadOnce(addDevice)])).resolves.toMatchObject({ ok: true });
+  });
+  it('verifyMemberChainFromAnchor: reads a signed subject once', async () => {
+    await expect(verifyMemberChainFromAnchor({ ...anchorInput, entries: [genesis, subjectReadOnce(addDevice)] })).resolves.toMatchObject({ ok: true, anchorSeq: 2 });
+  });
 });
 
 describe('E2 member entry points with one hostile field', () => {
