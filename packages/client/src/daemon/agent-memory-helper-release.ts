@@ -2,7 +2,7 @@ import { copyFileSync, constants, lstatSync, mkdirSync, readFileSync, readdirSyn
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { AGENT_MEMORY_HELPER_RELEASE } from './agent-memory-helper-release-pin';
-import { agentMemoryHelperDigest } from './agent-memory-helper-digest';
+import { agentMemoryHelperTargetDigest } from './agent-memory-helper-digest';
 
 function installedReleaseDirectory(): string {
   const root = path.dirname(createRequire(import.meta.url).resolve('@byok-sdk/client/package.json'));
@@ -17,22 +17,20 @@ function assetDirectory(assetRoot?: string): string {
   return assetRoot;
 }
 
-function verifiedRelease(directory: string, arch: 'arm64' | 'x64'): string {
+type HelperTarget = keyof typeof AGENT_MEMORY_HELPER_RELEASE.entries;
+const platformTargets = { darwin: ['darwin-arm64', 'darwin-x64'], win32: ['win32-x64'] } as const;
+
+function verifiedRelease(directory: string, key: HelperTarget): string {
   const manifest = JSON.parse(readFileSync(path.join(directory, 'manifest.json'), 'utf8'));
-  const key = `darwin-${arch}` as const;
   const { entries, ...metadata } = AGENT_MEMORY_HELPER_RELEASE;
   if (manifest === null || Object.entries(metadata).some(([field, value]) =>
     JSON.stringify(manifest[field]) !== JSON.stringify(value))) {
     throw new Error('SDK Agent memory helper release manifest mismatch');
   }
-  for (const target of ['darwin-arm64', 'darwin-x64'] as const) {
-    const entry = manifest.entries?.[target];
-    if (entry?.file !== entries[target].file || entry.digest !== entries[target].digest) {
-      throw new Error('SDK Agent memory helper release target mismatch');
-    }
-  }
-  const bin = path.join(directory, key);
-  if (agentMemoryHelperDigest(readFileSync(bin), arch) !== entries[key].digest) {
+  // Every entry, with its digest algorithm, must equal the compiled pin.
+  if (JSON.stringify(manifest.entries) !== JSON.stringify(entries)) throw new Error('SDK Agent memory helper release target mismatch');
+  const bin = path.join(directory, entries[key].file);
+  if (agentMemoryHelperTargetDigest(key, readFileSync(bin)) !== entries[key].digest) {
     throw new Error('SDK Agent memory helper deployment digest mismatch');
   }
   return realpathSync(bin);
@@ -44,7 +42,7 @@ export function resolveAgentMemoryFilesystemHelper(assetRoot?: string): string {
     throw new Error('SDK Agent memory helper is not admitted on this platform');
   }
   try {
-    return verifiedRelease(assetDirectory(assetRoot), process.arch as 'arm64' | 'x64');
+    return verifiedRelease(assetDirectory(assetRoot), `darwin-${process.arch as 'arm64' | 'x64'}`);
   } catch (cause) {
     const code = (cause as NodeJS.ErrnoException | undefined)?.code;
     if (code === 'ENOENT' || code === 'MODULE_NOT_FOUND' || code === 'ERR_MODULE_NOT_FOUND') {
@@ -62,25 +60,29 @@ export function verifyAgentMemoryFilesystemHelper(helperBin: string, assetRoot?:
   return expected;
 }
 
-/** Build-time copy of the SDK release manifest and both Darwin targets into a new or empty product asset directory. */
+/** Build-time copy of the SDK release manifest and the targets of one platform into a new or empty product asset directory. */
 export interface CopyAgentMemoryHelperAssetsOptions {
   readonly outDir: string;
+  /** `darwin` (default) copies both Darwin targets; `win32` copies the Windows x64 target. */
+  readonly platform?: 'darwin' | 'win32';
 }
 
 /**
  * Run against an installed SDK release, then ship these files with the product.
- * The manifest and Mach-O digest detect deployment errors, not signer trust.
+ * The manifest and the Mach-O or PE digest detect deployment errors, not signer trust.
  * Product re-signing remains supported. Returns sorted paths relative to outDir.
  */
 export async function copyAgentMemoryHelperAssets(options: CopyAgentMemoryHelperAssetsOptions): Promise<readonly string[]> {
   const directory = installedReleaseDirectory();
-  const files = ['darwin-arm64', 'darwin-x64', 'manifest.json'];
+  const platform = options.platform ?? 'darwin';
+  if (platform !== 'darwin' && platform !== 'win32') throw new Error('copyAgentMemoryHelperAssets: unsupported platform');
+  const targets = platformTargets[platform];
+  const files = [...targets.map(target => AGENT_MEMORY_HELPER_RELEASE.entries[target].file), 'manifest.json'].sort();
   // Validate the whole source before creating or writing the destination.
   for (const file of files) if (!lstatSync(path.join(directory, file)).isFile()) {
     throw new Error('SDK Agent memory helper release assets must be regular files');
   }
-  verifiedRelease(directory, 'arm64');
-  verifiedRelease(directory, 'x64');
+  for (const target of targets) verifiedRelease(directory, target);
   const outDir = path.resolve(options.outDir);
   let createdDirectory = false;
   try {
@@ -98,8 +100,7 @@ export async function copyAgentMemoryHelperAssets(options: CopyAgentMemoryHelper
       copied.push(target);
     }
     // Recheck copied bytes, including after a source mutation during the copy.
-    verifiedRelease(outDir, 'arm64');
-    verifiedRelease(outDir, 'x64');
+    for (const target of targets) verifiedRelease(outDir, target);
     return files;
   } catch (error) {
     // Remove only files this call created, preserving a pre-existing directory.

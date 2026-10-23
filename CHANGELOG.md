@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Added (client)** — the SDK release now has a Windows x64 Agent memory
+  helper, `dist/native/agent-memory-fs/win32-x64.exe` (#605). Its
+  `pe-content-v1` digest ignores what Authenticode signing writes, so a product
+  can sign the exe. `copyAgentMemoryHelperAssets` takes `platform: 'win32'` to
+  copy it, and `copySdkNativeAssets({ platform: 'win32', arch: 'x64' })` now
+  also copies it into `agent-memory-fs/`. That call now needs the helper build
+  (`build:release`). `sdkNativeAssetTargets['win32-x64']` gets an
+  `agentMemoryHelper` group with its own files and signing policy. The SDK
+  still does not admit Agent memory on Windows.
+- **Changed (client)** — the Agent memory helper manifest is now version 2 and
+  records the digest algorithm of each entry (#605). The resolver requires
+  every entry to equal the pin of the running SDK. So a product asset folder
+  that an older SDK copied fails with a manifest mismatch after the upgrade,
+  also on macOS, where the Darwin digests do not change. Migration: run
+  `copyAgentMemoryHelperAssets` or `copySdkNativeAssets` again with the new SDK
+  and ship the new folder.
 - **Feature (core)** — the new subpath `@byok-sdk/core/sealed-payload` exports
   the sealed payload v1 byte rules (#654 E1a, E1b). It seals and opens one
   category of a payload with HKDF-SHA-256 and AES-256-GCM, pads the frame, and

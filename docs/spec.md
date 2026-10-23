@@ -2327,7 +2327,19 @@ normalizes the header command counts and `__LINKEDIT` file and VM sizes. It
 accounts for the zero-filled command slot in unsigned Go x64 output. The
 signature must end at EOF. Wrong architecture, format, code or manifest fails
 closed. This check detects deployment errors. It does not verify signer trust.
-Windows PE digest support belongs to its separate platform slice.
+
+The release also has a Windows x64 helper, `win32-x64.exe`. Its
+`pe-content-v1` digest covers the PE32+ file except the optional-header
+CheckSum, the certificate table directory entry and the certificate table, which
+Authenticode signing writes. A certificate table must start on an 8-byte
+boundary after the headers and the raw data of every section, and must end the
+file. Each certificate must fit in the table. The content is padded with zeros
+to 8 bytes, as a signer pads it. The release manifest (version 2) records the
+digest algorithm of each entry. The target name, not the manifest, selects the
+digest function; the resolver then requires every manifest entry, with its
+algorithm, to equal the compiled pin. `copyAgentMemoryHelperAssets({ outDir, platform:
+'win32' })` copies the Windows target and the manifest. Runtime admission on
+Windows is unchanged: the helper is not resolved there.
 
 For Windows, the accepted fault model S covers process crash, OS crash and
 power loss. Its proposed support domain is local NTFS on an explicit OS
@@ -3285,9 +3297,12 @@ files. `reservedHelperKinds` plus `piSubagentHelperKinds` is exactly the set tha
 `DaemonConfig`, or to each custom adapter constructor. An explicit root is scoped
 to that adapter's owned process trees and fails closed on missing or modified
 bytes without searching installed dependencies. Omission keeps installed behavior.
-For Darwin the copier delegates to the existing memory-helper release copier;
-`agentMemoryHelperAssetRoot` remains the separate memory-helper authority. Windows
-memory remains unavailable. Native target metadata is not platform qualification;
+For Darwin the copier delegates to the existing memory-helper release copier.
+For Windows x64 it also copies the Windows memory helper and its manifest into
+`agent-memory-fs/`, listed in `sdkNativeAssetTargets['win32-x64'].agentMemoryHelper`
+with the policy `product-resigning-allowed`; the Koffi `files` keep
+`unmodified-official-addon`. `agentMemoryHelperAssetRoot` remains the separate
+memory-helper authority. Windows memory remains unavailable. Native target metadata is not platform qualification;
 Windows SEA qualification requires the actual Windows CI process-ownership fixture.
 
 ### Embedded Agent-home projection completion waiting

@@ -817,6 +817,18 @@ jobs:
       - name: Build (needed so @byok-sdk/client has a dist/ to bundle)
         run: bun run build
 
+      # copySdkNativeAssets for win32 also copies the Agent memory helper, so
+      # the legs that copy Windows assets build the helper release first.
+      - name: Setup Go for the Agent memory helper
+        if: matrix.recipe == 'sea' && matrix.os != 'ubuntu-latest'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: packages/client/native/agent-memory-fs/go.mod
+
+      - name: Build the Agent memory helper release assets
+        if: matrix.recipe == 'sea' && matrix.os != 'ubuntu-latest'
+        run: bun run --filter @byok-sdk/client build:agent-memory-helper
+
       - name: Cross-build pinned Windows native assets on macOS
         if: matrix.recipe == 'sea' && matrix.os == 'macos-latest'
         run: node examples/packaging/native-assets-smoke.mjs --copy-only

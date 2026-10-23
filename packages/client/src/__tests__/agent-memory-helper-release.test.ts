@@ -4,7 +4,7 @@ import { promises as fs, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { agentMemoryHelperDigest } from '../daemon/agent-memory-helper-digest';
+import { agentMemoryHelperDigest, agentMemoryHelperPeDigest, agentMemoryHelperTargetDigest } from '../daemon/agent-memory-helper-digest';
 import { resolveAgentMemoryFilesystemHelper, verifyAgentMemoryFilesystemHelper } from '../daemon/agent-memory-helper-release';
 import { helperAgentMemoryIntentBackend } from '../daemon/agent-memory-intent';
 import { hasAgentMemoryHelperBuild } from './fixtures/agent-memory-helper-build';
@@ -43,6 +43,53 @@ describe.skipIf(!hasAgentMemoryHelperBuild())('SDK Agent memory helper release c
     const command = Buffer.from(bytes);
     command.writeUInt32LE(0xffffffff, 36);
     expect(() => agentMemoryHelperDigest(command, arch)).toThrow();
+  });
+
+  it('binds the win32-x64 PE image and admits only a certificate table at the end', () => {
+    const bytes = readFileSync(new URL('win32-x64.exe', directory));
+    const manifest = JSON.parse(readFileSync(new URL('manifest.json', directory), 'utf8'));
+    const digest = agentMemoryHelperPeDigest(bytes);
+    expect(manifest.entries['win32-x64']).toEqual({ file: 'win32-x64.exe', digestAlgorithm: 'pe-content-v1', digest });
+    expect(agentMemoryHelperTargetDigest('win32-x64', bytes)).toBe(digest);
+    const optional = bytes.readUInt32LE(0x3c) + 24;
+    const sectionEnd = bytes.length;
+    const changed = Buffer.from(bytes);
+    changed[4096] = changed[4096]! ^ 1;
+    expect(agentMemoryHelperPeDigest(changed)).not.toBe(digest);
+    const header = Buffer.from(bytes);
+    header[optional + 68] = header[optional + 68]! ^ 1;
+    expect(agentMemoryHelperPeDigest(header)).not.toBe(digest);
+    // A signer writes CheckSum, the certificate entry and an aligned table at the end.
+    const signedLike = (table: Buffer, start = sectionEnd, size = table.length): Buffer => {
+      const signed = Buffer.concat([bytes, Buffer.alloc(start - bytes.length), table]);
+      signed.writeUInt32LE(0x1234, optional + 64);
+      signed.writeUInt32LE(start, optional + 144);
+      signed.writeUInt32LE(size, optional + 148);
+      return signed;
+    };
+    const certificate = Buffer.alloc(24); certificate.writeUInt32LE(20, 0);
+    expect(agentMemoryHelperPeDigest(signedLike(certificate))).toBe(digest);
+    expect(agentMemoryHelperPeDigest(signedLike(certificate, sectionEnd + 8))).not.toBe(digest);
+    // A content length that is not a multiple of 8: the signer pads it with zeros before the table.
+    const odd = Buffer.concat([bytes, Buffer.alloc(3)]);
+    const oddSigned = Buffer.concat([odd, Buffer.alloc(5), certificate]);
+    oddSigned.writeUInt32LE(0x1234, optional + 64);
+    oddSigned.writeUInt32LE(odd.length + 5, optional + 144);
+    oddSigned.writeUInt32LE(certificate.length, optional + 148);
+    expect(agentMemoryHelperPeDigest(oddSigned)).toBe(agentMemoryHelperPeDigest(odd));
+    expect(agentMemoryHelperPeDigest(odd)).not.toBe(digest);
+    for (const invalid of [
+      signedLike(certificate, sectionEnd + 4),
+      signedLike(certificate, sectionEnd, certificate.length - 8),
+      signedLike(Buffer.alloc(8)),
+      (() => { const forged = Buffer.from(bytes); forged.writeUInt32LE(4096, optional + 144); forged.writeUInt32LE(bytes.length - 4096, optional + 148); return forged; })(),
+      Buffer.concat([bytes.subarray(0, 0x3c + 4)]),
+    ]) expect(() => agentMemoryHelperPeDigest(invalid)).toThrow('Invalid Agent memory helper PE image');
+    const machine = Buffer.from(bytes); machine.writeUInt16LE(0xaa64, optional - 20);
+    expect(() => agentMemoryHelperPeDigest(machine)).toThrow('Invalid Agent memory helper PE image');
+    expect(() => agentMemoryHelperPeDigest(readFileSync(new URL('darwin-x64', directory)))).toThrow('Invalid Agent memory helper PE image');
+    expect(() => agentMemoryHelperTargetDigest('win32-x64', readFileSync(new URL('darwin-arm64', directory)))).toThrow();
+    expect(() => agentMemoryHelperTargetDigest('win32-arm64', bytes)).toThrow('Unknown Agent memory helper target');
   });
 
   (process.platform === 'darwin' ? it : it.skip).each(['arm64', 'x64'])('allows real product re-signing for %s and still binds code', async arch => {

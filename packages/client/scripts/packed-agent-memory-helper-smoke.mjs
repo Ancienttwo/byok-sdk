@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { agentMemoryHelperDigest } from '../src/daemon/agent-memory-helper-digest.ts';
+import { agentMemoryHelperDigest, agentMemoryHelperTargetDigest } from '../src/daemon/agent-memory-helper-digest.ts';
 
 const installRoot = process.argv[2];
 if (!installRoot) throw new Error('Expected an isolated installed package root');
@@ -13,12 +13,49 @@ const require = createRequire(path.join(installRoot, 'package.json'));
 const root = path.dirname(require.resolve('@byok-sdk/client/package.json'));
 const directory = path.join(root, 'dist/native/agent-memory-fs');
 const manifest = JSON.parse(readFileSync(path.join(directory, 'manifest.json'), 'utf8'));
-assert.equal(manifest.digestAlgorithm, 'mach-o-content-v1');
+assert.equal(manifest.version, 2);
 assert.equal(manifest.signingPolicy, 'product-resigning-allowed');
 assert.deepEqual(manifest.flags, ['-buildvcs=false', '-trimpath']);
-for (const arch of ['arm64', 'x64']) {
-  const bin = path.join(directory, `darwin-${arch}`);
-  assert.equal(agentMemoryHelperDigest(readFileSync(bin), arch), manifest.entries[`darwin-${arch}`].digest);
+assert.deepEqual(Object.fromEntries(Object.entries(manifest.entries).map(([target, entry]) => [target, [entry.file, entry.digestAlgorithm]])), {
+  'darwin-arm64': ['darwin-arm64', 'mach-o-content-v1'],
+  'darwin-x64': ['darwin-x64', 'mach-o-content-v1'],
+  'win32-x64': ['win32-x64.exe', 'pe-content-v1'],
+});
+for (const [target, entry] of Object.entries(manifest.entries)) {
+  assert.equal(agentMemoryHelperTargetDigest(target, readFileSync(path.join(directory, entry.file))), entry.digest);
+}
+if (process.platform === 'win32') {
+  const bin = path.join(directory, 'win32-x64.exe');
+  const original = readFileSync(bin);
+  const scratch = mkdtempSync(path.join(tmpdir(), 'byok-packed-helper-pe-'));
+  const copy = path.join(scratch, 'agent-memory-fs.exe');
+  // A real signer, not a model of one: Authenticode signing twice must keep
+  // the content digest, and changed code must not. Windows PowerShell gets no
+  // inherited PSModulePath: a pwsh 7 parent's module path hides its Cert: drive.
+  const signerEnv = Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toUpperCase() !== 'PSMODULEPATH'));
+  const sign = () => execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+    "$ErrorActionPreference = 'Stop'; $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=byok packed helper test' -CertStoreLocation Cert:\\CurrentUser\\My; "
+    + "try { $result = Set-AuthenticodeSignature -FilePath $env:BYOK_SIGN_TARGET -Certificate $cert -HashAlgorithm SHA256; if ($null -eq $result.SignerCertificate) { throw 'no signature written' } } "
+    + "finally { Remove-Item -LiteralPath (Join-Path 'Cert:\\CurrentUser\\My' $cert.Thumbprint) }"], { env: { ...signerEnv, BYOK_SIGN_TARGET: copy }, stdio: 'inherit' });
+  try {
+    writeFileSync(copy, original);
+    assert.equal(execFileSync(copy, ['--version'], { encoding: 'utf8' }), `${manifest.helperVersion}\n`);
+    const expected = manifest.entries['win32-x64'].digest;
+    sign();
+    const signed = readFileSync(copy);
+    assert.notDeepEqual(signed, original);
+    assert.equal(agentMemoryHelperTargetDigest('win32-x64', signed), expected);
+    sign();
+    assert.equal(agentMemoryHelperTargetDigest('win32-x64', readFileSync(copy)), expected);
+    assert.equal(execFileSync(copy, ['--version'], { encoding: 'utf8' }), `${manifest.helperVersion}\n`);
+    const changed = Buffer.from(signed);
+    changed[4096] ^= 1;
+    assert.notEqual(agentMemoryHelperTargetDigest('win32-x64', changed), expected);
+    assert.throws(() => agentMemoryHelperTargetDigest('win32-x64', readFileSync(path.join(directory, 'darwin-x64'))), /Invalid Agent memory helper PE image/);
+    console.log('[release-pack] Authenticode-signed SDK helper keeps its digest; changed code rejected');
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 }
 if (process.platform === 'darwin') {
   const clientManifest = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -68,4 +105,4 @@ if (process.platform === 'darwin') {
     rmSync(scratch, { recursive: true, force: true });
   }
 }
-console.log('[release-pack] both SDK Mach-O helper artifacts match the release manifest');
+console.log('[release-pack] every SDK helper artifact matches the release manifest');
