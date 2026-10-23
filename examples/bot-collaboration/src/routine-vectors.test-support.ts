@@ -9,6 +9,8 @@ import { ROUTINE_LATE_AFTER_MS, ROUTINE_WAIT_MS } from './routines';
  * #793 D2f routine vectors. Each Host runs the same cases: the K8 L ledger now, and the H store in D2f-3.
  * A subject sees only Host verbs and the row views below, not its row layout. The views are the H projection of the K4
  * rows (scheduler note §2.0): K4 fields with no H reader are left out. A subject may be async.
+ * Each verb that writes (`input`, `finish`, `fire`, `cancelTurn`, `update`, `lifecycle`) ends by running the Host as `sync` does,
+ * so the cases read promotions, claims and switches right after it.
  */
 export interface RoutineSubject {
   /** The Host clock. The subject picks the start, because the L SDK keeps real time. */
