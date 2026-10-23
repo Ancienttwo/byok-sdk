@@ -68,7 +68,8 @@ export type SealedDirection = (typeof SEALED_DIRECTIONS)[number];
 
 export const SEALED_NONCE_BYTES = 12;
 
-const AEAD_TAG_BYTES = 16;
+/** @internal Shared with `sealed-blob.ts`. Stripped from the published declarations. */
+export const AEAD_TAG_BYTES = 16;
 const FRAME_HEADER_BYTES = 4;
 const ALIGNED_FRAME_LIMIT = 16 * 1024;
 const FRAME_ALIGNMENT = 256;
@@ -110,8 +111,11 @@ export function sealedPaddedLength(frameLength: number): number {
   return Math.ceil(frameLength / step) * step;
 }
 
-/** Total on any number: zod runs this refinement even after the integer checks fail. */
-function isLegalPaddedLength(paddedLength: number): boolean {
+/**
+ * Total on any number: zod runs this refinement even after the integer checks fail.
+ * @internal Shared with `sealed-blob.ts`. Stripped from the published declarations.
+ */
+export function isLegalPaddedLength(paddedLength: number): boolean {
   return Number.isSafeInteger(paddedLength)
     && paddedLength >= FRAME_ALIGNMENT
     && sealedPaddedLength(paddedLength) === paddedLength;
@@ -149,7 +153,8 @@ export function decodeSealedFrame(frame: Uint8Array, paddedLength: number, maxCo
 // ---------------------------------------------------------------------------
 
 const NonEmptyStringSchema = z.string().min(1);
-const PositiveIntegerSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+/** @internal Shared with `sealed-blob.ts`. Stripped from the published declarations. */
+export const PositiveIntegerSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 
 /** What the Host may read of one sealed content. The ciphertext travels next to it. */
 export const SealedContentHeaderV1Schema = z.strictObject({
@@ -198,7 +203,8 @@ export interface SealedBinding {
   readonly notAfter: string | null;
 }
 
-const SealedBindingSchema = z
+/** @internal Shared with `sealed-blob.ts`. Stripped from the published declarations. */
+export const SealedBindingSchema = z
   .strictObject({
     tenantId: NonEmptyStringSchema,
     family: z.string().regex(FAMILY_PATTERN),
@@ -224,25 +230,34 @@ const SealedBindingSchema = z
       });
     }
   });
-type ParsedBinding = z.infer<typeof SealedBindingSchema>;
+/** @internal Shared with `sealed-blob.ts`. Stripped from the published declarations. */
+export type ParsedBinding = z.infer<typeof SealedBindingSchema>;
 
-function parseBinding(binding: SealedBinding): ParsedBinding {
+/** @internal Shared with `sealed-blob.ts`. Stripped from the published declarations. */
+export function parseBinding(binding: SealedBinding): ParsedBinding {
   const parsed = SealedBindingSchema.safeParse(binding);
   if (!parsed.success) throw invalidInput('Sealed content binding is invalid');
   return parsed.data;
 }
 
-function assertMaxContentLength(maxContentLength: number): void {
+/** @internal Shared with `sealed-blob.ts`. Stripped from the published declarations. */
+export function assertMaxContentLength(maxContentLength: number): void {
   if (!Number.isSafeInteger(maxContentLength) || maxContentLength < 0 || maxContentLength > MAX_CONTENT_LENGTH) {
     throw invalidInput('Sealed content limit must be a non-negative 32-bit integer');
   }
 }
 
-/** The header fields that do not depend on the plaintext. A blob is sealed before its outer content, so it knows only these. */
-type SealedAadContext = Pick<SealedContentHeaderV1, 'v' | 'suite' | 'category' | 'scope' | 'chainHead' | 'sender'>;
+/**
+ * The header fields that do not depend on the plaintext. A blob is sealed before its outer content, so it knows only these.
+ * @internal Shared with `sealed-blob.ts`. Stripped from the published declarations.
+ */
+export type SealedAadContext = Pick<SealedContentHeaderV1, 'v' | 'suite' | 'category' | 'scope' | 'chainHead' | 'sender'>;
 
-/** The 16 AAD members that the outer content and its blobs share (§8.2, §8.1). */
-function bindingAad(header: SealedAadContext, binding: ParsedBinding) {
+/**
+ * The 16 AAD members that the outer content and its blobs share (§8.2, §8.1).
+ * @internal Shared with `sealed-blob.ts`. Stripped from the published declarations.
+ */
+export function bindingAad(header: SealedAadContext, binding: ParsedBinding) {
   return {
     v: header.v,
     suite: header.suite,
@@ -335,7 +350,8 @@ export async function sealedContentMac(input: {
 // Seal and open
 // ---------------------------------------------------------------------------
 
-async function aesGcm(
+/** @internal Shared with `sealed-blob.ts`. Stripped from the published declarations. */
+export async function aesGcm(
   mode: 'encrypt' | 'decrypt',
   key: Uint8Array,
   nonce: Uint8Array,
@@ -464,7 +480,8 @@ export interface OpenSealedContentInput {
   readonly maxContentLength: number;
 }
 
-function failure(reason: SealedContentOpenFailure): { readonly ok: false; readonly reason: SealedContentOpenFailure } {
+/** @internal Shared with `sealed-blob.ts`. Stripped from the published declarations. */
+export function failure(reason: SealedContentOpenFailure): { readonly ok: false; readonly reason: SealedContentOpenFailure } {
   return { ok: false, reason };
 }
 
@@ -516,189 +533,6 @@ export async function openSealedContent(input: OpenSealedContentInput): Promise<
       return failure('sealed_content_mac_mismatch');
     }
     return { ok: true, plaintext: plaintext.value, header };
-  } finally {
-    frame.fill(0);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Blob bytes (§8.1, E1c)
-// ---------------------------------------------------------------------------
-
-/**
- * An RFC 6901 JSON Pointer from the moved-fields object to one BlobRef node,
- * e.g. `/instruction/blobRef` or `/events/0/spill/blob`. A segment is a field
- * name or a canonical decimal index, so no segment needs a `~` escape.
- */
-const BLOB_FIELD_PATH_PATTERN = /^(?:\/(?:[A-Za-z][A-Za-z0-9]*|0|[1-9][0-9]*))+$/u;
-
-/**
- * What the outer plaintext carries next to a sealed blob's BlobRef.
- * @internal Stripped from the published declarations.
- */
-export const SealedBlobParamsV1Schema = z.strictObject({
-  salt: base64UrlBytes(SEALED_SALT_BYTES),
-  nonce: base64UrlBytes(SEALED_NONCE_BYTES),
-  paddedLength: PositiveIntegerSchema.refine(isLegalPaddedLength, 'must be a legal padded frame length'),
-});
-/** @internal Stripped from the published declarations. */
-export type SealedBlobParamsV1 = z.infer<typeof SealedBlobParamsV1Schema>;
-
-/**
- * The blob AAD: the 16 shared members, the blob's own `paddedLength` and
- * `fieldPath`. The outer `paddedLength` and `contentMac` depend on the outer
- * plaintext, which holds this blob's BlobRef, so they stay out. The outer AAD
- * always has `contentMac` and never `fieldPath`, so the two AADs never match.
- */
-function blobAadBytes(context: SealedAadContext, binding: ParsedBinding, paddedLength: number, fieldPath: string): Uint8Array {
-  return canonicalizeJsonBytes({ ...bindingAad(context, binding), paddedLength, fieldPath });
-}
-
-function assertBlobFieldPath(fieldPath: string): void {
-  if (!BLOB_FIELD_PATH_PATTERN.test(fieldPath)) throw invalidInput('Sealed blob field path must be a JSON Pointer of field names and indexes');
-}
-
-/**
- * The canonical AAD bytes of a blob sealed under an outer header (§8.1).
- * @internal Stripped from the published declarations.
- */
-export function sealedBlobAad(header: SealedContentHeaderV1, binding: SealedBinding, paddedLength: number, fieldPath: string): Uint8Array {
-  const parsed = SealedContentHeaderV1Schema.safeParse(header);
-  if (!parsed.success || !isLegalPaddedLength(paddedLength)) throw invalidInput('Sealed blob header input is invalid');
-  assertBlobFieldPath(fieldPath);
-  return blobAadBytes(parsed.data, parseBinding(binding), paddedLength, fieldPath);
-}
-
-/**
- * The input of one blob seal. Scope, chain head, sender, category and binding
- * must be the ones of the outer content that will carry the BlobRef.
- * @internal Stripped from the published declarations.
- */
-export interface SealBlobInput {
-  readonly scopeKey: Uint8Array;
-  readonly scope: { readonly id: string; readonly epoch: number };
-  readonly chainHead: { readonly seq: number; readonly hash: string };
-  readonly sender: string;
-  readonly category: SealedCategory;
-  readonly binding: SealedBinding;
-  /** The pointer to the BlobRef node in the moved-fields object. */
-  readonly fieldPath: string;
-  /** The raw blob bytes. */
-  readonly bytes: Uint8Array;
-  /** The plaintext limit of this field, in bytes. */
-  readonly maxContentLength: number;
-}
-
-/** @internal Stripped from the published declarations. */
-export interface SealedBlob {
-  readonly params: SealedBlobParamsV1;
-  /** AES-256-GCM output: the padded frame followed by the 16-byte tag. Upload these bytes. */
-  readonly ciphertext: Uint8Array;
-}
-
-/**
- * Seal one blob once, before the outer content. A retry must reuse the
- * uploaded blob, never seal again (§8.6).
- * @internal Stripped from the published declarations.
- */
-export async function sealBlob(input: SealBlobInput): Promise<SealedBlob> {
-  return sealBlobWithRandomness(input, { salt: randomBytes(SEALED_SALT_BYTES), nonce: randomBytes(SEALED_NONCE_BYTES) });
-}
-
-/**
- * {@link sealBlob} with a caller-chosen salt and nonce, for test vectors only.
- * @internal Stripped from the published declarations.
- */
-export async function sealBlobWithRandomness(input: SealBlobInput, randomness: SealedContentRandomness): Promise<SealedBlob> {
-  const binding = parseBinding(input.binding);
-  assertMaxContentLength(input.maxContentLength);
-  assertBlobFieldPath(input.fieldPath);
-  if (!binding.categories.includes(input.category)) {
-    throw invalidInput('Sealed blob category is not one of the task sealing categories');
-  }
-  if (input.bytes.byteLength > input.maxContentLength) throw invalidInput('Sealed blob exceeds its plaintext limit');
-  const frame = encodeSealedFrame(input.bytes);
-  const context = SealedContentHeaderV1Schema.pick({ v: true, suite: true, category: true, scope: true, chainHead: true, sender: true }).safeParse({
-    v: SEALED_CONTENT_VERSION,
-    suite: SEALED_CONTENT_SUITE,
-    category: input.category,
-    scope: { id: input.scope.id, epoch: input.scope.epoch, keyId: await deriveScopeKeyId(input.scopeKey) },
-    chainHead: { seq: input.chainHead.seq, hash: input.chainHead.hash },
-    sender: input.sender,
-  });
-  const params = SealedBlobParamsV1Schema.safeParse({
-    salt: encodeBase64Url(randomness.salt),
-    nonce: encodeBase64Url(randomness.nonce),
-    paddedLength: frame.byteLength,
-  });
-  if (!context.success || !params.success) throw invalidInput('Sealed blob input is invalid');
-  const contentKey = await deriveSealedContentKey(input.scopeKey, randomness.salt);
-  try {
-    const aad = blobAadBytes(context.data, binding, frame.byteLength, input.fieldPath);
-    return { params: params.data, ciphertext: await aesGcm('encrypt', contentKey, randomness.nonce, aad, frame) };
-  } finally {
-    contentKey.fill(0);
-    frame.fill(0);
-  }
-}
-
-/** @internal Stripped from the published declarations. */
-export interface OpenSealedBlobInput {
-  /** The outer header that {@link openSealedContent} authenticated. */
-  readonly header: SealedContentHeaderV1;
-  /** The binding the outer content opened under. */
-  readonly binding: SealedBinding;
-  readonly scopeKey: Uint8Array;
-  /** The receiver derives it from where it found the BlobRef, never from a table. */
-  readonly fieldPath: string;
-  /** From the opened outer plaintext. Its shape is still checked here. */
-  readonly params: unknown;
-  /** The downloaded blob bytes. The caller checks the BlobRef `contentHash` against them (§9.3). */
-  readonly ciphertext: Uint8Array;
-  readonly maxContentLength: number;
-}
-
-/** @internal Stripped from the published declarations. */
-export type SealedBlobOpenResult =
-  | { readonly ok: true; readonly bytes: Uint8Array }
-  | { readonly ok: false; readonly reason: SealedContentOpenFailure };
-
-/**
- * Open one blob, fail closed. In order: binding and category
- * (`sealing_policy_mismatch`); header, field path and params shape
- * (`sealed_open_failed`); key id (`sealed_key_unavailable`); ciphertext
- * length, AEAD under the rebuilt blob AAD and the five frame checks (all
- * `sealed_open_failed`). Nothing here throws for hostile input.
- * @internal Stripped from the published declarations.
- */
-export async function openSealedBlob(input: OpenSealedBlobInput): Promise<SealedBlobOpenResult> {
-  assertMaxContentLength(input.maxContentLength);
-  const parsedBinding = SealedBindingSchema.safeParse(input.binding);
-  const header = SealedContentHeaderV1Schema.safeParse(input.header);
-  if (!parsedBinding.success || (header.success && !parsedBinding.data.categories.includes(header.data.category))) {
-    return failure('sealing_policy_mismatch');
-  }
-  const params = SealedBlobParamsV1Schema.safeParse(input.params);
-  if (!header.success || !params.success || typeof input.fieldPath !== 'string' || !BLOB_FIELD_PATH_PATTERN.test(input.fieldPath)) {
-    return failure('sealed_open_failed');
-  }
-  if ((await deriveScopeKeyId(input.scopeKey)) !== header.data.scope.keyId) return failure('sealed_key_unavailable');
-  const { salt, nonce, paddedLength } = params.data;
-  if (input.ciphertext.byteLength !== paddedLength + AEAD_TAG_BYTES) return failure('sealed_open_failed');
-
-  const contentKey = await deriveSealedContentKey(input.scopeKey, decodeBase64Url(salt, 'salt'));
-  let frame: Bytes;
-  try {
-    const aad = blobAadBytes(header.data, parsedBinding.data, paddedLength, input.fieldPath);
-    frame = await aesGcm('decrypt', contentKey, decodeBase64Url(nonce, 'nonce'), aad, input.ciphertext);
-  } catch {
-    return failure('sealed_open_failed');
-  } finally {
-    contentKey.fill(0);
-  }
-  try {
-    const content = decodeSealedFrame(frame, paddedLength, input.maxContentLength);
-    return content === undefined ? failure('sealed_open_failed') : { ok: true, bytes: copy(content) };
   } finally {
     frame.fill(0);
   }

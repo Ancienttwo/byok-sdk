@@ -44,15 +44,14 @@ import {
 } from '../sealed-payload/scope-key';
 import {
   encodeSealedFrame,
-  sealBlobWithRandomness,
   sealContentWithRandomness,
-  sealedBlobAad,
   sealedContentAad,
   sealedPaddedLength,
   type SealedBinding,
   type SealedCategory,
   type SealedContentHeaderV1,
 } from '../sealed-payload/sealed-content';
+import { sealBlobWithRandomness, sealedBlobAad } from '../sealed-payload/sealed-blob';
 import { canonicalizeSealedJson } from '../sealed-payload/sealed-json';
 import {
   checkSealedPayloadVectors,

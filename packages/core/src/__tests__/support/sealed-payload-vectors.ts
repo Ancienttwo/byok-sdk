@@ -30,23 +30,19 @@ import {
   SEALED_CATEGORIES,
   decodeSealedFrame,
   encodeSealedFrame,
-  openSealedBlob,
   openSealedContent,
-  sealBlobWithRandomness,
   sealContentWithRandomness,
-  sealedBlobAad,
   sealedContentAad,
   sealedContentMac,
   sealedPaddedLength,
-  type OpenSealedBlobInput,
   type OpenSealedContentInput,
   type SealedBinding,
-  type SealedBlobParamsV1,
   type SealedCategory,
   type SealedContentHeaderV1,
   type SealedContentOpenFailure,
   type SealedScopePolicy,
 } from '../../sealed-payload/sealed-content';
+import { openSealedBlob, sealBlobWithRandomness, sealedBlobAad, type OpenSealedBlobInput, type SealedBlobParamsV1 } from '../../sealed-payload/sealed-blob';
 import { canonicalizeSealedJson } from '../../sealed-payload/sealed-json';
 import { decodeBase64Url, encodeBase64Url } from '../../sealed-provider-secret';
 import type { WebCryptoKey } from '../../webcrypto';
