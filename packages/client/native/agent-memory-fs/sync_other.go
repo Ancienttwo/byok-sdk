@@ -9,6 +9,10 @@ import (
 
 func platformStrictSync(file *os.File) error { return file.Sync() }
 
+// checkRootVolume has no volume rule here: dev and ino identify the root on
+// every volume.
+func checkRootVolume(*os.Root) error { return nil }
+
 func sameVolume(a, b os.FileInfo) (bool, error) {
 	left, err := identityForRoot(nil, a)
 	if err != nil {
