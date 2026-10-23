@@ -416,6 +416,9 @@ export function selectImpact(paths, context = {}) {
     // checks the inventory table in this doc against real Postgres and S3.
     if (path === 'docs/security.md') { families.add('dataplane'); continue; }
     if (rootDocs.has(path) || /^(docs|tasks|deploy\/runbooks)\/.+\.md$/.test(path)) continue;
+    // #749: the dataplane job runs constraints.test.ts, which checks this
+    // workflow's dataplane job and its setup-bun / bun ci pairing.
+    if (path === '.github/workflows/ci.yml') { scripts = true; families.add('dataplane'); continue; }
     if (rootCi.has(path) || /^scripts\/ci\/[a-z0-9-]+(?:\.test)?\.mjs$/.test(path)) { scripts = true; continue; }
     const golden = /^api-surface\/([a-z-]+)\.d\.ts$/.exec(path);
     if (golden) {
