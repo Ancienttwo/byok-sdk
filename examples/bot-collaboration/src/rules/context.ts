@@ -74,6 +74,33 @@ export function turnInstruction<R extends ContextRoutine>(state: ContextState, h
     cross ? limits.instructionMaxBytes - instructionOverhead(prompt) : limits.contextMaxBytes, cross ? request : undefined, routines);
   return { context, instruction: `${prompt}\n\nRequest:\n${request}\n\nContextPack:\n${JSON.stringify(context)}` };
 }
+/** The stored Turn and row tables that a Bot's history selects from. */
+export interface BotHistoryState {
+  readonly turns: Readonly<Record<string, Turn>>; readonly cards: Readonly<Record<string, Card>>;
+  readonly questions: Readonly<Record<string, Question>>; readonly rejected: readonly Rejection[];
+}
+/**
+ * One Bot's history in ledger order. `turn` takes its stored position, or comes last when it is not stored.
+ * Select within the Bot boundary before applying any count or byte window.
+ */
+export function botHistory(state: BotHistoryState, turn: Turn, injected?: readonly ContextTurn[]): ContextHistory {
+  const own = <T extends { turnId: string }>(rows: Readonly<Record<string, T>>) => Object.values(rows).filter(row => state.turns[row.turnId]?.botId === turn.botId);
+  return {
+    // Injected rows replace the stored Turns. The current Turn always comes from this ledger.
+    turns: injected ? [...injected.filter(row => row.id !== turn.id), turn]
+      : Object.values({ ...Object.fromEntries(Object.entries(state.turns).filter(([, row]) => row.botId === turn.botId)), [turn.id]: turn }),
+    cards: own(state.cards), questions: own(state.questions),
+    rejected: state.rejected.filter(rejection => rejection.botId === turn.botId && !rejection.consumedBy),
+  };
+}
+/**
+ * The frozen instruction of a Bot Turn, from its own history. A Cross-Bot Turn fits `instructionMaxBytes` as a whole.
+ * `injected` is the Bot's earlier history from an external authority. Cards, questions and rejected actions stay Host state.
+ */
+export function botTurnInstruction<R extends ContextRoutine>(state: ContextState & BotHistoryState, turn: Turn, limits: InstructionLimits,
+  routines: readonly R[] = [], injected?: readonly ContextTurn[]) {
+  return turnInstruction(state, botHistory(state, turn, injected), turn, limits, routines);
+}
 export const DEFAULT_CONTEXT_MAX_BYTES = HISTORY_MAX_BYTES;
 export const DEFAULT_CONTEXT_TURN_LIMIT = 12;
 

@@ -28,6 +28,7 @@
 --   deploy/sql/0024_mailbox_wake.sql (post-commit outbox wake trigger; no new table)
 --   deploy/sql/0025_drop_storage_usage_mailbox_bytes.sql (drops the retired storage_usage counter column; no new table or key)
 --   deploy/sql/0026_agent_message_draft.sql (ephemeral tenant-first Agent message draft snapshot; one row per task)
+--   deploy/sql/0027_e2ee_member.sql (tenant-first E2EE member chain, member keys, scope key packages and pairing MACs)
 --
 -- Every migration must be claimed here. `check-deploy-sql-order` enforces that
 -- the moment this file exists, and the friction is the point: a new table has
@@ -299,6 +300,126 @@ BEGIN
   IF expiry_index_unique THEN
     RAISE EXCEPTION
       'agent_message_draft_expiry must stay non-unique: expiry is a sweep order, not an identity';
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 0.11 E2EE member state is tenant-first and keyed by its first-writer identity
+-- ---------------------------------------------------------------------------
+--
+-- 0027 stores signed values and ciphertext as canonical JSON text. Each table
+-- leads its primary key with tenant_id. The chain is first-writer-wins per
+-- seq, a member belongs to one device, and a scope epoch fixes one keyId that
+-- every package of that epoch must reference.
+DO $$
+DECLARE
+  spec record;
+  missing_columns text;
+  defaulted_columns text;
+  key_columns text[];
+BEGIN
+  FOR spec IN
+    SELECT * FROM (VALUES
+      ('e2ee_member_chain_entry', ARRAY['tenant_id', 'seq', 'entry'], ARRAY['tenant_id', 'seq']),
+      ('e2ee_member_key', ARRAY['tenant_id', 'device_id', 'member_id', 'bundle'], ARRAY['tenant_id', 'device_id']),
+      ('e2ee_scope_epoch', ARRAY['tenant_id', 'scope_id', 'epoch', 'key_id'], ARRAY['tenant_id', 'scope_id', 'epoch']),
+      ('e2ee_scope_key_package', ARRAY['tenant_id', 'scope_id', 'epoch', 'recipient', 'key_id', 'sender', 'package', 'updated_at'],
+        ARRAY['tenant_id', 'scope_id', 'epoch', 'recipient']),
+      ('e2ee_pairing_mac', ARRAY['tenant_id', 'device_id', 'kind', 'body', 'expires_at'], ARRAY['tenant_id', 'device_id', 'kind'])
+    ) AS t(table_name, required_columns, primary_key)
+  LOOP
+    SELECT string_agg(required.column_name, ', ' ORDER BY required.column_name)
+      INTO missing_columns
+      FROM unnest(spec.required_columns) AS required(column_name)
+     WHERE NOT EXISTS (
+        SELECT 1
+          FROM pg_class t
+          JOIN pg_namespace n ON n.oid = t.relnamespace
+          JOIN pg_attribute a ON a.attrelid = t.oid
+         WHERE n.nspname = current_schema()
+           AND t.relname = spec.table_name
+           AND a.attname = required.column_name
+           AND a.attnotnull
+           AND a.attnum > 0
+           AND NOT a.attisdropped
+      );
+    IF missing_columns IS NOT NULL THEN
+      RAISE EXCEPTION
+        'control-plane invariants ran without complete 0027_e2ee_member.sql: %.% missing or nullable',
+        spec.table_name, missing_columns;
+    END IF;
+
+    SELECT array_agg(a.attname::text ORDER BY k.ordinality)
+      INTO key_columns
+      FROM pg_constraint c
+      JOIN pg_class t ON t.oid = c.conrelid
+      JOIN pg_namespace n ON n.oid = t.relnamespace
+      CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS k(attnum, ordinality)
+      JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+     WHERE n.nspname = current_schema()
+       AND t.relname = spec.table_name
+       AND c.contype = 'p';
+    IF key_columns IS DISTINCT FROM spec.primary_key THEN
+      RAISE EXCEPTION '% primary key must be %, found %', spec.table_name, spec.primary_key, key_columns;
+    END IF;
+  END LOOP;
+
+  SELECT array_agg(a.attname::text ORDER BY k.ordinality)
+    INTO key_columns
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS k(attnum, ordinality)
+    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+   WHERE n.nspname = current_schema()
+     AND t.relname = 'e2ee_member_key'
+     AND c.contype = 'u';
+  IF key_columns IS DISTINCT FROM ARRAY['tenant_id', 'member_id']::text[] THEN
+    RAISE EXCEPTION 'e2ee_member_key must keep one device per member: unique (tenant_id, member_id), found %', key_columns;
+  END IF;
+
+  SELECT array_agg(a.attname::text ORDER BY k.ordinality)
+    INTO key_columns
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_class r ON r.oid = c.confrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS k(attnum, ordinality)
+    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+   WHERE n.nspname = current_schema()
+     AND t.relname = 'e2ee_scope_key_package'
+     AND r.relname = 'e2ee_scope_epoch'
+     AND c.contype = 'f';
+  IF key_columns IS DISTINCT FROM ARRAY['tenant_id', 'scope_id', 'epoch']::text[] THEN
+    RAISE EXCEPTION 'e2ee_scope_key_package must reference its scope epoch on (tenant_id, scope_id, epoch), found %', key_columns;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+      FROM pg_index x
+      JOIN pg_class i ON i.oid = x.indexrelid
+      JOIN pg_class t ON t.oid = x.indrelid
+      JOIN pg_namespace n ON n.oid = t.relnamespace
+     WHERE n.nspname = current_schema()
+       AND t.relname = 'e2ee_scope_key_package'
+       AND i.relname = 'e2ee_scope_key_package_recipient'
+       AND NOT x.indisunique
+  ) THEN
+    RAISE EXCEPTION 'e2ee_scope_key_package needs its non-unique (tenant_id, recipient) index for device cleanup';
+  END IF;
+
+  -- The store writes every value, instants from the injected clock, so a
+  -- default (such as now()) would be a second, silent source.
+  SELECT string_agg(t.relname || '.' || a.attname, ', ' ORDER BY t.relname, a.attname)
+    INTO defaulted_columns
+    FROM pg_attrdef d
+    JOIN pg_class t ON t.oid = d.adrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = d.adnum
+   WHERE n.nspname = current_schema()
+     AND t.relname IN ('e2ee_member_chain_entry', 'e2ee_member_key', 'e2ee_scope_epoch', 'e2ee_scope_key_package', 'e2ee_pairing_mac');
+  IF defaulted_columns IS NOT NULL THEN
+    RAISE EXCEPTION 'E2EE member columns must have no default, found %', defaulted_columns;
   END IF;
 END $$;
 

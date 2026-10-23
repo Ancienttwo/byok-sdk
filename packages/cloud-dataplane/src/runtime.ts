@@ -47,6 +47,7 @@ export {
   createPostgresAgentMemoryProjectionStore,
   PostgresTaskRedactionStore,
   createPostgresTaskRedactionStore,
+  PostgresE2eeMemberStore,
   createPostgresCloudStores,
   POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED,
   PostgresMailboxProtocolUnsupportedError,

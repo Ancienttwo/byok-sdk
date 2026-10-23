@@ -103,11 +103,15 @@
       "name": "@byok-sdk/example-hosted-bot-collaboration",
       "version": "0.0.1",
       "dependencies": {
+        "@byok-sdk/cloud": "workspace:*",
+        "@byok-sdk/cloud-dataplane": "workspace:*",
         "@byok-sdk/example-bot-collaboration": "workspace:*",
         "@byok-sdk/example-host-execution-core": "workspace:*",
         "pg": "^8.22.0",
       },
       "devDependencies": {
+        "@byok-sdk/client": "workspace:*",
+        "@hono/node-server": "^2.0.10",
         "@types/node": "^24",
         "@types/pg": "^8.20.4",
         "typescript": "^7.0.2",

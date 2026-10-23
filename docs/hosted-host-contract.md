@@ -123,6 +123,10 @@ The Postgres directory does this in one transaction (`packages/cloud-dataplane/s
 - It deletes the device row (`packages/cloud-dataplane/src/stores/devices.ts:262-265`).
 - It deletes the `device_presence`, `auth_nonce`, `inbound_dedup` and `device_assertion_replay` rows of the device
   (`packages/cloud-dataplane/src/stores/devices.ts:94-99`, `packages/cloud-dataplane/src/stores/devices.ts:266-270`).
+- It deletes the E2EE member state of the device: the key packages addressed to its member, its pairing MACs and its
+  member key registration (#654 E2c, `DEVICE_STATE_DELETES` in `packages/cloud-dataplane/src/stores/devices.ts`).
+  Machine supersession runs the same deletes. The SQLite directory does the same; the in-memory directory does not.
+  The member chain is tenant history and stays. Security does not rest on this cleanup: the other members rotate.
 - It keeps the `task`, `agent_egress_event`, `proof_request_receipt`, `outbox` and `device_stream` rows
   (`packages/cloud-dataplane/src/stores/devices.ts:76-84`).
 - It writes no task terminal and does not change a task status.

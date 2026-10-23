@@ -51,3 +51,6 @@ export { runCloudRetentionConformance } from './cloud/retention';
 
 export { runAgentMessageDraftConformance } from './cloud/agent-message-draft';
 export type { AgentMessageDraftCompositionHandle, AgentMessageDraftCompositionFactory } from './cloud/agent-message-draft';
+
+export { runE2eeMemberStoreConformance } from './cloud/e2ee-member';
+export type { E2eeMemberCompositionHandle, E2eeMemberCompositionFactory } from './cloud/e2ee-member';

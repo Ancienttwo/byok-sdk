@@ -13,7 +13,9 @@ import {
   createInProcessMailboxWake,
   type MailboxWake,
   createWebCrypto,
+  InMemoryE2eeMemberStore,
   type BlobContentProxy,
+  type E2eeMemberStore,
   type CloudCrypto,
   type CloudStores,
   type InboundDedupStore,
@@ -85,6 +87,7 @@ export interface FacadeStoreComposition {
   readonly core: CoreStores;
   readonly cloud: CloudStores;
   readonly blobContentProxy: BlobContentProxy;
+  readonly e2eeMember: E2eeMemberStore;
   readonly clock: Clock;
   readonly crypto: CloudCrypto;
   readonly counters: FacadeCounters;
@@ -168,6 +171,7 @@ export function composeFacadeStores(options: FacadeStoreOptions): FacadeStoreCom
       dedup,
     },
     blobContentProxy,
+    e2eeMember: sqlite?.e2eeMember ?? new InMemoryE2eeMemberStore(),
     clock,
     crypto,
     counters,
