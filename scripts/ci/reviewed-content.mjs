@@ -136,6 +136,12 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       const entry = { types: './dist/pi-catalog.d.ts', import: './dist/pi-catalog.js' };
       if (before.exports?.[key] === undefined && isDeepStrictEqual(after.exports?.[key], entry)) delete after.exports[key];
     }
+    if (path === 'packages/core/package.json') {
+      // #654 adds one subpath for sealed payload v1, so the root bundle does not grow.
+      const key = './sealed-payload';
+      const entry = { types: './dist/sealed-payload/index.d.ts', import: './dist/sealed-payload/index.js' };
+      if (before.exports?.[key] === undefined && isDeepStrictEqual(after.exports?.[key], entry)) delete after.exports[key];
+    }
     // #702 raises the public Node floor with the Node 24.22.1 pin. Admit only
     // this exact engines.node edit in a public manifest. Any other engines value
     // or key, and any other field, still fails the comparison below.

@@ -2111,6 +2111,413 @@ export declare function checkRoutineSchedule(schedule: RoutineSchedule): Routine
  * later local time never resolves earlier. Assumes a gap is at most one day.
  */
 export declare function nextRoutineOccurrence(schedule: RoutineSchedule, now: number): number | null;
+// ==== @byok-sdk/core dist/sealed-payload/index.d.ts ====
+/**
+ * `@byok-sdk/core/sealed-payload` — sealed payload v1 (#654): sealed contents,
+ * scope keys and key packages, and member chain entries. The browser, the
+ * device and the hosted Host run this same WebCrypto code.
+ *
+ * It is a subpath, not part of the package root, so the root bundle and every
+ * closure that imports the root do not grow. Only a consumer that seals or
+ * opens content imports it.
+ */
+export { SEALED_CATEGORIES, SEALED_CONTENT_SUITE, SEALED_CONTENT_VERSION, SEALED_DIRECTIONS, SealedContentHeaderV1Schema, openSealedContent, sealContent, } from './sealed-content';
+export type { OpenSealedContentInput, SealContentInput, SealedBinding, SealedCategory, SealedContent, SealedContentHeaderV1, SealedContentOpenFailure, SealedContentOpenResult, SealedDirection, SealedScopePolicy, } from './sealed-content';
+export { deriveScopeKeyId, generateScopeKey, openScopeKeyPackage, sealScopeKeyPackage } from './scope-key';
+export type { OpenScopeKeyPackageInput, ScopeKeyPackageOpenResult, ScopeKeyPackageV1, SealScopeKeyPackageInput, } from './scope-key';
+export { MEMBER_CHAIN_OPS, deriveMemberId, memberChainEntryHash, signMemberChainEntry, verifyMemberChainEntry, } from './member-chain';
+export type { MemberChainEntryV1, MemberChainEntryVerifyResult, MemberChainOp, UnsignedMemberChainEntryV1, } from './member-chain';
+// ==== @byok-sdk/core dist/sealed-payload/member-chain.d.ts ====
+import { type JsonObject } from '../attestation';
+import type { WebCryptoKey } from '../webcrypto';
+import { type Bytes, type P256PublicJwk } from './primitives';
+/** Domain separation for {@link deriveMemberId}. */
+export declare const MEMBER_ID_DOMAIN = "byok-member-id-v1\n";
+/** `base64url(sha256(MEMBER_ID_DOMAIN || 0x04 || x || y))`: 43 characters, no padding. */
+export declare const MEMBER_ID_PATTERN: RegExp;
+export declare const MEMBER_CHAIN_VERSION = 1;
+/** Prepended to the canonical entry bytes, so a chain signature never verifies as another signed object. */
+export declare const MEMBER_CHAIN_DOMAIN_PREFIX = "byok-member-chain-v1\n";
+export declare const MEMBER_CHAIN_OPS: readonly ['add', 'remove', 'rotate', 'scope-policy', 'shred'];
+export type MemberChainOp = (typeof MEMBER_CHAIN_OPS)[number];
+/** One entry before it is signed. `seq` starts at 1; the first entry, and only it, has `prev: null`. */
+export interface UnsignedMemberChainEntryV1 {
+    readonly v: typeof MEMBER_CHAIN_VERSION;
+    readonly tenantId: string;
+    readonly seq: number;
+    /** `sha256:<hex>` of the previous entry's signing input. */
+    readonly prev: string | null;
+    readonly op: MemberChainOp;
+    readonly subject: JsonObject;
+    /** Member id of the signer. */
+    readonly signer: string;
+}
+export interface MemberChainEntryV1 extends UnsignedMemberChainEntryV1 {
+    /** ECDSA P-256 / SHA-256 over the signing input, base64url of the 64-byte P1363 form. */
+    readonly sig: string;
+}
+/** The member id of a signing public key. The key must be a point on P-256. */
+export declare function deriveMemberId(signingPublicJwk: P256PublicJwk): Promise<string>;
+/** `MEMBER_CHAIN_DOMAIN_PREFIX || canonicalJson(entry without sig)`. */
+export declare function memberChainSigningInput(entry: UnsignedMemberChainEntryV1): Bytes;
+/** `sha256:<hex>` of the signing input. The signature is not hashed, so the hash names the entry's content. */
+export declare function memberChainEntryHash(entry: UnsignedMemberChainEntryV1): Promise<string>;
+/**
+ * Sign one entry. The signer's public key is required so an entry is never
+ * signed under a member id that is not the signer's own. A private key that
+ * does not pair with that public key throws `sealed_secret_invalid`.
+ */
+export declare function signMemberChainEntry(entry: UnsignedMemberChainEntryV1, signer: {
+    readonly publicJwk: P256PublicJwk;
+    readonly privateKey: WebCryptoKey;
+}): Promise<MemberChainEntryV1>;
+export type MemberChainEntryVerifyResult = {
+    readonly ok: true;
+    readonly entry: MemberChainEntryV1;
+    readonly hash: string;
+} | {
+    readonly ok: false;
+    readonly reason: 'member_chain_entry_invalid' | 'member_chain_signature_invalid';
+};
+/**
+ * Verify one received entry against the signing key the verifier already
+ * pins for `entry.signer`. A malformed entry, or a key whose member id is not
+ * the entry's signer, is `member_chain_entry_invalid`; a bad signature is
+ * `member_chain_signature_invalid`. Nothing here throws for hostile input.
+ */
+export declare function verifyMemberChainEntry(entry: unknown, signerPublicJwk: P256PublicJwk): Promise<MemberChainEntryVerifyResult>;
+// ==== @byok-sdk/core dist/sealed-payload/primitives.d.ts ====
+/**
+ * Byte helpers shared by the sealed-payload modules (#654 E1a).
+ *
+ * Every function is WebCrypto-only and `node:`-free, so a browser, Workers,
+ * Node and Bun run the same code. The subpath `@byok-sdk/core/sealed-payload`
+ * exports the sealed-payload interface, but not these helpers. The package
+ * root exports none of the sealed-payload modules.
+ *
+ * Caller input errors throw `sealed_secret_invalid`, the code `hpke.ts`
+ * already raises for bad HPKE input. Receiver checks never throw for hostile
+ * bytes; they return a typed failure.
+ */
+import { z } from 'zod';
+import { ByokCoreError } from '../errors';
+import { decodeBase64Url, encodeBase64Url, type SealingPublicJwk } from '../sealed-provider-secret';
+import { type WebCryptoKey } from '../webcrypto';
+export type Bytes = Uint8Array<ArrayBuffer>;
+/**
+ * The strict EC P-256 public JWK core already uses for sealing keys. Member
+ * signing keys and member KEM keys use the same shape.
+ */
+export type P256PublicJwk = SealingPublicJwk;
+export declare const P256PublicJwkSchema: z.ZodObject<{
+    kty: z.ZodLiteral<"EC">;
+    crv: z.ZodLiteral<"P-256">;
+    x: z.ZodString;
+    y: z.ZodString;
+}, z.core.$strict>;
+export declare function invalidInput(message: string): ByokCoreError;
+export declare function utf8(value: string): Bytes;
+export declare function copy(bytes: Uint8Array): Bytes;
+export declare function concat(...parts: readonly Uint8Array[]): Bytes;
+export declare function hex(bytes: Uint8Array): string;
+export { decodeBase64Url, encodeBase64Url };
+/** Fresh CSPRNG bytes from `globalThis.crypto`, the same source WebCrypto keys come from. */
+export declare function randomBytes(length: number): Bytes;
+export declare function sha256(bytes: Uint8Array): Promise<Bytes>;
+export declare function hmacSha256(key: Uint8Array, data: Uint8Array): Promise<Bytes>;
+/** RFC 5869 HKDF-SHA-256 through WebCrypto's own HKDF. */
+export declare function hkdfSha256(ikm: Uint8Array, salt: Uint8Array, info: string, length: number): Promise<Bytes>;
+/** A zod string that must be canonical unpadded base64url of exactly `bytes` bytes. */
+export declare function base64UrlBytes(bytes: number): z.ZodString;
+/** Uncompressed SEC1 bytes of a strict P-256 public JWK, checked to be a point on the curve. */
+export declare function p256PublicKeyBytes(publicJwk: P256PublicJwk): Promise<Bytes>;
+/**
+ * ECDSA P-256 / SHA-256 signature over `data`, as base64url of the 64-byte
+ * P1363 form. The signature must verify under `publicJwk`, so a private key
+ * that does not pair with the caller's public key throws
+ * `sealed_secret_invalid` and signs nothing under another key's id.
+ */
+export declare function ecdsaSign(publicJwk: P256PublicJwk, privateKey: WebCryptoKey, data: Uint8Array): Promise<string>;
+/** True only for a canonical 64-byte P1363 signature that verifies under `publicJwk`. */
+export declare function ecdsaVerify(publicJwk: P256PublicJwk, signature: string, data: Uint8Array): Promise<boolean>;
+// ==== @byok-sdk/core dist/sealed-payload/scope-key.d.ts ====
+import type { WebCryptoKey } from '../webcrypto';
+import { type Bytes, type P256PublicJwk } from './primitives';
+export declare const SCOPE_KEY_BYTES = 32;
+/** 16 bytes of the key-id HMAC, as unpadded base64url. */
+export declare const SCOPE_KEY_ID_LENGTH = 22;
+export declare const SCOPE_KEY_ID_PATTERN: RegExp;
+/** Byte length of the per-content HKDF salt. */
+export declare const SEALED_SALT_BYTES = 32;
+export declare const SCOPE_KEY_PACKAGE_VERSION = 1;
+export declare const SCOPE_KEY_HPKE_INFO = "byok-sdk.scope-key.v1";
+/** Prepended to the canonical package bytes the sender signs. */
+export declare const SCOPE_KEY_PACKAGE_DOMAIN_PREFIX = "byok-scope-key-package-v1\n";
+/** A fresh scope key from the platform CSPRNG. */
+export declare function generateScopeKey(): Bytes;
+export declare function deriveScopeKeyId(scopeKey: Uint8Array): Promise<string>;
+/** The AES-256-GCM key of one sealed content. Each content has its own salt, so each key encrypts once. */
+export declare function deriveSealedContentKey(scopeKey: Uint8Array, salt: Uint8Array): Promise<Bytes>;
+/**
+ * The content-MAC key of one scope epoch. The design's salt is empty; HMAC
+ * pads its key with zeros, so 32 zero bytes give the same output, and no
+ * runtime has to accept a zero-length HKDF salt.
+ */
+export declare function deriveSealedMacKey(scopeKey: Uint8Array): Promise<Bytes>;
+export interface ScopeKeyPackageV1 {
+    readonly v: typeof SCOPE_KEY_PACKAGE_VERSION;
+    readonly tenantId: string;
+    readonly scopeId: string;
+    readonly epoch: number;
+    readonly keyId: string;
+    /** Member id of the member that can open the package. */
+    readonly recipient: string;
+    /** Member id of the member that sealed and signed the package. */
+    readonly sender: string;
+    /** HPKE encapsulated key: base64url of a 65-byte uncompressed P-256 point. */
+    readonly enc: string;
+    /** HPKE ciphertext of the scope key: base64url of 48 bytes. */
+    readonly ciphertext: string;
+    /** Sender's ECDSA P-256 / SHA-256 signature, base64url of the 64-byte P1363 form. */
+    readonly sig: string;
+}
+export interface SealScopeKeyPackageInput {
+    readonly scopeKey: Uint8Array;
+    readonly tenantId: string;
+    readonly scopeId: string;
+    readonly epoch: number;
+    readonly recipient: {
+        readonly memberId: string;
+        readonly kemPublicJwk: P256PublicJwk;
+    };
+    readonly sender: {
+        readonly signingPublicJwk: P256PublicJwk;
+        readonly signingPrivateKey: WebCryptoKey;
+    };
+}
+/**
+ * Wrap one scope key to one member and sign the package. A signing private key
+ * that does not pair with `sender.signingPublicJwk` throws
+ * `sealed_secret_invalid`.
+ */
+export declare function sealScopeKeyPackage(input: SealScopeKeyPackageInput): Promise<ScopeKeyPackageV1>;
+export interface OpenScopeKeyPackageInput {
+    readonly package: unknown;
+    /** What the caller asked the Host for. A package for anything else is refused. */
+    readonly expected: {
+        readonly tenantId: string;
+        readonly scopeId: string;
+        readonly epoch: number;
+    };
+    readonly recipient: {
+        readonly memberId: string;
+        readonly kemPublicJwk: P256PublicJwk;
+        readonly kemPrivateKey: WebCryptoKey;
+    };
+    /** The signing key the caller's verified chain holds for `package.sender`. */
+    readonly senderSigningPublicJwk: P256PublicJwk;
+}
+export type ScopeKeyPackageOpenResult = {
+    readonly ok: true;
+    readonly scopeKey: Uint8Array;
+    readonly keyId: string;
+} | {
+    readonly ok: false;
+    readonly reason: 'key_package_invalid' | 'key_package_signature_invalid' | 'key_package_open_failed';
+};
+/**
+ * Verify and open one key package, in this order: shape; addressed to this
+ * recipient for the expected tenant, scope and epoch; sender key matches the
+ * sender id; sender signature; HPKE open; key length; and `keyId` equal to
+ * the opened key's own id. Nothing here throws for hostile input.
+ */
+export declare function openScopeKeyPackage(input: OpenScopeKeyPackageInput): Promise<ScopeKeyPackageOpenResult>;
+// ==== @byok-sdk/core dist/sealed-payload/sealed-content.d.ts ====
+/**
+ * Sealed content v1 (#654 design §8.1, §8.2, §8.6, §9.1).
+ *
+ * A member seals the fields one category moves out of a payload. The result is
+ * a header the Host may read — version, suite, category, scope, chain head,
+ * sender, salt, nonce, padded length and content MAC — and the ciphertext
+ * bytes. Whether the ciphertext travels inline or by reference is the wire
+ * schema's rule, not this module's.
+ *
+ * The plaintext is the canonical JSON of the moved fields. It is framed before
+ * encryption: `u32be(contentLength) || content || zeros`, padded in 256-byte
+ * steps up to 16 KiB and with Padmé above. The frame is inside the AEAD, so the
+ * length and the padding are authenticated, and one content has exactly one
+ * legal padded length.
+ *
+ * The AAD binds every identity the Host could otherwise swap: tenant, scope,
+ * epoch, key id, chain head, sender, message family, direction, the write's
+ * identity, target device, Agent, the task's sealing categories, padded length
+ * and content MAC. Envelope `id`, `seq` and `ts` stay out, so an envelope that
+ * a dead-letter replay re-encodes still opens.
+ *
+ * `contentMac` is a keyed MAC over category, family, identity and plaintext. The
+ * Host compares two submissions of one identity by it, without a key.
+ *
+ * Blob fields are not sealed here yet; their AAD rule comes with the blob wire
+ * rules.
+ */
+import { z } from 'zod';
+import { type JsonObject } from '../attestation';
+import { type Bytes } from './primitives';
+export declare const SEALED_CONTENT_VERSION = 1;
+/** The only suite v1 admits. A new suite is a new constant and a new capability, never a parser branch. */
+export declare const SEALED_CONTENT_SUITE = "byok-sealed-v1.hkdf-sha256.aes-256-gcm";
+/** C1–C4, in their canonical order. A task's sealing categories are listed in this order. */
+export declare const SEALED_CATEGORIES: readonly ['task-input', 'agent-message', 'task-output', 'memory-projection'];
+export type SealedCategory = (typeof SEALED_CATEGORIES)[number];
+export declare const SEALED_DIRECTIONS: readonly ['server-to-daemon', 'daemon-to-server'];
+export type SealedDirection = (typeof SEALED_DIRECTIONS)[number];
+export declare const SEALED_NONCE_BYTES = 12;
+/**
+ * The one legal padded length of a frame whose unpadded length is
+ * `frameLength` (`4 + contentLength`). Up to 16 KiB: the next multiple of 256.
+ * Above: Padmé — `E = floor(log2 n)`, `S = floor(log2 E) + 1`, rounded up to a
+ * multiple of `2^(E − S)`, which adds less than 6.25%.
+ */
+export declare function sealedPaddedLength(frameLength: number): number;
+/** `u32be(contentLength) || content || zeros`, as long as {@link sealedPaddedLength} says. */
+export declare function encodeSealedFrame(content: Uint8Array): Bytes;
+/**
+ * The content of a decrypted frame, or `undefined` when one of the five
+ * receiver checks fails: frame length equals `paddedLength`; the content fits;
+ * `paddedLength` is the padded length of exactly this content; every padding
+ * byte is zero; the content is within the message type's plaintext limit.
+ */
+export declare function decodeSealedFrame(frame: Uint8Array, paddedLength: number, maxContentLength: number): Uint8Array | undefined;
+/** What the Host may read of one sealed content. The ciphertext travels next to it. */
+export declare const SealedContentHeaderV1Schema: z.ZodObject<{
+    v: z.ZodLiteral<1>;
+    suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+    category: z.ZodEnum<{
+        "agent-message": "agent-message";
+        "memory-projection": "memory-projection";
+        "task-input": "task-input";
+        "task-output": "task-output";
+    }>;
+    scope: z.ZodObject<{
+        id: z.ZodString;
+        epoch: z.ZodNumber;
+        keyId: z.ZodString;
+    }, z.core.$strict>;
+    chainHead: z.ZodObject<{
+        seq: z.ZodNumber;
+        hash: z.ZodString;
+    }, z.core.$strict>;
+    sender: z.ZodString;
+    salt: z.ZodString;
+    nonce: z.ZodString;
+    paddedLength: z.ZodNumber;
+    contentMac: z.ZodString;
+}, z.core.$strict>;
+export type SealedContentHeaderV1 = z.infer<typeof SealedContentHeaderV1Schema>;
+/**
+ * What the receiver knows from its own context and the payload's plaintext
+ * fields. The receiver builds it; the sealed bytes never supply it.
+ */
+export interface SealedBinding {
+    readonly tenantId: string;
+    /** Message family, e.g. `task.offer_for_agent`, or `routine.template`. */
+    readonly family: string;
+    readonly direction: SealedDirection;
+    /** The write's identity: `{ taskId }`, `{ messageId }`, … or `{ routineId, definitionVersion }`. */
+    readonly identity: {
+        readonly [field: string]: string | number;
+    };
+    /** Target device. `null` only for the `routine.template` family, which binds no device. */
+    readonly deviceId: string | null;
+    readonly agentRef: {
+        readonly agentId: string;
+        readonly profileRevision: string;
+    } | null;
+    /** The task's `sealing.categories`, unique and in {@link SEALED_CATEGORIES} order. */
+    readonly categories: readonly SealedCategory[];
+    /** A `routine.template`'s expiry; `null` for every other family. */
+    readonly notAfter: string | null;
+}
+/** The canonical AAD bytes of a header under a binding (§8.2). */
+export declare function sealedContentAad(header: SealedContentHeaderV1, binding: SealedBinding): Uint8Array;
+/** The content MAC of one plaintext under one scope key (§9.1). */
+export declare function sealedContentMac(input: {
+    readonly scopeKey: Uint8Array;
+    readonly category: SealedCategory;
+    readonly binding: SealedBinding;
+    readonly plaintext: JsonObject;
+}): Promise<string>;
+export interface SealContentInput {
+    readonly scopeKey: Uint8Array;
+    readonly scope: {
+        readonly id: string;
+        readonly epoch: number;
+    };
+    /** The member chain head the sender verified before sealing. */
+    readonly chainHead: {
+        readonly seq: number;
+        readonly hash: string;
+    };
+    /** The sender's member id. */
+    readonly sender: string;
+    readonly category: SealedCategory;
+    readonly binding: SealedBinding;
+    /** The fields this category moves out of the payload. */
+    readonly plaintext: JsonObject;
+    /** The plaintext limit of this message type, in UTF-8 bytes of canonical JSON. */
+    readonly maxContentLength: number;
+}
+export interface SealedContent {
+    readonly header: SealedContentHeaderV1;
+    /** AES-256-GCM output: the padded frame followed by the 16-byte tag. */
+    readonly ciphertext: Uint8Array;
+}
+/** Seal one category of a payload once. A retry must resend these bytes, never seal again (§9.2). */
+export declare function sealContent(input: SealContentInput): Promise<SealedContent>;
+/** The receiver failure codes of design §8.3. */
+export type SealedContentOpenFailure = 'sealed_key_unavailable' | 'sealed_open_failed' | 'sealed_content_mac_mismatch' | 'sealing_policy_mismatch';
+/**
+ * An opened content, with the header that the AEAD authenticated. The caller
+ * reads `chainHead` and `sender` from it for the sender-view check (§7.3).
+ */
+export type SealedContentOpenResult = {
+    readonly ok: true;
+    readonly plaintext: JsonObject;
+    readonly header: SealedContentHeaderV1;
+} | {
+    readonly ok: false;
+    readonly reason: SealedContentOpenFailure;
+};
+/** The task's frozen `sealing` scope (§6.2). Its `categories` are {@link SealedBinding.categories}. */
+export interface SealedScopePolicy {
+    readonly scopeId: string;
+    /** The lowest epoch the task accepts: the epoch of the offer's C1 content. */
+    readonly epoch: number;
+}
+export interface OpenSealedContentInput {
+    /** The header as received. It is untrusted. */
+    readonly header: unknown;
+    readonly ciphertext: Uint8Array;
+    /** The scope key the receiver holds for `header.scope`. */
+    readonly scopeKey: Uint8Array;
+    /** Partly written by the Host (`sealing.categories`, `notAfter`), so it is untrusted too. */
+    readonly binding: SealedBinding;
+    /** From the task's `sealing`, which the Host writes. Untrusted. */
+    readonly sealing: SealedScopePolicy;
+    readonly maxContentLength: number;
+}
+/**
+ * Open one sealed content, fail closed. In order: a binding and a task scope
+ * that parse (`sealing_policy_mismatch`); header shape (`sealed_open_failed`);
+ * the category within the task's categories, and the header scope equal to
+ * the task's scope at its epoch or later (both `sealing_policy_mismatch`); key
+ * id of the held scope key (`sealed_key_unavailable`); ciphertext length; AEAD
+ * under the rebuilt AAD; the five frame checks; canonical JSON of a plain
+ * object (all `sealed_open_failed`); and the content MAC
+ * (`sealed_content_mac_mismatch`).
+ * There is no plaintext fallback, and nothing here throws for hostile input.
+ */
+export declare function openSealedContent(input: OpenSealedContentInput): Promise<SealedContentOpenResult>;
 // ==== @byok-sdk/core dist/sealed-provider-secret.d.ts ====
 /**
  * Sealed provider provisioning v1 (plan web-sealed-provisioning §3).

@@ -20,6 +20,7 @@ import {
   encodeSealedFrame,
   openSealedContent,
   sealContent,
+  sealContentWithRandomness,
   sealedPaddedLength,
   type SealContentInput,
   type SealedBinding,
@@ -48,6 +49,8 @@ const BINDING: SealedBinding = {
   categories: ['task-input', 'task-output'],
   notAfter: null,
 };
+
+const SEALING = { scopeId: 'scope-1', epoch: 1 } as const;
 
 function sealInput(overrides: Partial<SealContentInput> = {}): SealContentInput {
   return {
@@ -110,8 +113,8 @@ describe('sealContent', () => {
     expect(first.header.nonce).not.toBe(second.header.nonce);
     expect(first.header.contentMac).toBe(second.header.contentMac);
     for (const sealed of [first, second]) {
-      const opened = await openSealedContent({ ...sealed, scopeKey: sealInput().scopeKey, binding: BINDING, maxContentLength: 1024 });
-      expect(opened).toEqual({ ok: true, plaintext: { input: 'hello' } });
+      const opened = await openSealedContent({ ...sealed, scopeKey: sealInput().scopeKey, binding: BINDING, sealing: SEALING, maxContentLength: 1024 });
+      expect(opened).toEqual({ ok: true, plaintext: { input: 'hello' }, header: sealed.header });
     }
   });
 
@@ -135,9 +138,20 @@ describe('sealContent', () => {
     await expectInvalid(sealContent(sealInput({ binding: { ...BINDING, deviceId: null, notAfter: '2026-12-31T00:00:00Z' } })));
   });
 
+  it('binds a device for every family except routine.template', async () => {
+    const expiry = '2026-12-31T00:00:00.000Z';
+    const template = { ...BINDING, family: 'routine.template', identity: { routineId: 'routine-1', definitionVersion: 1 }, deviceId: null, notAfter: expiry };
+    await expect(sealContent(sealInput({ binding: template }))).resolves.toHaveProperty('header');
+    await expectInvalid(sealContent(sealInput({ binding: { ...BINDING, deviceId: null, notAfter: expiry } })));
+    await expectInvalid(sealContent(sealInput({ binding: { ...BINDING, family: 'task.result', direction: 'daemon-to-server', deviceId: null, notAfter: expiry } })));
+    await expectInvalid(sealContent(sealInput({ binding: { ...template, deviceId: 'device-1', notAfter: null } })));
+    await expectInvalid(sealContent(sealInput({ binding: { ...template, deviceId: 'device-1' } })));
+    await expectInvalid(sealContent(sealInput({ binding: { ...template, notAfter: null } })));
+  });
+
   it('rejects a fixed salt or nonce of the wrong length', async () => {
-    await expectInvalid(sealContent(sealInput(), { salt: new Uint8Array(16), nonce: new Uint8Array(12) }));
-    await expectInvalid(sealContent(sealInput(), { salt: new Uint8Array(32), nonce: new Uint8Array(16) }));
+    await expectInvalid(sealContentWithRandomness(sealInput(), { salt: new Uint8Array(16), nonce: new Uint8Array(12) }));
+    await expectInvalid(sealContentWithRandomness(sealInput(), { salt: new Uint8Array(32), nonce: new Uint8Array(16) }));
   });
 });
 
@@ -145,8 +159,30 @@ describe('openSealedContent', () => {
   it('returns a typed failure for hostile headers and never throws', async () => {
     const sealed = await sealContent(sealInput());
     for (const header of [undefined, 'header', [], { ...sealed.header, salt: 'not base64url!' }, { ...sealed.header, paddedLength: 2 ** 60 }]) {
-      const opened = await openSealedContent({ header, ciphertext: sealed.ciphertext, scopeKey: sealInput().scopeKey, binding: BINDING, maxContentLength: 1024 });
+      const opened = await openSealedContent({ header, ciphertext: sealed.ciphertext, scopeKey: sealInput().scopeKey, binding: BINDING, sealing: SEALING, maxContentLength: 1024 });
       expect(opened).toEqual({ ok: false, reason: 'sealed_open_failed' });
+    }
+  });
+
+  it('returns sealing_policy_mismatch for a hostile binding or task scope and never throws', async () => {
+    const sealed = await sealContent(sealInput());
+    const open = (binding: unknown, sealing: unknown) => openSealedContent({
+      ...sealed,
+      scopeKey: sealInput().scopeKey,
+      binding: binding as SealedBinding,
+      sealing: sealing as typeof SEALING,
+      maxContentLength: 1024,
+    });
+    for (const binding of [
+      null,
+      { ...BINDING, categories: ['task-output', 'task-input'] },
+      { ...BINDING, notAfter: '2026-12-31T00:00:00Z' },
+      { ...BINDING, deviceId: null, notAfter: '2026-12-31T00:00:00.000Z' },
+    ]) {
+      expect(await open(binding, SEALING)).toEqual({ ok: false, reason: 'sealing_policy_mismatch' });
+    }
+    for (const sealing of [null, { scopeId: '', epoch: 1 }, { scopeId: 'scope-1', epoch: 0 }, { scopeId: 'scope-2', epoch: 1 }, { scopeId: 'scope-1', epoch: 2 }]) {
+      expect(await open(BINDING, sealing)).toEqual({ ok: false, reason: 'sealing_policy_mismatch' });
     }
   });
 });
@@ -163,6 +199,16 @@ describe('member chain entries', () => {
     await expectInvalid(signMemberChainEntry(entry, { publicJwk: other.publicJwk, privateKey: signer.privateKey }));
     await expectInvalid(signMemberChainEntry({ ...entry, prev: `sha256:${'0'.repeat(64)}` }, signer));
     await expectInvalid(signMemberChainEntry({ ...entry, subject: { value: 0.5 } }, signer));
+  });
+
+  it('refuses a private key that does not pair with the signer public key', async () => {
+    const signer = await p256Pair('sign');
+    const other = await p256Pair('sign');
+    const entry: UnsignedMemberChainEntryV1 = {
+      v: 1, tenantId: 'tenant-1', seq: 1, prev: null, op: 'add', subject: { member: 'x' }, signer: await deriveMemberId(signer.publicJwk),
+    };
+    await expectInvalid(signMemberChainEntry(entry, { publicJwk: signer.publicJwk, privateKey: other.privateKey }));
+    await expectInvalid(signMemberChainEntry(entry, { publicJwk: signer.publicJwk, privateKey: (await p256Pair('kem')).privateKey }));
   });
 
   it('rejects hostile entries without throwing', async () => {
@@ -222,5 +268,20 @@ describe('scope key packages', () => {
     await expectInvalid(sealScopeKeyPackage({ ...base, scopeKey: new Uint8Array(31) }));
     await expectInvalid(sealScopeKeyPackage({ ...base, recipient: { ...base.recipient, memberId: 'short' } }));
     await expectInvalid(sealScopeKeyPackage({ ...base, recipient: { ...base.recipient, kemPublicJwk: OFF_CURVE_JWK } }));
+  });
+
+  it('refuses a signing private key that does not pair with the sender public key', async () => {
+    const senderSigning = await p256Pair('sign');
+    const recipientKem = await p256Pair('kem');
+    const base = {
+      scopeKey: generateScopeKey(),
+      tenantId: 'tenant-1',
+      scopeId: 'scope-1',
+      epoch: 1,
+      recipient: { memberId: 'M'.repeat(43), kemPublicJwk: recipientKem.publicJwk },
+    };
+    const otherPrivateKey = (await p256Pair('sign')).privateKey;
+    await expectInvalid(sealScopeKeyPackage({ ...base, sender: { signingPublicJwk: senderSigning.publicJwk, signingPrivateKey: otherPrivateKey } }));
+    await expectInvalid(sealScopeKeyPackage({ ...base, sender: { signingPublicJwk: senderSigning.publicJwk, signingPrivateKey: recipientKem.privateKey } }));
   });
 });

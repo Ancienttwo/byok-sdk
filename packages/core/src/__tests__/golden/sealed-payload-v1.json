@@ -1,5 +1,5 @@
 {
-  "note": "Sealed-payload v1 vectors (#654 E1a). Regenerate with BYOK_CORE_UPDATE_GOLDEN=1 bun run --filter @byok-sdk/core test. A diff in a deterministic field is a breaking change to the v1 format. Chain signatures and key packages are random at generation, so they are verify-only and change on every regeneration. All keys derive from public labels and are test values only.",
+  "note": "Sealed-payload v1 vectors (#654 E1a, E1b). Regenerate with BYOK_CORE_UPDATE_GOLDEN=1 bun run --filter @byok-sdk/core test. A diff in a deterministic field is a breaking change to the v1 format. Chain signatures and key packages are random at generation, so they are verify-only and change on every regeneration. All keys derive from public labels and are test values only.",
   "padding": [
     {
       "frameLength": 4,
@@ -179,6 +179,10 @@
           "taskId": "task-1"
         }
       },
+      "sealing": {
+        "scopeId": "scope-1",
+        "epoch": 1
+      },
       "plaintext": {
         "input": {
           "prompt": "Summarize the attached notes.",
@@ -244,6 +248,10 @@
           "taskId": "task-1",
           "messageId": "message-1"
         }
+      },
+      "sealing": {
+        "scopeId": "scope-1",
+        "epoch": 1
       },
       "plaintext": {
         "body": "Done. 結果を添付しました。",
@@ -311,6 +319,10 @@
           "taskId": "task-1"
         }
       },
+      "sealing": {
+        "scopeId": "scope-1",
+        "epoch": 1
+      },
       "plaintextFill": {
         "key": "output",
         "unit": "0123456789abcdef",
@@ -368,6 +380,10 @@
           "memory-projection"
         ],
         "notAfter": null
+      },
+      "sealing": {
+        "scopeId": "scope-1",
+        "epoch": 1
       },
       "plaintext": {
         "text": "The user prefers metric units."
@@ -427,6 +443,10 @@
           "task-input"
         ],
         "notAfter": "2026-12-31T00:00:00.000Z"
+      },
+      "sealing": {
+        "scopeId": "scope-1",
+        "epoch": 1
       },
       "plaintext": {
         "input": {
@@ -497,6 +517,10 @@
         ],
         "notAfter": null
       },
+      "sealing": {
+        "scopeId": "scope-1",
+        "epoch": 1
+      },
       "ciphertext": "813e3cedd439bc38f12e7483534dc0ffceecee9a8ad4b60b3374bcc02f95b1af73632a27fd9971e6dfc514c1850e686d57e5ce34de576e8fcd1e5fc6dfd95552f9ce2e221730f3b3714c80c44ba6b9ef4de1998d87ee98750c9bb9c73a11895d732c88b9be376fd3b09822139a8c0eb0de3f3693aff555c665d5d41d1370c230abf9a9b2cd80940d2c3658e12c39621af0dfe9810006e88a0e97aa4af65b7e0fd7e42bb4b157ed9a5f9ffbea478e86428a97ba87861b37a392bf2ae70e38e0b3a22cfb9e06bca34db68978698ae5596909aac9be74210fe7e19f37599dc3acb9a4ae9c42a78e5c49b9d8ae42a09d3c3bf37ea73dba410a08fba07af2ffb559a9ba6db06c2a3bf2bcea55392fe3d16e62",
       "maxContentLength": 1024,
       "expect": "sealed_content_mac_mismatch"
@@ -536,6 +560,10 @@
           "task-input"
         ],
         "notAfter": null
+      },
+      "sealing": {
+        "scopeId": "scope-1",
+        "epoch": 1
       },
       "ciphertext": "127cef56756423e3e43632ae0282151cd3073172274c6304464825c0378b70ac73241cfecc85c4db6401c13a8e2b16f57981098e12690f44dd07549a0fd8e07ed3c21ccb1dda0ada6a0e2f2b1daf7fc1dbac3954c51e71e266e4490220a16405e24988999802cf0ec48f5d6376fe62ed8da02906972f6cc9f3705fc763b70d62907f9ca6dc30fd2a0e5007f66fe78799d3627ab4bc2cb8baf6bbc43efba690761e91105c2be3fe4235090d883e03327c28893f13ac908408f0e2964c5512296682f6940fab0911edd7d18cffb5d5d59c2c3828285566eb1ac6cc7e86ebdabc0fe7012f0dbac8cdf01f60a43588a69b5ac00fb75cc3ab5fe15bf33ac474c443abeb0c64aa3bac656fc30aa6a8290504eb",
       "maxContentLength": 1024,
@@ -577,6 +605,10 @@
         ],
         "notAfter": null
       },
+      "sealing": {
+        "scopeId": "scope-1",
+        "epoch": 1
+      },
       "ciphertext": "ad71b98f14e5832f0e50579b0fc618d25d1321df8502a2fc68fe14b98eea8f15584978f2ba39856661b268e4194e7620a0a5055e083414c86c64693eb0e37ad4869203e011f9da784edd4857eaf682541b631a76dd5490b435d31d2ea76c0257e9ba8d07a22c36a0a636a982ef382981df57a88e93a7b5a61a66d72ccbefcdd602de094460993ad8843c956373fccf85d661fc2c3a83810580e9ff85019d419a574c23251f3dcd17a072ba9ba09e5c56c2e7f4862ae7995102e7114ab7dbee7d9ff2c80c3e7a357fb5da9a60f385d3d1c0867783ac18b50acdbba2855ce4ffd264515a9ba27a624ba81eda026288b95eaf05c1a324153ac3933feca21b9f42bf5d766bd5aae8ecabc707a9cc0569afd17971a43179e55131e4e3d6e62d27b21d89692863d760589882eda26fd0e2b9363184f654371892e4a4a4a2b93c847f2975e89c7349fe3b5b79c60de11f98feb7ab43a6c83f0d3258a0525af20c0f2079e22ce67f68bc57f7b5a4b7b9871bdc568afba71bc67bc65bd7e0c43938ef2625ee8cdbdb2e9240d29c7dbd158a308a6c7dc767b68445a75f19fb60a22e461fa9ce61123de56b5add54b4a487b33bb600cc8b48939c102c119b291a55c38ffe8ec79b8591dda8520281db597d9352066dea61de3fb9f3748922c94da8e2e21989469b9f4a6b1634b82bb7e7d3bff33d46e1717e6b85a5163336329cd05e1df59a2c8a1442f22a99e2028bd57c71fd9702",
       "maxContentLength": 1024,
       "expect": "sealed_open_failed"
@@ -616,6 +648,10 @@
           "task-input"
         ],
         "notAfter": null
+      },
+      "sealing": {
+        "scopeId": "scope-1",
+        "epoch": 1
       },
       "ciphertext": "ad04bde7208178d10a221b4625162b7fd1aa435b07da2ebac0b9b53006f5396231334d4755cd2983e4f4834ff6b43d214a3564cd78817c55a213feb3606997c862f282abb8c51ab57eb59ed1a9687089765c521c0d33c3bee2ff866622370e93bfdf5e9ec61121fc8fc25b98729f61fa10a2a9b54e2b576d79e905dff10c601298dfeaf6cf479e70ff7fcc012beeeee871d32b6b2c41e9cdbb5e10b33c23777fe4e1d752ca9ed4814690014cf167fdcaf166493041390882870c543684b9e5ad122cfdd5242bacd480bbaad948a0064e1f53598d20e55fae024fc8fe7db45612e42db148348b422ccfae505cbfb26f4b6e105b3ec3f5f0cf4e7bce7bda35d2529968410c7b57685b4665f27ffdcc2d7b",
       "maxContentLength": 1024,
@@ -657,9 +693,306 @@
         ],
         "notAfter": null
       },
+      "sealing": {
+        "scopeId": "scope-1",
+        "epoch": 1
+      },
       "ciphertext": "47b519764f310575006adb18d58fcc2ce704ae461ed58226b7f90a61d8956afc5c2064659254449b5654b602bee45d396003061ff41b90ad7cdda763ae29caf52ad1588dfc0b2a38c1f6118135ed3fc083fce721a8c86b0834effbb4a3c9e4321a298a352d179eb1003944fc5a768585b30a95bc069ecf6ec873400428790be0cc7dba350dbe9ff1315f4b1a571abe8cc94fc9fecc1090cbc61f61957b89894981f3d64735d806f997caf1ae6317411fcdb42085e19d5faf3ae40f66cb5245a0ccbf43103d062b6fc0840fcd7ecf018016af557ec817f8072de9751ec11ea0a7f43fd2072f860460a7aea9ac57ce443c404062dc8ae6af9eceba4dbece81fc82c64e877216f87c7943001702a15fc690",
       "maxContentLength": 1024,
       "expect": "sealed_open_failed"
+    }
+  ],
+  "policyOpenFailures": [
+    {
+      "name": "policy-key-id",
+      "defect": "key-id",
+      "header": {
+        "v": 1,
+        "suite": "byok-sealed-v1.hkdf-sha256.aes-256-gcm",
+        "category": "task-input",
+        "scope": {
+          "id": "scope-1",
+          "epoch": 1,
+          "keyId": "n_k8FQbyP_xdCauyemUoyg"
+        },
+        "chainHead": {
+          "seq": 3,
+          "hash": "sha256:9c79d638b64f872407026d7eb6e65868c9b45570ce1759a74e85e033fbbe1ea1"
+        },
+        "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
+        "salt": "W63Lg8RnCUyjp1CT6pdDi_ntf_og-nFz2ui8ebskb1Q",
+        "nonce": "zQadScv9pynJ6kHg",
+        "paddedLength": 256,
+        "contentMac": "hmac-sha256:f83002eccf683eeb1ececf16eb4219fe0692c95589803fa016ef08abef1b6505"
+      },
+      "binding": {
+        "tenantId": "tenant-1",
+        "deviceId": "device-1",
+        "agentRef": {
+          "agentId": "agent-1",
+          "profileRevision": "rev-1"
+        },
+        "categories": [
+          "task-input",
+          "agent-message",
+          "task-output"
+        ],
+        "notAfter": null,
+        "family": "task.offer_for_agent",
+        "direction": "server-to-daemon",
+        "identity": {
+          "taskId": "task-1"
+        }
+      },
+      "sealing": {
+        "scopeId": "scope-1",
+        "epoch": 1
+      },
+      "ciphertext": "df47988b5c0f452c85fab91f910ed17cb3662ef196827d1e059b8a1021dfb1811bafc4625d573f5a78a974d8c6e211645573e51d9881138a31697f20fd662054f2d58746804bc2f69e4a63159a797a72cc2cbbe6db156d14b9e8806ce78b91efb54e45aa24e17eda024d1e92537a23e819dd64bb6562cf5b818c17f966749cc9b8db43cf8c1f7b359a926e741615720fb606c9190bcb680985a1a78837ba8340bdba38c25592132b51e8cd7f34b5faec97807c52b9e536196bd11f501d410f481a6a50bcff7eb9fc84642baf80c734b1f18f67bbb44b67732c67841849546c176a278d3677a4fc1501dd2377d38bc14193fa3c00e20f405d20110ec611257de47fd53e0ca21dbed5cbc2fa09fbe341f3",
+      "maxContentLength": 65536,
+      "expect": "sealed_key_unavailable"
+    },
+    {
+      "name": "policy-category-not-sealed",
+      "defect": "category-not-sealed",
+      "header": {
+        "v": 1,
+        "suite": "byok-sealed-v1.hkdf-sha256.aes-256-gcm",
+        "category": "task-input",
+        "scope": {
+          "id": "scope-1",
+          "epoch": 1,
+          "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw"
+        },
+        "chainHead": {
+          "seq": 3,
+          "hash": "sha256:9c79d638b64f872407026d7eb6e65868c9b45570ce1759a74e85e033fbbe1ea1"
+        },
+        "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
+        "salt": "W63Lg8RnCUyjp1CT6pdDi_ntf_og-nFz2ui8ebskb1Q",
+        "nonce": "zQadScv9pynJ6kHg",
+        "paddedLength": 256,
+        "contentMac": "hmac-sha256:f83002eccf683eeb1ececf16eb4219fe0692c95589803fa016ef08abef1b6505"
+      },
+      "binding": {
+        "tenantId": "tenant-1",
+        "deviceId": "device-1",
+        "agentRef": {
+          "agentId": "agent-1",
+          "profileRevision": "rev-1"
+        },
+        "categories": [
+          "task-output"
+        ],
+        "notAfter": null,
+        "family": "task.offer_for_agent",
+        "direction": "server-to-daemon",
+        "identity": {
+          "taskId": "task-1"
+        }
+      },
+      "sealing": {
+        "scopeId": "scope-1",
+        "epoch": 1
+      },
+      "ciphertext": "df47988b5c0f452c85fab91f910ed17cb3662ef196827d1e059b8a1021dfb1811bafc4625d573f5a78a974d8c6e211645573e51d9881138a31697f20fd662054f2d58746804bc2f69e4a63159a797a72cc2cbbe6db156d14b9e8806ce78b91efb54e45aa24e17eda024d1e92537a23e819dd64bb6562cf5b818c17f966749cc9b8db43cf8c1f7b359a926e741615720fb606c9190bcb680985a1a78837ba8340bdba38c25592132b51e8cd7f34b5faec97807c52b9e536196bd11f501d410f481a6a50bcff7eb9fc84642baf80c734b1f18f67bbb44b67732c67841849546c176a278d3677a4fc1501dd2377d38bc14193fa3c00e20f405d20110ec611257de47fd53e0ca21dbed5cbc2fa09fbe341f3",
+      "maxContentLength": 65536,
+      "expect": "sealing_policy_mismatch"
+    },
+    {
+      "name": "policy-scope-id",
+      "defect": "scope-id",
+      "header": {
+        "v": 1,
+        "suite": "byok-sealed-v1.hkdf-sha256.aes-256-gcm",
+        "category": "task-input",
+        "scope": {
+          "id": "scope-1",
+          "epoch": 1,
+          "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw"
+        },
+        "chainHead": {
+          "seq": 3,
+          "hash": "sha256:9c79d638b64f872407026d7eb6e65868c9b45570ce1759a74e85e033fbbe1ea1"
+        },
+        "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
+        "salt": "W63Lg8RnCUyjp1CT6pdDi_ntf_og-nFz2ui8ebskb1Q",
+        "nonce": "zQadScv9pynJ6kHg",
+        "paddedLength": 256,
+        "contentMac": "hmac-sha256:f83002eccf683eeb1ececf16eb4219fe0692c95589803fa016ef08abef1b6505"
+      },
+      "binding": {
+        "tenantId": "tenant-1",
+        "deviceId": "device-1",
+        "agentRef": {
+          "agentId": "agent-1",
+          "profileRevision": "rev-1"
+        },
+        "categories": [
+          "task-input",
+          "agent-message",
+          "task-output"
+        ],
+        "notAfter": null,
+        "family": "task.offer_for_agent",
+        "direction": "server-to-daemon",
+        "identity": {
+          "taskId": "task-1"
+        }
+      },
+      "sealing": {
+        "scopeId": "scope-2",
+        "epoch": 1
+      },
+      "ciphertext": "df47988b5c0f452c85fab91f910ed17cb3662ef196827d1e059b8a1021dfb1811bafc4625d573f5a78a974d8c6e211645573e51d9881138a31697f20fd662054f2d58746804bc2f69e4a63159a797a72cc2cbbe6db156d14b9e8806ce78b91efb54e45aa24e17eda024d1e92537a23e819dd64bb6562cf5b818c17f966749cc9b8db43cf8c1f7b359a926e741615720fb606c9190bcb680985a1a78837ba8340bdba38c25592132b51e8cd7f34b5faec97807c52b9e536196bd11f501d410f481a6a50bcff7eb9fc84642baf80c734b1f18f67bbb44b67732c67841849546c176a278d3677a4fc1501dd2377d38bc14193fa3c00e20f405d20110ec611257de47fd53e0ca21dbed5cbc2fa09fbe341f3",
+      "maxContentLength": 65536,
+      "expect": "sealing_policy_mismatch"
+    },
+    {
+      "name": "policy-epoch-below",
+      "defect": "epoch-below",
+      "header": {
+        "v": 1,
+        "suite": "byok-sealed-v1.hkdf-sha256.aes-256-gcm",
+        "category": "task-input",
+        "scope": {
+          "id": "scope-1",
+          "epoch": 1,
+          "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw"
+        },
+        "chainHead": {
+          "seq": 3,
+          "hash": "sha256:9c79d638b64f872407026d7eb6e65868c9b45570ce1759a74e85e033fbbe1ea1"
+        },
+        "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
+        "salt": "W63Lg8RnCUyjp1CT6pdDi_ntf_og-nFz2ui8ebskb1Q",
+        "nonce": "zQadScv9pynJ6kHg",
+        "paddedLength": 256,
+        "contentMac": "hmac-sha256:f83002eccf683eeb1ececf16eb4219fe0692c95589803fa016ef08abef1b6505"
+      },
+      "binding": {
+        "tenantId": "tenant-1",
+        "deviceId": "device-1",
+        "agentRef": {
+          "agentId": "agent-1",
+          "profileRevision": "rev-1"
+        },
+        "categories": [
+          "task-input",
+          "agent-message",
+          "task-output"
+        ],
+        "notAfter": null,
+        "family": "task.offer_for_agent",
+        "direction": "server-to-daemon",
+        "identity": {
+          "taskId": "task-1"
+        }
+      },
+      "sealing": {
+        "scopeId": "scope-1",
+        "epoch": 2
+      },
+      "ciphertext": "df47988b5c0f452c85fab91f910ed17cb3662ef196827d1e059b8a1021dfb1811bafc4625d573f5a78a974d8c6e211645573e51d9881138a31697f20fd662054f2d58746804bc2f69e4a63159a797a72cc2cbbe6db156d14b9e8806ce78b91efb54e45aa24e17eda024d1e92537a23e819dd64bb6562cf5b818c17f966749cc9b8db43cf8c1f7b359a926e741615720fb606c9190bcb680985a1a78837ba8340bdba38c25592132b51e8cd7f34b5faec97807c52b9e536196bd11f501d410f481a6a50bcff7eb9fc84642baf80c734b1f18f67bbb44b67732c67841849546c176a278d3677a4fc1501dd2377d38bc14193fa3c00e20f405d20110ec611257de47fd53e0ca21dbed5cbc2fa09fbe341f3",
+      "maxContentLength": 65536,
+      "expect": "sealing_policy_mismatch"
+    },
+    {
+      "name": "policy-categories-order",
+      "defect": "categories-order",
+      "header": {
+        "v": 1,
+        "suite": "byok-sealed-v1.hkdf-sha256.aes-256-gcm",
+        "category": "task-input",
+        "scope": {
+          "id": "scope-1",
+          "epoch": 1,
+          "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw"
+        },
+        "chainHead": {
+          "seq": 3,
+          "hash": "sha256:9c79d638b64f872407026d7eb6e65868c9b45570ce1759a74e85e033fbbe1ea1"
+        },
+        "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
+        "salt": "W63Lg8RnCUyjp1CT6pdDi_ntf_og-nFz2ui8ebskb1Q",
+        "nonce": "zQadScv9pynJ6kHg",
+        "paddedLength": 256,
+        "contentMac": "hmac-sha256:f83002eccf683eeb1ececf16eb4219fe0692c95589803fa016ef08abef1b6505"
+      },
+      "binding": {
+        "tenantId": "tenant-1",
+        "deviceId": "device-1",
+        "agentRef": {
+          "agentId": "agent-1",
+          "profileRevision": "rev-1"
+        },
+        "categories": [
+          "task-output",
+          "agent-message",
+          "task-input"
+        ],
+        "notAfter": null,
+        "family": "task.offer_for_agent",
+        "direction": "server-to-daemon",
+        "identity": {
+          "taskId": "task-1"
+        }
+      },
+      "sealing": {
+        "scopeId": "scope-1",
+        "epoch": 1
+      },
+      "ciphertext": "df47988b5c0f452c85fab91f910ed17cb3662ef196827d1e059b8a1021dfb1811bafc4625d573f5a78a974d8c6e211645573e51d9881138a31697f20fd662054f2d58746804bc2f69e4a63159a797a72cc2cbbe6db156d14b9e8806ce78b91efb54e45aa24e17eda024d1e92537a23e819dd64bb6562cf5b818c17f966749cc9b8db43cf8c1f7b359a926e741615720fb606c9190bcb680985a1a78837ba8340bdba38c25592132b51e8cd7f34b5faec97807c52b9e536196bd11f501d410f481a6a50bcff7eb9fc84642baf80c734b1f18f67bbb44b67732c67841849546c176a278d3677a4fc1501dd2377d38bc14193fa3c00e20f405d20110ec611257de47fd53e0ca21dbed5cbc2fa09fbe341f3",
+      "maxContentLength": 65536,
+      "expect": "sealing_policy_mismatch"
+    },
+    {
+      "name": "policy-not-after-format",
+      "defect": "not-after-format",
+      "header": {
+        "v": 1,
+        "suite": "byok-sealed-v1.hkdf-sha256.aes-256-gcm",
+        "category": "task-input",
+        "scope": {
+          "id": "scope-1",
+          "epoch": 1,
+          "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw"
+        },
+        "chainHead": {
+          "seq": 3,
+          "hash": "sha256:9c79d638b64f872407026d7eb6e65868c9b45570ce1759a74e85e033fbbe1ea1"
+        },
+        "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
+        "salt": "gt2JtxQrnH6qS0z4kv6Ev2Kavb2fOQeHHaakakXvA8I",
+        "nonce": "TwsXAr_j64qakCeY",
+        "paddedLength": 256,
+        "contentMac": "hmac-sha256:cb43d59c6294b842c74a5e974264eb775aa0410586c36e2b2a84a062c01e6482"
+      },
+      "binding": {
+        "tenantId": "tenant-1",
+        "family": "routine.template",
+        "direction": "server-to-daemon",
+        "identity": {
+          "routineId": "routine-1",
+          "definitionVersion": 4
+        },
+        "deviceId": null,
+        "agentRef": {
+          "agentId": "agent-1",
+          "profileRevision": "rev-1"
+        },
+        "categories": [
+          "task-input"
+        ],
+        "notAfter": "2026-12-31T00:00:00Z"
+      },
+      "sealing": {
+        "scopeId": "scope-1",
+        "epoch": 1
+      },
+      "ciphertext": "d9182dfeb87603fc401c3d78c47dbf179e9e291f4c164b47d0eeb20631e2b2d199529043332e3e5d7b33b01d7a5edd078fd40f1d3255cc1e196c0671099aa219d13e4d0fbbc24db730a4789f58d73d598d408d1a6ae891c6e4fc415055a4d115219931823ac91d19f8ceaa8cb9288f3f524698f451dc662e2e8b66a1d6ecad97989ba532a9eba4b0392677b1d31d1cb9e3aeb94282590d7c8e4d8a41a5389141a403a4018c481a1c927f29260a804db7352793a3663d15a5a349f09e9b6461fcc04ded958943705587f903470d612d159b17997efd639a313a491d1af0af7d4cd3746e6201a4d74ec16d718a0239c13a645721d141a0ce3b5126d24ab8520dce8bebc995c9530fb9af96ab67350848f0",
+      "maxContentLength": 65536,
+      "expect": "sealing_policy_mismatch"
     }
   ],
   "chain": [
@@ -688,7 +1021,7 @@
           }
         },
         "signer": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "sig": "wPm7OerLbH0YWaLTNGaRfW90ITTSTYgpDDx8UDg72zIPNh7PYQcIKqEVYqE7KbNC3vasgEuWTAVXZX6w-IQCrw"
+        "sig": "FLsWjvUo4QBhwrg5cEEKDnBw6X3s2BVeciSw2gvcNiEHqoWsF5z7-mCD-50sstMtDZUk8--gOaW9KOka4hd3yA"
       },
       "signingInput": "62796f6b2d6d656d6265722d636861696e2d76310a7b226f70223a22616464222c2270726576223a6e756c6c2c22736571223a312c227369676e6572223a227742636a724e48436232685a776f6a6a4a394c4f4474595f6872432d6746665f51484d6e6f5f6766377649222c227375626a656374223a7b226b656d4b6579223a7b22637276223a22502d323536222c226b7479223a224543222c2278223a22674b4c676f644972676b32386b41556442615a695174766575305253412d4a58754f4d7054306933625555222c2279223a222d6646715065426b73546d6c6d535f426b76667067367950794e354f576e654a4b5a613732705175765251227d2c226b696e64223a22636c69656e74222c226d656d626572223a227742636a724e48436232685a776f6a6a4a394c4f4474595f6872432d6746665f51484d6e6f5f6766377649222c227369676e696e674b6579223a7b22637276223a22502d323536222c226b7479223a224543222c2278223a22366e512d494b674c5455495953546a53626371456766366678786a58506f7a5a6f4b6f35613062592d6f38222c2279223a224c305f7655376e6a554a44395f5174336c756a5431774a6d705756616f4a452d4238796c385137614b5a6f227d7d2c2274656e616e744964223a2274656e616e742d31222c2276223a317d",
       "hash": "sha256:25ee64669e72891dcf1add0144f8110c2afead476ba373fd896c17ece17c648a"
@@ -719,7 +1052,7 @@
           }
         },
         "signer": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "sig": "GE1oC_kU1SER7G_gT6MZ9tD-a8mTzR8OaSG0aIYS9MmbHWP90Rw9oVKXx3-HBZoexS2d08urOGtIKj4Mv2hLZQ"
+        "sig": "eS3bMEckNuPi99WSiuj14CiIes67QzqlDIGjEqfFoFVn5nj4GJmaSedm5TUP_3nIxx9Fq41bTzGgcMv-sSWUmQ"
       },
       "signingInput": "62796f6b2d6d656d6265722d636861696e2d76310a7b226f70223a22616464222c2270726576223a227368613235363a32356565363436363965373238393164636631616464303134346638313130633261666561643437366261333733666438393663313765636531376336343861222c22736571223a322c227369676e6572223a227742636a724e48436232685a776f6a6a4a394c4f4474595f6872432d6746665f51484d6e6f5f6766377649222c227375626a656374223a7b226465766963654964223a226465766963652d31222c226b656d4b6579223a7b22637276223a22502d323536222c226b7479223a224543222c2278223a2267507a456155426a4e506e4736674754777a7259526b575630372d6134786e58456a7a6f744e2d66554451222c2279223a22614f5378663170756c6c384869485178686967375556584c32455f57347051586e6a414333466a46726373227d2c226b696e64223a22646576696365222c226d656d626572223a2252444f4248384f446c794c664c42547254374f306c44316173536d39646b5f4d666250775367315f737934222c227369676e696e674b6579223a7b22637276223a22502d323536222c226b7479223a224543222c2278223a2237496e4a4238397a53306b55456d4e77494f796e79677a54564350426e78587a6c45685259376b46412d6f222c2279223a227a667779636d714f73734f79524d383969725f7061684977386d557366304e69566a6a36746e2d36384c55227d7d2c2274656e616e744964223a2274656e616e742d31222c2276223a317d",
       "hash": "sha256:cf9cdfe207049a6f60b840efa5e4baa9acc4ce979937b9d3e7a5eec0de2f653b"
@@ -741,10 +1074,139 @@
           ]
         },
         "signer": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "sig": "_cimqWTwvD2ZPeHMfDh60uh-EYMgsxem1eHDpAUJ9vcQt9yMVbafI8iZEXonFpGcwTSAVDKl10EJq6P4OxKu0w"
+        "sig": "SFQFAPawdUzhDzUjeBxJJNPY3A06CHGDSHFCJVo4jMXH0mBNPytBmiESlIcEXwDoSm6o7uhPpAKy7Tw7HGB7yw"
       },
       "signingInput": "62796f6b2d6d656d6265722d636861696e2d76310a7b226f70223a2273636f70652d706f6c696379222c2270726576223a227368613235363a63663963646665323037303439613666363062383430656661356534626161396163633463653937393933376239643365376135656563306465326636353362222c22736571223a332c227369676e6572223a227742636a724e48436232685a776f6a6a4a394c4f4474595f6872432d6746665f51484d6e6f5f6766377649222c227375626a656374223a7b2265706f6368223a312c226d656d62657273223a5b227742636a724e48436232685a776f6a6a4a394c4f4474595f6872432d6746665f51484d6e6f5f6766377649222c2252444f4248384f446c794c664c42547254374f306c44316173536d39646b5f4d666250775367315f737934225d2c2273636f70654964223a2273636f70652d31227d2c2274656e616e744964223a2274656e616e742d31222c2276223a317d",
       "hash": "sha256:9c79d638b64f872407026d7eb6e65868c9b45570ce1759a74e85e033fbbe1ea1"
+    }
+  ],
+  "chainFailures": [
+    {
+      "name": "chain-signature",
+      "defect": "signature",
+      "signer": "client",
+      "entry": {
+        "v": 1,
+        "tenantId": "tenant-1",
+        "seq": 2,
+        "prev": "sha256:25ee64669e72891dcf1add0144f8110c2afead476ba373fd896c17ece17c648a",
+        "op": "add",
+        "subject": {
+          "member": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
+          "kind": "device",
+          "deviceId": "device-1",
+          "signingKey": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "7InJB89zS0kUEmNwIOynygzTVCPBnxXzlEhRY7kFA-o",
+            "y": "zfwycmqOssOyRM89ir_pahIw8mUsf0NiVjj6tn-68LU"
+          },
+          "kemKey": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "gPzEaUBjNPnG6gGTwzrYRkWV07-a4xnXEjzotN-fUDQ",
+            "y": "aOSxf1pull8HiHQxhig7UVXL2E_W4pQXnjAC3FjFrcs"
+          }
+        },
+        "signer": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
+        "sig": "eS3bMEckNuPi99WSiuj14CiIes67QzqlDIGjEqfFoFVn5nj4GJmaSedm5TUP_3nIxx9Fq41bTzGgcMv-sSWUmA"
+      },
+      "expect": "member_chain_signature_invalid"
+    },
+    {
+      "name": "chain-tenant",
+      "defect": "tenant",
+      "signer": "client",
+      "entry": {
+        "v": 1,
+        "tenantId": "tenant-2",
+        "seq": 2,
+        "prev": "sha256:25ee64669e72891dcf1add0144f8110c2afead476ba373fd896c17ece17c648a",
+        "op": "add",
+        "subject": {
+          "member": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
+          "kind": "device",
+          "deviceId": "device-1",
+          "signingKey": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "7InJB89zS0kUEmNwIOynygzTVCPBnxXzlEhRY7kFA-o",
+            "y": "zfwycmqOssOyRM89ir_pahIw8mUsf0NiVjj6tn-68LU"
+          },
+          "kemKey": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "gPzEaUBjNPnG6gGTwzrYRkWV07-a4xnXEjzotN-fUDQ",
+            "y": "aOSxf1pull8HiHQxhig7UVXL2E_W4pQXnjAC3FjFrcs"
+          }
+        },
+        "signer": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
+        "sig": "eS3bMEckNuPi99WSiuj14CiIes67QzqlDIGjEqfFoFVn5nj4GJmaSedm5TUP_3nIxx9Fq41bTzGgcMv-sSWUmQ"
+      },
+      "expect": "member_chain_signature_invalid"
+    },
+    {
+      "name": "chain-prev-rule",
+      "defect": "prev-rule",
+      "signer": "client",
+      "entry": {
+        "v": 1,
+        "tenantId": "tenant-1",
+        "seq": 1,
+        "prev": "sha256:cf9cdfe207049a6f60b840efa5e4baa9acc4ce979937b9d3e7a5eec0de2f653b",
+        "op": "add",
+        "subject": {
+          "member": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
+          "kind": "client",
+          "signingKey": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "6nQ-IKgLTUIYSTjSbcqEgf6fxxjXPozZoKo5a0bY-o8",
+            "y": "L0_vU7njUJD9_Qt3lujT1wJmpWVaoJE-B8yl8Q7aKZo"
+          },
+          "kemKey": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "gKLgodIrgk28kAUdBaZiQtveu0RSA-JXuOMpT0i3bUU",
+            "y": "-fFqPeBksTmlmS_Bkvfpg6yPyN5OWneJKZa72pQuvRQ"
+          }
+        },
+        "signer": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
+        "sig": "FLsWjvUo4QBhwrg5cEEKDnBw6X3s2BVeciSw2gvcNiEHqoWsF5z7-mCD-50sstMtDZUk8--gOaW9KOka4hd3yA"
+      },
+      "expect": "member_chain_entry_invalid"
+    },
+    {
+      "name": "chain-signer-key",
+      "defect": "signer-key",
+      "signer": "device",
+      "entry": {
+        "v": 1,
+        "tenantId": "tenant-1",
+        "seq": 2,
+        "prev": "sha256:25ee64669e72891dcf1add0144f8110c2afead476ba373fd896c17ece17c648a",
+        "op": "add",
+        "subject": {
+          "member": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
+          "kind": "device",
+          "deviceId": "device-1",
+          "signingKey": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "7InJB89zS0kUEmNwIOynygzTVCPBnxXzlEhRY7kFA-o",
+            "y": "zfwycmqOssOyRM89ir_pahIw8mUsf0NiVjj6tn-68LU"
+          },
+          "kemKey": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "gPzEaUBjNPnG6gGTwzrYRkWV07-a4xnXEjzotN-fUDQ",
+            "y": "aOSxf1pull8HiHQxhig7UVXL2E_W4pQXnjAC3FjFrcs"
+          }
+        },
+        "signer": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
+        "sig": "eS3bMEckNuPi99WSiuj14CiIes67QzqlDIGjEqfFoFVn5nj4GJmaSedm5TUP_3nIxx9Fq41bTzGgcMv-sSWUmQ"
+      },
+      "expect": "member_chain_entry_invalid"
     }
   ],
   "keyPackages": [
@@ -765,9 +1227,9 @@
         "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw",
         "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
         "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "enc": "BFIiDP_v9bvDLAorWZucvLXefDrD48tXFJy8yXmjO6fKPYCkyGyMuGbfe65RnYXM4MagECMHzxb722ADymgjxfc",
-        "ciphertext": "CtAiNiWIwEnsV7AqP92l-g8SuxZPdbp5merZOE-fTIjJWUwXT-Qj9KTJA7iHwtKv",
-        "sig": "LyCGMeQCBv7b78cHq8dfK5A6TR7KJXPy5qF3a0yeSGHcdIzf-HTU5-ZY_SHshJhQ2l6dTpprS2XZNYMV7NF8OQ"
+        "enc": "BC7kwv2ZOevwP04P6QbbK-kjZjjijYvYIkzPOm3gn5yA-SSquoBzUQB92AvdwAXB3lKfrB3xPAbXtFMj0Rb95ns",
+        "ciphertext": "9dWFFkVMCXmPok01iHLkxRNGUdQhnA-iTrvFtBPY_OhSGtbeYHPnKEAWNHVoqpVk",
+        "sig": "_tRtvrZaaHjWWDKAFDq_5j2Cfecxhv8Mr3F-5xY-EyCnbonmbFVGhx59LgfwIQKaQaiBSBZjsd4EG2JL89QYvg"
       },
       "expect": "ok"
     },
@@ -788,9 +1250,9 @@
         "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw",
         "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
         "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "enc": "BE5gBaw_sH_Dv642OkJdzJeQ3m0ca4MXt7CvxJ6bspnAJW8bXKuljyO0uZHSXvgK-k1ItMbpsp6eX5093VOip5I",
-        "ciphertext": "B5gftuO19hxaE1sM2yAhcaF_2e8mVjvpdT4iU3bhnFeFcNl7sKnu635dW2Y1Gpr1",
-        "sig": "CUpOH3-UK_rHDJ8mzzWkhNSoOKD_mrYNsOyPhXvp1ih27GUEmE-e-dsvhd0SGC_1JhRTd0T7zmSQZ-WmRhIGnw"
+        "enc": "BFFVYM8hMTZMruecxw94F-4NSS1z_aWFvaxvmvkhBxpQ6iiU0cCTQim6VwakWOWleSTxf-h9tNXKhf2eOIIFDhg",
+        "ciphertext": "DrSS2waCmt3JDyqcisPAGpNxAhEl5E6ZArV0cc9aFo8ax1rAiUNIsVUMZdjpy0wD",
+        "sig": "CxX1IhzO8Gb6zL0ei3gzIFLBWda7owlJm1tQLOKC6C4mvQCFmZZwgFFcup9sjihCwGDUZM62GrxWj8eW3t8CpA"
       },
       "expect": "key_package_open_failed"
     },
@@ -811,9 +1273,9 @@
         "keyId": "n_k8FQbyP_xdCauyemUoyg",
         "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
         "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "enc": "BOQjbV7crvDvV0vejakTFzTvnLDtU7lI5dFI9gL4Cq_i3bXCxGiHXSwtfGxfJoTewm2B6gU0rmbn3wGLoTORSkI",
-        "ciphertext": "hTqyptSmke8OoZiCA7WoXNljpXxl-4COs7BliUqBRrUqAkiuEFifJLQaBz8qJV0D",
-        "sig": "bcAVVuVVgs3-AxZVSTQU5c9HVAOLMKTKrPeocrZXlzLT8hPtOhVGMsRt1sfysPlrLkA9-2Kk-gEafqINOS9akQ"
+        "enc": "BEITdTDFmTAayGMF-Dc6TEluvZf6yW2ioeNXQ4j1h-WNoGZ1a4rpbl_Nd9NJJklFAqw46U8uEH_-tI2iAs05iE4",
+        "ciphertext": "QW9PuMeoss_LfU4Fd3kfIV2mazcGdiGx6ak5c6NL7QHqOqOp8K4ucMNHh6WLdxGm",
+        "sig": "hfE4X3lcCfdE56y3YvEyHW42FtuP8NHkkwlfvZ_jmlbomIxO99u04R__Yj_IzQRiOKnMvBTMr8mdEmbuOl5LtA"
       },
       "expect": "key_package_open_failed"
     },
@@ -834,9 +1296,9 @@
         "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw",
         "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
         "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "enc": "BFIiDP_v9bvDLAorWZucvLXefDrD48tXFJy8yXmjO6fKPYCkyGyMuGbfe65RnYXM4MagECMHzxb722ADymgjxfc",
-        "ciphertext": "CtAiNiWIwEnsV7AqP92l-g8SuxZPdbp5merZOE-fTIjJWUwXT-Qj9KTJA7iHwtKv",
-        "sig": "LiCGMeQCBv7b78cHq8dfK5A6TR7KJXPy5qF3a0yeSGHcdIzf-HTU5-ZY_SHshJhQ2l6dTpprS2XZNYMV7NF8OQ"
+        "enc": "BC7kwv2ZOevwP04P6QbbK-kjZjjijYvYIkzPOm3gn5yA-SSquoBzUQB92AvdwAXB3lKfrB3xPAbXtFMj0Rb95ns",
+        "ciphertext": "9dWFFkVMCXmPok01iHLkxRNGUdQhnA-iTrvFtBPY_OhSGtbeYHPnKEAWNHVoqpVk",
+        "sig": "_9RtvrZaaHjWWDKAFDq_5j2Cfecxhv8Mr3F-5xY-EyCnbonmbFVGhx59LgfwIQKaQaiBSBZjsd4EG2JL89QYvg"
       },
       "expect": "key_package_signature_invalid"
     },
@@ -857,9 +1319,9 @@
         "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw",
         "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
         "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "enc": "BFIiDP_v9bvDLAorWZucvLXefDrD48tXFJy8yXmjO6fKPYCkyGyMuGbfe65RnYXM4MagECMHzxb722ADymgjxfc",
-        "ciphertext": "CtAiNiWIwEnsV7AqP92l-g8SuxZPdbp5merZOE-fTIjJWUwXT-Qj9KTJA7iHwtKv",
-        "sig": "LyCGMeQCBv7b78cHq8dfK5A6TR7KJXPy5qF3a0yeSGHcdIzf-HTU5-ZY_SHshJhQ2l6dTpprS2XZNYMV7NF8OQ"
+        "enc": "BC7kwv2ZOevwP04P6QbbK-kjZjjijYvYIkzPOm3gn5yA-SSquoBzUQB92AvdwAXB3lKfrB3xPAbXtFMj0Rb95ns",
+        "ciphertext": "9dWFFkVMCXmPok01iHLkxRNGUdQhnA-iTrvFtBPY_OhSGtbeYHPnKEAWNHVoqpVk",
+        "sig": "_tRtvrZaaHjWWDKAFDq_5j2Cfecxhv8Mr3F-5xY-EyCnbonmbFVGhx59LgfwIQKaQaiBSBZjsd4EG2JL89QYvg"
       },
       "expect": "key_package_invalid"
     },
@@ -880,9 +1342,9 @@
         "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw",
         "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
         "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "enc": "BFIiDP_v9bvDLAorWZucvLXefDrD48tXFJy8yXmjO6fKPYCkyGyMuGbfe65RnYXM4MagECMHzxb722ADymgjxfc",
-        "ciphertext": "CtAiNiWIwEnsV7AqP92l-g8SuxZPdbp5merZOE-fTIjJWUwXT-Qj9KTJA7iHwtKv",
-        "sig": "LyCGMeQCBv7b78cHq8dfK5A6TR7KJXPy5qF3a0yeSGHcdIzf-HTU5-ZY_SHshJhQ2l6dTpprS2XZNYMV7NF8OQ"
+        "enc": "BC7kwv2ZOevwP04P6QbbK-kjZjjijYvYIkzPOm3gn5yA-SSquoBzUQB92AvdwAXB3lKfrB3xPAbXtFMj0Rb95ns",
+        "ciphertext": "9dWFFkVMCXmPok01iHLkxRNGUdQhnA-iTrvFtBPY_OhSGtbeYHPnKEAWNHVoqpVk",
+        "sig": "_tRtvrZaaHjWWDKAFDq_5j2Cfecxhv8Mr3F-5xY-EyCnbonmbFVGhx59LgfwIQKaQaiBSBZjsd4EG2JL89QYvg"
       },
       "expect": "key_package_invalid"
     },
@@ -903,9 +1365,9 @@
         "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw",
         "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
         "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "enc": "BFIiDP_v9bvDLAorWZucvLXefDrD48tXFJy8yXmjO6fKPYCkyGyMuGbfe65RnYXM4MagECMHzxb722ADymgjxfc",
-        "ciphertext": "CtAiNiWIwEnsV7AqP92l-g8SuxZPdbp5merZOE-fTIjJWUwXT-Qj9KTJA7iHwtKv",
-        "sig": "LyCGMeQCBv7b78cHq8dfK5A6TR7KJXPy5qF3a0yeSGHcdIzf-HTU5-ZY_SHshJhQ2l6dTpprS2XZNYMV7NF8OQ"
+        "enc": "BC7kwv2ZOevwP04P6QbbK-kjZjjijYvYIkzPOm3gn5yA-SSquoBzUQB92AvdwAXB3lKfrB3xPAbXtFMj0Rb95ns",
+        "ciphertext": "9dWFFkVMCXmPok01iHLkxRNGUdQhnA-iTrvFtBPY_OhSGtbeYHPnKEAWNHVoqpVk",
+        "sig": "_tRtvrZaaHjWWDKAFDq_5j2Cfecxhv8Mr3F-5xY-EyCnbonmbFVGhx59LgfwIQKaQaiBSBZjsd4EG2JL89QYvg"
       },
       "expect": "key_package_invalid"
     }

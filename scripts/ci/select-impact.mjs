@@ -369,6 +369,8 @@ export function selectImpact(paths, context = {}) {
     // #636: the keys pi-catalog subpath entry, and the generator that keys
     // source imports and the client drift test re-runs.
     if (path === 'packages/keys/tsup.config.ts') { dirs.add('packages/keys'); families.add('npm-release-pack'); continue; }
+    // #654: the core sealed-payload subpath entry.
+    if (path === 'packages/core/tsup.config.ts') { dirs.add('packages/core'); families.add('npm-release-pack'); continue; }
     if (path === 'scripts/keys/generate-pi-model-catalog.ts') { dirs.add('packages/keys'); dirs.add('packages/client'); continue; }
     if (path === 'packages/client/scripts/packed-agent-memory-helper-smoke.mjs'
       || path === 'scripts/release/agent-memory-helper-source.test.mjs') {
