@@ -307,3 +307,9 @@ test('vendored pi-subagents 0.60.0 factory files select only the client closure 
     assert.throws(() => selectImpact([path]), /reviewed CI mapping required/i, path);
   }
 });
+
+test('#793 O5: a direct hosted example path selects only that example and the dataplane family', () => {
+  for (const path of ['examples/hosted-bot-collaboration/src/k8-entry.test.ts', 'examples/hosted-bot-collaboration/vitest.config.ts']) {
+    assert.deepEqual(selectImpact([path]), { dirs: ['examples/hosted-bot-collaboration'], files: [path], families: ['dataplane'], reason: 'impacted' });
+  }
+});
