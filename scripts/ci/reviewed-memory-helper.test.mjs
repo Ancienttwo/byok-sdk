@@ -34,7 +34,7 @@ test('helper smoke and source contract select client and packaging without accep
   for (const path of ['packages/client/scripts/packed-agent-memory-helper-smoke.mjs', 'scripts/release/agent-memory-helper-source.test.mjs']) {
     const plan = selectImpact([path]);
     assert.ok(plan.dirs.includes('packages/client'));
-    for (const family of ['agent-memory-helper', 'agent-memory-helper-linux', 'npm-release-pack']) assert.ok(plan.families.includes(family));
+    for (const family of ['agent-memory-helper', 'agent-memory-helper-non-darwin', 'npm-release-pack']) assert.ok(plan.families.includes(family));
   }
   assert.throws(() => selectImpact(['packages/client/scripts/packed-other-smoke.mjs']));
   assert.throws(() => selectImpact(['scripts/release/unreviewed.test.mjs']));
