@@ -152,6 +152,17 @@ describe.skipIf(POSTGRES_URL === undefined)('H sync step on real Postgres (#793 
     expect(await intentRow(h.scope, 'q2')).toBeUndefined();
   });
 
+  it('runs to a fixed point: one sync cancels the untried intent of an archived Bot and ends its Turn, as the L pass drains again (#793 D2f-3)', async () => {
+    const h = await hosted();
+    await h.change(queueTurns);
+    await h.sync();
+    expect(await intentRow(h.scope, 'q1')).toMatchObject({ cancel_reason: null, conclusion: null });
+    await h.change(state => { state.team.bots.main!.archived = true; });
+    await h.sync();
+    expect(await intentRow(h.scope, 'q1')).toMatchObject({ cancel_reason: 'cancelled', conclusion: 'cancelled' });
+    expect((await h.state()).turns.q1).toMatchObject({ status: 'failed', conclusion: 'cancelled', reported: true });
+  });
+
   it('refuses a routine Turn that has no occurrence row, and writes nothing (#793 D2f)', async () => {
     const h = await hosted();
     await h.change(state => {
