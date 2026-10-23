@@ -34,6 +34,7 @@ import {
 import { CodexProjection, type CodexRecord } from './projection';
 import { AsyncQueue } from '../../util/async-queue';
 import { resolveCodexBin, type ResolvedBin } from './resolve-bin';
+import { resolveRuntimeInvocation, type RuntimeInvocation } from '../runtime-invocation';
 import { isQualifiedCodexVersion, QUALIFIED_CODEX_VERSION } from './codex-version';
 
 const execFileAsync = promisify(execFile);
@@ -121,12 +122,12 @@ export class CodexAdapter implements RuntimeAdapter {
   }
   async detect(): Promise<RuntimeDetectResult> {
     try {
-      const command = (this.options.resolveBin ?? resolveCodexBin)().command;
-      const version = await probeRuntimeVersion(command, DETECT_TIMEOUT_MS);
+      const { command, args } = resolveRuntimeInvocation((this.options.resolveBin ?? resolveCodexBin)().command);
+      const version = await probeRuntimeVersion(command, DETECT_TIMEOUT_MS, args);
       if (version.kind !== 'available') return version;
       const text = version.stdout.trim() || version.stderr.trim();
       try {
-        await execFileAsync(command, ['app-server', '--help'], {
+        await execFileAsync(command, [...args, 'app-server', '--help'], {
           timeout: DETECT_TIMEOUT_MS,
           killSignal: 'SIGKILL',
           env: buildRuntimeEnv({ ambient: process.env }),
@@ -136,7 +137,7 @@ export class CodexAdapter implements RuntimeAdapter {
       }
       let authPresent = false;
       try {
-        const auth = await execFileAsync(command, ['login', 'status'], {
+        const auth = await execFileAsync(command, [...args, 'login', 'status'], {
           timeout: DETECT_TIMEOUT_MS,
           killSignal: 'SIGKILL',
           env: buildRuntimeEnv({ ambient: process.env }),
@@ -178,17 +179,22 @@ export class CodexAdapter implements RuntimeAdapter {
         reason: `codex installation refused: ${detected.kind === 'refused' ? detected.reason : detected.kind}`,
         retryable: false,
       };
-    const command = (this.options.resolveBin ?? resolveCodexBin)().command;
+    let invocation: RuntimeInvocation;
+    try {
+      invocation = resolveRuntimeInvocation((this.options.resolveBin ?? resolveCodexBin)().command);
+    } catch (error) {
+      return { kind: 'reject', reason: `codex installation refused: ${classifyDetectError(error).kind}`, retryable: false };
+    }
     return {
       kind: 'prepared',
       operation: {
-        start: (start) => this.start(start, command, model),
+        start: (start) => this.start(start, invocation, model),
       },
     };
   }
   private async start(
     input: RuntimeOperationStartInput,
-    command: string,
+    invocation: RuntimeInvocation,
     model: string | undefined,
   ): Promise<Session> {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string')
@@ -220,7 +226,7 @@ export class CodexAdapter implements RuntimeAdapter {
       // The open deadline covers spawn, initialize, the thread open and its read-back.
       const raw = await session.within('open', retryable, codexSession(
         (bin, args, options) => {
-          const child = spawned(bin, args, options);
+          const child = spawned(bin, [...invocation.args, ...args], options);
           session.own(child);
           void child.exited.then(
             () => session.exited(),
@@ -228,7 +234,7 @@ export class CodexAdapter implements RuntimeAdapter {
           );
           return session.gate(child);
         },
-        { kind: 'available', via: 'executable', command },
+        { kind: 'available', via: 'executable', command: invocation.command },
         {
           cwd,
           env: { ...input.env, ...input.scratch.env } as Record<string, string>,
