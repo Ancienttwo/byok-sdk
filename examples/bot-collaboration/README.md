@@ -316,8 +316,9 @@ Windows, it means that the file only is flushed. There, an OS crash or a power
 loss after the readback can bring back the old persona while the SDK record
 keeps the new revision. This Host does not deliver an acknowledged revision
 again, so the old file stays until the next persona update writes it. A process
-crash can leave an `AGENTS.md.<pid>-<n>.tmp` file in the home. The Host failure
-and retry API does not change these limits.
+crash can leave an `AGENTS.md.<pid>-<n>.tmp` file in the home. The next
+`writeHomeFile` call for `AGENTS.md` removes it when that process has ended.
+The Host failure and retry API does not change these limits.
 
 
 ## Deferred Main Bot routine target
