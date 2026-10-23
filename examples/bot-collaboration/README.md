@@ -175,7 +175,11 @@ The veto guards each `HostLedger` instance that has it. Another instance on
 the same file without the veto can still compact a Turn intent early. Then the
 next pass fails that Turn with conclusion `failed`, because K8 did not see the
 K4 result. It writes an audit line and reports the Turn once, with
-`reason: 'result_retired'`. A due reply check of a compacted chain intent takes
+`reason: 'result_retired'`. The Turn fails even when K4 already applied its
+outcome, because K8 does not read the K4 application tombstone. A routine
+Turn's intent tombstone expires with its slot. K4 removes the occurrence with
+the intent, so the pass also fails a routine Turn whose occurrence is gone,
+after its tombstone expired. A due reply check of a compacted chain intent takes
 the failed readback path. The Host keeps processing other work.
 
 `CollaborationState.version` is 2. Version 1 kept the routines in K8 state.
