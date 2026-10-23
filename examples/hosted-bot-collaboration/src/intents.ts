@@ -124,10 +124,22 @@ export class HostedSubmitter {
     if (claim === 'expired') return true;
     const scope = JSON.parse(scopeKey) as string;
     let outcome: 'delivered' | 'stopped' | { error: unknown };
-    try { outcome = await submitFrozen(this.options.port(scope), claim.input, () => this.now() < claim.waitUntil); }
+    try { outcome = await submitFrozen(this.options.port(scope), claim.input, () => this.mayStillSubmit(claim)); }
     catch (error) { outcome = { error }; }
     await this.settleTry(claim, outcome);
     return true;
+  }
+
+  /**
+   * The K4 check right before the SDK call: the wait is open, and the row has no conclusion and no cancel reason.
+   * It reads outside the scope lock, so a sync cancel after this read can still reach the SDK. D2d's attempt check
+   * is the guard for that case.
+   */
+  private async mayStillSubmit(claim: Claim): Promise<boolean> {
+    if (this.now() >= claim.waitUntil) return false;
+    const found = await inSchema(this.pool, this.schema, client => client.query<{ open: boolean }>(
+      'SELECT conclusion IS NULL AND cancel_reason IS NULL AS open FROM intent WHERE scope = $1 AND key = $2', [claim.scopeKey, claim.key]), true);
+    return found.rows[0]?.open === true;
   }
 
   /** Step 1: under the scope lock, expire an untried row, or take the lease and raise `tries`. */

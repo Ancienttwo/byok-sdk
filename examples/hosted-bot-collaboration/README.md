@@ -34,6 +34,9 @@ queued expiry (`queuedExpiry`) and the frozen submit (`submitFrozen`).
 - A row that was never tried expires at `wait_until`. A tried row past `wait_until` is never submitted
   again. It gets `cancel_reason = 'expired'` and no conclusion, because an SDK attempt can still exist.
   Reconciliation (D2d) checks the attempt first. A sync cancel that lands during the try keeps its reason.
+- Right before the SDK call, a try reads the row again, as K4 does. It stops when the row has a conclusion or a
+  cancel reason. The read is outside the scope lock, so a cancel after it can still reach the SDK. D2d's attempt
+  check is the guard for that case.
 - A delivered head holds its agent's queue until it has a conclusion. The scan returns only FIFO heads, so the
   followers of a queue never fill a pass ahead of a due head.
 - A row whose try throws outside the SDK call is backed off, and the pass goes on. `run()` reports it in

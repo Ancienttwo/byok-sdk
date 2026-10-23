@@ -148,6 +148,19 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('H submitter on real Postgres and a real SDK 
     expect(submitted).toEqual([]);
   });
 
+  it('does not submit a claimed row that a sync cancels while its wait is still open (#793 D2b-2)', async () => {
+    const scope = `tenant:${randomUUID()}`, input = await freeze(scope), { port, submitted } = sdkPort();
+    // The sync cancel commits between the claim and the check before the SDK call.
+    const racing: FrozenSubmitPort = { ...port, offer: async id => {
+      await update(scope, input.taskId, `cancel_reason = 'cancelled'`);
+      return port.offer(id);
+    } };
+    expect(await submitter(racing).run()).toEqual({ tried: 1, failed: [] });
+    expect(await row(scope, input.taskId)).toMatchObject({ submission: 'uncertain', tries: 1, cancel_reason: 'cancelled', conclusion: null });
+    expect(submitted).toEqual([]);
+    expect(await offers(input.taskId)).toBe(0);
+  });
+
   it('submits only the FIFO head of an agent, and the next intent waits until the head concludes', async () => {
     const scope = `tenant:${randomUUID()}`, first = await freeze(scope), second = await freeze(scope), { port, submitted } = sdkPort();
     await submitter(port).run();
