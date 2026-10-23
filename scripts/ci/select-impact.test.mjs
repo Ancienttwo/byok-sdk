@@ -27,10 +27,20 @@ test('docs and known CI contracts select light checks, not release families', ()
   assert.deepEqual(selectImpact(['README.md', 'docs/releases/v0.28.1.md']), {
     dirs: [], files: ['README.md', 'docs/releases/v0.28.1.md'], families: [], reason: 'docs-only',
   });
-  for (const path of ['.github/workflows/ci.yml', '.github/workflows/release.yml', 'scripts/ci/select-impact.mjs']) {
+  for (const path of ['.github/workflows/release.yml', 'scripts/ci/select-impact.mjs']) {
     assert.equal(selectImpact([path]).reason, 'root-ci-scripts');
     assert.deepEqual(selectImpact([path]).families, []);
   }
+});
+
+test('ci.yml selects the dataplane job that checks the workflow (#749)', () => {
+  const constraints = 'packages/cloud-dataplane/src/__tests__/constraints.test.ts';
+  assert.match(readFileSync(new URL(constraints, root), 'utf8'), /\.github\/workflows\/ci\.yml/);
+  assert.deepEqual(selectImpact(['.github/workflows/ci.yml']), {
+    dirs: [], files: ['.github/workflows/ci.yml'], families: ['dataplane'], reason: 'impacted',
+  });
+  assert.deepEqual(selectImpact(['.github/workflows/release.yml']).families, []);
+  assert.deepEqual(selectImpact(['scripts/ci/select-impact.mjs']).families, []);
 });
 
 test('docs/security.md selects the dataplane job that checks its plaintext inventory (#654)', () => {
