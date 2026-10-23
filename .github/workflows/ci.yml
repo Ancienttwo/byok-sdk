@@ -436,7 +436,9 @@ jobs:
       - name: Test Go helper
         if: runner.os == 'macOS'
         working-directory: packages/client/native/agent-memory-fs
-        run: GOTOOLCHAIN=go1.26.5 go test -race ./...
+        env:
+          BYOK_REQUIRE_DARWIN_NONLOCAL_VOLUME: '1'
+        run: GOTOOLCHAIN=go1.26.5 go test -race -v ./...
 
       - name: Build Go helper
         if: runner.os == 'macOS'

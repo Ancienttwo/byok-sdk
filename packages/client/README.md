@@ -580,6 +580,13 @@ to build both macOS architectures and Windows x64 under
 `dist/native/agent-memory-fs` and verify their source and reproducibility.
 Without these verified assets, a macOS or Windows daemon does not offer memory tools.
 
+On macOS the Agent home must be on a local volume. The helper reads the
+`fstatfs` flags of the pinned home handle. A volume without `MNT_LOCAL`, for
+example an SMB, NFS or AFP mount, fails the helper open with `unsafe_root`.
+A failed query fails the same way. Memory recall and save, projection and
+export then fail, and the daemon does not advertise memory intents. Move such a
+home to a local volume.
+
 Runtime dependencies, code-generation evidence and size budgets are recorded in the [entry dependency contract](../../README.md#entry-dependencies).
 
 Hosted projection is not on this entry. An embedded host gets the local
