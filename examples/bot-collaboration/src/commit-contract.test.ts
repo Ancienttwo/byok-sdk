@@ -36,6 +36,7 @@ function memorySubject(): CommitSubject {
       return result;
     },
     stored: () => JSON.stringify(stored),
+    state: () => structuredClone(stored.state),
   };
 }
 /** The K8 L store: a real SQLite HostLedger. */
@@ -49,6 +50,7 @@ function ledgerSubject(): CommitSubject & { ledger: HostLedger } {
     scope: ledger.tenant, ledger,
     commit: request => commitInLedger(ledger, request, (s: LedgerState) => ports(stateOf(s.application), (id, value) => project(s, id, value))),
     stored: () => JSON.stringify(ledger.snapshot()),
+    state: () => stateOf(ledger.snapshot().application),
   };
 }
 commitVectors('pure rules in memory', memorySubject);

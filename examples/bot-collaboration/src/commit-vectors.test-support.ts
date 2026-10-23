@@ -15,6 +15,8 @@ export interface CommitSubject {
   commit(request: CommitRequest<Command>): CommitResult;
   /** All stored bytes of the store, for the checks that a refused commit changed nothing. */
   stored(): string;
+  /** A copy of the stored collaboration state. */
+  state(): CollaborationState;
 }
 export const VECTOR_NOW = 1000;
 /** One active Main Bot `main`, its processing Turn `t1` with a frozen schema, an open question `q1` and an expired card `c1`. */
@@ -90,6 +92,22 @@ export function commitVectors(name: string, open: () => CommitSubject): void {
       expect(first).toEqual({ revision: 1, disposition: { outcome: 'refused', reasonCode: 'card_expired', reason: 'Card expired' }, outbox: [] });
       expect(subject.commit(request(subject, 'd1', decide))).toEqual(first);
       conflict(subject, request(subject, 'd1', { ...decide, decision: 'rejected' }), 'identity_conflict', 'Card expired');
+    });
+
+    it('applies a keyless command at each call, adds 1 each time and keeps no record (#739 6a)', () => {
+      const subject = open(), command: Command = { kind: 'set_main_bot', botId: 'main', mainBot: true };
+      subject.commit(request(subject, 'i1', input('k1')));
+      expect(subject.commit(request(subject, 'm1', command))).toEqual({ revision: 2, disposition: { outcome: 'accepted' }, outbox: [] });
+      expect(subject.commit(request(subject, 'm1', command)).revision).toBe(3);
+      expect(Object.keys(subject.state().commands ?? {})).toEqual(['i1']);
+    });
+
+    it('protects a keyless retry only with an explicit expected revision', () => {
+      const subject = open(), command: Command = { kind: 'set_main_bot', botId: 'main', mainBot: false };
+      expect(subject.commit(request(subject, 'm1', command, 0)).revision).toBe(1);
+      // No record: the retry is a new commit, and the first commit moved the head.
+      conflict(subject, request(subject, 'm1', command, 0), 'stale_revision');
+      expect(subject.commit(request(subject, 'm1', command, 1)).revision).toBe(2);
     });
 
     it('keys each record by its own command id, also for `constructor` and `__proto__`', () => {

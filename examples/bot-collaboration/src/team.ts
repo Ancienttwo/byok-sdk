@@ -2,13 +2,13 @@ import { admitBotToolsets } from './toolset-policy';
 import type { BotTurnOutcome, CreateBotAction, RoomFields, UpdateBotAction } from '@byok-sdk/protocol';
 import { hash, canonical, type ExecutionTemplate } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState } from './model';
-import type { BotProfile, Room, TeamState } from './team-model';
-import { roomVisibility } from './rules/rooms';
+import type { BotProfile, Room } from './team-model';
+import { roomFields, roomVisibility } from './rules/rooms';
 
 import { NEW_BOTS, NEW_ROOMS } from './rules/schema';
 import { activeBot, requireMain } from './rules/team';
 
-export { activeBot, NEW_BOTS, NEW_ROOMS, requireMain };
+export { activeBot, NEW_BOTS, NEW_ROOMS, requireMain, roomFields };
 export const TEAM_NOTE_LIMIT = 20;
 export function projectionRequestId(value: unknown): string {
   const digest = hash(value);
@@ -53,14 +53,6 @@ export function updateBot(state: CollaborationState, action: UpdateBotAction, mo
   Object.assign(bot, { name: action.name ?? bot.name, role: action.role ?? bot.role, persona: action.persona ?? bot.persona,
     model, revision, readyRevision: null, execution });
   projection(state, bot);
-}
-export function roomFields(team: TeamState, fields: RoomFields): Omit<Room, 'id' | 'messages'> {
-  if (fields.mode && fields.mode !== 'mention') throw new Error('Only mention mode is supported');
-  const members = [...fields.members];
-  if (!members.length || members.length > 12 || new Set(members).size !== members.length) throw new Error('Room needs 1 to 12 distinct members');
-  members.forEach(id => activeBot(team, id));
-  if (fields.admin && !members.includes(fields.admin)) throw new Error('Admin must be a room member');
-  return { name: fields.name, members, visibleFrom: Object.fromEntries(members.map(id => [id, 0])), ...(fields.admin ? { admin: fields.admin } : {}), mode: 'mention', announcement: fields.announcement ?? '' };
 }
 export function applyManagement(state: CollaborationState, actor: string, taskId: string, outcome: BotTurnOutcome,
   models: Record<string, ExecutionTemplate>, accept: (action: string, work: () => void) => void, readOnlyToolsets: readonly string[] = []): void {

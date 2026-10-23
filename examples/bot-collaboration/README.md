@@ -196,14 +196,24 @@ the state change, the command record and the outbox rows.
 - Without an expected revision, the commit decides on the head. An explicit
   revision that is not the head is a `stale_revision` conflict. A replay is
   checked first, so a retry with its original revision gets its first result.
-- Each new commit adds 1 to the revision, also for a refused disposition.
-  Host passes that only apply evidence (sync, reply checks, deliveries, device
-  refresh) do not change the revision.
+- The revision counts committed commands only (#739 6b). Each new commit adds
+  1, also for a refused disposition. A command that throws commits nothing.
+  Host passes that only apply evidence (sync, reconcile, reply checks,
+  deliveries, device refresh) do not change the revision.
+- A keyless command has no record (#739 6a). Each call applies and adds 1 to
+  the revision, so its command id is not a dedup key. Only an explicit expected
+  revision protects a retry: the first commit moved the head, so the retry is a
+  `stale_revision` conflict.
 
-The commands are owner input, received IM input, room input, answers, card
-decisions, and three K4 callbacks: a terminal outcome, an Agent message and a
-Bot routine occurrence. `src/rules/commands.ts` decides them. The routine
-owner APIs are K4 commands on K4 rows and do not commit here.
+The keyed commands are owner input, received IM input, room input, answers,
+card decisions, and three K4 callbacks: a terminal outcome, an Agent message
+and a Bot routine occurrence. The keyless commands are `setMainBot`,
+`updateRoom`, `retryPersona`, `enablePushRoute`, `revokePushRoute`,
+`resendDelivery`, `cancelDelegation`, `abandonDelegation` and `cancelTurn`.
+`src/rules/commands.ts` decides all of them. The Host checks the principal
+and the channel before the commit, and it calls K4 cancel and delivers cancel
+facts after the commit. The routine owner APIs are K4 commands on K4 rows and
+do not commit here.
 
 In this L example the scope is the ledger tenant. Owner APIs pass no expected
 revision. K4 already deduplicates terminals (`applied`) and accepted messages (the

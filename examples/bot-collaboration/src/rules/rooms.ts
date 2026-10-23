@@ -1,4 +1,4 @@
-import type { BotTurnOutcome } from '@byok-sdk/protocol';
+import type { BotTurnOutcome, RoomFields } from '@byok-sdk/protocol';
 import { canonical, hash } from '@byok-sdk/example-host-execution-core';
 import { HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS, historyWindow } from './history';
 
@@ -43,7 +43,7 @@ export interface RoomAdvance {
 }
 const NOT_ADMITTED: SeatFacts = { admitted: false, started: false };
 
-function activeBot(team: RoomsState, botId: string): void {
+function activeBot(team: Pick<RoomsState, 'bots'>, botId: string): void {
   const bot = team.bots[botId];
   if (!bot || bot.archived) throw new Error('Bot is archived or absent');
 }
@@ -75,6 +75,24 @@ export function roomVisibility(room: Room, members: readonly string[]): Record<s
   return Object.fromEntries(members.map(id => [id,
     room.members.includes(id) ? room.visibleFrom?.[id] ?? room.messages.length : room.messages.length,
   ]));
+}
+export function roomFields(team: Pick<RoomsState, 'bots'>, fields: RoomFields): Omit<Room, 'id' | 'messages'> {
+  if (fields.mode && fields.mode !== 'mention') throw new Error('Only mention mode is supported');
+  const members = [...fields.members];
+  if (!members.length || members.length > 12 || new Set(members).size !== members.length) throw new Error('Room needs 1 to 12 distinct members');
+  members.forEach(id => activeBot(team, id));
+  if (fields.admin && !members.includes(fields.admin)) throw new Error('Admin must be a room member');
+  return { name: fields.name, members, visibleFrom: Object.fromEntries(members.map(id => [id, 0])), ...(fields.admin ? { admin: fields.admin } : {}), mode: 'mention', announcement: fields.announcement ?? '' };
+}
+/** Owner room edit. An admin that leaves the members is dropped unless the update names one. */
+export function updateRoom(team: Pick<RoomsState, 'bots' | 'rooms'>, roomId: string, update: Partial<RoomFields>): void {
+  const room = team.rooms[roomId];
+  if (!room) throw new Error('Room not found');
+  const fields = { ...room, ...update };
+  if (!update.admin && !fields.members.includes(fields.admin ?? '')) delete fields.admin;
+  const next = roomFields(team, fields);
+  next.visibleFrom = roomVisibility(room, next.members);
+  Object.assign(room, next); if (!next.admin) delete room.admin;
 }
 /** `from` is the sender's principal id (#552). Without it, the message is from `user` and the input identity is the K8b one. */
 export function roomInput(team: RoomsState, key: string, roomId: string, text: string, mentions: Mentions, from?: string): string {
