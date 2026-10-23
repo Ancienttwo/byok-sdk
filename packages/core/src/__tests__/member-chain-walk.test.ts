@@ -133,6 +133,17 @@ describe('member key bundle', () => {
     await expect(parseMemberKeyBundle(bundleJson(client.bundle))).resolves.toEqual(client.bundle);
   });
 
+  it('accepts a bundle only when memberId is deriveMemberId of its signing key', async () => {
+    // A key store (for example DeviceMemberKeyStore in @byok-sdk/keys) gives
+    // only keys. The member id always comes from this one core rule.
+    const signing = await p256Pair('sign');
+    const kem = await p256Pair('kem');
+    const base = { v: 1, signingPublicJwk: signing.publicJwk, kemPublicJwk: kem.publicJwk, kemEpoch: 1, deviceId: 'device-1' };
+    const memberId = await deriveMemberId(signing.publicJwk);
+    await expect(parseMemberKeyBundle({ ...base, memberId })).resolves.toMatchObject({ memberId });
+    await expect(parseMemberKeyBundle({ ...base, memberId: await deriveMemberId(kem.publicJwk) })).resolves.toBeUndefined();
+  });
+
   it('rejects a bundle whose id, keys or shape is wrong', async () => {
     const { bundle } = await newMember('device-1');
     const other = await newMember();

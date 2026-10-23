@@ -4,7 +4,6 @@ import {
   type SealingPublicJwk,
   type WebCryptoKey,
 } from '@byok-sdk/core';
-import { deriveMemberId } from '@byok-sdk/core/sealed-payload';
 import { z } from 'zod';
 
 import type { DeviceSealingEnrollment } from './device-sealing-key';
@@ -19,7 +18,9 @@ import type { SecretStore } from './secret-store';
  *
  * - The signing key (ECDSA) is the member identity. The member id derives
  *   from its public key, so it never rotates. A new enrollment is a new
- *   member with a new signing key (§7.5).
+ *   member with a new signing key (§7.5). This store does not compute the
+ *   id: the one rule is `deriveMemberId` in `@byok-sdk/core/sealed-payload`,
+ *   and the daemon calls it. So this package does not import that subpath.
  * - The KEM key (ECDH) receives scope key packages. It rotates by epoch
  *   without a change to the member id (§7.5).
  *
@@ -46,10 +47,12 @@ export const DEVICE_MEMBER_SECRET_NAME = 'device-member-p256-v1';
 export type DeviceMemberSecretName = typeof DEVICE_MEMBER_SECRET_NAME;
 
 export interface DeviceMemberKeys {
-  /** `deriveMemberId(signing.publicJwk)`. It stays the same across KEM rotations. */
-  readonly memberId: string;
   readonly enrollment: DeviceSealingEnrollment;
-  /** Signs member chain entries and scope key packages. `privateKey` is non-extractable. */
+  /**
+   * Signs member chain entries and scope key packages. `privateKey` is
+   * non-extractable. The member id is `deriveMemberId(signing.publicJwk)`; it
+   * stays the same across KEM rotations.
+   */
   readonly signing: { readonly publicJwk: SealingPublicJwk; readonly privateKey: WebCryptoKey };
   /** Opens scope key packages. `privateKey` is non-extractable. `epoch` starts at 1 for each member. */
   readonly kem: DeviceMemberKemKey;
@@ -305,7 +308,6 @@ async function materialize(stored: StoredMemberKeys): Promise<DeviceMemberKeys> 
   const signing = await importSigningKey(stored.signingJwk);
   const kem = { epoch: stored.kemEpoch, ...(await importKemKey(stored.kemJwk)) };
   const base = {
-    memberId: await deriveMemberId(signing.publicJwk),
     enrollment: { tenantId: stored.tenantId, deviceId: stored.deviceId },
     signing,
     kem,

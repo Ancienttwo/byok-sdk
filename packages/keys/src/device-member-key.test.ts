@@ -52,7 +52,6 @@ describe('DeviceMemberKeyStore', () => {
   it('creates once, persists in the credential store, and loads the same keys afterwards', async () => {
     const secrets = new InMemorySecretStore();
     const created = await new DeviceMemberKeyStore({ secretStore: secrets }).loadOrCreate(ENROLLMENT);
-    expect(created.memberId).toBe(await deriveMemberId(created.signing.publicJwk));
     expect(created.enrollment).toEqual(ENROLLMENT);
     expect(created.kem.epoch).toBe(1);
     expect(created.signing.privateKey.extractable).toBe(false);
@@ -64,10 +63,28 @@ describe('DeviceMemberKeyStore', () => {
     expect(stored).not.toMatch(/[\r\n]/u);
 
     const loaded = await new DeviceMemberKeyStore({ secretStore: secrets }).loadOrCreate(ENROLLMENT);
-    expect(loaded.memberId).toBe(created.memberId);
+    expect(loaded.signing.publicJwk).toEqual(created.signing.publicJwk);
     expect(loaded.kem.publicJwk).toEqual(created.kem.publicJwk);
     expect(loaded.kem.epoch).toBe(1);
     await expect(secrets.get(DEVICE_MEMBER_SECRET_NAME)).resolves.toBe(stored);
+  });
+
+  it('gives a stable member id under the core rule, and a new one for a new enrollment', async () => {
+    // The store does not compute the id. The one rule is deriveMemberId in
+    // @byok-sdk/core/sealed-payload; the daemon applies it to signing.publicJwk.
+    const secrets = new InMemorySecretStore();
+    const store = new DeviceMemberKeyStore({ secretStore: secrets });
+    const created = await store.loadOrCreate(ENROLLMENT);
+    const memberId = await deriveMemberId(created.signing.publicJwk);
+    expect(memberId).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    const begun = await store.beginKemRotation(ENROLLMENT);
+    const finished = await store.finishKemRotation(ENROLLMENT, begun.nextKem!.epoch);
+    const reloaded = await new DeviceMemberKeyStore({ secretStore: secrets }).loadOrCreate(ENROLLMENT);
+    for (const keys of [begun, finished, reloaded]) {
+      await expect(deriveMemberId(keys.signing.publicJwk)).resolves.toBe(memberId);
+    }
+    const repaired = await store.loadOrCreate({ tenantId: 'tenant-1', deviceId: 'device-2' });
+    await expect(deriveMemberId(repaired.signing.publicJwk)).resolves.not.toBe(memberId);
   });
 
   it('does not touch the provider sealing key entry', async () => {
@@ -83,8 +100,9 @@ describe('DeviceMemberKeyStore', () => {
 
   it('signs member chain entries and opens scope key packages sealed to it', async () => {
     const device = await new DeviceMemberKeyStore({ secretStore: new InMemorySecretStore() }).loadOrCreate(ENROLLMENT);
+    const memberId = await deriveMemberId(device.signing.publicJwk);
     const entry = await signMemberChainEntry(
-      { v: 1, tenantId: 'tenant-1', seq: 1, prev: null, op: 'add', subject: { member: device.memberId }, signer: device.memberId },
+      { v: 1, tenantId: 'tenant-1', seq: 1, prev: null, op: 'add', subject: { member: memberId }, signer: memberId },
       device.signing,
     );
     await expect(verifyMemberChainEntry(entry, device.signing.publicJwk)).resolves.toMatchObject({ ok: true });
@@ -99,13 +117,13 @@ describe('DeviceMemberKeyStore', () => {
       tenantId: 'tenant-1',
       scopeId: 'scope-1',
       epoch: 1,
-      recipient: { memberId: device.memberId, kemPublicJwk: device.kem.publicJwk },
+      recipient: { memberId, kemPublicJwk: device.kem.publicJwk },
       sender: { signingPublicJwk: sender.signing.publicJwk, signingPrivateKey: sender.signing.privateKey },
     });
     const opened = await openScopeKeyPackage({
       package: pkg,
       expected: { tenantId: 'tenant-1', scopeId: 'scope-1', epoch: 1 },
-      recipient: { memberId: device.memberId, kemPublicJwk: device.kem.publicJwk, kemPrivateKey: device.kem.privateKey },
+      recipient: { memberId, kemPublicJwk: device.kem.publicJwk, kemPrivateKey: device.kem.privateKey },
       senderSigningPublicJwk: sender.signing.publicJwk,
     });
     expect(opened).toMatchObject({ ok: true });
@@ -120,7 +138,7 @@ describe('DeviceMemberKeyStore', () => {
     const before = await storedRecord(secrets);
 
     const begun = await store.beginKemRotation(ENROLLMENT);
-    expect(begun.memberId).toBe(first.memberId);
+    expect(begun.signing.publicJwk).toEqual(first.signing.publicJwk);
     expect(begun.kem.epoch).toBe(1);
     expect(begun.kem.publicJwk).toEqual(first.kem.publicJwk);
     expect(begun.nextKem?.epoch).toBe(2);
@@ -150,6 +168,7 @@ describe('DeviceMemberKeyStore', () => {
     const secrets = new InMemorySecretStore();
     const store = new DeviceMemberKeyStore({ secretStore: secrets });
     const device = await store.loadOrCreate(ENROLLMENT);
+    const memberId = await deriveMemberId(device.signing.publicJwk);
     const sender = await new DeviceMemberKeyStore({ secretStore: new InMemorySecretStore() }).loadOrCreate({
       tenantId: 'tenant-1',
       deviceId: 'device-2',
@@ -160,14 +179,14 @@ describe('DeviceMemberKeyStore', () => {
         tenantId: 'tenant-1',
         scopeId: 'scope-1',
         epoch,
-        recipient: { memberId: device.memberId, kemPublicJwk },
+        recipient: { memberId, kemPublicJwk },
         sender: { signingPublicJwk: sender.signing.publicJwk, signingPrivateKey: sender.signing.privateKey },
       });
     const open = (pkg: unknown, kem: DeviceMemberKeys['kem'], epoch: number) =>
       openScopeKeyPackage({
         package: pkg,
         expected: { tenantId: 'tenant-1', scopeId: 'scope-1', epoch },
-        recipient: { memberId: device.memberId, kemPublicJwk: kem.publicJwk, kemPrivateKey: kem.privateKey },
+        recipient: { memberId, kemPublicJwk: kem.publicJwk, kemPrivateKey: kem.privateKey },
         senderSigningPublicJwk: sender.signing.publicJwk,
       });
     const oldPackage = await seal(device.kem.publicJwk, 1);
@@ -186,7 +205,7 @@ describe('DeviceMemberKeyStore', () => {
     const begun = await store.beginKemRotation(ENROLLMENT);
 
     const finished = await store.finishKemRotation(ENROLLMENT, 2);
-    expect(finished.memberId).toBe(first.memberId);
+    expect(finished.signing.publicJwk).toEqual(first.signing.publicJwk);
     expect(finished.kem.epoch).toBe(2);
     expect(finished.kem.publicJwk).toEqual(begun.nextKem?.publicJwk);
     expect(finished.nextKem).toBeUndefined();
@@ -231,7 +250,7 @@ describe('DeviceMemberKeyStore', () => {
     await store.beginKemRotation(ENROLLMENT);
 
     const repaired = await store.loadOrCreate({ tenantId: 'tenant-1', deviceId: 'device-2' });
-    expect(repaired.memberId).not.toBe(first.memberId);
+    expect(repaired.signing.publicJwk).not.toEqual(first.signing.publicJwk);
     expect(repaired.enrollment).toEqual({ tenantId: 'tenant-1', deviceId: 'device-2' });
     expect(repaired.kem.epoch).toBe(1);
     expect(repaired.kem.publicJwk).not.toEqual(first.kem.publicJwk);
@@ -240,7 +259,7 @@ describe('DeviceMemberKeyStore', () => {
     const rotatedForNew = await store.beginKemRotation({ tenantId: 'tenant-2', deviceId: 'device-3' });
     expect(rotatedForNew.kem.epoch).toBe(1);
     expect(rotatedForNew.nextKem?.epoch).toBe(2);
-    expect(rotatedForNew.memberId).not.toBe(repaired.memberId);
+    expect(rotatedForNew.signing.publicJwk).not.toEqual(repaired.signing.publicJwk);
   });
 
   it('gives each concurrent caller a signing key and a KEM key from one write', async () => {
