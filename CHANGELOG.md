@@ -189,14 +189,15 @@ lock records move to 0.29.0.
   `outcomeSchema`, `turnContext`, `turnInstruction` and `contextPack` take a
   trailing `routines` argument. Its default is `[]`.
 - **Changed (client)** — the Agent memory Go helper can now open a home on
-  Windows (#605). The Windows helper asset and the gate that admits it are in
-  the two entries above. On Windows the helper accepts only an NTFS volume. It
-  does not flush the directories above the home. So a Windows write is atomic
-  under a process crash and flushes its own file and directory, but it is not
-  durable after an OS crash or a power loss. The SDK does not claim directory
-  durability on Windows. CI now runs the helper tests on Windows Server 2025 and
-  Windows Server 2022, as the administrator and as a standard user. It also
-  checks the root identity that Node and Bun compute.
+  Windows (#605). The Windows helper asset (#759) and the gate that admits it
+  (#761) are in the entries at the top of this section. On Windows the helper
+  accepts only a local NTFS volume. It does not flush the directories above
+  the home. So a Windows write is atomic under a process crash and flushes its
+  own file and directory, but it is not durable after an OS crash or a power
+  loss. The SDK does not claim directory durability on Windows. CI now runs
+  the helper tests on Windows Server 2025 and Windows Server 2022, as the
+  administrator and as a standard user. It also checks the root identity that
+  Node and Bun compute.
 - **Breaking (client)** — Agent memory names are now the same on every
   platform (#605). A memory path may not use a Windows device name, such as
   `notes/con.md`, or a segment that ends in `.`. Below `notes`, two names in
