@@ -161,6 +161,9 @@ describe('sealContent', () => {
     await expectInvalid(sealContent(sealInput({ plaintext: { value: [1, Number.NEGATIVE_INFINITY] } })));
     await expectInvalid(sealContent(sealInput({ plaintext: { value: [1, , 3] as never } })));
     await expectInvalid(sealContent(sealInput({ plaintext: new Map() as never })));
+    const throwingGetter = { get value(): string { throw new TypeError('getter'); } };
+    await expectInvalid(sealContent(sealInput({ plaintext: throwingGetter as never })));
+    await expectInvalid(sealContent(sealInput({ plaintext: { nested: throwingGetter } as never })));
     await expectInvalid(sealContent(sealInput({ maxContentLength: 4 })));
     await expectInvalid(sealContent(sealInput({ maxContentLength: -1 })));
     await expectInvalid(sealContent(sealInput({ scopeKey: new Uint8Array(16) })));
