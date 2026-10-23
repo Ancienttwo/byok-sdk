@@ -47,7 +47,8 @@ authority: the daemon still resolves every required ID locally and declines
 fail-closed if its configuration changed.
 
 Reading a task's outcome goes through the same first terminal fact twice:
-`readTerminalReceipt(tenant, taskId)` returns the stored envelope raw, and
+`readTerminalReceipt(tenant, taskId)` returns the stored envelope raw (after
+`redactTasks` it throws `task_content_redacted`), and
 `readTaskResult(tenant, taskId)` decodes that same receipt into a typed
 `TerminalResult` — the state, plus `summary`/`sessionRef`/`artifactRefs`/
 `document` on a completion or `reason`/`retryable` on a failure — projected

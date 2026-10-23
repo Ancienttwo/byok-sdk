@@ -249,7 +249,8 @@ describe.skipIf(SKIP_DATAPLANE)(`task redaction on Postgres — ${SKIP_REASON}`,
       expect(contentRows.length).toBeGreaterThan(3);
 
       await expect(host.cloud.redactTasks(TENANT_1, { taskIds: [run.taskId] })).rejects.toThrow('row step failed');
-      // The object is gone. The row step rolled back: every content row is as before and no fence or audit row exists.
+      // The object is gone. The row step rolled back: every content row is as before and no audit row exists.
+      // (The task has a terminal receipt, so the row step writes no fence.)
       const objectsAfter = await readObjects(storage);
       expect([...objectsBefore.keys()].filter((key) => !objectsAfter.has(key))).toEqual([objectKey]);
       expect(await rowsMarkedBy(scope.pool, [canary.core])).toEqual(contentRows);

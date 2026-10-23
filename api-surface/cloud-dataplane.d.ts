@@ -1470,7 +1470,9 @@ export declare class PostgresTaskCancellationStore implements TaskCancellationSt
  * One call handles one terminal task in two steps:
  *
  * 1. Read the task's bodies without a lock and delete every object they name,
- *    under the orphan-GC guards (no reference, no reserved upload).
+ *    unless another receipt body or a pending mailbox row of the tenant also
+ *    names it, and only under the orphan-GC guards (no reference, no reserved
+ *    upload).
  * 2. In one transaction that holds the task row lock (the lock admission and
  *    cancellation also take), fence an absent terminal receipt, replace each
  *    body with the cloud tombstone, clear the free-text task columns, delete

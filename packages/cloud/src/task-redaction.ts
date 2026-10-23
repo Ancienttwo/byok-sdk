@@ -81,7 +81,10 @@ export interface TaskRedactionStoreInput {
 /**
  * Durable redaction authority for one task. It must be tenant-closed, refuse a
  * task that is not terminal or still has an undelivered mailbox row, and be
- * safe to call again after any failure.
+ * safe to call again after any failure. Inside the transaction that holds the
+ * task lock, and before it reads the receipts, it must write `codec.absent`
+ * under `terminalReceiptKey` when that key is absent. Without this fence a late
+ * device terminal stores new plaintext after the redaction.
  */
 export interface TaskRedactionStore {
   redactTask(input: TaskRedactionStoreInput): Promise<TaskRedactionTaskResult>;

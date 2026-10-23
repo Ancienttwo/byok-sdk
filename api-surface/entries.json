@@ -1272,7 +1272,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 802204,
+      "budgetBytes": 801702,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

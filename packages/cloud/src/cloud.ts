@@ -807,7 +807,9 @@ export interface ByokCloud {
    * non-complete terminal, or an offer with no `result-document` terminal
    * projection); a
    * receipt whose body is not a terminal envelope throws rather than
-   * returning a best-effort shape.
+   * returning a best-effort shape. After {@link ByokCloud.redactTasks} the
+   * receipt read throws `task_content_redacted`; a Host cancellation still
+   * returns `state: 'cancelled'`, with its reason cleared.
    */
   readTaskResult(tenant: TenantId, taskId: string): Promise<TerminalResult | undefined>;
   listDevices(tenant: TenantId): Promise<readonly DeviceRecord[]>;

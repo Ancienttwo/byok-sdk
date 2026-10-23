@@ -1612,7 +1612,9 @@ export interface ByokCloud {
      * non-complete terminal, or an offer with no `result-document` terminal
      * projection); a
      * receipt whose body is not a terminal envelope throws rather than
-     * returning a best-effort shape.
+     * returning a best-effort shape. After {@link ByokCloud.redactTasks} the
+     * receipt read throws `task_content_redacted`; a Host cancellation still
+     * returns `state: 'cancelled'`, with its reason cleared.
      */
     readTaskResult(tenant: TenantId, taskId: string): Promise<TerminalResult | undefined>;
     listDevices(tenant: TenantId): Promise<readonly DeviceRecord[]>;
@@ -3919,7 +3921,10 @@ export interface TaskRedactionStoreInput {
 /**
  * Durable redaction authority for one task. It must be tenant-closed, refuse a
  * task that is not terminal or still has an undelivered mailbox row, and be
- * safe to call again after any failure.
+ * safe to call again after any failure. Inside the transaction that holds the
+ * task lock, and before it reads the receipts, it must write `codec.absent`
+ * under `terminalReceiptKey` when that key is absent. Without this fence a late
+ * device terminal stores new plaintext after the redaction.
  */
 export interface TaskRedactionStore {
     redactTask(input: TaskRedactionStoreInput): Promise<TaskRedactionTaskResult>;

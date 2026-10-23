@@ -122,7 +122,7 @@ Postgres store 分两步：
 
 ### 4.5 R2 对象与同 hash 共享
 
-task 不写 `object_reference`，所以 task 的对象 `ref_count` 为 0。同一 tenant 里，两个 task 的正文可以引用同一个对象。维护者要求在本 PR 里保护它（2026-10-23）：第一步删对象前，再检查两件事。租户内有别的 `device_request_receipts` 正文（key 不属于本 task）含这个 hash，或有 `pending` 的 `outbox` 行含这个 hash，就不删，留给 orphan GC。检查用 `strpos`，在标记和加锁两处都做。还没有任何正文引用的上传（例如运行中 task 的 artifact）看不到，留给 E3b 的 `object_reference`。
+task 不写 `object_reference`，所以 task 的对象 `ref_count` 为 0。同一 tenant 里，两个 task 的正文可以引用同一个对象。维护者要求在本 PR 里保护它（2026-10-23）：第一步删对象前，再检查两件事。租户内有别的 `device_request_receipts` 正文（key 不属于本 task）含这个 hash，或有 `pending` 的 `outbox` 行含这个 hash，就不删，留给 orphan GC。检查用 `strpos` 子串匹配，正文里以纯文本出现的同一个 `sha256:<hex>` 也会保留对象（失败安全）。检查没有索引，按 hash 扫描租户的 receipt 正文和 pending outbox 行，所以放在拿上传 gate 之前做，不持锁：receipt 和 mailbox 的写入不拿这把锁，持锁也不能让检查变成精确的。拿锁后只做原来的 orphan-GC 检查（gatekeeper 复审意见，2026-10-23）。两种情况看不到，留给 E3b 的 `object_reference`：还没有任何正文引用的上传（例如运行中 task 的 artifact）；检查之后、物理删除之前 Host 新提交、引用同一 BlobRef 的 task。
 
 ### 4.6 观测
 
@@ -158,7 +158,7 @@ store 是 `PostgresTaskRedactionStore`，从 `@byok-sdk/cloud-dataplane/runtime`
 - S0 的扫描函数移到 `__tests__/support/plaintext-scan.ts`，两个测试共用。S0 的断言不变。
 - 终态 fence：task D 在 redaction 后收到带 canary 的 `task.decline` 和 `task.cancelled`，canary 仍零命中，`readTerminalReceipt` 和 `readDeviceTerminal` 抛 `task_content_redacted`，`readTaskResult` 仍是 `cancelled`。
 - 共享对象：task C 的终态引用 task A 的 BlobRef。redact A 后，只被 A 引用的对象被删，共享对象还在，C 能下载。去掉保护时测试失败。
-- 两步之间失败：第二步的 tombstone 回调抛错。对象已删，内容行不变，没有 fence 和审计行。重试返回 `redacted`，`objectsDeleted` 为 0，canary 零命中。
+- 两步之间失败：第二步的 tombstone 回调抛错。对象已删，内容行不变，没有审计行（这个 task 已有终态 receipt，所以不写 fence）。重试返回 `redacted`，`objectsDeleted` 为 0，canary 零命中。
 
 ## 6. 要维护者确认
 

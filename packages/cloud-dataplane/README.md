@@ -294,7 +294,7 @@ stay, so receipt fences, mailbox cursors and the dead-letter floor keep their
 meaning. It clears the free-text `task` columns, deletes the activity, approval
 and draft rows, and deletes each object that the bodies name when no reference,
 reserved upload, other receipt body or pending mailbox row of the tenant holds
-it. An object that only a running task's upload names is not seen (E3b). Use the same `objectStorage` (and `keyPrefix`) as
+it (a substring match on the hash, one unindexed scan per object). An object that only a running task's upload names is not seen (E3b). Use the same `objectStorage` (and `keyPrefix`) as
 the blob composition. When the task has no terminal receipt, the store writes a
 tombstone under that key, so a late device terminal stores nothing. The objects
 go first and the rows next, so a retry after any failure is safe; until the
