@@ -169,7 +169,11 @@ export function commitVectors(name: string, open: (team?: SeedTeam) => CommitSub
     it('changes nothing for an invalid team snapshot, a returning archived Bot or setMainBot in external mode', () => {
       const subject = open('external'), before = subject.stored();
       expect(() => subject.commit(request(subject, ...team(2, main, main)))).toThrow('Duplicate team snapshot Bot');
-      for (const id of ['__proto__', 'constructor']) expect(() => subject.commit(request(subject, ...team(2, main, { id })))).toThrow('Invalid team snapshot Bot id');
+      for (const id of ['__proto__', 'constructor', 'team/helper', 'CON', 'tab\there', 'x'.repeat(300)]) {
+        expect(() => subject.commit(request(subject, ...team(2, main, { id })))).toThrow('Invalid team snapshot Bot id');
+      }
+      expect(() => subject.commit(request(subject, ...team(2, main, { id: 'b2', persona: 'x'.repeat(70_000) }))))
+        .toThrow('Team snapshot Bot projection is too large');
       expect(() => subject.commit(request(subject, ...team(2, { ...main, model: 'absent' })))).toThrow('Unavailable model');
       expect(teamError(() => subject.commit(request(subject, 'm1', { kind: 'set_main_bot', botId: 'main', mainBot: false })))).toBe('external_team');
       expect(subject.stored()).toBe(before);
