@@ -32,6 +32,19 @@ function clearSeed(state: CollaborationState): void {
   delete state.turns.t1; delete state.budgets.t1; delete state.schemas.t1; delete state.questions.q1; delete state.cards.c1;
 }
 const settle = async <T>(work: () => T | Promise<T>): Promise<T> => work();
+const delegation = (): CollaborationState['delegations'][string] => ({ id: 'd', root: 'r1', fromBotId: 'main', fromTurnId: 'r1', fromTaskId: 'r1:task',
+  index: 0, toBotId: 'main', request: '', hop: 1, chainTurnIds: [], batch: 'b', status: 'running', revision: 0 });
+const inputBatch = (state: 'open' | 'sealed') => ({ id: 'r1', botId: 'main', key: 'k', inputIds: [], bytes: 0, openedAt: 0, sealAt: 0, state, revision: 2 as const });
+function room(state: CollaborationState, round: { closed: boolean }, seat: { released: boolean }): void {
+  state.team.rooms.room = { id: 'room', name: 'Room', members: ['main'], visibleFrom: { main: 0 }, mode: 'mention', announcement: '', messages: [] };
+  state.team.rounds.round = { id: 'round', root: 'r1', roomId: 'room', input: '{}', seats: ['seat'], limit: 5, counts: { main: 1 }, ...round };
+  state.team.seats.seat = { id: 'seat', roundId: 'round', botId: 'main', status: 'post', late: false, ...seat };
+}
+function delivery(state: CollaborationState, row: 'pending' | 'unknown'): void {
+  state.replies['r1:task'] = { turnId: 'r1', messageId: 'm', contentHash: 'h', contentType: 'text/markdown', acceptedAt: 0 };
+  state.channel = { inbounds: {}, pushRoutes: {}, deliveries: { x: { id: 'x', taskId: 'r1:task', messageId: 'm', body: 'b', conversation: { kind: 'direct', id: 'main' },
+    channel: 'fake', route: { kind: 'push', pushRouteId: 'p' }, state: row, attempts: 0 } } };
+}
 
 export function retentionVectors(name: string, open: () => RetentionSubject | Promise<RetentionSubject>): void {
   describe(`retention contract: ${name}`, () => {
@@ -88,11 +101,30 @@ export function retentionVectors(name: string, open: () => RetentionSubject | Pr
         ['an open question', state => { delete state.questions['r1:q']!.answer; }, 'A question of the root is unanswered'],
         ['a pending card', state => { state.cards['r1:c']!.state = 'pending'; }, 'A card of the root is not settled'],
         ['an unreported card', state => { delete state.cards['r1:c']!.decisionReported; }, 'A card of the root is not settled'],
-        ['a delegation without a verdict', state => {
-          state.delegations.d = { id: 'd', root: 'r1', fromBotId: 'main', fromTurnId: 'r1', fromTaskId: 'r1:task', index: 0, toBotId: 'main', request: '',
-            hop: 1, chainTurnIds: [], batch: 'b', status: 'running', revision: 0 };
-        }, 'A delegation of the root is unresolved'],
+        ['a delegation without a verdict', state => { state.delegations.d = delegation(); }, 'A delegation of the root is unresolved'],
         ['a reserved unit', state => { state.units.u = { id: 'u', root: 'r1', state: 'reserved' }; }, 'A budget unit of the root is reserved'],
+        ['a late chain Turn', state => { state.delegations.d = { ...delegation(), verdict: 'answered', status: 'resolved', lateTurnId: 'late' }; },
+          'A delegation of the root is unresolved'],
+        ['an undelivered cancel', state => {
+          state.delegations.d = { ...delegation(), verdict: 'cancelled', status: 'resolved', cancel: { requestedAt: 0, targetTurnId: 'r1', delivered: false } };
+        }, 'A delegation of the root is unresolved'],
+        ['an unreleased delegation batch', state => {
+          state.delegations.d = { ...delegation(), verdict: 'answered', status: 'resolved' };
+          state.batches.b = { id: 'b', delegationIds: ['d'], slots: [] };
+        }, 'A delegation batch of the root is not released'],
+        ['an open input batch', state => { state.inputBatches = { r1: inputBatch('open') }; }, 'The input batch of the root is not settled'],
+        ['an unprojected input batch', state => { state.inputBatches = { r1: { ...inputBatch('sealed'), revision: 1 } }; },
+          'The input batch of the root is not settled'],
+        ['an open round', state => { room(state, { closed: false }, { released: true }); }, 'A round of the root is open'],
+        ['an unreleased seat', state => { room(state, { closed: true }, { released: false }); }, 'A room seat of the root is not released'],
+        ['a pending delivery', state => { delivery(state, 'pending'); }, 'A delivery of the root is not settled'],
+        ['an unknown delivery', state => { delivery(state, 'unknown'); }, 'A delivery of the root is not settled'],
+        ['a live reply route', state => {
+          state.channel = { pushRoutes: {}, deliveries: {}, inbounds: { i: { id: 'i', root: 'r1', conversation: { kind: 'direct', id: 'main' }, channel: 'fake', sequence: 1,
+            reply: { kind: 'reply', channel: 'fake', inboundId: 'i', token: 'secret', expiresAt: RETENTION_NOW + 1 } } } };
+        }, 'An inbound reply route of the root is live'],
+        ['the newest card', state => { state.cards['r1:c2'] = { ...state.cards['r1:c']!, id: 'r1:c2' }; }, 'The root is in the ContextPack window of its Bot'],
+        ['the newest question', state => { state.questions['r1:q2'] = { ...state.questions['r1:q']!, id: 'r1:q2' }; }, 'The root is in the ContextPack window of its Bot'],
         ['the ContextPack window', () => {}, 'The root is in the ContextPack window of its Bot', { contextTurnLimit: 2 }],
       ];
       for (const [label, edit, reason, limits] of cases) {
@@ -128,6 +160,22 @@ export function retentionVectors(name: string, open: () => RetentionSubject | Pr
       // After its window the record expires. The retry decides again and meets the Turn tombstone.
       expect(await retain(subject, [], { now: RETENTION_NOW + MIN_TOMBSTONE_RETENTION_MS })).toMatchObject({ expiredCommands: 1 });
       await refused(subject, () => settle(() => subject.commit(request(subject, 'i1', input('k1')))), error => expect(error).toBeInstanceOf(RetiredIdentityError));
+    });
+
+    it('refuses a retired round id at admission', async () => {
+      const subject = await opened();
+      await subject.change(state => {
+        state.team.rooms.room = { id: 'room', name: 'Room', members: ['main'], visibleFrom: { main: 0 }, mode: 'mention', announcement: '', messages: [] };
+      });
+      const command: Command = { kind: 'room_input', key: 'k1', roomId: 'room', text: 'Hello', mentions: [] };
+      const round = (await subject.commit(request(subject, 'ri1', command))).disposition;
+      expect(round.outcome).toBe('accepted');
+      const roundId = (round as { value: string }).value;
+      expect(await retain(subject, [roundId])).toMatchObject({ archivedRoots: 1 });
+      await refused(subject, () => settle(() => subject.commit(request(subject, 'ri2', command))), error => {
+        expect(error).toBeInstanceOf(RetiredIdentityError);
+        expect(error).toMatchObject({ namespace: 'round', id: roundId });
+      });
     });
 
     it('keeps the record of a command whose root is still in the state', async () => {
