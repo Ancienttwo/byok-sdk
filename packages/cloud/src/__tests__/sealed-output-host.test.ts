@@ -183,13 +183,34 @@ describe('a sealed terminal of an output-sealed task (#654 E3b-2)', () => {
     },
   );
 
-  it.each(['task.progress_sealed', 'task.await_approval_sealed'] as const)(
-    'refuses %s, which this Host does not store yet',
-    async (type) => {
-      const task = await offeredTask(OUTPUT_SEALING);
-      expect(await task.send(type, SEALED_OUTPUTS[type])).toEqual(refused('sealed_payload_unsupported'));
-    },
-  );
+  it('stores each sealed progress batch as one activity entry (12e)', async () => {
+    const task = await offeredTask(OUTPUT_SEALING);
+    expect(await task.send('task.progress_sealed', SEALED_OUTPUTS['task.progress_sealed'])).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.progress_sealed', { ...SEALED_OUTPUTS['task.progress_sealed'], seq: 2 })).toEqual({ outcome: 'accepted' });
+    const tail = await task.harness.cloud.readActivity(TENANT_A, task.taskId);
+    expect(tail?.entries).toEqual([1, 2].map((batchSeq) => ({
+      taskId: task.taskId,
+      sourceEnvelopeId: expect.any(String),
+      batchSeq,
+      eventIndex: 0,
+      sourceDropped: 0,
+      receivedAt: expect.any(String),
+      sealed: OUTPUT_MEMBER,
+    })));
+    expect(tail?.cursor).toEqual({ batchSeq: 2, eventIndex: 0 });
+  });
+
+  it('stores a sealed approval request, which the Host approves while it is pending (12e)', async () => {
+    const task = await offeredTask(OUTPUT_SEALING);
+    expect(await task.send('task.await_approval_sealed', SEALED_OUTPUTS['task.await_approval_sealed'])).toEqual({ outcome: 'accepted' });
+    expect((await task.harness.cloud.readApprovalTimeline(TENANT_A, task.taskId))?.entries.map(({ event }) => event)).toEqual([
+      { type: 'approval_requested', approvalId: 'approval-1', sealed: OUTPUT_MEMBER },
+    ]);
+    await expect(task.harness.cloud.approveTask(TENANT_A, task.taskId, { approvalId: 'approval-1' })).resolves.toBeDefined();
+    expect((await task.harness.cloud.readApprovalTimeline(TENANT_A, task.taskId))?.entries.map(({ event }) => event.type)).toEqual([
+      'approval_requested', 'approval_resolved',
+    ]);
+  });
 });
 
 describe('every sealed offer lane freezes the output sealing that the gate reads (#654 E3b-2)', () => {
