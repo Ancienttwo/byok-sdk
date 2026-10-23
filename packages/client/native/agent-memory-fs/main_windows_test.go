@@ -80,6 +80,8 @@ func TestWindowsOpenAdmitsOnlyNTFS(t *testing.T) {
 
 // Local NTFS only: a remote volume is refused before its file system name is
 // read, and a failed device query also fails closed.
+// ci.yml requires a PASS line for this test in the administrator run and in
+// the standard-user run. A rename must also change the name lists in ci.yml.
 func TestWindowsOpenRefusesRemoteVolume(t *testing.T) {
 	for _, volume := range []struct {
 		name   string
@@ -102,6 +104,8 @@ func TestWindowsOpenRefusesRemoteVolume(t *testing.T) {
 // The real device query: the temp volume is local. The same directory through
 // the SMB loopback admin share is remote, although its server reports NTFS,
 // and its open is refused.
+// ci.yml requires a PASS line for this test in the administrator run and in
+// the standard-user run. A rename must also change the name lists in ci.yml.
 func TestWindowsRemoteVolumeQueryOnSMBLoopback(t *testing.T) {
 	home := newMemoryHome(t)
 	local, err := os.OpenRoot(home)
