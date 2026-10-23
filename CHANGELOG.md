@@ -18,7 +18,7 @@
   and binds the memory MCP from that answer. The terminal does not report
   which mode ran.
 
-- **Changed (client)** — on macOS the Agent memory helper refuses a directory
+- **Breaking (client)** — on macOS the Agent memory helper refuses a directory
   or a file below the Agent home that is on another device than its parent
   directory (#781). Before, the local-volume rule (#765) checked only the home
   itself, so a network volume mounted over `notes` was admitted. The helper
@@ -44,7 +44,7 @@
   `task.decline` accepts four sealed decline codes. Cloud gets six sealed
   hosted entries, from `enqueueSealedOffer` to `steerSealedTask`. Cloud does
   not advertise the flag yet.
-- **Changed (protocol, cloud, server)** — the plaintext hosted entries now
+- **Breaking (protocol, cloud, server)** — the plaintext hosted entries now
   refuse `sealing` and `sealed` with `coordination_input_invalid` (#654 E3a).
   Before, the plain payload schema dropped these keys, and the task ran in
   plaintext. `steerTask` also refuses `steerId`. The reference server
@@ -58,9 +58,8 @@
   `sealed_key_unavailable` as its `reason` and `code`. To other servers, its
   `reason` starts with `sealed_payload_unsupported` and it has no `code`.
   Cloud inbound refuses a sealed daemon message with
-  `sealed_payload_unsupported`. The sealed hosted entries refuse a
-  `ciphertextRef` with `coordination_input_invalid`, because the Host does not
-  yet check and retain the referenced blob. Inline ciphertext works.
+  `sealed_payload_unsupported`. The `ciphertextRef` lane of the sealed hosted
+  entries is in the #654 E3b entry below.
 - **Changed (client)** — the hosted journal admits an inbound envelope record
   up to the larger of `hostedJournal.maxRecordBytes` and 415083 bytes (#654
   E3a). The journal derives this floor from the largest inline sealed member:
@@ -86,6 +85,143 @@
   redacted task. Only task redaction and tenant erasure release the
   reference, so the ciphertext of a sealed task stays stored as long as its
   offer receipt does.
+- **Feature (cloud, cloud-dataplane)** — the new `ByokCloud.redactTasks`
+  replaces the stored content of terminal tasks with body-free tombstones
+  (#654 E5a). One call takes 1 to `TASK_REDACTION_MAX_TASKS` (100)
+  task ids. Each task gets one result: `redacted`, `already_redacted`,
+  `not_found`, or `refused` with `task_not_terminal` or `pending_delivery`. A
+  refused task can be retried. Status, digests and identity fences stay, so a
+  replay is still a duplicate. The store also deletes the stored objects that
+  a redacted body names. After a redaction, the content reads of the task,
+  from `readTaskOffer` to `readAgentMessageDisposition`, throw
+  `task_content_redacted`. The store comes from the new option
+  `taskRedactionStore`. cloud-dataplane exports `PostgresTaskRedactionStore`
+  and `createPostgresTaskRedactionStore`. Without a store, the call throws
+  `task_redaction_unavailable`. There is no SQL migration.
+- **Feature (protocol, server, cloud, cloud-dataplane)** — the Host stores
+  E2EE member state (#654 E2c-1): the member chain, the scope key packages
+  and the pairing MACs. `ByokCloud` gets `appendMemberChainEntries`,
+  `readMemberChain`, `putScopeKeyPackages`, `readScopeKeyPackages`,
+  `readMemberKeyRegistration` and `relayClientPairingMac`. The Host checks
+  shapes only. It does not compute hashes or verify signatures. The store
+  comes from the new option `e2eeMemberStore` (the `E2eeMemberStore` port).
+  cloud exports `InMemoryE2eeMemberStore`, and cloud-dataplane exports
+  `PostgresE2eeMemberStore`. The reference server keeps the state in memory or
+  in SQLite. New error codes: `e2ee_member_store_unavailable`,
+  `e2ee_member_chain_conflict`, `e2ee_scope_key_conflict`,
+  `e2ee_member_not_registered` and `e2ee_member_state_unreadable`. protocol
+  gets the member bundle, chain entry and key package schemas. Postgres
+  migration `0027_e2ee_member.sql` adds five tables. A device removal deletes
+  the device rows from three of them, and tenant erasure covers all five.
+  Upgrade: a Postgres Host applies migration 0027 before it runs 0.30.0.
+- **Feature (core, keys)** — `@byok-sdk/core/sealed-payload` exports the E2
+  member key and member chain modules (#654 E2a, E2b, E2). The new exports
+  are the member key bundle (`createMemberKeyBundle`,
+  `parseMemberKeyBundle`), the KEM self-signature check (`verifyMemberKem`),
+  the member fingerprint and approval code, the pairing verification secret
+  and the pairing MACs, and the member chain walk
+  (`applyMemberChainEntries`, `verifyMemberChainFromAnchor`,
+  `memberChainScopeRecipients`). The chain refuses a remove of its last
+  member. A hostile JavaScript object gets a typed failure. keys exports
+  `DeviceMemberKeyStore` and `DEVICE_MEMBER_SECRET_NAME`, with the error codes
+  `DEVICE_MEMBER_KEY_INVALID` and `DEVICE_MEMBER_KEY_ROTATION_MISMATCH`. There
+  is no wire or SQL change.
+- **Changed (core)** — sealed content seals plaintext numbers with the RFC
+  8785 number rule (#786). A decimal or a large double in the plaintext is now
+  accepted. Number text that is not canonical, such as `1.0`, `1E3` or `-0`, is
+  still refused on open. The sealed bytes of a plaintext with only safe
+  integers do not change. `canonicalizeJson`, the AAD, chain entries and key
+  packages keep the safe-integer rule. A 0.29.0 opener may refuse a decimal
+  plaintext that 0.30.0 seals.
+- **Fixed (keys)** — `DeviceSealingKeyStore` refuses a stored record whose key
+  coordinates are not canonical base64url, with `DEVICE_SEALING_KEY_INVALID`.
+  Each coordinate must be 43 characters that decode to 32 bytes and encode
+  back to the same text. The SDK writes only canonical records, so only a
+  hand-edited or damaged record is refused.
+- **Fixed (core)** — the sealed entry points and the provider-secret entry
+  point return their typed error for a hostile in-process object: a getter
+  that throws, a proxy trap or a revoked proxy. Before, some of these cases
+  threw a raw `TypeError`. Wire input cannot reach these paths.
+- **Fixed (client)** — on Windows, Hermes gateway identification names the
+  control pipe as CPython `os.path.normcase` does (#712). Before, an Agent home
+  whose path has U+0130 or a final U+03A3 got another pipe name, and the SDK
+  did not find the gateway. Other homes keep the same pipe name. No action is
+  needed at upgrade.
+- **Breaking (client)** — the daemon declines an inbound offer that is above
+  the journal record bound, and it drops other over-bound envelopes (#826).
+  Before, `JournalRecordTooLargeError` stopped the handler, and the cursor
+  stalled. The mailbox then sent the row again at each reconnect. Now an
+  over-bound offer (any of the 11 offer types, sealed ones too) gets one
+  `task.decline` with `reason: 'inbound_envelope_too_large'` and
+  `retryable: false`. The journal stores the digest and the length, not the
+  bytes. A later offer for the same task gets the stored decline. An
+  over-bound `task.steer`, `task.steer_sealed`, `task.cancel`, `task.approve`
+  or `task.reject` is dropped with a local warning. The cursor moves in both
+  cases. The local journal gets the column `withheld_bytes`, which it adds
+  when it opens. Compatibility: `LocalTaskJournal` gets the required method
+  `appendWithheldOffer`, and `readTask` can return a `WithheldOfferTask`. A
+  Host that injects its own journal must implement the method. On a journal
+  with a withheld offer, an older daemon stalls its cursor when the same task
+  is offered again.
+- **Feature (examples)** — the K8 example has a runner for the
+  `submit_result` measurement method (#610). One run measures one runtime,
+  model and platform cell. It does a dry run by default. A real run needs
+  `--execute`, an authorization, a deadline, a spend limit and an output
+  path. A declined trial marks the result `incomplete`. `sdkBuild` records
+  every runtime SDK package and a hash of each dist tree.
+- **Feature (examples)** — K8 has a collaboration commit contract (#739 D1).
+  `commitInLedger` runs an owner command or a K4 callback in one commit with
+  a revision. A replay with the same evidence returns the first result.
+  `CommitConflict` reports `identity_conflict`, `stale_revision` or
+  `scope_mismatch`. The keyless owner commands, from `setMainBot` to
+  `cancelTurn`, also commit and increase the revision, but they store no
+  command record. A keyless retry with its old expected revision gets
+  `stale_revision`. `CollaborationState` gets the optional `revision` and
+  `commands`.
+- **Feature (examples)** — K8 can read ContextPack history from an external
+  authority (#739 D1). The new `BotOptions.history` reads the rows of one Bot
+  and Turn. A read that throws leaves the Turn queued, and the timer tries
+  again. Without the option, nothing changes.
+- **Feature (examples)** — K8 has an external team mode (#739 D1). With
+  `team: 'external'`, there is no Main Bot, and `applyTeam({ revision, bots })`
+  applies a team snapshot. `setMainBot`, `create_bot`, `update_bot` and
+  `delete_bot` refuse with `external_team`. A ledger keeps its mode, so a
+  local ledger cannot open as external, or the reverse. An archived Bot id
+  cannot come back. Each snapshot Bot id must be a valid AgentRef, and its
+  projection must be at most 64 KiB. Otherwise the snapshot is refused before
+  the commit.
+- **Feature (examples)** — K4 exports the parts that a second store needs
+  (#793 D2b, #798 S1). `ledger.transaction` gives a second argument,
+  `ApplicationRows`, with typed rows in the new SQLite table
+  `host_application_row`. The frozen submit and FIFO rules are exported:
+  `submitFrozen`, `sameFrozenOffer`, `fifoHeads`, `queuedExpiry` and
+  `agentKey`. K4 behavior does not change.
+- **Feature (examples)** — the new private package
+  `examples/hosted-bot-collaboration` runs the K8 commit contract on Postgres
+  (#793 D2a, D2b). `HostedCollaborationStore` keeps the scope, entities,
+  entries, commands and outbox in the tables of `DDL` (`src/ddl.ts`), in a
+  separate schema. It refuses an unknown store version. `HostedSubmitter`
+  and the `intent` table submit the frozen intents with the K4 rules. The
+  store sync runs the K8 sync rule and freezes the intent of a ready Turn in
+  the same transaction. Nothing is deployed, so the tables change in place
+  with no migration.
+- **Breaking (examples)** — K8 needs the K4 compaction veto (#816).
+  `BotCollaboration` refuses a Host ledger that was opened without
+  `{ compactVeto: botCompactVeto }`. K4 gets the option `compactVeto` and
+  `CompactVetoError` (`compact_vetoed`), and a veto rolls back the whole
+  `compact` batch. Sync no longer throws when a Turn's result was retired. It
+  marks the Turn `failed`, writes an audit line and reports
+  `result_retired` once.
+- **Breaking (examples)** — K8 `CollaborationState` is version 3 (#798 S2).
+  The Host refuses a version 2 ledger with a clear error and writes no
+  migration. Earlier K8 code refuses a version 3 ledger. Back up the ledger
+  before you upgrade. To roll back, restore that backup or start a new
+  ledger. The new `bot.retain({ acknowledgedRoots, now, retentionMs })` moves
+  settled roots that the Host acknowledged out of the state into K4
+  application rows. `retentionMs` must be at least 7 days. A root that is
+  still in use is refused with `protected_root` or `seat_root`, and a retired
+  id at admission throws `RetiredIdentityError`. The commit store gets the
+  hooks `CommitOptions.archived` and `CommandStore.admitted`.
 
 ## 0.29.0 — 2026-10-23 (published)
 
