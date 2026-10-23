@@ -721,6 +721,9 @@ func openVerifiedChild(parent *os.Root, name string) (*os.Root, *protocolError) 
 	if before.Mode()&os.ModeSymlink != 0 || !before.IsDir() {
 		return nil, failure("unsafe_path", "path is unsafe")
 	}
+	if err := requireParentVolume(parent, before); err != nil {
+		return nil, err
+	}
 	child, err := parent.OpenRoot(name)
 	if err != nil {
 		return nil, failure("unsafe_path", "path is unsafe")
@@ -741,6 +744,30 @@ func openVerifiedChild(parent *os.Root, name string) (*os.Root, *protocolError) 
 	}
 	keepChild = true
 	return child, nil
+}
+
+// sameEntryVolume is a test seam. The release binary compares device numbers.
+var sameEntryVolume = sameVolume
+
+// requireParentVolume refuses an entry on another device than its parent
+// directory, for example a network volume mounted over notes. Lstat crosses
+// into a mounted volume, so the same-file checks alone admit it. Each entry
+// below the pinned root passes this check, so each admitted entry is on the
+// root's device. The check uses the Lstat result, so the helper does not open
+// an object on the other volume. Windows reports a volume mount point as a
+// reparse point without ModeDir, so the directory check refuses it there.
+func requireParentVolume(parent *os.Root, entry fs.FileInfo) *protocolError {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	info, err := parent.Stat(".")
+	if err != nil {
+		return failure("io_failure", "filesystem operation failed")
+	}
+	if same, err := sameEntryVolume(info, entry); err != nil || !same {
+		return failure("unsafe_path", "path is unsafe")
+	}
+	return nil
 }
 
 func (p *pinnedDirectory) readState(name string, maximum int) (fileState, *protocolError) {
@@ -765,6 +792,9 @@ func (p *pinnedDirectory) openExisting(name string, flags int) (*os.File, fs.Fil
 	}
 	if before.Mode()&os.ModeSymlink != 0 || !before.Mode().IsRegular() {
 		return nil, nil, false, failure("unsafe_path", "path is unsafe")
+	}
+	if err := requireParentVolume(p.root, before); err != nil {
+		return nil, nil, false, err
 	}
 	file, err := p.root.OpenFile(name, flags, 0)
 	if err != nil {
