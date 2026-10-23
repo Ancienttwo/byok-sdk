@@ -13,6 +13,17 @@
   duplicate offer. The Host does not check `notAfter`; the device does. No
   daemon advertises `sealed-payload-v1` yet, so no device receives the field.
 
+- **Feature (client)** — the daemon opens the routine template of a sealed
+  offer with `routineRef` (#654 E3d-3). It builds the template binding from
+  `routineRef`, the offer's `agentRef` and its `sealing.categories`, with no
+  device. A template runs up to and including its `notAfter` on the daemon
+  clock. A later one gets a non-retry `task.decline` with
+  `sealing_policy_mismatch`. Another routine, Agent or category list fails
+  the open with `sealed_open_failed`, and a content MAC that does not match
+  gets `sealed_content_mac_mismatch`. The decline reason is the code. Only the
+  test seam of `buildDaemonWithAdapters` gives a daemon a keyring, so a
+  default daemon still declines every sealed offer.
+
 - **Feature (protocol, server, cloud, client)** — an ordinary Agent offer can
   select `agentMemory: 'read-if-admitted'` (#815). It runs exactly as `read`
   when the daemon admits the memory MCP, and exactly as `none` when it does

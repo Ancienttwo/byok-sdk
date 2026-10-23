@@ -8229,7 +8229,9 @@ export declare class SealedTasks {
     /**
      * Opens a sealed offer and returns the plaintext offer it seals, or the
      * closed decline code. A task that seals its output needs a sealing key
-     * before it may run, also when its instruction is plaintext.
+     * before it may run, also when its instruction is plaintext. An offer with
+     * `routineRef` carries a routine template, which opens under the template
+     * binding and only up to its `notAfter`.
      */
     openOffer(envelope: Envelope): Promise<SealedOfferOpenResult>;
     /**
