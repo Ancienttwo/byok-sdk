@@ -1013,9 +1013,10 @@ the ledger barrier and conflict-before-rename ordering, so that daemon can
 advertise. Missing or invalid helper assets cannot admit memory tools. An
 explicit intent configuration with invalid assets fails before startup.
 Windows does not advertise. The Windows x64 SDK helper admits the memory
-tools, but its backend reports no strict ledger barrier. Its accepted model S covers process
-crash, OS crash and power loss. The proposed domain is local NTFS on an
-explicit OS build with a normal user token and storage that honors flush.
+tools, but its backend reports no strict ledger barrier. For Windows B, the
+accepted model S covers process crash, OS crash and power loss. The proposed
+domain is local NTFS on an explicit OS build with a normal user token and
+storage that honors flush.
 It excludes SMB, synced directories and other file systems. Windows B stays
 false until the ledger, memory replace/delete, metadata, name changes and new
 parent directories meet the full recovery contract. A successful file flush,

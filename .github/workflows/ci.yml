@@ -256,8 +256,8 @@ jobs:
     # administrator, and as a new standard user. Node and Bun also check the
     # root identity that the TS caller sends to open. windows-latest is
     # Server 2025 and windows-2022 is Server 2022, so the evidence covers two
-    # Windows builds. The helper admits a Windows open, but the TS gate stays
-    # closed and B stays false. See docs/plans/2026-10-22-605-windows-memory.md.
+    # Windows builds. The TS gate admits Windows x64 recall and save, and B
+    # stays false. See docs/plans/2026-10-22-605-windows-memory.md.
     strategy:
       fail-fast: false
       matrix:
@@ -287,11 +287,22 @@ jobs:
 
       - name: Test Go helper and non-Darwin volume identity
         working-directory: packages/client/native/agent-memory-fs
-        run: go test -v ./...
+        run: go test -v ./... 2>&1 | tee "$RUNNER_TEMP/go-admin.txt"
+        # An explicit bash shell sets pipefail, so a test failure fails the step.
+        shell: bash
         env:
           GOTOOLCHAIN: go1.26.5
           # The Windows remote-volume refusal must run against the SMB loopback share.
           BYOK_REQUIRE_SMB_LOOPBACK_TEST: '1'
+
+      - name: Check the administrator run passed the Windows tests
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # A skip or a renamed test also exits 0.
+          for name in TestVersionAndOpenProtocol TestWindowsOpenWithJunctionFixtures TestWindowsReparseParentSwapCannotTouchOutsideSentinel TestWindowsMemoryResultBarrierFailsClosedOnNTFS TestWindowsProcessKillAtEachBarrierPointOnNTFS TestWindowsProcessKillAtRandomTimesOnNTFS TestWindowsOpenRefusesRemoteVolume TestWindowsRemoteVolumeQueryOnSMBLoopback; do
+            grep -qF -- "--- PASS: $name (" "$RUNNER_TEMP/go-admin.txt" || { echo "administrator run did not pass $name" >&2; exit 1; }
+          done
 
       - name: Check Node and Bun root identity against the helper handle
         if: runner.os == 'Windows'
@@ -353,13 +364,13 @@ jobs:
           $output = Get-Content -Raw (Join-Path $work 'go.txt')
           if ($output -match '--- FAIL') { throw 'standard-user tests reported a failure' }
           # A renamed test would match nothing and still exit 0.
-          foreach ($name in 'TestVersionAndOpenProtocol', 'TestWindowsOpenWithJunctionFixtures', 'TestWindowsReparseParentSwapCannotTouchOutsideSentinel', 'TestWindowsMemoryResultBarrierFailsClosedOnNTFS', 'TestWindowsProcessKillAtEachBarrierPointOnNTFS', 'TestWindowsProcessKillAtRandomTimesOnNTFS') {
+          foreach ($name in 'TestVersionAndOpenProtocol', 'TestWindowsOpenWithJunctionFixtures', 'TestWindowsReparseParentSwapCannotTouchOutsideSentinel', 'TestWindowsMemoryResultBarrierFailsClosedOnNTFS', 'TestWindowsProcessKillAtEachBarrierPointOnNTFS', 'TestWindowsProcessKillAtRandomTimesOnNTFS', 'TestWindowsOpenRefusesRemoteVolume', 'TestWindowsRemoteVolumeQueryOnSMBLoopback') {
             if ($output -notmatch "--- PASS: $name \(") { throw "standard-user run did not pass $name" }
           }
 
-  # The Go helper is admitted only on macOS. Keep its toolchain and the
-  # TypeScript-to-Go integration test in one independent job so the admission
-  # path cannot be hidden behind the Linux full-suite skips.
+  # The Go helper is admitted on macOS and on Windows x64. Keep its toolchain
+  # and the TypeScript-to-Go integration test in one independent job so the
+  # admission path cannot be hidden behind the Linux full-suite skips.
   agent-memory-helper:
     needs: select
     if: ${{ contains(fromJSON(needs.select.outputs.families), 'agent-memory-helper') }}
@@ -393,6 +404,20 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
+      # The test Bun lookup knows only POSIX install paths, so the Windows leg
+      # names the real bun.exe. BYOK_REQUIRE_BUN=1 makes a missing Bun fail
+      # the compiled-product test instead of skipping it.
+      - name: Resolve Bun for the compiled-product test
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bun = (Get-Command bun -CommandType Application | Select-Object -First 1).Source
+          if (-not (Test-Path -LiteralPath $bun -PathType Leaf)) { throw "bun is not a file: $bun" }
+          "bun path: $bun"
+          & $bun --version
+          Add-Content -Encoding utf8 -Path $env:GITHUB_ENV -Value "BYOK_TEST_BUN_BIN=$bun"
+          Add-Content -Encoding utf8 -Path $env:GITHUB_ENV -Value 'BYOK_REQUIRE_BUN=1'
+
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
@@ -411,7 +436,9 @@ jobs:
       - name: Test Go helper
         if: runner.os == 'macOS'
         working-directory: packages/client/native/agent-memory-fs
-        run: GOTOOLCHAIN=go1.26.5 go test -race ./...
+        env:
+          BYOK_REQUIRE_DARWIN_NONLOCAL_VOLUME: '1'
+        run: GOTOOLCHAIN=go1.26.5 go test -race -v ./...
 
       - name: Build Go helper
         if: runner.os == 'macOS'

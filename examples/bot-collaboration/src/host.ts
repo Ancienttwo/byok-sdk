@@ -720,7 +720,7 @@ export class BotCollaboration {
     }
     this.ledger.transaction(s => cleanReplyTokens(s, stateOf(s.application), this.now()));
   }
-  /** A failed pass still re-arms the timer, so the timer retries a failed K4 wake call. */
+  /** A failed pass still re-arms the timer, so other timer work keeps its times. K4 retries a failed wake call itself. */
   private async process(): Promise<void> {
     try { await this.pass(); } finally { this.armTimer(); }
   }
@@ -762,10 +762,8 @@ export class BotCollaboration {
     if (!this.closed) {
       // Durable state is authority. The timer only retries outbox work, expires cards and seals input batches at their window end.
       const ledger = this.ledger.snapshot(), state = stateOf(ledger.application);
-      // K4 keeps a failed wake call in its outbox with `lastError`. Retry it after 60 seconds.
-      const wakes = Object.values(ledger.outbox).filter(row => (row.kind === 'schedule' || row.kind === 'cancel-wake') && row.lastError !== undefined);
-      const due = [...wakes.map(() => this.now() + 60_000),
-        ...(this.options.channel ? Object.values(state.channel?.deliveries ?? {}).filter(row => row.state === 'pending').map(row => row.nextAttemptAt ?? this.now()) : []),
+      // K4 retries a failed wake call from its own timer.
+      const due = [...(this.options.channel ? Object.values(state.channel?.deliveries ?? {}).filter(row => row.state === 'pending').map(row => row.nextAttemptAt ?? this.now()) : []),
         ...Object.values(state.channel?.inbounds ?? {}).filter(row => row.reply?.token).map(row => row.reply!.expiresAt),
         ...Object.values(state.cards).filter(c => c.state === 'pending').map(c => c.expiresAt),
         ...Object.values(state.team.seats).filter(seat => !seat.released && seat.deadline !== undefined).map(seat => seat.deadline!),
