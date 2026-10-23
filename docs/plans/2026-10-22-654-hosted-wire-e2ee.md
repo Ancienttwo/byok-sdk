@@ -404,6 +404,7 @@ AiphaBee 自研的配对和 device grant，在 SDK 里对应 `/byok/pair` 和 `/
 ```
 
 - 明文是移走字段组成的对象的 canonical JSON，例如 `{ "instruction": "..." }`。
+- 明文的数字按 RFC 8785 序列化：有限的数字按 ECMAScript `Number.prototype.toString` 写出，NaN 和 Infinity 被拒绝。小数和超过 2^53 的整数因此可以封装（#786，owner 2026-10-23 的决定）。这条规则只用于明文。AAD、MAC 里的身份、成员链条目和 key package 仍用 attestation 的 canonical JSON，只接受安全整数。
 - 内容密钥为 `HKDF-SHA-256(SK, salt, "byok-sdk.sealed.v1.enc")`。每条内容用新 salt，所以每个内容密钥只用一次。
 - 加密前先组帧：`frame = u32be(contentLength) || content || 0x00 × (paddedLength − 4 − contentLength)`。`content` 是明文对象的 canonical JSON 的 UTF-8 字节；blob 时是原始字节。`paddedLength` 是帧长，算法见 §8.6。
 - 接收端解密后检查五项：解密得到的帧长等于 `paddedLength`；`contentLength ≤ paddedLength − 4`；`paddedLength = pad(4 + contentLength)`（§8.6）；填充字节全是 0；`contentLength` 不超过这个消息类型的明文上限。任何一项不符，按 `sealed_open_failed` 拒绝。

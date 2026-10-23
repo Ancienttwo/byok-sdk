@@ -1,9 +1,10 @@
 /**
  * Sealed-payload v1 test vectors (#654 E1a), Node leg.
  *
- * `golden/sealed-payload-v1.json` pins the v1 bytes: padding, frames, scope
- * key derivations, member ids, sealed contents, crafted receiver failures,
- * member chain entries and key packages. Two checks run against it:
+ * `golden/sealed-payload-v1.json` pins the v1 bytes: plaintext numbers,
+ * padding, frames, scope key derivations, member ids, sealed contents, crafted
+ * receiver failures, member chain entries and key packages. Two checks run
+ * against it:
  *
  * 1. `support/sealed-payload-vectors.ts` runs every vector through the core
  *    modules. The Bun leg (`sealed-payload-bun.test.ts`) runs the same checker.
@@ -50,6 +51,7 @@ import {
   type SealedCategory,
   type SealedContentHeaderV1,
 } from '../sealed-payload/sealed-content';
+import { canonicalizeSealedJson } from '../sealed-payload/sealed-json';
 import {
   checkSealedPayloadVectors,
   fromHex,
@@ -61,6 +63,7 @@ import {
   type ChainVector,
   type CraftedOpenVector,
   type KeyPackageVector,
+  type NumberVector,
   type PlaintextFill,
   type PolicyOpenVector,
   type SealedPayloadVectors,
@@ -97,6 +100,42 @@ const TENANT = 'tenant-1';
 const SCOPE = { id: 'scope-1', epoch: 1 } as const;
 const SEALING = { scopeId: SCOPE.id, epoch: SCOPE.epoch } as const;
 const PACKAGE_DOMAIN = 'byok-scope-key-package-v1\n';
+
+/**
+ * RFC 8785 Appendix B, Table 1, row by row: IEEE 754 bits and the canonical
+ * text. `null` marks NaN and Infinity, which have no JSON form (#786).
+ */
+const RFC8785_NUMBER_SAMPLES: readonly NumberVector[] = [
+  { ieee: '0000000000000000', json: '0' },
+  { ieee: '8000000000000000', json: '0' },
+  { ieee: '0000000000000001', json: '5e-324' },
+  { ieee: '8000000000000001', json: '-5e-324' },
+  { ieee: '7fefffffffffffff', json: '1.7976931348623157e+308' },
+  { ieee: 'ffefffffffffffff', json: '-1.7976931348623157e+308' },
+  { ieee: '4340000000000000', json: '9007199254740992' },
+  { ieee: 'c340000000000000', json: '-9007199254740992' },
+  { ieee: '4430000000000000', json: '295147905179352830000' },
+  { ieee: '7fffffffffffffff', json: null },
+  { ieee: '7ff0000000000000', json: null },
+  { ieee: '44b52d02c7e14af5', json: '9.999999999999997e+22' },
+  { ieee: '44b52d02c7e14af6', json: '1e+23' },
+  { ieee: '44b52d02c7e14af7', json: '1.0000000000000001e+23' },
+  { ieee: '444b1ae4d6e2ef4e', json: '999999999999999700000' },
+  { ieee: '444b1ae4d6e2ef4f', json: '999999999999999900000' },
+  { ieee: '444b1ae4d6e2ef50', json: '1e+21' },
+  { ieee: '3eb0c6f7a0b5ed8c', json: '9.999999999999997e-7' },
+  { ieee: '3eb0c6f7a0b5ed8d', json: '0.000001' },
+  { ieee: '41b3de4355555553', json: '333333333.3333332' },
+  { ieee: '41b3de4355555554', json: '333333333.33333325' },
+  { ieee: '41b3de4355555555', json: '333333333.3333333' },
+  { ieee: '41b3de4355555556', json: '333333333.3333334' },
+  { ieee: '41b3de4355555557', json: '333333333.33333343' },
+  { ieee: 'becbf647612f3696', json: '-0.0000033333333333333333' },
+  { ieee: '43143ff3c1cb0959', json: '1424953923781206.2' },
+];
+
+/** Texts that parse to a number whose canonical text differs. */
+const NON_CANONICAL_NUMBERS: readonly string[] = ['1.0', '1e0', '1E3', '-0', '0.10', '10e-1', '1e-07', '100000000000000000000000', '5E-324', '1.000000000000000000001'];
 
 function frameContents(): string[] {
   return [0, 1, 252, 253].map((length) => toHex(Uint8Array.from({ length }, (_, index) => (index * 7 + 1) & 0xff)));
@@ -184,11 +223,23 @@ function sealedInputs(client: VectorMember, device: VectorMember): SealedInput[]
       plaintext: { input: { prompt: 'Write the daily digest.' } },
       maxContentLength: 64 * 1024,
     },
+    {
+      // #786: numbers the safe-integer rule refused, in the RFC 8785 number form.
+      name: 'c3-task-output-numbers',
+      sender: device,
+      category: 'task-output',
+      binding: { ...deviceBinding, family: 'task.result', direction: 'daemon-to-server', identity: { taskId: 'task-3' } },
+      plaintext: {
+        usage: { costUsd: 0.0123, ratio: -1.5 },
+        values: [0.1, 1e-7, 1e21, 1e23, 2 ** 53, 5e-324, 1.7976931348623157e308, -0.0000033333333333333333, 333333333.3333333],
+      },
+      maxContentLength: 64 * 1024,
+    },
   ];
 }
 
 function macInputHex(category: SealedCategory, binding: SealedBinding, plaintext: JsonObject): string {
-  const text = `byok-content-mac-v1\n${category}\n${binding.family}\n${canonicalizeJson(binding.identity)}\n${canonicalizeJson(plaintext)}`;
+  const text = `byok-content-mac-v1\n${category}\n${binding.family}\n${canonicalizeJson(binding.identity)}\n${canonicalizeSealedJson(plaintext)}`;
   return Buffer.from(text, 'utf8').toString('hex');
 }
 
@@ -422,7 +473,9 @@ async function buildVectors(): Promise<SealedPayloadVectors> {
   }
 
   return {
-    note: 'Sealed-payload v1 vectors (#654 E1a, E1b). Regenerate with BYOK_CORE_UPDATE_GOLDEN=1 bun run --filter @byok-sdk/core test. A diff in a deterministic field is a breaking change to the v1 format. Chain signatures and key packages are random at generation, so they are verify-only and change on every regeneration. All keys derive from public labels and are test values only.',
+    note: 'Sealed-payload v1 vectors (#654 E1a, E1b; #786 numbers). Regenerate with BYOK_CORE_UPDATE_GOLDEN=1 bun run --filter @byok-sdk/core test. A diff in a deterministic field is a breaking change to the v1 format. Chain signatures and key packages are random at generation, so they are verify-only and change on every regeneration. All keys derive from public labels and are test values only.',
+    numbers: RFC8785_NUMBER_SAMPLES,
+    nonCanonicalNumbers: NON_CANONICAL_NUMBERS,
     padding: [4, 5, 256, 257, 512, 16383, 16384, 16385, 17408, 17409, 20017, 32768, 32769, 65536, 65537, 1_000_000, 4 + 0xffff_ffff]
       .map((frameLength) => ({ frameLength, paddedLength: sealedPaddedLength(frameLength) })),
     frames: frameContents().map((content) => ({ content, frame: toHex(encodeSealedFrame(fromHex(content))) })),
@@ -464,11 +517,15 @@ function compareCodeUnits(left: string, right: string): number {
   return left.length - right.length;
 }
 
-/** RFC 8785 for the v1 value space: keys sorted by UTF-16 code unit, safe integers only. */
+/**
+ * RFC 8785: keys sorted by UTF-16 code unit; a finite number as ECMAScript
+ * `Number.prototype.toString`. Its number text is pinned to the RFC table by
+ * the RFC 8785 test below, not by this function.
+ */
 function oracleCanonical(value: unknown): string {
   if (value === null || typeof value === 'boolean' || typeof value === 'string') return JSON.stringify(value);
   if (typeof value === 'number') {
-    if (!Number.isSafeInteger(value)) throw new Error(`oracle: ${value} is outside the v1 number space`);
+    if (!Number.isFinite(value)) throw new Error(`oracle: ${value} has no JSON form`);
     return String(value);
   }
   if (Array.isArray(value)) return `[${value.map(oracleCanonical).join(',')}]`;
@@ -570,6 +627,8 @@ describe('sealed-payload v1 vectors', () => {
   it('pass every check in the core modules', async () => {
     const counts = await checkSealedPayloadVectors(golden);
     expect(counts).toMatchObject({
+      numbers: golden.numbers.length,
+      nonCanonicalNumbers: golden.nonCanonicalNumbers.length,
       padding: golden.padding.length,
       frames: golden.frames.length,
       contentKeys: golden.scopeKey.contentKeys.length,
@@ -588,6 +647,7 @@ describe('sealed-payload v1 vectors', () => {
     expect(new Set(golden.sealed.map((vector) => vector.category))).toEqual(new Set(['task-input', 'agent-message', 'task-output', 'memory-projection']));
     expect(golden.sealed.some((vector) => vector.binding.deviceId === null && vector.binding.notAfter !== null)).toBe(true);
     expect(golden.sealed.some((vector) => vector.header.paddedLength > 16_384)).toBe(true);
+    expect(golden.sealed.find((vector) => vector.name === 'c3-task-output-numbers')?.plaintext).toBeDefined();
     expect(golden.craftedOpenFailures.map((vector) => vector.defect)).toEqual(['content-mac', 'padding-byte', 'padded-length', 'length-overflow', 'non-canonical-json']);
     expect(golden.policyOpenFailures.map((vector) => vector.defect)).toEqual(['key-id', 'category-not-sealed', 'scope-id', 'epoch-below', 'categories-order', 'not-after-format']);
     expect(new Set(golden.policyOpenFailures.map((vector) => vector.expect))).toEqual(new Set(['sealed_key_unavailable', 'sealing_policy_mismatch']));
@@ -599,6 +659,24 @@ describe('sealed-payload v1 vectors', () => {
 });
 
 describe('sealed-payload v1 vectors against an independent oracle', () => {
+  it('plaintext numbers: every RFC 8785 Appendix B sample, and refusal of other number texts (#786)', () => {
+    expect(golden.numbers).toEqual(RFC8785_NUMBER_SAMPLES);
+    expect(golden.nonCanonicalNumbers).toEqual(NON_CANONICAL_NUMBERS);
+    for (const { ieee, json } of golden.numbers) {
+      const value = Buffer.from(ieee, 'hex').readDoubleBE(0);
+      if (json === null) {
+        expect(Number.isFinite(value)).toBe(false);
+        continue;
+      }
+      // The RFC text parses back to the same double; JSON has no -0, so only zero may lose its sign.
+      expect(JSON.parse(json)).toBe(value === 0 ? 0 : value);
+    }
+    for (const text of golden.nonCanonicalNumbers) {
+      expect(Number.isFinite(JSON.parse(text))).toBe(true);
+      expect(oracleCanonical(JSON.parse(text))).not.toBe(text);
+    }
+  });
+
   it('padding lengths and frames', () => {
     for (const { frameLength, paddedLength } of golden.padding) expect(oraclePaddedLength(frameLength)).toBe(paddedLength);
     for (const { content, frame } of golden.frames) expect(oracleFrame(Buffer.from(content, 'hex')).toString('hex')).toBe(frame);
