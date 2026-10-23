@@ -3,8 +3,8 @@
 Private reference example for #793 (#606 D2). It is the hosted (H) adapter of the K8 collaboration
 commit contract (`examples/bot-collaboration`, #739 D1), on Node and Postgres.
 
-Status: the commit store, the intent submitter (D2b-1) and the sync step (D2b-2). The message consumer,
-result reconciliation, the command entry, the routine scheduler and retention come in later slices of #793.
+Status: the commit store, the intent submitter (D2b-1), the sync step (D2b-2) and the message consumer (D2c).
+Result reconciliation, the command entry, the routine scheduler and retention come in later slices of #793.
 Do not use this example as a deployed Host yet.
 
 ## Commit store
@@ -96,6 +96,24 @@ The projections that the rule publishes reach the outbox in the same transaction
 record and keeps the revision. A throw writes nothing. H records no execution start before D2d, so the rule
 sees every open intent as not started. H retires no Turn id before D2g.
 
+## Message consumer
+
+`hostedMessageConsumer(store, { scopeOf, ports })` is the `agentMessage` option of `createByokCloud`. Its
+`consume` decides each Agent message in one transaction under the scope lock, in the order of K4
+`consumeMessage`:
+
+1. A tenant whose scope has no row, or a task with no frozen intent: `unknown_task`.
+2. A device, Agent or message context that differs from the frozen input: `binding_mismatch`.
+3. Another message than the task's accepted reply: `message_conflict`. A task has one accepted reply.
+4. Otherwise the `message` command commits under the id `taskId:messageId`. A replay returns the decision of
+   its command record. Other content for that id is `message_conflict`.
+
+Steps 1 to 3 write nothing. A replay gets the same decision, because the frozen input never changes and an
+accepted reply stays. H never returns `held`. A throw writes nothing and leaves the SDK admission pending.
+
+Two decisions differ from K4. A message for another tenant gets `unknown_task`, because H maps each tenant to
+its own scope. H has no `stale_generation`, because each H task is generation 0.
+
 ## Tests
 
 ```sh
@@ -111,6 +129,7 @@ three and runs these suites.
 
 - The D1 commit vectors run on the store and on a reference subject (the pure rules in memory).
 - The D2b sync vectors run on the store.
+- The message consumer tests port the K4 Host-side message vectors (`host-execution-core/src/message.test.ts`).
 - The sync test freezes the same Turns in an L ledger with K4 `enqueue`. Each H input is byte-equal to the K4
   execution input, and the H state bytes equal the L state bytes.
 - The submitter tests use the hosted SDK composition (`createByokCloud` over `createPostgresCloudStores`, with
