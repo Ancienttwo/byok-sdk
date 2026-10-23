@@ -45,6 +45,8 @@ export {
   PostgresDeviceAssertionReplayAuthority,
   PostgresAgentMemoryProjectionStore,
   createPostgresAgentMemoryProjectionStore,
+  PostgresTaskRedactionStore,
+  createPostgresTaskRedactionStore,
   createPostgresCloudStores,
   POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED,
   PostgresMailboxProtocolUnsupportedError,
@@ -54,6 +56,7 @@ export type {
   PostgresCloudStores,
   PostgresObjectStorageOptions,
   PostgresAgentMemoryProjectionStoreOptions,
+  PostgresTaskRedactionStoreOptions,
 } from './stores/index';
 
 // The object-storage half of blobs. Grants only: this composition supplies no

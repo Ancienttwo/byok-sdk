@@ -5,6 +5,7 @@ import {
 } from '@byok-sdk/protocol';
 import type { TenantStores } from './tenant-stores';
 import { parseAgentMessageDisposition } from './inbound';
+import { assertTaskContentPresent } from './task-redaction';
 
 /** SDK transmission evidence; payload remains untrusted and never authors a Host product message. */
 export interface TaskAgentMessage {
@@ -35,6 +36,8 @@ export async function readTaskAgentMessage(
   const invalid = () => new Error('Invalid persisted task Agent message.');
   const binding = await stores.receipts.get(`agent-message-offer:${deviceId}:${taskId}`);
   if (!binding) throw invalid();
+  assertTaskContentPresent(taskId, admission.payloadBody);
+  assertTaskContentPresent(taskId, binding.body);
   let body: unknown, frozenBody: unknown;
   try { body = JSON.parse(admission.payloadBody); frozenBody = JSON.parse(binding.body); } catch { throw invalid(); }
   const parsed = AgentMessagePublishPayloadSchema.safeParse(body);
@@ -62,6 +65,7 @@ export async function readTaskAgentMessageBinding(
   if (attempt === undefined) return undefined;
   const binding = await stores.receipts.get(`agent-message-offer:${deviceId}:${taskId}`);
   if (!binding) return undefined;
+  assertTaskContentPresent(taskId, binding.body);
   let value: unknown;
   try { value = JSON.parse(binding.body); } catch { throw new Error('Invalid persisted task Agent message.'); }
   const frozen = FrozenMessageBinding.safeParse(value);

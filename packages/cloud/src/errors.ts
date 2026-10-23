@@ -46,6 +46,10 @@ export const CLOUD_ERROR_CODES = {
   activity_batch_too_large: 'activity_batch_too_large',
   /** Host control-plane task lookup is tenant-closed and found no task. */
   task_not_found: 'task_not_found',
+  /** A Host read named a task whose content `redactTasks` replaced with a tombstone. */
+  task_content_redacted: 'task_content_redacted',
+  /** `redactTasks` was called on a deployment that has no `taskRedactionStore`. */
+  task_redaction_unavailable: 'task_redaction_unavailable',
   /** Explicit legacy dispatch target is unknown or revoked in this tenant. */
   device_not_found: 'device_not_found',
   /**
