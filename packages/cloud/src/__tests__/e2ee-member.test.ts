@@ -3,15 +3,7 @@
  * first-writer rules as Host errors, and fail-closed behavior without a store.
  */
 import { canonicalizeJson, createMutableClock, type JsonValue, type TenantId } from '@byok-sdk/core';
-import {
-  createMemberKeyBundle,
-  generateScopeKey,
-  memberChainEntryHash,
-  sealScopeKeyPackage,
-  signMemberChainEntry,
-  type MemberChainEntryV1,
-  type MemberKeyBundleV1,
-} from '@byok-sdk/core/sealed-payload';
+import { generateScopeKey, type MemberChainEntryV1 } from '@byok-sdk/core/sealed-payload';
 import { E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { PAIRING_CODE_TTL_MS } from '../auth/plane';
@@ -21,59 +13,8 @@ import { createByokCloud, type ByokCloud } from '../cloud';
 import { createInMemoryByokCloud } from '../composition/in-memory';
 import { isCloudError } from '../errors';
 import { InMemoryE2eeMemberStore } from '../stores/in-memory/e2ee-member';
+import { chain, keyPackage, newMember } from './support/e2ee-members';
 import { TENANT_A, TENANT_B, createHarness } from './support/harness';
-
-type Jwk = MemberKeyBundleV1['signingPublicJwk'];
-type CryptoKey = Parameters<typeof createMemberKeyBundle>[0]['signingPrivateKey'];
-
-interface Member {
-  readonly bundle: MemberKeyBundleV1;
-  readonly signer: { readonly publicJwk: Jwk; readonly privateKey: CryptoKey };
-}
-
-async function keyPair(use: 'sign' | 'kem'): Promise<{ publicJwk: Jwk; privateKey: CryptoKey }> {
-  const pair = await crypto.subtle.generateKey(
-    { name: use === 'sign' ? 'ECDSA' : 'ECDH', namedCurve: 'P-256' },
-    true,
-    use === 'sign' ? ['sign', 'verify'] : ['deriveBits'],
-  );
-  const jwk = await crypto.subtle.exportKey('jwk', pair.publicKey);
-  return { publicJwk: { kty: 'EC', crv: 'P-256', x: jwk.x!, y: jwk.y! }, privateKey: pair.privateKey as CryptoKey };
-}
-
-async function newMember(deviceId?: string): Promise<Member> {
-  const signing = await keyPair('sign');
-  const bundle = await createMemberKeyBundle({
-    signingPublicJwk: signing.publicJwk,
-    signingPrivateKey: signing.privateKey,
-    kemPublicJwk: (await keyPair('kem')).publicJwk,
-    kemEpoch: 1,
-    ...(deviceId === undefined ? {} : { deviceId }),
-  });
-  return { bundle, signer: signing };
-}
-
-async function chain(tenant: TenantId, signer: Member, length: number): Promise<MemberChainEntryV1[]> {
-  const entries: MemberChainEntryV1[] = [];
-  let prev: string | null = null;
-  for (let seq = 1; seq <= length; seq += 1) {
-    const unsigned = { v: 1 as const, tenantId: tenant, seq, prev, op: 'add' as const, subject: { member: signer.bundle as unknown as JsonValue, seq }, signer: signer.bundle.memberId };
-    entries.push(await signMemberChainEntry(unsigned, signer.signer));
-    prev = await memberChainEntryHash(unsigned);
-  }
-  return entries;
-}
-
-async function keyPackage(tenant: TenantId, sender: Member, recipient: Member, epoch: number, scopeKey = generateScopeKey()) {
-  return sealScopeKeyPackage({
-    scopeKey,
-    tenantId: tenant,
-    scopeId: 'scope-1',
-    epoch,
-    recipient: { memberId: recipient.bundle.memberId, kemPublicJwk: recipient.bundle.kemPublicJwk },
-    sender: { signingPublicJwk: sender.signer.publicJwk, signingPrivateKey: sender.signer.privateKey },
-  });
-}
 
 function setup(withStore = true, store = new InMemoryE2eeMemberStore()) {
   const clock = createMutableClock();

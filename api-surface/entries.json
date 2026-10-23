@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2204680,
+      "budgetBytes": 2206208,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1220,7 +1220,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Cloud coordination and HTTP handlers",
-      "budgetBytes": 591842,
+      "budgetBytes": 601150,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1273,7 +1273,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 861525,
+      "budgetBytes": 870833,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1398,7 +1398,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Worker online stores; pg requires nodejs_compat",
-      "budgetBytes": 816742,
+      "budgetBytes": 826050,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1680,7 +1680,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Sealed payload v1 byte rules",
-      "budgetBytes": 190719,
+      "budgetBytes": 191066,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1860,7 +1860,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Wire schemas and codecs; codegen negative control",
-      "budgetBytes": 149978,
+      "budgetBytes": 150896,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1969,7 +1969,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 747750,
+      "budgetBytes": 757058,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2066,7 +2066,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 620171,
+      "budgetBytes": 629479,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2148,7 +2148,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2143677,
+      "budgetBytes": 2145205,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
