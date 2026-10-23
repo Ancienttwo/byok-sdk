@@ -54,6 +54,15 @@ describe('syncTurn', () => {
     expect([row.status, row.conclusion]).toEqual(['failed', 'cancelled']);
   });
 
+  it('fails a retired Turn of an archived Bot, and keeps the conclusion of a concluded Turn of an archived Bot', () => {
+    const s = state(true), row = turn(s, { status: 'queued' });
+    expect(syncTurn(s, row, facts(undefined, false, 'result_retired'), OPTIONS, () => {})).toBeUndefined();
+    expect([row.status, row.conclusion]).toEqual(['failed', 'failed']);
+    const done = turn(state(true), { status: 'succeeded', conclusion: 'succeeded' });
+    expect(syncTurn(state(true), done, facts(undefined, false, 'result_retired'), OPTIONS, () => {})).toEqual({ kind: 'ended' });
+    expect([done.status, done.conclusion]).toEqual(['succeeded', 'succeeded']);
+  });
+
   it('fails a retired Turn with the reason, an audit line and one report', () => {
     for (const [reason, line] of [['result_retired', 'Turn result retired before sync: t1'], ['turn_retired', 'Turn identity retired: t1']] as const) {
       const s = state(), row = turn(s, { status: 'queued' }), out = published();

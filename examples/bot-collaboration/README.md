@@ -179,7 +179,9 @@ K4 result. It writes an audit line and reports the Turn once, with
 outcome, because K8 does not read the K4 application tombstone. A routine
 Turn's intent tombstone expires with its slot. K4 removes the occurrence with
 the intent, so the pass also fails a routine Turn whose occurrence is gone,
-after its tombstone expired. A due reply check of a compacted chain intent takes
+after its tombstone expired. The check runs before the archived Bot check, so a
+retired Turn of an archived Bot also fails with `result_retired`. The archived
+Bot check cancels only a Turn that has no conclusion. A due reply check of a compacted chain intent takes
 the failed readback path. The Host keeps processing other work.
 
 ### Retention

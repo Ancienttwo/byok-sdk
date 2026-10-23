@@ -97,13 +97,10 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
     }
     return undefined;
   }
-  if (bot?.archived) { turn.status = 'failed'; turn.conclusion = 'cancelled'; }
-  if (turn.conclusion) return { kind: 'ended' };
-  if (turn.source === 'room_slot' && state.team.seats[turn.id]?.status === 'blocked') return undefined;
   // #816: the store compacted the intent before this sync saw its result. #798: retention retired this Turn id.
   // Either identity can never run again. The rule does not know the intent's conclusion, so the Turn fails, and every reader of
-  // `turn.conclusion` can settle.
-  const retired = facts.retired(turn.id);
+  // `turn.conclusion` can settle. This runs before the archive check: the work may have run, so the Turn is not `cancelled`.
+  const retired = turn.conclusion ? undefined : facts.retired(turn.id);
   if (retired) {
     turn.status = 'failed'; turn.conclusion = 'failed';
     state.audit.push(`Turn ${retired === 'result_retired' ? 'result retired before sync' : 'identity retired'}: ${turn.id}`);
@@ -111,6 +108,10 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
     turn.reported = true;
     return undefined;
   }
+  // An archived Bot never starts this Turn. A concluded Turn keeps its conclusion.
+  if (!turn.conclusion && bot?.archived) { turn.status = 'failed'; turn.conclusion = 'cancelled'; }
+  if (turn.conclusion) return { kind: 'ended' };
+  if (turn.source === 'room_slot' && state.team.seats[turn.id]?.status === 'blocked') return undefined;
   if (!bot || bot.readyRevision !== bot.revision) {
     const failed = state.team.homeOperations.find(op => op.botId === turn.botId
       && op.request.payload.agentRef.profileRevision === bot?.revision && op.status === 'failed');
