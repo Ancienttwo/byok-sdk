@@ -33,8 +33,10 @@ export interface CommitOptions {
   scope: string;
   /** The fields that decide the command's effect. Only their hash is stored. */
   evidence: Json;
-  /** False when the caller already deduplicates this command durably, as K4 does for terminals and messages. */
+  /** False when the caller already deduplicates this command durably, as K4 does for terminals. */
   record: boolean;
+  /** Which new records to keep. Absent: keep each one. A caller that deduplicates some dispositions itself keeps the rest. */
+  keep?: (disposition: Disposition) => boolean;
   /** The message of an identity conflict. */
   conflict: () => string;
 }
@@ -48,7 +50,8 @@ export function commit<C>(state: CommitState, request: CommitRequest<C>, options
   if (request.scope !== options.scope) throw new CommitConflict('scope_mismatch', 'Commit scope mismatch');
   if (typeof request.commandId !== 'string' || !request.commandId) throw new Error('Invalid command id');
   const evidence = hash(canonical(options.evidence));
-  const prior = options.record ? state.commands?.[request.commandId] : undefined;
+  // Own properties only: a command id such as `constructor` or `__proto__` is a valid opaque id.
+  const prior = options.record && state.commands && Object.hasOwn(state.commands, request.commandId) ? state.commands[request.commandId] : undefined;
   if (prior) {
     if (prior.evidence !== evidence) throw new CommitConflict('identity_conflict', options.conflict());
     return structuredClone(prior.result);
@@ -62,6 +65,9 @@ export function commit<C>(state: CommitState, request: CommitRequest<C>, options
   const disposition = decide(intent => { outbox.push(intent); });
   const result: CommitResult = { revision: head + 1, disposition, outbox };
   state.revision = result.revision;
-  if (options.record) (state.commands ??= {})[request.commandId] = { evidence, result: structuredClone(result) };
+  if (options.record && (options.keep?.(disposition) ?? true)) {
+    Object.defineProperty(state.commands ??= {}, request.commandId,
+      { value: { evidence, result: structuredClone(result) }, enumerable: true, writable: true, configurable: true });
+  }
   return result;
 }

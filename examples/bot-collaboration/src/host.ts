@@ -306,9 +306,16 @@ export class BotCollaboration {
   }
   private applyMessage(input: AgentMessageInput, tx: MessageTransaction): { outcome: 'accepted' | 'refused'; reasonCode?: string } {
     const state = stateOf(tx.application);
-    const { disposition } = this.commitCallback(state, `${input.taskId}:${input.payload.messageId}`,
-      { kind: 'message', turnId: tx.intent.key, message: { taskId: input.taskId, payload: input.payload } },
-      { publish: tx.publish, ...this.deliverPort(state, input.taskId) });
+    let disposition;
+    try {
+      ({ disposition } = this.commitCallback(state, `${input.taskId}:${input.payload.messageId}`,
+        { kind: 'message', turnId: tx.intent.key, message: { taskId: input.taskId, payload: input.payload } },
+        { publish: tx.publish, ...this.deliverPort(state, input.taskId) }));
+    } catch (cause) {
+      // Other content for the id of a refused message: the same refusal that K4 gives for an accepted one.
+      if (cause instanceof CommitConflict && cause.code === 'identity_conflict') return { outcome: 'refused', reasonCode: 'message_conflict' };
+      throw cause;
+    }
     return disposition.outcome === 'accepted' ? { outcome: 'accepted' } : { outcome: 'refused', reasonCode: disposition.reasonCode };
   }
   /**

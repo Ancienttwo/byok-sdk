@@ -206,8 +206,11 @@ Bot routine occurrence. `src/rules/commands.ts` decides them. The routine
 owner APIs are K4 commands on K4 rows and do not commit here.
 
 In this L example the scope is the ledger tenant. Owner APIs pass no expected
-revision. K4 already deduplicates terminals (`applied`) and messages (the
-message receipt), so L stores no record for the callbacks. The D1 vectors in
+revision. K4 already deduplicates terminals (`applied`) and accepted messages (the
+message receipt), so L stores no record for those callbacks. K4 writes no
+receipt for a refused message, so L keeps a record for it: a retry gets the
+same refusal and does not change the revision. Other content for the same
+message id is refused with `message_conflict`. The D1 vectors in
 `src/commit-vectors.test-support.ts` run against a pure in-memory store and
 against the L ledger; the D2 H adapter runs the same vectors.
 
