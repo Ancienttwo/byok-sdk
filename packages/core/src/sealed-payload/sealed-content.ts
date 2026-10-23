@@ -79,6 +79,8 @@ const CONTENT_MAC_PATTERN = /^hmac-sha256:[0-9a-f]{64}$/u;
 /** Dot-separated lowercase words, e.g. `task.offer_for_agent`. It can never hold the MAC's `\n` separator. */
 const FAMILY_PATTERN = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/u;
 const IDENTITY_FIELD_PATTERN = /^[a-z][A-Za-z0-9]*$/u;
+/** The one family that binds no device (design §6.3). */
+const ROUTINE_TEMPLATE_FAMILY = 'routine.template';
 
 // ---------------------------------------------------------------------------
 // Padding and framing (§8.1, §8.6)
@@ -186,12 +188,12 @@ export interface SealedBinding {
   readonly direction: SealedDirection;
   /** The write's identity: `{ taskId }`, `{ messageId }`, … or `{ routineId, definitionVersion }`. */
   readonly identity: { readonly [field: string]: string | number };
-  /** Target device. `null` only for a routine template, which binds no device. */
+  /** Target device. `null` only for the `routine.template` family, which binds no device. */
   readonly deviceId: string | null;
   readonly agentRef: { readonly agentId: string; readonly profileRevision: string } | null;
   /** The task's `sealing.categories`, unique and in {@link SEALED_CATEGORIES} order. */
   readonly categories: readonly SealedCategory[];
-  /** A routine template's expiry; `null` for everything else. */
+  /** A `routine.template`'s expiry; `null` for every other family. */
   readonly notAfter: string | null;
 }
 
@@ -212,11 +214,12 @@ const SealedBindingSchema = z
     notAfter: z.union([z.null(), z.string().refine(isCanonicalTimestamp, 'must be a canonical UTC instant')]),
   })
   .superRefine((binding, ctx) => {
-    if ((binding.deviceId === null) === (binding.notAfter === null)) {
+    const template = binding.family === ROUTINE_TEMPLATE_FAMILY;
+    if ((binding.deviceId === null) !== template || (binding.notAfter === null) === template) {
       ctx.addIssue({
         code: 'custom',
         path: ['deviceId'],
-        message: 'a routine template binds an expiry and no device; other content binds a device and no expiry',
+        message: 'a routine template binds an expiry and no device; every other family binds a device and no expiry',
       });
     }
   });

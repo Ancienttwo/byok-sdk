@@ -285,7 +285,6 @@ function bindingRejections(category: SealedCategory, binding: SealedBinding): Re
   const otherCategory = SEALED_CATEGORIES.find((candidate) => candidate !== category)!;
   const rejections: Rejection[] = [
     failed('tenant', { ...binding, tenantId: changed(binding.tenantId) as string }),
-    failed('family', { ...binding, family: 'task.other_family' }),
     failed('direction', { ...binding, direction: binding.direction === 'server-to-daemon' ? 'daemon-to-server' : 'server-to-daemon' }),
     failed('identity value', { ...binding, identity: { ...binding.identity, [firstField!]: changed(binding.identity[firstField!]!) } }),
     failed('identity extra field', { ...binding, identity: { ...binding.identity, extraField: 'x' } }),
@@ -295,9 +294,6 @@ function bindingRejections(category: SealedCategory, binding: SealedBinding): Re
         ? { agentId: 'agent-other', profileRevision: 'rev-other' }
         : { ...binding.agentRef, profileRevision: changed(binding.agentRef.profileRevision) as string },
     }),
-    binding.deviceId === null
-      ? failed('device instead of expiry', { ...binding, deviceId: 'device-1', notAfter: null })
-      : failed('device', { ...binding, deviceId: changed(binding.deviceId) as string }),
     {
       label: 'binding category not sealed',
       binding: { ...binding, categories: [otherCategory] },
@@ -305,9 +301,23 @@ function bindingRejections(category: SealedCategory, binding: SealedBinding): Re
     },
   ];
   const policy = (label: string, value: unknown): Rejection => ({ label: `binding ${label}`, binding: value as SealedBinding, expect: 'sealing_policy_mismatch' });
+  // Only `routine.template` binds no device, so a routine template has no
+  // other family and no device that still parses: both changes are policy.
+  if (binding.deviceId === null) {
+    rejections.push(
+      policy('family that binds a device', { ...binding, family: 'task.other_family' }),
+      policy('template with a device instead of expiry', { ...binding, deviceId: 'device-1', notAfter: null }),
+    );
+  } else {
+    rejections.push(
+      failed('family', { ...binding, family: 'task.other_family' }),
+      failed('device', { ...binding, deviceId: changed(binding.deviceId) as string }),
+      policy('no device for a device-bound family', { ...binding, deviceId: null, notAfter: '2026-12-31T00:00:00.000Z' }),
+    );
+  }
   rejections.push(
     policy('categories not canonical', { ...binding, categories: [...binding.categories, binding.categories[0]!] }),
-    policy('expiry not canonical', { ...binding, deviceId: null, notAfter: '2026-12-31T00:00:00Z' }),
+    policy('expiry not canonical', { ...binding, family: 'routine.template', deviceId: null, notAfter: '2026-12-31T00:00:00Z' }),
     policy('device and expiry together', { ...binding, deviceId: 'device-1', notAfter: '2026-12-31T00:00:00.000Z' }),
     policy('not an object', null),
   );

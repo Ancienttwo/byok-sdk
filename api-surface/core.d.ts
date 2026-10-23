@@ -2164,7 +2164,8 @@ export declare function memberChainSigningInput(entry: UnsignedMemberChainEntryV
 export declare function memberChainEntryHash(entry: UnsignedMemberChainEntryV1): Promise<string>;
 /**
  * Sign one entry. The signer's public key is required so an entry is never
- * signed under a member id that is not the signer's own.
+ * signed under a member id that is not the signer's own. A private key that
+ * does not pair with that public key throws `sealed_secret_invalid`.
  */
 export declare function signMemberChainEntry(entry: UnsignedMemberChainEntryV1, signer: {
     readonly publicJwk: P256PublicJwk;
@@ -2230,8 +2231,13 @@ export declare function hkdfSha256(ikm: Uint8Array, salt: Uint8Array, info: stri
 export declare function base64UrlBytes(bytes: number): z.ZodString;
 /** Uncompressed SEC1 bytes of a strict P-256 public JWK, checked to be a point on the curve. */
 export declare function p256PublicKeyBytes(publicJwk: P256PublicJwk): Promise<Bytes>;
-/** ECDSA P-256 / SHA-256 signature over `data`, as base64url of the 64-byte P1363 form. */
-export declare function ecdsaSign(privateKey: WebCryptoKey, data: Uint8Array): Promise<string>;
+/**
+ * ECDSA P-256 / SHA-256 signature over `data`, as base64url of the 64-byte
+ * P1363 form. The signature must verify under `publicJwk`, so a private key
+ * that does not pair with the caller's public key throws
+ * `sealed_secret_invalid` and signs nothing under another key's id.
+ */
+export declare function ecdsaSign(publicJwk: P256PublicJwk, privateKey: WebCryptoKey, data: Uint8Array): Promise<string>;
 /** True only for a canonical 64-byte P1363 signature that verifies under `publicJwk`. */
 export declare function ecdsaVerify(publicJwk: P256PublicJwk, signature: string, data: Uint8Array): Promise<boolean>;
 // ==== @byok-sdk/core dist/sealed-payload/scope-key.d.ts ====
@@ -2289,7 +2295,11 @@ export interface SealScopeKeyPackageInput {
         readonly signingPrivateKey: WebCryptoKey;
     };
 }
-/** Wrap one scope key to one member and sign the package. */
+/**
+ * Wrap one scope key to one member and sign the package. A signing private key
+ * that does not pair with `sender.signingPublicJwk` throws
+ * `sealed_secret_invalid`.
+ */
 export declare function sealScopeKeyPackage(input: SealScopeKeyPackageInput): Promise<ScopeKeyPackageV1>;
 export interface OpenScopeKeyPackageInput {
     readonly package: unknown;
@@ -2417,7 +2427,7 @@ export interface SealedBinding {
     readonly identity: {
         readonly [field: string]: string | number;
     };
-    /** Target device. `null` only for a routine template, which binds no device. */
+    /** Target device. `null` only for the `routine.template` family, which binds no device. */
     readonly deviceId: string | null;
     readonly agentRef: {
         readonly agentId: string;
@@ -2425,7 +2435,7 @@ export interface SealedBinding {
     } | null;
     /** The task's `sealing.categories`, unique and in {@link SEALED_CATEGORIES} order. */
     readonly categories: readonly SealedCategory[];
-    /** A routine template's expiry; `null` for everything else. */
+    /** A `routine.template`'s expiry; `null` for every other family. */
     readonly notAfter: string | null;
 }
 /** The canonical AAD bytes of a header under a binding (§8.2). */

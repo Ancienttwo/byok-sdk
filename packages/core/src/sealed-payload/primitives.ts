@@ -136,9 +136,23 @@ async function importEcdsaPublicKey(publicJwk: P256PublicJwk): Promise<WebCrypto
   }
 }
 
-/** ECDSA P-256 / SHA-256 signature over `data`, as base64url of the 64-byte P1363 form. */
-export async function ecdsaSign(privateKey: WebCryptoKey, data: Uint8Array): Promise<string> {
-  return encodeBase64Url(new Uint8Array(await ecdsaSubtle().sign(ECDSA_SHA256, privateKey, copy(data))));
+/**
+ * ECDSA P-256 / SHA-256 signature over `data`, as base64url of the 64-byte
+ * P1363 form. The signature must verify under `publicJwk`, so a private key
+ * that does not pair with the caller's public key throws
+ * `sealed_secret_invalid` and signs nothing under another key's id.
+ */
+export async function ecdsaSign(publicJwk: P256PublicJwk, privateKey: WebCryptoKey, data: Uint8Array): Promise<string> {
+  let signature: string;
+  try {
+    signature = encodeBase64Url(new Uint8Array(await ecdsaSubtle().sign(ECDSA_SHA256, privateKey, copy(data))));
+  } catch (cause) {
+    throw new ByokCoreError('sealed_secret_invalid', 'Signing key is not an ECDSA P-256 private key', { cause });
+  }
+  if (!(await ecdsaVerify(publicJwk, signature, data))) {
+    throw invalidInput('Signing private key does not pair with the signing public key');
+  }
+  return signature;
 }
 
 /** True only for a canonical 64-byte P1363 signature that verifies under `publicJwk`. */
