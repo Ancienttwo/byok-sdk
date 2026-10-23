@@ -116,7 +116,11 @@ func TestWindowsRemoteVolumeQueryOnSMBLoopback(t *testing.T) {
 	share := `\\localhost\` + strings.TrimSuffix(volume, ":") + "$" + strings.TrimPrefix(home, volume)
 	shared, err := os.OpenRoot(share)
 	if err != nil {
-		t.Skipf("SMB loopback admin share is unavailable (it needs an administrator and the Server service): %v", err)
+		// CI sets BYOK_REQUIRE_SMB_LOOPBACK_TEST=1, so a missing share fails there.
+		if os.Getenv("BYOK_REQUIRE_SMB_LOOPBACK_TEST") == "1" {
+			t.Fatalf("SMB loopback admin share is unavailable: %v", err)
+		}
+		t.Skipf("SMB loopback admin share is unavailable (it needs the Server service and share access): %v", err)
 	}
 	defer shared.Close()
 	if remote, err := volumeIsRemote(shared); err != nil || !remote {
