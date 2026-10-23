@@ -112,6 +112,15 @@ const ShredSubjectSchema = z.strictObject({ scopeId: ScopeIdSchema });
 const SignerSchema = z.object({ signer: MemberIdSchema });
 const GenesisSchema = z.object({ op: z.literal('add'), subject: AddSubjectSchema });
 const HeadSchema = z.object({ seq: z.number(), hash: z.string() });
+const EntriesSchema = z.array(z.unknown());
+/** The caller data of the anchor check, read once. `self` and `authenticatedHead` are parsed after this read. */
+const AnchorInputSchema = z.object({
+  tenantId: z.string(),
+  entries: EntriesSchema,
+  self: z.unknown(),
+  approverSigningPublicJwk: P256PublicJwkSchema,
+  authenticatedHead: z.unknown().optional(),
+});
 
 /** The state before the genesis entry of `tenantId`'s chain. */
 export function emptyMemberChainState(tenantId: string): MemberChainState {
@@ -130,7 +139,9 @@ export function memberChainScopeRecipients(state: MemberChainState, scopeId: str
 
 /** Apply `entries` in order after `state`. Never throws for hostile entries. */
 export async function applyMemberChainEntries(state: MemberChainState, entries: readonly unknown[]): Promise<MemberChainWalkResult> {
-  const result = await walk(state, entries, () => false);
+  const list = safeParseTotal(EntriesSchema, entries);
+  if (!list.success) return { ok: false, reason: 'member_chain_entry_invalid', index: 0 };
+  const result = await walk(state, list.data, () => false);
   return result.ok ? { ok: true, state: result.state } : result;
 }
 
@@ -151,8 +162,15 @@ interface WalkState {
   shredded: Set<string>;
 }
 
+/** The first entry that `mark` accepted: its index in the batch, its `seq` and its entry hash. */
+interface MarkedEntry {
+  readonly index: number;
+  readonly seq: number;
+  readonly hash: string;
+}
+
 type WalkOutcome =
-  | { readonly ok: true; readonly state: MemberChainState; readonly marked: number | undefined }
+  | { readonly ok: true; readonly state: MemberChainState; readonly marked: MarkedEntry | undefined }
   | { readonly ok: false; readonly reason: MemberChainWalkFailure; readonly index: number };
 
 /**
@@ -172,7 +190,7 @@ async function walk(
     scopes: new Map(state.scopes),
     shredded: new Set(state.shredded),
   };
-  let marked: number | undefined;
+  let marked: MarkedEntry | undefined;
   for (const [index, raw] of entries.entries()) {
     const signer = safeParseTotal(SignerSchema, raw);
     if (!signer.success) return { ok: false, reason: 'member_chain_entry_invalid', index };
@@ -185,7 +203,7 @@ async function walk(
     if (entry.tenantId !== next.tenantId || entry.seq !== expected.seq || entry.prev !== expected.prev) {
       return { ok: false, reason: 'member_chain_link_invalid', index };
     }
-    if (marked === undefined && mark(entry, signerBundle.signingPublicJwk)) marked = index;
+    if (marked === undefined && mark(entry, signerBundle.signingPublicJwk)) marked = { index, seq: entry.seq, hash: verified.hash };
     if (!(await applySubject(next, entry))) return { ok: false, reason: 'member_chain_subject_invalid', index };
     next.head = { seq: entry.seq, hash: verified.hash };
   }
@@ -288,34 +306,35 @@ export interface VerifyMemberChainFromAnchorInput {
  * hostile entries.
  */
 export async function verifyMemberChainFromAnchor(input: VerifyMemberChainFromAnchorInput): Promise<MemberChainAnchorResult> {
+  const parsed = safeParseTotal(AnchorInputSchema, input);
+  if (!parsed.success) return { ok: false, reason: 'member_chain_anchor_missing' };
+  const { tenantId, entries, self, approverSigningPublicJwk: approver, authenticatedHead } = parsed.data;
   let approverId: string;
   let selfText: string;
   try {
-    approverId = await deriveMemberId(input.approverSigningPublicJwk);
-    selfText = canonicalizeJson(input.self as unknown as JsonObject);
+    approverId = await deriveMemberId(approver);
+    selfText = canonicalizeJson(self as JsonObject);
   } catch {
     return { ok: false, reason: 'member_chain_anchor_missing' };
   }
+  // The walk verified each entry with `signerKey`, so an entry that matches here verifies with the approver's key.
   const isAnchor = (entry: MemberChainEntryV1, signerKey: P256PublicJwk): boolean => {
-    if (entry.op !== 'add' || entry.signer !== approverId) return false;
-    if (signerKey.x !== input.approverSigningPublicJwk.x || signerKey.y !== input.approverSigningPublicJwk.y) return false;
-    const member = (entry.subject as { member?: unknown }).member;
+    if (entry.op !== 'add' || entry.signer !== approverId || signerKey.x !== approver.x || signerKey.y !== approver.y) return false;
     try {
-      return canonicalizeJson(member as JsonObject) === selfText;
+      return canonicalizeJson((entry.subject as { member?: unknown }).member as JsonObject) === selfText;
     } catch {
       return false;
     }
   };
-  const outcome = await walk(emptyMemberChainState(input.tenantId), input.entries, isAnchor);
+  const outcome = await walk(emptyMemberChainState(tenantId), entries, isAnchor);
   if (!outcome.ok) return outcome;
-  if (outcome.marked === undefined) return { ok: false, reason: 'member_chain_anchor_missing' };
-  const anchor = await verifyMemberChainEntry(input.entries[outcome.marked], input.approverSigningPublicJwk);
-  if (!anchor.ok) return { ok: false, reason: 'member_chain_anchor_missing', index: outcome.marked };
-  if (input.authenticatedHead !== undefined) {
-    const head = safeParseTotal(HeadSchema, input.authenticatedHead);
-    if (!head.success || head.data.seq !== anchor.entry.seq || head.data.hash !== anchor.hash) {
-      return { ok: false, reason: 'member_chain_head_mismatch', index: outcome.marked };
+  const anchor = outcome.marked;
+  if (anchor === undefined) return { ok: false, reason: 'member_chain_anchor_missing' };
+  if (authenticatedHead !== undefined) {
+    const head = safeParseTotal(HeadSchema, authenticatedHead);
+    if (!head.success || head.data.seq !== anchor.seq || head.data.hash !== anchor.hash) {
+      return { ok: false, reason: 'member_chain_head_mismatch', index: anchor.index };
     }
   }
-  return { ok: true, state: outcome.state, anchorSeq: anchor.entry.seq };
+  return { ok: true, state: outcome.state, anchorSeq: anchor.seq };
 }

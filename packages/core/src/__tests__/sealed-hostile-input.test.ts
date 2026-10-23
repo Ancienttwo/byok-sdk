@@ -214,6 +214,7 @@ const E2_RECEIVERS: Record<string, readonly [(hostile: object) => Promise<unknow
   'verifyClientPairingMac member': [(h) => verifyClientPairingMac(PV, { member: h as never, chainHead: HEAD }, MAC), (r) => r === false],
   'verifyClientPairingMac chainHead': [(h) => verifyClientPairingMac(PV, { member: client.bundle, chainHead: h as never }, MAC), (r) => r === false],
   'verifyClientPairingMac mac': [(h) => verifyClientPairingMac(PV, { member: client.bundle, chainHead: HEAD }, h), (r) => r === false],
+  'applyMemberChainEntries entries': [(h) => applyMemberChainEntries(emptyMemberChainState('tenant-1'), h as never), (r) => (r as { ok: boolean }).ok === false],
   'applyMemberChainEntries entry': [(h) => applyMemberChainEntries(emptyMemberChainState('tenant-1'), [h]), (r) => (r as { ok: boolean }).ok === false],
   'applyMemberChainEntries genesis subject': [(h) => applyMemberChainEntries(emptyMemberChainState('tenant-1'), [genesisWith(h)]), (r) => (r as { ok: boolean }).ok === false],
   'applyMemberChainEntries genesis member': [(h) => applyMemberChainEntries(emptyMemberChainState('tenant-1'), [genesisWith({ member: h })]), (r) => (r as { ok: boolean }).ok === false],
@@ -223,6 +224,63 @@ const E2_RECEIVERS: Record<string, readonly [(hostile: object) => Promise<unknow
   'verifyMemberChainFromAnchor approverSigningPublicJwk': [(h) => verifyMemberChainFromAnchor({ ...anchorInput, approverSigningPublicJwk: h as never }), (r) => (r as { ok: boolean }).ok === false],
   'verifyMemberChainFromAnchor authenticatedHead': [(h) => verifyMemberChainFromAnchor({ ...anchorInput, authenticatedHead: h as never }), (r) => (r as { ok: boolean }).ok === false],
 };
+
+/**
+ * One field of an otherwise valid input made hostile. The second-read getter
+ * returns the real value once and then throws: it catches a field that is
+ * read again after the total parse instead of from the parsed copy.
+ */
+function hostileField(base: object, field: string): Record<string, () => object> {
+  const value = (base as Record<string, unknown>)[field];
+  const withGetter = (get: () => unknown) => Object.defineProperty({ ...base }, field, { get, enumerable: true, configurable: true });
+  return {
+    'throwing getter': () => withGetter(trap),
+    'get trap on the field': () => new Proxy({ ...base }, { get: (target, key) => (key === field ? trap() : Reflect.get(target, key)) }),
+    'second-read getter': () => {
+      let reads = 0;
+      return withGetter(() => (reads++ === 0 ? value : trap()));
+    },
+    'revoked proxy value': () => ({ ...base, [field]: HOSTILE['revoked proxy']!() }),
+  };
+}
+
+const createInput = { signingPublicJwk: client.signing.publicJwk, signingPrivateKey: client.signing.privateKey, kemPublicJwk: device.bundle.kemPublicJwk, kemEpoch: 1, deviceId: 'device-9' };
+const fingerprintInput = { tenantId: 'tenant-1', signingPublicJwk: client.signing.publicJwk };
+const deviceMacInput = { tenantId: 'tenant-1', deviceId: 'device-1', member: device.bundle };
+const clientMacInput = { member: client.bundle, chainHead: HEAD };
+
+/** Each E2 export, its valid input, and the fields to make hostile. Receivers must not throw at all. */
+const E2_FIELDS: readonly { readonly name: string; readonly base: object; readonly fields: readonly string[]; readonly receiver: boolean; readonly call: (input: object) => unknown }[] = [
+  { name: 'createMemberKeyBundle', base: createInput, fields: Object.keys(createInput), receiver: false, call: (i) => createMemberKeyBundle(i as never) },
+  { name: 'memberFingerprint', base: fingerprintInput, fields: Object.keys(fingerprintInput), receiver: false, call: (i) => memberFingerprint(i as never) },
+  { name: 'memberFingerprint signingPublicJwk', base: client.signing.publicJwk, fields: ['x', 'y'], receiver: false, call: (i) => memberFingerprint({ tenantId: 'tenant-1', signingPublicJwk: i as never }) },
+  { name: 'memberApprovalCode first', base: client.signing.publicJwk, fields: ['x', 'y'], receiver: false, call: (i) => memberApprovalCode('tenant-1', i as never, device.signing.publicJwk) },
+  { name: 'computeDevicePairingMac', base: deviceMacInput, fields: Object.keys(deviceMacInput), receiver: false, call: (i) => computeDevicePairingMac(PV, i as never) },
+  { name: 'computeClientPairingMac', base: clientMacInput, fields: Object.keys(clientMacInput), receiver: false, call: (i) => computeClientPairingMac(PV, i as never) },
+  { name: 'verifyDevicePairingMac', base: deviceMacInput, fields: Object.keys(deviceMacInput), receiver: true, call: (i) => verifyDevicePairingMac(PV, i as never, MAC) },
+  { name: 'verifyClientPairingMac', base: clientMacInput, fields: Object.keys(clientMacInput), receiver: true, call: (i) => verifyClientPairingMac(PV, i as never, MAC) },
+  { name: 'verifyMemberChainFromAnchor', base: { ...anchorInput, authenticatedHead: HEAD }, fields: [...Object.keys(anchorInput), 'authenticatedHead'], receiver: true, call: (i) => verifyMemberChainFromAnchor(i as never) },
+  { name: 'verifyMemberChainFromAnchor approverSigningPublicJwk', base: client.signing.publicJwk, fields: ['x', 'y'], receiver: true, call: (i) => verifyMemberChainFromAnchor({ ...anchorInput, approverSigningPublicJwk: i as never }) },
+];
+
+describe('E2 member entry points with one hostile field', () => {
+  for (const { name, base, fields, receiver, call } of E2_FIELDS) {
+    for (const field of fields) {
+      it(`${name} ${field}: ${receiver ? 'never throws' : 'typed'} for every hostile field`, async () => {
+        const outcomes: Record<string, string> = {};
+        for (const [variant, make] of Object.entries(hostileField(base, field))) {
+          try {
+            await call(make());
+            outcomes[variant] = 'ok';
+          } catch (error) {
+            outcomes[variant] = !receiver && error instanceof ByokCoreError ? 'ok' : `threw: ${String(error)}`;
+          }
+        }
+        expect(outcomes).toEqual({ 'throwing getter': 'ok', 'get trap on the field': 'ok', 'second-read getter': 'ok', 'revoked proxy value': 'ok' });
+      });
+    }
+  }
+});
 
 describe('E2 member entry points with hostile JavaScript objects', () => {
   it('the fixtures are valid: the anchor check accepts the real chain', async () => {

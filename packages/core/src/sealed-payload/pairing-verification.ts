@@ -142,27 +142,26 @@ const ChainHeadSchema = z.strictObject({
   hash: z.string().regex(CONTENT_HASH_PATTERN),
 });
 
+/** The caller data of the two MAC inputs, read once into plain values. */
+const DeviceMacInputSchema = z.object({ tenantId: z.string().min(1), deviceId: z.string().min(1), member: MemberKeyBundleV1Schema });
+const ClientMacInputSchema = z.object({ member: MemberKeyBundleV1Schema, chainHead: ChainHeadSchema });
+
 function devicePairingMacInput(input: DevicePairingMacInput): Bytes {
-  const member = safeParseTotal(MemberKeyBundleV1Schema, input.member);
-  if (input.tenantId.length === 0 || input.deviceId.length === 0 || !member.success || member.data.deviceId !== input.deviceId) {
+  const parsed = safeParseTotal(DeviceMacInputSchema, input);
+  if (!parsed.success || parsed.data.member.deviceId !== parsed.data.deviceId) {
     throw invalidInput('Device pairing MAC input must name the device member\'s own device id');
   }
-  return concat(
-    utf8(DEVICE_PAIRING_MAC_DOMAIN),
-    canonicalizeJsonBytes({ tenantId: input.tenantId, deviceId: input.deviceId, member: member.data }),
-  );
+  const { tenantId, deviceId, member } = parsed.data;
+  return concat(utf8(DEVICE_PAIRING_MAC_DOMAIN), canonicalizeJsonBytes({ tenantId, deviceId, member }));
 }
 
 function clientPairingMacInput(input: ClientPairingMacInput): Bytes {
-  const member = safeParseTotal(MemberKeyBundleV1Schema, input.member);
-  const head = safeParseTotal(ChainHeadSchema, input.chainHead);
-  if (!member.success || member.data.deviceId !== undefined || !head.success) {
+  const parsed = safeParseTotal(ClientMacInputSchema, input);
+  if (!parsed.success || parsed.data.member.deviceId !== undefined) {
     throw invalidInput('Client pairing MAC input must hold a client member and a chain head');
   }
-  return concat(
-    utf8(CLIENT_PAIRING_MAC_DOMAIN),
-    canonicalizeJsonBytes({ member: member.data, chainHead: { seq: head.data.seq, hash: head.data.hash } }),
-  );
+  const { member, chainHead } = parsed.data;
+  return concat(utf8(CLIENT_PAIRING_MAC_DOMAIN), canonicalizeJsonBytes({ member, chainHead: { seq: chainHead.seq, hash: chainHead.hash } }));
 }
 
 function checkPv(pv: Uint8Array): void {

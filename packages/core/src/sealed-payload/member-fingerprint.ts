@@ -19,15 +19,21 @@
  * new member pins the approver's signing key only after it confirms (11b).
  * A device's local approval command shows the same code.
  */
+import { z } from 'zod';
+
 import { canonicalizeJsonBytes } from '../attestation';
+import { safeParseTotal } from '../total-parse';
 import { deriveMemberId } from './member-chain';
-import { concat, invalidInput, sha256, utf8, type P256PublicJwk } from './primitives';
+import { P256PublicJwkSchema, concat, invalidInput, sha256, utf8, type P256PublicJwk } from './primitives';
 
 export const MEMBER_FINGERPRINT_DOMAIN = 'byok-member-fingerprint-v1\n';
 
 const FINGERPRINT_GROUPS = 5;
 const GROUP_BYTES = 5;
 const GROUP_MODULUS = 100000n;
+
+/** The caller data, read once into plain values. */
+const FingerprintInputSchema = z.object({ tenantId: z.string().min(1), signingPublicJwk: P256PublicJwkSchema });
 
 export interface MemberFingerprintInput {
   readonly tenantId: string;
@@ -36,7 +42,7 @@ export interface MemberFingerprintInput {
 
 /** The 25-digit fingerprint of one member, as 5 groups of 5 digits joined by single spaces. */
 export async function memberFingerprint(input: MemberFingerprintInput): Promise<string> {
-  return (await fingerprintGroups(input)).join(' ');
+  return (await fingerprintGroups(input)).groups.join(' ');
 }
 
 /**
@@ -49,25 +55,23 @@ export async function memberApprovalCode(
   first: P256PublicJwk,
   second: P256PublicJwk,
 ): Promise<string> {
-  const members = await Promise.all(
-    [first, second].map(async (signingPublicJwk) => ({
-      memberId: await deriveMemberId(signingPublicJwk),
-      groups: await fingerprintGroups({ tenantId, signingPublicJwk }),
-    })),
-  );
+  const members = await Promise.all([first, second].map((signingPublicJwk) => fingerprintGroups({ tenantId, signingPublicJwk })));
   if (members[0]!.memberId === members[1]!.memberId) throw invalidInput('An approval code needs two different members');
   members.sort((a, b) => (a.memberId < b.memberId ? -1 : 1));
   return members.flatMap((member) => member.groups).join(' ');
 }
 
-async function fingerprintGroups(input: MemberFingerprintInput): Promise<string[]> {
-  if (input.tenantId.length === 0) throw invalidInput('Member fingerprint needs a tenant id');
+/** The member id and the 5 fingerprint groups of one member. */
+async function fingerprintGroups(input: MemberFingerprintInput): Promise<{ memberId: string; groups: string[] }> {
+  const parsed = safeParseTotal(FingerprintInputSchema, input);
+  if (!parsed.success) throw invalidInput('Member fingerprint needs a tenant id and a P-256 signing key');
+  const { tenantId, signingPublicJwk } = parsed.data;
   // deriveMemberId checks that the key is a point on P-256.
-  await deriveMemberId(input.signingPublicJwk);
+  const memberId = await deriveMemberId(signingPublicJwk);
   const digest = await sha256(
     concat(
       utf8(MEMBER_FINGERPRINT_DOMAIN),
-      canonicalizeJsonBytes({ v: 1, tenantId: input.tenantId, signingKey: { x: input.signingPublicJwk.x, y: input.signingPublicJwk.y } }),
+      canonicalizeJsonBytes({ v: 1, tenantId, signingKey: { x: signingPublicJwk.x, y: signingPublicJwk.y } }),
     ),
   );
   const groups: string[] = [];
@@ -76,5 +80,5 @@ async function fingerprintGroups(input: MemberFingerprintInput): Promise<string[
     for (const byte of digest.subarray(group * GROUP_BYTES, (group + 1) * GROUP_BYTES)) value = (value << 8n) | BigInt(byte);
     groups.push((value % GROUP_MODULUS).toString().padStart(5, '0'));
   }
-  return groups;
+  return { memberId, groups };
 }

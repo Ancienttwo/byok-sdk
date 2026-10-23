@@ -63,9 +63,10 @@ export const MemberKeyBundleV1Schema = z.strictObject({
   deviceId: z.string().min(1).optional(),
 });
 
-/** The caller data of `createMemberKeyBundle`, read once into plain values. The private key stays a `CryptoKey`. */
+/** The caller data of `createMemberKeyBundle`, read once. The private key is kept as given; `ecdsaSign` checks it. */
 const CreateInputSchema = z.object({
   signingPublicJwk: P256PublicJwkSchema,
+  signingPrivateKey: z.custom<WebCryptoKey>(),
   kemPublicJwk: P256PublicJwkSchema,
   kemEpoch: KemEpochSchema,
   deviceId: z.string().min(1).optional(),
@@ -95,10 +96,10 @@ export interface CreateMemberKeyBundleInput {
 export async function createMemberKeyBundle(input: CreateMemberKeyBundleInput): Promise<MemberKeyBundleV1> {
   const parsed = safeParseTotal(CreateInputSchema, input);
   if (!parsed.success) throw invalidInput('Member key bundle input is invalid');
-  const { signingPublicJwk, kemPublicJwk, kemEpoch, deviceId } = parsed.data;
+  const { signingPublicJwk, signingPrivateKey, kemPublicJwk, kemEpoch, deviceId } = parsed.data;
   const memberId = await deriveMemberId(signingPublicJwk);
   if (!(await isValidMemberKemKey(kemPublicJwk, signingPublicJwk))) throw invalidInput('Member KEM key is invalid');
-  const kemSig = await ecdsaSign(signingPublicJwk, input.signingPrivateKey, memberKemSigningInput(memberId, kemPublicJwk, kemEpoch));
+  const kemSig = await ecdsaSign(signingPublicJwk, signingPrivateKey, memberKemSigningInput(memberId, kemPublicJwk, kemEpoch));
   return {
     v: MEMBER_KEY_BUNDLE_VERSION,
     memberId,
