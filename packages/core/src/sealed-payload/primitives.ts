@@ -2,13 +2,13 @@
  * Byte helpers shared by the sealed-payload modules (#654 E1a).
  *
  * Every function is WebCrypto-only and `node:`-free, so a browser, Workers,
- * Node and Bun run the same code. None of these modules is re-exported from
- * the package root yet: the export, and its API budget, is a later slice.
+ * Node and Bun run the same code. The subpath `@byok-sdk/core/sealed-payload`
+ * exports the sealed-payload interface, but not these helpers. The package
+ * root exports none of the sealed-payload modules.
  *
  * Caller input errors throw `sealed_secret_invalid`, the code `hpke.ts`
- * already raises for bad HPKE input. `CORE_ERROR_CODES` is public API, so the
- * dedicated sealed-payload codes arrive with the export, not before it.
- * Receiver checks never throw for hostile bytes; they return a typed failure.
+ * already raises for bad HPKE input. Receiver checks never throw for hostile
+ * bytes; they return a typed failure.
  */
 import { z } from 'zod';
 
@@ -136,9 +136,23 @@ async function importEcdsaPublicKey(publicJwk: P256PublicJwk): Promise<WebCrypto
   }
 }
 
-/** ECDSA P-256 / SHA-256 signature over `data`, as base64url of the 64-byte P1363 form. */
-export async function ecdsaSign(privateKey: WebCryptoKey, data: Uint8Array): Promise<string> {
-  return encodeBase64Url(new Uint8Array(await ecdsaSubtle().sign(ECDSA_SHA256, privateKey, copy(data))));
+/**
+ * ECDSA P-256 / SHA-256 signature over `data`, as base64url of the 64-byte
+ * P1363 form. The signature must verify under `publicJwk`, so a private key
+ * that does not pair with the caller's public key throws
+ * `sealed_secret_invalid` and signs nothing under another key's id.
+ */
+export async function ecdsaSign(publicJwk: P256PublicJwk, privateKey: WebCryptoKey, data: Uint8Array): Promise<string> {
+  let signature: string;
+  try {
+    signature = encodeBase64Url(new Uint8Array(await ecdsaSubtle().sign(ECDSA_SHA256, privateKey, copy(data))));
+  } catch (cause) {
+    throw new ByokCoreError('sealed_secret_invalid', 'Signing key is not an ECDSA P-256 private key', { cause });
+  }
+  if (!(await ecdsaVerify(publicJwk, signature, data))) {
+    throw invalidInput('Signing private key does not pair with the signing public key');
+  }
+  return signature;
 }
 
 /** True only for a canonical 64-byte P1363 signature that verifies under `publicJwk`. */

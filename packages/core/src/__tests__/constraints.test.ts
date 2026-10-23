@@ -144,6 +144,29 @@ describe('public API surface', () => {
     expect(Object.keys(publicApi)).not.toContain('runCoreConformance');
   });
 
+  it('keeps sealed payload v1 on its own subpath, with a frozen runtime export list', async () => {
+    const subpath = await import('../sealed-payload/index');
+    expect(Object.keys(subpath).sort()).toEqual([
+      'MEMBER_CHAIN_OPS',
+      'SEALED_CATEGORIES',
+      'SEALED_CONTENT_SUITE',
+      'SEALED_CONTENT_VERSION',
+      'SEALED_DIRECTIONS',
+      'SealedContentHeaderV1Schema',
+      'deriveMemberId',
+      'deriveScopeKeyId',
+      'generateScopeKey',
+      'memberChainEntryHash',
+      'openScopeKeyPackage',
+      'openSealedContent',
+      'sealContent',
+      'sealScopeKeyPackage',
+      'signMemberChainEntry',
+      'verifyMemberChainEntry',
+    ]);
+    for (const name of Object.keys(subpath)) expect(Object.keys(publicApi)).not.toContain(name);
+  });
+
   it('freezes the runtime export list', () => {
     expect(Object.keys(publicApi).sort()).toEqual([
       'AGENT_MEMORY_INTENT_DIGEST_VERSION',

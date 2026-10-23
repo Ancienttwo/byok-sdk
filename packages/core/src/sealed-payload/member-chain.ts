@@ -133,7 +133,8 @@ export async function memberChainEntryHash(entry: UnsignedMemberChainEntryV1): P
 
 /**
  * Sign one entry. The signer's public key is required so an entry is never
- * signed under a member id that is not the signer's own.
+ * signed under a member id that is not the signer's own. A private key that
+ * does not pair with that public key throws `sealed_secret_invalid`.
  */
 export async function signMemberChainEntry(
   entry: UnsignedMemberChainEntryV1,
@@ -143,7 +144,7 @@ export async function signMemberChainEntry(
   if ((await deriveMemberId(signer.publicJwk)) !== unsigned.signer) {
     throw invalidInput('Member chain entry signer does not match the signing key');
   }
-  return { ...unsigned, sig: await ecdsaSign(signer.privateKey, signingInput(unsigned)) };
+  return { ...unsigned, sig: await ecdsaSign(signer.publicJwk, signer.privateKey, signingInput(unsigned)) };
 }
 
 export type MemberChainEntryVerifyResult =

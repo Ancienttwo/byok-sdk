@@ -79,6 +79,8 @@ const CONTENT_MAC_PATTERN = /^hmac-sha256:[0-9a-f]{64}$/u;
 /** Dot-separated lowercase words, e.g. `task.offer_for_agent`. It can never hold the MAC's `\n` separator. */
 const FAMILY_PATTERN = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/u;
 const IDENTITY_FIELD_PATTERN = /^[a-z][A-Za-z0-9]*$/u;
+/** The one family that binds no device (design §6.3). */
+const ROUTINE_TEMPLATE_FAMILY = 'routine.template';
 
 // ---------------------------------------------------------------------------
 // Padding and framing (§8.1, §8.6)
@@ -186,12 +188,12 @@ export interface SealedBinding {
   readonly direction: SealedDirection;
   /** The write's identity: `{ taskId }`, `{ messageId }`, … or `{ routineId, definitionVersion }`. */
   readonly identity: { readonly [field: string]: string | number };
-  /** Target device. `null` only for a routine template, which binds no device. */
+  /** Target device. `null` only for the `routine.template` family, which binds no device. */
   readonly deviceId: string | null;
   readonly agentRef: { readonly agentId: string; readonly profileRevision: string } | null;
   /** The task's `sealing.categories`, unique and in {@link SEALED_CATEGORIES} order. */
   readonly categories: readonly SealedCategory[];
-  /** A routine template's expiry; `null` for everything else. */
+  /** A `routine.template`'s expiry; `null` for every other family. */
   readonly notAfter: string | null;
 }
 
@@ -212,11 +214,12 @@ const SealedBindingSchema = z
     notAfter: z.union([z.null(), z.string().refine(isCanonicalTimestamp, 'must be a canonical UTC instant')]),
   })
   .superRefine((binding, ctx) => {
-    if ((binding.deviceId === null) === (binding.notAfter === null)) {
+    const template = binding.family === ROUTINE_TEMPLATE_FAMILY;
+    if ((binding.deviceId === null) !== template || (binding.notAfter === null) === template) {
       ctx.addIssue({
         code: 'custom',
         path: ['deviceId'],
-        message: 'a routine template binds an expiry and no device; other content binds a device and no expiry',
+        message: 'a routine template binds an expiry and no device; every other family binds a device and no expiry',
       });
     }
   });
@@ -359,7 +362,10 @@ export interface SealContentInput {
   readonly maxContentLength: number;
 }
 
-/** A caller-fixed salt and nonce. Test vectors only; production always draws fresh ones. */
+/**
+ * The salt and nonce of one seal, for test vectors only.
+ * @internal Stripped from the published declarations.
+ */
 export interface SealedContentRandomness {
   readonly salt: Uint8Array;
   readonly nonce: Uint8Array;
@@ -372,7 +378,17 @@ export interface SealedContent {
 }
 
 /** Seal one category of a payload once. A retry must resend these bytes, never seal again (§9.2). */
-export async function sealContent(input: SealContentInput, fixed?: SealedContentRandomness): Promise<SealedContent> {
+export async function sealContent(input: SealContentInput): Promise<SealedContent> {
+  return sealContentWithRandomness(input, { salt: randomBytes(SEALED_SALT_BYTES), nonce: randomBytes(SEALED_NONCE_BYTES) });
+}
+
+/**
+ * {@link sealContent} with a caller-chosen salt and nonce, for test vectors
+ * only. Neither the root nor the subpath exports it: a reused nonce under one
+ * content key breaks AES-GCM.
+ * @internal Stripped from the published declarations.
+ */
+export async function sealContentWithRandomness(input: SealContentInput, randomness: SealedContentRandomness): Promise<SealedContent> {
   const binding = parseBinding(input.binding);
   assertMaxContentLength(input.maxContentLength);
   if (!binding.categories.includes(input.category)) {
@@ -382,8 +398,7 @@ export async function sealContent(input: SealContentInput, fixed?: SealedContent
   const content = utf8(plaintextText);
   if (content.byteLength > input.maxContentLength) throw invalidInput('Sealed content exceeds its plaintext limit');
   const frame = encodeSealedFrame(content);
-  const salt = fixed?.salt ?? randomBytes(SEALED_SALT_BYTES);
-  const nonce = fixed?.nonce ?? randomBytes(SEALED_NONCE_BYTES);
+  const { salt, nonce } = randomness;
   const parsed = SealedContentHeaderV1Schema.safeParse({
     v: SEALED_CONTENT_VERSION,
     suite: SEALED_CONTENT_SUITE,
@@ -415,9 +430,22 @@ export type SealedContentOpenFailure =
   | 'sealed_content_mac_mismatch'
   | 'sealing_policy_mismatch';
 
+/**
+ * An opened content, with the header that the AEAD authenticated. The caller
+ * reads `chainHead` and `sender` from it for the sender-view check (§7.3).
+ */
 export type SealedContentOpenResult =
-  | { readonly ok: true; readonly plaintext: JsonObject }
+  | { readonly ok: true; readonly plaintext: JsonObject; readonly header: SealedContentHeaderV1 }
   | { readonly ok: false; readonly reason: SealedContentOpenFailure };
+
+/** The task's frozen `sealing` scope (§6.2). Its `categories` are {@link SealedBinding.categories}. */
+export interface SealedScopePolicy {
+  readonly scopeId: string;
+  /** The lowest epoch the task accepts: the epoch of the offer's C1 content. */
+  readonly epoch: number;
+}
+
+const SealedScopePolicySchema = z.strictObject({ scopeId: NonEmptyStringSchema, epoch: PositiveIntegerSchema });
 
 export interface OpenSealedContentInput {
   /** The header as received. It is untrusted. */
@@ -425,7 +453,10 @@ export interface OpenSealedContentInput {
   readonly ciphertext: Uint8Array;
   /** The scope key the receiver holds for `header.scope`. */
   readonly scopeKey: Uint8Array;
+  /** Partly written by the Host (`sealing.categories`, `notAfter`), so it is untrusted too. */
   readonly binding: SealedBinding;
+  /** From the task's `sealing`, which the Host writes. Untrusted. */
+  readonly sealing: SealedScopePolicy;
   readonly maxContentLength: number;
 }
 
@@ -434,20 +465,33 @@ function failure(reason: SealedContentOpenFailure): SealedContentOpenResult {
 }
 
 /**
- * Open one sealed content, fail closed. In order: header shape; category within
- * the task's categories (`sealing_policy_mismatch`); key id of the held scope
- * key (`sealed_key_unavailable`); ciphertext length; AEAD under the rebuilt
- * AAD; the five frame checks; canonical JSON of a plain object (all
- * `sealed_open_failed`); and the content MAC (`sealed_content_mac_mismatch`).
- * There is no plaintext fallback, and nothing here throws for hostile bytes.
+ * Open one sealed content, fail closed. In order: a binding and a task scope
+ * that parse (`sealing_policy_mismatch`); header shape (`sealed_open_failed`);
+ * the category within the task's categories, and the header scope equal to
+ * the task's scope at its epoch or later (both `sealing_policy_mismatch`); key
+ * id of the held scope key (`sealed_key_unavailable`); ciphertext length; AEAD
+ * under the rebuilt AAD; the five frame checks; canonical JSON of a plain
+ * object (all `sealed_open_failed`); and the content MAC
+ * (`sealed_content_mac_mismatch`).
+ * There is no plaintext fallback, and nothing here throws for hostile input.
  */
 export async function openSealedContent(input: OpenSealedContentInput): Promise<SealedContentOpenResult> {
-  const binding = parseBinding(input.binding);
   assertMaxContentLength(input.maxContentLength);
+  const parsedBinding = SealedBindingSchema.safeParse(input.binding);
+  const parsedSealing = SealedScopePolicySchema.safeParse(input.sealing);
+  if (!parsedBinding.success || !parsedSealing.success) return failure('sealing_policy_mismatch');
+  const binding = parsedBinding.data;
+  const sealing = parsedSealing.data;
   const parsed = SealedContentHeaderV1Schema.safeParse(input.header);
   if (!parsed.success) return failure('sealed_open_failed');
   const header = parsed.data;
-  if (!binding.categories.includes(header.category)) return failure('sealing_policy_mismatch');
+  if (
+    !binding.categories.includes(header.category)
+    || header.scope.id !== sealing.scopeId
+    || header.scope.epoch < sealing.epoch
+  ) {
+    return failure('sealing_policy_mismatch');
+  }
   if ((await deriveScopeKeyId(input.scopeKey)) !== header.scope.keyId) return failure('sealed_key_unavailable');
   if (input.ciphertext.byteLength !== header.paddedLength + AEAD_TAG_BYTES) return failure('sealed_open_failed');
 
@@ -467,7 +511,7 @@ export async function openSealedContent(input: OpenSealedContentInput): Promise<
     if ((await contentMacOf(input.scopeKey, header.category, binding, plaintext.text)) !== header.contentMac) {
       return failure('sealed_content_mac_mismatch');
     }
-    return { ok: true, plaintext: plaintext.value };
+    return { ok: true, plaintext: plaintext.value, header };
   } finally {
     frame.fill(0);
   }
