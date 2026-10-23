@@ -14,14 +14,14 @@ export interface HermesGatewayIdentity {
 /**
  * Hermes's Windows control pipe for a home (`windows_pipe_name` in
  * `gateway/control_socket.py`): the first 16 hex digits of the SHA-256 of the
- * home's real path, normalized by `normcase`. On Windows that must be
- * `windowsNormcase`, as Hermes's `os.path.normcase`; the default is CPython's
- * normcase off Windows (backslashes, `str.lower`). `realHome` must be the
- * native real path, so that an 8.3 short form names the same pipe as the long
- * form Hermes resolves.
+ * home's real path, normalized as `os.path.normcase` does: backslashes, then
+ * `lower`. On Windows `lower` must be `windowsLower`, as in Hermes; the
+ * default is CPython's `str.lower`, which normcase uses off Windows.
+ * `realHome` must be the native real path, so that an 8.3 short form names the
+ * same pipe as the long form Hermes resolves.
  */
-export function hermesGatewayPipeName(realHome: string, normcase = (home: string) => home.replaceAll('/', '\\').toLowerCase()): string {
-  return `\\\\.\\pipe\\hermes-gateway-${createHash('sha256').update(normcase(realHome), 'utf8').digest('hex').slice(0, 16)}`;
+export function hermesGatewayPipeName(realHome: string, lower = (key: string) => key.toLowerCase()): string {
+  return `\\\\.\\pipe\\hermes-gateway-${createHash('sha256').update(lower(realHome.replaceAll('/', '\\')), 'utf8').digest('hex').slice(0, 16)}`;
 }
 
 /** Whether the gateway names `served` (a real path) among its profiles. Windows paths compare without case. */
@@ -76,10 +76,9 @@ export interface IdentifyHermesGatewayOptions {
 /** Windows: one exchange with the koffi pipe client (`gateway-pipe-win32.ts`). */
 async function identifyOverPipe(home: string, options: IdentifyHermesGatewayOptions): Promise<HermesGatewayIdentity | undefined> {
   // The koffi client lives in the lazy session entry, so the root entries do not carry it.
-  const { exchangeHermesPipe, windowsNormcase } = await import('#byok-hermes-session');
+  const hermes = await import('#byok-hermes-session');
   const koffi = await loadKoffi(options.nativeAssetRoot);
-  const name = hermesGatewayPipeName(await fs.realpath(home).catch(() => path.resolve(home)), (key) => windowsNormcase(key, koffi));
-  const answer = await exchangeHermesPipe(name, IDENTIFY_REQUEST, options.owned ?? (() => false), Date.now() + (options.timeoutMs ?? 1_000), koffi);
+  const answer = await hermes.exchangeHermesPipe(hermesGatewayPipeName(await fs.realpath(home).catch(() => path.resolve(home)), hermes.windowsLower(koffi)), IDENTIFY_REQUEST, options.owned ?? (() => false), Date.now() + (options.timeoutMs ?? 1_000), koffi);
   if (answer === undefined) return undefined;
   const identity = answer.line === undefined ? undefined : parseIdentity(answer.line);
   if (identity === undefined) return { pid: answer.serverPid, state: 'unverified', servedHomes: [] };

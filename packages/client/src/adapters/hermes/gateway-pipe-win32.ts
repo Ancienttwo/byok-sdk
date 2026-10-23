@@ -22,7 +22,6 @@ const INVALID_HANDLE = -1;
 /** The only open failure that means no pipe has the name. */
 const ERROR_FILE_NOT_FOUND = 2;
 const POLL_MS = 10;
-const LCMAP_LOWERCASE = 0x100;
 const MAX_ANSWER_BYTES = 256 * 1024;
 
 type Handle = number;
@@ -72,21 +71,20 @@ function loadPipeBindings(koffi: KoffiModule): PipeBindings {
 }
 
 /**
- * `os.path.normcase` of CPython 3.11 to 3.14 on Windows: backslashes, then
+ * The lower case of `os.path.normcase` in CPython 3.11 to 3.14 on Windows:
  * `LCMapStringEx` with the invariant locale (the empty name) and
- * `LCMAP_LOWERCASE`. Hermes names its pipe from this string. It differs from
- * `toLowerCase`: U+0130 stays, and a final U+03A3 becomes U+03C3.
+ * `LCMAP_LOWERCASE` (0x100). As CPython, it asks for the output size first,
+ * because the output can be longer than the input. Hermes names its pipe from
+ * this string. It differs from `toLowerCase`: U+0130 stays, and a final U+03A3
+ * becomes U+03C3. An empty key gives an empty string, as in CPython.
  */
-export function windowsNormcase(path: string, koffi: unknown): string {
-  const api = bindings(koffi as KoffiModule);
-  const source = Buffer.from(path.replaceAll('/', '\\'), 'utf16le');
-  const units = api.lower('', LCMAP_LOWERCASE, source, source.length / 2, null, 0, null, null, 0);
-  const target = Buffer.alloc(units * 2);
-  if (units === 0 || api.lower('', LCMAP_LOWERCASE, source, source.length / 2, target, units, null, null, 0) !== units) {
-    throw new Error('Windows path case mapping failed');
-  }
+export const windowsLower = (koffi: unknown) => (key: string): string => {
+  const source = Buffer.from(key, 'utf16le');
+  const map = (out: Buffer | null, size: number): number => bindings(koffi as KoffiModule).lower('', 0x100, source, key.length, out, size, null, null, 0);
+  const target = Buffer.alloc(map(null, 0) * 2);
+  if (map(target, target.length / 2) * 2 !== target.length) throw new Error('LCMapStringEx failed');
   return target.toString('utf16le');
-}
+};
 
 export interface HermesPipeAnswer {
   /** The pid of the process that serves the pipe, from the kernel. */
