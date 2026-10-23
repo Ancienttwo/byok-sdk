@@ -20,6 +20,7 @@ import {
 } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { handleInboundEnvelope } from '../inbound';
+import { taskRedactionReceiptKey } from '../task-redaction';
 import { tenantStoresFor } from '../tenant-stores';
 import { PRODUCT_ID, TENANT_A, createHarness, type CloudHarness, type PairedDevice } from './support/harness';
 import { SEALING, inlineMember, sealInput } from './support/sealed';
@@ -170,6 +171,27 @@ describe('a sealed terminal of an output-sealed task (#654 E3b-2)', () => {
     const task = await offeredTask(OUTPUT_SEALING);
     expect(await task.send('task.artifact_sealed', SEALED_OUTPUTS['task.artifact_sealed'])).toEqual({ outcome: 'accepted' });
     expect(await task.harness.cloud.readTaskAttempt(TENANT_A, task.taskId)).toMatchObject({ status: 'running' });
+  });
+
+  it('pairs a device approval resolution with a sealed approval request', async () => {
+    const task = await offeredTask(OUTPUT_SEALING);
+    expect(await task.send('task.await_approval_sealed', SEALED_OUTPUTS['task.await_approval_sealed'])).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.approval_resolved', { approvalId: 'approval-1', decision: 'reject', resolvedBy: 'local', at: '2026-10-24T00:00:00.000Z' }))
+      .toEqual({ outcome: 'accepted' });
+    expect((await task.harness.cloud.readApprovalTimeline(TENANT_A, task.taskId))?.entries.map(({ event }) => event)).toEqual([
+      { type: 'approval_requested', approvalId: 'approval-1', sealed: OUTPUT_MEMBER },
+      { type: 'approval_resolved', approvalId: 'approval-1', decision: 'reject', resolvedBy: 'local', at: '2026-10-24T00:00:00.000Z' },
+    ]);
+  });
+
+  it('stores nothing for a late sealed progress or approval report on a redacted task', async () => {
+    const task = await offeredTask(OUTPUT_SEALING);
+    expect(await task.send('task.complete_sealed', SEALED_OUTPUTS['task.complete_sealed'])).toEqual({ outcome: 'accepted' });
+    await task.harness.stores.receipts.record(TENANT_A, { key: taskRedactionReceiptKey(task.taskId), body: '{}' });
+    expect(await task.send('task.progress_sealed', SEALED_OUTPUTS['task.progress_sealed'])).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.await_approval_sealed', SEALED_OUTPUTS['task.await_approval_sealed'])).toEqual({ outcome: 'accepted' });
+    expect(await task.harness.cloud.readActivity(TENANT_A, task.taskId)).toBeUndefined();
+    expect(await task.harness.cloud.readApprovalTimeline(TENANT_A, task.taskId)).toBeUndefined();
   });
 
   it.each(Object.keys(SEALED_OUTPUTS) as SealedOutputType[])(
