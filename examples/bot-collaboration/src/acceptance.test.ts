@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration, type BotOptions } from './host';
 import { stateOf } from './model';
-import type { Json } from '@byok-sdk/example-host-execution-core';
+import { hash, type Json } from '@byok-sdk/example-host-execution-core';
 
 let fixture: TestHost | undefined;
 let bot: BotCollaboration | undefined;
@@ -68,7 +68,7 @@ it('bounds an uncooperative connector and releases queued input, answer, decisio
   expect(signal?.aborted).toBe(true);
   expect(bot!.snapshot().turns[inputId!]).toBeDefined();
   expect(Object.values(bot!.snapshot().questions)[0]!.answer).toBe('Yes');
-  expect(bot!.snapshot().audit).toContain('Invalid routine wake: malformed');
+  expect(fixture!.ledger.snapshot().ignoredWakes).toContainEqual(expect.objectContaining({ reason: 'unknown_key', wakeKeyHash: hash('malformed') }));
   expect(bot!.snapshot().cards[card.id]!.error).toContain('Connector timed out');
   expect(bot!.snapshot().cards[card.id]!.conclusion).toBe('failed');
   complete({ externalId: 'late-result' });
@@ -125,12 +125,14 @@ it('applies routine policy before questions and delegation, and publishes cards 
   expect(projections.slice(0, 2)).toEqual(['card', 'question']);
 });
 
-it('uses state version 1 and rejects unsupported or unversioned saved state without resetting it', () => {
-  expect(stateOf({}).version).toBe(1);
-  const savedStates: Json[] = [{ version: 2, sequence: 7 }, { sequence: 7 }];
-  for (const saved of savedStates) {
+it('uses state version 2 and rejects version 1, unsupported or unversioned saved state without resetting it', () => {
+  expect(stateOf({}).version).toBe(2);
+  const savedStates: Array<[Json, string]> = [
+    [{ version: 1, sequence: 7 }, 'Bot collaboration state version 1 is not supported. Bot routines moved to K4 routines.'],
+    [{ version: 3, sequence: 7 }, 'Unsupported Bot collaboration state version'], [{ sequence: 7 }, 'Unsupported Bot collaboration state version']];
+  for (const [saved, message] of savedStates) {
     const application: Record<string, Json> = { collaboration: saved };
-    expect(() => stateOf(application)).toThrow('Unsupported Bot collaboration state version');
+    expect(() => stateOf(application)).toThrow(message);
     expect(application.collaboration).toBe(saved);
   }
 });

@@ -1,6 +1,7 @@
 import { botTurnOutcomeFragments as f, composeBotTurnOutcomeSchema, type NonEmptyIds, type BotTurnOutcomeFragments, BotTurnOutcomeSchemaError, type RoutineScheduleShape } from '@byok-sdk/protocol';
 import type { CollaborationState, Turn } from './model';
 import type { BotProfile } from './team-model';
+import type { BotRoutine } from './routines';
 
 import { NEW_BOTS, NEW_ROOMS } from './team';
 import { roomContext } from './rooms';
@@ -37,8 +38,9 @@ function ownerMainTurn(state: CollaborationState, botId: string, turn?: Turn): b
   const bot = state.team.bots[botId];
   return turn?.source !== 'room_slot' && turn?.authority === 'owner' && !!bot?.mainBot && !bot.archived;
 }
-export function outcomeSchema(botId: string, state: CollaborationState, turn?: Turn, models: readonly string[] = ['default']) {
-  const ids = Object.values(state.routines).filter(r => r.owner === botId && r.lifecycle !== 'completed').map(r => r.id);
+/** `routines` are the Bot routine views of the K4 routine rows. */
+export function outcomeSchema(botId: string, state: CollaborationState, turn?: Turn, models: readonly string[] = ['default'], routines: readonly BotRoutine[] = []) {
+  const ids = routines.filter(r => r.owner === botId && r.lifecycle !== 'completed').map(r => r.id);
   const compose = (scheduleShape: RoutineScheduleShape) => {
     const fragments: BotTurnOutcomeFragments = turn?.source === 'room_slot' ? (() => {
       const seat = state.team.seats[turn.id]!, room = state.team.rooms[state.team.rounds[seat.roundId]!.roomId]!;
@@ -79,7 +81,8 @@ export function outcomeSchema(botId: string, state: CollaborationState, turn?: T
   }
 }
 /** `crossRequest` is the framed Request section of a Cross-Bot Turn; its background is trimmed too (§3.7). */
-export function turnContext(state: CollaborationState, turn: Turn, turnLimit = HISTORY_MAX_ITEMS, maxBytes = HISTORY_MAX_BYTES, crossRequest?: string) {
+export function turnContext(state: CollaborationState, turn: Turn, turnLimit = HISTORY_MAX_ITEMS, maxBytes = HISTORY_MAX_BYTES, crossRequest?: string,
+  routines: readonly BotRoutine[] = []) {
   const team = state.team;
   const ownRejections = state.rejected.filter(rejection => rejection.botId === turn.botId && !rejection.consumedBy);
   const shared = { teamNotes: crossRequest === undefined ? team.notes : [...team.notes],
@@ -98,20 +101,19 @@ export function turnContext(state: CollaborationState, turn: Turn, turnLimit = H
   const scoped = { ...state,
     turns: { ...Object.fromEntries(Object.entries(state.turns).filter(([, row]) => row.botId === turn.botId)), [turn.id]: turn },
     cards: own(state.cards), questions: own(state.questions),
-    routines: Object.fromEntries(Object.entries(state.routines).filter(([, row]) => row.owner === turn.botId)),
     rejected: ownRejections,
   };
   return contextPack(scoped, turnLimit, turn.id, maxBytes, true, shared,
-    crossRequest === undefined ? {} : { request: crossRequest, background: [shared.rooms, shared.teamNotes] });
+    crossRequest === undefined ? {} : { request: crossRequest, background: [shared.rooms, shared.teamNotes] }, routines.filter(row => row.owner === turn.botId));
 }
 export interface InstructionLimits { turnLimit: number; contextMaxBytes: number; instructionMaxBytes: number }
 /** The frozen instruction. A Cross-Bot Turn fits `instructionMaxBytes` as a whole. */
-export function turnInstruction(state: CollaborationState, turn: Turn, limits: InstructionLimits) {
+export function turnInstruction(state: CollaborationState, turn: Turn, limits: InstructionLimits, routines: readonly BotRoutine[] = []) {
   const prompt = turn.source === 'room_slot' ? ROOM_SYSTEM_PROMPT : SYSTEM_PROMPT;
   const cross = isCrossBot(turn);
   const request = cross ? crossBotRequest(state, turn) : turn.request;
   const context = turnContext(state, turn, limits.turnLimit,
-    cross ? limits.instructionMaxBytes - instructionOverhead(prompt) : limits.contextMaxBytes, cross ? request : undefined);
+    cross ? limits.instructionMaxBytes - instructionOverhead(prompt) : limits.contextMaxBytes, cross ? request : undefined, routines);
   return { context, instruction: `${prompt}\n\nRequest:\n${request}\n\nContextPack:\n${JSON.stringify(context)}` };
 }
 export const DEFAULT_CONTEXT_MAX_BYTES = HISTORY_MAX_BYTES;
@@ -119,7 +121,8 @@ export const DEFAULT_CONTEXT_TURN_LIMIT = 12;
 
 /** Snapshot views include the candidate. Frozen turn views keep it in Request. */
 export function contextPack<T extends object = Record<never, never>>(state: CollaborationState, turnLimit = DEFAULT_CONTEXT_TURN_LIMIT, currentTurnId?: string,
-  maxBytes = DEFAULT_CONTEXT_MAX_BYTES, separateRequest = false, shared: T = {} as T, fit: { request?: string; background?: unknown[][] } = {}) {
+  maxBytes = DEFAULT_CONTEXT_MAX_BYTES, separateRequest = false, shared: T = {} as T, fit: { request?: string; background?: unknown[][] } = {},
+  routines: readonly BotRoutine[] = []) {
   if (!Number.isSafeInteger(turnLimit) || turnLimit < 1) throw new Error('Invalid ContextPack turn limit');
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new Error('Invalid ContextPack byte budget');
   const turns = Object.values(state.turns);
@@ -146,11 +149,7 @@ export function contextPack<T extends object = Record<never, never>>(state: Coll
     },
     rejectedActions: state.rejected.filter(row => !row.consumedBy).slice(-turnLimit),
     questions: selectedQuestions, cards: selectedCards,
-    routines: Object.values(state.routines).map(routine => ({
-      id: routine.id, owner: routine.owner, current: routine.current, pending: routine.pending,
-      lifecycle: routine.lifecycle, status: routine.status,
-      definition: routine.versions[routine.current], lastError: routine.errors.at(-1),
-    })),
+    routines: [...routines],
     turns: selected.map(turn => ({
       id: turn.id, root: turn.root, source: turn.source, request: turn.request,
       hop: turn.hop, status: turn.status, conclusion: turn.conclusion,

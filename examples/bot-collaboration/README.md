@@ -61,7 +61,8 @@ The Host applies management actions, Main Bot delegation cancels, routine
 actions, confirmation cards, questions, then delegations. Each turn freezes
 the ordinary Bot schema and its ContextPack
 when its K4 intent is enqueued. Waiting turns and retries reuse that frozen
-input. The wait limit is five minutes before execution starts. A started
+input. The wait limit is five minutes before execution starts. For a routine
+Turn, it counts from the occurrence record. A started
 execution waits for canonical device terminal evidence.
 The schema offers delegation, `ask_user`, `confirmable_action`, and the
 three routine actions. It offers all current routine ids, up to eight.
@@ -102,39 +103,65 @@ It does not turn an outcome document into a second chat message.
 
 ## Routine invariants
 
-K4's routine definitions stay immutable. K8a stores its versioned routine state
-in the K4 application ledger. This state participates in the outcome commit.
-The SDK stores one-shot times only. The Host uses `nextRoutineOccurrence`.
+Bot routines are K4 routines. Each one is a `hostOccurrence` definition with
+the `bot-routine` hook. The K4 ledger stores the definition, the pending
+version, the reserved slot, the occurrences and the wake outbox. K8 keeps no
+routine state. The Host core uses `nextRoutineOccurrence` as its calendar: a
+routine rule is a `RoutineSchedule` whose `tz` is the definition time zone.
 K4, K8-S and the SDK all use the 368-day wake horizon.
 
-Each routine has immutable versions, `current`, `pending`, and a scheduling
-`generation`. Its unique slot is `(routineId, version, t)`. A delivery freezes
-its decision, trigger, and definition snapshot. Redelivery reads that row.
-Late or cancelled hooks cannot recreate a discarded chain.
+K8 keeps the Bot policy. A Bot creates routines only for itself. Each owner
+has at most eight routines that are not completed. The routine id is
+`hash([taskId, 'create_routine', index])`. The hook input holds `owner`,
+`authority` and `prompt`, and a new version keeps the owner and the authority.
+An update must change the schedule or the prompt. Duplicate weekdays are
+stored once. The routine actions run as K4 routine commands in the outcome
+commit. A refused action changes no routine.
 
-At most two occurrences remain unsettled for one routine. A third due slot
-gets a `capacity` audit decision and no execution. The active version arms
-its next time. On update, accepted work and a due undelivered slot stay on
-the old version. The Host stops replenishing that chain. It switches only when
-accepted work settles and no due old slot remains. It cancels the old future
-slot, advances generation, and arms the new version. Further updates replace
-`pending` with a new immutable version.
+The hook writes the routine Turn in the occurrence commit. The Turn id is the
+K4 intent key `occurrence:<occurrence key>`. The next sync promotes the Turn
+with `promoteOccurrence` and its frozen schema and ContextPack. Its wait limit
+is five minutes from the occurrence record, not from the promotion. A routine
+Turn that ends before promotion, for example on cancel or for an archived
+owner, concludes its occurrence as `cancelled`. Redelivery reads the stored
+occurrence and does not call the hook again.
 
-Pause cancels the armed slot. Resume keeps `current` while work is unsettled.
-Cancel marks the routine completed and stops new occurrences. Accepted work
-finishes with its old snapshot. To stop an execution too, use K4 cancellation
-explicitly. Routine results are owner turns with source `routine`.
+K4 keeps a running occurrence and only the latest queued one. A new slot
+settles an older queued routine Turn as `superseded`. On update, the new
+version stays `pending` while an occurrence is unsettled or an old slot is
+due. The old chain gets no new slot, and the version switches when that work
+settles. K4 stores only the current and the pending definition; the Host
+service keeps the version history. Pause cancels the reserved slot. Resume
+keeps the current version while work is unsettled. Cancel marks the routine
+completed and stops new occurrences. Accepted work finishes with its old
+version. To stop an execution too, use K4 cancellation explicitly. Routine
+results are owner turns with source `routine`.
 
-The wake outbox has persistent sequence numbers and one serial consumer.
+`compact` removes settled routine rows: a promoted
+occurrence through its intent key, and a concluded occurrence through its
+occurrence key. `botRoutines` reads the Bot routine views from the K4 rows.
+Other K4 routines of the Host, for example Host jobs from `BotOptions.hostJobs`,
+are not Bot routines.
+
+`CollaborationState.version` is 2. Version 1 kept the routines in K8 state.
+The Host refuses a version 1 ledger and changes nothing. Restore a ledger
+backup made before this change, or start a new ledger.
+
 The Host drains application commands until all new turns have a K4 intent.
 An immediate terminal cannot leave a continuation without a wake.
-A schedule must match the active generation and armed slot. A cancel cannot
-be overtaken by a later schedule for the same key. Failed operations retain
-a retry time. A process timer retries them. Startup repairs a missing armed
-wake. A mismatched wake time records an audit and resolves without a retry
-loop. A successful cancel retry clears its stale failure status.
-Calendar errors stop the chain, record an audit, and let the accepted
-occurrence finish. Startup or explicit pause/resume retries the calendar.
+K4 schedules and cancels routine wakes through its outbox. A resume of the
+same key replaces a pending cancel with the schedule, so the SDK holds one
+wake. A failed SDK wake call rejects the K4 drain, and the Host call that
+started it rejects after its commit. The K4 outbox keeps the row with
+`lastError`. A process timer retries it after 60 seconds, and each later
+drain, wake delivery or `recover()` also retries it. A failed K4 drain does
+not stop the rest of its process pass, and the pass arms the timer, so card
+expiry, delivery retries, reply checks, seat deadlines and input batch seals
+keep their times. The pass then rethrows the drain error. Startup schedules a reserved wake that the SDK
+no longer holds. K4 rejects a wake whose time differs from its reservation,
+and the SDK delivers it again. K4 records an unknown, inactive or superseded
+wake in `ignoredWakes`. Calendar errors stop the chain, record an audit, and
+let the accepted occurrence finish. Pause and resume retry the calendar.
 
 ## Boundaries
 
@@ -240,9 +267,8 @@ The Host removes old refusals, settled items, old messages, then pending items.
 private context also report `omittedTurns`, `omittedMessages`, `omittedCards`,
 `omittedQuestions`, `omittedPendingCards`, `omittedPendingQuestions`, and
 `omittedRejections`. Zero counts remain explicit. The same byte accounting
-includes the Request and all selected context. Full outcomes and old routine
-versions stay in the ledger. Context includes action names and the current
-routine definition.
+includes the Request and all selected context. Full outcomes stay in the
+ledger. Context includes action names and the current routine definition.
 
 Rejected feedback is private to its Bot. The next frozen input reserves it.
 An execution that fails before it starts releases that reservation.

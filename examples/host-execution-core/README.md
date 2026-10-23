@@ -438,7 +438,7 @@ These rows cover routine sync with the browser closed, `sync_failed`, 409, `devi
 
 The owner decisions of 2026-10-22 for #606 (O1, O2 and O8) move same-routine-ID version changes
 into K4 `updateRoutine`. K4 keeps its overlap rule: a new slot settles queued older work and keeps
-the running one. K8 keeps its own routine model until #737 moves it onto K4.
+the running one. Since #737, K8 Bot routines are K4 `hostOccurrence` routines.
 
 K8 actions and group chat remain in their own work orders.
 P5a adds Host memory commands and Linux synthetic memory tests below.
