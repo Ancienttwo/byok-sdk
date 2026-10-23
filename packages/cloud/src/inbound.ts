@@ -78,6 +78,7 @@ import { isCloudError } from './errors';
 import { projectTerminalToReview } from './board-projection';
 import { agentReliabilityKey } from './agent-reliability';
 import type { TenantStores } from './tenant-stores';
+import { isTaskRedactionTombstone, taskRedactionReceiptKey } from './task-redaction';
 
 export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected' | 'rate_limited';
 
@@ -235,6 +236,7 @@ export async function handleAgentMessagePublish(
   ) return refuse('device_not_eligible');
   if (attempt === undefined || attempt.deviceId !== deviceId) return refuse('task_not_found_for_device');
   if (binding === undefined) return refuse('agent_message_offer_binding_missing');
+  if (isTaskRedactionTombstone(binding.body)) return refuse('agent_message_binding_mismatch');
   if (attempt.agentRef === undefined || !sameAgentRef(attempt.agentRef, payload.agentRef)) {
     return refuse('agent_message_attempt_mismatch');
   }
@@ -652,6 +654,7 @@ async function applyInboundGate(
       || !device.harnesses?.some(harness => harness.id === harnessId))) return refuse('claim_harness_unavailable');
     const messageId = await taskOfferMessageId(stores.tenant, taskId, deviceId, attempt.agentRef, hashOfferBytes);
     const offer = await stores.receipts.get(`task-offer:${messageId}`);
+    if (offer !== undefined && isTaskRedactionTombstone(offer.body)) return refuse('claim_offer_mismatch');
     if (offer !== undefined) {
       const sealed = JSON.parse(offer.body) as { payload: { harnessId?: string; runtime?: string; dispatchSelection?: unknown } };
       if (harnessId !== undefined && (sealed.payload.runtime !== undefined || sealed.payload.dispatchSelection !== undefined)) return refuse('claim_offer_mismatch');
@@ -666,7 +669,7 @@ async function applyInboundGate(
     const messageId = await taskOfferMessageId(stores.tenant, taskId, deviceId, attempt.agentRef, hashOfferBytes);
     if (envelope.payload.recovery.offerId !== messageId) return refuse('recovery_offer_mismatch');
     const offer = await stores.receipts.get(`task-offer:${messageId}`);
-    if (offer === undefined) return refuse('recovery_offer_mismatch');
+    if (offer === undefined || isTaskRedactionTombstone(offer.body)) return refuse('recovery_offer_mismatch');
     const sealed = JSON.parse(offer.body) as { payload: { harnessId?: string; runtime?: string; dispatchSelection?: unknown } };
     const harnessId = envelope.payload.harnessId;
     if (sealed.payload.harnessId !== undefined && sealed.payload.harnessId !== harnessId) return refuse('recovery_offer_mismatch');
@@ -687,6 +690,12 @@ async function applyInboundGate(
     !sameAgentRef(attempt.agentRef, inboundAgentRef(envelope))
   ) {
     return refuse('agent_identity_mismatch');
+  }
+  // A redacted task keeps no new content. A late progress or approval report
+  // is complete as received, the same as one stored and then redacted.
+  if (REDACTABLE_REPORT_TYPES.includes(envelope.type) && TERMINAL_TASK_STATUSES.includes(attempt.status)
+    && await stores.receipts.get(taskRedactionReceiptKey(taskId)) !== undefined) {
+    return completeInboundEnvelope(stores, deviceId, envelope.id, attempt.agentRef);
   }
   if (envelope.type === 'task.progress' && envelope.payload.events.length > 0) {
     try {
@@ -721,6 +730,9 @@ async function applyInboundGate(
   if (lifecycleRefusal !== undefined) return lifecycleRefusal;
   return completeInboundEnvelope(stores, deviceId, envelope.id, attempt?.agentRef);
 }
+
+const REDACTABLE_REPORT_TYPES: readonly string[] = ['task.progress', 'task.await_approval', 'task.approval_resolved'];
+const TERMINAL_TASK_STATUSES: readonly string[] = ['complete', 'failed', 'cancelled'];
 
 /** Marks an envelope complete only after all of its authoritative facts converged. */
 async function completeInboundEnvelope(
@@ -881,6 +893,9 @@ async function recordTerminal(
     key: terminalReceiptKey(taskId),
     body: encodeEnvelope(envelope),
   });
+  // Redaction runs only on a terminal task, so its status and projections are
+  // already settled. A later terminal is a replay with nothing to record.
+  if (isTaskRedactionTombstone(receipt.receipt.body)) return;
   // Receipt insertion and the status/board projections are separate durable
   // writes. A retry resumes from the winning receipt instead of returning just
   // because the receipt was already present.

@@ -1447,19 +1447,26 @@ export type TaskAwaitApprovalSealedPayload = z.infer<typeof TaskAwaitApprovalSea
 // registry — single source of truth mapping message type -> payload schema
 // ---------------------------------------------------------------------------
 
-/** Protocol-owned task-opening family; the wire registry consumes these same entries. */
+/**
+ * Protocol-owned task-opening family; the wire registry consumes these same entries.
+ *
+ * Each value is written `X as typeof X`, here and in `MESSAGE_PAYLOAD_SCHEMAS`.
+ * The assertion is type-only (no runtime code). It makes declaration emit
+ * name each schema (`typeof X`) instead of copying its full type, which keeps
+ * the published `.d.ts` small. Every new entry follows this rule.
+ */
 const TASK_OFFER_PAYLOAD_SCHEMAS = {
-  'task.offer': TaskOfferPayloadSchema,
-  'task.offer_with_toolsets': TaskOfferWithToolsetsPayloadSchema,
-  'task.offer_for_agent': TaskOfferForAgentPayloadSchema,
-  'task.offer_for_agent_with_egress': TaskOfferForAgentWithEgressPayloadSchema,
-  'task.offer_for_agent_with_egress_fresh': TaskOfferForAgentWithEgressFreshPayloadSchema,
-  'task.offer_prepared': TaskOfferPreparedPayloadSchema,
-  'task.offer_sealed': TaskOfferSealedPayloadSchema,
-  'task.offer_with_toolsets_sealed': TaskOfferWithToolsetsSealedPayloadSchema,
-  'task.offer_for_agent_sealed': TaskOfferForAgentSealedPayloadSchema,
-  'task.offer_for_agent_with_egress_sealed': TaskOfferForAgentWithEgressSealedPayloadSchema,
-  'task.offer_for_agent_with_egress_fresh_sealed': TaskOfferForAgentWithEgressFreshSealedPayloadSchema,
+  'task.offer': TaskOfferPayloadSchema as typeof TaskOfferPayloadSchema,
+  'task.offer_with_toolsets': TaskOfferWithToolsetsPayloadSchema as typeof TaskOfferWithToolsetsPayloadSchema,
+  'task.offer_for_agent': TaskOfferForAgentPayloadSchema as typeof TaskOfferForAgentPayloadSchema,
+  'task.offer_for_agent_with_egress': TaskOfferForAgentWithEgressPayloadSchema as typeof TaskOfferForAgentWithEgressPayloadSchema,
+  'task.offer_for_agent_with_egress_fresh': TaskOfferForAgentWithEgressFreshPayloadSchema as typeof TaskOfferForAgentWithEgressFreshPayloadSchema,
+  'task.offer_prepared': TaskOfferPreparedPayloadSchema as typeof TaskOfferPreparedPayloadSchema,
+  'task.offer_sealed': TaskOfferSealedPayloadSchema as typeof TaskOfferSealedPayloadSchema,
+  'task.offer_with_toolsets_sealed': TaskOfferWithToolsetsSealedPayloadSchema as typeof TaskOfferWithToolsetsSealedPayloadSchema,
+  'task.offer_for_agent_sealed': TaskOfferForAgentSealedPayloadSchema as typeof TaskOfferForAgentSealedPayloadSchema,
+  'task.offer_for_agent_with_egress_sealed': TaskOfferForAgentWithEgressSealedPayloadSchema as typeof TaskOfferForAgentWithEgressSealedPayloadSchema,
+  'task.offer_for_agent_with_egress_fresh_sealed': TaskOfferForAgentWithEgressFreshSealedPayloadSchema as typeof TaskOfferForAgentWithEgressFreshSealedPayloadSchema,
 } as const;
 
 export type TaskOfferType = keyof typeof TASK_OFFER_PAYLOAD_SCHEMAS;
@@ -1473,42 +1480,42 @@ export function isTaskOfferType(type: string): type is TaskOfferType {
 }
 
 export const MESSAGE_PAYLOAD_SCHEMAS = {
-  'conn.hello': ConnHelloPayloadSchema,
-  'conn.ack': ConnAckPayloadSchema,
+  'conn.hello': ConnHelloPayloadSchema as typeof ConnHelloPayloadSchema,
+  'conn.ack': ConnAckPayloadSchema as typeof ConnAckPayloadSchema,
   ...TASK_OFFER_PAYLOAD_SCHEMAS,
-  'agent.egress.reliable': AgentEgressReliablePayloadSchema,
-  'agent.egress.ack': AgentEgressAckPayloadSchema,
-  'agent.message.draft': AgentMessageDraftPayloadSchema,
-  'agent.message.publish': AgentMessagePublishPayloadSchema,
-  'agent.message.disposition': AgentMessageDispositionPayloadSchema,
-  'agent.content.read': AgentContentReadPayloadSchema,
-  'agent.content.receipt': AgentContentReceiptPayloadSchema,
-  'agent.home.projection': AgentHomeProjectionPayloadSchema,
-  'agent.input.preparation': AgentInputPreparationPayloadSchema,
-  'provider.provisioning.available': ProviderProvisioningAvailablePayloadSchema,
-  'agent.memory.intent.available': AgentMemoryIntentAvailablePayloadSchema,
-  'task.approve': TaskApprovePayloadSchema,
-  'task.reject': TaskRejectPayloadSchema,
-  'task.cancel': TaskCancelPayloadSchema,
-  'task.steer': TaskSteerPayloadSchema,
-  'task.claim': TaskClaimPayloadSchema,
-  'task.started': TaskStartedPayloadSchema,
-  'task.decline': TaskDeclinePayloadSchema,
-  'task.progress': TaskProgressPayloadSchema,
-  'task.artifact': TaskArtifactPayloadSchema,
-  'task.await_approval': TaskAwaitApprovalPayloadSchema,
-  'task.complete': TaskCompletePayloadSchema,
-  'task.fail': TaskFailPayloadSchema,
-  'task.cancelled': TaskCancelledPayloadSchema,
-  'task.approval_resolved': TaskApprovalResolvedPayloadSchema,
-  'task.steer_sealed': TaskSteerSealedPayloadSchema,
-  'task.complete_sealed': TaskCompleteSealedPayloadSchema,
-  'task.fail_sealed': TaskFailSealedPayloadSchema,
-  'task.decline_sealed': TaskDeclineSealedPayloadSchema,
-  'task.cancelled_sealed': TaskCancelledSealedPayloadSchema,
-  'task.progress_sealed': TaskProgressSealedPayloadSchema,
-  'task.artifact_sealed': TaskArtifactSealedPayloadSchema,
-  'task.await_approval_sealed': TaskAwaitApprovalSealedPayloadSchema,
+  'agent.egress.reliable': AgentEgressReliablePayloadSchema as typeof AgentEgressReliablePayloadSchema,
+  'agent.egress.ack': AgentEgressAckPayloadSchema as typeof AgentEgressAckPayloadSchema,
+  'agent.message.draft': AgentMessageDraftPayloadSchema as typeof AgentMessageDraftPayloadSchema,
+  'agent.message.publish': AgentMessagePublishPayloadSchema as typeof AgentMessagePublishPayloadSchema,
+  'agent.message.disposition': AgentMessageDispositionPayloadSchema as typeof AgentMessageDispositionPayloadSchema,
+  'agent.content.read': AgentContentReadPayloadSchema as typeof AgentContentReadPayloadSchema,
+  'agent.content.receipt': AgentContentReceiptPayloadSchema as typeof AgentContentReceiptPayloadSchema,
+  'agent.home.projection': AgentHomeProjectionPayloadSchema as typeof AgentHomeProjectionPayloadSchema,
+  'agent.input.preparation': AgentInputPreparationPayloadSchema as typeof AgentInputPreparationPayloadSchema,
+  'provider.provisioning.available': ProviderProvisioningAvailablePayloadSchema as typeof ProviderProvisioningAvailablePayloadSchema,
+  'agent.memory.intent.available': AgentMemoryIntentAvailablePayloadSchema as typeof AgentMemoryIntentAvailablePayloadSchema,
+  'task.approve': TaskApprovePayloadSchema as typeof TaskApprovePayloadSchema,
+  'task.reject': TaskRejectPayloadSchema as typeof TaskRejectPayloadSchema,
+  'task.cancel': TaskCancelPayloadSchema as typeof TaskCancelPayloadSchema,
+  'task.steer': TaskSteerPayloadSchema as typeof TaskSteerPayloadSchema,
+  'task.claim': TaskClaimPayloadSchema as typeof TaskClaimPayloadSchema,
+  'task.started': TaskStartedPayloadSchema as typeof TaskStartedPayloadSchema,
+  'task.decline': TaskDeclinePayloadSchema as typeof TaskDeclinePayloadSchema,
+  'task.progress': TaskProgressPayloadSchema as typeof TaskProgressPayloadSchema,
+  'task.artifact': TaskArtifactPayloadSchema as typeof TaskArtifactPayloadSchema,
+  'task.await_approval': TaskAwaitApprovalPayloadSchema as typeof TaskAwaitApprovalPayloadSchema,
+  'task.complete': TaskCompletePayloadSchema as typeof TaskCompletePayloadSchema,
+  'task.fail': TaskFailPayloadSchema as typeof TaskFailPayloadSchema,
+  'task.cancelled': TaskCancelledPayloadSchema as typeof TaskCancelledPayloadSchema,
+  'task.approval_resolved': TaskApprovalResolvedPayloadSchema as typeof TaskApprovalResolvedPayloadSchema,
+  'task.steer_sealed': TaskSteerSealedPayloadSchema as typeof TaskSteerSealedPayloadSchema,
+  'task.complete_sealed': TaskCompleteSealedPayloadSchema as typeof TaskCompleteSealedPayloadSchema,
+  'task.fail_sealed': TaskFailSealedPayloadSchema as typeof TaskFailSealedPayloadSchema,
+  'task.decline_sealed': TaskDeclineSealedPayloadSchema as typeof TaskDeclineSealedPayloadSchema,
+  'task.cancelled_sealed': TaskCancelledSealedPayloadSchema as typeof TaskCancelledSealedPayloadSchema,
+  'task.progress_sealed': TaskProgressSealedPayloadSchema as typeof TaskProgressSealedPayloadSchema,
+  'task.artifact_sealed': TaskArtifactSealedPayloadSchema as typeof TaskArtifactSealedPayloadSchema,
+  'task.await_approval_sealed': TaskAwaitApprovalSealedPayloadSchema as typeof TaskAwaitApprovalSealedPayloadSchema,
 } as const;
 
 export type MessageType = keyof typeof MESSAGE_PAYLOAD_SCHEMAS;

@@ -33,12 +33,16 @@ test('docs and known CI contracts select light checks, not release families', ()
   }
 });
 
-test('ci.yml selects the dataplane job that checks the workflow (#749)', () => {
-  const constraints = 'packages/cloud-dataplane/src/__tests__/constraints.test.ts';
-  assert.match(readFileSync(new URL(constraints, root), 'utf8'), /\.github\/workflows\/ci\.yml/);
-  assert.deepEqual(selectImpact(['.github/workflows/ci.yml']), {
-    dirs: [], files: ['.github/workflows/ci.yml'], families: ['dataplane'], reason: 'impacted',
-  });
+test('ci.yml selects every routine family and the client suites that read it (W7)', () => {
+  for (const reader of [
+    'packages/cloud-dataplane/src/__tests__/constraints.test.ts',
+    'packages/client/src/__tests__/agent-memory-helper-ci-p1-regression.test.ts',
+    'packages/client/src/__tests__/support/test-bun-bin.pin.test.ts',
+  ]) assert.match(readFileSync(new URL(reader, root), 'utf8'), /\.github\/workflows\/ci\.yml/, reader);
+  const impact = selectImpact(['.github/workflows/ci.yml']);
+  assert.deepEqual(impact.families, knownFamilies.filter(id => id !== 'build-test').sort());
+  assert.ok(impact.dirs.includes('packages/client'));
+  assert.equal(impact.reason, 'impacted');
   assert.deepEqual(selectImpact(['.github/workflows/release.yml']).families, []);
   assert.deepEqual(selectImpact(['scripts/ci/select-impact.mjs']).families, []);
 });
@@ -64,7 +68,7 @@ test('client source/deleted tests select reverse dependents but no platform fami
 test('a platform family is selected only by a path it owns', () => {
   const owned = {
     'agent-memory-export-linux': 'packages/client/src/daemon/agent-memory-export.ts',
-    'agent-memory-helper-linux': 'packages/client/native/agent-memory-fs/main.go',
+    'agent-memory-helper-non-darwin': 'packages/client/native/agent-memory-fs/main.go',
     'agent-memory-helper': 'packages/client/src/daemon/agent-memory-intent.ts',
     'execution-recovery-native': 'packages/client/src/daemon/journal/sqlite-journal.ts',
     'adapter-lifecycle-smoke': 'packages/client/src/adapters/codex/codex-adapter.ts',
@@ -110,7 +114,7 @@ test('Hermes adapter, fake and custody launcher paths select the Windows Hermes 
 test('owned helper build scripts keep release packaging qualification', () => {
   for (const path of ['packages/client/scripts/build-agent-memory-helper.mjs', 'packages/client/scripts/check-agent-memory-helper-build.mjs', 'packages/client/scripts/agent-memory-helper-source.mjs']) {
     const families = selectImpact([path]).families;
-    for (const id of ['npm-release-pack', 'agent-memory-helper', 'agent-memory-helper-linux']) assert.ok(families.includes(id), `${path}: ${id}`);
+    for (const id of ['npm-release-pack', 'agent-memory-helper', 'agent-memory-helper-non-darwin']) assert.ok(families.includes(id), `${path}: ${id}`);
   }
 });
 

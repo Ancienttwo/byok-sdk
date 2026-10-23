@@ -268,6 +268,41 @@ host-owned dead-letter replay path to rebind frozen envelope bytes to the new
 mailbox sequence; core remains protocol-free. Nothing depends back on it; no ambient AWS
 credential-provider chain is installed.
 
+## Task redaction
+
+`createPostgresTaskRedactionStore` is the store behind `ByokCloud.redactTasks`
+(#654 E5a). It ships from `./runtime`, so a Worker can run it over Hyperdrive.
+Pass it as the `taskRedactionStore` option; without it, `redactTasks` throws
+`task_redaction_unavailable`.
+
+```ts
+import { createPostgresTaskRedactionStore } from '@byok-sdk/cloud-dataplane/runtime';
+
+const cloud = createByokCloud({
+  // ...the usual stores...
+  taskRedactionStore: createPostgresTaskRedactionStore({ pool, clock, objectStorage }),
+});
+const { tasks } = await cloud.redactTasks(tenantId, { taskIds: ['task-1'] });
+// Per task: `redacted`, `already_redacted`, `not_found`, or `refused` with
+// `task_not_terminal` / `pending_delivery`. A refused task can be retried.
+```
+
+For each terminal task the store replaces the stored bodies (task receipts,
+the Agent message admission, acked and expired mailbox rows) with a body-free
+tombstone that keeps the SHA-256, the byte length and the envelope type. Rows
+stay, so receipt fences, mailbox cursors and the dead-letter floor keep their
+meaning. It clears the free-text `task` columns, deletes the activity, approval
+and draft rows, and deletes each object that the bodies name when no reference,
+reserved upload, other receipt body or pending mailbox row of the tenant holds
+it (a substring match on the hash, one unindexed scan per object). An object that only a running task's upload names is not seen (E3b). Use the same `objectStorage` (and `keyPrefix`) as
+the blob composition. When the task has no terminal receipt, the store writes a
+tombstone under that key, so a late device terminal stores nothing. The objects
+go first and the rows next, so a retry after any failure is safe; until the
+retry, the bodies can name deleted objects. A `task-redaction:<taskId>` receipt
+records the counts. A late progress or approval report can add a row after the
+call; call it again to delete that row. Backups, replicas and logs are not
+reached.
+
 ## Migrations
 
 Schema is authored in the repository's `deploy/sql/` directory as plain SQL

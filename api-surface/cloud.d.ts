@@ -1272,6 +1272,7 @@ import type { AgentMemoryProjectionAuthorizer, AgentMemoryProjectionStore } from
 import type { BlobContentProxy, CloudStores, DeviceRecord, AgentEgressRecord, PairingCodeInfo, RequestReceipt, TaskAttempt, TaskAttemptListQuery, TaskAttemptPage } from './stores/ports';
 import { type DeviceTerminal, type TerminalResult } from './terminal-result';
 import type { MailboxWake } from './mailbox-wake';
+import { type TaskRedactionResult, type TaskRedactionStore } from './task-redaction';
 import type { TruthCommitter, TruthObjectDownloads } from './truth/contract';
 /** Matches the reference server's ceiling (§7). */
 export declare const DEFAULT_MAX_BLOB_SIZE_BYTES: number;
@@ -1369,6 +1370,8 @@ export interface ByokCloudOptions {
     readonly agentMemoryProjectionAuthorizer?: AgentMemoryProjectionAuthorizer;
     /** Durable snapshot + immutable metering receipt authority for optional hosted Agent-memory projection. */
     readonly agentMemoryProjectionStore?: AgentMemoryProjectionStore;
+    /** Durable authority for {@link ByokCloud.redactTasks}. Without it, `redactTasks` fails closed. */
+    readonly taskRedactionStore?: TaskRedactionStore;
     readonly maxBlobSizeBytes?: number;
     readonly longPollHoldMs?: number;
     readonly eventsPageLimit?: number;
@@ -1689,6 +1692,16 @@ export interface ByokCloud {
      * depend on a device being online and never imports anything back locally.
      */
     eraseAgentMemoryProjection(tenant: TenantId, agentId: string): Promise<AgentMemoryProjectionEraseResult>;
+    /**
+     * Host control plane: replace the stored content of terminal tasks with
+     * body-free tombstones (#654 E5a). Status, digests and identity fences stay,
+     * so a replay is still a duplicate and new content is still a conflict.
+     * Content reads of a redacted task throw `task_content_redacted`.
+     * Each task is redacted on its own; a refused task can be retried.
+     */
+    redactTasks(tenant: TenantId, input: {
+        readonly taskIds: readonly string[];
+    }): Promise<TaskRedactionResult>;
     /** Host control plane: durably request cancellation by tenant/task id. Idempotent. */
     cancelTask(tenant: TenantId, taskId: string, reason?: string): Promise<TaskAttempt>;
     /**
@@ -1775,7 +1788,7 @@ export interface ByokCloud {
     listTaskAttempts(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
     /** Store-aggregated task counts, with host cancellation separated from coarse status. */
     countTaskAttempts(tenant: TenantId): Promise<import('./stores/ports').TaskAttemptCounts>;
-    /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). */
+    /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). Throws `task_content_redacted` after {@link ByokCloud.redactTasks}. */
     readTerminalReceipt(tenant: TenantId, taskId: string): Promise<RequestReceipt | undefined>;
     /** Actual device terminal only; cancellation intent never creates this observation. */
     readDeviceTerminal(tenant: TenantId, taskId: string): Promise<DeviceTerminal | undefined>;
@@ -1800,7 +1813,9 @@ export interface ByokCloud {
      * non-complete terminal, or an offer with no `result-document` terminal
      * projection); a
      * receipt whose body is not a terminal envelope throws rather than
-     * returning a best-effort shape.
+     * returning a best-effort shape. After {@link ByokCloud.redactTasks} the
+     * receipt read throws `task_content_redacted`; a Host cancellation still
+     * returns `state: 'cancelled'`, with its reason cleared.
      */
     readTaskResult(tenant: TenantId, taskId: string): Promise<TerminalResult | undefined>;
     listDevices(tenant: TenantId): Promise<readonly DeviceRecord[]>;
@@ -2147,6 +2162,10 @@ export declare const CLOUD_ERROR_CODES: {
     readonly activity_batch_too_large: 'activity_batch_too_large';
     /** Host control-plane task lookup is tenant-closed and found no task. */
     readonly task_not_found: 'task_not_found';
+    /** A Host read named a task whose content `redactTasks` replaced with a tombstone. */
+    readonly task_content_redacted: 'task_content_redacted';
+    /** `redactTasks` was called on a deployment that has no `taskRedactionStore`. */
+    readonly task_redaction_unavailable: 'task_redaction_unavailable';
     /** Explicit legacy dispatch target is unknown or revoked in this tenant. */
     readonly device_not_found: 'device_not_found';
     /**
@@ -2526,6 +2545,8 @@ export { ByokCloudError, CLOUD_ERROR_CODES, TaskOfferAppendRefusedError, isCloud
 export type { CloudErrorCode } from './errors';
 export { InMemoryAgentMemoryProjectionAuthorizer, InMemoryAgentMemoryProjectionStore, } from './stores/in-memory/agent-memory-projection';
 export type { AgentMemoryProjectionAuthorization, AgentMemoryProjectionEraseResult, AgentMemoryProjectionAuthorizer, AgentMemoryProjectionAuthorizerInput, AgentMemoryProjectionCommitInput, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionStore, } from './agent-memory-projection';
+export { TASK_REDACTION_MAX_TASKS } from './task-redaction';
+export type { TaskRedactionCodec, TaskRedactionCounts, TaskRedactionRefusal, TaskRedactionResult, TaskRedactionStore, TaskRedactionStoreInput, TaskRedactionTaskResult, } from './task-redaction';
 export { CLOUD_CAPABILITIES, CapabilitiesResponseSchema, declares, fullCapabilityDeclaration, } from './capabilities';
 export type { CapabilitiesResponse, CloudCapability, FullCapabilityDeclarationOptions, } from './capabilities';
 export { CloudRouteRegistry, ROUTE_CLASSES, ROUTE_METHODS, routeKey } from './router/registry';
@@ -4021,6 +4042,105 @@ export declare function readTaskAgentMessageBinding(stores: TenantStores, device
         };
     };
 } | undefined>;
+// ==== @byok-sdk/cloud dist/task-redaction.d.ts ====
+/**
+ * Scoped row-delete for plaintext task content (#654 E5a).
+ *
+ * The Host names terminal tasks. A store replaces each stored body of those
+ * tasks with a body-free tombstone, deletes the task's ephemeral rows and the
+ * objects its bodies name, and writes one audit receipt. The rows themselves
+ * stay, so every identity fence keeps working: a replay of the same body
+ * compares equal to the tombstone of that body, and a different body is still
+ * a conflict.
+ *
+ * This module is the one authority for the tombstone format. A store builds
+ * tombstones only through the {@link TaskRedactionCodec} that cloud passes in.
+ */
+import { type ContentHash, type TenantId } from '@byok-sdk/core';
+import type { CloudCrypto } from './crypto/port';
+/** The largest number of task ids that one `redactTasks` call accepts. */
+export declare const TASK_REDACTION_MAX_TASKS = 100;
+export interface TaskRedactionCounts {
+    /** Receipt bodies replaced by a tombstone. */
+    readonly receiptsRedacted: number;
+    /** `agent_message_admission` rows whose bodies were replaced. */
+    readonly admissionsRedacted: number;
+    /** Acked or expired mailbox rows whose bodies were replaced. */
+    readonly outboxRedacted: number;
+    /** Activity, approval-timeline and message-draft rows deleted. */
+    readonly ephemeralRowsDeleted: number;
+    /** Stored objects deleted because a redacted body named them. */
+    readonly objectsDeleted: number;
+}
+export type TaskRedactionRefusal = 'task_not_terminal' | 'pending_delivery';
+export type TaskRedactionTaskResult = {
+    readonly taskId: string;
+    /** `already_redacted`: an earlier call wrote the audit receipt and this call changed nothing. */
+    readonly outcome: 'redacted' | 'already_redacted';
+    readonly counts: TaskRedactionCounts;
+} | {
+    readonly taskId: string;
+    readonly outcome: 'not_found';
+}
+/** Retry later. `pending_delivery` clears when the device acks or the row expires. */
+ | {
+    readonly taskId: string;
+    readonly outcome: 'refused';
+    readonly reason: TaskRedactionRefusal;
+};
+export interface TaskRedactionResult {
+    readonly tasks: readonly TaskRedactionTaskResult[];
+}
+/** The tombstone rules a store applies inside its own transaction. */
+export interface TaskRedactionCodec {
+    /** The body-free replacement. One body always gives the same tombstone. */
+    tombstone(body: string): Promise<{
+        readonly body: string;
+        readonly bodyHash: ContentHash;
+        readonly byteSize: bigint;
+    }>;
+    /**
+     * The tombstone for a body that was never stored. A store writes it under an
+     * absent terminal receipt key, so a late device terminal stores nothing.
+     */
+    readonly absent: string;
+    isTombstone(body: string): boolean;
+    /** The object hashes of every BlobRef in `body`. A body that is not JSON names none. */
+    blobHashes(body: string): readonly ContentHash[];
+}
+export interface TaskRedactionStoreInput {
+    readonly tenantId: TenantId;
+    readonly taskId: string;
+    /** Every receipt key that holds this task's content. Cloud derives them; the store does not. */
+    readonly receiptKeys: readonly string[];
+    /** The device terminal receipt key. It is one of `receiptKeys`. When it is absent, the store writes `codec.absent` there. */
+    readonly terminalReceiptKey: string;
+    /** The identity receipt that records this redaction. */
+    readonly auditReceiptKey: string;
+    readonly codec: TaskRedactionCodec;
+}
+/**
+ * Durable redaction authority for one task. It must be tenant-closed, refuse a
+ * task that is not terminal or still has an undelivered mailbox row, and be
+ * safe to call again after any failure. Inside the transaction that holds the
+ * task lock, and before it reads the receipts, it must write `codec.absent`
+ * under `terminalReceiptKey` when that key is absent. Without this fence a late
+ * device terminal stores new plaintext after the redaction.
+ */
+export interface TaskRedactionStore {
+    redactTask(input: TaskRedactionStoreInput): Promise<TaskRedactionTaskResult>;
+}
+/** The audit receipt key. It is an identity receipt and never expires. */
+export declare function taskRedactionReceiptKey(taskId: string): string;
+export declare function isTaskRedactionTombstone(body: string): boolean;
+/** Readers call this before they parse a task body. */
+export declare function assertTaskContentPresent(taskId: string, body: string): void;
+/** True when `stored` holds `proposed` or the tombstone of `proposed`. */
+export declare function sameTaskBody(stored: string, proposed: string, crypto: Pick<CloudCrypto, 'sha256'>): Promise<boolean>;
+export declare function parseTaskRedactionInput(input: {
+    readonly taskIds: readonly string[];
+}): readonly string[];
+export declare function taskRedactionCodec(crypto: Pick<CloudCrypto, 'sha256'>): TaskRedactionCodec;
 // ==== @byok-sdk/cloud dist/tenant-stores.d.ts ====
 import type { AgentMessageDraftStore } from './agent-message-draft';
 import type { HarnessInfo } from '@byok-sdk/protocol';

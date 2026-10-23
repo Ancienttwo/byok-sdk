@@ -9,6 +9,22 @@ const REQUIRED_SEQ = z.number().int();
 const OPTIONAL_SEQ = REQUIRED_SEQ.optional();
 
 /**
+ * The schema `envelopeShape` returns, written out so declaration emit names
+ * each branch of `EnvelopeSchema` instead of copying every payload type.
+ * Type-only: it must stay equal to the inferred `z.object` type below.
+ */
+type EnvelopeShape<T extends MessageType, TaskId extends z.ZodTypeAny, Seq extends z.ZodTypeAny> = z.ZodObject<{
+  v: z.ZodNumber;
+  id: z.ZodUUID;
+  ts: z.ZodISODateTime;
+  type: z.ZodLiteral<T>;
+  task_id: TaskId;
+  session_ref: z.ZodOptional<z.ZodString>;
+  seq: Seq;
+  payload: (typeof MESSAGE_PAYLOAD_SCHEMAS)[T];
+}, z.core.$strip>;
+
+/**
  * Build the full envelope schema for one message type. Field order here
  * matches the spec's documented shape (`v, id, ts, type, task_id?,
  * session_ref?, seq?, payload`) so parsed output has predictable key order.
@@ -23,7 +39,7 @@ function envelopeShape<
   T extends MessageType,
   TaskId extends z.ZodTypeAny,
   Seq extends z.ZodTypeAny,
->(type: T, taskId: TaskId, seq: Seq) {
+>(type: T, taskId: TaskId, seq: Seq): EnvelopeShape<T, TaskId, Seq> {
   return z.object({
     // A known payload shape does not authorize interpreting another wire major
     // as v1. Keep the public number type and all supported v1 bytes unchanged.

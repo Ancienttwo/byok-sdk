@@ -57,6 +57,10 @@ func TestStrictBarrierFailuresNeverBecomeConflict(t *testing.T) {
 					if err != nil {
 						return err
 					}
+					// Keep the leftover check below tied to the name the helper uses.
+					if !info.IsDir() && !strings.HasPrefix(filepath.Base(file.Name()), ".byok-agent-memory-") {
+						t.Errorf("temp name %q has another prefix", file.Name())
+					}
 					if (window == "parent") == info.IsDir() {
 						calls++
 						return errno
@@ -77,8 +81,8 @@ func TestStrictBarrierFailuresNeverBecomeConflict(t *testing.T) {
 				}
 				names, _ := os.ReadDir(home)
 				for _, name := range names {
-					if strings.HasPrefix(name.Name(), ".byok-replace") {
-						t.Fatal("temp left after failed barrier")
+					if strings.HasPrefix(name.Name(), ".byok-agent-memory-") {
+						t.Fatalf("temp %q left after failed barrier", name.Name())
 					}
 				}
 			})

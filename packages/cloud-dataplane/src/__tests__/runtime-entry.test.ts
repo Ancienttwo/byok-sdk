@@ -52,6 +52,8 @@ const ONLINE_EXPORTS = [
   'PostgresTaskCancellationStore',
   'PostgresAgentMemoryProjectionStore',
   'createPostgresAgentMemoryProjectionStore',
+  'PostgresTaskRedactionStore',
+  'createPostgresTaskRedactionStore',
   'createPostgresCloudStores',
   // the composition's pending-mailbox wire-major fence
   'POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED',

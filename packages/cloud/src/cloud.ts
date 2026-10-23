@@ -217,6 +217,17 @@ import type {
 } from './stores/ports';
 import { projectTerminalResult, readDeviceTerminalReceipt, type DeviceTerminal, type TerminalResult } from './terminal-result';
 import type { MailboxWake } from './mailbox-wake';
+import {
+  assertTaskContentPresent,
+  isTaskRedactionTombstone,
+  parseTaskRedactionInput,
+  sameTaskBody,
+  taskRedactionCodec,
+  taskRedactionReceiptKey,
+  type TaskRedactionResult,
+  type TaskRedactionStore,
+  type TaskRedactionTaskResult,
+} from './task-redaction';
 import { tenantStoresFor, type CloudRootStores, type TenantStores } from './tenant-stores';
 import type { TruthCommitter, TruthObjectDownloads } from './truth/contract';
 
@@ -344,6 +355,8 @@ export interface ByokCloudOptions {
   readonly agentMemoryProjectionAuthorizer?: AgentMemoryProjectionAuthorizer;
   /** Durable snapshot + immutable metering receipt authority for optional hosted Agent-memory projection. */
   readonly agentMemoryProjectionStore?: AgentMemoryProjectionStore;
+  /** Durable authority for {@link ByokCloud.redactTasks}. Without it, `redactTasks` fails closed. */
+  readonly taskRedactionStore?: TaskRedactionStore;
   readonly maxBlobSizeBytes?: number;
   readonly longPollHoldMs?: number;
   readonly eventsPageLimit?: number;
@@ -743,6 +756,14 @@ export interface ByokCloud {
    * depend on a device being online and never imports anything back locally.
    */
   eraseAgentMemoryProjection(tenant: TenantId, agentId: string): Promise<AgentMemoryProjectionEraseResult>;
+  /**
+   * Host control plane: replace the stored content of terminal tasks with
+   * body-free tombstones (#654 E5a). Status, digests and identity fences stay,
+   * so a replay is still a duplicate and new content is still a conflict.
+   * Content reads of a redacted task throw `task_content_redacted`.
+   * Each task is redacted on its own; a refused task can be retried.
+   */
+  redactTasks(tenant: TenantId, input: { readonly taskIds: readonly string[] }): Promise<TaskRedactionResult>;
   /** Host control plane: durably request cancellation by tenant/task id. Idempotent. */
   cancelTask(tenant: TenantId, taskId: string, reason?: string): Promise<TaskAttempt>;
   /**
@@ -845,7 +866,7 @@ export interface ByokCloud {
   listTaskAttempts(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
   /** Store-aggregated task counts, with host cancellation separated from coarse status. */
   countTaskAttempts(tenant: TenantId): Promise<import('./stores/ports').TaskAttemptCounts>;
-  /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). */
+  /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). Throws `task_content_redacted` after {@link ByokCloud.redactTasks}. */
   readTerminalReceipt(tenant: TenantId, taskId: string): Promise<RequestReceipt | undefined>;
   /** Actual device terminal only; cancellation intent never creates this observation. */
   readDeviceTerminal(tenant: TenantId, taskId: string): Promise<DeviceTerminal | undefined>;
@@ -878,7 +899,9 @@ export interface ByokCloud {
    * non-complete terminal, or an offer with no `result-document` terminal
    * projection); a
    * receipt whose body is not a terminal envelope throws rather than
-   * returning a best-effort shape.
+   * returning a best-effort shape. After {@link ByokCloud.redactTasks} the
+   * receipt read throws `task_content_redacted`; a Host cancellation still
+   * returns `state: 'cancelled'`, with its reason cleared.
    */
   readTaskResult(tenant: TenantId, taskId: string): Promise<TerminalResult | undefined>;
   listDevices(tenant: TenantId): Promise<readonly DeviceRecord[]>;
@@ -1285,7 +1308,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       key: offerReceiptKey,
       body: proposedBody,
     });
-    if (!recorded.created && recorded.receipt.body !== proposedBody) {
+    if (!recorded.created && !(await sameTaskBody(recorded.receipt.body, proposedBody, options.crypto))) {
       throw new ByokCloudError(
         'coordination_input_invalid',
         `Task ${taskId} already has a different executable offer body.`,
@@ -1936,6 +1959,34 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     return store.erase({ tenantId: tenant, agentId });
   }
 
+  async function redactTasks(tenant: TenantId, input: { readonly taskIds: readonly string[] }): Promise<TaskRedactionResult> {
+    const store = options.taskRedactionStore;
+    if (store === undefined) {
+      throw new ByokCloudError('task_redaction_unavailable', 'Task redaction is not configured for this deployment.');
+    }
+    const taskIds = parseTaskRedactionInput(input);
+    const stores = tenantStoresFor(controlPlane(tenant), root);
+    const codec = taskRedactionCodec(options.crypto);
+    const tasks: TaskRedactionTaskResult[] = [];
+    for (const taskId of taskIds) {
+      const attempt = await stores.tasks.get(taskId);
+      if (attempt === undefined) {
+        tasks.push({ taskId, outcome: 'not_found' });
+        continue;
+      }
+      const messageId = await taskOfferMessageId(tenant, taskId, attempt.deviceId, attempt.agentRef, bytes => options.crypto.sha256(bytes));
+      tasks.push(await store.redactTask({
+        tenantId: tenant,
+        taskId,
+        receiptKeys: [`task-offer:${messageId}`, terminalReceiptKey(taskId), `agent-message-offer:${attempt.deviceId}:${taskId}`],
+        terminalReceiptKey: terminalReceiptKey(taskId),
+        auditReceiptKey: taskRedactionReceiptKey(taskId),
+        codec,
+      }));
+    }
+    return { tasks };
+  }
+
   async function enqueueReliableEgressAck(stores: TenantStores, record: AgentEgressRecord): Promise<void> {
     const payload: AgentEgressAckPayload = AgentEgressAckPayloadSchema.parse({
       agentRef: record.payload.agentRef,
@@ -2068,7 +2119,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     });
     return async (stores, taskId) => {
       const recorded = await stores.receipts.record({ key: `agent-message-offer:${deviceId}:${taskId}`, body });
-      if (!recorded.created && recorded.receipt.body !== body) {
+      if (!recorded.created && !(await sameTaskBody(recorded.receipt.body, body, options.crypto))) {
         throw new ByokCloudError('agent_content_request_mismatch', `Task ${taskId} already has a different Agent message context.`);
       }
     };
@@ -2423,6 +2474,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
     completeInputPreparation,
     eraseAgentMemoryProjection,
+    redactTasks,
 
     approveTask(tenant, taskId, opts) {
       return resolveApproval(tenant, taskId, 'approve', opts);
@@ -2460,7 +2512,8 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       if (mutation === undefined) {
         throw new ByokCloudError('task_not_found', `Task ${taskId} was not found for this tenant.`);
       }
-      if (mutation.message !== undefined) {
+      // A redacted task keeps its cancellation row with a tombstone body.
+      if (mutation.message !== undefined && !isTaskRedactionTombstone(mutation.message.body)) {
         const envelope = decodeEnvelope(mutation.message.body);
         if (envelope.seq !== mutation.message.seq || envelope.type !== 'task.cancel') {
           throw new ByokCloudError(
@@ -2479,6 +2532,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       const messageId = await taskOfferMessageId(tenant, taskId, attempt.deviceId, attempt.agentRef, bytes => options.crypto.sha256(bytes));
       const receipt = await stores.receipts.get(`task-offer:${messageId}`);
       if (receipt === undefined) return undefined;
+      assertTaskContentPresent(taskId, receipt.body);
       const invalid = () => new ByokCloudError('coordination_input_invalid', `Task ${taskId} has an unreadable or mismatched immutable offer receipt.`);
       let stored: { deviceId?: unknown; type?: unknown; payload?: unknown };
       try { stored = JSON.parse(receipt.body); } catch { throw invalid(); }
@@ -2507,8 +2561,10 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       return tenantStoresFor(controlPlane(tenant), root).tasks.countByStatus();
     },
 
-    readTerminalReceipt(tenant, taskId) {
-      return tenantStoresFor(controlPlane(tenant), root).receipts.get(terminalReceiptKey(taskId));
+    async readTerminalReceipt(tenant, taskId) {
+      const receipt = await tenantStoresFor(controlPlane(tenant), root).receipts.get(terminalReceiptKey(taskId));
+      if (receipt !== undefined) assertTaskContentPresent(taskId, receipt.body);
+      return receipt;
     },
 
     async readDeviceTerminal(tenant, taskId) {
@@ -2523,9 +2579,14 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       return readTaskAgentMessage(tenantStoresFor(controlPlane(tenant), root), deviceId, taskId, agentRef);
     },
 
-    readAgentMessageDisposition(tenant, deviceId, taskId, payload) {
+    async readAgentMessageDisposition(tenant, deviceId, taskId, payload) {
       const parsed = AgentMessagePublishPayloadSchema.parse(payload);
-      return readAgentMessageDisposition(tenantStoresFor(controlPlane(tenant), root), deviceId, taskId, parsed);
+      const stores = tenantStoresFor(controlPlane(tenant), root);
+      const disposition = await readAgentMessageDisposition(stores, deviceId, taskId, parsed);
+      if (disposition !== undefined) return disposition;
+      const admission = await stores.tasks.readTaskAgentMessage({ taskId, deviceId });
+      if (admission !== undefined) assertTaskContentPresent(taskId, admission.payloadBody);
+      return undefined;
     },
 
     readAgentEgress(tenant, deviceId, agentRef, eventId) {
