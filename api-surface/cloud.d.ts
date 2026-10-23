@@ -1201,6 +1201,14 @@ export declare const CLOUD_CAPABILITIES: {
      * the capability is declared only once it is completely implemented.
      */
     readonly hostMcpTaskContext: 'host-mcp-task-context';
+    /**
+     * The E2EE member device routes (#654): register a member key bundle,
+     * append and read the member chain, put and read scope key packages, and
+     * read the relayed client pairing MAC. Composition-bound like
+     * `truth.records`: declaring it without an `e2eeMemberStore` is refused at
+     * construction.
+     */
+    readonly e2eeMember: 'e2ee.member';
 };
 export type CloudCapability = (typeof CLOUD_CAPABILITIES)[keyof typeof CLOUD_CAPABILITIES];
 /** The wire DTO for `GET /byok/capabilities` — core's shape, bound to a cloud-owned route. */
@@ -1236,6 +1244,8 @@ export interface FullCapabilityDeclarationOptions {
      * deployment does not hold — so it is off unless a composition says otherwise.
      */
     readonly includeHostMcpTaskContext?: boolean;
+    /** `e2ee.member` is default-off: the composition must supply an `e2eeMemberStore`. */
+    readonly includeE2eeMember?: boolean;
 }
 /** Every capability the standard composition can serve, plus explicitly wired composition-bound ones. */
 export declare function fullCapabilityDeclaration(version?: number, options?: FullCapabilityDeclarationOptions): CapabilityDeclaration;
@@ -1397,6 +1407,8 @@ export interface ByokCloudOptions {
     readonly activityCapacity?: number;
     readonly activityTtlMs?: number;
     readonly maxTruthRequestBytes?: number;
+    /** Byte cap of one E2EE member device write. The default fits one full chain append (64 entries of 64 KiB). */
+    readonly maxE2eeRequestBytes?: number;
     readonly skillPackPageLimit?: number;
 }
 /** The unauthenticated routes {@link ByokCloudOptions.publicRouteLimiter} guards. */
@@ -2338,6 +2350,23 @@ export declare function readMemberKeyRegistration(ctx: E2eeMemberContext, device
 } | undefined>;
 /** Relay the client pairing MAC to a registered device for one pairing window. */
 export declare function relayClientPairingMac(ctx: E2eeMemberContext, deviceId: string, input: E2eeClientPairingMac): Promise<void>;
+/**
+ * A device registers its own member key bundle with the device pairing MAC
+ * (§7.2 step 3). The bundle must name the proven device. The MAC is kept for
+ * one pairing window; an identical retry replaces it.
+ */
+export declare function registerDeviceMemberKey(ctx: E2eeMemberContext, deviceId: string, input: unknown): Promise<{
+    readonly memberId: string;
+}>;
+/** The scope key packages addressed to the device's own registered member. */
+export declare function readDeviceScopeKeyPackages(ctx: E2eeMemberContext, deviceId: string, input: {
+    readonly scopeId: string;
+    readonly epoch?: number;
+}): Promise<{
+    readonly packages: readonly E2eeScopeKeyPackage[];
+}>;
+/** The client pairing MAC relayed to the device, while its pairing window is open. */
+export declare function readDeviceClientPairingMac(ctx: E2eeMemberContext, deviceId: string): Promise<E2eeClientPairingMac | undefined>;
 // ==== @byok-sdk/cloud dist/errors.d.ts ====
 /**
  * The one error taxonomy for `@byok-sdk/cloud`.
@@ -2398,6 +2427,8 @@ export declare const CLOUD_ERROR_CODES: {
     readonly e2ee_scope_key_conflict: 'e2ee_scope_key_conflict';
     /** The device has not registered a member key bundle. */
     readonly e2ee_member_not_registered: 'e2ee_member_not_registered';
+    /** The device registered another member key bundle, or another device registered this member id. */
+    readonly e2ee_member_key_conflict: 'e2ee_member_key_conflict';
     /** A stored E2EE member row is not the value its schema requires. Whatever wrote it broke the store contract. */
     readonly e2ee_member_state_unreadable: 'e2ee_member_state_unreadable';
     /** Explicit legacy dispatch target is unknown or revoked in this tenant. */
@@ -2503,6 +2534,18 @@ export declare function boardUnclaimHandler(deps: DeviceRouteDeps): (c: Context)
 export declare function boardStatusHandler(deps: DeviceRouteDeps): (c: Context) => Promise<Response>;
 export declare function boardStreamHandler(deps: BoardStreamRouteDeps): (c: Context) => Promise<Response>;
 export type BoardPollResponse = BoardPage;
+// ==== @byok-sdk/cloud dist/handlers/device-proof-request.d.ts ====
+import type { Context } from 'hono';
+import { type AuthenticatedDeviceProof, type DeviceProofAuthDeps } from '../auth/device-proof';
+export declare const MAX_DEVICE_PROOF_HEADER_BYTES: number;
+/** The raw request body, `'too_large'` over `maximum`, or `undefined` for an unreadable body. */
+export declare function readProofRequestBody(c: Context, maximum: number): Promise<Uint8Array | 'too_large' | undefined>;
+/** `undefined` means "answer 401", for every refused proof alike. */
+export declare function authenticateProofRequest(c: Context, deps: DeviceProofAuthDeps, request: {
+    readonly body: Uint8Array;
+    readonly operation: string;
+    readonly resource: string;
+}): Promise<AuthenticatedDeviceProof | undefined>;
 // ==== @byok-sdk/cloud dist/handlers/shared.d.ts ====
 /**
  * The two things every device-facing handler starts from: a tolerant JSON body
@@ -2596,11 +2639,11 @@ export declare function skillPackFileHandler(deps: SkillPackRouteDeps): (c: Cont
 // ==== @byok-sdk/cloud dist/handlers/truth.d.ts ====
 import { DEVICE_PROOF_HEADER } from '@byok-sdk/core';
 import type { Context } from 'hono';
-import { type DeviceProofAuthDeps } from '../auth/device-proof';
+import type { DeviceProofAuthDeps } from '../auth/device-proof';
 import { type TruthCommitter, type TruthObjectDownloads } from '../truth/contract';
 export { DEVICE_PROOF_HEADER };
+export { MAX_DEVICE_PROOF_HEADER_BYTES } from './device-proof-request';
 export declare const DEFAULT_MAX_TRUTH_REQUEST_BYTES: number;
-export declare const MAX_DEVICE_PROOF_HEADER_BYTES: number;
 export interface TruthRouteDeps {
     readonly proof: DeviceProofAuthDeps;
     readonly truth: TruthCommitter;
