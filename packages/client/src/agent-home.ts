@@ -110,8 +110,9 @@ export interface AgentHomeProjectionApplyInput extends AgentHomeProjectionInput 
    * Atomically replace one file at the root of the canonical Agent home with
    * `body`. A string body is written as UTF-8. `name` is one portable file
    * name: no path separator, no `:<>"|?*`, no control character, no trailing
-   * dot or space and no Windows device name. `.byok`, `MEMORY.md` and `notes`
-   * belong to the SDK and are refused in any letter case.
+   * dot or space, no Windows device name and no `<file>.<pid>-<n>.tmp` temp
+   * file name. `.byok`, `MEMORY.md` and `notes` belong to the SDK and are
+   * refused in any letter case.
    *
    * The call is valid only while this hook runs. The SDK waits for every call
    * before it records the projection, and refuses a call after the hook
@@ -128,7 +129,9 @@ export interface AgentHomeProjectionApplyInput extends AgentHomeProjectionInput 
    * crash or a power loss the new name can be lost while the SDK projection
    * record stays. Only a delivery of the same revision and hash calls this
    * hook again and repairs the file. A process crash can leave a
-   * `<name>.<pid>-<n>.tmp` file in the home. The SDK does not remove it.
+   * `<name>.<pid>-<n>.tmp` file in the home. Before it writes, a call removes
+   * each such file of the same name whose process has ended. The SDK owns
+   * file names of that form.
    */
   readonly writeHomeFile: (name: string, body: string | Uint8Array) => Promise<void>;
 }
@@ -1109,10 +1112,40 @@ async function writeProjectionState(
 /** Home entries that the SDK owns, compared in lower case. */
 const SDK_HOME_ENTRIES = new Set([AGENT_HOME_INTERNAL_DIRECTORY, 'memory.md', 'notes']);
 
-/** One portable file name at the home root, with the same segment rules as an Agent id. */
+/**
+ * One portable file name at the home root, with the same segment rules as an
+ * Agent id. A temp file name of atomicWriteFile is refused too, because
+ * removeDeadTempFiles can remove a file with such a name.
+ */
 function isHomeFileName(name: unknown): name is string {
   return typeof name === 'string' && /^[^\u0000-\u001f\u007f\\/:<>"|?*]+$/u.test(name) && !/[. ]$/u.test(name)
-    && !/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/iu.test(name) && !SDK_HOME_ENTRIES.has(name.toLowerCase());
+    && !/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/iu.test(name) && !/\.\d+-\d+\.tmp$/iu.test(name)
+    && !SDK_HOME_ENTRIES.has(name.toLowerCase());
+}
+
+/** Signal 0 only checks the process. EPERM still means that it exists. */
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+}
+
+/**
+ * Remove the `<name>.<pid>-<n>.tmp` files that atomicWriteFile left for
+ * `name` when its process ended before the rename. The temp file of a live
+ * process can belong to a running write, so it stays. Best effort: a file
+ * that cannot be removed now stays for the next call.
+ */
+async function removeDeadTempFiles(canonicalHome: string, name: string): Promise<void> {
+  for (const entry of await fs.readdir(canonicalHome)) {
+    const pid = entry.startsWith(`${name}.`) ? /^(\d+)-\d+\.tmp$/u.exec(entry.slice(name.length + 1))?.[1] : undefined;
+    if (pid === undefined || processAlive(Number(pid))) continue;
+    const file = path.join(canonicalHome, entry);
+    if ((await fs.lstat(file).catch(() => undefined))?.isFile()) await fs.unlink(file).catch(() => {});
+  }
 }
 
 /**
@@ -1129,7 +1162,9 @@ function homeFileWriter(canonicalHome: string) {
       let write: Promise<void>;
       if (!open) write = Promise.reject(new AgentHomeError('writeHomeFile is valid only while the projection hook runs'));
       else if (!isHomeFileName(name)) write = Promise.reject(new AgentHomeError(`invalid Agent home file name: ${JSON.stringify(name)}`));
-      else writes.push(write = atomicWriteFile(path.join(canonicalHome, name), body, { mode: 0o600, fsync: true }));
+      // The cleanup is best effort. Its failure does not fail the write.
+      else writes.push(write = removeDeadTempFiles(canonicalHome, name).catch(() => {})
+        .then(() => atomicWriteFile(path.join(canonicalHome, name), body, { mode: 0o600, fsync: true })));
       // A hook that does not await a call, a refused one too, must not crash
       // the process with an unhandled rejection. A caller that awaits the
       // call still gets the rejection, and close() still reports a failed write.
