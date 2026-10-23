@@ -7195,11 +7195,13 @@ export declare const SEALED_DECLINE_CODES: readonly ['sealed_key_unavailable', '
 export type SealedDeclineCode = (typeof SEALED_DECLINE_CODES)[number];
 /**
  * The closed plaintext codes of a task whose output is sealed (#654 12d).
- * For each plaintext output type, the codes that each field moved or dropped
- * by its sealed type may hold. Such a field that is not listed here must be
- * absent. An interrupted task reports `daemon_interrupted`; a device that
- * cannot seal reports `sealed_key_unavailable`. The Host check, the daemon
- * and the member display read this one list, and compare by exact match.
+ * It lists each plaintext output type that has a plaintext form on such a
+ * task, with the codes that each field moved or dropped by its sealed type
+ * may hold. Such a field that is not listed here must be absent. An output
+ * type with a sealed form that is not listed has no plaintext form. An
+ * interrupted task reports `daemon_interrupted`; a device that cannot seal
+ * reports `sealed_key_unavailable`. The Host check, the daemon and the member
+ * display read this one list, and compare by exact match.
  */
 export declare const SEALED_TASK_PLAIN_CODES: Readonly<{
     readonly 'task.fail': {
@@ -7208,13 +7210,17 @@ export declare const SEALED_TASK_PLAIN_CODES: Readonly<{
     readonly 'task.decline': {
         readonly reason: readonly ["sealed_key_unavailable", "sealed_open_failed", "sealed_content_mac_mismatch", "sealing_policy_mismatch"];
     };
+    readonly 'task.cancelled': {
+        readonly reason: readonly [];
+    };
 }>;
 /**
  * True when `payload` is a legal plaintext `type` message of a task whose
  * output is sealed: each field that a `task-output` sealed type of `type`
  * moves or drops is absent or holds one of {@link SEALED_TASK_PLAIN_CODES}.
- * A plaintext decline also names its code as `code`. A type with no sealed
- * output form is always legal.
+ * A type that has a sealed output form and is not listed there is never
+ * legal. A plaintext decline also names its code as `code`. A type with no
+ * sealed output form is always legal.
  */
 export declare function isSealedTaskPlainOutput(type: string, payload: object): boolean;
 /** Padded frames above this length travel as a ciphertext blob (§8.6). */
