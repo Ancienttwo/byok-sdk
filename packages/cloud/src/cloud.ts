@@ -1732,8 +1732,10 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
   /**
    * The four sealed enqueue lanes (#654). Each follows its plaintext sibling:
-   * the legacy admission or the resume check, the gate of its sealed type, a
-   * strict parse, and the same task envelope path.
+   * the legacy admission or the resume check, the gate of its sealed type and
+   * the same task envelope path. The strict parse comes first, and every
+   * later step reads that copy, so a caller that changes its object during
+   * an await cannot make the checks and the enqueue see different payloads.
    */
   async function enqueueSealedTaskOffer(
     tenant: TenantId,
@@ -1741,11 +1743,11 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     type: 'task.offer_sealed' | 'task.offer_with_toolsets_sealed' | 'task.offer_for_agent_sealed' | 'task.offer_for_agent_with_egress_sealed',
     input: { readonly taskId?: string; readonly payload: object; readonly agentMessageContext?: AgentMessageServerContext },
   ): Promise<EnqueuedOffer> {
-    if (type === 'task.offer_sealed' || type === 'task.offer_with_toolsets_sealed') await assertLegacyAdmission(tenant, deviceId);
-    if (type === 'task.offer_for_agent_sealed') assertResumeSessionRef(input.payload);
-    await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities(type, input.payload));
-    refuseCiphertextRef(input.payload);
     const payload = MESSAGE_PAYLOAD_SCHEMAS[type].parse(input.payload);
+    if (type === 'task.offer_sealed' || type === 'task.offer_with_toolsets_sealed') await assertLegacyAdmission(tenant, deviceId);
+    if (type === 'task.offer_for_agent_sealed') assertResumeSessionRef(payload);
+    await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities(type, payload));
+    refuseCiphertextRef(payload);
     const agentRef = 'agentRef' in payload ? payload.agentRef : undefined;
     return enqueueTaskEnvelope(
       tenant,

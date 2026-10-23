@@ -350,6 +350,25 @@ describe('sealed payload v1: each sealed type has its own hosted entry (#654)', 
     },
   );
 
+  it('checks and enqueues one parsed copy, so a payload that the caller changes during the device read has no effect', async () => {
+    const line = laneLines.find((candidate) => candidate.type === 'task.offer_for_agent_sealed' && candidate.payload.sealed !== undefined)!;
+    const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+    const device = await harness.pairDevice(TENANT_A);
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: requiredReceiverCapabilities(line.type, line.payload) });
+    const payload: Json = structuredClone(line.payload);
+    const read = harness.stores.devices.get.bind(harness.stores.devices);
+    vi.spyOn(harness.stores.devices, 'get').mockImplementation(async (...args) => {
+      // A non-resume offer with a selection would need dispatch-selection, which this device lacks.
+      delete payload.sessionRef;
+      payload.dispatchSelection = { lane: 'subscription', runtimeId: 'codex' };
+      return read(...args);
+    });
+
+    const enqueued = await lanes[line.type]!.sealed(harness, device.deviceId, payload as never);
+
+    expect(enqueued.envelope.payload).toEqual(line.payload);
+  });
+
   // E3a: the Host does not yet check or retain a ciphertextRef blob, so a sealed lane refuses it.
   // Each lane line with sealed input, with the ciphertextRef member of the large corpus line of its type.
   const byReference = Object.keys(lanes).map((type) => {
