@@ -13,6 +13,7 @@ import { policy } from '@byok-sdk/example-host-execution-core/test-support';
 import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
 import { BotStubAdapter, waitForReady } from '../../basic/goal-btw.test-support';
 import { POSTGRES_URL } from './postgres.test-support';
+import type { HostedTaskPort } from './reconcile';
 
 // The dataplane gate: the hosted SDK composition needs Postgres and the object store endpoint.
 export const S3_ENDPOINT = process.env.BYOK_TEST_S3_ENDPOINT || undefined;
@@ -60,10 +61,11 @@ export async function openHostedCloud() {
     if (!http.listening) await new Promise<void>(resolve => http.once('listening', resolve));
     const address = http.address();
     if (!address || typeof address === 'string') throw new Error('Missing HTTP address');
+    const adapter = new BotStubAdapter();
     const daemon = createDaemonWithAdapters({ productId: PRODUCT_ID, productName: 'Hosted collaboration', localAgentRelease: { version: '0.0.0-test' },
       serverUrl: `http://127.0.0.1:${address.port}`, workspaceRoot: path.join(root, 'workspace'), storeDir: path.join(root, 'sdk'),
       agentHome: { hostStorageRoot: path.join(root, 'homes') }, hostedJournal: { mode: 'sqlite' as const }, agentEgress: { policy },
-    }, [new BotStubAdapter()], { deviceCredentials: new InMemoryDeviceCredentialStore() });
+    }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });
     const { code } = await cloud.createPairingCode(tenant, { productId: PRODUCT_ID });
     const { deviceId } = await daemon.pair(code);
     await daemon.start();
@@ -71,14 +73,17 @@ export async function openHostedCloud() {
     await waitForReady(daemon);
 
     /** The SDK calls of the tenant, as H binds them. */
-    const port: FrozenSubmitPort = {
+    const port: FrozenSubmitPort & HostedTaskPort = {
       submit: input => cloud.submitAgentExecution(tenant, input),
       offer: taskId => cloud.readTaskOffer(tenant, taskId),
+      attempt: taskId => cloud.readTaskAttempt(tenant, taskId),
+      deviceTerminal: taskId => cloud.readDeviceTerminal(tenant, taskId),
+      cancel: (taskId, reason) => cloud.cancelTask(tenant, taskId, reason),
     };
     /** Read only: the SDK mailbox rows of one offer message. One offer is one row, however many submits resolved. */
     const mailboxRows = async (messageId: string) =>
       Number((await pool.query<{ n: string }>('SELECT count(*) AS n FROM outbox WHERE message_id = $1', [messageId])).rows[0]!.n);
-    return { cloud, tenant, deviceId, port, mailboxRows, async close() { await shutdown(); } };
+    return { cloud, tenant, deviceId, adapter, daemon, port, mailboxRows, async close() { await shutdown(); } };
   } catch (error) {
     await shutdown();
     throw error;

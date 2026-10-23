@@ -147,8 +147,8 @@ describe('member key bundle', () => {
   });
 
   it('accepts a bundle only when memberId is deriveMemberId of its signing key', async () => {
-    // A key store (for example DeviceMemberKeyStore in @byok-sdk/keys) gives
-    // only keys. The member id always comes from this one core rule.
+    // A key store gives only keys. The member id always comes from this one
+    // core rule.
     const signing = await p256Pair('sign');
     const kem = await p256Pair('kem');
     const bundle = await createMemberKeyBundle({

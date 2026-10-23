@@ -1,11 +1,12 @@
 import type { Pool, PoolClient } from 'pg';
-import { canonical, type ExecutionTemplate, type Json } from '@byok-sdk/example-host-execution-core';
+import { canonical, type Conclusion, type ExecutionTemplate, type Json } from '@byok-sdk/example-host-execution-core';
 import { stateOf, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
 import { commitCommand, syncTurn, type Command, type CommandPorts, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
 import { syncFacts, writeSyncStep } from './intents';
 import { decideMessage, messageCommandId, type AgentMessageInput, type MessageDecision } from './messages';
+import { decideFinish, type TaskEvidence } from './reconcile';
 import { assemble, entryGroup, split, storedKey, type EntityKind, type EntryKind, type Split } from './layout';
 
 /** A stored scope row of a store version that this code does not support. Nothing was written. */
@@ -83,7 +84,7 @@ export class HostedCollaborationStore {
         'SELECT key, ordinal::text, evidence, result::text, root FROM command WHERE scope = $1 ORDER BY key',
         'SELECT key, ordinal::text, kind, body::text FROM outbox WHERE scope = $1 ORDER BY key',
         `SELECT key, task_id, ordinal::text, agent, source, input::text, wait_until::text, submission, tries, next_at::text, last_error,
-          cancel_reason, conclusion FROM intent WHERE scope = $1 ORDER BY key`,
+          cancel_reason, conclusion, started, attempt::text, terminal::text, reconcile_at::text FROM intent WHERE scope = $1 ORDER BY key`,
       ]) rows.push((await client.query({ text: query, values: [storedKey(scope)], rowMode: 'array' })).rows);
       return JSON.stringify(rows);
     }, true);
@@ -120,6 +121,16 @@ export class HostedCollaborationStore {
       if (!(await client.query('SELECT 1 FROM scope WHERE scope = $1', [key])).rows[0]) return { outcome: 'refused', reasonCode: 'unknown_task' };
       return this.decideIn(client, key, messageCommandId(input), (state, publish) => decideMessage(client, scope, state, publish, input, ports));
     }, false);
+  }
+
+  /**
+   * The terminal transaction of one reconciled task of `scope` (#793 D2d), as K4 `finish`: the outcome command, the
+   * projections and the intent's conclusion commit together, under the scope lock. Returns the conclusion that it wrote,
+   * or nothing when the intent already had one. A throw writes nothing.
+   */
+  finish(scope: string, turnId: string, evidence: TaskEvidence, ports: PortsFactory): Promise<Conclusion | undefined> {
+    return this.transaction(client => this.decideIn(client, storedKey(scope), evidence.terminal.envelope.task_id,
+      (state, publish) => decideFinish(client, scope, turnId, state, publish, evidence, ports)), false);
   }
 
   private change<T>(scope: string, commandId: string | undefined, decide: Decide<T>): Promise<T> {

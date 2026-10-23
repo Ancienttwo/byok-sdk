@@ -20,6 +20,8 @@ import { z } from 'zod';
 
 import { BlobRefSchema, CONTENT_HASH_RE } from './blob';
 
+import { SEALED_SPLIT_TABLE } from './sealed-split-table';
+
 export { SEALED_SPLIT_TABLE, isSealedMessageType } from './sealed-split-table';
 export type { SealedDigestRule, SealedMessageType, SealedSplitEntry } from './sealed-split-table';
 
@@ -51,6 +53,46 @@ export const SEALED_DECLINE_CODES = [
   'sealing_policy_mismatch',
 ] as const;
 export type SealedDeclineCode = (typeof SEALED_DECLINE_CODES)[number];
+
+/**
+ * The closed plaintext codes of a task whose output is sealed (#654 12d).
+ * It lists each plaintext output type that has a plaintext form on such a
+ * task, with the codes that each field moved or dropped by its sealed type
+ * may hold. Such a field that is not listed here must be absent. An output
+ * type with a sealed form that is not listed has no plaintext form. An
+ * interrupted task reports `daemon_interrupted`; a device that cannot seal
+ * reports `sealed_key_unavailable`. The Host check, the daemon and the member
+ * display read this one list, and compare by exact match.
+ */
+export const SEALED_TASK_PLAIN_CODES = Object.freeze({
+  'task.fail': { reason: ['daemon_interrupted', 'sealed_key_unavailable'] },
+  'task.decline': { reason: SEALED_DECLINE_CODES },
+  'task.cancelled': { reason: [] },
+} as const);
+
+/**
+ * True when `payload` is a legal plaintext `type` message of a task whose
+ * output is sealed: each field that a `task-output` sealed type of `type`
+ * moves or drops is absent or holds one of {@link SEALED_TASK_PLAIN_CODES}.
+ * A type that has a sealed output form and is not listed there is never
+ * legal. A plaintext decline also names its code as `code`. A type with no
+ * sealed output form is always legal.
+ */
+export function isSealedTaskPlainOutput(type: string, payload: object): boolean {
+  const codes: { readonly [field: string]: readonly string[] } = Object.hasOwn(SEALED_TASK_PLAIN_CODES, type)
+    ? SEALED_TASK_PLAIN_CODES[type as keyof typeof SEALED_TASK_PLAIN_CODES]
+    : {};
+  const fields = Object.values(SEALED_SPLIT_TABLE)
+    .filter((entry) => entry.category === 'task-output' && entry.plainType === type)
+    .flatMap((entry): readonly string[] => [...entry.moved, ...entry.forbidden]);
+  if (fields.length > 0 && !Object.hasOwn(SEALED_TASK_PLAIN_CODES, type)) return false;
+  const record = payload as Readonly<Record<string, unknown>>;
+  for (const field of fields) {
+    const value = record[field];
+    if (value !== undefined && !(typeof value === 'string' && (codes[field] ?? []).includes(value))) return false;
+  }
+  return type !== 'task.decline' || record.reason === undefined || record.code === record.reason;
+}
 
 /** Padded frames above this length travel as a ciphertext blob (§8.6). */
 export const SEALED_INLINE_MAX_PADDED_LENGTH = 256 * 1024;
