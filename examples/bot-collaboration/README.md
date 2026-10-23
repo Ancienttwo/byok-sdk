@@ -184,16 +184,19 @@ Every transaction reads and rewrites the collaboration state, so settled
 history must leave it. `bot.retain({ acknowledgedRoots, now, retentionMs })`
 does that on the Host's explicit acknowledgement. It never runs on its own.
 
-- A root is the `root` field of a Turn projection. One root holds its Turns,
+- A root is the `root` field of a Turn projection, or the round root that
+  `roomInput` and a room `receive` return. One root holds its Turns,
   budget, delegations and their batches and units, replies, schemas, cards,
   questions, the rejections that its Turns consumed, its input batch and
   inputs, its rounds with their seats, seat Turns and `team.roots` row, its
-  inbounds and their deliveries. A seat Turn belongs to its round's root:
-  acknowledging the seat id throws `RetentionRefused`.
+  inbounds and their deliveries. A seat Turn belongs to its round's root, but
+  its projection shows its seat id as `root`. Acknowledging a seat id throws
+  `RetentionRefused` with code `seat_root` and the round's root in
+  `roundRoot`. Acknowledge that root instead.
 - One ledger transaction moves every row of each acknowledged root into K4
   application rows by map name and id (the K4 row port). It retires the
   root's Turn, input and round ids for good.
-- `RetentionRefused` (code `protected_root`) rolls back the whole call while a
+- `RetentionRefused` with code `protected_root` rolls back the whole call while a
   root is still in use: a Turn that is not concluded, or that still has its
   K4 intent and is not reported; an unresolved delegation, an unreleased
   batch or a reserved unit; an open card or question; an open input batch; an
@@ -207,8 +210,13 @@ does that on the Host's explicit acknowledgement. It never runs on its own.
   with no root. They answer replays for at least `retentionMs`, which must be
   seven days or more; a later call removes them after that. A retry after the
   window decides again, and an archived Turn, input or round id makes the
-  commit throw `RetiredIdentityError` and change nothing. Sync fails a Turn
-  with a retired id instead of running it.
+  commit throw `RetiredIdentityError` and change nothing. A store makes that
+  check itself: `commitCommand` hands the ids that `decide` added to
+  `CommandStore.admitted`, and the store calls `refuseRetired` before it
+  commits. Sync fails a Turn with a retired id instead of running it.
+- The ContextPack window of a Bot with a Turn that has not frozen yet (queued
+  or blocked) is its last `contextTurnLimit + 1` Turns, because that Turn
+  reads the last `contextTurnLimit` other Turns.
 - Each call moves the audit lines, revoked push routes that no delivery uses,
   and settled persona deliveries: applied ones except the newest of each Bot,
   and failures of an older profile revision. These archived rows stay.

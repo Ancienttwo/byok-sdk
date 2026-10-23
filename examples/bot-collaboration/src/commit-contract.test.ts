@@ -5,12 +5,13 @@ import { afterAll, expect, it } from 'vitest';
 import { canonical, hash, HostLedger, project, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
 import { stateOf, type CollaborationState } from './model';
 import { admitUserInput } from './coalesce';
+import { coalescePolicy } from './rules/coalesce';
 import { CommitConflict, commitInLedger, retainInLedger, type CommitRequest } from './commit';
 import { retainRoots, type RetentionStore } from './retention';
 import { retentionVectors, type RetentionSubject } from './retention-vectors.test-support';
 import type { CommandRecord } from './rules/commit';
 import { DatabaseSync } from 'node:sqlite';
-import { commitCommand, type Command, type CommandPorts } from './rules/commands';
+import { commitCommand, refuseRetired, type AdmittedIds, type Command, type CommandPorts } from './rules/commands';
 import { commitVectors, seedCollaboration, VECTOR_NOW, type CommitSubject, type SeedTeam } from './commit-vectors.test-support';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { writeSnapshotBot } from './team';
@@ -52,11 +53,13 @@ function memorySubject(team?: SeedTeam): RetentionSubject {
     scope: 'memory',
     commit(request) {
       const next = structuredClone(stored), rows = memoryStore(next.archive);
-      const archive = { command: (id: string) => rows.get('commands', id) as CommandRecord | undefined, retired: rows.isRetired };
-      const result = commitCommand(next.state, request, { scope: 'memory', recordCallbacks: true, archive }, ports(next.state, (id, value) => {
+      let admitted: AdmittedIds | undefined;
+      const result = commitCommand(next.state, request, { scope: 'memory', recordCallbacks: true,
+        archived: id => rows.get('commands', id) as CommandRecord | undefined, admitted: ids => { admitted = ids; } }, ports(next.state, (id, value) => {
         if (next.outbox[id] !== undefined && canonical(next.outbox[id]) !== canonical(value)) throw new Error('Projection identity conflict');
         next.outbox[id] = value;
       }));
+      refuseRetired(admitted, rows.isRetired);
       stored = next;
       return result;
     },
@@ -134,4 +137,23 @@ it('L: keeps a record for a refused message only; K4 deduplicates an accepted on
   const state = stateOf(subject.ledger.snapshot().application);
   expect(state.revision).toBe(2);
   expect(Object.keys(state.commands ?? {})).toEqual(['task-9:m1']);
+});
+
+it('records the root of the input itself when the input also seals an earlier due batch', () => {
+  const state = stateOf({});
+  seedCollaboration(state);
+  const policy = coalescePolicy({ windowMs: 1000 }, 64_000);
+  let now = 0;
+  const run = (commandId: string, key: string) => commitCommand(state, { scope: 's', commandId,
+    command: { kind: 'input', botId: 'main', key, request: key, sender: 'owner' } }, { scope: 's', recordCallbacks: true },
+  { ...ports(state, () => {}), now: () => now, admitInput: fields => admitUserInput(state, fields, policy, now) });
+  const first = run('c1', 'k1');
+  now = 5000;
+  // c2 seals k1's due batch, which adds k1's Turn, and opens its own batch.
+  const second = run('c2', 'k2');
+  const own = (result: typeof first) => (result.disposition as { value: string }).value;
+  expect(own(first)).not.toBe(own(second));
+  expect(state.turns[own(first)]).toBeDefined();
+  expect(state.commands?.c1?.root).toBe(own(first));
+  expect(state.commands?.c2?.root).toBe(own(second));
 });

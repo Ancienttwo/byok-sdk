@@ -8,7 +8,11 @@ import type { CollaborationState, Turn } from './model';
  * Command records answer replays for `retentionMs` after they move; the other rows stay.
  */
 export interface RetentionInput {
-  /** Root ids from the `root` field of the Turn projections. A root that is already archived counts again harmlessly. */
+  /**
+   * Root ids: the `root` field of a Turn projection, or the round root that `roomInput` and a room `receive` return.
+   * A room seat Turn shows its seat id as `root`; it is refused with `seat_root` and its `roundRoot`.
+   * A root that is already archived counts again harmlessly.
+   */
   acknowledgedRoots: readonly string[];
   now: number;
   /** At least seven days: the replay window of the moved command records. */
@@ -34,25 +38,44 @@ export interface RetentionResult {
   archivedRoots: number; alreadyArchivedRoots: number; archivedRows: number;
   archivedCommands: number; expiredCommands: number; beforeBytes: number; afterBytes: number;
 }
-/** A root that is still in use. The whole call changes nothing. */
+/**
+ * The whole call changes nothing. `protected_root`: the root is still in use; acknowledge it again after it settles.
+ * `seat_root`: the id is a room seat Turn, which belongs to its round's root. Acknowledge `roundRoot` instead; a retry of
+ * the seat id fails the same way each time.
+ */
+export type RetentionRefusedCode = 'protected_root' | 'seat_root';
 export class RetentionRefused extends Error {
-  readonly code = 'protected_root' as const;
-  constructor(readonly root: string, reason: string) { super(`Retention refused: ${reason}`); this.name = 'RetentionRefused'; }
+  constructor(readonly code: RetentionRefusedCode, readonly root: string, reason: string, readonly roundRoot?: string) {
+    super(`Retention refused: ${reason}`); this.name = 'RetentionRefused';
+  }
 }
 const OPEN_DELIVERY = new Set(['pending', 'sending', 'unknown']);
 const values = <T>(rows: Record<string, T> | undefined): T[] => Object.values(rows ?? {});
 const own = <T>(rows: Record<string, T> | undefined, id: string): T | undefined => rows && Object.hasOwn(rows, id) ? rows[id] : undefined;
 
-/** The ids that a Bot's next ContextPack can still read: its last Turns, cards and questions. */
+/**
+ * The ids that a Bot's next ContextPacks can still read: its last Turns, cards and questions.
+ * A Turn that has not frozen yet reads the last `limit` other Turns of its Bot (`earlier.slice(-limit)`), which can reach
+ * one Turn further back than the window of a new Turn. So a Bot with an unfrozen Turn keeps `limit + 1` Turns.
+ */
 function contextWindow(state: CollaborationState, limit: number): Set<string> {
-  const kept = new Set<string>(), byBot = new Map<string, { turns: string[]; cards: string[]; questions: string[] }>();
-  const of = (botId: string) => { let rows = byBot.get(botId); if (!rows) byBot.set(botId, rows = { turns: [], cards: [], questions: [] }); return rows; };
-  for (const turn of values(state.turns)) of(turn.botId).turns.push(turn.id);
+  const kept = new Set<string>(), byBot = new Map<string, { turns: string[]; cards: string[]; questions: string[]; unfrozen: boolean }>();
+  const of = (botId: string) => {
+    let rows = byBot.get(botId);
+    if (!rows) byBot.set(botId, rows = { turns: [], cards: [], questions: [], unfrozen: false });
+    return rows;
+  };
+  for (const turn of values(state.turns)) {
+    const rows = of(turn.botId);
+    rows.turns.push(turn.id);
+    // A frozen Turn is `processing` (its offer is in K4) or concluded. Queued and blocked Turns can still freeze.
+    if (!turn.conclusion && turn.status !== 'processing') rows.unfrozen = true;
+  }
   for (const card of values(state.cards)) { const turn = own(state.turns, card.turnId); if (turn) of(turn.botId).cards.push(card.turnId); }
   for (const question of values(state.questions)) { const turn = own(state.turns, question.turnId); if (turn) of(turn.botId).questions.push(question.turnId); }
   const rows = Math.min(limit, DEFAULT_CONTEXT_TURN_LIMIT);
   for (const bot of byBot.values()) {
-    for (const id of [...bot.turns.slice(-limit), ...bot.cards.slice(-rows), ...bot.questions.slice(-rows)]) kept.add(id);
+    for (const id of [...bot.turns.slice(-(limit + (bot.unfrozen ? 1 : 0))), ...bot.cards.slice(-rows), ...bot.questions.slice(-rows)]) kept.add(id);
   }
   return kept;
 }
@@ -134,14 +157,17 @@ export function retainRoots(state: CollaborationState, input: RetentionInput, li
   const window = contextWindow(state, limits.contextTurnLimit), selected: Members[] = [];
   for (const root of roots) {
     const seat = own(state.team.seats, root);
-    if (seat) throw new RetentionRefused(root, `The Turn is a room seat of root ${state.team.rounds[seat.roundId]?.root ?? seat.roundId}`);
+    if (seat) {
+      const roundRoot = state.team.rounds[seat.roundId]?.root ?? seat.roundId;
+      throw new RetentionRefused('seat_root', root, `The Turn is a room seat of root ${roundRoot}`, roundRoot);
+    }
     const m = members(state, root);
     if (!m.turns.length && !m.rounds.length && m.batch === undefined && !own(state.budgets, root)) {
       if (!store.isRetired('root', root)) throw new Error('Acknowledged root not found');
       result.alreadyArchivedRoots++; continue;
     }
     const reason = protection(state, m, facts, window, now);
-    if (reason) throw new RetentionRefused(root, reason);
+    if (reason) throw new RetentionRefused('protected_root', root, reason);
     selected.push(m);
   }
   for (const m of selected) {

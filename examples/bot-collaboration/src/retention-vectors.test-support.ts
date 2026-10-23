@@ -91,7 +91,7 @@ export function retentionVectors(name: string, open: () => RetentionSubject | Pr
       });
       await refused(subject, () => retain(subject, ['seat']), error => {
         expect(error).toBeInstanceOf(RetentionRefused);
-        expect(error).toMatchObject({ code: 'protected_root', root: 'seat', message: 'Retention refused: The Turn is a room seat of root round' });
+        expect(error).toMatchObject({ code: 'seat_root', root: 'seat', roundRoot: 'round', message: 'Retention refused: The Turn is a room seat of root round' });
       });
     });
 
@@ -133,6 +133,7 @@ export function retentionVectors(name: string, open: () => RetentionSubject | Pr
         await refused(subject, () => retain(subject, ['r1'], {}, limits ?? LIMITS), error => {
           expect(error, label).toBeInstanceOf(RetentionRefused);
           expect((error as RetentionRefused).message, label).toBe(`Retention refused: ${reason}`);
+          expect((error as RetentionRefused).code, label).toBe('protected_root');
         });
       }
       // The newest root is in the window too.
@@ -160,6 +161,25 @@ export function retentionVectors(name: string, open: () => RetentionSubject | Pr
       // After its window the record expires. The retry decides again and meets the Turn tombstone.
       expect(await retain(subject, [], { now: RETENTION_NOW + MIN_TOMBSTONE_RETENTION_MS })).toMatchObject({ expiredCommands: 1 });
       await refused(subject, () => settle(() => subject.commit(request(subject, 'i1', input('k1')))), error => expect(error).toBeInstanceOf(RetiredIdentityError));
+    });
+
+    it('keeps the Turns that an unfrozen Turn will read, and not more', async () => {
+      const queued = (status: 'queued' | 'blocked' | 'processing') => (state: CollaborationState) => {
+        state.cards = {}; state.questions = {};
+        state.turns.q = { id: 'q', root: 'q', botId: 'main', source: 'user', request: 'later', hop: 0, status, authority: 'owner' };
+      };
+      // q freezes later with the last `contextTurnLimit` other Turns of its Bot, which includes r2.
+      for (const status of ['queued', 'blocked'] as const) {
+        const subject = await opened();
+        await subject.change(queued(status));
+        await refused(subject, () => retain(subject, ['r2']), error => expect((error as Error).message, status)
+          .toBe('Retention refused: The root is in the ContextPack window of its Bot'));
+        expect(await retain(subject, ['r1'])).toMatchObject({ archivedRoots: 1 });
+      }
+      // A processing Turn has frozen its ContextPack already. A new Turn reads only the last Turn, q.
+      const subject = await opened();
+      await subject.change(queued('processing'));
+      expect(await retain(subject, ['r2'])).toMatchObject({ archivedRoots: 1 });
     });
 
     it('refuses a retired round id at admission', async () => {

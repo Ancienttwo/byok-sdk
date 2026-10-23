@@ -1,8 +1,8 @@
 export { BotCollaboration } from './host';
 export { botCompactVeto } from './compaction';
 export { RetentionRefused, retainRoots } from './retention';
-export type { RetentionFacts, RetentionInput, RetentionLimits, RetentionResult, RetentionStore } from './retention';
-export { RetiredIdentityError, type CommandArchive, type RetiredNamespace } from './rules/commands';
+export type { RetentionFacts, RetentionInput, RetentionRefusedCode, RetentionLimits, RetentionResult, RetentionStore } from './retention';
+export { refuseRetired, RetiredIdentityError, type AdmittedIds, type RetiredNamespace } from './rules/commands';
 export type { AgentMessageInput, BotOptions, MessageServer } from './host';
 export { classifyInbound, inboundKey } from './channel';
 export type { ChannelOptions, ChannelPort, Conversation, Delivery, DeliveryState, InboundClass, InboundMessage, Principal, PushRoute, ReplyRoute } from './channel';
@@ -10,7 +10,7 @@ export { BOT_REPLY_MAX_BYTES, DEFAULT_INSTRUCTION_MAX_BYTES, minimumInstructionB
 export { SYSTEM_PROMPT, contextPack, outcomeSchema, DEFAULT_CONTEXT_MAX_BYTES, DEFAULT_CONTEXT_TURN_LIMIT } from './schema';
 export type { Card, CollaborationState, Delegation, InputBatch, ReplyEntry, SealReason, Turn, UserInput } from './model';
 export { BOT_ROUTINE, botRoutines } from './routines';
-export { CommitConflict, commitInLedger, ledgerArchive, retainInLedger, revisionOf } from './commit';
+export { CommitConflict, commitInLedger, retainInLedger, revisionOf } from './commit';
 export type { Command, CommandPorts, CommitRequest, CommitResult, Disposition, OutboxIntent } from './commit';
 export type { BotRoutine, BotRoutineInput } from './routines';
 export type { BotProfile, Room, Round, Seat, TeamState } from './team-model';
