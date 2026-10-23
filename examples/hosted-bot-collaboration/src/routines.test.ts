@@ -111,8 +111,11 @@ describe.skipIf(POSTGRES_URL === undefined)('H routines on real Postgres (#793 D
     expect(await routineRow(scope, id)).toMatchObject({ lifecycle: 'paused', next_at: null });
     await store().setRoutineLifecycle(scope, 'main', id, 'active', NOW);
     expect(await routineRow(scope, id)).toMatchObject({ lifecycle: 'active', next_at: String(FIRST) });
+    await store().seed(scope, state => {
+      state.team.bots.helper = { ...state.team.bots.main!, id: 'helper', name: 'Helper', mainBot: false, execution: template('device', 'helper') };
+    });
     const before = await store().dump(scope);
-    await expect(store().setRoutineLifecycle(scope, 'other', id, 'paused', NOW)).rejects.toThrow();
+    await expect(store().setRoutineLifecycle(scope, 'helper', id, 'paused', NOW)).rejects.toThrow('Main Bot role required');
     expect(await store().dump(scope)).toBe(before);
     await store().setRoutineLifecycle(scope, 'main', id, 'completed', NOW);
     expect(await routineRow(scope, id)).toMatchObject({ lifecycle: 'completed', next_at: null });
@@ -128,6 +131,14 @@ describe.skipIf(POSTGRES_URL === undefined)('H routines on real Postgres (#793 D
     expect((row.input as { payload: { instruction: string } }).payload.instruction).toContain(PROMPT);
     expect(await occurrenceRow(scope, key)).toEqual({ execution_superseded: false, conclusion: null });
     expect((await store().read(scope)).turns[turn]).toMatchObject({ status: 'processing', source: 'routine' });
+  });
+
+  it('promotes the routine Turn of a paused routine with no retry_until', async () => {
+    const scope = await scoped(), id = await created(scope);
+    const { turn } = await fired(scope, id, FIRST);
+    await store().setRoutineLifecycle(scope, 'main', id, 'paused', FIRST);
+    await store().sync(scope, SYNC);
+    expect(await intentRow(scope, turn)).toMatchObject({ source: 'routine', retry_until: null, conclusion: null });
   });
 
   it('refuses the promotion of a routine Turn for a device with no H binding, and writes nothing (#793 D2e)', async () => {

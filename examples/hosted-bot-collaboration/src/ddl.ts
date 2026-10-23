@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS intent (
   ordinal        bigint  NOT NULL CHECK (ordinal >= 0),
   -- K4 agentKey(scope, execution): one FIFO for each scope, device and Agent.
   agent          text    NOT NULL,
-  -- K4 IntentInput.source, part of the intent identity.
+  -- K4 IntentInput.source, part of the intent identity. A routine occurrence is not an H intent before D2f.
   source         text    NOT NULL CHECK (source IN ('user', 'bot', 'routine')),
   -- K4 Intent.retryUntil: a superseded routine version stops its intent early (K4 routines.ts:162, :177, :193).
   retry_until    bigint  CHECK (retry_until >= 0),

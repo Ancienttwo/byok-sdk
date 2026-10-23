@@ -25,6 +25,8 @@ const OCCURRENCE_COLUMNS = `o.key, o.routine_id, o.definition_version, o.trigger
   o.execution_superseded`;
 // The intent key of an occurrence: JSON.stringify(`occurrence:${key}`). A K4 occurrence key is hex, so JSON adds no escapes.
 const INTENT_OF = `'"occurrence:' || (o.key::json #>> '{}') || '"'`;
+// The occurrence key of a routine intent, so the join uses the occurrence primary key: 'occurrence:' is 11 characters.
+const OCCURRENCE_OF = `'"' || substr(i.key::json #>> '{}', 12) || '"'`;
 const slot = (id: string, version: number, at: number) => `${id}:${version}:${at}`;
 
 function occurrence(row: OccurrenceRow, intentKey?: string): Occurrence {
@@ -54,7 +56,7 @@ export async function loadSlice(client: PoolClient, scopeKey: string): Promise<R
     AND NOT EXISTS (SELECT 1 FROM intent i WHERE i.scope = o.scope AND i.key = ${INTENT_OF}) ORDER BY o.ordinal`, [scopeKey]);
   for (const row of unpromoted.rows) state.occurrences[JSON.parse(row.key) as string] = occurrence(row);
   const promoted = await client.query<IntentRow>(`SELECT ${OCCURRENCE_COLUMNS}, i.key AS intent_key, i.ordinal::text, i.agent, i.input, i.wait_until::text,
-    i.tries, i.retry_until::text, i.cancel_reason FROM intent i JOIN occurrence o ON o.scope = i.scope AND i.key = ${INTENT_OF}
+    i.tries, i.retry_until::text, i.cancel_reason FROM intent i JOIN occurrence o ON o.scope = i.scope AND o.key = ${OCCURRENCE_OF}
     WHERE i.scope = $1 AND i.source = 'routine' AND i.conclusion IS NULL ORDER BY i.ordinal`, [scopeKey]);
   for (const row of promoted.rows) {
     const key = JSON.parse(row.intent_key) as string, { taskId, ...execution } = row.input;
