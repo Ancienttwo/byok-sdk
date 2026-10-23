@@ -2434,7 +2434,7 @@ export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected' | 'rate_limit
  * and may be refined without a protocol revision. `rate_limited` is a separate outcome,
  * not a refusal reason.
  */
-export declare const INBOUND_REFUSAL_REASONS: readonly ['protocol_version_unsupported', 'type_not_allowed', 'sealed_payload_unsupported', 'task_id_missing', 'device_not_eligible', 'hello_device_mismatch', 'hello_harnesses_without_capability', 'hello_protocol_version_unsupported', 'hello_product_mismatch', 'hello_capabilities_not_recorded', 'agent_message_draft_invalid', 'agent_message_attempt_mismatch', 'agent_message_offer_binding_missing', 'agent_message_binding_corrupt', 'agent_message_binding_mismatch', 'agent_message_too_large', 'agent_message_already_deduplicated', 'agent_message_reservation_conflict', 'agent_message_admission_unconfirmed', 'egress_conflict', 'content_receipt_event_request_mismatch', 'content_receipt_request_unknown', 'content_receipt_request_mismatch', 'content_receipt_conflict', 'task_not_found_for_device', 'task_owned_by_other_device', 'agent_identity_mismatch', 'terminal_harness_mismatch', 'claim_device_mismatch', 'claim_harness_and_runtime_conflict', 'claim_harness_mismatch', 'claim_harness_unavailable', 'claim_offer_mismatch', 'claim_not_won', 'recovery_report_invalid', 'recovery_offer_mismatch', 'activity_batch_too_large', 'activity_batch_invalid', 'approval_event_invalid'];
+export declare const INBOUND_REFUSAL_REASONS: readonly ['protocol_version_unsupported', 'type_not_allowed', 'sealed_payload_unsupported', 'sealed_output_required', 'task_id_missing', 'device_not_eligible', 'hello_device_mismatch', 'hello_harnesses_without_capability', 'hello_protocol_version_unsupported', 'hello_product_mismatch', 'hello_capabilities_not_recorded', 'agent_message_draft_invalid', 'agent_message_attempt_mismatch', 'agent_message_offer_binding_missing', 'agent_message_binding_corrupt', 'agent_message_binding_mismatch', 'agent_message_too_large', 'agent_message_already_deduplicated', 'agent_message_reservation_conflict', 'agent_message_admission_unconfirmed', 'egress_conflict', 'content_receipt_event_request_mismatch', 'content_receipt_request_unknown', 'content_receipt_request_mismatch', 'content_receipt_conflict', 'task_not_found_for_device', 'task_owned_by_other_device', 'agent_identity_mismatch', 'terminal_harness_mismatch', 'claim_device_mismatch', 'claim_harness_and_runtime_conflict', 'claim_harness_mismatch', 'claim_harness_unavailable', 'claim_offer_mismatch', 'claim_not_won', 'recovery_report_invalid', 'recovery_offer_mismatch', 'activity_batch_too_large', 'activity_batch_invalid', 'approval_event_invalid'];
 export type InboundRefusalReason = (typeof INBOUND_REFUSAL_REASONS)[number];
 /** The only way to build a rejection: the reason is required and closed. */
 interface Refused {
@@ -4359,10 +4359,14 @@ export declare function tenantStoresFor(principal: Principal, root: CloudRootSto
 // ==== @byok-sdk/cloud dist/terminal-result.d.ts ====
 import { type AgentRef, type BlobRef, type Envelope, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TaskFailPayload, type TaskDeclinePayload } from '@byok-sdk/protocol';
 import type { RequestReceipt } from './stores/ports';
-/** Canonical device evidence, independent of the Host cancellation projection. */
+declare const DEVICE_TERMINAL_TYPES: readonly ['task.complete', 'task.fail', 'task.decline', 'task.cancelled', 'task.complete_sealed', 'task.fail_sealed', 'task.decline_sealed', 'task.cancelled_sealed'];
+/**
+ * Canonical device evidence, independent of the Host cancellation projection.
+ * A sealed terminal keeps its sealed member, which a member opens (#654 12e).
+ */
 export interface DeviceTerminal {
     readonly envelope: Extract<Envelope, {
-        type: 'task.complete' | 'task.fail' | 'task.decline' | 'task.cancelled';
+        type: (typeof DEVICE_TERMINAL_TYPES)[number];
     }>;
     readonly recordedAt: string;
 }
@@ -4436,7 +4440,9 @@ export interface TerminalResult {
     readonly recordedAt: string;
 }
 /**
- * Pure projection of a terminal receipt onto {@link TerminalResult}. `taskId`
+ * Pure projection of a terminal receipt onto {@link TerminalResult}. A sealed
+ * terminal projects only its plaintext fields; its moved fields stay in the
+ * sealed member, which {@link DeviceTerminal} carries. `taskId`
  * names the task the receipt was read for (the receipt's key carries it, its
  * body does not); `recordedAt` is the receipt store's write time.
  *
@@ -4446,6 +4452,7 @@ export interface TerminalResult {
  * error, never a best-effort shape.
  */
 export declare function projectTerminalResult(taskId: string, receipt: RequestReceipt): TerminalResult;
+export {};
 // ==== @byok-sdk/cloud dist/truth/contract.d.ts ====
 import type { ContentHash, TenantId, TruthBodyRef, TruthManifestEntry, TruthManifestQuery, TruthRecord, TruthRecordKind, TruthRecordSelector } from '@byok-sdk/core';
 import { z } from 'zod';
