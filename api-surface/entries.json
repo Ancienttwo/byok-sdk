@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2092521,
+      "budgetBytes": 2092552,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -360,7 +360,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 378474,
+      "budgetBytes": 378505,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -476,7 +476,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Hermes session runtime; loaded only when starting an execution",
-      "budgetBytes": 19343,
+      "budgetBytes": 19871,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
