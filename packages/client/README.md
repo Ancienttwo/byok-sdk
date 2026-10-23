@@ -512,8 +512,11 @@ What the Host can do:
   With an explicit root, a missing or changed helper fails construction; it does
   not become a silent `unavailable`.
 - On Linux, run the daemon where `/proc/self/fd` exists. On Windows, the memory
-  MCP needs x64 and an NTFS volume for the Agent home; another file system fails
-  the helper open with `unsafe_root`.
+  MCP needs an x64 process and a local NTFS volume for the Agent home. Another
+  file system or a remote volume, also an SMB share whose server reports NTFS,
+  fails the helper open with `unsafe_root`. The gate reads the process
+  architecture: x64 Node under emulation on Windows arm64 runs the x64 helper
+  and is admitted.
 - After the memory MCP is admitted, each ordinary Agent task needs an adapter
   with MCP toolset support. Without it, the daemon declines the task with
   `runtime "<id>" cannot project required MCP toolsets`.
@@ -567,7 +570,7 @@ the native descriptor-relative backend. macOS uses the SDK release helper.
 The daemon resolves the binary and checks its Mach-O content digest. Product
 re-signing is allowed. The helper requires strict `F_FULLFSYNC` on the home
 volume. Windows x64 uses the same helper (`pe-content-v1` digest, Authenticode
-re-signing allowed) on NTFS only. Each Windows write flushes its file and its
+re-signing allowed) on local NTFS only. Each Windows write flushes its file and its
 directory. The SDK does not claim that a write survives an OS crash or power
 loss on Windows, so a Windows daemon does not advertise memory intents. The
 ordinary `bun run build` needs no Go. Run `bun run build:release` with Go 1.26.5

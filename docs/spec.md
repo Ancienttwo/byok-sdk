@@ -2178,7 +2178,7 @@ same pinned filesystem and admitted memory-path policy as memory recall/save:
 `.byok` state, credentials, or opaque unsupported note paths. Linux uses native
 pinned descriptors; macOS requires the verified SDK release helper and its
 strict volume barriers. Windows x64 requires the verified SDK release helper on
-NTFS; it makes no OS-crash or power-loss claim (see below).
+local NTFS; it makes no OS-crash or power-loss claim (see below).
 The protocol exports `AGENT_MEMORY_MAX_SNAPSHOT_FILES` (128, including MEMORY.md)
 and `AGENT_MEMORY_MAX_SNAPSHOT_BYTES` (1 MiB total UTF-8 content). Existing 256 KiB
 per-file and 512 directory-entry bounds still apply. Limit/validation failures
@@ -2341,8 +2341,11 @@ algorithm for a target. `copyAgentMemoryHelperAssets({ outDir, platform:
 
 On Windows x64 the daemon resolves and opens this helper. It admits memory
 recall and save, hosted projection and the task-free export. The helper accepts
-an Agent home only on NTFS; another file system fails the open with
-`unsafe_root`. Each write flushes its own file and directory, so one file stays
+an Agent home only on a local NTFS volume. It refuses a remote volume first,
+from the handle's device information, so an SMB share whose server reports NTFS
+also fails the open with `unsafe_root`; another file system fails the same way.
+The platform gate reads the process architecture: x64 Node under emulation on
+Windows arm64 runs the x64 helper and is admitted. Each write flushes its own file and directory, so one file stays
 atomic under a process crash. Windows runs no home-chain barrier and makes no
 OS-crash or power-loss claim. The Windows helper intent backend therefore has
 `conflictProvesNoRename: true` and `strictLedgerBarrier: false`, and the daemon

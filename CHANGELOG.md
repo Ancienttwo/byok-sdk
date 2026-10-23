@@ -16,11 +16,14 @@
   release helper (#605). The memory MCP (`memory_recall`, `memory_save`), the
   hosted projection (`agentMemory`) and the task-free export
   (`agentMemoryExport`) work there, and `agentMemoryHelperAssetRoot` is valid
-  there. The Agent home must be on NTFS; another file system fails with
+  there. The Agent home must be on a local NTFS volume. Another file system or
+  a remote volume, also an SMB share whose server reports NTFS, fails with
   `unsafe_root`. Each write flushes its file and directory, but the SDK makes
   no OS-crash or power-loss claim on Windows. So the Windows helper intent
   backend reports `strictLedgerBarrier: false`, and a Windows daemon does not
-  advertise `agent-memory-intent.v1`. Windows arm64 stays unavailable.
+  advertise `agent-memory-intent.v1`. The gate reads the process
+  architecture: an arm64 process stays unavailable, and x64 Node under
+  emulation on Windows arm64 is admitted.
 - **Feature (client)** — the task-free projection hook gets
   `writeHomeFile(name, body)` on its input (#738, #606 R6). One call
   atomically replaces one file at the root of the canonical Agent home under
