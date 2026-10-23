@@ -2190,13 +2190,13 @@ export declare function verifyMemberChainEntry(entry: unknown, signerPublicJwk: 
  * Byte helpers shared by the sealed-payload modules (#654 E1a).
  *
  * Every function is WebCrypto-only and `node:`-free, so a browser, Workers,
- * Node and Bun run the same code. None of these modules is re-exported from
- * the package root yet: the export, and its API budget, is a later slice.
+ * Node and Bun run the same code. The subpath `@byok-sdk/core/sealed-payload`
+ * exports the sealed-payload interface, but not these helpers. The package
+ * root exports none of the sealed-payload modules.
  *
  * Caller input errors throw `sealed_secret_invalid`, the code `hpke.ts`
- * already raises for bad HPKE input. `CORE_ERROR_CODES` is public API, so the
- * dedicated sealed-payload codes arrive with the export, not before it.
- * Receiver checks never throw for hostile bytes; they return a typed failure.
+ * already raises for bad HPKE input. Receiver checks never throw for hostile
+ * bytes; they return a typed failure.
  */
 import { z } from 'zod';
 import { ByokCoreError } from '../errors';
@@ -2498,12 +2498,13 @@ export interface OpenSealedContentInput {
 }
 /**
  * Open one sealed content, fail closed. In order: a binding and a task scope
- * that parse, the category within the task's categories, and the header scope
- * equal to the task's scope at its epoch or later (all
- * `sealing_policy_mismatch`); header shape (`sealed_open_failed`); key id of
- * the held scope key (`sealed_key_unavailable`); ciphertext length; AEAD under
- * the rebuilt AAD; the five frame checks; canonical JSON of a plain object (all
- * `sealed_open_failed`); and the content MAC (`sealed_content_mac_mismatch`).
+ * that parse (`sealing_policy_mismatch`); header shape (`sealed_open_failed`);
+ * the category within the task's categories, and the header scope equal to
+ * the task's scope at its epoch or later (both `sealing_policy_mismatch`); key
+ * id of the held scope key (`sealed_key_unavailable`); ciphertext length; AEAD
+ * under the rebuilt AAD; the five frame checks; canonical JSON of a plain
+ * object (all `sealed_open_failed`); and the content MAC
+ * (`sealed_content_mac_mismatch`).
  * There is no plaintext fallback, and nothing here throws for hostile input.
  */
 export declare function openSealedContent(input: OpenSealedContentInput): Promise<SealedContentOpenResult>;

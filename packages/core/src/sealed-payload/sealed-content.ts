@@ -381,8 +381,8 @@ export async function sealContent(input: SealContentInput): Promise<SealedConten
 
 /**
  * {@link sealContent} with a caller-chosen salt and nonce, for test vectors
- * only. The package root does not export it: a reused nonce under one content
- * key breaks AES-GCM.
+ * only. Neither the root nor the subpath exports it: a reused nonce under one
+ * content key breaks AES-GCM.
  * @internal Stripped from the published declarations.
  */
 export async function sealContentWithRandomness(input: SealContentInput, randomness: SealedContentRandomness): Promise<SealedContent> {
@@ -463,12 +463,13 @@ function failure(reason: SealedContentOpenFailure): SealedContentOpenResult {
 
 /**
  * Open one sealed content, fail closed. In order: a binding and a task scope
- * that parse, the category within the task's categories, and the header scope
- * equal to the task's scope at its epoch or later (all
- * `sealing_policy_mismatch`); header shape (`sealed_open_failed`); key id of
- * the held scope key (`sealed_key_unavailable`); ciphertext length; AEAD under
- * the rebuilt AAD; the five frame checks; canonical JSON of a plain object (all
- * `sealed_open_failed`); and the content MAC (`sealed_content_mac_mismatch`).
+ * that parse (`sealing_policy_mismatch`); header shape (`sealed_open_failed`);
+ * the category within the task's categories, and the header scope equal to
+ * the task's scope at its epoch or later (both `sealing_policy_mismatch`); key
+ * id of the held scope key (`sealed_key_unavailable`); ciphertext length; AEAD
+ * under the rebuilt AAD; the five frame checks; canonical JSON of a plain
+ * object (all `sealed_open_failed`); and the content MAC
+ * (`sealed_content_mac_mismatch`).
  * There is no plaintext fallback, and nothing here throws for hostile input.
  */
 export async function openSealedContent(input: OpenSealedContentInput): Promise<SealedContentOpenResult> {

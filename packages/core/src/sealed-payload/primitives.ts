@@ -2,13 +2,13 @@
  * Byte helpers shared by the sealed-payload modules (#654 E1a).
  *
  * Every function is WebCrypto-only and `node:`-free, so a browser, Workers,
- * Node and Bun run the same code. None of these modules is re-exported from
- * the package root yet: the export, and its API budget, is a later slice.
+ * Node and Bun run the same code. The subpath `@byok-sdk/core/sealed-payload`
+ * exports the sealed-payload interface, but not these helpers. The package
+ * root exports none of the sealed-payload modules.
  *
  * Caller input errors throw `sealed_secret_invalid`, the code `hpke.ts`
- * already raises for bad HPKE input. `CORE_ERROR_CODES` is public API, so the
- * dedicated sealed-payload codes arrive with the export, not before it.
- * Receiver checks never throw for hostile bytes; they return a typed failure.
+ * already raises for bad HPKE input. Receiver checks never throw for hostile
+ * bytes; they return a typed failure.
  */
 import { z } from 'zod';
 
