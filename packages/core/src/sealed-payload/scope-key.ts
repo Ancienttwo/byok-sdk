@@ -21,6 +21,7 @@ import { z } from 'zod';
 import { canonicalizeJsonBytes } from '../attestation';
 import { ByokCoreError } from '../errors';
 import { hpkeOpenBase, hpkeSealBase } from '../hpke';
+import { safeParseTotal } from '../total-parse';
 import type { WebCryptoKey } from '../webcrypto';
 import { MEMBER_ID_PATTERN, deriveMemberId } from './member-chain';
 import {
@@ -175,7 +176,7 @@ const PackageIdentitySchema = ScopeKeyPackageV1Schema.omit({ enc: true, cipherte
  * `sealed_secret_invalid`.
  */
 export async function sealScopeKeyPackage(input: SealScopeKeyPackageInput): Promise<ScopeKeyPackageV1> {
-  const parsed = PackageIdentitySchema.safeParse({
+  const parsed = safeParseTotal(PackageIdentitySchema, {
     v: SCOPE_KEY_PACKAGE_VERSION,
     tenantId: input.tenantId,
     scopeId: input.scopeId,
@@ -223,7 +224,7 @@ export type ScopeKeyPackageOpenResult =
  * the opened key's own id. Nothing here throws for hostile input.
  */
 export async function openScopeKeyPackage(input: OpenScopeKeyPackageInput): Promise<ScopeKeyPackageOpenResult> {
-  const parsed = ScopeKeyPackageV1Schema.safeParse(input.package);
+  const parsed = safeParseTotal(ScopeKeyPackageV1Schema, input.package);
   if (!parsed.success) return { ok: false, reason: 'key_package_invalid' };
   const pkg = parsed.data;
   if (

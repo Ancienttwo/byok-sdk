@@ -5,6 +5,7 @@ import type { ChannelState } from './delivery-routing';
 import type { InputBatch, UserInput } from './rules/coalesce';
 import { json, type Budget, type Card, type Question, type Rejection, type Turn } from './rules/turn';
 import type { AcceptedReply, Batch, Delegation, Unit } from './rules/delegation';
+import type { CommandRecord } from './rules/commit';
 
 export type { Authority, InputBatch, SealReason, UserInput } from './rules/coalesce';
 export { addBatchTurns, addTurn, json } from './rules/turn';
@@ -22,6 +23,11 @@ export interface CollaborationState {
   inputs?: Record<string, UserInput>; inputBatches?: Record<string, InputBatch>;
   /** Host-only routes and final-content outbox. Never included in ContextPack or projections. */
   channel?: ChannelState;
+  /**
+   * Commit contract (#739 D1). Both appear at the first commit; a state without them is at revision 0.
+   * `commands` holds the dedup evidence of owner commands. K4 deduplicates terminals and messages itself.
+   */
+  revision?: number; commands?: Record<string, CommandRecord>;
 }
 export function stateOf(application: Record<string, Json>): CollaborationState {
   if (application.collaboration === undefined) application.collaboration = json({

@@ -258,10 +258,18 @@ describe('sealed payload v1: the sealed steer and output types', () => {
     }
   });
 
-  it('accept the sealed decline codes, with the code in plaintext', () => {
+  it('carry the sealed decline codes only on the plaintext task.decline, with reason === code (owner decision 12c)', () => {
+    const sealedDecline = sealedLine('task.decline_sealed');
     for (const code of SEALED_DECLINE_CODES) {
-      expect(corpus.some((line) => line.type === 'task.decline_sealed' && line.payload.code === code), code).toBe(true);
+      expect(corpus.some((line) => line.type === 'task.decline' && line.payload.code === code && line.payload.reason === code), code).toBe(true);
+      expect(corpus.some((line) => line.type === 'task.decline_sealed' && line.payload.code === code), code).toBe(false);
+      expect(parse('task.decline', { reason: code, retryable: false, code }), code).toBe(true);
+      expect(parse('task.decline', { reason: `${code}: free text`, retryable: false, code }), code).toBe(false);
+      expect(parse('task.decline', { reason: code, retryable: true, code }), `${code} is not retryable`).toBe(false);
+      expect(parse('task.decline_sealed', { ...sealedDecline, code }), code).toBe(false);
     }
+    expect(parse('task.decline', { reason: 'free text', code: 'agent_home_writer_busy' })).toBe(true);
+    expect(parse('task.decline_sealed', { ...sealedDecline, code: 'agent_home_writer_busy' })).toBe(true);
   });
 });
 

@@ -1157,10 +1157,11 @@ rule for every such field, and checks the rule against the sealed type.
 **Fail closed.** A receiver never falls back to plaintext. A device that
 refuses sealed task input declines non-retryably with one of the closed codes
 `sealed_key_unavailable`, `sealed_open_failed`, `sealed_content_mac_mismatch`
-or `sealing_policy_mismatch` in `code`. On the plaintext `task.decline`, each
-code is a value gate on the server flag. A device without the scope key
-cannot seal a reason, so it sends the plaintext `task.decline`. A device that
-can seal the reason may send `task.decline_sealed` with the same code.
+or `sealing_policy_mismatch` in `code`. These codes go only on the plaintext
+`task.decline`, and its `reason` is then the code itself. On the plaintext
+`task.decline`, each code is a value gate on the server flag.
+`task.decline_sealed` refuses them: a device that cannot open or use the
+scope key often cannot seal a reply either, so one outcome has one encoding.
 
 ## 3. Task state machine (M1 gap #2, #5, #6)
 

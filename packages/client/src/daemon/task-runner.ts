@@ -5092,11 +5092,23 @@ export class TaskRunner {
     });
   }
 
-  /** Declines a sealed offer once, non-retryably, with a plaintext reason and no sealed decline code (those need the server flag). */
+  /**
+   * Declines a sealed offer once, non-retryably. This daemon holds no scope
+   * key. To a server with `sealed-payload-v1` it sends the closed code
+   * `sealed_key_unavailable` as both `reason` and `code` (#654 decisions 12c
+   * and 12d). The code is a value gate on that flag, so without it the
+   * decline has a plaintext reason and no code.
+   */
   private declineSealedOffer(taskId: string, agentRef: AgentRef | undefined): void {
     if (this.tasks.has(taskId) || this.startupOwnership.has(taskId) || this.inFlightOffers.has(taskId) || this.finishedTaskIds.has(taskId) || this.strictDeclinedTaskIds.has(taskId)) return;
     this.addStrictDeclinedTaskId(taskId);
-    this.decline(taskId, 'sealed_payload_unsupported: this daemon does not open sealed task input', false, agentRef);
+    const code = 'sealed_key_unavailable';
+    const capabilities = this.deps.getServerCapabilities?.() ?? [];
+    if (requiredReceiverCapabilities('task.decline', { reason: code, code }).every((flag) => capabilities.includes(flag))) {
+      this.decline(taskId, code, false, agentRef, code);
+    } else {
+      this.decline(taskId, 'sealed_payload_unsupported: this daemon does not open sealed task input', false, agentRef);
+    }
   }
 
   /** Pre-claim, fail-closed rejection (protocol §3.2) — never claims first. */

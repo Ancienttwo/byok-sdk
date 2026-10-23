@@ -410,7 +410,11 @@ AiphaBee 自研的配对和 device grant，在 SDK 里对应 `/byok/pair` 和 `/
 - 接收端解密后检查五项：解密得到的帧长等于 `paddedLength`；`contentLength ≤ paddedLength − 4`；`paddedLength = pad(4 + contentLength)`（§8.6）；填充字节全是 0；`contentLength` 不超过这个消息类型的明文上限。任何一项不符，按 `sealed_open_failed` 拒绝。
 - 帧在 AEAD 之内，所以原长和填充都受认证。帧是规范的：同一内容只有一个合法的 `paddedLength`，同一份密文只有一种解码结果。发送方不能用 `paddedLength` 另带信息，同一内容的两次提交也不会因长度不同被判为冲突（§9.2）。
 - `ciphertext` 与 `ciphertextRef` 二选一。`paddedLength` 超过 256 KiB 时用 `ciphertextRef`（§8.6）。
-- 协议字段里的 blob（例如 `instruction.blobRef`、artifact）先按同一规则封装字节，再上传。blob 自己的 `salt`、`nonce` 和 `paddedLength` 与 `BlobRef` 一起放进加密的内层对象。blob 的 AAD 是外层的 AAD 加上字段路径，例如 `instruction`，所以 Host 不能在字段之间互换 blob。
+- 协议字段里的 blob（例如 `instruction.blobRef`、artifact）先按同一规则封装字节，再上传。blob 自己的 `salt`、`nonce` 和 `paddedLength` 与 `BlobRef` 一起放进加密的内层对象。blob 的 AAD 是外层的 AAD 加上字段路径，例如 `/instruction/blobRef`，所以 Host 不能在字段之间互换 blob。字节规则（E1c，owner 2026-10-23 的决定）：
+  - blob 在外层内容之前封装。外层的 `paddedLength` 和 `contentMac` 依赖外层明文，所以 blob 的 AAD 不含它们。blob 的 AAD 是外层 AAD 的另外 16 个成员，加上 blob 自己的 `paddedLength`，再加上新成员 `fieldPath`，按同一 canonical JSON 编码。外层 AAD 一定有 `contentMac`、没有 `fieldPath`，所以两种 AAD 不会相同。
+  - `fieldPath` 是 RFC 6901 JSON Pointer，根是移走字段组成的对象，指向 BlobRef 节点，例如 `/instruction/blobRef`、`/events/0/spill/blob`、`/artifactRefs/1`。每一段是字段名 `[A-Za-z][A-Za-z0-9]*` 或规范的十进制下标，所以不需要 `~` 转义。接收端按找到 BlobRef 的位置得出它。
+  - blob 的明文上限是调用方参数 `maxContentLength`，由各字段的规则决定。
+  - 接收端还要按 §9.3 检查 `BlobRef.contentHash` 等于密文的 SHA-256。
 
 ### 8.2 AAD
 

@@ -2357,8 +2357,9 @@ export declare function openScopeKeyPackage(input: OpenScopeKeyPackageInput): Pr
  * `contentMac` is a keyed MAC over category, family, identity and plaintext. The
  * Host compares two submissions of one identity by it, without a key.
  *
- * Blob fields are not sealed here yet; their AAD rule comes with the blob wire
- * rules.
+ * A blob field is sealed by the same frame and key rule, before its outer
+ * content. Its AAD is the outer AAD without `paddedLength` and `contentMac`,
+ * plus its own `paddedLength` and the JSON Pointer `fieldPath` to its BlobRef.
  */
 import { z } from 'zod';
 import { type JsonObject } from '../attestation';

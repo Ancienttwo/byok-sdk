@@ -1,0 +1,225 @@
+{
+  "note": "Member rule vectors (#654 E2b; decisions 10a, 11a, 11b). Regenerate with BYOK_CORE_UPDATE_GOLDEN=1 bun run --filter @byok-sdk/core test. A diff in a deterministic field is a breaking change. kemSig and chain signatures are random at generation, so they are verify-only. All keys derive from public labels and are test values only.",
+  "tenantId": "tenant-vector-1",
+  "members": [
+    {
+      "name": "client",
+      "memberId": "bifZEcU9uFUqVQR6zUKTt7Pp_jnJGasueUwgD1R0-vg",
+      "signing": {
+        "d": "cmcPH-BNO-dnztB2gCF9Nk-IS5_ILwT9DkIJmD6yV7o",
+        "x": "mtmjoFrlg6AG5zQJrb27aCySbWasFj2rtLHYk8l7ZL4",
+        "y": "s3vsnST-YO-DYWzW1Vx2CLzmQO7eliu1OCOorRXQFgE"
+      },
+      "kem": {
+        "d": "B3r-ujjetQe9JjNviCRFqKIhwTDx8-s84oNECkUGu4w",
+        "x": "Fj6eB59-KQSGyNwQXNQ-rnF9Cq2nBwkGoqaRLA4QXjE",
+        "y": "hrUgdRGna2npw_LpsJI53_3h4Pi64Tiw2lonfT9zhc4"
+      },
+      "kemStatement": "62796f6b2d6d656d6265722d6b656d2d76310a7b226b656d45706f6368223a312c226b656d5075626c69634b6579223a7b2278223a22466a36654235392d4b515347794e7751584e512d726e46394371326e42776b476f7161524c413451586a45222c2279223a22687255676452476e61326e70775f4c70734a4935335f33683450693634546977326c6f6e6654397a686334227d2c226d656d6265724964223a226269665a4563553975465571565152367a554b54743750705f6a6e4a4761737565557767443152302d7667227d",
+      "bundle": {
+        "v": 1,
+        "memberId": "bifZEcU9uFUqVQR6zUKTt7Pp_jnJGasueUwgD1R0-vg",
+        "signingPublicJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "mtmjoFrlg6AG5zQJrb27aCySbWasFj2rtLHYk8l7ZL4",
+          "y": "s3vsnST-YO-DYWzW1Vx2CLzmQO7eliu1OCOorRXQFgE"
+        },
+        "kemPublicJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "Fj6eB59-KQSGyNwQXNQ-rnF9Cq2nBwkGoqaRLA4QXjE",
+          "y": "hrUgdRGna2npw_LpsJI53_3h4Pi64Tiw2lonfT9zhc4"
+        },
+        "kemEpoch": 1,
+        "kemSig": "IP_Rdl316UsIi0NnQRorUUkK9a4qOLz_I7r3fqzEB5deRigWeWHK1nW7x7Ta3xoNvOQNpipG310jgHr8kG_dMg"
+      }
+    },
+    {
+      "name": "device",
+      "memberId": "kUC06wQwgjkfgi7g7rhQcDDcou_SvsywV-xs5DXVQ_E",
+      "deviceId": "device-vector-1",
+      "signing": {
+        "d": "uLUl70LHwLMMGbFWv6PyC2uHXAqANpVwwvWZc7mhiO4",
+        "x": "mRJ9uQBMsjE7QZsf1W6ZZ9D7oB9hjGlxJoh61RZu46s",
+        "y": "Iv1rCn2e-mqIAA9BqRmvHv0NCmNrhmLI868gdG0Cftw"
+      },
+      "kem": {
+        "d": "p-R6U-FbekAT2hIXIG6-IRQ3BiRQawkxTaM75BW6y3I",
+        "x": "ocYWXQq-N6LmzX9DbBVG62plNI_PI_Qgg-iXgdfSglU",
+        "y": "oqHNGSY29O1H_Ih2aZGetDy_KiTcx1vUPVMPXKeBFk0"
+      },
+      "kemStatement": "62796f6b2d6d656d6265722d6b656d2d76310a7b226b656d45706f6368223a312c226b656d5075626c69634b6579223a7b2278223a226f6359575851712d4e364c6d7a583944624256473632706c4e495f50495f5167672d695867646653676c55222c2279223a226f71484e47535932394f31485f496832615a47657444795f4b6954637831765550564d50584b6542466b30227d2c226d656d6265724964223a226b55433036775177676a6b666769376737726851634444636f755f5376737977562d787335445856515f45227d",
+      "bundle": {
+        "v": 1,
+        "memberId": "kUC06wQwgjkfgi7g7rhQcDDcou_SvsywV-xs5DXVQ_E",
+        "signingPublicJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "mRJ9uQBMsjE7QZsf1W6ZZ9D7oB9hjGlxJoh61RZu46s",
+          "y": "Iv1rCn2e-mqIAA9BqRmvHv0NCmNrhmLI868gdG0Cftw"
+        },
+        "kemPublicJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "ocYWXQq-N6LmzX9DbBVG62plNI_PI_Qgg-iXgdfSglU",
+          "y": "oqHNGSY29O1H_Ih2aZGetDy_KiTcx1vUPVMPXKeBFk0"
+        },
+        "kemEpoch": 1,
+        "kemSig": "aft_6qc8qfGbGepJ3eP2e0eem-2QN-Xm-nZIpdamYZIwCOHl7b7fwZ1iLrvHhmj8QZQMfH7yZypEUaY9S9anrg",
+        "deviceId": "device-vector-1"
+      }
+    },
+    {
+      "name": "stranger",
+      "memberId": "1vmG-3gjcNsJGNEhcxb88zHySQoFjcvuNKJANNXsFsI",
+      "signing": {
+        "d": "GYS10dNMxAD4YM9Cbj7M_0cOzC9m_Nr5yDiR4lSDD2I",
+        "x": "4-E8cIQnvOQRJxIe6pmSzf8rGZu5UZetJx23fHWhilw",
+        "y": "DW_8ibGfBuqa4e0MV5TjWC6gmjz2zVFptm7YOCEbdoY"
+      },
+      "kem": {
+        "d": "MbxOGk5ttJMC3ejF5KSg93x9uZskELhDWSMQrmVHNAQ",
+        "x": "lQGxxjRSRHO0ERBwpDICLTjcUgAW_tOWdGjTN5dLBxs",
+        "y": "tcWJv-CuUOVMy4jH4mbleXpmeaNlQvluSmxOcR9rO2w"
+      },
+      "kemStatement": "62796f6b2d6d656d6265722d6b656d2d76310a7b226b656d45706f6368223a312c226b656d5075626c69634b6579223a7b2278223a226c514778786a525352484f3045524277704449434c546a63556741575f744f5764476a544e35644c427873222c2279223a227463574a762d4375554f564d79346a48346d626c6558706d65614e6c51766c75536d784f635239724f3277227d2c226d656d6265724964223a2231766d472d33676a634e734a474e456863786238387a487953516f466a6376754e4b4a414e4e5873467349227d",
+      "bundle": {
+        "v": 1,
+        "memberId": "1vmG-3gjcNsJGNEhcxb88zHySQoFjcvuNKJANNXsFsI",
+        "signingPublicJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "4-E8cIQnvOQRJxIe6pmSzf8rGZu5UZetJx23fHWhilw",
+          "y": "DW_8ibGfBuqa4e0MV5TjWC6gmjz2zVFptm7YOCEbdoY"
+        },
+        "kemPublicJwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "lQGxxjRSRHO0ERBwpDICLTjcUgAW_tOWdGjTN5dLBxs",
+          "y": "tcWJv-CuUOVMy4jH4mbleXpmeaNlQvluSmxOcR9rO2w"
+        },
+        "kemEpoch": 1,
+        "kemSig": "Pc-trFU6tSl3REEcwNEMsYXJSh02n-jzhAGVJ2S7aakGQH1UChyJFLCjPrSkhnw1RzA2yrxjEd01tWwFzM2d4Q"
+      }
+    }
+  ],
+  "fingerprints": [
+    {
+      "member": "client",
+      "tenantId": "tenant-vector-1",
+      "fingerprint": "79278 58176 46660 56790 22431"
+    },
+    {
+      "member": "device",
+      "tenantId": "tenant-vector-1",
+      "fingerprint": "05687 43625 68597 26148 99341"
+    },
+    {
+      "member": "client",
+      "tenantId": "tenant-vector-2",
+      "fingerprint": "88840 11784 27546 19256 33539"
+    }
+  ],
+  "approvalCodes": [
+    {
+      "tenantId": "tenant-vector-1",
+      "members": [
+        "client",
+        "device"
+      ],
+      "code": "79278 58176 46660 56790 22431 05687 43625 68597 26148 99341"
+    },
+    {
+      "tenantId": "tenant-vector-1",
+      "members": [
+        "device",
+        "stranger"
+      ],
+      "code": "01073 44278 94547 34511 79911 05687 43625 68597 26148 99341"
+    }
+  ],
+  "pairing": {
+    "pv": "7a7a6715c97787223b1f5bd34ac1934e",
+    "device": "device",
+    "client": "client",
+    "chainHead": {
+      "seq": 2,
+      "hash": "sha256:1983ccf295a407d7a54efdfafbf5dcd00da26f3b222702ea026572ae152e1712"
+    },
+    "deviceMac": "S1UHsB-RkwJUvjnYvwkwaENi45KAHjllBGTP6VUEpAM",
+    "clientMac": "OSTxNhll_k-w0mmDIJ70o-Vw-b3x0qfXzm4OVAnm5L4"
+  },
+  "chain": {
+    "entries": [
+      {
+        "v": 1,
+        "tenantId": "tenant-vector-1",
+        "seq": 1,
+        "prev": null,
+        "op": "add",
+        "subject": {
+          "member": {
+            "v": 1,
+            "memberId": "bifZEcU9uFUqVQR6zUKTt7Pp_jnJGasueUwgD1R0-vg",
+            "signingPublicJwk": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "mtmjoFrlg6AG5zQJrb27aCySbWasFj2rtLHYk8l7ZL4",
+              "y": "s3vsnST-YO-DYWzW1Vx2CLzmQO7eliu1OCOorRXQFgE"
+            },
+            "kemPublicJwk": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "Fj6eB59-KQSGyNwQXNQ-rnF9Cq2nBwkGoqaRLA4QXjE",
+              "y": "hrUgdRGna2npw_LpsJI53_3h4Pi64Tiw2lonfT9zhc4"
+            },
+            "kemEpoch": 1,
+            "kemSig": "IP_Rdl316UsIi0NnQRorUUkK9a4qOLz_I7r3fqzEB5deRigWeWHK1nW7x7Ta3xoNvOQNpipG310jgHr8kG_dMg"
+          }
+        },
+        "signer": "bifZEcU9uFUqVQR6zUKTt7Pp_jnJGasueUwgD1R0-vg",
+        "sig": "xrOjPX7NEmKpbAwS7H9qh2lejP4qEgPGBkXkvyydREnyLmBIw8T921B8b7FqWionJeJj0Ua-bJQYP4s5rMZAGg"
+      },
+      {
+        "v": 1,
+        "tenantId": "tenant-vector-1",
+        "seq": 2,
+        "prev": "sha256:c6807c8ebe6274a27b0cb24884086beb5e6da0d03416396ef92651e7c8623848",
+        "op": "add",
+        "subject": {
+          "member": {
+            "v": 1,
+            "memberId": "kUC06wQwgjkfgi7g7rhQcDDcou_SvsywV-xs5DXVQ_E",
+            "signingPublicJwk": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "mRJ9uQBMsjE7QZsf1W6ZZ9D7oB9hjGlxJoh61RZu46s",
+              "y": "Iv1rCn2e-mqIAA9BqRmvHv0NCmNrhmLI868gdG0Cftw"
+            },
+            "kemPublicJwk": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "ocYWXQq-N6LmzX9DbBVG62plNI_PI_Qgg-iXgdfSglU",
+              "y": "oqHNGSY29O1H_Ih2aZGetDy_KiTcx1vUPVMPXKeBFk0"
+            },
+            "kemEpoch": 1,
+            "kemSig": "aft_6qc8qfGbGepJ3eP2e0eem-2QN-Xm-nZIpdamYZIwCOHl7b7fwZ1iLrvHhmj8QZQMfH7yZypEUaY9S9anrg",
+            "deviceId": "device-vector-1"
+          }
+        },
+        "signer": "bifZEcU9uFUqVQR6zUKTt7Pp_jnJGasueUwgD1R0-vg",
+        "sig": "JI-p6wftTlnyX3jgxiDu3Iap7_j5xh-ewUpDv92Sl24e0MliHlJybhmQIoOvsUVkY28A-1GT8ejPymnUVmcxhQ"
+      }
+    ],
+    "hashes": [
+      "sha256:c6807c8ebe6274a27b0cb24884086beb5e6da0d03416396ef92651e7c8623848",
+      "sha256:1983ccf295a407d7a54efdfafbf5dcd00da26f3b222702ea026572ae152e1712"
+    ],
+    "anchor": {
+      "self": "device",
+      "approver": "client",
+      "anchorSeq": 2
+    }
+  }
+}

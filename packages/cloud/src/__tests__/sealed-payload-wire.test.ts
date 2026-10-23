@@ -78,7 +78,7 @@ function bindingOf(line: (typeof corpus)[number]): SealedBinding {
   const agentRef = offer.payload.agentRef as SealedBinding['agentRef'] | undefined;
   return {
     tenantId: GOLDEN_TENANT,
-    family: line.type,
+    family: SEALED_SPLIT_TABLE[line.type].plainType,
     direction: isServerToDaemonType(line.type) ? 'server-to-daemon' : 'daemon-to-server',
     identity,
     deviceId: GOLDEN_DEVICE,
@@ -349,6 +349,57 @@ describe('sealed payload v1: each sealed type has its own hosted entry (#654)', 
       expect(page.messages).toEqual([]);
     },
   );
+
+  // The four enqueue lanes take an optional task id. The fresh lane always requires one.
+  const enqueueLanes: Record<string, (harness: ReturnType<typeof createHarness>, deviceId: string, payload: never, taskId?: string) => Promise<{ taskId: string }>> = {
+    'task.offer_sealed': (h, d, payload, taskId) => h.cloud.enqueueSealedOffer(TENANT_A, d, { taskId, payload }),
+    'task.offer_with_toolsets_sealed': (h, d, payload, taskId) => h.cloud.enqueueSealedToolsetOffer(TENANT_A, d, { taskId, payload }),
+    'task.offer_for_agent_sealed': (h, d, payload, taskId) => h.cloud.enqueueSealedAgentOffer(TENANT_A, d, { taskId, payload }),
+    'task.offer_for_agent_with_egress_sealed': (h, d, payload, taskId) =>
+      h.cloud.enqueueSealedAgentEgressOffer(TENANT_A, d, { taskId, payload, ...withContext(payload as { messageEgress?: unknown }) }),
+  };
+
+  it.each(laneLines.filter((line) => line.type in enqueueLanes).map((line) => [line.type, line.payload.sealed === undefined ? 'output only' : 'sealed input', line] as const))(
+    '%s (%s) without a taskId: a sealed instruction is refused, because it binds the task id; output-only sealing gets a minted id',
+    async (type, label, line) => {
+      const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+      const device = await harness.pairDevice(TENANT_A);
+      await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: requiredReceiverCapabilities(type, line.payload) });
+      const page = () => harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0, limit: 10 });
+
+      if (label === 'sealed input') {
+        await expect(enqueueLanes[type]!(harness, device.deviceId, line.payload as never)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+        // A JavaScript caller may pass a value that is not a task id.
+        for (const taskId of [null, '']) {
+          await expect(enqueueLanes[type]!(harness, device.deviceId, line.payload as never, taskId as never)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+        }
+        expect((await page()).messages).toEqual([]);
+      } else {
+        const enqueued = await enqueueLanes[type]!(harness, device.deviceId, line.payload as never);
+        expect(enqueued.taskId).toMatch(/^task_/u);
+        expect((await page()).messages).toHaveLength(1);
+      }
+    },
+  );
+
+  it('checks and enqueues one parsed copy, so a payload that the caller changes during the device read has no effect', async () => {
+    const line = laneLines.find((candidate) => candidate.type === 'task.offer_for_agent_sealed' && candidate.payload.sealed !== undefined)!;
+    const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+    const device = await harness.pairDevice(TENANT_A);
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: requiredReceiverCapabilities(line.type, line.payload) });
+    const payload: Json = structuredClone(line.payload);
+    const read = harness.stores.devices.get.bind(harness.stores.devices);
+    vi.spyOn(harness.stores.devices, 'get').mockImplementation(async (...args) => {
+      // A non-resume offer with a selection would need dispatch-selection, which this device lacks.
+      delete payload.sessionRef;
+      payload.dispatchSelection = { lane: 'subscription', runtimeId: 'codex' };
+      return read(...args);
+    });
+
+    const enqueued = await lanes[line.type]!.sealed(harness, device.deviceId, payload as never);
+
+    expect(enqueued.envelope.payload).toEqual(line.payload);
+  });
 
   // A ciphertextRef must name a committed blob of this tenant (E3b). The corpus blob ids name no
   // uploaded blob, so each lane refuses them. `sealed-offer-host.test.ts` covers the accepted path.

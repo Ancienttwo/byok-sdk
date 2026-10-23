@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { contextPack, turnInstruction, type ContextHistory } from './context';
+import { contextPack, contextTurns, turnInstruction, type ContextHistory } from './context';
 import type { ContextState } from './schema';
 import type { Turn } from './turn';
 
@@ -50,4 +50,15 @@ it('selects the current Turn by id and keeps it out of the history rows', () => 
   expect(context.turns.map(row => row.id)).toEqual(['t1', 't3']);
   expect(contextPack(history, 2).turns.map(row => row.id)).toEqual(['t2', 't3']);
   expect(() => contextPack(history, 2, 'missing')).toThrow('Missing ContextPack candidate');
+});
+
+it('takes injected rows in the ContextPack row shape, and refuses any other shape', () => {
+  const injected = contextTurns([{ id: 'c1', root: 'c1', source: 'user', request: 'Cloud', hop: 0, status: 'succeeded', outcomeSummary: ['ask_user'] }]);
+  const current = turn('t1', 'Now', 'queued');
+  const history: ContextHistory = { turns: [...injected, current], cards: [], questions: [], rejected: [] };
+  const { context } = turnInstruction(authority(), history, current, limits);
+  if (!('turns' in context)) throw new Error('Expected a Bot Turn context');
+  expect(context.turns).toEqual(injected);
+  for (const bad of [null, {}, [null], [{ ...injected[0], source: 'other' }], [{ ...injected[0], hop: -1 }], [{ ...injected[0], outcomeSummary: [1] }],
+    [{ ...injected[0], conclusion: 3 }]]) expect(() => contextTurns(bad)).toThrow('Invalid injected history');
 });
