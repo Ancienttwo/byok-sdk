@@ -78,7 +78,7 @@ function bindingOf(line: (typeof corpus)[number]): SealedBinding {
   const agentRef = offer.payload.agentRef as SealedBinding['agentRef'] | undefined;
   return {
     tenantId: GOLDEN_TENANT,
-    family: line.type,
+    family: SEALED_SPLIT_TABLE[line.type].plainType,
     direction: isServerToDaemonType(line.type) ? 'server-to-daemon' : 'daemon-to-server',
     identity,
     deviceId: GOLDEN_DEVICE,
