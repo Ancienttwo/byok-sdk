@@ -5092,7 +5092,6 @@ export class TaskRunner {
     });
   }
 
-  /** Pre-claim, fail-closed rejection (protocol §3.2) — never claims first. */
   /** Declines a sealed offer once, non-retryably, with a plaintext reason and no sealed decline code (those need the server flag). */
   private declineSealedOffer(taskId: string, agentRef: AgentRef | undefined): void {
     if (this.tasks.has(taskId) || this.startupOwnership.has(taskId) || this.inFlightOffers.has(taskId) || this.finishedTaskIds.has(taskId) || this.strictDeclinedTaskIds.has(taskId)) return;
@@ -5100,6 +5099,7 @@ export class TaskRunner {
     this.decline(taskId, 'sealed_payload_unsupported: this daemon does not open sealed task input', false, agentRef);
   }
 
+  /** Pre-claim, fail-closed rejection (protocol §3.2) — never claims first. */
   private decline(taskId: string, reason: string, retryable: boolean, agentRef?: AgentRef, code?: TaskDeclinePayload['code']): void {
     this.deps.send(createEnvelope(
       'task.decline',

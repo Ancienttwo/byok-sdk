@@ -309,40 +309,6 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
             maxTokens: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strip>>;
-        sealing: z.ZodOptional<z.ZodObject<{
-            scopeId: z.ZodString;
-            epoch: z.ZodNumber;
-            categories: z.ZodArray<z.ZodEnum<{
-                "task-input": "task-input";
-                "task-output": "task-output";
-            }>>;
-        }, z.core.$strict>>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-input">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
             activity: z.ZodObject<{
@@ -385,7 +351,156 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
         freshnessCursor: z.ZodOptional<z.ZodString>;
     }, z.core.$strict>>;
 }, z.core.$strict>;
-export type AgentExecutionInput = z.infer<typeof AgentExecutionInputSchema>;
+/**
+ * The sealed lane of the same execution (#654): the payload names `sealing`,
+ * and carries the sealed instruction when the task seals its input. The same
+ * rules apply. `submitAgentExecution` picks this schema when the payload has
+ * `sealing` or `sealed`, so a sealing policy is never stripped.
+ */
+export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
+    taskId: z.ZodString;
+    deviceId: z.ZodString;
+    payload: z.ZodObject<{
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+        agentMemory: z.ZodOptional<z.ZodEnum<{
+            none: "none";
+            read: "read";
+            "read-write": "read-write";
+        }>>;
+        requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        runtime: z.ZodOptional<z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            pi: "pi";
+        }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
+        dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            lane: z.ZodLiteral<"subscription">;
+            runtimeId: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+            }>;
+            providerId: z.ZodNull;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerId: z.ZodString;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok-profile">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerProfile: z.ZodObject<{
+                profileRef: z.ZodString;
+                profileRevision: z.ZodString;
+                profileHash: z.ZodString;
+                modelId: z.ZodString;
+                requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                    "image-input": "image-input";
+                }>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>], "lane">>;
+        terminalProjection: z.ZodNonOptional<z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            mode: z.ZodLiteral<"none">;
+        }, z.core.$strict>, z.ZodObject<{
+            mode: z.ZodLiteral<"result-document">;
+            contract: z.ZodString;
+            schema: z.ZodCustom<import("@byok-sdk/protocol").ResultSchema, import("@byok-sdk/protocol").ResultSchema>;
+        }, z.core.$strict>], "mode">>>;
+        limits: z.ZodOptional<z.ZodObject<{
+            maxDurationMs: z.ZodOptional<z.ZodNumber>;
+            maxTokens: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>;
+        egressPolicy: z.ZodObject<{
+            policyRevision: z.ZodString;
+            activity: z.ZodObject<{
+                delivery: z.ZodLiteral<"latest-value">;
+                maxCoalesceMs: z.ZodNumber;
+                maxEventBytes: z.ZodNumber;
+            }, z.core.$strict>;
+            reliable: z.ZodObject<{
+                maxPendingEventsPerAgent: z.ZodNumber;
+                maxPendingBytesPerAgent: z.ZodNumber;
+                maxPendingBytesPerTenant: z.ZodNumber;
+            }, z.core.$strict>;
+            transfers: z.ZodObject<{
+                workspace: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+                transcript: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+                artifact: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
+        messageEgress: z.ZodOptional<z.ZodObject<{
+            mode: z.ZodLiteral<"required">;
+            contract: z.ZodString;
+            contentType: z.ZodEnum<{
+                "text/markdown": "text/markdown";
+                "text/plain": "text/plain";
+            }>;
+            maxBytes: z.ZodNumber;
+        }, z.core.$strict>>;
+        instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+            blobRef: z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+        }, z.core.$strict>]>>;
+        sealing: z.ZodObject<{
+            scopeId: z.ZodString;
+            epoch: z.ZodNumber;
+            categories: z.ZodArray<z.ZodEnum<{
+                "task-input": "task-input";
+                "task-output": "task-output";
+            }>>;
+        }, z.core.$strict>;
+        sealed: z.ZodOptional<z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-input">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+    agentMessageContext: z.ZodOptional<z.ZodObject<{
+        destinationBinding: z.ZodString;
+        freshnessCursor: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
+export type AgentExecutionInput = z.infer<typeof AgentExecutionInputSchema> | z.infer<typeof SealedAgentExecutionInputSchema>;
 // ==== @byok-sdk/cloud dist/agent-home-projections.d.ts ====
 /**
  * Durable task-free Agent-home projection facts.
@@ -1146,7 +1261,7 @@ import { type AgentExecutionInput } from './agent-execution';
 import { type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { ActivityTail } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
-import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskSteerPayload, type TaskOfferForAgentPayload, type TaskOfferPreparedPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
+import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskOfferSealedPayload, type TaskSteerPayload, type TaskSteerSealedPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentSealedPayload, type TaskOfferPreparedPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressSealedPayload, type TaskOfferWithToolsetsPayload, type TaskOfferWithToolsetsSealedPayload } from '@byok-sdk/protocol';
 import type { TokenSigner } from './auth/tokens';
 import type { CloudCrypto } from './crypto/port';
 import { type RouteDescriptor } from './router/registry';
@@ -1287,16 +1402,21 @@ export type LimitedPublicRoute = {
 };
 /** `true` admits the request; `false` answers 429 before the handler or any store runs. */
 export type PublicRouteLimiter = (route: LimitedPublicRoute, request: Request) => boolean | Promise<boolean>;
+/**
+ * #654: an offer payload that carries `sealing` or `sealed` travels as the
+ * sealed offer type of its lane (`task.offer_sealed`, …), gated on the
+ * device's `sealed-payload-v1`. A plaintext lane never strips them.
+ */
 export interface EnqueueOfferInput {
     /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
     readonly taskId?: string;
-    readonly payload: TaskOfferPayload;
+    readonly payload: TaskOfferPayload | TaskOfferSealedPayload;
 }
 export interface EnqueueToolsetOfferInput {
     /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
     readonly taskId?: string;
     /** Strict control payload containing logical ids only; executable MCP definitions are not part of this type. */
-    readonly payload: TaskOfferWithToolsetsPayload;
+    readonly payload: TaskOfferWithToolsetsPayload | TaskOfferWithToolsetsSealedPayload;
 }
 /**
  * Strict Agent dispatch input. The device path is intentionally a separate
@@ -1312,7 +1432,7 @@ export interface AgentDispatchInput {
      * optional; this host lane does not: a fresh Agent execution is admitted only
      * through {@link ByokCloud.submitAgentExecution}.
      */
-    readonly payload: TaskOfferForAgentPayload & {
+    readonly payload: (TaskOfferForAgentPayload | TaskOfferForAgentSealedPayload) & {
         readonly sessionRef: string;
     };
 }
@@ -1338,7 +1458,7 @@ export interface PreparedDispatchInput {
 export interface AgentEgressDispatchInput {
     /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
     readonly taskId?: string;
-    readonly payload: TaskOfferForAgentWithEgressPayload;
+    readonly payload: TaskOfferForAgentWithEgressPayload | TaskOfferForAgentWithEgressSealedPayload;
     /** Host-only product destination/freshness authority; never serialized to the daemon. */
     readonly agentMessageContext?: AgentMessageServerContext;
 }
@@ -1570,9 +1690,9 @@ export interface ByokCloud {
      * Host control plane: inject steering text into a RUNNING task, by enqueueing
      * `task.steer` to the device that claimed it.
      *
-     * The runtime gate reads the claim-time capability snapshot and nothing
-     * else — see `steer-control.ts` for why that is the only admissible input
-     * and why an absent snapshot refuses. Gate order mirrors the reference server
+     * Gated on the claim-time capability snapshot and on nothing else — see
+     * `steer-control.ts` for why that is the only admissible input and why an
+     * absent snapshot refuses. Gate order mirrors the reference server
      * (`ConnectionHub.steerTask`, `packages/server/src/hub.ts`), and every gate is
      * evaluated in full before a mailbox row is allocated, so a refused call has
      * zero side effects:
@@ -1586,16 +1706,15 @@ export interface ByokCloud {
      *   4. the claim snapshot does not positively say `steer: true` ->
      *      {@link SteerRejectedError} `steer_unsupported_runtime`, including when
      *      there is no snapshot at all;
-     *   5. a sealed steer (#654) to a device that did not durably advertise
-     *      `sealed-payload-v1` -> `agent_capability_missing`. This reads
-     *      `WIRE_ADDITIONS`, the same gate as every offer; a plaintext steer
-     *      needs no device flag.
+     *   5. a sealed steer (`{ steerId, sealed }`, #654) travels as
+     *      `task.steer_sealed`, and a device that did not durably advertise
+     *      `sealed-payload-v1` refuses it with `agent_capability_missing`.
      *
      * Delivery is the same best-effort notification every control message has:
      * the enqueued envelope is durable, and whether the runtime acted on it is
      * observable only through that task's own later messages.
      */
-    steerTask(tenant: TenantId, taskId: string, payload: TaskSteerPayload): Promise<EnqueuedAgentControl>;
+    steerTask(tenant: TenantId, taskId: string, payload: TaskSteerPayload | TaskSteerSealedPayload): Promise<EnqueuedAgentControl>;
     readTaskAttempt(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
     /** Read the original executable offer; missing/corrupt authority never becomes a guessed payload. */
     readTaskOffer(tenant: TenantId, taskId: string): Promise<TaskOfferReadback | undefined>;

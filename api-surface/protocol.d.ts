@@ -1811,6 +1811,58 @@ interface EnvelopeShapeOptions {
         taskId: string;
         seq?: number;
     };
+    'task.offer_sealed': {
+        taskId: string;
+        seq: number;
+    };
+    'task.offer_with_toolsets_sealed': {
+        taskId: string;
+        seq: number;
+    };
+    'task.offer_for_agent_sealed': {
+        taskId: string;
+        seq: number;
+    };
+    'task.offer_for_agent_with_egress_sealed': {
+        taskId: string;
+        seq: number;
+    };
+    'task.offer_for_agent_with_egress_fresh_sealed': {
+        taskId: string;
+        seq: number;
+    };
+    'task.steer_sealed': {
+        taskId: string;
+        seq: number;
+    };
+    'task.complete_sealed': {
+        taskId: string;
+        seq?: number;
+    };
+    'task.fail_sealed': {
+        taskId: string;
+        seq?: number;
+    };
+    'task.decline_sealed': {
+        taskId: string;
+        seq?: number;
+    };
+    'task.cancelled_sealed': {
+        taskId: string;
+        seq?: number;
+    };
+    'task.progress_sealed': {
+        taskId: string;
+        seq?: number;
+    };
+    'task.artifact_sealed': {
+        taskId: string;
+        seq?: number;
+    };
+    'task.await_approval_sealed': {
+        taskId: string;
+        seq?: number;
+    };
 }
 interface EnvelopeCommonOptions {
     id?: string;
@@ -1982,40 +2034,6 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
             maxTokens: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strip>>;
-        sealing: z.ZodOptional<z.ZodObject<{
-            scopeId: z.ZodString;
-            epoch: z.ZodNumber;
-            categories: z.ZodArray<z.ZodEnum<{
-                "task-input": "task-input";
-                "task-output": "task-output";
-            }>>;
-        }, z.core.$strict>>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-input">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
     }, z.core.$strip>;
 }, z.core.$strip>, z.ZodObject<{
     v: z.ZodNumber;
@@ -2073,40 +2091,6 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
             maxTokens: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strip>>;
-        sealing: z.ZodOptional<z.ZodObject<{
-            scopeId: z.ZodString;
-            epoch: z.ZodNumber;
-            categories: z.ZodArray<z.ZodEnum<{
-                "task-input": "task-input";
-                "task-output": "task-output";
-            }>>;
-        }, z.core.$strict>>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-input">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
         requiredToolsets: z.ZodArray<z.ZodString>;
     }, z.core.$strict>;
 }, z.core.$strip>, z.ZodObject<{
@@ -2182,40 +2166,6 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
             maxTokens: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strip>>;
-        sealing: z.ZodOptional<z.ZodObject<{
-            scopeId: z.ZodString;
-            epoch: z.ZodNumber;
-            categories: z.ZodArray<z.ZodEnum<{
-                "task-input": "task-input";
-                "task-output": "task-output";
-            }>>;
-        }, z.core.$strict>>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-input">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
     }, z.core.$strict>;
 }, z.core.$strip>, z.ZodObject<{
     v: z.ZodNumber;
@@ -2289,40 +2239,6 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
             maxTokens: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strip>>;
-        sealing: z.ZodOptional<z.ZodObject<{
-            scopeId: z.ZodString;
-            epoch: z.ZodNumber;
-            categories: z.ZodArray<z.ZodEnum<{
-                "task-input": "task-input";
-                "task-output": "task-output";
-            }>>;
-        }, z.core.$strict>>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-input">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
         sessionRef: z.ZodString;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
@@ -2433,40 +2349,6 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
             maxTokens: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strip>>;
-        sealing: z.ZodOptional<z.ZodObject<{
-            scopeId: z.ZodString;
-            epoch: z.ZodNumber;
-            categories: z.ZodArray<z.ZodEnum<{
-                "task-input": "task-input";
-                "task-output": "task-output";
-            }>>;
-        }, z.core.$strict>>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-input">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
             activity: z.ZodObject<{
@@ -2912,32 +2794,6 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     seq: z.ZodNumber;
     payload: z.ZodObject<{
         text: z.ZodString;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-input">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
     }, z.core.$strip>;
 }, z.core.$strip>, z.ZodObject<{
     v: z.ZodNumber;
@@ -3000,32 +2856,6 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             sealed_open_failed: "sealed_open_failed";
             sealing_policy_mismatch: "sealing_policy_mismatch";
         }>>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-output">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
     }, z.core.$strip>;
 }, z.core.$strip>, z.ZodObject<{
     v: z.ZodNumber;
@@ -3121,32 +2951,6 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         }, z.core.$strip>], "type">, z.ZodObject<{
             type: z.ZodString;
         }, z.core.$loose>]>>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-output">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
     }, z.core.$strip>;
 }, z.core.$strip>, z.ZodObject<{
     v: z.ZodNumber;
@@ -3167,32 +2971,6 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             contentType: z.ZodString;
             url: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-output">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
     }, z.core.$strip>;
 }, z.core.$strip>, z.ZodObject<{
     v: z.ZodNumber;
@@ -3205,32 +2983,6 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     payload: z.ZodObject<{
         summary: z.ZodString;
         approvalId: z.ZodOptional<z.ZodString>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-output">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
     }, z.core.$strip>;
 }, z.core.$strip>, z.ZodObject<{
     v: z.ZodNumber;
@@ -3291,32 +3043,6 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         }, z.core.$strict>, z.ZodObject<{
             outcome: z.ZodLiteral<"unmeasured">;
         }, z.core.$strict>], "outcome">>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-output">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
     }, z.core.$strip>;
 }, z.core.$strip>, z.ZodObject<{
     v: z.ZodNumber;
@@ -3372,32 +3098,6 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         }, z.core.$strict>, z.ZodObject<{
             outcome: z.ZodLiteral<"unmeasured">;
         }, z.core.$strict>], "outcome">>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-output">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
     }, z.core.$strip>;
 }, z.core.$strip>, z.ZodObject<{
     v: z.ZodNumber;
@@ -3443,32 +3143,6 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         }, z.core.$strict>, z.ZodObject<{
             outcome: z.ZodLiteral<"unmeasured">;
         }, z.core.$strict>], "outcome">>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-output">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
     }, z.core.$strip>;
 }, z.core.$strip>, z.ZodObject<{
     v: z.ZodNumber;
@@ -3665,6 +3339,998 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             "text-not-allowlisted": "text-not-allowlisted";
         }>;
     }, z.core.$strict>], "decision">;
+}, z.core.$strip>, z.ZodObject<{
+    v: z.ZodNumber;
+    id: z.ZodUUID;
+    ts: z.ZodISODateTime;
+    type: z.ZodLiteral<"task.offer_sealed">;
+    task_id: z.ZodString;
+    session_ref: z.ZodOptional<z.ZodString>;
+    seq: z.ZodNumber;
+    payload: z.ZodObject<{
+        runtime: z.ZodOptional<z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            pi: "pi";
+        }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
+        dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            lane: z.ZodLiteral<"subscription">;
+            runtimeId: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+            }>;
+            providerId: z.ZodNull;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerId: z.ZodString;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok-profile">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerProfile: z.ZodObject<{
+                profileRef: z.ZodString;
+                profileRevision: z.ZodString;
+                profileHash: z.ZodString;
+                modelId: z.ZodString;
+                requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                    "image-input": "image-input";
+                }>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>], "lane">>;
+        sessionRef: z.ZodOptional<z.ZodString>;
+        workspaceHint: z.ZodOptional<z.ZodString>;
+        limits: z.ZodOptional<z.ZodObject<{
+            maxDurationMs: z.ZodOptional<z.ZodNumber>;
+            maxTokens: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>;
+        instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+            blobRef: z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+        }, z.core.$strict>]>>;
+        sealing: z.ZodObject<{
+            scopeId: z.ZodString;
+            epoch: z.ZodNumber;
+            categories: z.ZodArray<z.ZodEnum<{
+                "task-input": "task-input";
+                "task-output": "task-output";
+            }>>;
+        }, z.core.$strict>;
+        sealed: z.ZodOptional<z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-input">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+}, z.core.$strip>, z.ZodObject<{
+    v: z.ZodNumber;
+    id: z.ZodUUID;
+    ts: z.ZodISODateTime;
+    type: z.ZodLiteral<"task.offer_with_toolsets_sealed">;
+    task_id: z.ZodString;
+    session_ref: z.ZodOptional<z.ZodString>;
+    seq: z.ZodNumber;
+    payload: z.ZodObject<{
+        runtime: z.ZodOptional<z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            pi: "pi";
+        }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
+        dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            lane: z.ZodLiteral<"subscription">;
+            runtimeId: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+            }>;
+            providerId: z.ZodNull;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerId: z.ZodString;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok-profile">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerProfile: z.ZodObject<{
+                profileRef: z.ZodString;
+                profileRevision: z.ZodString;
+                profileHash: z.ZodString;
+                modelId: z.ZodString;
+                requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                    "image-input": "image-input";
+                }>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>], "lane">>;
+        sessionRef: z.ZodOptional<z.ZodString>;
+        workspaceHint: z.ZodOptional<z.ZodString>;
+        limits: z.ZodOptional<z.ZodObject<{
+            maxDurationMs: z.ZodOptional<z.ZodNumber>;
+            maxTokens: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>;
+        requiredToolsets: z.ZodArray<z.ZodString>;
+        instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+            blobRef: z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+        }, z.core.$strict>]>>;
+        sealing: z.ZodObject<{
+            scopeId: z.ZodString;
+            epoch: z.ZodNumber;
+            categories: z.ZodArray<z.ZodEnum<{
+                "task-input": "task-input";
+                "task-output": "task-output";
+            }>>;
+        }, z.core.$strict>;
+        sealed: z.ZodOptional<z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-input">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+}, z.core.$strip>, z.ZodObject<{
+    v: z.ZodNumber;
+    id: z.ZodUUID;
+    ts: z.ZodISODateTime;
+    type: z.ZodLiteral<"task.offer_for_agent_sealed">;
+    task_id: z.ZodString;
+    session_ref: z.ZodOptional<z.ZodString>;
+    seq: z.ZodNumber;
+    payload: z.ZodObject<{
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+        agentMemory: z.ZodOptional<z.ZodEnum<{
+            none: "none";
+            read: "read";
+            "read-write": "read-write";
+        }>>;
+        requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        runtime: z.ZodOptional<z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            pi: "pi";
+        }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
+        dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            lane: z.ZodLiteral<"subscription">;
+            runtimeId: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+            }>;
+            providerId: z.ZodNull;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerId: z.ZodString;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok-profile">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerProfile: z.ZodObject<{
+                profileRef: z.ZodString;
+                profileRevision: z.ZodString;
+                profileHash: z.ZodString;
+                modelId: z.ZodString;
+                requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                    "image-input": "image-input";
+                }>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>], "lane">>;
+        terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            mode: z.ZodLiteral<"none">;
+        }, z.core.$strict>, z.ZodObject<{
+            mode: z.ZodLiteral<"result-document">;
+            contract: z.ZodString;
+            schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
+        }, z.core.$strict>], "mode">>;
+        sessionRef: z.ZodOptional<z.ZodString>;
+        limits: z.ZodOptional<z.ZodObject<{
+            maxDurationMs: z.ZodOptional<z.ZodNumber>;
+            maxTokens: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>;
+        instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+            blobRef: z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+        }, z.core.$strict>]>>;
+        sealing: z.ZodObject<{
+            scopeId: z.ZodString;
+            epoch: z.ZodNumber;
+            categories: z.ZodArray<z.ZodEnum<{
+                "task-input": "task-input";
+                "task-output": "task-output";
+            }>>;
+        }, z.core.$strict>;
+        sealed: z.ZodOptional<z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-input">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+}, z.core.$strip>, z.ZodObject<{
+    v: z.ZodNumber;
+    id: z.ZodUUID;
+    ts: z.ZodISODateTime;
+    type: z.ZodLiteral<"task.offer_for_agent_with_egress_sealed">;
+    task_id: z.ZodString;
+    session_ref: z.ZodOptional<z.ZodString>;
+    seq: z.ZodNumber;
+    payload: z.ZodObject<{
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+        agentMemory: z.ZodOptional<z.ZodEnum<{
+            none: "none";
+            read: "read";
+            "read-write": "read-write";
+        }>>;
+        requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        runtime: z.ZodOptional<z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            pi: "pi";
+        }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
+        dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            lane: z.ZodLiteral<"subscription">;
+            runtimeId: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+            }>;
+            providerId: z.ZodNull;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerId: z.ZodString;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok-profile">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerProfile: z.ZodObject<{
+                profileRef: z.ZodString;
+                profileRevision: z.ZodString;
+                profileHash: z.ZodString;
+                modelId: z.ZodString;
+                requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                    "image-input": "image-input";
+                }>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>], "lane">>;
+        terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            mode: z.ZodLiteral<"none">;
+        }, z.core.$strict>, z.ZodObject<{
+            mode: z.ZodLiteral<"result-document">;
+            contract: z.ZodString;
+            schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
+        }, z.core.$strict>], "mode">>;
+        limits: z.ZodOptional<z.ZodObject<{
+            maxDurationMs: z.ZodOptional<z.ZodNumber>;
+            maxTokens: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>;
+        sessionRef: z.ZodString;
+        egressPolicy: z.ZodObject<{
+            policyRevision: z.ZodString;
+            activity: z.ZodObject<{
+                delivery: z.ZodLiteral<"latest-value">;
+                maxCoalesceMs: z.ZodNumber;
+                maxEventBytes: z.ZodNumber;
+            }, z.core.$strict>;
+            reliable: z.ZodObject<{
+                maxPendingEventsPerAgent: z.ZodNumber;
+                maxPendingBytesPerAgent: z.ZodNumber;
+                maxPendingBytesPerTenant: z.ZodNumber;
+            }, z.core.$strict>;
+            transfers: z.ZodObject<{
+                workspace: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+                transcript: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+                artifact: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
+        messageEgress: z.ZodOptional<z.ZodObject<{
+            mode: z.ZodLiteral<"required">;
+            contract: z.ZodString;
+            contentType: z.ZodEnum<{
+                "text/markdown": "text/markdown";
+                "text/plain": "text/plain";
+            }>;
+            maxBytes: z.ZodNumber;
+        }, z.core.$strict>>;
+        instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+            blobRef: z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+        }, z.core.$strict>]>>;
+        sealing: z.ZodObject<{
+            scopeId: z.ZodString;
+            epoch: z.ZodNumber;
+            categories: z.ZodArray<z.ZodEnum<{
+                "task-input": "task-input";
+                "task-output": "task-output";
+            }>>;
+        }, z.core.$strict>;
+        sealed: z.ZodOptional<z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-input">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+}, z.core.$strip>, z.ZodObject<{
+    v: z.ZodNumber;
+    id: z.ZodUUID;
+    ts: z.ZodISODateTime;
+    type: z.ZodLiteral<"task.offer_for_agent_with_egress_fresh_sealed">;
+    task_id: z.ZodString;
+    session_ref: z.ZodOptional<z.ZodString>;
+    seq: z.ZodNumber;
+    payload: z.ZodObject<{
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+        agentMemory: z.ZodOptional<z.ZodEnum<{
+            none: "none";
+            read: "read";
+            "read-write": "read-write";
+        }>>;
+        requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        runtime: z.ZodOptional<z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            pi: "pi";
+        }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
+        dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            lane: z.ZodLiteral<"subscription">;
+            runtimeId: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+            }>;
+            providerId: z.ZodNull;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerId: z.ZodString;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok-profile">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerProfile: z.ZodObject<{
+                profileRef: z.ZodString;
+                profileRevision: z.ZodString;
+                profileHash: z.ZodString;
+                modelId: z.ZodString;
+                requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                    "image-input": "image-input";
+                }>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>], "lane">>;
+        terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            mode: z.ZodLiteral<"none">;
+        }, z.core.$strict>, z.ZodObject<{
+            mode: z.ZodLiteral<"result-document">;
+            contract: z.ZodString;
+            schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
+        }, z.core.$strict>], "mode">>;
+        limits: z.ZodOptional<z.ZodObject<{
+            maxDurationMs: z.ZodOptional<z.ZodNumber>;
+            maxTokens: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>;
+        egressPolicy: z.ZodObject<{
+            policyRevision: z.ZodString;
+            activity: z.ZodObject<{
+                delivery: z.ZodLiteral<"latest-value">;
+                maxCoalesceMs: z.ZodNumber;
+                maxEventBytes: z.ZodNumber;
+            }, z.core.$strict>;
+            reliable: z.ZodObject<{
+                maxPendingEventsPerAgent: z.ZodNumber;
+                maxPendingBytesPerAgent: z.ZodNumber;
+                maxPendingBytesPerTenant: z.ZodNumber;
+            }, z.core.$strict>;
+            transfers: z.ZodObject<{
+                workspace: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+                transcript: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+                artifact: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
+        messageEgress: z.ZodOptional<z.ZodObject<{
+            mode: z.ZodLiteral<"required">;
+            contract: z.ZodString;
+            contentType: z.ZodEnum<{
+                "text/markdown": "text/markdown";
+                "text/plain": "text/plain";
+            }>;
+            maxBytes: z.ZodNumber;
+        }, z.core.$strict>>;
+        instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+            blobRef: z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+        }, z.core.$strict>]>>;
+        sealing: z.ZodObject<{
+            scopeId: z.ZodString;
+            epoch: z.ZodNumber;
+            categories: z.ZodArray<z.ZodEnum<{
+                "task-input": "task-input";
+                "task-output": "task-output";
+            }>>;
+        }, z.core.$strict>;
+        sealed: z.ZodOptional<z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-input">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+}, z.core.$strip>, z.ZodObject<{
+    v: z.ZodNumber;
+    id: z.ZodUUID;
+    ts: z.ZodISODateTime;
+    type: z.ZodLiteral<"task.steer_sealed">;
+    task_id: z.ZodString;
+    session_ref: z.ZodOptional<z.ZodString>;
+    seq: z.ZodNumber;
+    payload: z.ZodObject<{
+        steerId: z.ZodUUID;
+        sealed: z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-input">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>;
+    }, z.core.$strict>;
+}, z.core.$strip>, z.ZodObject<{
+    v: z.ZodNumber;
+    id: z.ZodUUID;
+    ts: z.ZodISODateTime;
+    type: z.ZodLiteral<"task.complete_sealed">;
+    task_id: z.ZodString;
+    session_ref: z.ZodOptional<z.ZodString>;
+    seq: z.ZodOptional<z.ZodNumber>;
+    payload: z.ZodObject<{
+        harnessId: z.ZodOptional<z.ZodString>;
+        sessionRef: z.ZodString;
+        usage: z.ZodOptional<z.ZodObject<{
+            runtime: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+                pi: "pi";
+            }>;
+            provider: z.ZodOptional<z.ZodString>;
+            model: z.ZodOptional<z.ZodString>;
+            promptTokens: z.ZodOptional<z.ZodNumber>;
+            completionTokens: z.ZodOptional<z.ZodNumber>;
+            durationMs: z.ZodOptional<z.ZodNumber>;
+            clientVersion: z.ZodString;
+            reportedAt: z.ZodISODateTime;
+        }, z.core.$strip>>;
+        agentRef: z.ZodOptional<z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>>;
+        agentHomeProjection: z.ZodOptional<z.ZodObject<{
+            profileRevision: z.ZodString;
+            projectionHash: z.ZodString;
+        }, z.core.$strict>>;
+        agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            outcome: z.ZodLiteral<"unchanged">;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"reader-attributed">;
+            paths: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"unattributed">;
+            paths: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"unmeasured">;
+        }, z.core.$strict>], "outcome">>;
+        sealed: z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-output">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>;
+    }, z.core.$strict>;
+}, z.core.$strip>, z.ZodObject<{
+    v: z.ZodNumber;
+    id: z.ZodUUID;
+    ts: z.ZodISODateTime;
+    type: z.ZodLiteral<"task.fail_sealed">;
+    task_id: z.ZodString;
+    session_ref: z.ZodOptional<z.ZodString>;
+    seq: z.ZodOptional<z.ZodNumber>;
+    payload: z.ZodObject<{
+        recovery: z.ZodOptional<z.ZodObject<{
+            kind: z.ZodLiteral<"daemon_interrupted">;
+            offerId: z.ZodUUID;
+        }, z.core.$strict>>;
+        harnessId: z.ZodOptional<z.ZodString>;
+        retryable: z.ZodOptional<z.ZodBoolean>;
+        usage: z.ZodOptional<z.ZodObject<{
+            runtime: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+                pi: "pi";
+            }>;
+            provider: z.ZodOptional<z.ZodString>;
+            model: z.ZodOptional<z.ZodString>;
+            promptTokens: z.ZodOptional<z.ZodNumber>;
+            completionTokens: z.ZodOptional<z.ZodNumber>;
+            durationMs: z.ZodOptional<z.ZodNumber>;
+            clientVersion: z.ZodString;
+            reportedAt: z.ZodISODateTime;
+        }, z.core.$strip>>;
+        agentRef: z.ZodOptional<z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>>;
+        agentHomeProjection: z.ZodOptional<z.ZodObject<{
+            profileRevision: z.ZodString;
+            projectionHash: z.ZodString;
+        }, z.core.$strict>>;
+        agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            outcome: z.ZodLiteral<"unchanged">;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"reader-attributed">;
+            paths: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"unattributed">;
+            paths: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"unmeasured">;
+        }, z.core.$strict>], "outcome">>;
+        sealed: z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-output">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>;
+    }, z.core.$strict>;
+}, z.core.$strip>, z.ZodObject<{
+    v: z.ZodNumber;
+    id: z.ZodUUID;
+    ts: z.ZodISODateTime;
+    type: z.ZodLiteral<"task.decline_sealed">;
+    task_id: z.ZodString;
+    session_ref: z.ZodOptional<z.ZodString>;
+    seq: z.ZodOptional<z.ZodNumber>;
+    payload: z.ZodObject<{
+        retryable: z.ZodOptional<z.ZodBoolean>;
+        agentRef: z.ZodOptional<z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>>;
+        code: z.ZodOptional<z.ZodEnum<{
+            agent_home_reader_busy: "agent_home_reader_busy";
+            agent_home_writer_busy: "agent_home_writer_busy";
+            sealed_content_mac_mismatch: "sealed_content_mac_mismatch";
+            sealed_key_unavailable: "sealed_key_unavailable";
+            sealed_open_failed: "sealed_open_failed";
+            sealing_policy_mismatch: "sealing_policy_mismatch";
+        }>>;
+        sealed: z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-output">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>;
+    }, z.core.$strict>;
+}, z.core.$strip>, z.ZodObject<{
+    v: z.ZodNumber;
+    id: z.ZodUUID;
+    ts: z.ZodISODateTime;
+    type: z.ZodLiteral<"task.cancelled_sealed">;
+    task_id: z.ZodString;
+    session_ref: z.ZodOptional<z.ZodString>;
+    seq: z.ZodOptional<z.ZodNumber>;
+    payload: z.ZodObject<{
+        harnessId: z.ZodOptional<z.ZodString>;
+        usage: z.ZodOptional<z.ZodObject<{
+            runtime: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+                pi: "pi";
+            }>;
+            provider: z.ZodOptional<z.ZodString>;
+            model: z.ZodOptional<z.ZodString>;
+            promptTokens: z.ZodOptional<z.ZodNumber>;
+            completionTokens: z.ZodOptional<z.ZodNumber>;
+            durationMs: z.ZodOptional<z.ZodNumber>;
+            clientVersion: z.ZodString;
+            reportedAt: z.ZodISODateTime;
+        }, z.core.$strip>>;
+        agentRef: z.ZodOptional<z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>>;
+        agentHomeProjection: z.ZodOptional<z.ZodObject<{
+            profileRevision: z.ZodString;
+            projectionHash: z.ZodString;
+        }, z.core.$strict>>;
+        agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            outcome: z.ZodLiteral<"unchanged">;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"reader-attributed">;
+            paths: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"unattributed">;
+            paths: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"unmeasured">;
+        }, z.core.$strict>], "outcome">>;
+        sealed: z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-output">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>;
+    }, z.core.$strict>;
+}, z.core.$strip>, z.ZodObject<{
+    v: z.ZodNumber;
+    id: z.ZodUUID;
+    ts: z.ZodISODateTime;
+    type: z.ZodLiteral<"task.progress_sealed">;
+    task_id: z.ZodString;
+    session_ref: z.ZodOptional<z.ZodString>;
+    seq: z.ZodOptional<z.ZodNumber>;
+    payload: z.ZodObject<{
+        seq: z.ZodNumber;
+        sealed: z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-output">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>;
+    }, z.core.$strict>;
+}, z.core.$strip>, z.ZodObject<{
+    v: z.ZodNumber;
+    id: z.ZodUUID;
+    ts: z.ZodISODateTime;
+    type: z.ZodLiteral<"task.artifact_sealed">;
+    task_id: z.ZodString;
+    session_ref: z.ZodOptional<z.ZodString>;
+    seq: z.ZodOptional<z.ZodNumber>;
+    payload: z.ZodObject<{
+        name: z.ZodString;
+        contentType: z.ZodString;
+        sealed: z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-output">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>;
+    }, z.core.$strict>;
+}, z.core.$strip>, z.ZodObject<{
+    v: z.ZodNumber;
+    id: z.ZodUUID;
+    ts: z.ZodISODateTime;
+    type: z.ZodLiteral<"task.await_approval_sealed">;
+    task_id: z.ZodString;
+    session_ref: z.ZodOptional<z.ZodString>;
+    seq: z.ZodOptional<z.ZodNumber>;
+    payload: z.ZodObject<{
+        approvalId: z.ZodString;
+        sealed: z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-output">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>;
+    }, z.core.$strict>;
 }, z.core.$strip>], "type">;
 export type Envelope = z.infer<typeof EnvelopeSchema>;
 /** `true` for every message type the server sends to the daemon (envelope `seq` is required for these). */
@@ -3963,40 +4629,6 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 maxDurationMs: z.ZodOptional<z.ZodNumber>;
                 maxTokens: z.ZodOptional<z.ZodNumber>;
             }, z.core.$strip>>;
-            sealing: z.ZodOptional<z.ZodObject<{
-                scopeId: z.ZodString;
-                epoch: z.ZodNumber;
-                categories: z.ZodArray<z.ZodEnum<{
-                    "task-input": "task-input";
-                    "task-output": "task-output";
-                }>>;
-            }, z.core.$strict>>;
-            sealed: z.ZodOptional<z.ZodObject<{
-                v: z.ZodLiteral<1>;
-                suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-                category: z.ZodLiteral<"task-input">;
-                scope: z.ZodObject<{
-                    id: z.ZodString;
-                    epoch: z.ZodNumber;
-                    keyId: z.ZodString;
-                }, z.core.$strict>;
-                chainHead: z.ZodObject<{
-                    seq: z.ZodNumber;
-                    hash: z.ZodString;
-                }, z.core.$strict>;
-                sender: z.ZodString;
-                salt: z.ZodString;
-                nonce: z.ZodString;
-                paddedLength: z.ZodNumber;
-                contentMac: z.ZodString;
-                ciphertext: z.ZodOptional<z.ZodString>;
-                ciphertextRef: z.ZodOptional<z.ZodObject<{
-                    blobId: z.ZodString;
-                    contentHash: z.ZodString;
-                    size: z.ZodNumber;
-                    contentType: z.ZodString;
-                }, z.core.$strict>>;
-            }, z.core.$strict>>;
         }, z.core.$strip>;
     }, z.core.$strip>, z.ZodObject<{
         v: z.ZodNumber;
@@ -4054,40 +4686,6 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 maxDurationMs: z.ZodOptional<z.ZodNumber>;
                 maxTokens: z.ZodOptional<z.ZodNumber>;
             }, z.core.$strip>>;
-            sealing: z.ZodOptional<z.ZodObject<{
-                scopeId: z.ZodString;
-                epoch: z.ZodNumber;
-                categories: z.ZodArray<z.ZodEnum<{
-                    "task-input": "task-input";
-                    "task-output": "task-output";
-                }>>;
-            }, z.core.$strict>>;
-            sealed: z.ZodOptional<z.ZodObject<{
-                v: z.ZodLiteral<1>;
-                suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-                category: z.ZodLiteral<"task-input">;
-                scope: z.ZodObject<{
-                    id: z.ZodString;
-                    epoch: z.ZodNumber;
-                    keyId: z.ZodString;
-                }, z.core.$strict>;
-                chainHead: z.ZodObject<{
-                    seq: z.ZodNumber;
-                    hash: z.ZodString;
-                }, z.core.$strict>;
-                sender: z.ZodString;
-                salt: z.ZodString;
-                nonce: z.ZodString;
-                paddedLength: z.ZodNumber;
-                contentMac: z.ZodString;
-                ciphertext: z.ZodOptional<z.ZodString>;
-                ciphertextRef: z.ZodOptional<z.ZodObject<{
-                    blobId: z.ZodString;
-                    contentHash: z.ZodString;
-                    size: z.ZodNumber;
-                    contentType: z.ZodString;
-                }, z.core.$strict>>;
-            }, z.core.$strict>>;
             requiredToolsets: z.ZodArray<z.ZodString>;
         }, z.core.$strict>;
     }, z.core.$strip>, z.ZodObject<{
@@ -4163,40 +4761,6 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 maxDurationMs: z.ZodOptional<z.ZodNumber>;
                 maxTokens: z.ZodOptional<z.ZodNumber>;
             }, z.core.$strip>>;
-            sealing: z.ZodOptional<z.ZodObject<{
-                scopeId: z.ZodString;
-                epoch: z.ZodNumber;
-                categories: z.ZodArray<z.ZodEnum<{
-                    "task-input": "task-input";
-                    "task-output": "task-output";
-                }>>;
-            }, z.core.$strict>>;
-            sealed: z.ZodOptional<z.ZodObject<{
-                v: z.ZodLiteral<1>;
-                suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-                category: z.ZodLiteral<"task-input">;
-                scope: z.ZodObject<{
-                    id: z.ZodString;
-                    epoch: z.ZodNumber;
-                    keyId: z.ZodString;
-                }, z.core.$strict>;
-                chainHead: z.ZodObject<{
-                    seq: z.ZodNumber;
-                    hash: z.ZodString;
-                }, z.core.$strict>;
-                sender: z.ZodString;
-                salt: z.ZodString;
-                nonce: z.ZodString;
-                paddedLength: z.ZodNumber;
-                contentMac: z.ZodString;
-                ciphertext: z.ZodOptional<z.ZodString>;
-                ciphertextRef: z.ZodOptional<z.ZodObject<{
-                    blobId: z.ZodString;
-                    contentHash: z.ZodString;
-                    size: z.ZodNumber;
-                    contentType: z.ZodString;
-                }, z.core.$strict>>;
-            }, z.core.$strict>>;
         }, z.core.$strict>;
     }, z.core.$strip>, z.ZodObject<{
         v: z.ZodNumber;
@@ -4270,40 +4834,6 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 maxDurationMs: z.ZodOptional<z.ZodNumber>;
                 maxTokens: z.ZodOptional<z.ZodNumber>;
             }, z.core.$strip>>;
-            sealing: z.ZodOptional<z.ZodObject<{
-                scopeId: z.ZodString;
-                epoch: z.ZodNumber;
-                categories: z.ZodArray<z.ZodEnum<{
-                    "task-input": "task-input";
-                    "task-output": "task-output";
-                }>>;
-            }, z.core.$strict>>;
-            sealed: z.ZodOptional<z.ZodObject<{
-                v: z.ZodLiteral<1>;
-                suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-                category: z.ZodLiteral<"task-input">;
-                scope: z.ZodObject<{
-                    id: z.ZodString;
-                    epoch: z.ZodNumber;
-                    keyId: z.ZodString;
-                }, z.core.$strict>;
-                chainHead: z.ZodObject<{
-                    seq: z.ZodNumber;
-                    hash: z.ZodString;
-                }, z.core.$strict>;
-                sender: z.ZodString;
-                salt: z.ZodString;
-                nonce: z.ZodString;
-                paddedLength: z.ZodNumber;
-                contentMac: z.ZodString;
-                ciphertext: z.ZodOptional<z.ZodString>;
-                ciphertextRef: z.ZodOptional<z.ZodObject<{
-                    blobId: z.ZodString;
-                    contentHash: z.ZodString;
-                    size: z.ZodNumber;
-                    contentType: z.ZodString;
-                }, z.core.$strict>>;
-            }, z.core.$strict>>;
             sessionRef: z.ZodString;
             egressPolicy: z.ZodObject<{
                 policyRevision: z.ZodString;
@@ -4414,40 +4944,6 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 maxDurationMs: z.ZodOptional<z.ZodNumber>;
                 maxTokens: z.ZodOptional<z.ZodNumber>;
             }, z.core.$strip>>;
-            sealing: z.ZodOptional<z.ZodObject<{
-                scopeId: z.ZodString;
-                epoch: z.ZodNumber;
-                categories: z.ZodArray<z.ZodEnum<{
-                    "task-input": "task-input";
-                    "task-output": "task-output";
-                }>>;
-            }, z.core.$strict>>;
-            sealed: z.ZodOptional<z.ZodObject<{
-                v: z.ZodLiteral<1>;
-                suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-                category: z.ZodLiteral<"task-input">;
-                scope: z.ZodObject<{
-                    id: z.ZodString;
-                    epoch: z.ZodNumber;
-                    keyId: z.ZodString;
-                }, z.core.$strict>;
-                chainHead: z.ZodObject<{
-                    seq: z.ZodNumber;
-                    hash: z.ZodString;
-                }, z.core.$strict>;
-                sender: z.ZodString;
-                salt: z.ZodString;
-                nonce: z.ZodString;
-                paddedLength: z.ZodNumber;
-                contentMac: z.ZodString;
-                ciphertext: z.ZodOptional<z.ZodString>;
-                ciphertextRef: z.ZodOptional<z.ZodObject<{
-                    blobId: z.ZodString;
-                    contentHash: z.ZodString;
-                    size: z.ZodNumber;
-                    contentType: z.ZodString;
-                }, z.core.$strict>>;
-            }, z.core.$strict>>;
             egressPolicy: z.ZodObject<{
                 policyRevision: z.ZodString;
                 activity: z.ZodObject<{
@@ -4893,32 +5389,6 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
         seq: z.ZodNumber;
         payload: z.ZodObject<{
             text: z.ZodString;
-            sealed: z.ZodOptional<z.ZodObject<{
-                v: z.ZodLiteral<1>;
-                suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-                category: z.ZodLiteral<"task-input">;
-                scope: z.ZodObject<{
-                    id: z.ZodString;
-                    epoch: z.ZodNumber;
-                    keyId: z.ZodString;
-                }, z.core.$strict>;
-                chainHead: z.ZodObject<{
-                    seq: z.ZodNumber;
-                    hash: z.ZodString;
-                }, z.core.$strict>;
-                sender: z.ZodString;
-                salt: z.ZodString;
-                nonce: z.ZodString;
-                paddedLength: z.ZodNumber;
-                contentMac: z.ZodString;
-                ciphertext: z.ZodOptional<z.ZodString>;
-                ciphertextRef: z.ZodOptional<z.ZodObject<{
-                    blobId: z.ZodString;
-                    contentHash: z.ZodString;
-                    size: z.ZodNumber;
-                    contentType: z.ZodString;
-                }, z.core.$strict>>;
-            }, z.core.$strict>>;
         }, z.core.$strip>;
     }, z.core.$strip>, z.ZodObject<{
         v: z.ZodNumber;
@@ -4981,32 +5451,6 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 sealed_open_failed: "sealed_open_failed";
                 sealing_policy_mismatch: "sealing_policy_mismatch";
             }>>;
-            sealed: z.ZodOptional<z.ZodObject<{
-                v: z.ZodLiteral<1>;
-                suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-                category: z.ZodLiteral<"task-output">;
-                scope: z.ZodObject<{
-                    id: z.ZodString;
-                    epoch: z.ZodNumber;
-                    keyId: z.ZodString;
-                }, z.core.$strict>;
-                chainHead: z.ZodObject<{
-                    seq: z.ZodNumber;
-                    hash: z.ZodString;
-                }, z.core.$strict>;
-                sender: z.ZodString;
-                salt: z.ZodString;
-                nonce: z.ZodString;
-                paddedLength: z.ZodNumber;
-                contentMac: z.ZodString;
-                ciphertext: z.ZodOptional<z.ZodString>;
-                ciphertextRef: z.ZodOptional<z.ZodObject<{
-                    blobId: z.ZodString;
-                    contentHash: z.ZodString;
-                    size: z.ZodNumber;
-                    contentType: z.ZodString;
-                }, z.core.$strict>>;
-            }, z.core.$strict>>;
         }, z.core.$strip>;
     }, z.core.$strip>, z.ZodObject<{
         v: z.ZodNumber;
@@ -5102,32 +5546,6 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
             }, z.core.$strip>], "type">, z.ZodObject<{
                 type: z.ZodString;
             }, z.core.$loose>]>>;
-            sealed: z.ZodOptional<z.ZodObject<{
-                v: z.ZodLiteral<1>;
-                suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-                category: z.ZodLiteral<"task-output">;
-                scope: z.ZodObject<{
-                    id: z.ZodString;
-                    epoch: z.ZodNumber;
-                    keyId: z.ZodString;
-                }, z.core.$strict>;
-                chainHead: z.ZodObject<{
-                    seq: z.ZodNumber;
-                    hash: z.ZodString;
-                }, z.core.$strict>;
-                sender: z.ZodString;
-                salt: z.ZodString;
-                nonce: z.ZodString;
-                paddedLength: z.ZodNumber;
-                contentMac: z.ZodString;
-                ciphertext: z.ZodOptional<z.ZodString>;
-                ciphertextRef: z.ZodOptional<z.ZodObject<{
-                    blobId: z.ZodString;
-                    contentHash: z.ZodString;
-                    size: z.ZodNumber;
-                    contentType: z.ZodString;
-                }, z.core.$strict>>;
-            }, z.core.$strict>>;
         }, z.core.$strip>;
     }, z.core.$strip>, z.ZodObject<{
         v: z.ZodNumber;
@@ -5148,32 +5566,6 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 contentType: z.ZodString;
                 url: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>>;
-            sealed: z.ZodOptional<z.ZodObject<{
-                v: z.ZodLiteral<1>;
-                suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-                category: z.ZodLiteral<"task-output">;
-                scope: z.ZodObject<{
-                    id: z.ZodString;
-                    epoch: z.ZodNumber;
-                    keyId: z.ZodString;
-                }, z.core.$strict>;
-                chainHead: z.ZodObject<{
-                    seq: z.ZodNumber;
-                    hash: z.ZodString;
-                }, z.core.$strict>;
-                sender: z.ZodString;
-                salt: z.ZodString;
-                nonce: z.ZodString;
-                paddedLength: z.ZodNumber;
-                contentMac: z.ZodString;
-                ciphertext: z.ZodOptional<z.ZodString>;
-                ciphertextRef: z.ZodOptional<z.ZodObject<{
-                    blobId: z.ZodString;
-                    contentHash: z.ZodString;
-                    size: z.ZodNumber;
-                    contentType: z.ZodString;
-                }, z.core.$strict>>;
-            }, z.core.$strict>>;
         }, z.core.$strip>;
     }, z.core.$strip>, z.ZodObject<{
         v: z.ZodNumber;
@@ -5186,32 +5578,6 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
         payload: z.ZodObject<{
             summary: z.ZodString;
             approvalId: z.ZodOptional<z.ZodString>;
-            sealed: z.ZodOptional<z.ZodObject<{
-                v: z.ZodLiteral<1>;
-                suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-                category: z.ZodLiteral<"task-output">;
-                scope: z.ZodObject<{
-                    id: z.ZodString;
-                    epoch: z.ZodNumber;
-                    keyId: z.ZodString;
-                }, z.core.$strict>;
-                chainHead: z.ZodObject<{
-                    seq: z.ZodNumber;
-                    hash: z.ZodString;
-                }, z.core.$strict>;
-                sender: z.ZodString;
-                salt: z.ZodString;
-                nonce: z.ZodString;
-                paddedLength: z.ZodNumber;
-                contentMac: z.ZodString;
-                ciphertext: z.ZodOptional<z.ZodString>;
-                ciphertextRef: z.ZodOptional<z.ZodObject<{
-                    blobId: z.ZodString;
-                    contentHash: z.ZodString;
-                    size: z.ZodNumber;
-                    contentType: z.ZodString;
-                }, z.core.$strict>>;
-            }, z.core.$strict>>;
         }, z.core.$strip>;
     }, z.core.$strip>, z.ZodObject<{
         v: z.ZodNumber;
@@ -5272,32 +5638,6 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
             }, z.core.$strict>, z.ZodObject<{
                 outcome: z.ZodLiteral<"unmeasured">;
             }, z.core.$strict>], "outcome">>;
-            sealed: z.ZodOptional<z.ZodObject<{
-                v: z.ZodLiteral<1>;
-                suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-                category: z.ZodLiteral<"task-output">;
-                scope: z.ZodObject<{
-                    id: z.ZodString;
-                    epoch: z.ZodNumber;
-                    keyId: z.ZodString;
-                }, z.core.$strict>;
-                chainHead: z.ZodObject<{
-                    seq: z.ZodNumber;
-                    hash: z.ZodString;
-                }, z.core.$strict>;
-                sender: z.ZodString;
-                salt: z.ZodString;
-                nonce: z.ZodString;
-                paddedLength: z.ZodNumber;
-                contentMac: z.ZodString;
-                ciphertext: z.ZodOptional<z.ZodString>;
-                ciphertextRef: z.ZodOptional<z.ZodObject<{
-                    blobId: z.ZodString;
-                    contentHash: z.ZodString;
-                    size: z.ZodNumber;
-                    contentType: z.ZodString;
-                }, z.core.$strict>>;
-            }, z.core.$strict>>;
         }, z.core.$strip>;
     }, z.core.$strip>, z.ZodObject<{
         v: z.ZodNumber;
@@ -5353,32 +5693,6 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
             }, z.core.$strict>, z.ZodObject<{
                 outcome: z.ZodLiteral<"unmeasured">;
             }, z.core.$strict>], "outcome">>;
-            sealed: z.ZodOptional<z.ZodObject<{
-                v: z.ZodLiteral<1>;
-                suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-                category: z.ZodLiteral<"task-output">;
-                scope: z.ZodObject<{
-                    id: z.ZodString;
-                    epoch: z.ZodNumber;
-                    keyId: z.ZodString;
-                }, z.core.$strict>;
-                chainHead: z.ZodObject<{
-                    seq: z.ZodNumber;
-                    hash: z.ZodString;
-                }, z.core.$strict>;
-                sender: z.ZodString;
-                salt: z.ZodString;
-                nonce: z.ZodString;
-                paddedLength: z.ZodNumber;
-                contentMac: z.ZodString;
-                ciphertext: z.ZodOptional<z.ZodString>;
-                ciphertextRef: z.ZodOptional<z.ZodObject<{
-                    blobId: z.ZodString;
-                    contentHash: z.ZodString;
-                    size: z.ZodNumber;
-                    contentType: z.ZodString;
-                }, z.core.$strict>>;
-            }, z.core.$strict>>;
         }, z.core.$strip>;
     }, z.core.$strip>, z.ZodObject<{
         v: z.ZodNumber;
@@ -5424,32 +5738,6 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
             }, z.core.$strict>, z.ZodObject<{
                 outcome: z.ZodLiteral<"unmeasured">;
             }, z.core.$strict>], "outcome">>;
-            sealed: z.ZodOptional<z.ZodObject<{
-                v: z.ZodLiteral<1>;
-                suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-                category: z.ZodLiteral<"task-output">;
-                scope: z.ZodObject<{
-                    id: z.ZodString;
-                    epoch: z.ZodNumber;
-                    keyId: z.ZodString;
-                }, z.core.$strict>;
-                chainHead: z.ZodObject<{
-                    seq: z.ZodNumber;
-                    hash: z.ZodString;
-                }, z.core.$strict>;
-                sender: z.ZodString;
-                salt: z.ZodString;
-                nonce: z.ZodString;
-                paddedLength: z.ZodNumber;
-                contentMac: z.ZodString;
-                ciphertext: z.ZodOptional<z.ZodString>;
-                ciphertextRef: z.ZodOptional<z.ZodObject<{
-                    blobId: z.ZodString;
-                    contentHash: z.ZodString;
-                    size: z.ZodNumber;
-                    contentType: z.ZodString;
-                }, z.core.$strict>>;
-            }, z.core.$strict>>;
         }, z.core.$strip>;
     }, z.core.$strip>, z.ZodObject<{
         v: z.ZodNumber;
@@ -5646,6 +5934,998 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 "text-not-allowlisted": "text-not-allowlisted";
             }>;
         }, z.core.$strict>], "decision">;
+    }, z.core.$strip>, z.ZodObject<{
+        v: z.ZodNumber;
+        id: z.ZodUUID;
+        ts: z.ZodISODateTime;
+        type: z.ZodLiteral<"task.offer_sealed">;
+        task_id: z.ZodString;
+        session_ref: z.ZodOptional<z.ZodString>;
+        seq: z.ZodNumber;
+        payload: z.ZodObject<{
+            runtime: z.ZodOptional<z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+                pi: "pi";
+            }>>;
+            harnessId: z.ZodOptional<z.ZodString>;
+            dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                lane: z.ZodLiteral<"subscription">;
+                runtimeId: z.ZodEnum<{
+                    claude: "claude";
+                    codex: "codex";
+                }>;
+                providerId: z.ZodNull;
+                modelId: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
+                lane: z.ZodLiteral<"byok">;
+                runtimeId: z.ZodLiteral<"pi">;
+                providerId: z.ZodString;
+                modelId: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
+                lane: z.ZodLiteral<"byok-profile">;
+                runtimeId: z.ZodLiteral<"pi">;
+                providerProfile: z.ZodObject<{
+                    profileRef: z.ZodString;
+                    profileRevision: z.ZodString;
+                    profileHash: z.ZodString;
+                    modelId: z.ZodString;
+                    requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                        "image-input": "image-input";
+                    }>>;
+                }, z.core.$strict>;
+            }, z.core.$strict>], "lane">>;
+            sessionRef: z.ZodOptional<z.ZodString>;
+            workspaceHint: z.ZodOptional<z.ZodString>;
+            limits: z.ZodOptional<z.ZodObject<{
+                maxDurationMs: z.ZodOptional<z.ZodNumber>;
+                maxTokens: z.ZodOptional<z.ZodNumber>;
+            }, z.core.$strip>>;
+            instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+                blobRef: z.ZodObject<{
+                    blobId: z.ZodString;
+                    contentHash: z.ZodString;
+                    size: z.ZodNumber;
+                    contentType: z.ZodString;
+                    url: z.ZodOptional<z.ZodString>;
+                }, z.core.$strip>;
+            }, z.core.$strict>]>>;
+            sealing: z.ZodObject<{
+                scopeId: z.ZodString;
+                epoch: z.ZodNumber;
+                categories: z.ZodArray<z.ZodEnum<{
+                    "task-input": "task-input";
+                    "task-output": "task-output";
+                }>>;
+            }, z.core.$strict>;
+            sealed: z.ZodOptional<z.ZodObject<{
+                v: z.ZodLiteral<1>;
+                suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+                category: z.ZodLiteral<"task-input">;
+                scope: z.ZodObject<{
+                    id: z.ZodString;
+                    epoch: z.ZodNumber;
+                    keyId: z.ZodString;
+                }, z.core.$strict>;
+                chainHead: z.ZodObject<{
+                    seq: z.ZodNumber;
+                    hash: z.ZodString;
+                }, z.core.$strict>;
+                sender: z.ZodString;
+                salt: z.ZodString;
+                nonce: z.ZodString;
+                paddedLength: z.ZodNumber;
+                contentMac: z.ZodString;
+                ciphertext: z.ZodOptional<z.ZodString>;
+                ciphertextRef: z.ZodOptional<z.ZodObject<{
+                    blobId: z.ZodString;
+                    contentHash: z.ZodString;
+                    size: z.ZodNumber;
+                    contentType: z.ZodString;
+                }, z.core.$strict>>;
+            }, z.core.$strict>>;
+        }, z.core.$strict>;
+    }, z.core.$strip>, z.ZodObject<{
+        v: z.ZodNumber;
+        id: z.ZodUUID;
+        ts: z.ZodISODateTime;
+        type: z.ZodLiteral<"task.offer_with_toolsets_sealed">;
+        task_id: z.ZodString;
+        session_ref: z.ZodOptional<z.ZodString>;
+        seq: z.ZodNumber;
+        payload: z.ZodObject<{
+            runtime: z.ZodOptional<z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+                pi: "pi";
+            }>>;
+            harnessId: z.ZodOptional<z.ZodString>;
+            dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                lane: z.ZodLiteral<"subscription">;
+                runtimeId: z.ZodEnum<{
+                    claude: "claude";
+                    codex: "codex";
+                }>;
+                providerId: z.ZodNull;
+                modelId: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
+                lane: z.ZodLiteral<"byok">;
+                runtimeId: z.ZodLiteral<"pi">;
+                providerId: z.ZodString;
+                modelId: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
+                lane: z.ZodLiteral<"byok-profile">;
+                runtimeId: z.ZodLiteral<"pi">;
+                providerProfile: z.ZodObject<{
+                    profileRef: z.ZodString;
+                    profileRevision: z.ZodString;
+                    profileHash: z.ZodString;
+                    modelId: z.ZodString;
+                    requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                        "image-input": "image-input";
+                    }>>;
+                }, z.core.$strict>;
+            }, z.core.$strict>], "lane">>;
+            sessionRef: z.ZodOptional<z.ZodString>;
+            workspaceHint: z.ZodOptional<z.ZodString>;
+            limits: z.ZodOptional<z.ZodObject<{
+                maxDurationMs: z.ZodOptional<z.ZodNumber>;
+                maxTokens: z.ZodOptional<z.ZodNumber>;
+            }, z.core.$strip>>;
+            requiredToolsets: z.ZodArray<z.ZodString>;
+            instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+                blobRef: z.ZodObject<{
+                    blobId: z.ZodString;
+                    contentHash: z.ZodString;
+                    size: z.ZodNumber;
+                    contentType: z.ZodString;
+                    url: z.ZodOptional<z.ZodString>;
+                }, z.core.$strip>;
+            }, z.core.$strict>]>>;
+            sealing: z.ZodObject<{
+                scopeId: z.ZodString;
+                epoch: z.ZodNumber;
+                categories: z.ZodArray<z.ZodEnum<{
+                    "task-input": "task-input";
+                    "task-output": "task-output";
+                }>>;
+            }, z.core.$strict>;
+            sealed: z.ZodOptional<z.ZodObject<{
+                v: z.ZodLiteral<1>;
+                suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+                category: z.ZodLiteral<"task-input">;
+                scope: z.ZodObject<{
+                    id: z.ZodString;
+                    epoch: z.ZodNumber;
+                    keyId: z.ZodString;
+                }, z.core.$strict>;
+                chainHead: z.ZodObject<{
+                    seq: z.ZodNumber;
+                    hash: z.ZodString;
+                }, z.core.$strict>;
+                sender: z.ZodString;
+                salt: z.ZodString;
+                nonce: z.ZodString;
+                paddedLength: z.ZodNumber;
+                contentMac: z.ZodString;
+                ciphertext: z.ZodOptional<z.ZodString>;
+                ciphertextRef: z.ZodOptional<z.ZodObject<{
+                    blobId: z.ZodString;
+                    contentHash: z.ZodString;
+                    size: z.ZodNumber;
+                    contentType: z.ZodString;
+                }, z.core.$strict>>;
+            }, z.core.$strict>>;
+        }, z.core.$strict>;
+    }, z.core.$strip>, z.ZodObject<{
+        v: z.ZodNumber;
+        id: z.ZodUUID;
+        ts: z.ZodISODateTime;
+        type: z.ZodLiteral<"task.offer_for_agent_sealed">;
+        task_id: z.ZodString;
+        session_ref: z.ZodOptional<z.ZodString>;
+        seq: z.ZodNumber;
+        payload: z.ZodObject<{
+            agentRef: z.ZodObject<{
+                agentId: z.ZodString;
+                profileRevision: z.ZodString;
+            }, z.core.$strict>;
+            homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+            agentMemory: z.ZodOptional<z.ZodEnum<{
+                none: "none";
+                read: "read";
+                "read-write": "read-write";
+            }>>;
+            requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            runtime: z.ZodOptional<z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+                pi: "pi";
+            }>>;
+            harnessId: z.ZodOptional<z.ZodString>;
+            dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                lane: z.ZodLiteral<"subscription">;
+                runtimeId: z.ZodEnum<{
+                    claude: "claude";
+                    codex: "codex";
+                }>;
+                providerId: z.ZodNull;
+                modelId: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
+                lane: z.ZodLiteral<"byok">;
+                runtimeId: z.ZodLiteral<"pi">;
+                providerId: z.ZodString;
+                modelId: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
+                lane: z.ZodLiteral<"byok-profile">;
+                runtimeId: z.ZodLiteral<"pi">;
+                providerProfile: z.ZodObject<{
+                    profileRef: z.ZodString;
+                    profileRevision: z.ZodString;
+                    profileHash: z.ZodString;
+                    modelId: z.ZodString;
+                    requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                        "image-input": "image-input";
+                    }>>;
+                }, z.core.$strict>;
+            }, z.core.$strict>], "lane">>;
+            terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                mode: z.ZodLiteral<"none">;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"result-document">;
+                contract: z.ZodString;
+                schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
+            }, z.core.$strict>], "mode">>;
+            sessionRef: z.ZodOptional<z.ZodString>;
+            limits: z.ZodOptional<z.ZodObject<{
+                maxDurationMs: z.ZodOptional<z.ZodNumber>;
+                maxTokens: z.ZodOptional<z.ZodNumber>;
+            }, z.core.$strip>>;
+            instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+                blobRef: z.ZodObject<{
+                    blobId: z.ZodString;
+                    contentHash: z.ZodString;
+                    size: z.ZodNumber;
+                    contentType: z.ZodString;
+                    url: z.ZodOptional<z.ZodString>;
+                }, z.core.$strip>;
+            }, z.core.$strict>]>>;
+            sealing: z.ZodObject<{
+                scopeId: z.ZodString;
+                epoch: z.ZodNumber;
+                categories: z.ZodArray<z.ZodEnum<{
+                    "task-input": "task-input";
+                    "task-output": "task-output";
+                }>>;
+            }, z.core.$strict>;
+            sealed: z.ZodOptional<z.ZodObject<{
+                v: z.ZodLiteral<1>;
+                suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+                category: z.ZodLiteral<"task-input">;
+                scope: z.ZodObject<{
+                    id: z.ZodString;
+                    epoch: z.ZodNumber;
+                    keyId: z.ZodString;
+                }, z.core.$strict>;
+                chainHead: z.ZodObject<{
+                    seq: z.ZodNumber;
+                    hash: z.ZodString;
+                }, z.core.$strict>;
+                sender: z.ZodString;
+                salt: z.ZodString;
+                nonce: z.ZodString;
+                paddedLength: z.ZodNumber;
+                contentMac: z.ZodString;
+                ciphertext: z.ZodOptional<z.ZodString>;
+                ciphertextRef: z.ZodOptional<z.ZodObject<{
+                    blobId: z.ZodString;
+                    contentHash: z.ZodString;
+                    size: z.ZodNumber;
+                    contentType: z.ZodString;
+                }, z.core.$strict>>;
+            }, z.core.$strict>>;
+        }, z.core.$strict>;
+    }, z.core.$strip>, z.ZodObject<{
+        v: z.ZodNumber;
+        id: z.ZodUUID;
+        ts: z.ZodISODateTime;
+        type: z.ZodLiteral<"task.offer_for_agent_with_egress_sealed">;
+        task_id: z.ZodString;
+        session_ref: z.ZodOptional<z.ZodString>;
+        seq: z.ZodNumber;
+        payload: z.ZodObject<{
+            agentRef: z.ZodObject<{
+                agentId: z.ZodString;
+                profileRevision: z.ZodString;
+            }, z.core.$strict>;
+            homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+            agentMemory: z.ZodOptional<z.ZodEnum<{
+                none: "none";
+                read: "read";
+                "read-write": "read-write";
+            }>>;
+            requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            runtime: z.ZodOptional<z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+                pi: "pi";
+            }>>;
+            harnessId: z.ZodOptional<z.ZodString>;
+            dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                lane: z.ZodLiteral<"subscription">;
+                runtimeId: z.ZodEnum<{
+                    claude: "claude";
+                    codex: "codex";
+                }>;
+                providerId: z.ZodNull;
+                modelId: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
+                lane: z.ZodLiteral<"byok">;
+                runtimeId: z.ZodLiteral<"pi">;
+                providerId: z.ZodString;
+                modelId: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
+                lane: z.ZodLiteral<"byok-profile">;
+                runtimeId: z.ZodLiteral<"pi">;
+                providerProfile: z.ZodObject<{
+                    profileRef: z.ZodString;
+                    profileRevision: z.ZodString;
+                    profileHash: z.ZodString;
+                    modelId: z.ZodString;
+                    requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                        "image-input": "image-input";
+                    }>>;
+                }, z.core.$strict>;
+            }, z.core.$strict>], "lane">>;
+            terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                mode: z.ZodLiteral<"none">;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"result-document">;
+                contract: z.ZodString;
+                schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
+            }, z.core.$strict>], "mode">>;
+            limits: z.ZodOptional<z.ZodObject<{
+                maxDurationMs: z.ZodOptional<z.ZodNumber>;
+                maxTokens: z.ZodOptional<z.ZodNumber>;
+            }, z.core.$strip>>;
+            sessionRef: z.ZodString;
+            egressPolicy: z.ZodObject<{
+                policyRevision: z.ZodString;
+                activity: z.ZodObject<{
+                    delivery: z.ZodLiteral<"latest-value">;
+                    maxCoalesceMs: z.ZodNumber;
+                    maxEventBytes: z.ZodNumber;
+                }, z.core.$strict>;
+                reliable: z.ZodObject<{
+                    maxPendingEventsPerAgent: z.ZodNumber;
+                    maxPendingBytesPerAgent: z.ZodNumber;
+                    maxPendingBytesPerTenant: z.ZodNumber;
+                }, z.core.$strict>;
+                transfers: z.ZodObject<{
+                    workspace: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                        maxBytes: z.ZodNumber;
+                        allowedMimeTypes: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>]>;
+                    transcript: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                        maxBytes: z.ZodNumber;
+                        allowedMimeTypes: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>]>;
+                    artifact: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                        maxBytes: z.ZodNumber;
+                        allowedMimeTypes: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>]>;
+                }, z.core.$strict>;
+            }, z.core.$strict>;
+            messageEgress: z.ZodOptional<z.ZodObject<{
+                mode: z.ZodLiteral<"required">;
+                contract: z.ZodString;
+                contentType: z.ZodEnum<{
+                    "text/markdown": "text/markdown";
+                    "text/plain": "text/plain";
+                }>;
+                maxBytes: z.ZodNumber;
+            }, z.core.$strict>>;
+            instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+                blobRef: z.ZodObject<{
+                    blobId: z.ZodString;
+                    contentHash: z.ZodString;
+                    size: z.ZodNumber;
+                    contentType: z.ZodString;
+                    url: z.ZodOptional<z.ZodString>;
+                }, z.core.$strip>;
+            }, z.core.$strict>]>>;
+            sealing: z.ZodObject<{
+                scopeId: z.ZodString;
+                epoch: z.ZodNumber;
+                categories: z.ZodArray<z.ZodEnum<{
+                    "task-input": "task-input";
+                    "task-output": "task-output";
+                }>>;
+            }, z.core.$strict>;
+            sealed: z.ZodOptional<z.ZodObject<{
+                v: z.ZodLiteral<1>;
+                suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+                category: z.ZodLiteral<"task-input">;
+                scope: z.ZodObject<{
+                    id: z.ZodString;
+                    epoch: z.ZodNumber;
+                    keyId: z.ZodString;
+                }, z.core.$strict>;
+                chainHead: z.ZodObject<{
+                    seq: z.ZodNumber;
+                    hash: z.ZodString;
+                }, z.core.$strict>;
+                sender: z.ZodString;
+                salt: z.ZodString;
+                nonce: z.ZodString;
+                paddedLength: z.ZodNumber;
+                contentMac: z.ZodString;
+                ciphertext: z.ZodOptional<z.ZodString>;
+                ciphertextRef: z.ZodOptional<z.ZodObject<{
+                    blobId: z.ZodString;
+                    contentHash: z.ZodString;
+                    size: z.ZodNumber;
+                    contentType: z.ZodString;
+                }, z.core.$strict>>;
+            }, z.core.$strict>>;
+        }, z.core.$strict>;
+    }, z.core.$strip>, z.ZodObject<{
+        v: z.ZodNumber;
+        id: z.ZodUUID;
+        ts: z.ZodISODateTime;
+        type: z.ZodLiteral<"task.offer_for_agent_with_egress_fresh_sealed">;
+        task_id: z.ZodString;
+        session_ref: z.ZodOptional<z.ZodString>;
+        seq: z.ZodNumber;
+        payload: z.ZodObject<{
+            agentRef: z.ZodObject<{
+                agentId: z.ZodString;
+                profileRevision: z.ZodString;
+            }, z.core.$strict>;
+            homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+            agentMemory: z.ZodOptional<z.ZodEnum<{
+                none: "none";
+                read: "read";
+                "read-write": "read-write";
+            }>>;
+            requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            runtime: z.ZodOptional<z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+                pi: "pi";
+            }>>;
+            harnessId: z.ZodOptional<z.ZodString>;
+            dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                lane: z.ZodLiteral<"subscription">;
+                runtimeId: z.ZodEnum<{
+                    claude: "claude";
+                    codex: "codex";
+                }>;
+                providerId: z.ZodNull;
+                modelId: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
+                lane: z.ZodLiteral<"byok">;
+                runtimeId: z.ZodLiteral<"pi">;
+                providerId: z.ZodString;
+                modelId: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
+                lane: z.ZodLiteral<"byok-profile">;
+                runtimeId: z.ZodLiteral<"pi">;
+                providerProfile: z.ZodObject<{
+                    profileRef: z.ZodString;
+                    profileRevision: z.ZodString;
+                    profileHash: z.ZodString;
+                    modelId: z.ZodString;
+                    requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                        "image-input": "image-input";
+                    }>>;
+                }, z.core.$strict>;
+            }, z.core.$strict>], "lane">>;
+            terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                mode: z.ZodLiteral<"none">;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"result-document">;
+                contract: z.ZodString;
+                schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
+            }, z.core.$strict>], "mode">>;
+            limits: z.ZodOptional<z.ZodObject<{
+                maxDurationMs: z.ZodOptional<z.ZodNumber>;
+                maxTokens: z.ZodOptional<z.ZodNumber>;
+            }, z.core.$strip>>;
+            egressPolicy: z.ZodObject<{
+                policyRevision: z.ZodString;
+                activity: z.ZodObject<{
+                    delivery: z.ZodLiteral<"latest-value">;
+                    maxCoalesceMs: z.ZodNumber;
+                    maxEventBytes: z.ZodNumber;
+                }, z.core.$strict>;
+                reliable: z.ZodObject<{
+                    maxPendingEventsPerAgent: z.ZodNumber;
+                    maxPendingBytesPerAgent: z.ZodNumber;
+                    maxPendingBytesPerTenant: z.ZodNumber;
+                }, z.core.$strict>;
+                transfers: z.ZodObject<{
+                    workspace: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                        maxBytes: z.ZodNumber;
+                        allowedMimeTypes: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>]>;
+                    transcript: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                        maxBytes: z.ZodNumber;
+                        allowedMimeTypes: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>]>;
+                    artifact: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                        maxBytes: z.ZodNumber;
+                        allowedMimeTypes: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>]>;
+                }, z.core.$strict>;
+            }, z.core.$strict>;
+            messageEgress: z.ZodOptional<z.ZodObject<{
+                mode: z.ZodLiteral<"required">;
+                contract: z.ZodString;
+                contentType: z.ZodEnum<{
+                    "text/markdown": "text/markdown";
+                    "text/plain": "text/plain";
+                }>;
+                maxBytes: z.ZodNumber;
+            }, z.core.$strict>>;
+            instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+                blobRef: z.ZodObject<{
+                    blobId: z.ZodString;
+                    contentHash: z.ZodString;
+                    size: z.ZodNumber;
+                    contentType: z.ZodString;
+                    url: z.ZodOptional<z.ZodString>;
+                }, z.core.$strip>;
+            }, z.core.$strict>]>>;
+            sealing: z.ZodObject<{
+                scopeId: z.ZodString;
+                epoch: z.ZodNumber;
+                categories: z.ZodArray<z.ZodEnum<{
+                    "task-input": "task-input";
+                    "task-output": "task-output";
+                }>>;
+            }, z.core.$strict>;
+            sealed: z.ZodOptional<z.ZodObject<{
+                v: z.ZodLiteral<1>;
+                suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+                category: z.ZodLiteral<"task-input">;
+                scope: z.ZodObject<{
+                    id: z.ZodString;
+                    epoch: z.ZodNumber;
+                    keyId: z.ZodString;
+                }, z.core.$strict>;
+                chainHead: z.ZodObject<{
+                    seq: z.ZodNumber;
+                    hash: z.ZodString;
+                }, z.core.$strict>;
+                sender: z.ZodString;
+                salt: z.ZodString;
+                nonce: z.ZodString;
+                paddedLength: z.ZodNumber;
+                contentMac: z.ZodString;
+                ciphertext: z.ZodOptional<z.ZodString>;
+                ciphertextRef: z.ZodOptional<z.ZodObject<{
+                    blobId: z.ZodString;
+                    contentHash: z.ZodString;
+                    size: z.ZodNumber;
+                    contentType: z.ZodString;
+                }, z.core.$strict>>;
+            }, z.core.$strict>>;
+        }, z.core.$strict>;
+    }, z.core.$strip>, z.ZodObject<{
+        v: z.ZodNumber;
+        id: z.ZodUUID;
+        ts: z.ZodISODateTime;
+        type: z.ZodLiteral<"task.steer_sealed">;
+        task_id: z.ZodString;
+        session_ref: z.ZodOptional<z.ZodString>;
+        seq: z.ZodNumber;
+        payload: z.ZodObject<{
+            steerId: z.ZodUUID;
+            sealed: z.ZodObject<{
+                v: z.ZodLiteral<1>;
+                suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+                category: z.ZodLiteral<"task-input">;
+                scope: z.ZodObject<{
+                    id: z.ZodString;
+                    epoch: z.ZodNumber;
+                    keyId: z.ZodString;
+                }, z.core.$strict>;
+                chainHead: z.ZodObject<{
+                    seq: z.ZodNumber;
+                    hash: z.ZodString;
+                }, z.core.$strict>;
+                sender: z.ZodString;
+                salt: z.ZodString;
+                nonce: z.ZodString;
+                paddedLength: z.ZodNumber;
+                contentMac: z.ZodString;
+                ciphertext: z.ZodOptional<z.ZodString>;
+                ciphertextRef: z.ZodOptional<z.ZodObject<{
+                    blobId: z.ZodString;
+                    contentHash: z.ZodString;
+                    size: z.ZodNumber;
+                    contentType: z.ZodString;
+                }, z.core.$strict>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
+    }, z.core.$strip>, z.ZodObject<{
+        v: z.ZodNumber;
+        id: z.ZodUUID;
+        ts: z.ZodISODateTime;
+        type: z.ZodLiteral<"task.complete_sealed">;
+        task_id: z.ZodString;
+        session_ref: z.ZodOptional<z.ZodString>;
+        seq: z.ZodOptional<z.ZodNumber>;
+        payload: z.ZodObject<{
+            harnessId: z.ZodOptional<z.ZodString>;
+            sessionRef: z.ZodString;
+            usage: z.ZodOptional<z.ZodObject<{
+                runtime: z.ZodEnum<{
+                    claude: "claude";
+                    codex: "codex";
+                    pi: "pi";
+                }>;
+                provider: z.ZodOptional<z.ZodString>;
+                model: z.ZodOptional<z.ZodString>;
+                promptTokens: z.ZodOptional<z.ZodNumber>;
+                completionTokens: z.ZodOptional<z.ZodNumber>;
+                durationMs: z.ZodOptional<z.ZodNumber>;
+                clientVersion: z.ZodString;
+                reportedAt: z.ZodISODateTime;
+            }, z.core.$strip>>;
+            agentRef: z.ZodOptional<z.ZodObject<{
+                agentId: z.ZodString;
+                profileRevision: z.ZodString;
+            }, z.core.$strict>>;
+            agentHomeProjection: z.ZodOptional<z.ZodObject<{
+                profileRevision: z.ZodString;
+                projectionHash: z.ZodString;
+            }, z.core.$strict>>;
+            agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                outcome: z.ZodLiteral<"unchanged">;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"reader-attributed">;
+                paths: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"unattributed">;
+                paths: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"unmeasured">;
+            }, z.core.$strict>], "outcome">>;
+            sealed: z.ZodObject<{
+                v: z.ZodLiteral<1>;
+                suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+                category: z.ZodLiteral<"task-output">;
+                scope: z.ZodObject<{
+                    id: z.ZodString;
+                    epoch: z.ZodNumber;
+                    keyId: z.ZodString;
+                }, z.core.$strict>;
+                chainHead: z.ZodObject<{
+                    seq: z.ZodNumber;
+                    hash: z.ZodString;
+                }, z.core.$strict>;
+                sender: z.ZodString;
+                salt: z.ZodString;
+                nonce: z.ZodString;
+                paddedLength: z.ZodNumber;
+                contentMac: z.ZodString;
+                ciphertext: z.ZodOptional<z.ZodString>;
+                ciphertextRef: z.ZodOptional<z.ZodObject<{
+                    blobId: z.ZodString;
+                    contentHash: z.ZodString;
+                    size: z.ZodNumber;
+                    contentType: z.ZodString;
+                }, z.core.$strict>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
+    }, z.core.$strip>, z.ZodObject<{
+        v: z.ZodNumber;
+        id: z.ZodUUID;
+        ts: z.ZodISODateTime;
+        type: z.ZodLiteral<"task.fail_sealed">;
+        task_id: z.ZodString;
+        session_ref: z.ZodOptional<z.ZodString>;
+        seq: z.ZodOptional<z.ZodNumber>;
+        payload: z.ZodObject<{
+            recovery: z.ZodOptional<z.ZodObject<{
+                kind: z.ZodLiteral<"daemon_interrupted">;
+                offerId: z.ZodUUID;
+            }, z.core.$strict>>;
+            harnessId: z.ZodOptional<z.ZodString>;
+            retryable: z.ZodOptional<z.ZodBoolean>;
+            usage: z.ZodOptional<z.ZodObject<{
+                runtime: z.ZodEnum<{
+                    claude: "claude";
+                    codex: "codex";
+                    pi: "pi";
+                }>;
+                provider: z.ZodOptional<z.ZodString>;
+                model: z.ZodOptional<z.ZodString>;
+                promptTokens: z.ZodOptional<z.ZodNumber>;
+                completionTokens: z.ZodOptional<z.ZodNumber>;
+                durationMs: z.ZodOptional<z.ZodNumber>;
+                clientVersion: z.ZodString;
+                reportedAt: z.ZodISODateTime;
+            }, z.core.$strip>>;
+            agentRef: z.ZodOptional<z.ZodObject<{
+                agentId: z.ZodString;
+                profileRevision: z.ZodString;
+            }, z.core.$strict>>;
+            agentHomeProjection: z.ZodOptional<z.ZodObject<{
+                profileRevision: z.ZodString;
+                projectionHash: z.ZodString;
+            }, z.core.$strict>>;
+            agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                outcome: z.ZodLiteral<"unchanged">;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"reader-attributed">;
+                paths: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"unattributed">;
+                paths: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"unmeasured">;
+            }, z.core.$strict>], "outcome">>;
+            sealed: z.ZodObject<{
+                v: z.ZodLiteral<1>;
+                suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+                category: z.ZodLiteral<"task-output">;
+                scope: z.ZodObject<{
+                    id: z.ZodString;
+                    epoch: z.ZodNumber;
+                    keyId: z.ZodString;
+                }, z.core.$strict>;
+                chainHead: z.ZodObject<{
+                    seq: z.ZodNumber;
+                    hash: z.ZodString;
+                }, z.core.$strict>;
+                sender: z.ZodString;
+                salt: z.ZodString;
+                nonce: z.ZodString;
+                paddedLength: z.ZodNumber;
+                contentMac: z.ZodString;
+                ciphertext: z.ZodOptional<z.ZodString>;
+                ciphertextRef: z.ZodOptional<z.ZodObject<{
+                    blobId: z.ZodString;
+                    contentHash: z.ZodString;
+                    size: z.ZodNumber;
+                    contentType: z.ZodString;
+                }, z.core.$strict>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
+    }, z.core.$strip>, z.ZodObject<{
+        v: z.ZodNumber;
+        id: z.ZodUUID;
+        ts: z.ZodISODateTime;
+        type: z.ZodLiteral<"task.decline_sealed">;
+        task_id: z.ZodString;
+        session_ref: z.ZodOptional<z.ZodString>;
+        seq: z.ZodOptional<z.ZodNumber>;
+        payload: z.ZodObject<{
+            retryable: z.ZodOptional<z.ZodBoolean>;
+            agentRef: z.ZodOptional<z.ZodObject<{
+                agentId: z.ZodString;
+                profileRevision: z.ZodString;
+            }, z.core.$strict>>;
+            code: z.ZodOptional<z.ZodEnum<{
+                agent_home_reader_busy: "agent_home_reader_busy";
+                agent_home_writer_busy: "agent_home_writer_busy";
+                sealed_content_mac_mismatch: "sealed_content_mac_mismatch";
+                sealed_key_unavailable: "sealed_key_unavailable";
+                sealed_open_failed: "sealed_open_failed";
+                sealing_policy_mismatch: "sealing_policy_mismatch";
+            }>>;
+            sealed: z.ZodObject<{
+                v: z.ZodLiteral<1>;
+                suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+                category: z.ZodLiteral<"task-output">;
+                scope: z.ZodObject<{
+                    id: z.ZodString;
+                    epoch: z.ZodNumber;
+                    keyId: z.ZodString;
+                }, z.core.$strict>;
+                chainHead: z.ZodObject<{
+                    seq: z.ZodNumber;
+                    hash: z.ZodString;
+                }, z.core.$strict>;
+                sender: z.ZodString;
+                salt: z.ZodString;
+                nonce: z.ZodString;
+                paddedLength: z.ZodNumber;
+                contentMac: z.ZodString;
+                ciphertext: z.ZodOptional<z.ZodString>;
+                ciphertextRef: z.ZodOptional<z.ZodObject<{
+                    blobId: z.ZodString;
+                    contentHash: z.ZodString;
+                    size: z.ZodNumber;
+                    contentType: z.ZodString;
+                }, z.core.$strict>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
+    }, z.core.$strip>, z.ZodObject<{
+        v: z.ZodNumber;
+        id: z.ZodUUID;
+        ts: z.ZodISODateTime;
+        type: z.ZodLiteral<"task.cancelled_sealed">;
+        task_id: z.ZodString;
+        session_ref: z.ZodOptional<z.ZodString>;
+        seq: z.ZodOptional<z.ZodNumber>;
+        payload: z.ZodObject<{
+            harnessId: z.ZodOptional<z.ZodString>;
+            usage: z.ZodOptional<z.ZodObject<{
+                runtime: z.ZodEnum<{
+                    claude: "claude";
+                    codex: "codex";
+                    pi: "pi";
+                }>;
+                provider: z.ZodOptional<z.ZodString>;
+                model: z.ZodOptional<z.ZodString>;
+                promptTokens: z.ZodOptional<z.ZodNumber>;
+                completionTokens: z.ZodOptional<z.ZodNumber>;
+                durationMs: z.ZodOptional<z.ZodNumber>;
+                clientVersion: z.ZodString;
+                reportedAt: z.ZodISODateTime;
+            }, z.core.$strip>>;
+            agentRef: z.ZodOptional<z.ZodObject<{
+                agentId: z.ZodString;
+                profileRevision: z.ZodString;
+            }, z.core.$strict>>;
+            agentHomeProjection: z.ZodOptional<z.ZodObject<{
+                profileRevision: z.ZodString;
+                projectionHash: z.ZodString;
+            }, z.core.$strict>>;
+            agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                outcome: z.ZodLiteral<"unchanged">;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"reader-attributed">;
+                paths: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"unattributed">;
+                paths: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"unmeasured">;
+            }, z.core.$strict>], "outcome">>;
+            sealed: z.ZodObject<{
+                v: z.ZodLiteral<1>;
+                suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+                category: z.ZodLiteral<"task-output">;
+                scope: z.ZodObject<{
+                    id: z.ZodString;
+                    epoch: z.ZodNumber;
+                    keyId: z.ZodString;
+                }, z.core.$strict>;
+                chainHead: z.ZodObject<{
+                    seq: z.ZodNumber;
+                    hash: z.ZodString;
+                }, z.core.$strict>;
+                sender: z.ZodString;
+                salt: z.ZodString;
+                nonce: z.ZodString;
+                paddedLength: z.ZodNumber;
+                contentMac: z.ZodString;
+                ciphertext: z.ZodOptional<z.ZodString>;
+                ciphertextRef: z.ZodOptional<z.ZodObject<{
+                    blobId: z.ZodString;
+                    contentHash: z.ZodString;
+                    size: z.ZodNumber;
+                    contentType: z.ZodString;
+                }, z.core.$strict>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
+    }, z.core.$strip>, z.ZodObject<{
+        v: z.ZodNumber;
+        id: z.ZodUUID;
+        ts: z.ZodISODateTime;
+        type: z.ZodLiteral<"task.progress_sealed">;
+        task_id: z.ZodString;
+        session_ref: z.ZodOptional<z.ZodString>;
+        seq: z.ZodOptional<z.ZodNumber>;
+        payload: z.ZodObject<{
+            seq: z.ZodNumber;
+            sealed: z.ZodObject<{
+                v: z.ZodLiteral<1>;
+                suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+                category: z.ZodLiteral<"task-output">;
+                scope: z.ZodObject<{
+                    id: z.ZodString;
+                    epoch: z.ZodNumber;
+                    keyId: z.ZodString;
+                }, z.core.$strict>;
+                chainHead: z.ZodObject<{
+                    seq: z.ZodNumber;
+                    hash: z.ZodString;
+                }, z.core.$strict>;
+                sender: z.ZodString;
+                salt: z.ZodString;
+                nonce: z.ZodString;
+                paddedLength: z.ZodNumber;
+                contentMac: z.ZodString;
+                ciphertext: z.ZodOptional<z.ZodString>;
+                ciphertextRef: z.ZodOptional<z.ZodObject<{
+                    blobId: z.ZodString;
+                    contentHash: z.ZodString;
+                    size: z.ZodNumber;
+                    contentType: z.ZodString;
+                }, z.core.$strict>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
+    }, z.core.$strip>, z.ZodObject<{
+        v: z.ZodNumber;
+        id: z.ZodUUID;
+        ts: z.ZodISODateTime;
+        type: z.ZodLiteral<"task.artifact_sealed">;
+        task_id: z.ZodString;
+        session_ref: z.ZodOptional<z.ZodString>;
+        seq: z.ZodOptional<z.ZodNumber>;
+        payload: z.ZodObject<{
+            name: z.ZodString;
+            contentType: z.ZodString;
+            sealed: z.ZodObject<{
+                v: z.ZodLiteral<1>;
+                suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+                category: z.ZodLiteral<"task-output">;
+                scope: z.ZodObject<{
+                    id: z.ZodString;
+                    epoch: z.ZodNumber;
+                    keyId: z.ZodString;
+                }, z.core.$strict>;
+                chainHead: z.ZodObject<{
+                    seq: z.ZodNumber;
+                    hash: z.ZodString;
+                }, z.core.$strict>;
+                sender: z.ZodString;
+                salt: z.ZodString;
+                nonce: z.ZodString;
+                paddedLength: z.ZodNumber;
+                contentMac: z.ZodString;
+                ciphertext: z.ZodOptional<z.ZodString>;
+                ciphertextRef: z.ZodOptional<z.ZodObject<{
+                    blobId: z.ZodString;
+                    contentHash: z.ZodString;
+                    size: z.ZodNumber;
+                    contentType: z.ZodString;
+                }, z.core.$strict>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
+    }, z.core.$strip>, z.ZodObject<{
+        v: z.ZodNumber;
+        id: z.ZodUUID;
+        ts: z.ZodISODateTime;
+        type: z.ZodLiteral<"task.await_approval_sealed">;
+        task_id: z.ZodString;
+        session_ref: z.ZodOptional<z.ZodString>;
+        seq: z.ZodOptional<z.ZodNumber>;
+        payload: z.ZodObject<{
+            approvalId: z.ZodString;
+            sealed: z.ZodObject<{
+                v: z.ZodLiteral<1>;
+                suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+                category: z.ZodLiteral<"task-output">;
+                scope: z.ZodObject<{
+                    id: z.ZodString;
+                    epoch: z.ZodNumber;
+                    keyId: z.ZodString;
+                }, z.core.$strict>;
+                chainHead: z.ZodObject<{
+                    seq: z.ZodNumber;
+                    hash: z.ZodString;
+                }, z.core.$strict>;
+                sender: z.ZodString;
+                salt: z.ZodString;
+                nonce: z.ZodString;
+                paddedLength: z.ZodNumber;
+                contentMac: z.ZodString;
+                ciphertext: z.ZodOptional<z.ZodString>;
+                ciphertextRef: z.ZodOptional<z.ZodObject<{
+                    blobId: z.ZodString;
+                    contentHash: z.ZodString;
+                    size: z.ZodNumber;
+                    contentType: z.ZodString;
+                }, z.core.$strict>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
     }, z.core.$strip>], "type">>;
 }, z.core.$strip>;
 export type MessagesSendRequest = z.infer<typeof MessagesSendRequestSchema>;
@@ -6244,7 +7524,7 @@ export type { WireAddition } from './wire-additions';
 export { BlobRefSchema, CONTENT_HASH_RE } from './blob';
 export type { BlobRef } from './blob';
 export { SEALED_DECLINE_CODES, SEALED_INLINE_MAX_PADDED_LENGTH, SEALED_PAYLOAD_CATEGORIES, SEALED_PAYLOAD_MAX_CONTENT_LENGTH, SEALED_PAYLOAD_MAX_PADDED_LENGTH, SEALED_PAYLOAD_SUITE, SEALED_PAYLOAD_V1_CATEGORIES, SEALED_PAYLOAD_VERSION, SEALED_SPLIT_TABLE, SealedPayloadSchema, SealedTaskInputSchema, SealedTaskOutputSchema, TaskSealingSchema, isSealedMessageType, sealedBase64UrlByteLength, sealedPayloadPaddedLength, } from './sealed-payload';
-export type { SealedDeclineCode, SealedDigestRule, SealedMessageType, SealedPayload, SealedPayloadCategory, SealedPayloadV1Category, SealedPlaceholder, SealedSplitEntry, TaskSealing, } from './sealed-payload';
+export type { SealedDeclineCode, SealedDigestRule, SealedMessageType, SealedPayload, SealedPayloadCategory, SealedPayloadV1Category, SealedSplitEntry, TaskSealing, } from './sealed-payload';
 export { PROVIDER_MODEL_CAPABILITIES, ProviderProfileRefSchema, ProviderProfileRevisionSchema, ProviderProfileHashSchema, ProviderModelCapabilitySchema, ProviderProfileBindingSchema, } from './provider-profile-binding';
 export type { ProviderProfileRef, ProviderProfileRevision, ProviderProfileHash, ProviderModelCapability, ProviderProfileBinding, } from './provider-profile-binding';
 export { PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION, PROVIDER_PROVISIONING_OPERATIONS, PROVIDER_PROVISIONING_OPERATION_GENERATION_MAXIMUM, PROVIDER_PROVISIONING_REJECTION_CODES, PROVIDER_PROVISIONING_HOST_TERMINAL_CODES, PROVIDER_PROVISIONING_DISPOSITIONS, PROVIDER_PROVISIONING_KEY_CHECK_RESULTS, ProviderProvisioningAvailablePayloadSchema, ProviderProvisioningKeyCheckResultSchema, ProviderProvisioningKeyCheckSchema, ProviderProvisioningOperationSchema, ProviderProvisioningOperationGenerationSchema, ProviderProvisioningOperationDigestSchema, ProviderProvisioningRejectionCodeSchema, ProviderProvisioningProviderStatusSchema, ProviderProvisioningCompletionSchema, ProviderProvisioningDispositionSchema, ProviderProvisioningReadbackSchema, } from './provider-provisioning';
@@ -6268,7 +7548,7 @@ export type { ResultSchema, ResultSchemaKeyword, ResultSchemaInstanceType, Resul
 export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
 export type { TaskState } from './task-state';
 export { MESSAGE_TYPES, TASK_OFFER_TYPES, isTaskOfferType, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, ConnAckPayloadSchema, TaskOfferPayloadSchema, TaskOfferWithToolsetsPayloadSchema, AgentHomeAccessSchema, TaskOfferForAgentPayloadSchema, TaskOfferForAgentWithEgressPayloadSchema, TaskOfferForAgentWithEgressFreshPayloadSchema, TaskOfferPreparedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDraftPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskClaimPayloadSchema, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TerminalAgentHomeProjectionSchema, TerminalAgentHomeMemoryChangeSchema, AGENT_HOME_MEMORY_DIGEST_MAX_FILES, AGENT_HOME_MEMORY_DIGEST_MAX_BYTES, AGENT_HOME_MEMORY_PATH_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
-export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, ConnAckPayload, TaskOfferPayload, TaskOfferWithToolsetsPayload, TaskOfferForAgentPayload, TaskOfferForAgentWithEgressPayload, TaskOfferForAgentWithEgressFreshPayload, TaskOfferPreparedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDraftPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, TaskStartedPayload, TaskDeclinePayload, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, TerminalAgentHomeProjection, TerminalAgentHomeMemoryChange, AgentHomeAccess, } from './messages';
+export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, ConnAckPayload, TaskOfferPayload, TaskOfferWithToolsetsPayload, TaskOfferForAgentPayload, TaskOfferForAgentWithEgressPayload, TaskOfferForAgentWithEgressFreshPayload, TaskOfferPreparedPayload, TaskOfferSealedPayload, TaskOfferWithToolsetsSealedPayload, TaskOfferForAgentSealedPayload, TaskOfferForAgentWithEgressSealedPayload, TaskOfferForAgentWithEgressFreshSealedPayload, TaskSteerSealedPayload, TaskCompleteSealedPayload, TaskFailSealedPayload, TaskDeclineSealedPayload, TaskCancelledSealedPayload, TaskProgressSealedPayload, TaskArtifactSealedPayload, TaskAwaitApprovalSealedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDraftPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, TaskStartedPayload, TaskDeclinePayload, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, TerminalAgentHomeProjection, TerminalAgentHomeMemoryChange, AgentHomeAccess, } from './messages';
 export { EnvelopeSchema, isServerToDaemonType } from './envelope';
 export type { Envelope } from './envelope';
 export { ProtocolError, EnvelopeParseError, UnknownMessageTypeError, EnvelopeValidationError, } from './errors';
@@ -7290,9 +8570,10 @@ export declare const DispatchSelectionSchema: z.ZodDiscriminatedUnion<[z.ZodObje
 }, z.core.$strict>], "lane">;
 export type DispatchSelection = z.infer<typeof DispatchSelectionSchema>;
 /**
- * `sealing` and `sealed` (#654, `sealed-payload-v1`): the task's frozen
- * sealing policy, and the instruction sealed as task input. A sealed offer
- * keeps `instruction: ''` as the placeholder; `sealed-payload.ts` has the rule.
+ * server -> daemon: offer a task for a device to claim.
+ *
+ * `taskId` used to be duplicated here; it is now carried only by the
+ * envelope's `task_id` (M1 gap #7 — single source of truth for routing).
  */
 export declare const TaskOfferPayloadSchema: z.ZodObject<{
     instruction: z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
@@ -7342,40 +8623,6 @@ export declare const TaskOfferPayloadSchema: z.ZodObject<{
         maxDurationMs: z.ZodOptional<z.ZodNumber>;
         maxTokens: z.ZodOptional<z.ZodNumber>;
     }, z.core.$strip>>;
-    sealing: z.ZodOptional<z.ZodObject<{
-        scopeId: z.ZodString;
-        epoch: z.ZodNumber;
-        categories: z.ZodArray<z.ZodEnum<{
-            "task-input": "task-input";
-            "task-output": "task-output";
-        }>>;
-    }, z.core.$strict>>;
-    sealed: z.ZodOptional<z.ZodObject<{
-        v: z.ZodLiteral<1>;
-        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-        category: z.ZodLiteral<"task-input">;
-        scope: z.ZodObject<{
-            id: z.ZodString;
-            epoch: z.ZodNumber;
-            keyId: z.ZodString;
-        }, z.core.$strict>;
-        chainHead: z.ZodObject<{
-            seq: z.ZodNumber;
-            hash: z.ZodString;
-        }, z.core.$strict>;
-        sender: z.ZodString;
-        salt: z.ZodString;
-        nonce: z.ZodString;
-        paddedLength: z.ZodNumber;
-        contentMac: z.ZodString;
-        ciphertext: z.ZodOptional<z.ZodString>;
-        ciphertextRef: z.ZodOptional<z.ZodObject<{
-            blobId: z.ZodString;
-            contentHash: z.ZodString;
-            size: z.ZodNumber;
-            contentType: z.ZodString;
-        }, z.core.$strict>>;
-    }, z.core.$strict>>;
 }, z.core.$strip>;
 export type TaskOfferPayload = z.infer<typeof TaskOfferPayloadSchema>;
 /** Every named toolset is required; duplicates are rejected instead of silently de-duplicated. */
@@ -7437,40 +8684,6 @@ export declare const TaskOfferWithToolsetsPayloadSchema: z.ZodObject<{
         maxDurationMs: z.ZodOptional<z.ZodNumber>;
         maxTokens: z.ZodOptional<z.ZodNumber>;
     }, z.core.$strip>>;
-    sealing: z.ZodOptional<z.ZodObject<{
-        scopeId: z.ZodString;
-        epoch: z.ZodNumber;
-        categories: z.ZodArray<z.ZodEnum<{
-            "task-input": "task-input";
-            "task-output": "task-output";
-        }>>;
-    }, z.core.$strict>>;
-    sealed: z.ZodOptional<z.ZodObject<{
-        v: z.ZodLiteral<1>;
-        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-        category: z.ZodLiteral<"task-input">;
-        scope: z.ZodObject<{
-            id: z.ZodString;
-            epoch: z.ZodNumber;
-            keyId: z.ZodString;
-        }, z.core.$strict>;
-        chainHead: z.ZodObject<{
-            seq: z.ZodNumber;
-            hash: z.ZodString;
-        }, z.core.$strict>;
-        sender: z.ZodString;
-        salt: z.ZodString;
-        nonce: z.ZodString;
-        paddedLength: z.ZodNumber;
-        contentMac: z.ZodString;
-        ciphertext: z.ZodOptional<z.ZodString>;
-        ciphertextRef: z.ZodOptional<z.ZodObject<{
-            blobId: z.ZodString;
-            contentHash: z.ZodString;
-            size: z.ZodNumber;
-            contentType: z.ZodString;
-        }, z.core.$strict>>;
-    }, z.core.$strict>>;
     requiredToolsets: z.ZodArray<z.ZodString>;
 }, z.core.$strict>;
 export type TaskOfferWithToolsetsPayload = z.infer<typeof TaskOfferWithToolsetsPayloadSchema>;
@@ -7487,7 +8700,16 @@ export type TaskOfferWithToolsetsPayload = z.infer<typeof TaskOfferWithToolsetsP
  */
 export declare const AgentHomeAccessSchema: z.ZodLiteral<"memory-reader">;
 export type AgentHomeAccess = z.infer<typeof AgentHomeAccessSchema>;
-/** `sealing` and `sealed` follow {@link TaskOfferPayloadSchema}. */
+/**
+ * Strict additive offer for a durable host-owned Agent. An older daemon that
+ * does not advertise `agent-home-contract` skips this distinct message type
+ * instead of stripping identity and applying legacy workspace semantics.
+ *
+ * `agentMemory` selects the Agent memory of this one task, with the values of
+ * the prepared offer. Absent keeps the daemon admission. A host sends it only
+ * to a device that advertises `agent-memory-selection`. The prepared offer
+ * replaces it with its own required selection.
+ */
 export declare const TaskOfferForAgentPayloadSchema: z.ZodObject<{
     instruction: z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
         blobRef: z.ZodObject<{
@@ -7553,40 +8775,6 @@ export declare const TaskOfferForAgentPayloadSchema: z.ZodObject<{
         maxDurationMs: z.ZodOptional<z.ZodNumber>;
         maxTokens: z.ZodOptional<z.ZodNumber>;
     }, z.core.$strip>>;
-    sealing: z.ZodOptional<z.ZodObject<{
-        scopeId: z.ZodString;
-        epoch: z.ZodNumber;
-        categories: z.ZodArray<z.ZodEnum<{
-            "task-input": "task-input";
-            "task-output": "task-output";
-        }>>;
-    }, z.core.$strict>>;
-    sealed: z.ZodOptional<z.ZodObject<{
-        v: z.ZodLiteral<1>;
-        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-        category: z.ZodLiteral<"task-input">;
-        scope: z.ZodObject<{
-            id: z.ZodString;
-            epoch: z.ZodNumber;
-            keyId: z.ZodString;
-        }, z.core.$strict>;
-        chainHead: z.ZodObject<{
-            seq: z.ZodNumber;
-            hash: z.ZodString;
-        }, z.core.$strict>;
-        sender: z.ZodString;
-        salt: z.ZodString;
-        nonce: z.ZodString;
-        paddedLength: z.ZodNumber;
-        contentMac: z.ZodString;
-        ciphertext: z.ZodOptional<z.ZodString>;
-        ciphertextRef: z.ZodOptional<z.ZodObject<{
-            blobId: z.ZodString;
-            contentHash: z.ZodString;
-            size: z.ZodNumber;
-            contentType: z.ZodString;
-        }, z.core.$strict>>;
-    }, z.core.$strict>>;
 }, z.core.$strict>;
 export type TaskOfferForAgentPayload = z.infer<typeof TaskOfferForAgentPayloadSchema>;
 /**
@@ -7658,40 +8846,6 @@ export declare const TaskOfferForAgentWithEgressPayloadSchema: z.ZodObject<{
         maxDurationMs: z.ZodOptional<z.ZodNumber>;
         maxTokens: z.ZodOptional<z.ZodNumber>;
     }, z.core.$strip>>;
-    sealing: z.ZodOptional<z.ZodObject<{
-        scopeId: z.ZodString;
-        epoch: z.ZodNumber;
-        categories: z.ZodArray<z.ZodEnum<{
-            "task-input": "task-input";
-            "task-output": "task-output";
-        }>>;
-    }, z.core.$strict>>;
-    sealed: z.ZodOptional<z.ZodObject<{
-        v: z.ZodLiteral<1>;
-        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-        category: z.ZodLiteral<"task-input">;
-        scope: z.ZodObject<{
-            id: z.ZodString;
-            epoch: z.ZodNumber;
-            keyId: z.ZodString;
-        }, z.core.$strict>;
-        chainHead: z.ZodObject<{
-            seq: z.ZodNumber;
-            hash: z.ZodString;
-        }, z.core.$strict>;
-        sender: z.ZodString;
-        salt: z.ZodString;
-        nonce: z.ZodString;
-        paddedLength: z.ZodNumber;
-        contentMac: z.ZodString;
-        ciphertext: z.ZodOptional<z.ZodString>;
-        ciphertextRef: z.ZodOptional<z.ZodObject<{
-            blobId: z.ZodString;
-            contentHash: z.ZodString;
-            size: z.ZodNumber;
-            contentType: z.ZodString;
-        }, z.core.$strict>>;
-    }, z.core.$strict>>;
     sessionRef: z.ZodString;
     egressPolicy: z.ZodObject<{
         policyRevision: z.ZodString;
@@ -7801,40 +8955,6 @@ export declare const TaskOfferForAgentWithEgressFreshPayloadSchema: z.ZodObject<
         maxDurationMs: z.ZodOptional<z.ZodNumber>;
         maxTokens: z.ZodOptional<z.ZodNumber>;
     }, z.core.$strip>>;
-    sealing: z.ZodOptional<z.ZodObject<{
-        scopeId: z.ZodString;
-        epoch: z.ZodNumber;
-        categories: z.ZodArray<z.ZodEnum<{
-            "task-input": "task-input";
-            "task-output": "task-output";
-        }>>;
-    }, z.core.$strict>>;
-    sealed: z.ZodOptional<z.ZodObject<{
-        v: z.ZodLiteral<1>;
-        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-        category: z.ZodLiteral<"task-input">;
-        scope: z.ZodObject<{
-            id: z.ZodString;
-            epoch: z.ZodNumber;
-            keyId: z.ZodString;
-        }, z.core.$strict>;
-        chainHead: z.ZodObject<{
-            seq: z.ZodNumber;
-            hash: z.ZodString;
-        }, z.core.$strict>;
-        sender: z.ZodString;
-        salt: z.ZodString;
-        nonce: z.ZodString;
-        paddedLength: z.ZodNumber;
-        contentMac: z.ZodString;
-        ciphertext: z.ZodOptional<z.ZodString>;
-        ciphertextRef: z.ZodOptional<z.ZodObject<{
-            blobId: z.ZodString;
-            contentHash: z.ZodString;
-            size: z.ZodNumber;
-            contentType: z.ZodString;
-        }, z.core.$strict>>;
-    }, z.core.$strict>>;
     egressPolicy: z.ZodObject<{
         policyRevision: z.ZodString;
         activity: z.ZodObject<{
@@ -7888,8 +9008,6 @@ export type TaskOfferForAgentWithEgressFreshPayload = z.infer<typeof TaskOfferFo
  * have two answers to what the runtime is about to send. `sessionRef` is absent
  * for the same structural reason the adapter refuses the pair — a prepared
  * Execution never resumes.
- *
- * It carries no `sealing`: a v1 sealed task is never prepared (#654 D17).
  *
  * Every value under `preparation` is the Host RE-PRESENTING what the device
  * already told it. The device compares each one against its own durable record
@@ -8450,32 +9568,6 @@ export type TaskCancelPayload = z.infer<typeof TaskCancelPayloadSchema>;
 /** server -> daemon: inject steering text into a running task. */
 export declare const TaskSteerPayloadSchema: z.ZodObject<{
     text: z.ZodString;
-    sealed: z.ZodOptional<z.ZodObject<{
-        v: z.ZodLiteral<1>;
-        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-        category: z.ZodLiteral<"task-input">;
-        scope: z.ZodObject<{
-            id: z.ZodString;
-            epoch: z.ZodNumber;
-            keyId: z.ZodString;
-        }, z.core.$strict>;
-        chainHead: z.ZodObject<{
-            seq: z.ZodNumber;
-            hash: z.ZodString;
-        }, z.core.$strict>;
-        sender: z.ZodString;
-        salt: z.ZodString;
-        nonce: z.ZodString;
-        paddedLength: z.ZodNumber;
-        contentMac: z.ZodString;
-        ciphertext: z.ZodOptional<z.ZodString>;
-        ciphertextRef: z.ZodOptional<z.ZodObject<{
-            blobId: z.ZodString;
-            contentHash: z.ZodString;
-            size: z.ZodNumber;
-            contentType: z.ZodString;
-        }, z.core.$strict>>;
-    }, z.core.$strict>>;
 }, z.core.$strip>;
 export type TaskSteerPayload = z.infer<typeof TaskSteerPayloadSchema>;
 /**
@@ -8574,32 +9666,6 @@ export declare const TaskDeclinePayloadSchema: z.ZodObject<{
         sealed_open_failed: "sealed_open_failed";
         sealing_policy_mismatch: "sealing_policy_mismatch";
     }>>;
-    sealed: z.ZodOptional<z.ZodObject<{
-        v: z.ZodLiteral<1>;
-        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-        category: z.ZodLiteral<"task-output">;
-        scope: z.ZodObject<{
-            id: z.ZodString;
-            epoch: z.ZodNumber;
-            keyId: z.ZodString;
-        }, z.core.$strict>;
-        chainHead: z.ZodObject<{
-            seq: z.ZodNumber;
-            hash: z.ZodString;
-        }, z.core.$strict>;
-        sender: z.ZodString;
-        salt: z.ZodString;
-        nonce: z.ZodString;
-        paddedLength: z.ZodNumber;
-        contentMac: z.ZodString;
-        ciphertext: z.ZodOptional<z.ZodString>;
-        ciphertextRef: z.ZodOptional<z.ZodObject<{
-            blobId: z.ZodString;
-            contentHash: z.ZodString;
-            size: z.ZodNumber;
-            contentType: z.ZodString;
-        }, z.core.$strict>>;
-    }, z.core.$strict>>;
 }, z.core.$strip>;
 export type TaskDeclinePayload = z.infer<typeof TaskDeclinePayloadSchema>;
 /**
@@ -8699,32 +9765,6 @@ export declare const TaskProgressPayloadSchema: z.ZodObject<{
     }, z.core.$strip>], "type">, z.ZodObject<{
         type: z.ZodString;
     }, z.core.$loose>]>>;
-    sealed: z.ZodOptional<z.ZodObject<{
-        v: z.ZodLiteral<1>;
-        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-        category: z.ZodLiteral<"task-output">;
-        scope: z.ZodObject<{
-            id: z.ZodString;
-            epoch: z.ZodNumber;
-            keyId: z.ZodString;
-        }, z.core.$strict>;
-        chainHead: z.ZodObject<{
-            seq: z.ZodNumber;
-            hash: z.ZodString;
-        }, z.core.$strict>;
-        sender: z.ZodString;
-        salt: z.ZodString;
-        nonce: z.ZodString;
-        paddedLength: z.ZodNumber;
-        contentMac: z.ZodString;
-        ciphertext: z.ZodOptional<z.ZodString>;
-        ciphertextRef: z.ZodOptional<z.ZodObject<{
-            blobId: z.ZodString;
-            contentHash: z.ZodString;
-            size: z.ZodNumber;
-            contentType: z.ZodString;
-        }, z.core.$strict>>;
-    }, z.core.$strict>>;
 }, z.core.$strip>;
 export type TaskProgressPayload = z.infer<typeof TaskProgressPayloadSchema>;
 /** daemon -> server: an artifact produced by the task, inline or by blob ref. */
@@ -8739,32 +9779,6 @@ export declare const TaskArtifactPayloadSchema: z.ZodObject<{
         contentType: z.ZodString;
         url: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>;
-    sealed: z.ZodOptional<z.ZodObject<{
-        v: z.ZodLiteral<1>;
-        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-        category: z.ZodLiteral<"task-output">;
-        scope: z.ZodObject<{
-            id: z.ZodString;
-            epoch: z.ZodNumber;
-            keyId: z.ZodString;
-        }, z.core.$strict>;
-        chainHead: z.ZodObject<{
-            seq: z.ZodNumber;
-            hash: z.ZodString;
-        }, z.core.$strict>;
-        sender: z.ZodString;
-        salt: z.ZodString;
-        nonce: z.ZodString;
-        paddedLength: z.ZodNumber;
-        contentMac: z.ZodString;
-        ciphertext: z.ZodOptional<z.ZodString>;
-        ciphertextRef: z.ZodOptional<z.ZodObject<{
-            blobId: z.ZodString;
-            contentHash: z.ZodString;
-            size: z.ZodNumber;
-            contentType: z.ZodString;
-        }, z.core.$strict>>;
-    }, z.core.$strict>>;
 }, z.core.$strip>;
 export type TaskArtifactPayload = z.infer<typeof TaskArtifactPayloadSchema>;
 /**
@@ -8786,32 +9800,6 @@ export type TaskArtifactPayload = z.infer<typeof TaskArtifactPayloadSchema>;
 export declare const TaskAwaitApprovalPayloadSchema: z.ZodObject<{
     summary: z.ZodString;
     approvalId: z.ZodOptional<z.ZodString>;
-    sealed: z.ZodOptional<z.ZodObject<{
-        v: z.ZodLiteral<1>;
-        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-        category: z.ZodLiteral<"task-output">;
-        scope: z.ZodObject<{
-            id: z.ZodString;
-            epoch: z.ZodNumber;
-            keyId: z.ZodString;
-        }, z.core.$strict>;
-        chainHead: z.ZodObject<{
-            seq: z.ZodNumber;
-            hash: z.ZodString;
-        }, z.core.$strict>;
-        sender: z.ZodString;
-        salt: z.ZodString;
-        nonce: z.ZodString;
-        paddedLength: z.ZodNumber;
-        contentMac: z.ZodString;
-        ciphertext: z.ZodOptional<z.ZodString>;
-        ciphertextRef: z.ZodOptional<z.ZodObject<{
-            blobId: z.ZodString;
-            contentHash: z.ZodString;
-            size: z.ZodNumber;
-            contentType: z.ZodString;
-        }, z.core.$strict>>;
-    }, z.core.$strict>>;
 }, z.core.$strip>;
 export type TaskAwaitApprovalPayload = z.infer<typeof TaskAwaitApprovalPayloadSchema>;
 /**
@@ -9075,32 +10063,6 @@ export declare const TaskCompletePayloadSchema: z.ZodObject<{
     }, z.core.$strict>, z.ZodObject<{
         outcome: z.ZodLiteral<"unmeasured">;
     }, z.core.$strict>], "outcome">>;
-    sealed: z.ZodOptional<z.ZodObject<{
-        v: z.ZodLiteral<1>;
-        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-        category: z.ZodLiteral<"task-output">;
-        scope: z.ZodObject<{
-            id: z.ZodString;
-            epoch: z.ZodNumber;
-            keyId: z.ZodString;
-        }, z.core.$strict>;
-        chainHead: z.ZodObject<{
-            seq: z.ZodNumber;
-            hash: z.ZodString;
-        }, z.core.$strict>;
-        sender: z.ZodString;
-        salt: z.ZodString;
-        nonce: z.ZodString;
-        paddedLength: z.ZodNumber;
-        contentMac: z.ZodString;
-        ciphertext: z.ZodOptional<z.ZodString>;
-        ciphertextRef: z.ZodOptional<z.ZodObject<{
-            blobId: z.ZodString;
-            contentHash: z.ZodString;
-            size: z.ZodNumber;
-            contentType: z.ZodString;
-        }, z.core.$strict>>;
-    }, z.core.$strict>>;
 }, z.core.$strip>;
 export type TaskCompletePayload = z.infer<typeof TaskCompletePayloadSchema>;
 /** daemon -> server: task failed. */
@@ -9150,32 +10112,6 @@ export declare const TaskFailPayloadSchema: z.ZodObject<{
     }, z.core.$strict>, z.ZodObject<{
         outcome: z.ZodLiteral<"unmeasured">;
     }, z.core.$strict>], "outcome">>;
-    sealed: z.ZodOptional<z.ZodObject<{
-        v: z.ZodLiteral<1>;
-        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-        category: z.ZodLiteral<"task-output">;
-        scope: z.ZodObject<{
-            id: z.ZodString;
-            epoch: z.ZodNumber;
-            keyId: z.ZodString;
-        }, z.core.$strict>;
-        chainHead: z.ZodObject<{
-            seq: z.ZodNumber;
-            hash: z.ZodString;
-        }, z.core.$strict>;
-        sender: z.ZodString;
-        salt: z.ZodString;
-        nonce: z.ZodString;
-        paddedLength: z.ZodNumber;
-        contentMac: z.ZodString;
-        ciphertext: z.ZodOptional<z.ZodString>;
-        ciphertextRef: z.ZodOptional<z.ZodObject<{
-            blobId: z.ZodString;
-            contentHash: z.ZodString;
-            size: z.ZodNumber;
-            contentType: z.ZodString;
-        }, z.core.$strict>>;
-    }, z.core.$strict>>;
 }, z.core.$strip>;
 export type TaskFailPayload = z.infer<typeof TaskFailPayloadSchema>;
 /**
@@ -9233,32 +10169,6 @@ export declare const TaskCancelledPayloadSchema: z.ZodObject<{
     }, z.core.$strict>, z.ZodObject<{
         outcome: z.ZodLiteral<"unmeasured">;
     }, z.core.$strict>], "outcome">>;
-    sealed: z.ZodOptional<z.ZodObject<{
-        v: z.ZodLiteral<1>;
-        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-        category: z.ZodLiteral<"task-output">;
-        scope: z.ZodObject<{
-            id: z.ZodString;
-            epoch: z.ZodNumber;
-            keyId: z.ZodString;
-        }, z.core.$strict>;
-        chainHead: z.ZodObject<{
-            seq: z.ZodNumber;
-            hash: z.ZodString;
-        }, z.core.$strict>;
-        sender: z.ZodString;
-        salt: z.ZodString;
-        nonce: z.ZodString;
-        paddedLength: z.ZodNumber;
-        contentMac: z.ZodString;
-        ciphertext: z.ZodOptional<z.ZodString>;
-        ciphertextRef: z.ZodOptional<z.ZodObject<{
-            blobId: z.ZodString;
-            contentHash: z.ZodString;
-            size: z.ZodNumber;
-            contentType: z.ZodString;
-        }, z.core.$strict>>;
-    }, z.core.$strict>>;
 }, z.core.$strip>;
 export type TaskCancelledPayload = z.infer<typeof TaskCancelledPayloadSchema>;
 /**
@@ -9309,6 +10219,932 @@ export declare const TaskApprovalResolvedPayloadSchema: z.ZodObject<{
     at: z.ZodISODateTime;
 }, z.core.$strip>;
 export type TaskApprovalResolvedPayload = z.infer<typeof TaskApprovalResolvedPayloadSchema>;
+/** server -> daemon: `task.offer` of a sealed task. */
+export declare const TaskOfferSealedPayloadSchema: z.ZodObject<{
+    runtime: z.ZodOptional<z.ZodEnum<{
+        claude: "claude";
+        codex: "codex";
+        pi: "pi";
+    }>>;
+    harnessId: z.ZodOptional<z.ZodString>;
+    dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+        lane: z.ZodLiteral<"subscription">;
+        runtimeId: z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+        }>;
+        providerId: z.ZodNull;
+        modelId: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        lane: z.ZodLiteral<"byok">;
+        runtimeId: z.ZodLiteral<"pi">;
+        providerId: z.ZodString;
+        modelId: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        lane: z.ZodLiteral<"byok-profile">;
+        runtimeId: z.ZodLiteral<"pi">;
+        providerProfile: z.ZodObject<{
+            profileRef: z.ZodString;
+            profileRevision: z.ZodString;
+            profileHash: z.ZodString;
+            modelId: z.ZodString;
+            requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                "image-input": "image-input";
+            }>>;
+        }, z.core.$strict>;
+    }, z.core.$strict>], "lane">>;
+    sessionRef: z.ZodOptional<z.ZodString>;
+    workspaceHint: z.ZodOptional<z.ZodString>;
+    limits: z.ZodOptional<z.ZodObject<{
+        maxDurationMs: z.ZodOptional<z.ZodNumber>;
+        maxTokens: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strip>>;
+    instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+        blobRef: z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+            url: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>;
+    }, z.core.$strict>]>>;
+    sealing: z.ZodObject<{
+        scopeId: z.ZodString;
+        epoch: z.ZodNumber;
+        categories: z.ZodArray<z.ZodEnum<{
+            "task-input": "task-input";
+            "task-output": "task-output";
+        }>>;
+    }, z.core.$strict>;
+    sealed: z.ZodOptional<z.ZodObject<{
+        v: z.ZodLiteral<1>;
+        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+        category: z.ZodLiteral<"task-input">;
+        scope: z.ZodObject<{
+            id: z.ZodString;
+            epoch: z.ZodNumber;
+            keyId: z.ZodString;
+        }, z.core.$strict>;
+        chainHead: z.ZodObject<{
+            seq: z.ZodNumber;
+            hash: z.ZodString;
+        }, z.core.$strict>;
+        sender: z.ZodString;
+        salt: z.ZodString;
+        nonce: z.ZodString;
+        paddedLength: z.ZodNumber;
+        contentMac: z.ZodString;
+        ciphertext: z.ZodOptional<z.ZodString>;
+        ciphertextRef: z.ZodOptional<z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
+export type TaskOfferSealedPayload = z.infer<typeof TaskOfferSealedPayloadSchema>;
+/** server -> daemon: `task.offer_with_toolsets` of a sealed task. */
+export declare const TaskOfferWithToolsetsSealedPayloadSchema: z.ZodObject<{
+    runtime: z.ZodOptional<z.ZodEnum<{
+        claude: "claude";
+        codex: "codex";
+        pi: "pi";
+    }>>;
+    harnessId: z.ZodOptional<z.ZodString>;
+    dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+        lane: z.ZodLiteral<"subscription">;
+        runtimeId: z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+        }>;
+        providerId: z.ZodNull;
+        modelId: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        lane: z.ZodLiteral<"byok">;
+        runtimeId: z.ZodLiteral<"pi">;
+        providerId: z.ZodString;
+        modelId: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        lane: z.ZodLiteral<"byok-profile">;
+        runtimeId: z.ZodLiteral<"pi">;
+        providerProfile: z.ZodObject<{
+            profileRef: z.ZodString;
+            profileRevision: z.ZodString;
+            profileHash: z.ZodString;
+            modelId: z.ZodString;
+            requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                "image-input": "image-input";
+            }>>;
+        }, z.core.$strict>;
+    }, z.core.$strict>], "lane">>;
+    sessionRef: z.ZodOptional<z.ZodString>;
+    workspaceHint: z.ZodOptional<z.ZodString>;
+    limits: z.ZodOptional<z.ZodObject<{
+        maxDurationMs: z.ZodOptional<z.ZodNumber>;
+        maxTokens: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strip>>;
+    requiredToolsets: z.ZodArray<z.ZodString>;
+    instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+        blobRef: z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+            url: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>;
+    }, z.core.$strict>]>>;
+    sealing: z.ZodObject<{
+        scopeId: z.ZodString;
+        epoch: z.ZodNumber;
+        categories: z.ZodArray<z.ZodEnum<{
+            "task-input": "task-input";
+            "task-output": "task-output";
+        }>>;
+    }, z.core.$strict>;
+    sealed: z.ZodOptional<z.ZodObject<{
+        v: z.ZodLiteral<1>;
+        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+        category: z.ZodLiteral<"task-input">;
+        scope: z.ZodObject<{
+            id: z.ZodString;
+            epoch: z.ZodNumber;
+            keyId: z.ZodString;
+        }, z.core.$strict>;
+        chainHead: z.ZodObject<{
+            seq: z.ZodNumber;
+            hash: z.ZodString;
+        }, z.core.$strict>;
+        sender: z.ZodString;
+        salt: z.ZodString;
+        nonce: z.ZodString;
+        paddedLength: z.ZodNumber;
+        contentMac: z.ZodString;
+        ciphertext: z.ZodOptional<z.ZodString>;
+        ciphertextRef: z.ZodOptional<z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
+export type TaskOfferWithToolsetsSealedPayload = z.infer<typeof TaskOfferWithToolsetsSealedPayloadSchema>;
+/** server -> daemon: `task.offer_for_agent` of a sealed task. */
+export declare const TaskOfferForAgentSealedPayloadSchema: z.ZodObject<{
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+    agentMemory: z.ZodOptional<z.ZodEnum<{
+        none: "none";
+        read: "read";
+        "read-write": "read-write";
+    }>>;
+    requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    runtime: z.ZodOptional<z.ZodEnum<{
+        claude: "claude";
+        codex: "codex";
+        pi: "pi";
+    }>>;
+    harnessId: z.ZodOptional<z.ZodString>;
+    dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+        lane: z.ZodLiteral<"subscription">;
+        runtimeId: z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+        }>;
+        providerId: z.ZodNull;
+        modelId: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        lane: z.ZodLiteral<"byok">;
+        runtimeId: z.ZodLiteral<"pi">;
+        providerId: z.ZodString;
+        modelId: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        lane: z.ZodLiteral<"byok-profile">;
+        runtimeId: z.ZodLiteral<"pi">;
+        providerProfile: z.ZodObject<{
+            profileRef: z.ZodString;
+            profileRevision: z.ZodString;
+            profileHash: z.ZodString;
+            modelId: z.ZodString;
+            requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                "image-input": "image-input";
+            }>>;
+        }, z.core.$strict>;
+    }, z.core.$strict>], "lane">>;
+    terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+        mode: z.ZodLiteral<"none">;
+    }, z.core.$strict>, z.ZodObject<{
+        mode: z.ZodLiteral<"result-document">;
+        contract: z.ZodString;
+        schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
+    }, z.core.$strict>], "mode">>;
+    sessionRef: z.ZodOptional<z.ZodString>;
+    limits: z.ZodOptional<z.ZodObject<{
+        maxDurationMs: z.ZodOptional<z.ZodNumber>;
+        maxTokens: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strip>>;
+    instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+        blobRef: z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+            url: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>;
+    }, z.core.$strict>]>>;
+    sealing: z.ZodObject<{
+        scopeId: z.ZodString;
+        epoch: z.ZodNumber;
+        categories: z.ZodArray<z.ZodEnum<{
+            "task-input": "task-input";
+            "task-output": "task-output";
+        }>>;
+    }, z.core.$strict>;
+    sealed: z.ZodOptional<z.ZodObject<{
+        v: z.ZodLiteral<1>;
+        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+        category: z.ZodLiteral<"task-input">;
+        scope: z.ZodObject<{
+            id: z.ZodString;
+            epoch: z.ZodNumber;
+            keyId: z.ZodString;
+        }, z.core.$strict>;
+        chainHead: z.ZodObject<{
+            seq: z.ZodNumber;
+            hash: z.ZodString;
+        }, z.core.$strict>;
+        sender: z.ZodString;
+        salt: z.ZodString;
+        nonce: z.ZodString;
+        paddedLength: z.ZodNumber;
+        contentMac: z.ZodString;
+        ciphertext: z.ZodOptional<z.ZodString>;
+        ciphertextRef: z.ZodOptional<z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
+export type TaskOfferForAgentSealedPayload = z.infer<typeof TaskOfferForAgentSealedPayloadSchema>;
+/** server -> daemon: `task.offer_for_agent_with_egress` of a sealed task. */
+export declare const TaskOfferForAgentWithEgressSealedPayloadSchema: z.ZodObject<{
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+    agentMemory: z.ZodOptional<z.ZodEnum<{
+        none: "none";
+        read: "read";
+        "read-write": "read-write";
+    }>>;
+    requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    runtime: z.ZodOptional<z.ZodEnum<{
+        claude: "claude";
+        codex: "codex";
+        pi: "pi";
+    }>>;
+    harnessId: z.ZodOptional<z.ZodString>;
+    dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+        lane: z.ZodLiteral<"subscription">;
+        runtimeId: z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+        }>;
+        providerId: z.ZodNull;
+        modelId: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        lane: z.ZodLiteral<"byok">;
+        runtimeId: z.ZodLiteral<"pi">;
+        providerId: z.ZodString;
+        modelId: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        lane: z.ZodLiteral<"byok-profile">;
+        runtimeId: z.ZodLiteral<"pi">;
+        providerProfile: z.ZodObject<{
+            profileRef: z.ZodString;
+            profileRevision: z.ZodString;
+            profileHash: z.ZodString;
+            modelId: z.ZodString;
+            requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                "image-input": "image-input";
+            }>>;
+        }, z.core.$strict>;
+    }, z.core.$strict>], "lane">>;
+    terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+        mode: z.ZodLiteral<"none">;
+    }, z.core.$strict>, z.ZodObject<{
+        mode: z.ZodLiteral<"result-document">;
+        contract: z.ZodString;
+        schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
+    }, z.core.$strict>], "mode">>;
+    limits: z.ZodOptional<z.ZodObject<{
+        maxDurationMs: z.ZodOptional<z.ZodNumber>;
+        maxTokens: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strip>>;
+    sessionRef: z.ZodString;
+    egressPolicy: z.ZodObject<{
+        policyRevision: z.ZodString;
+        activity: z.ZodObject<{
+            delivery: z.ZodLiteral<"latest-value">;
+            maxCoalesceMs: z.ZodNumber;
+            maxEventBytes: z.ZodNumber;
+        }, z.core.$strict>;
+        reliable: z.ZodObject<{
+            maxPendingEventsPerAgent: z.ZodNumber;
+            maxPendingBytesPerAgent: z.ZodNumber;
+            maxPendingBytesPerTenant: z.ZodNumber;
+        }, z.core.$strict>;
+        transfers: z.ZodObject<{
+            workspace: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                maxBytes: z.ZodNumber;
+                allowedMimeTypes: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>]>;
+            transcript: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                maxBytes: z.ZodNumber;
+                allowedMimeTypes: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>]>;
+            artifact: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                maxBytes: z.ZodNumber;
+                allowedMimeTypes: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>]>;
+        }, z.core.$strict>;
+    }, z.core.$strict>;
+    messageEgress: z.ZodOptional<z.ZodObject<{
+        mode: z.ZodLiteral<"required">;
+        contract: z.ZodString;
+        contentType: z.ZodEnum<{
+            "text/markdown": "text/markdown";
+            "text/plain": "text/plain";
+        }>;
+        maxBytes: z.ZodNumber;
+    }, z.core.$strict>>;
+    instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+        blobRef: z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+            url: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>;
+    }, z.core.$strict>]>>;
+    sealing: z.ZodObject<{
+        scopeId: z.ZodString;
+        epoch: z.ZodNumber;
+        categories: z.ZodArray<z.ZodEnum<{
+            "task-input": "task-input";
+            "task-output": "task-output";
+        }>>;
+    }, z.core.$strict>;
+    sealed: z.ZodOptional<z.ZodObject<{
+        v: z.ZodLiteral<1>;
+        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+        category: z.ZodLiteral<"task-input">;
+        scope: z.ZodObject<{
+            id: z.ZodString;
+            epoch: z.ZodNumber;
+            keyId: z.ZodString;
+        }, z.core.$strict>;
+        chainHead: z.ZodObject<{
+            seq: z.ZodNumber;
+            hash: z.ZodString;
+        }, z.core.$strict>;
+        sender: z.ZodString;
+        salt: z.ZodString;
+        nonce: z.ZodString;
+        paddedLength: z.ZodNumber;
+        contentMac: z.ZodString;
+        ciphertext: z.ZodOptional<z.ZodString>;
+        ciphertextRef: z.ZodOptional<z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
+export type TaskOfferForAgentWithEgressSealedPayload = z.infer<typeof TaskOfferForAgentWithEgressSealedPayloadSchema>;
+/** server -> daemon: `task.offer_for_agent_with_egress_fresh` of a sealed task. */
+export declare const TaskOfferForAgentWithEgressFreshSealedPayloadSchema: z.ZodObject<{
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+    agentMemory: z.ZodOptional<z.ZodEnum<{
+        none: "none";
+        read: "read";
+        "read-write": "read-write";
+    }>>;
+    requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    runtime: z.ZodOptional<z.ZodEnum<{
+        claude: "claude";
+        codex: "codex";
+        pi: "pi";
+    }>>;
+    harnessId: z.ZodOptional<z.ZodString>;
+    dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+        lane: z.ZodLiteral<"subscription">;
+        runtimeId: z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+        }>;
+        providerId: z.ZodNull;
+        modelId: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        lane: z.ZodLiteral<"byok">;
+        runtimeId: z.ZodLiteral<"pi">;
+        providerId: z.ZodString;
+        modelId: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        lane: z.ZodLiteral<"byok-profile">;
+        runtimeId: z.ZodLiteral<"pi">;
+        providerProfile: z.ZodObject<{
+            profileRef: z.ZodString;
+            profileRevision: z.ZodString;
+            profileHash: z.ZodString;
+            modelId: z.ZodString;
+            requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                "image-input": "image-input";
+            }>>;
+        }, z.core.$strict>;
+    }, z.core.$strict>], "lane">>;
+    terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+        mode: z.ZodLiteral<"none">;
+    }, z.core.$strict>, z.ZodObject<{
+        mode: z.ZodLiteral<"result-document">;
+        contract: z.ZodString;
+        schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
+    }, z.core.$strict>], "mode">>;
+    limits: z.ZodOptional<z.ZodObject<{
+        maxDurationMs: z.ZodOptional<z.ZodNumber>;
+        maxTokens: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strip>>;
+    egressPolicy: z.ZodObject<{
+        policyRevision: z.ZodString;
+        activity: z.ZodObject<{
+            delivery: z.ZodLiteral<"latest-value">;
+            maxCoalesceMs: z.ZodNumber;
+            maxEventBytes: z.ZodNumber;
+        }, z.core.$strict>;
+        reliable: z.ZodObject<{
+            maxPendingEventsPerAgent: z.ZodNumber;
+            maxPendingBytesPerAgent: z.ZodNumber;
+            maxPendingBytesPerTenant: z.ZodNumber;
+        }, z.core.$strict>;
+        transfers: z.ZodObject<{
+            workspace: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                maxBytes: z.ZodNumber;
+                allowedMimeTypes: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>]>;
+            transcript: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                maxBytes: z.ZodNumber;
+                allowedMimeTypes: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>]>;
+            artifact: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                maxBytes: z.ZodNumber;
+                allowedMimeTypes: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>]>;
+        }, z.core.$strict>;
+    }, z.core.$strict>;
+    messageEgress: z.ZodOptional<z.ZodObject<{
+        mode: z.ZodLiteral<"required">;
+        contract: z.ZodString;
+        contentType: z.ZodEnum<{
+            "text/markdown": "text/markdown";
+            "text/plain": "text/plain";
+        }>;
+        maxBytes: z.ZodNumber;
+    }, z.core.$strict>>;
+    instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+        blobRef: z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+            url: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>;
+    }, z.core.$strict>]>>;
+    sealing: z.ZodObject<{
+        scopeId: z.ZodString;
+        epoch: z.ZodNumber;
+        categories: z.ZodArray<z.ZodEnum<{
+            "task-input": "task-input";
+            "task-output": "task-output";
+        }>>;
+    }, z.core.$strict>;
+    sealed: z.ZodOptional<z.ZodObject<{
+        v: z.ZodLiteral<1>;
+        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+        category: z.ZodLiteral<"task-input">;
+        scope: z.ZodObject<{
+            id: z.ZodString;
+            epoch: z.ZodNumber;
+            keyId: z.ZodString;
+        }, z.core.$strict>;
+        chainHead: z.ZodObject<{
+            seq: z.ZodNumber;
+            hash: z.ZodString;
+        }, z.core.$strict>;
+        sender: z.ZodString;
+        salt: z.ZodString;
+        nonce: z.ZodString;
+        paddedLength: z.ZodNumber;
+        contentMac: z.ZodString;
+        ciphertext: z.ZodOptional<z.ZodString>;
+        ciphertextRef: z.ZodOptional<z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
+export type TaskOfferForAgentWithEgressFreshSealedPayload = z.infer<typeof TaskOfferForAgentWithEgressFreshSealedPayloadSchema>;
+/**
+ * server -> daemon: sealed steering text. `steerId` names this steer in the
+ * AAD and the content MAC, so the Host cannot replay an earlier steer of the
+ * same task as a new one.
+ */
+export declare const TaskSteerSealedPayloadSchema: z.ZodObject<{
+    steerId: z.ZodUUID;
+    sealed: z.ZodObject<{
+        v: z.ZodLiteral<1>;
+        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+        category: z.ZodLiteral<"task-input">;
+        scope: z.ZodObject<{
+            id: z.ZodString;
+            epoch: z.ZodNumber;
+            keyId: z.ZodString;
+        }, z.core.$strict>;
+        chainHead: z.ZodObject<{
+            seq: z.ZodNumber;
+            hash: z.ZodString;
+        }, z.core.$strict>;
+        sender: z.ZodString;
+        salt: z.ZodString;
+        nonce: z.ZodString;
+        paddedLength: z.ZodNumber;
+        contentMac: z.ZodString;
+        ciphertext: z.ZodOptional<z.ZodString>;
+        ciphertextRef: z.ZodOptional<z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+export type TaskSteerSealedPayload = z.infer<typeof TaskSteerSealedPayloadSchema>;
+/**
+ * daemon -> server: `task.complete` of a sealed task. `summary`,
+ * `finalMessage` and `document` are sealed. `artifactRefs` and
+ * `preparedObservation` are not carried in v1.
+ */
+export declare const TaskCompleteSealedPayloadSchema: z.ZodObject<{
+    harnessId: z.ZodOptional<z.ZodString>;
+    sessionRef: z.ZodString;
+    usage: z.ZodOptional<z.ZodObject<{
+        runtime: z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            pi: "pi";
+        }>;
+        provider: z.ZodOptional<z.ZodString>;
+        model: z.ZodOptional<z.ZodString>;
+        promptTokens: z.ZodOptional<z.ZodNumber>;
+        completionTokens: z.ZodOptional<z.ZodNumber>;
+        durationMs: z.ZodOptional<z.ZodNumber>;
+        clientVersion: z.ZodString;
+        reportedAt: z.ZodISODateTime;
+    }, z.core.$strip>>;
+    agentRef: z.ZodOptional<z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>>;
+    agentHomeProjection: z.ZodOptional<z.ZodObject<{
+        profileRevision: z.ZodString;
+        projectionHash: z.ZodString;
+    }, z.core.$strict>>;
+    agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+        outcome: z.ZodLiteral<"unchanged">;
+    }, z.core.$strict>, z.ZodObject<{
+        outcome: z.ZodLiteral<"reader-attributed">;
+        paths: z.ZodArray<z.ZodString>;
+    }, z.core.$strict>, z.ZodObject<{
+        outcome: z.ZodLiteral<"unattributed">;
+        paths: z.ZodArray<z.ZodString>;
+    }, z.core.$strict>, z.ZodObject<{
+        outcome: z.ZodLiteral<"unmeasured">;
+    }, z.core.$strict>], "outcome">>;
+    sealed: z.ZodObject<{
+        v: z.ZodLiteral<1>;
+        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+        category: z.ZodLiteral<"task-output">;
+        scope: z.ZodObject<{
+            id: z.ZodString;
+            epoch: z.ZodNumber;
+            keyId: z.ZodString;
+        }, z.core.$strict>;
+        chainHead: z.ZodObject<{
+            seq: z.ZodNumber;
+            hash: z.ZodString;
+        }, z.core.$strict>;
+        sender: z.ZodString;
+        salt: z.ZodString;
+        nonce: z.ZodString;
+        paddedLength: z.ZodNumber;
+        contentMac: z.ZodString;
+        ciphertext: z.ZodOptional<z.ZodString>;
+        ciphertextRef: z.ZodOptional<z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+export type TaskCompleteSealedPayload = z.infer<typeof TaskCompleteSealedPayloadSchema>;
+/** daemon -> server: `task.fail` of a sealed task. `reason` is sealed; `preparedObservation` is not carried in v1. */
+export declare const TaskFailSealedPayloadSchema: z.ZodObject<{
+    recovery: z.ZodOptional<z.ZodObject<{
+        kind: z.ZodLiteral<"daemon_interrupted">;
+        offerId: z.ZodUUID;
+    }, z.core.$strict>>;
+    harnessId: z.ZodOptional<z.ZodString>;
+    retryable: z.ZodOptional<z.ZodBoolean>;
+    usage: z.ZodOptional<z.ZodObject<{
+        runtime: z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            pi: "pi";
+        }>;
+        provider: z.ZodOptional<z.ZodString>;
+        model: z.ZodOptional<z.ZodString>;
+        promptTokens: z.ZodOptional<z.ZodNumber>;
+        completionTokens: z.ZodOptional<z.ZodNumber>;
+        durationMs: z.ZodOptional<z.ZodNumber>;
+        clientVersion: z.ZodString;
+        reportedAt: z.ZodISODateTime;
+    }, z.core.$strip>>;
+    agentRef: z.ZodOptional<z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>>;
+    agentHomeProjection: z.ZodOptional<z.ZodObject<{
+        profileRevision: z.ZodString;
+        projectionHash: z.ZodString;
+    }, z.core.$strict>>;
+    agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+        outcome: z.ZodLiteral<"unchanged">;
+    }, z.core.$strict>, z.ZodObject<{
+        outcome: z.ZodLiteral<"reader-attributed">;
+        paths: z.ZodArray<z.ZodString>;
+    }, z.core.$strict>, z.ZodObject<{
+        outcome: z.ZodLiteral<"unattributed">;
+        paths: z.ZodArray<z.ZodString>;
+    }, z.core.$strict>, z.ZodObject<{
+        outcome: z.ZodLiteral<"unmeasured">;
+    }, z.core.$strict>], "outcome">>;
+    sealed: z.ZodObject<{
+        v: z.ZodLiteral<1>;
+        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+        category: z.ZodLiteral<"task-output">;
+        scope: z.ZodObject<{
+            id: z.ZodString;
+            epoch: z.ZodNumber;
+            keyId: z.ZodString;
+        }, z.core.$strict>;
+        chainHead: z.ZodObject<{
+            seq: z.ZodNumber;
+            hash: z.ZodString;
+        }, z.core.$strict>;
+        sender: z.ZodString;
+        salt: z.ZodString;
+        nonce: z.ZodString;
+        paddedLength: z.ZodNumber;
+        contentMac: z.ZodString;
+        ciphertext: z.ZodOptional<z.ZodString>;
+        ciphertextRef: z.ZodOptional<z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+export type TaskFailSealedPayload = z.infer<typeof TaskFailSealedPayloadSchema>;
+/**
+ * daemon -> server: `task.decline` of a sealed task with a sealed `reason`. A
+ * device that cannot seal (for example without the scope key) sends a
+ * plaintext `task.decline` with a closed sealed failure code instead.
+ */
+export declare const TaskDeclineSealedPayloadSchema: z.ZodObject<{
+    retryable: z.ZodOptional<z.ZodBoolean>;
+    agentRef: z.ZodOptional<z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>>;
+    code: z.ZodOptional<z.ZodEnum<{
+        agent_home_reader_busy: "agent_home_reader_busy";
+        agent_home_writer_busy: "agent_home_writer_busy";
+        sealed_content_mac_mismatch: "sealed_content_mac_mismatch";
+        sealed_key_unavailable: "sealed_key_unavailable";
+        sealed_open_failed: "sealed_open_failed";
+        sealing_policy_mismatch: "sealing_policy_mismatch";
+    }>>;
+    sealed: z.ZodObject<{
+        v: z.ZodLiteral<1>;
+        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+        category: z.ZodLiteral<"task-output">;
+        scope: z.ZodObject<{
+            id: z.ZodString;
+            epoch: z.ZodNumber;
+            keyId: z.ZodString;
+        }, z.core.$strict>;
+        chainHead: z.ZodObject<{
+            seq: z.ZodNumber;
+            hash: z.ZodString;
+        }, z.core.$strict>;
+        sender: z.ZodString;
+        salt: z.ZodString;
+        nonce: z.ZodString;
+        paddedLength: z.ZodNumber;
+        contentMac: z.ZodString;
+        ciphertext: z.ZodOptional<z.ZodString>;
+        ciphertextRef: z.ZodOptional<z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+export type TaskDeclineSealedPayload = z.infer<typeof TaskDeclineSealedPayloadSchema>;
+/** daemon -> server: `task.cancelled` of a sealed task. `reason` is sealed. */
+export declare const TaskCancelledSealedPayloadSchema: z.ZodObject<{
+    harnessId: z.ZodOptional<z.ZodString>;
+    usage: z.ZodOptional<z.ZodObject<{
+        runtime: z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            pi: "pi";
+        }>;
+        provider: z.ZodOptional<z.ZodString>;
+        model: z.ZodOptional<z.ZodString>;
+        promptTokens: z.ZodOptional<z.ZodNumber>;
+        completionTokens: z.ZodOptional<z.ZodNumber>;
+        durationMs: z.ZodOptional<z.ZodNumber>;
+        clientVersion: z.ZodString;
+        reportedAt: z.ZodISODateTime;
+    }, z.core.$strip>>;
+    agentRef: z.ZodOptional<z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>>;
+    agentHomeProjection: z.ZodOptional<z.ZodObject<{
+        profileRevision: z.ZodString;
+        projectionHash: z.ZodString;
+    }, z.core.$strict>>;
+    agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+        outcome: z.ZodLiteral<"unchanged">;
+    }, z.core.$strict>, z.ZodObject<{
+        outcome: z.ZodLiteral<"reader-attributed">;
+        paths: z.ZodArray<z.ZodString>;
+    }, z.core.$strict>, z.ZodObject<{
+        outcome: z.ZodLiteral<"unattributed">;
+        paths: z.ZodArray<z.ZodString>;
+    }, z.core.$strict>, z.ZodObject<{
+        outcome: z.ZodLiteral<"unmeasured">;
+    }, z.core.$strict>], "outcome">>;
+    sealed: z.ZodObject<{
+        v: z.ZodLiteral<1>;
+        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+        category: z.ZodLiteral<"task-output">;
+        scope: z.ZodObject<{
+            id: z.ZodString;
+            epoch: z.ZodNumber;
+            keyId: z.ZodString;
+        }, z.core.$strict>;
+        chainHead: z.ZodObject<{
+            seq: z.ZodNumber;
+            hash: z.ZodString;
+        }, z.core.$strict>;
+        sender: z.ZodString;
+        salt: z.ZodString;
+        nonce: z.ZodString;
+        paddedLength: z.ZodNumber;
+        contentMac: z.ZodString;
+        ciphertext: z.ZodOptional<z.ZodString>;
+        ciphertextRef: z.ZodOptional<z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+export type TaskCancelledSealedPayload = z.infer<typeof TaskCancelledSealedPayloadSchema>;
+/** daemon -> server: `task.progress` of a sealed task. `events` is sealed; `seq` names the batch. */
+export declare const TaskProgressSealedPayloadSchema: z.ZodObject<{
+    seq: z.ZodNumber;
+    sealed: z.ZodObject<{
+        v: z.ZodLiteral<1>;
+        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+        category: z.ZodLiteral<"task-output">;
+        scope: z.ZodObject<{
+            id: z.ZodString;
+            epoch: z.ZodNumber;
+            keyId: z.ZodString;
+        }, z.core.$strict>;
+        chainHead: z.ZodObject<{
+            seq: z.ZodNumber;
+            hash: z.ZodString;
+        }, z.core.$strict>;
+        sender: z.ZodString;
+        salt: z.ZodString;
+        nonce: z.ZodString;
+        paddedLength: z.ZodNumber;
+        contentMac: z.ZodString;
+        ciphertext: z.ZodOptional<z.ZodString>;
+        ciphertextRef: z.ZodOptional<z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+export type TaskProgressSealedPayload = z.infer<typeof TaskProgressSealedPayloadSchema>;
+/** daemon -> server: an inline artifact of a sealed task. `inline` is sealed; a blob artifact is not carried in v1. */
+export declare const TaskArtifactSealedPayloadSchema: z.ZodObject<{
+    name: z.ZodString;
+    contentType: z.ZodString;
+    sealed: z.ZodObject<{
+        v: z.ZodLiteral<1>;
+        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+        category: z.ZodLiteral<"task-output">;
+        scope: z.ZodObject<{
+            id: z.ZodString;
+            epoch: z.ZodNumber;
+            keyId: z.ZodString;
+        }, z.core.$strict>;
+        chainHead: z.ZodObject<{
+            seq: z.ZodNumber;
+            hash: z.ZodString;
+        }, z.core.$strict>;
+        sender: z.ZodString;
+        salt: z.ZodString;
+        nonce: z.ZodString;
+        paddedLength: z.ZodNumber;
+        contentMac: z.ZodString;
+        ciphertext: z.ZodOptional<z.ZodString>;
+        ciphertextRef: z.ZodOptional<z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+export type TaskArtifactSealedPayload = z.infer<typeof TaskArtifactSealedPayloadSchema>;
+/** daemon -> server: `task.await_approval` of a sealed task. `summary` is sealed; `approvalId` is required. */
+export declare const TaskAwaitApprovalSealedPayloadSchema: z.ZodObject<{
+    approvalId: z.ZodString;
+    sealed: z.ZodObject<{
+        v: z.ZodLiteral<1>;
+        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+        category: z.ZodLiteral<"task-output">;
+        scope: z.ZodObject<{
+            id: z.ZodString;
+            epoch: z.ZodNumber;
+            keyId: z.ZodString;
+        }, z.core.$strict>;
+        chainHead: z.ZodObject<{
+            seq: z.ZodNumber;
+            hash: z.ZodString;
+        }, z.core.$strict>;
+        sender: z.ZodString;
+        salt: z.ZodString;
+        nonce: z.ZodString;
+        paddedLength: z.ZodNumber;
+        contentMac: z.ZodString;
+        ciphertext: z.ZodOptional<z.ZodString>;
+        ciphertextRef: z.ZodOptional<z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+export type TaskAwaitApprovalSealedPayload = z.infer<typeof TaskAwaitApprovalSealedPayloadSchema>;
 /** Protocol-owned task-opening family; the wire registry consumes these same entries. */
 declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
     readonly 'task.offer': z.ZodObject<{
@@ -9359,40 +11195,6 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
             maxTokens: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strip>>;
-        sealing: z.ZodOptional<z.ZodObject<{
-            scopeId: z.ZodString;
-            epoch: z.ZodNumber;
-            categories: z.ZodArray<z.ZodEnum<{
-                "task-input": "task-input";
-                "task-output": "task-output";
-            }>>;
-        }, z.core.$strict>>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-input">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
     }, z.core.$strip>;
     readonly 'task.offer_with_toolsets': z.ZodObject<{
         instruction: z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
@@ -9442,40 +11244,6 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
             maxTokens: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strip>>;
-        sealing: z.ZodOptional<z.ZodObject<{
-            scopeId: z.ZodString;
-            epoch: z.ZodNumber;
-            categories: z.ZodArray<z.ZodEnum<{
-                "task-input": "task-input";
-                "task-output": "task-output";
-            }>>;
-        }, z.core.$strict>>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-input">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
         requiredToolsets: z.ZodArray<z.ZodString>;
     }, z.core.$strict>;
     readonly 'task.offer_for_agent': z.ZodObject<{
@@ -9543,40 +11311,6 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
             maxTokens: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strip>>;
-        sealing: z.ZodOptional<z.ZodObject<{
-            scopeId: z.ZodString;
-            epoch: z.ZodNumber;
-            categories: z.ZodArray<z.ZodEnum<{
-                "task-input": "task-input";
-                "task-output": "task-output";
-            }>>;
-        }, z.core.$strict>>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-input">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
     }, z.core.$strict>;
     readonly 'task.offer_for_agent_with_egress': z.ZodObject<{
         instruction: z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
@@ -9642,40 +11376,6 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
             maxTokens: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strip>>;
-        sealing: z.ZodOptional<z.ZodObject<{
-            scopeId: z.ZodString;
-            epoch: z.ZodNumber;
-            categories: z.ZodArray<z.ZodEnum<{
-                "task-input": "task-input";
-                "task-output": "task-output";
-            }>>;
-        }, z.core.$strict>>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-input">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
         sessionRef: z.ZodString;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
@@ -9778,40 +11478,6 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
             maxTokens: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strip>>;
-        sealing: z.ZodOptional<z.ZodObject<{
-            scopeId: z.ZodString;
-            epoch: z.ZodNumber;
-            categories: z.ZodArray<z.ZodEnum<{
-                "task-input": "task-input";
-                "task-output": "task-output";
-            }>>;
-        }, z.core.$strict>>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-input">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
             activity: z.ZodObject<{
@@ -9944,6 +11610,544 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
                 "text/plain": "text/plain";
             }>;
             maxBytes: z.ZodNumber;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+    readonly 'task.offer_sealed': z.ZodObject<{
+        runtime: z.ZodOptional<z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            pi: "pi";
+        }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
+        dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            lane: z.ZodLiteral<"subscription">;
+            runtimeId: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+            }>;
+            providerId: z.ZodNull;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerId: z.ZodString;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok-profile">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerProfile: z.ZodObject<{
+                profileRef: z.ZodString;
+                profileRevision: z.ZodString;
+                profileHash: z.ZodString;
+                modelId: z.ZodString;
+                requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                    "image-input": "image-input";
+                }>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>], "lane">>;
+        sessionRef: z.ZodOptional<z.ZodString>;
+        workspaceHint: z.ZodOptional<z.ZodString>;
+        limits: z.ZodOptional<z.ZodObject<{
+            maxDurationMs: z.ZodOptional<z.ZodNumber>;
+            maxTokens: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>;
+        instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+            blobRef: z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+        }, z.core.$strict>]>>;
+        sealing: z.ZodObject<{
+            scopeId: z.ZodString;
+            epoch: z.ZodNumber;
+            categories: z.ZodArray<z.ZodEnum<{
+                "task-input": "task-input";
+                "task-output": "task-output";
+            }>>;
+        }, z.core.$strict>;
+        sealed: z.ZodOptional<z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-input">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+    readonly 'task.offer_with_toolsets_sealed': z.ZodObject<{
+        runtime: z.ZodOptional<z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            pi: "pi";
+        }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
+        dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            lane: z.ZodLiteral<"subscription">;
+            runtimeId: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+            }>;
+            providerId: z.ZodNull;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerId: z.ZodString;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok-profile">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerProfile: z.ZodObject<{
+                profileRef: z.ZodString;
+                profileRevision: z.ZodString;
+                profileHash: z.ZodString;
+                modelId: z.ZodString;
+                requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                    "image-input": "image-input";
+                }>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>], "lane">>;
+        sessionRef: z.ZodOptional<z.ZodString>;
+        workspaceHint: z.ZodOptional<z.ZodString>;
+        limits: z.ZodOptional<z.ZodObject<{
+            maxDurationMs: z.ZodOptional<z.ZodNumber>;
+            maxTokens: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>;
+        requiredToolsets: z.ZodArray<z.ZodString>;
+        instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+            blobRef: z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+        }, z.core.$strict>]>>;
+        sealing: z.ZodObject<{
+            scopeId: z.ZodString;
+            epoch: z.ZodNumber;
+            categories: z.ZodArray<z.ZodEnum<{
+                "task-input": "task-input";
+                "task-output": "task-output";
+            }>>;
+        }, z.core.$strict>;
+        sealed: z.ZodOptional<z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-input">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+    readonly 'task.offer_for_agent_sealed': z.ZodObject<{
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+        agentMemory: z.ZodOptional<z.ZodEnum<{
+            none: "none";
+            read: "read";
+            "read-write": "read-write";
+        }>>;
+        requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        runtime: z.ZodOptional<z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            pi: "pi";
+        }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
+        dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            lane: z.ZodLiteral<"subscription">;
+            runtimeId: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+            }>;
+            providerId: z.ZodNull;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerId: z.ZodString;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok-profile">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerProfile: z.ZodObject<{
+                profileRef: z.ZodString;
+                profileRevision: z.ZodString;
+                profileHash: z.ZodString;
+                modelId: z.ZodString;
+                requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                    "image-input": "image-input";
+                }>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>], "lane">>;
+        terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            mode: z.ZodLiteral<"none">;
+        }, z.core.$strict>, z.ZodObject<{
+            mode: z.ZodLiteral<"result-document">;
+            contract: z.ZodString;
+            schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
+        }, z.core.$strict>], "mode">>;
+        sessionRef: z.ZodOptional<z.ZodString>;
+        limits: z.ZodOptional<z.ZodObject<{
+            maxDurationMs: z.ZodOptional<z.ZodNumber>;
+            maxTokens: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>;
+        instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+            blobRef: z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+        }, z.core.$strict>]>>;
+        sealing: z.ZodObject<{
+            scopeId: z.ZodString;
+            epoch: z.ZodNumber;
+            categories: z.ZodArray<z.ZodEnum<{
+                "task-input": "task-input";
+                "task-output": "task-output";
+            }>>;
+        }, z.core.$strict>;
+        sealed: z.ZodOptional<z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-input">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+    readonly 'task.offer_for_agent_with_egress_sealed': z.ZodObject<{
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+        agentMemory: z.ZodOptional<z.ZodEnum<{
+            none: "none";
+            read: "read";
+            "read-write": "read-write";
+        }>>;
+        requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        runtime: z.ZodOptional<z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            pi: "pi";
+        }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
+        dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            lane: z.ZodLiteral<"subscription">;
+            runtimeId: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+            }>;
+            providerId: z.ZodNull;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerId: z.ZodString;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok-profile">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerProfile: z.ZodObject<{
+                profileRef: z.ZodString;
+                profileRevision: z.ZodString;
+                profileHash: z.ZodString;
+                modelId: z.ZodString;
+                requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                    "image-input": "image-input";
+                }>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>], "lane">>;
+        terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            mode: z.ZodLiteral<"none">;
+        }, z.core.$strict>, z.ZodObject<{
+            mode: z.ZodLiteral<"result-document">;
+            contract: z.ZodString;
+            schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
+        }, z.core.$strict>], "mode">>;
+        limits: z.ZodOptional<z.ZodObject<{
+            maxDurationMs: z.ZodOptional<z.ZodNumber>;
+            maxTokens: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>;
+        sessionRef: z.ZodString;
+        egressPolicy: z.ZodObject<{
+            policyRevision: z.ZodString;
+            activity: z.ZodObject<{
+                delivery: z.ZodLiteral<"latest-value">;
+                maxCoalesceMs: z.ZodNumber;
+                maxEventBytes: z.ZodNumber;
+            }, z.core.$strict>;
+            reliable: z.ZodObject<{
+                maxPendingEventsPerAgent: z.ZodNumber;
+                maxPendingBytesPerAgent: z.ZodNumber;
+                maxPendingBytesPerTenant: z.ZodNumber;
+            }, z.core.$strict>;
+            transfers: z.ZodObject<{
+                workspace: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+                transcript: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+                artifact: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
+        messageEgress: z.ZodOptional<z.ZodObject<{
+            mode: z.ZodLiteral<"required">;
+            contract: z.ZodString;
+            contentType: z.ZodEnum<{
+                "text/markdown": "text/markdown";
+                "text/plain": "text/plain";
+            }>;
+            maxBytes: z.ZodNumber;
+        }, z.core.$strict>>;
+        instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+            blobRef: z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+        }, z.core.$strict>]>>;
+        sealing: z.ZodObject<{
+            scopeId: z.ZodString;
+            epoch: z.ZodNumber;
+            categories: z.ZodArray<z.ZodEnum<{
+                "task-input": "task-input";
+                "task-output": "task-output";
+            }>>;
+        }, z.core.$strict>;
+        sealed: z.ZodOptional<z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-input">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+    readonly 'task.offer_for_agent_with_egress_fresh_sealed': z.ZodObject<{
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+        agentMemory: z.ZodOptional<z.ZodEnum<{
+            none: "none";
+            read: "read";
+            "read-write": "read-write";
+        }>>;
+        requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        runtime: z.ZodOptional<z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            pi: "pi";
+        }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
+        dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            lane: z.ZodLiteral<"subscription">;
+            runtimeId: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+            }>;
+            providerId: z.ZodNull;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerId: z.ZodString;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok-profile">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerProfile: z.ZodObject<{
+                profileRef: z.ZodString;
+                profileRevision: z.ZodString;
+                profileHash: z.ZodString;
+                modelId: z.ZodString;
+                requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                    "image-input": "image-input";
+                }>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>], "lane">>;
+        terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            mode: z.ZodLiteral<"none">;
+        }, z.core.$strict>, z.ZodObject<{
+            mode: z.ZodLiteral<"result-document">;
+            contract: z.ZodString;
+            schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
+        }, z.core.$strict>], "mode">>;
+        limits: z.ZodOptional<z.ZodObject<{
+            maxDurationMs: z.ZodOptional<z.ZodNumber>;
+            maxTokens: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>;
+        egressPolicy: z.ZodObject<{
+            policyRevision: z.ZodString;
+            activity: z.ZodObject<{
+                delivery: z.ZodLiteral<"latest-value">;
+                maxCoalesceMs: z.ZodNumber;
+                maxEventBytes: z.ZodNumber;
+            }, z.core.$strict>;
+            reliable: z.ZodObject<{
+                maxPendingEventsPerAgent: z.ZodNumber;
+                maxPendingBytesPerAgent: z.ZodNumber;
+                maxPendingBytesPerTenant: z.ZodNumber;
+            }, z.core.$strict>;
+            transfers: z.ZodObject<{
+                workspace: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+                transcript: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+                artifact: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
+        messageEgress: z.ZodOptional<z.ZodObject<{
+            mode: z.ZodLiteral<"required">;
+            contract: z.ZodString;
+            contentType: z.ZodEnum<{
+                "text/markdown": "text/markdown";
+                "text/plain": "text/plain";
+            }>;
+            maxBytes: z.ZodNumber;
+        }, z.core.$strict>>;
+        instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+            blobRef: z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+        }, z.core.$strict>]>>;
+        sealing: z.ZodObject<{
+            scopeId: z.ZodString;
+            epoch: z.ZodNumber;
+            categories: z.ZodArray<z.ZodEnum<{
+                "task-input": "task-input";
+                "task-output": "task-output";
+            }>>;
+        }, z.core.$strict>;
+        sealed: z.ZodOptional<z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-input">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
         }, z.core.$strict>>;
     }, z.core.$strict>;
 };
@@ -10000,40 +12204,6 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
             maxTokens: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strip>>;
-        sealing: z.ZodOptional<z.ZodObject<{
-            scopeId: z.ZodString;
-            epoch: z.ZodNumber;
-            categories: z.ZodArray<z.ZodEnum<{
-                "task-input": "task-input";
-                "task-output": "task-output";
-            }>>;
-        }, z.core.$strict>>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-input">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
     }, z.core.$strip>;
     readonly 'task.offer_with_toolsets': z.ZodObject<{
         instruction: z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
@@ -10083,40 +12253,6 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
             maxTokens: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strip>>;
-        sealing: z.ZodOptional<z.ZodObject<{
-            scopeId: z.ZodString;
-            epoch: z.ZodNumber;
-            categories: z.ZodArray<z.ZodEnum<{
-                "task-input": "task-input";
-                "task-output": "task-output";
-            }>>;
-        }, z.core.$strict>>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-input">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
         requiredToolsets: z.ZodArray<z.ZodString>;
     }, z.core.$strict>;
     readonly 'task.offer_for_agent': z.ZodObject<{
@@ -10184,40 +12320,6 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
             maxTokens: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strip>>;
-        sealing: z.ZodOptional<z.ZodObject<{
-            scopeId: z.ZodString;
-            epoch: z.ZodNumber;
-            categories: z.ZodArray<z.ZodEnum<{
-                "task-input": "task-input";
-                "task-output": "task-output";
-            }>>;
-        }, z.core.$strict>>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-input">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
     }, z.core.$strict>;
     readonly 'task.offer_for_agent_with_egress': z.ZodObject<{
         instruction: z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
@@ -10283,40 +12385,6 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
             maxTokens: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strip>>;
-        sealing: z.ZodOptional<z.ZodObject<{
-            scopeId: z.ZodString;
-            epoch: z.ZodNumber;
-            categories: z.ZodArray<z.ZodEnum<{
-                "task-input": "task-input";
-                "task-output": "task-output";
-            }>>;
-        }, z.core.$strict>>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-input">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
         sessionRef: z.ZodString;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
@@ -10419,40 +12487,6 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
             maxTokens: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strip>>;
-        sealing: z.ZodOptional<z.ZodObject<{
-            scopeId: z.ZodString;
-            epoch: z.ZodNumber;
-            categories: z.ZodArray<z.ZodEnum<{
-                "task-input": "task-input";
-                "task-output": "task-output";
-            }>>;
-        }, z.core.$strict>>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-input">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
             activity: z.ZodObject<{
@@ -10585,6 +12619,544 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
                 "text/plain": "text/plain";
             }>;
             maxBytes: z.ZodNumber;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+    readonly 'task.offer_sealed': z.ZodObject<{
+        runtime: z.ZodOptional<z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            pi: "pi";
+        }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
+        dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            lane: z.ZodLiteral<"subscription">;
+            runtimeId: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+            }>;
+            providerId: z.ZodNull;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerId: z.ZodString;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok-profile">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerProfile: z.ZodObject<{
+                profileRef: z.ZodString;
+                profileRevision: z.ZodString;
+                profileHash: z.ZodString;
+                modelId: z.ZodString;
+                requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                    "image-input": "image-input";
+                }>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>], "lane">>;
+        sessionRef: z.ZodOptional<z.ZodString>;
+        workspaceHint: z.ZodOptional<z.ZodString>;
+        limits: z.ZodOptional<z.ZodObject<{
+            maxDurationMs: z.ZodOptional<z.ZodNumber>;
+            maxTokens: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>;
+        instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+            blobRef: z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+        }, z.core.$strict>]>>;
+        sealing: z.ZodObject<{
+            scopeId: z.ZodString;
+            epoch: z.ZodNumber;
+            categories: z.ZodArray<z.ZodEnum<{
+                "task-input": "task-input";
+                "task-output": "task-output";
+            }>>;
+        }, z.core.$strict>;
+        sealed: z.ZodOptional<z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-input">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+    readonly 'task.offer_with_toolsets_sealed': z.ZodObject<{
+        runtime: z.ZodOptional<z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            pi: "pi";
+        }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
+        dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            lane: z.ZodLiteral<"subscription">;
+            runtimeId: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+            }>;
+            providerId: z.ZodNull;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerId: z.ZodString;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok-profile">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerProfile: z.ZodObject<{
+                profileRef: z.ZodString;
+                profileRevision: z.ZodString;
+                profileHash: z.ZodString;
+                modelId: z.ZodString;
+                requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                    "image-input": "image-input";
+                }>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>], "lane">>;
+        sessionRef: z.ZodOptional<z.ZodString>;
+        workspaceHint: z.ZodOptional<z.ZodString>;
+        limits: z.ZodOptional<z.ZodObject<{
+            maxDurationMs: z.ZodOptional<z.ZodNumber>;
+            maxTokens: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>;
+        requiredToolsets: z.ZodArray<z.ZodString>;
+        instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+            blobRef: z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+        }, z.core.$strict>]>>;
+        sealing: z.ZodObject<{
+            scopeId: z.ZodString;
+            epoch: z.ZodNumber;
+            categories: z.ZodArray<z.ZodEnum<{
+                "task-input": "task-input";
+                "task-output": "task-output";
+            }>>;
+        }, z.core.$strict>;
+        sealed: z.ZodOptional<z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-input">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+    readonly 'task.offer_for_agent_sealed': z.ZodObject<{
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+        agentMemory: z.ZodOptional<z.ZodEnum<{
+            none: "none";
+            read: "read";
+            "read-write": "read-write";
+        }>>;
+        requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        runtime: z.ZodOptional<z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            pi: "pi";
+        }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
+        dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            lane: z.ZodLiteral<"subscription">;
+            runtimeId: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+            }>;
+            providerId: z.ZodNull;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerId: z.ZodString;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok-profile">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerProfile: z.ZodObject<{
+                profileRef: z.ZodString;
+                profileRevision: z.ZodString;
+                profileHash: z.ZodString;
+                modelId: z.ZodString;
+                requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                    "image-input": "image-input";
+                }>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>], "lane">>;
+        terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            mode: z.ZodLiteral<"none">;
+        }, z.core.$strict>, z.ZodObject<{
+            mode: z.ZodLiteral<"result-document">;
+            contract: z.ZodString;
+            schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
+        }, z.core.$strict>], "mode">>;
+        sessionRef: z.ZodOptional<z.ZodString>;
+        limits: z.ZodOptional<z.ZodObject<{
+            maxDurationMs: z.ZodOptional<z.ZodNumber>;
+            maxTokens: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>;
+        instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+            blobRef: z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+        }, z.core.$strict>]>>;
+        sealing: z.ZodObject<{
+            scopeId: z.ZodString;
+            epoch: z.ZodNumber;
+            categories: z.ZodArray<z.ZodEnum<{
+                "task-input": "task-input";
+                "task-output": "task-output";
+            }>>;
+        }, z.core.$strict>;
+        sealed: z.ZodOptional<z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-input">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+    readonly 'task.offer_for_agent_with_egress_sealed': z.ZodObject<{
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+        agentMemory: z.ZodOptional<z.ZodEnum<{
+            none: "none";
+            read: "read";
+            "read-write": "read-write";
+        }>>;
+        requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        runtime: z.ZodOptional<z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            pi: "pi";
+        }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
+        dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            lane: z.ZodLiteral<"subscription">;
+            runtimeId: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+            }>;
+            providerId: z.ZodNull;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerId: z.ZodString;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok-profile">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerProfile: z.ZodObject<{
+                profileRef: z.ZodString;
+                profileRevision: z.ZodString;
+                profileHash: z.ZodString;
+                modelId: z.ZodString;
+                requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                    "image-input": "image-input";
+                }>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>], "lane">>;
+        terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            mode: z.ZodLiteral<"none">;
+        }, z.core.$strict>, z.ZodObject<{
+            mode: z.ZodLiteral<"result-document">;
+            contract: z.ZodString;
+            schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
+        }, z.core.$strict>], "mode">>;
+        limits: z.ZodOptional<z.ZodObject<{
+            maxDurationMs: z.ZodOptional<z.ZodNumber>;
+            maxTokens: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>;
+        sessionRef: z.ZodString;
+        egressPolicy: z.ZodObject<{
+            policyRevision: z.ZodString;
+            activity: z.ZodObject<{
+                delivery: z.ZodLiteral<"latest-value">;
+                maxCoalesceMs: z.ZodNumber;
+                maxEventBytes: z.ZodNumber;
+            }, z.core.$strict>;
+            reliable: z.ZodObject<{
+                maxPendingEventsPerAgent: z.ZodNumber;
+                maxPendingBytesPerAgent: z.ZodNumber;
+                maxPendingBytesPerTenant: z.ZodNumber;
+            }, z.core.$strict>;
+            transfers: z.ZodObject<{
+                workspace: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+                transcript: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+                artifact: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
+        messageEgress: z.ZodOptional<z.ZodObject<{
+            mode: z.ZodLiteral<"required">;
+            contract: z.ZodString;
+            contentType: z.ZodEnum<{
+                "text/markdown": "text/markdown";
+                "text/plain": "text/plain";
+            }>;
+            maxBytes: z.ZodNumber;
+        }, z.core.$strict>>;
+        instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+            blobRef: z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+        }, z.core.$strict>]>>;
+        sealing: z.ZodObject<{
+            scopeId: z.ZodString;
+            epoch: z.ZodNumber;
+            categories: z.ZodArray<z.ZodEnum<{
+                "task-input": "task-input";
+                "task-output": "task-output";
+            }>>;
+        }, z.core.$strict>;
+        sealed: z.ZodOptional<z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-input">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+    readonly 'task.offer_for_agent_with_egress_fresh_sealed': z.ZodObject<{
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
+        agentMemory: z.ZodOptional<z.ZodEnum<{
+            none: "none";
+            read: "read";
+            "read-write": "read-write";
+        }>>;
+        requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        runtime: z.ZodOptional<z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            pi: "pi";
+        }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
+        dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            lane: z.ZodLiteral<"subscription">;
+            runtimeId: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+            }>;
+            providerId: z.ZodNull;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerId: z.ZodString;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok-profile">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerProfile: z.ZodObject<{
+                profileRef: z.ZodString;
+                profileRevision: z.ZodString;
+                profileHash: z.ZodString;
+                modelId: z.ZodString;
+                requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                    "image-input": "image-input";
+                }>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>], "lane">>;
+        terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            mode: z.ZodLiteral<"none">;
+        }, z.core.$strict>, z.ZodObject<{
+            mode: z.ZodLiteral<"result-document">;
+            contract: z.ZodString;
+            schema: z.ZodCustom<import("./result-schema").ResultSchema, import("./result-schema").ResultSchema>;
+        }, z.core.$strict>], "mode">>;
+        limits: z.ZodOptional<z.ZodObject<{
+            maxDurationMs: z.ZodOptional<z.ZodNumber>;
+            maxTokens: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>;
+        egressPolicy: z.ZodObject<{
+            policyRevision: z.ZodString;
+            activity: z.ZodObject<{
+                delivery: z.ZodLiteral<"latest-value">;
+                maxCoalesceMs: z.ZodNumber;
+                maxEventBytes: z.ZodNumber;
+            }, z.core.$strict>;
+            reliable: z.ZodObject<{
+                maxPendingEventsPerAgent: z.ZodNumber;
+                maxPendingBytesPerAgent: z.ZodNumber;
+                maxPendingBytesPerTenant: z.ZodNumber;
+            }, z.core.$strict>;
+            transfers: z.ZodObject<{
+                workspace: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+                transcript: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+                artifact: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
+        messageEgress: z.ZodOptional<z.ZodObject<{
+            mode: z.ZodLiteral<"required">;
+            contract: z.ZodString;
+            contentType: z.ZodEnum<{
+                "text/markdown": "text/markdown";
+                "text/plain": "text/plain";
+            }>;
+            maxBytes: z.ZodNumber;
+        }, z.core.$strict>>;
+        instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+            blobRef: z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+        }, z.core.$strict>]>>;
+        sealing: z.ZodObject<{
+            scopeId: z.ZodString;
+            epoch: z.ZodNumber;
+            categories: z.ZodArray<z.ZodEnum<{
+                "task-input": "task-input";
+                "task-output": "task-output";
+            }>>;
+        }, z.core.$strict>;
+        sealed: z.ZodOptional<z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-input">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
         }, z.core.$strict>>;
     }, z.core.$strict>;
     readonly 'conn.hello': z.ZodObject<{
@@ -10987,32 +13559,6 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
     }, z.core.$strip>;
     readonly 'task.steer': z.ZodObject<{
         text: z.ZodString;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-input">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
     }, z.core.$strip>;
     readonly 'task.claim': z.ZodObject<{
         deviceId: z.ZodString;
@@ -11051,32 +13597,6 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             sealed_open_failed: "sealed_open_failed";
             sealing_policy_mismatch: "sealing_policy_mismatch";
         }>>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-output">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
     }, z.core.$strip>;
     readonly 'task.progress': z.ZodObject<{
         seq: z.ZodNumber;
@@ -11164,32 +13684,6 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
         }, z.core.$strip>], "type">, z.ZodObject<{
             type: z.ZodString;
         }, z.core.$loose>]>>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-output">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
     }, z.core.$strip>;
     readonly 'task.artifact': z.ZodObject<{
         name: z.ZodString;
@@ -11202,62 +13696,10 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             contentType: z.ZodString;
             url: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-output">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
     }, z.core.$strip>;
     readonly 'task.await_approval': z.ZodObject<{
         summary: z.ZodString;
         approvalId: z.ZodOptional<z.ZodString>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-output">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
     }, z.core.$strip>;
     readonly 'task.complete': z.ZodObject<{
         harnessId: z.ZodOptional<z.ZodString>;
@@ -11310,32 +13752,6 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
         }, z.core.$strict>, z.ZodObject<{
             outcome: z.ZodLiteral<"unmeasured">;
         }, z.core.$strict>], "outcome">>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-output">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
     }, z.core.$strip>;
     readonly 'task.fail': z.ZodObject<{
         recovery: z.ZodOptional<z.ZodObject<{
@@ -11383,32 +13799,6 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
         }, z.core.$strict>, z.ZodObject<{
             outcome: z.ZodLiteral<"unmeasured">;
         }, z.core.$strict>], "outcome">>;
-        sealed: z.ZodOptional<z.ZodObject<{
-            v: z.ZodLiteral<1>;
-            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-            category: z.ZodLiteral<"task-output">;
-            scope: z.ZodObject<{
-                id: z.ZodString;
-                epoch: z.ZodNumber;
-                keyId: z.ZodString;
-            }, z.core.$strict>;
-            chainHead: z.ZodObject<{
-                seq: z.ZodNumber;
-                hash: z.ZodString;
-            }, z.core.$strict>;
-            sender: z.ZodString;
-            salt: z.ZodString;
-            nonce: z.ZodString;
-            paddedLength: z.ZodNumber;
-            contentMac: z.ZodString;
-            ciphertext: z.ZodOptional<z.ZodString>;
-            ciphertextRef: z.ZodOptional<z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
     }, z.core.$strip>;
     readonly 'task.cancelled': z.ZodObject<{
         harnessId: z.ZodOptional<z.ZodString>;
@@ -11446,7 +13836,84 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
         }, z.core.$strict>, z.ZodObject<{
             outcome: z.ZodLiteral<"unmeasured">;
         }, z.core.$strict>], "outcome">>;
-        sealed: z.ZodOptional<z.ZodObject<{
+    }, z.core.$strip>;
+    readonly 'task.approval_resolved': z.ZodObject<{
+        approvalId: z.ZodString;
+        decision: z.ZodEnum<{
+            approve: "approve";
+            reject: "reject";
+        }>;
+        resolvedBy: z.ZodEnum<{
+            local: "local";
+        }>;
+        at: z.ZodISODateTime;
+    }, z.core.$strip>;
+    readonly 'task.steer_sealed': z.ZodObject<{
+        steerId: z.ZodUUID;
+        sealed: z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-input">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>;
+    }, z.core.$strict>;
+    readonly 'task.complete_sealed': z.ZodObject<{
+        harnessId: z.ZodOptional<z.ZodString>;
+        sessionRef: z.ZodString;
+        usage: z.ZodOptional<z.ZodObject<{
+            runtime: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+                pi: "pi";
+            }>;
+            provider: z.ZodOptional<z.ZodString>;
+            model: z.ZodOptional<z.ZodString>;
+            promptTokens: z.ZodOptional<z.ZodNumber>;
+            completionTokens: z.ZodOptional<z.ZodNumber>;
+            durationMs: z.ZodOptional<z.ZodNumber>;
+            clientVersion: z.ZodString;
+            reportedAt: z.ZodISODateTime;
+        }, z.core.$strip>>;
+        agentRef: z.ZodOptional<z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>>;
+        agentHomeProjection: z.ZodOptional<z.ZodObject<{
+            profileRevision: z.ZodString;
+            projectionHash: z.ZodString;
+        }, z.core.$strict>>;
+        agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            outcome: z.ZodLiteral<"unchanged">;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"reader-attributed">;
+            paths: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"unattributed">;
+            paths: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"unmeasured">;
+        }, z.core.$strict>], "outcome">>;
+        sealed: z.ZodObject<{
             v: z.ZodLiteral<1>;
             suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
             category: z.ZodLiteral<"task-output">;
@@ -11471,19 +13938,266 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
                 size: z.ZodNumber;
                 contentType: z.ZodString;
             }, z.core.$strict>>;
+        }, z.core.$strict>;
+    }, z.core.$strict>;
+    readonly 'task.fail_sealed': z.ZodObject<{
+        recovery: z.ZodOptional<z.ZodObject<{
+            kind: z.ZodLiteral<"daemon_interrupted">;
+            offerId: z.ZodUUID;
         }, z.core.$strict>>;
-    }, z.core.$strip>;
-    readonly 'task.approval_resolved': z.ZodObject<{
+        harnessId: z.ZodOptional<z.ZodString>;
+        retryable: z.ZodOptional<z.ZodBoolean>;
+        usage: z.ZodOptional<z.ZodObject<{
+            runtime: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+                pi: "pi";
+            }>;
+            provider: z.ZodOptional<z.ZodString>;
+            model: z.ZodOptional<z.ZodString>;
+            promptTokens: z.ZodOptional<z.ZodNumber>;
+            completionTokens: z.ZodOptional<z.ZodNumber>;
+            durationMs: z.ZodOptional<z.ZodNumber>;
+            clientVersion: z.ZodString;
+            reportedAt: z.ZodISODateTime;
+        }, z.core.$strip>>;
+        agentRef: z.ZodOptional<z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>>;
+        agentHomeProjection: z.ZodOptional<z.ZodObject<{
+            profileRevision: z.ZodString;
+            projectionHash: z.ZodString;
+        }, z.core.$strict>>;
+        agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            outcome: z.ZodLiteral<"unchanged">;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"reader-attributed">;
+            paths: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"unattributed">;
+            paths: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"unmeasured">;
+        }, z.core.$strict>], "outcome">>;
+        sealed: z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-output">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>;
+    }, z.core.$strict>;
+    readonly 'task.decline_sealed': z.ZodObject<{
+        retryable: z.ZodOptional<z.ZodBoolean>;
+        agentRef: z.ZodOptional<z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>>;
+        code: z.ZodOptional<z.ZodEnum<{
+            agent_home_reader_busy: "agent_home_reader_busy";
+            agent_home_writer_busy: "agent_home_writer_busy";
+            sealed_content_mac_mismatch: "sealed_content_mac_mismatch";
+            sealed_key_unavailable: "sealed_key_unavailable";
+            sealed_open_failed: "sealed_open_failed";
+            sealing_policy_mismatch: "sealing_policy_mismatch";
+        }>>;
+        sealed: z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-output">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>;
+    }, z.core.$strict>;
+    readonly 'task.cancelled_sealed': z.ZodObject<{
+        harnessId: z.ZodOptional<z.ZodString>;
+        usage: z.ZodOptional<z.ZodObject<{
+            runtime: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+                pi: "pi";
+            }>;
+            provider: z.ZodOptional<z.ZodString>;
+            model: z.ZodOptional<z.ZodString>;
+            promptTokens: z.ZodOptional<z.ZodNumber>;
+            completionTokens: z.ZodOptional<z.ZodNumber>;
+            durationMs: z.ZodOptional<z.ZodNumber>;
+            clientVersion: z.ZodString;
+            reportedAt: z.ZodISODateTime;
+        }, z.core.$strip>>;
+        agentRef: z.ZodOptional<z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>>;
+        agentHomeProjection: z.ZodOptional<z.ZodObject<{
+            profileRevision: z.ZodString;
+            projectionHash: z.ZodString;
+        }, z.core.$strict>>;
+        agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            outcome: z.ZodLiteral<"unchanged">;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"reader-attributed">;
+            paths: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"unattributed">;
+            paths: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"unmeasured">;
+        }, z.core.$strict>], "outcome">>;
+        sealed: z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-output">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>;
+    }, z.core.$strict>;
+    readonly 'task.progress_sealed': z.ZodObject<{
+        seq: z.ZodNumber;
+        sealed: z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-output">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>;
+    }, z.core.$strict>;
+    readonly 'task.artifact_sealed': z.ZodObject<{
+        name: z.ZodString;
+        contentType: z.ZodString;
+        sealed: z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-output">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>;
+    }, z.core.$strict>;
+    readonly 'task.await_approval_sealed': z.ZodObject<{
         approvalId: z.ZodString;
-        decision: z.ZodEnum<{
-            approve: "approve";
-            reject: "reject";
-        }>;
-        resolvedBy: z.ZodEnum<{
-            local: "local";
-        }>;
-        at: z.ZodISODateTime;
-    }, z.core.$strip>;
+        sealed: z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-output">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>;
+    }, z.core.$strict>;
 };
 export type MessageType = keyof typeof MESSAGE_PAYLOAD_SCHEMAS;
 export declare const MESSAGE_TYPES: MessageType[];
@@ -11492,7 +14206,7 @@ export declare const MESSAGE_TYPES: MessageType[];
  * (`envelope.ts`) to decide which branches require envelope `seq` (M1
  * redelivery cursor).
  */
-export declare const SERVER_TO_DAEMON_TYPES: readonly ["conn.ack", "task.offer", "task.offer_with_toolsets", "task.offer_for_agent", "task.offer_for_agent_with_egress", "task.offer_for_agent_with_egress_fresh", "task.offer_prepared", "agent.egress.ack", "agent.message.disposition", "agent.content.read", "agent.home.projection", "agent.input.preparation", "provider.provisioning.available", "agent.memory.intent.available", "task.approve", "task.reject", "task.cancel", "task.steer"];
+export declare const SERVER_TO_DAEMON_TYPES: readonly ["conn.ack", "task.offer", "task.offer_with_toolsets", "task.offer_for_agent", "task.offer_for_agent_with_egress", "task.offer_for_agent_with_egress_fresh", "task.offer_prepared", "agent.egress.ack", "agent.message.disposition", "agent.content.read", "agent.home.projection", "agent.input.preparation", "provider.provisioning.available", "agent.memory.intent.available", "task.approve", "task.reject", "task.cancel", "task.steer", "task.offer_sealed", "task.offer_with_toolsets_sealed", "task.offer_for_agent_sealed", "task.offer_for_agent_with_egress_sealed", "task.offer_for_agent_with_egress_fresh_sealed", "task.steer_sealed"];
 /**
  * Message types the daemon sends to the server — the flip side of
  * {@link SERVER_TO_DAEMON_TYPES}. `conn.hello` is deliberately excluded: it's
@@ -11505,7 +14219,7 @@ export declare const SERVER_TO_DAEMON_TYPES: readonly ["conn.ack", "task.offer",
  * or anything unrecognized — is rejected before it's dispatched to any
  * handler or counted `accepted` on the `/byok/messages` wire.
  */
-export declare const DAEMON_TO_SERVER_TYPES: readonly ["task.claim", "task.started", "task.decline", "task.progress", "task.artifact", "task.await_approval", "task.complete", "task.fail", "task.cancelled", "task.approval_resolved", "agent.egress.reliable", "agent.message.draft", "agent.message.publish", "agent.content.receipt"];
+export declare const DAEMON_TO_SERVER_TYPES: readonly ["task.claim", "task.started", "task.decline", "task.progress", "task.artifact", "task.await_approval", "task.complete", "task.fail", "task.cancelled", "task.approval_resolved", "agent.egress.reliable", "agent.message.draft", "agent.message.publish", "agent.content.receipt", "task.complete_sealed", "task.fail_sealed", "task.decline_sealed", "task.cancelled_sealed", "task.progress_sealed", "task.artifact_sealed", "task.await_approval_sealed"];
 export {};
 // ==== @byok-sdk/protocol dist/plain-json.d.ts ====
 /**
@@ -12067,8 +14781,11 @@ export {};
 /**
  * Sealed payload v1 on the hosted wire (#654 design §8.1, §8.3, §8.6).
  *
- * A sealed member replaces the fields that one data category moves out of a
- * payload. The Host reads only its outer fields. It checks the shape here:
+ * Each sealed message type (`task.complete_sealed`, …) is its plaintext type
+ * without the fields one data category moves into the ciphertext, plus a
+ * sealed member. The type, not a field, is gated, so a decoder that does not
+ * know `sealed-payload-v1` refuses the whole message. The Host reads only the
+ * sealed member's outer fields. It checks the shape here:
  * version, suite, encodings, a legal padded length, and exactly one of inline
  * `ciphertext` and `ciphertextRef`. Inline is the only legal form up to
  * {@link SEALED_INLINE_MAX_PADDED_LENGTH}; above it, the ciphertext is a blob.
@@ -12080,6 +14797,8 @@ export {};
  * length function; a cross-package test keeps the two equal.
  */
 import { z } from 'zod';
+export { SEALED_SPLIT_TABLE, isSealedMessageType } from './sealed-split-table';
+export type { SealedDigestRule, SealedMessageType, SealedSplitEntry } from './sealed-split-table';
 export declare const SEALED_PAYLOAD_VERSION = 1;
 /** The only suite v1 admits. A new suite is a new constant and a new capability, never a parser branch. */
 export declare const SEALED_PAYLOAD_SUITE = "byok-sealed-v1.hkdf-sha256.aes-256-gcm";
@@ -12216,79 +14935,105 @@ export declare const TaskSealingSchema: z.ZodObject<{
     }>>;
 }, z.core.$strict>;
 export type TaskSealing = z.infer<typeof TaskSealingSchema>;
-/** What a moved field holds on the wire: its placeholder, or `absent` for an optional field. */
-export type SealedPlaceholder = '' | 'empty-array' | 'absent';
 /**
- * How a sealed message type treats one digest field (D16, design §9.3).
+ * The rule of a sealed offer, for `superRefine`: `sealed` is present exactly
+ * when the task's `sealing` includes `task-input`, and then `instruction` is
+ * absent and `sealed.scope` is the task's scope at the task's epoch. When the
+ * task seals only its output, `instruction` is plaintext and required.
+ *
+ * Whether a task's later messages must be sealed is the Host's and the
+ * device's check: they know the task's `sealing`, this payload does not.
+ */
+export declare function sealedOfferRule(payload: {
+    readonly instruction?: unknown;
+    readonly sealing: TaskSealing;
+    readonly sealed?: SealedPayload;
+}, ctx: z.RefinementCtx): void;
+// ==== @byok-sdk/protocol dist/sealed-split-table.d.ts ====
+/**
+ * The split table of sealed payload v1 (#654 design §8.1, §9.3): for each
+ * sealed message type, its plaintext type, its data category, its identity
+ * fields, the fields that move into the ciphertext, the fields it drops, and
+ * the rule of each digest field (D16).
+ *
+ * Plain data with no runtime imports, so `wire-additions.ts` can derive the
+ * sealed gates from it and stay free of zod.
+ */
+import type { MessageType } from './messages';
+import type { SealedPayloadV1Category } from './sealed-payload';
+/**
+ * How a sealed message type treats one digest field of its plaintext type
+ * (D16, design §9.3).
  *
  * - `ciphertext-sha256`: the SHA-256 of the sealed bytes, for a Host that
  *   checks the bytes it stores (a ciphertext blob).
  * - `keyed-mac`: a keyed MAC under the scope's MAC key; the Host forwards it.
  * - `sealed`: the field moves into the ciphertext with its parent.
  * - `plain`: a digest that no sealed content derives, kept in plaintext.
- * - `forbidden`: a sealed message must not carry it in v1.
+ * - `forbidden`: the sealed type does not carry it in v1.
  */
 export type SealedDigestRule = 'ciphertext-sha256' | 'keyed-mac' | 'sealed' | 'plain' | 'forbidden';
-/** One message type in the split table. */
+/** One sealed message type in the split table. */
 export interface SealedSplitEntry {
+    /** The plaintext message type this type seals. */
+    readonly plainType: MessageType;
     readonly category: SealedPayloadV1Category;
     /**
      * Payload fields that, after the envelope `task_id`, name this write in the
-     * AAD and the content MAC (§8.2, §9.1). A sealed message must carry them.
+     * AAD and the content MAC (§8.2, §9.1). The sealed type requires them.
      */
     readonly identity: readonly string[];
     /**
-     * Top-level payload fields the category moves into the ciphertext. A
-     * required field stays on the wire with its placeholder (`''` or `[]`), so
-     * a payload that drops `sealed` still has the released shape; an optional
-     * field is absent. The receiver replaces each with its opened value.
+     * Top-level fields of the plaintext type that move into the ciphertext.
+     * The sealed type does not have them; the receiver merges the opened
+     * object back and validates the plaintext type.
      */
-    readonly moved: {
-        readonly [field: string]: SealedPlaceholder;
-    };
+    readonly moved: readonly string[];
+    /** Top-level fields of the plaintext type that the sealed type drops in v1. */
+    readonly forbidden: readonly string[];
     /**
-     * Every payload path whose name contains `digest`, `hash` or `revision`
-     * (case-insensitive), with its rule. A schema test keeps this complete.
+     * Every path of the plaintext type whose name contains `digest`, `hash` or
+     * `revision` (case-insensitive), with its rule. A schema test keeps this
+     * complete.
      */
     readonly digests: {
         readonly [path: string]: SealedDigestRule;
     };
-    /** Top-level fields a sealed message must not carry (the `forbidden` digests' parents). */
-    readonly forbidden: readonly string[];
 }
 /**
- * The split table (design §8.3): for each message type that v1 may seal, the
- * category, the moved fields, and the rule of each digest field. It is the
- * one authority; the schemas, the Host's comparison projection and the
- * receiver's merge read it. A type that is not here is never sealed.
+ * The split table (design §8.3): each sealed message type, the plaintext type
+ * it seals, its category, identity, moved and forbidden fields, and the rule
+ * of each digest field. It is the one authority; the schemas, the Host's
+ * comparison projection and the receiver's merge read it.
  *
- * Blob bytes have no sealing rule yet, so a sealed message carries no
- * plaintext blob reference: `artifactRefs` and the artifact `blobRef` are
- * forbidden until that rule exists. A sealed artifact is inline content.
+ * A sealed offer also carries the task's `sealing`. When the categories
+ * include `task-input`, `instruction` is sealed; otherwise it stays plaintext
+ * and only the task output is sealed.
+ *
+ * Blob bytes have no sealing rule yet, so a sealed type carries no plaintext
+ * blob reference: `artifactRefs` and the artifact `blobRef` are dropped until
+ * that rule exists. A sealed artifact is inline content.
  */
 export declare const SEALED_SPLIT_TABLE: Readonly<{
-    readonly 'task.offer': SealedSplitEntry;
-    readonly 'task.offer_with_toolsets': SealedSplitEntry;
-    readonly 'task.offer_for_agent': SealedSplitEntry;
-    readonly 'task.offer_for_agent_with_egress': SealedSplitEntry;
-    readonly 'task.offer_for_agent_with_egress_fresh': SealedSplitEntry;
-    readonly 'task.steer': {
+    readonly 'task.offer_sealed': SealedSplitEntry;
+    readonly 'task.offer_with_toolsets_sealed': SealedSplitEntry;
+    readonly 'task.offer_for_agent_sealed': SealedSplitEntry;
+    readonly 'task.offer_for_agent_with_egress_sealed': SealedSplitEntry;
+    readonly 'task.offer_for_agent_with_egress_fresh_sealed': SealedSplitEntry;
+    readonly 'task.steer_sealed': {
+        readonly plainType: 'task.steer';
         readonly category: 'task-input';
-        readonly identity: readonly [];
-        readonly moved: {
-            readonly text: '';
-        };
-        readonly digests: {};
+        readonly identity: readonly ["steerId"];
+        readonly moved: readonly ["text"];
         readonly forbidden: readonly [];
+        readonly digests: {};
     };
-    readonly 'task.complete': {
+    readonly 'task.complete_sealed': {
+        readonly plainType: 'task.complete';
         readonly category: 'task-output';
         readonly identity: readonly [];
-        readonly moved: {
-            readonly summary: '';
-            readonly finalMessage: 'absent';
-            readonly document: 'absent';
-        };
+        readonly moved: readonly ["summary", "finalMessage", "document"];
+        readonly forbidden: readonly ["artifactRefs", "preparedObservation"];
         readonly digests: {
             readonly 'agentRef.profileRevision': 'plain';
             readonly 'agentHomeProjection.profileRevision': 'plain';
@@ -12296,97 +15041,73 @@ export declare const SEALED_SPLIT_TABLE: Readonly<{
             readonly 'artifactRefs[].contentHash': 'forbidden';
             readonly 'preparedObservation.requestDigest': 'forbidden';
         };
-        readonly forbidden: readonly ["preparedObservation", "artifactRefs"];
     };
-    readonly 'task.fail': {
+    readonly 'task.fail_sealed': {
+        readonly plainType: 'task.fail';
         readonly category: 'task-output';
         readonly identity: readonly [];
-        readonly moved: {
-            readonly reason: '';
-        };
+        readonly moved: readonly ["reason"];
+        readonly forbidden: readonly ["preparedObservation"];
         readonly digests: {
             readonly 'agentRef.profileRevision': 'plain';
             readonly 'agentHomeProjection.profileRevision': 'plain';
             readonly 'agentHomeProjection.projectionHash': 'plain';
             readonly 'preparedObservation.requestDigest': 'forbidden';
         };
-        readonly forbidden: readonly ["preparedObservation"];
     };
-    readonly 'task.decline': {
+    readonly 'task.decline_sealed': {
+        readonly plainType: 'task.decline';
         readonly category: 'task-output';
         readonly identity: readonly [];
-        readonly moved: {
-            readonly reason: '';
-        };
+        readonly moved: readonly ["reason"];
+        readonly forbidden: readonly [];
         readonly digests: {
             readonly 'agentRef.profileRevision': 'plain';
         };
-        readonly forbidden: readonly [];
     };
-    readonly 'task.cancelled': {
+    readonly 'task.cancelled_sealed': {
+        readonly plainType: 'task.cancelled';
         readonly category: 'task-output';
         readonly identity: readonly [];
-        readonly moved: {
-            readonly reason: 'absent';
-        };
+        readonly moved: readonly ["reason"];
+        readonly forbidden: readonly [];
         readonly digests: {
             readonly 'agentRef.profileRevision': 'plain';
             readonly 'agentHomeProjection.profileRevision': 'plain';
             readonly 'agentHomeProjection.projectionHash': 'plain';
         };
-        readonly forbidden: readonly [];
     };
-    readonly 'task.progress': {
+    readonly 'task.progress_sealed': {
+        readonly plainType: 'task.progress';
         readonly category: 'task-output';
         readonly identity: readonly ["seq"];
-        readonly moved: {
-            readonly events: 'empty-array';
-        };
+        readonly moved: readonly ["events"];
+        readonly forbidden: readonly [];
         readonly digests: {
             readonly 'events[].spill.blob.contentHash': 'sealed';
         };
-        readonly forbidden: readonly [];
     };
-    readonly 'task.artifact': {
+    readonly 'task.artifact_sealed': {
+        readonly plainType: 'task.artifact';
         readonly category: 'task-output';
         readonly identity: readonly ["name"];
-        readonly moved: {
-            readonly inline: 'absent';
-        };
+        readonly moved: readonly ["inline"];
+        readonly forbidden: readonly ["blobRef"];
         readonly digests: {
             readonly 'blobRef.contentHash': 'forbidden';
         };
-        readonly forbidden: readonly ["blobRef"];
     };
-    readonly 'task.await_approval': {
+    readonly 'task.await_approval_sealed': {
+        readonly plainType: 'task.await_approval';
         readonly category: 'task-output';
         readonly identity: readonly ["approvalId"];
-        readonly moved: {
-            readonly summary: '';
-        };
-        readonly digests: {};
+        readonly moved: readonly ["summary"];
         readonly forbidden: readonly [];
+        readonly digests: {};
     };
 }>;
 export type SealedMessageType = keyof typeof SEALED_SPLIT_TABLE;
 export declare function isSealedMessageType(type: string): type is SealedMessageType;
-/**
- * The payload rule of one sealed message type, for `superRefine`. It reads
- * the split table:
- *
- * - With `sealed`: the identity fields are present, every moved field holds
- *   its placeholder, and no forbidden field is present.
- * - On an offer: `sealing` names the task's categories. `sealed` is present
- *   exactly when they include `task-input`, and its scope is the task's scope
- *   at the task's epoch. `sealed` never travels without `sealing`.
- *
- * Whether a task's later messages must be sealed is the Host's and the
- * device's check: they know the task's `sealing`, this payload does not.
- */
-export declare function sealedPayloadRule(type: SealedMessageType): (payload: {
-    readonly sealed?: SealedPayload;
-    readonly sealing?: TaskSealing;
-}, ctx: z.RefinementCtx) => void;
 // ==== @byok-sdk/protocol dist/task-state.d.ts ====
 export declare const TASK_STATES: readonly ['Offered', 'Claimed', 'Running', 'AwaitApproval', 'Complete', 'Failed', 'Cancelled'];
 export type TaskState = (typeof TASK_STATES)[number];
@@ -12563,8 +15284,8 @@ export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
  *
  * Senders derive their admission flags from {@link requiredReceiverCapabilities}
  * and nowhere else, so a gate cannot exist in one place and be missing in
- * another. This module imports no runtime code (types only) so it stays free
- * of zod.
+ * another. This module imports no runtime code except the plain-data split
+ * table, so it stays free of zod.
  */
 import type { MessageType } from './messages';
 import type { CapabilityFlag } from './version';

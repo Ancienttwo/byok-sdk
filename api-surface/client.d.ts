@@ -9728,6 +9728,8 @@ export declare class TaskRunner {
      * session about it succeeded.
      */
     private handleReject;
+    /** Declines a sealed offer once, non-retryably, with a plaintext reason and no sealed decline code (those need the server flag). */
+    private declineSealedOffer;
     /** Pre-claim, fail-closed rejection (protocol §3.2) — never claims first. */
     private decline;
     private fail;
