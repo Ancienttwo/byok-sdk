@@ -867,7 +867,7 @@ export declare class PostgresDeviceDirectory implements DeviceDirectory {
     resolveByDeviceId(deviceId: string): Promise<DeviceRecord | undefined>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/e2ee-member.d.ts ====
-import type { TenantId } from '@byok-sdk/core';
+import type { Clock, TenantId } from '@byok-sdk/core';
 import type { E2eeMemberChainAppendResult, E2eeMemberChainRow, E2eeMemberRegisterResult, E2eeMemberRegistrationInput, E2eeMemberRegistrationRow, E2eeMemberStore, E2eeScopeKeyPackagePutResult, E2eeScopeKeyPackageRow } from '@byok-sdk/cloud';
 import type { Pool } from 'pg';
 /**
@@ -878,7 +878,8 @@ import type { Pool } from 'pg';
 export declare class PostgresE2eeMemberStore implements E2eeMemberStore {
     #private;
     private readonly pool;
-    constructor(pool: Pool);
+    private readonly clock;
+    constructor(pool: Pool, clock: Clock);
     appendChainEntries(tenant: TenantId, rows: readonly E2eeMemberChainRow[]): Promise<E2eeMemberChainAppendResult>;
     readChainEntries(tenant: TenantId, input: {
         readonly afterSeq: number;

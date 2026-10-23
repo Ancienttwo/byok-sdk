@@ -25,7 +25,7 @@ if (SKIP_DATAPLANE) {
     async create() {
       const scope = await createDataplaneScope();
       await migrate(scope.pool, DEPLOY_SQL);
-      return { store: new PostgresE2eeMemberStore(scope.pool), dispose: () => scope.dispose() };
+      return { store: new PostgresE2eeMemberStore(scope.pool, createMutableClock()), dispose: () => scope.dispose() };
     },
   });
 }
@@ -65,7 +65,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres device cleanup removes the device memb
     try {
       await migrate(scope.pool, DEPLOY_SQL);
       const devices = new PostgresDeviceDirectory(scope.pool, createMutableClock());
-      const store = new PostgresE2eeMemberStore(scope.pool);
+      const store = new PostgresE2eeMemberStore(scope.pool, createMutableClock());
       const revoked = await seed(devices, store, TENANT_A, 'revoked-device');
       const kept = await seed(devices, store, TENANT_A, 'kept-device');
       const other = await seed(devices, store, TENANT_B, 'other-device');
@@ -90,7 +90,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres device cleanup removes the device memb
     try {
       await migrate(scope.pool, DEPLOY_SQL);
       const devices = new PostgresDeviceDirectory(scope.pool, createMutableClock());
-      const store = new PostgresE2eeMemberStore(scope.pool);
+      const store = new PostgresE2eeMemberStore(scope.pool, createMutableClock());
       const old = await seed(devices, store, TENANT_A, 'old-device', MACHINE);
       const fresh = await seed(devices, store, TENANT_A, 'new-device', MACHINE);
 

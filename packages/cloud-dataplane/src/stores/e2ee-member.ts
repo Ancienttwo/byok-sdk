@@ -1,4 +1,4 @@
-import type { TenantId } from '@byok-sdk/core';
+import type { Clock, TenantId } from '@byok-sdk/core';
 import type {
   E2eeMemberChainAppendResult,
   E2eeMemberChainRow,
@@ -29,7 +29,7 @@ async function rollback(client: PoolClient): Promise<void> {
  * transaction (`DEVICE_STATE_DELETES` in `devices.ts`).
  */
 export class PostgresE2eeMemberStore implements E2eeMemberStore {
-  constructor(private readonly pool: Pool) {}
+  constructor(private readonly pool: Pool, private readonly clock: Clock) {}
 
   async #transaction<T>(operation: (client: PoolClient) => Promise<T | undefined>): Promise<T> {
     const client = await this.pool.connect();
@@ -94,6 +94,7 @@ export class PostgresE2eeMemberStore implements E2eeMemberStore {
 
   async putScopeKeyPackages(tenant: TenantId, rows: readonly E2eeScopeKeyPackageRow[]): Promise<E2eeScopeKeyPackagePutResult> {
     let refusal: E2eeScopeKeyPackagePutResult | undefined;
+    const updatedAt = this.clock.now();
     const result = await this.#transaction<E2eeScopeKeyPackagePutResult>(async client => {
       for (const row of rows) {
         await client.query(
@@ -110,11 +111,11 @@ export class PostgresE2eeMemberStore implements E2eeMemberStore {
           return undefined;
         }
         await client.query(
-          `INSERT INTO e2ee_scope_key_package (tenant_id, scope_id, epoch, recipient, key_id, sender, package)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
+          `INSERT INTO e2ee_scope_key_package (tenant_id, scope_id, epoch, recipient, key_id, sender, package, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
            ON CONFLICT (tenant_id, scope_id, epoch, recipient) DO UPDATE SET
-             sender = EXCLUDED.sender, package = EXCLUDED.package, updated_at = now()`,
-          [tenant, row.scopeId, row.epoch, row.recipient, row.keyId, row.sender, row.package]);
+             sender = EXCLUDED.sender, package = EXCLUDED.package, updated_at = EXCLUDED.updated_at`,
+          [tenant, row.scopeId, row.epoch, row.recipient, row.keyId, row.sender, row.package, updatedAt]);
       }
       return { outcome: 'stored', stored: rows.length };
     });

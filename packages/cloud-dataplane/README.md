@@ -282,7 +282,7 @@ import { PostgresE2eeMemberStore } from '@byok-sdk/cloud-dataplane/runtime';
 
 const cloud = createByokCloud({
   // ...the usual stores...
-  e2eeMemberStore: new PostgresE2eeMemberStore(pool),
+  e2eeMemberStore: new PostgresE2eeMemberStore(pool, clock),
 });
 ```
 
