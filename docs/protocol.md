@@ -1156,6 +1156,27 @@ or `sealing_policy_mismatch` in `code`. These codes go only on the plaintext
 `task.decline_sealed` refuses them: a device that cannot open or use the
 scope key often cannot seal a reply either, so one outcome has one encoding.
 
+**Merge limits (decision 12b).** After the merge, the receiver validates the
+plaintext type, except that a moved field listed in the split table's `limits`
+takes that limit instead of the plaintext one. `task.artifact_sealed` lists
+`inline` at 2 MiB (the plaintext `task.artifact.inline` limit is 64 KB). The
+category limit of 2 MiB still bounds the whole opened content.
+
+**Plaintext output of a sealed task (decision 12d).** A task whose `sealing`
+includes `task-output` sends its `task.complete`, `task.fail`,
+`task.decline`, `task.cancelled`, `task.progress`, `task.artifact` and
+`task.await_approval` sealed. The only plaintext forms are closed:
+
+- `task.fail` with `reason` in `SEALED_PLAIN_FAIL_REASONS`
+  (`daemon_interrupted` for a task the daemon lost in a restart, always in
+  plaintext; `sealed_key_unavailable` when the device cannot seal), and no
+  `preparedObservation`;
+- `task.decline` with a `SEALED_DECLINE_CODES` code and `reason` equal to it;
+- `task.cancelled` with no `reason`.
+
+`task.complete`, `task.progress`, `task.artifact` and `task.await_approval`
+have no plaintext form for such a task. The comparison is exact equality.
+
 ## 3. Task state machine (M1 gap #2, #5, #6)
 
 ```mermaid

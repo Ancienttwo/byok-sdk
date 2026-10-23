@@ -52,6 +52,15 @@ export const SEALED_DECLINE_CODES = [
 ] as const;
 export type SealedDeclineCode = (typeof SEALED_DECLINE_CODES)[number];
 
+/**
+ * The only `task.fail` reasons in plaintext for a task that seals its output
+ * (#654 decision 12d). An interrupted task reports `daemon_interrupted`; a
+ * device that cannot seal reports `sealed_key_unavailable`. Every other
+ * failure of such a task is sealed. A sender, the Host and a member compare
+ * by exact equality.
+ */
+export const SEALED_PLAIN_FAIL_REASONS = ['daemon_interrupted', 'sealed_key_unavailable'] as const;
+
 /** Padded frames above this length travel as a ciphertext blob (§8.6). */
 export const SEALED_INLINE_MAX_PADDED_LENGTH = 256 * 1024;
 
