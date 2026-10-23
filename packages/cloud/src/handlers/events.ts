@@ -1,4 +1,4 @@
-import { isTaskOfferType, MAILBOX_READ_AHEAD_CAPABILITY, MAILBOX_READ_AHEAD_MAX_SEQS } from '@byok-sdk/protocol';
+import { isTaskOfferType, MAILBOX_READ_AHEAD_CAPABILITY, MAILBOX_READ_AHEAD_MAX_SEQS, SEALED_PAYLOAD_CAPABILITY } from '@byok-sdk/protocol';
 /**
  * `GET /byok/events?cursor=N` — the long-poll receive half (§8).
  *
@@ -86,6 +86,9 @@ export const CLOUD_PROTOCOL_CAPABILITIES = [
   'agent-content-workspace-read',
   'agent-content-transcript-read',
   'agent-content-artifact-read',
+  // The inbound gate accepts every sealed daemon-to-server type, and the four
+  // sealed decline codes on the plaintext decline (#654 E3b-2).
+  SEALED_PAYLOAD_CAPABILITY,
 ];
 
 export interface EventsRouteDeps extends DeviceRouteDeps {

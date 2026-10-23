@@ -378,6 +378,13 @@ AiphaBee 自研的配对和 device grant，在 SDK 里对应 `/byok/pair` 和 `/
 - 新设备加入后，只为它建它自己的 scope（§7.4）：一个成员（新设备或用户的客户端）生成 `SK(scope, 1)`，签署 `scope-policy`（成员为这台设备和用户的客户端），再为每个成员生成 key package。已有成员不把其他设备 scope 的 key package 发给新设备，当前 epoch 和旧 epoch 都不发。所以新设备读不到其他设备的 offer 和历史。
 - 重新配对的设备是新成员（§7.5），所以它也只得到新的 scope。旧 scope 的内容仍由用户的客户端读取。
 - 同一 scope 的成员都能解密这个 scope 的内容。AAD 绑定目标 `deviceId`（§8.2）。别的设备能读一份 offer，但会拒绝执行它。scope 按设备划分时（§7.4），别的设备不是这个 scope 的成员，读不到它的内容。
+- 谁能改一个 scope（owner batch §50f A）：已有 scope 的 `scope-policy` 和 `shred` 只能由这个 scope 当前策略里的成员签署；新 scope 的第一条 `scope-policy` 只能由它的成员列表里的成员签署。其他签名者的条目在走链时无效（`member_chain_signer_invalid`）。所以一个成员不能在链上修改或 shred 一个它不在其中的 scope。这条规则不覆盖两种情况：
+  - Host 收到任何形状合法的 `shred` 都删除这个 scope 的 key package，不验签名（owner batch §50g）。这一步删除仍依赖其他成员诚实。
+  - 一个 scope id 归第一个建它的成员。不诚实的成员可以抢先建另一台设备要用的 scope id，并把自己列进成员列表。
+- E2d 必须满足两条要求（§50f A）：
+  1. 客户端为一台设备的 scope 封装内容或发 key package 之前，确认这个 scope 的当前策略恰好是这台设备加上用户的客户端。
+  2. 客户端代码追加一条链条目之前，先在本地对它走链。局外签名者的 scope 变更对每个成员都无效，而链只能追加（§7.3），所以这样一条条目会让所有成员的链停在它前面。
+- 冻结的 scope：一个 scope 当前策略里的成员全部被移除后，没有人能再更新或 shred 这个 scope。它的数据仍能通过 §7.6 第 4 步和 §11.3 删除。所以要先用新的 `scope-policy` 把 scope 交给别的成员，再移除它当前策略里的最后一个成员。
 - 撤销一台设备只移除这一个成员。它所在的每个 scope 在下一次封装前轮换 epoch（§7.6）。其他设备第一次遇到新 epoch 时，取新的 key package。
 - v1 的 scope 只含同一个用户的设备和客户端（§14 D10）。多个用户共用一个 scope 需要发送方签名，留到以后。
 

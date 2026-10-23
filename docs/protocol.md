@@ -1186,6 +1186,48 @@ or `sealing_policy_mismatch` in `code`. These codes go only on the plaintext
 `task.decline_sealed` refuses them: a device that cannot open or use the
 scope key often cannot seal a reply either, so one outcome has one encoding.
 
+**Host rule for task output.** The Host reads the frozen `sealing` of the
+task from its offer. When `categories` includes `task-output`, the device
+reports every output sealed. A plaintext output is legal only when each field
+that its sealed type moves or drops is absent or holds a closed code of
+`SEALED_TASK_PLAIN_CODES`, by exact match:
+
+- `task.fail`: `reason` is `daemon_interrupted` or `sealed_key_unavailable`,
+  and there is no `preparedObservation`. An interrupted task always reports
+  `daemon_interrupted` in plaintext with `recovery`, so `task.fail_sealed`
+  never carries `recovery`.
+- `task.decline`: `reason` is one of the sealed decline codes, and equals
+  `code`.
+- `task.cancelled`: no `reason`.
+- `task.complete`, `task.progress`, `task.artifact` and
+  `task.await_approval` have no plaintext form.
+
+The Host refuses any other plaintext output with `sealed_output_required`.
+When the task did not seal `task-output`, it refuses every sealed output with
+`sealed_payload_unsupported`. A sealed terminal takes the status of its
+plaintext type, and the first terminal wins. `task.terminal_cause` keeps only
+a closed code: the `code` of a `task.decline_sealed`, or the code of a legal
+plaintext terminal. `readDeviceTerminal` returns the sealed terminal with its
+sealed member. `readTaskResult` gives only its plaintext fields. The cloud
+does not store a sealed artifact.
+
+A `task.progress_sealed` batch is one activity tail entry. It has `sealed` in
+place of `event`, and `eventIndex` 0, so the tail capacity counts it once. A
+`task.await_approval_sealed` is one approval timeline request with
+`approvalId` and `sealed`, and no `summary`. The Host resolves it by
+`approvalId`, the same as a plaintext request. A replay under the same source
+envelope is the same entry when its comparison projection (above) is the
+same. A sealed output is inline only: the cloud refuses a sealed output
+that carries `ciphertextRef`, because it does not retain that blob. The cloud
+advertises `sealed-payload-v1` in `EventsPollResponse.capabilities`, because
+it accepts all seven sealed output types.
+
+**Drafts and `cloud-do`.** An `agent.message.draft` is plaintext. So the Host
+refuses a draft for a task whose offer has any `sealing`, with
+`agent_message_draft_invalid`. A sealed task must not go to
+`@byok-sdk/cloud-do`: it runs the model with platform keys, so it reads the
+instruction and the output in plaintext.
+
 ### 2.6 E2EE member routes (#654 E2c-2)
 
 These HTTP routes let a device store and read E2EE member state on the Host.
@@ -1221,6 +1263,15 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
   top-level field gets 400. The chain append and the package put run the
   same checks as the Host control plane calls `appendMemberChainEntries` and
   `putScopeKeyPackages`.
+- **Proof replay.** A device proof is not single-use on the three writes.
+  Anyone who captures a proof and its body can send them again while the
+  proof's `issuedAt` is within the Host clock skew (60 s by default). A
+  replayed registration extends the pairing MAC expiry, or puts back an older
+  MAC for the same bundle. A replayed package put can overwrite a newer
+  package for the same scope epoch, `keyId` and recipient. A replayed chain
+  append changes nothing. The owner accepted this window for now (owner batch
+  §41a A). Before E2d-5, `requestId` becomes single-use on the three writes,
+  as on the truth put.
 - **Reads.** A device route checks the bearer against the device row, so a
   revoked or superseded device gets 401. The package read returns only the
   packages addressed to the device's registered member; a query names no

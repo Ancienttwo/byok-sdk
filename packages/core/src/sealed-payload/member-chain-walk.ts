@@ -9,7 +9,9 @@
  *   (from the empty state: `seq = 1`, `prev = null`);
  * - be signed by a current member (an `add`ed member that is not removed), or
  *   be the genesis entry (11a, below);
- * - have the subject shape and the rule of its op (below).
+ * - have the subject shape and the rule of its op (below);
+ * - for `scope-policy` and `shred`, after the subject rules, be signed by a
+ *   member of the scope (below).
  *
  * One bad entry rejects the whole batch. The caller's state does not change.
  *
@@ -20,9 +22,25 @@
  * Host can write a false first entry first; that only denies service.
  *
  * Precondition (D10, #655 D-I2): one tenant is one user. v1 has no per-user
- * permissions, so any current member may sign `add`, `remove`,
- * `scope-policy` and `shred`. A Host that maps two users to one tenant breaks
- * this: one user's client could change the other user's devices and scopes.
+ * permissions, so any current member may sign `add` and `remove`. A Host
+ * that maps two users to one tenant breaks this: one user's client could
+ * change the other user's devices.
+ *
+ * Scope signers (owner batch §50f A): a `scope-policy` or `shred` of an
+ * existing scope must be signed by a member in that scope's current policy.
+ * The first `scope-policy` of a new scope must be signed by a member in its
+ * own member list. Another signer fails with `member_chain_signer_invalid`.
+ * So a member cannot change or shred, on the chain, a scope it is not in.
+ * The rule does not cover two cases (design §7.9):
+ *
+ * - The Host deletes a scope's key packages on any well-shaped `shred` and
+ *   does not check the signature (owner batch §50g). That deletion still
+ *   depends on the other members being honest.
+ * - The first member that creates a scope id takes it. E2d confirms a
+ *   scope's current policy before it seals to the scope.
+ *
+ * When every member of a scope's current policy has been removed, nobody can
+ * update or shred that scope again (design §7.9).
  *
  * Op rules:
  *
@@ -204,13 +222,19 @@ async function walk(
       return { ok: false, reason: 'member_chain_link_invalid', index };
     }
     if (marked === undefined && mark(entry, signerBundle.signingPublicJwk)) marked = { index, seq: entry.seq, hash: verified.hash };
-    if (!(await applySubject(next, entry))) return { ok: false, reason: 'member_chain_subject_invalid', index };
+    const applied = await applySubject(next, entry);
+    if (applied !== true) return { ok: false, reason: applied === false ? 'member_chain_subject_invalid' : applied, index };
     next.head = { seq: entry.seq, hash: verified.hash };
   }
   return { ok: true, state: next, marked };
 }
 
-async function applySubject(state: WalkState, entry: MemberChainEntryV1): Promise<boolean> {
+/**
+ * `true` when the entry applied, `false` when its subject breaks the op rule.
+ * A scope change with a valid subject from a member outside the scope (§50f
+ * A) is `member_chain_signer_invalid`; the subject rules are checked first.
+ */
+async function applySubject(state: WalkState, entry: MemberChainEntryV1): Promise<boolean | 'member_chain_signer_invalid'> {
   switch (entry.op) {
     case 'add': {
       const subject = safeParseTotal(AddSubjectSchema, entry.subject);
@@ -249,12 +273,17 @@ async function applySubject(state: WalkState, entry: MemberChainEntryV1): Promis
       const { categories, members } = subject.data;
       if (!strictlyIncreasing(categories.map((category) => SEALED_CATEGORIES.indexOf(category)))) return false;
       if (!strictlyIncreasing(members) || !members.every((memberId) => state.members.has(memberId))) return false;
+      // An existing scope's current policy names who may change it; a new scope's own list names who may create it.
+      if (!(state.scopes.get(subject.data.scopeId)?.members ?? members).includes(entry.signer)) return 'member_chain_signer_invalid';
       state.scopes.set(subject.data.scopeId, { categories, members, policySeq: entry.seq });
       return true;
     }
     case 'shred': {
       const subject = safeParseTotal(ShredSubjectSchema, entry.subject);
-      if (!subject.success || !state.scopes.has(subject.data.scopeId)) return false;
+      if (!subject.success) return false;
+      const scope = state.scopes.get(subject.data.scopeId);
+      if (scope === undefined) return false;
+      if (!scope.members.includes(entry.signer)) return 'member_chain_signer_invalid';
       state.scopes.delete(subject.data.scopeId);
       state.shredded.add(subject.data.scopeId);
       return true;

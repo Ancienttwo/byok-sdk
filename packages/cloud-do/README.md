@@ -108,6 +108,10 @@ The supported profiles are zai_openai and deepseek_direct. The model URLs
 and model names are fixed in this package. Cloud execution uses platform keys.
 Local BYOK keys do not enter this runtime.
 
+A task with #654 sealed payload `sealing` must not go to this runtime. It
+runs the model with platform keys, so it reads the instruction and the
+output in plaintext. See [protocol §2.5](../../docs/protocol.md#25-sealed-payload-v1-654-gated-addition).
+
 Configure the session and supply a dispatcher before tool execution.
 The subclass can supply instructions, createDispatcher, admitWake,
 renew, settleRun, projectInvocation, and onInvocationSettled hooks.
