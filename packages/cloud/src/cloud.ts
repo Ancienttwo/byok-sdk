@@ -30,6 +30,7 @@ import { HarnessIdSchema, isSealedMessageType, requiredReceiverCapabilities } fr
 import {
   contentHash,
   parseCapabilityDeclaration,
+  principalTenant,
   type BoardItem,
   type BoardItemInput,
   type BoardListQuery,
@@ -39,6 +40,7 @@ import {
   type ContentHash,
   type ControlPlanePrincipal,
   type CoreStores,
+  type DevicePrincipal,
   type PresenceHint,
   type SkillPackStore,
   type TenantId,
@@ -70,6 +72,10 @@ import {
   BYOK_PRESENCE_PATH,
   BYOK_RECORD_ROUTE,
   BYOK_RECORDS_PATH,
+  BYOK_E2EE_CHAIN_PATH,
+  BYOK_E2EE_KEY_PACKAGES_PATH,
+  BYOK_E2EE_MEMBER_KEY_PATH,
+  BYOK_E2EE_PAIRING_MAC_PATH,
   BYOK_SKILL_PACK_FILE_ROUTE,
   BYOK_SKILL_PACKS_PATH,
   BYOK_TOKEN_PATH,
@@ -183,6 +189,15 @@ import {
   skillPackFileHandler,
   skillPackListHandler,
 } from './handlers/skill-packs';
+import {
+  DEFAULT_MAX_E2EE_REQUEST_BYTES,
+  e2eeMemberChainAppendHandler,
+  e2eeMemberChainReadHandler,
+  e2eeMemberKeyRegisterHandler,
+  e2eePairingMacReadHandler,
+  e2eeScopeKeyPackagePutHandler,
+  e2eeScopeKeyPackageReadHandler,
+} from './handlers/e2ee-member';
 import {
   DEFAULT_MAX_TRUTH_REQUEST_BYTES,
   truthGetHandler,
@@ -386,6 +401,8 @@ export interface ByokCloudOptions {
   readonly activityCapacity?: number;
   readonly activityTtlMs?: number;
   readonly maxTruthRequestBytes?: number;
+  /** Byte cap of one E2EE member device write. The default fits one full chain append (64 entries of 64 KiB). */
+  readonly maxE2eeRequestBytes?: number;
   readonly skillPackPageLimit?: number;
 }
 
@@ -991,6 +1008,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     options.skillPacks,
     options.agentMemoryProjectionAuthorizer,
     options.agentMemoryProjectionStore,
+    options.e2eeMemberStore,
   );
   const root: CloudRootStores = { core: options.core, cloud: options.cloud, mailboxWake: options.mailboxWake };
   const auth: AuthPlane = createAuthPlane({
@@ -1215,6 +1233,21 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       { method: 'PUT', path: BYOK_RECORD_ROUTE, class: 'proof' },
       truthPutHandler(truthDeps),
     );
+  }
+
+  if (options.e2eeMemberStore !== undefined && declares(declaration, CLOUD_CAPABILITIES.e2eeMember)) {
+    const e2eeDeps = {
+      proof: { devices: options.cloud.devices, crypto: options.crypto, clock: options.clock },
+      device: deviceRouteDeps,
+      context: (device: DevicePrincipal) => e2eeMemberContext(principalTenant(device)),
+      maxRequestBytes: options.maxE2eeRequestBytes ?? DEFAULT_MAX_E2EE_REQUEST_BYTES,
+    };
+    registry.register({ method: 'POST', path: BYOK_E2EE_MEMBER_KEY_PATH, class: 'proof' }, e2eeMemberKeyRegisterHandler(e2eeDeps));
+    registry.register({ method: 'POST', path: BYOK_E2EE_CHAIN_PATH, class: 'proof' }, e2eeMemberChainAppendHandler(e2eeDeps));
+    registry.register({ method: 'POST', path: BYOK_E2EE_KEY_PACKAGES_PATH, class: 'proof' }, e2eeScopeKeyPackagePutHandler(e2eeDeps));
+    registry.register({ method: 'GET', path: BYOK_E2EE_CHAIN_PATH, class: 'device' }, e2eeMemberChainReadHandler(e2eeDeps));
+    registry.register({ method: 'GET', path: BYOK_E2EE_KEY_PACKAGES_PATH, class: 'device' }, e2eeScopeKeyPackageReadHandler(e2eeDeps));
+    registry.register({ method: 'GET', path: BYOK_E2EE_PAIRING_MAC_PATH, class: 'device' }, e2eePairingMacReadHandler(e2eeDeps));
   }
 
   // Skill packs: both conditions, same asymmetry as the byte proxy below.
@@ -2834,6 +2867,7 @@ function assertNoOverDeclaration(
   skillPacks: SkillPackStore | undefined,
   agentMemoryProjectionAuthorizer: AgentMemoryProjectionAuthorizer | undefined,
   agentMemoryProjectionStore: AgentMemoryProjectionStore | undefined,
+  e2eeMemberStore: E2eeMemberStore | undefined,
 ): void {
   if (
     declares(declaration, CLOUD_CAPABILITIES.boardSse) &&
@@ -2875,6 +2909,12 @@ function assertNoOverDeclaration(
     throw new ByokCloudError(
       'capability_over_declared',
       `This deployment declares ${CLOUD_CAPABILITIES.agentMemoryProjection} but was given no complete AgentMemoryProjectionAuthorizer/AgentMemoryProjectionStore pair.`,
+    );
+  }
+  if (e2eeMemberStore === undefined && declares(declaration, CLOUD_CAPABILITIES.e2eeMember)) {
+    throw new ByokCloudError(
+      'capability_over_declared',
+      `This deployment declares ${CLOUD_CAPABILITIES.e2eeMember} but was given no E2eeMemberStore, so the /byok/e2ee routes would be published and unserved.`,
     );
   }
 }

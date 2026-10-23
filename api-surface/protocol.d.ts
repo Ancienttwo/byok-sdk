@@ -1924,6 +1924,12 @@ export declare const E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES = 65536;
 export declare const E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES = 256;
 /** The most scope key packages one put accepts. */
 export declare const E2EE_SCOPE_KEY_PACKAGE_PUT_MAX = 256;
+/** Register the device's member key bundle and its device pairing MAC (§7.2 step 3). */
+export declare const E2EE_MEMBER_KEY_REGISTER_OPERATION: 'e2ee-member-key.register';
+/** Append member chain entries. */
+export declare const E2EE_MEMBER_CHAIN_APPEND_OPERATION: 'e2ee-member-chain.append';
+/** Put scope key packages. */
+export declare const E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION: 'e2ee-scope-key-package.put';
 /** A member's public key bundle. A device member names its SDK device id; a client member has none. */
 export declare const E2eeMemberKeyBundleSchema: z.ZodObject<{
     v: z.ZodLiteral<1>;
@@ -1983,6 +1989,33 @@ export declare const E2eeScopeKeyPackageSchema: z.ZodObject<{
 export type E2eeScopeKeyPackage = z.infer<typeof E2eeScopeKeyPackageSchema>;
 /** A pairing MAC (§7.2 steps 3 and 4): HMAC-SHA-256 under `pv`, which the Host never holds. */
 export declare const E2eePairingMacSchema: z.ZodString;
+/**
+ * The device registration body. `member` is the device's own bundle, so it
+ * names the device id; `mac` is the device pairing MAC over it under `pv`.
+ */
+export declare const E2eeMemberKeyRegisterRequestSchema: z.ZodObject<{
+    member: z.ZodObject<{
+        v: z.ZodLiteral<1>;
+        memberId: z.ZodString;
+        signingPublicJwk: z.ZodObject<{
+            kty: z.ZodLiteral<"EC">;
+            crv: z.ZodLiteral<"P-256">;
+            x: z.ZodString;
+            y: z.ZodString;
+        }, z.core.$strict>;
+        kemPublicJwk: z.ZodObject<{
+            kty: z.ZodLiteral<"EC">;
+            crv: z.ZodLiteral<"P-256">;
+            x: z.ZodString;
+            y: z.ZodString;
+        }, z.core.$strict>;
+        kemEpoch: z.ZodNumber;
+        kemSig: z.ZodString;
+        deviceId: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>;
+    mac: z.ZodString;
+}, z.core.$strict>;
+export type E2eeMemberKeyRegisterRequest = z.infer<typeof E2eeMemberKeyRegisterRequestSchema>;
 /** What the client relays to the device in pairing step 4. The client member has no device id. */
 export declare const E2eeClientPairingMacSchema: z.ZodObject<{
     mac: z.ZodString;
@@ -2797,6 +2830,14 @@ export declare const BYOK_RECORDS_PATH = "/byok/records";
 export declare const BYOK_RECORD_ROUTE = "/byok/records/:kind/:key";
 /** Client builder for a truth record path. Mirrors the `:kind/:key` template, each segment URL-encoded. */
 export declare function byokRecordPath(kind: string, key: string): string;
+/** `POST /byok/e2ee/member-key` — device proof: register the device's member key bundle and pairing MAC (#654). */
+export declare const BYOK_E2EE_MEMBER_KEY_PATH = "/byok/e2ee/member-key";
+/** `POST /byok/e2ee/chain` (device proof: append) and `GET` (device: read) — the member chain. */
+export declare const BYOK_E2EE_CHAIN_PATH = "/byok/e2ee/chain";
+/** `POST /byok/e2ee/key-packages` (device proof: put) and `GET` (device: this device's packages). */
+export declare const BYOK_E2EE_KEY_PACKAGES_PATH = "/byok/e2ee/key-packages";
+/** `GET /byok/e2ee/pairing-mac` — device: the client pairing MAC relayed to this device. */
+export declare const BYOK_E2EE_PAIRING_MAC_PATH = "/byok/e2ee/pairing-mac";
 /** `GET /byok/skill-packs` — skill-pack manifest catalogue. */
 export declare const BYOK_SKILL_PACKS_PATH = "/byok/skill-packs";
 /** Router template for a skill-pack file — `GET /byok/skill-packs/:name/files/:path`. */
@@ -2861,14 +2902,14 @@ export type { Envelope } from './envelope';
 export { ProtocolError, EnvelopeParseError, UnknownMessageTypeError, EnvelopeValidationError, } from './errors';
 export { encodeEnvelope, decodeEnvelope, createEnvelope, parseMessage } from './codec';
 export type { CreateEnvelopeOptions } from './codec';
-export { PairRequestSchema, PairResponseTenantIdSchema, PAIR_RESPONSE_TENANT_ID_MAX_LENGTH, PairResponseSchema, ChallengeRequestSchema, ChallengeResponseSchema, TokenRequestSchema, TokenResponseSchema, PresencePublishRequestSchema, CreateBlobRequestSchema, CreateBlobResponseSchema, BlobDownloadUrlResponseSchema, EventsPollQuerySchema, ActivityIngressSchema, MessageSendOutcomeSchema, OUTBOUND_REFUSAL_REASONS, EventsPollResponseSchema, MessagesSendRequestSchema, MessagesSendResponseSchema, AgentHomeProjectionCompletionRequestSchema, AgentHomeProjectionStatusSchema, AgentHomeProjectionReadbackSchema, AgentMemoryProjectionCommitRequestSchema, AgentMemoryProjectionCommitResponseSchema, MAX_MESSAGES_PER_BATCH, BYOK_PAIR_PATH, BYOK_CHALLENGE_PATH, BYOK_TOKEN_PATH, BYOK_CAPABILITIES_PATH, BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, BYOK_AGENT_HOME_PROJECTIONS_PATH, BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE, byokAgentHomeProjectionCompletionPath, BYOK_AGENT_MEMORY_PROJECTIONS_PATH, BYOK_PRESENCE_PATH, BYOK_ACTIVITY_PATH, BYOK_BOARD_PATH, BYOK_BOARD_STREAM_PATH, BYOK_BOARD_CLAIM_ROUTE, BYOK_BOARD_UNCLAIM_ROUTE, BYOK_BOARD_STATUS_ROUTE, BYOK_RECORDS_PATH, BYOK_RECORD_ROUTE, byokRecordPath, BYOK_SKILL_PACKS_PATH, BYOK_SKILL_PACK_FILE_ROUTE, byokSkillPackFilePath, BYOK_BLOBS_PATH, BYOK_BLOB_FINALIZE_ROUTE, BYOK_BLOB_URL_ROUTE, BYOK_BLOB_CONTENT_ROUTE, byokBlobFinalizePath, byokBlobUrlPath, byokBlobContentPath, BYOK_INPUT_PREPARATIONS_PATH, BYOK_INPUT_PREPARATION_COMPLETION_ROUTE, BYOK_INPUT_PREPARATION_STATUS_ROUTE, byokInputPreparationCompletionPath, byokInputPreparationStatusPath, InputPreparationCompletionRequestSchema, InputPreparationStatusSchema, InputPreparationReadbackSchema, InputPreparationStatusQuerySchema, } from './http-api';
+export { PairRequestSchema, PairResponseTenantIdSchema, PAIR_RESPONSE_TENANT_ID_MAX_LENGTH, PairResponseSchema, ChallengeRequestSchema, ChallengeResponseSchema, TokenRequestSchema, TokenResponseSchema, PresencePublishRequestSchema, CreateBlobRequestSchema, CreateBlobResponseSchema, BlobDownloadUrlResponseSchema, EventsPollQuerySchema, ActivityIngressSchema, MessageSendOutcomeSchema, OUTBOUND_REFUSAL_REASONS, EventsPollResponseSchema, MessagesSendRequestSchema, MessagesSendResponseSchema, AgentHomeProjectionCompletionRequestSchema, AgentHomeProjectionStatusSchema, AgentHomeProjectionReadbackSchema, AgentMemoryProjectionCommitRequestSchema, AgentMemoryProjectionCommitResponseSchema, MAX_MESSAGES_PER_BATCH, BYOK_PAIR_PATH, BYOK_CHALLENGE_PATH, BYOK_TOKEN_PATH, BYOK_CAPABILITIES_PATH, BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, BYOK_AGENT_HOME_PROJECTIONS_PATH, BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE, byokAgentHomeProjectionCompletionPath, BYOK_AGENT_MEMORY_PROJECTIONS_PATH, BYOK_PRESENCE_PATH, BYOK_ACTIVITY_PATH, BYOK_BOARD_PATH, BYOK_BOARD_STREAM_PATH, BYOK_BOARD_CLAIM_ROUTE, BYOK_BOARD_UNCLAIM_ROUTE, BYOK_BOARD_STATUS_ROUTE, BYOK_RECORDS_PATH, BYOK_RECORD_ROUTE, byokRecordPath, BYOK_E2EE_MEMBER_KEY_PATH, BYOK_E2EE_CHAIN_PATH, BYOK_E2EE_KEY_PACKAGES_PATH, BYOK_E2EE_PAIRING_MAC_PATH, BYOK_SKILL_PACKS_PATH, BYOK_SKILL_PACK_FILE_ROUTE, byokSkillPackFilePath, BYOK_BLOBS_PATH, BYOK_BLOB_FINALIZE_ROUTE, BYOK_BLOB_URL_ROUTE, BYOK_BLOB_CONTENT_ROUTE, byokBlobFinalizePath, byokBlobUrlPath, byokBlobContentPath, BYOK_INPUT_PREPARATIONS_PATH, BYOK_INPUT_PREPARATION_COMPLETION_ROUTE, BYOK_INPUT_PREPARATION_STATUS_ROUTE, byokInputPreparationCompletionPath, byokInputPreparationStatusPath, InputPreparationCompletionRequestSchema, InputPreparationStatusSchema, InputPreparationReadbackSchema, InputPreparationStatusQuerySchema, } from './http-api';
 export type { PairRequest, PairResponse, ChallengeRequest, ChallengeResponse, TokenRequest, TokenResponse, PresencePublishRequest, CreateBlobRequest, CreateBlobResponse, BlobDownloadUrlResponse, EventsPollQuery, ActivityIngress, MessageSendOutcome, OutboundRefusalReason, EventsPollResponse, MessagesSendRequest, MessagesSendResponse, AgentHomeProjectionCompletionRequest, AgentHomeProjectionStatus, AgentHomeProjectionReadback, AgentMemoryProjectionCommitRequest, AgentMemoryProjectionCommitResponse, InputPreparationCompletionRequest, InputPreparationStatus, InputPreparationReadback, InputPreparationStatusQuery, } from './http-api';
 export type { TaskOfferType } from './messages';
 export type { HarnessId, HarnessInfo } from './messages';
 export { CUSTOM_HARNESS_CAPABILITY } from './version';
 export { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from './input-preparation';
-export { E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES, E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES, E2EE_MEMBER_CHAIN_OPS, E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, E2eeClientPairingMacSchema, E2eeMemberChainEntrySchema, E2eeMemberKeyBundleSchema, E2eePairingMacSchema, E2eeScopeKeyPackageSchema, } from './e2ee-member';
-export type { E2eeClientPairingMac, E2eeMemberChainEntry, E2eeMemberKeyBundle, E2eeScopeKeyPackage } from './e2ee-member';
+export { E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES, E2EE_MEMBER_CHAIN_APPEND_OPERATION, E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES, E2EE_MEMBER_CHAIN_OPS, E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES, E2EE_MEMBER_KEY_REGISTER_OPERATION, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, E2eeClientPairingMacSchema, E2eeMemberChainEntrySchema, E2eeMemberKeyBundleSchema, E2eeMemberKeyRegisterRequestSchema, E2eePairingMacSchema, E2eeScopeKeyPackageSchema, } from './e2ee-member';
+export type { E2eeClientPairingMac, E2eeMemberChainEntry, E2eeMemberKeyBundle, E2eeMemberKeyRegisterRequest, E2eeScopeKeyPackage, } from './e2ee-member';
 export * from './bot-turn-outcome';
 export { resultOutcomeMaxBytes } from './result-schema';
 // ==== @byok-sdk/protocol dist/input-preparation.d.ts ====
