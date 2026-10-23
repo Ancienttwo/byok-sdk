@@ -138,16 +138,19 @@
   being visible to recall and export. A `MEMORY.md` with more than one hard
   link makes capture fail.
 
-## 0.28.3 — source candidate
+## 0.28.3 — 2026-10-22 (published)
 
 The owner selected 0.28.3 as one more one-release exception to the default
-pre-1.0 MINOR policy, after the 0.28.1 and 0.28.2 exceptions. The candidate
+pre-1.0 MINOR policy, after the 0.28.1 and 0.28.2 exceptions. The release
 adds public API and behavior: the Grok `compatInstructions` option, the `mcp`
 field on durable Pi tool events and `HermesAdapter.prepare()` on Windows. The
-0.29.0 schedule does not change. This candidate is not published. See the
-[release notes](docs/releases/v0.28.3.md) for scope and outstanding
-qualification. All nine public manifests and their lock records move to
-0.28.3.
+npm registry lists all nine public packages at 0.28.3. The registry
+publication times fall on 2026-10-22 (UTC). The registry read on 2026-10-23
+at 02:58 UTC reports 0.28.3 as `latest` for all nine. The tag `v0.28.3` and
+its GitHub Release point to `9ca1f3ea`. See the
+[release notes](docs/releases/v0.28.3.md) for scope and the qualification
+limits that were recorded at preparation. All nine public manifests and their
+lock records move to 0.28.3.
 
 - **Docs (cloud-dataplane)** — `docs/security.md` has a new "Hosted surface
   threat model" section (#654). For each data category (C1 to C4 and routing
@@ -349,13 +352,14 @@ qualification. All nine public manifests and their lock records move to
   duplicate. In one daemon run, `observer.onInboundCommitted` now fires only
   once for each record (#698).
 
-## 0.28.2 — 2026-10-22 (published)
+## 0.28.2 — 2026-10-22 (published; superseded by 0.28.3)
 
 The owner selected 0.28.2 as a second one-release exception to the default
 pre-1.0 MINOR policy for additive changes. The npm registry lists all nine
 public packages at 0.28.2, keys included. The registry publication times fall
-on 2026-10-22 (UTC). The registry read on 2026-10-22 at 15:58 UTC reports
-0.28.2 as `latest` for all nine. See the
+on 2026-10-22 (UTC). The registry read on 2026-10-22 at 15:58 UTC reported
+0.28.2 as `latest` for all nine. The read on 2026-10-23 at 02:58 UTC reports
+0.28.3 as `latest`. See the
 [release notes](docs/releases/v0.28.2.md) for scope and the qualification
 limits that were recorded at preparation. All nine public manifests and their
 lock records move to 0.28.2; keys leaves its own version line to join the
@@ -540,7 +544,7 @@ The owner selected 0.28.1 as a one-release exception to the default pre-1.0
 MINOR policy for additive changes. The npm registry lists all eight aligned
 packages at 0.28.1 and keys at 0.13.1. The registry publication times fall on
 2026-10-21 (UTC). The registry read on 2026-10-21 at 18:13 UTC reported both
-as `latest`. The read on 2026-10-22 at 15:58 UTC reports 0.28.2 as `latest`.
+as `latest`. The read on 2026-10-22 at 15:58 UTC reported 0.28.2 as `latest`.
 See the [release notes](docs/releases/v0.28.1.md)
 for scope and the qualification limits that were recorded at preparation.
 The eight aligned manifests and lock records move to 0.28.1; keys moves to

@@ -7,19 +7,16 @@ composition over Postgres and R2.
 
 ## Release status
 
-The source candidate is **0.28.3** for all nine packages. It is not
-published. See the
-[candidate notes](docs/releases/v0.28.3.md) and
+The current stable release is **0.28.3** for all nine packages. From 0.28.2,
+keys uses the release train version instead of its own version line. See the
+[release notes](docs/releases/v0.28.3.md) and
 [release process](docs/releases/README.md).
 
-The current stable release is **0.28.2** for all nine packages. From 0.28.2,
-keys uses the release train version instead of its own version line. See the
-[release notes](docs/releases/v0.28.2.md).
-Public npm metadata read on 2026-10-22 at 15:58 UTC reports `latest` **0.28.2**
-for all nine packages. The registry lists 0.28.1 / keys 0.13.1 (2026-10-21,
-UTC) and 0.28.0 / keys 0.13.0 (2026-10-20, UTC) as the earlier published
-versions. This read confirms registry availability, not isolated-install
-qualification.
+Public npm metadata read on 2026-10-23 at 02:58 UTC reports `latest` **0.28.3**
+for all nine packages. The registry lists 0.28.2 (2026-10-22, UTC),
+0.28.1 / keys 0.13.1 (2026-10-21, UTC) and 0.28.0 / keys 0.13.0 (2026-10-20,
+UTC) as the earlier published versions. This read confirms registry
+availability, not isolated-install qualification.
 
 Historically, all nine **0.27.0** / keys **0.12.0** packages were published from
 `v0.27.0` (`cd977261`), and complete registry readback and isolated installation
@@ -33,8 +30,7 @@ changes server, cloud, client and keys APIs.
 [Release notes](docs/releases/v0.27.0.md) describe the changes since 0.26.1
 and the Host upgrade and migration steps.
 
-Versioned install examples below name the unpublished source candidate.
-Use the stable 0.28.2 until this candidate is published.
+Versioned install examples below name the current stable release, 0.28.3.
 The historical `rc` publication is **0.27.0-rc.2** / keys **0.12.0-rc.2**; see its
 [publication record](docs/releases/v0.27.0-rc.2-publication.md).
 
