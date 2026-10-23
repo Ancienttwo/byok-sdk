@@ -3163,9 +3163,11 @@ export class TaskRunner {
         ...(terminalProjection === undefined ? {} : { terminalProjection }),
         ...(terminalProjection?.mode !== 'result-document' ? {} : { resultStore: this.resultContextByTask.get(taskId)?.store }),
       };
+      // #654 D9: a task with sealing streams no draft (design §6.1, §10.4).
       if (active.messageRequirement !== undefined && active.agentRef !== undefined
         && pick.descriptor.capabilities.messageDraft === true
-        && this.deps.getServerCapabilities?.().includes('agent-message-draft')) {
+        && this.deps.getServerCapabilities?.().includes('agent-message-draft')
+        && this.deps.sealedTasks?.isSealed(taskId) !== true) {
         active.messageDraft = new AgentMessageDraftPublisher({
           taskId,
           agentRef: active.agentRef,

@@ -8215,6 +8215,8 @@ export declare class SealedTasks {
     constructor(options: SealedTasksOptions);
     /** Whether this task's output is sealed. */
     sealsOutput(taskId: string | undefined): boolean;
+    /** Whether this task has a sealing policy at all. */
+    isSealed(taskId: string | undefined): boolean;
     /** Whether this task's input is sealed, so a plaintext steer is a downgrade (§6.2). */
     sealsInput(taskId: string | undefined): boolean;
     /**

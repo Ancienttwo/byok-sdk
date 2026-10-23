@@ -118,6 +118,11 @@ export class SealedTasks {
     return taskId !== undefined && this.#tasks.get(taskId)?.sealing.categories.includes('task-output') === true;
   }
 
+  /** Whether this task has a sealing policy at all. */
+  isSealed(taskId: string | undefined): boolean {
+    return taskId !== undefined && this.#tasks.has(taskId);
+  }
+
   /** Whether this task's input is sealed, so a plaintext steer is a downgrade (§6.2). */
   sealsInput(taskId: string | undefined): boolean {
     return taskId !== undefined && this.#tasks.get(taskId)?.sealing.categories.includes('task-input') === true;
