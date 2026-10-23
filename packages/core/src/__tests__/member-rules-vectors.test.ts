@@ -31,7 +31,9 @@ import { deriveMemberId, memberChainEntryHash, signMemberChainEntry } from '../s
 import { memberApprovalCode, memberFingerprint } from '../sealed-payload/member-fingerprint';
 import { computeClientPairingMac, computeDevicePairingMac } from '../sealed-payload/pairing-verification';
 import {
+  buildScopeSignerVectors,
   checkMemberRulesVectors,
+  checkScopeSignerVectors,
   vectorPublicJwk,
   type MemberRulesVectorMember,
   type MemberRulesVectors,
@@ -107,7 +109,7 @@ async function buildVectors(): Promise<MemberRulesVectors> {
   const chainHead = { seq: 2, hash: addHash };
   const deviceBundle = device.bundle as unknown as Parameters<typeof computeDevicePairingMac>[1]['member'];
   const clientBundle = client.bundle as unknown as Parameters<typeof computeClientPairingMac>[1]['member'];
-  return {
+  const vectors = {
     note: 'Member rule vectors (#654 E2b; decisions 10a, 11a, 11b). Regenerate with BYOK_CORE_UPDATE_GOLDEN=1 bun run --filter @byok-sdk/core test. A diff in a deterministic field is a breaking change. kemSig and chain signatures are random at generation, so they are verify-only. All keys derive from public labels and are test values only.',
     tenantId: TENANT,
     members,
@@ -123,6 +125,7 @@ async function buildVectors(): Promise<MemberRulesVectors> {
     },
     chain: { entries: [genesis, addDevice], hashes: [genesisHash, addHash], anchor: { self: 'device', approver: 'client', anchorSeq: 2 } },
   };
+  return { ...vectors, scopeSigners: await buildScopeSignerVectors(vectors) };
 }
 
 if (process.env['BYOK_CORE_UPDATE_GOLDEN'] === '1' || !existsSync(GOLDEN_URL)) {
@@ -224,6 +227,34 @@ describe('member rule vectors', () => {
       expect(`sha256:${sha256(`byok-member-chain-v1\n${oracleCanonical(unsigned)}`).toString('hex')}`).toBe(golden.chain.hashes[index]);
     }
     expect(golden.pairing.chainHead).toEqual({ seq: 2, hash: golden.chain.hashes[1] });
+  });
+
+  it('pin the scope signer rule (§50f A), with hashes and signatures checked by the oracle', async () => {
+    await expect(checkScopeSignerVectors(golden)).resolves.toBe(6);
+    expect(golden.scopeSigners.cases.map((vector) => [vector.name, vector.outcome])).toEqual([
+      ['outsider-adds-itself', 'member_chain_signer_invalid'],
+      ['outsider-shreds', 'member_chain_signer_invalid'],
+      ['new-scope-unlisted-signer', 'member_chain_signer_invalid'],
+      ['policy-member-updates', 'ok'],
+      ['policy-member-shreds', 'ok'],
+      ['new-scope-listed-signer', 'ok'],
+    ]);
+    const signed = [
+      ...golden.scopeSigners.entries.map((entry, index) => ({ entry, hash: golden.scopeSigners.hashes[index] })),
+      ...golden.scopeSigners.cases.map(({ entry, hash }) => ({ entry, hash })),
+    ];
+    let prev = golden.chain.hashes[1];
+    for (const [index, { entry, hash }] of signed.entries()) {
+      const { sig, ...unsigned } = entry;
+      const text = `byok-member-chain-v1\n${oracleCanonical(unsigned)}`;
+      expect(`sha256:${sha256(text).toString('hex')}`).toBe(hash);
+      expect(unsigned.prev).toBe(prev);
+      const signer = golden.members.find((candidate) => candidate.memberId === unsigned.signer)!;
+      const key = { key: { kty: 'EC', crv: 'P-256', x: signer.signing.x, y: signer.signing.y }, format: 'jwk', dsaEncoding: 'ieee-p1363' } as const;
+      expect(verify('sha256', Buffer.from(text), key, Buffer.from(sig, 'base64url'))).toBe(true);
+      // The two prefix entries chain on; every case continues from the second.
+      if (index < golden.scopeSigners.entries.length) prev = hash!;
+    }
   });
 });
 

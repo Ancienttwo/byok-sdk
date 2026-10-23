@@ -448,6 +448,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `agent.home.projection` | S→D | forbidden | **required** | exact `requestId`, AgentRef/profile revision, SHA-256 projection identity, bounded opaque JSON | A durable task-free projection targets one exact capable device |
 | `provider.provisioning.available` | S→D | forbidden | **required** | exactly `{ requestId }` (strict; nothing else) | A Host holds a sealed provider provisioning request for one exact device advertising `provider-provisioning.v1` (§2.3) |
 | `agent.memory.intent.available` | S→D | forbidden | **required** | exactly `{ intentId, agentRef }` (strict; nothing else) | A Host holds an approved Agent memory intent for one exact device advertising `agent-memory-intent.v1` (§2.4) |
+| `e2ee.key_package.available` | S→D | forbidden | **required** | exactly `{ scopeId, epoch }` (strict; nothing else) | A Host stored a scope key package for the member of one exact device advertising `sealed-payload-v1` (§2.7) |
 | `task.approve` | S→D | **required** | **required** | `{}`, `approvalId?` (M5, additive — §5.3) | `TaskHandle.approve()` while `AwaitApproval` |
 | `task.reject` | S→D | **required** | **required** | `reason?`, `approvalId?` (M5, additive — §5.3) | `TaskHandle.reject()` while `AwaitApproval` |
 | `task.cancel` | S→D | **required** | **required** | `reason?` | `TaskHandle.cancel()` from any non-terminal state |
@@ -1226,6 +1227,106 @@ refuses a draft for a task whose offer has any `sealing`, with
 `agent_message_draft_invalid`. A sealed task must not go to
 `@byok-sdk/cloud-do`: it runs the model with platform keys, so it reads the
 instruction and the output in plaintext.
+
+### 2.6 E2EE member routes (#654 E2c-2)
+
+These HTTP routes let a device store and read E2EE member state on the Host.
+They add no envelope type. The Host checks shapes and the first-writer rules
+only; members verify every signature (design §7.3). A deployment mounts the
+routes only when its capability declaration has `e2ee.member` and the
+composition supplies an `E2eeMemberStore`. Declaring `e2ee.member` without a
+store fails at construction. `fullCapabilityDeclaration()` leaves it out
+unless `includeE2eeMember` is set.
+
+The three writes are device-proof routes (`x-byok-device-proof`). The proof's
+`operation` is the constant in the table, and its `resource` is the route path.
+The tenant and device come from the proven device row. The body may be at most
+`maxE2eeRequestBytes` (default 4 MiB + 64 KiB, room for one append of 64
+entries of 64 KiB); a larger body gets 413 before the proof is checked.
+
+| Route | Class | Operation | Body | 200 response |
+| --- | --- | --- | --- | --- |
+| `POST /byok/e2ee/member-key` | proof | `e2ee-member-key.register` | `{ member, mac }` | `{ memberId }` |
+| `POST /byok/e2ee/chain` | proof | `e2ee-member-chain.append` | `{ entries }` | `{ appended, replayed }` |
+| `POST /byok/e2ee/key-packages` | proof | `e2ee-scope-key-package.put` | `{ packages }` | `{ stored, skippedDeviceIds }` |
+| `GET /byok/e2ee/chain?afterSeq=&limit=` | device | — | — | `{ entries }` |
+| `GET /byok/e2ee/key-packages?scopeId=&epoch=` | device | — | — | `{ packages }` |
+| `GET /byok/e2ee/pairing-mac` | device | — | — | `{ mac, member, chainHead }` |
+
+- **Registration.** `member` is the device's own member key bundle, so its
+  `deviceId` must be the proven device; `mac` is the device pairing MAC
+  (§7.2 step 3). The first registration of a device wins. A retry with the
+  same bundle succeeds, also with a different `mac`, and replaces the stored
+  MAC and its expiry. The MAC is kept for one pairing window
+  (`PAIRING_CODE_TTL_MS`) from the last registration.
+- **Writes.** Each write body holds only the fields in the table; any other
+  top-level field gets 400. The chain append and the package put run the
+  same checks as the Host control plane calls `appendMemberChainEntries` and
+  `putScopeKeyPackages`.
+- **Proof replay.** A device proof is not single-use on the three writes.
+  Anyone who captures a proof and its body can send them again while the
+  proof's `issuedAt` is within the Host clock skew (60 s by default). A
+  replayed registration extends the pairing MAC expiry, or puts back an older
+  MAC for the same bundle. A replayed package put can overwrite a newer
+  package for the same scope epoch, `keyId` and recipient. A replayed chain
+  append changes nothing. The owner accepted this window for now (owner batch
+  §41a A). Before E2d-5, `requestId` becomes single-use on the three writes,
+  as on the truth put.
+- **Reads.** A device route checks the bearer against the device row, so a
+  revoked or superseded device gets 401. The package read returns only the
+  packages addressed to the device's registered member; a query names no
+  recipient. A query accepts only the names in the table, each once. The
+  package read checks its query before the registration, so a bad query gets
+  400 also from an unregistered device.
+- **Errors.** Every error body is `{ error }`:
+
+  | Status | `error` |
+  | --- | --- |
+  | 400 | `coordination_input_invalid`, or an unreadable body |
+  | 401 | `unauthorized` |
+  | 404 | `e2ee_pairing_mac_not_found` |
+  | 409 | `e2ee_member_chain_conflict`, `e2ee_scope_key_conflict`, `e2ee_member_key_conflict`, `e2ee_member_not_registered` |
+  | 413 | the body is over `maxE2eeRequestBytes` |
+  | 500 | `e2ee_member_state_unreadable` |
+
+### 2.7 E2EE key package notice (#654 E2c-3)
+
+`e2ee.key_package.available` is an additive server-to-daemon message type,
+gated as a whole type by the device capability `sealed-payload-v1`
+(`SEALED_PAYLOAD_CAPABILITY`, §2.5). It forbids `task_id`, requires `seq`,
+and its payload (`E2eeKeyPackageAvailablePayloadSchema`) is strict:
+
+```text
+{ scopeId,  // string of 1 to 512 UTF-16 code units (E2EE_SCOPE_ID_MAX_LENGTH)
+  epoch }   // positive safe integer
+```
+
+The notice is notice-and-fetch: it never carries the package. The device
+fetches the packages addressed to its member from
+`GET /byok/e2ee/key-packages?scopeId=&epoch=` (§2.6).
+
+- **Who gets it.** After a key package put commits (the control plane
+  `putScopeKeyPackages` or the device route), each recipient that is a
+  registered device gets one notice per scope epoch. A replayed put enqueues
+  again, because a crash between the commit and the notice must not lose the
+  notice. The mailbox message id is derived from the domain
+  `byok:e2ee-key-package-notice`, the tenant, the device, `scopeId` and
+  `epoch`, so a repeat returns the same mailbox row.
+- **A device without `sealed-payload-v1`.** The put stores its packages, sends
+  it no notice and lists it in `skippedDeviceIds`. A recipient with no device
+  registration (for example a browser member) has no mailbox: it gets no
+  notice and is not listed.
+- **Direct enqueue.** `enqueueScopeKeyPackageNotice(tenant, deviceId,
+  { scopeId, epoch })` sends one notice. It validates the strict payload
+  first, then refuses (`agent_capability_missing`, no mailbox row) a device
+  whose durable capabilities lack `sealed-payload-v1`.
+- **Partial failure.** Devices are notified one after another. If one
+  device's mailbox append fails, the put throws and the later devices get no
+  notice; a retry of the same put stores nothing new and sends them all again.
+- **Release rule.** No release may ship a daemon that advertises
+  `sealed-payload-v1` unless that release's protocol has this type and the
+  daemon handles it. Otherwise a daemon that advertised the flag gets a type
+  it cannot decode.
 
 ## 3. Task state machine (M1 gap #2, #5, #6)
 

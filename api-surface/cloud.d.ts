@@ -1314,6 +1314,14 @@ export declare const CLOUD_CAPABILITIES: {
      * the capability is declared only once it is completely implemented.
      */
     readonly hostMcpTaskContext: 'host-mcp-task-context';
+    /**
+     * The E2EE member device routes (#654): register a member key bundle,
+     * append and read the member chain, put and read scope key packages, and
+     * read the relayed client pairing MAC. Composition-bound like
+     * `truth.records`: declaring it without an `e2eeMemberStore` is refused at
+     * construction.
+     */
+    readonly e2eeMember: 'e2ee.member';
 };
 export type CloudCapability = (typeof CLOUD_CAPABILITIES)[keyof typeof CLOUD_CAPABILITIES];
 /** The wire DTO for `GET /byok/capabilities` — core's shape, bound to a cloud-owned route. */
@@ -1349,6 +1357,8 @@ export interface FullCapabilityDeclarationOptions {
      * deployment does not hold — so it is off unless a composition says otherwise.
      */
     readonly includeHostMcpTaskContext?: boolean;
+    /** `e2ee.member` is default-off: the composition must supply an `e2eeMemberStore`. */
+    readonly includeE2eeMember?: boolean;
 }
 /** Every capability the standard composition can serve, plus explicitly wired composition-bound ones. */
 export declare function fullCapabilityDeclaration(version?: number, options?: FullCapabilityDeclarationOptions): CapabilityDeclaration;
@@ -1378,7 +1388,7 @@ import { type AgentExecutionInput, type SealedAgentExecutionInput } from './agen
 import { type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { ActivityTail } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
-import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskOfferSealedPayload, type TaskSteerPayload, type TaskSteerSealedPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentSealedPayload, type TaskOfferPreparedPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressSealedPayload, type TaskOfferWithToolsetsPayload, type TaskOfferWithToolsetsSealedPayload, type E2eeClientPairingMac, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage } from '@byok-sdk/protocol';
+import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskOfferSealedPayload, type TaskSteerPayload, type TaskSteerSealedPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentSealedPayload, type TaskOfferPreparedPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressSealedPayload, type TaskOfferWithToolsetsPayload, type TaskOfferWithToolsetsSealedPayload, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage } from '@byok-sdk/protocol';
 import type { TokenSigner } from './auth/tokens';
 import type { CloudCrypto } from './crypto/port';
 import { type RouteDescriptor } from './router/registry';
@@ -1510,6 +1520,8 @@ export interface ByokCloudOptions {
     readonly activityCapacity?: number;
     readonly activityTtlMs?: number;
     readonly maxTruthRequestBytes?: number;
+    /** Byte cap of one E2EE member device write. The default fits one full chain append (64 entries of 64 KiB). */
+    readonly maxE2eeRequestBytes?: number;
     readonly skillPackPageLimit?: number;
 }
 /** The unauthenticated routes {@link ByokCloudOptions.publicRouteLimiter} guards. */
@@ -1803,6 +1815,16 @@ export interface ByokCloud {
      * routes; this plane records no intent receipt of its own.
      */
     enqueueAgentMemoryIntentNotice(tenant: TenantId, deviceId: string, input: AgentMemoryIntentNoticeInput): Promise<EnqueuedAgentControl>;
+    /**
+     * Durable, task-free `e2ee.key_package.available` notice (#654 E2c-3) for
+     * one device that durably advertised `sealed-payload-v1`; otherwise it
+     * throws `agent_capability_missing` before the mailbox append. The payload
+     * is exactly `{ scopeId, epoch }`; the device fetches the package from its
+     * device route. Idempotent per (tenant, device, scopeId, epoch) while the
+     * mailbox row is retained. `putScopeKeyPackages` calls it for every
+     * recipient device that has the capability.
+     */
+    enqueueScopeKeyPackageNotice(tenant: TenantId, deviceId: string, input: E2eeKeyPackageAvailablePayload): Promise<EnqueuedAgentControl>;
     /** Tenant/device/request-bound durable desired-state and terminal-outcome readback. */
     getInputPreparationStatus(tenant: TenantId, deviceId: string, input: InputPreparationStatusInput): Promise<InputPreparationReadback | undefined>;
     /** Direct device completion endpoint authority; first exact terminal receipt wins. */
@@ -1846,11 +1868,17 @@ export interface ByokCloud {
      * Host control plane: store scope key packages. The first package of a
      * scope epoch fixes its `keyId`; a package with another `keyId` throws
      * `e2ee_scope_key_conflict`, and the call stores nothing.
+     *
+     * After the commit, each recipient that is a registered device gets one
+     * `e2ee.key_package.available` notice per scope epoch, also on a replay.
+     * A recipient device without `sealed-payload-v1` gets no notice and is
+     * listed in `skippedDeviceIds`; its packages are stored all the same.
      */
     putScopeKeyPackages(tenant: TenantId, input: {
         readonly packages: readonly E2eeScopeKeyPackage[];
     }): Promise<{
         readonly stored: number;
+        readonly skippedDeviceIds: readonly string[];
     }>;
     /** Host control plane: the stored packages of one scope, optionally for one epoch or one recipient. */
     readScopeKeyPackages(tenant: TenantId, input: {
@@ -2295,7 +2323,7 @@ export declare function createWebCrypto(): CloudCrypto;
  * bytes the writer sent.
  */
 import { type TenantId } from '@byok-sdk/core';
-import { type E2eeClientPairingMac, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage } from '@byok-sdk/protocol';
+import { type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage } from '@byok-sdk/protocol';
 import type { DeviceDirectory } from './stores/ports';
 /** One stored chain entry: its seq and its canonical JSON. */
 export interface E2eeMemberChainRow {
@@ -2414,6 +2442,8 @@ export interface E2eeMemberContext {
     readonly tenant: TenantId;
     readonly devices: DeviceDirectory;
     readonly now: () => Date;
+    /** Enqueue `e2ee.key_package.available` for one device; it refuses a device without the gate capability. */
+    readonly enqueueKeyPackageNotice: (deviceId: string, payload: E2eeKeyPackageAvailablePayload) => Promise<unknown>;
 }
 export declare function appendMemberChainEntries(ctx: E2eeMemberContext, input: {
     readonly entries: readonly E2eeMemberChainEntry[];
@@ -2431,6 +2461,7 @@ export declare function putScopeKeyPackages(ctx: E2eeMemberContext, input: {
     readonly packages: readonly E2eeScopeKeyPackage[];
 }): Promise<{
     readonly stored: number;
+    readonly skippedDeviceIds: readonly string[];
 }>;
 export declare function readScopeKeyPackages(ctx: E2eeMemberContext, input: {
     readonly scopeId: string;
@@ -2450,6 +2481,23 @@ export declare function readMemberKeyRegistration(ctx: E2eeMemberContext, device
 } | undefined>;
 /** Relay the client pairing MAC to a registered device for one pairing window. */
 export declare function relayClientPairingMac(ctx: E2eeMemberContext, deviceId: string, input: E2eeClientPairingMac): Promise<void>;
+/**
+ * A device registers its own member key bundle with the device pairing MAC
+ * (§7.2 step 3). The bundle must name the proven device. The MAC is kept for
+ * one pairing window; a retry with the same bundle replaces the MAC and its expiry.
+ */
+export declare function registerDeviceMemberKey(ctx: E2eeMemberContext, deviceId: string, input: unknown): Promise<{
+    readonly memberId: string;
+}>;
+/** The scope key packages addressed to the device's own registered member. */
+export declare function readDeviceScopeKeyPackages(ctx: E2eeMemberContext, deviceId: string, input: {
+    readonly scopeId: string;
+    readonly epoch?: number;
+}): Promise<{
+    readonly packages: readonly E2eeScopeKeyPackage[];
+}>;
+/** The client pairing MAC relayed to the device, while its pairing window is open. */
+export declare function readDeviceClientPairingMac(ctx: E2eeMemberContext, deviceId: string): Promise<E2eeClientPairingMac | undefined>;
 // ==== @byok-sdk/cloud dist/errors.d.ts ====
 /**
  * The one error taxonomy for `@byok-sdk/cloud`.
@@ -2510,6 +2558,8 @@ export declare const CLOUD_ERROR_CODES: {
     readonly e2ee_scope_key_conflict: 'e2ee_scope_key_conflict';
     /** The device has not registered a member key bundle. */
     readonly e2ee_member_not_registered: 'e2ee_member_not_registered';
+    /** The device registered another member key bundle, or another device registered this member id. */
+    readonly e2ee_member_key_conflict: 'e2ee_member_key_conflict';
     /** A stored E2EE member row is not the value its schema requires. Whatever wrote it broke the store contract. */
     readonly e2ee_member_state_unreadable: 'e2ee_member_state_unreadable';
     /** Explicit legacy dispatch target is unknown or revoked in this tenant. */
@@ -2615,6 +2665,18 @@ export declare function boardUnclaimHandler(deps: DeviceRouteDeps): (c: Context)
 export declare function boardStatusHandler(deps: DeviceRouteDeps): (c: Context) => Promise<Response>;
 export declare function boardStreamHandler(deps: BoardStreamRouteDeps): (c: Context) => Promise<Response>;
 export type BoardPollResponse = BoardPage;
+// ==== @byok-sdk/cloud dist/handlers/device-proof-request.d.ts ====
+import type { Context } from 'hono';
+import { type AuthenticatedDeviceProof, type DeviceProofAuthDeps } from '../auth/device-proof';
+export declare const MAX_DEVICE_PROOF_HEADER_BYTES: number;
+/** The raw request body, `'too_large'` over `maximum`, or `undefined` for an unreadable body. */
+export declare function readProofRequestBody(c: Context, maximum: number): Promise<Uint8Array | 'too_large' | undefined>;
+/** `undefined` means "answer 401", for every refused proof alike. */
+export declare function authenticateProofRequest(c: Context, deps: DeviceProofAuthDeps, request: {
+    readonly body: Uint8Array;
+    readonly operation: string;
+    readonly resource: string;
+}): Promise<AuthenticatedDeviceProof | undefined>;
 // ==== @byok-sdk/cloud dist/handlers/shared.d.ts ====
 /**
  * The two things every device-facing handler starts from: a tolerant JSON body
@@ -2708,11 +2770,11 @@ export declare function skillPackFileHandler(deps: SkillPackRouteDeps): (c: Cont
 // ==== @byok-sdk/cloud dist/handlers/truth.d.ts ====
 import { DEVICE_PROOF_HEADER } from '@byok-sdk/core';
 import type { Context } from 'hono';
-import { type DeviceProofAuthDeps } from '../auth/device-proof';
+import type { DeviceProofAuthDeps } from '../auth/device-proof';
 import { type TruthCommitter, type TruthObjectDownloads } from '../truth/contract';
 export { DEVICE_PROOF_HEADER };
+export { MAX_DEVICE_PROOF_HEADER_BYTES } from './device-proof-request';
 export declare const DEFAULT_MAX_TRUTH_REQUEST_BYTES: number;
-export declare const MAX_DEVICE_PROOF_HEADER_BYTES: number;
 export interface TruthRouteDeps {
     readonly proof: DeviceProofAuthDeps;
     readonly truth: TruthCommitter;
