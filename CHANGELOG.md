@@ -18,7 +18,23 @@
   also on macOS, where the Darwin digests do not change. Migration: run
   `copyAgentMemoryHelperAssets` or `copySdkNativeAssets` again with the new SDK
   and ship the new folder.
-
+- **Feature (client)** — the task-free projection hook gets
+  `writeHomeFile(name, body)` on its input (#738, #606 R6). One call
+  atomically replaces one file at the root of the canonical Agent home under
+  the writer lease. `name` is one portable file name. `.byok`, `MEMORY.md`,
+  `notes` and `<file>.<pid>-<n>.tmp` temp file names belong to the SDK and are
+  refused. The SDK waits for every call
+  before it writes its projection record, and it refuses a call after the hook
+  settles. Each call is atomic for one file only, and several calls are not one
+  transaction. After a process crash, each file has its old or its new bytes.
+  On POSIX, a successful call has flushed the file and its directory. On
+  Windows, it has flushed the file only: there is no promise for an OS crash
+  or a power loss, and a delivery of the same revision and hash repairs a lost
+  file. Before it writes, a call removes the `<name>.<pid>-<n>.tmp` files that
+  an ended process left for the same name. `agent-home-write-file.test.ts`
+  kills a child process at five points of a three-file apply and checks each
+  file, the redelivery and the temp file cleanup. The root `@byok-sdk/client`
+  entry grows by 2139 bytes.
 - **Feature (protocol, server, cloud, client)** — an ordinary Agent offer can
   select the Agent memory of its one task with the optional
   `agentMemory: 'none' | 'read' | 'read-write'` (#614). The values are those of
@@ -79,6 +95,15 @@
   `OutcomeTransaction.routines` runs `create`, `update` and `lifecycle` in the
   outcome commit with the `addRoutine`, `updateRoutine` and `lifecycle()`
   rules; a refused command changes nothing. `LedgerState.version` stays 1.
+- **Feature (examples)** — the K8 `createBotPersonaProjection` consumer writes
+  `AGENTS.md` with `writeHomeFile` and runs on Windows (#738). It no longer
+  opens or flushes a directory itself. The K8 Windows CI leg no longer excludes
+  the 14 suites that use the real persona consumer, so every K8 suite runs on
+  `windows-latest` with the same assertions. On Windows, an OS crash or a power
+  loss can bring back the old persona after an `applied` readback, and this
+  Host does not deliver that revision again; the next persona update writes the
+  file. A new `persona.test.ts` checks the write, a same-revision repair and a
+  refused digest.
 - **Breaking (examples)** — K8 Bot routines are K4 routines (#737). Each Bot
   routine is a `hostOccurrence` definition with the `bot-routine` hook, and K4
   owns its versions, slots, occurrences and wakes. The hook writes the routine
@@ -105,6 +130,14 @@
   loss. B stays false. CI now runs the helper tests on Windows Server 2025 and
   Windows Server 2022, as the administrator and as a standard user. It also
   checks the root identity that Node and Bun compute.
+- **Changed (client)** — Agent memory names are now the same on every
+  platform (#605). A memory path may not use a Windows device name, such as
+  `notes/con.md`, or a segment that ends in `.`. Below `notes`, two names in
+  one directory may not differ only in ASCII letter case. Recall, save, intents
+  and observation also refuse a file with more than one hard link. Capture and
+  export leave these files out. Existing notes with these names or links stop
+  being visible to recall and export. A `MEMORY.md` with more than one hard
+  link makes capture fail.
 
 ## 0.28.3 — source candidate
 

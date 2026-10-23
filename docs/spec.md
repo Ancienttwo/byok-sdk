@@ -2131,6 +2131,31 @@ Busy, containment, hook, fsync, transport, or readback mismatch leaves the
 cursor at its prior value and redelivers after reconnect/restart. No fake task,
 runtime, session, terminal event, or task journal record is created.
 
+The consumer hook input carries `writeHomeFile(name, body)` (#738). It
+atomically replaces one file at the root of the canonical Agent home, under the
+same writer lease. `name` is one portable file name. The call checks that it
+has no path separator, no `:<>"|?*` and no control character, that it does not
+end in a dot or a space, and that it is not a Windows device name. The call
+does not check the length. A name that is too long for the file system fails
+the write with `ENAMETOOLONG`, and so fails the projection. `.byok`,
+`MEMORY.md` and `notes` belong to the SDK, and the call refuses them in any
+letter case. The call is valid only while the hook runs. The SDK
+waits for every call before it writes the ordering record. A write that fails
+also fails the projection, even when the hook catches the error; a refused call
+writes nothing. Each call is atomic for its own file only. Several calls
+are not one transaction. After a process crash on any platform, each file has
+its old bytes or its new bytes. On POSIX, a successful call has flushed the
+file and its directory. On Windows, a successful call has flushed the file
+only. Node has no Windows directory flush, and the NTFS barrier is not proven
+(`B=false`), so the SDK makes no promise for an OS crash or a power loss there:
+the ordering record can survive while the new file name is lost. Only a
+delivery of the same revision and hash calls the hook again and repairs the
+file. A process crash can leave a `<name>.<pid>-<n>.tmp` file in the home.
+Before it writes, a call removes each such file of the same name whose process
+has ended (signal 0 reports no such process). The temp file of a live process
+stays, because it can belong to a running write. The SDK owns file names of
+that form, and the call refuses such a `name` in any letter case.
+
 Local Host memory export is a separate, explicitly enabled in-process API.
 `DaemonConfig.agentMemoryExport: true` exposes
 `daemon.exportAgentMemory(agentRef, { signal })`; without that opt-in the method
@@ -2161,6 +2186,17 @@ and `AGENT_MEMORY_MAX_SNAPSHOT_BYTES` (1 MiB total UTF-8 content). Existing 256 
 per-file and 512 directory-entry bounds still apply. Limit/validation failures
 reject the whole operation, never truncate; aggregate file/byte limits use
 `AgentMemorySnapshotLimitError`. I/O and invalid files fail closed.
+
+Memory names are the same on every platform. A path segment may not be a
+Windows device name (`CON`, `PRN`, `AUX`, `NUL`, `COM0`–`COM9`, `LPT0`–`LPT9`),
+with or without an extension, and may not end in `.`. Below `notes`, two names
+in one directory may not differ only in ASCII letter case; an existing name
+with upper case stays usable while it has no such pair. Recall, save, intents
+and observation refuse such a path and a file with more than one hard link.
+When two such names already exist, both are refused. Capture leaves all of
+these entries out, and they still count toward the 512-entry bound. Capture
+always reads `MEMORY.md`, so a `MEMORY.md` with more than one hard link makes
+capture fail.
 
 A successful export returns immutable `files` with exact `path`, SHA-256
 `revision`, `byteCount`, and UTF-8 `content`, plus `totalBytes` and `snapshotDigest`.

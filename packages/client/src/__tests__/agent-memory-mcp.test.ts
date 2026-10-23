@@ -16,6 +16,8 @@ import {
   captureAgentMemorySnapshot,
   snapshotAndProjectAgentMemory,
   type AgentMemoryTaskContext,
+  AgentMemoryValidationError,
+  validateAgentMemoryPath,
 } from '../daemon/agent-memory';
 import { AGENT_MEMORY_TOOLS, handleAgentMemoryToolCall } from '../bin/agent-memory-mcp-server';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
@@ -26,6 +28,7 @@ import { TaskRunner } from '../daemon/task-runner';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { expectAgentMemoryNameRules } from './fixtures/agent-memory-name-rules';
 
 const roots: string[] = [];
 const sha256 = (value: string): string => `sha256:${createHash('sha256').update(value, 'utf8').digest('hex')}`;
@@ -72,6 +75,22 @@ describe('Agent memory MCP local authority', () => {
       const audit = await fs.readFile(path.join(context.canonicalHome, '.byok', 'agent-memory-audit-v1.jsonl'), 'utf8');
       expect(audit).toContain('"kind":"save"');
       expect(audit).not.toContain('durable secret-looking value stays local');
+    } finally { await release(); }
+  });
+
+  it('refuses Windows device names and trailing dots in memory paths on every platform', () => {
+    for (const value of ['notes/CON.md', 'notes/con', 'notes/nul.txt.md', 'notes/Aux/a.md', 'notes/com0.md', 'notes/LPT9.md', 'notes/x./a.md', 'notes/a.md.']) {
+      expect(() => validateAgentMemoryPath(value)).toThrow(AgentMemoryValidationError);
+    }
+    for (const value of ['notes/console.md', 'notes/com10.md', 'notes/lpt.md', 'notes/nul-x.md', 'notes/x.y/a.md']) {
+      expect(validateAgentMemoryPath(value)).toBe(value);
+    }
+  });
+
+  itWithSecureDescriptors('refuses case pairs and hard links, and the snapshot leaves them out', async () => {
+    const { context, release } = await memory();
+    try {
+      await expectAgentMemoryNameRules(context, await root(), { caseAlias: 'differs only in letter case', hardLink: 'with one link' });
     } finally { await release(); }
   });
 

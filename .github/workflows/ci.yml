@@ -541,8 +541,8 @@ jobs:
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
 
-      # Explicit per-suite exclusions are logged for the documented POSIX-only
-      # persona consumer. All other K8 suites run with unchanged assertions.
+      # #738: every K8 suite runs, with the real persona fixture suites. The
+      # persona consumer writes AGENTS.md with the SDK writeHomeFile.
       - name: K8 Windows portable Bot qualification
         if: matrix.os == 'windows-latest'
         run: node scripts/ci/run-windows-bot-tests.mjs
@@ -740,6 +740,11 @@ jobs:
             src/__tests__/support-bundle.test.ts `
             src/__tests__/daemon-auth.test.ts `
             src/__tests__/daemon-stop-shutdown-parity.test.ts
+
+      # #738: writeHomeFile on NTFS. A child process is killed at five points
+      # of a three-file projection apply; each file must keep its old or new bytes.
+      - name: Run Agent-home file write crash tests on Windows
+        run: bun run --filter @byok-sdk/client test -- src/__tests__/agent-home-write-file.test.ts
 
       # #712: the Hermes gateway control pipe, ownership walk and custody launcher on Windows.
       # Two steps: the pwsh step fails only on the exit code of its last command.
