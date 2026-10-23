@@ -251,22 +251,11 @@ export async function putScopeKeyPackages(
   ctx: E2eeMemberContext,
   input: { readonly packages: readonly E2eeScopeKeyPackage[] },
 ): Promise<{ readonly stored: number }> {
-  const keyIds = new Map<string, string>();
-  const recipients = new Set<string>();
   const list = boundedList(() => input.packages, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, 'Scope key packages');
   const rows = list.map((input, index) => {
     const { text, value } = canonicalParse(E2eeScopeKeyPackageSchema, input, `Scope key package ${index}`);
     if (value.tenantId !== ctx.tenant) throw invalid(`Scope key package ${index} names another tenant`);
     if (!scopeIdValid(value.scopeId)) throw invalid(`Scope key package ${index} has a scopeId over ${E2EE_SCOPE_ID_MAX_LENGTH} characters`);
-    // JSON text of the tuple keeps the composite key unambiguous for any string.
-    const epochKey = JSON.stringify([value.scopeId, value.epoch]);
-    if ((keyIds.get(epochKey) ?? value.keyId) !== value.keyId) {
-      throw invalid(`Scope key packages name two keyIds for scope ${value.scopeId} epoch ${value.epoch}`);
-    }
-    keyIds.set(epochKey, value.keyId);
-    const recipientKey = JSON.stringify([value.scopeId, value.epoch, value.recipient]);
-    if (recipients.has(recipientKey)) throw invalid(`Scope key package ${index} repeats a recipient`);
-    recipients.add(recipientKey);
     return {
       scopeId: value.scopeId,
       epoch: value.epoch,
@@ -278,8 +267,16 @@ export async function putScopeKeyPackages(
   });
   // One lock order for every writer: Postgres puts and device cleanup both
   // lock rows by (scopeId, epoch, recipient) in code point order, so two
-  // writers that share rows cannot deadlock.
+  // writers that share rows cannot deadlock. Sorted, the rows of one scope
+  // epoch are adjacent, so neighbours show a second keyId or a repeated recipient.
   rows.sort((a, b) => compareCodePoints(a.scopeId, b.scopeId) || a.epoch - b.epoch || compareCodePoints(a.recipient, b.recipient));
+  for (let index = 1; index < rows.length; index += 1) {
+    const previous = rows[index - 1]!;
+    const row = rows[index]!;
+    if (previous.scopeId !== row.scopeId || previous.epoch !== row.epoch) continue;
+    if (previous.keyId !== row.keyId) throw invalid(`Scope key packages name two keyIds for scope ${row.scopeId} epoch ${row.epoch}`);
+    if (previous.recipient === row.recipient) throw invalid(`Scope key packages repeat a recipient of scope ${row.scopeId} epoch ${row.epoch}`);
+  }
   const result = await ctx.store.putScopeKeyPackages(ctx.tenant, rows);
   if (result.outcome === 'key_id_conflict') {
     throw new ByokCloudError(
