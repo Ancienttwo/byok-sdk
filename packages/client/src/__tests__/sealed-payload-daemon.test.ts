@@ -52,11 +52,14 @@ class TestKeyring implements SealedScopeKeyring {
   readonly scopeKey = generateScopeKey();
   sealing = true;
   failing = false;
+  /** A sealing key waits for this, so a test can hold a seal open. */
+  gate: Promise<void> = Promise.resolve();
   async openingKey(scope: { readonly id: string; readonly epoch: number }) {
     if (this.failing) throw new Error('keyring store unavailable');
     return scope.id === SCOPE && scope.epoch === EPOCH ? this.scopeKey : undefined;
   }
   async sealingKey(scopeId: string, minEpoch: number) {
+    await this.gate;
     if (this.failing) throw new Error('keyring store unavailable');
     return this.sealing && scopeId === SCOPE && minEpoch <= EPOCH
       ? { scopeKey: this.scopeKey, epoch: EPOCH, sender: SENDER, chainHead: CHAIN_HEAD }
@@ -77,6 +80,8 @@ afterEach(async () => {
 async function start(options: {
   keyring?: TestKeyring;
   serverFlag?: boolean;
+  /** `false` runs the daemon without a hosted journal. */
+  journal?: false;
   beforeStart?: (storeDir: string, deviceId: string) => Promise<void>;
 } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-sealed-daemon-'));
@@ -89,7 +94,7 @@ async function start(options: {
     storage: { scratchRoot: testScratchRoot() },
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Sealed daemon test', productId: 'sealed-daemon-test',
     serverUrl: server.url, storeDir, workspaceRoot: path.join(root, 'workspace'),
-    hostedJournal: { mode: 'sqlite' as const },
+    ...(options.journal === false ? {} : { hostedJournal: { mode: 'sqlite' as const } }),
   };
   daemon = options.keyring === undefined
     ? createDaemonWithAdapters(config, [adapter])
@@ -396,6 +401,46 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const types = taskEnvelopes('key-lost').map((envelope) => envelope.type);
     expect(types).not.toContain('task.progress');
     expect(JSON.stringify(taskEnvelopes('key-lost'))).not.toContain('lost output');
+  });
+
+  it('keeps a terminal ciphertext upload alive through the shutdown commit barrier', async () => {
+    const keyring = new TestKeyring();
+    const { server, adapter, deviceId } = await start({ keyring });
+    server.send(await sealedOffer(keyring, 'upload-at-stop', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    const release = server.holdBlobUploads();
+    const summary = `large summary ${'s'.repeat(300 * 1024)}`;
+    adapter.sessions[0]!.emit({ type: 'progress', text: summary });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(server.blobUploadsHeld).toBeGreaterThan(0), BUDGET_MS);
+
+    // Shutdown starts while the upload is held, and the upload ends after that.
+    const stopped = daemon!.stop();
+    daemon = undefined;
+    setTimeout(release, 100);
+    await stopped;
+    const complete = taskEnvelopes('upload-at-stop').find((envelope) => envelope.type === 'task.complete_sealed');
+    expect(complete).toBeDefined();
+    const opened = await openOutput(keyring, complete!, deviceId, BOTH, ({ blobId }) => server.blobContent(blobId)!);
+    expect(opened).toMatchObject({ summary });
+  });
+
+  it('sends a sealed terminal made at shutdown before the connection closes, without a journal', async () => {
+    const keyring = new TestKeyring();
+    const { server, adapter, deviceId } = await start({ keyring, journal: false });
+    server.send(await sealedOffer(keyring, 'stop-no-journal', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    let release!: () => void;
+    keyring.gate = new Promise<void>((resolve) => { release = resolve; });
+
+    // The shutdown failure waits for its sealing key past the empty-outbox drain.
+    const stopped = daemon!.stop();
+    daemon = undefined;
+    setTimeout(release, 200);
+    await stopped;
+    const fail = taskEnvelopes('stop-no-journal').find((envelope) => envelope.type === 'task.fail_sealed');
+    expect(fail).toBeDefined();
+    expect(taskEnvelopes('stop-no-journal').map((envelope) => envelope.type)).not.toContain('task.fail');
   });
 
   it('reports an interrupted sealed task with the plaintext daemon_interrupted terminal', async () => {

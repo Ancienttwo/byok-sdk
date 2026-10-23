@@ -204,6 +204,10 @@ export class SealedTasks {
     return sealed;
   }
 
+  async settled(): Promise<void> {
+    await Promise.all([...this.#tasks.values()].map((task) => task.tail));
+  }
+
   /**
    * A sealed task's artifact (decision 12b): inline content only, up to the
    * table's `inline` limit, named by a fresh `artifactId`. `undefined` when no
