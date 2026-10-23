@@ -7,7 +7,9 @@ import { stateOf, type CollaborationState } from './model';
 import { admitUserInput } from './coalesce';
 import { CommitConflict, commitInLedger, type CommitRequest } from './commit';
 import { commitCommand, type Command, type CommandPorts } from './rules/commands';
-import { commitVectors, seedCollaboration, VECTOR_NOW, type CommitSubject } from './commit-vectors.test-support';
+import { commitVectors, seedCollaboration, VECTOR_NOW, type CommitSubject, type SeedTeam } from './commit-vectors.test-support';
+import { template } from '@byok-sdk/example-host-execution-core/test-support';
+import { writeSnapshotBot } from './team';
 
 const roots: string[] = [], ledgers: HostLedger[] = [];
 // Windows cannot delete an open SQLite file, so each ledger closes first.
@@ -18,12 +20,13 @@ afterAll(() => {
 
 function ports(state: CollaborationState, publish: CommandPorts['publish']): CommandPorts {
   return { now: () => VECTOR_NOW, publish, admitInput: fields => admitUserInput(state, fields, undefined, VECTOR_NOW),
+    teamBot: row => writeSnapshotBot(state, row, { default: template('device', 'main') }),
     outcome: { committed: { intent: () => undefined }, manage: () => {}, createRoutine: () => {}, updateRoutine: () => {}, cancelRoutine: () => {} } };
 }
 /** The pure rules on a plain object. A commit works on a copy and keeps it only when it returns. */
-function memorySubject(): CommitSubject {
+function memorySubject(team?: SeedTeam): CommitSubject {
   let stored = { state: stateOf({}), outbox: {} as Record<string, Json> };
-  seedCollaboration(stored.state);
+  seedCollaboration(stored.state, team);
   return {
     scope: 'memory',
     commit(request) {
@@ -40,12 +43,12 @@ function memorySubject(): CommitSubject {
   };
 }
 /** The K8 L store: a real SQLite HostLedger. */
-function ledgerSubject(): CommitSubject & { ledger: HostLedger } {
+function ledgerSubject(team?: SeedTeam): CommitSubject & { ledger: HostLedger } {
   const root = mkdtempSync(join(tmpdir(), 'k8-commit-'));
   roots.push(root);
   const ledger = new HostLedger(join(root, 'host.sqlite'), 'product:commit');
   ledgers.push(ledger);
-  ledger.transaction(s => { seedCollaboration(stateOf(s.application)); });
+  ledger.transaction(s => { seedCollaboration(stateOf(s.application), team); });
   return {
     scope: ledger.tenant, ledger,
     commit: request => commitInLedger(ledger, request, (s: LedgerState) => ports(stateOf(s.application), (id, value) => project(s, id, value))),

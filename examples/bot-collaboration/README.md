@@ -206,7 +206,7 @@ the state change, the command record and the outbox rows.
   `stale_revision` conflict.
 
 The keyed commands are owner input, received IM input, room input, answers,
-card decisions, and three K4 callbacks: a terminal outcome, an Agent message
+card decisions, team snapshots, and three K4 callbacks: a terminal outcome, an Agent message
 and a Bot routine occurrence. The keyless commands are `setMainBot`,
 `updateRoom`, `retryPersona`, `enablePushRoute`, `revokePushRoute`,
 `resendDelivery`, `cancelDelegation`, `abandonDelegation` and `cancelTurn`.
@@ -251,7 +251,41 @@ transaction freezes only a Turn that still has no offer.
 - A read that throws or returns another shape leaves the Turn queued. The
   timer reads again after about one second.
 
-The team still comes from this ledger in this mode.
+The team comes from this ledger, unless the `team: 'external'` option is set.
+
+## External team authority
+
+With `team: 'external'`, an external authority owns the Bots (#739 Q4c). The
+constructor creates no Main Bot. The authority sends team snapshots with
+`applyTeam({ revision, bots })`. Each Bot has `id`, `name`, `role`,
+`persona`, `model` and `mainBot`. The Host maps `model` to its own execution
+template.
+
+- The team revision is the authority's revision. It is not the collaboration
+  commit revision. It must be a safe integer of 1 or more, and each new
+  snapshot must have a higher revision.
+- A newer snapshot archives each Bot that it does not list, as `delete_bot`
+  does. A new Bot gets its first persona projection. A changed name, role,
+  persona or model queues the same projection as `update_bot`. A change of the
+  Main Bot flag only sets the flag.
+- An archived Bot cannot come back. A snapshot that lists one is refused, and
+  nothing changes.
+- The command id is the team revision. The same revision with the same Bots
+  replays, in any Bot order. The same revision with other Bots is an
+  `identity_conflict`. The replay check comes first, so an exact retry of an
+  applied older snapshot gets its first result.
+- A revision that is not newer and was not applied before refuses with
+  `stale_team`. The refusal is a commit, so it adds 1 to the collaboration
+  revision.
+- The snapshot covers the Bots only. `setMainBot`, `create_bot`, `update_bot`
+  and `delete_bot` refuse with `external_team`, and the Main Bot schema does
+  not offer those three actions. Rooms, team notes and persona retries stay
+  local.
+- The ledger stores the mode. A ledger with a local team cannot open in
+  external mode, and an external ledger cannot open without the option.
+
+With `history` and `team: 'external'` together, the device ledger holds
+neither the history nor the team authority.
 
 ## Group chat and Main Bot
 

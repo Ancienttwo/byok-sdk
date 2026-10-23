@@ -12,4 +12,5 @@ export type { BotRoutine, BotRoutineInput } from './routines';
 export type { BotProfile, Room, Round, Seat, TeamState } from './team-model';
 export { ROOM_GRACE_MS, ROOM_CONTEXT_BYTES, ROOM_CONTEXT_MESSAGES } from './rooms';
 export { TEAM_NOTE_LIMIT } from './team';
+export { TeamModeError, type TeamModeCode, type TeamSnapshot, type TeamSnapshotBot } from './rules/team';
 export { createBotPersonaProjection } from './persona';
