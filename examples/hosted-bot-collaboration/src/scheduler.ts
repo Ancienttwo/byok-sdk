@@ -8,13 +8,14 @@ import { inSchema, type HostedCollaborationStore } from './store';
 export interface SchedulerOptions {
   now?: () => number;
   /**
-   * How often the deployment runs a pass. It must stay below the K8 late bound, or every slot would fire as `catch_up`
-   * and its occurrence key would differ from L's. Default 5 s.
+   * How often the deployment runs a pass. H has no timer: the deployment reads `intervalMs` to time its `run()` calls, so
+   * the constructor checks the value that timer uses. It must stay below the K8 late bound, or every slot would fire as
+   * `catch_up` and its occurrence key would differ from L's. Default 5 s.
    */
   intervalMs?: number;
-  /** The most fires and failures that one pass takes. A fenced row does not count. */
+  /** The most fires that one pass takes. A fenced or failed row does not count: its backoff limits how often it runs. */
   batch?: number;
-  /** How long a routine whose fire threw waits before the next try. The wait is kept in memory only. */
+  /** How long a fenced routine, or one whose fire threw, waits before the next try. The wait is kept in memory only. */
   backoffMs?: number;
 }
 /** A routine that a pass could not fire. `fenced`: its owner Bot's device has no active H binding, and nothing was written. */
@@ -55,15 +56,18 @@ export class HostedRoutineScheduler {
   /**
    * One pass: the schedule upkeep of the scopes with a `schedule_retrying` slot now within the horizon, then the fire of each
    * due routine in slot order. The rows are read in keyset pages, so fenced rows and backed-off rows cannot fill the batch.
+   * Each fire reads the clock, as K4 does when it consumes a wake. The pass time only selects the due rows.
    */
   async run(): Promise<SchedulerPass> {
     const now = this.now(), pass: SchedulerPass = { fired: 0, fenced: [], failed: [] };
+    // An expired wait has no effect, so a routine that stopped being due leaves the map within one backoff.
+    for (const [retry, at] of this.retryAt) if (at <= now) this.retryAt.delete(retry);
     const retrying = await this.scopes(`SELECT DISTINCT r.scope FROM routine r JOIN scope s ON s.scope = r.scope WHERE s.state_version = ANY($1::integer[])
       AND r.status = 'schedule_retrying' AND r.next_at <= $2 ORDER BY r.scope`, [now + WAKE_HORIZON_MS]);
     pass.failed.push(...await this.plan(retrying, 'pass'));
-    const batch = this.options.batch ?? 100;
-    let cursor: [number, string, number] = [-1, '', -1], tried = 0;
-    while (tried < batch) {
+    const batch = this.options.batch ?? 100, backoffMs = this.options.backoffMs ?? 60_000;
+    let cursor: [number, string, number] = [-1, '', -1];
+    while (pass.fired < batch) {
       const due = await inSchema(this.pool, this.store.schema, client => client.query<DueRow>(
         `SELECT r.scope, r.id, r.next_at::text, r.ordinal::text FROM routine r JOIN scope s ON s.scope = r.scope
           WHERE s.state_version = ANY($3::integer[]) AND r.lifecycle = 'active' AND r.next_at <= $1
@@ -71,18 +75,18 @@ export class HostedRoutineScheduler {
         [now, batch, [...SUPPORTED_STORE_VERSIONS], ...cursor]), true);
       for (const row of due.rows) {
         cursor = [Number(row.next_at), row.scope, Number(row.ordinal)];
-        if (tried >= batch) break;
+        if (pass.fired >= batch) break;
         const scope = JSON.parse(row.scope) as string, routineId = JSON.parse(row.id) as string, retry = `${row.scope}\n${row.id}`;
-        if ((this.retryAt.get(retry) ?? 0) > now) continue;
+        const at = this.now();
+        if ((this.retryAt.get(retry) ?? 0) > at) continue;
         try {
-          if (await this.store.fire(scope, routineId, now) === 'fired') { pass.fired++; tried++; }
+          if (await this.store.fire(scope, routineId, at) === 'fired') pass.fired++;
           this.retryAt.delete(retry);
         } catch (error) {
-          if (error instanceof DeviceBindingError) { pass.fenced.push({ scope, routineId, error }); continue; }
-          // A throw wrote nothing. The routine waits before its next try, so it cannot take every pass.
-          pass.failed.push({ scope, routineId, error });
-          this.retryAt.set(retry, now + (this.options.backoffMs ?? 60_000));
-          tried++;
+          (error instanceof DeviceBindingError ? pass.fenced : pass.failed).push({ scope, routineId, error });
+          // A throw wrote nothing. The routine keeps its old slot, which sorts ahead of healthy rows, so it waits before its
+          // next try and does not run a transaction on every pass.
+          this.retryAt.set(retry, at + backoffMs);
         }
       }
       if (due.rows.length < batch) break;

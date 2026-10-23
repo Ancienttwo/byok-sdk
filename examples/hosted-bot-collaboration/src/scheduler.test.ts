@@ -101,7 +101,9 @@ describe.skipIf(POSTGRES_URL === undefined)('H routine scheduler on real Postgre
     await scheduler().run();
     expect(await intentRow(scope, untried)).toMatchObject({ tries: 0, conclusion: 'superseded' });
     await store().sync(scope, SYNC);
-    await query(`UPDATE ${table('intent')} SET tries = 1, submission = 'uncertain' WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(tried)]);
+    // No bound yet, so only the fire's write can set it.
+    await query(`UPDATE ${table('intent')} SET tries = 1, submission = 'uncertain', retry_until = NULL WHERE scope = $1 AND key = $2`,
+      [storedKey(scope), storedKey(tried)]);
     clock = THIRD;
     await scheduler().run();
     expect(await intentRow(scope, tried)).toMatchObject({ tries: 1, retry_until: String(THIRD), conclusion: null });
@@ -136,6 +138,60 @@ describe.skipIf(POSTGRES_URL === undefined)('H routine scheduler on real Postgre
     clock = FIRST + ROUTINE_LATE_AFTER_MS + 1;
     expect(await scheduler().run()).toMatchObject({ fired: 1, fenced: [] });
     expect(await occurrences(fenced)).toMatchObject([{ trigger_kind: 'catch_up', planned_at: String(FIRST) }]);
+  });
+
+  it('fires the routine of an archived owner Bot on a revoked device: the sync ends its Turn, no intent row is written', async () => {
+    const archived = await scoped('a'), healthy = await scoped('b');
+    const [archivedId, healthyId] = [await created(archived), await created(healthy)];
+    // A Bot that created a routine and was then archived, on a device whose binding was then revoked. Both are final.
+    await store().seed(archived, state => { state.team.bots.helper = { ...state.team.bots.main!, id: 'helper', name: 'Helper', mainBot: false,
+      archived: true, execution: template('device2', 'helper') }; });
+    await store().bindDevice(archived, 'device2');
+    await store().revokeDevice(archived, 'device2', NOW);
+    await query(`UPDATE ${table('routine')} SET definition = jsonb_set(definition::jsonb, '{hostOccurrence,input,owner}', '"helper"')::json
+      WHERE scope = $1`, [storedKey(archived)]);
+    const key = occurrenceKey(archivedId, 'scheduled', FIRST), turn = `occurrence:${key}`;
+    clock = FIRST;
+    expect(await scheduler().run()).toEqual({ fired: 2, fenced: [], failed: [] });
+    expect(await routineRow(healthy, healthyId)).toMatchObject({ next_at: String(SECOND) });
+    expect((await store().read(archived)).turns[turn]).toMatchObject({ botId: 'helper', status: 'queued' });
+    await store().sync(archived, { ...SYNC, now: FIRST });
+    expect((await store().read(archived)).turns[turn]).toMatchObject({ status: 'failed', conclusion: 'cancelled' });
+    expect(await intentRow(archived, turn)).toBeUndefined();
+    expect(await occurrences(archived)).toMatchObject([{ key: storedKey(key), conclusion: 'cancelled' }]);
+    expect(await routineRow(archived, archivedId)).toMatchObject({ next_at: String(SECOND) });
+  });
+
+  it('does not let failing or fenced routines delay a healthy one: only fires count against the batch, and both back off', async () => {
+    const [failing, fenced, healthy] = [await scoped('a'), await scoped('b'), await scoped('c')];
+    const [failingId, fencedId, healthyId] = [await created(failing), await created(fenced), await created(healthy)];
+    await query(`INSERT INTO ${table('occurrence')} (scope, key, ordinal, routine_id, definition_version, trigger_kind, planned_at, recorded_at, next_at)
+      VALUES ($1, $2, 0, $3, 1, 'scheduled', $4, $4, $5)`, [storedKey(failing), storedKey('other'), storedKey(failingId), FIRST, SECOND]);
+    await store().revokeDevice(fenced, 'device', NOW);
+    const runner = scheduler({ batch: 1, backoffMs: 1000 });
+    clock = FIRST;
+    // Both stuck rows sort ahead of the healthy one, in slot and then scope order.
+    expect(await runner.run()).toMatchObject({ fired: 1, failed: [{ scope: failing, routineId: failingId }], fenced: [{ scope: fenced, routineId: fencedId }] });
+    expect(await routineRow(healthy, healthyId)).toMatchObject({ next_at: String(SECOND) });
+    expect(await runner.run()).toEqual({ fired: 0, fenced: [], failed: [] });
+    clock = FIRST + 1000;
+    expect(await runner.run()).toMatchObject({ fired: 0, failed: [{ routineId: failingId }], fenced: [{ routineId: fencedId }] });
+    // Routines that stop being due leave the backoff map once their wait ends.
+    await query(`UPDATE ${table('routine')} SET lifecycle = 'paused' WHERE scope = ANY($1)`, [[storedKey(failing), storedKey(fenced)]]);
+    expect(runner['retryAt'].size).toBe(2);
+    clock = FIRST + 2000;
+    expect(await runner.run()).toEqual({ fired: 0, fenced: [], failed: [] });
+    expect(runner['retryAt'].size).toBe(0);
+  });
+
+  it('reads the clock for each fire, as K4 does when it consumes a wake', async () => {
+    const [first, second] = [await scoped('a'), await scoped('b')];
+    await created(first); await created(second);
+    clock = FIRST;
+    const ticking = () => { const at = clock; clock += 7; return at; };
+    expect(await scheduler({ now: ticking }).run()).toMatchObject({ fired: 2 });
+    expect(await occurrences(first)).toMatchObject([{ trigger_kind: 'scheduled', planned_at: String(FIRST), recorded_at: String(FIRST + 7) }]);
+    expect(await occurrences(second)).toMatchObject([{ trigger_kind: 'scheduled', planned_at: String(FIRST), recorded_at: String(FIRST + 14) }]);
   });
 
   it('keeps a staged version through a fire, which reserves no later old slot, and switches it when the occurrence concludes', async () => {

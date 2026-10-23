@@ -235,7 +235,9 @@ H has no SDK wake. `HostedRoutineScheduler` finds due slots in `routine_due` and
 - The store re-reads the routine. One that is not active, or whose slot is not due, is skipped with nothing written.
 - The fire can create execution, so the owner Bot's device must have an active H binding, read from the same state
   that the sync builds the routine offer from. Otherwise the fire throws `DeviceBindingError` and writes nothing, and
-  the slot stays due. When the Bot moves to a bound device, a later pass fires the slot as `catch_up`.
+  the slot stays due. When the Bot moves to a bound device, a later pass fires the slot as `catch_up`. An archived owner
+  Bot skips this check: its routine Turn creates no execution, because the sync ends it as `cancelled` before any freeze,
+  as L does. A revoke and an archive are both final, so with the check that slot could never fire.
 - K4 `recordOccurrence` runs on the slice, with the wake built from the locked row. The K8 `occurrence` command adds
   the routine Turn with no command record, as in L: the slot is the replay guard (`UNIQUE (scope, routine_id,
   definition_version, planned_at)`). The occurrence row, the routine's next slot, the routine Turn and the supersede of
@@ -244,22 +246,53 @@ H has no SDK wake. `HostedRoutineScheduler` finds due slots in `routine_due` and
   promotion settles at once.
 - A fire runs no version switch: its new occurrence stays open, so K4 `versionSwitchDue` is false for that routine.
 
-`run()` is one pass. It reads due rows in slot order in keyset pages, so fenced rows (`pass.fenced`) and rows that are
-backing off cannot fill the batch. A fire that throws writes nothing, is reported in `pass.failed`, and waits
-`backoffMs` (default 60 s, in memory only) before its next try. The pass also sets `ok` on a `schedule_retrying`
-routine once its slot is within the K4 horizon, as K4 `scheduleNext`.
+`run()` is one pass. It reads due rows in slot order in keyset pages. Only fires count against `batch` (default 100),
+so fenced rows and failed rows cannot fill it. A fenced fire (`pass.fenced`) and a fire that throws (`pass.failed`) write
+nothing, and the routine waits `backoffMs` (default 60 s, in memory only) before its next try: a stuck row keeps its
+old slot, which sorts ahead of every healthy row. A wait that has ended is dropped at the start of a pass. Each fire
+reads the clock, as K4 does when it consumes a wake; the pass time only selects the due rows. The pass also sets `ok` on
+a `schedule_retrying` routine once its slot is within the K4 horizon, as K4 `scheduleNext`.
 
 `start()` runs once when the scheduler starts, as K4 `recover`: an active routine with no slot within the horizon is
 planned again, and a staged version that is due switches.
 
-The deployment runs `run()` every `intervalMs`. The default is 5 s, and the constructor refuses an interval at or above
-the K8 late bound (`ROUTINE_LATE_AFTER_MS`, 60 s): with a longer interval every slot would fire as `catch_up`, and its
-occurrence key would differ from L's.
+H has no timer. The deployment reads `scheduler.intervalMs` and runs `run()` at that interval. The default is 5 s, and
+the constructor refuses an interval at or above the K8 late bound (`ROUTINE_LATE_AFTER_MS`, 60 s): with a longer
+interval every slot would fire as `catch_up`, and its occurrence key would differ from L's.
 
-- Each pass reads the fenced due rows again. Keyset paging stops them from starving other rows, but not that cost.
+- Each pass reads the fenced and failed due rows again, and skips them while they wait. Their fire transactions run
+  once per `backoffMs`.
+- A routine that waits fires late. Its next try records `catch_up` when the wait ends past the K8 late bound.
 - A promoted occurrence keeps `conclusion IS NULL` for good, so `occurrence_open` holds every promoted occurrence of a
   routine. The slice load still scans that history for the unpromoted open rows, so a fire costs more as the routine
   ages. A fix (a `promoted` flag, or moving unpromoted rows) is a DDL change.
+
+## Deployment config
+
+H is not deployed yet (see Status). A deployment composes these parts. `hosted-cloud.test-support.ts` composes the
+same parts for the tests.
+
+- **Database.** One Postgres database. The store takes its own `pg.Pool` and its own schema
+  (`new HostedCollaborationStore(pool, schema)`), and `migrate()` creates the H tables there. The SDK tables come from
+  the `@byok-sdk/cloud-dataplane` migrations (`migrate(pool, migrationsDir())`), in the same database or another one.
+  No path assumes one atomic commit across the two (see Database). A scope row of an unknown store version is refused.
+- **Object storage.** The SDK stores need an S3-compatible endpoint: `objectStorage` with `endpoint`, `bucket`,
+  `accessKeyId`, `secretAccessKey`, `region` and a `signingClock`, passed to `createPostgresCoreStores` and
+  `createPostgresCloudStores`. H stores no objects itself.
+- **Host auth.** The Host resolves each request to the product user that owns it, and passes that user's scope. One
+  scope belongs to one SDK tenant: the submitter's and reconciler's `port(scope)` and the message consumer's
+  `scopeOf(tenant)` are inverse maps, and that map is the tenant check (see Message consumer). A command for another
+  scope is a `scope_mismatch` conflict. The command entry comes in a later slice of #793.
+- **Enrollment.** A device pairs with the SDK through a pairing code (`cloud.createPairingCode(tenant, { productId })`).
+  The Host then binds it to H with `bindDevice(scope, deviceId)`, and `revokeDevice` ends that binding for good (see
+  Device binding). Each tenant needs a storage entitlement (`core.quota.writeEntitlement`) before a mailbox append.
+- **Signing.** `createByokCloud` takes a `tokenSigner` (for example `createHmacTokenSigner(key, clock)`) and a `crypto`
+  port (`createWebCrypto()`). The key is a deployment secret; H never reads it.
+- **Retention.** The Host calls `retain(scope, input, limits)` with the acknowledged roots. `retentionMs` must be at
+  least seven days (see Retention). The SDK side has its own `retentionPolicyId` in the tenant's entitlement.
+- **Workers.** The Host runs, each on its own interval: `HostedSubmitter.run()`, `HostedReconciler.run()`,
+  `store.sync(scope, …)` for scopes with work, and `HostedRoutineScheduler.run()` every `intervalMs` after one `start()`.
+  `hostedMessageConsumer(store, …)` is the `agentMessage` option of `createByokCloud`.
 
 ## Tests
 

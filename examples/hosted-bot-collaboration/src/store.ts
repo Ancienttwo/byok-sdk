@@ -175,7 +175,9 @@ export class HostedCollaborationStore {
    *
    * The fire can create execution, so the owner Bot's device must have an active H binding (#793 D2e), read from the state of
    * this transaction, as the sync builds the routine offer from it. Otherwise it throws `DeviceBindingError` and writes
-   * nothing, and the slot stays due. The promotion checks the binding again.
+   * nothing, and the slot stays due. The promotion checks the binding again. An archived owner Bot skips the fence: its
+   * routine Turn creates no execution, because the sync ends it before any freeze, as L does. A revoke and an archive are both
+   * final, so with the fence that slot could never fire.
    *
    * It runs no version switch: a fire leaves its new occurrence open, so K4 `versionSwitchDue` stays false for the routine.
    */
@@ -187,7 +189,7 @@ export class HostedCollaborationStore {
       const owner = (routine.definition.hostOccurrence?.input as BotRoutineInput | undefined)?.owner;
       const bot = owner === undefined ? undefined : state.team.bots[owner];
       if (!bot) throw new Error('Routine owner Bot not found');
-      await activeBinding(client, key, bot.execution.deviceId);
+      if (!bot.archived) await activeBinding(client, key, bot.execution.deviceId);
       const occurrence = recordDue(slice, scope, routine, now);
       const run = occurrenceRun(routine, occurrence);
       const result = commitCommand(state, { scope, commandId: occurrence.key, command: { kind: 'occurrence', key: occurrence.key } },
