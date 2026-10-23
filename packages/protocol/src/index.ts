@@ -580,11 +580,13 @@ export {
   E2eeMemberChainEntrySchema,
   E2eeMemberKeyBundleSchema,
   E2eeMemberKeyRegisterRequestSchema,
+  E2eeKeyPackageAvailablePayloadSchema,
   E2eePairingMacSchema,
   E2eeScopeKeyPackageSchema,
 } from './e2ee-member';
 export type {
   E2eeClientPairingMac,
+  E2eeKeyPackageAvailablePayload,
   E2eeMemberChainEntry,
   E2eeMemberKeyBundle,
   E2eeMemberKeyRegisterRequest,

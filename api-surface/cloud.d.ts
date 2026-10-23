@@ -1275,7 +1275,7 @@ import { type AgentExecutionInput, type SealedAgentExecutionInput } from './agen
 import { type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { ActivityTail } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
-import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskOfferSealedPayload, type TaskSteerPayload, type TaskSteerSealedPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentSealedPayload, type TaskOfferPreparedPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressSealedPayload, type TaskOfferWithToolsetsPayload, type TaskOfferWithToolsetsSealedPayload, type E2eeClientPairingMac, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage } from '@byok-sdk/protocol';
+import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskOfferSealedPayload, type TaskSteerPayload, type TaskSteerSealedPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentSealedPayload, type TaskOfferPreparedPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressSealedPayload, type TaskOfferWithToolsetsPayload, type TaskOfferWithToolsetsSealedPayload, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage } from '@byok-sdk/protocol';
 import type { TokenSigner } from './auth/tokens';
 import type { CloudCrypto } from './crypto/port';
 import { type RouteDescriptor } from './router/registry';
@@ -1702,6 +1702,16 @@ export interface ByokCloud {
      * routes; this plane records no intent receipt of its own.
      */
     enqueueAgentMemoryIntentNotice(tenant: TenantId, deviceId: string, input: AgentMemoryIntentNoticeInput): Promise<EnqueuedAgentControl>;
+    /**
+     * Durable, task-free `e2ee.key_package.available` notice (#654 E2c-3) for
+     * one device that durably advertised `sealed-payload-v1`; otherwise it
+     * throws `agent_capability_missing` before the mailbox append. The payload
+     * is exactly `{ scopeId, epoch }`; the device fetches the package from its
+     * device route. Idempotent per (tenant, device, scopeId, epoch) while the
+     * mailbox row is retained. `putScopeKeyPackages` calls it for every
+     * recipient device that has the capability.
+     */
+    enqueueScopeKeyPackageNotice(tenant: TenantId, deviceId: string, input: E2eeKeyPackageAvailablePayload): Promise<EnqueuedAgentControl>;
     /** Tenant/device/request-bound durable desired-state and terminal-outcome readback. */
     getInputPreparationStatus(tenant: TenantId, deviceId: string, input: InputPreparationStatusInput): Promise<InputPreparationReadback | undefined>;
     /** Direct device completion endpoint authority; first exact terminal receipt wins. */
@@ -1745,11 +1755,17 @@ export interface ByokCloud {
      * Host control plane: store scope key packages. The first package of a
      * scope epoch fixes its `keyId`; a package with another `keyId` throws
      * `e2ee_scope_key_conflict`, and the call stores nothing.
+     *
+     * After the commit, each recipient that is a registered device gets one
+     * `e2ee.key_package.available` notice per scope epoch, also on a replay.
+     * A recipient device without `sealed-payload-v1` gets no notice and is
+     * listed in `skippedDeviceIds`; its packages are stored all the same.
      */
     putScopeKeyPackages(tenant: TenantId, input: {
         readonly packages: readonly E2eeScopeKeyPackage[];
     }): Promise<{
         readonly stored: number;
+        readonly skippedDeviceIds: readonly string[];
     }>;
     /** Host control plane: the stored packages of one scope, optionally for one epoch or one recipient. */
     readScopeKeyPackages(tenant: TenantId, input: {
@@ -2195,7 +2211,7 @@ export declare function createWebCrypto(): CloudCrypto;
  * bytes the writer sent.
  */
 import { type TenantId } from '@byok-sdk/core';
-import { type E2eeClientPairingMac, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage } from '@byok-sdk/protocol';
+import { type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage } from '@byok-sdk/protocol';
 import type { DeviceDirectory } from './stores/ports';
 /** One stored chain entry: its seq and its canonical JSON. */
 export interface E2eeMemberChainRow {
@@ -2314,6 +2330,8 @@ export interface E2eeMemberContext {
     readonly tenant: TenantId;
     readonly devices: DeviceDirectory;
     readonly now: () => Date;
+    /** Enqueue `e2ee.key_package.available` for one device; it refuses a device without the gate capability. */
+    readonly enqueueKeyPackageNotice: (deviceId: string, payload: E2eeKeyPackageAvailablePayload) => Promise<unknown>;
 }
 export declare function appendMemberChainEntries(ctx: E2eeMemberContext, input: {
     readonly entries: readonly E2eeMemberChainEntry[];
@@ -2331,6 +2349,7 @@ export declare function putScopeKeyPackages(ctx: E2eeMemberContext, input: {
     readonly packages: readonly E2eeScopeKeyPackage[];
 }): Promise<{
     readonly stored: number;
+    readonly skippedDeviceIds: readonly string[];
 }>;
 export declare function readScopeKeyPackages(ctx: E2eeMemberContext, input: {
     readonly scopeId: string;

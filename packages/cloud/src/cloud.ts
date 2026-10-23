@@ -96,6 +96,7 @@ import {
   AgentInputPreparationPayloadSchema,
   ProviderProvisioningAvailablePayloadSchema,
   AgentMemoryIntentAvailablePayloadSchema,
+  E2eeKeyPackageAvailablePayloadSchema,
   InputPreparationCompletionRequestSchema,
   AgentMemoryProjectionCommitRequestSchema,
   AgentEgressAckPayloadSchema,
@@ -135,6 +136,7 @@ import {
   type TaskOfferWithToolsetsPayload,
   type TaskOfferWithToolsetsSealedPayload,
   type E2eeClientPairingMac,
+  type E2eeKeyPackageAvailablePayload,
   type E2eeMemberChainEntry,
   type E2eeMemberKeyBundle,
   type E2eeScopeKeyPackage,
@@ -775,6 +777,20 @@ export interface ByokCloud {
     deviceId: string,
     input: AgentMemoryIntentNoticeInput,
   ): Promise<EnqueuedAgentControl>;
+  /**
+   * Durable, task-free `e2ee.key_package.available` notice (#654 E2c-3) for
+   * one device that durably advertised `sealed-payload-v1`; otherwise it
+   * throws `agent_capability_missing` before the mailbox append. The payload
+   * is exactly `{ scopeId, epoch }`; the device fetches the package from its
+   * device route. Idempotent per (tenant, device, scopeId, epoch) while the
+   * mailbox row is retained. `putScopeKeyPackages` calls it for every
+   * recipient device that has the capability.
+   */
+  enqueueScopeKeyPackageNotice(
+    tenant: TenantId,
+    deviceId: string,
+    input: E2eeKeyPackageAvailablePayload,
+  ): Promise<EnqueuedAgentControl>;
   /** Tenant/device/request-bound durable desired-state and terminal-outcome readback. */
   getInputPreparationStatus(
     tenant: TenantId,
@@ -820,11 +836,16 @@ export interface ByokCloud {
    * Host control plane: store scope key packages. The first package of a
    * scope epoch fixes its `keyId`; a package with another `keyId` throws
    * `e2ee_scope_key_conflict`, and the call stores nothing.
+   *
+   * After the commit, each recipient that is a registered device gets one
+   * `e2ee.key_package.available` notice per scope epoch, also on a replay.
+   * A recipient device without `sealed-payload-v1` gets no notice and is
+   * listed in `skippedDeviceIds`; its packages are stored all the same.
    */
   putScopeKeyPackages(
     tenant: TenantId,
     input: { readonly packages: readonly E2eeScopeKeyPackage[] },
-  ): Promise<{ readonly stored: number }>;
+  ): Promise<{ readonly stored: number; readonly skippedDeviceIds: readonly string[] }>;
   /** Host control plane: the stored packages of one scope, optionally for one epoch or one recipient. */
   readScopeKeyPackages(
     tenant: TenantId,
@@ -2122,7 +2143,43 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     if (store === undefined) {
       throw new ByokCloudError('e2ee_member_store_unavailable', 'E2EE member storage is not configured for this deployment.');
     }
-    return { store, tenant, devices: options.cloud.devices, now: () => options.clock.now() };
+    return {
+      store,
+      tenant,
+      devices: options.cloud.devices,
+      now: () => options.clock.now(),
+      enqueueKeyPackageNotice: (deviceId, payload) => enqueueScopeKeyPackageNotice(tenant, deviceId, payload),
+    };
+  }
+
+  async function enqueueScopeKeyPackageNotice(
+    tenant: TenantId,
+    deviceId: string,
+    input: E2eeKeyPackageAvailablePayload,
+  ): Promise<EnqueuedAgentControl> {
+    const payload = E2eeKeyPackageAvailablePayloadSchema.parse(input);
+    await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('e2ee.key_package.available', payload));
+    const messageId = uuidFromSha256(
+      await options.crypto.sha256(
+        new TextEncoder().encode(
+          JSON.stringify({ domain: 'byok:e2ee-key-package-notice', tenant, deviceId, scopeId: payload.scopeId, epoch: payload.epoch }),
+        ),
+      ),
+    );
+    const control = await enqueueAgentControlEnvelope(tenant, deviceId, messageId, (seq) =>
+      createEnvelope('e2ee.key_package.available', payload, { id: messageId, seq }),
+    );
+    if (
+      control.envelope.type !== 'e2ee.key_package.available' ||
+      control.envelope.payload.scopeId !== payload.scopeId ||
+      control.envelope.payload.epoch !== payload.epoch
+    ) {
+      throw new ByokCloudError(
+        'mailbox_receipt_mismatch',
+        `Mailbox message ${messageId} does not carry the key package notice for scope ${payload.scopeId} epoch ${payload.epoch}.`,
+      );
+    }
+    return control;
   }
 
   async function redactTasks(tenant: TenantId, input: { readonly taskIds: readonly string[] }): Promise<TaskRedactionResult> {
@@ -2652,6 +2709,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     async putScopeKeyPackages(tenant, input) {
       return e2eeMember.putScopeKeyPackages(e2eeMemberContext(tenant), input);
     },
+    enqueueScopeKeyPackageNotice,
     async readScopeKeyPackages(tenant, input) {
       return e2eeMember.readScopeKeyPackages(e2eeMemberContext(tenant), input);
     },

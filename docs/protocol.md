@@ -448,6 +448,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `agent.home.projection` | S→D | forbidden | **required** | exact `requestId`, AgentRef/profile revision, SHA-256 projection identity, bounded opaque JSON | A durable task-free projection targets one exact capable device |
 | `provider.provisioning.available` | S→D | forbidden | **required** | exactly `{ requestId }` (strict; nothing else) | A Host holds a sealed provider provisioning request for one exact device advertising `provider-provisioning.v1` (§2.3) |
 | `agent.memory.intent.available` | S→D | forbidden | **required** | exactly `{ intentId, agentRef }` (strict; nothing else) | A Host holds an approved Agent memory intent for one exact device advertising `agent-memory-intent.v1` (§2.4) |
+| `e2ee.key_package.available` | S→D | forbidden | **required** | exactly `{ scopeId, epoch }` (strict; nothing else) | A Host stored a scope key package for the member of one exact device advertising `sealed-payload-v1` (§2.7) |
 | `task.approve` | S→D | **required** | **required** | `{}`, `approvalId?` (M5, additive — §5.3) | `TaskHandle.approve()` while `AwaitApproval` |
 | `task.reject` | S→D | **required** | **required** | `reason?`, `approvalId?` (M5, additive — §5.3) | `TaskHandle.reject()` while `AwaitApproval` |
 | `task.cancel` | S→D | **required** | **required** | `reason?` | `TaskHandle.cancel()` from any non-terminal state |
@@ -1205,7 +1206,7 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
 | --- | --- | --- | --- | --- |
 | `POST /byok/e2ee/member-key` | proof | `e2ee-member-key.register` | `{ member, mac }` | `{ memberId }` |
 | `POST /byok/e2ee/chain` | proof | `e2ee-member-chain.append` | `{ entries }` | `{ appended, replayed }` |
-| `POST /byok/e2ee/key-packages` | proof | `e2ee-scope-key-package.put` | `{ packages }` | `{ stored }` |
+| `POST /byok/e2ee/key-packages` | proof | `e2ee-scope-key-package.put` | `{ packages }` | `{ stored, skippedDeviceIds }` |
 | `GET /byok/e2ee/chain?afterSeq=&limit=` | device | — | — | `{ entries }` |
 | `GET /byok/e2ee/key-packages?scopeId=&epoch=` | device | — | — | `{ packages }` |
 | `GET /byok/e2ee/pairing-mac` | device | — | — | `{ mac, member, chainHead }` |
@@ -1236,6 +1237,42 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
   | 409 | `e2ee_member_chain_conflict`, `e2ee_scope_key_conflict`, `e2ee_member_key_conflict`, `e2ee_member_not_registered` |
   | 413 | the body is over `maxE2eeRequestBytes` |
   | 500 | `e2ee_member_state_unreadable` |
+
+### 2.7 E2EE key package notice (#654 E2c-3)
+
+`e2ee.key_package.available` is an additive server-to-daemon message type,
+gated as a whole type by the device capability `sealed-payload-v1`
+(`SEALED_PAYLOAD_CAPABILITY`, §2.5). It forbids `task_id`, requires `seq`,
+and its payload (`E2eeKeyPackageAvailablePayloadSchema`) is strict:
+
+```text
+{ scopeId,  // nonempty string
+  epoch }   // positive safe integer
+```
+
+The notice is notice-and-fetch: it never carries the package. The device
+fetches the packages addressed to its member from
+`GET /byok/e2ee/key-packages?scopeId=&epoch=` (§2.6).
+
+- **Who gets it.** After a key package put commits (the control plane
+  `putScopeKeyPackages` or the device route), each recipient that is a
+  registered device gets one notice per scope epoch. A replayed put enqueues
+  again, because a crash between the commit and the notice must not lose the
+  notice. The mailbox message id is derived from the domain
+  `byok:e2ee-key-package-notice`, the tenant, the device, `scopeId` and
+  `epoch`, so a repeat returns the same mailbox row.
+- **A device without `sealed-payload-v1`.** The put stores its packages, sends
+  it no notice and lists it in `skippedDeviceIds`. A recipient with no device
+  registration (for example a browser member) has no mailbox: it gets no
+  notice and is not listed.
+- **Direct enqueue.** `enqueueScopeKeyPackageNotice(tenant, deviceId,
+  { scopeId, epoch })` sends one notice. It validates the strict payload
+  first, then refuses (`agent_capability_missing`, no mailbox row) a device
+  whose durable capabilities lack `sealed-payload-v1`.
+- **Release rule.** No release may ship a daemon that advertises
+  `sealed-payload-v1` unless that release's protocol has this type and the
+  daemon handles it. Otherwise a daemon that advertised the flag gets a type
+  it cannot decode.
 
 ## 3. Task state machine (M1 gap #2, #5, #6)
 

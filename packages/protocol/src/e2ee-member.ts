@@ -128,3 +128,16 @@ export const E2eeClientPairingMacSchema = z.strictObject({
   chainHead: z.strictObject({ seq: PositiveSafeIntegerSchema, hash: z.string().regex(CONTENT_HASH_RE) }),
 });
 export type E2eeClientPairingMac = z.infer<typeof E2eeClientPairingMacSchema>;
+
+/**
+ * Server -> daemon `e2ee.key_package.available` (E2c-3): the Host stored a
+ * scope key package for this device's member. The payload names only the
+ * scope epoch; the device fetches the package from its device route (§7.4,
+ * notice-and-fetch), so a mailbox row never holds key material. Gated by
+ * `sealed-payload-v1`.
+ */
+export const E2eeKeyPackageAvailablePayloadSchema = z.strictObject({
+  scopeId: z.string().min(1),
+  epoch: PositiveSafeIntegerSchema,
+});
+export type E2eeKeyPackageAvailablePayload = z.infer<typeof E2eeKeyPackageAvailablePayloadSchema>;
