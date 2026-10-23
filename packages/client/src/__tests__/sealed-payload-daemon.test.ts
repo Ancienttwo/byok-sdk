@@ -131,14 +131,14 @@ async function sealedOffer(
 }
 
 /** Opens a sealed output as a member would, with the binding the receiver builds. */
-async function openOutput(keyring: TestKeyring, envelope: Envelope, deviceId: string, sealing = BOTH, ciphertextOf?: (ref: { blobId: string }) => Uint8Array) {
+async function openOutput(keyring: TestKeyring, envelope: Envelope, deviceId: string, sealing = BOTH) {
   const entry = SEALED_SPLIT_TABLE[envelope.type as SealedMessageType];
-  const { sealed, ...kept } = envelope.payload as Record<string, unknown> & { sealed: Record<string, unknown> & { ciphertext?: string; ciphertextRef?: { blobId: string } } };
-  const { ciphertext, ciphertextRef, ...header } = sealed;
+  const { sealed, ...kept } = envelope.payload as Record<string, unknown> & { sealed: Record<string, unknown> & { ciphertext: string } };
+  const { ciphertext, ...header } = sealed;
   const identity = { taskId: envelope.task_id!, ...Object.fromEntries(entry.identity.map((field) => [field, kept[field] as string | number])) };
   const opened = await openSealedContent({
     header,
-    ciphertext: ciphertext !== undefined ? Buffer.from(ciphertext, 'base64url') : ciphertextOf!(ciphertextRef!),
+    ciphertext: Buffer.from(ciphertext, 'base64url'),
     scopeKey: keyring.scopeKey,
     binding: binding(entry.plainType, 'daemon-to-server', identity, deviceId, sealing),
     sealing: { scopeId: SCOPE, epoch: EPOCH },
@@ -405,26 +405,23 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     expect(JSON.stringify(taskEnvelopes('key-lost'))).not.toContain('lost output');
   });
 
-  it('keeps a terminal ciphertext upload alive through the shutdown commit barrier', async () => {
+  it('settles a terminal whose sealed frame is over the inline maximum with a small sealed failure', async () => {
     const keyring = new TestKeyring();
     const { server, adapter, deviceId } = await start({ keyring });
-    server.send(await sealedOffer(keyring, 'upload-at-stop', server.nextSeq(), deviceId, 'run'));
+    server.send(await sealedOffer(keyring, 'over-inline', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
-    const release = server.holdBlobUploads();
-    const summary = `large summary ${'s'.repeat(300 * 1024)}`;
-    adapter.sessions[0]!.emit({ type: 'progress', text: summary });
-    adapter.sessions[0]!.emit({ type: 'turn_end' });
-    await vi.waitFor(() => expect(server.blobUploadsHeld).toBeGreaterThan(0), BUDGET_MS);
-
-    // Shutdown starts while the upload is held, and the upload ends after that.
-    const stopped = daemon!.stop();
-    daemon = undefined;
-    setTimeout(release, 100);
-    await stopped;
-    const complete = taskEnvelopes('upload-at-stop').find((envelope) => envelope.type === 'task.complete_sealed');
-    expect(complete).toBeDefined();
-    const opened = await openOutput(keyring, complete!, deviceId, BOTH, ({ blobId }) => server.blobContent(blobId)!);
-    expect(opened).toMatchObject({ summary });
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      // Under the 2 MiB plaintext limit, over the 256 KiB inline frame.
+      adapter.sessions[0]!.emit({ type: 'progress', text: `large summary ${'s'.repeat(300 * 1024)}` });
+      adapter.sessions[0]!.emit({ type: 'turn_end' });
+      const failed = await server.waitFor((envelope) => envelope.type === 'task.fail_sealed' && envelope.task_id === 'over-inline', BUDGET_MS);
+      expect(await openOutput(keyring, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
+    } finally {
+      diagnostic.mockRestore();
+    }
+    expect(taskEnvelopes('over-inline').map((envelope) => envelope.type)).not.toContain('task.complete_sealed');
+    expect(JSON.stringify(server.received)).not.toContain('ciphertextRef');
   });
 
   it('sends a sealed terminal made at shutdown before the connection closes, without a journal', async () => {
@@ -505,21 +502,27 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     expect(events.join('')).toContain('over the sealed inline limit');
   });
 
-  it('uploads a large sealed output as an octet-stream ciphertext blob', async () => {
+  it('reports an artifact whose sealed frame is over the inline maximum as a sealed error, and uploads nothing', async () => {
     const keyring = new TestKeyring();
     const { server, adapter, deviceId } = await start({ keyring });
     server.send(await sealedOffer(keyring, 'large', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
-    const content = randomBytes(220 * 1024);
-    await fs.writeFile(path.join(adapter.startCalls[0]!.ctx.workspaceDir, 'large.bin'), content);
-    adapter.sessions[0]!.emit({ type: 'artifact', name: 'large.bin', contentType: 'application/octet-stream' });
-
-    const artifact = await server.waitFor((envelope) => envelope.type === 'task.artifact_sealed', BUDGET_MS);
-    const ref = (artifact.payload as { sealed: { paddedLength: number; ciphertextRef?: { blobId: string; contentType: string } } }).sealed;
-    expect(ref.paddedLength).toBeGreaterThan(SEALED_INLINE_MAX_PADDED_LENGTH);
-    expect(ref.ciphertextRef?.contentType).toBe('application/octet-stream');
-    const opened = await openOutput(keyring, artifact, deviceId, BOTH, ({ blobId }) => server.blobContent(blobId)!);
-    expect(opened).toEqual({ inline: content.toString('base64') });
+    await fs.writeFile(path.join(adapter.startCalls[0]!.ctx.workspaceDir, 'large.bin'), randomBytes(220 * 1024));
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      adapter.sessions[0]!.emit({ type: 'artifact', name: 'large.bin', contentType: 'application/octet-stream' });
+      adapter.sessions[0]!.emit({ type: 'turn_end' });
+      await server.waitFor((envelope) => envelope.type === 'task.complete_sealed' && envelope.task_id === 'large', BUDGET_MS);
+    } finally {
+      diagnostic.mockRestore();
+    }
+    const types = taskEnvelopes('large').map((envelope) => envelope.type);
+    expect(types).not.toContain('task.artifact_sealed');
+    expect(types).not.toContain('task.artifact');
+    const events = await Promise.all(taskEnvelopes('large').filter((envelope) => envelope.type === 'task.progress_sealed')
+      .map(async (envelope) => JSON.stringify((await openOutput(keyring, envelope, deviceId)).events)));
+    expect(events.join('')).toContain('over the inline maximum');
+    expect(JSON.stringify(server.received)).not.toContain('ciphertextRef');
   });
 
   it('opens a sealed offer whose ciphertext is a blob, after the hash check', async () => {

@@ -1757,9 +1757,6 @@ export function buildDaemonWithAdapters(
 
   let connection: ConnectionManager | undefined;
   let blobLifecycleAbort: AbortController | undefined;
-  // #654: sealed output uploads its ciphertext through its own blob client,
-  // which shutdown aborts only after the terminal commit barrier.
-  let sealedUploadAbort: AbortController | undefined;
   let sealedOutputSettled: (() => Promise<void>) | undefined;
   let inputPreparationStatusAbort: AbortController | undefined;
   let lifecycle: DaemonLifecycle = { phase: 'stopped' };
@@ -2341,16 +2338,11 @@ export function buildDaemonWithAdapters(
     capabilities.push('custom-harness');
     if (sealedPayload !== undefined) {
       capabilities.push(SEALED_PAYLOAD_CAPABILITY);
-      sealedUploadAbort = new AbortController();
-      const sealedUploads = new BlobClient(config.serverUrl, auth, { signal: sealedUploadAbort.signal });
       const opened = new SealedTasks({
         keyring: sealedPayload.keyring,
         tenantId: record.tenantId,
         deviceId: record.deviceId,
-        blobs: {
-          download: (ref) => blobClient.downloadBlob(ref, { signal: blobLifecycleAbort?.signal }),
-          upload: (ciphertext) => sealedUploads.uploadArtifact(ciphertext, 'application/octet-stream'),
-        },
+        blobs: { download: (ref) => blobClient.downloadBlob(ref, { signal: blobLifecycleAbort?.signal }) },
       });
       sealedTasks = opened;
       sealedOutputSettled = () => opened.settled();
@@ -3412,7 +3404,6 @@ export function buildDaemonWithAdapters(
     // journal, before the drain below decides the connection is idle.
     await attempt(() => sealedOutputSettled?.(), false);
     const journalTailSettled = journal ? await attempt(() => terminalCommits.stop(), true) : true;
-    sealedUploadAbort?.abort();
     // stop() cleared the maintenance timer synchronously above. Await the pass
     // that may already have been inside SQLite only here, immediately before
     // closing the owned journal, so task interruption is not held behind a
