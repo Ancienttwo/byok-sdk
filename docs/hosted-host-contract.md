@@ -373,7 +373,7 @@ Deletion paths:
   `listDeadLetters` returns a redacted row with the tombstone as its body.
   It refuses a task that is not terminal or that has a pending outbox row; the Host retries later.
   A failed or refused call can leave the objects deleted and the bodies in place; call it again.
-  A late progress or approval report can add a row after a call; a second call deletes it.
+  Known limit: a late progress or approval report can add a row after a call. A second call deletes it, and the row TTL bounds it.
   The limits are in [security.md](security.md) (Deletion paths).
   It needs the `taskRedactionStore` option. `createPostgresTaskRedactionStore` ships from `./runtime`, so it runs on Workers.
 - `createPostgresTenantErasure` is the only path that deletes task receipt rows
