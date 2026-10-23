@@ -728,6 +728,13 @@ jobs:
       - name: Conformance suites (in-memory compositions)
         run: bun run --filter @byok-sdk/conformance test
 
+      # #793 D2: the hosted (H) Bot collaboration example runs the D1 commit
+      # vectors against this job's Postgres. The selector maps the example to
+      # this family, and examples/hosted-bot-collaboration/src/ci.test.ts pins
+      # this step.
+      - name: Hosted Bot collaboration example (real Postgres)
+        run: bun run --filter @byok-sdk/example-hosted-bot-collaboration test
+
       # Issue #196 durable restart leg: the recurring packed smoke's restart
       # scenario runs against THIS job's compose Postgres from the EXACT
       # tarballs the release driver packs -- never repacked, never from a

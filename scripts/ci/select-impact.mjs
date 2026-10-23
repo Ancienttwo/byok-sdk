@@ -52,6 +52,13 @@ export const workspaceGraph = {
       "@byok-sdk/server"
     ]
   },
+  "examples/hosted-bot-collaboration": {
+    "name": "@byok-sdk/example-hosted-bot-collaboration",
+    "dependencies": [
+      "@byok-sdk/example-bot-collaboration",
+      "@byok-sdk/example-host-execution-core"
+    ]
+  },
   "examples/live-activity-host": {
     "name": "@byok-sdk/example-live-activity-host",
     "dependencies": [
@@ -339,6 +346,11 @@ export function selectImpact(paths, context = {}) {
       verifyReviewedContent(path, context);
       dirs.add('examples/bot-collaboration'); continue;
     }
+    // #793 D2: the private hosted example manifest, checked by its reviewed shape.
+    if (path === 'examples/hosted-bot-collaboration/package.json') {
+      verifyReviewedContent(path, context);
+      dirs.add('examples/hosted-bot-collaboration'); continue;
+    }
     // These root-level fixtures are executed by the relocated native SEA smoke.
     if (path === 'examples/packaging/native-assets-fixture.ts' || path === 'examples/packaging/native-assets-smoke.mjs') {
       dirs.add('examples/packaging'); families.add('packageability-smoke'); continue;
@@ -487,7 +499,8 @@ export function selectImpact(paths, context = {}) {
     }
   }
   for (const dir of leafDirs) dirs.add(dir);
-  if (dirs.has('packages/cloud-dataplane') || dirs.has('packages/conformance')) families.add('dataplane');
+  // #793 O5: the hosted example runs its suites only in the dataplane job, which has the real Postgres.
+  if (dirs.has('packages/cloud-dataplane') || dirs.has('packages/conformance') || dirs.has('examples/hosted-bot-collaboration')) families.add('dataplane');
   return { dirs: sorted(dirs), files: sorted(files), families: sorted(families),
     reason: dirs.size || families.size ? 'impacted' : scripts ? 'root-ci-scripts' : 'docs-only' };
 }

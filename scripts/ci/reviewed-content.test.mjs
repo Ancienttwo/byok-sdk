@@ -131,8 +131,8 @@ test('reviewed root-level basic fixtures select their workspace while unknown ro
 
 test('shared goal fixture selects its consumers without broadening unknown root support files', () => {
   const plan = selectImpact(['examples/basic/goal-btw.test-support.ts']);
-  assert.deepEqual(plan.dirs, ['examples/basic', 'examples/bot-collaboration', 'examples/byok-mcp-server', 'examples/host-execution-core']);
-  assert.deepEqual(plan.families, ['adapter-lifecycle-smoke']);
+  assert.deepEqual(plan.dirs, ['examples/basic', 'examples/bot-collaboration', 'examples/byok-mcp-server', 'examples/host-execution-core', 'examples/hosted-bot-collaboration']);
+  assert.deepEqual(plan.families, ['adapter-lifecycle-smoke', 'dataplane']);
   assert.throws(() => selectImpact(['examples/basic/other.test-support.ts']));
 });
 
@@ -350,4 +350,63 @@ test('reviewed undici security move admits only the exact pins and their lock en
     apply(candidate);
     assert.throws(() => selectImpact([path], context), pattern, reason);
   }
+});
+
+test('#793: the hosted example manifest and lock rows are admitted only with the reviewed shape and reused specs', t => {
+  const f = fixture(t);
+  const dir = 'examples/hosted-bot-collaboration', path = `${dir}/package.json`;
+  const manifest = { name: '@byok-sdk/example-hosted-bot-collaboration', version: '0.0.1', private: true, type: 'module',
+    scripts: { typecheck: 'tsc --noEmit', test: 'vitest run' }, dependencies: { '@byok-sdk/client': 'workspace:*', x: '1.0.0' } };
+  f.write(path, manifest);
+  f.lock.workspaces[dir] = { name: manifest.name, version: manifest.version, dependencies: manifest.dependencies };
+  f.lock.packages[manifest.name] = [`${manifest.name}@workspace:${dir}`];
+  f.write('bun.lock', f.lock);
+  assert.ok(selectImpact([path, 'bun.lock'], f).dirs.includes(dir));
+  for (const [candidate, reason] of [
+    [{ ...manifest, dependencies: { x: '2.0.0' } }, 'a spec that no other workspace declares'],
+    [{ ...manifest, dependencies: { y: '1.0.0' } }, 'a new package'],
+    [{ ...manifest, dependencies: { '@byok-sdk/absent': 'workspace:*' } }, 'an unknown workspace'],
+    [{ ...manifest, dependencies: { '@byok-sdk/client': '^0.28.0' } }, 'a registry spec for a workspace'],
+    [{ ...manifest, private: false }, 'a public manifest'],
+    [{ ...manifest, bin: { x: 'x.js' } }, 'an unreviewed field'],
+    [{ ...manifest, scripts: { ...manifest.scripts, postinstall: 'x' } }, 'an unreviewed script'],
+  ]) {
+    f.write(path, candidate);
+    assert.throws(() => selectImpact([path], f), /Reviewed CI mapping required/, reason);
+  }
+  f.write(path, manifest);
+  f.lock.workspaces[dir].dependencies = { x: '1.0.0' }; f.write('bun.lock', f.lock);
+  assert.throws(() => selectImpact(['bun.lock'], f), /lock rows differ/, 'a lock entry that differs from the manifest');
+  f.lock.workspaces[dir].dependencies = manifest.dependencies;
+  f.lock.packages[manifest.name] = [`${manifest.name}@workspace:examples/other`]; f.write('bun.lock', f.lock);
+  assert.throws(() => selectImpact(['bun.lock'], f), /lock rows differ/, 'a package row for another path');
+  f.lock.packages[manifest.name] = [`${manifest.name}@workspace:${dir}`];
+  f.lock.packages.y = ['y@1.0.0']; f.write('bun.lock', f.lock);
+  assert.throws(() => selectImpact(['bun.lock'], f), /more than/, 'a new resolved package');
+});
+
+test('#793: the K8 manifest admits only the reviewed hosted entries, and stays private', t => {
+  const f = fixture(t);
+  const dir = 'examples/bot-collaboration', path = `${dir}/package.json`;
+  const manifest = { name: '@byok-sdk/example-bot-collaboration', private: true, version: '0.0.1', devDependencies: { '@byok-sdk/cloud': 'workspace:*' } };
+  f.write(path, manifest);
+  const git = (...args) => execFileSync('git', args, { cwd: f.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'K8 with the cloud edge');
+  f.base = git('rev-parse', 'HEAD').trim();
+  const exports = {
+    './rules/commands': './src/rules/commands.ts', './rules/commit': './src/rules/commit.ts', './model': './src/model.ts',
+    './coalesce': './src/coalesce.ts', './team': './src/team.ts', './test-support': './src/commit-vectors.test-support.ts',
+  };
+  f.write(path, { ...manifest, exports });
+  assert.deepEqual(selectImpact([path], f).dirs.filter(name => name === dir), [dir]);
+  for (const [candidate, reason] of [
+    [{ ...manifest, exports: { ...exports, '.': './src/index.ts' } }, 'a root entry'],
+    [{ ...manifest, exports: { ...exports, './host': './src/host.ts' } }, 'another entry'],
+    [{ ...manifest, exports, scripts: { test: 'echo bypass' } }, 'another field'],
+  ]) {
+    f.write(path, candidate);
+    assert.throws(() => selectImpact([path], f), /more than/, reason);
+  }
+  f.write(path, { ...manifest, exports, private: false });
+  assert.throws(() => selectImpact([path], f), /must stay private/);
 });
