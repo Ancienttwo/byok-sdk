@@ -4842,19 +4842,8 @@ export type TaskClaimPayload = z.infer<typeof TaskClaimPayloadSchema>;
 export declare const TaskStartedPayloadSchema: z.ZodObject<{}, z.core.$strip>;
 export type TaskStartedPayload = z.infer<typeof TaskStartedPayloadSchema>;
 /**
- * daemon -> server: decline an offer *before* claiming it (M1 gap #5) — e.g.
- * no compatible/available runtime. Fail-closed rejections must use this instead of silently
- * dropping the offer.
- *
- * Decision (see docs/protocol.md "Declined vs. Failed" for the full
- * writeup): declining does *not* introduce a new `Declined` terminal state.
- * It maps onto the existing `Failed` state via a new `Offered -> Failed`
- * transition. `reason`/`retryable` intentionally mirror `TaskFailPayload`
- * semantics, because a pre-claim decline and a post-claim failure are the same
- * outcome from the dispatcher's point of view (this attempt produced no
- * result; here's whether retrying — e.g. offering to a different device —
- * makes sense), and keeping the state machine minimal avoids forking every
- * terminal-state consumer into "Failed or Declined, handle both".
+ * #654: a sealed decline code names a fixed outcome and carries no content,
+ * so its `reason` is the code itself. A free-text reason never goes with it.
  */
 export declare const TaskDeclinePayloadSchema: z.ZodObject<{
     sealed: z.ZodOptional<z.ZodNever>;
@@ -6162,9 +6151,9 @@ export declare const TaskFailSealedPayloadSchema: z.ZodObject<{
 }, z.core.$strict>;
 export type TaskFailSealedPayload = z.infer<typeof TaskFailSealedPayloadSchema>;
 /**
- * daemon -> server: `task.decline` of a sealed task with a sealed `reason`. A
- * device that cannot seal (for example without the scope key) sends a
- * plaintext `task.decline` with a closed sealed failure code instead.
+ * daemon -> server: `task.decline` of a sealed task with a sealed `reason`.
+ * The sealed decline codes go only on the plaintext `task.decline`: a device
+ * that cannot open or use the scope key often cannot seal a reply either.
  */
 export declare const TaskDeclineSealedPayloadSchema: z.ZodObject<{
     sealing: z.ZodOptional<z.ZodNever>;
@@ -6176,10 +6165,6 @@ export declare const TaskDeclineSealedPayloadSchema: z.ZodObject<{
     code: z.ZodOptional<z.ZodEnum<{
         agent_home_reader_busy: "agent_home_reader_busy";
         agent_home_writer_busy: "agent_home_writer_busy";
-        sealed_content_mac_mismatch: "sealed_content_mac_mismatch";
-        sealed_key_unavailable: "sealed_key_unavailable";
-        sealed_open_failed: "sealed_open_failed";
-        sealing_policy_mismatch: "sealing_policy_mismatch";
     }>>;
     sealed: z.ZodObject<{
         v: z.ZodLiteral<1>;

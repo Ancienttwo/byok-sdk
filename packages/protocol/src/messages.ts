@@ -902,13 +902,22 @@ export type TaskStartedPayload = z.infer<typeof TaskStartedPayloadSchema>;
  * makes sense), and keeping the state machine minimal avoids forking every
  * terminal-state consumer into "Failed or Declined, handle both".
  */
-export const TaskDeclinePayloadSchema = z.object({
+const HOME_DECLINE_CODES = ['agent_home_writer_busy', 'agent_home_reader_busy'] as const;
+const DeclineFields = z.object({
   ...NO_SEALED_MEMBER,
   reason: z.string(),
   retryable: z.boolean().optional(),
   agentRef: AgentRefSchema.optional(),
-  code: z.enum(['agent_home_writer_busy', 'agent_home_reader_busy', ...SEALED_DECLINE_CODES]).optional(),
+  code: z.enum([...HOME_DECLINE_CODES, ...SEALED_DECLINE_CODES]).optional(),
 });
+/**
+ * #654: a sealed decline code names a fixed outcome and carries no content,
+ * so its `reason` is the code itself. A free-text reason never goes with it.
+ */
+export const TaskDeclinePayloadSchema = DeclineFields.refine(
+  (p) => !(SEALED_DECLINE_CODES as readonly unknown[]).includes(p.code) || p.reason === p.code,
+  { path: ['reason'], message: 'reason must be the code' },
+);
 export type TaskDeclinePayload = z.infer<typeof TaskDeclinePayloadSchema>;
 
 /**
@@ -1423,12 +1432,12 @@ export const TaskFailSealedPayloadSchema = TaskFailPayloadSchema.omit({ reason: 
 export type TaskFailSealedPayload = z.infer<typeof TaskFailSealedPayloadSchema>;
 
 /**
- * daemon -> server: `task.decline` of a sealed task with a sealed `reason`. A
- * device that cannot seal (for example without the scope key) sends a
- * plaintext `task.decline` with a closed sealed failure code instead.
+ * daemon -> server: `task.decline` of a sealed task with a sealed `reason`.
+ * The sealed decline codes go only on the plaintext `task.decline`: a device
+ * that cannot open or use the scope key often cannot seal a reply either.
  */
-export const TaskDeclineSealedPayloadSchema = TaskDeclinePayloadSchema.omit({ reason: true })
-  .extend({ sealed: SealedTaskOutputSchema })
+export const TaskDeclineSealedPayloadSchema = DeclineFields.omit({ reason: true })
+  .extend({ code: z.enum(HOME_DECLINE_CODES).optional(), sealed: SealedTaskOutputSchema })
   .strict();
 export type TaskDeclineSealedPayload = z.infer<typeof TaskDeclineSealedPayloadSchema>;
 

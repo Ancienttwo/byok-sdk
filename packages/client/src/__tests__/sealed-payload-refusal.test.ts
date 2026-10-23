@@ -43,7 +43,7 @@ afterEach(async () => {
   }
 });
 
-async function runnerWith(adapter: StubRuntimeAdapter, sent: Envelope[]): Promise<TaskRunner> {
+async function runnerWith(adapter: StubRuntimeAdapter, sent: Envelope[], serverCapabilities: readonly string[] = []): Promise<TaskRunner> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-sealed-refusal-'));
   const store = new SessionWorkspaceStore(path.join(dir, 'sessions'));
   dirs.push({ dir, store });
@@ -58,6 +58,7 @@ async function runnerWith(adapter: StubRuntimeAdapter, sent: Envelope[]): Promis
     sessionWorkspaces: store,
     approvalRegistry: new ApprovalRegistry(), storeDir: dir, productId: 'sealed-refusal',
     localAgentRelease: Object.freeze({ version: '0.24.0-rc.1' }),
+    getServerCapabilities: () => serverCapabilities,
   });
 }
 
@@ -83,6 +84,26 @@ describe('sealed payload refusal on a daemon without sealed-payload-v1 (#654)', 
       expect(declines[0]!.payload).not.toHaveProperty('code');
       if (line.payload.agentRef !== undefined) expect(declines[0]!.payload).toMatchObject({ agentRef: line.payload.agentRef });
       expect(sent.filter((envelope) => envelope.type === 'task.claim')).toHaveLength(0);
+      expect(adapter.startCalls).toHaveLength(0);
+    },
+  );
+
+  it.each(sealedOffers.map(([label, line]) => [line.type, label, line] as const))(
+    'declines %s (%s) with the closed code sealed_key_unavailable to a server with sealed-payload-v1',
+    async (_type, _label, line) => {
+      const adapter = new StubRuntimeAdapter('pi');
+      const sent: Envelope[] = [];
+      const runner = await runnerWith(adapter, sent, ['sealed-payload-v1']);
+
+      await runner.handleEnvelope(createEnvelope(line.type as (typeof SEALED_OFFER_TYPES)[number], line.payload as never, { taskId: 'sealed-task', seq: 1 }));
+
+      const declines = sent.filter((envelope) => envelope.type === 'task.decline');
+      expect(declines.map((envelope) => envelope.payload)).toEqual([{
+        reason: 'sealed_key_unavailable',
+        code: 'sealed_key_unavailable',
+        retryable: false,
+        ...(line.payload.agentRef === undefined ? {} : { agentRef: line.payload.agentRef }),
+      }]);
       expect(adapter.startCalls).toHaveLength(0);
     },
   );
