@@ -2248,7 +2248,13 @@ AFP mount, fails the open with `unsafe_root` before any chain barrier. A failed
 query also fails the open. On a remote mount, `F_FULLFSYNC` and rename
 durability depend on the server. On such a home each memory recall or save,
 the hosted projection and the task-free export fail, and the daemon does not
-advertise `agent-memory-intent.v1`. Linux has no volume rule.
+advertise `agent-memory-intent.v1`. Each operation below the root also
+requires every directory and file on its path to be on the device of its
+parent directory. The helper compares the `lstat` device before it opens the
+entry. A mount below the home, for example a network volume over `notes`,
+fails that operation with `unsafe_path`, and a walk that meets one fails as a
+whole. The Windows helper refuses a volume mount point because it is a reparse
+point. Linux has no volume rule.
 Shared home initialization syncs each new directory's parent on POSIX. A retry
 repeats the parent barrier for existing entries.
 
