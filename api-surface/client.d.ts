@@ -4228,8 +4228,9 @@ export interface HostedJournalConfig {
     /**
      * Per-record byte bound. Defaults to the journal's own bound; oversized records are refused, never truncated.
      * An inbound envelope record may still reach a floor derived from the inline sealed maximum (415083 bytes),
-     * so a sealed envelope is journaled and declined, not stalled (#654). The floor covers the inline maximum plus
-     * 64 KiB of plaintext metadata. Larger metadata stalls the cursor, the same way as a large plain offer (#826).
+     * so a sealed envelope is journaled and declined, not stalled (#654). An inbound envelope above the bound is
+     * not stored and does not stall the cursor: an offer is declined (`inbound_envelope_too_large`), any other
+     * envelope is dropped (#826).
      */
     maxRecordBytes?: number;
 }
@@ -6511,6 +6512,27 @@ export interface ReceivedEnvelopeRecord {
     readonly opensTask: boolean;
 }
 /**
+ * A task-opening envelope above the inbound record bound (#826). Its bytes are
+ * not stored: the journal keeps its identity, digest and length, the declined
+ * task and the daemon's decline in one transaction, so the cursor can move
+ * past it and the decline survives a crash.
+ */
+export interface WithheldOfferRecord {
+    readonly identity: JournalIdentity;
+    readonly envelopeId: string;
+    readonly taskId: string;
+    readonly seq: number;
+    /** `sha256:<hex>` over the canonical bytes that were not stored. */
+    readonly bytesHash: string;
+    readonly byteLength: number;
+    readonly receivedAt: string;
+    /** The canonical `task.decline` of this task. Bounded like any terminal record. */
+    readonly decline: {
+        readonly bytes: string;
+        readonly payloadHash: string;
+    };
+}
+/**
  * What {@link LocalTaskJournal.appendEnvelope} hands back. The cursor may
  * advance past {@link seq} once — and only once — this exists.
  */
@@ -6587,6 +6609,11 @@ export interface RecoverableTask {
     readonly updatedAt: string;
     readonly envelopeBytes: string;
 }
+/** A task whose offer was withheld (#826). It is declined and has nothing to run or recover. */
+export interface WithheldOfferTask extends Omit<RecoverableTask, 'envelopeBytes'> {
+    /** Length of the canonical offer bytes that were not stored. */
+    readonly withheldEnvelopeBytes: number;
+}
 /**
  * What recovery decided about a task. `interrupted` is the honest default for
  * a daemon restart: local runtime sessions do not survive the process, so the
@@ -6651,6 +6678,12 @@ export interface LocalTaskJournal {
      * second side effect.
      */
     appendEnvelope(record: ReceivedEnvelopeRecord): Promise<JournalReceipt>;
+    /**
+     * Make one over-bound task-opening envelope durable without its bytes, with
+     * its task declined and the decline pending. Idempotent by envelope id like
+     * {@link appendEnvelope}. Refuses a task whose stored offer could still run.
+     */
+    appendWithheldOffer(record: WithheldOfferRecord): Promise<JournalReceipt>;
     /** Record the admission decision for a task whose offer envelope is already durable. */
     recordAdmission(record: AdmissionRecord): Promise<void>;
     /** Record one local execution-state transition. Idempotent by transition id. */
@@ -6664,7 +6697,7 @@ export interface LocalTaskJournal {
     rejectTerminal(taskId: string, payloadHash: string, reason: string): Promise<void>;
     /** Includes old interruption markers without reports; they must not hide pending work. */
     listRecoveryTasks(identity: JournalIdentity): Promise<RecoverableTask[]>;
-    readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | undefined>;
+    readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | WithheldOfferTask | undefined>;
     /** Tasks with no terminal and no recovery marker — what this daemon was in the middle of when it last stopped. */
     listRecoverable(): Promise<RecoverableTask[]>;
     /** Close out one recoverable task by writing its recovery marker. Never deletes; a marked row is on §12.7.2.1's never-auto-delete list. */
@@ -6744,7 +6777,7 @@ export declare class JournalClosedError extends Error {
     constructor(operation: string);
 }
 // ==== @byok-sdk/client dist/daemon/journal/sqlite-journal.d.ts ====
-import { type JournalIdentity, type AdmissionRecord, type CompactOptions, type CompactResult, type JournalReceipt, type LocalStorageUsage, type LocalTaskJournal, type LocalTerminalRecord, type LocalTransitionRecord, type RecoverableTask, type RecoveryOutcome, type ReceivedEnvelopeRecord } from './journal';
+import { type JournalIdentity, type AdmissionRecord, type CompactOptions, type CompactResult, type JournalReceipt, type LocalStorageUsage, type LocalTaskJournal, type LocalTerminalRecord, type LocalTransitionRecord, type RecoverableTask, type RecoveryOutcome, type ReceivedEnvelopeRecord, type WithheldOfferRecord, type WithheldOfferTask } from './journal';
 import { JournalHandleCleanupError, type JournalOpenFaultSeam } from './sqlite-support';
 export { JournalHandleCleanupError };
 /** The single database file, per §12.7.2's "建议单库 `<storeDir>/daemon.db`". */
@@ -6784,9 +6817,8 @@ export interface SqliteLocalTaskJournalOptions {
      * Per-record byte bound. Default {@link DEFAULT_MAX_RECORD_BYTES}. An inbound
      * envelope record may still reach a floor derived from the inline sealed
      * maximum (415083 bytes), so a sealed envelope can be journaled and declined.
-     * The floor covers the inline maximum plus 64 KiB of plaintext metadata.
-     * Larger metadata stalls the cursor, the same way as a large plain offer
-     * (#826).
+     * A task-opening envelope above the bound is kept without its bytes and
+     * declined ({@link SqliteLocalTaskJournal.appendWithheldOffer}, #826).
      */
     readonly maxRecordBytes?: number;
     /** Test seam — see {@link JournalFaultSeam}. Never supplied in production. */
@@ -6812,6 +6844,8 @@ export declare class SqliteLocalTaskJournal implements LocalTaskJournal {
      * exactly what the cursor needed.
      */
     appendEnvelope(record: ReceivedEnvelopeRecord): Promise<JournalReceipt>;
+    /** #826: the decline commits with the row, because the cursor moves once this commits. */
+    appendWithheldOffer(record: WithheldOfferRecord): Promise<JournalReceipt>;
     recordAdmission(record: AdmissionRecord): Promise<void>;
     /**
      * Idempotent by transition id. `INSERT OR IGNORE` decides it: when the row
@@ -6830,7 +6864,7 @@ export declare class SqliteLocalTaskJournal implements LocalTaskJournal {
      * first fact stands.
      */
     recordTerminal(record: LocalTerminalRecord): Promise<void>;
-    readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | undefined>;
+    readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | WithheldOfferTask | undefined>;
     listRecoveryTasks(identity: JournalIdentity): Promise<RecoverableTask[]>;
     listPendingTerminals(identity: JournalIdentity): Promise<LocalTerminalRecord[]>;
     confirmTerminal(taskId: string, payloadHash: string): Promise<void>;
@@ -10517,7 +10551,7 @@ export type { InputPreparationArtifactSummaryV1, InputPreparationAuthorityGrantV
 export { INPUT_PREPARATION_CANCEL_METHOD, INPUT_PREPARATION_IDENTIFIER_MAX_BYTES, INPUT_PREPARATION_LOOKUP_METHOD, INPUT_PREPARATION_PREPARE_METHOD, parseInputPreparationCancelParams, parseInputPreparationLookupParams, parseInputPreparationRequestParams, } from './daemon/control-protocol';
 export type { InputPreparationResult } from './daemon/control-protocol';
 export { journalHash, JournalUnavailableError, JournalCorruptError, JournalRecordTooLargeError, JournalUnknownTaskError, JournalClosedError, } from './daemon/journal/journal';
-export type { LocalTaskJournal, JournalIdentity, JournalReceipt, ReceivedEnvelopeRecord, AdmissionRecord, LocalTransitionRecord, LocalTerminalRecord, TerminalTruthState, RecoverableTask, RecoveryOutcome, RecoveryDisposition, LocalStorageUsage, CompactOptions, CompactResult, } from './daemon/journal/journal';
+export type { LocalTaskJournal, JournalIdentity, JournalReceipt, ReceivedEnvelopeRecord, AdmissionRecord, LocalTransitionRecord, LocalTerminalRecord, TerminalTruthState, RecoverableTask, WithheldOfferRecord, WithheldOfferTask, RecoveryOutcome, RecoveryDisposition, LocalStorageUsage, CompactOptions, CompactResult, } from './daemon/journal/journal';
 export { SqliteLocalTaskJournal, JOURNAL_DB_FILENAME, JOURNAL_QUARANTINE_DIRNAME } from './daemon/journal/sqlite-journal';
 export type { SqliteLocalTaskJournalOptions } from './daemon/journal/sqlite-journal';
 export { LocalStorageConfigError, resolveStorageConfig, DEFAULT_RETENTION_TTL_MS } from './daemon/retention/config';

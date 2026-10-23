@@ -297,8 +297,9 @@ export interface HostedJournalConfig {
   /**
    * Per-record byte bound. Defaults to the journal's own bound; oversized records are refused, never truncated.
    * An inbound envelope record may still reach a floor derived from the inline sealed maximum (415083 bytes),
-   * so a sealed envelope is journaled and declined, not stalled (#654). The floor covers the inline maximum plus
-   * 64 KiB of plaintext metadata. Larger metadata stalls the cursor, the same way as a large plain offer (#826).
+   * so a sealed envelope is journaled and declined, not stalled (#654). An inbound envelope above the bound is
+   * not stored and does not stall the cursor: an offer is declined (`inbound_envelope_too_large`), any other
+   * envelope is dropped (#826).
    */
   maxRecordBytes?: number;
 
@@ -2355,6 +2356,7 @@ export function buildDaemonWithAdapters(
           if (!activeJournal || !journalIdentity) throw error;
           const task = await activeJournal.readTask(taskId, journalIdentity);
           if (!task) throw new Error(`missing durable task ${taskId}`);
+          if (!('envelopeBytes' in task)) throw new Error(`task ${taskId} has a withheld offer and no result`);
           const offer = decodeEnvelope(task.envelopeBytes);
           if (!isTaskOfferType(offer.type) || offer.task_id !== taskId) throw new Error(`invalid durable offer binding for ${taskId}`);
           const offerPayload = offer.payload as { agentRef?: AgentRef };
@@ -2375,6 +2377,33 @@ export function buildDaemonWithAdapters(
           // recovery; the oversized result itself is never silently dropped.
         }
       });
+    };
+
+    // #826: an inbound envelope above the journal record bound is never stored
+    // or run, and it must not hold the cursor. An offer is declined once,
+    // non-retryably, from a journal record kept without its bytes. Any other
+    // envelope is dropped; for a task.cancel, the local task runs until it ends.
+    const refuseOverBoundEnvelope = async (envelope: Envelope, record: ReceivedEnvelopeRecord, byteLength: number): Promise<void> => {
+      const taskId = envelope.task_id;
+      if (!isTaskOfferType(envelope.type) || taskId === undefined) {
+        console.warn(`[byok/client] dropped inbound ${envelope.type} (seq=${record.seq}): ${byteLength} bytes is over the journal record bound`);
+        return;
+      }
+      if (!activeJournal || !journalIdentity) throw new Error('durable journal unavailable');
+      const { agentRef } = envelope.payload as { agentRef?: AgentRef };
+      const decline = createEnvelope('task.decline', {
+        reason: 'inbound_envelope_too_large', retryable: false, ...(agentRef === undefined ? {} : { agentRef }),
+      }, { taskId });
+      const bytes = encodeEnvelope(decline);
+      const receipt = await activeJournal.appendWithheldOffer({
+        identity: journalIdentity, envelopeId: record.envelopeId, taskId, seq: record.seq, bytesHash: record.bytesHash,
+        byteLength, receivedAt: record.receivedAt, decline: { bytes, payloadHash: journalHash(bytes) },
+      });
+      // The decline is already durable. A new receipt sends it; a redelivery
+      // retries a send still in flight (startup replays any other pending one).
+      if (receipt.created) sendEnvelope(decline);
+      else if (terminalCommits.hasPending(taskId)) await terminalCommits.retry(taskId);
+      await terminalCommits.receipt(taskId);
     };
 
     // Serialize the marker/acceptance handshake across inbound dispositions
@@ -2578,7 +2607,7 @@ export function buildDaemonWithAdapters(
         if (taskId !== undefined && taskId !== id) continue;
         const task = await activeJournal.readTask(id, journalIdentity);
         const failure = task && resultReplyFailureFromState(task.localState);
-        if (!task || !failure) { resultReplyRecoveryTasks.delete(id); continue; }
+        if (!task || !failure || !('envelopeBytes' in task)) { resultReplyRecoveryTasks.delete(id); continue; }
         const state = runner?.recoveredAgentMessageState(id);
         const accepted = task.localState.endsWith('-accepted');
         if (!accepted && state !== 'refused') continue;
@@ -2836,7 +2865,14 @@ export function buildDaemonWithAdapters(
               // is not lost; it is left in the one place that still has room
               // for it. Nothing is deleted to make space.
               activePressureEngine?.assertAckCriticalAllowed();
-              await activeJournal.appendEnvelope(toJournalEnvelopeRecord(envelope, journalIdentity));
+              const record = toJournalEnvelopeRecord(envelope, journalIdentity);
+              try {
+                await activeJournal.appendEnvelope(record);
+              } catch (error: unknown) {
+                if (!(error instanceof JournalRecordTooLargeError)) throw error;
+                await refuseOverBoundEnvelope(envelope, record, error.actualBytes);
+                return;
+              }
               if (isTaskOfferType(envelope.type) && envelope.task_id !== undefined) {
                 // A selected terminal fences admission even if its transaction rolled
                 // back to received. Check before reading a possibly stale task row.

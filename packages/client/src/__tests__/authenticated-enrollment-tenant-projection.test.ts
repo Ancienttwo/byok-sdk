@@ -46,6 +46,7 @@ class CapturingJournal implements LocalTaskJournal {
     };
   }
 
+  async appendWithheldOffer(): Promise<never> { throw new Error('not used'); }
   async recordAdmission(): Promise<void> {}
   async recordTransition(): Promise<void> {}
   async recordTerminal(): Promise<void> {}
