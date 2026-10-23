@@ -29,7 +29,9 @@
  * - `add` `{ member }`: a valid bundle (`parseMemberKeyBundle`) of a member
  *   that is not current and was never removed. A removed member id is final;
  *   a re-paired device is a new member (§7.5).
- * - `remove` `{ memberId }`: a current member.
+ * - `remove` `{ memberId }`: a current member. A member may remove itself,
+ *   but the last member may not: the member set never becomes empty after
+ *   genesis (owner decision 14A).
  * - `rotate` `{ memberId, kemPublicJwk, kemEpoch, kemSig }`: signed by that
  *   member itself; `kemEpoch` is its current KEM epoch + 1; the KEM key is
  *   not the current one; `kemSig` is the member's signature over the new KEM
@@ -202,7 +204,7 @@ async function applySubject(state: WalkState, entry: MemberChainEntryV1): Promis
     }
     case 'remove': {
       const subject = RemoveSubjectSchema.safeParse(entry.subject);
-      if (!subject.success || !state.members.has(subject.data.memberId)) return false;
+      if (!subject.success || !state.members.has(subject.data.memberId) || state.members.size === 1) return false;
       state.members.delete(subject.data.memberId);
       state.removed.add(subject.data.memberId);
       return true;
