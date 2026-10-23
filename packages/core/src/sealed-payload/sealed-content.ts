@@ -29,6 +29,7 @@ import { z } from 'zod';
 
 import { canonicalizeJson, canonicalizeJsonBytes, type JsonObject } from '../attestation';
 import { CONTENT_HASH_PATTERN } from '../blob';
+import { ByokCoreError } from '../errors';
 import { isCanonicalTimestamp } from '../time';
 import { webCryptoSubtle } from '../webcrypto';
 import { MEMBER_ID_PATTERN } from './member-chain';
@@ -281,8 +282,13 @@ function isNonEmptyPlainObject(value: unknown): boolean {
 
 /** The plaintext text, with the RFC 8785 number rule (#786). The AAD and the MAC identity keep `canonicalizeJson`. */
 function canonicalPlaintext(plaintext: JsonObject): string {
-  if (!isNonEmptyPlainObject(plaintext)) throw invalidInput('Sealed plaintext must be a non-empty plain JSON object');
-  return canonicalizeSealedJson(plaintext);
+  try {
+    if (isNonEmptyPlainObject(plaintext)) return canonicalizeSealedJson(plaintext);
+  } catch (cause) {
+    // A throwing getter or proxy trap reaches here too, from either check; the caller sees one typed error.
+    throw new ByokCoreError('sealed_secret_invalid', 'Sealed plaintext is not canonical JSON', { cause });
+  }
+  throw invalidInput('Sealed plaintext must be a non-empty plain JSON object');
 }
 
 /** Decoded content, only when it is the canonical JSON text of a non-empty plain object. */
