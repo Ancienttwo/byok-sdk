@@ -19,15 +19,15 @@
  * design writes their inputs with `||`. Here each input is a domain tag and
  * the canonical JSON of named fields, so field boundaries are unambiguous and
  * a device MAC never verifies as a client MAC.
- *
- * This module is internal: the subpath index does not export it.
  */
 import { z } from 'zod';
 
 import { canonicalizeJsonBytes } from '../attestation';
 import { CONTENT_HASH_PATTERN } from '../blob';
+import { safeParseTotal } from '../total-parse';
 import { webCryptoSubtle, type WebCryptoKey } from '../webcrypto';
 import type { MemberKeyBundleV1 } from './member-bundle';
+import { MemberKeyBundleV1Schema } from './member-bundle';
 import {
   base64UrlBytes,
   concat,
@@ -142,38 +142,26 @@ const ChainHeadSchema = z.strictObject({
   hash: z.string().regex(CONTENT_HASH_PATTERN),
 });
 
+/** The caller data of the two MAC inputs, read once into plain values. */
+const DeviceMacInputSchema = z.object({ tenantId: z.string().min(1), deviceId: z.string().min(1), member: MemberKeyBundleV1Schema });
+const ClientMacInputSchema = z.object({ member: MemberKeyBundleV1Schema, chainHead: ChainHeadSchema });
+
 function devicePairingMacInput(input: DevicePairingMacInput): Bytes {
-  if (input.tenantId.length === 0 || input.deviceId.length === 0 || input.member.deviceId !== input.deviceId) {
+  const parsed = safeParseTotal(DeviceMacInputSchema, input);
+  if (!parsed.success || parsed.data.member.deviceId !== parsed.data.deviceId) {
     throw invalidInput('Device pairing MAC input must name the device member\'s own device id');
   }
-  return concat(
-    utf8(DEVICE_PAIRING_MAC_DOMAIN),
-    canonicalizeJsonBytes({ tenantId: input.tenantId, deviceId: input.deviceId, member: bundleJson(input.member) }),
-  );
+  const { tenantId, deviceId, member } = parsed.data;
+  return concat(utf8(DEVICE_PAIRING_MAC_DOMAIN), canonicalizeJsonBytes({ tenantId, deviceId, member }));
 }
 
 function clientPairingMacInput(input: ClientPairingMacInput): Bytes {
-  const head = ChainHeadSchema.safeParse(input.chainHead);
-  if (input.member.deviceId !== undefined || !head.success) {
+  const parsed = safeParseTotal(ClientMacInputSchema, input);
+  if (!parsed.success || parsed.data.member.deviceId !== undefined) {
     throw invalidInput('Client pairing MAC input must hold a client member and a chain head');
   }
-  return concat(
-    utf8(CLIENT_PAIRING_MAC_DOMAIN),
-    canonicalizeJsonBytes({ member: bundleJson(input.member), chainHead: { seq: head.data.seq, hash: head.data.hash } }),
-  );
-}
-
-function bundleJson(member: MemberKeyBundleV1) {
-  const jwk = (key: MemberKeyBundleV1['signingPublicJwk']) => ({ kty: key.kty, crv: key.crv, x: key.x, y: key.y });
-  return {
-    v: member.v,
-    memberId: member.memberId,
-    signingPublicJwk: jwk(member.signingPublicJwk),
-    kemPublicJwk: jwk(member.kemPublicJwk),
-    kemEpoch: member.kemEpoch,
-    kemSig: member.kemSig,
-    ...(member.deviceId === undefined ? {} : { deviceId: member.deviceId }),
-  };
+  const { member, chainHead } = parsed.data;
+  return concat(utf8(CLIENT_PAIRING_MAC_DOMAIN), canonicalizeJsonBytes({ member, chainHead: { seq: chainHead.seq, hash: chainHead.hash } }));
 }
 
 function checkPv(pv: Uint8Array): void {
@@ -223,7 +211,7 @@ interface HmacVerifySubtle {
 }
 
 async function hmacVerify(key: Uint8Array, buildData: () => Bytes, mac: unknown): Promise<boolean> {
-  const parsed = PairingMacSchema.safeParse(mac);
+  const parsed = safeParseTotal(PairingMacSchema, mac);
   if (!parsed.success) return false;
   let data: Bytes;
   try {

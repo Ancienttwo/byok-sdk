@@ -46,7 +46,7 @@ import {
   TASK_STATES,
   TerminalProjectionSelectionSchema,
   AgentHomeAccessSchema,
-  PreparedAgentMemoryModeSchema,
+  AgentMemorySelectionSchema,
   type AgentHomeProjectionPayload,
   type AgentRef,
   type AgentMessagePublishPayload,
@@ -532,7 +532,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     if (homeAccess !== undefined && agentRef === undefined) {
       throw new Error('homeAccess requires an explicit AgentRef; legacy task dispatch has no Agent home');
     }
-    const agentMemory = input.agentMemory === undefined ? undefined : PreparedAgentMemoryModeSchema.parse(input.agentMemory);
+    const agentMemory = input.agentMemory === undefined ? undefined : AgentMemorySelectionSchema.parse(input.agentMemory);
     if (agentMemory !== undefined && agentRef === undefined) {
       throw new Error('agentMemory requires an explicit AgentRef; legacy task dispatch has no Agent memory');
     }

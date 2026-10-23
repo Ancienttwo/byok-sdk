@@ -63,16 +63,22 @@ export interface MemberChainEntryV1 extends UnsignedMemberChainEntryV1 {
   readonly sig: string;
 }
 
-/** A plain JSON object that has exactly one canonical byte form. */
-const CanonicalJsonObjectSchema = z.custom<JsonObject>((value) => {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+/**
+ * A plain JSON object that has exactly one canonical byte form. The output is
+ * rebuilt from the canonical text, so no later step reads the caller's object
+ * again: a getter or a proxy cannot change or throw after this check.
+ */
+const CanonicalJsonObjectSchema = z.unknown().transform((value, ctx): JsonObject => {
   try {
-    canonicalizeJson(value as JsonObject);
-    return true;
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      return JSON.parse(canonicalizeJson(value as JsonObject)) as JsonObject;
+    }
   } catch {
-    return false;
+    // Not canonical JSON, or a read threw: the issue below reports it.
   }
-}, 'must be a canonical JSON object');
+  ctx.addIssue({ code: 'custom', message: 'must be a canonical JSON object' });
+  return z.NEVER;
+});
 
 const unsignedEntryShape = {
   v: z.literal(MEMBER_CHAIN_VERSION),

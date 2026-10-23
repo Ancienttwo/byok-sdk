@@ -7,7 +7,8 @@ import { canonical, hash, project, taskId, time, validateInput, validateJson, va
 import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
 import { applyPlan, auditCalendarError, auditIgnoredWake, createRoutine, deferSchedule, nextWake, promote, recordOccurrence, scheduleNext, setLifecycle,
   stageVersion, switchVersion, versionSwitchDue, WAKE_HORIZON_MS } from './routines';
-import { cancelWake, enqueue, settle } from './transitions';
+import { cancelWake, enqueue, fifoHeads, queuedExpiry, settle } from './transitions';
+import { frozenDelivered, submitFrozen, type FrozenSubmitPort } from './submit';
 
 export type ExecutionServer = {
   executions: Pick<ByokServer['executions'], 'submit'>;
@@ -437,22 +438,15 @@ export class HostExecutionCore {
       for (let pass = 0; pass < 100 && !this.stopped; pass++) {
         this.ledger.transaction(state => {
           for (const intent of Object.values(state.intents)) {
-            if ((intent.phase === 'queued' || intent.phase === 'memory_blocked') && (intent.cancelReason || this.now() >= intent.waitUntil || this.now() >= (intent.retryUntil ?? Infinity))) {
-              settle(state, intent, intent.cancelReason === 'cancelled' ? 'cancelled' : this.now() >= intent.waitUntil ? 'expired' : 'superseded');
-            } else if (intent.phase === 'backoff' && (intent.cancelReason || this.now() >= Math.min(intent.waitUntil, intent.retryUntil ?? Infinity))) {
-              settle(state, intent, intent.cancelReason === 'cancelled' ? 'cancelled' : this.now() >= intent.waitUntil ? 'expired' : 'superseded');
-            }
+            if (intent.phase !== 'queued' && intent.phase !== 'memory_blocked' && intent.phase !== 'backoff') continue;
+            const conclusion = queuedExpiry(intent, this.now());
+            if (conclusion) settle(state, intent, conclusion);
           }
         });
         const state = this.ledger.snapshot();
-        const heads = new Map<string, Intent>();
-        for (const row of Object.values(state.outbox)) {
-          if (row.kind !== 'intent') continue;
-          const intent = state.intents[row.intentId]!;
-          if (!heads.has(intent.agent) || heads.get(intent.agent)!.sequence > intent.sequence) heads.set(intent.agent, intent);
-        }
+        const heads = fifoHeads(Object.values(state.outbox).flatMap(row => row.kind === 'intent' ? [state.intents[row.intentId]!] : []));
         let changed = false;
-        for (const intent of heads.values()) {
+        for (const intent of heads) {
           try { changed = await this.reconcile(intent) || changed; }
           catch (error) { if (error instanceof OutboxFullError) throw error; this.error(`intent:${intent.id}`, error); }
         }
@@ -622,31 +616,30 @@ export class HostExecutionCore {
     if (attempt && (attempt.taskId !== intent.taskId || attempt.deviceId !== intent.execution.deviceId
       || canonical(attempt.agentRef) !== canonical(intent.execution.payload.agentRef))) throw new Error('Attempt identity conflict');
   }
-  private async delivered(intent: Intent): Promise<boolean> {
-    const offer = await this.server.tasks.offer(intent.taskId);
-    if (!offer) return false;
-    const input = this.ledger.snapshot().executions[intent.taskId]!.input;
-    if (offer.taskId !== input.taskId || offer.deviceId !== input.deviceId || offer.type !== 'task.offer_for_agent_with_egress_fresh'
-      || canonical(offer.payload) !== canonical(input.payload)) throw new Error('Offer differs from the frozen input');
-    return offer.delivered;
+  private readonly frozenPort: FrozenSubmitPort = {
+    submit: async input => {
+      const enqueued = await this.server.executions.submit(input);
+      if (this.eventsActive) this.liveTasks.add(input.taskId);
+      return enqueued;
+    },
+    offer: taskId => this.server.tasks.offer(taskId),
+  };
+  private delivered(intent: Intent): Promise<boolean> {
+    return frozenDelivered(this.frozenPort, this.ledger.snapshot().executions[intent.taskId]!.input);
   }
   private async submit(intent: Intent): Promise<void> {
-    if (!await this.delivered(intent)) {
+    const input = this.ledger.snapshot().executions[intent.taskId]!.input;
+    const outcome = await submitFrozen(this.frozenPort, input, () => {
       const latest = this.ledger.snapshot().intents[intent.id]!;
-      if (latest.conclusion || latest.cancelReason) return;
+      if (latest.conclusion || latest.cancelReason) return false;
       if (this.now() >= latest.waitUntil) {
         this.ledger.transaction(state => { state.intents[intent.id]!.cancelReason = 'expired'; });
-        return;
+        return false;
       }
-      const input = this.ledger.snapshot().executions[intent.taskId]!.input;
       this.options.memory?.refreshExecution({ deviceId: input.deviceId, agentRef: input.payload.agentRef }, input.taskId);
-      try {
-        await this.server.executions.submit(input);
-        if (this.eventsActive) this.liveTasks.add(intent.taskId);
-      }
-      catch (error) { if (!await this.delivered(intent)) throw error; }
-    }
-    this.ledger.transaction(state => { state.executions[intent.taskId]!.submission = 'delivered'; });
+      return true;
+    });
+    if (outcome === 'delivered') this.ledger.transaction(state => { state.executions[intent.taskId]!.submission = 'delivered'; });
   }
   private memoryInstruction(intent: Intent): string | undefined {
     if (!this.options.memory) return undefined;
