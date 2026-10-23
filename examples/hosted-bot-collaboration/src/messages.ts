@@ -47,7 +47,11 @@ export async function decideMessage(client: PoolClient, scope: string, state: Co
 }
 
 export interface MessageConsumerOptions {
-  /** The H scope of an SDK tenant. */
+  /**
+   * The H scope of an SDK tenant. It must map each tenant to its own scope, and it must be the inverse of the submitter's
+   * `port(scope)`, which submits the tasks of a scope as one tenant. The frozen input has no tenant field, so H cannot
+   * repeat K4's tenant check: this mapping is the tenant check.
+   */
   scopeOf(tenant: TenantId): string;
   /** The command ports of the consume transaction. */
   ports: PortsFactory;

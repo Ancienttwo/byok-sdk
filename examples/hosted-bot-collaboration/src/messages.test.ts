@@ -78,6 +78,15 @@ describe.skipIf(POSTGRES_URL === undefined)('H message consumer on real Postgres
     expect((await opened!.pool.query(`SELECT 1 FROM "${store().schema}".scope WHERE scope = $1`, [storedKey(tenant)])).rows).toEqual([]);
   });
 
+  it('checks the binding before the accepted reply, as K4 does', async () => {
+    const f = await fixture();
+    await consumer().consume(f.input);
+    const stored = await f.stored();
+    expect(await consumer().consume({ ...other(f.input, { messageId: 'two', contentHash: 'sha256:two' }), deviceId: 'other' }))
+      .toEqual({ outcome: 'refused', reasonCode: 'binding_mismatch' });
+    expect(await f.stored()).toBe(stored);
+  });
+
   it('accepts only the exact accepted message of a task: other content or another message is a conflict', async () => {
     const f = await fixture();
     await consumer().consume(f.input);
@@ -105,6 +114,8 @@ describe.skipIf(POSTGRES_URL === undefined)('H message consumer on real Postgres
 
   it('gives two concurrent deliveries of one message one acceptance', async () => {
     const f = await fixture();
+    // Open every pool connection first, so the two deliveries run at the same time and only the scope lock orders them.
+    await Promise.all(Array.from({ length: 4 }, () => opened!.pool.query('SELECT pg_sleep(0.05)')));
     expect(await Promise.all([consumer().consume(f.input), consumer().consume(f.input)])).toEqual([{ outcome: 'accepted' }, { outcome: 'accepted' }]);
     expect([(await store().read(f.scope)).revision, await commands(f.scope)]).toEqual([1, [`${f.input.taskId}:one`]]);
   });
