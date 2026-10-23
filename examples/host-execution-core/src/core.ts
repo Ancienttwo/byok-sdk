@@ -16,6 +16,11 @@ export type ExecutionServer = {
   /** Embedded process-local hints; reads from tasks remain authoritative. */
   events?: ByokServer['events'];
 };
+// The server emits no event when the device terminal of a Host-cancelled task arrives.
+// Each task gets this many read-only terminal probes, about 15.6 s in all, then only the `reconcileMs` scans.
+const CANCEL_PROBE_TICKS = 20;
+const CANCEL_PROBE_FIRST_MS = 25;
+const CANCEL_PROBE_MAX_MS = 1000;
 /** Routine commands in the caller's transaction. A refused command throws before it changes any state. */
 export interface RoutineCommands {
   /** The rules of `addRoutine`. */
@@ -79,6 +84,10 @@ export class HostExecutionCore {
   private eventsActive = false;
   private readonly liveTasks = new Set<string>();
   private liveScanTimer?: ReturnType<typeof setTimeout>;
+  /** Task ID to used probe ticks and the next probe time (`performance.now()`). Rearming keeps both, so the bound is real. */
+  private readonly cancelProbes = new Map<string, { used: number; at: number }>();
+  private cancelProbeTimer?: ReturnType<typeof setTimeout>;
+  private cancelProbing?: Promise<void>;
   private stopOutboxUpdates?: () => void;
   private outboxQueued = false;
   private outboxNotifying?: Promise<void>;
@@ -305,16 +314,17 @@ export class HostExecutionCore {
       this.draining = undefined;
       this.armScheduleRetry();
       this.armLiveScan();
+      this.armCancelProbe();
       if (this.again && !this.stopped) return this.drain();
     });
     return this.draining;
   }
   async close(): Promise<void> {
     this.stopped = true; this.stopMemoryUpdates?.(); this.stopMemoryLedgerBinding?.(); this.stopOutboxUpdates?.();
-    clearTimeout(this.scheduleRetryTimer); clearTimeout(this.liveScanTimer);
+    clearTimeout(this.scheduleRetryTimer); clearTimeout(this.liveScanTimer); clearTimeout(this.cancelProbeTimer);
     this.outboxAbort.abort(); this.jobAbort.abort();
     await this.eventIterator?.return?.();
-    await Promise.all([this.draining, this.memoryWaking, this.eventPump,
+    await Promise.all([this.draining, this.memoryWaking, this.eventPump, this.cancelProbing,
       ...(this.outboxContext.getStore() ? [] : [this.outboxNotifying])]);
   }
   private notifyOutbox(): void {
@@ -365,6 +375,43 @@ export class HostExecutionCore {
     // recovered/uncertain tasks keep durable scans instead of trusting old relay state.
     this.liveScanTimer = setTimeout(() => { if (!this.stopped) void this.drain().catch(() => {}); }, Math.max(1, Math.min(this.reconcileMs, due - this.now(), 2_147_483_647)));
     this.liveScanTimer.unref?.();
+  }
+  /**
+   * A cancelled inflight intent has had `tasks.cancel` and waits for its device terminal.
+   * Probe that terminal with a backoff per task. A probe never writes the ledger; only a found terminal drains.
+   */
+  private armCancelProbe(): void {
+    clearTimeout(this.cancelProbeTimer);
+    if (this.stopped || this.cancelProbing) return;
+    const state = this.ledger.snapshot();
+    const waiting = new Set(Object.values(state.intents)
+      .filter(intent => !intent.conclusion && intent.cancelReason && intent.phase === 'inflight').map(intent => intent.taskId));
+    for (const taskId of this.cancelProbes.keys()) if (!waiting.has(taskId)) this.cancelProbes.delete(taskId);
+    for (const taskId of waiting) if (!this.cancelProbes.has(taskId)) this.cancelProbes.set(taskId, { used: 0, at: performance.now() + this.cancelProbeDelay(0) });
+    const open = [...this.cancelProbes.values()].filter(probe => probe.used < CANCEL_PROBE_TICKS);
+    if (!open.length) return;
+    this.cancelProbeTimer = setTimeout(() => {
+      // A failed ledger read stops probing until the next drain; the reconcileMs scans remain.
+      this.cancelProbing = this.probeCancelled().finally(() => { this.cancelProbing = undefined; this.armCancelProbe(); }).catch(() => {});
+    }, Math.max(0, Math.min(...open.map(probe => probe.at)) - performance.now()));
+    this.cancelProbeTimer.unref?.();
+  }
+  private cancelProbeDelay(used: number): number {
+    return Math.min(CANCEL_PROBE_FIRST_MS * 2 ** used, CANCEL_PROBE_MAX_MS, this.reconcileMs);
+  }
+  private async probeCancelled(): Promise<void> {
+    let found = false;
+    for (const [taskId, probe] of this.cancelProbes) {
+      if (this.stopped) return;
+      if (probe.used >= CANCEL_PROBE_TICKS || probe.at > performance.now()) continue;
+      probe.used++;
+      probe.at = performance.now() + this.cancelProbeDelay(probe.used);
+      try {
+        // One found terminal ends this task's probes. If that drain fails, the normal scans retry it.
+        if (await this.server.tasks.deviceTerminal(taskId)) { probe.used = CANCEL_PROBE_TICKS; found = true; }
+      } catch { /* A failed read uses its tick. */ }
+    }
+    if (found && !this.stopped) void this.drain().catch(() => {});
   }
   private assertOpen(): void { if (this.stopped) throw new Error('Host core is closed'); }
 

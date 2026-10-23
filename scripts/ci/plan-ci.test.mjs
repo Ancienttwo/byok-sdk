@@ -62,9 +62,14 @@ test('renames include both deleted source and destination workspace paths', () =
   }
 });
 test('CI policy and runbook changes take the contract-only lane', () => {
-  const plan = planCi({ event: 'pull_request', sha, paths: ['.github/workflows/ci.yml', '.github/workflows/release.yml', 'deploy/runbooks/release-responsibility.md', 'scripts/ci/plan-ci.mjs'] });
+  const plan = planCi({ event: 'pull_request', sha, paths: ['.github/workflows/release.yml', 'deploy/runbooks/release-responsibility.md', 'scripts/ci/plan-ci.mjs'] });
   assert.deepEqual(plan.dirs, []); assert.deepEqual(plan.families, []);
   assert.equal(plan.reason, 'root-ci-scripts');
+});
+test('a ci.yml change also runs the dataplane job that checks the workflow (#749)', () => {
+  const plan = planCi({ event: 'pull_request', sha, paths: ['.github/workflows/ci.yml'] });
+  assert.deepEqual(plan.dirs, []); assert.deepEqual(plan.families, ['dataplane']);
+  assert.equal(plan.reason, 'impacted');
 });
 
 

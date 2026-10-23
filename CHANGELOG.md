@@ -138,6 +138,17 @@
   being visible to recall and export. A `MEMORY.md` with more than one hard
   link makes capture fail.
 
+- **Fix (examples)** — K4 settles a cancelled claimed task soon after its
+  device terminal arrives (#762). Before, the intent waited for the next
+  `reconcileMs` scan, because the server emits no event for that terminal.
+  While it waited, it held the FIFO of its Agent. The core now reads the device
+  terminal of each such task on its own backoff. The interval starts at 25 ms
+  and doubles up to 1 s, and it is never more than `reconcileMs`. Each task
+  gets at most 20 reads, about 15.6 s in all. A read does not write the Host
+  ledger. A found terminal ends the reads of that task and starts one drain.
+  After the last read, only the `reconcileMs` scans remain. This also covers a
+  claimed task that the core cancels at its waiting deadline.
+
 ## 0.28.3 — 2026-10-22 (published)
 
 The owner selected 0.28.3 as one more one-release exception to the default
