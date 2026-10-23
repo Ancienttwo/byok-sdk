@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import type { MemoryIntentRow } from './memory';
-import { hash, taskId, time, type LedgerState, type Occurrence } from './model';
+import { hash, taskId, time, type Json, type LedgerState, type Occurrence } from './model';
 
 export interface ProjectionOutboxLimits { maxCount?: number; maxBytes?: number }
 /**
@@ -31,6 +31,25 @@ function projectionUsage(state: LedgerState): ProjectionOutboxUsage {
 export class CompactVetoError extends Error {
   readonly code = 'compact_vetoed' as const;
   constructor(readonly intentKey: string, reason: string) { super(`Compaction refused: ${reason}`); this.name = 'CompactVetoError'; }
+}
+
+/**
+ * Application rows by stable identity, in the same transaction as the ledger body (#798).
+ * The port is open only while `apply` runs. It reads and writes only this tenant's rows.
+ * A retired identity stays retired: the port has no way to clear it.
+ */
+export interface ApplicationRows {
+  get(namespace: string, id: string): Json | undefined;
+  put(namespace: string, id: string, value: Json): void;
+  /** Returns whether a row existed. */
+  delete(namespace: string, id: string): boolean;
+  retire(namespace: string, id: string): void;
+  isRetired(namespace: string, id: string): boolean;
+}
+const ROW_NAMESPACE_MAX = 128, ROW_ID_MAX = 1024;
+function rowKey(namespace: unknown, id: unknown): void {
+  if (typeof namespace !== 'string' || !namespace || namespace.length > ROW_NAMESPACE_MAX) throw new Error('Invalid application row namespace');
+  if (typeof id !== 'string' || !id || id.length > ROW_ID_MAX) throw new Error('Invalid application row id');
 }
 
 export const MIN_TOMBSTONE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -109,7 +128,10 @@ export class HostLedger {
         tenant TEXT NOT NULL, intent_id TEXT NOT NULL, approval TEXT NOT NULL, body TEXT NOT NULL, expires_at INTEGER NOT NULL,
         PRIMARY KEY (tenant, intent_id));
       CREATE INDEX IF NOT EXISTS host_retired_memory_approval ON host_retired_memory_intent (tenant, approval);
-      CREATE INDEX IF NOT EXISTS host_retired_memory_expiry ON host_retired_memory_intent (tenant, expires_at);`);
+      CREATE INDEX IF NOT EXISTS host_retired_memory_expiry ON host_retired_memory_intent (tenant, expires_at);
+      CREATE TABLE IF NOT EXISTS host_application_row (
+        tenant TEXT NOT NULL, namespace TEXT NOT NULL, id TEXT NOT NULL, body TEXT NOT NULL,
+        PRIMARY KEY (tenant, namespace, id));`);
     this.db.prepare('INSERT OR IGNORE INTO host_ledger VALUES (?, ?)').run(tenant, JSON.stringify(empty()));
   }
   snapshot(): LedgerState {
@@ -120,7 +142,7 @@ export class HostLedger {
     return state;
   }
   projectionOutboxUsage(): ProjectionOutboxUsage { return projectionUsage(this.snapshot()); }
-  transaction<T>(apply: (state: LedgerState) => T): T {
+  transaction<T>(apply: (state: LedgerState, rows: ApplicationRows) => T): T {
     this.db.exec('BEGIN IMMEDIATE');
     let result: T;
     let added = false;
@@ -129,7 +151,8 @@ export class HostLedger {
       const existing = new Set(Object.keys(state.intents));
       const prior = new Set(Object.keys(state.outbox));
       const before = this.projectionLimits && projectionUsage(state);
-      result = apply(state);
+      const port = this.rows();
+      try { result = apply(state, port.rows); } finally { port.close(); }
       if (result && typeof (result as { then?: unknown }).then === 'function') throw new Error('Host transactions must be synchronous');
       // Also covers callers of the exported pure enqueue/recordOccurrence transitions.
       const retired = this.db.prepare("SELECT 1 FROM host_retired_identity WHERE tenant=? AND kind='intent' AND identity=?");
@@ -154,6 +177,43 @@ export class HostLedger {
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
     if (added) for (const listener of [...this.outboxListeners]) { try { listener(); } catch { /* Hints cannot roll back committed state. */ } }
     return result;
+  }
+  /** A port for one transaction. All SQL stays here; the caller gets no database handle. */
+  private rows(): { rows: ApplicationRows; close(): void } {
+    let open = true;
+    const tenant = this.tenant, db = this.db;
+    const check = (namespace: string, id: string) => {
+      if (!open) throw new Error('The application row port is closed');
+      rowKey(namespace, id);
+    };
+    const rows: ApplicationRows = Object.freeze({
+      get(namespace: string, id: string) {
+        check(namespace, id);
+        const row = db.prepare('SELECT body FROM host_application_row WHERE tenant=? AND namespace=? AND id=?').get(tenant, namespace, id);
+        return typeof row?.body === 'string' ? JSON.parse(row.body) as Json : undefined;
+      },
+      put(namespace: string, id: string, value: Json) {
+        check(namespace, id);
+        const body = JSON.stringify(value);
+        if (typeof body !== 'string') throw new Error('An application row must be JSON');
+        db.prepare(`INSERT INTO host_application_row (tenant,namespace,id,body) VALUES (?,?,?,?)
+          ON CONFLICT (tenant,namespace,id) DO UPDATE SET body=excluded.body`).run(tenant, namespace, id, body);
+      },
+      delete(namespace: string, id: string) {
+        check(namespace, id);
+        return Number(db.prepare('DELETE FROM host_application_row WHERE tenant=? AND namespace=? AND id=?').run(tenant, namespace, id).changes) > 0;
+      },
+      retire(namespace: string, id: string) {
+        check(namespace, id);
+        db.prepare("INSERT INTO host_retired_identity (tenant,kind,identity,expires_at) VALUES (?,'row',?,NULL) ON CONFLICT (tenant,kind,identity) DO UPDATE SET expires_at=NULL")
+          .run(tenant, hash([namespace, id]));
+      },
+      isRetired(namespace: string, id: string) {
+        check(namespace, id);
+        return !!db.prepare("SELECT 1 FROM host_retired_identity WHERE tenant=? AND kind='row' AND identity=?").get(tenant, hash([namespace, id]));
+      },
+    });
+    return { rows, close: () => { open = false; } };
   }
   /** Replay evidence is time-bounded. Caller intent identities are permanent; routine occurrence identities expire with their slot. */
   hasTombstone(kind: TombstoneKind, identity: string, now: number): boolean {

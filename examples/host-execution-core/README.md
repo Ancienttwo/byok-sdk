@@ -98,6 +98,24 @@ Every transaction reads and rewrites the whole JSON ledger. History cleanup is e
 executions with terminal documents, occurrences, slot dedup keys, outcome markers, terminal memory
 intents and calendar audits remain in that JSON body. This is not a large-dataset storage design.
 
+An application can keep settled rows out of the body with the row port of the same transaction:
+
+```ts
+ledger.transaction((state, rows) => {
+  rows.put('turns', turnId, row);
+  rows.retire('turns', turnId);
+  delete (state.application.turns as Record<string, unknown>)[turnId];
+});
+```
+
+The port reads and writes rows by namespace and stable id in the `host_application_row` table.
+`get` returns a copy, `put` replaces a row and `delete` reports whether a row existed. `retire`
+records a permanent identity tombstone, and `isRetired` reads it. The port has no way to clear a
+tombstone, and `compact` never removes one. The rows commit or roll back with the body. The port
+reads and writes only this ledger's tenant. It closes when `apply` returns or throws, so a kept
+reference or a write after an `await` throws. The caller never gets the database handle: all SQL,
+the transaction end and the retired-identity tables stay in K4.
+
 Ignored routine wakes are visible in `ledger.snapshot().ignoredWakes`. The optional
 array retains the newest `IGNORED_WAKE_AUDIT_LIMIT` (128) observations in delivery
 order, discarding the oldest. Each record contains `at`, `reason`, and `wakeKeyHash`
@@ -424,7 +442,7 @@ projections, routines and audits can still grow independently; compact does not 
 disk-size bound or run VACUUM.
 
 Opening an existing version-1 ledger adds the tables without changing its JSON format. Back up and
-restore the **whole SQLite database atomically**, including the identity and retired memory tables
+restore the **whole SQLite database atomically**, including the identity, retired memory and application row tables
 (and SQLite's WAL state through a supported backup mechanism). Restoring JSON alone or running an
 older copy of the core loses the retirement guard. Do not downgrade to an earlier version after using
 this API: an older writer ignores the new tables and can reuse retired identities, routine keys and
