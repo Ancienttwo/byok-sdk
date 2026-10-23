@@ -47,7 +47,7 @@ const K8_HOSTED_EXPORTS = Object.freeze({
   './test-support': './src/commit-vectors.test-support.ts',
 });
 // #793 D2g: the K8 retention rule and its shared vectors, added to the hosted
-// entries (owner decision for H's retention slice, 2026-10-24).
+// entries for H's retention slice (owner question §53d).
 const K8_RETENTION_EXPORTS = Object.freeze({
   './retention': './src/retention.ts',
   './retention-vectors': './src/retention-vectors.test-support.ts',
