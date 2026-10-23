@@ -53,11 +53,14 @@
   sealed sibling fails to parse when it carries `sealing` or `sealed`, so a
   direct protocol caller cannot send a sealed task as plaintext.
 - **Changed (client, cloud)** — until the sealed receivers exist, the daemon
-  declines a sealed offer non-retryably (`sealed_payload_unsupported`) and
-  drops a sealed steer (#654 E3a). Cloud inbound refuses a sealed daemon
-  message with `sealed_payload_unsupported`. The sealed hosted entries refuse
-  a `ciphertextRef` with `coordination_input_invalid`, because the Host does
-  not yet check and retain the referenced blob. Inline ciphertext works.
+  declines a sealed offer non-retryably and drops a sealed steer (#654 E3a).
+  To a server that advertises `sealed-payload-v1`, the decline has
+  `sealed_key_unavailable` as its `reason` and `code`. To other servers, its
+  `reason` starts with `sealed_payload_unsupported` and it has no `code`.
+  Cloud inbound refuses a sealed daemon message with
+  `sealed_payload_unsupported`. The sealed hosted entries refuse a
+  `ciphertextRef` with `coordination_input_invalid`, because the Host does not
+  yet check and retain the referenced blob. Inline ciphertext works.
 - **Changed (client)** — the hosted journal admits an inbound envelope record
   up to the larger of `hostedJournal.maxRecordBytes` and 415083 bytes (#654
   E3a). The journal derives this floor from the largest inline sealed member:
