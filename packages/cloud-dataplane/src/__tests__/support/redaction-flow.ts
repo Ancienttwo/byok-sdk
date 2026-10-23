@@ -128,7 +128,7 @@ export interface Device {
   deviceFetch(path: string, init: RequestInit): Promise<Response>;
 }
 
-export async function pairDevice(host: RedactionHost, tenant: TenantId): Promise<Device> {
+export async function pairDevice(host: RedactionHost, tenant: TenantId, extraCapabilities: readonly string[] = []): Promise<Device> {
   if ((await host.core.quota.readEntitlement(tenant)) === undefined) {
     await host.core.quota.writeEntitlement(tenant, {
       version: 1n,
@@ -169,7 +169,7 @@ export async function pairDevice(host: RedactionHost, tenant: TenantId): Promise
   };
   const hello = await device.send(createEnvelope('conn.hello', {
     protocolVersions: [PROTOCOL_VERSION],
-    capabilities: DEVICE_CAPABILITIES,
+    capabilities: [...DEVICE_CAPABILITIES, ...extraCapabilities],
     deviceId,
     productId: PRODUCT_ID,
   }));
@@ -260,18 +260,22 @@ export async function startTask(host: RedactionHost, device: Device, taskId: str
   return { taskId, messageId, artifactHex: '' };
 }
 
-async function uploadArtifact(device: Device, text: string): Promise<UploadedArtifact> {
-  const artifact = Buffer.from(text, 'utf8');
+function uploadArtifact(device: Device, text: string): Promise<UploadedArtifact> {
+  return uploadObject(device, Buffer.from(text, 'utf8'), 'text/plain');
+}
+
+/** Uploads and finalizes one blob through the device blob routes. */
+export async function uploadObject(device: Device, artifact: Uint8Array, contentType: string): Promise<UploadedArtifact> {
   const artifactHash = await createWebCrypto().sha256(artifact);
   const reservation = randomUUID();
   const created = await device.deviceFetch(BYOK_BLOBS_PATH, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'idempotency-key': reservation },
-    body: JSON.stringify({ size: artifact.byteLength, contentType: 'text/plain', contentHash: artifactHash }),
+    body: JSON.stringify({ size: artifact.byteLength, contentType, contentHash: artifactHash }),
   });
   expect(created.status, await created.clone().text()).toBe(200);
   const { blobId, uploadUrl } = (await created.json()) as { blobId: string; uploadUrl: string };
-  const uploaded = await globalThis.fetch(uploadUrl, { method: 'PUT', body: artifact, headers: { 'content-type': 'text/plain' } });
+  const uploaded = await globalThis.fetch(uploadUrl, { method: 'PUT', body: artifact, headers: { 'content-type': contentType } });
   expect(uploaded.ok, await uploaded.text()).toBe(true);
   const finalized = await device.deviceFetch(byokBlobFinalizePath(blobId), {
     method: 'POST',
@@ -280,7 +284,7 @@ async function uploadArtifact(device: Device, text: string): Promise<UploadedArt
   expect(finalized.status, await finalized.text()).toBe(204);
   return {
     blobId,
-    ref: { blobId, contentHash: artifactHash, size: artifact.byteLength, contentType: 'text/plain' },
+    ref: { blobId, contentHash: artifactHash, size: artifact.byteLength, contentType },
     hex: artifactHash.slice('sha256:'.length),
   };
 }

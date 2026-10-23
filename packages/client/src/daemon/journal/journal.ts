@@ -84,6 +84,25 @@ export interface ReceivedEnvelopeRecord {
 }
 
 /**
+ * A task-opening envelope above the inbound record bound (#826). Its bytes are
+ * not stored: the journal keeps its identity, digest and length, the declined
+ * task and the daemon's decline in one transaction, so the cursor can move
+ * past it and the decline survives a crash.
+ */
+export interface WithheldOfferRecord {
+  readonly identity: JournalIdentity;
+  readonly envelopeId: string;
+  readonly taskId: string;
+  readonly seq: number;
+  /** `sha256:<hex>` over the canonical bytes that were not stored. */
+  readonly bytesHash: string;
+  readonly byteLength: number;
+  readonly receivedAt: string;
+  /** The canonical `task.decline` of this task. Bounded like any terminal record. */
+  readonly decline: { readonly bytes: string; readonly payloadHash: string };
+}
+
+/**
  * What {@link LocalTaskJournal.appendEnvelope} hands back. The cursor may
  * advance past {@link seq} once — and only once — this exists.
  */
@@ -166,6 +185,12 @@ export interface RecoverableTask {
   readonly envelopeBytes: string;
 }
 
+/** A task whose offer was withheld (#826). It is declined and has nothing to run or recover. */
+export interface WithheldOfferTask extends Omit<RecoverableTask, 'envelopeBytes'> {
+  /** Length of the canonical offer bytes that were not stored. */
+  readonly withheldEnvelopeBytes: number;
+}
+
 /**
  * What recovery decided about a task. `interrupted` is the honest default for
  * a daemon restart: local runtime sessions do not survive the process, so the
@@ -235,6 +260,12 @@ export interface LocalTaskJournal {
    * second side effect.
    */
   appendEnvelope(record: ReceivedEnvelopeRecord): Promise<JournalReceipt>;
+  /**
+   * Make one over-bound task-opening envelope durable without its bytes, with
+   * its task declined and the decline pending. Idempotent by envelope id like
+   * {@link appendEnvelope}. Refuses a task whose stored offer could still run.
+   */
+  appendWithheldOffer(record: WithheldOfferRecord): Promise<JournalReceipt>;
   /** Record the admission decision for a task whose offer envelope is already durable. */
   recordAdmission(record: AdmissionRecord): Promise<void>;
   /** Record one local execution-state transition. Idempotent by transition id. */
@@ -248,7 +279,7 @@ export interface LocalTaskJournal {
   rejectTerminal(taskId: string, payloadHash: string, reason: string): Promise<void>;
   /** Includes old interruption markers without reports; they must not hide pending work. */
   listRecoveryTasks(identity: JournalIdentity): Promise<RecoverableTask[]>;
-  readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | undefined>;
+  readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | WithheldOfferTask | undefined>;
   /** Tasks with no terminal and no recovery marker — what this daemon was in the middle of when it last stopped. */
   listRecoverable(): Promise<RecoverableTask[]>;
   /** Close out one recoverable task by writing its recovery marker. Never deletes; a marked row is on §12.7.2.1's never-auto-delete list. */
@@ -341,7 +372,7 @@ export class JournalRecordTooLargeError extends Error {
     super(
       `journal record field "${field}" is ${actualBytes} bytes, over the ${limitBytes}-byte bound — refusing it rather ` +
         'than truncating (a truncated envelope is not the envelope that was acked). The journal stores reliability ' +
-        'metadata and small bounded bytes only; large payloads belong on the filesystem, referenced by local_artifact_ref.',
+        'metadata and small bounded bytes only; large content travels by reference (for example an instruction blob ref), never inline.',
     );
     this.name = 'JournalRecordTooLargeError';
   }

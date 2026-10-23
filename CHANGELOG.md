@@ -69,6 +69,23 @@
   KiB) was over the default bound of 256 KiB. The cursor stalled, and the
   daemon sent no decline. Terminal and transition records keep
   `maxRecordBytes`. There is no new config option.
+- **Feature (cloud, cloud-dataplane)** — the sealed hosted entries accept a
+  `ciphertextRef` (#654 E3b). The object with the declared hash must be
+  committed in the tenant, with the declared size and content type. The
+  receiver checks the SHA-256 of the bytes it fetches. The task holds an
+  object reference to the object, and the Postgres task redaction store
+  releases that reference before it deletes the task's objects. A sealed
+  offer retry and a `task.steer_sealed` retry now compare by the comparison
+  projection: a retry that sealed the same content again is a duplicate, and
+  the first ciphertext stays. A steer id now names one steer: before, each
+  `steerSealedTask` call appended a new mailbox row. Compatibility:
+  `TaskRedactionStoreInput` gets the required field
+  `releaseObjectReferences`. A Host with its own `TaskRedactionStore` must
+  remove those references before it deletes the task's objects. A store that
+  ignores the field still compiles, but it keeps the sealed ciphertext of a
+  redacted task. Only task redaction and tenant erasure release the
+  reference, so the ciphertext of a sealed task stays stored as long as its
+  offer receipt does.
 
 ## 0.29.0 — 2026-10-23 (published)
 

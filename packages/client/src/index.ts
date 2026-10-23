@@ -371,6 +371,8 @@ export type {
   LocalTerminalRecord,
   TerminalTruthState,
   RecoverableTask,
+  WithheldOfferRecord,
+  WithheldOfferTask,
   RecoveryOutcome,
   RecoveryDisposition,
   LocalStorageUsage,

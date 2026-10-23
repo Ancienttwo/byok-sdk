@@ -21,9 +21,10 @@
  * no mailbox row, so a mistargeted operator click cannot leave a `task.steer`
  * behind for a runtime that would choke on it later.
  */
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
-import type { TenantId } from '@byok-sdk/core';
+import type { ContentHash, TenantId } from '@byok-sdk/core';
 import {
   PROTOCOL_VERSION,
   createEnvelope,
@@ -46,6 +47,7 @@ import {
   type DecodedEventsPage,
   type PairedDevice,
 } from './support/harness';
+import { BY_REFERENCE_TEXT_LENGTH, inlineMember, referenceMember, sealInput, uploadCiphertext } from './support/sealed';
 
 function devicePrincipal(tenant: TenantId, deviceId: string) {
   return { kind: 'device', tenantId: tenant, productId: PRODUCT_ID, deviceId } as const;
@@ -209,7 +211,7 @@ describe('steerTask (GAP-2)', () => {
     expect(page.events[0]).toMatchObject({ type: 'task.steer_sealed', task_id: task.taskId, payload: sealedSteer });
   });
 
-  it('steerSealedTask refuses a sealed steer by ciphertextRef until the Host retains the blob, and writes no mailbox row (#654)', async () => {
+  it('steerSealedTask refuses a sealed steer by ciphertextRef to a blob that is not committed, and writes no mailbox row (#654)', async () => {
     const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url), 'utf8');
     const byReference = corpus.trimEnd().split('\n').map((raw) => JSON.parse(raw) as { type: string; payload: TaskSteerSealedPayload })
       .find((line) => line.type === 'task.steer_sealed' && 'ciphertextRef' in line.payload.sealed)!.payload;
@@ -220,6 +222,86 @@ describe('steerTask (GAP-2)', () => {
 
     await expect(harness.cloud.steerSealedTask(TENANT_A, task.taskId, byReference)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
     expect((await poll(harness, device, task.seq)).events).toEqual([]);
+  });
+
+  it('steerSealedTask is one steer per steerId: a reseal keeps the first ciphertext, other content is a conflict (#654 E3b)', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const task = await running(harness, device, { runtime: 'pi', capabilities: { steer: true } });
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: ['sealed-payload-v1'] });
+    const seal = (steerId: string, text: string) => sealInput({
+      tenant: TENANT_A, deviceId: device.deviceId, type: 'task.steer_sealed', identity: { taskId: task.taskId, steerId }, plaintext: { text },
+    });
+    const steerId = randomUUID();
+    const first = await seal(steerId, 'go left');
+    const again = await seal(steerId, 'go left');
+    expect(again.header.salt).not.toBe(first.header.salt);
+
+    const enqueued = await harness.cloud.steerSealedTask(TENANT_A, task.taskId, { steerId, sealed: inlineMember(first) });
+    const retried = await harness.cloud.steerSealedTask(TENANT_A, task.taskId, { steerId, sealed: inlineMember(again) });
+    expect(retried).toEqual(enqueued);
+    await expect(
+      harness.cloud.steerSealedTask(TENANT_A, task.taskId, { steerId, sealed: inlineMember(await seal(steerId, 'go right')) }),
+    ).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+    expect((await poll(harness, device, task.seq)).events.map((event) => event.payload))
+      .toEqual([{ steerId, sealed: inlineMember(first) }]);
+
+    const nextId = randomUUID();
+    const next = inlineMember(await seal(nextId, 'go left'));
+    await harness.cloud.steerSealedTask(TENANT_A, task.taskId, { steerId: nextId, sealed: next });
+    expect((await poll(harness, device, task.seq)).events.map((event) => event.payload))
+      .toEqual([{ steerId, sealed: inlineMember(first) }, { steerId: nextId, sealed: next }]);
+  });
+
+  it('steerSealedTask accepts a steer by ciphertextRef to a committed blob, and the task holds one reference to it (#654 E3b)', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const task = await running(harness, device, { runtime: 'pi', capabilities: { steer: true } });
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: ['sealed-payload-v1'] });
+    const steerId = randomUUID();
+    const content = await sealInput({
+      tenant: TENANT_A,
+      deviceId: device.deviceId,
+      type: 'task.steer_sealed',
+      identity: { taskId: task.taskId, steerId },
+      plaintext: { text: 'x'.repeat(BY_REFERENCE_TEXT_LENGTH) },
+    });
+    const ref = await uploadCiphertext(harness, device, content.ciphertext);
+
+    await harness.cloud.steerSealedTask(TENANT_A, task.taskId, { steerId, sealed: referenceMember(content, ref) });
+
+    expect((await poll(harness, device, task.seq)).events.map((event) => event.payload))
+      .toEqual([{ steerId, sealed: referenceMember(content, ref) }]);
+    expect((await harness.core.objects.get(TENANT_A, ref.contentHash as ContentHash))?.refCount).toBe(1);
+  });
+
+  it('steerSealedTask holds no reference to the new blob of a by-reference retry or conflict (#654 E3b)', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const task = await running(harness, device, { runtime: 'pi', capabilities: { steer: true } });
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: ['sealed-payload-v1'] });
+    const steerId = randomUUID();
+    const byReference = async (text: string) => {
+      const content = await sealInput({
+        tenant: TENANT_A, deviceId: device.deviceId, type: 'task.steer_sealed', identity: { taskId: task.taskId, steerId }, plaintext: { text },
+      });
+      return referenceMember(content, await uploadCiphertext(harness, device, content.ciphertext));
+    };
+    const refCount = async (sealed: { ciphertextRef: { contentHash: string } }) =>
+      (await harness.core.objects.get(TENANT_A, sealed.ciphertextRef.contentHash as ContentHash))?.refCount;
+    const text = 'x'.repeat(BY_REFERENCE_TEXT_LENGTH);
+    const first = await byReference(text);
+    const again = await byReference(text);
+    const other = await byReference('y'.repeat(BY_REFERENCE_TEXT_LENGTH));
+
+    await harness.cloud.steerSealedTask(TENANT_A, task.taskId, { steerId, sealed: first });
+    await harness.cloud.steerSealedTask(TENANT_A, task.taskId, { steerId, sealed: again });
+    await expect(harness.cloud.steerSealedTask(TENANT_A, task.taskId, { steerId, sealed: other })).rejects.toMatchObject({
+      code: 'coordination_input_invalid',
+    });
+
+    expect((await poll(harness, device, task.seq)).events.map((event) => event.payload)).toEqual([{ steerId, sealed: first }]);
+    expect([await refCount(first), await refCount(again), await refCount(other)]).toEqual([1, 0, 0]);
   });
 
   it('refuses a claim that reported steer: false, and allocates no mailbox row', async () => {
