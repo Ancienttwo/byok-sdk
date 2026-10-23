@@ -32,7 +32,7 @@ async function freeze(scope: string, turnId = randomUUID(), waitUntil = clock + 
   await opened!.store.seed(scope, () => {});
   return inSchema(opened!.pool, opened!.store.schema, async client => {
     await lockScope(client, storedKey(scope));
-    return freezeIntent(client, scope, { turnId, execution: template(host!.deviceId), waitUntil });
+    return freezeIntent(client, scope, { key: turnId, source: 'user', execution: template(host!.deviceId), waitUntil });
   });
 }
 /** The SDK mailbox rows of the task's offer. */
@@ -63,7 +63,16 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('H submitter on real Postgres and a real SDK 
     expect(await freeze(scope, turnId)).toEqual(input);
     await expect(inSchema(opened!.pool, opened!.store.schema, async client => {
       await lockScope(client, storedKey(scope));
-      return freezeIntent(client, scope, { turnId, execution: { ...template(host!.deviceId), deviceId: 'other' }, waitUntil: clock + 60_000 });
+      return freezeIntent(client, scope, { key: turnId, source: 'user', execution: { ...template(host!.deviceId), deviceId: 'other' }, waitUntil: clock + 60_000 });
+    })).rejects.toThrow('Intent identity conflict');
+  });
+
+  it('refuses a second freeze of the Turn with another source (#793 D2b-2)', async () => {
+    const scope = `tenant:${randomUUID()}`, turnId = randomUUID();
+    await freeze(scope, turnId);
+    await expect(inSchema(opened!.pool, opened!.store.schema, async client => {
+      await lockScope(client, storedKey(scope));
+      return freezeIntent(client, scope, { key: turnId, source: 'bot', execution: template(host!.deviceId), waitUntil: clock + 60_000 });
     })).rejects.toThrow('Intent identity conflict');
   });
 
@@ -124,6 +133,19 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('H submitter on real Postgres and a real SDK 
     expect(submitted).toEqual([]);
     clock += 2000;
     expect(await submitter(port).run()).toEqual({ tried: 0, failed: [] });
+  });
+
+  it('keeps the cancel reason of a sync cancel that lands during a stopped try (#793 D2b-2)', async () => {
+    const scope = `tenant:${randomUUID()}`, input = await freeze(scope, randomUUID(), clock + 10), { port, submitted } = sdkPort();
+    // The sync cancel commits between the claim and the late write, and the wait ends, so the try stops.
+    const racing: FrozenSubmitPort = { ...port, offer: async id => {
+      await update(scope, input.taskId, `cancel_reason = 'cancelled'`);
+      clock += 10;
+      return port.offer(id);
+    } };
+    expect(await submitter(racing).run()).toEqual({ tried: 1, failed: [] });
+    expect(await row(scope, input.taskId)).toMatchObject({ submission: 'uncertain', tries: 1, cancel_reason: 'cancelled', conclusion: null });
+    expect(submitted).toEqual([]);
   });
 
   it('submits only the FIFO head of an agent, and the next intent waits until the head concludes', async () => {
