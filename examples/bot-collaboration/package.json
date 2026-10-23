@@ -4,6 +4,14 @@
   "private": true,
   "type": "module",
   "description": "Single Bot actions on the K4 Host execution core",
+  "exports": {
+    "./rules/commands": "./src/rules/commands.ts",
+    "./rules/commit": "./src/rules/commit.ts",
+    "./model": "./src/model.ts",
+    "./coalesce": "./src/coalesce.ts",
+    "./team": "./src/team.ts",
+    "./test-support": "./src/commit-vectors.test-support.ts"
+  },
   "scripts": { "typecheck": "tsc --noEmit", "test": "vitest run" },
   "dependencies": {
     "@byok-sdk/core": "workspace:*",
