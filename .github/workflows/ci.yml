@@ -354,7 +354,9 @@ jobs:
             'exit /b %ERRORLEVEL%'
           ) | Set-Content -Encoding ascii (Join-Path $work 'run.cmd')
           $credential = [pscredential]::new($user, (ConvertTo-SecureString $password -AsPlainText -Force))
-          $process = Start-Process -FilePath (Join-Path $work 'run.cmd') -Credential $credential -WorkingDirectory $work -Wait -PassThru
+          # -LoadUserProfile gives the account a real profile, so the W2 home
+          # chain probe also walks a user-owned LOCALAPPDATA chain.
+          $process = Start-Process -FilePath (Join-Path $work 'run.cmd') -Credential $credential -WorkingDirectory $work -LoadUserProfile -Wait -PassThru
           Get-Content (Join-Path $work 'token.txt')
           Get-Content (Join-Path $work 'go.txt')
           $token = Get-Content -Raw (Join-Path $work 'token.txt')
