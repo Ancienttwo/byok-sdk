@@ -152,14 +152,14 @@ describe.skipIf(POSTGRES_URL === undefined)('H sync step on real Postgres (#793 
     expect(await intentRow(h.scope, 'q2')).toBeUndefined();
   });
 
-  it('refuses a routine Turn before D2f, and writes nothing', async () => {
+  it('refuses a routine Turn that has no occurrence row, and writes nothing (#793 D2f)', async () => {
     const h = await hosted();
     await h.change(state => {
       queueTurns(state);
       state.turns.r1 = { id: 'r1', root: 'r1', botId: 'main', source: 'routine', request: 'Daily', hop: 0, status: 'queued', authority: 'owner' };
     });
     const before = await h.stored();
-    await expect(h.sync()).rejects.toThrow('H has no routine Turns before #793 D2f');
+    await expect(h.sync()).rejects.toThrow('Host occurrence not found');
     expect(await h.stored()).toBe(before);
   });
 });
