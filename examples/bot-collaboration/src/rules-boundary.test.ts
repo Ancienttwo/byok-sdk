@@ -58,3 +58,8 @@ it('finds a boundary break in each import form that it reads', () => {
   ]);
   expect(violations('sample.test.ts', "import { expect } from 'vitest';\nimport { canonical, hash } from '@byok-sdk/example-host-execution-core';")).toEqual([]);
 });
+
+it('holds the #739 D1 pure modules under the boundary', () => {
+  const files = new Set(readdirSync(RULES));
+  for (const name of ['turn', 'team', 'history', 'delegation', 'schema', 'context', 'outcome']) expect(files.has(`${name}.ts`), name).toBe(true);
+});
