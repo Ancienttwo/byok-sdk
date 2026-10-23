@@ -134,12 +134,12 @@ describe('E2EE member control plane', () => {
     const key = generateScopeKey();
     const first = await keyPackage(TENANT_A, sender, sender, 1, key);
     const second = await keyPackage(TENANT_A, sender, device, 1, key);
-    expect(await cloud.putScopeKeyPackages(TENANT_A, { packages: [first, second] })).toEqual({ stored: 2 });
+    expect(await cloud.putScopeKeyPackages(TENANT_A, { packages: [first, second] })).toEqual({ stored: 2, skippedDeviceIds: [] });
     expect(await code(cloud.putScopeKeyPackages(TENANT_A, { packages: [await keyPackage(TENANT_A, sender, device, 1)] })))
       .toBe('e2ee_scope_key_conflict');
     // A re-wrap of the same scope key replaces the recipient's package.
     const rewrapped = await keyPackage(TENANT_A, sender, device, 1, key);
-    expect(await cloud.putScopeKeyPackages(TENANT_A, { packages: [rewrapped] })).toEqual({ stored: 1 });
+    expect(await cloud.putScopeKeyPackages(TENANT_A, { packages: [rewrapped] })).toEqual({ stored: 1, skippedDeviceIds: [] });
     const stored = await cloud.readScopeKeyPackages(TENANT_A, { scopeId: 'scope-1' });
     expect(stored.packages).toHaveLength(2);
     expect(stored.packages).toContainEqual(first);
@@ -176,7 +176,7 @@ describe('E2EE member control plane', () => {
     const longest = 'x'.repeat(512);
     expect(await code(cloud.putScopeKeyPackages(TENANT_A, { packages: [{ ...one, scopeId: `${longest}x` }] }))).toBe('coordination_input_invalid');
     expect(await code(cloud.readScopeKeyPackages(TENANT_A, { scopeId: `${longest}x` }))).toBe('coordination_input_invalid');
-    expect(await cloud.putScopeKeyPackages(TENANT_A, { packages: [{ ...one, scopeId: longest }] })).toEqual({ stored: 1 });
+    expect(await cloud.putScopeKeyPackages(TENANT_A, { packages: [{ ...one, scopeId: longest }] })).toEqual({ stored: 1, skippedDeviceIds: [] });
     expect(await cloud.readScopeKeyPackages(TENANT_A, { scopeId: longest })).toEqual({ packages: [{ ...one, scopeId: longest }] });
   });
 
@@ -198,7 +198,7 @@ describe('E2EE member control plane', () => {
     const packages = [
       ['\u{1F600}', 1, high], ['b', 2, low], ['\uFF61', 1, low], ['b', 1, high], ['a', 1, high], ['b', 1, low],
     ].map(([scopeId, epoch, recipient]) => ({ ...base, scopeId: scopeId as string, epoch: epoch as number, recipient: recipient as string }));
-    expect(await cloud.putScopeKeyPackages(TENANT_A, { packages })).toEqual({ stored: 6 });
+    expect(await cloud.putScopeKeyPackages(TENANT_A, { packages })).toEqual({ stored: 6, skippedDeviceIds: [] });
     expect(received).toEqual([
       ['a', 1, high], ['b', 1, low], ['b', 1, high], ['b', 2, low], ['\uFF61', 1, low], ['\u{1F600}', 1, high],
     ]);

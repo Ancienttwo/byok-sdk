@@ -71,6 +71,7 @@ const ENQUEUE: Partial<Record<MessageType, Enqueue>> = {
   'agent.input.preparation': (h, d, payload) => h.cloud.enqueueInputPreparation(TENANT_A, d, payload),
   'provider.provisioning.available': (h, d, payload) => h.cloud.enqueueProviderProvisioningNotice(TENANT_A, d, payload),
   'agent.memory.intent.available': (h, d, payload) => h.cloud.enqueueAgentMemoryIntentNotice(TENANT_A, d, payload),
+  'e2ee.key_package.available': (h, d, payload) => h.cloud.enqueueScopeKeyPackageNotice(TENANT_A, d, payload),
   // #654: each sealed type has its own hosted entry.
   'task.offer_sealed': (h, d, payload) => h.cloud.enqueueSealedOffer(TENANT_A, d, { taskId: 'gated', payload }),
   'task.offer_with_toolsets_sealed': (h, d, payload) => h.cloud.enqueueSealedToolsetOffer(TENANT_A, d, { taskId: 'gated', payload }),
