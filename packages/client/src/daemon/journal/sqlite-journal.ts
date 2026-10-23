@@ -92,7 +92,8 @@ const SEALED_ENVELOPE_MARGIN_BYTES = 64 * 1024;
  * member carries up to `SEALED_INLINE_MAX_PADDED_LENGTH` + 16 bytes of
  * ciphertext as unpadded base64url. That is above the default record bound,
  * and the daemon must journal such an envelope before it can decline it.
- * Terminal and transition records keep `maxRecordBytes`.
+ * A sealed terminal record has the same floor; plaintext terminal and
+ * transition records keep `maxRecordBytes`.
  */
 const ENVELOPE_RECORD_FLOOR_BYTES = Math.ceil(((SEALED_INLINE_MAX_PADDED_LENGTH + SEALED_AEAD_TAG_BYTES) * 4) / 3) + SEALED_ENVELOPE_MARGIN_BYTES;
 
@@ -715,7 +716,7 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
    */
   recordTerminal(record: LocalTerminalRecord): Promise<void> {
     return this.#enqueue('recordTerminal', () => {
-      this.#assertTerminalBytes(record.bytes, record.payloadHash);
+      this.#assertTerminalBytes(record.bytes, record.payloadHash, record.sealed === true);
       this.#transaction(() => {
         this.#requireTask(record.taskId, 'recordTerminal');
         const existing = this.#db.prepare('SELECT * FROM journal_terminal WHERE task_id = ?')
@@ -740,12 +741,13 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
     });
   }
 
-  #assertTerminalBytes(bytes: string, payloadHash: string): void {
+  #assertTerminalBytes(bytes: string, payloadHash: string, sealed = false): void {
     if (typeof bytes !== 'string' || journalHash(bytes) !== payloadHash) {
       throw new Error('terminal bytes do not match their canonical hash');
     }
-    if (byteLength(bytes) > this.#maxRecordBytes) {
-      throw new JournalRecordTooLargeError('terminal bytes', byteLength(bytes), this.#maxRecordBytes);
+    const bound = sealed ? Math.max(this.#maxRecordBytes, ENVELOPE_RECORD_FLOOR_BYTES) : this.#maxRecordBytes;
+    if (byteLength(bytes) > bound) {
+      throw new JournalRecordTooLargeError('terminal bytes', byteLength(bytes), bound);
     }
   }
 

@@ -17,7 +17,10 @@ import {
   decodeEnvelope,
   encodeEnvelope,
   isTaskOfferType,
+  isSealedMessageType,
+  requiredReceiverCapabilities,
   PROTOCOL_VERSION,
+  SEALED_PAYLOAD_CAPABILITY,
   STRICT_AGENT_ONLY_CAPABILITY,
   TASK_TRANSITIONS,
   AGENT_EGRESS_POLICY_CAPABILITY,
@@ -74,6 +77,7 @@ import { assertCodexSandboxSetting, CodexAdapter, type CodexSandboxSetting } fro
 import { ApprovalNotFoundError, ApprovalRegistry } from './approvals';
 import { AuthManager, DeviceRevokedError } from './auth-manager';
 import { BlobClient } from './blob-client';
+import { SealedTasks, type SealedScopeKeyring } from './sealed-task';
 import { resolveMachineId } from './machine-id';
 import { declares, fetchCapabilityDeclaration, PRESENCE_HINTS_CAPABILITY } from './capabilities-client';
 import type { CapabilityDeclaration } from '@byok-sdk/core';
@@ -955,12 +959,14 @@ export interface AssertionIssueProbe {
  * refusing to take a task, not producing a result for one.
  *
  * `task.complete`/`task.fail`/`task.cancelled` -> the terminal kind recorded locally.
+ * A sealed terminal (`task.complete_sealed`, …) has the kind of its plaintext type.
  */
 function terminalKindOf(type: string): 'complete' | 'failed' | 'cancelled' | 'declined' | undefined {
-  if (type === 'task.decline') return 'declined';
-  if (type === 'task.complete') return 'complete';
-  if (type === 'task.fail') return 'failed';
-  if (type === 'task.cancelled') return 'cancelled';
+  const plainType = type.endsWith('_sealed') ? type.slice(0, -'_sealed'.length) : type;
+  if (plainType === 'task.decline') return 'declined';
+  if (plainType === 'task.complete') return 'complete';
+  if (plainType === 'task.fail') return 'failed';
+  if (plainType === 'task.cancelled') return 'cancelled';
   return undefined;
 }
 
@@ -1287,6 +1293,16 @@ export function createDaemonWithAdapters(
 }
 
 /**
+ * #654 E3c: an injected scope keyring. Only tests pass it. With it the daemon
+ * opens and seals sealed task content and advertises `sealed-payload-v1`.
+ * A release must not advertise that flag before the device can receive key
+ * packages (E2c-3, E2d), so no public option reaches this.
+ */
+export interface SealedPayloadTestSeam {
+  readonly keyring: SealedScopeKeyring;
+}
+
+/**
  * codex round-2 F3: the real builder. Exported from THIS module but NOT from
  * the package `index.ts`, so the optional `assertionProbe` (an
  * {@link AssertionIssueProbe} post-sign observer) is reachable only by tests
@@ -1299,6 +1315,7 @@ export function buildDaemonWithAdapters(
   adapters: RuntimeAdapter[],
   overrides: DaemonOverrides = {},
   assertionProbe?: AssertionIssueProbe,
+  sealedPayload?: SealedPayloadTestSeam,
 ): Daemon {
   if (overrides.deviceCredentials !== undefined && config.deviceCredentials !== undefined) {
     throw new TypeError('configure OS deviceCredentials or inject a credential backend, not both');
@@ -2136,16 +2153,21 @@ export function buildDaemonWithAdapters(
       ? { tenantId: record.tenantId, productId: config.productId, deviceId: record.deviceId }
       : undefined;
     const resultReplyRecoveryTasks = new Map<string, { agentRef: AgentRef; contract: string }>();
+    // Assigned once the blob client exists. Startup recovery before that
+    // writes only `daemon_interrupted`, which stays plaintext (decision 12d).
+    let sealedTasks: SealedTasks | undefined;
     const recordRecoveryFailure = async (task: import('./journal/journal').RecoverableTask, reason: string, interrupted = false) => {
       const offer = decodeEnvelope(task.envelopeBytes);
       const { agentRef } = offer.payload as { agentRef?: AgentRef };
-      const envelope = createEnvelope('task.fail', { reason, retryable: false,
+      const failure = createEnvelope('task.fail', { reason, retryable: false,
         ...terminalIdentity(task.claimedRuntime, agentRef),
         ...(interrupted ? { recovery: { kind: 'daemon_interrupted' as const, offerId: offer.id } } : {}),
       }, { taskId: task.taskId });
+      const envelope = sealedTasks === undefined ? failure : await sealedTasks.sealRecovered(offer, failure);
       const bytes = encodeEnvelope(envelope);
       await activeJournal!.recordTerminal({ taskId: task.taskId, terminalType: 'failed', bytes, payloadHash: journalHash(bytes),
         truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString(),
+        ...(isSealedMessageType(envelope.type) ? { sealed: true } : {}),
         recovery: { disposition: interrupted ? 'interrupted' : 'abandoned', reason } });
     };
     if (activeJournal && journalIdentity) {
@@ -2314,6 +2336,18 @@ export function buildDaemonWithAdapters(
     });
 
     capabilities.push('custom-harness');
+    if (sealedPayload !== undefined) {
+      capabilities.push(SEALED_PAYLOAD_CAPABILITY);
+      sealedTasks = new SealedTasks({
+        keyring: sealedPayload.keyring,
+        tenantId: record.tenantId,
+        deviceId: record.deviceId,
+        blobs: {
+          download: (ref) => blobClient.downloadBlob(ref, { signal: blobLifecycleAbort?.signal }),
+          upload: (ciphertext) => blobClient.uploadArtifact(ciphertext, 'application/octet-stream', { signal: blobLifecycleAbort?.signal }),
+        },
+      });
+    }
     // Contract §8.1 / §8.3: the device-level capability string is NOT computed
     // here. It is the one flag whose answer depends on a deployment fact this
     // daemon has not read yet at this point in `start()`, so it is added (and
@@ -2325,25 +2359,28 @@ export function buildDaemonWithAdapters(
     deploymentDeclaration = undefined;
     helloCapabilities = capabilities;
 
-    // The journal owns terminal bytes; the transport owns one delivery queue.
-    // A local write failure must never bypass durability and send different truth.
-    const sendEnvelope: TaskRunnerDeps['send'] = (envelope) => {
-      const terminalKind = terminalKindOf(envelope.type);
-      if (!activeJournal || !journalIdentity || terminalKind === undefined || envelope.task_id === undefined) {
-        observer.captureOutboundApproval(envelope);
-        connection?.send(envelope);
-        return;
-      }
-      const taskId = envelope.task_id;
-      const bytes = encodeEnvelope(envelope);
+    const commitTerminal = (taskId: string, terminal: Envelope | (() => Promise<Envelope | undefined>)): void => {
+      const plainBytes = typeof terminal === 'function' ? undefined : encodeEnvelope(terminal);
+      // A sealed terminal is sealed once and its bytes are journaled; a retry
+      // of the commit reuses them and never seals or uploads again (§9.2).
+      let sealing: Promise<Envelope | undefined> | undefined;
       terminalCommits.enqueue(taskId, async () => {
+        if (!activeJournal || !journalIdentity) throw new Error('durable journal unavailable');
+        let envelope: Envelope | undefined;
+        if (typeof terminal === 'function') {
+          sealing ??= terminal();
+          try { envelope = await sealing; } catch (error) { sealing = undefined; throw error; }
+          if (envelope === undefined) return;
+        } else envelope = terminal;
+        const bytes = plainBytes ?? encodeEnvelope(envelope);
         try {
-          await activeJournal.recordTerminal({ taskId, terminalType: terminalKind, bytes,
-            payloadHash: journalHash(bytes), truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });
+          await activeJournal.recordTerminal({ taskId, terminalType: terminalKindOf(envelope.type)!, bytes,
+            payloadHash: journalHash(bytes), truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString(),
+            ...(isSealedMessageType(envelope.type) ? { sealed: true } : {}) });
           // Read the first immutable winner, not an attempted replacement candidate.
-          const terminal = (await activeJournal.listPendingTerminals(journalIdentity)).find((row) => row.taskId === taskId);
-          if (!terminal || terminal.truthState !== 'pending') return;
-          const durable = decodeEnvelope(terminal.bytes);
+          const durableTerminal = (await activeJournal.listPendingTerminals(journalIdentity)).find((row) => row.taskId === taskId);
+          if (!durableTerminal || durableTerminal.truthState !== 'pending') return;
+          const durable = decodeEnvelope(durableTerminal.bytes);
           overrides.executionRecoveryFault?.('terminal:before-send');
           observer.captureOutboundApproval(durable);
           connection?.send(durable);
@@ -2353,20 +2390,21 @@ export function buildDaemonWithAdapters(
           // Do not truncate or invent a success: settle the exact task identity
           // with one small, canonical, non-retryable failure. The offer is the
           // sole source of AgentRef, so a foreign or missing ref is never guessed.
-          if (!activeJournal || !journalIdentity) throw error;
           const task = await activeJournal.readTask(taskId, journalIdentity);
           if (!task) throw new Error(`missing durable task ${taskId}`);
           if (!('envelopeBytes' in task)) throw new Error(`task ${taskId} has a withheld offer and no result`);
           const offer = decodeEnvelope(task.envelopeBytes);
           if (!isTaskOfferType(offer.type) || offer.task_id !== taskId) throw new Error(`invalid durable offer binding for ${taskId}`);
           const offerPayload = offer.payload as { agentRef?: AgentRef };
-          const failure = createEnvelope('task.fail', {
+          const plainFailure = createEnvelope('task.fail', {
             reason: 'terminal_result_too_large', retryable: false,
             ...terminalIdentity(task.claimedRuntime, offerPayload.agentRef),
           }, { taskId });
+          const failure = sealedTasks === undefined ? plainFailure : await sealedTasks.sealRecovered(offer, plainFailure);
           const failureBytes = encodeEnvelope(failure);
           await activeJournal.recordTerminal({ taskId, terminalType: 'failed', bytes: failureBytes,
-            payloadHash: journalHash(failureBytes), truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });
+            payloadHash: journalHash(failureBytes), truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString(),
+            ...(isSealedMessageType(failure.type) ? { sealed: true } : {}) });
           const durableFailure = (await activeJournal.listPendingTerminals(journalIdentity)).find((row) => row.taskId === taskId);
           if (!durableFailure || durableFailure.truthState !== 'pending') return;
           const decoded = decodeEnvelope(durableFailure.bytes);
@@ -2377,6 +2415,34 @@ export function buildDaemonWithAdapters(
           // recovery; the oversized result itself is never silently dropped.
         }
       });
+    };
+
+    // The journal owns terminal bytes; the transport owns one delivery queue.
+    // A local write failure must never bypass durability and send different truth.
+    // #654: a task that seals its output sends each outbound sealed, in order.
+    const sendEnvelope: TaskRunnerDeps['send'] = (envelope) => {
+      const terminal = activeJournal !== undefined && journalIdentity !== undefined && envelope.task_id !== undefined
+        && terminalKindOf(envelope.type) !== undefined;
+      if (sealedTasks?.sealsOutbound(envelope)) {
+        // The local observer reads the plaintext envelope; see `plainOf`.
+        observer.captureOutboundApproval(envelope);
+        const sealedTaskOutput = sealedTasks;
+        if (terminal) {
+          commitTerminal(envelope.task_id!, () => sealedTaskOutput.sealOutbound(envelope));
+          return;
+        }
+        void sealedTaskOutput.sealOutbound(envelope).then(
+          (sealed) => { if (sealed !== undefined) connection?.send(sealed); },
+          (error: unknown) => console.error(`[byok/client] ${envelope.type} for sealed task ${envelope.task_id} not sent`, error),
+        );
+        return;
+      }
+      if (!terminal) {
+        observer.captureOutboundApproval(envelope);
+        connection?.send(envelope);
+        return;
+      }
+      commitTerminal(envelope.task_id!, envelope);
     };
 
     // #826: an inbound envelope above the journal record bound is never stored
@@ -2391,8 +2457,15 @@ export function buildDaemonWithAdapters(
       }
       if (!activeJournal || !journalIdentity) throw new Error('durable journal unavailable');
       const { agentRef } = envelope.payload as { agentRef?: AgentRef };
+      // A sealed offer this device cannot hold is one it cannot open. The
+      // closed code is a value gate on the server's `sealed-payload-v1`.
+      const code = 'sealed_open_failed';
+      const serverCapabilities = connection?.getServerCapabilities() ?? [];
+      const closedCode = isSealedMessageType(envelope.type)
+        && requiredReceiverCapabilities('task.decline', { reason: code, code }).every((flag) => serverCapabilities.includes(flag));
       const decline = createEnvelope('task.decline', {
-        reason: 'inbound_envelope_too_large', retryable: false, ...(agentRef === undefined ? {} : { agentRef }),
+        ...(closedCode ? { reason: code, code } : { reason: 'inbound_envelope_too_large' }),
+        retryable: false, ...(agentRef === undefined ? {} : { agentRef }),
       }, { taskId });
       const bytes = encodeEnvelope(decline);
       const receipt = await activeJournal.appendWithheldOffer({
@@ -2572,6 +2645,7 @@ export function buildDaemonWithAdapters(
       // capability is only known once the handshake completes, strictly
       // after this `deps` object is constructed.
       getServerCapabilities: () => connection?.getServerCapabilities() ?? [],
+      ...(sealedTasks === undefined ? {} : { sealedTasks }),
       // Same late-binding closure as `getServerCapabilities`; with no
       // connection yet there is no advertisement, and that is an error.
       getIngressBudget: () => {
@@ -2892,8 +2966,11 @@ export function buildDaemonWithAdapters(
                 const binding = resultReplyRecoveryTasks.get(taskId)!;
                 await runner!.cancelRecoveredAgentMessage(taskId, async () => {
                   const task = await activeJournal.readTask(taskId, journalIdentity);
-                  sendEnvelope(createEnvelope('task.cancelled', { reason: envelope.payload.reason,
-                    ...terminalIdentity(task?.claimedRuntime, binding.agentRef) }, { taskId }));
+                  const cancelled = createEnvelope('task.cancelled', { reason: envelope.payload.reason,
+                    ...terminalIdentity(task?.claimedRuntime, binding.agentRef) }, { taskId });
+                  sendEnvelope(sealedTasks !== undefined && task !== undefined && 'envelopeBytes' in task
+                    ? await sealedTasks.sealRecovered(decodeEnvelope(task.envelopeBytes), cancelled)
+                    : cancelled);
                   await terminalCommits.receipt(taskId);
                 });
                 resultReplyRecoveryTasks.delete(taskId);
@@ -2943,7 +3020,7 @@ export function buildDaemonWithAdapters(
         for (const settlement of settlements) {
           const { envelope } = settlement;
           outbound[settlement.outcome] += 1;
-          if (settlement.outcome !== 'rejected') { observer.handleOutboundEnvelope(envelope); continue; }
+          if (settlement.outcome !== 'rejected') { observer.handleOutboundEnvelope(sealedTasks?.plainOf(envelope) ?? envelope); continue; }
           const rejection = {
             envelopeId: envelope.id, type: envelope.type,
             ...(envelope.task_id === undefined ? {} : { taskId: envelope.task_id }),
@@ -2952,7 +3029,7 @@ export function buildDaemonWithAdapters(
           outbound.rejectedByReason[rejection.reason] = (outbound.rejectedByReason[rejection.reason] ?? 0) + 1;
           if (rejection.terminal) outbound.rejectedTerminals += 1;
           outbound.lastRejection = rejection;
-          observer.noteOutboundRejected(envelope, rejection);
+          observer.noteOutboundRejected(sealedTasks?.plainOf(envelope) ?? envelope, rejection);
         }
       },
       onStateChange: (state) => {

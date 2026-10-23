@@ -170,6 +170,12 @@ export interface LocalTerminalRecord {
   readonly recordedAt: string;
   /** Committed atomically with the original interruption report. */
   readonly recovery?: RecoveryOutcome;
+  /**
+   * The bytes are a sealed terminal (#654). An inline sealed member is larger
+   * than the default record bound, so such a record may reach the inbound
+   * envelope floor. Not stored.
+   */
+  readonly sealed?: boolean;
 }
 
 /** A task the journal knows about that has no terminal and no recovery marker — i.e. one this daemon was in the middle of when it stopped. */

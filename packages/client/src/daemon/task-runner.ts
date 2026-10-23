@@ -29,6 +29,7 @@ import {
   type AgentEgressPolicy,
   type BlobRef,
   type Envelope,
+  type SealedDeclineCode,
   type PreparedAgentMemoryMode,
   type RuntimeId,
   type TerminalInferenceUsage,
@@ -45,6 +46,7 @@ import {
   type TaskOfferWithToolsetsPayload,
   type InputPreparationOfferBinding,
   requiredReceiverCapabilities,
+  SEALED_SPLIT_TABLE,
   validateResultOutcome,
 } from '@byok-sdk/protocol';
 import {
@@ -98,6 +100,7 @@ import {
 } from '../runtime-failure';
 import { ApprovalNotFoundError, type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
+import type { SealedTasks } from './sealed-task';
 import type {
   AgentResultDescribeParams,
   AgentResultDescribeResult,
@@ -600,6 +603,11 @@ export interface TaskRunnerDeps {
    * about this gate isn't forced to supply one — see `sendApprovalResolved`.
    */
   getServerCapabilities?: () => readonly string[];
+  /**
+   * #654: opens sealed task input and seals sealed task output. Absent on a
+   * daemon that holds no scope key, which declines every sealed offer.
+   */
+  sealedTasks?: SealedTasks;
   /**
    * The server-advertised activity ingress (protocol v3), read fresh at each
    * progress push. `create-daemon.ts` wires it to
@@ -1366,6 +1374,10 @@ export type HostToolsetContextLookup =
   | { readonly status: 'revoked' }
   | { readonly status: 'unknown' };
 
+const NO_SEALED_SPILL: Pick<BlobResolver, 'uploadArtifact'> = {
+  uploadArtifact: async () => { throw new Error('a sealed task stores no plaintext spill blob'); },
+};
+
 // Keep internal lifecycle bookkeeping out of the exported class declaration.
 const offerSettlements = new WeakMap<TaskRunner, Set<Promise<void>>>();
 async function trackOffer(runner: TaskRunner, operation: Promise<void>): Promise<void> {
@@ -1503,6 +1515,8 @@ export class TaskRunner {
    */
   private readonly preparationPinsByTask = new Map<string, string>();
   private readonly inFlightOffers = new Set<string>();
+  /** Sealed offers being opened, so a redelivery during the open is not opened twice. */
+  private readonly sealedOpening = new Set<string>();
   private readonly claimedHarnesses = new Map<string, string>();
   private readonly homeReservations = new Map<string, number>();
   private readonly startupOwnership: StartupOwnership;
@@ -2189,22 +2203,28 @@ export class TaskRunner {
       case 'agent.message.disposition':
         await this.handleAgentMessageDisposition(envelope.task_id, envelope.payload);
         return;
-      // #654: this daemon does not open sealed content and does not advertise
-      // `sealed-payload-v1`. A sealed type reaches it only from a Host that
-      // skipped the gate. A sealed offer is declined, not dropped, so the
-      // task does not wait for a timeout; a sealed steer is dropped.
+      // #654: a sealed offer that cannot be opened is declined, not dropped,
+      // so the task does not wait for a timeout; a sealed steer that cannot
+      // be opened is dropped.
       case 'task.offer_sealed':
       case 'task.offer_with_toolsets_sealed':
       case 'task.offer_for_agent_sealed':
       case 'task.offer_for_agent_with_egress_sealed':
       case 'task.offer_for_agent_with_egress_fresh_sealed':
-        this.declineSealedOffer(envelope.task_id, 'agentRef' in envelope.payload ? envelope.payload.agentRef : undefined);
+        await trackOffer(this, this.handleSealedOffer(envelope));
         return;
-      case 'task.steer_sealed':
-        console.error(
-          `[byok/client] inbound sealed task.steer for task ${envelope.task_id} rejected: this daemon does not open sealed task input — acked without retry; this envelope should have been gated server-side`,
-        );
+      case 'task.steer_sealed': {
+        if (this.deps.sealedTasks === undefined) {
+          console.error(
+            `[byok/client] inbound sealed task.steer for task ${envelope.task_id} rejected: this daemon does not open sealed task input — acked without retry; this envelope should have been gated server-side`,
+          );
+          return;
+        }
+        if (!this.tasks.has(envelope.task_id)) return;
+        const text = await this.deps.sealedTasks.openSteer(envelope);
+        if (text !== undefined) await this.handleSteer(envelope.task_id, text);
         return;
+      }
       default:
         return; // conn.* and daemon->server-only types are handled elsewhere / not applicable
     }
@@ -4138,7 +4158,9 @@ export class TaskRunner {
         // not a task that flooded.
         event = await spillOversizedEvent(event, {
           maxInlineBytes: this.maxInlineEventBytes,
-          blobClient: this.deps.blobClient,
+          // #654: a sealed task never stores a plaintext spill blob. Its
+          // event keeps the preview, which is sealed with the rest of the batch.
+          blobClient: this.deps.sealedTasks?.sealsOutput(active.taskId) ? NO_SEALED_SPILL : this.deps.blobClient,
           taskId: active.taskId,
           signal: active.blobAbort.signal,
           log: (message) => {
@@ -4498,6 +4520,25 @@ export class TaskRunner {
     }
 
     if (this.tasks.get(active.taskId) !== active || active.blobAbort.signal.aborted || active.beingTornDown) return;
+    const sealedTasks = this.deps.sealedTasks;
+    if (sealedTasks?.sealsOutput(active.taskId)) {
+      // #654 decision 12b: a sealed task's artifact is sealed inline content.
+      // It is never uploaded as a plaintext blob.
+      const inline = bytes.toString('base64');
+      if (Buffer.byteLength(inline, 'utf8') > SEALED_SPLIT_TABLE['task.artifact_sealed'].limits.inline) {
+        this.reportArtifactError(active, name, `artifact "${name}" is over the sealed inline limit and was not sent`);
+        return;
+      }
+      try {
+        const sealed = await sealedTasks.sealArtifact(active.taskId, { name, contentType, inline });
+        if (this.tasks.get(active.taskId) !== active || active.blobAbort.signal.aborted || active.beingTornDown) return;
+        if (sealed === undefined) this.reportArtifactError(active, name, `artifact "${name}" was not sent: no sealing key`);
+        else this.deps.send(sealed);
+      } catch (err) {
+        this.reportArtifactError(active, name, `failed to seal artifact "${name}": ${errorMessage(err)}`);
+      }
+      return;
+    }
     if (bytes.length <= MAX_INLINE_ARTIFACT_BYTES) {
       const inline = bytes.toString('base64');
       if (new TextEncoder().encode(inline).length <= MAX_INLINE_ARTIFACT_BYTES) {
@@ -5101,21 +5142,52 @@ export class TaskRunner {
   }
 
   /**
-   * Declines a sealed offer once, non-retryably. This daemon holds no scope
-   * key. To a server with `sealed-payload-v1` it sends the closed code
-   * `sealed_key_unavailable` as both `reason` and `code` (#654 decisions 12c
-   * and 12d). The code is a value gate on that flag, so without it the
-   * decline has a plaintext reason and no code.
+   * Opens a sealed offer, then runs the plaintext offer through every check of
+   * {@link handleOffer}. A server without `sealed-payload-v1` gets a plaintext
+   * decline before the open: the task's output could not be sent to it.
    */
-  private declineSealedOffer(taskId: string, agentRef: AgentRef | undefined): void {
-    if (this.tasks.has(taskId) || this.startupOwnership.has(taskId) || this.inFlightOffers.has(taskId) || this.finishedTaskIds.has(taskId) || this.strictDeclinedTaskIds.has(taskId)) return;
-    this.addStrictDeclinedTaskId(taskId);
-    const code = 'sealed_key_unavailable';
+  private async handleSealedOffer(envelope: Envelope): Promise<void> {
+    const taskId = envelope.task_id!;
+    if (this.tasks.has(taskId) || this.startupOwnership.has(taskId) || this.inFlightOffers.has(taskId) || this.finishedTaskIds.has(taskId) || this.strictDeclinedTaskIds.has(taskId) || this.sealedOpening.has(taskId)) return;
+    const agentRef = (envelope.payload as { agentRef?: AgentRef }).agentRef;
+    const sealedTasks = this.deps.sealedTasks;
+    if (sealedTasks === undefined || !this.sealedCodesAllowed()) {
+      this.declineSealedOffer(taskId, agentRef, 'sealed_key_unavailable');
+      return;
+    }
+    this.sealedOpening.add(taskId);
+    try {
+      const opened = await sealedTasks.openOffer(envelope);
+      if (!opened.ok) {
+        this.declineSealedOffer(taskId, agentRef, opened.code);
+        return;
+      }
+      await this.handleOffer(taskId, opened.offer.payload as AcceptedOfferPayload, opened.offer.type.startsWith('task.offer_for_agent'));
+    } finally {
+      this.sealedOpening.delete(taskId);
+    }
+  }
+
+  private sealedCodesAllowed(): boolean {
     const capabilities = this.deps.getServerCapabilities?.() ?? [];
-    if (requiredReceiverCapabilities('task.decline', { reason: code, code }).every((flag) => capabilities.includes(flag))) {
+    return requiredReceiverCapabilities('task.decline', { reason: 'sealed_open_failed', code: 'sealed_open_failed' })
+      .every((flag) => capabilities.includes(flag));
+  }
+
+  /**
+   * Declines a sealed offer once, non-retryably, before any claim. To a server
+   * with `sealed-payload-v1` it sends the closed code as both `reason` and
+   * `code` (#654 decisions 12c and 12d). The code is a value gate on that
+   * flag, so without it the decline has a plaintext reason and no code.
+   */
+  private declineSealedOffer(taskId: string, agentRef: AgentRef | undefined, code: SealedDeclineCode): void {
+    if (this.strictDeclinedTaskIds.has(taskId)) return;
+    this.addStrictDeclinedTaskId(taskId);
+    if (this.sealedCodesAllowed()) {
       this.decline(taskId, code, false, agentRef, code);
     } else {
-      this.decline(taskId, 'sealed_payload_unsupported: this daemon does not open sealed task input', false, agentRef);
+      const why = this.deps.sealedTasks === undefined ? 'this daemon does not open sealed task input' : 'the server does not accept sealed task output';
+      this.decline(taskId, `sealed_payload_unsupported: ${why}`, false, agentRef);
     }
   }
 
