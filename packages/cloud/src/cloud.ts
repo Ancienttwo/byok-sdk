@@ -2376,13 +2376,13 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     redactTasks,
 
     async appendMemberChainEntries(tenant, input) {
-      return e2eeMember.appendMemberChainEntries(e2eeMemberContext(tenant), input.entries);
+      return e2eeMember.appendMemberChainEntries(e2eeMemberContext(tenant), input);
     },
     async readMemberChain(tenant, input) {
       return e2eeMember.readMemberChain(e2eeMemberContext(tenant), input);
     },
     async putScopeKeyPackages(tenant, input) {
-      return e2eeMember.putScopeKeyPackages(e2eeMemberContext(tenant), input.packages);
+      return e2eeMember.putScopeKeyPackages(e2eeMemberContext(tenant), input);
     },
     async readScopeKeyPackages(tenant, input) {
       return e2eeMember.readScopeKeyPackages(e2eeMemberContext(tenant), input);

@@ -21,7 +21,7 @@ import { createByokCloud, type ByokCloud } from '../cloud';
 import { createInMemoryByokCloud } from '../composition/in-memory';
 import { isCloudError } from '../errors';
 import { InMemoryE2eeMemberStore } from '../stores/in-memory/e2ee-member';
-import { TENANT_A, TENANT_B } from './support/harness';
+import { TENANT_A, TENANT_B, createHarness } from './support/harness';
 
 type Jwk = MemberKeyBundleV1['signingPublicJwk'];
 type CryptoKey = Parameters<typeof createMemberKeyBundle>[0]['signingPrivateKey'];
@@ -172,6 +172,14 @@ describe('E2EE member control plane', () => {
     expect(await code(cloud.appendMemberChainEntries(TENANT_A, { entries: [throwing as never] }))).toBe('coordination_input_invalid');
     expect(await code(cloud.appendMemberChainEntries(TENANT_A, { entries: [new Proxy(genesis!, { get() { throw new Error('trap'); } })] })))
       .toBe('coordination_input_invalid');
+    // A hostile list, a hostile field getter and a hostile query object fail as input, not as a raw throw.
+    const trap = <T extends object>(target: T) => new Proxy(target, { get() { throw new Error('trap'); } });
+    expect(await code(cloud.appendMemberChainEntries(TENANT_A, { entries: trap([genesis!]) }))).toBe('coordination_input_invalid');
+    expect(await code(cloud.appendMemberChainEntries(TENANT_A, { get entries(): never { throw new Error('getter'); } })))
+      .toBe('coordination_input_invalid');
+    expect(await code(cloud.putScopeKeyPackages(TENANT_A, { packages: trap([]) }))).toBe('coordination_input_invalid');
+    expect(await code(cloud.readMemberChain(TENANT_A, { get afterSeq(): never { throw new Error('getter'); } }))).toBe('coordination_input_invalid');
+    expect(await code(cloud.readScopeKeyPackages(TENANT_A, trap({ scopeId: 'scope-1' })))).toBe('coordination_input_invalid');
     // The second read would see another op. The stored entry is the first read.
     expect(await cloud.appendMemberChainEntries(TENANT_A, { entries: [changing as never] })).toEqual({ appended: 1, replayed: 0 });
     expect(reads).toBe(1);
@@ -235,6 +243,15 @@ describe('E2EE member control plane', () => {
     expect(await cloud.readMemberKeyRegistration(TENANT_B, 'device-1')).toBeUndefined();
     await base.stores.devices.revoke(TENANT_A, 'device-1');
     expect(await cloud.readMemberKeyRegistration(TENANT_A, 'device-1')).toBeUndefined();
+  });
+
+  it('gives a re-paired machine a new device id, so an old registration cannot block its new bundle', async () => {
+    const harness = createHarness();
+    const machineId = 'd'.repeat(64);
+    const first = await harness.pairDevice(TENANT_A, undefined, machineId);
+    const second = await harness.pairDevice(TENANT_A, undefined, machineId);
+    expect(second.deviceId).not.toBe(first.deviceId);
+    expect(await harness.stores.devices.get(TENANT_A, first.deviceId)).toBeUndefined();
   });
 
   it('relays a client MAC only to a registered active device, for one pairing window', async () => {

@@ -151,11 +151,27 @@ function canonicalParse<S extends z.ZodType>(schema: S, value: unknown, what: st
   return { text, value: parsed.data };
 }
 
-function boundedList(value: unknown, max: number, what: string): readonly unknown[] {
-  if (!Array.isArray(value) || value.length === 0 || value.length > max) {
+/** Read a list field once: the field, the list and every item become one plain JSON snapshot. */
+function boundedList(read: () => unknown, max: number, what: string): readonly unknown[] {
+  let list: unknown;
+  try {
+    list = JSON.parse(canonicalizeJson(read() as JsonValue));
+  } catch {
+    throw invalid(`${what} must be a canonical JSON list`);
+  }
+  if (!Array.isArray(list) || list.length === 0 || list.length > max) {
     throw invalid(`${what} must hold 1 to ${max} items`);
   }
-  return value;
+  return list;
+}
+
+/** Read the named fields of a small input object once each. */
+function readFields<T extends object>(input: T | undefined): Partial<T> {
+  try {
+    return input === undefined ? {} : { ...input };
+  } catch {
+    throw invalid('Input could not be read');
+  }
 }
 
 export interface E2eeMemberContext {
@@ -167,9 +183,10 @@ export interface E2eeMemberContext {
 
 export async function appendMemberChainEntries(
   ctx: E2eeMemberContext,
-  entries: readonly E2eeMemberChainEntry[],
+  input: { readonly entries: readonly E2eeMemberChainEntry[] },
 ): Promise<{ readonly appended: number; readonly replayed: number }> {
-  const rows = boundedList(entries, E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES, 'Member chain entries').map((input, index) => {
+  const list = boundedList(() => input.entries, E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES, 'Member chain entries');
+  const rows = list.map((input, index) => {
     const { text, value } = canonicalParse(E2eeMemberChainEntrySchema, input, `Member chain entry ${index}`);
     if (new TextEncoder().encode(text).byteLength > E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES) {
       throw invalid(`Member chain entry ${index} exceeds ${E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES} bytes`);
@@ -197,7 +214,7 @@ export async function readMemberChain(
   ctx: E2eeMemberContext,
   input: { readonly afterSeq?: number; readonly limit?: number } = {},
 ): Promise<{ readonly entries: readonly E2eeMemberChainEntry[] }> {
-  const { afterSeq = 0, limit = E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES } = input;
+  const { afterSeq = 0, limit = E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES } = readFields(input);
   if (!Number.isSafeInteger(afterSeq) || afterSeq < 0) throw invalid('afterSeq must be a nonnegative safe integer');
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES) {
     throw invalid(`limit must be 1 to ${E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES}`);
@@ -208,11 +225,12 @@ export async function readMemberChain(
 
 export async function putScopeKeyPackages(
   ctx: E2eeMemberContext,
-  packages: readonly E2eeScopeKeyPackage[],
+  input: { readonly packages: readonly E2eeScopeKeyPackage[] },
 ): Promise<{ readonly stored: number }> {
   const keyIds = new Map<string, string>();
   const recipients = new Set<string>();
-  const rows = boundedList(packages, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, 'Scope key packages').map((input, index) => {
+  const list = boundedList(() => input.packages, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, 'Scope key packages');
+  const rows = list.map((input, index) => {
     const { text, value } = canonicalParse(E2eeScopeKeyPackageSchema, input, `Scope key package ${index}`);
     if (value.tenantId !== ctx.tenant) throw invalid(`Scope key package ${index} names another tenant`);
     // JSON text of the tuple keeps the composite key unambiguous for any string.
@@ -233,6 +251,9 @@ export async function putScopeKeyPackages(
       package: text,
     };
   });
+  // One lock order for every writer, so two puts that share scope epochs
+  // cannot deadlock on the epoch rows.
+  rows.sort((a, b) => compareText(a.scopeId, b.scopeId) || a.epoch - b.epoch || compareText(a.recipient, b.recipient));
   const result = await ctx.store.putScopeKeyPackages(ctx.tenant, rows);
   if (result.outcome === 'key_id_conflict') {
     throw new ByokCloudError(
@@ -247,7 +268,7 @@ export async function readScopeKeyPackages(
   ctx: E2eeMemberContext,
   input: { readonly scopeId: string; readonly epoch?: number; readonly recipient?: string },
 ): Promise<{ readonly packages: readonly E2eeScopeKeyPackage[] }> {
-  const { scopeId, epoch, recipient } = input;
+  const { scopeId, epoch, recipient } = readFields(input);
   if (typeof scopeId !== 'string' || scopeId.length === 0) throw invalid('scopeId is required');
   if (epoch !== undefined && (!Number.isSafeInteger(epoch) || epoch < 1)) {
     throw invalid('epoch must be a positive safe integer');
@@ -261,6 +282,10 @@ export async function readScopeKeyPackages(
     ...(recipient === undefined ? {} : { recipient }),
   });
   return { packages: rows.map(row => JSON.parse(row.package) as E2eeScopeKeyPackage) };
+}
+
+function compareText(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 async function activeDevice(ctx: E2eeMemberContext, deviceId: string): Promise<boolean> {

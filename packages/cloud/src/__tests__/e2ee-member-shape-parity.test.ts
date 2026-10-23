@@ -52,7 +52,7 @@ const NUMBER = [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, '1'];
 
 /** Every variant replaces one field (or removes it, for `undefined`). */
 function variants(base: Json, fields: Record<string, readonly unknown[]>): Array<{ readonly label: string; readonly value: Json }> {
-  const out = [{ label: 'extra key', value: { ...base, extra: 1 } }];
+  const out: Array<{ readonly label: string; readonly value: Json }> = [{ label: 'extra key', value: { ...base, extra: 1 } }];
   for (const [field, values] of Object.entries(fields)) {
     for (const value of [...COMMON, ...values]) {
       const copy: Json = { ...base };

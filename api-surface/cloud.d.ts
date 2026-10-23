@@ -2098,7 +2098,9 @@ export interface E2eeMemberContext {
     readonly devices: DeviceDirectory;
     readonly now: () => Date;
 }
-export declare function appendMemberChainEntries(ctx: E2eeMemberContext, entries: readonly E2eeMemberChainEntry[]): Promise<{
+export declare function appendMemberChainEntries(ctx: E2eeMemberContext, input: {
+    readonly entries: readonly E2eeMemberChainEntry[];
+}): Promise<{
     readonly appended: number;
     readonly replayed: number;
 }>;
@@ -2108,7 +2110,9 @@ export declare function readMemberChain(ctx: E2eeMemberContext, input?: {
 }): Promise<{
     readonly entries: readonly E2eeMemberChainEntry[];
 }>;
-export declare function putScopeKeyPackages(ctx: E2eeMemberContext, packages: readonly E2eeScopeKeyPackage[]): Promise<{
+export declare function putScopeKeyPackages(ctx: E2eeMemberContext, input: {
+    readonly packages: readonly E2eeScopeKeyPackage[];
+}): Promise<{
     readonly stored: number;
 }>;
 export declare function readScopeKeyPackages(ctx: E2eeMemberContext, input: {
