@@ -60,6 +60,8 @@ export {
   createPostgresAgentMemoryProjectionStore,
 } from './agent-memory-projection';
 export type { PostgresAgentMemoryProjectionStoreOptions } from './agent-memory-projection';
+export { PostgresTaskRedactionStore, createPostgresTaskRedactionStore } from './task-redaction';
+export type { PostgresTaskRedactionStoreOptions } from './task-redaction';
 export { PostgresDeviceAssertionReplayAuthority } from './device-assertion-replay';
 export {
   DEFAULT_MAX_ATTEMPTS,

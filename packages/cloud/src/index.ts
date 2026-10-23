@@ -98,6 +98,17 @@ export type {
   AgentMemoryProjectionStore,
 } from './agent-memory-projection';
 
+export { TASK_REDACTION_MAX_TASKS } from './task-redaction';
+export type {
+  TaskRedactionCodec,
+  TaskRedactionCounts,
+  TaskRedactionRefusal,
+  TaskRedactionResult,
+  TaskRedactionStore,
+  TaskRedactionStoreInput,
+  TaskRedactionTaskResult,
+} from './task-redaction';
+
 // Capability declaration (ADR-010)
 export {
   CLOUD_CAPABILITIES,
