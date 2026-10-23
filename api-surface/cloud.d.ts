@@ -1113,7 +1113,7 @@ import { type AgentExecutionInput } from './agent-execution';
 import { type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { ActivityTail } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
-import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskSteerPayload, type TaskOfferForAgentPayload, type TaskOfferPreparedPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
+import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskSteerPayload, type TaskOfferForAgentPayload, type TaskOfferPreparedPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferWithToolsetsPayload, type E2eeClientPairingMac, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage } from '@byok-sdk/protocol';
 import type { TokenSigner } from './auth/tokens';
 import type { CloudCrypto } from './crypto/port';
 import { type RouteDescriptor } from './router/registry';
@@ -1125,6 +1125,7 @@ import type { BlobContentProxy, CloudStores, DeviceRecord, AgentEgressRecord, Pa
 import { type DeviceTerminal, type TerminalResult } from './terminal-result';
 import type { MailboxWake } from './mailbox-wake';
 import { type TaskRedactionResult, type TaskRedactionStore } from './task-redaction';
+import type { E2eeMemberStore } from './e2ee-member';
 import type { TruthCommitter, TruthObjectDownloads } from './truth/contract';
 /** Matches the reference server's ceiling (§7). */
 export declare const DEFAULT_MAX_BLOB_SIZE_BYTES: number;
@@ -1224,6 +1225,8 @@ export interface ByokCloudOptions {
     readonly agentMemoryProjectionStore?: AgentMemoryProjectionStore;
     /** Durable authority for {@link ByokCloud.redactTasks}. Without it, `redactTasks` fails closed. */
     readonly taskRedactionStore?: TaskRedactionStore;
+    /** Durable authority for the E2EE member chain, key packages and pairing MACs. Without it, those calls fail closed. */
+    readonly e2eeMemberStore?: E2eeMemberStore;
     readonly maxBlobSizeBytes?: number;
     readonly longPollHoldMs?: number;
     readonly eventsPageLimit?: number;
@@ -1509,6 +1512,54 @@ export interface ByokCloud {
     redactTasks(tenant: TenantId, input: {
         readonly taskIds: readonly string[];
     }): Promise<TaskRedactionResult>;
+    /**
+     * Host control plane (#654 E2c): append signed member chain entries. First
+     * writer wins per seq: an entry already stored with the same bytes is a
+     * replay, and a different one throws `e2ee_member_chain_conflict`. The
+     * first new entry must follow the stored head. The Host checks shapes and
+     * the tenant only; members verify signatures and links.
+     */
+    appendMemberChainEntries(tenant: TenantId, input: {
+        readonly entries: readonly E2eeMemberChainEntry[];
+    }): Promise<{
+        readonly appended: number;
+        readonly replayed: number;
+    }>;
+    /** Host control plane: member chain entries after `afterSeq` (default 0), ascending, at most `limit` (default and maximum 256). */
+    readMemberChain(tenant: TenantId, input?: {
+        readonly afterSeq?: number;
+        readonly limit?: number;
+    }): Promise<{
+        readonly entries: readonly E2eeMemberChainEntry[];
+    }>;
+    /**
+     * Host control plane: store scope key packages. The first package of a
+     * scope epoch fixes its `keyId`; a package with another `keyId` throws
+     * `e2ee_scope_key_conflict`, and the call stores nothing.
+     */
+    putScopeKeyPackages(tenant: TenantId, input: {
+        readonly packages: readonly E2eeScopeKeyPackage[];
+    }): Promise<{
+        readonly stored: number;
+    }>;
+    /** Host control plane: the stored packages of one scope, optionally for one epoch or one recipient. */
+    readScopeKeyPackages(tenant: TenantId, input: {
+        readonly scopeId: string;
+        readonly epoch?: number;
+        readonly recipient?: string;
+    }): Promise<{
+        readonly packages: readonly E2eeScopeKeyPackage[];
+    }>;
+    /**
+     * Host control plane: the member key bundle an active device registered,
+     * and its pairing MAC while the pairing window is open (§7.2 step 3).
+     */
+    readMemberKeyRegistration(tenant: TenantId, deviceId: string): Promise<{
+        readonly member: E2eeMemberKeyBundle;
+        readonly deviceMac?: string;
+    } | undefined>;
+    /** Host control plane: relay the client pairing MAC to a registered device (§7.2 step 4). */
+    relayClientPairingMac(tenant: TenantId, deviceId: string, input: E2eeClientPairingMac): Promise<void>;
     /** Host control plane: durably request cancellation by tenant/task id. Idempotent. */
     cancelTask(tenant: TenantId, taskId: string, reason?: string): Promise<TaskAttempt>;
     /**
@@ -1914,6 +1965,170 @@ export type SubtleCryptoLike = typeof globalThis.crypto.subtle;
 export type CryptoKeyLike = Awaited<ReturnType<SubtleCryptoLike['importKey']>>;
 export type KeyUsageLike = Parameters<SubtleCryptoLike['importKey']>[4][number];
 export declare function createWebCrypto(): CloudCrypto;
+// ==== @byok-sdk/cloud dist/e2ee-member.d.ts ====
+/**
+ * Host storage for member keys, the member chain and scope key packages
+ * (#654 design §7.2–§7.4, E2c).
+ *
+ * The Host holds no key. It checks shapes, keeps the chain contiguous and
+ * first-writer-wins per seq, fixes one `keyId` per scope epoch, and relays
+ * the pairing MACs. Members verify everything else (§7.3).
+ *
+ * Every input is read once into canonical JSON text. The store keeps that
+ * text, so a replay compares by bytes and a later read returns the same
+ * bytes the writer sent.
+ */
+import { type TenantId } from '@byok-sdk/core';
+import { type E2eeClientPairingMac, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage } from '@byok-sdk/protocol';
+import type { DeviceDirectory } from './stores/ports';
+/** One stored chain entry: its seq and its canonical JSON. */
+export interface E2eeMemberChainRow {
+    readonly seq: number;
+    readonly entry: string;
+}
+export type E2eeMemberChainAppendResult = {
+    readonly outcome: 'appended';
+    /** New rows written. */
+    readonly appended: number;
+    /** Rows already stored with the same bytes. */
+    readonly replayed: number;
+}
+/** A different entry is stored at `seq`. Nothing was written. */
+ | {
+    readonly outcome: 'conflict';
+    readonly seq: number;
+}
+/** The first new entry does not follow the stored head. Nothing was written. */
+ | {
+    readonly outcome: 'gap';
+    readonly seq: number;
+    readonly headSeq: number;
+};
+/** One stored scope key package, with the columns the store keys and filters on. */
+export interface E2eeScopeKeyPackageRow {
+    readonly scopeId: string;
+    readonly epoch: number;
+    readonly recipient: string;
+    readonly keyId: string;
+    readonly sender: string;
+    /** Canonical JSON of the package. */
+    readonly package: string;
+}
+export type E2eeScopeKeyPackagePutResult = {
+    readonly outcome: 'stored';
+    readonly stored: number;
+}
+/** The first package of this scope epoch fixed another `keyId`. Nothing was written. */
+ | {
+    readonly outcome: 'key_id_conflict';
+    readonly scopeId: string;
+    readonly epoch: number;
+    readonly keyId: string;
+};
+export interface E2eeMemberRegistrationInput {
+    readonly deviceId: string;
+    readonly memberId: string;
+    /** Canonical JSON of the device's member key bundle. */
+    readonly bundle: string;
+    /** The device pairing MAC (§7.2 step 3). */
+    readonly deviceMac: string;
+    readonly macExpiresAt: string;
+}
+/**
+ * - `registered`: the bundle and the MAC were stored.
+ * - `replayed`: the same bundle was already stored; the MAC and its expiry were replaced.
+ * - `device_conflict`: the device registered another bundle. Nothing changed.
+ * - `member_conflict`: another device registered this member id. Nothing changed.
+ */
+export type E2eeMemberRegisterResult = 'registered' | 'replayed' | 'device_conflict' | 'member_conflict';
+export interface E2eeMemberRegistrationRow {
+    readonly memberId: string;
+    /** Canonical JSON of the bundle. */
+    readonly bundle: string;
+    /** Absent once the pairing window has passed. */
+    readonly deviceMac?: string;
+}
+/**
+ * Durable E2EE member state. Every method is scoped to `tenant`. Each write
+ * is atomic: a refused write leaves nothing behind.
+ */
+export interface E2eeMemberStore {
+    /**
+     * Rows have contiguous ascending seqs. A row at a stored seq must hold the
+     * same bytes (a replay). The first new row must be the stored head plus one.
+     */
+    appendChainEntries(tenant: TenantId, rows: readonly E2eeMemberChainRow[]): Promise<E2eeMemberChainAppendResult>;
+    /** Entries with `seq > afterSeq`, ascending, at most `limit`. */
+    readChainEntries(tenant: TenantId, input: {
+        readonly afterSeq: number;
+        readonly limit: number;
+    }): Promise<readonly E2eeMemberChainRow[]>;
+    /**
+     * The first package of a `(scopeId, epoch)` fixes its `keyId`. A package
+     * with that `keyId` inserts or replaces the row of its recipient.
+     */
+    putScopeKeyPackages(tenant: TenantId, rows: readonly E2eeScopeKeyPackageRow[]): Promise<E2eeScopeKeyPackagePutResult>;
+    /** Ordered by epoch, then recipient. */
+    readScopeKeyPackages(tenant: TenantId, input: {
+        readonly scopeId: string;
+        readonly epoch?: number;
+        readonly recipient?: string;
+    }): Promise<readonly E2eeScopeKeyPackageRow[]>;
+    registerMember(tenant: TenantId, input: E2eeMemberRegistrationInput): Promise<E2eeMemberRegisterResult>;
+    /** The MAC is returned only while `now` is before its expiry. */
+    readMemberRegistration(tenant: TenantId, input: {
+        readonly deviceId: string;
+        readonly now: string;
+    }): Promise<E2eeMemberRegistrationRow | undefined>;
+    /** Store or replace the client pairing MAC (§7.2 step 4) of a registered device. */
+    putClientPairingMac(tenant: TenantId, input: {
+        readonly deviceId: string;
+        readonly body: string;
+        readonly expiresAt: string;
+    }): Promise<'stored' | 'not_registered'>;
+    /** Canonical JSON of the client MAC, while `now` is before its expiry. */
+    readClientPairingMac(tenant: TenantId, input: {
+        readonly deviceId: string;
+        readonly now: string;
+    }): Promise<string | undefined>;
+}
+export interface E2eeMemberContext {
+    readonly store: E2eeMemberStore;
+    readonly tenant: TenantId;
+    readonly devices: DeviceDirectory;
+    readonly now: () => Date;
+}
+export declare function appendMemberChainEntries(ctx: E2eeMemberContext, entries: readonly E2eeMemberChainEntry[]): Promise<{
+    readonly appended: number;
+    readonly replayed: number;
+}>;
+export declare function readMemberChain(ctx: E2eeMemberContext, input?: {
+    readonly afterSeq?: number;
+    readonly limit?: number;
+}): Promise<{
+    readonly entries: readonly E2eeMemberChainEntry[];
+}>;
+export declare function putScopeKeyPackages(ctx: E2eeMemberContext, packages: readonly E2eeScopeKeyPackage[]): Promise<{
+    readonly stored: number;
+}>;
+export declare function readScopeKeyPackages(ctx: E2eeMemberContext, input: {
+    readonly scopeId: string;
+    readonly epoch?: number;
+    readonly recipient?: string;
+}): Promise<{
+    readonly packages: readonly E2eeScopeKeyPackage[];
+}>;
+/**
+ * The bundle a device registered, and its pairing MAC while the pairing
+ * window is open. A missing or revoked device has none, even if a cleanup
+ * missed its rows.
+ */
+export declare function readMemberKeyRegistration(ctx: E2eeMemberContext, deviceId: string): Promise<{
+    readonly member: E2eeMemberKeyBundle;
+    readonly deviceMac?: string;
+} | undefined>;
+/** Relay the client pairing MAC to a registered device for one pairing window. */
+export declare function relayClientPairingMac(ctx: E2eeMemberContext, deviceId: string, input: E2eeClientPairingMac): Promise<void>;
 // ==== @byok-sdk/cloud dist/errors.d.ts ====
 /**
  * The one error taxonomy for `@byok-sdk/cloud`.
@@ -1966,6 +2181,14 @@ export declare const CLOUD_ERROR_CODES: {
     readonly task_content_redacted: 'task_content_redacted';
     /** `redactTasks` was called on a deployment that has no `taskRedactionStore`. */
     readonly task_redaction_unavailable: 'task_redaction_unavailable';
+    /** An E2EE member call on a deployment that has no `e2eeMemberStore`. */
+    readonly e2ee_member_store_unavailable: 'e2ee_member_store_unavailable';
+    /** A different member chain entry is stored at that seq, or the first new entry does not follow the head. Read the chain again. */
+    readonly e2ee_member_chain_conflict: 'e2ee_member_chain_conflict';
+    /** The first package of that scope epoch fixed another `keyId`. */
+    readonly e2ee_scope_key_conflict: 'e2ee_scope_key_conflict';
+    /** The device has not registered a member key bundle. */
+    readonly e2ee_member_not_registered: 'e2ee_member_not_registered';
     /** Explicit legacy dispatch target is unknown or revoked in this tenant. */
     readonly device_not_found: 'device_not_found';
     /**
@@ -2347,6 +2570,7 @@ export { InMemoryAgentMemoryProjectionAuthorizer, InMemoryAgentMemoryProjectionS
 export type { AgentMemoryProjectionAuthorization, AgentMemoryProjectionEraseResult, AgentMemoryProjectionAuthorizer, AgentMemoryProjectionAuthorizerInput, AgentMemoryProjectionCommitInput, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionStore, } from './agent-memory-projection';
 export { TASK_REDACTION_MAX_TASKS } from './task-redaction';
 export type { TaskRedactionCodec, TaskRedactionCounts, TaskRedactionRefusal, TaskRedactionResult, TaskRedactionStore, TaskRedactionStoreInput, TaskRedactionTaskResult, } from './task-redaction';
+export type { E2eeMemberChainAppendResult, E2eeMemberChainRow, E2eeMemberRegisterResult, E2eeMemberRegistrationInput, E2eeMemberRegistrationRow, E2eeMemberStore, E2eeScopeKeyPackagePutResult, E2eeScopeKeyPackageRow, } from './e2ee-member';
 export { CLOUD_CAPABILITIES, CapabilitiesResponseSchema, declares, fullCapabilityDeclaration, } from './capabilities';
 export type { CapabilitiesResponse, CloudCapability, FullCapabilityDeclarationOptions, } from './capabilities';
 export { CloudRouteRegistry, ROUTE_CLASSES, ROUTE_METHODS, routeKey } from './router/registry';
@@ -2390,7 +2614,7 @@ export type { TruthCommitErrorCode } from './truth/errors';
 export { BLOB_READ_ERROR_CODES, CLOUD_STORE_NAMES, TASK_ATTEMPT_STATUSES, TASK_ATTEMPT_ACTIVE_STATUSES, } from './stores/ports';
 export { CLOUD_PORT_INTERFACES, CLOUD_PORT_METHODS } from './stores/ports-contract';
 export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, BlobReadErrorCode, BlobReadResult, BlobWriteResult, CloudBlobStore, CloudStoreName, CloudStores, DeviceDirectory, DeviceRecord, DeviceRegistration, InboundDedupStore, InboundRateLimiter, NonceStore, PairingCodeClaims, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollment, PairingEnrollmentInput, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore, RequestReceipt, RequestReceiptStore, TaskAttempt, TaskAttemptListQuery, TaskAttemptCounts, TaskAttemptPage, TaskAttemptStatus, TaskAttemptStore, AgentRef, AgentEgressRecord, AgentEgressStore, AgentMessageAdmission, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore, } from './stores/ports';
-export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlobContentProxy, InMemoryCloudBlobStore, InMemoryActivityStore, InMemoryAgentMessageDraftStore, InMemoryDeviceDirectory, InMemoryInboundDedupStore, InMemoryNonceStore, InMemoryPairingCodeStore, InMemoryRequestReceiptStore, InMemoryAgentEgressStore, InMemoryProofRequestReceiptStore, InMemoryTaskAttemptStore, InMemoryTaskCancellationStore, NONCE_TTL_MS, createInMemoryBlobs, createInMemoryCloudStores, createInMemoryBlobBytes, InMemoryBlobBytes, } from './stores/in-memory/index';
+export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlobContentProxy, InMemoryCloudBlobStore, InMemoryActivityStore, InMemoryAgentMessageDraftStore, InMemoryE2eeMemberStore, InMemoryDeviceDirectory, InMemoryInboundDedupStore, InMemoryNonceStore, InMemoryPairingCodeStore, InMemoryRequestReceiptStore, InMemoryAgentEgressStore, InMemoryProofRequestReceiptStore, InMemoryTaskAttemptStore, InMemoryTaskCancellationStore, NONCE_TTL_MS, createInMemoryBlobs, createInMemoryCloudStores, createInMemoryBlobBytes, InMemoryBlobBytes, } from './stores/in-memory/index';
 export type { InMemoryBlobStoreOptions, InMemoryBlobs, InMemoryCloudComposition, } from './stores/in-memory/index';
 export type { DeviceTerminal } from './terminal-result';
 export { AgentExecutionInputSchema, type AgentExecutionInput } from './agent-execution';
@@ -2904,8 +3128,44 @@ export declare class InMemoryDeviceDirectory implements DeviceDirectory {
     readiness(tenant: TenantId, presence: PresenceStore): Promise<TenantReadiness>;
     resolveByDeviceId(deviceId: string): Promise<DeviceRecord | undefined>;
 }
+// ==== @byok-sdk/cloud dist/stores/in-memory/e2ee-member.d.ts ====
+import type { TenantId } from '@byok-sdk/core';
+import type { E2eeMemberChainAppendResult, E2eeMemberChainRow, E2eeMemberRegisterResult, E2eeMemberRegistrationInput, E2eeMemberRegistrationRow, E2eeMemberStore, E2eeScopeKeyPackagePutResult, E2eeScopeKeyPackageRow } from '../../e2ee-member';
+/**
+ * Reference E2EE member store. Each method checks and writes in one
+ * synchronous step, so no other call interleaves with it.
+ */
+export declare class InMemoryE2eeMemberStore implements E2eeMemberStore {
+    #private;
+    appendChainEntries(tenant: TenantId, rows: readonly E2eeMemberChainRow[]): Promise<E2eeMemberChainAppendResult>;
+    readChainEntries(tenant: TenantId, input: {
+        readonly afterSeq: number;
+        readonly limit: number;
+    }): Promise<readonly E2eeMemberChainRow[]>;
+    putScopeKeyPackages(tenant: TenantId, rows: readonly E2eeScopeKeyPackageRow[]): Promise<E2eeScopeKeyPackagePutResult>;
+    readScopeKeyPackages(tenant: TenantId, input: {
+        readonly scopeId: string;
+        readonly epoch?: number;
+        readonly recipient?: string;
+    }): Promise<readonly E2eeScopeKeyPackageRow[]>;
+    registerMember(tenant: TenantId, input: E2eeMemberRegistrationInput): Promise<E2eeMemberRegisterResult>;
+    readMemberRegistration(tenant: TenantId, input: {
+        readonly deviceId: string;
+        readonly now: string;
+    }): Promise<E2eeMemberRegistrationRow | undefined>;
+    putClientPairingMac(tenant: TenantId, input: {
+        readonly deviceId: string;
+        readonly body: string;
+        readonly expiresAt: string;
+    }): Promise<'stored' | 'not_registered'>;
+    readClientPairingMac(tenant: TenantId, input: {
+        readonly deviceId: string;
+        readonly now: string;
+    }): Promise<string | undefined>;
+}
 // ==== @byok-sdk/cloud dist/stores/in-memory/index.d.ts ====
 export { InMemoryAgentMessageDraftStore } from './agent-message-draft';
+export { InMemoryE2eeMemberStore } from './e2ee-member';
 /**
  * The in-memory reference implementation of every cloud-local port.
  *
