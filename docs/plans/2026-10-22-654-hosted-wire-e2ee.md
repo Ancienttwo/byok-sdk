@@ -248,7 +248,7 @@ v1 的范围（§14 D17）：只交付 C1 和 C3，C2 按需开启。下面三�
 - 一个 offer 可以同时带两种作者的内容。成员写的部分进 C1。Host 组装的部分放进一个明文字段，只有存储层保护。设备按固定规则把两部分拼成交给 Agent 的 instruction。例如 AiphaBee 聊天里触发的研究：用户输入的问题进 C1；对话来自 `BotConversationDO`，由 Host 组装（AiphaBee `apps/local-agent/src/local-bot-chat-research.ts:63`）。划分表为这个明文字段单列一项（§8.3）。
 - 读者规则：产品后端要读的内容不能加密。Bot 对话的回复要写进产品的对话存储，所以 Bot 对话的 C2 保持明文。
 - 策略按 task 冻结。offer 带一个明文字段 `sealing`：`{ scopeId, epoch, categories }`。task 创建后它不再变化。这个 task 的每个 envelope 都按它处理。`epoch` 是 offer 里 C1 密文用的 epoch。之后的 envelope 用发送方封装时的当前 epoch，不低于它（§7.5、§13.5）。
-- 降级保护：C1 密文的 AAD 包含 `categories`（§8.2）。Host 不能保留用户的 C1 密文，同时把 C3 改成明文。offer 的策略与 AAD 不一致时，设备以 `sealing_policy_mismatch` 做非重试 decline。
+- 降级保护：C1 密文的 AAD 包含 `categories`（§8.2）。Host 不能保留用户的 C1 密文，同时把 C3 改成明文。offer 的 `sealing.categories` 与 AAD 不一致时 AEAD 校验失败，设备以 `sealed_open_failed` 做非重试 decline。`sealing` 的 scope 或 epoch 与密文头不符，或类别里没有密文的类别时，设备以 `sealing_policy_mismatch` 做非重试 decline。
 - 每个 scope 有一条成员签名的 `scope-policy`（§7.4）。设备拒绝策略低于它的 task。
 - `cloud-do` 托管执行器必须读明文。Host 不能把带 `sealing` 的 task 交给它。这是产品的义务：`cloud-do` 与托管 wire 没有连接点（§2.0），SDK 无法替产品检查。
 - AiphaBee 的建议配置：研究 scope 开启 C1 和 C3；研究任务发 Agent 消息时再开 C2；Bot 对话和 Bot 记忆保持明文。由 owner 确认（§14 D1、D3）。
@@ -258,10 +258,11 @@ v1 的范围（§14 D17）：只交付 C1 和 C3，C2 按需开启。下面三�
 - K4 的 routine 由 Host 调度。每个 occurrence 的每次执行都是新的 SDK task，taskId 由 K4 core 分配（`docs/host-execution-core.md:13-19`、`:64`）。在 H 里，调度在 Host 服务上运行（`docs/host-execution-core.md:25`）。occurrence 发生时不一定有成员在线。AAD 和 MAC 都绑定 taskId（§8.2、§9.1），所以成员事先封装的 C1 不能在下一个 occurrence 上复用。
 - 决定：成员封装一份 routine 模板（§14 D15）。模板只含成员写的 routine 输入，例如 AiphaBee 复核提到的 S10 watchlist routine。
 - 模板身份是 `routineId` 加 `definitionVersion`，与 K4 occurrence key 用同一对值（`docs/host-execution-core.md:176`）。消息族为 `routine.template`。模板的 AAD 和 MAC 用这个身份代替 taskId，不带目标 `deviceId`。AAD 另外绑定 `agentRef`、成员设定的到期时间 `notAfter`，以及成员为这个 routine 选的类别 `categories`。
-- Host 把模板密文与 routine 定义存在一起。每次执行的 offer 原样带上模板，再加一个明文的 `routineRef: { routineId, definitionVersion }`。Host 组装的内容按 §6.2 放在明文字段里。
-- 设备校验：消息族是 `routine.template`；AAD 身份等于 `routineRef`；`agentRef` 相同；offer 的 `sealing.categories` 等于模板的 `categories`，否则返回 `sealing_policy_mismatch`（与 §6.2 的降级保护相同）；没有过 `notAfter`；解密后 MAC 相符。任何一项不符，设备做非重试 decline。
+- Host 把模板密文与 routine 定义存在一起。每次执行的 offer 把模板原样放在 `sealed` 成员里，再加一个明文的 `routineRef: { routineId, definitionVersion, notAfter }`。AAD 绑定 `notAfter`，设备要用它重建 AAD，所以它以明文传输。`definitionVersion` 是整数，`notAfter` 是 core 绑定的规范 UTC 时刻。只有 `task.offer_for_agent_with_egress_fresh_sealed` 带 `routineRef`，而且这个 offer 必须加密 `task-input`。offer 的 `sealing.epoch` 取模板的 epoch。Host 组装的内容按 §6.2 放在明文字段里。
+- 设备校验：消息族是 `routine.template`；AAD 身份等于 `routineRef`；`agentRef` 相同；offer 的 `sealing.categories` 等于模板的 `categories`，否则 AEAD 校验失败，返回 `sealed_open_failed`（与 §6.2 的降级保护相同）；没有过 `notAfter`，否则返回 `sealing_policy_mismatch`，Host 不检查这一项；解密后 MAC 相符。任何一项不符，设备做非重试 decline。
 - 幂等不变：offer 仍以 taskId 为身份。比较投影带 `routineRef` 和模板的 `contentMac`。同一 taskId 换了模板，返回 `coordination_input_invalid`。
 - 成员修改 routine 时封装新版本的模板。用户在线时，成员客户端在 `notAfter` 之前续封。续封按当前 epoch 重新封装。
+- scope 的 `scope-policy` 提高类别之后（§6.2），之前封装的模板类别比它少，设备拒绝这份模板，直到成员按新类别续封。
 - 模板的 epoch 或链头比设备看到的旧时，设备在 `notAfter` 之前照常接受。§7.3 的「发送方视图过期」标记对模板只作提示。§7.8 的恢复和成员移除都会推进链头和 epoch，所以这种情况常见。
 - Host 仍决定执行的时间和次数，也能在 `notAfter` 之前继续用已被替换的旧版本。它不能改模板内容，也不能把模板用到另一个 routine、Agent 或 scope。Host 本来就能下发任意任务（§5.4），所以多执行几次不增加它能读到的内容。
 - 模板交付之前，routine 任务只封装 C3，输入对 Host 可读。
@@ -418,7 +419,7 @@ AiphaBee 自研的配对和 device grant，在 SDK 里对应 `/byok/pair` 和 `/
 
 ### 8.2 AAD
 
-AAD 是下列字段的 canonical JSON：`v`、`suite`、`category`、`tenantId`、`scopeId`、`epoch`、`keyId`、`chainHead`、`sender`、消息族（例如 `task.offer_for_agent`）、方向、身份（`taskId`，或 `requestId`、`messageId`、`mutationId`，或 routine 模板的 `routineId` 与 `definitionVersion`）、目标 `deviceId`、`agentRef`、task 的 `sealing.categories`、`paddedLength` 和 `contentMac`。
+AAD 是下列字段的 canonical JSON：`v`、`suite`、`category`、`tenantId`、`scopeId`、`epoch`、`keyId`、`chainHead`、`sender`、消息族（例如 `task.offer_for_agent`）、方向、身份（`taskId`，或 `requestId`、`messageId`、`mutationId`，或 routine 模板的 `routineId` 与 `definitionVersion`）、目标 `deviceId`、`agentRef`、task 的 `sealing.categories`、routine 模板的 `notAfter`（其他消息族为 `null`）、`paddedLength` 和 `contentMac`。
 
 AAD 不含 envelope 的 `id`、`seq` 和 `ts`。dead-letter 重放会用新 `seq` 重新编码 envelope（`cleanup.ts:533-563`）。AAD 绑定了身份字段，所以 Host 不能把密文搬到另一个 task、设备、Agent 或 scope。唯一的例外是 routine 模板：按设计，它在同一 routine 的多次执行上复用（§6.3）。
 
@@ -731,7 +732,8 @@ identity receipt 是防重放的 fence，同时保存了正文，而且永不过
 | 缺 key package | 设备或客户端 | `sealed_key_unavailable`。设备做非重试 decline | task 不运行 |
 | AEAD 失败、帧检查失败，或 `ciphertextRef` 的 blob 缺失 | 接收端 | `sealed_open_failed` | 拒绝这条内容 |
 | MAC 与内容不符 | 接收端 | `sealed_content_mac_mismatch` | 拒绝这条内容 |
-| `sealing` 与 AAD 或 `scope-policy` 不符 | 设备 | `sealing_policy_mismatch`，非重试 decline（§6.2） | Host 的降级被挡住 |
+| `sealing.categories` 与 AAD 不符 | 设备 | AEAD 失败，`sealed_open_failed`，非重试 decline（§6.2） | Host 的降级被挡住 |
+| `sealing` 的 scope 或 epoch 与密文头不符、低于 `scope-policy`，或 routine 模板过了 `notAfter` | 设备 | `sealing_policy_mismatch`，非重试 decline（§6.2、§6.3） | Host 的降级被挡住 |
 | 同一身份跨 epoch 重试 | Host | MAC 不同，按冲突处理。offer 返回 `coordination_input_invalid`，其他身份用各自现有的冲突代码（§9.2） | 发送方必须重发第一次的字节 |
 | task 运行中有成员被移除 | 设备 | 封装输出前检查链，按 §7.5 轮换到新 epoch 再封装。已发出的密文不变 | 被移除方读不到之后的输出 |
 | Host 扣留成员链的 `remove` | 签署 `remove` 的成员 | 从后续内容 AAD 的链头和 epoch 发现，提示用户（§7.6） | 被撤销方可能读到扣留期间的内容 |
