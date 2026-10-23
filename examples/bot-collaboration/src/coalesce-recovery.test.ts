@@ -6,6 +6,7 @@ import { createByokServer } from '@byok-sdk/server';
 import { hash, HostLedger } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration, type BotOptions } from './host';
+import { botCompactVeto } from './compaction';
 
 const idOf = (key: string) => hash(['user', 'main', key]);
 let root: string | undefined;
@@ -23,13 +24,13 @@ afterEach(async () => {
 async function open(options: Partial<BotOptions>) {
   root = await mkdtemp(path.join(tmpdir(), 'bot-coalesce-recovery-'));
   const server = createByokServer({ productId: 'coalesce-recovery', storage: { kind: 'sqlite', path: path.join(root, 'server.sqlite') }, wake: { consume: async () => {} } });
-  let ledger = new HostLedger(path.join(root, 'host.sqlite'), 'coalesce-recovery');
+  let ledger = new HostLedger(path.join(root, 'host.sqlite'), 'coalesce-recovery', { compactVeto: botCompactVeto });
   const start = () => new BotCollaboration(server, ledger, { botId: 'main', execution: template('device'), connector: async () => null, coalesce: {}, ...options });
   const fixture = {
     bot: start(), get ledger() { return ledger; },
     async restart(next: Partial<BotOptions> = {}) {
       await fixture.bot.close(); ledger.close();
-      ledger = new HostLedger(path.join(root!, 'host.sqlite'), 'coalesce-recovery');
+      ledger = new HostLedger(path.join(root!, 'host.sqlite'), 'coalesce-recovery', { compactVeto: botCompactVeto });
       options = { ...options, ...next };
       fixture.bot = start();
       await fixture.bot.recover();

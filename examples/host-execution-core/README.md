@@ -374,6 +374,15 @@ an already compacted key is harmless and reports `alreadyCompactedIntents` while
 exists; duplicate keys count once. A routine occurrence key is unknown again after its row expires.
 An empty selection explicitly expires eligible tombstones without selecting additional history.
 
+An application that keeps its own rows by intent key can register one veto when it opens the
+ledger: `new HostLedger(file, tenant, { compactVeto })`. `compact` calls it in its own transaction,
+before it removes anything, once for each selected intent key that still has an intent and once for
+the derived `occurrence:` key of each selected occurrence. A veto returns a reason to refuse that
+key, or `undefined` to allow it. A refusal throws the exported `CompactVetoError` with stable
+`code: 'compact_vetoed'` and the refused `intentKey`, and the whole batch rolls back. A veto must
+not change the state; a change also rolls the batch back. The veto guards each compaction through
+that `HostLedger` instance. Another instance opened without it does not run it.
+
 One SQLite transaction deletes the selected intent's execution generations, terminal documents,
 settled occurrence, slot and application markers, and writes replacement tombstones. No outbox row,
 business `application` value, routine or calendar audit is deleted. Memory rows are deleted only

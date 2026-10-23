@@ -3,7 +3,13 @@ import type { MemoryIntentRow } from './memory';
 import { hash, taskId, time, type LedgerState, type Occurrence } from './model';
 
 export interface ProjectionOutboxLimits { maxCount?: number; maxBytes?: number }
-export interface HostLedgerOptions { projectionOutboxLimits?: ProjectionOutboxLimits }
+/**
+ * Refuses the compaction of one intent identity with a reason, or allows it with `undefined`.
+ * `compact` calls it in its own transaction, before it removes anything, with the state before the compaction.
+ * It must not change the state. An application registers it once, so a plain `compact` call cannot skip it.
+ */
+export type CompactVeto = (state: Readonly<LedgerState>, intentKey: string) => string | undefined;
+export interface HostLedgerOptions { projectionOutboxLimits?: ProjectionOutboxLimits; compactVeto?: CompactVeto }
 export interface ProjectionOutboxUsage { count: number; bytes: number }
 /** Capacity refusal contains no projection identity or payload. */
 export class OutboxFullError extends Error {
@@ -19,6 +25,12 @@ function projectionUsage(state: LedgerState): ProjectionOutboxUsage {
     bytes += Buffer.byteLength(JSON.stringify([key, { kind: row.kind, id: row.id, value: row.value }]), 'utf8');
   }
   return { count, bytes };
+}
+
+/** The registered veto refused one identity. The whole compaction rolls back. */
+export class CompactVetoError extends Error {
+  readonly code = 'compact_vetoed' as const;
+  constructor(readonly intentKey: string, reason: string) { super(`Compaction refused: ${reason}`); this.name = 'CompactVetoError'; }
 }
 
 export const MIN_TOMBSTONE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -70,7 +82,13 @@ export class HostLedger {
     return () => { this.outboxListeners.delete(listener); };
   }
   private readonly projectionLimits?: Readonly<ProjectionOutboxLimits>;
+  /** An application checks this identity to prove that its veto guards every compaction. */
+  readonly compactVeto?: CompactVeto;
   constructor(filename: string, readonly tenant: string, options: HostLedgerOptions = {}) {
+    if (options.compactVeto !== undefined) {
+      if (typeof options.compactVeto !== 'function') throw new Error('The compact veto must be a function');
+      this.compactVeto = options.compactVeto;
+    }
     if (options.projectionOutboxLimits !== undefined) {
       const { maxCount, maxBytes } = options.projectionOutboxLimits;
       if (maxCount === undefined && maxBytes === undefined) throw new Error('Supply a projection outbox limit');
@@ -166,8 +184,19 @@ export class HostLedger {
     const memoryIds = [...new Set(options.acknowledgedMemoryIntentIds ?? [])];
     if (memoryIds.some(id => typeof id !== 'string' || !id.trim())) throw new Error('Invalid acknowledged memory intent ID');
     return this.transaction(state => {
+      const body = JSON.stringify(state);
       const result: CompactionResult = { compactedIntents: 0, alreadyCompactedIntents: 0, executions: 0, occurrences: 0,
-        memoryIntents: 0, alreadyCompactedMemoryIntents: 0, expiredTombstones: 0, beforeBytes: Buffer.byteLength(JSON.stringify(state)), afterBytes: 0 };
+        memoryIntents: 0, alreadyCompactedMemoryIntents: 0, expiredTombstones: 0, beforeBytes: Buffer.byteLength(body), afterBytes: 0 };
+      if (this.compactVeto) {
+        // An acknowledged occurrence retires the derived intent identity of its occurrence too.
+        for (const key of [...keys.filter(key => state.intents[hash(key)]), ...occurrenceKeys.map(key => `occurrence:${key}`)]) {
+          const reason: unknown = this.compactVeto(state, key);
+          if (reason === undefined) continue;
+          if (typeof reason !== 'string' || !reason) throw new Error('A compact veto returns a reason or undefined');
+          throw new CompactVetoError(key, reason);
+        }
+        if (JSON.stringify(state) !== body) throw new Error('A compact veto must not change the ledger');
+      }
       const retire = this.db.prepare(`INSERT INTO host_retired_identity (tenant,kind,identity,expires_at)
         VALUES (?,?,?,?) ON CONFLICT (tenant,kind,identity) DO UPDATE SET
         expires_at=CASE WHEN expires_at IS NULL THEN NULL ELSE max(expires_at,excluded.expires_at) END`);

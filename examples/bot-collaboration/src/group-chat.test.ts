@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { openTeam, type TestTeam } from './team.test-support';
 import { ROOM_GRACE_MS } from './rooms';
 import { stateOf } from './model';
+import { HostLedger, MIN_TOMBSTONE_RETENTION_MS } from '@byok-sdk/example-host-execution-core';
 import { HISTORY_MAX_BYTES } from './history';
 import type { BotProfile } from './team-model';
 
@@ -141,6 +142,28 @@ it('skips a queued busy member without starting it, then runs the next selected 
   expect(host().core.intent(first.id)?.conclusion).toBe('cancelled');
   await finish(second.id, { speech: { kind: 'pass' } }); await finish(own);
   expect(fixture.adapter.sessions.has(host().core.intent(first.id)!.taskId)).toBe(false);
+});
+
+it('releases the seat of a room Turn whose intent a writer without the veto compacted, and runs the next seat', async () => {
+  let now = Date.now(); fixture = await openTeam({ now: () => now });
+  const { profiles, room } = await createTeam(); await ready(profiles);
+  const round = await host().roomInput('retired-seat', room.id, 'Review', [profiles[0]!.id, profiles[1]!.id]);
+  const first = seats(round)[0]!, second = seats(round)[1]!;
+  // K4 settles the seat intent outside a K8 pass, and a maintenance writer without the veto compacts it.
+  await host().core.cancel(first.id);
+  await host().core.flushProjections(async () => {});
+  const other = new HostLedger(join(fixture.root, 'host.sqlite'), fixture.ledger.tenant);
+  try {
+    expect(other.compact({ acknowledgedIntentKeys: [first.id], now, tombstoneRetentionMs: MIN_TOMBSTONE_RETENTION_MS })).toMatchObject({ compactedIntents: 1 });
+  } finally { other.close(); }
+  await host().drain();
+  expect(seats(round)[0]).toMatchObject({ status: 'failed', released: true, reason: 'result_retired' });
+  expect(host().snapshot().turns[first.id]).toMatchObject({ status: 'failed', conclusion: 'failed', reported: true });
+  // The next seat starts without waiting for the room grace.
+  expect(host().core.intent(second.id)).toBeDefined();
+  await finish(second.id, { speech: { kind: 'pass' } });
+  expect(host().snapshot().team.rounds[round]!.closed).toBe(true);
+  expect(host().snapshot().turns[first.id]!.conclusion).toBe('failed');
 });
 
 it('invalidates waiting seats and audits running results after member removal', async () => {

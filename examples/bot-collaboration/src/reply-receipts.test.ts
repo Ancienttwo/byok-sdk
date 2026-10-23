@@ -48,6 +48,19 @@ it('retains business receipts after proven compaction and refuses retired task r
   const core = new HostExecutionCore({} as ExecutionServer, reopened);
   expect(await core.consumeMessage(f.input)).toMatchObject({ reasonCode: 'unknown_task' });
 });
+it('keeps the receipt of a compacted routine Turn after its tombstone expired, and refuses one whose occurrence is still open', () => {
+  const f = fixture(), id = `occurrence:${'a'.repeat(64)}`, receipt = taskId(id, 0);
+  // The state after K4 compacted the routine intent with its occurrence, and the slot tombstone expired.
+  f.ledger.transaction(s => {
+    const state = stateOf(s.application);
+    state.turns[id] = { id, root: id, botId: 'main', source: 'routine', request: 'Report', hop: 0, status: 'succeeded', conclusion: 'succeeded', reported: true };
+    state.replies[receipt] = { turnId: id, messageId: 'two', contentHash: 'hash', contentType: 'text/plain', acceptedAt: 1 };
+  });
+  f.ledger.transaction(s => promoteReplyReceipts(f.ledger, s, stateOf(s.application), 10));
+  expect(stateOf(f.ledger.snapshot().application).replies[receipt]).toBeDefined();
+  f.ledger.transaction(s => { s.occurrences['a'.repeat(64)] = {} as never; });
+  expect(() => f.ledger.transaction(s => promoteReplyReceipts(f.ledger, s, stateOf(s.application), 10))).toThrow('Orphaned legacy reply receipt');
+});
 it.each(['orphan', 'conflict', 'task', 'context'])('fails closed on invalid legacy %s without altering receipts', kind => {
   const f = fixture();
   f.ledger.transaction(s => {

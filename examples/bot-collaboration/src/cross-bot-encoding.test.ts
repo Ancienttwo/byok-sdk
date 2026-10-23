@@ -13,6 +13,7 @@ import type { BotRoutine } from './routines';
 import { routineViews } from './routines.test-support';
 import { outcomeSchema, SYSTEM_PROMPT, turnInstruction } from './schema';
 import { BOT_REPLY_MAX_BYTES, DEFAULT_INSTRUCTION_MAX_BYTES, minimumInstructionBytes, OPEN_DELEGATION_ENTRY_MAX_BYTES, OPEN_DELEGATIONS_MAX_BYTES } from './delegation';
+import { botCompactVeto } from './compaction';
 
 let root: string | undefined;
 let fixture: TestTeam | undefined;
@@ -88,7 +89,7 @@ it('bounds every worst-case Cross-Bot instruction, never blocks it, and the real
 
 it('refuses an instructionMaxBytes below the computed minimum at construction', async () => {
   root = await mkdtemp(path.join(tmpdir(), 'cross-bot-minimum-'));
-  const ledger = new HostLedger(path.join(root, 'host.sqlite'), 'minimum');
+  const ledger = new HostLedger(path.join(root, 'host.sqlite'), 'minimum', { compactVeto: botCompactVeto });
   const server = createByokServer({ productId: 'minimum', storage: { kind: 'sqlite', path: path.join(root, 'server.sqlite') }, wake: { consume: async () => {} } });
   try {
     const minimum = minimumInstructionBytes(SYSTEM_PROMPT);
