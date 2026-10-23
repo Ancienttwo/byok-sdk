@@ -512,6 +512,8 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     }
   }
   async function dispatchWithIdentity(input: DispatchInput): Promise<TaskHandle> {
+    // Before the snapshot: a spread drops an inherited or non-enumerable key.
+    refuseSealedFields(input);
     const submission = { ...input };
     const taskId = submission.taskId;
     if (taskId === undefined) return dispatchInternal(submission);
@@ -525,7 +527,6 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
   async function dispatchInternal(
     input: DispatchInput,
   ): Promise<TaskHandle> {
-    refuseSealedFields(input);
     const sessionRef = 'sessionRef' in input ? input.sessionRef : undefined;
     const agentRef = input.agentRef === undefined ? undefined : AgentRefSchema.parse(input.agentRef);
     const egressPolicy =

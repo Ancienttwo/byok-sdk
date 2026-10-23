@@ -25,6 +25,34 @@ describe('sealed fields on the server dispatch lanes (#654)', () => {
     } finally { await byok.close(); }
   });
 
+  // A spread drops an inherited or a non-enumerable key, so the guard reads the caller's own object.
+  const hidden = (field: string, value: unknown, base: object) => [
+    [`${field} (inherited)`, Object.assign(Object.create({ [field]: value }) as object, base)],
+    [`${field} (non-enumerable)`, Object.defineProperty({ ...base }, field, { value, enumerable: false })],
+  ] as const;
+
+  it.each([
+    ...hidden('sealing', SEALING, { instruction: 'do the thing', deviceId: 'dev_ghost' }),
+    ...hidden('sealed', SEALED, { instruction: 'do the thing', deviceId: 'dev_ghost', taskId: 'sealed-hidden' }),
+  ])('dispatch refuses a hidden key: %s', async (_label, input) => {
+    const byok = createByokServer({ productId: 'acme' });
+    try {
+      await expect(byok.dispatch(input as never)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+      expect((await byok.tasks.list()).tasks).toEqual([]);
+    } finally { await byok.close(); }
+  });
+
+  it.each(hidden('sealing', SEALING, {
+    instruction: 'do the thing', runtime: 'codex', agentRef: AGENT_REF, terminalProjection: { mode: 'none' },
+  }))('executions.submit refuses a hidden payload key: %s', async (_label, payload) => {
+    const byok = createByokServer({ productId: 'acme' });
+    try {
+      await expect(byok.executions.submit({ taskId: 'sealed-hidden', deviceId: 'dev_ghost', payload } as never))
+        .rejects.toMatchObject({ code: 'coordination_input_invalid' });
+      expect((await byok.tasks.list()).tasks).toEqual([]);
+    } finally { await byok.close(); }
+  });
+
   it.each([
     ['sealing', { sealing: SEALING }],
     ['sealed', { sealed: SEALED }],
