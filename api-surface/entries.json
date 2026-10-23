@@ -1727,7 +1727,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local provider credential custody",
-      "budgetBytes": 290208,
+      "budgetBytes": 296083,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
