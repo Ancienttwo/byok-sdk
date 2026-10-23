@@ -519,7 +519,8 @@ These facts apply to the runner on this SDK revision.
 - A counted trial that does not start goes to the `not_started` table.
   The batch is then `incomplete`.
 - The cell records `sdkBuild`: the checkout commit, a `dirty` flag, and each SDK
-  package version with the SHA-256 of its built `dist/index.js`.
+  package that the runner loads at runtime (`client`, `server`, `protocol`, `core`
+  and `cloud`), with its version and a SHA-256 over its whole built `dist`.
 - The runner sets the generated cell facts itself.
   A `--cell` fact with a reserved key, for example `model` or `platform`, is refused.
   `--cases` must not repeat a case.
