@@ -25,5 +25,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H intent table checks on real Postg
     await expect(insert(scope, 't3', taskId('t3', 0), 'another', 102)).rejects.toThrow(/intent_input_task/);
     await expect(opened!.pool.query(`UPDATE "${opened!.store.schema}".intent SET task_id = $1 WHERE key = '"t1"'`, [taskId('t2', 0)]))
       .rejects.toThrow(/intent_(stable|input)_task/);
+    await expect(opened!.pool.query(`UPDATE "${opened!.store.schema}".intent SET cancel_reason = 'superseded' WHERE key = '"t1"'`))
+      .rejects.toThrow(/intent_cancel_reason_check/);
   });
 });

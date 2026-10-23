@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
+import pg from 'pg';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sameFrozenOffer, taskId, type FrozenSubmitPort } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { openHostedCloud, SKIP_HOSTED_CLOUD, type HostedCloud } from './hosted-cloud.test-support';
 import { freezeIntent, HostedSubmitter, type SubmitterOptions } from './intents';
 import { storedKey } from './layout';
-import { openStore } from './postgres.test-support';
+import { openStore, POSTGRES_URL } from './postgres.test-support';
 import { inSchema, lockScope } from './store';
 
 // The SDK side is the hosted composition (createByokCloud over createPostgresCloudStores) with a real daemon, paired
@@ -33,6 +34,11 @@ async function freeze(scope: string, turnId = randomUUID(), waitUntil = clock + 
     await lockScope(client, storedKey(scope));
     return freezeIntent(client, scope, { turnId, execution: template(host!.deviceId), waitUntil });
   });
+}
+/** The SDK mailbox rows of the task's offer. */
+async function offers(task: string): Promise<number> {
+  const offer = await host!.port.offer(task);
+  return offer ? host!.mailboxRows(offer.messageId) : 0;
 }
 type Row = { submission: string; tries: number; cancel_reason: string | null; conclusion: string | null; last_error: string | null };
 async function row(scope: string, task: string): Promise<Row> {
@@ -63,7 +69,7 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('H submitter on real Postgres and a real SDK 
 
   it('delivers the frozen input, and the SDK readback is that input', async () => {
     const scope = `tenant:${randomUUID()}`, input = await freeze(scope), { port, submitted } = sdkPort();
-    expect(await submitter(port).run()).toBe(1);
+    expect(await submitter(port).run()).toEqual({ tried: 1, failed: [] });
     expect(await row(scope, input.taskId)).toMatchObject({ submission: 'delivered', tries: 1, last_error: null });
     const offer = await host!.port.offer(input.taskId);
     expect(offer && sameFrozenOffer(offer, input)).toBe(true);
@@ -75,7 +81,7 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('H submitter on real Postgres and a real SDK 
     const crashed: FrozenSubmitPort = { ...port, submit: async () => { throw new Error('crash before the SDK call'); } };
     await submitter(crashed).run();
     expect(await row(scope, input.taskId)).toMatchObject({ submission: 'uncertain', tries: 1, last_error: 'crash before the SDK call' });
-    expect(await submitter(port).run()).toBe(0); // the backoff holds the row
+    expect(await submitter(port).run()).toEqual({ tried: 0, failed: [] }); // the backoff holds the row
     clock += 500;
     await submitter(port).run();
     expect(await row(scope, input.taskId)).toMatchObject({ submission: 'delivered', tries: 2, last_error: null });
@@ -89,6 +95,7 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('H submitter on real Postgres and a real SDK 
     await submitter(lost).run();
     expect(await row(scope, input.taskId)).toMatchObject({ submission: 'delivered', tries: 1, last_error: null });
     expect(submitted).toEqual([input.taskId]);
+    expect(await offers(input.taskId)).toBe(1);
   });
 
   it('never submits when the SDK holds another offer for the task id, and keeps the error', async () => {
@@ -102,7 +109,7 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('H submitter on real Postgres and a real SDK 
   it('expires an untried row at wait_until with no SDK attempt', async () => {
     const scope = `tenant:${randomUUID()}`, input = await freeze(scope, randomUUID(), clock + 10), { port, submitted } = sdkPort();
     clock += 10;
-    expect(await submitter(port).run()).toBe(1);
+    expect(await submitter(port).run()).toEqual({ tried: 1, failed: [] });
     expect(await row(scope, input.taskId)).toMatchObject({ submission: 'reserved', tries: 0, conclusion: 'expired' });
     expect(submitted).toEqual([]);
     expect(await host!.cloud.readTaskAttempt(host!.tenant, input.taskId)).toBeUndefined();
@@ -112,11 +119,11 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('H submitter on real Postgres and a real SDK 
     const scope = `tenant:${randomUUID()}`, input = await freeze(scope, randomUUID(), clock + 10), { port, submitted } = sdkPort();
     await update(scope, input.taskId, `submission = 'uncertain', tries = 1`); // a crash after an earlier claim
     clock += 10;
-    expect(await submitter(port).run()).toBe(1);
+    expect(await submitter(port).run()).toEqual({ tried: 1, failed: [] });
     expect(await row(scope, input.taskId)).toMatchObject({ submission: 'uncertain', tries: 2, cancel_reason: 'expired', conclusion: null });
     expect(submitted).toEqual([]);
     clock += 2000;
-    expect(await submitter(port).run()).toBe(0);
+    expect(await submitter(port).run()).toEqual({ tried: 0, failed: [] });
   });
 
   it('submits only the FIFO head of an agent, and the next intent waits until the head concludes', async () => {
@@ -137,6 +144,7 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('H submitter on real Postgres and a real SDK 
     await Promise.all([submitter(port).run(), submitter(port).run()]);
     expect(await row(scope, input.taskId)).toMatchObject({ submission: 'delivered', tries: 1 });
     expect(submitted).toEqual([input.taskId]);
+    expect(await offers(input.taskId)).toBe(1);
   });
 
   it('keeps the newer try when a stale submitter fails late over a row that is not delivered', async () => {
@@ -171,5 +179,86 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('H submitter on real Postgres and a real SDK 
     await first;
     expect(await row(scope, input.taskId)).toMatchObject({ submission: 'delivered', tries: 2, last_error: null });
     expect(submitted).toEqual([input.taskId]);
+  });
+  it('retries a head in backoff ahead of its follower, with a batch of 1', async () => {
+    const scope = `tenant:${randomUUID()}`, head = await freeze(scope), follower = await freeze(scope), { port } = sdkPort();
+    let fail = true;
+    const once: FrozenSubmitPort = { ...port, submit: async input => { if (fail) { fail = false; throw new Error('first try fails'); } return port.submit(input); } };
+    await submitter(once, { batch: 1 }).run();
+    expect(await row(scope, head.taskId)).toMatchObject({ submission: 'uncertain', tries: 1, last_error: 'first try fails' });
+    clock += 500;
+    expect(await submitter(once, { batch: 1 }).run()).toEqual({ tried: 1, failed: [] });
+    expect(await row(scope, head.taskId)).toMatchObject({ submission: 'delivered', tries: 2 });
+    expect(await row(scope, follower.taskId)).toMatchObject({ submission: 'reserved', tries: 0 });
+  });
+
+  it('does not let the followers of one scope starve the head of another scope, with a batch of 2', async () => {
+    const first = `tenant:a-${randomUUID()}`, second = `tenant:z-${randomUUID()}`, { port } = sdkPort();
+    const firstHead = await freeze(first);
+    for (let index = 0; index < 3; index++) await freeze(first);
+    await submitter(port, { batch: 1 }).run();
+    expect((await row(first, firstHead.taskId)).submission).toBe('delivered');
+    const secondHead = await freeze(second);
+    expect(await submitter(port, { batch: 2 }).run()).toEqual({ tried: 1, failed: [] });
+    expect(await row(second, secondHead.taskId)).toMatchObject({ submission: 'delivered', tries: 1 });
+  });
+
+  it('goes on with the pass when one row cannot be tried, and writes nothing to that row', async () => {
+    const bad = `tenant:a-${randomUUID()}`, good = `tenant:z-${randomUUID()}`, { port } = sdkPort();
+    const refused = await freeze(bad), input = await freeze(good);
+    await opened!.pool.query(`UPDATE "${opened!.store.schema}".scope SET state_version = 3 WHERE scope = $1`, [storedKey(bad)]);
+    const pass = await submitter(port).run();
+    expect(pass.tried).toBe(1);
+    expect(pass.failed).toMatchObject([{ scope: bad, error: { name: 'HostedStoreVersionError' } }]);
+    expect(await row(bad, refused.taskId)).toMatchObject({ submission: 'reserved', tries: 0, last_error: null });
+    expect((await row(good, input.taskId)).submission).toBe('delivered');
+  });
+
+  it('gives one SDK mailbox row when a stale submitter and a newer one both reach the SDK', async () => {
+    const scope = `tenant:${randomUUID()}`, input = await freeze(scope), { port, submitted } = sdkPort();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const stale: FrozenSubmitPort = { ...port, submit: async frozen => { await gate; return port.submit(frozen); } };
+    const first = submitter(stale).run();
+    await vi.waitFor(async () => expect((await row(scope, input.taskId)).tries).toBe(1));
+    clock += 1000; // A's lease has expired
+    await submitter(port).run();
+    release();
+    await first;
+    expect(await row(scope, input.taskId)).toMatchObject({ submission: 'delivered', tries: 2, last_error: null });
+    expect(submitted).toEqual([input.taskId]); // the stale submit reached the SDK and was refused there
+    expect(await offers(input.taskId)).toBe(1);
+  });
+
+  it('recovers a row after its submitter dies after the claim, once the lease ends', async () => {
+    const scope = `tenant:${randomUUID()}`, input = await freeze(scope), { port } = sdkPort();
+    const dead: FrozenSubmitPort = { ...port, submit: () => new Promise<never>(() => {}) };
+    void submitter(dead).run(); // never settles: the process is gone
+    await vi.waitFor(async () => expect((await row(scope, input.taskId)).tries).toBe(1));
+    expect(await submitter(port).run()).toEqual({ tried: 0, failed: [] }); // the lease holds the row
+    clock += 1000;
+    expect(await submitter(port).run()).toEqual({ tried: 1, failed: [] });
+    expect(await row(scope, input.taskId)).toMatchObject({ submission: 'delivered', tries: 2 });
+    expect(await offers(input.taskId)).toBe(1);
+  });
+
+  it('checks the lease again under the scope lock, so a submitter whose scan ran before a claim skips the row', async () => {
+    const scope = `tenant:${randomUUID()}`, input = await freeze(scope), { port, submitted } = sdkPort();
+    const name = `lease_${randomUUID().slice(0, 8)}`;
+    const pool = new pg.Pool({ connectionString: POSTGRES_URL, max: 4, application_name: name });
+    const blocker = await opened!.pool.connect();
+    try {
+      // Hold the scope lock, so both scans read the row as due and both claims wait for the lock.
+      await blocker.query('BEGIN');
+      await blocker.query(`SELECT 1 FROM "${opened!.store.schema}".scope WHERE scope = $1 FOR UPDATE`, [storedKey(scope)]);
+      const both = [0, 1].map(() => new HostedSubmitter(pool, opened!.store.schema, { port: () => port, now: () => clock, leaseMs: 1000 }).run());
+      await vi.waitFor(async () => expect(Number((await opened!.pool.query(
+        `SELECT count(*) AS n FROM pg_stat_activity WHERE application_name = $1 AND wait_event_type = 'Lock'`, [name])).rows[0].n)).toBe(2));
+      await blocker.query('COMMIT');
+      const passes = await Promise.all(both);
+      expect(passes.map(pass => pass.tried).sort()).toEqual([0, 1]);
+      expect(await row(scope, input.taskId)).toMatchObject({ submission: 'delivered', tries: 1 });
+      expect(submitted).toEqual([input.taskId]);
+    } finally { blocker.release(); await pool.end(); }
   });
 });

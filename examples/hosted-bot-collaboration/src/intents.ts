@@ -40,6 +40,9 @@ export interface SubmitterOptions {
   batch?: number;
 }
 type Claim = { scopeKey: string; key: string; tries: number; input: FrozenInput; waitUntil: number };
+/** A row whose try threw outside the SDK call, for example on an unknown store version. The pass went on. */
+export interface SubmitFailure { scope: string; turnId: string; error: unknown }
+export interface SubmitPass { tried: number; failed: SubmitFailure[] }
 
 /**
  * Submits frozen intents (#793 D2b-1). It uses the K4 rules: the FIFO head, the queued expiry and `submitFrozen`.
@@ -53,14 +56,37 @@ export class HostedSubmitter {
     this.now = options.now ?? Date.now;
   }
 
-  /** One pass over the due rows. It returns how many rows it tried or expired. */
-  async run(): Promise<number> {
+  /**
+   * One pass over the due FIFO heads. A follower is never due, so it cannot fill the batch ahead of a head. A row
+   * whose try throws is backed off when its scope can be locked, and the pass goes on with the next row.
+   */
+  async run(): Promise<SubmitPass> {
     const due = await inSchema(this.pool, this.schema, client => client.query<{ scope: string; key: string }>(
-      `SELECT scope, key FROM intent WHERE conclusion IS NULL AND submission <> 'delivered' AND cancel_reason IS NULL
-        AND next_at <= $1 ORDER BY next_at, scope, ordinal LIMIT $2`, [this.now(), this.options.batch ?? 100]), true);
-    let worked = 0;
-    for (const row of due.rows) if (await this.try(row.scope, row.key)) worked++;
-    return worked;
+      `SELECT i.scope, i.key FROM intent i WHERE i.conclusion IS NULL AND i.submission <> 'delivered' AND i.cancel_reason IS NULL
+        AND i.next_at <= $1 AND NOT EXISTS (SELECT 1 FROM intent o WHERE o.scope = i.scope AND o.agent = i.agent
+          AND o.conclusion IS NULL AND o.ordinal < i.ordinal)
+        ORDER BY i.next_at, i.scope, i.ordinal LIMIT $2`, [this.now(), this.options.batch ?? 100]), true);
+    const pass: SubmitPass = { tried: 0, failed: [] };
+    for (const row of due.rows) {
+      try { if (await this.try(row.scope, row.key)) pass.tried++; }
+      catch (error) {
+        pass.failed.push({ scope: JSON.parse(row.scope) as string, turnId: JSON.parse(row.key) as string, error });
+        // The backoff can fail too, for example when the scope has an unknown store version. Then nothing is written.
+        await this.backOff(row.scope, row.key, error).catch(() => undefined);
+      }
+    }
+    return pass;
+  }
+
+  /** Saves the error of a failed try and delays the row. It does not touch a row that another try holds. */
+  private backOff(scopeKey: string, key: string, error: unknown): Promise<void> {
+    return inSchema(this.pool, this.schema, async client => {
+      await lockScope(client, scopeKey);
+      const now = this.now();
+      await client.query(`UPDATE intent SET last_error = $3, next_at = $5 WHERE scope = $1 AND key = $2 AND conclusion IS NULL
+        AND submission <> 'delivered' AND cancel_reason IS NULL AND next_at <= $4`,
+      [scopeKey, key, error instanceof Error ? error.message : String(error), now, now + (this.options.backoffMs ?? 30_000)]);
+    });
   }
 
   private async try(scopeKey: string, key: string): Promise<boolean> {

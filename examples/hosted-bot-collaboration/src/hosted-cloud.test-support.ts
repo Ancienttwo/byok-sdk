@@ -75,7 +75,10 @@ export async function openHostedCloud() {
       submit: input => cloud.submitAgentExecution(tenant, input),
       offer: taskId => cloud.readTaskOffer(tenant, taskId),
     };
-    return { cloud, tenant, deviceId, port, async close() { await shutdown(); } };
+    /** Read only: the SDK mailbox rows of one offer message. One offer is one row, however many submits resolved. */
+    const mailboxRows = async (messageId: string) =>
+      Number((await pool.query<{ n: string }>('SELECT count(*) AS n FROM outbox WHERE message_id = $1', [messageId])).rows[0]!.n);
+    return { cloud, tenant, deviceId, port, mailboxRows, async close() { await shutdown(); } };
   } catch (error) {
     await shutdown();
     throw error;

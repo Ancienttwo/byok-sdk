@@ -33,7 +33,10 @@ queued expiry (`queuedExpiry`) and the frozen submit (`submitFrozen`).
 - A row that was never tried expires at `wait_until`. A tried row past `wait_until` is never submitted
   again. It gets `cancel_reason = 'expired'` and no conclusion, because an SDK attempt can still exist.
   Reconciliation (D2d) checks the attempt first.
-- A delivered head holds its agent's queue until it has a conclusion.
+- A delivered head holds its agent's queue until it has a conclusion. The scan returns only FIFO heads, so the
+  followers of a queue never fill a pass ahead of a due head.
+- A row whose try throws outside the SDK call is backed off, and the pass goes on. `run()` reports it in
+  `failed`. A scope of an unknown store version is not written at all.
 - The SDK input never changes, and the task id never changes. After a lost response, a readback finds the
   offer, and no second submit runs.
 
