@@ -14,6 +14,7 @@ import { z } from 'zod';
 
 import { canonicalizeJson, canonicalizeJsonBytes, type JsonObject } from '../attestation';
 import { CONTENT_HASH_PATTERN } from '../blob';
+import { safeParseTotal } from '../total-parse';
 import type { WebCryptoKey } from '../webcrypto';
 import {
   base64UrlBytes,
@@ -101,7 +102,7 @@ export async function deriveMemberId(signingPublicJwk: P256PublicJwk): Promise<s
 }
 
 function parseUnsignedEntry(entry: UnsignedMemberChainEntryV1): UnsignedMemberChainEntryV1 {
-  const parsed = UnsignedMemberChainEntryV1Schema.safeParse(entry);
+  const parsed = safeParseTotal(UnsignedMemberChainEntryV1Schema, entry);
   if (!parsed.success) throw invalidInput('Member chain entry is invalid');
   return parsed.data;
 }
@@ -161,7 +162,7 @@ export async function verifyMemberChainEntry(
   entry: unknown,
   signerPublicJwk: P256PublicJwk,
 ): Promise<MemberChainEntryVerifyResult> {
-  const parsed = MemberChainEntryV1Schema.safeParse(entry);
+  const parsed = safeParseTotal(MemberChainEntryV1Schema, entry);
   if (!parsed.success || (await deriveMemberId(signerPublicJwk)) !== parsed.data.signer) {
     return { ok: false, reason: 'member_chain_entry_invalid' };
   }
