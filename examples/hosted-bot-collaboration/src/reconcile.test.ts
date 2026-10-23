@@ -124,10 +124,12 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('H reconciliation on a real SDK server and da
 function fakePort() {
   const offers = new Map<string, unknown>(), attempts = new Map<string, TaskAttempt>(), terminals = new Map<string, DeviceTerminal>();
   const cancels: string[] = [];
+  /** Runs inside the SDK call, after its read: another pass or a clock step lands while the call is in flight. */
+  const during: { attempt?: () => void | Promise<void>; terminal?: () => void | Promise<void> } = {};
   const port: HostedTaskPort = {
     offer: async id => offers.get(id) as never,
-    attempt: async id => attempts.get(id),
-    deviceTerminal: async id => terminals.get(id),
+    attempt: async id => { const found = attempts.get(id); await during.attempt?.(); return found; },
+    deviceTerminal: async id => { const found = terminals.get(id); await during.terminal?.(); return found; },
     cancel: async (id, reason) => {
       cancels.push(`${id}:${reason}`);
       const attempt = attempts.get(id)!;
@@ -135,7 +137,7 @@ function fakePort() {
     },
   };
   return {
-    port, cancels, attempts, terminals,
+    port, cancels, attempts, terminals, during,
     deliver(input: FrozenInput, rest: Partial<TaskAttempt> = {}) {
       offers.set(input.taskId, { taskId: input.taskId, deviceId: input.deviceId, type: 'task.offer_for_agent_with_egress_fresh',
         payload: structuredClone(input.payload), delivered: true, messageId: `offer-${input.taskId}` });
@@ -222,6 +224,33 @@ describe.skipIf(POSTGRES_URL === undefined)('H reconciliation edge cases on real
     expect(await run(sdk.port)).toEqual({ concluded: 1, failed: [] });
     expect(await row(scope, 'q1')).toMatchObject({ conclusion: 'cancelled' });
     expect(sdk.cancels).toEqual([]);
+  });
+
+  it('does not expire a row whose claim another pass saw after this pass read the row', async () => {
+    const { scope, input } = await tried(), sdk = fakePort();
+    sdk.deliver(input, { status: 'claimed', ownerDeviceId: 'device' });
+    clock += 60_000;
+    // This pass read `started = false`. Another pass records the claim while this pass waits for the terminal read.
+    sdk.during.terminal = async () => {
+      sdk.during.terminal = undefined;
+      await opened!.pool.query(`UPDATE ${table('intent')} SET started = true WHERE scope = $1`, [storedKey(scope)]);
+    };
+    expect(await run(sdk.port)).toEqual({ concluded: 0, failed: [] });
+    expect(await row(scope, 'q1')).toMatchObject({ started: true, cancel_reason: null, conclusion: null });
+    expect(sdk.cancels).toEqual([]);
+  });
+
+  it('keeps a cancelled row open when its submit lease ends only after the attempt read', async () => {
+    const { scope } = await tried(() => {}, 1000), sdk = fakePort();
+    await opened!.pool.query(`UPDATE ${table('intent')} SET cancel_reason = 'cancelled' WHERE scope = $1`, [storedKey(scope)]);
+    clock += 999;
+    // The read sees no attempt while the lease holds the row; the lease ends before the conclusion takes the lock.
+    sdk.during.attempt = () => { clock += 1; };
+    expect(await run(sdk.port)).toEqual({ concluded: 0, failed: [] });
+    expect(await row(scope, 'q1')).toMatchObject({ conclusion: null });
+    sdk.during.attempt = undefined;
+    expect(await run(sdk.port)).toEqual({ concluded: 1, failed: [] });
+    expect(await row(scope, 'q1')).toMatchObject({ conclusion: 'cancelled' });
   });
 
   it.each(['attempt', 'offer'])('throws on another %s identity, and writes no evidence', async field => {

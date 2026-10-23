@@ -79,13 +79,16 @@ export class HostedReconciler {
     // Only an earlier observed claim removes the waiting deadline, as in K4.
     if (!terminal && !cancelReason && !row.started && this.now() >= row.waitUntil) {
       const stored = await this.expire(scopeKey, key);
-      if (!stored) return false;
+      if (stored === 'concluded') return false;
       cancelReason = stored;
     }
+    // Read before the attempt: a submit lease that ended by then held no try that could still create an attempt.
+    const attemptReadAt = this.now();
     let attempt = verified(row.input, await port.attempt(task));
     if (cancelReason && !terminal) {
-      // No attempt: conclude, but only when no submit try holds the row. K4 serializes this with every submit; H uses the lease.
-      if (!attempt) return this.conclude(scopeKey, key, cancelReason, true);
+      // No attempt: conclude, but only when no submit try held the row at the read. K4 serializes this with every submit;
+      // H uses the lease.
+      if (!attempt) return this.conclude(scopeKey, key, cancelReason, attemptReadAt);
       await port.cancel(task, cancelReason);
       attempt = verified(row.input, await port.attempt(task));
       if (!attempt) throw new Error('Attempt disappeared after cancellation');
@@ -93,7 +96,7 @@ export class HostedReconciler {
     }
     if (attempt) await this.record(scopeKey, key, attempt);
     if (attempt?.status === 'cancelled' && !attempt.claimedRuntime && !attempt.ownerDeviceId && !terminal) {
-      return this.conclude(scopeKey, key, cancelReason === 'expired' ? 'expired' : 'cancelled', false);
+      return this.conclude(scopeKey, key, cancelReason === 'expired' ? 'expired' : 'cancelled');
     }
     if (terminal) {
       if (terminal.envelope.task_id !== task) throw new Error('Terminal identity conflict');
@@ -115,11 +118,21 @@ export class HostedReconciler {
     return row && { input: row.input, waitUntil: Number(row.wait_until), cancelReason: row.cancel_reason, concluded: row.concluded, started: row.started };
   }
 
-  /** Sets `cancel_reason = 'expired'` unless the row has a reason. Returns the stored reason, or nothing for a concluded row. */
-  private expire(scopeKey: string, key: string): Promise<'expired' | 'cancelled' | undefined> {
-    return this.locked(scopeKey, async client => (await client.query<{ cancel_reason: 'expired' | 'cancelled' }>(
-      `UPDATE intent SET cancel_reason = coalesce(cancel_reason, 'expired') WHERE scope = $1 AND key = $2 AND conclusion IS NULL
-        RETURNING cancel_reason`, [scopeKey, key])).rows[0]?.cancel_reason);
+  /**
+   * Under the scope lock, sets `cancel_reason = 'expired'` on a row with no reason and no observed claim. Returns the stored
+   * reason; `null` when another pass has seen the claim since this pass read the row, so the row keeps waiting; or
+   * `concluded`.
+   */
+  private expire(scopeKey: string, key: string): Promise<'expired' | 'cancelled' | null | 'concluded'> {
+    return this.locked(scopeKey, async client => {
+      const found = await client.query<{ cancel_reason: 'expired' | 'cancelled' | null; concluded: boolean; started: boolean }>(
+        'SELECT cancel_reason, conclusion IS NOT NULL AS concluded, started FROM intent WHERE scope = $1 AND key = $2 FOR UPDATE', [scopeKey, key]);
+      const row = found.rows[0];
+      if (!row || row.concluded) return 'concluded';
+      if (row.cancel_reason || row.started) return row.cancel_reason;
+      await client.query(`UPDATE intent SET cancel_reason = 'expired' WHERE scope = $1 AND key = $2`, [scopeKey, key]);
+      return 'expired';
+    });
   }
 
   /** Saves the last attempt, and K4 `started` once the attempt has a claim. */
@@ -131,13 +144,13 @@ export class HostedReconciler {
   }
 
   /**
-   * Concludes a row with no device terminal. With `leaseEnded`, it waits until the submit lease of the row has ended,
-   * because a try in flight can still create an attempt.
+   * Concludes a row with no device terminal. With `attemptReadAt`, the row's submit lease must have ended by the time that
+   * the attempt was read as absent, because a try in flight then could still create an attempt.
    */
-  private conclude(scopeKey: string, key: string, conclusion: 'expired' | 'cancelled', leaseEnded: boolean): Promise<boolean> {
+  private conclude(scopeKey: string, key: string, conclusion: 'expired' | 'cancelled', attemptReadAt?: number): Promise<boolean> {
     return this.locked(scopeKey, async (client, now) => {
       const done = await client.query(`UPDATE intent SET conclusion = $3 WHERE scope = $1 AND key = $2 AND conclusion IS NULL
-        AND (NOT $4 OR next_at <= $5)`, [scopeKey, key, conclusion, leaseEnded, now]);
+        AND ($4::bigint IS NULL OR next_at <= $4)`, [scopeKey, key, conclusion, attemptReadAt ?? null]);
       if (done.rowCount) return true;
       await this.delay(client, scopeKey, key, now);
       return false;

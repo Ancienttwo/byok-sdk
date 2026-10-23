@@ -124,9 +124,11 @@ of K4 `reconcile` and `finish`. It reads `readTaskOffer`, `readDeviceTerminal` a
 
 - The offer readback must be the frozen input, and the attempt must have the frozen task, device and Agent.
   Otherwise the row throws, and nothing but its next readback time is written.
-- A row with no terminal, no cancel reason and no observed claim gets `cancel_reason = 'expired'` at `wait_until`.
-- A row with a cancel reason and an attempt cancels the SDK task. With no attempt, it concludes, but only after its
-  submit lease has ended, because a try in flight can still create an attempt. K4 serializes this with each submit.
+- A row with no terminal, no cancel reason and no observed claim gets `cancel_reason = 'expired'` at `wait_until`. The
+  write checks `started` again under the scope lock, so a claim that another pass saw keeps the row waiting.
+- A row with a cancel reason and an attempt cancels the SDK task. With no attempt, it concludes, but only when its
+  submit lease had ended before the attempt read, because a try in flight can still create an attempt. K4 serializes
+  this with each submit.
 - `started` is set once an attempt has a claim. A cancelled attempt with no claim and no terminal concludes the row.
 - A device terminal concludes the row in one store transaction, under the scope lock: `cancelled` for a cancellation
   or `task.cancelled`; `succeeded` for `task.complete`, with the K8 `outcome` command; otherwise `declined` or `failed`.
