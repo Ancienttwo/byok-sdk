@@ -2226,8 +2226,8 @@ export class TaskRunner {
           return;
         }
         if (!this.tasks.has(envelope.task_id)) return;
-        const text = await this.deps.sealedTasks.openSteer(envelope);
-        if (text !== undefined) await this.handleSteer(envelope.task_id, text);
+        const taskId = envelope.task_id;
+        await this.deps.sealedTasks.applySteer(envelope, (text) => this.handleSteer(taskId, text));
         return;
       }
       default:

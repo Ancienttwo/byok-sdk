@@ -341,6 +341,25 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     }
   });
 
+  it('applies the redelivery of a sealed steer whose first apply failed', async () => {
+    const keyring = new TestKeyring();
+    const { server, adapter, deviceId } = await start({ keyring });
+    server.send(await sealedOffer(keyring, 'steer-retry', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    const session = adapter.sessions[0]!;
+
+    const steerId = randomUUID();
+    const { header, ciphertext } = await sealedMember(keyring, { text: 'go right' }, binding('task.steer', 'server-to-daemon', { taskId: 'steer-retry', steerId }, deviceId, BOTH));
+    const steer = createEnvelope('task.steer_sealed', { steerId, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never, { taskId: 'steer-retry', seq: server.nextSeq() });
+    session.steerError = new Error('transient steer failure');
+    server.send(steer);
+    await vi.waitFor(() => expect(session.steerError).toBeUndefined(), BUDGET_MS);
+    expect(session.steerCalls).toEqual([]);
+
+    server.send({ ...steer, id: randomUUID(), seq: server.nextSeq() });
+    await vi.waitFor(() => expect(session.steerCalls).toEqual(['go right']), BUDGET_MS);
+  });
+
   it('seals an approval request, a cancel and a runtime failure', async () => {
     const keyring = new TestKeyring();
     const { server, adapter, deviceId } = await start({ keyring });
