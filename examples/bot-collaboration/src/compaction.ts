@@ -1,5 +1,15 @@
-import { hash, type CompactVeto } from '@byok-sdk/example-host-execution-core';
-import type { CollaborationState } from './model';
+import { hash, type CompactVeto, type HostLedger, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import type { CollaborationState, Turn } from './model';
+import { routineOccurrence } from './routines';
+
+/**
+ * K4 compacted the intent of this Turn, so its identity can never run again (#816). The intent tombstone proves it.
+ * A routine Turn's tombstone expires with its slot, but K4 removes its occurrence with the intent, and a routine Turn is
+ * written with its occurrence. So a routine Turn without its occurrence was compacted too.
+ */
+export function turnIntentRetired(ledger: HostLedger, s: Pick<LedgerState, 'occurrences'>, turn: Turn, now: number): boolean {
+  return ledger.hasTombstone('intent', turn.id, now) || turn.source === 'routine' && !s.occurrences[routineOccurrence(turn)];
+}
 
 /**
  * The K8 compact veto (#816). Open every Bot ledger with it: `new HostLedger(file, tenant, { compactVeto: botCompactVeto })`.
