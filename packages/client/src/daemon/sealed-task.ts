@@ -26,6 +26,7 @@ import {
   type SealedSplitEntry,
   type TaskSealing,
 } from '@byok-sdk/protocol';
+import { BlobHttpError } from './blob-http-error';
 import { routineTemplateBinding, routineTemplateExpired, type RoutineRef } from './sealed-routine-template';
 
 type JsonObject = { [key: string]: unknown };
@@ -94,8 +95,9 @@ const SEALED_OUTPUT_TYPE: Partial<Record<MessageType, SealedMessageType>> = Obje
 const TERMINAL_TYPES: ReadonlySet<MessageType> = new Set(['task.complete', 'task.fail', 'task.cancelled', 'task.decline']);
 
 /**
- * A seal that may succeed later: its ciphertext upload failed, or the server
- * flags are not known until the next session. The caller seals again later.
+ * A seal that may succeed later: its ciphertext upload failed short of a
+ * final refusal, or the server flags are not known until the next session.
+ * The caller seals again later.
  */
 class SealedRetryError extends Error {}
 
@@ -277,7 +279,8 @@ export class SealedTasks {
     } catch (error) {
       if (error instanceof SealedRetryError || !TERMINAL_TYPES.has(envelope.type)) throw error;
       // A terminal that cannot be sealed as it is (over the plaintext limit,
-      // over an inline-only frame, or not a valid sealed message) would hold the task's terminal commit
+      // over an inline-only frame, a ciphertext blob the server refused for good,
+      // or not a valid sealed message) would hold the task's terminal commit
       // forever. Settle it with a small sealed failure instead, and show the
       // local observer that failure, not the terminal it replaced.
       console.error(`[byok/client] ${envelope.type} for sealed task ${taskId} replaced by a sealed failure: ${error instanceof Error ? error.message : String(error)}`);
@@ -333,7 +336,13 @@ export class SealedTasks {
     try {
       return await this.options.blobs.upload(ciphertext);
     } catch (error) {
-      throw new SealedRetryError(`ciphertext upload failed: ${error instanceof Error ? error.message : String(error)}`);
+      const message = `ciphertext upload failed: ${error instanceof Error ? error.message : String(error)}`;
+      // A 4xx other than a timeout or a rate limit (a quota, the blob size
+      // limit, a bad request) refuses every later reservation the same way.
+      if (error instanceof BlobHttpError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
+        throw new Error(message);
+      }
+      throw new SealedRetryError(message);
     }
   }
 
