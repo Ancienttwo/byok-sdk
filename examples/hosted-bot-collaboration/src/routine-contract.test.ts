@@ -3,7 +3,6 @@ import { afterAll, beforeAll, describe } from 'vitest';
 import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
 import { hash, taskId, type Conclusion, type FrozenInput, type FrozenSubmitPort, type Intent, type RoutineDefinition } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
-import { admitUserInput } from '@byok-sdk/example-bot-collaboration/coalesce';
 import type { CommitResult } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { routineVectors, type OccurrenceRow, type RoutineSubject } from '@byok-sdk/example-bot-collaboration/routine-vectors';
 import { SYNC_OPTIONS } from '@byok-sdk/example-bot-collaboration/test-support';
@@ -46,8 +45,7 @@ async function hostedSubject(): Promise<RoutineSubject> {
   });
   await store().bindDevice(scope, 'device');
   const submitter = new HostedSubmitter(opened!.pool, store().schema, { port: () => fakePort(), now: () => clock, leaseMs: 60_000, backoffMs: 1000 });
-  const ports: FinishPortsFactory = (state, publish) => ({ ...vectorPorts(state, publish), now: () => clock,
-    admitInput: fields => admitUserInput(state, fields, undefined, clock) });
+  const ports: FinishPortsFactory = (state, publish) => ({ ...vectorPorts(state, publish), now: () => clock });
   /** Runs the Host as the L pass does: the sync, then the submit of each FIFO head, then the sync again. */
   const run = async () => {
     await store().sync(scope, { ...SYNC_OPTIONS, now: clock, history: undefined });
