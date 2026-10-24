@@ -98,6 +98,9 @@ export class TestServer {
   blobUploadsHeld = 0;
   /** Blob content PUTs refused by {@link setFailBlobUploads}. */
   blobUploadsFailed = 0;
+  private blobCreateRefusal: number | undefined;
+  /** Blob creates answered by {@link refuseBlobCreates}. */
+  blobCreatesRefused = 0;
   private dropNextBlobFinalizeResponse = false;
   /** Capabilities advertised in every subsequent long-poll response. */
   private ackCapabilities: string[] = [];
@@ -188,6 +191,11 @@ export class TestServer {
   /** Make every blob content PUT fail with a 500 while `true` — used to test the client's handling of an upload failure (finding F7). */
   setFailBlobUploads(fail: boolean): void {
     this.failBlobUploads = fail;
+  }
+
+  /** Answer every blob create with this HTTP status (a quota or size refusal) until `undefined`. */
+  refuseBlobCreates(status: number | undefined): void {
+    this.blobCreateRefusal = status;
   }
 
   /** Hold every blob content PUT, after its body arrived, until the returned function runs. */
@@ -504,6 +512,11 @@ export class TestServer {
       return;
     }
     const body = (await readJsonBody(req)) as { size: number; contentType: string; contentHash: string };
+    if (this.blobCreateRefusal !== undefined) {
+      this.blobCreatesRefused += 1;
+      respondJson(res, this.blobCreateRefusal, { error: 'simulated blob refusal' });
+      return;
+    }
     const existingBlobId = this.blobReservations.get(reservationId);
     if (existingBlobId !== undefined) {
       respondJson(res, 200, {

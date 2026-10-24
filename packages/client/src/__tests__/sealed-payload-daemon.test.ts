@@ -675,6 +675,25 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 Â
     expect(taskEnvelopes('upload-retry').map((envelope) => envelope.type)).not.toContain('task.fail_sealed');
   });
 
+  it('settles a terminal with a small sealed failure, without a retry, when the server refuses its ciphertext blob for good', async () => {
+    const keyring = new TestKeyring();
+    const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true });
+    server.send(await sealedOffer(keyring, 'upload-refused', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    server.refuseBlobCreates(413);
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      adapter.sessions[0]!.emit({ type: 'progress', text: `large summary ${'s'.repeat(300 * 1024)}` });
+      adapter.sessions[0]!.emit({ type: 'turn_end' });
+      const failed = await server.waitFor((envelope) => envelope.type === 'task.fail_sealed' && envelope.task_id === 'upload-refused', BUDGET_MS);
+      expect(await openOutput(keyring, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
+    } finally {
+      diagnostic.mockRestore();
+    }
+    expect(server.blobCreatesRefused).toBe(1);
+    expect(taskEnvelopes('upload-refused').map((envelope) => envelope.type)).not.toContain('task.complete_sealed');
+  });
+
   it.each(['with', 'without'] as const)('waits for the next session to read the server flags before it seals a large terminal %s a journal', async (journal) => {
     const keyring = new TestKeyring();
     const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true, ...(journal === 'without' ? { journal: false as const } : {}) });
