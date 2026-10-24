@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- **Breaking (cloud)** — a sealed terminal (`task.complete_sealed`,
+  `task.fail_sealed`, `task.decline_sealed`, `task.cancelled_sealed`) or
+  `task.artifact_sealed` may carry `ciphertextRef` above the 256 KiB inline
+  frame (#654, owner batch §58a A). The cloud checks that the object is
+  committed in the tenant, with the declared size and content type; a failure
+  is reported as `payload_invalid`. The task holds the blob under its
+  `(sealed-task, taskId)` reference, and redaction releases it.
+  `task.progress_sealed` and `task.await_approval_sealed` stay inline only.
+  The cloud advertises the new server capability
+  `sealed-output-ciphertext-ref`. Upgrade note: `TenantStores` has a new
+  required member `objects`, the tenant-bound `get`, `addReference` and
+  `removeReference` of the core `ObjectStore`. `tenantStoresFor` builds it, so
+  only code that builds a `TenantStores` literal needs to add it.
+- **Feature (client)** — when the server advertises
+  `sealed-output-ciphertext-ref`, the daemon uploads a sealed task output
+  over the inline frame as a ciphertext blob and sends the terminal or
+  artifact by `ciphertextRef`, so the plaintext limit is 2 MiB again (#654,
+  owner batch §58a A). Without the flag, the daemon keeps the output inline:
+  a terminal over the frame becomes the sealed `task.fail` with
+  `terminal_result_unsealable`, and an artifact becomes a sealed error event.
+  Known limit: a terminal sent by reference and refused for good by the Host
+  reaches the Host as no terminal (`docs/protocol.md` §2.5).
 - **Docs** — a pairing string `<code>.<pv>` used once without `--e2ee` is
   burned: start a new registration at the Host, do not retry it (#654 E2d).
 - **Breaking (cloud)** — the device-proof `requestId` is single-use on the
