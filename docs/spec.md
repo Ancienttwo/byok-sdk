@@ -2311,16 +2311,24 @@ sends no `agentMemory`. An ordinary offer can also select `read-if-admitted`:
 it runs exactly as `read` when the daemon admits the memory MCP and exactly as
 `none` when it does not, for a writer and a `memory-reader`, and it never gets
 `agent_memory_unavailable`. This is the read-only choice for a Host that cannot
-see the admission. The daemon reads its admission once per offer, and the
-runtime binding uses that answer, so the two cannot disagree. The terminal
-does not report which mode ran. Prepared offers do not accept the value. The
-offers are strict, so the field is a gated wire addition: a daemon with an
-Agent home advertises `agent-memory-selection` and
-`agent-memory-read-if-admitted` whatever its admission, and server and cloud
-refuse the field (or the `read-if-admitted` value) to a device without the
-matching flag before task creation or mailbox append. The reference server takes
-it on `executions.submit` and on `dispatch` with an explicit `agentRef`, and
-both refuse `read-write` for a `memory-reader` before the task exists.
+see the admission. `read-write-if-admitted` is its writing sibling: it runs
+exactly as `read-write` when the daemon admits the memory MCP and exactly as
+`none` when it does not, and it never gets `agent_memory_unavailable`. A task
+that needs memory to be useful selects `read-write` instead, which declines
+when memory is not admitted. A `memory-reader` Attempt that selects
+`read-write-if-admitted` is declined without retry
+(`agent_memory_selection_invalid`), whatever the admission. The daemon reads
+its admission once per offer, and the runtime binding uses that answer, so the
+two cannot disagree. The terminal does not report which mode ran. Prepared
+offers do not accept either `*-if-admitted` value. The offers are strict, so
+the field is a gated wire addition: a daemon with an Agent home advertises
+`agent-memory-selection`, `agent-memory-read-if-admitted` and
+`agent-memory-read-write-if-admitted` whatever its admission, and server and
+cloud refuse the field (or a `*-if-admitted` value) to a device without the
+matching flag before task creation or mailbox append. The reference server
+takes it on `executions.submit` and on `dispatch` with an explicit `agentRef`,
+and both refuse `read-write` and `read-write-if-admitted` for a
+`memory-reader` before the task exists.
 `AGENT_MEMORY_MCP_SERVER_NAME` from `@byok-sdk/client` is the reserved name of
 the SDK memory MCP server, so Host tests and diagnostics need no literal name.
 
