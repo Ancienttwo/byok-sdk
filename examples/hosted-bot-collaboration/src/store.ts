@@ -5,13 +5,13 @@ import { requireMain } from '@byok-sdk/example-bot-collaboration/team';
 import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, type CoalescePolicy, type InputFields } from '@byok-sdk/example-bot-collaboration/coalesce';
 /** A K8 `update_routine` action. */
 type UpdateRoutineAction = Parameters<typeof updateDefinition>[2];
-import { stateOf, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
-import { collaborationDue, commitCommand, expireCards, reportCardDecisions, settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers,
-  type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import { addTurn, stateOf, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
+import { advanceRoomSeats, collaborationDue, commitCommand, expireCards, reportCardDecisions, seatTurn, settleDelegations, syncTurn, type Command,
+  type CommandPorts, type DelegationTimers, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { activeBinding, bindDevice, revokeDevice } from './binding';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
-import { cancelIntent, deliverCancels, intentConclusions, settleFacts, syncFacts, writeSyncStep } from './intents';
+import { cancelIntent, deliverCancels, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
 import { decideMessage, messageCommandId, type AgentMessageInput, type MessageDecision } from './messages';
 import { decideFinish, type TaskEvidence } from './reconcile';
 import { archivedRow, commitStored, decideRetention } from './retention';
@@ -113,6 +113,7 @@ type SendResult = Awaited<ReturnType<ChannelPort['send']>>;
 type ReadbackResult = Awaited<ReturnType<NonNullable<ChannelPort['readback']>>>;
 
 const SCHEMA = /^[a-z_][a-z0-9_]{0,62}$/;
+const releasedSeats = (state: CollaborationState) => Object.values(state.team.seats).filter(seat => seat.released).length;
 const EMPTY_FRAME = split(stateOf({})).frame;
 
 /**
@@ -307,9 +308,9 @@ export class HostedCollaborationStore {
    * the Turn steps, and `reportCardDecisions` after the settlement. A decided card's `action_result` Turn starts a new round.
    *
    * It runs to a fixed point, as the L pass drains again after a step that changed K4 (K8 host.ts pass): while a round
-   * froze, promoted or concluded an intent or an occurrence, delivered a cancel fact, or added a Turn (the `bot_reply` of a
-   * batch join, or an `action_result`), it reads the facts again and runs the Turns again. Each such step happens once per intent, occurrence,
-   * fact or join, so the rounds end.
+   * froze, promoted or concluded an intent or an occurrence, delivered a cancel fact, added a Turn (the `bot_reply` of a
+   * batch join, or an `action_result`), or released a seat (a blocked or retired seat Turn), it reads the facts again and
+   * runs the Turns again. Each such step happens once per intent, occurrence, fact, join or seat, so the rounds end.
    */
   async sync(scope: string, options: HostedSyncOptions): Promise<SyncResult> {
     // As L checks its coalesce policy against its ContextPack budget (K8 host.ts constructor).
@@ -325,6 +326,13 @@ export class HostedCollaborationStore {
         sealDueBatches(state, this.coalesce, options.now);
         // As L's sync, card expiry runs before the Turn steps, so a ContextPack frozen in this round shows it.
         expireCards(state, options.now);
+        // As L's sync, the room step runs before the Turn steps, so a seat Turn that it adds freezes in this round. The K4
+        // cancel of a seat's admitted work is H's `cancelIntent`, as for a delegation cancel.
+        const seats = await seatFacts(client, scope, Object.keys(state.team.seats));
+        for (const seatId of advanceRoomSeats(state, seats, options.now, (id, botId, request) => addTurn(state, seatTurn(id, botId, request)))) {
+          await cancelIntent(client, scope, seatId, options.now);
+        }
+        const released = releasedSeats(state);
         const facts = await syncFacts(client, scope, Object.keys(state.turns));
         const steps: Array<[Turn, SyncStep<ExecutionTemplate>]> = [];
         for (const turn of Object.values(state.turns)) {
@@ -336,7 +344,8 @@ export class HostedCollaborationStore {
         const turns = Object.keys(state.turns).length;
         settleDelegations(state, await settleFacts(client, scope, Object.keys(state.turns)), options.now, emit, this.timers);
         reportCardDecisions(state, emit);
-        more = await deliverCancels(client, scope, state, options.now) || Object.keys(state.turns).length > turns || more;
+        // A Turn step can release a seat (a blocked seat Turn): the room step then runs again, so the next seat gets its Turn.
+        more = await deliverCancels(client, scope, state, options.now) || Object.keys(state.turns).length > turns || releasedSeats(state) > released || more;
       }
       await writeSlice(client, key, slice);
       await switchDueVersions(client, key, options.now);
