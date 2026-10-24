@@ -230,6 +230,14 @@ export function runE2eeMemberStoreConformance(name: string, factory: E2eeMemberC
       expect(await store.readMemberRegistration(tenant, { deviceId: 'dev-1', now: T0 }))
         .toEqual({ memberId: 'm1', bundle: '{"memberId":"m1"}', deviceMac: 'mac-2' });
     });
+    check('a refused registration records nothing, so its request id stays free', async store => {
+      expect(await store.registerMember(tenant, registration('dev-1', 'm1'))).toBe('registered');
+      const request = (bodySha256: string) => proof('c1', bodySha256).request;
+      expect(await store.registerMember(tenant, { ...registration('dev-1', 'm1', '{"memberId":"m1","other":true}'), request: request('sha256-a') }))
+        .toBe('device_conflict');
+      // Another binding of the same id would be refused had the first attempt recorded it.
+      expect(await store.registerMember(tenant, { ...registration('dev-1', 'm1'), request: request('sha256-b') })).toBe('replayed');
+    });
     check('registers one bundle per device and one device per member', async store => {
       expect(await store.registerMember(tenant, registration('dev-1', 'm1'))).toBe('registered');
       expect(await store.readMemberRegistration(tenant, { deviceId: 'dev-1', now: T0 }))

@@ -41,7 +41,8 @@ describe('SealedTasks send order (#654 E3c)', () => {
     const keyring = new GatedKeyring();
     const tasks = new SealedTasks({
       keyring, tenantId: 'tenant-test', deviceId: 'dev_1',
-      blobs: { download: async () => { throw new Error('unused'); } },
+      blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } },
+      serverCapabilities: () => [],
     });
     const opened = await tasks.openOffer(createEnvelope('task.offer_sealed', {
       instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
@@ -73,7 +74,8 @@ describe('SealedTasks memory after a terminal (#654 E3c)', () => {
     const gc = vm.runInNewContext('gc') as () => void;
     const tasks = new SealedTasks({
       keyring: new GatedKeyring(), tenantId: 'tenant-test', deviceId: 'dev_1',
-      blobs: { download: async () => { throw new Error('unused'); } },
+      blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } },
+      serverCapabilities: () => [],
     });
     await tasks.openOffer(createEnvelope('task.offer_sealed', {
       instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
@@ -114,7 +116,8 @@ describe('Agent message drafts of a sealed task (#654 D9)', () => {
     const policy = { ...DEFAULT_AGENT_EGRESS_POLICY, activity: { ...DEFAULT_AGENT_EGRESS_POLICY.activity, maxCoalesceMs: 10 } };
     const sealedTasks = new SealedTasks({
       keyring: new GatedKeyring(), tenantId: 'draft-tenant', deviceId: 'draft-device',
-      blobs: { download: async () => { throw new Error('unused'); } },
+      blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } },
+      serverCapabilities: () => [],
     });
     const runner = new TaskRunner({
       getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),

@@ -63,6 +63,7 @@ import {
   type AgentMessageServerContext,
   type Envelope,
   type MessageType,
+  type SealedSplitEntry,
 } from '@byok-sdk/protocol';
 import type { TenantId } from '@byok-sdk/core';
 import {
@@ -80,6 +81,13 @@ import { projectTerminalToReview } from './board-projection';
 import { agentReliabilityKey } from './agent-reliability';
 import type { TenantStores } from './tenant-stores';
 import { isTaskRedactionTombstone, taskRedactionReceiptKey } from './task-redaction';
+import {
+  releaseSealedCiphertext,
+  retainSealedCiphertext,
+  sealedCiphertextCommitted,
+  sealedCiphertextHeld,
+  sealedCiphertextRef,
+} from './sealed-ciphertext';
 
 export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected' | 'rate_limited';
 
@@ -101,6 +109,7 @@ export const INBOUND_REFUSAL_REASONS = [
   'type_not_allowed',
   'sealed_payload_unsupported',
   'sealed_output_required',
+  'sealed_ciphertext_invalid',
   'task_id_missing',
   'device_not_eligible',
   // conn.hello capability snapshot
@@ -602,12 +611,11 @@ async function applyInboundGate(
   }
 
   if (!(DAEMON_TO_SERVER_TYPES as readonly MessageType[]).includes(envelope.type)) return refuse('type_not_allowed');
-  // A sealed output is inline only. Progress and approval rows expire and
-  // release nothing (12e), and this gate does not retain the blob of a
-  // sealed terminal or artifact.
-  if ((envelope.payload as { sealed?: { ciphertextRef?: unknown } }).sealed?.ciphertextRef !== undefined) {
-    return refuse('sealed_payload_unsupported');
-  }
+  // Progress and approval rows expire and release nothing, so their sealed
+  // forms are inline only (12e, the split table's `inlineOnly`).
+  const ciphertextRef = sealedCiphertextRef(envelope.payload);
+  if (ciphertextRef !== undefined && isSealedMessageType(envelope.type)
+    && (SEALED_SPLIT_TABLE[envelope.type] as SealedSplitEntry).inlineOnly === true) return refuse('sealed_payload_unsupported');
 
   if (envelope.type === 'agent.message.draft') {
     const parsed = AgentMessageDraftPayloadSchema.safeParse(envelope.payload);
@@ -749,14 +757,23 @@ async function applyInboundGate(
   ) {
     return refuse('agent_identity_mismatch');
   }
-  // A redacted task keeps no new content. A late progress or approval report
-  // is complete as received, the same as one stored and then redacted.
-  if (REDACTABLE_REPORT_TYPES.includes(plainTypeOf(envelope.type)) && TERMINAL_TASK_STATUSES.includes(attempt.status)
+  // A redacted task keeps no new content. A late progress, approval or
+  // artifact report is complete as received, the same as one stored and then
+  // redacted. So is a terminal that names its ciphertext blob: redaction
+  // deleted the blob, and the terminal receipt is already a tombstone.
+  if ((REDACTABLE_REPORT_TYPES.includes(plainTypeOf(envelope.type)) || ciphertextRef !== undefined)
+    && TERMINAL_TASK_STATUSES.includes(attempt.status)
     && await stores.receipts.get(taskRedactionReceiptKey(taskId)) !== undefined) {
     return completeInboundEnvelope(stores, deviceId, envelope.id, attempt.agentRef);
   }
   const sealingRefusal = await sealedOutputRefusal(stores, deviceId, taskId, attempt.agentRef, envelope);
   if (sealingRefusal !== undefined) return sealingRefusal;
+  // A sealed terminal or artifact above the inline limit names its ciphertext
+  // blob, which the task then holds while it lives. Every step so far only
+  // read, so a refusal here leaves no state.
+  if (ciphertextRef !== undefined && !(await sealedCiphertextCommitted(stores.objects, ciphertextRef))) {
+    return refuse('sealed_ciphertext_invalid');
+  }
   const activityBatch = activityBatchOf(taskId, envelope);
   if (activityBatch !== undefined) {
     try {
@@ -783,7 +800,7 @@ async function applyInboundGate(
   return completeInboundEnvelope(stores, deviceId, envelope.id, attempt?.agentRef);
 }
 
-const REDACTABLE_REPORT_TYPES: readonly string[] = ['task.progress', 'task.await_approval', 'task.approval_resolved'];
+const REDACTABLE_REPORT_TYPES: readonly string[] = ['task.progress', 'task.artifact', 'task.await_approval', 'task.approval_resolved'];
 const TERMINAL_TASK_STATUSES: readonly string[] = ['complete', 'failed', 'cancelled'];
 
 /** Marks an envelope complete only after all of its authoritative facts converged. */
@@ -881,6 +898,23 @@ async function applyLifecycle(
     case 'task.cancelled_sealed':
       await recordTerminal(stores, taskId, envelope);
       return;
+    case 'task.artifact_sealed': {
+      const ref = sealedCiphertextRef(envelope.payload);
+      if (ref === undefined) return;
+      // One reference per (blob, task): a replay cannot tell its reference
+      // from the one an earlier delivery added. So an artifact on a terminal
+      // task changes no reference. A new one holds no blob, and a replay keeps
+      // the earlier hold until redaction releases it.
+      const before = await stores.tasks.get(taskId);
+      if (before === undefined || TERMINAL_TASK_STATUSES.includes(before.status)) return;
+      await retainSealedCiphertext(stores.objects, taskId, ref);
+      // Redaction releases the task's references again after it commits, so
+      // only a redaction that has already finished can miss this one.
+      if (await stores.receipts.get(taskRedactionReceiptKey(taskId)) !== undefined) {
+        await releaseSealedCiphertext(stores.objects, taskId, ref);
+      }
+      return;
+    }
     default:
       return;
   }
@@ -955,10 +989,22 @@ async function recordTerminal(
   taskId: string,
   envelope: Envelope,
 ): Promise<void> {
-  const receipt = await stores.receipts.record({
-    key: terminalReceiptKey(taskId),
-    body: encodeEnvelope(envelope),
-  });
+  const body = encodeEnvelope(envelope);
+  // The task holds a sealed terminal's blob before any receipt names it.
+  const ciphertextRef = sealedCiphertextRef(envelope.payload);
+  const heldBefore = ciphertextRef !== undefined && await sealedCiphertextHeld(stores.objects, ciphertextRef);
+  if (ciphertextRef !== undefined) await retainSealedCiphertext(stores.objects, taskId, ciphertextRef);
+  const receipt = await stores.receipts.record({ key: terminalReceiptKey(taskId), body });
+  // A terminal that lost, or one that arrived after redaction, keeps nothing.
+  // A redacted task holds nothing, so after redaction it always releases. A
+  // terminal that lost releases only a blob that nothing held before: one
+  // reference per (blob, task) cannot tell whose hold it is, and one that
+  // names the task's offer or steer blob leaves that hold in place.
+  if (ciphertextRef !== undefined && receipt.receipt.body !== body
+    && storedCiphertextHash(receipt.receipt.body) !== ciphertextRef.contentHash
+    && (isTaskRedactionTombstone(receipt.receipt.body) || !heldBefore)) {
+    await releaseSealedCiphertext(stores.objects, taskId, ciphertextRef);
+  }
   // Redaction runs only on a terminal task, so its status and projections are
   // already settled. A later terminal is a replay with nothing to record.
   if (isTaskRedactionTombstone(receipt.receipt.body)) return;
@@ -1004,6 +1050,15 @@ async function recordTerminal(
     return;
   }
   await projectTerminalToReview(stores.board, taskId);
+}
+
+/** The ciphertext blob hash a stored terminal names; none for a plaintext terminal or a tombstone. */
+function storedCiphertextHash(body: string): string | undefined {
+  try {
+    return sealedCiphertextRef(decodeEnvelope(body).payload)?.contentHash;
+  } catch {
+    return undefined;
+  }
 }
 
 function terminalStatus(envelope: Envelope): 'complete' | 'failed' | 'cancelled' | undefined {

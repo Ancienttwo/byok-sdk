@@ -32,6 +32,7 @@ import {
   type BoardPage,
   type BoardStatusUpdateInput,
   type BoardUnclaimInput,
+  type ContentHash,
   type CoreStores,
   type MailboxAdvanceCursorInput,
   type MailboxAppendInput,
@@ -40,6 +41,8 @@ import {
   type MailboxPage,
   type MailboxReadQuery,
   type MailboxRecordDeliveryInput,
+  type ObjectManifestEntry,
+  type ObjectReferenceInput,
   type Principal,
   type PresenceHint,
   type PresenceHintInput,
@@ -199,6 +202,13 @@ export interface TenantBoundBlobs {
   getDownloadUrl(blobId: string): Promise<string | undefined>;
 }
 
+/** The object manifest reads and references a task needs for the blobs it names (#654). */
+export interface TenantBoundObjects {
+  get(hash: ContentHash): Promise<ObjectManifestEntry | undefined>;
+  addReference(input: ObjectReferenceInput): Promise<ObjectManifestEntry>;
+  removeReference(input: ObjectReferenceInput): Promise<ObjectManifestEntry>;
+}
+
 export interface TenantBoundQuota {
   readReservation(reservationId: string): Promise<StorageReservation | undefined>;
   reserve(input: StorageReservationInput): Promise<StorageReservation>;
@@ -230,6 +240,7 @@ export interface TenantStores {
   readonly receipts: TenantBoundReceipts;
   readonly egress: TenantBoundAgentEgress;
   readonly blobs: TenantBoundBlobs;
+  readonly objects: TenantBoundObjects;
   readonly quota: TenantBoundQuota;
   readonly rateLimiter: TenantBoundRateLimiter;
 }
@@ -338,6 +349,11 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
       createUpload: (reservation) => cloud.blobs.createUpload(tenant, reservation),
       observeUpload: (blobId, reservation) => cloud.blobs.observeUpload(tenant, blobId, reservation),
       getDownloadUrl: (blobId) => cloud.blobs.getDownloadUrl(tenant, blobId),
+    },
+    objects: {
+      get: (hash) => core.objects.get(tenant, hash),
+      addReference: (input) => core.objects.addReference(tenant, input),
+      removeReference: (input) => core.objects.removeReference(tenant, input),
     },
     quota: {
       readReservation: (reservationId) => core.quota.readReservation(tenant, reservationId),

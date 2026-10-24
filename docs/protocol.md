@@ -1124,7 +1124,11 @@ know a sealed type refuses it with `UnknownMessageTypeError`. A sealed type
 also takes every gate of its plaintext type, except the gates of the moved and
 dropped fields. For example, `task.offer_for_agent_sealed` also needs
 `agent-home-contract`, and `harnessId` on `task.offer_sealed` also needs
-`custom-harness`. Sealing never removes a gate.
+`custom-harness`. Sealing never removes a gate. A sealed task output that
+names its ciphertext blob (`sealed.ciphertextRef`) also needs the server flag
+`sealed-output-ciphertext-ref`. The split table marks `task.progress_sealed`
+and `task.await_approval_sealed` `inlineOnly`, so they have no such gate: they
+are always inline.
 
 `PROTOCOL_VERSION` stays 3. `task.offer_prepared`, input preparation, Agent
 messages, egress, drafts and memory projections are not sealed in v1.
@@ -1216,18 +1220,32 @@ family `routine.template`, for every occurrence of one routine version (design
 - `paddedLength` above 256 KiB: `ciphertextRef`, a `BlobRef` without `url`
   whose `size` is `paddedLength + 16`.
 
-**Host check of a `ciphertextRef`.** A sealed hosted entry accepts a
-`ciphertextRef` only when the object with its `contentHash` is `committed` in
-the same tenant, with the declared `size` and `contentType`. Otherwise it
-fails with `coordination_input_invalid` before any task, receipt or mailbox
-write. The receiver checks that the SHA-256 of the bytes it fetches by
+**Host check of a `ciphertextRef`.** A sealed hosted entry, and a sealed
+daemon output, is accepted with a `ciphertextRef` only when the object with
+its `contentHash` is `committed` in the same tenant, with the declared `size`
+and `contentType`. Otherwise a hosted entry fails with
+`coordination_input_invalid`, and a daemon output is refused with
+`payload_invalid`, before any task, receipt or mailbox write. The check binds
+a `ciphertextRef` to the tenant, not to the device that uploaded the object.
+The receiver checks that the SHA-256 of the bytes it fetches by
 `blobId` equals `contentHash`, before it opens them. The task then holds an
 object reference to the object (kind `sealed-task`, id the task id), so
 orphan GC keeps the ciphertext while the task lives. `redactTasks` releases
 the reference. It deletes the object when a stored row of the task still
-names it. Retention can prune the mailbox row of a delivered steer. Then no
-row names its object, and orphan GC deletes the object later. Tenant erasure
-also releases the reference.
+names it. Retention can prune the mailbox row of a delivered steer, and the
+cloud stores no artifact. Then no row names the object, and orphan GC deletes
+it later. `redactTasks` releases the references again after it replaces the
+bodies, so a report that adds a reference while redaction runs holds nothing
+afterwards, and orphan GC deletes its object. Tenant erasure also releases the
+reference. A terminal that loses to the first terminal releases its
+reference only when no reference held the object before it, so one that names
+the task's offer or steer blob leaves that reference in place. A terminal that loses to a redaction tombstone always releases its reference. A losing terminal that names a blob another task holds keeps its own hold until this task is redacted. An artifact that arrives once its task is terminal changes no
+reference: a new one holds nothing, and a replay keeps the reference of its
+earlier delivery. A terminal replayed after redaction is complete as received,
+so the Host does not check its blob. A terminal replay that arrives after
+redaction deleted the object but before it committed its audit receipt fails
+the object check with `payload_invalid`, and the daemon treats that terminal
+as rejected.
 
 **Host comparison of a sealed retry.** The Host compares two sealed
 submissions of one identity by their comparison projection: the plaintext
@@ -1304,10 +1322,28 @@ place of `event`, and `eventIndex` 0, so the tail capacity counts it once. A
 `approvalId` and `sealed`, and no `summary`. The Host resolves it by
 `approvalId`, the same as a plaintext request. A replay under the same source
 envelope is the same entry when its comparison projection (above) is the
-same. A sealed output is inline only: the cloud refuses a sealed output
-that carries `ciphertextRef`, because it does not retain that blob. The cloud
-advertises `sealed-payload-v1` in `EventsPollResponse.capabilities`, because
-it accepts all seven sealed output types.
+same. A sealed terminal or `task.artifact_sealed` carries `ciphertextRef`
+above the inline limit, and the task holds its blob (above), so the
+plaintext limit of each is 2 MiB. `task.progress_sealed` and
+`task.await_approval_sealed` are inline only (`inlineOnly`): their tail rows
+expire, so the cloud refuses either one with `ciphertextRef`
+(`sealed_payload_unsupported`). The device uploads a ciphertext blob first.
+If the device sends the terminal more than one day after the upload, orphan
+GC may have deleted the blob, and the Host then refuses the terminal.
+When the Host refuses a terminal sent by reference for good, because it no
+longer declares `sealed-output-ciphertext-ref` or orphan GC has deleted the
+blob, the daemon settles that terminal once and sends no other terminal, so
+the Host receives none for the task. This is a known limit of this version; a
+later version is to replace the queued terminal with a closed form.
+
+The cloud advertises `sealed-payload-v1` in `EventsPollResponse.capabilities`,
+because it accepts all seven sealed output types. It also advertises
+`sealed-output-ciphertext-ref`, because it holds the blob of a sealed
+terminal or artifact. A device sends a sealed output by `ciphertextRef` only
+to a server that advertises this flag. Without it, the device keeps every
+sealed output inline: a terminal over the inline frame becomes the sealed
+`task.fail` with `reason` `terminal_result_unsealable`, and an artifact over
+it becomes an error event.
 
 **Drafts and `cloud-do`.** An `agent.message.draft` is plaintext. So the Host
 refuses a draft for a task whose offer has any `sealing`, with

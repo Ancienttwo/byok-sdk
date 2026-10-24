@@ -26,6 +26,7 @@ import { CLOUD_CAPABILITIES, fullCapabilityDeclaration } from '../capabilities';
 import { createByokCloud, type ByokCloudOptions } from '../cloud';
 import { createInMemoryByokCloud } from '../composition/in-memory';
 import { InMemoryE2eeMemberStore } from '../stores/in-memory/e2ee-member';
+import { TRUTH_REQUEST_ID_MAX_LENGTH } from '../truth/contract';
 import { chain, keyPackage, newMember, signedChain } from './support/e2ee-members';
 import { TENANT_A, TENANT_B } from './support/harness';
 
@@ -245,6 +246,19 @@ describe('E2EE member device routes', () => {
     expect(await answer(await append({ entries: entries.slice(0, 1) }, 'append-1'))).toEqual({ status: 200, body: { appended: 1, replayed: 0 } });
     expect(await answer(await append({ entries }, 'append-1'))).toEqual({ status: 409, body: { error: 'proof_request_conflict' } });
     expect((await env.cloud.readMemberChain(TENANT_A)).entries).toEqual(entries.slice(0, 1));
+  });
+
+  it('refuses a proof requestId over the truth put cap before any store call, and accepts one at the cap', async () => {
+    const env = setup();
+    const device = await env.pair(TENANT_A);
+    const member = await newMember(device.deviceId);
+    const register = (requestId: string) =>
+      env.write(device, '/byok/e2ee/member-key', E2EE_MEMBER_KEY_REGISTER_OPERATION, { member: member.bundle, mac: MAC }, undefined, requestId);
+
+    expect(await answer(await register('r'.repeat(TRUTH_REQUEST_ID_MAX_LENGTH + 1)))).toEqual({ status: 409, body: { error: 'proof_request_conflict' } });
+    expect(await env.cloud.readMemberKeyRegistration(TENANT_A, device.deviceId)).toBeUndefined();
+    expect(await answer(await register('r'.repeat(TRUTH_REQUEST_ID_MAX_LENGTH)))).toEqual({ status: 200, body: { memberId: member.bundle.memberId } });
+    expect(await env.cloud.readMemberKeyRegistration(TENANT_A, device.deviceId)).toEqual({ member: member.bundle, deviceMac: MAC });
   });
 
   it('puts packages under device proof and returns only the packages addressed to the reading device', async () => {
