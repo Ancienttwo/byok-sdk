@@ -576,4 +576,36 @@ describe('device member keyring rotation (E2d-4)', () => {
     expect((await keyring.sealingKey('scope-a', 1))?.epoch).toBe(3);
     expect(server.e2ee.devicePuts.map((put) => put[0]!.epoch)).toEqual([2, 3]);
   });
+  it('reads four epochs per rotation and fails closed when the Host holds a package at the top one', async () => {
+    const { server, web, device, logs, keyring } = await member();
+    await web.putScope('scope-a', [device]);
+    await keyring.catchUp();
+    const reads = server.e2ee.packageReads;
+    server.e2ee.packageResponse = [{}];
+    expect(await keyring.sealingKey('scope-a', 1)).toBeUndefined();
+    expect(server.e2ee.packageReads - reads).toBe(4);
+    expect(logs.join('\n')).toContain('the Host holds epoch 5 of scope "scope-a", beyond the epochs this device checks');
+    // The next decision reads the four epochs above.
+    expect(await keyring.sealingKey('scope-a', 1)).toBeUndefined();
+    expect(server.e2ee.packageReads - reads).toBe(8);
+    expect(logs.join('\n')).toContain('the Host holds epoch 9 of scope "scope-a"');
+    server.e2ee.packageResponse = undefined;
+    expect((await keyring.sealingKey('scope-a', 1))?.epoch).toBe(10);
+    expect(server.e2ee.devicePuts.map((put) => put[0]!.epoch)).toEqual([10]);
+  });
+
+  it('cuts off a hung key package put, so the next seal of the scope rotates again', async () => {
+    const { server, web, device, keyring } = await member({ requestTimeoutMs: 50 });
+    await web.putScope('scope-a', [device]);
+    await keyring.catchUp();
+    let release!: () => void;
+    server.e2ee.holdPackagePuts = new Promise<void>((resolve) => { release = resolve; });
+    try {
+      await expect(keyring.sealingKey('scope-a', 1)).rejects.toMatchObject({ name: 'TimeoutError' });
+      server.e2ee.holdPackagePuts = undefined;
+      expect((await keyring.sealingKey('scope-a', 1))?.epoch).toBe(2);
+    } finally {
+      release();
+    }
+  });
 });
