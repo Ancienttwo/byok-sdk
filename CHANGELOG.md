@@ -9,10 +9,12 @@
   family `routine.template`, for every occurrence of one routine version. The
   offer must seal `task-input`. `definitionVersion` is an integer and
   `notAfter` is a canonical UTC instant, the forms core binds in the AAD. The
-  hosted sealed execution lane accepts the field and compares it on a
-  duplicate offer. The Host does not check `notAfter`; the device does. No
-  daemon advertises `sealed-payload-v1` yet, so no device receives the field.
-
+  hosted sealed execution lane accepts the field. Its comparison projection
+  keeps `routineRef` and the template `contentMac`, so a duplicate offer with
+  another `routineRef` or template under the same task id fails with
+  `coordination_input_invalid`. The Host does not check `notAfter`; the device
+  does. No daemon advertises `sealed-payload-v1` yet, so no device receives
+  the field.
 - **Changed (core)** — the member chain walk limits who may sign a scope
   change (#654, owner batch §50f A). A `scope-policy` or `shred` of an
   existing scope must be signed by a member in that scope's current policy,
