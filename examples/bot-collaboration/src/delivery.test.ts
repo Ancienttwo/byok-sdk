@@ -50,7 +50,7 @@ it('accepts the current send and keeps platform acceptance final', () => {
   settleDelivery(row, 1, retryable, 2);
   unknownDelivery(row, 1, 'timeout');
   recoverDelivery(row);
-  readbackDelivery(row, 'absent', 2);
+  readbackDelivery(row, 1, 'absent', 2);
   expect(row).toEqual(before);
 });
 
@@ -86,7 +86,7 @@ it('makes a permanent platform rejection final', () => {
   settleDelivery(row, 1, { result: 'rejected', code: 'forbidden', retryable: false }, 1);
   expect(row).toMatchObject({ state: 'rejected', code: 'forbidden', attempts: 1 });
   expect(acceptDeliveryEcho(row, 'platform-1')).toBe(false);
-  readbackDelivery(row, 'accepted', 2);
+  readbackDelivery(row, 1, 'accepted', 2);
   expect(row.state).toBe('rejected');
 });
 
@@ -145,23 +145,23 @@ it('leaves uncertain sends unknown until authoritative readback or echo', () => 
   expect(row).toMatchObject({ state: 'unknown', attempts: 1, code: 'timeout' });
   settleDelivery(row, 1, accepted, 1);
   expect(row.state).toBe('unknown');
-  readbackDelivery(row, 'unsupported', 2);
+  readbackDelivery(row, 1, 'unsupported', 2);
   expect(row).toMatchObject({ state: 'unknown', code: 'timeout' });
   expect(startDelivery(row, 100_000)).toBe(false);
-  readbackDelivery(row, 'accepted', 3);
+  readbackDelivery(row, 1, 'accepted', 3);
   expect(row.state).toBe('accepted');
   expect(row).not.toHaveProperty('code');
 });
 
 it('requires authoritative absence to retry unknown and applies the same attempt limit', () => {
   const row = delivery({ state: 'unknown', attempts: 2, code: 'timeout' });
-  readbackDelivery(row, 'absent', 50);
+  readbackDelivery(row, 2, 'absent', 50);
   expect(row).toMatchObject({ state: 'pending', nextAttemptAt: 2_050 });
   expect(row).not.toHaveProperty('code');
   expect(startDelivery(row, 2_049)).toBe(false);
   expect(startDelivery(row, 2_050)).toBe(true);
   unknownDelivery(row, 3, 'timeout');
-  readbackDelivery(row, 'absent', 2_060);
+  readbackDelivery(row, 3, 'absent', 2_060);
   expect(row).toMatchObject({ state: 'rejected', attempts: 3, code: 'attempts_exhausted' });
   expect(startDelivery(row, 100_000)).toBe(false);
 });
@@ -188,7 +188,7 @@ it('accepts a late exact echo during the retry wait after absent readback', () =
   const row = delivery();
   expect(startDelivery(row, 0)).toBe(true);
   unknownDelivery(row, 1, 'timeout');
-  readbackDelivery(row, 'absent', 50);
+  readbackDelivery(row, 1, 'absent', 50);
   expect(row).toMatchObject({ state: 'pending', attempts: 1, nextAttemptAt: 1_050 });
   expect(acceptDeliveryEcho(row, 'late-echo')).toBe(true);
   expect(row).toMatchObject({ state: 'accepted', attempts: 1, platformMessageId: 'late-echo' });

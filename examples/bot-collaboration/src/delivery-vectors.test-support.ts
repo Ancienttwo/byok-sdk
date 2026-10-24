@@ -9,7 +9,8 @@ import type { CollaborationState } from './model';
  * entities, not its row layout, and every read may be async.
  *
  * The subject's Bot `main` takes owner messages on channel `fake` in its direct conversation, and the configured self bot of
- * that channel is `own-bot`. Its business send deadline is short, so a send that never settles times out in the case.
+ * that channel is `own-bot`. Its business send deadline outlasts the steps of a case, so a held send is still in flight while
+ * later verbs run, and a send that never settles times out within the case.
  * `drain`, `advance`, `publish`, `end`, `echo`, `resend`, `enablePush` and `revokePush` each end by running the Host, with
  * one sender pass: a due row is sent inside the verb.
  */
@@ -32,9 +33,15 @@ export interface DeliverySubject {
    * Holds the next send call: its claim commits and the send starts, but the call does not return until `release`. The verb
    * that makes the claim returns once the send has started. While the send is held, the Host that holds it is busy, and each
    * verb runs another Host from the stored state, which takes the claim over after `recoveryMs`. `release` lets the send
-   * return its scripted result, and waits until the holding Host has handled it.
+   * return its scripted result, and waits until the holding Host has handled it. A second hold may start while the first is
+   * held; each one holds its own Host.
    */
   holdNextSend(): { release(): Promise<void> };
+  /**
+   * Holds the next readback call in the same way: the port is called at once, so its result is the one at that time, and
+   * the result returns to the Host at `release`.
+   */
+  holdNextReadback(): { release(): Promise<void> };
   /** The owner opts the direct conversation of Bot `main` into push on channel `fake`. Returns the route id. */
   enablePush(target: string): Promise<string>;
   revokePush(routeId: string): Promise<void>;
@@ -292,6 +299,51 @@ export function deliveryVectors(name: string, open: (port: ChannelPort) => Promi
       expect(await subject.deliveries()).toMatchObject([{ state: 'rejected', attempts: 3, code: 'attempts_exhausted' }]);
       await subject.advance(60_000);
       expect(port.calls).toHaveLength(3);
+    }, 60_000);
+
+    it('18. ignores a readback result for an earlier attempt that arrives after a later attempt went unknown', async () => {
+      const port = scripted(new Error('receipt lost'));
+      let found: 'absent' | 'unsupported' = 'unsupported';
+      const subject = await open({ send: port.send, readback: async () => found });
+      await subject.publish('in1');
+      expect(await subject.deliveries()).toMatchObject([{ state: 'unknown', attempts: 1 }]);
+      // One Host reads attempt 1 back as absent, and its result is held.
+      found = 'absent';
+      const held = subject.holdNextReadback();
+      await subject.advance(60_000);
+      // Another Host reads it back as absent too, and the delivery waits for attempt 2.
+      await subject.advance(60_000);
+      expect(await subject.deliveries()).toMatchObject([{ state: 'pending', attempts: 1 }]);
+      found = 'unsupported';
+      await subject.advance(1_000);
+      expect(await subject.deliveries()).toMatchObject([{ state: 'unknown', attempts: 2 }]);
+      // The held absent of attempt 1 is no evidence for attempt 2.
+      await held.release();
+      const [row] = await subject.deliveries();
+      expect(row).toMatchObject({ state: 'unknown', attempts: 2 });
+      expect(row!.nextAttemptAt).toBeUndefined();
+      await subject.advance(60_000);
+      expect(port.calls).toHaveLength(2);
+    }, 60_000);
+
+    it('19. ignores a held send of attempt 1 that completes while attempt 2 is sending', async () => {
+      const port = scripted(accepted('late'), accepted('p2'));
+      const subject = await open({ send: port.send, readback: async () => 'absent' });
+      const first = subject.holdNextSend();
+      await subject.publish('in1');
+      // Another Host recovers attempt 1, reads it back as absent, and sends attempt 2, which is held too.
+      await subject.advance(subject.recoveryMs);
+      expect(await subject.deliveries()).toMatchObject([{ state: 'pending', attempts: 1 }]);
+      const second = subject.holdNextSend();
+      await subject.advance(1_000);
+      expect(await subject.deliveries()).toMatchObject([{ state: 'sending', attempts: 2 }]);
+      await first.release();
+      const [row] = await subject.deliveries();
+      expect(row).toMatchObject({ state: 'sending', attempts: 2 });
+      expect(row!.platformMessageId).toBeUndefined();
+      await second.release();
+      expect(await subject.deliveries()).toMatchObject([{ state: 'accepted', attempts: 2, platformMessageId: 'p2' }]);
+      expect(port.calls).toHaveLength(2);
     }, 60_000);
   });
 }

@@ -42,9 +42,24 @@ const closers: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of closers.splice(0).reverse()) await close(); });
 
 async function ledgerSubject(port: ChannelPort): Promise<DeliverySubject> {
-  let bot!: BotCollaboration, reopened: HostLedger | undefined, now = Date.now(), armed = false, checkpoint: string | undefined;
-  /** A held send: `started` resolves when it starts, `open` lets it go on, and `holder` is the drain that waits for it. */
-  let hold: { armed: boolean; started: Promise<void>; begin(): void; gate: Promise<void>; open(): void; holder?: Promise<void>; takenOver?: true } | undefined;
+  let bot!: BotCollaboration, reopened: HostLedger | undefined, now = Date.now(), crash = false, checkpoint: string | undefined;
+  /**
+   * A held channel call: `started` resolves when it starts, `open` lets its result return, and `holder` is the drain that
+   * waits for it. `armed` is the hold that the next call of its kind takes. `busy` is the drain of the current Host while
+   * that Host holds a call.
+   */
+  type Hold = { kind: 'send' | 'readback'; started: Promise<void>; begin(): void; gate: Promise<void>; open(): void; holder?: Promise<void> };
+  let armed: Hold | undefined, busy: Promise<void> | undefined;
+  /** Makes the call at once, and returns its result once the hold that it took opens. */
+  const held = async <T>(kind: Hold['kind'], call: () => Promise<T>): Promise<T> => {
+    const hold = armed?.kind === kind ? armed : undefined;
+    if (!hold) return call();
+    armed = undefined;
+    const result = call();
+    hold.begin();
+    await hold.gate;
+    return result;
+  };
   const roots = new Map<string, string>();
   const adapter = new DraftAdapter();
   const fixture: TestHost = await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, adapter,
@@ -52,26 +67,22 @@ async function ledgerSubject(port: ChannelPort): Promise<DeliverySubject> {
   const ledger = () => reopened ?? fixture.ledger;
   // The crash boundary: the claim is committed, and this copy of the database is what a restarted Host opens.
   const send: ChannelPort['send'] = async (input, signal) => {
-    if (armed) {
-      armed = false;
+    if (crash) {
+      crash = false;
       const db = new DatabaseSync(join(fixture.root, 'host.sqlite'));
       checkpoint = join(fixture.root, `crash-${randomUUID()}.sqlite`);
       db.exec(`VACUUM INTO '${checkpoint.replaceAll("'", "''")}'`); db.close();
     }
-    if (hold?.armed) {
-      hold.armed = false;
-      hold.begin();
-      await hold.gate;
-    }
-    return port.send(input, signal);
+    return held('send', () => port.send(input, signal));
   };
+  const readback = port.readback && ((id: string) => held('readback', () => port.readback!(id)));
   const base = template(fixture.deviceId);
   const options: BotOptions = { botId: 'main', execution: { ...base,
     agentMessageContext: { destinationBinding: 'owner', freshnessCursor: 'delivery' }, payload: { ...base.payload,
       messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 65536 } } },
     connector: async () => null, now: () => now,
     // Long enough for a held send to outlive the steps of its vector; a hanging send still times out within the case.
-    channel: { port: { send, ...(port.readback ? { readback: port.readback } : {}) }, self: { fake: ['own-bot'] }, sendTimeoutMs: 2_000 } };
+    channel: { port: { send, ...(readback ? { readback } : {}) }, self: { fake: ['own-bot'] }, sendTimeoutMs: 2_000 } };
   bot = new BotCollaboration(fixture.server, fixture.ledger, options);
   closers.push(async () => { await bot.close(); reopened?.close(); await fixture.close(); });
   /** A crashed claim: the replacement Host opens the checkpoint and recovers at startup. */
@@ -86,24 +97,36 @@ async function ledgerSubject(port: ChannelPort): Promise<DeliverySubject> {
     await bot.recover();
   };
   /**
-   * Runs the Host. While a send is held, its Host is busy in that send, so another Host on the same ledger takes over: L
-   * recovers at startup, so its claim becomes `unknown` (`interrupted`) at once.
+   * Runs the Host. While a call is held, its Host is busy in that call, so another Host on the same ledger takes over: L
+   * recovers at startup, so a held send's claim becomes `unknown` (`interrupted`) at once.
    */
   const run = async () => {
-    if (hold?.holder && !hold.takenOver) {
-      const holding = bot, holder = hold.holder;
+    if (busy) {
+      const holding = bot, holder = busy;
       bot = new BotCollaboration(fixture.server, ledger(), options);
       closers.push(async () => { await holder; await holding.close(); });
-      hold.takenOver = true;
+      busy = undefined;
       await bot.recover();
     }
-    const pass = bot.drain();
-    if (hold && hold.armed) {
-      // The held send may start in this pass: then this verb returns while the pass waits for it.
+    const pass = bot.drain(), hold = armed;
+    if (hold) {
+      // The held call may start in this pass: then this verb returns while the pass waits for it.
       const started = await Promise.race([pass.then(() => false), hold.started.then(() => true)]);
-      if (started) { hold.holder = pass; return; }
+      if (started) { hold.holder = busy = pass; return; }
     } else await pass;
     await settle();
+  };
+  const holdNext = (kind: Hold['kind']) => {
+    let begin!: () => void, open!: () => void;
+    const started = new Promise<void>(resolve => { begin = resolve; }), gate = new Promise<void>(resolve => { open = resolve; });
+    const hold: Hold = { kind, started, begin, gate, open };
+    armed = hold;
+    return { release: async () => {
+      hold.open();
+      await hold.holder;
+      if (busy === hold.holder) busy = undefined;
+      await settle();
+    } };
   };
   const agentMessage = (turnId: string): AgentMessageInput => {
     const intent = bot.core.intent(turnId)!;
@@ -145,13 +168,8 @@ async function ledgerSubject(port: ChannelPort): Promise<DeliverySubject> {
       }
       expect(bot.snapshot().turns[root]).toMatchObject({ conclusion: 'cancelled' });
     },
-    holdNextSend: () => {
-      let begin!: () => void, open!: () => void;
-      const started = new Promise<void>(resolve => { begin = resolve; }), gate = new Promise<void>(resolve => { open = resolve; });
-      const held = { armed: true, started, begin, gate, open } as NonNullable<typeof hold>;
-      hold = held;
-      return { release: async () => { held.open(); await held.holder; hold = undefined; await settle(); } };
-    },
+    holdNextSend: () => holdNext('send'),
+    holdNextReadback: () => holdNext('readback'),
     enablePush: async target => { const id = await bot.enablePushRoute(conversation, 'fake', target); await run(); return id; },
     revokePush: async id => { await bot.revokePushRoute(id); await run(); },
     echo: async (deliveryId, platformMessageId) => {
@@ -160,7 +178,7 @@ async function ledgerSubject(port: ChannelPort): Promise<DeliverySubject> {
       await run();
     },
     resend: async id => { const next = await bot.resendDelivery(id); await run(); return next; },
-    crashOnNextSend: () => { armed = true; },
+    crashOnNextSend: () => { crash = true; },
     recoveryMs: 0,
     deliveries: () => Object.values(bot.snapshot().channel?.deliveries ?? {}),
     projections: () => Object.values(ledger().snapshot().outbox).flatMap(row => row.kind === 'projection' ? [{ id: row.id, value: row.value }] : []),
