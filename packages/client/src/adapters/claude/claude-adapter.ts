@@ -1,10 +1,12 @@
 import { isReservedMcpServerName } from '../../sdk-reserved-mcp';
 import { claudeMcpEventIdentities } from './mcp-identity';
+import { claudeAgentUserContextSettings } from './agent-user-context';
 import type { McpEventIdentity } from '../../mcp/event-identity';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { execFile } from 'node:child_process';
-import { promises as fs } from 'node:fs';
+import { promises as fs, realpathSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
@@ -89,6 +91,17 @@ export interface ClaudeAdapterOptions {
   interruptTimeoutMs?: number;
   /** Local Host callbacks for native stdio requests; never enables remote boolean approvals. */
   nativeInteractions?: NativeInteractionHostOptions;
+  /**
+   * For an Agent task (`task.offer_for_agent`), `excluded` starts Claude with
+   * `--strict-mcp-config`, so only the task's and the SDK's MCP servers load,
+   * and with a `--settings` file that excludes the `CLAUDE.md`,
+   * `CLAUDE.local.md` and rules of the Claude config directory and of every
+   * directory above the Agent home, and turns off Claude auto memory. The
+   * user's settings, deny rules, hooks, model and env still apply. It affects
+   * new sessions only: a resumed session keeps its history. Other tasks are
+   * unchanged. Default `inherit`.
+   */
+  agentUserContext?: 'inherit' | 'excluded';
 }
 
 /**
@@ -113,6 +126,8 @@ export class ClaudeAdapter implements RuntimeAdapter {
   constructor(private readonly options: ClaudeAdapterOptions = {}) {
     const timeout = options.interruptTimeoutMs ?? 1000;
     if (!Number.isFinite(timeout) || timeout <= 0 || timeout > 2_147_483_647) throw new TypeError('invalid Claude interrupt timeout');
+    if (options.agentUserContext !== undefined && options.agentUserContext !== 'inherit' && options.agentUserContext !== 'excluded')
+      throw new TypeError('ClaudeAdapterOptions.agentUserContext must be inherit or excluded');
     this.nativeOptions = options.nativeInteractions === undefined ? undefined : snapshotNativeInteractionHostOptions(options.nativeInteractions);
     this.descriptor = freezeRuntimeAdapterDescriptor({
       id: 'claude',
@@ -211,7 +226,6 @@ export class ClaudeAdapter implements RuntimeAdapter {
     const mcpArgs: string[] = [];
 
     // Generate only task-scoped host/reserved MCP config outside the operation workspace.
-    let mcpConfigDir: string | undefined;
     let client: ClaudeProcessClient | undefined;
     let cancellation: RuntimeExecutionFailure | undefined;
     let rejectCancellation!: (failure: RuntimeExecutionFailure) => void;
@@ -234,22 +248,39 @@ export class ClaudeAdapter implements RuntimeAdapter {
     signal?.addEventListener('abort', onAbort, { once: true });
     try {
       throwIfCancelled();
+      // Built before any write, so a refusal leaves no file behind.
+      const userContextSettings = this.options.agentUserContext === 'excluded' && startInput.manifest.agentRef !== undefined
+        ? claudeAgentUserContextSettings(startInput.manifest, startInput.env, process.platform, os.homedir, dir => {
+          // A directory that does not resolve holds no files to keep.
+          try { return realpathSync.native(dir); } catch { return dir; }
+        })
+        : undefined;
       const taskMcpServers = startInput.mcpServers ?? {};
       const needsMcpConfig = Object.keys(taskMcpServers).length > 0;
-
+      const sdkDir = startInput.scratch.sdkDir;
+      if (needsMcpConfig || userContextSettings) {
+        await fs.chmod(sdkDir, 0o700).catch(() => {});
+        throwIfCancelled();
+      }
+      // Under `agentUserContext: 'excluded'` an Agent task gets exactly the
+      // `--mcp-config` servers, or none. Otherwise they are added to the
+      // user's own MCP configuration. The user's settings, deny rules and
+      // hooks load either way, as in OAR.
+      if (userContextSettings) mcpArgs.push('--strict-mcp-config');
       if (needsMcpConfig) {
-        mcpConfigDir = startInput.scratch.sdkDir;
-        throwIfCancelled();
-        await fs.chmod(mcpConfigDir, 0o700).catch(() => {});
-        throwIfCancelled();
-        const mcpConfigPath = path.join(mcpConfigDir, 'mcp-config.json');
+        const mcpConfigPath = path.join(sdkDir, 'mcp-config.json');
         // The claude CLI spawns these servers itself, in its own cwd: the
         // session workspace or the Agent home, as in OAR.
-        throwIfCancelled();
         await fs.writeFile(mcpConfigPath, JSON.stringify({ mcpServers: taskMcpServers }), { mode: 0o600 });
-        // Added to the user's own MCP configuration, not in place of it: the
-        // user's settings, deny rules and hooks still load, as in OAR.
+        throwIfCancelled();
         mcpArgs.push('--mcp-config', mcpConfigPath);
+      }
+      if (userContextSettings) {
+        // A file, not inline JSON: Windows command-shim quoting and length.
+        const settingsPath = path.join(sdkDir, 'claude-settings.json');
+        await fs.writeFile(settingsPath, JSON.stringify(userContextSettings), { mode: 0o600 });
+        throwIfCancelled();
+        mcpArgs.push('--settings', settingsPath);
       }
 
       const resumeSessionId = startInput.manifest.sessionRef;

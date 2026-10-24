@@ -40,6 +40,7 @@ const ERROR_STATUS: Partial<Record<CloudErrorCode, 400 | 409 | 500>> = {
   coordination_input_invalid: 400,
   e2ee_member_chain_conflict: 409,
   e2ee_scope_key_conflict: 409,
+  e2ee_scope_shredded: 409,
   e2ee_member_key_conflict: 409,
   e2ee_member_not_registered: 409,
   e2ee_member_state_unreadable: 500,
@@ -79,8 +80,8 @@ function onlyField(body: unknown, field: string): never {
 
 /** `POST /byok/e2ee/chain`: the device appends member chain entries, `{ entries }`. */
 export function e2eeMemberChainAppendHandler(deps: E2eeMemberRouteDeps) {
-  return proofWriteHandler(deps, E2EE_MEMBER_CHAIN_APPEND_OPERATION, BYOK_E2EE_CHAIN_PATH, (context, _deviceId, body) =>
-    e2eeMember.appendMemberChainEntries(context, onlyField(body, 'entries')));
+  return proofWriteHandler(deps, E2EE_MEMBER_CHAIN_APPEND_OPERATION, BYOK_E2EE_CHAIN_PATH, (context, deviceId, body) =>
+    e2eeMember.appendMemberChainEntries(context, onlyField(body, 'entries'), { kind: 'device', deviceId }));
 }
 
 /** `POST /byok/e2ee/key-packages`: the device puts scope key packages, `{ packages }`. */

@@ -24,11 +24,5 @@ export function advanceRooms(s: LedgerState, state: CollaborationState, now: num
     const intent = s.intents[hash(id)], execution = intent && s.executions[intent.taskId];
     facts[id] = { admitted: !!intent, started: !!execution?.started, conclusion: intent?.conclusion };
   }
-  const { cancel, turns } = rules.advanceRooms(state.team, facts, now);
-  for (const { seatId, conclusion } of cancel) {
-    const intent = s.intents[hash(seatId)], turn = state.turns[seatId];
-    if (intent) intent.cancelReason = 'cancelled';
-    else if (turn) { turn.status = 'failed'; turn.conclusion = conclusion; }
-  }
-  for (const turn of turns) add(turn.id, turn.botId, turn.request);
+  for (const seatId of rules.advanceRoomSeats(state, facts, now, add)) s.intents[hash(seatId)]!.cancelReason = 'cancelled';
 }

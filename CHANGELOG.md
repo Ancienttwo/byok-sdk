@@ -32,6 +32,57 @@
   and types each item as `AgentEvent` no longer compiles. It must widen the
   type or skip items of type `message_draft_delta`. An adapter whose
   `events` yields only `AgentEvent` still compiles.
+- **Feature (client)** — an opt-in Claude option for Agent tasks (#871,
+  #873). `ClaudeAdapterOptions.agentUserContext: 'excluded'` starts a
+  `task.offer_for_agent` task with `--strict-mcp-config`, so only the task's
+  and the SDK's MCP servers load, also when the task has none. A 0600
+  `--settings` file in the execution's scratch directory excludes the
+  `CLAUDE.md`, `CLAUDE.local.md` and rules of the Claude config directory and
+  of every directory above the sealed `lease.canonicalHome`, and sets
+  `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` in the flag-layer `env`, which outranks
+  a user `settings.json` `env` block. `--setting-sources` is untouched, so the
+  user's settings, deny rules, hooks, model and env still apply. An Agent
+  task without a sealed absolute canonical home, with a cwd outside it, or
+  with a relative `CLAUDE_CONFIG_DIR` fails to start as a non-retryable
+  authority failure. The switch affects new sessions only: a resumed session
+  keeps its history. Other tasks and the default, `'inherit'`, are unchanged.
+  `createDaemon` does not pass the option; a Host sets it through
+  `createDaemonWithAdapters`. On Windows only fixture tests cover the
+  patterns. `docs/adapter-capabilities.md` now lists, for every adapter,
+  whether the user's MCP servers reach a task and what runtime memory loads.
+  The evidence is in
+  `docs/notes/2026-10-24-871-873-claude-agent-user-context.md`.
+- **Feature (examples)** — K8 runs the Host's own K4 work on the Bot tenant's
+  core (#882). `enqueueHostIntent(input, handler)` enqueues a K4 intent and
+  stores the name of its `BotOptions.hostIntents` handler in one transaction.
+  The handler gets the result document in the terminal transaction. The intent
+  shares the FIFO of its Agent. `BotOptions` passes `reconcileMs` and
+  `onOutbox` to the K4 core. `CollaborationState` gets the optional
+  `hostIntents`, and its version stays 3.
+- **Breaking (examples)** — K8 `drain()` rejects with `IntentOutcomeError`
+  when a K4 terminal cannot apply (#882): its key is neither a Bot Turn nor a
+  Host intent, or its Host handler throws or is async. Before, an intent from a
+  direct `bot.core.enqueue` stayed in flight with only a K4 `lastError`. Every
+  API that runs a pass rejects until the outcome applies, and the audit gets
+  one row for each key and reason.
+- **Breaking (cloud)** — the Host shreds a sealed scope when the member chain
+  appends a `shred` (#654 E5b-1, design §11.2). A `shred` subject must now be
+  exactly `{ scopeId }`; another subject gets `coordination_input_invalid`.
+  The append that stores the entry deletes the scope's key packages and
+  epochs, records the scope as shredded, and writes the identity receipt
+  `e2ee-scope-shred:<scopeId>` with the seq, the time and who appended it.
+  A later package put for the scope gets 409 `e2ee_scope_shredded`. The Host
+  verifies no signature, so any paired device of the tenant can shred a
+  scope on the Host (`docs/security.md`). Store implementers:
+  `E2eeMemberStore.appendChainEntries` takes `{ rows, shreds }`,
+  `putScopeKeyPackages` takes `{ rows }` and can return `scope_shredded`, and
+  `InMemoryE2eeMemberStore` takes the composition's `RequestReceiptStore`.
+  Postgres needs migration `0028_e2ee_scope_shred.sql`; SQLite adds the table
+  on open.
+  Upgrade note: a `shred` entry that a 0.30.0 Host already stored is not
+  applied, so that scope keeps its packages and accepts new puts. A stored
+  `shred` entry whose subject is not `{ scopeId }` makes every chain read that
+  includes it fail with `e2ee_member_state_unreadable`.
 
 ## 0.30.0 — 2026-10-24 (published)
 
