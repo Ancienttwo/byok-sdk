@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS command (
   PRIMARY KEY (scope, key),
   UNIQUE (scope, ordinal)
 );
--- Pending owner §54a (#793 D2b-out O-1): the send-state columns, their two CHECKs and outbox_due are the plan text, not signed yet.
+-- Pending owner §54a (#793 D2b-out O-1): the send-state columns, their three column CHECKs and one table CHECK, and outbox_due are the plan text, not signed yet.
 CREATE TABLE IF NOT EXISTS outbox (
   scope       text    NOT NULL REFERENCES scope (scope),
   key         text    NOT NULL,

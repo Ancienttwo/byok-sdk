@@ -56,6 +56,8 @@ async function hostedSubject(port: ChannelPort): Promise<DeliverySubject> {
     if (!hold) return call();
     armed = undefined;
     const result = call();
+    // A call that fails before the release is awaited below; this keeps it from being an unhandled rejection meanwhile.
+    result.catch(() => {});
     hold.begin();
     await hold.gate;
     return result;

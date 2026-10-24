@@ -284,13 +284,19 @@ interval every slot would fire as `catch_up`, and its occurrence key would diffe
 
 `HostedOutboxSender.run()` is one pass over the unsettled outbox rows that are due, across scopes (`outbox_due`). Each row
 runs in its own steps, and a failed row does not stop the later rows. A scope of an unknown store version is left out
-before the limit. The outbox DDL is the D2b-out plan text, pending owner §54a.
+before the limit. The outbox DDL is the D2b-out plan text, pending owner §54a. Each claim and settle reads the clock after
+the scope lock. After a step that threw, the row waits `backoffMs`. That wait never moves `next_at` earlier, so it cannot
+shorten the lease of a newer claim. If the wait cannot be written, `run()` rejects and that pass's result is lost.
 
 - **Projections** are sent at least once, as K4's projection flush. A claim raises `tries` and takes a lease under the
   scope lock; the receiver call runs with no lock; the settle is fenced by that `tries`, so a stale settle after another
-  claim changes nothing. A receiver error keeps the row with `last_error` and waits `backoffMs`. **The receiver must
-  deduplicate by `(scope, id)`**: a crash after the call and before the settle sends the same value again. A sent
-  projection keeps its row with `settled_at`, where K4 deletes it (design §5 D2: the same record is updated).
+  claim changes nothing. A receiver error keeps the row with `last_error` and waits `backoffMs`. The wait is flat, where
+  the plan grows it with `tries`: K4 tries again at each flush with no wait, and the receiver deduplicates, so one wait is
+  enough to keep a broken receiver from a call on every pass. **The receiver must deduplicate by `(scope, id)`**: a crash
+  after the call and before the settle sends the same value again. A sent projection keeps its row with `settled_at`,
+  where K4 deletes it (design §5 D2: the same record is updated). So a projection id published again with another value
+  throws `Projection identity conflict` for as long as the row is kept, where K4 takes the new value once it has sent the
+  old one. K8 publishes each id once (plan §3.3); the check of that on L (plan §4) is in D2b-out-3.
 - **Deliveries** run the K8 delivery rules (`channel.ts`, `delivery.ts`, `delivery-routing.ts`) through the store, as L's
   `flushDeliveries` does: the claim (`startDelivery`) commits before the send, the route with its reply token stays in
   memory, and the settle (`settleDelivery` or `unknownDelivery`) is fenced by the attempt. A claim whose lease passed
@@ -298,9 +304,10 @@ before the limit. The outbox DDL is the D2b-out plan text, pending owner §54a.
   several senders can run at once. **The lease must be longer than `sendTimeoutMs`** (the constructor refuses it
   otherwise). An `unknown` row is read back at the next pass when the channel has a readback, and `readbackMs` after
   each readback that leaves it `unknown`. With no readback it waits an hour: only an echo or a manual resend changes it.
-  A readback result counts only for the attempt that it read back (K8 `readbackDelivery` takes that attempt). A readback
-  that outlasts `sendTimeoutMs` is missing evidence: the row stays `unknown` and waits `readbackMs`. L awaits a readback
-  with no deadline.
+  A readback claim takes the same lease, so one sender reads a row back at a time. A readback result counts only for the
+  attempt that it read back (K8 `readbackDelivery` takes that attempt). A readback that throws or outlasts
+  `sendTimeoutMs` is missing evidence: the row stays `unknown` and waits `readbackMs`, but only while it is still
+  `unknown` at that attempt. L awaits a readback with no deadline.
 - **The K8 delivery entity is the authority.** The outbox delivery row is a scan index that one hook in each store
   transaction writes from the entity diff: a row for each new delivery, `settled_at` once it is `accepted` or
   `rejected`, and `next_at` for a `pending` one. So the push fallback that `refuseRoute` inserts with no outbox intent
@@ -308,10 +315,15 @@ before the limit. The outbox DDL is the D2b-out plan text, pending owner §54a.
 - **The store owns the channel outbox port.** With `{ channel: true }`, a K4 callback (an Agent message or an outcome)
   queues its deliveries with K8 `queueDelivery`, which reads the intent conclusions of the scope as they were before
   the transaction wrote, as L reads its committed ledger. A caller's ports cannot supply `deliver`.
-- The sync and each delivery settle drop expired or unneeded reply tokens (`cleanReplyTokens`). L does it in each pass;
-  H drops an expired token at the next sync or settle of its scope.
-- A delivery row whose entity retention archived settles with no send. A row with no entity anywhere fails and waits.
-- Retention refuses a root while an outbox row of one of its deliveries is unsettled.
+- The sync and each delivery settle drop expired or unneeded reply tokens (`cleanReplyTokens`). L's sync does it too;
+  L's call in each flush pass is a call in each delivery settle here. H drops an expired token at the next sync or settle
+  of its scope.
+- An unsettled delivery row whose entity is not in the state fails as drift (`Delivery outbox row unsettled for an
+  archived entity`) and waits `backoffMs`, as a row with no entity anywhere does (`Delivery not found`). Nothing is
+  settled for it.
+- Retention refuses a root while an outbox row of one of its deliveries is unsettled. It is a drift guard: the
+  transaction that settles a delivery entity settles its row too, so no product path reaches it. Projection rows are left
+  out: a projection row carries its own value and belongs to no root.
 - Reply readback, Agent home projections and connector card calls are not in the sender (§54c A).
 
 ## Deployment config
@@ -371,7 +383,8 @@ three and runs these suites.
   which wait for the H inbound echo path (D2b-out-3). After each Host step, the delivery outbox index matches the K8 entities. The
   sender tests cover the projection claim, lease, fence, backoff, race, order and version filter, the archived and
   missing delivery entity, the retention refusal of an unsettled delivery row, a terminal delivery on the reply route,
-  and a hung readback.
+  a hung readback, the clock read after the scope lock, the readback lease, a failed readback fenced by its attempt, a
+  wait that never moves `next_at` earlier, the option checks, and a wait that cannot be written.
 - The scheduler tests cover on-time and late fires, the supersede in the fire, the device fence and its paging, two
   racing fires, a fire that throws and its backoff, the interval guard, and the start and pass upkeep.
 - The reconciliation tests run a real daemon for the completed outcome, a replayed terminal and a busy decline. The
