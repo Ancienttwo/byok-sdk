@@ -1185,6 +1185,35 @@ describe('device member KEM rotation (E2d-5)', () => {
     expect(logs.join('\n')).not.toContain('no scope key');
   });
 
+  it('opens a package read before a concurrent KEM rotation re-wrapped it and answered after the rotation finished', async () => {
+    const { server, web, device, logs, keyring } = await member();
+    const scopeKey = await web.putScope('scope-a', [device]);
+    await keyring.catchUp();
+    let reached!: () => void;
+    const reading = new Promise<void>((resolve) => { reached = resolve; });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    // The fetch's read takes the Host state before the re-wrap and answers after the rotation.
+    const original = server.e2ee.handle.bind(server.e2ee);
+    let first = true;
+    server.e2ee.handle = async (req, res, url) => {
+      if (!first || req.method !== 'GET' || !url.pathname.endsWith('/key-packages')) return original(req, res, url);
+      first = false;
+      const snapshot = server.e2ee.packages.filter((pkg) => pkg.scopeId === 'scope-a' && pkg.epoch === 1 && pkg.recipient === device.memberId);
+      reached();
+      await held;
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ packages: snapshot }));
+      return true;
+    };
+    const opening = keyring.openingKey({ id: 'scope-a', epoch: 1 });
+    await reading;
+    expect(await keyring.rotateKem()).toEqual({ ok: true, epoch: 2 });
+    expect(keyring.session!.keys.nextKem).toBeUndefined();
+    release();
+    expect(await opening).toEqual(scopeKey);
+    expect(logs.join('\n')).not.toContain('no scope key');
+  });
+
   it('shares one rotation between concurrent calls, and refuses one after the member is lost', async () => {
     const { server, web, device, keyring } = await member();
     await web.putScope('scope-a', [device]);
