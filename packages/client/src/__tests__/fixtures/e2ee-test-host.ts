@@ -62,6 +62,10 @@ export class E2eeTestHost {
   /** Answer this many key package reads with 503 first. */
   failPackageReads = 0;
   packageReads = 0;
+  /** When set, every key package read answers with this list as it is. */
+  packageResponse: unknown[] | undefined;
+  /** When set, each key package read waits for it before it answers. */
+  holdPackageReads: Promise<void> | undefined;
 
   constructor(private readonly deps: E2eeTestHostDeps) {}
 
@@ -114,6 +118,11 @@ export class E2eeTestHost {
         return true;
       }
       this.packageReads += 1;
+      await this.holdPackageReads;
+      if (this.packageResponse !== undefined) {
+        respond(res, 200, { packages: this.packageResponse });
+        return true;
+      }
       const recipient = this.registration(device.deviceId)?.member.memberId;
       const scopeId = url.searchParams.get('scopeId');
       const epoch = Number(url.searchParams.get('epoch'));

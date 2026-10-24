@@ -45,13 +45,12 @@ export interface ScopeKey {
   readonly sender: string;
 }
 
-type ScopeFailure = 'scope_unknown' | 'not_a_scope_member' | 'scope_shared_with_device';
+type ScopeFailure = 'scope_unknown' | 'not_a_scope_member' | 'scope_shared_with_device' | 'key_package_sender_invalid';
 
 export type ScopeKeyFetchFailure =
   | 'member_lost'
   | ScopeFailure
   | 'key_package_missing'
-  | 'key_package_sender_invalid'
   | Extract<ScopeKeyPackageOpenResult, { ok: false }>['reason'];
 
 export type ScopeKeyFetchResult =
@@ -97,11 +96,10 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     return this.#session;
   }
 
-  /** The opened key of one scope epoch, if this run holds it and the scope is still usable. */
+  /** The opened key of one scope epoch, if this run holds it and the scope and its sender are still usable. */
   cached(scopeId: string, epoch: number): ScopeKey | undefined {
-    return this.#session !== undefined && this.#scopeFailure(this.#session, scopeId) === undefined
-      ? this.#keys.get(keyOf(scopeId, epoch))
-      : undefined;
+    const key = this.#keys.get(keyOf(scopeId, epoch));
+    return key !== undefined && this.#session !== undefined && this.#scopeFailure(this.#session, scopeId, key.sender) === undefined ? key : undefined;
   }
 
   /**
@@ -124,15 +122,16 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     if (session === undefined) return { ok: false, reason: 'member_lost' };
     const failure = this.#scopeFailure(session, scopeId);
     if (failure !== undefined) return { ok: false, reason: failure };
-    const known = this.#keys.get(keyOf(scopeId, epoch));
+    const known = this.cached(scopeId, epoch);
     if (known !== undefined) return { ok: true, key: known };
-    const scope = session.state.scopes.get(scopeId)!;
     const self = session.member.memberId;
     const packages = await this.options.client.readKeyPackages(scopeId, epoch);
     // The Host keeps one package per (scope, epoch, recipient).
     if (packages.length !== 1) return { ok: false, reason: packages.length === 0 ? 'key_package_missing' : 'key_package_invalid' };
-    const pkg = packages[0] as { readonly sender?: unknown };
-    const sender = typeof pkg.sender === 'string' && scope.members.includes(pkg.sender) ? session.state.members.get(pkg.sender) : undefined;
+    const pkg: unknown = packages[0];
+    if (typeof pkg !== 'object' || pkg === null) return { ok: false, reason: 'key_package_invalid' };
+    const senderId = (pkg as { readonly sender?: unknown }).sender;
+    const sender = typeof senderId === 'string' && this.#scopeFailure(session, scopeId, senderId) === undefined ? session.state.members.get(senderId) : undefined;
     if (sender === undefined) return { ok: false, reason: 'key_package_sender_invalid' };
     const opened = await openScopeKeyPackage({
       package: pkg,
@@ -141,11 +140,13 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
       senderSigningPublicJwk: sender.signingPublicJwk,
     });
     if (!opened.ok) return opened;
-    // A concurrent fetch, or a loss, may have settled this epoch meanwhile.
+    // A concurrent fetch may have settled this epoch, or a catch-up moved the view, while the package was read and opened.
     const raced = this.cached(scopeId, epoch);
-    if (raced !== undefined || this.#session === undefined) {
+    const current = this.#session;
+    const lost = current === undefined ? 'member_lost' : this.#scopeFailure(current, scopeId, sender.memberId);
+    if (raced !== undefined || lost !== undefined) {
       opened.scopeKey.fill(0);
-      return raced === undefined ? { ok: false, reason: 'member_lost' } : { ok: true, key: raced };
+      return raced !== undefined ? { ok: true, key: raced } : { ok: false, reason: lost! };
     }
     const key = { scopeKey: opened.scopeKey, keyId: opened.keyId, sender: sender.memberId };
     this.#keys.set(keyOf(scopeId, epoch), key);
@@ -233,9 +234,9 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     };
     this.#session = session;
     this.#record(verified);
-    // A shred drops the scope, and a policy can drop this device or add another one: their keys go.
+    // A shred drops the scope, and a policy can drop this device or the sender, or add another device: their keys go.
     for (const [at, key] of this.#keys) {
-      if (this.#scopeFailure(session, at.slice(at.indexOf('\0') + 1)) !== undefined) {
+      if (this.#scopeFailure(session, at.slice(at.indexOf('\0') + 1), key.sender) !== undefined) {
         key.scopeKey.fill(0);
         this.#keys.delete(at);
       }
@@ -279,13 +280,15 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     return undefined;
   }
 
-  #scopeFailure(session: DeviceMemberSession, scopeId: string): ScopeFailure | undefined {
+  /** Why a key of this scope, from this sender, is not usable in the verified state; `undefined` when it is. */
+  #scopeFailure(session: DeviceMemberSession, scopeId: string, sender?: string): ScopeFailure | undefined {
     const scope = session.state.scopes.get(scopeId);
     if (scope === undefined) return 'scope_unknown';
     const self = session.member.memberId;
     if (!scope.members.includes(self)) return 'not_a_scope_member';
-    const sharedWithDevice = scope.members.some((id) => id !== self && session.state.members.get(id)?.deviceId !== undefined);
-    return sharedWithDevice ? 'scope_shared_with_device' : undefined;
+    if (scope.members.some((id) => id !== self && session.state.members.get(id)?.deviceId !== undefined)) return 'scope_shared_with_device';
+    if (sender !== undefined && !(scope.members.includes(sender) && session.state.members.has(sender))) return 'key_package_sender_invalid';
+    return undefined;
   }
 
   #lose(message: string): void {

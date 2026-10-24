@@ -164,6 +164,40 @@ describe('device member keyring (E2d-2)', () => {
     expect(await keyring.fetch('scope-b', 1)).toEqual({ ok: false, reason: 'scope_unknown' });
   });
 
+  it('drops a cached key once the policy drops its sender', async () => {
+    const { web, device, keyring } = await member();
+    const helper = await stranger();
+    await web.append('add', { member: helper.member });
+    await web.putScope('scope-a', [device, helper.member]);
+    const fetched = await keyring.fetch('scope-a', 1);
+    if (!fetched.ok) throw new Error(fetched.reason);
+    await web.append('scope-policy', { scopeId: 'scope-a', categories: ['task-input'], members: [device.memberId, helper.member.memberId].sort() });
+    await keyring.catchUp();
+    expect(keyring.cached('scope-a', 1)).toBeUndefined();
+    expect(fetched.key.scopeKey.every((byte) => byte === 0)).toBe(true);
+  });
+
+  it('refuses a package that is not an object without throwing', async () => {
+    const { server, web, device, keyring } = await member();
+    await web.putScope('scope-a', [device]);
+    server.e2ee.packageResponse = [null];
+    expect(await keyring.fetch('scope-a', 1)).toEqual({ ok: false, reason: 'key_package_invalid' });
+  });
+
+  it('does not keep a key whose scope was shredded while its package was read', async () => {
+    const { server, web, device, keyring } = await member();
+    await web.putScope('scope-a', [device]);
+    let release!: () => void;
+    server.e2ee.holdPackageReads = new Promise<void>((resolve) => { release = resolve; });
+    const fetching = keyring.fetch('scope-a', 1);
+    while (server.e2ee.packageReads === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+    await web.append('shred', { scopeId: 'scope-a' });
+    await keyring.catchUp();
+    release();
+    expect(await fetching).toEqual({ ok: false, reason: 'scope_unknown' });
+    expect(keyring.cached('scope-a', 1)).toBeUndefined();
+  });
+
   it('ends the member when the chain removes this device', async () => {
     const { web, device, logs, keyring } = await member();
     await web.append('remove', { memberId: device.memberId });
