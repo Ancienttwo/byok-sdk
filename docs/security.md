@@ -837,9 +837,9 @@ What stays after a Host shred:
 - Metadata: the scope id, the epoch numbers in the ciphertext rows, member ids, row keys, sizes and times.
 - The plaintext categories of the scope's tasks (section [Readers by data category](#readers-by-data-category)).
   There is no `redactScope` (owner batch §50i A). `redactTasks` with the scope's taskIds removes the task-keyed rows. Egress rows, truth records and receipts without a task key stay (see [Deletion paths](#deletion-paths)).
-- Scope keys on members. Members hold scope keys locally (design §7.4).
-  Today only tests inject the device keyring (`SealedScopeKeyring` in `packages/client/src/daemon/sealed-task.ts`), and the daemon does not advertise `sealed-payload-v1`.
-  The member purge on a shred is E5b-2. A member that still holds a scope key can open the scope's ciphertext.
+- Scope keys on members. Members hold scope keys locally (design §7.4); the daemon's device member holds them in memory only.
+  When its catch-up applies the shred, the device keyring zeroes the scope's keys and drops its freshness points and rotated epochs (#654 E5b-2).
+  A member that still holds a scope key can open the scope's ciphertext: a device that has not read the chain since the shred, or a client that does not purge.
 - Plaintext that a member has already opened, shown, exported or logged.
 
 Who can start a shred, and the unverified delete:
@@ -861,7 +861,9 @@ The backup gap:
   Each package is sealed to one member's KEM public key.
   So a person who holds a backup and that member's KEM private key can open the package, get the scope key, and open the scope's ciphertext.
 - The gap closes for a member when it rotates its KEM key and deletes the old private key (design §7.5).
-  The SDK does not run that rotation after a shred yet; that is E5b-2.
+  The daemon's device member starts that rotation after it applies a shred of a scope whose policy held it, where the Host declares `e2ee.member.kem-epoch` (#654 E5b-2, owner §74c).
+  It applies a shred only when it next reads the chain: at its next key fetch, seal or notice, or its next start. The Host sends no notice for a shred, so an idle device leaves the gap open until then.
+  A failed rotation keeps the old key until the next shred or the next start. The SDK ships no browser member rotation.
 - Until each member of the scope has rotated, treat the shred as complete only for the live Host store.
 
 ### Member KEM floor
@@ -994,9 +996,10 @@ The #654 design gives the digest rules for sealed categories (§9.3).
 - **A scope shred is complete only on the live Host store.** The Host deletes
   the key packages without verifying the signer. Backup copies of the packages
   stay openable until each member rotates its KEM key and deletes the old
-  private key, and members keep their scope keys until they purge them. E5b-2
-  adds the purge and the rotation. Stated in full above
-  ([Scope shred](#scope-shred)).
+  private key, and members keep their scope keys until they purge them. The
+  daemon's device member purges and rotates only when it next reads the
+  chain, so an idle device waits for its next sealed task or start. Stated
+  in full above ([Scope shred](#scope-shred)).
 - **Agents run with the daemon user's full filesystem and network access.**
   Sessions run YOLO (ADR-037). Claude and Pi have no SDK-applied sandbox;
   Codex uses `danger-full-access` unless `DaemonConfig.codexSandbox` selects

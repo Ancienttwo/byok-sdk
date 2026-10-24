@@ -327,6 +327,7 @@ AiphaBee 自研的配对和 device grant，在 SDK 里对应 `/byok/pair` 和 `/
 - 由下一个发送方轮换。成员在封装前检查链。当前 epoch 包含已移除成员时，它先建 `e+1`，只为剩余成员生成 key package，然后封装。没有成员在线时，没有新内容产生。
 - 成员 KEM 密钥轮换：成员登记新公钥（`rotate` 条目），把自己持有的 scope key 重新包装到新公钥，再删除旧私钥。旧 key package 随之打不开。
 - 重新包装只处理发送方仍是 scope 策略成员的 key package，发送方换成这台设备。发送方已被移除的 package 保持原样，不带设备的签名（E2d-5）。因此轮换之后，原发送方再被 `remove`，设备缓存的这个 epoch 的 key 不再因此失效。owner 接受这一点：被移除的成员本来就持有这个 epoch 的 key。之后的内容用新 epoch 隔开，`remove` 之后下一个发送方会先轮换 scope epoch（E2d-4）。
+- E5b-2（owner batch §77a）：key package 升到 v2，签名字段带收件人的 `recipientKemEpoch`。Host 在追加 `rotate` 时把这个成员的 KEM 下限提到它的 `kemEpoch`，之后拒收包装到更旧 KEM epoch 的包（409 `e2ee_scope_key_package_stale`）。设备按页读自己在一个 scope 的全部包（每页 16 个，最多 4096 个），读 scope 的最新 epoch 决定下一个 epoch。重新包装之后，最后一遍对重新包装过的 scope 只核对持有的和有 freshness 点的 epoch 还在。
 - Ed25519 设备身份不轮换（`plane.ts:32` 固定 epoch 0）。重新配对得到新 deviceId，在链上是新成员。旧成员要显式 `remove`。
 
 ### 7.6 撤销设备与客户端
@@ -611,6 +612,7 @@ identity receipt 是防重放的 fence，同时保存了正文，而且永不过
 - MAC 密钥一起销毁。留下的 MAC 不能再用来确认猜测。
 - 备份缺口：备份里可能还有 key package。只要某个成员的 KEM 私钥还在，就能打开它们。处理方法是 shred 之后每个成员轮换 KEM 密钥，并删除旧私钥（§7.5）。另一个选项是 key package 只在投递窗口内保留，代价是成员丢失本地密钥后无法恢复（§14 D5）。
 - 不覆盖：明文类别；已导出或截图的明文；元数据。
+- E5b-2 的设备部分（owner batch §74c）：设备的 keyring 在 catch-up 应用 shred 时清零这个 scope 的 key，并删掉它的 freshness 点和轮换过的 epoch。链上有一条 shred 晚于本设备最新的 `rotate`（没有就是 `add`），而且那个 scope 的 policy 包含本设备，就欠一次 KEM 轮换。Host 声明 `e2ee.member.kem-epoch` 时，设备在后台做这次轮换；失败的不在同一轮重试。设备只在取包、封装、收到通知或启动时读链，Host 不为 shred 发通知。
 - E5b-1 的 Host 部分（owner batch §50g A、§50h A）：Host 在追加链条目的同一个事务里识别 `op: 'shred'`（协议把它的主体限定为严格的 `{ scopeId }`），先删这个 scope 的 key package，再删它的 epoch，把 scope 记进 `e2ee_scope_shred`（迁移 0028），并写 `e2ee-scope-shred:<scopeId>` 审计 receipt。之后对这个 scope 的 key package 写入返回 409 `e2ee_scope_shredded`。Postgres 里 shred 和写入都先拿 `(tenant, scope)` 的事务 advisory 锁。Host 不验签名，`docs/security.md` 记录了这个代价。
 
 ### 11.3 scoped row-delete（脱敏删除）

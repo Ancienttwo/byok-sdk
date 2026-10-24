@@ -30,8 +30,7 @@
   epoch with a freshness point, to read back, including a key the run opened
   or a point it gained during the rotation. A Host that withholds such a row
   now stops the rotation with `key_package_missing`, and the old key stays.
-  Before, the rotation finished and dropped that epoch. The rotation still
-  has no production caller.
+  Before, the rotation finished and dropped that epoch.
 - **Fixed (examples)** — K8 counts a Bot Turn whose outcome commit throws as a
   stuck intent, with the new `IntentOutcomeError` code `outcome_failed`.
   `drain()` and every API that runs a pass reject with it, the audit gets one
@@ -130,6 +129,22 @@
   with `e2ee.member`. Postgres needs migration
   `0029_e2ee_member_kem_floor.sql`; SQLite adds the table and index on open,
   with no schema version change.
+- **Feature (client)** — the device member wraps scope keys as version 2 key
+  packages to each recipient's KEM epoch, and rotates its own KEM key after
+  a shred (#654 E5b-2, owner §74c, §77a). It owes a rotation after a `shred`
+  of a scope whose policy held it, later than its own latest `rotate` or its
+  `add`, and while its custody holds an unfinished one. It starts it in the
+  background after a chain catch-up and when the daemon reads the capability
+  declaration; a failed one waits for the next shred or the next start. A
+  shred also drops the scope's freshness points and rotated epochs. The KEM
+  rotation reads the member's own packages page by page, up to 4096 per
+  scope, so packages above epoch 256 are re-wrapped too. A device epoch
+  rotation goes to the epoch after the scope head the Host reports, and a
+  put the Host refuses with `e2ee_scope_key_package_stale` fails that seal.
+- **Breaking (client)** — the daemon advertises `sealed-payload-v1` only
+  where the Host declares both `e2ee.member` and `e2ee.member.kem-epoch`.
+  On a 0.30.1 Host, E2EE stays off, and the daemon logs why. Upgrade the Host
+  first.
 
 - **Breaking (client)** — `byok-agent doctor` no longer scans `os.tmpdir()`
   for the temporary directories that releases before 0.27.0 left there (#938).
