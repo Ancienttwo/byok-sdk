@@ -233,6 +233,7 @@ export class ClaudeProcessClient {
     return this.exitError;
   }
 
+  /** The child process closed on its own (a `close` event, not a spawn error), and no adoption or transport failure outranked that exit; consumers classify it at the session boundary. */
   get processExited(): boolean {
     return this.exited;
   }

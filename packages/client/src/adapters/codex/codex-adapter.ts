@@ -470,7 +470,9 @@ class CodexSession implements Session {
     void this.close().catch(() => {});
   }
   exited(): void {
-    if (!this.stopping) this.fail(infrastructure('codex app-server exited', { class: 'runtime_exited' }));
+    if (!this.stopping) {
+      this.fail(infrastructure('codex app-server exited', { class: this.exitedOnItsOwn ? 'runtime_exited' : 'unknown' }));
+    }
   }
   get events(): AsyncIterable<AgentEvent | MessageDraftDelta> {
     const self = this;

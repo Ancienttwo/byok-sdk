@@ -314,7 +314,9 @@ class GrokSession implements Session {
     void this.close().catch(() => {});
   }
   exited(): void {
-    if (!this.stopping) this.fail(infrastructure('grok agent exited', { class: 'runtime_exited' }));
+    if (!this.stopping) {
+      this.fail(infrastructure('grok agent exited', { class: this.exitedOnItsOwn ? 'runtime_exited' : 'unknown' }));
+    }
   }
   get events(): AsyncIterable<AgentEvent | MessageDraftDelta> {
     const self = this;
