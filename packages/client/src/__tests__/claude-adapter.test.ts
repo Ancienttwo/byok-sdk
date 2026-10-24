@@ -652,6 +652,17 @@ describe('ClaudeAdapter agentUserContext', () => {
     expect(settings.claudeMdExcludes.some(pattern => pattern.startsWith(`${slash(ctx.workspaceDir)}/`))).toBe(false);
   });
 
+  it.skipIf(process.platform === 'win32')('keeps the home files when CLAUDE_CONFIG_DIR is a symlink into the Agent home', async () => {
+    const { adapter, spawned } = recordingAdapter('excluded');
+    const ctx = await agentCtx();
+    await fs.mkdir(path.join(ctx.workspaceDir, '.claude'));
+    await fs.symlink(path.join(ctx.workspaceDir, '.claude'), ctx.configDir);
+    openSessions.push(await startAdapter(adapter, baseTask, ctx));
+    const settings = JSON.parse(await fs.readFile(flagValue(spawned[0] ?? [], '--settings'), 'utf8')) as { claudeMdExcludes: string[] };
+    expect(settings.claudeMdExcludes.some(pattern => pattern.startsWith(`${slash(ctx.configDir)}/`))).toBe(false);
+    expect(settings.claudeMdExcludes).toContain(slash(path.join(path.dirname(ctx.workspaceDir), 'CLAUDE.md')));
+  });
+
   it('leaves an ordinary task unchanged', async () => {
     const { adapter, spawned } = recordingAdapter('excluded');
     const ctx = await makeCtx();

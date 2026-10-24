@@ -5,7 +5,7 @@ import type { McpEventIdentity } from '../../mcp/event-identity';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { execFile } from 'node:child_process';
-import { promises as fs } from 'node:fs';
+import { promises as fs, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -248,7 +248,10 @@ export class ClaudeAdapter implements RuntimeAdapter {
       throwIfCancelled();
       // Built before any write, so a refusal leaves no file behind.
       const userContextSettings = this.options.agentUserContext === 'excluded' && startInput.manifest.agentRef !== undefined
-        ? claudeAgentUserContextSettings(startInput.manifest, startInput.env, process.platform, os.homedir)
+        ? claudeAgentUserContextSettings(startInput.manifest, startInput.env, process.platform, os.homedir, dir => {
+          // A directory that does not resolve holds no files to keep.
+          try { return realpathSync.native(dir); } catch { return dir; }
+        })
         : undefined;
       const taskMcpServers = startInput.mcpServers ?? {};
       const needsMcpConfig = Object.keys(taskMcpServers).length > 0;

@@ -26,6 +26,7 @@ export function claudeAgentUserContextSettings(
   env: Readonly<Record<string, string | undefined>>,
   platform: NodeJS.Platform,
   homedir: () => string,
+  realpath: (dir: string) => string,
 ): ClaudeAgentUserContextSettings {
   const p = platform === 'win32' ? path.win32 : path.posix;
   const home = manifest.lease?.canonicalHome;
@@ -47,7 +48,8 @@ export function claudeAgentUserContextSettings(
   const rules = (dir: string) => `${file(dir).replace(GLOB_SYNTAX, '?')}/**`;
   const excludes: string[] = [];
   // A config directory inside the home holds Agent-home files, which stay.
-  if (!within(configDir)) excludes.push(file(configDir, 'CLAUDE.md'), rules(p.join(configDir, 'rules')));
+  // Claude also matches a pattern's real path, so an alias into the home counts.
+  if (!within(configDir) && !within(realpath(configDir))) excludes.push(file(configDir, 'CLAUDE.md'), rules(p.join(configDir, 'rules')));
   for (let dir = p.dirname(home); p.dirname(dir) !== dir; dir = p.dirname(dir)) {
     excludes.push(file(dir, 'CLAUDE.md'), file(dir, 'CLAUDE.local.md'), file(dir, '.claude', 'CLAUDE.md'), rules(p.join(dir, '.claude', 'rules')));
   }

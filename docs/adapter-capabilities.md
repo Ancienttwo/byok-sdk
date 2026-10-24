@@ -130,8 +130,8 @@ parent walk. Under `excluded` an Agent task starts with:
 - A `--settings` file, `claude-settings.json` (mode 0600) in the execution's
   SDK scratch directory, removed with it. Its `claudeMdExcludes` names
   `CLAUDE.md` and `rules/**` of the config directory (`CLAUDE_CONFIG_DIR`, else
-  `.claude` in `HOME`, or in `USERPROFILE` on Windows) unless that directory
-  lies inside the Agent home. It also names `CLAUDE.md`, `CLAUDE.local.md`,
+  `.claude` in `HOME`, or in `USERPROFILE` on Windows) unless that directory,
+  or its real path, lies inside the Agent home. It also names `CLAUDE.md`, `CLAUDE.local.md`,
   `.claude/CLAUDE.md` and `.claude/rules/**` of every directory strictly above
   the Agent home, up to but not including the filesystem root. Everything at
   and below the Agent home stays. Claude turns `\` into `/` before it
