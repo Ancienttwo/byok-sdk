@@ -7,7 +7,7 @@ import type { ByokServer, CreateByokServerOptions, DueWake } from '@byok-sdk/ser
 import { HostExecutionCore, type ExecutionServer, type OutcomeTransaction, type MessageTransaction } from '@byok-sdk/example-host-execution-core';
 import type { HostJobHandler, Routine } from '@byok-sdk/example-host-execution-core';
 import { HostLedger } from '@byok-sdk/example-host-execution-core';
-import { canonical, hash, project, time, type ApplicationRows, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import { canonical, hash, project, setLifecycle, time, type ApplicationRows, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
 import { addTurn, json, stateOf, type CollaborationState, type Turn } from './model';
 import { contextTurns, SYSTEM_PROMPT, type ContextTurn } from './schema';
 import { DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
@@ -17,7 +17,7 @@ import { collaborationDue, commitCommand, type Command, type CommandPorts, type 
 import type { CommandRecord } from './rules/commit';
 import { CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, type CommitResult } from './commit';
 import type { RetentionInput, RetentionResult } from './retention';
-import { BOT_ROUTINE, botRoutines, createDefinition, owned, routineCalendar, routineTurn,
+import { BOT_ROUTINE, botRoutines, createDefinition, endable, owned, routineCalendar, routineTurn,
   updateDefinition } from './routines';
 
 import { applyManagement, updateBot, writeSnapshotBot } from './team';
@@ -457,6 +457,15 @@ export class BotCollaboration {
     await this.exclusive(async () => {
       try { await this.core.lifecycle(owned(this.routineRows(), this.options.botId, id).definition.id, value); }
       finally { await this.process(); }
+    });
+  }
+  /** Owner API (§55c): completes any open Bot routine, an archived owner's too, with this Host's Main Bot authority. */
+  async endRoutine(id: string): Promise<void> {
+    await this.exclusive(async () => {
+      try {
+        this.commitOwner(randomUUID(), { kind: 'end_routine', botId: this.options.botId, routineId: id }, s => ({ routines: {
+          end: routineId => setLifecycle(s, endable(Object.values(s.routines), routineId).definition.id, 'completed', this.now(), routineCalendar) } }));
+      } finally { await this.process(); }
     });
   }
   async updateRoutine(action: UpdateRoutineAction): Promise<void> {

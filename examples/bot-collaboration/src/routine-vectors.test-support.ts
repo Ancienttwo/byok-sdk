@@ -4,12 +4,13 @@ import type { RoutineScheduleFields, UpdateRoutineAction } from '@byok-sdk/proto
 import { hash, taskId, type Conclusion, type Intent, type Json, type Occurrence, type Routine } from '@byok-sdk/example-host-execution-core';
 import { json, type CollaborationState } from './model';
 import { ROUTINE_LATE_AFTER_MS, ROUTINE_WAIT_MS } from './routines';
+import { archiveBot } from './rules/team';
 
 /**
  * #793 D2f routine vectors. Each Host runs the same cases: the K8 L ledger now, and the H store in D2f-3.
  * A subject sees only Host verbs and the row views below, not its row layout. The views are the H projection of the K4
  * rows (scheduler note §2.0): K4 fields with no H reader are left out. A subject may be async.
- * Each verb that writes (`input`, `finish`, `fire`, `cancelTurn`, `update`, `lifecycle`) ends by running the Host as `sync` does,
+ * Each verb that writes (`input`, `finish`, `fire`, `cancelTurn`, `update`, `lifecycle`, `end`) ends by running the Host as `sync` does,
  * so the cases read promotions, claims and switches right after it.
  */
 export interface RoutineSubject {
@@ -18,6 +19,11 @@ export interface RoutineSubject {
   at(now: number): void;
   /** A test edit of the stored collaboration state, outside the contract. */
   change(edit: (state: CollaborationState) => void): void | Promise<void>;
+  /**
+   * A test write of one routine of Bot `owner`, outside the contract: the K4 create command with the K8 Bot definition, as an
+   * outcome of that Bot's Turn writes it. Returns the routine id. The other cases create routines through Bot `main`'s outcomes.
+   */
+  addRoutine(owner: string, schedule: RoutineScheduleFields): Promise<string>;
   /** An owner input to Bot `main`. Returns its Turn id once the Host has run it. */
   input(key: string, request: string): Promise<string>;
   /** Waits until the device has claimed the Turn's intent. Then the intent is tried (K4 `attempts > 0`, H `tries > 0`). */
@@ -32,7 +38,11 @@ export interface RoutineSubject {
   /** The owner routine API of the Main Bot. */
   update(action: UpdateRoutineAction): Promise<void>;
   lifecycle(id: string, value: Routine['lifecycle']): Promise<void>;
+  /** The keyless `end_routine` command of Bot `main` (§55c). */
+  end(id: string): Promise<void>;
   routine(id: string): RoutineRow | undefined | Promise<RoutineRow | undefined>;
+  /** The slot times that the Host still holds to fire routine `id`: L's pending SDK wakes, H's `routine_due` scan rows. */
+  reserved(id: string): Promise<number[]>;
   /** The occurrences of a routine, by planned time. */
   occurrences(id: string): OccurrenceRow[] | Promise<OccurrenceRow[]>;
   intent(key: string): RoutineIntentRow | undefined | Promise<RoutineIntentRow | undefined>;
@@ -226,6 +236,27 @@ export function routineVectors(name: string, open: () => RoutineSubject | Promis
       const tenth = await created(subject, 'plan-9');
       expect(await subject.routine(tenth.id)).toMatchObject({ lifecycle: 'active', version: 1 });
     }, 120_000);
+
+    it('ends a routine of an archived owner only with Main Bot authority, and the ended routine has no later slot', async () => {
+      const subject = await open(), at = subject.now();
+      await subject.change(state => {
+        state.team.bots.helper = { ...structuredClone(state.team.bots.main!), id: 'helper', name: 'Helper', mainBot: false };
+      });
+      const id = await subject.addRoutine('helper', daily(at)), slot = (await subject.routine(id))!.nextAt!;
+      expect(await subject.reserved(id)).toEqual([slot]);
+      await subject.change(state => { archiveBot(state.team, 'helper'); });
+      // The owner API completes only the Main Bot's own routines.
+      await expect(subject.lifecycle(id, 'completed')).rejects.toThrow('Routine is unavailable to this Bot');
+      await subject.change(state => { state.team.bots.main!.mainBot = false; });
+      await expect(subject.end(id)).rejects.toThrow('Main Bot role required');
+      expect(await subject.routine(id)).toMatchObject({ lifecycle: 'active', nextAt: slot });
+      await subject.change(state => { state.team.bots.main!.mainBot = true; });
+      await subject.end(id);
+      expect(await subject.routine(id)).toEqual({ id, version: 1, pending: null, lifecycle: 'completed', status: 'ok', nextAt: null, calendarErrors: 0 });
+      // No later occurrence: the Host holds no slot to fire.
+      expect(await subject.reserved(id)).toEqual([]);
+      await expect(subject.end(id)).rejects.toThrow('No open Bot routine has this id');
+    }, 60_000);
 
     it('concludes the occurrence cancelled when its routine Turn is cancelled before promotion', async () => {
       const subject = await open(), { id } = await created(subject);
