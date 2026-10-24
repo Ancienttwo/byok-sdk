@@ -113,6 +113,12 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
   readonly #kemRotations: Array<{ readonly seq: number; readonly memberId: string }> = [];
   /** The scope epochs this run rotated to itself, by `keyOf`. */
   readonly #rotated = new Set<string>();
+  /**
+   * Per scope, the newest epoch the Host showed taken: an epoch whose put it
+   * refused as a conflict, or the top epoch of a probe that found the scope
+   * further ahead. The next rotation starts above it.
+   */
+  readonly #taken = new Map<string, number>();
   /** The newest authenticated chain head per scope, then per epoch. */
   readonly #fresh = new Map<string, Map<number, MemberChainPoint>>();
   /** The rotation in flight per scope, so concurrent seals rotate once. */
@@ -343,6 +349,8 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     } catch (error) {
       scopeKey.fill(0);
       if (!(error instanceof E2eeMemberClientError && error.code === 'e2ee_scope_key_conflict')) throw error;
+      // Another client may hold the epoch without a package for this member, so a read would show it free again.
+      this.#take(scopeId, epoch);
       this.options.log(`the Host holds epoch ${epoch} of scope ${JSON.stringify(scopeId)} under another key; output is not sealed`);
     }
   }
@@ -364,16 +372,21 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     const held = await Promise.all(epochs.map(async (epoch) => (await this.options.client.readKeyPackages(scopeId, epoch, this.#requestSignal())).length > 0));
     const top = held.lastIndexOf(true);
     if (top === epochs.length - 1) {
+      this.#take(scopeId, epochs[top]!);
       this.options.log(`the Host holds epoch ${epochs[top]} of scope ${JSON.stringify(scopeId)}, beyond the epochs this device checks; output is not sealed`);
       return undefined;
     }
     return epochs[top + 1];
   }
 
-  /** The epochs of a scope this run holds a key of or a freshness point for. */
+  /** The epochs of a scope this run holds a key of, a freshness point for, or found taken. */
   #knownEpochs(scopeId: string): number[] {
     const opened = [...this.#keys.keys()].filter((at) => at.slice(at.indexOf('\0') + 1) === scopeId).map((at) => Number(at.slice(0, at.indexOf('\0'))));
-    return [...opened, ...(this.#fresh.get(scopeId)?.keys() ?? [])];
+    return [...opened, ...(this.#fresh.get(scopeId)?.keys() ?? []), this.#taken.get(scopeId) ?? 0];
+  }
+
+  #take(scopeId: string, epoch: number): void {
+    this.#taken.set(scopeId, Math.max(this.#taken.get(scopeId) ?? 0, epoch));
   }
 
   async #advance(): Promise<void> {

@@ -565,4 +565,15 @@ describe('device member keyring rotation (E2d-4)', () => {
     expect(await openStored(server.e2ee, device, 'scope-a', 3, web.member.memberId, kem)).toEqual(next.scopeKey);
     await expect(openStored(server.e2ee, device, 'scope-a', 3, web.member.memberId, web.keys.kem)).rejects.toThrow(/does not open/u);
   });
+  it('rotates above an epoch whose put conflicted with another client that left this device out', async () => {
+    const { server, web, device, logs, keyring } = await member();
+    await web.putScope('scope-a', [device]);
+    await keyring.catchUp();
+    // Another client put epoch 2 for itself only, so the device's read of epoch 2 is empty.
+    server.e2ee.clientPutPackages(await web.sealPackage('scope-a', web.member, new Uint8Array(32).fill(5), 2));
+    expect(await keyring.sealingKey('scope-a', 1)).toBeUndefined();
+    expect(logs.join('\n')).toContain('the Host holds epoch 2 of scope "scope-a" under another key');
+    expect((await keyring.sealingKey('scope-a', 1))?.epoch).toBe(3);
+    expect(server.e2ee.devicePuts.map((put) => put[0]!.epoch)).toEqual([2, 3]);
+  });
 });
