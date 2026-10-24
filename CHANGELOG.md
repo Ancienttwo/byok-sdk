@@ -27,9 +27,9 @@ nine public manifests and their lock records move to 0.30.0.
   `coordination_input_invalid`. The Host does not check `notAfter`; the device
   does. No daemon advertises `sealed-payload-v1` yet, so no device receives
   the field.
-- **Feature (client)** — the daemon opens sealed task input and seals sealed
-  task output (#654 E3c). Only the test parameter `sealedPayload` of
-  `buildDaemonWithAdapters` gives a daemon a scope keyring and the
+- **Feature (protocol, client)** — the daemon opens sealed task input and
+  seals sealed task output (#654 E3c). Only the test parameter `sealedPayload`
+  of `buildDaemonWithAdapters` gives a daemon a scope keyring and the
   `sealed-payload-v1` advertisement. The package index does not export that
   function. So a default 0.30.0 daemon does not advertise `sealed-payload-v1`,
   and it declines every sealed offer. With a keyring, the daemon opens a
