@@ -2,7 +2,7 @@ import { BOT_TURN_OUTCOME_CONTRACT, BotTurnOutcomeSchemaError, type ResultSchema
 import { json, type Turn } from './turn';
 import { BOT_REPLY_MAX_BYTES, type IntentFacts, type Publish } from './delegation';
 import { CurrentRequestTooLargeError } from './history';
-import { outcomeSchema, type ContextBot, type ContextRoutine, type ContextState, type CheckedOffer } from './schema';
+import { outcomeSchema, promptActions, type ContextBot, type ContextRoutine, type ContextState, type CheckedOffer } from './schema';
 import { botTurnInstruction, type BotHistoryState, type ContextTurn, type InstructionLimits } from './context';
 import { admitBotToolsets } from './team';
 import type { RoomMessage, Seat } from './rooms';
@@ -141,7 +141,7 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
   let schema: ResultSchema, frozen: ReturnType<typeof botTurnInstruction>;
   try {
     schema = outcomeSchema(turn.botId, state, turn, options.models, options.routines, options.offer);
-    frozen = botTurnInstruction(state, turn, options.limits, options.routines, history?.rows, room?.rows);
+    frozen = botTurnInstruction(state, turn, options.limits, options.routines, history?.rows, room?.rows, promptActions(schema, options.offer));
   } catch (error) {
     if (error instanceof BotTurnOutcomeSchemaError && error.code === 'schema-over-budget') {
       blockTurn(state, turn, `Outcome schema over budget after flat fallback: ${error.message}`, publish);

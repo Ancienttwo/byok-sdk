@@ -2,7 +2,7 @@ import type { Card, Question, Rejection, Turn } from './turn';
 import { roomContext, type RoomMessage } from './rooms';
 import { HISTORY_MAX_ITEMS, HISTORY_MAX_BYTES, historyWindow, fitHistory } from './history';
 import { crossBotRequest, delegationBlock, instructionOverhead, isCrossBot, openDelegationsContext } from './delegation';
-import { ownerMainTurn, ROOM_SYSTEM_PROMPT, SYSTEM_PROMPT, type ContextRoutine, type ContextState } from './schema';
+import { ownerMainTurn, ROOM_SYSTEM_PROMPT, systemPrompt, type ContextRoutine, type ContextState } from './schema';
 
 /**
  * The frozen ContextPack and instruction as pure rules (#739 D1). The caller gives the history; no function
@@ -64,10 +64,13 @@ export function turnContext<R extends ContextRoutine>(state: ContextState, histo
     crossRequest === undefined ? {} : { request: crossRequest, background: [shared.rooms, shared.teamNotes] }, routines.filter(row => row.owner === turn.botId));
 }
 export interface InstructionLimits { turnLimit: number; contextMaxBytes: number; instructionMaxBytes: number }
-/** The frozen instruction. A Cross-Bot Turn fits `instructionMaxBytes` as a whole. */
+/**
+ * The frozen instruction. A Cross-Bot Turn fits `instructionMaxBytes` as a whole.
+ * `actions` narrows the Bot Turn prompt to those actions (`promptActions`). Absent: `SYSTEM_PROMPT`.
+ */
 export function turnInstruction<R extends ContextRoutine>(state: ContextState, history: ContextHistory, turn: Turn, limits: InstructionLimits,
-  routines: readonly R[] = []) {
-  const prompt = turn.source === 'room_slot' ? ROOM_SYSTEM_PROMPT : SYSTEM_PROMPT;
+  routines: readonly R[] = [], actions?: readonly string[]) {
+  const prompt = turn.source === 'room_slot' ? ROOM_SYSTEM_PROMPT : systemPrompt(actions);
   const cross = isCrossBot(turn);
   const request = cross ? crossBotRequest(state, turn) : turn.request;
   const context = turnContext(state, history, turn, limits.turnLimit,
@@ -97,11 +100,11 @@ export function botHistory(state: BotHistoryState, turn: Turn, injected?: readon
 /**
  * The frozen instruction of a Bot Turn, from its own history. A Cross-Bot Turn fits `instructionMaxBytes` as a whole.
  * `injected` is the Bot's earlier history from an external authority. Cards, questions and rejected actions stay Host state.
- * `room` is a seat Turn's room messages from an external authority.
+ * `room` is a seat Turn's room messages from an external authority. `actions` narrows the prompt, as in `turnInstruction`.
  */
 export function botTurnInstruction<R extends ContextRoutine>(state: ContextState & BotHistoryState, turn: Turn, limits: InstructionLimits,
-  routines: readonly R[] = [], injected?: readonly ContextTurn[], room?: readonly RoomMessage[]) {
-  return turnInstruction(state, botHistory(state, turn, injected, room), turn, limits, routines);
+  routines: readonly R[] = [], injected?: readonly ContextTurn[], room?: readonly RoomMessage[], actions?: readonly string[]) {
+  return turnInstruction(state, botHistory(state, turn, injected, room), turn, limits, routines, actions);
 }
 export const DEFAULT_CONTEXT_MAX_BYTES = HISTORY_MAX_BYTES;
 export const DEFAULT_CONTEXT_TURN_LIMIT = 12;
