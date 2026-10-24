@@ -213,6 +213,10 @@ A chain end that succeeded with no Host reply record leaves its delegation `repl
 `agentMessage` is on `HostedReplyPort`, not on `HostedTaskPort`. The submitter and the reconciler use `HostedTaskPort`. So a
 deployment wires one more scope-bound port, `port(scope)` of the reply checker, to the same SDK tenant (see Deployment config).
 
+`replyChecks` selects the due checks from a snapshot without the scope lock, so a selection can be stale. The settle reads
+the delegation again under the lock and checks the fence. A stale selection costs at most one extra SDK read, and its
+settle writes nothing.
+
 Two checkers may both read the same delegation; only the first settle applies. The SDK read is read only: the SDK
 `readTaskAgentMessage` (`@byok-sdk/cloud` `task-agent-message.ts`) runs SELECTs on the task, its admission and its
 offer receipt, and writes nothing. K8 `delegationDue` puts each check time into `scope.due_at`, so the deployment runs
