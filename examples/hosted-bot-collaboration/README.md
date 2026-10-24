@@ -74,7 +74,7 @@ schema. The SDK tables stay under the SDK migrations. This example never writes 
 
 | Table | One row per |
 |---|---|
-| `scope` | scope: the store version and the frame (the state without its rows) |
+| `scope` | scope: the store version, the frame (the state without its rows) and the due time |
 | `entity` | map entry of the state (Turn, card, Bot, room, delivery, ...), keyed by its id |
 | `entry` | element of a list (audit, rejected, team note, home operation, room message), keyed by position |
 | `command` | command record: the dedup evidence, the first result and the retention root (nullable) |
@@ -144,8 +144,9 @@ freezes the `target_archived` cancel, resolves a cancel once its target conclude
 timers, and gives a chain end that did not succeed its verdict. A verdict can add the `bot_reply` Turn of a batch join.
 
 The same round then delivers each new delegation cancel fact (`deliverCancels`), as the L pass does after its sync. A
-round that delivered a fact or added a Turn runs again, so one sync freezes the report to A. `options.timers` are the K8
-`DelegationTimers`; without them the rule's defaults apply.
+round that delivered a fact or added a Turn runs again, so one sync freezes the report to A. The store option `timers`
+holds the K8 `DelegationTimers`, which the constructor checks as L's does; without it the rule's defaults apply. The
+scope due time reads the same timers.
 
 The terminal transaction delivers the Main Bot cancel that its outcome froze, after the row's conclusion and before the
 version switch, as L runs `core.cancel` after its terminal transaction. An untried target concludes `cancelled` there;
@@ -153,9 +154,9 @@ the verdict comes at the next sync of the scope.
 
 H does not yet run these L sync and pass steps: `sealDueBatches`, card expiry, `advanceRooms`, the card decision
 projections and their `action_result` Turns, `projectInputBatches`, the reply checks (`reconcileReply`, `retryReply`),
-the device observation (`observeDevices`), and the card and Agent home flushes. Some of them (the batch seal, card
-expiry and the reply checks) need a due time per scope, which H does not store. These steps come after 0.30.0, in a
-later #793 slice, with a per-scope due index.
+the device observation (`observeDevices`), and the card and Agent home flushes. The due scheduler syncs a scope when one
+of the due times is reached (see Due scheduler). Until H runs the step that clears it, that sync leaves the scope due, and
+the scheduler reports the scope as stalled.
 
 The projections that the rule publishes reach the outbox in the same transaction. A sync writes no command
 record and keeps the revision. A throw writes nothing. The rule's `executionStarted` fact is the intent's `started`
@@ -311,6 +312,25 @@ interval every slot would fire as `catch_up`, and its occurrence key would diffe
   routine. The slice load still scans that history for the unpromoted open rows, so a fire costs more as the routine
   ages. A fix (a `promoted` flag, or moving unpromoted rows) is a DDL change.
 
+## Due scheduler
+
+Each store transaction that loads a scope's state writes `scope.due_at` from the state that it commits: the earliest time
+that the K8 rule `collaborationDue` gives, or NULL for none (#793 S4). The rule is L's timer list: each open input batch's
+seal, each pending card's expiry, each unreleased seat's deadline, and the delegation times (the reply checks, the cancel
+grace and the uncertain timer). Routine slots are not in it: `routine_due` holds them. The write is skipped when the time
+did not change, so a step that keeps it does not rewrite the scope row. A sync returns the time that it wrote
+(`{ dueAt }`).
+
+`HostedDueScheduler.run()` is one pass over the scopes whose time has come (`scope_due`), in due order, in keyset pages.
+It calls the deployment's `sync(scope, now)`, which runs `store.sync` with the deployment's sync options, and reads the
+clock for each sync; the pass time only selects the scopes. Only syncs count against `batch` (default 100).
+
+- A sync that leaves the scope due is reported in `stalled`. That covers the times whose step H does not yet run: the
+  batch seal (#858), card expiry (#864), seat deadlines (`advanceRooms`, S6) and the reply checks (S7). A sync that
+  throws is reported in `failed` and wrote nothing. Either scope waits `backoffMs` (default 60 s, in memory only)
+  before its next sync, so it is synced at most once per backoff, and each pass reports it again when it is retried.
+- H has no timer. The deployment runs `run()` on its own interval, which bounds how late a due step runs.
+
 ## Outbox sender
 
 `HostedOutboxSender.run()` is one pass over the unsettled outbox rows that are due, across scopes (`outbox_due`). Each row
@@ -398,10 +418,10 @@ message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMe
   least seven days (see Retention). The SDK side has its own `retentionPolicyId` in the tenant's entitlement.
 - **Workers.** The Host runs, each on its own interval: `HostedSubmitter.run()`, `HostedReconciler.run()`,
   `store.sync(scope, …)` for each scope that changed (the `changed` option of `HostedReconciler`, for a conclusion or
-  a first claim, and of `HostedRoutineScheduler`, for a fire, and the scope of each commit and consume), and for every scope on its own interval as
-  the fallback for timers (there is no due index), `HostedOutboxSender.run()` with the projection receiver and the channel,
+  a first claim, and of `HostedRoutineScheduler`, for a fire, and the scope of each commit and consume),
+  `HostedDueScheduler.run()` for the due scopes, `HostedOutboxSender.run()` with the projection receiver and the channel,
   and `HostedRoutineScheduler.run()` every `intervalMs` after one `start()`. A Host with a channel opens its store with
-  `{ channel: true }`.
+  `{ channel: true }`, and a Host with its own delegation timers passes them as `{ timers }`.
   `hostedMessageConsumer(store, …)` is the `agentMessage` option of `createByokCloud`.
 
 ## Tests
@@ -442,8 +462,12 @@ three and runs these suites.
 - The K8 settlement vectors (`settlementVectors`) run on the store, as on L.
 - The settlement tests build each delegation through the product path (an outcome `delegate`, then a sync), and cover
   each verdict, the units, `target_archived`, the timers, the late terminal audit, the Main Bot cancel in the terminal
-  transaction, a rollback, the settlement facts, a verdict at the sync of a reported scope, and the refusal of invalid
-  delegation timers.
+  transaction, a rollback, the settlement facts, a verdict at the sync of a reported scope, and the store's refusal of
+  invalid delegation timers.
+- The due tests check the stored due time against the K8 rule after each seed, commit, sync and finish, a cancel commit
+  with the store's timers, a command that throws, a step that keeps the time, and the DDL check. The due scheduler tests
+  cover a due scope whose sync clears it, the clock read for each sync, a stalled scope and a failed sync with their
+  backoff, the batch in due order, and the version filter.
 - The sync test freezes the same Turns in an L ledger with K4 `enqueue`. Each H input is byte-equal to the K4
   execution input, and the H state bytes equal the L state bytes.
 - The submitter tests use the hosted SDK composition (`createByokCloud` over `createPostgresCloudStores`, with
