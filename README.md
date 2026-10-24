@@ -7,17 +7,14 @@ composition over Postgres and R2.
 
 ## Release status
 
-The source candidate is **0.30.0** for all nine packages. It is not
-published. See the
-[candidate notes](docs/releases/v0.30.0.md) and
+The current stable release is **0.30.0** for all nine packages. From 0.28.2,
+keys uses the release train version instead of its own version line. See the
+[release notes](docs/releases/v0.30.0.md) and
 [release process](docs/releases/README.md).
 
-The current stable release is **0.29.0** for all nine packages. From 0.28.2,
-keys uses the release train version instead of its own version line. See the
-[release notes](docs/releases/v0.29.0.md).
-
-Public npm metadata read on 2026-10-23 at 10:20 UTC reports `latest` **0.29.0**
-for all nine packages. The registry lists 0.28.3 and 0.28.2 (2026-10-22, UTC),
+Public npm metadata read on 2026-10-24 at 07:39 UTC reports `latest` **0.30.0**
+for all nine packages. The registry lists 0.29.0 (2026-10-23, UTC), 0.28.3 and
+0.28.2 (2026-10-22, UTC),
 0.28.1 / keys 0.13.1 (2026-10-21, UTC) and 0.28.0 / keys 0.13.0 (2026-10-20,
 UTC) as the earlier published versions. This read confirms registry
 availability, not isolated-install qualification.
@@ -34,8 +31,7 @@ changes server, cloud, client and keys APIs.
 [Release notes](docs/releases/v0.27.0.md) describe the changes since 0.26.1
 and the Host upgrade and migration steps.
 
-Versioned install examples below name the unpublished source candidate.
-Use the stable 0.29.0 until this candidate is published.
+Versioned install examples below name the current stable release, 0.30.0.
 The historical `rc` publication is **0.27.0-rc.2** / keys **0.12.0-rc.2**; see its
 [publication record](docs/releases/v0.27.0-rc.2-publication.md).
 
@@ -396,7 +392,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 
 | Import / command | Purpose | Third-party dependencies | Zod | Budget |
 | --- | --- | --- | --- | ---: |
-| `@byok-sdk/client` | Local daemon composition | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2208837 B |
+| `@byok-sdk/client` | Local daemon composition | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2239142 B |
 | `@byok-sdk/client/adapters` | Runtime adapters; private hosts load lazily | — | forbidden | 415785 B |
 | `@byok-sdk/client/agent-memory` | Embedded Agent memory service | — | forbidden | 73586 B |
 | `@byok-sdk/client/assertion-client` | Task/device assertions; core includes protected Zod probes | `zod` | allowed | 171848 B |
@@ -418,7 +414,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/cloud/package.json` | Package metadata | — | forbidden | 1400 B |
 | `@byok-sdk/core` | Shared contracts and validation | `zod` | allowed | 126523 B |
 | `@byok-sdk/core/package.json` | Package metadata | — | forbidden | 1403 B |
-| `@byok-sdk/core/sealed-payload` | Sealed payload v1 byte rules | `zod` | allowed | 191066 B |
+| `@byok-sdk/core/sealed-payload` | Sealed payload v1 byte rules | `zod` | allowed | 195024 B |
 | `@byok-sdk/keys` | Local provider credential custody | `zod` | allowed | 288693 B |
 | `@byok-sdk/keys/package.json` | Package metadata | — | forbidden | 1466 B |
 | `@byok-sdk/keys/pi-catalog` | Pinned pi-ai catalog lookup for pi_model | `zod` | allowed | 173028 B |
@@ -429,7 +425,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/server/package.json` | Package metadata | — | forbidden | 1609 B |
 | `@byok-sdk/ui-runtime` | UI folds; current cloud/Hono/Zod closure | `@cfworker/json-schema`, `hono`, `zod` | allowed | 633073 B |
 | `@byok-sdk/ui-runtime/package.json` | Package metadata | — | forbidden | 1337 B |
-| `bin:byok-agent` | Device daemon CLI | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2147822 B |
+| `bin:byok-agent` | Device daemon CLI | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2180614 B |
 | `bin:byok-agent-memory-mcp` | Agent memory MCP helper | — | forbidden | 50265 B |
 | `bin:byok-agent-message-mcp` | Agent message MCP helper | — | forbidden | 50270 B |
 | `bin:byok-agent-result-mcp` | Task-bound structured outcome MCP helper | — | forbidden | 52457 B |

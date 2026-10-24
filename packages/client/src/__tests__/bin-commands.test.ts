@@ -9,7 +9,7 @@ import { ControlError } from '../daemon/control-protocol';
 import type { ConnectControlResult, ControlClient } from '../bin/control-client';
 import { runApprovalsCommand } from '../bin/commands/approvals';
 import { runApproveCommand, runRejectCommand } from '../bin/commands/approve-reject';
-import { runPairCommand } from '../bin/commands/pair';
+import { readPairInput, runPairCommand } from '../bin/commands/pair';
 import { runRuntimesCommand } from '../bin/commands/runtimes';
 import { runStatusCommand } from '../bin/commands/status';
 import { runTasksFollowCommand, runTasksListCommand } from '../bin/commands/tasks';
@@ -247,6 +247,23 @@ describe('bin/commands/pair: runPairCommand', () => {
     expect(handleRequest).toHaveBeenCalledWith('enrollment.pair', { pairingCode: 'opaque-pair-code' });
     expect(close).toHaveBeenCalledTimes(1);
     expect(lines).toEqual(['paired: deviceId=dev-service-1']);
+  });
+
+  it('splits <code>.<pv> only under --e2ee, on the last dot (#654 §50c)', () => {
+    const pv = 'ABCDEFGHIJKLMNOPQRSTUVWXYA';
+    expect(readPairInput(`host.code.${pv}`, false)).toEqual({ code: `host.code.${pv}` });
+    expect(readPairInput(`host.code.${pv.toLowerCase()}`, true)).toEqual({ code: 'host.code', verificationSecret: pv });
+    expect(() => readPairInput('no-secret', true)).toThrow();
+  });
+
+  it('passes an E2EE verification secret to daemon.pair and to the service endpoint (#654 §50c)', async () => {
+    const pair = vi.fn().mockResolvedValue({ deviceId: 'dev-9' } as DeviceEnrollment);
+    await runPairCommand(baseConfig('/unused'), 'the-code', { log: collectLog().log, daemon: { pair } }, 'PV-TEXT');
+    expect(pair).toHaveBeenCalledWith('the-code', { verificationSecret: 'PV-TEXT' });
+    const handleRequest = vi.fn().mockResolvedValue({ deviceId: 'dev-service-1' });
+    const { connectControl } = fakeConnected(handleRequest);
+    await runPairCommand(baseConfig('/service-store'), 'opaque-pair-code', { log: collectLog().log, connectControl }, 'PV-TEXT');
+    expect(handleRequest).toHaveBeenCalledWith('enrollment.pair', { pairingCode: 'opaque-pair-code', verificationSecret: 'PV-TEXT' });
   });
 });
 

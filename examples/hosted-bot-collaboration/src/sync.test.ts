@@ -30,7 +30,7 @@ async function hosted(): Promise<SyncSubject> {
     stored: () => store().dump(scope),
     state: () => store().read(scope),
     change: edit => store().seed(scope, edit),
-    sync: () => store().sync(scope, { ...SYNC_OPTIONS, history: undefined }),
+    sync: async () => { await store().sync(scope, { ...SYNC_OPTIONS, history: undefined }); },
     intent: async turnId => {
       const found = await pool.query<{ key: string; source: SyncIntentRecord['source']; input: FrozenInput; wait_until: string }>(
         `SELECT key, source, input, wait_until::text FROM ${table('intent')} WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(turnId)]);
