@@ -1309,7 +1309,10 @@ terminal or artifact. A device sends a sealed output by `ciphertextRef` only
 to a server that advertises this flag. Without it, the device keeps every
 sealed output inline: a terminal over the inline frame becomes the sealed
 `task.fail` with `reason` `terminal_result_unsealable`, and an artifact over
-it becomes an error event.
+it becomes an error event. A terminal whose ciphertext blob the server
+refuses for good also becomes that sealed `task.fail`: a 4xx other than 408
+or 429, except a 401 or 403 from the signed content URL (§7.1), which the
+device retries with a new reservation.
 
 **Drafts and `cloud-do`.** An `agent.message.draft` is plaintext. So the Host
 refuses a draft for a task whose offer has any `sealing`, with
