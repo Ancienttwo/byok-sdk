@@ -1160,14 +1160,20 @@ export function homeVectors(name: string, open: () => HomeSubject | Promise<Home
       expect(await h.operation('b')).toMatchObject({ status: 'applied' });
     });
 
-    it('flushes only the oldest pending operation of a Bot, and the next one after it settles', async () => {
+    it('reads no later operation of a Bot while its oldest pending one is not settled, and flushes it once that one settles', async () => {
       const h = await opened();
-      await h.subject.change(state => { pendingBot(state, 'b'); state.team.homeOperations.at(-1)!.request.payload.requestId = projectionRequestId(['b', '3']); });
-      await h.subject.flushHomes(VECTOR_NOW, h.calls(request => h.readback(request, 'applied')));
-      expect(await h.operation('b', 0)).toMatchObject({ status: 'applied' });
+      const second = projectionRequestId(['b', '3']);
+      await h.subject.change(state => { pendingBot(state, 'b'); state.team.homeOperations.at(-1)!.request.payload.requestId = second; });
+      const first = (await h.operation('b', 0)).request.payload.requestId;
+      // The first operation has no terminal yet: it stays pending, so the second is never read.
+      await h.subject.flushHomes(VECTOR_NOW, h.calls(request => request.payload.requestId === second ? h.readback(request, 'applied') : undefined));
+      expect(await h.operation('b', 0)).toMatchObject({ status: 'pending' });
       expect(await h.operation('b', 1)).toMatchObject({ status: 'pending' });
-      expect(h.reads).not.toContain(projectionRequestId(['b', '3']));
-      await h.subject.flushHomes(VECTOR_NOW + HOUR, h.calls(request => h.readback(request, 'applied')));
+      expect(h.reads).not.toContain(second);
+      await h.subject.flushHomes(VECTOR_NOW + HOUR, h.calls(request => request.payload.requestId === first || request.payload.requestId === second
+        ? h.readback(request, 'applied') : undefined));
+      expect(await h.operation('b', 0)).toMatchObject({ status: 'applied' });
+      await h.subject.flushHomes(VECTOR_NOW + 2 * HOUR, h.calls(request => h.readback(request, 'applied')));
       expect(await h.operation('b', 1)).toMatchObject({ status: 'applied' });
     });
   });
