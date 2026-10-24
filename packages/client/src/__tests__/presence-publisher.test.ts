@@ -485,6 +485,9 @@ describe('presence re-discovery on reconnect', () => {
     });
     daemon = await startDaemon(server.url);
 
+    // Discovery runs off the connection path: wait for the failed first read,
+    // then hold a window of several beat intervals in which nothing publishes.
+    await vi.waitFor(() => expect(seen.discoveries()).toBeGreaterThanOrEqual(1), { timeout: 5_000 });
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(seen.discoveries()).toBe(1);
     expect(seen.presenceRequests()).toBe(0);
