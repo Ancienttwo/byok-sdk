@@ -1,6 +1,6 @@
 import { PreparedAgentMemoryModeSchema } from './input-preparation';
 import { z } from 'zod';
-import { RUNTIME_IDS } from './constants';
+import { RUNTIME_FAILURE_CLASSES, RUNTIME_IDS } from './constants';
 import { BlobRefSchema } from './blob';
 import {
   SEALED_DECLINE_CODES,
@@ -1280,6 +1280,21 @@ export const TaskCompletePayloadSchema = z.object({
 });
 export type TaskCompletePayload = z.infer<typeof TaskCompletePayloadSchema>;
 
+/** A closed runtime failure class (#869). `unknown` means the runtime gave no structured evidence. */
+export const RuntimeFailureClassSchema = z.enum(RUNTIME_FAILURE_CLASSES);
+export type RuntimeFailureClass = z.infer<typeof RuntimeFailureClassSchema>;
+
+/**
+ * The machine-readable failure of a `task.fail` (#869); `reason` stays display
+ * text. `resetsAt` (ISO 8601 UTC) exists only on `quota`, and only when the
+ * runtime reported when the limit resets.
+ */
+export const TaskFailureSchema = z.union([
+  z.object({ class: z.literal('quota'), resetsAt: z.iso.datetime().optional() }).strict(),
+  z.object({ class: RuntimeFailureClassSchema.exclude(['quota']) }).strict(),
+]);
+export type TaskFailure = z.infer<typeof TaskFailureSchema>;
+
 /** daemon -> server: task failed. */
 export const TaskFailPayloadSchema = z.object({
   ...NO_SEALED_MEMBER,
@@ -1288,6 +1303,8 @@ export const TaskFailPayloadSchema = z.object({
   harnessId: HarnessIdSchema.optional(),
   reason: z.string(),
   retryable: z.boolean().optional(),
+  /** Gated on the server's `runtime-failure-class` flag. Plaintext on `task.fail_sealed`. */
+  failure: TaskFailureSchema.optional(),
   usage: TerminalInferenceUsageSchema.optional(),
   /** Present on a prepared Execution that observed provider usage before failing. */
   preparedObservation: TerminalPreparedObservationSchema.optional(),

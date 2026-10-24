@@ -388,6 +388,7 @@ export class HermesAdapter implements RuntimeAdapter {
         category: isRuntimeExecutionFailure(error) ? error.category : 'infrastructure',
         retry: isRuntimeExecutionFailure(error) ? error.retry : error instanceof AcpRpcError ? 'non-retryable' : 'retryable',
         reason: error instanceof Error ? error.message : 'hermes open failed',
+        failure: isRuntimeExecutionFailure(error) ? error.failure : { class: 'unknown' },
       });
     }
   }

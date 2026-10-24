@@ -1,10 +1,11 @@
 // Keep this check at root, outside package source and declaration build roots.
 // It compares the private JS/declaration bridge with vendor and SDK source types.
 // The SDK projection imports built protocol types, so run after `bun run build`.
-// On re-vendor, update the c88a514 pins together in these four files:
+// On re-vendor, update the c88a514 pins together in these files:
 // packages/client/src/runtime/codex-session-runtime.js,
 // packages/client/src/runtime/oar-process-tree.js,
-// packages/client/src/runtime/acp-session-runtime.js, this test, and
+// packages/client/src/runtime/acp-session-runtime.js,
+// packages/client/src/runtime/oar-failure-runtime.js, this test, and
 // scripts/api-surface/oar-bridge-types.ts.
 // The bridge is outside the API golden. New type exports need explicit checks.
 import assert from 'node:assert/strict';
@@ -64,6 +65,22 @@ test('OAR ACP JS bridge re-exports the checked vendored values', () => {
     ['../../vendor/oar/c88a514/contracts/session-not-found-error.js', [['SessionNotFoundError', 'SessionNotFoundError']]],
     ['../../vendor/oar/c88a514/contracts/runtime-failure-error.js', [['RuntimeFailureError', 'RuntimeFailureError']]],
     ['../../vendor/oar/c88a514/runtimes/grok/session.js', [['grokSession', 'grokSession']]],
+  ]);
+});
+
+test('OAR failure JS bridge re-exports the checked vendored failure tables', () => {
+  const source = readFileSync(path.join(repoRoot, 'packages/client/src/runtime/oar-failure-runtime.js'), 'utf8');
+  const { body } = parse(source, { ecmaVersion: 'latest', sourceType: 'module' });
+  const reexports = body.map((statement) => {
+    assert.equal(statement.type, 'ExportNamedDeclaration');
+    return [
+      statement.source?.value,
+      statement.specifiers.map(({ local, exported }) => [local.name, exported.name]),
+    ];
+  });
+  assert.deepEqual(reexports, [
+    ['../../vendor/oar/c88a514/runtimes/codex/failure.js', [['codexFailure', 'codexFailure']]],
+    ['../../vendor/oar/c88a514/shared/failure-class.js', [['failureFromStatus', 'failureFromStatus']]],
   ]);
 });
 

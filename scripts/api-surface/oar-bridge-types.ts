@@ -183,3 +183,20 @@ export type CheckAcpHookRecord = Assert<Assignable<RawEvent, AcpBridge.AcpRecord
 export type CheckAcpSpawn = Assert<Assignable<typeof spawnOwnedLineProcess, SpawnAcpLineProcess>>;
 export type CheckAcpTerminalSpawn = Assert<Assignable<typeof spawnOwnedTerminalProcess, SpawnAcpTerminal>>;
 export type CheckAcpEnv = Assert<Equal<Readonly<ReturnType<typeof buildRuntimeEnv>>, AcpBridgeArgs[3]['env']>>;
+
+// The failure bridge (#869): the vendored OAR failure tables, typed with the
+// protocol's class. The protocol enum and OAR's `FailureClass` are one set.
+import type * as FailureBridge from '../../packages/client/src/runtime/oar-failure-runtime.js';
+import type { codexFailure as vendorCodexFailure } from '../../packages/client/vendor/oar/c88a514/runtimes/codex/failure.js';
+import type { failureFromStatus as vendorFailureFromStatus } from '../../packages/client/vendor/oar/c88a514/shared/failure-class.js';
+import type { FailureClass } from '../../packages/client/vendor/oar/c88a514/contracts/failure.js';
+import type { RuntimeFailureClass } from '../../packages/protocol/src/messages.js';
+
+export type CheckRuntimeFailureClass = Assert<Equal<RuntimeFailureClass, FailureClass>>;
+export type CheckFailureBridgeClass = Assert<Equal<ReturnType<typeof FailureBridge.failureFromStatus>, RuntimeFailureClass>>;
+export type CheckFailureExports = Assert<Equal<keyof typeof FailureBridge, 'codexFailure' | 'failureFromStatus'>>;
+export type CheckFailureFromStatus = Assert<Equal<typeof FailureBridge.failureFromStatus, typeof vendorFailureFromStatus>>;
+export type CheckCodexFailureParameters = Assert<Equal<Parameters<typeof FailureBridge.codexFailure>, Parameters<typeof vendorCodexFailure>>>;
+export type CheckCodexFailureClass = Assert<Equal<ReturnType<typeof FailureBridge.codexFailure>['failure'], ReturnType<typeof vendorCodexFailure>['failure']>>;
+export type CheckCodexFailureFromText = Assert<Equal<ReturnType<typeof FailureBridge.codexFailure>['fromText'], Field<ReturnType<typeof vendorCodexFailure>, 'fromText'>>>;
+export type CheckCodexFailureVendor = Assert<Assignable<typeof vendorCodexFailure, typeof FailureBridge.codexFailure>>;

@@ -502,6 +502,59 @@ const __executionScratch = await testExecutionScratch();
     expect(failure).toMatchObject({ phase: 'run', category: 'semantic', retry: 'non-retryable' });
   });
 
+  it.each([
+    '429 You exceeded your current quota, please check your plan and billing details',
+    '401 Incorrect API key provided',
+    '429 Rate limit reached for requests',
+    '404 The model `gpt-x` does not exist',
+  ])('reports unknown for a provider failure Pi gives only as text, reason unchanged (#869): %s', async (finalError) => {
+    const session = await startAdapter(fakePiAdapter(), baseTask, await makeCtx({ ...process.env, FAKE_PI_AUTO_RETRY_FAIL: '1', FAKE_PI_AUTO_RETRY_FINAL_ERROR: finalError }));
+    openSessions.push(session);
+    const events: Array<AgentEvent | MessageDraftDelta> = [];
+    const failure = await (async () => { for await (const event of session.events) events.push(event); })().then(() => undefined, (error: unknown) => error);
+    expect(events).toContainEqual({ type: 'error', message: finalError });
+    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+    expect((failure as RuntimeExecutionFailure).failure).toEqual({ class: 'unknown' });
+  });
+
+  it('marks a Pi process that ends before agent_settled runtime_exited (#869)', async () => {
+    const session = await startAdapter(fakePiAdapter(), baseTask, await makeCtx({ ...process.env, FAKE_PI_TRAJECTORY: 'killed' }));
+    openSessions.push(session);
+    const failure = await (async () => { for await (const _event of session.events); })().then(() => undefined, (error: unknown) => error);
+    expect(failure).toMatchObject({ category: 'infrastructure', failure: { class: 'runtime_exited' } });
+  });
+
+  it('marks a Pi child error during an admitted turn unknown, since the process did not exit (#869)', async () => {
+    let child: ReturnType<typeof realSpawn> | undefined;
+    const spawnFn = ((command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
+      child = realSpawn(command, args, options);
+      return child;
+    }) as never;
+    const adapter = new PiAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }), spawnFn });
+    const session = await startAdapter(adapter, baseTask, await makeCtx({ ...process.env, FAKE_PI_HANG_AFTER_TOOL: '1' }));
+    openSessions.push(session);
+    if (!child) throw new Error('pi child was not spawned');
+    child.emit('error', new Error('simulated pi child error'));
+    const failure = await (async () => { for await (const _event of session.events); })().then(() => undefined, (error: unknown) => error);
+    expect(failure).toMatchObject({ category: 'infrastructure', failure: { class: 'unknown' } });
+  });
+
+  it('marks pi exiting before it answers the initial prompt runtime_exited (#869)', async () => {
+    const task: TaskOfferPayload = { ...baseTask, sessionRef: 'some-other-unknown-id' };
+    await expect(startAdapter(fakePiAdapter(), task, await makeCtx())).rejects.toMatchObject({
+      phase: 'start', message: expect.stringMatching(/No session found matching/), failure: { class: 'runtime_exited' },
+    });
+  });
+
+  it('marks pi exiting before get_state runtime_exited, and a refused get_state unknown (#869)', async () => {
+    await expect(startAdapter(fakePiAdapter(), baseTask, await makeCtx({ ...process.env, FAKE_PI_GET_STATE_EXIT: '1' }))).rejects.toMatchObject({
+      phase: 'start', message: expect.stringMatching(/before yielding an authoritative session id/), failure: { class: 'runtime_exited' },
+    });
+    await expect(startAdapter(fakePiAdapter(), baseTask, await makeCtx({ ...process.env, FAKE_PI_GET_STATE_FAIL: '1' }))).rejects.toMatchObject({
+      phase: 'start', category: 'authority', failure: { class: 'unknown' },
+    });
+  });
+
   it('a task.offer carrying a known sessionRef resumes it via the real `--session <id>` flag', async () => {
     const adapter = fakePiAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_PI_SESSION_ID: 'resume-me-123' });

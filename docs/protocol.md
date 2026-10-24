@@ -332,6 +332,24 @@ information in runtime/harness discovery and the claim snapshot. The three
 paths name one shared field in `WIRE_ADDITIONS`. See the
 [Agent message draft lane](spec.md#agent-message-draft-lane).
 
+**Landed additive minor: `task.fail.failure` (#869).** `task.fail`, and so
+`task.fail_sealed`, gains an OPTIONAL strict `failure: { class, resetsAt? }`.
+`class` is a closed `RuntimeFailureClass` value: the vendored OAR
+`FailureClass` (`auth`, `quota`, `rate_limited`, `billing`,
+`model_unavailable`, `input_too_large`, `invalid_request`, `overloaded`,
+`provider`, `runtime_exited`, `limit_reached`, `output_schema`, `unknown`).
+`resetsAt` is an ISO 8601 UTC time, only on `quota`, and only when the runtime
+reported when the limit resets. Adapters classify from structured runtime
+fields only and never parse `reason`, which stays display text. `unknown`
+means the runtime gave no structured evidence; a failure the daemon makes
+itself is `unknown`. The field is gated on the server's new
+`runtime-failure-class` flag, because `task.fail_sealed` is strict: a daemon
+sends it only to a server that advertises the flag. Server flags are
+live-only, so a terminal built while the daemon had no connection carries no
+field. `failure` stays plaintext on `task.fail_sealed`. The reference server
+and the hosted cloud advertise the flag and project the field as
+`TaskResult.failure` and `TerminalResult.failure`.
+
 ## 1. Envelope
 
 Every wire message is a single-line NDJSON envelope:
@@ -469,7 +487,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `task.artifact` | D→S | **required** | optional | `name`, `contentType`, `inline?`, `blobRef?` | An artifact is produced |
 | `task.await_approval` | D→S | **required** | optional | `summary`, `approvalId?` (M5, additive — §5.3) | Runtime raised `needs_approval` |
 | `task.complete` | D→S | **required** | optional | `summary`, `finalMessage?` (additive — Freeze rule), `sessionRef`, `artifactRefs?`, `document?` (additive — §7.2), `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` (additive — §2.2) | Runtime reached `turn_end` |
-| `task.fail` | D→S | **required** | optional | `reason`, `retryable?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` | Task ends in error |
+| `task.fail` | D→S | **required** | optional | `reason`, `retryable?`, `failure?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` | Task ends in error; `failure` is gated on the server's `runtime-failure-class` flag |
 | `task.cancelled` | D→S | **required** | optional | `reason?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` | Task ends `Cancelled` (server- or daemon-initiated) |
 | `task.approval_resolved` | D→S | **required** | optional | `approvalId`, `decision` (`'approve'\|'reject'`), `resolvedBy` (`'local'`), `at` | A pending approval was resolved entirely on the device (§5.2) — gated on the `approval_resolved` capability flag |
 | `agent.message.draft` | D→S | **required** | optional | `agentRef`, `revision`, UTF-8 `offset`, `text` (≤ 16 KiB), `overflow?: true` | Display-only snapshot frames; server-advertised `agent-message-draft` gate |

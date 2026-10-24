@@ -185,7 +185,7 @@ describe('OAR session kernel record redaction', () => {
   });
 });
 
-it('accounts for every vendored file and the nine maintained source deltas', () => {
+it('accounts for every vendored file and the thirteen maintained source deltas', () => {
   const root = path.resolve(import.meta.dirname, '../../vendor/oar/c88a514');
   const manifest = JSON.parse(readFileSync(path.join(root, 'source-manifest.json'), 'utf8')) as {
     files: Array<{ path: string; sourcePath: string; upstreamSha256: string; vendoredSha256: string; delta?: string }>;
@@ -198,6 +198,6 @@ it('accounts for every vendored file and the nine maintained source deltas', () 
     if (!row.delta) expect(row.vendoredSha256).toBe(row.upstreamSha256);
     if (row.path.endsWith('.ts')) expect(row.sourcePath).toBe(`packages/oar/src/${row.path}`);
   }
-  expect(manifest.files.filter(row => row.delta).map(row => row.path).sort()).toEqual(['runtimes/codex/app-server-client.ts', 'runtimes/codex/open.ts', 'runtimes/codex/session.ts', 'runtimes/grok/session.ts', 'shared/acp/client-app.ts', 'shared/acp/process.ts', 'shared/acp/session.ts', 'shared/acp/terminal.ts', 'shared/acp/turns.ts']);
+  expect(manifest.files.filter(row => row.delta).map(row => row.path).sort()).toEqual(['contracts/failure.ts', 'runtimes/codex/app-server-client.ts', 'runtimes/codex/failure.ts', 'runtimes/codex/open.ts', 'runtimes/codex/session.ts', 'runtimes/grok/session.ts', 'shared/acp/client-app.ts', 'shared/acp/failure.ts', 'shared/acp/process.ts', 'shared/acp/session.ts', 'shared/acp/terminal.ts', 'shared/acp/turns.ts', 'shared/failure-class.ts']);
   expect(readFileSync(path.join(root, 'LICENSE'), 'utf8')).toContain('Apache License');
 });

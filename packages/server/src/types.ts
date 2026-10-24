@@ -17,6 +17,7 @@ import type {
   TaskApprovalResolvedPayload,
   TaskArtifactPayload,
   TaskDeclinePayload,
+  TaskFailure,
   TaskState,
   ToolsetId,
   TerminalProjectionSelection,
@@ -269,6 +270,14 @@ export interface TaskResult {
    */
   code?: TaskDeclinePayload['code'];
   retryable?: boolean;
+  /**
+   * The machine-readable runtime failure class of a failed task, verbatim
+   * `task.fail.failure`: `class` (a closed {@link TaskFailure} value, `unknown`
+   * when the runtime gave no structured evidence) and, on `quota`,
+   * `resetsAt` when the runtime reported it. Classify failures by this field;
+   * `reason` is display text only. Absent when the daemon predates the field.
+   */
+  failure?: TaskFailure;
   /**
    * The task's structured terminal result, projected verbatim from
    * `task.complete.document` (`@byok-sdk/protocol`'s `messages.ts`) — the

@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { promises as fs } from 'node:fs';
 import type {
   AgentEvent,
+  TaskFailure,
   TaskOfferPayload,
 } from '@byok-sdk/protocol';
 import {
@@ -32,6 +33,7 @@ import {
   SessionNotFoundError,
   type RawCodexSession,
 } from '../../runtime/codex-session-runtime';
+import { codexFailure } from '../../runtime/oar-failure-runtime';
 import { CodexProjection, type CodexRecord } from './projection';
 import { AsyncQueue } from '../../util/async-queue';
 import { resolveCodexBin, type ResolvedBin } from './resolve-bin';
@@ -292,6 +294,9 @@ export class CodexAdapter implements RuntimeAdapter {
           : 'infrastructure',
         retry: isRuntimeExecutionFailure(error) ? error.retry : 'retryable',
         reason: error instanceof Error ? error.message : 'codex open failed',
+        failure: isRuntimeExecutionFailure(error)
+          ? error.failure
+          : { class: session.exitedOnItsOwn ? 'runtime_exited' : 'unknown' },
       });
     }
   }
@@ -303,12 +308,13 @@ const authority = (reason: string) =>
     retry: 'non-retryable',
     reason,
   });
-const infrastructure = (reason: string) =>
+const infrastructure = (reason: string, failure?: TaskFailure) =>
   new RuntimeExecutionFailure({
     phase: 'run',
     category: 'infrastructure',
     retry: 'non-retryable',
     reason,
+    failure,
   });
 /** An open that timed out may succeed on a fresh app-server, as before the deadline moved here. */
 const retryable = (reason: string) =>
@@ -322,6 +328,7 @@ class CodexSession implements Session {
   sessionRef = '';
   private raw?: RawCodexSession;
   private child?: { dispose(): Promise<void>; kill(): void };
+  private exit?: { readonly exitedOnItsOwn: boolean };
   private projection?: CodexProjection;
   private readonly stream = {};
   private readonly queue = new AsyncQueue<AgentEvent | MessageDraftDelta>();
@@ -354,8 +361,12 @@ class CodexSession implements Session {
   serverRequest(id: string | number, method: string, params: Record<string, unknown>, reply: import('./native-interactions').CodexNativeReply): void {
     this.native!.receive(id, method, params, reply);
   }
-  own(child: { dispose(): Promise<void>; kill(): void }): void {
+  own(child: { dispose(): Promise<void>; kill(): void; readonly exitedOnItsOwn: boolean }): void {
     this.child = child;
+    this.exit = child;
+  }
+  get exitedOnItsOwn(): boolean {
+    return this.exit?.exitedOnItsOwn === true;
   }
   /** The app-server's lines stop at the transport once the record stream halted. */
   gate<T extends { onLine(handler: (line: string) => void): void }>(child: T): T {
@@ -413,7 +424,7 @@ class CodexSession implements Session {
         type?: string;
         native?: {
           threadId?: string;
-          turn?: { status?: string; error?: { message?: string } };
+          turn?: { status?: string; error?: { message?: string; codexErrorInfo?: unknown } };
         };
       };
       if (
@@ -425,15 +436,21 @@ class CodexSession implements Session {
       ) {
         this.active = false;
         for (const resolve of this.interruptWaiters) resolve();
-        if (body.native?.turn?.status === 'failed')
+        if (body.native?.turn?.status === 'failed') {
+          const reason = body.native.turn.error?.message ?? 'codex turn failed';
+          // The native frame precedes the fold, which classifies the same `turn.error`.
+          // A class OAR took from error text is not structured evidence: send `unknown`.
+          const classified = codexFailure(reason, body.native.turn.error);
           this.fail(
             new RuntimeExecutionFailure({
               phase: 'run',
               category: 'semantic',
               retry: 'non-retryable',
-              reason: body.native.turn.error?.message ?? 'codex turn failed',
+              reason,
+              failure: { class: classified.fromText ? 'unknown' : classified.failure },
             }),
           );
+        }
       }
     } catch (error) {
       this.fail(error);
@@ -453,7 +470,9 @@ class CodexSession implements Session {
     void this.close().catch(() => {});
   }
   exited(): void {
-    if (!this.stopping) this.fail(infrastructure('codex app-server exited'));
+    if (!this.stopping) {
+      this.fail(infrastructure('codex app-server exited', { class: this.exitedOnItsOwn ? 'runtime_exited' : 'unknown' }));
+    }
   }
   get events(): AsyncIterable<AgentEvent | MessageDraftDelta> {
     const self = this;

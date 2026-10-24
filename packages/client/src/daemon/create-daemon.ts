@@ -79,6 +79,7 @@ import { ApprovalNotFoundError, ApprovalRegistry } from './approvals';
 import { AuthManager, DeviceRevokedError } from './auth-manager';
 import { BlobClient } from './blob-client';
 import { SealedTasks } from './sealed-task';
+import { DAEMON_TASK_FAILURE, taskFailureField } from './task-failure';
 import { resolveMachineId } from './machine-id';
 import { declares, E2EE_MEMBER_CAPABILITY, fetchCapabilityDeclaration, PRESENCE_HINTS_CAPABILITY } from './capabilities-client';
 import type { CapabilityDeclaration } from '@byok-sdk/core';
@@ -2253,6 +2254,7 @@ export function buildDaemonWithAdapters(
       const offer = decodeEnvelope(task.envelopeBytes);
       const { agentRef } = offer.payload as { agentRef?: AgentRef };
       const failure = createEnvelope('task.fail', { reason, retryable: false,
+        ...taskFailureField(DAEMON_TASK_FAILURE, connection?.getServerCapabilities() ?? []),
         ...terminalIdentity(task.claimedRuntime, agentRef),
         ...(interrupted ? { recovery: { kind: 'daemon_interrupted' as const, offerId: offer.id } } : {}),
       }, { taskId: task.taskId });
@@ -2526,6 +2528,7 @@ export function buildDaemonWithAdapters(
           const offerPayload = offer.payload as { agentRef?: AgentRef };
           const plainFailure = createEnvelope('task.fail', {
             reason: 'terminal_result_too_large', retryable: false,
+            ...taskFailureField(DAEMON_TASK_FAILURE, connection?.getServerCapabilities() ?? []),
             ...terminalIdentity(task.claimedRuntime, offerPayload.agentRef),
           }, { taskId });
           // Only the owner run's tenant, device and member seal this failure.
