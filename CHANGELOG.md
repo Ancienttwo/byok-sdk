@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Breaking (cloud)** — the device-proof `requestId` is single-use on the
+  three E2EE member writes, as on the truth put (#654, owner batch §41a A).
+  The store records the `requestId`, its binding and the result with the
+  write. A replay with the same binding writes nothing and returns the
+  recorded result, so a replayed registration no longer extends or replaces
+  the pairing MAC and a replayed package put no longer overwrites a newer
+  package. The same `requestId` with another binding gets 409
+  `proof_request_conflict`. Postgres records it in `proof_request_receipt`
+  (no migration); SQLite adds that table on open. Store implementers: the
+  append and put inputs take an optional `proof`, and
+  `E2eeMemberRegistrationInput` takes `request`; the results can be
+  `request_conflict`.
+
 - **Feature (protocol, server, cloud, client)** — an ordinary Agent offer can
   select `agentMemory: 'read-write-if-admitted'` (#833). It runs exactly as
   `read-write` when the daemon admits the memory MCP, and exactly as `none`
@@ -17,6 +30,21 @@
   (`AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY`), and server and hosted
   cloud refuse the value to a device without it, before the task exists. The
   terminal does not report which mode ran.
+- **Feature (client)** — the Claude, Codex, Grok and Hermes adapters declare
+  `messageDraft`, so a Host that reads `tasks.messageDraft` sees their reply
+  while it is written (#870). Claude always runs with
+  `--include-partial-messages`. Its text deltas, Codex
+  `item/agentMessage/delta` and Grok's ACP text deltas feed the draft only.
+  Hermes already sends one `progress` per chunk. The accepted message stays
+  the only authority: each later `progress` event reconciles the draft, and
+  `progress`, the closing reply and the published body are unchanged. There
+  is no protocol or wire change.
+- **Type change (client)** — `Session.events` is now
+  `AsyncIterable<AgentEvent | MessageDraftDelta>`, and `MessageDraftDelta`
+  is exported from `@byok-sdk/client`. Code that iterates `Session.events`
+  and types each item as `AgentEvent` no longer compiles. It must widen the
+  type or skip items of type `message_draft_delta`. An adapter whose
+  `events` yields only `AgentEvent` still compiles.
 - **Feature (client)** — an opt-in Claude option for Agent tasks (#871,
   #873). `ClaudeAdapterOptions.agentUserContext: 'excluded'` starts a
   `task.offer_for_agent` task with `--strict-mcp-config`, so only the task's
@@ -68,6 +96,12 @@
   applied, so that scope keeps its packages and accepts new puts. A stored
   `shred` entry whose subject is not `{ scopeId }` makes every chain read that
   includes it fail with `e2ee_member_state_unreadable`.
+- **Docs and vectors** — `docs/security.md` gains a Scope shred section: what
+  a Host shred removes, the unverified delete, and the backup gap until each
+  member rotates its KEM key (#654 E5b-3). The hosted Host contract lists the
+  shred in §6 and §7. `member-rules-v1.json` gains a `shred` section: after a
+  shred, a `scope-policy` or a second `shred` of that scope is invalid, and
+  another scope stays live.
 
 ## 0.30.0 — 2026-10-24 (published)
 

@@ -178,7 +178,10 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
       agentRef: AGENT_REF,
       sessionRef: 'memory-session',
       agentMemory: 'read-write-if-admitted',
-    })).rejects.toMatchObject({ code: 'agent_capability_missing' });
+    })).rejects.toMatchObject({
+      code: 'agent_capability_missing',
+      message: expect.stringContaining('agent-memory-read-write-if-admitted'),
+    });
     await expect(started.byok.executions.submit({
       taskId: 'fresh-read-write-if-admitted-refused',
       deviceId: daemon.deviceId,
@@ -186,7 +189,10 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
         instruction: 'chat turn', runtime: 'codex', terminalProjection: { mode: 'none' }, agentRef: AGENT_REF,
         egressPolicy: POLICY, agentMemory: 'read-write-if-admitted',
       },
-    })).rejects.toMatchObject({ code: 'agent_capability_missing' });
+    })).rejects.toMatchObject({
+      code: 'agent_capability_missing',
+      message: expect.stringContaining('agent-memory-read-write-if-admitted'),
+    });
     expect(await started.byok.tasks.attempt('read-write-if-admitted-refused')).toBeUndefined();
     expect(await started.byok.tasks.offer('fresh-read-write-if-admitted-refused')).toBeUndefined();
   });
