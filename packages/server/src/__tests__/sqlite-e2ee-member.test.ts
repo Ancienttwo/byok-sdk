@@ -13,6 +13,9 @@ import { E2EE_MEMBER_SCHEMA, SqliteE2eeMemberStore } from '../stores/sqlite/e2ee
 const describeSqlite = isSqliteAvailable() ? describe : describe.skip;
 const TENANT = tenantId('sqlite-e2ee');
 const EXPIRES = '2099-01-01T00:00:00.000Z';
+let requests = 0;
+/** A device-proof binding with a requestId no other write has used. */
+const freshRequest = () => ({ requestId: `request-${++requests}`, operation: 'e2ee-member-key.register', resource: '/byok/e2ee/member-key', bodySha256: 'sha256', bodySize: 1 });
 const open = (path: string) => createSqliteEmbeddedStores({ path }, { clock: createMutableClock(), crypto: createWebCrypto() });
 
 if (isSqliteAvailable()) {
@@ -30,7 +33,7 @@ async function seed(stores: SqliteEmbeddedStores, deviceId: string, machineId?: 
     ...(machineId === undefined ? {} : { machineId }),
   });
   const memberId = `member-${deviceId}`;
-  expect(await stores.e2eeMember.registerMember(TENANT, { deviceId, memberId, bundle: `{"m":"${memberId}"}`, deviceMac: 'mac', macExpiresAt: EXPIRES }))
+  expect(await stores.e2eeMember.registerMember(TENANT, { deviceId, memberId, bundle: `{"m":"${memberId}"}`, deviceMac: 'mac', macExpiresAt: EXPIRES, request: freshRequest() }))
     .toBe('registered');
   expect(await stores.e2eeMember.putClientPairingMac(TENANT, { deviceId, body: '{"mac":"client"}', expiresAt: EXPIRES })).toBe('stored');
   expect(await stores.e2eeMember.putScopeKeyPackages(TENANT, { rows: [{ scopeId: 'scope', epoch: 1, recipient: memberId, keyId: 'key', sender: memberId, package: '{}' }] }))
@@ -144,7 +147,7 @@ describeSqlite('SQLite pairing MAC map', () => {
     const macs = new Map<string, { readonly body: string; readonly expiresAt: string }>();
     const store = new SqliteE2eeMemberStore(coordinator, clock, macs);
     const register = (deviceId: string, expiresAt: string) =>
-      store.registerMember(TENANT, { deviceId, memberId: `member-${deviceId}`, bundle: `{"m":"${deviceId}"}`, deviceMac: 'mac', macExpiresAt: expiresAt });
+      store.registerMember(TENANT, { deviceId, memberId: `member-${deviceId}`, bundle: `{"m":"${deviceId}"}`, deviceMac: 'mac', macExpiresAt: expiresAt, request: freshRequest() });
     try {
       expect(await register('ending', '2026-10-24T00:10:00.000Z')).toBe('registered');
       expect(await store.putClientPairingMac(TENANT, { deviceId: 'ending', body: '{}', expiresAt: '2026-10-24T00:10:00.000Z' })).toBe('stored');

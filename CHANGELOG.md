@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Breaking (cloud)** — the device-proof `requestId` is single-use on the
+  three E2EE member writes, as on the truth put (#654, owner batch §41a A).
+  The store records the `requestId`, its binding and the result with the
+  write. A replay with the same binding writes nothing and returns the
+  recorded result, so a replayed registration no longer extends or replaces
+  the pairing MAC and a replayed package put no longer overwrites a newer
+  package. The same `requestId` with another binding gets 409
+  `proof_request_conflict`. Postgres records it in `proof_request_receipt`
+  (no migration); SQLite adds that table on open. Store implementers: the
+  append and put inputs take an optional `proof`, and
+  `E2eeMemberRegistrationInput` takes `request`; the results can be
+  `request_conflict`.
+
 - **Feature (protocol, server, cloud, client)** — an ordinary Agent offer can
   select `agentMemory: 'read-write-if-admitted'` (#833). It runs exactly as
   `read-write` when the daemon admits the memory MCP, and exactly as `none`
