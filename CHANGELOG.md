@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Feature (client)** — the device member can rotate its own KEM key
+  (#654 E2d-5, design §7.5); no daemon path starts a rotation yet. The device
+  keeps the next key beside the current one, appends its `rotate` entry,
+  re-wraps its own packages to the next key, and drops the old key only
+  after every re-wrap reads back. It reads its packages one epoch at a time,
+  four at a time, up to four epochs above the newest one it knows and at most
+  256 per scope; a package at the top epoch, a scope past the cap, or an
+  epoch whose key it holds but cannot read stops the rotation and keeps the
+  old key. A second read-back of every re-wrapped epoch across all scopes
+  runs just before the old key goes. Every Host request of the rotation is
+  cut off after the member request timeout. Known limitation: a late put of
+  a package wrapped to the old key can still replace a re-wrapped row after
+  that read-back; the recipient `kemEpoch` in the signed package and the Host
+  row closes it and must land before a production trigger (E5b-2). Core adds
+  `beginMemberKemRotation` and `finishMemberKemRotation`.
 - **Docs** — a pairing string `<code>.<pv>` used once without `--e2ee` is
   burned: start a new registration at the Host, do not retry it (#654 E2d).
 - **Breaking (cloud)** — the device-proof `requestId` is single-use on the
