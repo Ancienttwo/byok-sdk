@@ -19,6 +19,7 @@ import {
   SEALED_PAYLOAD_MAX_CONTENT_LENGTH,
   SEALED_SPLIT_TABLE,
   createEnvelope,
+  decodeEnvelope,
   encodeEnvelope,
   isSealedTaskPlainOutput,
   type Envelope,
@@ -860,22 +861,34 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 Â
     expect(await openOutput(member, terminal, deviceId)).toMatchObject({ summary });
   });
 
-  it('settles a terminal that a failed shutdown left queued by the inline-only fallback on the next stop', async () => {
-    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true });
+  it('settles a terminal that a failed shutdown left queued in the closed form on the next stop', async () => {
+    const { server, adapter, deviceId, storeDir, member } = await start({ ciphertextRef: true });
     server.send(await sealedOffer(member, 'upload-stop-retry', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     server.setFailBlobUploads(true);
-    adapter.sessions[0]!.emit({ type: 'progress', text: `large summary ${'s'.repeat(300 * 1024)}` });
+    const summary = `large summary ${'s'.repeat(300 * 1024)}`;
+    adapter.sessions[0]!.emit({ type: 'progress', text: summary });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(server.blobUploadsFailed).toBeGreaterThan(0), BUDGET_MS);
 
     const stopErrors = (): Promise<string[]> => daemon!.stop().then(() => [], (error: unknown) => (error instanceof AggregateError ? error.errors : [error]).map(String));
     expect(await stopErrors()).toContainEqual(expect.stringContaining('ciphertext upload failed'));
-    // The stopped daemon has no session that could advertise the server flags,
-    // so the terminal takes the inline-only fallback and the barrier completes.
-    // The stub runtime still reports its disposal failure.
+    // The run is stopped and its keyring retired, so the queued terminal
+    // settles in the closed form and the barrier completes. The stub runtime
+    // still reports its disposal failure.
     expect((await stopErrors()).filter((error) => !error.startsWith('RuntimeDisposalFailure'))).toEqual([]);
     daemon = undefined;
+    const db = openJournalDatabase(path.join(storeDir, JOURNAL_DB_FILENAME), DEFAULT_JOURNAL_BUSY_TIMEOUT_MS);
+    let rows: Array<{ bytes: Parameters<typeof decodeEnvelope>[0] }>;
+    try {
+      rows = db.prepare("SELECT bytes FROM journal_terminal WHERE task_id = 'upload-stop-retry'").all() as typeof rows;
+    } finally { db.close(); }
+    expect(rows).toHaveLength(1);
+    const settled = decodeEnvelope(rows[0]!.bytes);
+    expect(settled.type).toBe('task.fail');
+    expect(settled.payload).toMatchObject({ reason: 'sealed_key_unavailable', retryable: false });
+    expect(settled.payload).not.toHaveProperty('sealed');
+    expect(JSON.stringify(settled)).not.toContain(summary);
   });
 
   it('uploads a terminal that a failed shutdown left queued through the next run\'s blob client', async () => {
