@@ -9,12 +9,12 @@ import { enqueue, HostExecutionCore, settle, type ExecutionServer, type HostOpti
 import type { HostJobHandler, Routine } from '@byok-sdk/example-host-execution-core';
 import { HostLedger } from '@byok-sdk/example-host-execution-core';
 import { canonical, hash, project, setLifecycle, time, type ApplicationRows, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
-import { addTurn, json, stateOf, type CollaborationState, type Turn } from './model';
+import { addTurn, stateOf, type CollaborationState, type Turn } from './model';
 import { contextTurns, outcomeOffer, outcomeSchema, SYSTEM_PROMPT, type CheckedOffer, type ContextTurn, type OutcomeOffer } from './schema';
 import { DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   intentRows, minimumInstructionBytes, observeDevices, REPLY_UNCERTAIN_AFTER_MS, settleDelegations, type DelegationTimers } from './delegation';
-import { checkReply, collaborationDue, commitCommand, expireCards, replyCheckDue, reportCardDecisions, seatTurn, type Command, type CommandPorts,
-  type CommandStore, type KeylessCommand, type ReplyCheck } from './rules/commands';
+import { cardCallDue, checkReply, collaborationDue, commitCommand, expireCards, replyCheckDue, reportCardDecisions, seatTurn, settleCardCall,
+  type Command, type CommandPorts, type CommandStore, type KeylessCommand, type ReplyCheck } from './rules/commands';
 import type { CommandRecord } from './rules/commit';
 import { CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, type CommitResult } from './commit';
 import type { RetentionInput, RetentionResult } from './retention';
@@ -725,7 +725,7 @@ export class BotCollaboration {
       });
     }
   }
-  private async callConnector(card: CollaborationState['cards'][string]): Promise<Json> {
+  private async callConnector(card: CollaborationState['cards'][string]): Promise<unknown> {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<never>((_, reject) => {
@@ -736,23 +736,18 @@ export class BotCollaboration {
       }, this.connectorTimeoutMs);
     });
     try {
-      return json(await Promise.race([
+      return await Promise.race([
         Promise.resolve().then(() => this.options.connector(card.id, card.action.action, card.action.draft, controller.signal)),
         deadline,
-      ]));
+      ]);
     } finally { clearTimeout(timer); }
   }
   private async flushCards(): Promise<void> {
     for (const card of Object.values(this.snapshot().cards)) {
-      if (card.state !== 'confirmed' || card.result !== undefined || card.error !== undefined) continue;
-      let result: Json | undefined, error: string | undefined;
-      try { result = await this.callConnector(card); }
-      catch (cause) { error = String(cause instanceof Error ? cause.message : cause).slice(0, 1024); }
-      this.ledger.transaction(s => {
-        const row = stateOf(s.application).cards[card.id]!;
-        if (error !== undefined) row.error = error; else row.result = result!;
-        row.conclusion = error === undefined ? 'succeeded' : 'failed';
-      });
+      if (!cardCallDue(card)) continue;
+      let outcome: Parameters<typeof settleCardCall>[1];
+      try { outcome = { result: await this.callConnector(card) }; } catch (error) { outcome = { error }; }
+      this.ledger.transaction(s => settleCardCall(stateOf(s.application).cards[card.id]!, outcome));
     }
   }
   private async flushDeliveries(): Promise<void> {

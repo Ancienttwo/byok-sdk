@@ -82,13 +82,13 @@ schema. The SDK tables stay under the SDK migrations. This example never writes 
 | `entity` | map entry of the state (Turn, card, Bot, room, delivery, ...), keyed by its id |
 | `entry` | element of a list (audit, rejected, team note, home operation, room message), keyed by position |
 | `command` | command record: the dedup evidence, the first result and the retention root (nullable) |
-| `outbox` | projection or delivery to send: a projection's value and send state, or a delivery's scan index (owner §54a, signed) |
+| `outbox` | work for the sender: a projection's value and send state, a delivery's scan index (owner §54a, signed), a card's connector call claim, an Agent home operation's scan index, or a Host job's claim (#793 §6, signed) |
 | `intent` | Turn intent: the frozen SDK input, the stable task id, the FIFO order, the submit state and the SDK result read back |
 | `device_binding` | device of a scope: its mode (`L` or `H`), its mode revision and its revoke time |
 | `retired_identity` | K8 identity that retention retired for good, `hash([namespace, id])`, or a compacted intent, `hash(['intent', turnId])` |
 | `archived_row` | row that retention moved out of the state, by namespace and id; a command record has an expiry |
 | `routine` | K4 routine of a Bot: its definition, staged version, lifecycle, status and next slot |
-| `occurrence` | K4 occurrence of a routine slot; its conclusion only when it has no intent |
+| `occurrence` | K4 occurrence of a routine slot; its conclusion only when it has no intent, and a Host job's state (`job`) |
 
 Each scope and each key is stored as `JSON.stringify(value)`, so two values that UTF-8 would merge stay
 apart, and a NUL is safe. Each body is `json` text, so the stored bytes keep their key order. `ordinal`

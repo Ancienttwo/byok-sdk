@@ -21,7 +21,7 @@ export { checkReply, delegationDue, observeDevices, replyCheckDue, settleDelegat
 export { advanceRoomSeats, seatTurn, type SeatFacts } from './rooms';
 export { collaborationDue } from './due';
 export { compactVeto, type CompactFacts, type CompactState } from './compaction';
-export { expireCards, reportCardDecisions } from './cards';
+export { cardCallDue, expireCards, reportCardDecisions, settleCardCall } from './cards';
 
 /** Commands with a caller key or a K4 key. The store records them, so a retry replays the first result. */
 export type KeyedCommand =
