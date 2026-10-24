@@ -3118,8 +3118,6 @@ draft frames.
 
 The daemon reconciles the draft to the published body with a final revision
 before `agent.message.publish` when the text differs.
-The draft and the closing reply share one message-boundary decision for each
-progress event.
 An adapter may also stream text for the draft only. The adapter's own message
 tracker sets those boundaries, and each later progress event is the authority
 that reconciles the draft.

@@ -122,34 +122,32 @@ async function setup(runtime: RuntimeCase) {
 }
 
 describe('Agent message drafts from each bundled runtime through the real server and daemon', () => {
-  it.each([
-    ['claude', true],
-    ['codex', true],
-    ['grok', posix],
-    ['hermes', posix],
-  ] as const)('%s shows the reply mid-turn and ends on the accepted text', async (id, supported) => {
-    if (!supported) return;
-    const f = await setup(cases[id]);
-    const appends = () => f.events.filter((e): e is Extract<AgentMessageDraftEvent, { kind: 'append' }> => e.kind === 'append' && e.text !== '');
-    // Held before the whole message: these appends can only come from streamed text.
-    await vi.waitFor(() => expect(appends().length).toBeGreaterThan(0), { timeout: 15_000 });
-    const midReply = appends().at(-1)!;
-    expect(f.accepted).toEqual([]);
-    await f.release();
-    await f.done;
-    await vi.waitFor(async () => {
-      expect(await f.server.byok.tasks.deviceTerminal(taskId)).toMatchObject({ envelope: { type: 'task.complete' } });
-    }, { timeout: 15_000 });
-    expect(f.accepted).toHaveLength(1);
-    const body = f.accepted[0]!.body;
-    expect(body).toBe(body.trim());
-    const last = appends().at(-1)!.revision;
-    expect(appends().filter(e => e.revision === last).map(e => e.text).join('')).toBe(body);
-    // The reply has no surrounding whitespace, so the streamed text already matched it: no reconciling revision.
-    expect(last).toBe(midReply.revision);
-    expect(f.events.at(-1)).toEqual({ kind: 'ended' });
-    expect(JSON.stringify(f.events)).not.toContain('STALE');
-    const drafts = f.sent.filter(e => e.type === 'agent.message.draft');
-    expect(f.sent.findIndex(e => e.type === 'agent.message.publish')).toBeGreaterThan(f.sent.lastIndexOf(drafts.at(-1)!));
-  }, 40_000);
+  // Grok and Hermes declare darwin and linux only.
+  it.skipIf(!posix).each(['grok', 'hermes'] as const)('%s shows the reply mid-turn and ends on the accepted text', id => runtimeCase(id), 40_000);
+  it.each(['claude', 'codex'] as const)('%s shows the reply mid-turn and ends on the accepted text', id => runtimeCase(id), 40_000);
 });
+
+async function runtimeCase(id: keyof typeof cases): Promise<void> {
+  const f = await setup(cases[id]);
+  const appends = () => f.events.filter((e): e is Extract<AgentMessageDraftEvent, { kind: 'append' }> => e.kind === 'append' && e.text !== '');
+  // Held before the whole message: these appends can only come from streamed text.
+  await vi.waitFor(() => expect(appends().length).toBeGreaterThan(0), { timeout: 15_000 });
+  const midReply = appends().at(-1)!;
+  expect(f.accepted).toEqual([]);
+  await f.release();
+  await f.done;
+  await vi.waitFor(async () => {
+    expect(await f.server.byok.tasks.deviceTerminal(taskId)).toMatchObject({ envelope: { type: 'task.complete' } });
+  }, { timeout: 15_000 });
+  expect(f.accepted).toHaveLength(1);
+  const body = f.accepted[0]!.body;
+  expect(body).toBe(body.trim());
+  const last = appends().at(-1)!.revision;
+  expect(appends().filter(e => e.revision === last).map(e => e.text).join('')).toBe(body);
+  // The reply has no surrounding whitespace, so the streamed text already matched it: no reconciling revision.
+  expect(last).toBe(midReply.revision);
+  expect(f.events.at(-1)).toEqual({ kind: 'ended' });
+  expect(JSON.stringify(f.events)).not.toContain('STALE');
+  const drafts = f.sent.filter(e => e.type === 'agent.message.draft');
+  expect(f.sent.findIndex(e => e.type === 'agent.message.publish')).toBeGreaterThan(f.sent.lastIndexOf(drafts.at(-1)!));
+}
