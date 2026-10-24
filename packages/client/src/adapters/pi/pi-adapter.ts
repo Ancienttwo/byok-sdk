@@ -1106,7 +1106,7 @@ class PiSession implements Session {
                   category: 'infrastructure',
                   retry: 'retryable',
                   reason: 'pi runtime process ended before agent_settled',
-                  failure: { class: 'runtime_exited' },
+                  failure: { class: rpc.processExited ? 'runtime_exited' : 'unknown' },
                 }, { cause: rpc.terminalError });
               }
               if (value.type === 'agent_settled') {

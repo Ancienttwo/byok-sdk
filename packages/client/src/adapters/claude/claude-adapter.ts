@@ -621,7 +621,7 @@ class ClaudeSession implements Session {
                   category: 'infrastructure',
                   retry: 'retryable',
                   reason: 'claude runtime process ended before a terminal result frame',
-                  failure: { class: 'runtime_exited' },
+                  failure: { class: client.processExited ? 'runtime_exited' : 'unknown' },
                 }, { cause: client.terminalError });
               }
 
