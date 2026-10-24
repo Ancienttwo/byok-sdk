@@ -3,8 +3,8 @@
  * shape-light, with the device proof checked by its Ed25519 signature. A test
  * plays the web client through the `client*` methods, which stand for the
  * Host control plane (relay the client MAC, append chain entries, put key
- * packages). A device puts key packages through the proof route, with the
- * Host's one `keyId` per scope epoch rule.
+ * packages). A device puts key packages and appends chain entries through
+ * the proof routes, with the Host's first-writer rules.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHash, createPublicKey, verify as edVerify } from 'node:crypto';
@@ -15,6 +15,7 @@ import {
   BYOK_E2EE_KEY_PACKAGES_PATH,
   BYOK_E2EE_MEMBER_KEY_PATH,
   BYOK_E2EE_PAIRING_MAC_PATH,
+  E2EE_MEMBER_CHAIN_APPEND_OPERATION,
   E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES,
   E2EE_MEMBER_KEY_REGISTER_OPERATION,
   E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION,
@@ -86,6 +87,12 @@ export class E2eeTestHost {
   readonly devicePuts: ScopeKeyPackageV1[][] = [];
   /** When set, each device key package put waits for it before it stores. */
   holdPackagePuts: Promise<void> | undefined;
+  /** Answer this many device key package puts with 503 first. */
+  failPackagePuts = 0;
+  /** Answer device key package puts with 200 and store nothing. */
+  dropPackagePuts = false;
+  /** Every device chain append body, in order. */
+  readonly deviceAppends: unknown[][] = [];
 
   constructor(private readonly deps: E2eeTestHostDeps) {}
 
@@ -164,6 +171,10 @@ export class E2eeTestHost {
       await this.#put(req, res);
       return true;
     }
+    if (method === 'POST' && url.pathname === BYOK_E2EE_CHAIN_PATH) {
+      await this.#append(req, res);
+      return true;
+    }
     if (method === 'GET' && url.pathname === BYOK_E2EE_PAIRING_MAC_PATH) {
       const device = this.#bearer(req, res);
       if (device === undefined) return true;
@@ -215,9 +226,14 @@ export class E2eeTestHost {
     if (this.#proven(req, body, E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, BYOK_E2EE_KEY_PACKAGES_PATH) === undefined) {
       return respond(res, 401, { error: 'unauthorized' });
     }
+    if (this.failPackagePuts > 0) {
+      this.failPackagePuts -= 1;
+      return respond(res, 503, { error: 'unavailable' });
+    }
     const { packages } = JSON.parse(body.toString('utf8')) as { packages: ScopeKeyPackageV1[] };
     this.devicePuts.push(packages);
     await this.holdPackagePuts;
+    if (this.dropPackagePuts) return respond(res, 200, { stored: packages.length, skippedDeviceIds: [] });
     const conflict = packages.some((put) => this.packages.some((stored) => stored.scopeId === put.scopeId && stored.epoch === put.epoch && stored.keyId !== put.keyId));
     if (conflict) return respond(res, 409, { error: 'e2ee_scope_key_conflict' });
     for (const put of packages) {
@@ -226,6 +242,29 @@ export class E2eeTestHost {
       this.packages.push(put);
     }
     respond(res, 200, { stored: packages.length, skippedDeviceIds: [] });
+  }
+
+  /** The device append: each entry takes the next seq; the same entry at a stored seq is a replay. */
+  async #append(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const body = await rawBody(req);
+    if (this.#proven(req, body, E2EE_MEMBER_CHAIN_APPEND_OPERATION, BYOK_E2EE_CHAIN_PATH) === undefined) {
+      return respond(res, 401, { error: 'unauthorized' });
+    }
+    const { entries } = JSON.parse(body.toString('utf8')) as { entries: Array<{ seq: number }> };
+    this.deviceAppends.push(entries);
+    let appended = 0;
+    let replayed = 0;
+    for (const entry of entries) {
+      if (entry.seq === this.chain.length + 1) {
+        this.chain.push(entry);
+        appended += 1;
+      } else if (JSON.stringify(this.chain[entry.seq - 1]) === JSON.stringify(entry)) {
+        replayed += 1;
+      } else {
+        return respond(res, 409, { error: 'e2ee_member_chain_conflict' });
+      }
+    }
+    respond(res, 200, { appended, replayed });
   }
 
   async #register(req: IncomingMessage, res: ServerResponse): Promise<void> {

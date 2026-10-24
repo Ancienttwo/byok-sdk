@@ -50,8 +50,13 @@ export type {
 } from './member-chain';
 export { MEMBER_KEY_BUNDLE_VERSION, createMemberKeyBundle, parseMemberKeyBundle, verifyMemberKem } from './member-bundle';
 export type { CreateMemberKeyBundleInput, MemberKeyBundleV1 } from './member-bundle';
-export { generateMemberKeyRecord, openMemberKeyRecord } from './member-key-record';
-export type { MemberKeyBinding, MemberKeyStore, MemberKeys } from './member-key-record';
+export {
+  beginMemberKemRotation,
+  finishMemberKemRotation,
+  generateMemberKeyRecord,
+  openMemberKeyRecord,
+} from './member-key-record';
+export type { MemberKemKey, MemberKeyBinding, MemberKeyStore, MemberKeys } from './member-key-record';
 export { MEMBER_FINGERPRINT_DOMAIN, memberApprovalCode, memberFingerprint } from './member-fingerprint';
 export type { MemberFingerprintInput } from './member-fingerprint';
 export {
