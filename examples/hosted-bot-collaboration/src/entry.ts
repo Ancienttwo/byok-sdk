@@ -37,8 +37,8 @@ export interface CommandEntryOptions<C> {
 /**
  * The authenticated product command entry of H (#793 S10), L's owner API (K8 host.ts) for requests: each method
  * authenticates, checks the principal as L's R2 checks do, commits with L's command id, then syncs the scope, as L runs its
- * pass. A commit that adds a Turn, room seat or input batch for a Bot whose device has no active H binding rolls back with
- * `DeviceBindingError` (§55a, the entry half).
+ * pass. A commit that adds work (a Turn that is not concluded, a room seat, or an input batch or an input to one) for a Bot
+ * whose device has no active H binding rolls back with `DeviceBindingError` (§55a, the entry half).
  *
  * L trusts the caller of `setMainBot`, `updateRoom`, `retryPersona` and its routine API; every call here comes from a
  * request, so they need the owner too. The Host's own calls (`personaReady`, a team snapshot, retention, compaction, device

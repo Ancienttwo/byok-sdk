@@ -126,15 +126,18 @@ type ReadbackResult = Awaited<ReturnType<NonNullable<ChannelPort['readback']>>>;
 
 const SCHEMA = /^[a-z_][a-z0-9_]{0,62}$/;
 /**
- * Snapshots the Turn, room seat and input batch ids of `state`. The returned function gives the device of each Bot of a row
- * added since, in insertion order, once each. A row whose Bot is not in the team is left to the rule that reads it.
+ * Snapshots the Turn and room seat ids of `state` and the input count of each input batch. The returned function gives the
+ * device of each Bot of a row that adds work since: a new Turn that is not concluded (a cancel concludes the Turn that it
+ * seals), a new room seat, and a new input batch or one that took another input. In insertion order, once each. A row whose
+ * Bot is not in the team is left to the rule that reads it.
  */
 function addedDevices(state: CollaborationState): () => string[] {
-  const turns = new Set(Object.keys(state.turns)), seats = new Set(Object.keys(state.team.seats)), batches = new Set(Object.keys(state.inputBatches ?? {}));
+  const turns = new Set(Object.keys(state.turns)), seats = new Set(Object.keys(state.team.seats));
+  const inputs = new Map(Object.values(state.inputBatches ?? {}).map(batch => [batch.id, batch.inputIds.length]));
   return () => {
-    const bots = [...Object.values(state.turns).filter(turn => !turns.has(turn.id)).map(turn => turn.botId),
+    const bots = [...Object.values(state.turns).filter(turn => !turns.has(turn.id) && !turn.conclusion).map(turn => turn.botId),
       ...Object.values(state.team.seats).filter(seat => !seats.has(seat.id)).map(seat => seat.botId),
-      ...Object.values(state.inputBatches ?? {}).filter(batch => !batches.has(batch.id)).map(batch => batch.botId)];
+      ...Object.values(state.inputBatches ?? {}).filter(batch => inputs.get(batch.id) !== batch.inputIds.length).map(batch => batch.botId)];
     return [...new Set(bots.flatMap(botId => state.team.bots[botId] ? [state.team.bots[botId]!.execution.deviceId] : []))];
   };
 }
@@ -192,7 +195,7 @@ export class HostedCollaborationStore {
    * The store builds every command port from the scope's Host config (#793 S9). `clock` is the Host clock.
    *
    * With `requireBinding` (the command entry's commits, #793 S10), a new commit checks, under the scope lock, that each Bot
-   * of a Turn, room seat or input batch that the commit added runs on a device with an active H binding, and throws
+   * of the work that the commit added (see `addedDevices`) runs on a device with an active H binding, and throws
    * `DeviceBindingError` otherwise, so the commit rolls back. It reads what the K8 rule produced, so H keeps no copy of the
    * mention and seat selection.
    */
