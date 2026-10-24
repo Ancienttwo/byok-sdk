@@ -30,7 +30,7 @@ async function hosted(): Promise<SyncSubject> {
     stored: () => store().dump(scope),
     state: () => store().read(scope),
     change: edit => store().seed(scope, edit),
-    sync: () => store().sync(scope, { ...SYNC_OPTIONS, history: undefined }),
+    sync: async () => { await store().sync(scope, { ...SYNC_OPTIONS, history: undefined }); },
     intent: async turnId => {
       const found = await pool.query<{ key: string; source: SyncIntentRecord['source']; input: FrozenInput; wait_until: string }>(
         `SELECT key, source, input, wait_until::text FROM ${table('intent')} WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(turnId)]);
@@ -49,7 +49,7 @@ async function hosted(): Promise<SyncSubject> {
 /** The H card subject (#793 S5): the H sync subject, whose sync runs at a given time. */
 async function hostedCards(): Promise<CardSubject> {
   const subject = await hosted();
-  return { ...subject, sync: now => store().sync(subject.scope, { ...SYNC_OPTIONS, now, history: undefined }) };
+  return { ...subject, sync: async now => { await store().sync(subject.scope, { ...SYNC_OPTIONS, now, history: undefined }); } };
 }
 /** A concluded Turn `t1`, a queued user Turn `q1` and a queued continuation `q2`. Card `c1` stays pending in the H sync. */
 function queueTurns(state: CollaborationState): void {
