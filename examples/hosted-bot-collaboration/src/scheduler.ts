@@ -17,6 +17,12 @@ export interface SchedulerOptions {
   batch?: number;
   /** How long a fenced routine, or one whose fire threw, waits before the next try. The wait is kept in memory only. */
   backoffMs?: number;
+  /**
+   * Called once for each scope where this pass committed a fire, in the order of its first one, at the end of the pass
+   * before it returns (#793 D2f-5). The Host syncs those scopes, so the steps that follow, such as a delegation verdict or a freeze, run at once. Work that threw or rolled back
+   * reports nothing. A throw from the callback propagates.
+   */
+  changed?: (scope: string) => void;
 }
 /** A routine that a pass could not fire. `fenced`: its owner Bot's device has no active H binding, and nothing was written. */
 export interface RoutineFailure { scope: string; routineId: string; error: unknown }
@@ -59,7 +65,7 @@ export class HostedRoutineScheduler {
    * Each fire reads the clock, as K4 does when it consumes a wake. The pass time only selects the due rows.
    */
   async run(): Promise<SchedulerPass> {
-    const now = this.now(), pass: SchedulerPass = { fired: 0, fenced: [], failed: [] };
+    const now = this.now(), pass: SchedulerPass = { fired: 0, fenced: [], failed: [] }, changed = new Set<string>();
     // An expired wait has no effect, so a routine that stopped being due leaves the map within one backoff.
     for (const [retry, at] of this.retryAt) if (at <= now) this.retryAt.delete(retry);
     const retrying = await this.scopes(`SELECT DISTINCT r.scope FROM routine r JOIN scope s ON s.scope = r.scope WHERE s.state_version = ANY($1::integer[])
@@ -80,7 +86,10 @@ export class HostedRoutineScheduler {
         const at = this.now();
         if ((this.retryAt.get(retry) ?? 0) > at) continue;
         try {
-          if (await this.store.fire(scope, routineId, at) === 'fired') pass.fired++;
+          if (await this.store.fire(scope, routineId, at) === 'fired') {
+            pass.fired++;
+            changed.add(scope);
+          }
           this.retryAt.delete(retry);
         } catch (error) {
           (error instanceof DeviceBindingError ? pass.fenced : pass.failed).push({ scope, routineId, error });
@@ -91,6 +100,7 @@ export class HostedRoutineScheduler {
       }
       if (due.rows.length < batch) break;
     }
+    for (const scope of changed) this.options.changed?.(scope);
     return pass;
   }
 

@@ -30,6 +30,12 @@ export interface ReconcilerOptions {
   pollMs?: number;
   /** The most rows that one pass takes. */
   batch?: number;
+  /**
+   * Called once for each scope where this pass committed a conclusion, in the order of its first one, at the end of the pass
+   * before it returns (#793 D2f-5). The Host syncs those scopes, so the steps that follow, such as a delegation verdict or a freeze, run at once. Work that threw or rolled back
+   * reports nothing. A throw from the callback propagates.
+   */
+  changed?: (scope: string) => void;
 }
 /** A row whose reconciliation threw. The pass went on with the next row. */
 export interface ReconcileFailure { scope: string; turnId: string; error: unknown }
@@ -56,14 +62,20 @@ export class HostedReconciler {
       `SELECT i.scope, i.key FROM intent i JOIN scope s ON s.scope = i.scope
         WHERE s.state_version = ANY($3::integer[]) AND i.conclusion IS NULL AND i.submission <> 'reserved' AND i.reconcile_at <= $1
         ORDER BY i.reconcile_at, i.scope, i.key LIMIT $2`, [this.now(), this.options.batch ?? 100, [...SUPPORTED_STORE_VERSIONS]]), true);
-    const pass: ReconcilePass = { concluded: 0, failed: [] };
+    const pass: ReconcilePass = { concluded: 0, failed: [] }, changed = new Set<string>();
     for (const row of due.rows) {
-      try { if (await this.reconcile(row.scope, row.key)) pass.concluded++; }
+      try {
+        if (await this.reconcile(row.scope, row.key)) {
+          pass.concluded++;
+          changed.add(JSON.parse(row.scope) as string);
+        }
+      }
       catch (error) {
         pass.failed.push({ scope: JSON.parse(row.scope) as string, turnId: JSON.parse(row.key) as string, error });
         await this.later(row.scope, row.key).catch(() => undefined);
       }
     }
+    for (const scope of changed) this.options.changed?.(scope);
     return pass;
   }
 

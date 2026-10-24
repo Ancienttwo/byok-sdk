@@ -1,16 +1,16 @@
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
 import { hash, taskId, type Json } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import type { Command, DelegationTimers } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { seedCollaboration, SYNC_OPTIONS, VECTOR_NOW } from '@byok-sdk/example-bot-collaboration/test-support';
-import { settleFacts } from './intents';
+import { frozenIntent, settleFacts } from './intents';
 import { storedKey } from './layout';
 import { vectorPorts } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
-import type { TaskEvidence } from './reconcile';
+import { HostedReconciler, type HostedTaskPort, type TaskEvidence } from './reconcile';
 import { inSchema, lockScope } from './store';
 
 // #793 D2f-5: the K8 delegation settlement in the H sync, and the cancel fact that a terminal's outcome freezes.
@@ -236,6 +236,38 @@ describe.skipIf(POSTGRES_URL === undefined)('H delegation settlement (#793 D2f-5
     const before = await h.stored();
     await expect(h.sync()).rejects.toThrow('Projection identity conflict');
     expect(await h.stored()).toBe(before);
+  });
+
+  describe('with its own schema, because a reconciler pass covers the whole schema', () => {
+    let shared: typeof opened;
+    beforeEach(async () => { shared = opened; opened = await openStore(); });
+    afterEach(async () => { await opened?.close(); opened = shared; });
+
+    it('gives the verdict at the sync of the scope that the reconciler reports for its conclusion', async () => {
+      const h = await delegated();
+      await h.set(h.id, `submission = 'delivered', tries = 1`);
+      const input = await inSchema(opened!.pool, store().schema, client => frozenIntent(client, h.scope, taskId(h.id, 0)), true);
+      const task = input!.input.taskId;
+      // The SDK side of B's task: the frozen offer, a claimed attempt and a busy decline.
+      const port: HostedTaskPort = {
+        offer: async () => ({ taskId: task, deviceId: input!.input.deviceId, type: 'task.offer_for_agent_with_egress_fresh',
+          payload: structuredClone(input!.input.payload), delivered: true, messageId: `offer-${task}` }) as never,
+        attempt: async () => ({ taskId: task, deviceId: input!.input.deviceId, agentRef: input!.input.payload.agentRef, status: 'complete',
+          ownerDeviceId: input!.input.deviceId, updatedAt: 'now' }) as TaskAttempt,
+        deviceTerminal: async () => ({ envelope: { task_id: task, type: 'task.decline', payload: { code: 'agent_home_writer_busy' } }, recordedAt: 'now' }) as never,
+        cancel: async () => { throw new Error('Unused cancel'); },
+      };
+      const reported: string[] = [];
+      const reconciler = new HostedReconciler(opened!.pool, store().schema, store(), { port: () => port, ports: vectorPorts, pollMs: 0,
+        now: () => VECTOR_NOW, changed: scope => { reported.push(scope); } });
+      expect(await reconciler.run()).toEqual({ concluded: 1, failed: [] });
+      expect(reported).toEqual([h.scope]);
+      expect(await h.delegation()).not.toHaveProperty('verdict');
+      // The Host syncs each reported scope.
+      for (const scope of reported) await store().sync(scope, { ...SYNC_OPTIONS, now: VECTOR_NOW, history: undefined });
+      expect(await h.delegation()).toMatchObject({ verdict: 'failed', reason: 'busy', status: 'resolved' });
+      await settled(h);
+    });
   });
 
   it('reads the settlement facts from the intent rows as K8 intentFacts reads them from the L ledger', async () => {
