@@ -5,7 +5,7 @@
  * the stored keys after a write.
  */
 import { testScratchRoot } from './fixtures/execution-scratch';
-import { deriveMemberId, encodePairingVerificationSecret, generatePairingVerificationSecret } from '@byok-sdk/core/sealed-payload';
+import { createMemberKeyBundle, deriveMemberId, encodePairingVerificationSecret, generatePairingVerificationSecret } from '@byok-sdk/core/sealed-payload';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DeviceCredentialStore, type DeviceCommandRunner } from '../daemon/device-credential-store';
@@ -174,10 +174,33 @@ describe('DeviceMemberRecords', () => {
   it('refuses a member state whose bundle names another device, or an anchor without a head', async () => {
     const custody = new InMemoryDeviceMemberCustody();
     const records = new DeviceMemberRecords(custody);
-    custody.entries.set('member-state', JSON.stringify({ v: 1, ...DEVICE, member: { v: 1 } }));
+    // A bundle that parses, so each refusal below is the rule it names.
+    const keys = await records.keys.loadOrCreate(DEVICE);
+    const member = await createMemberKeyBundle({
+      signingPublicJwk: keys.signing.publicJwk, signingPrivateKey: keys.signing.privateKey,
+      kemPublicJwk: keys.kem.publicJwk, kemEpoch: keys.kem.epoch, deviceId: DEVICE.deviceId,
+    });
+    const anchor = { approverSigningPublicJwk: keys.signing.publicJwk, entry: { seq: 1, hash: `sha256:${'0'.repeat(64)}` } };
+    custody.entries.set('member-state', JSON.stringify({ v: 1, ...DEVICE, member, anchor, head: anchor.entry }));
+    expect((await records.readState())?.anchor).toEqual(anchor);
+    custody.entries.set('member-state', JSON.stringify({ v: 1, ...DEVICE, deviceId: 'device-2', member }));
     await expect(records.readState()).rejects.toBeInstanceOf(DeviceMemberCustodyError);
-    custody.entries.set('member-state', JSON.stringify({ v: 1, ...DEVICE, member: {}, anchor: {} }));
+    custody.entries.set('member-state', JSON.stringify({ v: 1, ...DEVICE, member, anchor }));
     await expect(records.readState()).rejects.toBeInstanceOf(DeviceMemberCustodyError);
+  });
+
+  it('throws when the provider reports a deletion it did not make (#861 L1)', async () => {
+    class KeepsEntries extends InMemoryDeviceMemberCustody {
+      override async delete(): Promise<void> {}
+    }
+    const custody = new KeepsEntries();
+    const records = new DeviceMemberRecords(custody);
+    await records.savePending({ ...DEVICE, pv: encodePairingVerificationSecret(generatePairingVerificationSecret()), deadline: 1 });
+    await expect(records.deletePending()).rejects.toThrow('the member entry pairing-verification, but it remains');
+    await expect(records.clear()).rejects.toBeInstanceOf(DeviceMemberCustodyError);
+    await records.keys.loadOrCreate(DEVICE);
+    custody.entries.delete('pairing-verification');
+    await expect(records.clear()).rejects.toThrow('the member entry member-keys, but it remains');
   });
 
   it('clears all three entries', async () => {

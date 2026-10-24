@@ -52,15 +52,29 @@ export class E2eeTestHost {
   readonly #pairingMacs = new Map<string, unknown>();
   /** Answer this many registrations with 503 first. */
   failRegistrations = 0;
+  /** When set, every registration answers 400 with this error text. */
+  rejectRegistrations: string | undefined;
+  /** When set, each registration waits for it before it answers. */
+  holdRegistrations: Promise<void> | undefined;
   /** Answer this many chain reads with 503 first. */
   failChainReads = 0;
   /** Chain reads answered, for poll and re-walk assertions. */
   chainReads = 0;
+  /** When set, every chain read answers with this page as it is. */
+  chainResponse: unknown[] | undefined;
+  /** When set, each chain read waits for it before it answers. */
+  holdChainReads: Promise<void> | undefined;
   pairingMacReads = 0;
+  /** When set, each pairing MAC read waits for it before it answers. */
+  holdPairingMacReads: Promise<void> | undefined;
   /** Every key package put, as stored. */
   readonly packages: ScopeKeyPackageV1[] = [];
   /** Answer this many key package reads with 503 first. */
   failPackageReads = 0;
+  /** When set, every key package read answers with this status. */
+  rejectPackageReads: number | undefined;
+  /** When set, a rejected key package read carries this body instead of its error code. */
+  rejectPackageBody: unknown;
   packageReads = 0;
   /** When set, every key package read answers with this list as it is. */
   packageResponse: unknown[] | undefined;
@@ -104,6 +118,11 @@ export class E2eeTestHost {
         return true;
       }
       this.chainReads += 1;
+      await this.holdChainReads;
+      if (this.chainResponse !== undefined) {
+        respond(res, 200, { entries: this.chainResponse });
+        return true;
+      }
       const afterSeq = Number(url.searchParams.get('afterSeq') ?? '0');
       const limit = Math.min(Number(url.searchParams.get('limit') ?? E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES), E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES);
       respond(res, 200, { entries: this.chain.slice(afterSeq, afterSeq + limit) });
@@ -115,6 +134,10 @@ export class E2eeTestHost {
       if (this.failPackageReads > 0) {
         this.failPackageReads -= 1;
         respond(res, 503, { error: 'unavailable' });
+        return true;
+      }
+      if (this.rejectPackageReads !== undefined) {
+        respond(res, this.rejectPackageReads, this.rejectPackageBody ?? { error: 'forbidden' });
         return true;
       }
       this.packageReads += 1;
@@ -133,6 +156,7 @@ export class E2eeTestHost {
       const device = this.#bearer(req, res);
       if (device === undefined) return true;
       this.pairingMacReads += 1;
+      await this.holdPairingMacReads;
       const relay = this.#pairingMacs.get(device.deviceId);
       if (relay === undefined) respond(res, 404, { error: 'e2ee_pairing_mac_not_found' });
       else respond(res, 200, relay);
@@ -181,6 +205,8 @@ export class E2eeTestHost {
       this.failRegistrations -= 1;
       return respond(res, 503, { error: 'unavailable' });
     }
+    if (this.rejectRegistrations !== undefined) return respond(res, 400, { error: this.rejectRegistrations });
+    await this.holdRegistrations;
     const registration = JSON.parse(body.toString('utf8')) as E2eeRegistration;
     if (registration.member.deviceId !== device.deviceId) return respond(res, 400, { error: 'coordination_input_invalid' });
     const all = this.registrations.get(device.deviceId) ?? [];

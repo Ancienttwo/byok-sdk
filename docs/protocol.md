@@ -1378,10 +1378,22 @@ Host's own pairing code may hold a `.`. `pv` never reaches the Host.
   client's signing key, and walks the chain from seq 1 to the `add(device)`
   that key signed. It stores the anchor and the verified head, then deletes
   `pv`. A relay that does not verify only waits for the next one.
+- Each member request is cut off after 60 s
+  (`MEMBER_REQUEST_TIMEOUT_MS`), and a request of the pairing steps is also
+  cut off at the deadline. An answer that comes back at or after the
+  deadline is not used. The device reads at most 16384 chain entries
+  (`MEMBER_CHAIN_MAX_ENTRIES`, 64 full pages); a longer chain fails closed.
+- Each answer body has a byte cap, and a longer body is cut off unparsed: a
+  chain page at 256 times the largest entry (`MEMBER_CHAIN_PAGE_MAX_BYTES`),
+  a key package, relayed MAC or registration answer at 8 KiB
+  (`MEMBER_OBJECT_MAX_BYTES`), an error body at 1 KiB. A key package read
+  that returns more than one package is refused.
 - Each later start walks the chain from seq 1 again. The stored head must be
   on the new walk, with the same hash at the same seq. A shorter chain or
   another history keeps E2EE off for that run, so a Host cannot rewind the
-  chain to hide a `remove`.
+  chain to hide a `remove`. The start retries the chain read for 10 minutes
+  (`MEMBER_REWALK_TIMEOUT_MS`), then keeps E2EE off for that run. It also
+  deletes a `pv` left over from a pairing whose delete failed.
 - Without `pv`, or with an expired one, the device is no member. Missing or
   malformed member keys are never replaced: the Host keeps the first bundle
   per device, so the recovery is a re-pair, which mints a new device id.
@@ -1437,11 +1449,13 @@ journal, like `provider.provisioning.available`, and never journals it.
   the scope is in its verified chain state and the scope's latest
   `scope-policy` holds both the device and the sender. The sender's signing
   key comes from the verified chain. The opened key stays in memory.
+- Each Host read is cut off after 60 s (`MEMBER_REQUEST_TIMEOUT_MS`).
 - It keeps the row (does not acknowledge) only while the member is still
-  resuming at start, or when a Host read fails. It acknowledges every other
-  end with a log line: no member, an unknown scope, a missing package, or a
-  package that does not open. The first open or seal at that epoch fetches
-  again on its cache miss (E2d-3).
+  resuming at start, or when a Host read fails or times out. It acknowledges
+  every other end with a log line: no member, an unknown scope, a missing
+  package, a package that does not open, or a final Host answer (a 4xx other
+  than 429, a chain or body past its cap, more than one package). The first
+  open or seal at that epoch fetches again on its cache miss (E2d-3).
 
 ## 3. Task state machine (M1 gap #2, #5, #6)
 
