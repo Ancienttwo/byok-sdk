@@ -3147,6 +3147,8 @@ export declare class BlobClient implements BlobResolver {
     constructor(serverUrl: string, auth: AuthManager, options?: BlobClientOptions);
     /** `blobRef` -> `GET /byok/blobs/:id/url` -> fetch the presigned download URL -> text content. Always resolves fresh rather than trusting any inlined `BlobRef.url`, per docs/protocol.md §7. */
     resolveInstruction(blobRef: BlobRef, options?: BlobRequestOptions): Promise<string>;
+    /** The blob's bytes, after the declared SHA-256 and size check. */
+    downloadBlob(blobRef: BlobRef, options?: BlobRequestOptions): Promise<Uint8Array>;
     /** `POST /byok/blobs` -> PUT the bytes to the presigned URL -> finalize into a `BlobRef`. */
     uploadArtifact(content: string | Uint8Array, contentType: string, options?: BlobRequestOptions & {
         readonly idempotencyKey?: string;
@@ -3366,7 +3368,10 @@ export declare class ConnectionManager {
     refreshHello(): void;
     /**
      * POSTs the outbox through long-poll in chunks of at most
-     * `MAX_MESSAGES_PER_BATCH` (finding P1) — the server hard-caps a single
+     * `MAX_MESSAGES_PER_BATCH` envelopes and `MESSAGES_SEND_MAX_BODY_BYTES` of
+     * encoded body (one envelope always goes; the cloud answers 413 above the
+     * byte cap, and sealed envelopes reach about 350 KB each). Finding P1:
+     * the server hard-caps a single
      * `/byok/messages` batch there (`MessagesSendRequestSchema`, protocol
      * §8.2) and 400s the WHOLE request if it's exceeded, which — before this
      * fix — meant more than that queued during an outage produced an oversize
@@ -4159,6 +4164,7 @@ import { type AgentHomeExecutionStatus, type AgentHomeProjection } from '../agen
 import type { AgentRef } from '../agent-home';
 import { type LocalAgentReleaseIdentity } from '../release-identity';
 import { type CodexSandboxSetting } from '../adapters/codex/codex-adapter';
+import { type SealedScopeKeyring } from './sealed-task';
 import { type DaemonLifecycle } from './daemon-lifecycle';
 import { type ControlStorageStatus } from './control-protocol';
 import { type InputPreparationAuthorityResolver, type InputPreparationCounterAdapter, type InputPreparationLimitsPolicyV1 } from '../input-preparation';
@@ -4871,6 +4877,15 @@ export interface AssertionIssueProbe {
 }
 export declare function createDaemonWithAdapters(config: DaemonConfig, adapters: RuntimeAdapter[], overrides?: DaemonOverrides): Daemon;
 /**
+ * #654 E3c: an injected scope keyring. Only tests pass it. With it the daemon
+ * opens and seals sealed task content and advertises `sealed-payload-v1`.
+ * A release must not advertise that flag before the device can receive key
+ * packages (E2c-3, E2d), so no public option reaches this.
+ */
+export interface SealedPayloadTestSeam {
+    readonly keyring: SealedScopeKeyring;
+}
+/**
  * codex round-2 F3: the real builder. Exported from THIS module but NOT from
  * the package `index.ts`, so the optional `assertionProbe` (an
  * {@link AssertionIssueProbe} post-sign observer) is reachable only by tests
@@ -4878,7 +4893,7 @@ export declare function createDaemonWithAdapters(config: DaemonConfig, adapters:
  * `createDaemonWithAdapters` above forwards without it, so production has no
  * observer and no signer-injection surface at all.
  */
-export declare function buildDaemonWithAdapters(config: DaemonConfig, adapters: RuntimeAdapter[], overrides?: DaemonOverrides, assertionProbe?: AssertionIssueProbe): Daemon;
+export declare function buildDaemonWithAdapters(config: DaemonConfig, adapters: RuntimeAdapter[], overrides?: DaemonOverrides, assertionProbe?: AssertionIssueProbe, sealedPayload?: SealedPayloadTestSeam): Daemon;
 /**
  * Public white-label entry point (M0-M3): the "5-line launcher" — a product
  * only needs a `DaemonConfig`, no hand-built adapter list. The bundled
@@ -8135,6 +8150,127 @@ export declare class RetentionSweeper {
     private arm;
     stop(): Promise<void>;
 }
+// ==== @byok-sdk/client dist/daemon/sealed-task.d.ts ====
+/**
+ * Sealed payload v1 on the device (#654 E3c). A sealed task's offer carries
+ * its frozen `sealing` in plaintext. This module opens the task's sealed
+ * input (offer and steers) and seals its output (the 7 daemon-to-server
+ * types of `SEALED_SPLIT_TABLE`) with the scope key, through the core
+ * functions, fail closed.
+ *
+ * A task that seals its output never sends plaintext content in those types:
+ * each one is sealed, or it is one of the closed plaintext forms (decision
+ * 12d), or it is not sent.
+ */
+import { type SealedContentOpenFailure } from '@byok-sdk/core/sealed-payload';
+import { type BlobRef, type Envelope } from '@byok-sdk/protocol';
+/** The scope key this device seals a task's output with, and its view of the member chain. */
+export interface SealingKey {
+    readonly scopeKey: Uint8Array;
+    readonly epoch: number;
+    /** This device's member id. */
+    readonly sender: string;
+    /** The member chain head this device verified. */
+    readonly chainHead: {
+        readonly seq: number;
+        readonly hash: string;
+    };
+}
+/**
+ * The scope keys this device holds. Only tests inject one today; the key
+ * package store replaces it (E2d), and until then the daemon does not
+ * advertise `sealed-payload-v1`.
+ */
+export interface SealedScopeKeyring {
+    /** The key of one scope epoch, to open content sealed under it. */
+    openingKey(scope: {
+        readonly id: string;
+        readonly epoch: number;
+    }): Promise<Uint8Array | undefined>;
+    /** The newest key of the scope at `minEpoch` or later, to seal output. */
+    sealingKey(scopeId: string, minEpoch: number): Promise<SealingKey | undefined>;
+}
+/**
+ * Ciphertext blobs of sealed input: a padded frame above the inline maximum
+ * travels as a blob (§8.6). Sealed output is inline only (§2.5), so the
+ * device never uploads one.
+ */
+export interface SealedCiphertextBlobs {
+    /** The blob's bytes after the SHA-256 and size check. */
+    download(ref: BlobRef): Promise<Uint8Array>;
+}
+export interface SealedTasksOptions {
+    readonly keyring: SealedScopeKeyring;
+    readonly tenantId: string;
+    readonly deviceId: string;
+    readonly blobs: SealedCiphertextBlobs;
+}
+export type SealedOfferOpenResult = {
+    readonly ok: true;
+    readonly offer: Envelope;
+} | {
+    readonly ok: false;
+    readonly code: SealedContentOpenFailure;
+};
+export declare class SealedTasks {
+    #private;
+    private readonly options;
+    constructor(options: SealedTasksOptions);
+    /** Whether this task's output is sealed. */
+    sealsOutput(taskId: string | undefined): boolean;
+    /** Whether this task has a sealing policy at all. */
+    isSealed(taskId: string | undefined): boolean;
+    /** Whether this task's input is sealed, so a plaintext steer is a downgrade (§6.2). */
+    sealsInput(taskId: string | undefined): boolean;
+    /**
+     * Whether this outbound goes through {@link sealOutbound}: every outbound
+     * of a task that seals its output, so one task's sends keep their order.
+     * Only its output types are sealed; `task.claim` and the rest pass as they
+     * are. Checked synchronously at send time.
+     */
+    sealsOutbound(envelope: Envelope): boolean;
+    /**
+     * Opens a sealed offer and returns the plaintext offer it seals, or the
+     * closed decline code. A task that seals its output needs a sealing key
+     * before it may run, also when its instruction is plaintext.
+     */
+    openOffer(envelope: Envelope): Promise<SealedOfferOpenResult>;
+    /**
+     * Opens a sealed steer of a sealed task and applies its text once per
+     * `steerId` (decision 12a). The id is checked after the open, so it is the
+     * authenticated one. A failed apply does not count, so a redelivery is
+     * applied. Anything else is dropped with a log line.
+     */
+    applySteer(envelope: Envelope, apply: (text: string) => Promise<void>): Promise<void>;
+    /**
+     * Seals one outbound envelope of a task that seals its output, in send
+     * order. A closed plaintext form, or an envelope that is already sealed,
+     * passes as it is and keeps its place. Without a sealing key a terminal
+     * becomes its closed plaintext form, and any other type is not sent
+     * (`undefined`).
+     */
+    sealOutbound(envelope: Envelope): Promise<Envelope | undefined>;
+    settled(): Promise<void>;
+    /**
+     * A sealed task's artifact (decision 12b): inline content only, up to the
+     * table's `inline` limit, named by a fresh `artifactId`. `undefined` when no
+     * sealing key is available.
+     */
+    sealArtifact(taskId: string, artifact: {
+        readonly name: string;
+        readonly contentType: string;
+        readonly inline: string;
+    }): Promise<Envelope | undefined>;
+    /**
+     * A terminal the daemon builds from a journaled offer (recovery, or a
+     * result over the journal bound), sealed with that offer's context when it
+     * seals output. A closed plaintext form, such as `daemon_interrupted`,
+     * stays plaintext.
+     */
+    sealRecovered(offer: Envelope, terminal: Envelope): Promise<Envelope>;
+    /** The plaintext envelope a sealed outbound replaced, so the local observer keeps reading plaintext. */
+    plainOf(envelope: Envelope): Envelope;
+}
 // ==== @byok-sdk/client dist/daemon/session-workspace-store.d.ts ====
 /** What's recoverable for a given `sessionRef` — see the class doc comment. */
 export interface SessionWorkspaceRecord {
@@ -8502,6 +8638,7 @@ import { AgentSessionHandoffStore, type AgentTerminalCause } from './agent-sessi
 import { type RuntimeDisposalStage } from '../runtime-failure';
 import { type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
+import type { SealedTasks } from './sealed-task';
 import type { AgentResultDescribeParams, AgentResultDescribeResult, AgentResultSubmitParams, AgentResultSubmitResult, TaskQueueWatermark } from './control-protocol';
 import { type ExecutionRecord } from './execution-record';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
@@ -8884,6 +9021,11 @@ export interface TaskRunnerDeps {
      */
     getServerCapabilities?: () => readonly string[];
     /**
+     * #654: opens sealed task input and seals sealed task output. Absent on a
+     * daemon that holds no scope key, which declines every sealed offer.
+     */
+    sealedTasks?: SealedTasks;
+    /**
      * The server-advertised activity ingress (protocol v3), read fresh at each
      * progress push. `create-daemon.ts` wires it to
      * `ConnectionManager.getIngressBudget`. There is no default: a task only
@@ -9142,6 +9284,8 @@ export declare class TaskRunner {
      */
     private readonly preparationPinsByTask;
     private readonly inFlightOffers;
+    /** Sealed offers being opened, so a redelivery during the open is not opened twice. */
+    private readonly sealedOpening;
     private readonly claimedHarnesses;
     private readonly homeReservations;
     private readonly startupOwnership;
@@ -9775,11 +9919,17 @@ export declare class TaskRunner {
      */
     private handleReject;
     /**
-     * Declines a sealed offer once, non-retryably. This daemon holds no scope
-     * key. To a server with `sealed-payload-v1` it sends the closed code
-     * `sealed_key_unavailable` as both `reason` and `code` (#654 decisions 12c
-     * and 12d). The code is a value gate on that flag, so without it the
-     * decline has a plaintext reason and no code.
+     * Opens a sealed offer, then runs the plaintext offer through every check of
+     * {@link handleOffer}. A server without `sealed-payload-v1` gets a plaintext
+     * decline before the open: the task's output could not be sent to it.
+     */
+    private handleSealedOffer;
+    private sealedCodesAllowed;
+    /**
+     * Declines a sealed offer once, non-retryably, before any claim. To a server
+     * with `sealed-payload-v1` it sends the closed code as both `reason` and
+     * `code` (#654 decisions 12c and 12d). The code is a value gate on that
+     * flag, so without it the decline has a plaintext reason and no code.
      */
     private declineSealedOffer;
     /** Pre-claim, fail-closed rejection (protocol §3.2) — never claims first. */

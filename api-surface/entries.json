@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2123264,
+      "budgetBytes": 2207756,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -21,6 +21,7 @@
       ],
       "bareImports": [
         "@byok-sdk/core",
+        "@byok-sdk/core/sealed-payload",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/constants",
         "@cfworker/json-schema",
@@ -1219,7 +1220,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Cloud coordination and HTTP handlers",
-      "budgetBytes": 604643,
+      "budgetBytes": 604744,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1272,7 +1273,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 874326,
+      "budgetBytes": 874427,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1397,7 +1398,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Worker online stores; pg requires nodejs_compat",
-      "budgetBytes": 829543,
+      "budgetBytes": 829644,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1859,7 +1860,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Wire schemas and codecs; codegen negative control",
-      "budgetBytes": 152139,
+      "budgetBytes": 152262,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1968,7 +1969,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 760551,
+      "budgetBytes": 760652,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2065,7 +2066,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 632972,
+      "budgetBytes": 633073,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2147,7 +2148,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2064821,
+      "budgetBytes": 2146753,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2161,6 +2162,7 @@
       "types": [],
       "bareImports": [
         "@byok-sdk/core",
+        "@byok-sdk/core/sealed-payload",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/constants",
         "@cfworker/json-schema",
