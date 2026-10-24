@@ -13,7 +13,7 @@ import { contextTurns, SYSTEM_PROMPT, type ContextTurn } from './schema';
 import { DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   delegationDue, intentRows, minimumInstructionBytes, observeDevices, reconcileReply, REPLY_UNCERTAIN_AFTER_MS, resolveDelegation, retryReply,
   settleDelegations, type DelegationTimers } from './delegation';
-import { commitCommand, type Command, type CommandPorts, type CommandStore, type KeylessCommand } from './rules/commands';
+import { commitCommand, seatTurn, type Command, type CommandPorts, type CommandStore, type KeylessCommand } from './rules/commands';
 import type { CommandRecord } from './rules/commit';
 import { CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, type CommitResult } from './commit';
 import type { RetentionInput, RetentionResult } from './retention';
@@ -509,8 +509,7 @@ export class BotCollaboration {
     }
     let materialized = false;
     const routines = botRoutines(Object.values(s.routines));
-    // Seats never manage or delegate (§5), so no seat Turn carries owner authority.
-    advanceRooms(s, state, this.now(), (id, botId, request) => addTurn(state, { id, root: id, source: 'room_slot', request, botId, hop: 0, authority: 'bot' }));
+    advanceRooms(s, state, this.now(), (id, botId, request) => addTurn(state, seatTurn(id, botId, request)));
     const limits = { turnLimit: this.contextTurnLimit, contextMaxBytes: this.contextMaxBytes, instructionMaxBytes: this.instructionMaxBytes };
     for (const turn of Object.values(state.turns)) {
       materialized = syncTurnInLedger(this.ledger, s, rows, turn, { now: this.now(), models: Object.keys(this.models()),

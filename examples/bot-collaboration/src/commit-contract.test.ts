@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, expect, it } from 'vitest';
 import { canonical, hash, HostLedger, project, taskId, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
-import { stateOf, type CollaborationState } from './model';
+import { addTurn, stateOf, type CollaborationState } from './model';
 import { admitUserInput } from './coalesce';
 import { coalescePolicy } from './rules/coalesce';
 import { CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, type CommitRequest } from './commit';
@@ -11,9 +11,10 @@ import { retainRoots, type RetentionStore } from './retention';
 import { retentionVectors, type RetentionSubject } from './retention-vectors.test-support';
 import type { CommandRecord } from './rules/commit';
 import { DatabaseSync } from 'node:sqlite';
-import { commitCommand, refuseRetired, RetiredIdentityError, type AdmittedIds, type Command, type CommandPorts } from './rules/commands';
-import { commitVectors, seedCollaboration, settlementVectors, SYNC_OPTIONS, syncVectors, VECTOR_NOW, type CommitSubject, type SeedTeam,
-  type SettlementSubject, type SyncIntentRecord, type SyncSubject } from './commit-vectors.test-support';
+import { commitCommand, refuseRetired, RetiredIdentityError, seatTurn, type AdmittedIds, type Command, type CommandPorts } from './rules/commands';
+import { commitVectors, roomVectors, seedCollaboration, settlementVectors, SYNC_OPTIONS, syncVectors, VECTOR_NOW, type CommitSubject, type RoomSubject,
+  type SeedTeam, type SettlementSubject, type SyncIntentRecord, type SyncSubject } from './commit-vectors.test-support';
+import { advanceRooms } from './rooms';
 import { intentRows, settleDelegations } from './delegation';
 import { syncTurn } from './rules/sync';
 import type { Conclusion } from './rules/delegation';
@@ -232,3 +233,21 @@ function settlementSubject(): SettlementSubject {
   };
 }
 settlementVectors('L HostLedger', settlementSubject);
+
+/** The L ledger with L's room step (K8 host.ts `sync`): the room step on the K4 intents, then the Turn steps. */
+function roomSubject(): RoomSubject {
+  const base = ledgerSubject(), ledger = base.ledger;
+  return {
+    ...base,
+    sync: now => {
+      ledger.transaction((s, rows) => {
+        const state = stateOf(s.application);
+        advanceRooms(s, state, now, (id, botId, request) => addTurn(state, seatTurn(id, botId, request)));
+        for (const turn of Object.values(state.turns)) syncTurnInLedger(ledger, s, rows, turn, { ...SYNC_OPTIONS, now });
+      });
+    },
+    claim: turnId => { ledger.transaction(s => { s.executions[taskId(turnId, 0)]!.started = true; }); },
+    cancelReason: turnId => ledger.snapshot().intents[hash(turnId)]?.cancelReason,
+  };
+}
+roomVectors('L HostLedger', roomSubject);

@@ -4,13 +4,13 @@ import { botRoutines, owned, routineTurn, updateDefinition, type BotRoutineInput
 import { requireMain } from '@byok-sdk/example-bot-collaboration/team';
 /** A K8 `update_routine` action. */
 type UpdateRoutineAction = Parameters<typeof updateDefinition>[2];
-import { stateOf, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
-import { commitCommand, settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers, type SyncOptions,
+import { addTurn, stateOf, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
+import { advanceRoomSeats, commitCommand, seatTurn, settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers, type SyncOptions,
   type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { activeBinding, bindDevice, revokeDevice } from './binding';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
-import { cancelIntent, deliverCancels, intentConclusions, settleFacts, syncFacts, writeSyncStep } from './intents';
+import { cancelIntent, deliverCancels, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
 import { decideMessage, messageCommandId, type AgentMessageInput, type MessageDecision } from './messages';
 import { decideFinish, type TaskEvidence } from './reconcile';
 import { archivedRow, commitStored, decideRetention } from './retention';
@@ -287,6 +287,12 @@ export class HostedCollaborationStore {
       const emit: Publish = (id, body) => { publish(id, body); published.add(id); };
       let more = true;
       while (more) {
+        // As L's sync, the room step runs before the Turn steps, so a seat Turn that it adds freezes in this round. The K4
+        // cancel of a seat's admitted work is H's `cancelIntent`, as for a delegation cancel.
+        const seats = await seatFacts(client, scope, Object.keys(state.team.seats));
+        for (const seatId of advanceRoomSeats(state, seats, options.now, (id, botId, request) => addTurn(state, seatTurn(id, botId, request)))) {
+          await cancelIntent(client, scope, seatId, options.now);
+        }
         const facts = await syncFacts(client, scope, Object.keys(state.turns));
         const steps: Array<[Turn, SyncStep<ExecutionTemplate>]> = [];
         for (const turn of Object.values(state.turns)) {

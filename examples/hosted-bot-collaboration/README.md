@@ -151,11 +151,20 @@ The terminal transaction delivers the Main Bot cancel that its outcome froze, af
 version switch, as L runs `core.cancel` after its terminal transaction. An untried target concludes `cancelled` there;
 the verdict comes at the next sync of the scope.
 
-H does not yet run these L sync and pass steps: `sealDueBatches`, card expiry, `advanceRooms`, the card decision
-projections and their `action_result` Turns, `projectInputBatches`, the reply checks (`reconcileReply`, `retryReply`),
-the device observation (`observeDevices`), and the card and Agent home flushes. Some of them (the batch seal, card
-expiry and the reply checks) need a due time per scope, which H does not store. These steps come after 0.30.0, in a
-later #793 slice, with a per-scope due index.
+### Room step
+
+Each sync round starts with the K8 room step (`advanceRoomSeats`, through `./rules/commands`), as L's sync runs it before
+the Turn steps (#793 S6). Its seat facts come from the intent row of each seat Turn: `admitted` when the row exists,
+`started` from the reconciliation's claim fact, and the row's conclusion. A seat Turn that the step queues freezes in the
+same round. The step cancels a seat's admitted work through `cancelIntent`, as a delegation cancel does: an untried row
+concludes `cancelled` in that sync, and a tried row keeps its cancel reason for the reconciliation. A seat Turn with no
+intent fails with the seat's conclusion. A seat's deadline is reached only at the next sync of its scope.
+
+H does not yet run these L sync and pass steps: `sealDueBatches`, card expiry, the card decision projections and their
+`action_result` Turns, `projectInputBatches`, the reply checks (`reconcileReply`, `retryReply`), the device observation
+(`observeDevices`), and the card and Agent home flushes. Some of them (the batch seal, card expiry and the reply checks)
+need a due time per scope, which H does not store. These steps come after 0.30.0, in a later #793 slice, with a
+per-scope due index.
 
 The projections that the rule publishes reach the outbox in the same transaction. A sync writes no command
 record and keeps the revision. A throw writes nothing. The rule's `executionStarted` fact is the intent's `started`
@@ -440,6 +449,9 @@ three and runs these suites.
   busy decline runs on L too (K4 with the sync rule's wait), and both conclude `declined` at generation 0. An SDK
   tenant in memory covers the cancel, expiry, lease and identity cases, and the scopes that a pass reports.
 - The K8 settlement vectors (`settlementVectors`) run on the store, as on L.
+- The K8 room vectors (`roomVectors`) run on the store, as on L: the first seat queued and frozen, the deadline cancel of
+  an unclaimed seat, a claimed seat released late, a concluded seat, and a Bot that left the room with and without an
+  intent. H tests add the conclusion of an untried cancelled seat intent, a tried one kept open, and a rollback.
 - The settlement tests build each delegation through the product path (an outcome `delegate`, then a sync), and cover
   each verdict, the units, `target_archived`, the timers, the late terminal audit, the Main Bot cancel in the terminal
   transaction, a rollback, the settlement facts, a verdict at the sync of a reported scope, and the refusal of invalid

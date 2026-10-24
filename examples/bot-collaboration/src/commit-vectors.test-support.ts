@@ -10,6 +10,7 @@ import { BOT_TURN_OUTCOME_CONTRACT } from '@byok-sdk/protocol';
 import { OFFER_WAIT_MS, syncTurn, type SyncFacts, type SyncOptions, type SyncStep } from './rules/sync';
 import type { Conclusion, DelegationTimers } from './rules/delegation';
 import type { Json } from './rules/turn';
+import { ROOM_GRACE_MS, roomFields, roomInput, type Seat } from './rules/rooms';
 
 /**
  * #739 D1 commit contract vectors. Each store runs the same cases: the K8 L ledger now, and the H adapter in D2.
@@ -477,5 +478,110 @@ export function settlementVectors(name: string, open: () => SettlementSubject | 
         expect(await delegation()).toMatchObject({ verdict: 'cancelled', reason: 'main_bot_cancelled', status: 'resolved' });
       });
     }
+  });
+}
+
+/**
+ * #793 S6: the room step of the Host sync. `sync(now)` is one Host sync at `now`, in L's order: the room step (K8
+ * `advanceRoomSeats` on the seat facts of the K4 intents), then the Turn steps of the sync contract. A store may run more
+ * rounds in one sync. `claim` is a test edit: a device claimed the first attempt of the Turn's intent (K4 `Execution.started`).
+ * `cancelReason` reads the K4 cancel reason of the Turn's intent.
+ */
+export interface RoomSubject extends Omit<SyncSubject, 'sync'> {
+  sync(now: number): void | Promise<void>;
+  claim(turnId: string): void | Promise<void>;
+  cancelReason(turnId: string): string | undefined | Promise<string | undefined>;
+}
+export { ROOM_GRACE_MS };
+/**
+ * The room vectors' seed edit: `t1` concluded, the card `c1` kept pending, Bot `b` beside `main` on the same device, and room
+ * `r` with both. An owner message mentions `b`, then `main`, so its round has `b`'s seat first.
+ */
+export function seedRoom(state: CollaborationState): void {
+  Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
+  state.cards.c1!.expiresAt = Number.MAX_SAFE_INTEGER;
+  state.team.bots.b = { ...state.team.bots.main!, id: 'b', name: 'B', role: 'Reviewer', mainBot: false, execution: template('device', 'b') };
+  state.team.rooms.r = { id: 'r', ...roomFields(state.team, { name: 'Room', members: ['main', 'b'] }), messages: [] };
+  roomInput(state.team, 'm1', 'r', 'Hello', ['b', 'main']);
+}
+export function roomVectors(name: string, open: () => RoomSubject | Promise<RoomSubject>): void {
+  describe(`room contract: ${name}`, () => {
+    const opened = async () => {
+      const subject = await open();
+      await subject.change(seedRoom);
+      const round = Object.values((await subject.state()).team.rounds)[0]!;
+      const seats = async (): Promise<Seat[]> => { const team = (await subject.state()).team; return round.seats.map(id => team.seats[id]!); };
+      return { subject, round, first: round.seats[0]!, second: round.seats[1]!, seats };
+    };
+
+    it('queues the first seat as a room_slot Turn with Bot authority, and freezes it in the same sync', async () => {
+      const { subject, round, first, second, seats } = await opened();
+      await subject.sync(VECTOR_NOW);
+      expect(await seats()).toMatchObject([{ botId: 'b', status: 'queued', released: false, deadline: VECTOR_NOW + ROOM_GRACE_MS },
+        { botId: 'main', status: 'waiting', released: false }]);
+      const state = await subject.state();
+      expect(state.turns[first]).toMatchObject({ id: first, root: first, source: 'room_slot', botId: 'b', hop: 0, authority: 'bot',
+        request: JSON.stringify({ roomId: 'r', roundId: round.id, request: 'Hello', requestFrom: 'user' }) });
+      expect(await subject.intent(first)).toMatchObject({ key: first, source: 'bot' });
+      expect(state.turns[second]).toBeUndefined();
+      const before = await subject.stored();
+      await subject.sync(VECTOR_NOW);
+      expect(await subject.stored()).toBe(before);
+    });
+
+    it('cancels an unclaimed seat at its deadline as busy, and queues the next seat', async () => {
+      const { subject, first, second, seats } = await opened(), deadline = VECTOR_NOW + ROOM_GRACE_MS;
+      await subject.sync(VECTOR_NOW);
+      await subject.sync(deadline - 1);
+      expect((await seats())[0]).toMatchObject({ status: 'queued', released: false });
+      expect(await subject.cancelReason(first)).toBeUndefined();
+      await subject.sync(deadline);
+      expect(await seats()).toMatchObject([{ status: 'busy', released: true }, { status: 'queued', released: false, deadline: deadline + ROOM_GRACE_MS }]);
+      expect(await subject.cancelReason(first)).toBe('cancelled');
+      expect((await subject.state()).turns[second]).toMatchObject({ source: 'room_slot', botId: 'main', authority: 'bot' });
+      expect(await subject.intent(second)).toMatchObject({ key: second, source: 'bot' });
+    });
+
+    it('releases a claimed seat as late at its running deadline, with no cancel, and queues the next seat', async () => {
+      const { subject, first, seats } = await opened(), started = VECTOR_NOW + 5;
+      await subject.sync(VECTOR_NOW);
+      await subject.claim(first);
+      await subject.sync(started);
+      expect((await seats())[0]).toMatchObject({ status: 'running', released: false, startedAt: started, deadline: started + ROOM_GRACE_MS });
+      await subject.sync(started + ROOM_GRACE_MS);
+      expect(await seats()).toMatchObject([{ status: 'late', late: true, released: true }, { status: 'queued', released: false }]);
+      expect(await subject.cancelReason(first)).toBeUndefined();
+    });
+
+    it('releases a seat whose Turn concluded with no speech as failed, and queues the next seat', async () => {
+      const { subject, first, seats } = await opened();
+      await subject.sync(VECTOR_NOW);
+      await subject.concludeIntent(first, 'failed');
+      await subject.sync(VECTOR_NOW + 1);
+      expect(await seats()).toMatchObject([{ status: 'failed', released: true, reason: 'failed' }, { status: 'queued', released: false }]);
+    });
+
+    it('removes the admitted seat of a Bot that left the room, cancels its work, and queues the next seat', async () => {
+      const { subject, first, second, seats } = await opened();
+      await subject.sync(VECTOR_NOW);
+      await subject.change(state => { state.team.rooms.r!.members = ['main']; });
+      await subject.sync(VECTOR_NOW + 1);
+      expect(await seats()).toMatchObject([{ status: 'removed', released: true }, { status: 'queued', released: false }]);
+      expect(await subject.cancelReason(first)).toBe('cancelled');
+      expect((await subject.state()).turns[second]).toMatchObject({ source: 'room_slot', botId: 'main' });
+    });
+
+    it('fails the unadmitted seat Turn of a Bot that left the room with cancelled', async () => {
+      const { subject, second, seats } = await opened();
+      // The second seat Turn exists without an intent: the room step has not queued it, so nothing froze it.
+      await subject.change(state => {
+        state.turns[second] = { id: second, root: second, source: 'room_slot', request: '{}', botId: 'main', hop: 0, authority: 'bot', status: 'queued' };
+        state.team.rooms.r!.members = ['b'];
+      });
+      await subject.sync(VECTOR_NOW);
+      expect((await seats())[1]).toMatchObject({ status: 'removed', released: true });
+      expect((await subject.state()).turns[second]).toMatchObject({ status: 'failed', conclusion: 'cancelled' });
+      expect(await subject.intent(second)).toBeUndefined();
+    });
   });
 }

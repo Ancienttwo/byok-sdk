@@ -352,6 +352,14 @@ defines only the per-Turn step. The `syncVectors` in
 `src/commit-vectors.test-support.ts` hold these rules for the in-memory store
 and for L.
 
+The room step of a Host sync is `advanceRoomSeats(state, facts, now, add)` in
+`src/rules/rooms.ts` (#793 S6). It runs `advanceRooms` on the seat facts,
+fails a seat Turn whose work was not admitted, queues each new seat Turn
+through `add` (`seatTurn` gives its fields), and returns the seats whose
+admitted work the Host cancels. `src/rules/commands.ts` exports both. L builds
+the facts from its K4 intents; H builds them from its intent rows. The
+`roomVectors` run on both.
+
 Known L limit: K4 stores the whole Host ledger, with the collaboration state,
 in one JSON row per tenant. Turns, replies, audit rows and command records
 make that row grow. Command records are dedup evidence; retention must not
