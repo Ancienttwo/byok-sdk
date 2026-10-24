@@ -10,6 +10,8 @@ export interface ReplyCheckerOptions {
   port: (scope: string) => HostedReplyPort;
   /** How long one SDK read may take. A read that takes longer counts as a failed read. */
   timeoutMs?: number;
+  /** The clock that each settle reads under the scope lock. */
+  now?: () => number;
 }
 
 /**
@@ -20,14 +22,17 @@ export interface ReplyCheckerOptions {
  * scheduler `sync`, before `store.sync`, as L's pass syncs after its reply checks.
  */
 export class HostedReplyChecker {
-  constructor(private readonly store: HostedCollaborationStore, private readonly options: ReplyCheckerOptions) {}
+  private readonly now: () => number;
+  constructor(private readonly store: HostedCollaborationStore, private readonly options: ReplyCheckerOptions) {
+    this.now = options.now ?? Date.now;
+  }
 
-  /** Checks each due reply of `scope` at `now`, and returns how many checks it applied. */
+  /** Checks each reply of `scope` that is due at `now`, and returns how many checks it applied. Each settle reads the clock. */
   async check(scope: string, now: number): Promise<number> {
     let applied = 0;
     for (const due of await this.store.replyChecks(scope, now)) {
       const check: ReplyCheck = due.task ? await this.read(scope, due.task) : { failed: true };
-      if (await this.store.settleReplyCheck(scope, due.delegationId, due.fence, check, now)) applied++;
+      if (await this.store.settleReplyCheck(scope, due.delegationId, due.fence, check, this.now)) applied++;
     }
     return applied;
   }

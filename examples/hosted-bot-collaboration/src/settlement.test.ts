@@ -102,7 +102,7 @@ async function settlementSubject(): Promise<SettlementSubject> {
 async function replySubject(): Promise<ReplySubject> {
   const subject = await settlementSubject();
   return { ...subject, checkReplies: async (now, read, timers) => {
-    await new HostedReplyChecker(timed(timers), { port: () => ({ agentMessage: read }) }).check(subject.scope, now);
+    await new HostedReplyChecker(timed(timers), { port: () => ({ agentMessage: read }), now: () => now }).check(subject.scope, now);
   } };
 }
 
@@ -365,7 +365,8 @@ describe.skipIf(POSTGRES_URL === undefined)('H delegation settlement (#793 D2f-5
       expect(await h.delegation()).toMatchObject({ status: 'reply_pending', checks: 0, nextCheckAt: VECTOR_NOW });
       const reads: string[] = [];
       const checker = (read: () => Promise<unknown> = async () => PENDING, timeoutMs?: number) => new HostedReplyChecker(store(),
-        { port: () => ({ agentMessage: async taskId => { reads.push(taskId); return read() as never; } }), ...(timeoutMs ? { timeoutMs } : {}) });
+        { port: () => ({ agentMessage: async taskId => { reads.push(taskId); return read() as never; } }), now: () => VECTOR_NOW,
+          ...(timeoutMs ? { timeoutMs } : {}) });
       return { ...h, reads, checker };
     };
 
@@ -380,7 +381,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H delegation settlement (#793 D2f-5
     /** Settles a failed read of `h` with `fence` at `now`, and checks that it writes nothing. */
     const refused = async (h: Awaited<ReturnType<typeof pending>>, fence: { checks?: number; nextCheckAt: number }, now: number) => {
       const before = await h.stored();
-      expect(await store().settleReplyCheck(h.scope, h.id, fence, { taskId: taskId(h.id, 0), failed: true }, now)).toBe(false);
+      expect(await store().settleReplyCheck(h.scope, h.id, fence, { taskId: taskId(h.id, 0), failed: true }, () => now)).toBe(false);
       expect(await h.stored()).toBe(before);
     };
     it('writes nothing for a settle whose fence is stale, because another check applied first', async () => {
@@ -403,6 +404,13 @@ describe.skipIf(POSTGRES_URL === undefined)('H delegation settlement (#793 D2f-5
       const h = await pending();
       await h.checker().check(h.scope, VECTOR_NOW);
       await refused(h, { checks: 1, nextCheckAt: VECTOR_NOW + 1000 }, VECTOR_NOW + 999);
+    });
+
+    it('settles at the clock that it reads under the lock, after the read, not at the pass time', async () => {
+      const h = await pending();
+      const checker = new HostedReplyChecker(store(), { port: () => ({ agentMessage: async () => PENDING }), now: () => VECTOR_NOW + 500 });
+      expect(await checker.check(h.scope, VECTOR_NOW)).toBe(1);
+      expect(await h.delegation()).toMatchObject({ checks: 1, nextCheckAt: VECTOR_NOW + 1500 });
     });
 
     it('applies one check when two checkers read the same delegation', async () => {

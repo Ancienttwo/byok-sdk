@@ -181,10 +181,11 @@ A chain end that succeeded with no Host reply record leaves its delegation `repl
 - For each check, the checker reads the SDK readback outside any transaction, through the port's `agentMessage`. A read
   that throws or takes longer than `timeoutMs` (default 10 s) is a failed read, as in L. A chain end with no task is a
   failed read with no SDK call.
-- `store.settleReplyCheck(scope, delegationId, fence, check, now)` runs K8 `checkReply` with the store's timers, in one
-  transaction under the scope lock. A reply body that the Host holds answers the delegation; a failed read retries with
+- `store.settleReplyCheck(scope, delegationId, fence, check, clock)` runs K8 `checkReply` with the store's timers, in one
+  transaction under the scope lock, at the clock read after the lock (the checker's `now` option), as L reads its clock
+  again in its ledger transaction. A reply body that the Host holds answers the delegation; a failed read retries with
   backoff; otherwise the readback decides (`no_reply`, `reply_held`, or another check). The settle writes nothing when
-  the delegation is gone, is no longer due at `now` (it runs `replyCheckDue` again, so a verdict or a later check time
+  the delegation is gone, is no longer due at that time (it runs `replyCheckDue` again, so a verdict or a later check time
   stops it), or no longer matches the fence. A throw writes nothing and propagates.
 
 Two checkers may both read the same delegation; only the first settle applies. The SDK read is read only: the SDK

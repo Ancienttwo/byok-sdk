@@ -235,7 +235,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H scope due time and due scheduler 
       expect(await dueAt(h.scope)).toBe(String(VECTOR_NOW));
       // The store sync alone does not read the reply, so the scope stays due.
       expect(await scheduler().run()).toEqual({ synced: 1, stalled: [h.scope], failed: [] });
-      const checker = new HostedReplyChecker(store(), { port: () => ({ agentMessage: async () => ({ disposition: { outcome: 'held' } }) }) });
+      const checker = new HostedReplyChecker(store(), { port: () => ({ agentMessage: async () => ({ disposition: { outcome: 'held' } }) }), now: () => clock });
       const pass = scheduler({ sync: async (scope, now) => { await checker.check(scope, now); return sync(scope, now); } });
       expect(await pass.run()).toEqual({ synced: 1, stalled: [], failed: [] });
       expect(await h.delegation()).toMatchObject({ status: 'reply_held' });

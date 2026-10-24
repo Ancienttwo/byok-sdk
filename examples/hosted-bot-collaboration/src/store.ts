@@ -456,13 +456,14 @@ export class HostedCollaborationStore {
 
   /**
    * Applies one reply check (#793 S7), the K8 `checkReply` decision with the store's timers, in one transaction under the
-   * scope lock. The SDK read ran before, outside any transaction. When the delegation is gone, is no longer due at `now` (a
-   * verdict, or a later check time), or no longer matches `fence` (another check applied first), it writes nothing and
-   * returns false. A throw writes nothing.
+   * scope lock. The SDK read ran before, outside any transaction. The clock is read after the lock is taken, as L reads it
+   * again in its ledger transaction. When the delegation is gone, is no longer due at that time (a verdict, or a later
+   * check time), or no longer matches `fence` (another check applied first), it writes nothing and returns false. A throw
+   * writes nothing.
    */
-  settleReplyCheck(scope: string, delegationId: string, fence: ReplyFence, check: ReplyCheck, now: number): Promise<boolean> {
+  settleReplyCheck(scope: string, delegationId: string, fence: ReplyFence, check: ReplyCheck, clock: () => number): Promise<boolean> {
     return this.transaction(client => this.decideIn(client, storedKey(scope), undefined, async (state, publish) => {
-      const d = state.delegations[delegationId];
+      const now = clock(), d = state.delegations[delegationId];
       if (!d || !replyCheckDue(d, now) || d.checks !== fence.checks || d.nextCheckAt !== fence.nextCheckAt) return { value: false, outbox: [] };
       const published = new Set<string>();
       checkReply(state, d, check, now, (id, body) => { publish(id, body); published.add(id); }, this.timers?.uncertainAfterMs);
