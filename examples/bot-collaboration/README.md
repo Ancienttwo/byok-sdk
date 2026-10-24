@@ -507,8 +507,24 @@ transaction, in the same phase as `history`.
   seat deadline counts as failed.
   The seat deadline still applies, so a seat whose read never succeeds is
   released as `busy` and its Turn expires.
-- No projection carries an accepted room post yet. The Host reads posts from
-  `snapshot().team.rooms` to write them to its authority.
+- Each accepted seat post also publishes the projection
+  `room-message:<roomId>:<messageId>` with `{ roomId, id, from, text, late }`,
+  the row that `room.messages` stores. The message id is the seat id, so a
+  replay has the same id and body; the uploader delivers it at least once, and
+  the Host deduplicates by id. A `pass` and a refused post publish nothing.
+  Without the option, no `room-message:` projection exists.
+- The next seat of a room is not read while that room has an undelivered
+  `room-message:` projection. K4 drops a projection only after the Host
+  uploader's `deliver` resolved, so the Host's `deliver` must resolve only
+  after its write can be read back from the authority. The held seat waits
+  like a failed read, and its deadline still applies: a projection that never
+  delivers releases each later seat of its room as `busy` at its deadline.
+- Room input that the Host gives K8 (`roomInput`, or `receive` for a group
+  message) is not projected. The Host writes it to its authority first, then
+  calls K8, so the next seat reads it.
+- The ledger does not store the mode. Each time a Host turns the option on, it
+  first writes the posts made while it was off from `snapshot().team.rooms` to
+  its authority, deduplicated by id.
 
 The team comes from this ledger, unless the `team: 'external'` option is set.
 
