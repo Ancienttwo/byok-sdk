@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Breaking (examples)** — K8 `rules/` imports `hash` and `canonical` from
+  the K4 `./canonical` entry, not the K4 root entry (#884). That entry imports
+  only `node:crypto`, so the rules load without `node:sqlite` and
+  `node:async_hooks`, for example on Workers with `nodejs_compat`. The rules
+  boundary test refuses a root import. A Host that copies K8 must resolve the
+  new K4 entry. `hash` and `canonical` return the same values.
+
 - **Feature (protocol, server, cloud, client)** — an ordinary Agent offer can
   select `agentMemory: 'read-write-if-admitted'` (#833). It runs exactly as
   `read-write` when the daemon admits the memory MCP, and exactly as `none`
