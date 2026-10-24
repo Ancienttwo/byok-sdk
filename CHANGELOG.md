@@ -37,6 +37,19 @@
   whether the user's MCP servers reach a task and what runtime memory loads.
   The evidence is in
   `docs/notes/2026-10-24-871-873-claude-agent-user-context.md`.
+- **Feature (examples)** — K8 runs the Host's own K4 work on the Bot tenant's
+  core (#882). `enqueueHostIntent(input, handler)` enqueues a K4 intent and
+  stores the name of its `BotOptions.hostIntents` handler in one transaction.
+  The handler gets the result document in the terminal transaction. The intent
+  shares the FIFO of its Agent. `BotOptions` passes `reconcileMs` and
+  `onOutbox` to the K4 core. `CollaborationState` gets the optional
+  `hostIntents`, and its version stays 3.
+- **Breaking (examples)** — K8 `drain()` rejects with `IntentOutcomeError`
+  when a K4 terminal cannot apply (#882): its key is neither a Bot Turn nor a
+  Host intent, or its Host handler throws or is async. Before, an intent from a
+  direct `bot.core.enqueue` stayed in flight with only a K4 `lastError`. Every
+  API that runs a pass rejects until the outcome applies, and the audit gets
+  one row for each key and reason.
 
 ## 0.30.0 — 2026-10-24 (published)
 
