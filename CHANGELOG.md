@@ -81,6 +81,12 @@
   applied, so that scope keeps its packages and accepts new puts. A stored
   `shred` entry whose subject is not `{ scopeId }` makes every chain read that
   includes it fail with `e2ee_member_state_unreadable`.
+- **Docs and vectors** — `docs/security.md` gains a Scope shred section: what
+  a Host shred removes, the unverified delete, and the backup gap until each
+  member rotates its KEM key (#654 E5b-3). The hosted Host contract lists the
+  shred in §6 and §7. `member-rules-v1.json` gains a `shred` section: after a
+  shred, a `scope-policy` or a second `shred` of that scope is invalid, and
+  another scope stays live.
 
 ## 0.30.0 — 2026-10-24 (published)
 
