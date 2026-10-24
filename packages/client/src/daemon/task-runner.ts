@@ -5179,7 +5179,6 @@ export class TaskRunner {
     }
   }
 
-  /** `task.fail.failure` when the server advertised its gate. */
   private failurePayload(failure: TaskFailure): { failure?: TaskFailure } {
     return taskFailureField(failure, this.deps.getServerCapabilities?.() ?? []);
   }

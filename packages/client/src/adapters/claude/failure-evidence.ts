@@ -27,16 +27,16 @@ const MAX_DATE_MS = 8.64e15;
  * The failure class of one Claude session's failed turns, from structured
  * frame fields only (#869): the turn's last `assistant.error`, else the
  * result's `api_error_status`, else `unknown`. `reason` is never read.
+ * `observe` takes every raw frame before it is mapped; a `result` frame ends
+ * the turn and its error. The latest `rate_limit_info` is kept across turns:
+ * it is the runtime's last report. `attach` gives a failed `result` frame's
+ * failure the class of its turn.
  */
 export class ClaudeFailureEvidence {
-  /** The current turn's last `assistant.error`. */
   #error: string | undefined;
-  /** The latest `rate_limit_event.rate_limit_info`, kept across turns: the runtime's last report. */
   #rateLimit: Record<string, unknown> | undefined;
-  /** The class of the last `result` frame. */
   #turn: TaskFailure | undefined;
 
-  /** Every raw frame, before it is mapped. A `result` frame ends the turn. */
   observe(frame: ClaudeStreamMessage): void {
     if (frame.type === 'assistant' && typeof frame.error === 'string') {
       this.#error = frame.error;
@@ -48,7 +48,6 @@ export class ClaudeFailureEvidence {
     }
   }
 
-  /** A failed `result` frame's failure, with the class of its turn. */
   attach(frame: ClaudeStreamMessage, failure: RuntimeExecutionFailure): RuntimeExecutionFailure {
     if (frame.type !== 'result' || frame.is_error !== true || this.#turn === undefined) return failure;
     return new RuntimeExecutionFailure({

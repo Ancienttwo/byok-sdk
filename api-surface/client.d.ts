@@ -9955,7 +9955,6 @@ export declare class TaskRunner {
      * decline before the open: the task's output could not be sent to it.
      */
     private handleSealedOffer;
-    /** `task.fail.failure` when the server advertised its gate. */
     private failurePayload;
     private sealedCodesAllowed;
     /**
