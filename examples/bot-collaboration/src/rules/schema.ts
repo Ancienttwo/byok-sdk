@@ -150,7 +150,9 @@ export function outcomeSchema(botId: string, state: ContextState, turn?: Turn, m
     if (ownerMainTurn(state, botId, turn)) {
       const open = openDelegations(state).items.map(d => d.id);
       const botIds = Object.values(state.team.bots).filter(b => !b.archived).map(b => b.id) as unknown as NonEmptyIds;
-      const memberIds = [...botIds, ...NEW_BOTS] as unknown as NonEmptyIds;
+      // A room can name a Bot that the same outcome creates, so new_bot_* ids follow the create_bot offer.
+      const createsBots = !state.team.external && (offer?.actions?.main?.includes('create_bot') ?? true);
+      const memberIds = (createsBots ? [...botIds, ...NEW_BOTS] : botIds) as unknown as NonEmptyIds;
       Object.assign(fragments, allow({
         // T3: in external team mode, the authority owns the Bots, so these three actions are not offered.
         ...(state.team.external ? {} : {

@@ -10,6 +10,7 @@ import { outcomeOffer, outcomeSchema, TIME_ZONES_MAX, type OutcomeOffer } from '
 import { BotCollaboration } from './host';
 import { botCompactVeto } from './compaction';
 import { routineViews } from './routines.test-support';
+import { roomFields } from './rules/rooms';
 
 /** #881: the Host's outcome offer narrows the frozen schema of new Turns. */
 type Schema = protocol.ResultSchema;
@@ -42,6 +43,18 @@ it('offers only the allowed actions of each Turn kind, and the frozen schema ref
   expect(protocol.validateResultOutcome(owner, { ask_user: [{ question: 'Why?', answerKind: 'text' }] }).ok).toBe(false);
   // An empty list removes every action of that kind.
   expect(keys(outcomeSchema('main', state, turn, ['default'], [], outcomeOffer({ actions: { turn: [], main: [] } })))).toEqual([]);
+});
+
+it('offers new_bot_* room members only when the Main Bot list offers create_bot', () => {
+  const { state, turn } = ownerState();
+  state.team.rooms.r = { id: 'r', ...roomFields(state.team, { name: 'Room', members: ['main'] }), messages: [] };
+  const members = (schema: Schema, action: string) => schema.properties![action]!.items!.properties!.members!.items!.enum;
+  const all = outcomeSchema('main', state, turn, ['default'], [], outcomeOffer({ actions: { main: ['create_bot', 'create_room', 'update_room'] } }));
+  expect(members(all, 'create_room')).toEqual(['main', 'new_bot_1', 'new_bot_2', 'new_bot_3']);
+  const rooms = outcomeSchema('main', state, turn, ['default'], [], outcomeOffer({ actions: { main: ['create_room', 'update_room'] } }));
+  expect(members(rooms, 'create_room')).toEqual(['main']);
+  expect(members(rooms, 'update_room')).toEqual(['main']);
+  expect(protocol.validateResultOutcome(rooms, { create_room: [{ localId: 'new_room_1', name: 'Room', members: ['new_bot_1'] }] }).ok).toBe(false);
 });
 
 it('offers the Host time zones in create_routine and update_routine', () => {
