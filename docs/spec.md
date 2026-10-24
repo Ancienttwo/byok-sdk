@@ -2625,6 +2625,12 @@ then enters normal startup. Default unpaired `start()` still fails closed.
 No pairing code or credential is placed in WinSW XML, service argv, config,
 logs, or a second file authority.
 
+`byok-agent pair --e2ee <code>.<pv>` also enrolls the device as an E2EE
+member (#654 E2d-1, [protocol §2.6](./protocol.md)). The member keys, `pv` and
+the member state are three more entries of the same OS credential provider,
+cleared at a re-pair and at unpair. A daemon with an injected enrollment
+backend refuses an E2EE pairing.
+
 `DaemonConfig.strictAgentOnly` is an additive local-security gate. It requires
 successful construction-time Agent-home preflight and only then advertises
 `strict-agent-only` in addition to `agent-home-contract`. The local runner is

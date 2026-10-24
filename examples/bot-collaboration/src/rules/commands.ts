@@ -16,6 +16,7 @@ import { commit, type CommandRecord, type CommitRequest, type CommitResult, type
 export { OFFER_WAIT_MS, syncTurn, type FreezeExecution, type SyncBot, type SyncFacts, type SyncOptions, type SyncState, type SyncStep } from './sync';
 export { delegationDue, settleDelegations, type DelegationTimers } from './delegation';
 export { advanceRoomSeats, seatTurn, type SeatFacts } from './rooms';
+export { collaborationDue } from './due';
 
 /** Commands with a caller key or a K4 key. The store records them, so a retry replays the first result. */
 export type KeyedCommand =

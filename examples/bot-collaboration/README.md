@@ -352,6 +352,13 @@ defines only the per-Turn step. The `syncVectors` in
 `src/commit-vectors.test-support.ts` hold these rules for the in-memory store
 and for L.
 
+`collaborationDue(state, timers)` in `src/rules/due.ts` lists the times when a
+sync has collaboration work to do: each open input batch's seal, each pending
+card's expiry, each unreleased seat's deadline, and the delegation times
+(`delegationDue`). `src/rules/commands.ts` exports it. L arms its timer with
+these times and its own L-only ones. H stores their minimum as the scope's due
+time (#793 S4). Routine slots are K4's, so they are not in the list.
+
 The room step of a Host sync is `advanceRoomSeats(state, facts, now, add)` in
 `src/rules/rooms.ts` (#793 S6). It runs `advanceRooms` on the seat facts,
 fails a seat Turn whose work was not admitted, queues each new seat Turn
