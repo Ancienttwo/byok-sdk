@@ -140,10 +140,14 @@ With a coalesce policy (`new HostedCollaborationStore(pool, schema, { coalesce }
 its `coalesce` option. The policy is the value that K8 `coalescePolicy(options, contextMaxBytes)` returns for the
 ContextPack budget that the Host gives each sync in `limits`. The store checks the other bounds when it is built, and each
 sync checks `maxBytes` against its own budget. A sync whose budget is too small for the policy throws and writes nothing.
+The commit path does not know the budget, so it still admits inputs into batches: with that misconfiguration, every
+sync of every scope throws and no Turn freezes. L checks the budget once, when it is built, because L owns its budget.
+H takes the budget in each sync's `limits`, so give the store a policy built for the smallest budget that its syncs use.
 
 - The store admits each input itself (K8 `admitUserInput`), with its own policy, as L's owner commands do. So the
   admission and the seal use one policy. `CommitPorts` carries no `admitInput`, and the store sets the port on every commit.
 - Each sync round first runs K8 `sealDueBatches`, as L's sync does, so a sealed batch's Turn gets its step in that round.
+  A later round of the same sync seals again, so a Bot that an earlier round made idle gets its batch sealed in that sync.
 - The sync runs K8 `projectInputBatches` last, after the reply token cleanup, as L's sync does.
 
 There is no due index yet, so a batch whose window ended seals at the next sync of its scope: the interval fallback
@@ -456,8 +460,8 @@ three and runs these suites.
   tenant in memory covers the cancel, expiry, lease and identity cases, and the scopes that a pass reports.
 - The K8 settlement vectors (`settlementVectors`) run on the store, as on L.
 - The K8 coalesce vectors (`coalesceVectors`) run on the store, as on L: a busy Bot's inputs join one batch, the window
-  and idle seals, a full batch sealed before any sync, and no batch without a policy. H tests add the policy checks and an
-  input admission that a caller cannot replace.
+  and idle seals, a full batch sealed before any sync, and no batch without a policy. H tests add the policy checks, an
+  input admission that a caller cannot replace, and an idle seal in a later round of one sync.
 - The settlement tests build each delegation through the product path (an outcome `delegate`, then a sync), and cover
   each verdict, the units, `target_archived`, the timers, the late terminal audit, the Main Bot cancel in the terminal
   transaction, a rollback, the settlement facts, a verdict at the sync of a reported scope, and the refusal of invalid

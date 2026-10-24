@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { FrozenInput } from '@byok-sdk/example-host-execution-core';
+import { hash, type FrozenInput } from '@byok-sdk/example-host-execution-core';
+import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { coalescePolicy, type CoalescePolicy } from '@byok-sdk/example-bot-collaboration/coalesce';
-import { coalesceVectors, seedCollaboration, SYNC_OPTIONS, type CoalesceSubject, type SyncIntentRecord } from '@byok-sdk/example-bot-collaboration/test-support';
+import { coalesceVectors, seedCollaboration, SYNC_OPTIONS, VECTOR_NOW, type CoalesceSubject, type SyncIntentRecord } from '@byok-sdk/example-bot-collaboration/test-support';
 import { storedKey } from './layout';
 import { vectorPorts } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
@@ -57,6 +58,29 @@ describe.skipIf(POSTGRES_URL === undefined)('H input coalescing on real Postgres
     await expect(subject.store.sync(subject.scope, { ...SYNC_OPTIONS, limits: { ...SYNC_OPTIONS.limits, contextMaxBytes: 16_384 }, history: undefined }))
       .rejects.toThrow('coalesce.maxBytes must be an integer from 1024 to 4096');
     expect(await subject.stored()).toBe(before);
+  });
+
+  it('seals in each sync round: a later round of the same sync seals a batch whose Bot an earlier round made idle', async () => {
+    const subject = await hosted(coalescePolicy({}, 32_768)), batch = hash(['user', 'main', 'k1']);
+    await subject.change(state => {
+      Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
+      state.turns.q1 = { id: 'q1', root: 'q1', botId: 'main', source: 'user', request: 'First', hop: 0, status: 'queued', authority: 'owner' };
+      state.team.bots.helper = { ...structuredClone(state.team.bots.main!), id: 'helper', name: 'Helper', mainBot: false,
+        execution: template('device', 'helper') };
+    });
+    await subject.sync(VECTOR_NOW);
+    await subject.commit({ scope: subject.scope, commandId: 'c1', command: input('k1') });
+    await subject.concludeIntent('q1', 'succeeded');
+    // Round 1 ends q1 and freezes h1, so a round 2 runs. Only a seal at the start of round 2 sees the Bot idle.
+    await subject.change(state => {
+      state.turns.h1 = { id: 'h1', root: 'h1', botId: 'helper', source: 'user', request: 'Help', hop: 0, status: 'queued', authority: 'owner' };
+    });
+    await subject.sync(VECTOR_NOW);
+    const state = await subject.state();
+    expect(state.turns.q1).toMatchObject({ conclusion: 'succeeded' });
+    expect(await subject.intent('h1')).toMatchObject({ key: 'h1' });
+    expect(state.inputBatches![batch]).toMatchObject({ state: 'sealed', sealReason: 'idle' });
+    expect(await subject.intent(batch)).toMatchObject({ key: batch, source: 'user' });
   });
 
   it('admits each input with its own policy, never with a port that a caller slips past the type', async () => {
