@@ -35,8 +35,9 @@ export const DEFAULT_TIME_ZONES = ['UTC', 'America/New_York'] as const;
 export const TIME_ZONES_MAX = 8;
 /**
  * The most `confirmable_action` branches of an offer. At the eight-routine limit with eight long time zones, the schema
- * without `confirmable_action` is 5 208 bytes of the 16 384-byte cap. A branch with the `send_message` draft and a 64-byte
- * action name adds 392 bytes, so 16 such branches measure 11 564 bytes in the checked shape (`outcome-options.test.ts`).
+ * without `confirmable_action` is 5 208 bytes of the 16 384-byte cap. With the `send_message` draft and 64-byte action
+ * names, the first branch adds 464 bytes with the list around it, and the other 15 add 5 892 together (about 393 each).
+ * So 16 such branches measure 5 208 + 464 + 5 892 = 11 564 bytes in the checked shape (`outcome-options.test.ts`).
  * The other 4 820 bytes give each of the 16 branches about 300 more bytes of draft on average. A count cannot bound the size
  * of one branch: a heavier list fails at construction, or blocks each Turn whose schema it puts over budget.
  */

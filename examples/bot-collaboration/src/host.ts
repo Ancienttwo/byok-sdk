@@ -435,7 +435,9 @@ export class BotCollaboration {
   /**
    * Owner API (#882): settles as `failed` an open intent whose K4 terminal K8 refuses with `IntentOutcomeError`, so its FIFO
    * moves on. A fresh K4 drain decides that the intent is stuck, so the call also works right after a restart. One transaction
-   * settles it and writes the audit row. No handler runs, and the intent records no terminal; the server task keeps it.
+   * settles it and writes the audit row. The settle runs no handler, and the intent records no terminal; the server task
+   * keeps it. The drain before the settle applies the terminal once more, so a `handler_failed` handler runs once inside
+   * the call. If that drain applies the outcome, the call refuses with `Intent already settled`.
    * A Host intent keeps its `hostIntents` record until K4 compacts it, so an exact replay of `enqueueHostIntent` returns
    * the failed intent. Refuses an unknown key, a settled intent, and an intent whose terminal K8 did not refuse.
    */
@@ -444,12 +446,12 @@ export class BotCollaboration {
       this.ownerOnly(by, 'failStuckIntent', key);
       openIntent(this.ledger.snapshot().intents, key);
       this.intentFailures.clear();
-      // A drain error does not decide this call. The next pass reports it.
-      await this.core.drain().catch(() => {});
+      // A scan that stopped early may not have reached this key, so its error is the cause when the key has no refusal.
+      const drained = await this.core.drain().then(() => undefined, (error: unknown) => ({ error }));
       const refused = this.intentFailures.get(key);
       this.ledger.transaction(s => {
         const intent = openIntent(s.intents, key);
-        if (!refused) throw new Error(`Intent is not stuck: ${key} has no refused terminal`);
+        if (!refused) throw drained ? drained.error : new Error(`Intent is not stuck: ${key} has no refused terminal`);
         settle(s, intent, 'failed');
         stateOf(s.application).audit.push(`Intent failed by owner ${refused.code}: ${key} ${refused.message}`.slice(0, 1024));
       });

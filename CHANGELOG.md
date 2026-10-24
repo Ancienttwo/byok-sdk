@@ -185,7 +185,16 @@
   Host intent, or its Host handler throws or is async. Before, an intent from a
   direct `bot.core.enqueue` stayed in flight with only a K4 `lastError`. Every
   API that runs a pass rejects until the outcome applies, and the audit gets
-  one row for each key and reason.
+  one row for each key and reason. The owner call `failStuckIntent(key)` ends
+  such an intent. It runs a K4 drain first. If that drain refuses the terminal
+  again, one transaction settles the intent as `failed` and writes the audit
+  row `Intent failed by owner <code>: <key> <reason>`, and `drain()` then moves
+  past it. The settle runs no handler; the drain before it applies the terminal
+  once more, and if that drain applies the outcome, the call refuses with
+  `Intent already settled`. The call also refuses an unknown key, a settled
+  intent and an intent whose terminal K8 did not refuse, and it throws the
+  drain error when the scan stopped before it reached the key. K4 now exports
+  its `settle` transition for this.
 - **Breaking (cloud)** — the Host shreds a sealed scope when the member chain
   appends a `shred` (#654 E5b-1, design §11.2). A `shred` subject must now be
   exactly `{ scopeId }`; another subject gets `coordination_input_invalid`.
@@ -235,33 +244,15 @@
 - **Feature (examples)** — K8 `BotOptions.outcome` narrows the outcome offer
   of new Turns (#881). `actions.turn` and `actions.main` are allowlists for a
   Bot Turn and for the extra actions of an owner Main Bot Turn. `timeZones`
-  sets 1 to 8 IANA zones for the routine actions. `confirmable` sets the
+  sets 1 to 8 IANA zones for the routine actions. `confirmable` holds 1 to 16
   `confirmable_action` branches. Without the option, every schema is the same
-  as before. `outcomeOffer` checks an offer, and `SyncOptions.offer` takes its
+  as before. An offer with `actions.turn` also narrows the Bot Turn prompt to
+  the sentences for every Turn and for the actions in the Turn's frozen
+  schema, so an offer of only `delegate` names no `ask_user`,
+  `confirmable_action` or routine. Without `actions.turn`, the prompt is
+  unchanged. `outcomeOffer` checks an offer, and `SyncOptions.offer` takes its
   result, so the H sync uses the same rule. Turns frozen before keep their
   schema.
-- **Feature (examples)** — the K8 owner call `failStuckIntent(key)` ends an
-  intent whose K4 terminal K8 refuses with `IntentOutcomeError` (#882). It
-  runs a K4 drain, and if that drain refuses the terminal again, it settles
-  the intent as `failed` and writes the audit row
-  `Intent failed by owner <code>: <key> <reason>` in one transaction. No
-  handler runs, and `drain()` then moves past the intent. The call refuses an
-  unknown key, a settled intent and an intent whose terminal K8 did not
-  refuse. K4 now exports its `settle` transition for this.
-- **Feature (examples)** — in K8, an outcome offer with
-  `actions.turn` narrows the system prompt of new Bot Turns too (#881). The
-  prompt keeps only the sentences for every Bot Turn and for the actions of
-  the Turn's frozen schema, so an offer of only `delegate` names no
-  `ask_user`, `confirmable_action` or routine, and a narrowed prompt names no
-  `speech` or `room_call`. An offer without
-  `actions.turn` keeps `SYSTEM_PROMPT`, which is the same text as before.
-- **Fixed (examples)** — K8 `outcomeOffer` refuses more than 16
-  `confirmable` actions (#881). Before, the list had no count limit, and a
-  list that put the schema over budget blocked every Turn. Sixteen branches
-  with the `send_message` draft and 64-byte action names measure 11 564 of the
-  16 384 schema bytes with eight long time zones at the eight-routine limit.
-  A count does not bound a heavy draft, which still fails at construction or
-  blocks the Turns it puts over budget.
 
 ## 0.30.0 — 2026-10-24 (published)
 

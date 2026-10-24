@@ -77,9 +77,15 @@ after a restart with a fixed handler, or until the owner calls
 `failStuckIntent(key)`. That call runs a K4 drain first, so it also works right
 after a restart. If that drain refuses the intent's terminal again, one
 transaction settles the intent as `failed` with the K4 `settle` transition and
-adds the audit row `Intent failed by owner <code>: <key> <reason>`. No handler
-runs, and the intent records no terminal; the server task keeps it. Later drains
-move past it. A Host intent keeps its `hostIntents` record until K4 compacts it,
+adds the audit row `Intent failed by owner <code>: <key> <reason>`. The settle
+runs no handler, and the intent records no terminal; the server task keeps it.
+The drain before the settle applies the terminal once more, so a `handler_failed`
+handler runs once inside the call. If that drain applies the outcome, the call
+refuses with `Intent already settled`. If that drain rejects and the intent has
+no refusal of its own, the call throws the drain error. Later drains move past
+the intent. The call settles the key first. Its closing pass, like every API
+that runs a pass, rejects if another intent is stuck, and a retry for this key
+then says `Intent already settled`. A Host intent keeps its `hostIntents` record until K4 compacts it,
 so an exact replay of `enqueueHostIntent` returns the failed intent. The call
 refuses an unknown key, a settled intent, and an intent whose terminal K8 did not
 refuse, such as one still running. `BotOptions` passes `reconcileMs` (default

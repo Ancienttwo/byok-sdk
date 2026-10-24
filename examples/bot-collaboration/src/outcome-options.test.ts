@@ -110,6 +110,8 @@ it('keeps both bounds with the most confirmable actions, eight long time zones a
   const confirmable = Array.from({ length: CONFIRMABLE_MAX }, (_, n) => ({ action: `confirm_${n}`.padEnd(64, '_'), draft: DEFAULT_CONFIRMABLE[0].draft }));
   const schema = outcomeSchema('main', stateOf({}), undefined, ['default'], routineViews('main', 8, 'report'), outcomeOffer({ timeZones: LONG_ZONES, confirmable }));
   expect(Buffer.byteLength(JSON.stringify(schema))).toBeLessThanOrEqual(protocol.RESULT_SCHEMA_MAX_BYTES);
+  // The figure of the CONFIRMABLE_MAX comment.
+  expect(Buffer.byteLength(JSON.stringify(schema))).toBe(11_564);
   expect(protocol.resultOutcomeMaxBytes(schema)).toBeLessThanOrEqual(protocol.RESULT_OUTCOME_MAX_BYTES);
   expect(schema.properties!.confirmable_action!.items!.oneOf).toHaveLength(CONFIRMABLE_MAX);
   expect(schedule(schema, 'update_routine').oneOf).toBeDefined();

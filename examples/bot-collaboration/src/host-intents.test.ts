@@ -131,17 +131,19 @@ it('fails a stuck intent on an owner call, so drain moves past it and the Bot FI
   expect(ownerFailures()).toEqual([`Intent failed by owner unknown_intent: ${KEY} No Bot Turn or Host intent has this key`]);
 });
 
-it('fails a failed handler intent after a restart, and the handler does not run again', async () => {
+it('fails a failed handler intent after a restart, and only the probe drain of the call runs the handler', async () => {
   let calls = 0;
   const failing: HostIntentHandler = () => { calls++; throw new Error('research store offline'); };
   bot = openBot({ research: failing });
   await expect(bot.enqueueHostIntent(input(), 'research')).rejects.toMatchObject({ code: 'handler_failed' });
   // A fresh process has no refusal yet; the call drains first to find it.
   bot = await restart({ research: failing });
+  const before = calls;
   await bot.failStuckIntent(KEY);
-  const seen = calls;
+  // The drain inside the call applies the terminal once more; the settle and later drains run no handler.
+  expect({ conclusion: bot.core.intent(KEY)?.conclusion, calls }).toEqual({ conclusion: 'failed', calls: before + 1 });
   await expect(bot.drain()).resolves.toBeUndefined();
-  expect({ conclusion: bot.core.intent(KEY)?.conclusion, calls }).toEqual({ conclusion: 'failed', calls: seen });
+  expect(calls).toBe(before + 1);
   expect(ownerFailures()).toEqual([`Intent failed by owner handler_failed: ${KEY} research store offline`]);
   // The ownership record stays until K4 compacts the intent, so an exact replay returns the failed intent.
   expect(bot.snapshot().hostIntents).toEqual({ [KEY]: { handler: 'research' } });
@@ -163,6 +165,16 @@ it('refuses to fail an unknown key, an intent that can still settle, a settled i
   await bot.drain();
   await expect(bot.failStuckIntent(KEY)).rejects.toThrow(`Intent already settled: ${KEY}`);
   expect(bot.core.intent(KEY)?.conclusion).toBe('succeeded');
+  expect(ownerFailures()).toEqual([]);
+});
+
+it('throws the drain error when the intent has no refusal of its own', async () => {
+  bot = openBot({});
+  // The stuck direct intent stops the scan at the head of the Bot FIFO, so the queued Turn has no refusal.
+  await bot.core.enqueue(input({ execution: template('device') }));
+  await expect(bot.input('k1', 'hello')).rejects.toMatchObject({ code: 'unknown_intent' });
+  const turnId = Object.values(ledger!.snapshot().intents).find(row => row.key !== KEY)!.key;
+  await expect(bot.failStuckIntent(turnId)).rejects.toBeInstanceOf(IntentOutcomeError);
   expect(ownerFailures()).toEqual([]);
 });
 
