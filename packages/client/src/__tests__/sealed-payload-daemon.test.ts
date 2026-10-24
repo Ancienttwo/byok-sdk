@@ -675,6 +675,47 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 Â
     expect(taskEnvelopes('upload-retry').map((envelope) => envelope.type)).not.toContain('task.fail_sealed');
   });
 
+  it.each(['with', 'without'] as const)('waits for the next session to read the server flags before it seals a large terminal %s a journal', async (journal) => {
+    const keyring = new TestKeyring();
+    const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true, ...(journal === 'without' ? { journal: false as const } : {}) });
+    server.send(await sealedOffer(keyring, 'between-sessions', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    // A route failure withdraws the server flags until the next session advertises them.
+    server.setFailMessagesSends(true);
+    server.setFailEventsPolls(true);
+    await vi.waitFor(() => expect(daemon!.status().lifecycle).toMatchObject({ connection: 'connecting' }), BUDGET_MS);
+    const summary = `large summary ${'s'.repeat(300 * 1024)}`;
+    adapter.sessions[0]!.emit({ type: 'progress', text: summary });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    server.setFailMessagesSends(false);
+    server.setFailEventsPolls(false);
+
+    const terminal = await server.waitFor((envelope) => (envelope.type === 'task.complete_sealed' || envelope.type === 'task.fail_sealed') && envelope.task_id === 'between-sessions', BUDGET_MS);
+    expect(terminal.type).toBe('task.complete_sealed');
+    expect((terminal.payload as { sealed: { ciphertextRef?: unknown } }).sealed.ciphertextRef).toBeDefined();
+    expect(await openOutput(keyring, terminal, deviceId)).toMatchObject({ summary });
+  });
+
+  it('settles a terminal that a failed shutdown left queued by the inline-only fallback on the next stop', async () => {
+    const keyring = new TestKeyring();
+    const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true });
+    server.send(await sealedOffer(keyring, 'upload-stop-retry', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    server.setFailBlobUploads(true);
+    adapter.sessions[0]!.emit({ type: 'progress', text: `large summary ${'s'.repeat(300 * 1024)}` });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(server.blobUploadsFailed).toBeGreaterThan(0), BUDGET_MS);
+
+    const stopErrors = (): Promise<string[]> => daemon!.stop().then(() => [], (error: unknown) => (error instanceof AggregateError ? error.errors : [error]).map(String));
+    expect(await stopErrors()).toContainEqual(expect.stringContaining('ciphertext upload failed'));
+    // The stopped daemon has no session that could advertise the server flags,
+    // so the terminal takes the inline-only fallback and the barrier completes.
+    // The stub runtime still reports its disposal failure.
+    expect((await stopErrors()).filter((error) => !error.startsWith('RuntimeDisposalFailure'))).toEqual([]);
+    daemon = undefined;
+  });
+
   it('uploads an artifact over the inline frame as an octet-stream ciphertext blob', async () => {
     const keyring = new TestKeyring();
     const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true });

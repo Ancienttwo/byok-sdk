@@ -2351,7 +2351,12 @@ export function buildDaemonWithAdapters(
           download: (ref) => blobClient.downloadBlob(ref, { signal: blobLifecycleAbort?.signal }),
           upload: (ciphertext) => sealedUploads.uploadArtifact(ciphertext, 'application/octet-stream'),
         },
-        serverCapabilities: () => connection?.getServerCapabilities() ?? [],
+        // Between sessions the next session's flags are unknown. Once the
+        // daemon stopped, halted or crashed, no session will advertise any.
+        serverCapabilities: () => {
+          if (lifecycle.phase !== 'running') return [];
+          return connection?.isOpen() === true ? connection.getServerCapabilities() : undefined;
+        },
       });
       sealedTasks = opened;
       sealedOutputSettled = () => opened.settled();

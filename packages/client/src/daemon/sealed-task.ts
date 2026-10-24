@@ -64,8 +64,12 @@ export interface SealedTasksOptions {
   readonly tenantId: string;
   readonly deviceId: string;
   readonly blobs: SealedCiphertextBlobs;
-  /** The flags the server advertised last, which decide whether an output may name its ciphertext blob. */
-  readonly serverCapabilities: () => readonly string[];
+  /**
+   * The flags the current session's server advertised, which decide whether
+   * an output may name its ciphertext blob. `undefined` while the connection
+   * is between sessions: the next session's flags are not known yet.
+   */
+  readonly serverCapabilities: () => readonly string[] | undefined;
 }
 
 export type SealedOfferOpenResult =
@@ -89,8 +93,11 @@ const SEALED_OUTPUT_TYPE: Partial<Record<MessageType, SealedMessageType>> = Obje
 /** The terminal types; each must reach the wire in some form, or the task never settles. */
 const TERMINAL_TYPES: ReadonlySet<MessageType> = new Set(['task.complete', 'task.fail', 'task.cancelled', 'task.decline']);
 
-/** A ciphertext upload failed. Transient: the caller may seal again later. */
-class SealedUploadError extends Error {}
+/**
+ * A seal that may succeed later: its ciphertext upload failed, or the server
+ * flags are not known until the next session. The caller seals again later.
+ */
+class SealedRetryError extends Error {}
 
 /** Fields a `task.fail` keeps when a task that cannot seal reports `sealed_key_unavailable`. */
 const UNSEALABLE_FAIL_FIELDS = ['harnessId', 'usage', 'agentRef', 'agentHomeProjection', 'agentHomeMemoryChange'] as const;
@@ -268,7 +275,7 @@ export class SealedTasks {
     try {
       sealed = await this.#seal(taskId, task, envelope.type, payload);
     } catch (error) {
-      if (error instanceof SealedUploadError || !TERMINAL_TYPES.has(envelope.type)) throw error;
+      if (error instanceof SealedRetryError || !TERMINAL_TYPES.has(envelope.type)) throw error;
       // A terminal that cannot be sealed as it is (over the plaintext limit,
       // over an inline-only frame, or not a valid sealed message) would hold the task's terminal commit
       // forever. Settle it with a small sealed failure instead, and show the
@@ -309,8 +316,12 @@ export class SealedTasks {
     // Above the inline frame, the output names its ciphertext blob, but only
     // when the server holds such a blob (§2.5): never for an inline-only type,
     // and only after the server advertised every flag the member needs.
-    const advertised = this.options.serverCapabilities();
-    if ((entry as SealedSplitEntry).inlineOnly === true
+    const inlineOnly = (entry as SealedSplitEntry).inlineOnly === true;
+    const advertised = inlineOnly ? [] : this.options.serverCapabilities();
+    if (advertised === undefined) {
+      throw new SealedRetryError(`${plainType} of sealed task ${taskId} waits for the next session to advertise the server flags`);
+    }
+    if (inlineOnly
       || !requiredReceiverCapabilities(type, { ...kept, sealed: { ciphertextRef: {} } }).every((flag) => advertised.includes(flag))) {
       throw new Error(`${plainType} of sealed task ${taskId} seals to ${header.paddedLength} bytes, over the inline maximum`);
     }
@@ -322,7 +333,7 @@ export class SealedTasks {
     try {
       return await this.options.blobs.upload(ciphertext);
     } catch (error) {
-      throw new SealedUploadError(`ciphertext upload failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw new SealedRetryError(`ciphertext upload failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

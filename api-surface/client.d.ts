@@ -8201,8 +8201,12 @@ export interface SealedTasksOptions {
     readonly tenantId: string;
     readonly deviceId: string;
     readonly blobs: SealedCiphertextBlobs;
-    /** The flags the server advertised last, which decide whether an output may name its ciphertext blob. */
-    readonly serverCapabilities: () => readonly string[];
+    /**
+     * The flags the current session's server advertised, which decide whether
+     * an output may name its ciphertext blob. `undefined` while the connection
+     * is between sessions: the next session's flags are not known yet.
+     */
+    readonly serverCapabilities: () => readonly string[] | undefined;
 }
 export type SealedOfferOpenResult = {
     readonly ok: true;
