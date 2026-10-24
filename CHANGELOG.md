@@ -20,6 +20,21 @@
 - **Fixed (client)** — a terminal whose journal commit failed during a
   `stop()` is sent after the next `start()` in the same process. Startup
   recovery no longer replaces it with `task.fail` `daemon_interrupted`.
+- **Breaking (examples)** — K8 `rules/` imports `hash` and `canonical` from
+  the K4 `./canonical` entry, not the K4 root entry (#884). That entry imports
+  only `node:crypto`, so the rules load without `node:sqlite` and
+  `node:async_hooks`, for example on Workers with `nodejs_compat`. The rules
+  boundary test refuses a root import. A Host that copies K8 must resolve the
+  new K4 entry. `hash` and `canonical` return the same values.
+- **Feature (examples)** — the hosted collaboration example compacts settled
+  intent rows on an operator call (#793 S8).
+  `HostedCollaborationStore.compactIntents(scope, { acknowledgedTurnIds })`
+  runs the K8 rule `compactVeto`, the rule that L's `botCompactVeto` now
+  runs too. Each removed row leaves a permanent `hash(['intent', turnId])`
+  row in `retired_identity` in the same transaction. `freezeIntent` then
+  refuses the Turn, and a sync that has not seen the Turn's result fails it
+  as `result_retired`, as L does. Routine intents are refused. Nothing runs
+  it automatically.
 - **Breaking (cloud)** — a sealed terminal (`task.complete_sealed`,
   `task.fail_sealed`, `task.decline_sealed`, `task.cancelled_sealed`) or
   `task.artifact_sealed` may carry `ciphertextRef` above the 256 KiB inline
@@ -43,6 +58,25 @@
   for good, and an artifact becomes a sealed error event.
   Known limit: a terminal sent by reference and refused for good by the Host
   reaches the Host as no terminal (`docs/protocol.md` §2.5).
+- **Feature (client)** — a daemon paired as an E2EE member (`byok-agent pair
+  --e2ee`) opens and seals sealed task content with its own member keyring
+  (#654 E2d-3). It advertises `sealed-payload-v1` only while the member is
+  verified and the deployment declares `e2ee.member`. The first `conn.hello`
+  of a run has no flag, a later hello adds it when the member is ready, and a
+  loss of the member withdraws it. A scope is usable only when its latest
+  `scope-policy` holds this device and no other device. The offer's
+  `sealing.categories` must include every category of the scope policy, or
+  the offer gets `sealing_policy_mismatch`. The header's `chainHead` must be
+  on the verified chain and its `sender` a member of the scope policy at that
+  head, or the offer gets `sealed_open_failed` and a steer is dropped. Output
+  is sealed at the newest epoch with no scope member `remove` and no
+  member-dropping `scope-policy` after its freshness point. An output-only
+  task with no freshness point in the run gets `sealed_key_unavailable`. A
+  terminal that a failed `stop()` left queued is sealed by the next run in the
+  same process, which keeps the freshness points that are on its verified
+  chain. A terminal that the startup replay builds from the journal is in the
+  closed form. The internal `sealedPayload` test parameter of
+  `buildDaemonWithAdapters` is removed.
 - **Docs** — a pairing string `<code>.<pv>` used once without `--e2ee` is
   burned: start a new registration at the Host, do not retry it (#654 E2d).
 - **Breaking (cloud)** — the device-proof `requestId` is single-use on the
@@ -181,6 +215,10 @@
   how to record the source commit. A test checks each list against the import
   graph. The shared vectors need the L files and the K4 root entry, not
   `rules/` alone. No code changes.
+- **Fixed (client)** — under load, a Grok failure whose cause comes in a
+  `retry_state` notification (a rate limit, for example) could be classified
+  from the error text instead (#869). The vendored OAR now records that
+  notification before the failed turn reads its frames.
 - **Fixed (client)** — with `agentUserContext: 'excluded'`, an ancestor
   directory named `**` made the literal exclude patterns match the Agent home's
   own CLAUDE.md files. The patterns now escape glob syntax in every directory
