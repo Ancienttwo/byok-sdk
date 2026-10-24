@@ -1019,7 +1019,8 @@ describe('device member KEM rotation (E2d-5)', () => {
   });
 
   it('cuts off a hung re-wrap put, and keeps the old key', async () => {
-    const { server, web, device, custody, keyring } = await member({ requestTimeoutMs: 50 });
+    // Each of the 256 scan reads before the put has its own timeout too, so it is long enough that none of them cuts off.
+    const { server, web, device, custody, keyring } = await member({ requestTimeoutMs: 1000 });
     await web.putScope('scope-a', [device]);
     let release!: () => void;
     server.e2ee.holdPackagePuts = new Promise<void>((resolve) => { release = resolve; });
@@ -1089,6 +1090,7 @@ describe('device member KEM rotation (E2d-5)', () => {
     };
     expect(await keyring.rotateKem()).toEqual({ ok: false, reason: 'rewrap_unverified' });
     expect(puts).toBe(2);
+    expect(server.e2ee.devicePuts.map((put) => put[0]!.scopeId)).toEqual(['scope-a', 'scope-b']);
     expect(logs.join('\n')).toContain('epoch 2 of scope "scope-a" holds a key package that opens only with the old KEM key');
     expect(stored(custody)).toMatchObject({ kemEpoch: 1, nextKem: { epoch: 2 } });
     expect(await (await restart()).fetch('scope-a', 2)).toMatchObject({ ok: true, key: { scopeKey: lateKey } });
