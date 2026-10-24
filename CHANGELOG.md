@@ -26,6 +26,9 @@
   may not use during the rotation is not re-wrapped, and its packages
   wrapped to the old key do not open if it becomes usable again. Core
   adds `beginMemberKemRotation` and `finishMemberKemRotation`.
+- **Fixed (client)** — a sealed steer is dropped when its open catches the
+  chain up to a scope the device may no longer use, or to a policy its task's
+  categories do not cover, as a sealed offer is declined (#654 E2d-3).
 - **Fixed (client)** — a terminal whose journal commit failed during a
   `stop()` is sent after the next `start()` in the same process. Startup
   recovery no longer replaces it with `task.fail` `daemon_interrupted`.

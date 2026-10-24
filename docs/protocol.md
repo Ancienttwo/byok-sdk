@@ -1161,7 +1161,9 @@ refreshed hello adds it, and removes it again when the member is lost.
   header's `chainHead` must be on the verified chain (the daemon catches up
   when it is ahead), and its `sender` a current member in the scope policy
   at that head. Else the offer is declined with `sealed_open_failed`, and a
-  steer is dropped.
+  steer is dropped. The usable-scope and policy-floor checks then run again
+  against the caught-up view, with the same codes; a steer that fails them
+  is dropped.
 - **Freshness (owner §50d).** Each accepted header records its `chainHead` as
   the freshness point of its scope epoch. The daemon seals output at the
   newest epoch, at or after the offer's `epoch`, that has a point with no
