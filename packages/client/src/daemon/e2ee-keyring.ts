@@ -32,7 +32,8 @@
  * current member of the scope policy, puts the packages, and only then keeps
  * the key, with the head it chose the recipients at as the epoch's freshness
  * point. Such an epoch is also stale after a member is added to the scope
- * policy or rotates its KEM key.
+ * policy or rotates its KEM key, counted from the seq it was wrapped at; a
+ * carried point keeps that seq.
  */
 import {
   applyMemberChainEntries,
@@ -89,6 +90,8 @@ export interface MemberFreshness {
   readonly deviceId: string;
   readonly memberId: string;
   readonly points: ReadonlyMap<string, ReadonlyMap<number, MemberChainPoint>>;
+  /** The chain seq each scope epoch the device rotated to was wrapped at, by `keyOf`. */
+  readonly rotated: ReadonlyMap<string, number>;
 }
 
 export interface DeviceMemberKeyringOptions {
@@ -136,6 +139,8 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
   readonly #fresh = new Map<string, Map<number, MemberChainPoint>>();
   /** The rotation in flight per scope, so concurrent seals rotate once. */
   readonly #rotations = new Map<string, Promise<void>>();
+  /** Aborted at retire, so no Host request of this run outlives it. */
+  readonly #retired = new AbortController();
   #tail: Promise<void> = Promise.resolve();
 
   constructor(session: DeviceMemberSession, private readonly options: DeviceMemberKeyringOptions) {
@@ -406,21 +411,31 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
   /**
    * Ends this keyring with its daemon run, without `onLost`: the cached keys
    * are zeroed and the chain view and freshness points are dropped, so a
-   * seal or open that still holds this keyring finds no key. Returns the
-   * points for the next run's keyring; a lost member leaves none.
+   * seal or open that still holds this keyring finds no key. Its Host
+   * requests in flight are aborted, so a rotation keeps no key and puts
+   * nothing more. Returns the points for the next run's keyring; a lost
+   * member leaves none.
    */
   retire(): MemberFreshness | undefined {
     const session = this.#session;
     const points = new Map([...this.#fresh].map(([scopeId, epochs]) => [scopeId, new Map(epochs)] as const));
+    const rotated = new Map(this.#rotated);
     this.#session = undefined;
+    this.#retired.abort();
     for (const key of this.#keys.values()) key.scopeKey.fill(0);
     this.#keys.clear();
     this.#fresh.clear();
+    this.#rotated.clear();
+    this.#taken.clear();
     if (session === undefined) return undefined;
-    return { tenantId: this.options.tenantId, deviceId: this.options.deviceId, memberId: session.member.memberId, points };
+    return { tenantId: this.options.tenantId, deviceId: this.options.deviceId, memberId: session.member.memberId, points, rotated };
   }
 
-  /** Keep each carried point of this member whose chain head is on this run's verified chain. */
+  /**
+   * Keep each carried point of this member whose chain head is on this run's
+   * verified chain, with the seq a rotated epoch was wrapped at: that seq is
+   * at or before the point, so it is on the chain too.
+   */
   #carry(session: DeviceMemberSession, carried: MemberFreshness | undefined): void {
     if (carried === undefined || carried.tenantId !== this.options.tenantId || carried.deviceId !== this.options.deviceId
       || carried.memberId !== session.member.memberId) return;
@@ -430,6 +445,8 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
         const points = this.#fresh.get(scopeId) ?? new Map<number, MemberChainPoint>();
         this.#fresh.set(scopeId, points);
         points.set(epoch, point);
+        const wrapped = carried.rotated.get(keyOf(scopeId, epoch));
+        if (wrapped !== undefined) this.#rotated.set(keyOf(scopeId, epoch), wrapped);
       }
     }
   }
@@ -465,7 +482,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
 
   /** A signal for one Host read, made when the read starts so a queued catch-up does not spend its time waiting. */
   #requestSignal(): AbortSignal {
-    return AbortSignal.any([this.options.signal, AbortSignal.timeout(this.options.requestTimeoutMs ?? MEMBER_REQUEST_TIMEOUT_MS)]);
+    return AbortSignal.any([this.options.signal, this.#retired.signal, AbortSignal.timeout(this.options.requestTimeoutMs ?? MEMBER_REQUEST_TIMEOUT_MS)]);
   }
 
   /** Keep the policy versions and removals of verified entries. */

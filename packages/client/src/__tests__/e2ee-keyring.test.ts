@@ -696,4 +696,42 @@ describe('device member keyring rotation (E2d-4)', () => {
     const otherMember = { ...carried, memberId: web.member.memberId };
     expect(await new DeviceMemberKeyring(resumed.session!, { ...options, carried: otherMember }).sealingKey('scope-a', 1)).toMatchObject({ epoch: 3 });
   });
+
+  it('hands the next run the seq a rotated epoch was wrapped at, so a member KEM rotation after it still makes the epoch stale', async () => {
+    const { web, device, options, keyring } = await member();
+    await web.putScope('scope-a', [device]);
+    await keyring.catchUp();
+    expect((await keyring.sealingKey('scope-a', 1))?.epoch).toBe(2);
+    const session = keyring.session!;
+    const carried = keyring.retire()!;
+    const kem = (await openMemberKeyRecord(await generateMemberKeyRecord({ tenantId: 'tenant-test' })))!.kem;
+    const kemEpoch = web.member.kemEpoch + 1;
+    const rotated = await createMemberKeyBundle({
+      signingPublicJwk: web.keys.signing.publicJwk, signingPrivateKey: web.keys.signing.privateKey, kemPublicJwk: kem.publicJwk, kemEpoch,
+    });
+    await web.append('rotate', { memberId: web.member.memberId, kemPublicJwk: rotated.kemPublicJwk, kemEpoch, kemSig: rotated.kemSig });
+    const resumed = new DeviceMemberKeyring(session, options);
+    await resumed.catchUp();
+    // The carried point of epoch 2 is on the chain, but its packages name the old KEM key.
+    expect((await new DeviceMemberKeyring(resumed.session!, { ...options, carried }).sealingKey('scope-a', 1))?.epoch).toBe(3);
+  });
+
+  it('aborts a rotation in flight at retire, so it keeps no key', async () => {
+    const { server, web, device, keyring } = await member();
+    await web.putScope('scope-a', [device]);
+    await keyring.catchUp();
+    let release!: () => void;
+    server.e2ee.holdPackagePuts = new Promise<void>((resolve) => { release = resolve; });
+    try {
+      const sealing = keyring.sealingKey('scope-a', 1);
+      while (server.e2ee.devicePuts.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+      const carried = keyring.retire()!;
+      await expect(sealing).rejects.toMatchObject({ name: 'AbortError' });
+      expect(carried.points.get('scope-a')).toBeUndefined();
+      expect(keyring.cached('scope-a', 2)).toBeUndefined();
+    } finally {
+      release();
+      server.e2ee.holdPackagePuts = undefined;
+    }
+  });
 });
