@@ -8,6 +8,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHash, createPublicKey, verify as edVerify } from 'node:crypto';
 import { DEVICE_PROOF_HEADER, deviceProofSigningInput, type DeviceProofProtectedClaims } from '@byok-sdk/core';
+import type { ScopeKeyPackageV1 } from '@byok-sdk/core/sealed-payload';
 import {
   BYOK_E2EE_CHAIN_PATH,
   BYOK_E2EE_KEY_PACKAGES_PATH,
@@ -57,7 +58,7 @@ export class E2eeTestHost {
   chainReads = 0;
   pairingMacReads = 0;
   /** Every key package put, as stored. */
-  readonly packages: Array<Record<string, unknown> & { readonly scopeId: string; readonly epoch: number; readonly recipient: string }> = [];
+  readonly packages: ScopeKeyPackageV1[] = [];
   /** Answer this many key package reads with 503 first. */
   failPackageReads = 0;
   packageReads = 0;
@@ -75,8 +76,8 @@ export class E2eeTestHost {
   }
 
   /** Host control plane: store key packages, one per (scope, epoch, recipient). */
-  clientPutPackages(...packages: Array<{ readonly scopeId: string; readonly epoch: number; readonly recipient: string }>): void {
-    this.packages.push(...packages as never[]);
+  clientPutPackages(...packages: ScopeKeyPackageV1[]): void {
+    this.packages.push(...packages);
   }
 
   /** The registered bundle and the latest device MAC of a device. */
