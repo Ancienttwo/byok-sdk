@@ -58,6 +58,7 @@ src/rules/cards.ts
 src/rules/coalesce.ts
 src/rules/commands.ts
 src/rules/commit.ts
+src/rules/compaction.ts
 src/rules/context.ts
 src/rules/delegation.ts
 src/rules/due.ts
