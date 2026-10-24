@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
-import { hash, MIN_TOMBSTONE_RETENTION_MS, taskId, type Json } from '@byok-sdk/example-host-execution-core';
+import { MIN_TOMBSTONE_RETENTION_MS, taskId, type Json } from '@byok-sdk/example-host-execution-core';
 import { inboundKey, type ChannelPort, type Delivery, type InboundMessage } from '@byok-sdk/example-bot-collaboration/channel';
-import { enablePush, rememberInbound } from '@byok-sdk/example-bot-collaboration/delivery-routing';
+import { enablePush } from '@byok-sdk/example-bot-collaboration/delivery-routing';
 import { RetentionRefused } from '@byok-sdk/example-bot-collaboration/retention';
 import { seedCollaboration, SYNC_OPTIONS } from '@byok-sdk/example-bot-collaboration/test-support';
 import { storedKey } from './layout';
@@ -261,7 +261,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
     const ports = (extra: Partial<CommitPorts> = {}): FinishPortsFactory => (state, publish) => ({ ...vectorPorts(state, publish), now: () => NOW, ...extra });
     const MESSAGE: InboundMessage = { channel: 'fake', platformMessageId: 'in1', conversation: DIRECT, sender: { id: 'owner', kind: 'human' }, text: 'Do it',
       mentions: [], replyRoute: { kind: 'reply', channel: 'fake', inboundId: 'in1', token: 'secret', expiresAt: NOW + 600_000 } };
-    /** A channel store whose owner message `MESSAGE` has a Turn with a frozen intent, as the K8 receive command and a sync leave it. */
+    /** A channel store whose owner message `MESSAGE` has a Turn with a frozen intent, as `receive()` and a sync leave it. */
     async function received() {
       const channelStore = new HostedCollaborationStore(opened!.pool, store().schema, { channel: true });
       const scope = `tenant:${randomUUID()}`;
@@ -272,10 +272,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
       await channelStore.commit(scope, { scope, commandId: randomUUID(), command: { kind: 'enable_push_route', conversation: DIRECT, channel: 'fake', target: 't', owner: 'owner' } },
         (state, publish) => ports({ routes: { enable: (conversation, name, target, owner) => enablePush(state, conversation, name, target, owner, NOW).id,
           revoke: unused, resend: unused } })(state, publish));
-      const commit = await channelStore.commit(scope, { scope, commandId: hash(['receive', inboundKey(MESSAGE)]),
-        command: { kind: 'receive', inbound: 'owner_input', key: inboundKey(MESSAGE), botId: 'main', request: MESSAGE.text, sender: 'owner' } },
-      (state, publish) => ports({ remember: root => rememberInbound(state, MESSAGE, root) })(state, publish));
-      const turnId = (commit.disposition as { value: string }).value;
+      const turnId = (await channelStore.receive(scope, MESSAGE, { owner: 'owner' }, ports())).id!;
       await channelStore.sync(scope, { ...SYNC_OPTIONS, now: NOW, history: undefined });
       return { channelStore, scope, turnId };
     }

@@ -1,5 +1,5 @@
 import type { Pool, PoolClient } from 'pg';
-import { canonical, occurrenceRun, time, type Conclusion, type ExecutionTemplate, type Json, type Routine } from '@byok-sdk/example-host-execution-core';
+import { canonical, hash, occurrenceRun, time, type Conclusion, type ExecutionTemplate, type Json, type Routine } from '@byok-sdk/example-host-execution-core';
 import { botRoutines, owned, routineTurn, updateDefinition, type BotRoutineInput } from '@byok-sdk/example-bot-collaboration/routines';
 import { requireMain } from '@byok-sdk/example-bot-collaboration/team';
 /** A K8 `update_routine` action. */
@@ -16,9 +16,10 @@ import { decideFinish, type TaskEvidence } from './reconcile';
 import { archivedRow, commitStored, decideRetention } from './retention';
 import { dueRoutine, hostedRoutineCommands, loadSlice, planSlice, recordDue, switchDueVersions, writeSlice } from './routines';
 import type { RetentionInput, RetentionLimits, RetentionResult } from '@byok-sdk/example-bot-collaboration/retention';
-import type { ChannelPort, Delivery, PushRoute, ReplyRoute } from '@byok-sdk/example-bot-collaboration/channel';
-import { readbackDelivery, recoverDelivery, settleDelivery, startDelivery, unknownDelivery } from '@byok-sdk/example-bot-collaboration/delivery';
-import { cleanReplyTokens, deliveryRoute, refuseRoute } from '@byok-sdk/example-bot-collaboration/delivery-routing';
+import { classifyInbound, inboundKey, type ChannelPort, type Delivery, type InboundClass, type InboundMessage, type PushRoute,
+  type ReplyRoute } from '@byok-sdk/example-bot-collaboration/channel';
+import { acceptDeliveryEcho, readbackDelivery, recoverDelivery, settleDelivery, startDelivery, unknownDelivery } from '@byok-sdk/example-bot-collaboration/delivery';
+import { cleanReplyTokens, deliveryRoute, echoCandidates, refuseRoute, rememberInbound } from '@byok-sdk/example-bot-collaboration/delivery-routing';
 import { assemble, entryGroup, split, storedKey, type EntityKind, type EntryKind, type Split } from './layout';
 
 /** A stored scope row of a store version that this code does not support. Nothing was written. */
@@ -43,8 +44,12 @@ export type HostedSyncOptions = Omit<SyncOptions<never>, 'history' | 'routines'>
  * The message consumer and the internal `commitIn` take these ports.
  */
 export type PortsFactory = (state: CollaborationState, publish: Publish) => Omit<CommandPorts, 'intents' | 'deliver'>;
-/** The ports of `commit()`. It refuses the callback commands, so it takes no callback ports (#793 D2f-6). */
-export type CommitPorts = Omit<CommandPorts, 'intents' | 'deliver' | 'outcome' | 'occurrence'> & { outcome?: never; occurrence?: never };
+/**
+ * The ports of `commit()`. It refuses the callback commands, so it takes no callback ports (#793 D2f-6). The store owns the
+ * inbound `remember` port, which only `receive()` gives (#793 D2b-out-3).
+ */
+export type CommitPorts = Omit<CommandPorts, 'intents' | 'deliver' | 'outcome' | 'occurrence' | 'remember'>
+  & { outcome?: never; occurrence?: never; remember?: never };
 export type CommitPortsFactory = (state: CollaborationState, publish: Publish) => CommitPorts;
 /**
  * The ports of `finish()`: the commit ports and the team management port of an outcome. The store builds the committed
@@ -60,6 +65,15 @@ export class CallbackCommandError extends Error {
     this.name = 'CallbackCommandError';
   }
 }
+/** `commit()` takes no inbound `receive` command: `receive()` runs it, with the store's `remember` port (#793 D2b-out-3). */
+export class InboundCommandError extends Error {
+  constructor() {
+    super('commit() does not take the inbound receive command; receive() runs it');
+    this.name = 'InboundCommandError';
+  }
+}
+/** Who the Host is on its channels, as L's options give it: the owner principal, and the Host's own bot ids by channel. */
+export interface InboundIdentity { owner: string; self?: Record<string, readonly string[]> }
 export interface HostedStoreOptions {
   /** The Host has a channel: a K4 callback queues its channel deliveries, as L does with `channel` set. */
   channel?: boolean;
@@ -122,7 +136,59 @@ export class HostedCollaborationStore {
    */
   commit(scope: string, request: CommitRequest<Command>, ports: CommitPortsFactory): Promise<CommitResult> {
     if (CALLBACK_KINDS.has(request.command.kind)) return Promise.reject(new CallbackCommandError(request.command.kind));
+    if (request.command.kind === 'receive') return Promise.reject(new InboundCommandError());
     return this.commitIn(scope, request, ports);
+  }
+
+  /**
+   * The inbound channel entry (#793 D2b-out-3), as L `receive()` (K8 host.ts). K8 `classifyInbound` sorts the message:
+   * - `echo`: in one transaction under the scope lock, K8 `echoCandidates` and `acceptDeliveryEcho` settle the one delivery
+   *   that the echo names, or an `unmatched_echo` audit line is written; then the reply tokens are cleaned. The delivery index
+   *   follows the entity. An echo never creates input.
+   * - `owner_input` and `room_input`: the K8 `receive` command, under the command id `hash(['receive', inboundKey])`, so a
+   *   redelivered event replays. With a channel, the store's `remember` port (K8 `rememberInbound`) keeps the inbound and its
+   *   reply route.
+   * - `bot_background`: the K8 `room_input` command of a bot, with no mention, as L `roomInput`.
+   * - every other kind: an audit line only.
+   * Returns the kind, and the Turn id of an input. The authenticated command entry calls it with the scope of its owner.
+   */
+  async receive(scope: string, message: InboundMessage, identity: InboundIdentity, ports: CommitPortsFactory): Promise<{ kind: InboundClass; id?: string }> {
+    const kind = classifyInbound(message, identity.owner, identity.self), { channel, conversation, platformMessageId, sender } = message;
+    const turnOf = (result: CommitResult) => {
+      if (result.disposition.outcome !== 'accepted') throw new Error(`Inbound refused: ${JSON.stringify(result.disposition)}`);
+      return result.disposition.value as string;
+    };
+    if (kind === 'echo') {
+      await this.change(scope, undefined, async (state, publish, client) => {
+        const now = ports(state, publish).now(), matches = echoCandidates(state, message);
+        if (matches.length !== 1 || !acceptDeliveryEcho(matches[0]!, platformMessageId)) state.audit.push(`Delivery unmatched_echo: ${channel} ${platformMessageId}`.slice(0, 1024));
+        cleanReplyTokens(await intentConclusions(client, scope), state, now);
+        return { value: undefined, outbox: [], now };
+      });
+      return { kind };
+    }
+    if (kind === 'owner_input' || kind === 'room_input') {
+      const key = inboundKey(message), from = sender!.id;
+      const command: Command = kind === 'owner_input'
+        ? { kind: 'receive', inbound: kind, key, botId: conversation.id, request: message.text, sender: from }
+        : { kind: 'receive', inbound: kind, key, roomId: conversation.id, text: message.text, mentions: message.mentions, from };
+      const result = await this.commitIn(scope, { scope, commandId: hash(['receive', key]), command }, (state, publish) =>
+        ({ ...ports(state, publish), ...(this.channel ? { remember: (root: string) => rememberInbound(state, message, root) } : {}) }));
+      return { kind, id: turnOf(result) };
+    }
+    if (kind === 'bot_background') {
+      // R5: a bot message is room background. Its mention entities select no seat.
+      const key = inboundKey(message);
+      const result = await this.commitIn(scope, { scope, commandId: hash(['room_input', conversation.id, key]),
+        command: { kind: 'room_input', key, roomId: conversation.id, text: message.text, mentions: [], from: sender!.id } }, ports);
+      return { kind, id: turnOf(result) };
+    }
+    const who = sender ? ` ${sender.kind}:${sender.id}` : '';
+    await this.change(scope, undefined, async (state, publish) => {
+      state.audit.push(`Inbound ${kind}: ${channel} ${conversation.kind}:${conversation.id} ${platformMessageId}${who}`.slice(0, 1024));
+      return { value: undefined, outbox: [], now: ports(state, publish).now() };
+    });
+    return { kind };
   }
 
   /**
