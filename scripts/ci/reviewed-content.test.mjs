@@ -475,6 +475,36 @@ test('#793 D2f-1: the K8 manifest admits the routine entries only on top of the 
   }
 });
 
+test('#793 D2b-out-1: the K8 manifest admits the delivery entries only on top of the hosted, retention and routine entries', t => {
+  const f = fixture(t);
+  const dir = 'examples/bot-collaboration', path = `${dir}/package.json`;
+  const routed = {
+    './rules/commands': './src/rules/commands.ts', './rules/commit': './src/rules/commit.ts', './model': './src/model.ts',
+    './coalesce': './src/coalesce.ts', './team': './src/team.ts', './test-support': './src/commit-vectors.test-support.ts',
+    './retention': './src/retention.ts', './retention-vectors': './src/retention-vectors.test-support.ts',
+    './routines': './src/routines.ts', './routine-vectors': './src/routine-vectors.test-support.ts',
+  };
+  const manifest = { name: '@byok-sdk/example-bot-collaboration', private: true, version: '0.0.1', exports: routed };
+  f.write(path, manifest);
+  const git = (...args) => execFileSync('git', args, { cwd: f.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'K8 with the hosted, retention and routine entries');
+  f.base = git('rev-parse', 'HEAD').trim();
+  const delivery = { './channel': './src/channel.ts', './delivery': './src/delivery.ts', './delivery-routing': './src/delivery-routing.ts',
+    './delivery-vectors': './src/delivery-vectors.test-support.ts' };
+  f.write(path, { ...manifest, exports: { ...routed, ...delivery } });
+  assert.deepEqual(selectImpact([path], f).dirs.filter(name => name === dir), [dir]);
+  const { './routines': _routines, './routine-vectors': _vectors, ...withoutRoutines } = routed;
+  for (const [candidate, reason] of [
+    [{ ...manifest, exports: { ...routed, './channel': './src/channel.ts' } }, 'one of the four entries'],
+    [{ ...manifest, exports: { ...routed, ...delivery, './host': './src/host.ts' } }, 'another entry'],
+    [{ ...manifest, exports: { ...routed, ...delivery, './delivery': './src/host.ts' } }, 'an entry retargeted to another file'],
+    [{ ...manifest, exports: { ...withoutRoutines, ...delivery } }, 'the delivery entries without the routine entries'],
+  ]) {
+    f.write(path, candidate);
+    assert.throws(() => selectImpact([path], f), /more than/, reason);
+  }
+});
+
 test('#658: the K8 cloud edge is admitted only as a workspace spec', t => {
   const f = fixture(t);
   const path = 'examples/bot-collaboration/package.json';
