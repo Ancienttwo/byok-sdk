@@ -9,7 +9,7 @@ import { SessionManager } from '@earendil-works/pi-coding-agent';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { PI_RPC_IPC_KEY_MARKER } from '../adapters/pi/launcher-credential';
 import { buildRuntimeEnv } from '../daemon/environment';
-import type { Session } from '../types';
+import type { Session, MessageDraftDelta } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { resolveBunBin } from './support/test-bun-bin';
 import { testExecutionScratch } from './fixtures/execution-scratch';
@@ -109,7 +109,7 @@ describe('pi-rpc BYOK key custody (#385)', () => {
       dispatchSelection: { lane: 'byok', runtimeId: 'pi', providerId: 'probe', modelId: 'probe' },
     }, { workspaceDir: home, scratch, env: buildRuntimeEnv({ ambient: process.env }) });
     sessions.push(session);
-    const events: AgentEvent[] = [];
+    const events: Array<AgentEvent | MessageDraftDelta> = [];
     for await (const event of session.events) { events.push(event); if (event.type === 'turn_end' || event.type === 'error') break; }
     const launches = readFileSync(path.join(control, 'launches.jsonl'), 'utf8').trim().split('\n')
       .map(line => JSON.parse(line) as { args: string[]; env: Record<string, string>; stdio: unknown });

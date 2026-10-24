@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { startDurablePi, type DurableStart } from '../adapters/pi-durable/session';
-import type { Session } from '../types';
+import type { Session, MessageDraftDelta } from '../types';
 
 interface WorkerPlan {
   complete?: boolean;
@@ -53,7 +53,7 @@ async function fixture(plan: WorkerPlan[]) {
     }) as typeof spawn,
   });
   sessions.push(session);
-  const events: AgentEvent[] = [];
+  const events: Array<AgentEvent | MessageDraftDelta> = [];
   let failure: unknown;
   const collect = async () => {
     try { for await (const event of session.events) events.push(event); }

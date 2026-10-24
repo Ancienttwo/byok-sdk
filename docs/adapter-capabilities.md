@@ -21,6 +21,7 @@ they are not a second runtime-selection registry.
 | Recover pending native interactions after process restart | Unsupported | Unsupported | Unsupported | No new support introduced |
 | Host browser/mobile reconnect | Host-owned; not native session resume | Host-owned; not native session resume | Host-owned; not native session resume | Host-owned |
 | Trajectory evidence for the execution record (`trajectoryEvidence`) | Not declared; records are `unknown` | Not declared; records are `unknown` | Not declared; records are `unknown` | Declared (`event-stream`); not declared with `durablePi: true` |
+| Display-only message draft (`messageDraft`) | Declared; text deltas from `--include-partial-messages` | Declared; `item/agentMessage/delta` | Declared; ACP `text_delta` | Declared; `text_delta` progress |
 | MCP identity on tool events (`tool_use.mcp`, `tool_result.mcp`) | Set for task toolset servers from Claude's own `mcp_status` answer | Set from the native `mcpToolCall` `server` and `tool`, for every server Codex runs, SDK helpers included | Not set; ACP `tool_call` defines no MCP server field, and live Grok evidence is pending (#633) | Set by exact observed name; ordinary, prepared and durable |
 
 By default Claude and Codex run YOLO
@@ -49,27 +50,29 @@ Host process environment except `CLAUDECODE` and `BYOK_*`. Paths such as `HOME`,
 MCP configuration, a fresh native session, folder trust and filesystem permission
 modes address different concerns; none alone establishes persona isolation.
 
-The table names the user-level sources that each pinned runtime loads, and the
-per-process switch that the pinned CLI accepts. The
-[evidence note](notes/2026-10-22-634-runtime-user-config.md) gives the source
-lines, help output and probe. The SDK option is an adapter option: it applies
+The table names the user-level instruction sources that each pinned runtime
+loads, whether the user's own MCP servers reach a task, the runtime's own
+memory, and the per-process switch that the pinned CLI accepts. The
+[#634 evidence note](notes/2026-10-22-634-runtime-user-config.md) and the
+[#871/#873 evidence note](notes/2026-10-24-871-873-claude-agent-user-context.md)
+give the source lines, help output and probes. The SDK option is an adapter option: it applies
 to every session that the adapter starts. A choice per task would need a new
 wire field. The default is unchanged, and the option is not an isolation
 guarantee.
 
-| Adapter (version) | User-level sources | Per-process switch | SDK option |
-| --- | --- | --- | --- |
-| Claude (2.1.302) | `~/.claude/CLAUDE.md`, `~/.claude/rules/`, `~/.claude/settings.json`, user skills, commands and subagents; also managed policy, `~/.claude.json` and auto memory | `--setting-sources`, but a home under `$HOME` keeps the user instruction files; `claudeMdExcludes` through `--settings` removes only the files it names | None |
-| Codex (0.160.0) | `$CODEX_HOME/AGENTS.override.md` or `AGENTS.md`, `$CODEX_HOME/config.toml` | None | None |
-| Grok (1.0.52) | `$GROK_HOME/AGENTS.md` and `rules/`, `~/.claude/` and `~/.cursor/` instruction files and rules, `[paths] extra_rule_dirs`; also Claude and Cursor skills, hooks and MCP servers through compatibility cells | Four variables, for the Claude and Cursor instruction files and rules only | `compatInstructions` |
-| Pi (1.3.0) | Agent-directory `AGENTS.md`, `SYSTEM.md`, `APPEND_SYSTEM.md`, extensions, skills and prompts; `~/.agents/skills`; context files in every parent of the cwd | `--no-context-files` drops the persona too | None |
-| Hermes (0.22.2+2364.g0b10b9f) | None: each execution has a fresh `HERMES_HOME` | Not needed | None |
+| Adapter (version) | User-level instruction sources | User MCP servers in a task | Runtime memory | Per-process switch | SDK option |
+| --- | --- | --- | --- | --- | --- |
+| Claude (2.1.302) | `~/.claude/CLAUDE.md`, `~/.claude/rules/`, `~/.claude/settings.json`, user skills, commands and subagents; `CLAUDE.md`, `CLAUDE.local.md`, `.claude/CLAUDE.md` and `.claude/rules/` in every parent of the cwd; also managed policy and `~/.claude.json` | Yes, beside the task's `--mcp-config`: user and project servers; claude.ai connectors and plugin servers (inferred) | Auto memory, on by default | `--strict-mcp-config`; `claudeMdExcludes` and `env` through `--settings`; `--setting-sources` also drops guardrails | `agentUserContext`, Agent tasks only |
+| Codex (0.160.0) | `$CODEX_HOME/AGENTS.override.md` or `AGENTS.md`, `$CODEX_HOME/config.toml` | Yes: `config.toml` `[mcp_servers]`, merged with the task servers; plugins and apps (connectors) are on by default | `memories` feature, off by default | None | None |
+| Grok (1.0.52) | `$GROK_HOME/AGENTS.md` and `rules/`, `~/.claude/` and `~/.cursor/` instruction files and rules, `[paths] extra_rule_dirs`; also Claude and Cursor skills and hooks through compatibility cells | Yes (from the guide): `~/.grok/config.toml`, project `.grok/config.toml` and `.mcp.json`, plugins, and `~/.claude.json` and `~/.cursor/mcp.json` through compatibility cells | Experimental, off by default (`GROK_MEMORY`) | Four variables for the Claude and Cursor instruction files and rules; `GROK_CLAUDE_MCPS_ENABLED` and `GROK_CURSOR_MCPS_ENABLED` for those MCP cells only (from the guide) | `compatInstructions` |
+| Pi (1.3.0) | Agent-directory `AGENTS.md`, `SYSTEM.md`, `APPEND_SYSTEM.md`, extensions, skills and prompts; `~/.agents/skills`; context files in every parent of the cwd | Pi's built-in MCP and `mcp.json` do not load in SDK sessions; user extensions from the agent directory load and can register tools | None found (inferred) | `--no-context-files` drops the persona too | None |
+| Hermes (0.22.2+2364.g0b10b9f) | None: each execution has a fresh `HERMES_HOME` | No: the fresh `HERMES_HOME` configuration has no `mcp_servers` | Off in the SDK profile | Not needed | None |
 
 ### Claude: user-level configuration
 
 The [Claude adapter](../packages/client/src/adapters/claude/claude-adapter.ts)
 adds task MCP servers with `--mcp-config`. By default it keeps the user's
-settings, deny rules and hooks. The evidence version is Claude Code 2.1.302;
+settings, deny rules, hooks, MCP servers, instruction files and auto memory. The evidence version is Claude Code 2.1.302;
 the adapter pins no Claude version. Claude's
 [Agent SDK features](https://code.claude.com/docs/en/agent-sdk/claude-code-features)
 page lists what each setting source loads:
@@ -81,7 +84,8 @@ page lists what each setting source loads:
 - `local`: `CLAUDE.local.md` in the cwd and every parent directory, and
   `<cwd>/.claude/settings.local.json`.
 - Always: managed policy, `~/.claude.json`, and auto memory unless
-  `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` is set.
+  `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` is set. A user `settings.json` `env`
+  block wins over that process variable (probed).
 
 Claude's `--setting-sources` flag selects these sources. The SDK has no option
 for it, because a launch without the `user` source keeps the user instructions
@@ -104,7 +108,65 @@ patterns for `~/.claude/CLAUDE.md` and `~/.claude/rules/**` removed those two
 files and kept the user settings. `~/CLAUDE.md` still loaded, as a project
 file. To remove every instruction file above the Agent home, the patterns
 must name each parent directory. The paths also depend on `CLAUDE_CONFIG_DIR`
-and on symlinks. The adapter does not set it.
+and on symlinks.
+
+#### `agentUserContext`
+
+`ClaudeAdapterOptions.agentUserContext: 'excluded'` gives an Agent task
+(`task.offer_for_agent`) only SDK, Host and Agent-home inputs. Other tasks are
+unchanged: a parent `CLAUDE.md` of a workspace is a real project instruction.
+The default, `'inherit'`, sets nothing. The anchor is the sealed
+`lease.canonicalHome`, never the cwd, so a memory reader in
+`<home>/.byok/runs/<taskId>/` still loads the home's files through Claude's
+parent walk. Under `excluded` an Agent task starts with:
+
+- `--strict-mcp-config`, also when the task has no servers (then without
+  `--mcp-config`). The task toolset servers and the SDK's own servers stay,
+  because they are in the task's `--mcp-config`. The servers of
+  `~/.claude.json` do not load (probed). Project `.mcp.json` servers, plugin
+  servers and claude.ai connectors do not load either (inferred from the
+  binary and its help text; not probed). With an enterprise
+  `managed-mcp.json`, Claude exits at startup, as it already does for every
+  launch with `--mcp-config`; the start then fails as an early exit.
+- A `--settings` file, `claude-settings.json` (mode 0600) in the execution's
+  SDK scratch directory, removed with it. Its `claudeMdExcludes` names
+  `CLAUDE.md` and `rules/**` of the config directory (`CLAUDE_CONFIG_DIR`, else
+  `.claude` in `HOME`, or in `USERPROFILE` on Windows) unless that directory,
+  or its real path, lies inside the Agent home. It also names `CLAUDE.md`, `CLAUDE.local.md`,
+  `.claude/CLAUDE.md` and `.claude/rules/**` of every directory strictly above
+  the Agent home, up to but not including the filesystem root. Everything at
+  and below the Agent home stays. Claude turns `\` into `/` before it
+  matches, so the patterns use `/` and cannot escape glob syntax. In the
+  directory part of a `rules/**` pattern, each of `( ) [ ] { } * ? ! @ + | ^ $`
+  becomes `?`.
+- In the same file, `env.CLAUDE_CODE_DISABLE_AUTO_MEMORY` set to `1`. The flag
+  layer outranks a user `settings.json` `env` block. The process variable and
+  `autoMemoryEnabled: false` do not (probed).
+- `--setting-sources` untouched. The user's settings, deny rules, hooks,
+  `apiKeyHelper`, model and env still apply (probed for deny rules, a hook,
+  model and env).
+
+The start fails as a non-retryable `authority` failure, with a reason that
+names no path, when the Agent manifest has no sealed absolute, normalized
+`lease.canonicalHome`, when its cwd is not the home or inside it, or when
+`CLAUDE_CONFIG_DIR` is set but not absolute.
+
+The option affects new sessions only. In the probe, a session started without
+it and resumed with it still carried the user instruction files and the auto
+memory in its first history message. A Host that turns the option on should
+start fresh Agent sessions (drop `sessionRef`).
+
+Under `excluded` these still load: the user's skills, commands, subagents and
+output styles; installed plugins' skills and hooks; managed policy, including
+a managed `CLAUDE.md`, which cannot be excluded.
+
+On Windows the adapter writes the same patterns, and fixture tests cover a
+win32 home. No Claude on Windows was probed: drive-letter case, `\\?\` paths and
+junctions are unverified, so a Windows Host should check the result with its
+own installation.
+
+`createDaemon` builds the Claude adapter without options. A Host sets the
+option on its own `ClaudeAdapter` through `createDaemonWithAdapters`.
 
 ### Codex: user-level configuration
 
@@ -220,7 +282,11 @@ session, so Hermes needs no option.
 ### Evidence and remaining qualification
 
 Existing offline evidence includes `environment.test.ts` (environment inheritance),
-`claude-adapter.test.ts` (additive MCP launch), `grok-adapter.test.ts` (the
+`claude-adapter.test.ts` (additive MCP launch; under `agentUserContext:
+'excluded'`, the strict MCP flag, the settings file and the refusals),
+`claude-agent-user-context.test.ts` (exclude patterns for POSIX and win32
+homes, a reader cwd, `CLAUDE_CONFIG_DIR`, glob syntax in a parent),
+`grok-adapter.test.ts` (the
 four variables reach the agent process only with
 `compatInstructions: 'disabled'`, and never a hosted terminal command),
 `pi-rpc-host.test.ts` (user resources beside SDK extensions),
@@ -228,7 +294,11 @@ four variables reach the agent process only with
 `hermes-home.test.ts` (profile contents). The
 [evidence note](notes/2026-10-22-634-runtime-user-config.md) records the
 pinned-version sources, the Claude loader reading, a local Claude probe
-against a fake endpoint, and the `grok inspect` probe. These fixtures check
+against a fake endpoint, and the `grok inspect` probe. The
+[#871/#873 evidence note](notes/2026-10-24-871-873-claude-agent-user-context.md)
+records a probe of Claude 2.1.302 with the `agentUserContext` flags in a
+synthetic home: user markers and auto memory absent, Agent-home files present,
+the user MCP server gone, and the deny rule and hook still in effect. These fixtures check
 launch arguments and environment. They do not
 prove an installed CLI's entire prompt contains no user rules. No provider
 ran, and no global configuration changed.
@@ -330,7 +400,8 @@ custom-harness path (`harnessId: 'hermes'`). Its descriptor declares:
 | New instruction after an idle turn (`followUp`) | Supported, same ACP session |
 | Task MCP toolsets (`mcpToolsets`) | Supported; ACP `session/new.mcpServers` stdio entries |
 | MCP identity on tool events (`tool_use.mcp`, `tool_result.mcp`) | Not set; the ACP title is the Hermes registry name, not an authoritative identity |
-| Legacy boolean interactive approval, native interactions, message drafts | Unsupported and omitted |
+| Legacy boolean interactive approval, native interactions | Unsupported and omitted |
+| Display-only message draft | Declared; one `progress` per `agent_message_chunk` |
 | Trajectory evidence | Not declared |
 
 Hermes runs edits in ACP mode `dont_ask` and commands under `--yolo`. A

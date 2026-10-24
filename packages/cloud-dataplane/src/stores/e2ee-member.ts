@@ -1,11 +1,14 @@
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type {
+  E2eeMemberChainAppendInput,
   E2eeMemberChainAppendResult,
   E2eeMemberChainRow,
   E2eeMemberRegisterResult,
   E2eeMemberRegistrationInput,
   E2eeMemberRegistrationRow,
   E2eeMemberStore,
+  E2eeProvenWrite,
+  E2eeScopeKeyPackagePutInput,
   E2eeScopeKeyPackagePutResult,
   E2eeScopeKeyPackageRow,
 } from '@byok-sdk/cloud';
@@ -24,9 +27,55 @@ async function rollback(client: PoolClient): Promise<void> {
 }
 
 /**
- * Postgres E2EE member store (`deploy/sql/0027_e2ee_member.sql`). Device
- * revocation and machine supersession delete a device's rows in the device
- * transaction (`DEVICE_STATE_DELETES` in `devices.ts`).
+ * Single-use device requests (owner batch §41a A) use `proof_request_receipt`
+ * (0004), the authority the truth put uses for the same device `requestId`s.
+ * The transaction lock has the truth committer's key, so a truth commit and
+ * an E2EE write of one `requestId` also run one after the other. It is taken
+ * first, before the scope locks.
+ */
+async function recordedRequest<T>(client: PoolClient, tenant: TenantId, proof: E2eeProvenWrite | undefined): Promise<T | 'request_conflict' | undefined> {
+  if (proof === undefined) return undefined;
+  const { deviceId, request } = proof;
+  await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [JSON.stringify(['truth-receipt', tenant, deviceId, request.requestId])]);
+  const stored = await client.query<{ operation: string; resource: string; body_sha256: string; body_size: string; response_body: string }>(
+    `SELECT operation, resource, body_sha256, body_size::text AS body_size, response_body FROM proof_request_receipt
+      WHERE tenant_id = $1 AND device_id = $2 AND request_id = $3`, [tenant, deviceId, request.requestId]);
+  const row = stored.rows[0];
+  if (row === undefined) return undefined;
+  const same = row.operation === request.operation && row.resource === request.resource
+    && row.body_sha256 === request.bodySha256 && row.body_size === String(request.bodySize);
+  return same ? JSON.parse(row.response_body) as T : 'request_conflict';
+}
+
+async function recordRequest<T>(client: PoolClient, tenant: TenantId, proof: E2eeProvenWrite | undefined, result: T, now: Date): Promise<T> {
+  if (proof === undefined) return result;
+  const { deviceId, request } = proof;
+  await client.query(
+    `INSERT INTO proof_request_receipt (tenant_id, device_id, request_id, operation, resource, body_sha256, body_size, response_status, response_body, recorded_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 200, $8, $9)`,
+    [tenant, deviceId, request.requestId, request.operation, request.resource, request.bodySha256, request.bodySize, JSON.stringify(result), now]);
+  return result;
+}
+
+/**
+ * Take the transaction lock of each `(tenant, scope)` before any other
+ * statement of the transaction, in one sorted order so two lockers cannot
+ * deadlock. A shred and a package put of one scope then run one after the
+ * other, also for a new scope or a new epoch, which has no row to lock yet
+ * (owner batch §50h A).
+ */
+async function lockScopes(client: PoolClient, tenant: TenantId, scopeIds: Iterable<string>): Promise<void> {
+  for (const scopeId of [...new Set(scopeIds)].sort()) {
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [JSON.stringify(['e2ee-scope', tenant, scopeId])]);
+  }
+}
+
+/**
+ * Postgres E2EE member store (`deploy/sql/0027_e2ee_member.sql`,
+ * `0028_e2ee_scope_shred.sql`). Device revocation and machine supersession
+ * delete a device's rows in the device transaction (`DEVICE_STATE_DELETES`
+ * in `devices.ts`). A shred receipt goes to `device_request_receipts`, the
+ * request receipt store, in the append transaction.
  */
 export class PostgresE2eeMemberStore implements E2eeMemberStore {
   constructor(private readonly pool: Pool, private readonly clock: Clock) {}
@@ -47,9 +96,17 @@ export class PostgresE2eeMemberStore implements E2eeMemberStore {
     }
   }
 
-  async appendChainEntries(tenant: TenantId, rows: readonly E2eeMemberChainRow[]): Promise<E2eeMemberChainAppendResult> {
+  async appendChainEntries(tenant: TenantId, input: E2eeMemberChainAppendInput): Promise<E2eeMemberChainAppendResult> {
+    const { rows } = input;
     let refusal: E2eeMemberChainAppendResult | undefined;
     const result = await this.#transaction<E2eeMemberChainAppendResult>(async client => {
+      const replay = await recordedRequest<E2eeMemberChainAppendResult>(client, tenant, input.proof);
+      if (replay === 'request_conflict') {
+        refusal = { outcome: 'request_conflict' };
+        return undefined;
+      }
+      if (replay !== undefined) return replay;
+      await lockScopes(client, tenant, input.shreds.map(shred => shred.scopeId));
       // READ COMMITTED is enough: the head read sees only committed rows, and
       // the primary key decides between two writers of one seq.
       const head = await client.query<{ head: string }>(
@@ -80,7 +137,33 @@ export class PostgresE2eeMemberStore implements E2eeMemberStore {
         }
         replayed += 1;
       }
-      return { outcome: 'appended', appended, replayed };
+      const now = this.clock.now();
+      const shreds = input.shreds.filter(shred => shred.seq > headSeq);
+      const scopeIds = [...new Set(shreds.map(shred => shred.scopeId))];
+      if (scopeIds.length > 0) {
+        // Packages before their epochs, which they reference. One statement
+        // locks the package rows of every shredded scope in the order a put
+        // and device cleanup lock them, (scope_id, epoch, recipient) in code
+        // point order, so a racing device cleanup cannot deadlock with it.
+        await client.query(
+          `DELETE FROM e2ee_scope_key_package p USING (
+             SELECT scope_id, epoch, recipient FROM e2ee_scope_key_package
+              WHERE tenant_id = $1 AND scope_id = ANY($2::text[])
+              ORDER BY scope_id COLLATE "C", epoch, recipient COLLATE "C"
+              FOR UPDATE) locked
+            WHERE p.tenant_id = $1 AND p.scope_id = locked.scope_id AND p.epoch = locked.epoch AND p.recipient = locked.recipient`,
+          [tenant, scopeIds]);
+        await client.query('DELETE FROM e2ee_scope_epoch WHERE tenant_id = $1 AND scope_id = ANY($2::text[])', [tenant, scopeIds]);
+      }
+      for (const shred of shreds) {
+        await client.query(
+          `INSERT INTO e2ee_scope_shred (tenant_id, scope_id, chain_seq) VALUES ($1, $2, $3)
+           ON CONFLICT (tenant_id, scope_id) DO NOTHING`, [tenant, shred.scopeId, shred.seq]);
+        await client.query(
+          `INSERT INTO device_request_receipts (tenant_id, key, body, recorded_at) VALUES ($1, $2, $3, $4)
+           ON CONFLICT (tenant_id, key) DO NOTHING`, [tenant, shred.receipt.key, shred.receipt.body, now]);
+      }
+      return recordRequest<E2eeMemberChainAppendResult>(client, tenant, input.proof, { outcome: 'appended', appended, replayed }, now);
     });
     return refusal ?? result;
   }
@@ -92,10 +175,25 @@ export class PostgresE2eeMemberStore implements E2eeMemberStore {
     return result.rows.map(row => ({ seq: Number(row.seq), entry: row.entry }));
   }
 
-  async putScopeKeyPackages(tenant: TenantId, rows: readonly E2eeScopeKeyPackageRow[]): Promise<E2eeScopeKeyPackagePutResult> {
+  async putScopeKeyPackages(tenant: TenantId, { rows, proof }: E2eeScopeKeyPackagePutInput): Promise<E2eeScopeKeyPackagePutResult> {
     let refusal: E2eeScopeKeyPackagePutResult | undefined;
     const updatedAt = this.clock.now();
     const result = await this.#transaction<E2eeScopeKeyPackagePutResult>(async client => {
+      const replay = await recordedRequest<E2eeScopeKeyPackagePutResult>(client, tenant, proof);
+      if (replay === 'request_conflict') {
+        refusal = { outcome: 'request_conflict' };
+        return undefined;
+      }
+      if (replay !== undefined) return replay;
+      const scopeIds = [...new Set(rows.map(row => row.scopeId))];
+      await lockScopes(client, tenant, scopeIds);
+      const shredded = await client.query<{ scope_id: string }>(
+        'SELECT scope_id FROM e2ee_scope_shred WHERE tenant_id = $1 AND scope_id = ANY($2::text[]) ORDER BY scope_id COLLATE "C" LIMIT 1',
+        [tenant, scopeIds]);
+      if (shredded.rows[0] !== undefined) {
+        refusal = { outcome: 'scope_shredded', scopeId: shredded.rows[0].scope_id };
+        return undefined;
+      }
       for (const row of rows) {
         await client.query(
           `INSERT INTO e2ee_scope_epoch (tenant_id, scope_id, epoch, key_id) VALUES ($1, $2, $3, $4)
@@ -117,7 +215,7 @@ export class PostgresE2eeMemberStore implements E2eeMemberStore {
              sender = EXCLUDED.sender, package = EXCLUDED.package, updated_at = EXCLUDED.updated_at`,
           [tenant, row.scopeId, row.epoch, row.recipient, row.keyId, row.sender, row.package, updatedAt]);
       }
-      return { outcome: 'stored', stored: rows.length };
+      return recordRequest<E2eeScopeKeyPackagePutResult>(client, tenant, proof, { outcome: 'stored', stored: rows.length }, updatedAt);
     });
     return refusal ?? result;
   }
@@ -136,7 +234,14 @@ export class PostgresE2eeMemberStore implements E2eeMemberStore {
 
   async registerMember(tenant: TenantId, input: E2eeMemberRegistrationInput): Promise<E2eeMemberRegisterResult> {
     let refusal: E2eeMemberRegisterResult | undefined;
+    const proof = { deviceId: input.deviceId, request: input.request };
     const result = await this.#transaction<E2eeMemberRegisterResult>(async client => {
+      const replay = await recordedRequest<E2eeMemberRegisterResult>(client, tenant, proof);
+      if (replay === 'request_conflict') {
+        refusal = replay;
+        return undefined;
+      }
+      if (replay !== undefined) return replay;
       const inserted = await client.query(
         `INSERT INTO e2ee_member_key (tenant_id, device_id, member_id, bundle) VALUES ($1, $2, $3, $4)
          ON CONFLICT DO NOTHING`, [tenant, input.deviceId, input.memberId, input.bundle]);
@@ -153,7 +258,7 @@ export class PostgresE2eeMemberStore implements E2eeMemberStore {
         `INSERT INTO e2ee_pairing_mac (tenant_id, device_id, kind, body, expires_at) VALUES ($1, $2, 'device', $3, $4)
          ON CONFLICT (tenant_id, device_id, kind) DO UPDATE SET body = EXCLUDED.body, expires_at = EXCLUDED.expires_at`,
         [tenant, input.deviceId, input.deviceMac, input.macExpiresAt]);
-      return inserted.rowCount ? 'registered' : 'replayed';
+      return recordRequest<E2eeMemberRegisterResult>(client, tenant, proof, inserted.rowCount ? 'registered' : 'replayed', this.clock.now());
     });
     return refusal ?? result;
   }

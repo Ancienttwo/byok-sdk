@@ -13,13 +13,16 @@ import { E2EE_MEMBER_SCHEMA, SqliteE2eeMemberStore } from '../stores/sqlite/e2ee
 const describeSqlite = isSqliteAvailable() ? describe : describe.skip;
 const TENANT = tenantId('sqlite-e2ee');
 const EXPIRES = '2099-01-01T00:00:00.000Z';
+let requests = 0;
+/** A device-proof binding with a requestId no other write has used. */
+const freshRequest = () => ({ requestId: `request-${++requests}`, operation: 'e2ee-member-key.register', resource: '/byok/e2ee/member-key', bodySha256: 'sha256', bodySize: 1 });
 const open = (path: string) => createSqliteEmbeddedStores({ path }, { clock: createMutableClock(), crypto: createWebCrypto() });
 
 if (isSqliteAvailable()) {
   runE2eeMemberStoreConformance('sqlite', {
     create() {
       const stores = open(':memory:');
-      return { store: stores.e2eeMember, dispose: () => stores.close() };
+      return { store: stores.e2eeMember, receipts: stores.cloud.receipts, dispose: () => stores.close() };
     },
   });
 }
@@ -30,10 +33,10 @@ async function seed(stores: SqliteEmbeddedStores, deviceId: string, machineId?: 
     ...(machineId === undefined ? {} : { machineId }),
   });
   const memberId = `member-${deviceId}`;
-  expect(await stores.e2eeMember.registerMember(TENANT, { deviceId, memberId, bundle: `{"m":"${memberId}"}`, deviceMac: 'mac', macExpiresAt: EXPIRES }))
+  expect(await stores.e2eeMember.registerMember(TENANT, { deviceId, memberId, bundle: `{"m":"${memberId}"}`, deviceMac: 'mac', macExpiresAt: EXPIRES, request: freshRequest() }))
     .toBe('registered');
   expect(await stores.e2eeMember.putClientPairingMac(TENANT, { deviceId, body: '{"mac":"client"}', expiresAt: EXPIRES })).toBe('stored');
-  expect(await stores.e2eeMember.putScopeKeyPackages(TENANT, [{ scopeId: 'scope', epoch: 1, recipient: memberId, keyId: 'key', sender: memberId, package: '{}' }]))
+  expect(await stores.e2eeMember.putScopeKeyPackages(TENANT, { rows: [{ scopeId: 'scope', epoch: 1, recipient: memberId, keyId: 'key', sender: memberId, package: '{}' }] }))
     .toEqual({ outcome: 'stored', stored: 1 });
   return memberId;
 }
@@ -61,7 +64,7 @@ describeSqlite('SQLite E2EE member state', () => {
     const path = tempPath();
     const first = open(path);
     const memberId = await seed(first, 'device-1');
-    expect(await first.e2eeMember.appendChainEntries(TENANT, [{ seq: 1, entry: '{"seq":1}' }])).toMatchObject({ outcome: 'appended' });
+    expect(await first.e2eeMember.appendChainEntries(TENANT, { rows: [{ seq: 1, entry: '{"seq":1}' }], shreds: [] })).toMatchObject({ outcome: 'appended' });
     await first.close();
 
     const second = open(path);
@@ -84,7 +87,7 @@ describeSqlite('SQLite E2EE member state', () => {
 
     const reopened = open(path);
     try {
-      expect(await reopened.e2eeMember.appendChainEntries(TENANT, [{ seq: 1, entry: '{}' }])).toMatchObject({ outcome: 'appended' });
+      expect(await reopened.e2eeMember.appendChainEntries(TENANT, { rows: [{ seq: 1, entry: '{}' }], shreds: [] })).toMatchObject({ outcome: 'appended' });
     } finally {
       await reopened.close();
     }
@@ -144,7 +147,7 @@ describeSqlite('SQLite pairing MAC map', () => {
     const macs = new Map<string, { readonly body: string; readonly expiresAt: string }>();
     const store = new SqliteE2eeMemberStore(coordinator, clock, macs);
     const register = (deviceId: string, expiresAt: string) =>
-      store.registerMember(TENANT, { deviceId, memberId: `member-${deviceId}`, bundle: `{"m":"${deviceId}"}`, deviceMac: 'mac', macExpiresAt: expiresAt });
+      store.registerMember(TENANT, { deviceId, memberId: `member-${deviceId}`, bundle: `{"m":"${deviceId}"}`, deviceMac: 'mac', macExpiresAt: expiresAt, request: freshRequest() });
     try {
       expect(await register('ending', '2026-10-24T00:10:00.000Z')).toBe('registered');
       expect(await store.putClientPairingMac(TENANT, { deviceId: 'ending', body: '{}', expiresAt: '2026-10-24T00:10:00.000Z' })).toBe('stored');

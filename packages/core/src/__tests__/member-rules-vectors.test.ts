@@ -32,8 +32,10 @@ import { memberApprovalCode, memberFingerprint } from '../sealed-payload/member-
 import { computeClientPairingMac, computeDevicePairingMac } from '../sealed-payload/pairing-verification';
 import {
   buildScopeSignerVectors,
+  buildShredVectors,
   checkMemberRulesVectors,
   checkScopeSignerVectors,
+  checkShredVectors,
   vectorPublicJwk,
   type MemberRulesVectorMember,
   type MemberRulesVectors,
@@ -125,7 +127,8 @@ async function buildVectors(): Promise<MemberRulesVectors> {
     },
     chain: { entries: [genesis, addDevice], hashes: [genesisHash, addHash], anchor: { self: 'device', approver: 'client', anchorSeq: 2 } },
   };
-  return { ...vectors, scopeSigners: await buildScopeSignerVectors(vectors) };
+  const withSigners = { ...vectors, scopeSigners: await buildScopeSignerVectors(vectors) };
+  return { ...withSigners, shred: await buildShredVectors(withSigners) };
 }
 
 if (process.env['BYOK_CORE_UPDATE_GOLDEN'] === '1' || !existsSync(GOLDEN_URL)) {
@@ -254,6 +257,35 @@ describe('member rule vectors', () => {
       expect(verify('sha256', Buffer.from(text), key, Buffer.from(sig, 'base64url'))).toBe(true);
       // The two prefix entries chain on; every case continues from the second.
       if (index < golden.scopeSigners.entries.length) prev = hash!;
+    }
+  });
+
+  it('pin a shredded scope (§11.2), with hashes and signatures checked by the oracle', async () => {
+    await expect(checkShredVectors(golden)).resolves.toBe(5);
+    expect(golden.shred.cases.map((vector) => [vector.name, vector.outcome])).toEqual([
+      ['policy-after-shred', 'member_chain_subject_invalid'],
+      ['shred-again', 'member_chain_subject_invalid'],
+      ['shred-unknown-scope', 'member_chain_subject_invalid'],
+      ['shred-extra-key', 'member_chain_subject_invalid'],
+      ['shred-other-scope', 'ok'],
+    ]);
+    // The shred itself is the pinned scope signer case, not a second signature over the same bytes.
+    expect(golden.shred.entries[0]).toEqual(golden.scopeSigners.cases.find((vector) => vector.name === 'policy-member-shreds')!.entry);
+    const signed = [
+      ...golden.shred.entries.map((entry, index) => ({ entry, hash: golden.shred.hashes[index] })),
+      ...golden.shred.cases.map(({ entry, hash }) => ({ entry, hash })),
+    ];
+    let prev = golden.scopeSigners.hashes[1];
+    for (const [index, { entry, hash }] of signed.entries()) {
+      const { sig, ...unsigned } = entry;
+      const text = `byok-member-chain-v1\n${oracleCanonical(unsigned)}`;
+      expect(`sha256:${sha256(text).toString('hex')}`).toBe(hash);
+      expect(unsigned.prev).toBe(prev);
+      const signer = golden.members.find((candidate) => candidate.memberId === unsigned.signer)!;
+      const key = { key: { kty: 'EC', crv: 'P-256', x: signer.signing.x, y: signer.signing.y }, format: 'jwk', dsaEncoding: 'ieee-p1363' } as const;
+      expect(verify('sha256', Buffer.from(text), key, Buffer.from(sig, 'base64url'))).toBe(true);
+      // The two shred entries chain on; every case continues from the second.
+      if (index < golden.shred.entries.length) prev = hash!;
     }
   });
 });

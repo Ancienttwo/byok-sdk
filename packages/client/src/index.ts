@@ -13,6 +13,7 @@ export type {
   RuntimeDetectionAdvisory,
   RuntimeDetectionRefusalReason,
   Session,
+  MessageDraftDelta,
   SessionEvidence,
   GitWorkspaceConfig,
   McpStdioServerConfig,

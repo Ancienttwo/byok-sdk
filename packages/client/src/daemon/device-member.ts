@@ -16,7 +16,8 @@
  *
  * Each later start re-walks the chain from seq 1 and requires the stored
  * head on the new walk (same hash at the same seq), so a Host that rewinds
- * the chain to hide a `remove` fails closed (E2d-e7).
+ * the chain to hide a `remove` fails closed (E2d-e7). It retries the read for
+ * {@link MEMBER_REWALK_TIMEOUT_MS}, then leaves E2EE off for the run.
  *
  * Without `pv` the device pairs as before and is no member. A member key
  * loss before step 5 needs a re-pair: the Host keeps the first bundle per
@@ -46,6 +47,10 @@ export const PAIRING_VERIFICATION_TTL_MS = 10 * 60_000;
 /** The MAC poll and registration retry backoff, from 2 s to 15 s (E2d-e1). */
 export const MEMBER_POLL_MIN_DELAY_MS = 2_000;
 export const MEMBER_POLL_MAX_DELAY_MS = 15_000;
+/** The longest one member request may take; a slower one is cut off and retried. */
+export const MEMBER_REQUEST_TIMEOUT_MS = 60_000;
+/** How long a restart re-walk retries the chain read; then E2EE is off for the run, so a Host outage cannot hold the member at resuming. */
+export const MEMBER_REWALK_TIMEOUT_MS = 10 * 60_000;
 
 /** A verified member of the tenant's chain, held in memory for one daemon run. */
 export interface DeviceMemberSession {
@@ -72,6 +77,8 @@ export interface DeviceMemberEnrollmentOptions {
   readonly deviceId: string;
   readonly log: DeviceMemberLog;
   readonly now?: () => number;
+  /** Defaults to {@link MEMBER_REQUEST_TIMEOUT_MS}. */
+  readonly requestTimeoutMs?: number;
 }
 
 /** Decode `pv` before any network call, so a mistyped secret spends no pairing code. */
@@ -111,7 +118,7 @@ export async function enrollDeviceMember(options: DeviceMemberEnrollmentOptions 
   await records.savePending({ tenantId, deviceId, pv: verificationSecret, deadline: now() + PAIRING_VERIFICATION_TTL_MS });
   await records.saveState({ tenantId, deviceId, member });
   try {
-    await client.register(member, await deviceMac(verificationSecret, tenantId, deviceId, member));
+    await client.register(member, await deviceMac(verificationSecret, tenantId, deviceId, member), AbortSignal.timeout(options.requestTimeoutMs ?? MEMBER_REQUEST_TIMEOUT_MS));
   } catch (error) {
     log(`E2EE member registration failed; the daemon retries it until the pairing verification deadline: ${describe(error)}`);
   }
@@ -160,26 +167,27 @@ export interface ResumeDeviceMemberOptions extends DeviceMemberEnrollmentOptions
   readonly maxDelayMs?: number;
 }
 
-/** A 4xx other than 429 is the Host's answer, not a transport failure. */
-function isFinal(error: unknown): boolean {
-  return error instanceof E2eeMemberClientError && error.status !== undefined && error.status >= 400 && error.status < 500 && error.status !== 429;
-}
-
 /**
  * Call `attempt` with backoff until it gives a value. `undefined` at abort or
  * at `deadline`. A transport failure is retried; a final one throws.
+ *
+ * Each attempt gets a signal that ends at the deadline (and after the request
+ * timeout), and a value that comes back at or after the deadline is not
+ * used: `pv` is never used past its deadline (10b).
  */
-async function poll<T>(options: ResumeDeviceMemberOptions, deadline: number, attempt: () => Promise<T | undefined>): Promise<T | undefined> {
+async function poll<T>(options: ResumeDeviceMemberOptions, deadline: number, attempt: (signal: AbortSignal) => Promise<T | undefined>): Promise<T | undefined> {
   const now = options.now ?? Date.now;
   let delay = options.minDelayMs ?? MEMBER_POLL_MIN_DELAY_MS;
   for (;;) {
     if (options.signal.aborted || now() >= deadline) return undefined;
+    const limit = Math.min(options.requestTimeoutMs ?? MEMBER_REQUEST_TIMEOUT_MS, deadline - now());
     try {
-      const value = await attempt();
+      const value = await attempt(AbortSignal.any([options.signal, AbortSignal.timeout(limit)]));
+      if (now() >= deadline) return undefined;
       if (value !== undefined) return value;
     } catch (error) {
       if (options.signal.aborted) return undefined;
-      if (isFinal(error)) throw error;
+      if (error instanceof E2eeMemberClientError && error.final) throw error;
       options.log(`E2EE member request failed; retrying: ${describe(error)}`);
     }
     if (!(await sleep(Math.min(delay, Math.max(0, deadline - now())), options.signal))) return undefined;
@@ -219,12 +227,12 @@ async function completePairing(options: ResumeDeviceMemberOptions, state: Device
     return undefined;
   };
   try {
-    const registered = await poll(options, deadline, async () => {
-      await client.register(member, await deviceMac(pv, tenantId, deviceId, member));
+    const registered = await poll(options, deadline, async (attempt) => {
+      await client.register(member, await deviceMac(pv, tenantId, deviceId, member), attempt);
       return true;
     });
-    const relayed = registered && await poll(options, deadline, async () => checkRelay(await client.readPairingMac(), pv, log));
-    const entries = relayed && await poll(options, deadline, () => client.readChainFrom(0));
+    const relayed = registered && await poll(options, deadline, async (attempt) => checkRelay(await client.readPairingMac(attempt), pv, log));
+    const entries = relayed && await poll(options, deadline, (attempt) => client.readChainFrom(0, attempt));
     if (!relayed || !entries) return signal.aborted ? undefined : giveUp(EXPIRED);
     const anchor = { approverSigningPublicJwk: relayed.client.signingPublicJwk, entry: relayed.chainHead };
     const anchored = await verifyMemberChainFromAnchor({
@@ -267,10 +275,16 @@ async function checkRelay(relayed: unknown, pv: string, log: DeviceMemberLog): P
  * apply forward, and the new head is stored.
  */
 async function rewalk(options: ResumeDeviceMemberOptions, state: DeviceMemberState, keys: MemberKeys): Promise<DeviceMemberSession | undefined> {
-  const { records, client, tenantId, deviceId, log } = options;
+  const { records, client, tenantId, deviceId, log, signal } = options;
+  const now = options.now ?? Date.now;
   const { member, anchor, head } = state as Required<DeviceMemberState>;
-  const entries = await poll(options, Number.POSITIVE_INFINITY, () => client.readChainFrom(0));
-  if (entries === undefined) return undefined;
+  // Pairing stored the anchor before it deleted `pv`; a failed delete there leaves `pv`, and no later start pairs again.
+  await records.deletePending();
+  const entries = await poll(options, now() + MEMBER_REWALK_TIMEOUT_MS, (attempt) => client.readChainFrom(0, attempt));
+  if (entries === undefined) {
+    if (!signal.aborted) log(`the member chain could not be read within ${MEMBER_REWALK_TIMEOUT_MS / 60_000} minutes of start; E2EE stays off until the next start`);
+    return undefined;
+  }
   if (entries.length < head.seq) {
     log(`the member chain is shorter than the verified head seq ${head.seq}; E2EE stays off`);
     return undefined;

@@ -138,6 +138,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       resume: true,
       approvalInteractive: false,
       mcpToolsets: true,
+      messageDraft: true,
     });
 
     // codex: persistent app-server steering with YOLO-only auto permission mode.
@@ -146,6 +147,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       resume: true,
       approvalInteractive: false,
       mcpToolsets: true,
+      messageDraft: true,
     });
 
     // The wire value remains adapter-generated. The shipped adapters all
@@ -336,6 +338,32 @@ describe('conn.hello.capabilities (C2: approval-targeting)', () => {
     const hello = await server.waitFor((event) => event.type === 'conn.hello');
     if (hello.type !== 'conn.hello') throw new Error('unreachable');
     expect(hello.payload.capabilities).toContain('agent-memory-read-if-admitted');
+  });
+
+  // #833: `read-write-if-admitted` runs as `none` without admission, so its flag does not follow admission either.
+  it('advertises agent-memory-read-write-if-admitted with the Agent home, also when agentMemoryMcp is off', async () => {
+    const workspaceRoot = await tmpDir('byok-conn-hello-memory-rw-if-workspace-');
+    const storeDir = await tmpDir('byok-conn-hello-memory-rw-if-store-');
+    const hostStorageRoot = await tmpDir('byok-conn-hello-memory-rw-if-root-');
+    daemon = createDaemonWithAdapters(
+      { storage: { scratchRoot: testScratchRoot() },
+        localAgentRelease: { version: '0.0.0-test' },
+        productName: 'Test Product',
+        productId: 'test-product',
+        serverUrl: server.url,
+        workspaceRoot,
+        storeDir,
+        agentHome: { hostStorageRoot },
+        agentMemoryMcp: 'off',
+      },
+      [],
+    );
+    await daemon.pair('pairing-code');
+    await daemon.start();
+
+    const hello = await server.waitFor((event) => event.type === 'conn.hello');
+    if (hello.type !== 'conn.hello') throw new Error('unreachable');
+    expect(hello.payload.capabilities).toContain('agent-memory-read-write-if-admitted');
   });
 
   it('fails start before advertising Agent capability when hostStorageRoot is not a directory', async () => {

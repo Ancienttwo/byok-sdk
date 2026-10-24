@@ -12,6 +12,8 @@
 // The viewer refuses session/new unless a ready gateway serves its
 // HERMES_HOME, as the real viewer cannot run a turn without one. Every
 // observable input is appended to FAKE_HERMES_RECEIPT as one JSON line.
+// FAKE_HERMES_REPLY_GATE=<dir>: the closing reply streams as `Do`, `ne`,
+// then waits for `<dir>/release` before its last chunk `.`.
 // On Windows, ci.yml's windows-git-workspace job runs it under hermes-adapter.test.ts and hermes-custody.test.ts (#712).
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -171,7 +173,11 @@ function runViewer() {
       receipt({ mode: 'acp', method: 'permission-answer', answer });
     }
     update(sessionId, { sessionUpdate: 'tool_call_update', toolCallId: `t${turns}`, status: 'completed', rawOutput: 'file.txt' });
-    update(sessionId, { sessionUpdate: 'agent_message_chunk', messageId: `m${turns}b`, content: { type: 'text', text: 'Done.' } });
+    const gate = env.FAKE_HERMES_REPLY_GATE;
+    for (const chunk of gate ? ['Do', 'ne', '.'] : ['Done.']) {
+      while (gate && chunk === '.' && !existsSync(path.join(gate, 'release'))) await new Promise((resolve) => setTimeout(resolve, 10));
+      update(sessionId, { sessionUpdate: 'agent_message_chunk', messageId: `m${turns}b`, content: { type: 'text', text: chunk } });
+    }
     update(sessionId, { sessionUpdate: 'usage_update', used: 20, size: 1000 });
     send({ id, result: { stopReason: 'end_turn', usage: { inputTokens: 11, outputTokens: 3, totalTokens: 14 } } });
   }

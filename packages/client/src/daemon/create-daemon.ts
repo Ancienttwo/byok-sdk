@@ -32,6 +32,7 @@ import {
   AGENT_HOME_READERS_CAPABILITY,
   AGENT_MEMORY_SELECTION_CAPABILITY,
   AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY,
+  AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY,
   AGENT_INPUT_PREPARATION_CAPABILITY,
   TERMINAL_PROJECTION_SELECTION_CAPABILITY,
   PROVIDER_PROFILE_BINDING_CAPABILITY,
@@ -250,6 +251,14 @@ const SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS = 10_000;
 
 /** Finding F5(b): default bound on how long `performControlShutdown` waits for the outbox to actually drain before closing the connection — see `ConnectionManager.stop`'s own doc comment. Overridable via `DaemonOverrides.shutdown.outboxDrainTimeoutMs`. */
 const DEFAULT_SHUTDOWN_OUTBOX_DRAIN_TIMEOUT_MS = 5_000;
+
+/** The pairing is saved, but a member step after it failed: the device is paired without E2EE. */
+class PairedWithoutMemberError extends Error {
+  constructor(deviceId: string, what: string, cause: unknown) {
+    super(`device ${deviceId} is paired, but ${what}: ${cause instanceof Error ? cause.message : String(cause)}`);
+    this.name = 'PairedWithoutMemberError';
+  }
+}
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -1095,10 +1104,13 @@ function computeCapabilities(
     flags.push('toolset-selection');
   }
   // Every Agent-home daemon reads the per-task memory selection, whatever its
-  // memory admission: `none` and `read-if-admitted` always run, and an
-  // unadmitted `read` or `read-write` declines.
+  // memory admission: `none` and the two `*-if-admitted` values always run,
+  // and an unadmitted `read` or `read-write` declines.
   if (agentHomeConfigured) {
-    flags.push('agent-home-contract', AGENT_HOME_READERS_CAPABILITY, AGENT_MEMORY_SELECTION_CAPABILITY, AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY);
+    flags.push(
+      'agent-home-contract', AGENT_HOME_READERS_CAPABILITY, AGENT_MEMORY_SELECTION_CAPABILITY,
+      AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY, AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY,
+    );
   }
   if (strictAgentOnly) flags.push(STRICT_AGENT_ONLY_CAPABILITY);
   if (agentHomeProjectionConfigured) flags.push(AGENT_HOME_PROJECTION_CAPABILITY);
@@ -1635,7 +1647,7 @@ export function buildDaemonWithAdapters(
   /** This run's verified member, once the background resume finds one. */
   let deviceMember: DeviceMemberKeyring | undefined;
   let memberResuming = false;
-  /** Set by each start: builds that run's sealed tasks for a ready member. */
+  /** Set by each start: binds that run's sealed tasks to a ready member. */
   let activateSealedTasks: ((keyring: DeviceMemberKeyring) => void) | undefined;
   const memberStatus = (): DeviceMemberStatus => deviceMember ?? (memberResuming ? 'resuming' : 'none');
   let memberAbort: AbortController | undefined;
@@ -1992,8 +2004,13 @@ export function buildDaemonWithAdapters(
       if (previous && previous.deviceId !== record.deviceId) {
         await cursorStore.clear(config.serverUrl, previous.deviceId);
       }
+      observer.notePaired(record.deviceId);
       // A new enrollment is a new member (§7.5); the previous one's entries are void (10b).
-      await memberRecords?.clear();
+      try {
+        await memberRecords?.clear();
+      } catch (error) {
+        throw new PairedWithoutMemberError(record.deviceId, 'the previous E2EE member entries could not be deleted', error);
+      }
       if (verificationSecret !== undefined) {
         try {
           await enrollDeviceMember({
@@ -2001,10 +2018,9 @@ export function buildDaemonWithAdapters(
             verificationSecret, log: logMember,
           });
         } catch (error) {
-          throw new Error(`device ${record.deviceId} is paired, but its E2EE member enrollment failed; re-pair to enable E2EE: ${error instanceof Error ? error.message : String(error)}`);
+          throw new PairedWithoutMemberError(record.deviceId, 'its E2EE member enrollment failed; re-pair to enable E2EE', error);
         }
       }
-      observer.notePaired(record.deviceId);
       if (acquiredHere) {
         await daemonOwnerLease?.release();
         daemonOwnerLease = undefined;
@@ -2200,6 +2216,8 @@ export function buildDaemonWithAdapters(
     // Assigned once the blob client exists. Startup recovery before that
     // writes only `daemon_interrupted`, which stays plaintext (decision 12d).
     let sealedTasks: SealedTasks | undefined;
+    /** This run's verified member, bound when it is first ready; a loss leaves it bound and keyless. */
+    let sealedMember: DeviceMemberKeyring | undefined;
     const recordRecoveryFailure = async (task: import('./journal/journal').RecoverableTask, reason: string, interrupted = false) => {
       const offer = decodeEnvelope(task.envelopeBytes);
       const { agentRef } = offer.payload as { agentRef?: AgentRef };
@@ -2380,19 +2398,24 @@ export function buildDaemonWithAdapters(
 
     capabilities.push('custom-harness');
     // #654 E2d-3: sealed task content needs this run's verified member. The
-    // object is built when the member is first ready and then stays, also
+    // object exists before the restart replay, and its keyring holds no key
+    // until the member is ready, so a recovered sealed terminal is sealed or
+    // one of the closed plaintext forms (decision 74e). The member stays bound
     // after a loss: a sealed task must never fall back to plaintext output.
-    activateSealedTasks = (keyring) => {
-      if (sealedTasks !== undefined) return;
-      const opened = new SealedTasks({
-        keyring,
-        tenantId: record.tenantId,
-        deviceId: record.deviceId,
-        blobs: { download: (ref) => blobClient.downloadBlob(ref, { signal: blobLifecycleAbort?.signal }) },
-      });
-      sealedTasks = opened;
-      sealedOutputSettled = () => opened.settled();
-    };
+    const opened = new SealedTasks({
+      keyring: {
+        scopeCategories: async (scopeId) => sealedMember?.scopeCategories(scopeId),
+        openingKey: async (scope) => sealedMember?.openingKey(scope),
+        acceptHeader: async (header) => await sealedMember?.acceptHeader(header) === true,
+        sealingKey: async (scopeId, minEpoch) => sealedMember?.sealingKey(scopeId, minEpoch),
+      },
+      tenantId: record.tenantId,
+      deviceId: record.deviceId,
+      blobs: { download: (ref) => blobClient.downloadBlob(ref, { signal: blobLifecycleAbort?.signal }) },
+    });
+    sealedTasks = opened;
+    sealedOutputSettled = () => opened.settled();
+    activateSealedTasks = (keyring) => { sealedMember ??= keyring; };
     // Contract §8.1 / §8.3: the device-level capability string is NOT computed
     // here. It is the one flag whose answer depends on a deployment fact this
     // daemon has not read yet at this point in `start()`, so it is added (and
@@ -2520,7 +2543,7 @@ export function buildDaemonWithAdapters(
       // A sealed offer this device cannot hold is one it cannot open; a device
       // with no keyring declines every sealed offer for want of a key. The
       // closed code is a value gate on the server's `sealed-payload-v1`.
-      const code = sealedTasks === undefined ? 'sealed_key_unavailable' : 'sealed_open_failed';
+      const code = sealedMember === undefined ? 'sealed_key_unavailable' : 'sealed_open_failed';
       const serverCapabilities = connection?.getServerCapabilities() ?? [];
       const closedCode = isSealedMessageType(envelope.type)
         && requiredReceiverCapabilities('task.decline', { reason: code, code }).every((flag) => serverCapabilities.includes(flag));
@@ -2811,7 +2834,8 @@ export function buildDaemonWithAdapters(
     const handleE2eeKeyPackageEnvelope = async (envelope: Envelope): Promise<boolean> => {
       if (envelope.type !== 'e2ee.key_package.available') return false;
       // Task-free and never journaled, like provisioning. It throws only while
-      // the member resumes or when a Host read fails, which keeps the row.
+      // the member resumes or when a Host read fails or times out, which keeps
+      // the row; a final Host answer is acknowledged.
       await processE2eeKeyPackageNotice(envelope.payload, memberStatus(), logMember);
       return true;
     };
@@ -3384,10 +3408,11 @@ export function buildDaemonWithAdapters(
     const abort = new AbortController();
     const options = {
       records: memberRecords, client: memberClient(record, abort.signal), tenantId: record.tenantId, deviceId: record.deviceId, log: logMember,
+      signal: abort.signal,
     };
     memberAbort = abort;
     memberResuming = true;
-    memberResume = resumeDeviceMember({ ...options, signal: abort.signal }).then((session) => {
+    memberResume = resumeDeviceMember(options).then((session) => {
       if (abort.signal.aborted) return;
       memberResuming = false;
       if (session === undefined) return;
@@ -3700,7 +3725,7 @@ export function buildDaemonWithAdapters(
         if (!(error instanceof DeviceRecordRePairRequiredError)) throw error;
       }
       // The member entries go first: if their deletion fails, the device
-      // stays paired and E2EE-enrolled, and the unpair reports the failure.
+      // stays paired, and the unpair reports the failure.
       await memberRecords?.clear();
       try {
         await store.credentials.clear();
@@ -3909,27 +3934,31 @@ export function buildDaemonWithAdapters(
           throw new ControlError('pairing_in_progress', 'service enrollment is already in progress');
         }
         serviceEnrollmentTransitioning = true;
-        let record: DeviceRecord;
-        try {
-          record = await runLifecycleMutation(() => pairUnderLease(parsed.pairingCode, verificationSecret));
-        } catch (err) {
-          serviceEnrollmentTransitioning = false;
-          throw err;
-        }
-
         // `control-server.ts` writes this handler's result in the current
         // microtask. Starting on the next macrotask lets that persisted-id
         // receipt leave before normal startup replaces the enrollment-only
         // listener. A crash in this narrow window is safe: WinSW restarts,
         // loadExisting() sees the already-persisted credential, and takes the
         // same normal startup path.
-        setImmediate(() => {
-          void runLifecycleMutation(startUnderLease).catch(() => {
-            // Do not project provider/server exception text into service logs;
-            // the stopped/non-ready daemon is the fail-closed observable fact.
-            console.error('[byok/client] service enrollment persisted but normal daemon startup failed');
+        const startAfterEnrollment = (): void => {
+          setImmediate(() => {
+            void runLifecycleMutation(startUnderLease).catch(() => {
+              // Do not project provider/server exception text into service logs;
+              // the stopped/non-ready daemon is the fail-closed observable fact.
+              console.error('[byok/client] service enrollment persisted but normal daemon startup failed');
+            });
           });
-        });
+        };
+        let record: DeviceRecord;
+        try {
+          record = await runLifecycleMutation(() => pairUnderLease(parsed.pairingCode, verificationSecret));
+        } catch (err) {
+          // The pairing is saved, so the service starts as a device without E2EE.
+          if (err instanceof PairedWithoutMemberError) startAfterEnrollment();
+          else serviceEnrollmentTransitioning = false;
+          throw err;
+        }
+        startAfterEnrollment();
         return { deviceId: record.deviceId };
       },
       /**

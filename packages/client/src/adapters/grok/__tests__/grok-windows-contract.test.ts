@@ -70,6 +70,7 @@ async function open(a: GrokAdapter, offer: TaskOfferPayload, resources: Prepared
 async function turn(s: Session): Promise<AgentEvent[]> {
   const out: AgentEvent[] = [];
   for await (const e of s.events) {
+    if (e.type === 'message_draft_delta') continue; // Display-only; the draft lane has its own tests.
     out.push(e);
     if (e.type === 'turn_end') break;
   }

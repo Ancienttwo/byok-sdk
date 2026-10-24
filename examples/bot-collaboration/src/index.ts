@@ -1,9 +1,9 @@
-export { BotCollaboration } from './host';
+export { BotCollaboration, IntentOutcomeError } from './host';
 export { botCompactVeto } from './compaction';
 export { RetentionRefused, retainRoots } from './retention';
 export type { RetentionFacts, RetentionInput, RetentionRefusedCode, RetentionLimits, RetentionResult, RetentionStore } from './retention';
 export { refuseRetired, retiredIdentity, RetiredIdentityError, type AdmittedIds, type RetiredNamespace } from './rules/commands';
-export type { AgentMessageInput, BotOptions, MessageServer } from './host';
+export type { AgentMessageInput, BotOptions, HostIntentHandler, MessageServer } from './host';
 export { classifyInbound, inboundKey } from './channel';
 export type { ChannelOptions, ChannelPort, Conversation, Delivery, DeliveryState, InboundClass, InboundMessage, Principal, PushRoute, ReplyRoute } from './channel';
 export { BOT_REPLY_MAX_BYTES, DEFAULT_INSTRUCTION_MAX_BYTES, minimumInstructionBytes } from './delegation';
@@ -14,7 +14,7 @@ export { CommitConflict, commitInLedger, retainInLedger, revisionOf } from './co
 export type { Command, CommandPorts, CommitRequest, CommitResult, Disposition, OutboxIntent } from './commit';
 export type { BotRoutine, BotRoutineInput } from './routines';
 export type { BotProfile, Room, Round, Seat, TeamState } from './team-model';
-export { ROOM_GRACE_MS, ROOM_CONTEXT_BYTES, ROOM_CONTEXT_MESSAGES } from './rooms';
+export { ROOM_GRACE_MS, ROOM_CONTEXT_BYTES, ROOM_CONTEXT_MESSAGES, type RoomMessage } from './rooms';
 export { TEAM_NOTE_LIMIT } from './team';
 export { TeamModeError, type TeamModeCode, type TeamSnapshot, type TeamSnapshotBot } from './rules/team';
 export { createBotPersonaProjection } from './persona';

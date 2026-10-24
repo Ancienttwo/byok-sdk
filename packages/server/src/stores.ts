@@ -171,7 +171,7 @@ export function composeFacadeStores(options: FacadeStoreOptions): FacadeStoreCom
       dedup,
     },
     blobContentProxy,
-    e2eeMember: sqlite?.e2eeMember ?? new InMemoryE2eeMemberStore(),
+    e2eeMember: sqlite?.e2eeMember ?? new InMemoryE2eeMemberStore(stores.receipts),
     clock,
     crypto,
     counters,

@@ -469,6 +469,28 @@ export function retryReply(state: DelegationState, d: Delegation, now: number, e
   if (d.status !== 'uncertain' && now - (d.pendingSince ?? now) >= uncertainAfterMs) uncertain(state, d, now, emit);
 }
 
+/** The SDK reply readback that `reconcileReply` reads (`tasks.agentMessage`). */
+export type ReplyReadback = { disposition?: { outcome: string } } | undefined;
+/**
+ * One reply check of a delegation's chain end (§3.10). `taskId` is the chain end's task when it has an intent. The check
+ * `failed` when the chain end has no intent, or when the SDK read threw.
+ */
+export type ReplyCheck = { taskId?: string; failed: true } | { taskId: string; failed: false; readback: ReplyReadback };
+/** A delegation whose reply check is due at `now`: it has no verdict, and its check time has come. */
+export function replyCheckDue(d: Delegation, now: number): boolean {
+  return !d.verdict && d.nextCheckAt !== undefined && d.nextCheckAt <= now;
+}
+/**
+ * The decision of one reply check (§3.10). A reply body that the Host holds answers the delegation; a failed read retries;
+ * otherwise the readback decides.
+ */
+export function checkReply(state: DelegationState, d: Delegation, check: ReplyCheck, now: number, emit: Publish,
+  uncertainAfterMs = REPLY_UNCERTAIN_AFTER_MS): void {
+  if (check.taskId !== undefined && state.replies[check.taskId]?.body !== undefined) resolveDelegation(state, d, 'answered', now, emit, undefined, check.taskId);
+  else if (check.failed) retryReply(state, d, now, emit, uncertainAfterMs);
+  else reconcileReply(state, d, check.readback, now, emit, uncertainAfterMs);
+}
+
 function sender(state: Pick<DelegationView, 'team'>, botId: string) {
   return { botId, name: cut(state.team.bots[botId]?.name ?? '', 40) };
 }

@@ -43,7 +43,7 @@ import {
   type SealedContentHeaderV1,
 } from '@byok-sdk/core/sealed-payload';
 import type { DeviceMemberRecords, MemberChainPoint } from './device-member-custody';
-import { entryHashes, type DeviceMemberLog, type DeviceMemberSession } from './device-member';
+import { MEMBER_REQUEST_TIMEOUT_MS, entryHashes, type DeviceMemberLog, type DeviceMemberSession } from './device-member';
 import { E2EE_SCOPE_KEY_PACKAGE_PUT_MAX } from '@byok-sdk/protocol';
 import { E2eeMemberClientError, type E2eeMemberClient } from './e2ee-member-client';
 import type { SealedScopeKeyring, SealingKey } from './sealed-task';
@@ -76,6 +76,10 @@ export interface DeviceMemberKeyringOptions {
   readonly tenantId: string;
   readonly deviceId: string;
   readonly log: DeviceMemberLog;
+  /** Aborted at shutdown and at a new enrollment. */
+  readonly signal: AbortSignal;
+  /** Each Host read is cut off after this; defaults to {@link MEMBER_REQUEST_TIMEOUT_MS}. */
+  readonly requestTimeoutMs?: number;
   /** Called once when this run loses the member. */
   readonly onLost?: () => void;
 }
@@ -129,20 +133,30 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
 
   /**
    * Catch up, then the key of one scope epoch: cached, or fetched and
-   * opened. A transport failure throws; every other end is a result.
+   * opened. A failed or timed-out Host read throws, as does a final Host
+   * answer (`E2eeMemberClientError.final`); every other end is a result.
    */
-  async fetch(scopeId: string, epoch: number): Promise<ScopeKeyFetchResult> {
+  fetch(scopeId: string, epoch: number): Promise<ScopeKeyFetchResult> {
+    return this.#fetch(scopeId, epoch, false);
+  }
+
+  /**
+   * {@link fetch}; with `copy`, the result holds a copy of the key bytes,
+   * taken where the key is read, so a catch-up before the caller resumes
+   * cannot zero them.
+   */
+  async #fetch(scopeId: string, epoch: number, copy: boolean): Promise<ScopeKeyFetchResult> {
+    const own = (key: ScopeKey): ScopeKey => (copy ? { ...key, scopeKey: key.scopeKey.slice() } : key);
     await this.catchUp();
     const session = this.#session;
     if (session === undefined) return { ok: false, reason: 'member_lost' };
     const failure = this.#scopeFailure(session, scopeId);
     if (failure !== undefined) return { ok: false, reason: failure };
     const known = this.cached(scopeId, epoch);
-    if (known !== undefined) return { ok: true, key: known };
+    if (known !== undefined) return { ok: true, key: own(known) };
     const self = session.member.memberId;
-    const packages = await this.options.client.readKeyPackages(scopeId, epoch);
-    // The Host keeps one package per (scope, epoch, recipient).
-    if (packages.length !== 1) return { ok: false, reason: packages.length === 0 ? 'key_package_missing' : 'key_package_invalid' };
+    const packages = await this.options.client.readKeyPackages(scopeId, epoch, this.#requestSignal());
+    if (packages.length === 0) return { ok: false, reason: 'key_package_missing' };
     const pkg: unknown = packages[0];
     if (typeof pkg !== 'object' || pkg === null) return { ok: false, reason: 'key_package_invalid' };
     const senderId = (pkg as { readonly sender?: unknown }).sender;
@@ -161,11 +175,11 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     const lost = current === undefined ? 'member_lost' : this.#scopeFailure(current, scopeId, sender.memberId);
     if (raced !== undefined || lost !== undefined) {
       opened.scopeKey.fill(0);
-      return raced !== undefined ? { ok: true, key: raced } : { ok: false, reason: lost! };
+      return raced !== undefined ? { ok: true, key: own(raced) } : { ok: false, reason: lost! };
     }
     const key = { scopeKey: opened.scopeKey, keyId: opened.keyId, sender: sender.memberId };
     this.#keys.set(keyOf(scopeId, epoch), key);
-    return { ok: true, key };
+    return { ok: true, key: own(key) };
   }
 
   /** The latest policy categories of a usable scope, after a catch-up; `undefined` when it is not usable. */
@@ -184,8 +198,8 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
   async openingKey(scope: { readonly id: string; readonly epoch: number }): Promise<Uint8Array | undefined> {
     const known = this.cached(scope.id, scope.epoch);
     if (known !== undefined) return known.scopeKey.slice();
-    const result = await this.fetch(scope.id, scope.epoch);
-    if (result.ok) return result.key.scopeKey.slice();
+    const result = await this.#fetch(scope.id, scope.epoch, true);
+    if (result.ok) return result.key.scopeKey;
     this.options.log(`no scope key for epoch ${scope.epoch} of scope ${JSON.stringify(scope.id)} (${result.reason})`);
     return undefined;
   }
@@ -225,7 +239,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     const session = this.#session;
     if (session === undefined || this.#scope(session, scopeId) === undefined) return undefined;
     const fresh = this.#freshEpoch(scopeId, minEpoch, session.state.head!.seq);
-    if (fresh !== undefined) return this.#sealingAt(session, scopeId, fresh);
+    if (fresh !== undefined) return this.#sealingAt(scopeId, fresh);
     // A shared rotation may target an epoch below this call's `minEpoch`, so
     // a call that only joined one checks again and may rotate itself.
     for (let round = 0; round < MAX_ROTATION_ROUNDS; round += 1) {
@@ -239,7 +253,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
       const current = this.#session;
       if (current === undefined || this.#scope(current, scopeId) === undefined) return undefined;
       const rotated = this.#freshEpoch(scopeId, minEpoch, current.state.head!.seq);
-      if (rotated !== undefined) return this.#sealingAt(current, scopeId, rotated);
+      if (rotated !== undefined) return this.#sealingAt(scopeId, rotated);
       if (!joined) break;
     }
     this.options.log(`no fresh epoch at or after ${minEpoch} for scope ${JSON.stringify(scopeId)}; output is not sealed`);
@@ -253,10 +267,18 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     return epochs.length === 0 ? undefined : Math.max(...epochs);
   }
 
-  async #sealingAt(session: DeviceMemberSession, scopeId: string, epoch: number): Promise<SealingKey | undefined> {
-    const head = session.state.head!;
+  async #sealingAt(scopeId: string, epoch: number): Promise<SealingKey | undefined> {
+    const point = this.#fresh.get(scopeId)!.get(epoch)!;
     const key = await this.openingKey({ id: scopeId, epoch });
-    return key === undefined ? undefined : { scopeKey: key, epoch, sender: session.member.memberId, chainHead: { seq: head.seq, hash: head.hash } };
+    if (key === undefined) return undefined;
+    // The key read can catch up: the scope and the epoch must still hold at the head it left.
+    const current = this.#session;
+    if (current === undefined || this.#scope(current, scopeId) === undefined || this.#stale(scopeId, point.seq, current.state.head!.seq)) {
+      key.fill(0);
+      return undefined;
+    }
+    const now = current.state.head!;
+    return { scopeKey: key, epoch, sender: current.member.memberId, chainHead: { seq: now.seq, hash: now.hash } };
   }
 
   /**
@@ -317,7 +339,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     const current = this.#session;
     if (current === undefined) return;
     const head = current.state.head!;
-    const entries = await this.options.client.readChainFrom(head.seq);
+    const entries = await this.options.client.readChainFrom(head.seq, this.#requestSignal());
     if (entries.length === 0 || this.#session !== current) return;
     const applied = await applyMemberChainEntries(current.state, entries);
     if (!applied.ok) return this.#lose(`a member chain entry after seq ${head.seq} is invalid (${applied.reason}); E2EE stays off`);
@@ -337,6 +359,11 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
         this.#keys.delete(at);
       }
     }
+  }
+
+  /** A signal for one Host read, made when the read starts so a queued catch-up does not spend its time waiting. */
+  #requestSignal(): AbortSignal {
+    return AbortSignal.any([this.options.signal, AbortSignal.timeout(this.options.requestTimeoutMs ?? MEMBER_REQUEST_TIMEOUT_MS)]);
   }
 
   /** Keep the policy versions and removals of verified entries. */

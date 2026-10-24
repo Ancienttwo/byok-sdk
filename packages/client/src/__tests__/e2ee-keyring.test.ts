@@ -18,7 +18,7 @@ import { DeviceMemberRecords } from '../daemon/device-member-custody';
 import { enrollDeviceMember, resumeDeviceMember } from '../daemon/device-member';
 import { StoredDeviceProofSigner } from '../daemon/device-proof-signer';
 import { DeviceMemberKeyring } from '../daemon/e2ee-keyring';
-import { E2eeMemberClient } from '../daemon/e2ee-member-client';
+import { E2eeMemberClient, MEMBER_CHAIN_PAGE_MAX_BYTES, MEMBER_OBJECT_MAX_BYTES } from '../daemon/e2ee-member-client';
 import { enrollmentIdentityOf } from '../daemon/store';
 import { InMemoryDeviceMemberCustody, testDeviceCredentials } from './fixtures/credential-backend';
 import type { E2eeTestHost } from './fixtures/e2ee-test-host';
@@ -35,7 +35,7 @@ afterEach(async () => {
 });
 
 /** A paired, approved device member with its keyring, and the web client that approved it. */
-async function member() {
+async function member(keyringOptions: { readonly requestTimeoutMs?: number } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-keyring-'));
   dirs.push(root);
   server = await TestServer.start();
@@ -62,11 +62,11 @@ async function member() {
   const records = new DeviceMemberRecords(custody);
   const logs: string[] = [];
   const web = await E2eeWebClient.create(server.e2ee);
-  const options = { records, client, tenantId: record.tenantId, deviceId, log: (line: string) => logs.push(line) };
+  const options = { records, client, tenantId: record.tenantId, deviceId, log: (line: string) => logs.push(line), signal: new AbortController().signal };
   await enrollDeviceMember({ ...options, verificationSecret: web.verificationSecret });
   const device = await web.approve(deviceId);
-  const session = (await resumeDeviceMember({ ...options, signal: new AbortController().signal, minDelayMs: 5, maxDelayMs: 20 }))!;
-  return { server: server!, web, device, custody, logs, keyring: new DeviceMemberKeyring(session, options) };
+  const session = (await resumeDeviceMember({ ...options, minDelayMs: 5, maxDelayMs: 20 }))!;
+  return { server: server!, web, device, custody, logs, keyring: new DeviceMemberKeyring(session, { ...options, ...keyringOptions }) };
 }
 
 function head(custody: InMemoryDeviceMemberCustody): unknown {
@@ -197,6 +197,56 @@ describe('device member keyring (E2d-2)', () => {
     release();
     expect(await fetching).toEqual({ ok: false, reason: 'scope_unknown' });
     expect(keyring.cached('scope-a', 1)).toBeUndefined();
+  });
+
+  it('cuts off a hung chain read and a hung package read after the request timeout (#863 M1)', async () => {
+    const { server, web, device, keyring } = await member({ requestTimeoutMs: 50 });
+    await web.putScope('scope-a', [device]);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    try {
+      server.e2ee.holdChainReads = held;
+      await expect(keyring.catchUp()).rejects.toMatchObject({ name: 'TimeoutError' });
+      server.e2ee.holdChainReads = undefined;
+      server.e2ee.holdPackageReads = held;
+      await expect(keyring.fetch('scope-a', 1)).rejects.toMatchObject({ name: 'TimeoutError' });
+      server.e2ee.holdPackageReads = undefined;
+      expect((await keyring.fetch('scope-a', 1)).ok).toBe(true);
+    } finally {
+      release();
+    }
+  });
+
+  it('refuses an oversized key package body and a two-package answer as final (#863 M1)', async () => {
+    const { server, web, device, keyring } = await member();
+    await web.putScope('scope-a', [device]);
+    server.e2ee.packageResponse = [{ pad: 'x'.repeat(MEMBER_OBJECT_MAX_BYTES) }];
+    await expect(keyring.fetch('scope-a', 1)).rejects.toMatchObject({
+      name: 'E2eeMemberClientError', final: true, message: `key package read returned a body larger than ${MEMBER_OBJECT_MAX_BYTES} bytes`,
+    });
+    server.e2ee.packageResponse = [{}, {}];
+    await expect(keyring.fetch('scope-a', 1)).rejects.toMatchObject({
+      name: 'E2eeMemberClientError', final: true, message: 'key package read returned more than one package',
+    });
+    expect(keyring.cached('scope-a', 1)).toBeUndefined();
+  });
+
+  it('refuses a chain page body over its byte cap as final', async () => {
+    const { server, keyring } = await member();
+    server.e2ee.chainResponse = [{ pad: 'x'.repeat(MEMBER_CHAIN_PAGE_MAX_BYTES) }];
+    await expect(keyring.catchUp()).rejects.toMatchObject({
+      name: 'E2eeMemberClientError', final: true, message: `member chain read returned a body larger than ${MEMBER_CHAIN_PAGE_MAX_BYTES} bytes`,
+    });
+  });
+
+  it('lets the status decide an error whose body is over the 1 KiB cap', async () => {
+    const { server, web, device, keyring } = await member();
+    await web.putScope('scope-a', [device]);
+    server.e2ee.rejectPackageReads = 403;
+    server.e2ee.rejectPackageBody = { error: 'forbidden', pad: 'x'.repeat(2048) };
+    await expect(keyring.fetch('scope-a', 1)).rejects.toMatchObject({
+      name: 'E2eeMemberClientError', final: true, status: 403, code: undefined, message: 'key package read failed with HTTP 403',
+    });
   });
 
   it('ends the member when the chain removes this device', async () => {
