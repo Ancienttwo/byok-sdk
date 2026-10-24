@@ -176,8 +176,9 @@ export class HostedCollaborationStore {
       const command: Command = kind === 'owner_input'
         ? { kind: 'receive', inbound: kind, key, botId: conversation.id, request: message.text, sender: from }
         : { kind: 'receive', inbound: kind, key, roomId: conversation.id, text: message.text, mentions: message.mentions, from };
+      // The key is always set, so a caller's port never reaches the command, even through a cast.
       const result = await this.commitIn(scope, { scope, commandId: hash(['receive', key]), command }, (state, publish) =>
-        ({ ...ports(state, publish), ...(this.channel ? { remember: (root: string) => rememberInbound(state, message, root) } : {}) }));
+        ({ ...ports(state, publish), remember: this.channel ? (root: string) => rememberInbound(state, message, root) : undefined }));
       return { kind, id: turnOf(result) };
     }
     if (kind === 'bot_background') {

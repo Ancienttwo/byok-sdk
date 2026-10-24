@@ -27,6 +27,9 @@ describe.skipIf(POSTGRES_URL === undefined)('H inbound channel entry on real Pos
   beforeAll(async () => { opened = await openStore(); });
   afterAll(async () => { await opened?.close(); });
 
+  const commandKeys = async (scope: string) => (await opened!.pool.query<{ key: string }>(
+    `SELECT key FROM "${store().schema}".command WHERE scope = $1 ORDER BY key`, [storedKey(scope)])).rows.map(row => JSON.parse(row.key) as string);
+
   async function scoped(channel: boolean, seed: (state: CollaborationState) => void = seedCollaboration) {
     const on = new HostedCollaborationStore(opened!.pool, store().schema, { channel });
     const scope = `tenant:${randomUUID()}`;
@@ -52,6 +55,14 @@ describe.skipIf(POSTGRES_URL === undefined)('H inbound channel entry on real Pos
     expect((await on.read(scope)).channel?.inbounds ?? {}).toEqual({});
   });
 
+  it('never calls a remember port that a caller slips past the type, with no channel', async () => {
+    const { on, scope } = await scoped(false), called: string[] = [];
+    const slipped = ((...args: Parameters<CommitPortsFactory>) => ({ ...vectorPorts(...args), remember: (root: string) => { called.push(root); } })) as unknown as CommitPortsFactory;
+    expect(await on.receive(scope, message({ replyRoute: REPLY }), IDENTITY, slipped)).toMatchObject({ kind: 'owner_input' });
+    expect(called).toEqual([]);
+    expect((await on.read(scope)).channel?.inbounds ?? {}).toEqual({});
+  });
+
   it('takes a human message in a room as room input, and replays a redelivery', async () => {
     const { on, scope } = await scoped(true, room);
     const human = message({ conversation: GROUP, sender: { id: 'alice', kind: 'human' }, mentions: ['main'] });
@@ -73,6 +84,8 @@ describe.skipIf(POSTGRES_URL === undefined)('H inbound channel entry on real Pos
     const state = await on.read(scope);
     expect(state.team.rooms.r1!.messages).toEqual([expect.objectContaining({ from: 'other-bot', text: 'Hi' })]);
     expect(JSON.parse(state.team.rounds[first.id!]!.input)).toMatchObject({ mentions: [] });
+    // The command id is L roomInput's.
+    expect(await commandKeys(scope)).toEqual([hash(['room_input', 'r1', inboundKey(bot)])]);
     const before = await on.dump(scope);
     expect(await on.receive(scope, bot, IDENTITY, vectorPorts)).toEqual(first);
     expect(await on.dump(scope)).toBe(before);
@@ -105,6 +118,14 @@ describe.skipIf(POSTGRES_URL === undefined)('H inbound channel entry on real Pos
       expect(await on.receive(scope, inbound, IDENTITY, vectorPorts)).toEqual({ kind });
       expect((await on.read(scope)).audit).toEqual([...before.audit, line, line]);
     }
+  });
+
+  it('cuts an audit line at 1024 characters, as L, for an audit kind and an unmatched echo', async () => {
+    const { on, scope } = await scoped(true), long = 'x'.repeat(1100);
+    await on.receive(scope, message({ sender: { id: 'mallory', kind: 'human' }, platformMessageId: long }), IDENTITY, vectorPorts);
+    await on.receive(scope, message({ sender: { id: 'own-bot', kind: 'bot' }, platformMessageId: long, text: '' }), IDENTITY, vectorPorts);
+    expect((await on.read(scope)).audit.slice(-2)).toEqual([`Inbound not_owner: fake direct:main ${long}`.slice(0, 1024),
+      `Delivery unmatched_echo: fake ${long}`.slice(0, 1024)]);
   });
 
   it('accepts the one delivery that an echo names, settles its outbox row, and audits an echo that names none', async () => {
