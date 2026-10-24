@@ -2,7 +2,7 @@ import type { Pool, PoolClient } from 'pg';
 import { canonical, hash, occurrenceRun, taskId, time, type Conclusion, type ExecutionTemplate, type FrozenInput, type Json,
   type Routine } from '@byok-sdk/example-host-execution-core';
 import { botRoutines, endable, owned, routineTurn, updateDefinition, type BotRoutineInput } from '@byok-sdk/example-bot-collaboration/routines';
-import { requireMain } from '@byok-sdk/example-bot-collaboration/team';
+import { applyManagement, requireMain, updateBot, writeSnapshotBot } from '@byok-sdk/example-bot-collaboration/team';
 import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, type CoalescePolicy, type InputFields } from '@byok-sdk/example-bot-collaboration/coalesce';
 /** A K8 `update_routine` action. */
 type UpdateRoutineAction = Parameters<typeof updateDefinition>[2];
@@ -22,7 +22,8 @@ import type { RetentionInput, RetentionLimits, RetentionResult } from '@byok-sdk
 import { classifyInbound, inboundKey, verified, type ChannelPort, type Delivery, type InboundClass, type InboundMessage, type PushRoute,
   type ReplyRoute } from '@byok-sdk/example-bot-collaboration/channel';
 import { acceptDeliveryEcho, readbackDelivery, recoverDelivery, settleDelivery, startDelivery, unknownDelivery } from '@byok-sdk/example-bot-collaboration/delivery';
-import { cleanReplyTokens, deliveryRoute, echoCandidates, refuseRoute, rememberInbound } from '@byok-sdk/example-bot-collaboration/delivery-routing';
+import { cleanReplyTokens, deliveryRoute, echoCandidates, enablePush, refuseRoute, rememberInbound, resendUnknown,
+  revokePush } from '@byok-sdk/example-bot-collaboration/delivery-routing';
 import { assemble, entryGroup, split, storedKey, type EntityKind, type EntryKind, type Split } from './layout';
 
 /** A stored scope row of a store version that this code does not support. Nothing was written. */
@@ -36,30 +37,26 @@ type Decide<T> = (state: CollaborationState, publish: Publish, client: PoolClien
 type TurnHistory = NonNullable<SyncOptions<never>['history']>;
 /**
  * The sync options of a scope. In history mode, `history` holds the rows of each Turn that may freeze, by Turn id.
- * The store reads the routines itself (#793 D2f). The delegation timers are store options (#793 S4).
+ * The store reads the routines itself (#793 D2f). The delegation timers are store options (#793 S4). The model names and the
+ * read-only toolsets come from the scope's Host config (#793 S9).
  */
-export type HostedSyncOptions = Omit<SyncOptions<never>, 'history' | 'routines'> & { history?: ReadonlyMap<string, TurnHistory> };
+export type HostedSyncOptions = Omit<SyncOptions<never>, 'history' | 'routines' | 'models' | 'readOnlyToolsets'>
+  & { history?: ReadonlyMap<string, TurnHistory> };
 /** `dueAt`: the scope's due time after the sync, the value that it wrote to `scope.due_at` (#793 S4). */
 export interface SyncResult { dueAt: number | null }
 /**
- * Builds the command ports on the state of the open commit. `publish` writes a projection in the same commit. The store
- * reads the intent facts itself, under the scope lock (#793 D2f-4), and owns the channel outbox port (#793 D2b-out-2).
- * The message consumer and the internal `commitIn` take these ports.
+ * The Host config of one scope, as L's `BotOptions.models` and `readOnlyToolsets` (#793 S9). A model template carries the
+ * device that a new Bot runs on, so each scope has its own: the user's own devices.
  */
-export type PortsFactory = (state: CollaborationState, publish: Publish) => Omit<CommandPorts, 'intents' | 'deliver'>;
+export interface HostConfig { models: Record<string, ExecutionTemplate>; readOnlyToolsets?: readonly string[] }
+/** The outcome ports of the routine actions of a callback command. The store builds the committed intents and `manage`. */
+export type OutcomeRoutinePorts = Omit<NonNullable<CommandPorts['outcome']>, 'committed' | 'manage'>;
 /**
- * The ports of `commit()`. It refuses the callback commands, so it takes no callback ports (#793 D2f-6). The store owns the
- * inbound `remember` port, which only `receive()` gives (#793 D2b-out-3), the input admission, with its coalesce policy, and
- * the `routines` port of `end_routine` (§55c).
+ * The command ports that the store builds on the state of the open transaction, as L `commitOwner` builds them (K8 host.ts),
+ * from the scope's Host config. `manage` is the outcome team management of one task. No caller supplies a port (#793 S9).
  */
-export type CommitPorts = Omit<CommandPorts, 'intents' | 'deliver' | 'outcome' | 'occurrence' | 'remember' | 'admitInput' | 'routines'>
-  & { outcome?: never; occurrence?: never; remember?: never; admitInput?: never; routines?: never };
-export type CommitPortsFactory = (state: CollaborationState, publish: Publish) => CommitPorts;
-/**
- * The ports of `finish()`: the commit ports and the team management port of an outcome. The store builds the committed
- * intents and the routine ports of the outcome itself (#793 D2f-6).
- */
-export type FinishPortsFactory = (state: CollaborationState, publish: Publish) => CommitPorts & { manage: NonNullable<CommandPorts['outcome']>['manage'] };
+export type StorePorts = Omit<CommandPorts, 'intents' | 'deliver' | 'outcome' | 'occurrence' | 'remember' | 'admitInput' | 'routines'>
+  & { manage(taskId: string): NonNullable<CommandPorts['outcome']>['manage'] };
 /** The K4 callback commands. Only `finish`, `consume` and `fire` build them. */
 const CALLBACK_KINDS = new Set<Command['kind']>(['outcome', 'message', 'occurrence']);
 /** `commit()` takes no K4 callback command (#793 D2f-6). Nothing was written: no scope row and no command record. */
@@ -82,6 +79,8 @@ export class InboundCommandError extends Error {
  */
 export interface InboundIdentity { owner: string; self?: Record<string, readonly string[]> }
 export interface HostedStoreOptions {
+  /** The Host config of a scope: its model templates and read-only toolsets (#793 S9). Every port and sync reads it. */
+  host: (scope: string) => HostConfig;
   /** The Host has a channel: a K4 callback queues its channel deliveries, as L does with `channel` set. */
   channel?: boolean;
   /**
@@ -138,7 +137,10 @@ export class HostedCollaborationStore {
   private readonly channel: boolean;
   private readonly coalesce?: CoalescePolicy;
   private readonly timers: DelegationTimers | undefined;
-  constructor(private readonly pool: Pool, readonly schema: string, options: HostedStoreOptions = {}) {
+  private readonly host: (scope: string) => HostConfig;
+  constructor(private readonly pool: Pool, readonly schema: string, options: HostedStoreOptions) {
+    if (typeof options?.host !== 'function') throw new Error('The Host config of each scope is required');
+    this.host = options.host;
     this.channel = options.channel === true;
     // The ContextPack budget comes with each sync, so the construction checks every bound except that one.
     if (options.coalesce) this.coalesce = coalescePolicy(options.coalesce, Number.MAX_SAFE_INTEGER);
@@ -173,11 +175,13 @@ export class HostedCollaborationStore {
    *
    * `end_routine` (§55c) runs on the routine slice of the scope, as L `endRoutine` runs K4 `setLifecycle` in its commit: the store
    * gives the K8 rule its `routines` port, and a new acceptance writes the slice back.
+   *
+   * The store builds every command port from the scope's Host config (#793 S9). `clock` is the Host clock.
    */
-  commit(scope: string, request: CommitRequest<Command>, ports: CommitPortsFactory): Promise<CommitResult> {
+  commit(scope: string, request: CommitRequest<Command>, clock: () => number): Promise<CommitResult> {
     if (CALLBACK_KINDS.has(request.command.kind)) return Promise.reject(new CallbackCommandError(request.command.kind));
     if (request.command.kind === 'receive') return Promise.reject(new InboundCommandError());
-    return this.commitIn(scope, request, ports);
+    return this.commitWith(scope, request, clock);
   }
 
   /**
@@ -193,15 +197,15 @@ export class HostedCollaborationStore {
    * Returns the kind, and the Turn id of an input. The authenticated command entry calls it with the scope of its owner,
    * and with `identity` from the Host's configuration, never from the message.
    */
-  async receive(scope: string, message: InboundMessage, identity: InboundIdentity, ports: CommitPortsFactory): Promise<{ kind: InboundClass; id?: string }> {
+  async receive(scope: string, message: InboundMessage, identity: InboundIdentity, clock: () => number): Promise<{ kind: InboundClass; id?: string }> {
     const kind = classifyInbound(message, identity.owner, identity.self), { channel, conversation, platformMessageId, sender } = message;
     const turnOf = (result: CommitResult) => {
       if (result.disposition.outcome !== 'accepted') throw new Error(`Inbound refused: ${JSON.stringify(result.disposition)}`);
       return result.disposition.value as string;
     };
     if (kind === 'echo') {
-      await this.change(scope, undefined, async (state, publish, client) => {
-        const now = ports(state, publish).now(), matches = echoCandidates(state, message);
+      await this.change(scope, undefined, async (state, _publish, client) => {
+        const now = clock(), matches = echoCandidates(state, message);
         if (matches.length !== 1 || !acceptDeliveryEcho(matches[0]!, platformMessageId)) state.audit.push(`Delivery unmatched_echo: ${channel} ${platformMessageId}`.slice(0, 1024));
         cleanReplyTokens(await intentConclusions(client, scope), state, now);
         return { value: undefined, outbox: [], now };
@@ -213,39 +217,46 @@ export class HostedCollaborationStore {
       const command: Command = kind === 'owner_input'
         ? { kind: 'receive', inbound: kind, key, botId: conversation.id, request: message.text, sender: from }
         : { kind: 'receive', inbound: kind, key, roomId: conversation.id, text: message.text, mentions: message.mentions, from };
-      // The key is always set, so a caller's port never reaches the command, even through a cast.
-      const result = await this.commitIn(scope, { scope, commandId: hash(['receive', key]), command }, (state, publish) =>
-        ({ ...ports(state, publish), remember: this.channel ? (root: string) => rememberInbound(state, message, root) : undefined }));
+      const result = await this.commitWith(scope, { scope, commandId: hash(['receive', key]), command }, clock,
+        state => ({ remember: this.channel ? (root: string) => rememberInbound(state, message, root) : undefined }));
       return { kind, id: turnOf(result) };
     }
     if (kind === 'bot_background') {
       // R5: a bot message is room background. Its mention entities select no seat.
       const key = inboundKey(message);
-      const result = await this.commitIn(scope, { scope, commandId: hash(['room_input', conversation.id, key]),
-        command: { kind: 'room_input', key, roomId: conversation.id, text: message.text, mentions: [], from: sender!.id } }, ports);
+      const result = await this.commitWith(scope, { scope, commandId: hash(['room_input', conversation.id, key]),
+        command: { kind: 'room_input', key, roomId: conversation.id, text: message.text, mentions: [], from: sender!.id } }, clock);
       return { kind, id: turnOf(result) };
     }
     const who = verified(sender) ? ` ${sender.kind}:${sender.id}` : '';
-    await this.change(scope, undefined, async (state, publish) => {
+    await this.change(scope, undefined, async state => {
       state.audit.push(`Inbound ${kind}: ${channel} ${conversation.kind}:${conversation.id} ${platformMessageId}${who}`.slice(0, 1024));
-      return { value: undefined, outbox: [], now: ports(state, publish).now() };
+      return { value: undefined, outbox: [], now: clock() };
     });
     return { kind };
   }
 
   /**
-   * The commit body, which takes the callback commands too, with the caller's outcome ports. Host code only: the shared K8
-   * vectors reach it through a test subclass, as L's vector subject commits through `commitInLedger`.
+   * The commit body, which takes the callback commands too, with the given routine ports of an outcome. Host code only: the
+   * shared K8 vectors reach it through a test subclass, as L's vector subject commits through `commitInLedger`.
    */
-  protected commitIn(scope: string, request: CommitRequest<Command>, ports: PortsFactory): Promise<CommitResult> {
+  protected commitIn(scope: string, request: CommitRequest<Command>, clock: () => number, outcome?: OutcomeRoutinePorts): Promise<CommitResult> {
+    const command = request.command;
+    return this.commitWith(scope, request, clock, (_state, ports) => outcome && command.kind === 'outcome'
+      ? { outcome: { manage: ports.manage(command.taskId), ...outcome } } : {});
+  }
+
+  /** One commit with the store's ports and `extra`, the ports that only the store's own entries add. */
+  private commitWith(scope: string, request: CommitRequest<Command>, clock: () => number,
+    extra?: (state: CollaborationState, ports: StorePorts) => { remember?: CommandPorts['remember']; outcome?: Omit<NonNullable<CommandPorts['outcome']>, 'committed'> }): Promise<CommitResult> {
     const key = storedKey(scope);
     return this.change(scope, request.commandId, async (state, publish, client) => {
       // The store admits each input with its own policy, as L does (K8 host.ts `commitOwner`), so the admission and the sync's
-      // seal use one policy. The keys are always set, so a caller's port never reaches the command, even through a cast.
-      const own = ports(state, publish), head = revisionOf(state);
+      // seal use one policy.
+      const { manage, ...own } = this.ports(scope, state, publish, clock), head = revisionOf(state);
       const slice = request.command.kind === 'end_routine' ? await loadSlice(client, key) : undefined;
       const commands = slice && hostedRoutineCommands(slice, own.now());
-      const base = { ...own, admitInput: (fields: InputFields) => admitUserInput(state, fields, this.coalesce, own.now()),
+      const base = { ...own, ...extra?.(state, { ...own, manage }), admitInput: (fields: InputFields) => admitUserInput(state, fields, this.coalesce, own.now()),
         routines: commands && { end: (id: string) => commands.lifecycle(endable(commands.list(), id).definition.id, 'completed') } };
       const result = await commitStored(client, scope, state, request, base, this.channel);
       // A new commit moves the head by 1. A replay returns its first result and writes nothing.
@@ -263,6 +274,23 @@ export class HostedCollaborationStore {
       }
       return { value: result, outbox: result.outbox, now: base.now() };
     });
+  }
+
+  /**
+   * The command ports of one transaction on `state`, from the scope's Host config, as L `commitOwner` and `applyOutcome` build
+   * them (K8 host.ts). The route ports exist only with a channel.
+   */
+  private ports(scope: string, state: CollaborationState, publish: Publish, now: () => number): StorePorts {
+    const { models, readOnlyToolsets = [] } = this.host(scope);
+    return { now, publish,
+      updatePersona: (botId, persona) => updateBot(state, { botId, persona }, models, readOnlyToolsets),
+      teamBot: row => writeSnapshotBot(state, row, models, readOnlyToolsets),
+      ...(this.channel ? { routes: {
+        enable: (conversation, channel, target, owner) => enablePush(state, conversation, channel, target, owner, now()).id,
+        revoke: routeId => revokePush(state, routeId, now()),
+        resend: deliveryId => resendUnknown(state, deliveryId, now()).id,
+      } } : {}),
+      manage: taskId => (turn, outcome, managed) => applyManagement(state, turn.botId, taskId, outcome, models, managed, readOnlyToolsets) };
   }
 
   /**
@@ -322,7 +350,7 @@ export class HostedCollaborationStore {
   async sync(scope: string, options: HostedSyncOptions): Promise<SyncResult> {
     // As L checks its coalesce policy against its ContextPack budget (K8 host.ts constructor).
     if (this.coalesce) coalescePolicy(this.coalesce, options.limits.contextMaxBytes);
-    const key = storedKey(scope);
+    const key = storedKey(scope), config = this.host(scope), models = Object.keys(config.models), readOnlyToolsets = config.readOnlyToolsets ?? [];
     return this.change(scope, undefined, async (state, publish, client) => {
       const published = new Set<string>();
       const slice = await loadSlice(client, key), routines = botRoutines(Object.values(slice.state.routines));
@@ -343,7 +371,7 @@ export class HostedCollaborationStore {
         const facts = await syncFacts(client, scope, Object.keys(state.turns));
         const steps: Array<[Turn, SyncStep<ExecutionTemplate>]> = [];
         for (const turn of Object.values(state.turns)) {
-          const step = syncTurn(state, turn, facts, { ...options, routines, history: options.history?.get(turn.id) }, emit);
+          const step = syncTurn(state, turn, facts, { ...options, models, readOnlyToolsets, routines, history: options.history?.get(turn.id) }, emit);
           if (step) steps.push([turn, step]);
         }
         more = false;
@@ -444,11 +472,12 @@ export class HostedCollaborationStore {
    * command. A scope with no row has no task, so it is refused with nothing written. A throw writes nothing and leaves the
    * SDK admission pending.
    */
-  consume(scope: string, input: AgentMessageInput, ports: PortsFactory): Promise<MessageDecision> {
+  consume(scope: string, input: AgentMessageInput, clock: () => number): Promise<MessageDecision> {
     const key = storedKey(scope);
     return this.transaction(async client => {
       if (!(await client.query('SELECT 1 FROM scope WHERE scope = $1', [key])).rows[0]) return { outcome: 'refused', reasonCode: 'unknown_task' };
-      return this.decideIn(client, key, messageCommandId(input), (state, publish) => decideMessage(client, scope, state, publish, input, ports, this.channel));
+      return this.decideIn(client, key, messageCommandId(input), (state, publish) => decideMessage(client, scope, state, input,
+        this.ports(scope, state, publish, clock), this.channel));
     }, false);
   }
 
@@ -457,9 +486,9 @@ export class HostedCollaborationStore {
    * projections and the intent's conclusion commit together, under the scope lock. Returns the conclusion that it wrote,
    * or nothing when the intent already had one. A throw writes nothing.
    */
-  finish(scope: string, turnId: string, evidence: TaskEvidence, ports: FinishPortsFactory): Promise<Conclusion | undefined> {
+  finish(scope: string, turnId: string, evidence: TaskEvidence, clock: () => number): Promise<Conclusion | undefined> {
     return this.transaction(client => this.decideIn(client, storedKey(scope), evidence.terminal.envelope.task_id,
-      (state, publish) => decideFinish(client, scope, turnId, state, publish, evidence, ports, this.channel)), false);
+      (state, publish) => decideFinish(client, scope, turnId, state, evidence, this.ports(scope, state, publish, clock), this.channel)), false);
   }
 
   /**

@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Breaking (examples)** — the hosted collaboration store builds every
+  command port itself, from a per-scope Host config (#793 S9).
+  `new HostedCollaborationStore(pool, schema, { host })` requires
+  `host(scope) → { models, readOnlyToolsets }`, L's `models` and
+  `readOnlyToolsets`; a model template carries the device that a new Bot runs
+  on, so each scope has its own. The store builds `updatePersona`, `teamBot`,
+  the outcome's `manage` and, with `{ channel: true }`, the push route ports,
+  as L's owner commands and outcomes do. `commit`, `receive`, `consume` and
+  `finish` take the Host clock in place of a ports factory;
+  `hostedMessageConsumer` takes `now` and `HostedReconciler` no longer takes
+  `ports`. `HostedSyncOptions` drops `models` and `readOnlyToolsets`: the sync
+  reads them from the same config. `CommitPorts`, `CommitPortsFactory`,
+  `FinishPortsFactory` and `PortsFactory` are gone.
+
 ## 0.30.1 — source candidate
 
 0.30.1 is a PATCH release under a one-release exception to the pre-1.0

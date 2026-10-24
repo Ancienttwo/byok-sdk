@@ -8,7 +8,7 @@ import { RETENTION_NOW, retentionVectors, type RetentionSubject } from '@byok-sd
 import { seedCollaboration, SYNC_OPTIONS } from '@byok-sdk/example-bot-collaboration/test-support';
 import { freezeIntent } from './intents';
 import { storedKey } from './layout';
-import { vectorPorts } from './memory-subject.test-support';
+import { vectorClock } from './memory-subject.test-support';
 import { hostedMessageConsumer, type AgentMessageInput } from './messages';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import { inSchema, lockScope } from './store';
@@ -23,7 +23,7 @@ async function hosted(): Promise<RetentionSubject> {
   await store().seed(scope, state => seedCollaboration(state));
   return {
     scope,
-    commit: request => store().commit(scope, request, vectorPorts),
+    commit: request => store().commit(scope, request, vectorClock),
     retain: (input, limits) => store().retain(scope, input, limits),
     change: edit => store().seed(scope, edit),
     stored: () => store().dump(scope),
@@ -42,7 +42,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H retention on real Postgres (#793 
   retentionVectors('H HostedCollaborationStore on Postgres', hosted);
 
   const execution = { ...template('device'), agentMessageContext: { destinationBinding: 'one' } };
-  const consumer = () => hostedMessageConsumer(store(), { scopeOf: tenant => tenant, ports: vectorPorts });
+  const consumer = () => hostedMessageConsumer(store(), { scopeOf: tenant => tenant, now: vectorClock });
   /** A scope whose Turn `turnId` has a frozen intent, and the SDK input of its first reply. */
   async function messaged(turnId: string) {
     const h = await hosted();
