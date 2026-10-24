@@ -6,8 +6,8 @@ import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, ty
 /** A K8 `update_routine` action. */
 type UpdateRoutineAction = Parameters<typeof updateDefinition>[2];
 import { stateOf, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
-import { collaborationDue, commitCommand, settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers, type SyncOptions,
-  type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import { collaborationDue, commitCommand, expireCards, reportCardDecisions, settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers,
+  type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { activeBinding, bindDevice, revokeDevice } from './binding';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
@@ -303,11 +303,12 @@ export class HostedCollaborationStore {
    *
    * Each round then runs the K8 delegation settlement at L's position, after the Turn steps (K8 host.ts sync), on the intent
    * facts read again after those steps wrote. Then it delivers each new delegation cancel fact in the same transaction, as
-   * the L pass does after its sync (#793 D2f-5).
+   * the L pass does after its sync (#793 D2f-5). The K8 card steps run at L's positions too (#793 S5): `expireCards` before
+   * the Turn steps, and `reportCardDecisions` after the settlement. A decided card's `action_result` Turn starts a new round.
    *
    * It runs to a fixed point, as the L pass drains again after a step that changed K4 (K8 host.ts pass): while a round
    * froze, promoted or concluded an intent or an occurrence, delivered a cancel fact, or added a Turn (the `bot_reply` of a
-   * batch join), it reads the facts again and runs the Turns again. Each such step happens once per intent, occurrence,
+   * batch join, or an `action_result`), it reads the facts again and runs the Turns again. Each such step happens once per intent, occurrence,
    * fact or join, so the rounds end.
    */
   async sync(scope: string, options: HostedSyncOptions): Promise<SyncResult> {
@@ -322,6 +323,8 @@ export class HostedCollaborationStore {
       while (more) {
         // As L's sync, a batch sealed here gets its Turn's step in this round, before later Turns of its Bot.
         sealDueBatches(state, this.coalesce, options.now);
+        // As L's sync, card expiry runs before the Turn steps, so a ContextPack frozen in this round shows it.
+        expireCards(state, options.now);
         const facts = await syncFacts(client, scope, Object.keys(state.turns));
         const steps: Array<[Turn, SyncStep<ExecutionTemplate>]> = [];
         for (const turn of Object.values(state.turns)) {
@@ -332,6 +335,7 @@ export class HostedCollaborationStore {
         for (const [turn, step] of steps) more = await writeSyncStep(client, scope, turn, step, slice, options.now) || more;
         const turns = Object.keys(state.turns).length;
         settleDelegations(state, await settleFacts(client, scope, Object.keys(state.turns)), options.now, emit, this.timers);
+        reportCardDecisions(state, emit);
         more = await deliverCancels(client, scope, state, options.now) || Object.keys(state.turns).length > turns || more;
       }
       await writeSlice(client, key, slice);

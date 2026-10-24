@@ -265,7 +265,8 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
     async function received() {
       const channelStore = new HostedCollaborationStore(opened!.pool, store().schema, { channel: true });
       const scope = `tenant:${randomUUID()}`;
-      await channelStore.seed(scope, state => seedCollaboration(state));
+      // Card `c1` stays pending, so the sync queues no card projection beside the delivery.
+      await channelStore.seed(scope, state => { seedCollaboration(state); state.cards.c1!.expiresAt = Number.MAX_SAFE_INTEGER; });
       await channelStore.bindDevice(scope, 'device');
       // A push route exists too: a view that missed a concluded intent, or saw a conclusion too early, would choose the other route.
       const unused = () => { throw new Error('Unused route port'); };
