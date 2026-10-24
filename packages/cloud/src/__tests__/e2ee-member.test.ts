@@ -278,7 +278,7 @@ describe('E2EE member control plane', () => {
 
   it('fails a stored row that is not a valid value with a typed error', async () => {
     const { cloud, store, clock, registerDevice } = setup();
-    await store.appendChainEntries(TENANT_A, { rows: [{ seq: 1, entry: '{"seq":1}' }], shreds: [] });
+    await store.appendChainEntries(TENANT_A, { rows: [{ seq: 1, entry: '{"seq":1}' }], rotations: [], shreds: [] });
     expect(await code(cloud.readMemberChain(TENANT_A))).toBe('e2ee_member_state_unreadable');
     await store.putScopeKeyPackages(TENANT_A, { rows: [{ scopeId: 'scope-1', epoch: 1, recipient: 'r', keyId: 'k', sender: 's', package: 'not json' }] });
     expect(await code(cloud.readScopeKeyPackages(TENANT_A, { scopeId: 'scope-1' }))).toBe('e2ee_member_state_unreadable');

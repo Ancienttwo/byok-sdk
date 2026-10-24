@@ -76,7 +76,7 @@ async function seed(devices: PostgresDeviceDirectory, store: PostgresE2eeMemberS
   expect(await store.registerMember(tenant, { deviceId, memberId, bundle: `{"memberId":"${memberId}"}`, deviceMac: 'mac', macExpiresAt: EXPIRES, request: freshRequest() })).toBe('registered');
   expect(await store.putClientPairingMac(tenant, { deviceId, body: '{"mac":"client"}', expiresAt: EXPIRES })).toBe('stored');
   expect(await store.putScopeKeyPackages(tenant, { rows: [{
-    scopeId: 'scope', epoch: 1, recipient: memberId, keyId: 'key', sender: memberId, package: `{"recipient":"${memberId}"}`,
+    scopeId: 'scope', epoch: 1, recipient: memberId, keyId: 'key', sender: memberId, package: `{"recipient":"${memberId}"}`, recipientKemEpoch: 1,
   }] })).toEqual({ outcome: 'stored', stored: 1 });
   return memberId;
 }
@@ -99,7 +99,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres device cleanup removes the device memb
       await expect(memberRows(scope.pool, TENANT_A, 'kept-device', kept)).resolves.toEqual({ member_key: 1, pairing_mac: 2, packages: 1 });
       await expect(memberRows(scope.pool, TENANT_B, 'other-device', other)).resolves.toEqual({ member_key: 1, pairing_mac: 2, packages: 1 });
       // The chain is tenant history: a revoke never edits it.
-      expect(await store.appendChainEntries(TENANT_A, { rows: [{ seq: 1, entry: '{}' }], shreds: [] })).toEqual({ outcome: 'appended', appended: 1, replayed: 0 });
+      expect(await store.appendChainEntries(TENANT_A, { rows: [{ seq: 1, entry: '{}' }], rotations: [], shreds: [] })).toEqual({ outcome: 'appended', appended: 1, replayed: 0 });
       await devices.revoke(TENANT_A, 'kept-device');
       expect(await store.readChainEntries(TENANT_A, { afterSeq: 0, limit: 256 })).toEqual([{ seq: 1, entry: '{}' }]);
     } finally {
@@ -117,7 +117,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres device cleanup removes the device memb
       const member = await seed(devices, store, TENANT_A, 'raced-device');
       // Store scope 'b' before scope 'a', so the table order is not the put order.
       for (const scopeId of ['b', 'a']) {
-        await store.putScopeKeyPackages(TENANT_A, { rows: [{ scopeId, epoch: 1, recipient: member, keyId: 'key', sender: member, package: '{}' }] });
+        await store.putScopeKeyPackages(TENANT_A, { rows: [{ scopeId, epoch: 1, recipient: member, keyId: 'key', sender: member, package: '{}', recipientKemEpoch: 1 }] });
       }
       const lock = 'SELECT 1 FROM e2ee_scope_key_package WHERE tenant_id = $1 AND scope_id = $2 AND epoch = 1 AND recipient = $3 FOR UPDATE';
       // The holder locks rows as a sorted put does: 'a', then 'b'.
@@ -158,7 +158,8 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres shred serializes with package puts of 
   // The store's lock identity for one (tenant, scope).
   const scopeLock = 'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))';
   const scopeKey = (scopeId: string) => JSON.stringify(['e2ee-scope', TENANT_A, scopeId]);
-  const row = (epoch: number, keyId: string) => ({ scopeId: 'scope', epoch, recipient: 'member', keyId, sender: 'member', package: `{"epoch":${epoch}}` });
+  const row = (epoch: number, keyId: string) =>
+    ({ scopeId: 'scope', epoch, recipient: 'member', keyId, sender: 'member', package: `{"epoch":${epoch}}`, recipientKemEpoch: 1 });
   const shred = { seq: 1, scopeId: 'scope', receipt: { key: 'e2ee-scope-shred:scope', body: '{"chainSeq":1}' } };
 
   it('locks the packages of every shredded scope in cleanup order, so a racing cleanup does not deadlock', async () => {
@@ -176,7 +177,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres shred serializes with package puts of 
       await holder.query(lock, [TENANT_A, 'a']);
       const appended = store.appendChainEntries(TENANT_A, {
         rows: [{ seq: 1, entry: '{"op":"shred","scope":"b"}' }, { seq: 2, entry: '{"op":"shred","scope":"a"}' }],
-        shreds: [{ ...shred, seq: 1, scopeId: 'b' }, { ...shred, seq: 2, scopeId: 'a', receipt: { key: 'e2ee-scope-shred:a', body: '{"chainSeq":2}' } }],
+        rotations: [], shreds: [{ ...shred, seq: 1, scopeId: 'b' }, { ...shred, seq: 2, scopeId: 'a', receipt: { key: 'e2ee-scope-shred:a', body: '{"chainSeq":2}' } }],
       });
       await waitForLockWait(scope.pool);
       await holder.query(lock, [TENANT_A, 'b']);
@@ -198,7 +199,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres shred serializes with package puts of 
       // 512 random code points of three UTF-8 bytes each: 1536 bytes that do not compress.
       const scopeId = String.fromCodePoint(...Array.from({ length: E2EE_SCOPE_ID_MAX_LENGTH }, () => 0x4e00 + Math.floor(Math.random() * 0x5000)));
       const receipt = { key: `e2ee-scope-shred:${scopeId}`, body: '{"chainSeq":1}' };
-      await expect(store.appendChainEntries(TENANT_A, { rows: [{ seq: 1, entry: '{"op":"shred"}' }], shreds: [{ seq: 1, scopeId, receipt }] }))
+      await expect(store.appendChainEntries(TENANT_A, { rows: [{ seq: 1, entry: '{"op":"shred"}' }], rotations: [], shreds: [{ seq: 1, scopeId, receipt }] }))
         .resolves.toEqual({ outcome: 'appended', appended: 1, replayed: 0 });
       await expect(new PostgresRequestReceiptStore(scope.pool, createMutableClock()).get(TENANT_A, receipt.key)).resolves.toMatchObject({ body: receipt.body });
       await expect(store.putScopeKeyPackages(TENANT_A, { rows: [{ ...row(1, 'k1'), scopeId }] })).resolves.toEqual({ outcome: 'scope_shredded', scopeId });
@@ -237,7 +238,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres shred serializes with package puts of 
       // The holder is a put that has taken the scope lock and stores a new epoch.
       await holder.query('BEGIN');
       await holder.query(scopeLock, [scopeKey('scope')]);
-      const appended = store.appendChainEntries(TENANT_A, { rows: [{ seq: 1, entry: '{"op":"shred"}' }], shreds: [shred] });
+      const appended = store.appendChainEntries(TENANT_A, { rows: [{ seq: 1, entry: '{"op":"shred"}' }], rotations: [], shreds: [shred] });
       await waitForLockWait(scope.pool);
       await holder.query(`INSERT INTO e2ee_scope_epoch (tenant_id, scope_id, epoch, key_id) VALUES ($1, 'scope', 1, 'k1')`, [TENANT_A]);
       await holder.query(
@@ -257,6 +258,59 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres shred serializes with package puts of 
   });
 });
 
+describe.skipIf(SKIP_DATAPLANE)('Postgres rotate serializes with package puts to its member', () => {
+  const memberLock = 'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))';
+  const memberKey = JSON.stringify(['e2ee-member-kem', TENANT_A, 'member']);
+  const put = (store: PostgresE2eeMemberStore) => store.putScopeKeyPackages(TENANT_A, {
+    rows: [{ scopeId: 'scope', epoch: 1, recipient: 'member', keyId: 'k1', sender: 'member', package: '{}', recipientKemEpoch: 1 }],
+  });
+
+  it('makes a put wait for a rotate of its recipient, then refuses it', async () => {
+    const scope = await createDataplaneScope(4);
+    const holder = await scope.pool.connect();
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const store = new PostgresE2eeMemberStore(scope.pool, createMutableClock());
+      // The holder is a rotate that has taken the member lock and not yet committed.
+      await holder.query('BEGIN');
+      await holder.query(memberLock, [memberKey]);
+      const refused = put(store);
+      await waitForLockWait(scope.pool);
+      await holder.query(`INSERT INTO e2ee_member_kem_floor (tenant_id, member_id, kem_epoch, chain_seq) VALUES ($1, 'member', 2, 1)`, [TENANT_A]);
+      await holder.query('COMMIT');
+      await expect(refused).resolves.toEqual({ outcome: 'kem_epoch_stale', recipient: 'member', kemEpoch: 1, floor: 2 });
+      await expect(store.readScopeKeyPackages(TENANT_A, { scopeId: 'scope' })).resolves.toEqual([]);
+    } finally {
+      holder.release();
+      await scope.dispose();
+    }
+  });
+
+  it('makes a rotate wait for a put to its member, then raises the floor', async () => {
+    const scope = await createDataplaneScope(4);
+    const holder = await scope.pool.connect();
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const store = new PostgresE2eeMemberStore(scope.pool, createMutableClock());
+      // The holder is a put that has taken the member lock.
+      await holder.query('BEGIN');
+      await holder.query(memberLock, [memberKey]);
+      const appended = store.appendChainEntries(TENANT_A, {
+        rows: [{ seq: 1, entry: '{"op":"rotate"}' }], rotations: [{ seq: 1, memberId: 'member', kemEpoch: 2 }], shreds: [],
+      });
+      await waitForLockWait(scope.pool);
+      await holder.query('COMMIT');
+      await expect(appended).resolves.toEqual({ outcome: 'appended', appended: 1, replayed: 0 });
+      const floor = await scope.pool.query('SELECT kem_epoch::int AS kem_epoch, chain_seq::int AS chain_seq FROM e2ee_member_kem_floor WHERE tenant_id = $1', [TENANT_A]);
+      expect(floor.rows).toEqual([{ kem_epoch: 2, chain_seq: 1 }]);
+      await expect(put(store)).resolves.toEqual({ outcome: 'kem_epoch_stale', recipient: 'member', kemEpoch: 1, floor: 2 });
+    } finally {
+      holder.release();
+      await scope.dispose();
+    }
+  });
+});
+
 describe.skipIf(SKIP_DATAPLANE)('Postgres single-use device requests share proof_request_receipt with the truth put', () => {
   it('refuses an E2EE write whose requestId a truth put already used, and records an E2EE write there', async () => {
     const scope = await createDataplaneScope(2);
@@ -267,9 +321,9 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres single-use device requests share proof
         `INSERT INTO proof_request_receipt (tenant_id, device_id, request_id, operation, resource, body_sha256, body_size, response_status, response_body, recorded_at)
          VALUES ($1, 'dev-1', 'shared', 'truth.write', 'memory/key', 'sha256-truth', 5, 200, '{}', now())`, [TENANT_A]);
       const request = (requestId: string) => ({ requestId, operation: 'e2ee-member-chain.append', resource: '/byok/e2ee/chain', bodySha256: 'sha256-e2ee', bodySize: 7 });
-      expect(await store.appendChainEntries(TENANT_A, { rows: [{ seq: 1, entry: '{}' }], shreds: [], proof: { deviceId: 'dev-1', request: request('shared') } }))
+      expect(await store.appendChainEntries(TENANT_A, { rows: [{ seq: 1, entry: '{}' }], rotations: [], shreds: [], proof: { deviceId: 'dev-1', request: request('shared') } }))
         .toEqual({ outcome: 'request_conflict' });
-      expect(await store.appendChainEntries(TENANT_A, { rows: [{ seq: 1, entry: '{}' }], shreds: [], proof: { deviceId: 'dev-1', request: request('fresh') } }))
+      expect(await store.appendChainEntries(TENANT_A, { rows: [{ seq: 1, entry: '{}' }], rotations: [], shreds: [], proof: { deviceId: 'dev-1', request: request('fresh') } }))
         .toEqual({ outcome: 'appended', appended: 1, replayed: 0 });
       const stored = await scope.pool.query(
         `SELECT operation, resource, body_sha256, body_size::int AS body_size, response_status, response_body FROM proof_request_receipt
@@ -289,7 +343,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres single-use device requests share proof
       await migrate(scope.pool, DEPLOY_SQL);
       const store = new PostgresE2eeMemberStore(scope.pool, createMutableClock());
       const proof = { deviceId: 'dev-1', request: { requestId: 'parallel', operation: 'e2ee-member-chain.append', resource: '/byok/e2ee/chain', bodySha256: 'sha256-e2ee', bodySize: 7 } };
-      const append = () => store.appendChainEntries(TENANT_A, { rows: [{ seq: 1, entry: '{}' }], shreds: [], proof });
+      const append = () => store.appendChainEntries(TENANT_A, { rows: [{ seq: 1, entry: '{}' }], rotations: [], shreds: [], proof });
       expect(await Promise.all([append(), append()])).toEqual([
         { outcome: 'appended', appended: 1, replayed: 0 },
         { outcome: 'appended', appended: 1, replayed: 0 },
@@ -308,7 +362,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres single-use device requests share proof
       await migrate(scope.pool, DEPLOY_SQL);
       const store = new PostgresE2eeMemberStore(scope.pool, createMutableClock());
       const proof = { deviceId: 'dev-1', request: { requestId: 'corrupt', operation: 'e2ee-member-chain.append', resource: '/byok/e2ee/chain', bodySha256: 'sha256-e2ee', bodySize: 7 } };
-      const append = () => store.appendChainEntries(TENANT_A, { rows: [{ seq: 1, entry: '{}' }], shreds: [], proof });
+      const append = () => store.appendChainEntries(TENANT_A, { rows: [{ seq: 1, entry: '{}' }], rotations: [], shreds: [], proof });
       await append();
       await scope.pool.query(
         `UPDATE proof_request_receipt SET response_body = '{"outcome":"stored","stored":1}' WHERE tenant_id = $1 AND request_id = 'corrupt'`, [TENANT_A]);
