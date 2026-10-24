@@ -1,37 +1,41 @@
 /**
- * #654 E3c: a daemon with a scope keyring opens a sealed task's input and
- * seals its output. The keyring and the `sealed-payload-v1` advertisement
- * come only from the test seam of `buildDaemonWithAdapters`; a default
- * daemon never advertises the flag. The test plays the Host and the member:
- * it seals the input and opens the output with the same scope key.
+ * #654 E3c, E2d-3: a daemon that is a verified E2EE member opens a sealed
+ * task's input and seals its output with the keys of its member keyring.
+ * The test plays the Host and the web client member: it pairs the device
+ * with `pv`, creates the device scope with its key packages, seals the input
+ * and opens the output with the same scope key.
  */
 import { testScratchRoot } from './fixtures/execution-scratch';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { promises as fs, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { generateScopeKey, openSealedContent, sealContent, type SealedBinding } from '@byok-sdk/core/sealed-payload';
+import { openSealedContent, sealContent, type SealedBinding, type SealedCategory } from '@byok-sdk/core/sealed-payload';
 import {
   EnvelopeSchema,
+  HOST_MCP_TASK_CONTEXT_CAPABILITY,
   PROTOCOL_VERSION,
   SEALED_INLINE_MAX_PADDED_LENGTH,
   SEALED_PAYLOAD_MAX_CONTENT_LENGTH,
   SEALED_SPLIT_TABLE,
   createEnvelope,
+  decodeEnvelope,
   encodeEnvelope,
+  isSealedTaskPlainOutput,
   type Envelope,
   type MessageType,
   type SealedMessageType,
   type TaskSealing,
 } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildDaemonWithAdapters, createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
+import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { CursorStore } from '../daemon/cursor-store';
 import { journalHash } from '../daemon/journal/journal';
 import { DEFAULT_JOURNAL_BUSY_TIMEOUT_MS, JOURNAL_DB_FILENAME, SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
 import { openJournalDatabase } from '../daemon/journal/sqlite-support';
-import type { SealedScopeKeyring } from '../daemon/sealed-task';
+import { DeviceMemberKeyring } from '../daemon/e2ee-keyring';
 import { RuntimeExecutionFailure } from '../runtime-failure';
+import { E2eeWebClient } from './fixtures/e2ee-web-client';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 
@@ -39,8 +43,6 @@ const BUDGET_MS = 4_000;
 const TENANT = 'tenant-test';
 const SCOPE = 'scope-a';
 const EPOCH = 1;
-const SENDER = 'm'.repeat(43);
-const CHAIN_HEAD = { seq: 1, hash: `sha256:${'0'.repeat(64)}` };
 const BOTH: TaskSealing = { scopeId: SCOPE, epoch: EPOCH, categories: ['task-input', 'task-output'] };
 const OUTPUT_ONLY: TaskSealing = { scopeId: SCOPE, epoch: EPOCH, categories: ['task-output'] };
 
@@ -49,23 +51,19 @@ const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.e
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; payload: Record<string, unknown> });
 
-class TestKeyring implements SealedScopeKeyring {
-  readonly scopeKey = generateScopeKey();
-  sealing = true;
-  failing = false;
-  /** A sealing key waits for this, so a test can hold a seal open. */
-  gate: Promise<void> = Promise.resolve();
-  async openingKey(scope: { readonly id: string; readonly epoch: number }) {
-    if (this.failing) throw new Error('keyring store unavailable');
-    return scope.id === SCOPE && scope.epoch === EPOCH ? this.scopeKey : undefined;
-  }
-  async sealingKey(scopeId: string, minEpoch: number) {
-    await this.gate;
-    if (this.failing) throw new Error('keyring store unavailable');
-    return this.sealing && scopeId === SCOPE && minEpoch <= EPOCH
-      ? { scopeKey: this.scopeKey, epoch: EPOCH, sender: SENDER, chainHead: CHAIN_HEAD }
-      : undefined;
-  }
+/** The web client member and the scope key of the device scope it created. */
+interface ScopeMember {
+  readonly web: E2eeWebClient;
+  readonly scopeKey: Uint8Array;
+}
+
+/** The Host declares the E2EE member routes, so a verified member advertises sealed-payload-v1. */
+const E2EE_DECLARATION = { schema: 'byok-capabilities-v1', version: 1, capabilities: [HOST_MCP_TASK_CONTEXT_CAPABILITY, 'e2ee.member'] };
+/** A Host without the E2EE member routes: a verified member never advertises sealed-payload-v1 to it. */
+const NO_E2EE_DECLARATION = { ...E2EE_DECLARATION, capabilities: [HOST_MCP_TASK_CONTEXT_CAPABILITY] };
+
+function advertised(envelope: Envelope): boolean {
+  return envelope.type === 'conn.hello' && (envelope.payload as { capabilities: string[] }).capabilities.includes('sealed-payload-v1');
 }
 
 const dirs: string[] = [];
@@ -76,10 +74,10 @@ afterEach(async () => {
   await daemon?.stop(); daemon = undefined;
   await server?.close(); server = undefined;
   for (const dir of dirs.splice(0)) await fs.rm(dir, { recursive: true, force: true });
+  vi.restoreAllMocks();
 });
 
 async function start(options: {
-  keyring?: TestKeyring;
   serverFlag?: boolean;
   /** The server also holds sealed output blobs (`sealed-output-ciphertext-ref`). */
   ciphertextRef?: boolean;
@@ -87,7 +85,11 @@ async function start(options: {
   failureClass?: boolean;
   /** `false` runs the daemon without a hosted journal. */
   journal?: false;
-  beforeStart?: (storeDir: string, deviceId: string) => Promise<void>;
+  /** The categories of the device scope's policy. */
+  policy?: readonly SealedCategory[];
+  /** `false`: the Host does not declare `e2ee.member`, and start waits for the first hello only. */
+  e2ee?: false;
+  beforeStart?: (storeDir: string, deviceId: string, member: ScopeMember) => Promise<void>;
 } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-sealed-daemon-'));
   dirs.push(root);
@@ -103,29 +105,40 @@ async function start(options: {
     serverUrl: server.url, storeDir, workspaceRoot: path.join(root, 'workspace'),
     ...(options.journal === false ? {} : { hostedJournal: { mode: 'sqlite' as const } }),
   };
-  daemon = options.keyring === undefined
-    ? createDaemonWithAdapters(config, [adapter])
-    : buildDaemonWithAdapters(config, [adapter], {}, undefined, { keyring: options.keyring });
-  const { deviceId } = await daemon.pair('pair-code');
-  await options.beforeStart?.(storeDir, deviceId);
+  server.setCapabilityDeclaration(options.e2ee === false ? NO_E2EE_DECLARATION : E2EE_DECLARATION);
+  daemon = createDaemonWithAdapters(config, [adapter]);
+  const web = await E2eeWebClient.create(server.e2ee);
+  const { deviceId } = await daemon.pair('pair-code', { verificationSecret: web.verificationSecret });
+  const device = await web.approve(deviceId);
+  const member: ScopeMember = { web, scopeKey: await web.putScope(SCOPE, [device], { categories: options.policy ?? BOTH.categories }) };
+  await options.beforeStart?.(storeDir, deviceId, member);
   await daemon.start();
-  return { server, adapter, deviceId, storeDir, cursor: () => new CursorStore(storeDir).load(server!.url, deviceId) };
+  await server.waitFor(options.e2ee === false ? (envelope) => envelope.type === 'conn.hello' : advertised, BUDGET_MS);
+  return { server, adapter, deviceId, storeDir, member, device, cursor: () => new CursorStore(storeDir).load(server!.url, deviceId) };
+}
+
+/** A policy that drops the web client, and a notice that makes the device catch up: the epoch is stale now. */
+async function makeStale(member: ScopeMember, device: { readonly memberId: string }, cursor: () => Promise<number | undefined>): Promise<void> {
+  await member.web.append('scope-policy', { scopeId: SCOPE, categories: BOTH.categories, members: [device.memberId] });
+  const notice = createEnvelope('e2ee.key_package.available', { scopeId: SCOPE, epoch: EPOCH }, { seq: server!.nextSeq() });
+  server!.send(notice);
+  await vi.waitFor(async () => expect(await cursor()).toBe(notice.seq), BUDGET_MS);
 }
 
 function binding(family: MessageType, direction: SealedBinding['direction'], identity: SealedBinding['identity'], deviceId: string, sealing: TaskSealing): SealedBinding {
   return { tenantId: TENANT, family, direction, identity, deviceId, agentRef: null, categories: sealing.categories, notAfter: null };
 }
 
-async function sealedMember(keyring: TestKeyring, plaintext: Record<string, unknown>, bound: SealedBinding, category: 'task-input' | 'task-output' = 'task-input') {
+async function sealedMember(member: ScopeMember, plaintext: Record<string, unknown>, bound: SealedBinding, category: 'task-input' | 'task-output' = 'task-input') {
   const { header, ciphertext } = await sealContent({
-    scopeKey: keyring.scopeKey, scope: { id: SCOPE, epoch: EPOCH }, chainHead: CHAIN_HEAD, sender: SENDER,
+    scopeKey: member.scopeKey, scope: { id: SCOPE, epoch: EPOCH }, chainHead: member.web.head!, sender: member.web.member.memberId,
     category, binding: bound, plaintext: plaintext as never, maxContentLength: SEALED_PAYLOAD_MAX_CONTENT_LENGTH,
   });
   return { header, ciphertext };
 }
 
 async function sealedOffer(
-  keyring: TestKeyring, taskId: string, seq: number, deviceId: string, instruction: unknown, sealing = BOTH,
+  member: ScopeMember, taskId: string, seq: number, deviceId: string, instruction: unknown, sealing = BOTH,
   options: { plain?: Record<string, unknown>; boundSealing?: TaskSealing } = {},
 ): Promise<Envelope> {
   const plain = options.plain ?? {};
@@ -133,12 +146,12 @@ async function sealedOffer(
     return createEnvelope('task.offer_sealed', { ...plain, instruction, sealing } as never, { taskId, seq });
   }
   const bound = binding('task.offer', 'server-to-daemon', { taskId }, deviceId, options.boundSealing ?? sealing);
-  const { header, ciphertext } = await sealedMember(keyring, { instruction }, bound);
+  const { header, ciphertext } = await sealedMember(member, { instruction }, bound);
   return createEnvelope('task.offer_sealed', { ...plain, sealing, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never, { taskId, seq });
 }
 
 /** Opens a sealed output as a member would, with the binding the receiver builds. */
-async function openOutput(keyring: TestKeyring, envelope: Envelope, deviceId: string, sealing = BOTH) {
+async function openOutput(member: ScopeMember, envelope: Envelope, deviceId: string, sealing = BOTH) {
   const entry = SEALED_SPLIT_TABLE[envelope.type as SealedMessageType];
   const { sealed, ...kept } = envelope.payload as Record<string, unknown> & { sealed: Record<string, unknown> & { ciphertext?: string; ciphertextRef?: { blobId: string } } };
   const { ciphertext, ciphertextRef, ...header } = sealed;
@@ -146,7 +159,7 @@ async function openOutput(keyring: TestKeyring, envelope: Envelope, deviceId: st
   const opened = await openSealedContent({
     header,
     ciphertext: ciphertext !== undefined ? Buffer.from(ciphertext, 'base64url') : server!.blobContent(ciphertextRef!.blobId)!,
-    scopeKey: keyring.scopeKey,
+    scopeKey: member.scopeKey,
     binding: binding(entry.plainType, 'daemon-to-server', identity, deviceId, sealing),
     sealing: { scopeId: SCOPE, epoch: EPOCH },
     maxContentLength: SEALED_PAYLOAD_MAX_CONTENT_LENGTH,
@@ -160,34 +173,75 @@ function taskEnvelopes(taskId: string): Envelope[] {
 }
 
 describe('sealed payload v1 on the daemon (#654 E3c)', () => {
-  it('advertises sealed-payload-v1 only with the injected keyring', async () => {
-    const plain = await start();
-    const hello = await plain.server.waitFor((envelope) => envelope.type === 'conn.hello', BUDGET_MS);
-    expect((hello.payload as { capabilities: string[] }).capabilities).not.toContain('sealed-payload-v1');
-    await daemon!.stop(); daemon = undefined;
-    await server!.close(); server = undefined;
+  it('advertises sealed-payload-v1 only for a verified member on a Host that declares e2ee.member', async () => {
+    // No member: a daemon paired without pv never advertises.
+    server = await TestServer.start();
+    server.setCapabilityDeclaration(E2EE_DECLARATION);
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-sealed-daemon-'));
+    dirs.push(root);
+    daemon = createDaemonWithAdapters({
+      storage: { scratchRoot: testScratchRoot() },
+      localAgentRelease: { version: '0.0.0-test' }, productName: 'Sealed daemon test', productId: 'sealed-daemon-test',
+      serverUrl: server.url, storeDir: path.join(root, 'store'), workspaceRoot: path.join(root, 'workspace'),
+    }, [new StubRuntimeAdapter('pi')]);
+    await daemon.pair('pair-code');
+    await daemon.start();
+    await server.waitFor((envelope) => envelope.type === 'conn.hello', BUDGET_MS);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(server.received.filter(advertised)).toEqual([]);
+    await daemon.stop(); daemon = undefined;
+    await server.close(); server = undefined;
 
-    const sealed = await start({ keyring: new TestKeyring() });
-    const sealedHello = await sealed.server.waitFor((envelope) => envelope.type === 'conn.hello', BUDGET_MS);
-    expect((sealedHello.payload as { capabilities: string[] }).capabilities).toContain('sealed-payload-v1');
+    // A verified member: the first hello has no flag; a refreshed hello adds it.
+    const { server: sealed } = await start();
+    const hellos = sealed.received.filter((envelope) => envelope.type === 'conn.hello');
+    expect((hellos[0]!.payload as { capabilities: string[] }).capabilities).not.toContain('sealed-payload-v1');
+    expect(hellos.some(advertised)).toBe(true);
+  });
+
+  it('does not advertise sealed-payload-v1 for a verified member on a Host that does not declare e2ee.member', async () => {
+    const info = vi.spyOn(console, 'info');
+    const { server, adapter, deviceId, member } = await start({ e2ee: false });
+    await vi.waitFor(() => expect(info).toHaveBeenCalledWith(expect.stringMatching(/^\[byok\/client\] E2EE member \S+ verified/u)), BUDGET_MS);
+    // The verified member opens a sealed offer and runs it, and still no hello carries the flag.
+    server.send(await sealedOffer(member, 'undeclared', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    expect(server.received.filter(advertised)).toEqual([]);
+  });
+
+  it('withdraws sealed-payload-v1 when the chain removes the device', async () => {
+    const { server, member, device, cursor } = await start();
+    const hellosBefore = server.received.filter((envelope) => envelope.type === 'conn.hello').length;
+    await member.web.append('remove', { memberId: device.memberId });
+    const notice = createEnvelope('e2ee.key_package.available', { scopeId: SCOPE, epoch: EPOCH }, { seq: server.nextSeq() });
+    server.send(notice);
+    await vi.waitFor(async () => expect(await cursor()).toBe(notice.seq), BUDGET_MS);
+    const last = await vi.waitFor(() => {
+      const hellos = server.received.filter((envelope) => envelope.type === 'conn.hello');
+      expect(hellos.length).toBeGreaterThan(hellosBefore);
+      return hellos.at(-1)!;
+    }, BUDGET_MS);
+    expect(advertised(last)).toBe(false);
   });
 
   it('opens a sealed offer, runs it, and seals every output', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId, storeDir } = await start({ keyring });
+    const { server, adapter, deviceId, storeDir, member } = await start();
     const instruction = `secret instruction ${randomUUID()}`;
-    server.send(await sealedOffer(keyring, 'sealed-task', server.nextSeq(), deviceId, instruction));
+    // No notice reached the device: the first open fetches the package on its miss (E2d-e3).
+    expect(server.e2ee.packageReads).toBe(0);
+    server.send(await sealedOffer(member, 'sealed-task', server.nextSeq(), deviceId, instruction));
 
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    expect(server.e2ee.packageReads).toBe(1);
     expect(adapter.startCalls[0]!.task.instruction).toBe(instruction);
     adapter.sessions[0]!.emit({ type: 'progress', text: 'secret progress' });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
 
     const complete = await server.waitFor((envelope) => envelope.type === 'task.complete_sealed', BUDGET_MS);
-    expect(await openOutput(keyring, complete, deviceId)).toMatchObject({ summary: 'secret progress' });
+    expect(await openOutput(member, complete, deviceId)).toMatchObject({ summary: 'secret progress' });
     const progress = taskEnvelopes('sealed-task').filter((envelope) => envelope.type === 'task.progress_sealed');
     expect(progress.length).toBeGreaterThan(0);
-    expect(JSON.stringify((await openOutput(keyring, progress[0]!, deviceId)).events)).toContain('secret progress');
+    expect(JSON.stringify((await openOutput(member, progress[0]!, deviceId)).events)).toContain('secret progress');
 
     const types = taskEnvelopes('sealed-task').map((envelope) => envelope.type);
     expect(types).not.toContain('task.progress');
@@ -202,39 +256,85 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     } finally { db.close(); }
   });
 
-  it('seals the output of a task whose instruction is plaintext', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring });
-    server.send(await sealedOffer(keyring, 'output-only', server.nextSeq(), deviceId, 'plain instruction', OUTPUT_ONLY));
+  it('declines a first output-only task, which has no freshness point (ยง50d)', async () => {
+    const { server, adapter, deviceId, member } = await start({ policy: ['task-output'] });
+    server.send(await sealedOffer(member, 'output-only', server.nextSeq(), deviceId, 'plain instruction', OUTPUT_ONLY));
+    const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'output-only', BUDGET_MS);
+    expect(decline.payload).toEqual({ reason: 'sealed_key_unavailable', code: 'sealed_key_unavailable', retryable: false });
+    expect(adapter.startCalls).toHaveLength(0);
+  });
 
+  it('seals the output of a task whose instruction is plaintext, once sealed input made the epoch fresh', async () => {
+    const { server, adapter, deviceId, member } = await start({ policy: ['task-output'] });
+    server.send(await sealedOffer(member, 'fresh', server.nextSeq(), deviceId, 'run fresh'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
-    adapter.sessions[0]!.emit({ type: 'progress', text: 'sealed answer' });
-    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    server.send(await sealedOffer(member, 'output-only', server.nextSeq(), deviceId, 'plain instruction', OUTPUT_ONLY));
 
-    const complete = await server.waitFor((envelope) => envelope.type === 'task.complete_sealed', BUDGET_MS);
-    expect(await openOutput(keyring, complete, deviceId, OUTPUT_ONLY)).toMatchObject({ summary: 'sealed answer' });
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(2), BUDGET_MS);
+    adapter.sessions[1]!.emit({ type: 'progress', text: 'sealed answer' });
+    adapter.sessions[1]!.emit({ type: 'turn_end' });
+
+    const complete = await server.waitFor((envelope) => envelope.type === 'task.complete_sealed' && envelope.task_id === 'output-only', BUDGET_MS);
+    expect(await openOutput(member, complete, deviceId, OUTPUT_ONLY)).toMatchObject({ summary: 'sealed answer' });
     expect(JSON.stringify(taskEnvelopes('output-only'))).not.toContain('sealed answer');
   });
 
+  it('declines an offer whose categories do not cover the scope policy with sealing_policy_mismatch (ยง6.2)', async () => {
+    const { server, adapter, deviceId, member } = await start();
+    const inputOnly: TaskSealing = { scopeId: SCOPE, epoch: EPOCH, categories: ['task-input'] };
+    server.send(await sealedOffer(member, 'below-policy', server.nextSeq(), deviceId, 'never runs', inputOnly));
+    const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'below-policy', BUDGET_MS);
+    expect(decline.payload).toEqual({ reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false });
+    expect(adapter.startCalls).toHaveLength(0);
+  });
+
+  it('checks the policy floor again after the open moved the chain view', async () => {
+    const { server, adapter, deviceId, member } = await start();
+    // The view before the open still had an input-only policy; the open caught up to the policy with task-output.
+    const scopeCategories = DeviceMemberKeyring.prototype.scopeCategories;
+    vi.spyOn(DeviceMemberKeyring.prototype, 'scopeCategories')
+      .mockImplementationOnce(async () => ['task-input'])
+      .mockImplementation(function (this: DeviceMemberKeyring, scopeId: string) { return scopeCategories.call(this, scopeId); });
+    const inputOnly: TaskSealing = { scopeId: SCOPE, epoch: EPOCH, categories: ['task-input'] };
+    server.send(await sealedOffer(member, 'policy-moved', server.nextSeq(), deviceId, 'never runs', inputOnly));
+    const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'policy-moved', BUDGET_MS);
+    expect(decline.payload).toEqual({ reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false });
+    expect(adapter.startCalls).toHaveLength(0);
+  });
+
+  it('declines content whose sender view is not on the verified chain with sealed_open_failed', async () => {
+    const { server, adapter, deviceId, member } = await start();
+    const bound = binding('task.offer', 'server-to-daemon', { taskId: 'foreign-head' }, deviceId, BOTH);
+    const { header, ciphertext } = await sealContent({
+      scopeKey: member.scopeKey, scope: { id: SCOPE, epoch: EPOCH }, chainHead: { seq: member.web.head!.seq, hash: `sha256:${'0'.repeat(64)}` },
+      sender: member.web.member.memberId, category: 'task-input', binding: bound, plaintext: { instruction: 'never runs' } as never,
+      maxContentLength: SEALED_PAYLOAD_MAX_CONTENT_LENGTH,
+    });
+    server.send(createEnvelope('task.offer_sealed', { sealing: BOTH, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never,
+      { taskId: 'foreign-head', seq: server.nextSeq() }));
+    const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'foreign-head', BUDGET_MS);
+    expect(decline.payload).toEqual({ reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false });
+    expect(adapter.startCalls).toHaveLength(0);
+  });
+
   it.each([
-    ['sealed_key_unavailable', 'no key for the scope', async (keyring: TestKeyring, offer: Envelope) => {
-      keyring.sealing = false;
+    ['sealed_key_unavailable', 'no key package for the scope', async (host: TestServer, offer: Envelope) => {
+      host.e2ee.packages.splice(0);
       return offer;
     }],
-    ['sealed_key_unavailable', 'a keyring that throws', async (keyring: TestKeyring, offer: Envelope) => {
-      keyring.failing = true;
+    ['sealed_key_unavailable', 'a failed Host chain read', async (host: TestServer, offer: Envelope) => {
+      host.e2ee.failChainReads = Number.MAX_SAFE_INTEGER;
       return offer;
     }],
-    ['sealed_open_failed', 'a tampered ciphertext', async (_keyring: TestKeyring, offer: Envelope) => {
+    ['sealed_open_failed', 'a tampered ciphertext', async (_host: TestServer, offer: Envelope) => {
       const sealed = (offer.payload as { sealed: { ciphertext: string } }).sealed;
       const bytes = Buffer.from(sealed.ciphertext, 'base64url');
       bytes[0] = bytes[0]! ^ 1;
       return { ...offer, payload: { ...offer.payload, sealed: { ...sealed, ciphertext: bytes.toString('base64url') } } } as Envelope;
     }],
   ] as const)('declines with %s once, non-retryably, before a claim, for %s', async (code, _label, alter) => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId, cursor } = await start({ keyring });
-    const offer = await alter(keyring, await sealedOffer(keyring, 'declined', server.nextSeq(), deviceId, 'never runs'));
+    const { server, adapter, deviceId, cursor, member } = await start();
+    const offer = await alter(server, await sealedOffer(member, 'declined', server.nextSeq(), deviceId, 'never runs'));
     server.send(offer);
 
     const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'declined', BUDGET_MS);
@@ -247,19 +347,17 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   });
 
   it('declines a sealed instruction that names a blob with sealing_policy_mismatch', async () => {
-    const keyring = new TestKeyring();
-    const { server, deviceId } = await start({ keyring });
+    const { server, deviceId, member } = await start();
     const blobRef = { blobId: 'b1', contentHash: `sha256:${'1'.repeat(64)}`, size: 1, contentType: 'text/plain' };
-    server.send(await sealedOffer(keyring, 'blob-instruction', server.nextSeq(), deviceId, blobRef));
+    server.send(await sealedOffer(member, 'blob-instruction', server.nextSeq(), deviceId, blobRef));
 
     const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'blob-instruction', BUDGET_MS);
     expect(decline.payload).toEqual({ reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false });
   });
 
   it('declines in plaintext, without a code, when the server does not accept sealed output', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring, serverFlag: false });
-    server.send(await sealedOffer(keyring, 'no-flag', server.nextSeq(), deviceId, 'never runs'));
+    const { server, adapter, deviceId, member } = await start({ serverFlag: false });
+    server.send(await sealedOffer(member, 'no-flag', server.nextSeq(), deviceId, 'never runs'));
 
     const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'no-flag', BUDGET_MS);
     expect(decline.payload).toEqual({ reason: 'sealed_payload_unsupported: the server does not accept sealed task output', retryable: false });
@@ -267,10 +365,10 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   });
 
   it('declines a sealing policy that drops task-output after the Host sealed it, with sealed_open_failed', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring });
+    // The scope policy asks only for task-input, so the open itself sees the downgrade.
+    const { server, adapter, deviceId, member } = await start({ policy: ['task-input'] });
     const inputOnly: TaskSealing = { scopeId: SCOPE, epoch: EPOCH, categories: ['task-input'] };
-    server.send(await sealedOffer(keyring, 'downgraded', server.nextSeq(), deviceId, 'never runs', inputOnly, { boundSealing: BOTH }));
+    server.send(await sealedOffer(member, 'downgraded', server.nextSeq(), deviceId, 'never runs', inputOnly, { boundSealing: BOTH }));
 
     const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'downgraded', BUDGET_MS);
     expect(decline.payload).toEqual({ reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false });
@@ -278,21 +376,21 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   });
 
   it('seals the decline of a plain gate after the open', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring });
-    server.send(await sealedOffer(keyring, 'gated', server.nextSeq(), deviceId, 'never runs', BOTH, { plain: { harnessId: 'acme-harness' } }));
+    const { server, adapter, deviceId, member } = await start();
+    server.send(await sealedOffer(member, 'gated', server.nextSeq(), deviceId, 'never runs', BOTH, { plain: { harnessId: 'acme-harness' } }));
 
     const decline = await server.waitFor((envelope) => envelope.type === 'task.decline_sealed' && envelope.task_id === 'gated', BUDGET_MS);
-    expect(await openOutput(keyring, decline, deviceId)).toEqual({ reason: expect.any(String) });
+    expect(await openOutput(member, decline, deviceId)).toEqual({ reason: expect.any(String) });
     expect(taskEnvelopes('gated').map((envelope) => envelope.type)).toEqual(['task.decline_sealed']);
     expect(adapter.startCalls).toHaveLength(0);
   });
 
   it('drops a plaintext steer to a task that seals its input, and applies one to an output-only task', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring });
-    server.send(await sealedOffer(keyring, 'sealed-input', server.nextSeq(), deviceId, 'run sealed-input'));
-    server.send(await sealedOffer(keyring, 'output-only-steer', server.nextSeq(), deviceId, 'run output-only-steer', OUTPUT_ONLY));
+    const { server, adapter, deviceId, member } = await start({ policy: ['task-output'] });
+    // The sealed input comes first: it makes the epoch fresh for the output-only task.
+    server.send(await sealedOffer(member, 'sealed-input', server.nextSeq(), deviceId, 'run sealed-input'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    server.send(await sealedOffer(member, 'output-only-steer', server.nextSeq(), deviceId, 'run output-only-steer', OUTPUT_ONLY));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(2), BUDGET_MS);
     // The two offers may start in either order; each start call records its instruction.
     const sessionOf = (taskId: string) => adapter.sessions[adapter.startCalls.findIndex((call) => call.task.instruction === `run ${taskId}`)]!;
@@ -309,32 +407,32 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   });
 
   it('drops a sealed steer to an output-only task', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring });
-    server.send(await sealedOffer(keyring, 'output-only-sealed-steer', server.nextSeq(), deviceId, 'run', OUTPUT_ONLY));
+    const { server, adapter, deviceId, member } = await start({ policy: ['task-output'] });
+    server.send(await sealedOffer(member, 'fresh', server.nextSeq(), deviceId, 'run fresh'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    server.send(await sealedOffer(member, 'output-only-sealed-steer', server.nextSeq(), deviceId, 'run', OUTPUT_ONLY));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(2), BUDGET_MS);
     const steerId = randomUUID();
-    const { header, ciphertext } = await sealedMember(keyring, { text: 'go left' },
+    const { header, ciphertext } = await sealedMember(member, { text: 'go left' },
       binding('task.steer', 'server-to-daemon', { taskId: 'output-only-sealed-steer', steerId }, deviceId, BOTH));
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       server.send(createEnvelope('task.steer_sealed', { steerId, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never,
         { taskId: 'output-only-sealed-steer', seq: server.nextSeq() }));
       await vi.waitFor(() => expect(diagnostic).toHaveBeenCalledWith(expect.stringContaining('the task does not seal task input')), BUDGET_MS);
-      expect(adapter.sessions[0]!.steerCalls).toEqual([]);
+      expect(adapter.sessions[1]!.steerCalls).toEqual([]);
     } finally {
       diagnostic.mockRestore();
     }
   });
 
   it('applies a sealed steer once per steerId', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring });
-    server.send(await sealedOffer(keyring, 'steered', server.nextSeq(), deviceId, 'run'));
+    const { server, adapter, deviceId, member } = await start();
+    server.send(await sealedOffer(member, 'steered', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
 
     const steerId = randomUUID();
-    const { header, ciphertext } = await sealedMember(keyring, { text: 'go left' }, binding('task.steer', 'server-to-daemon', { taskId: 'steered', steerId }, deviceId, BOTH));
+    const { header, ciphertext } = await sealedMember(member, { text: 'go left' }, binding('task.steer', 'server-to-daemon', { taskId: 'steered', steerId }, deviceId, BOTH));
     const steer = createEnvelope('task.steer_sealed', { steerId, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never, { taskId: 'steered', seq: server.nextSeq() });
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
@@ -349,14 +447,13 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   });
 
   it('applies the redelivery of a sealed steer whose first apply failed', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring });
-    server.send(await sealedOffer(keyring, 'steer-retry', server.nextSeq(), deviceId, 'run'));
+    const { server, adapter, deviceId, member } = await start();
+    server.send(await sealedOffer(member, 'steer-retry', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     const session = adapter.sessions[0]!;
 
     const steerId = randomUUID();
-    const { header, ciphertext } = await sealedMember(keyring, { text: 'go right' }, binding('task.steer', 'server-to-daemon', { taskId: 'steer-retry', steerId }, deviceId, BOTH));
+    const { header, ciphertext } = await sealedMember(member, { text: 'go right' }, binding('task.steer', 'server-to-daemon', { taskId: 'steer-retry', steerId }, deviceId, BOTH));
     const steer = createEnvelope('task.steer_sealed', { steerId, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never, { taskId: 'steer-retry', seq: server.nextSeq() });
     session.steerError = new Error('transient steer failure');
     server.send(steer);
@@ -368,25 +465,24 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   });
 
   it('seals an approval request, a cancel and a runtime failure', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring });
-    server.send(await sealedOffer(keyring, 'approval', server.nextSeq(), deviceId, 'run'));
-    server.send(await sealedOffer(keyring, 'failing', server.nextSeq(), deviceId, 'run'));
+    const { server, adapter, deviceId, member } = await start();
+    server.send(await sealedOffer(member, 'approval', server.nextSeq(), deviceId, 'run'));
+    server.send(await sealedOffer(member, 'failing', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(2), BUDGET_MS);
     const session = (taskIndex: number) => adapter.sessions[taskIndex]!;
 
     session(0).emit({ type: 'needs_approval', summary: 'secret approval summary' });
     const approval = await server.waitFor((envelope) => envelope.type === 'task.await_approval_sealed', BUDGET_MS);
     expect(approval.payload).toMatchObject({ approvalId: expect.any(String) });
-    expect(await openOutput(keyring, approval, deviceId)).toEqual({ summary: 'secret approval summary' });
+    expect(await openOutput(member, approval, deviceId)).toEqual({ summary: 'secret approval summary' });
     server.send(createEnvelope('task.cancel', { reason: 'user stopped it' }, { taskId: approval.task_id!, seq: server.nextSeq() }));
     const cancelled = await server.waitFor((envelope) => envelope.type === 'task.cancelled_sealed', BUDGET_MS);
     expect(cancelled.task_id).toBe(approval.task_id);
-    expect(await openOutput(keyring, cancelled, deviceId)).toEqual({ reason: expect.any(String) });
+    expect(await openOutput(member, cancelled, deviceId)).toEqual({ reason: expect.any(String) });
 
     session(1).fail(new Error('secret runtime failure'));
     const failed = await server.waitFor((envelope) => envelope.type === 'task.fail_sealed', BUDGET_MS);
-    expect(await openOutput(keyring, failed, deviceId)).toEqual({ reason: expect.any(String) });
+    expect(await openOutput(member, failed, deviceId)).toEqual({ reason: expect.any(String) });
 
     const wire = JSON.stringify(server.received);
     expect(wire).not.toContain('secret approval summary');
@@ -394,16 +490,15 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   });
 
   it('settles a terminal over the sealed plaintext limit with a small sealed failure', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring });
-    server.send(await sealedOffer(keyring, 'huge', server.nextSeq(), deviceId, 'run'));
+    const { server, adapter, deviceId, member } = await start();
+    server.send(await sealedOffer(member, 'huge', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       adapter.sessions[0]!.emit({ type: 'progress', text: 'p'.repeat(SEALED_PAYLOAD_MAX_CONTENT_LENGTH + 1024) });
       adapter.sessions[0]!.emit({ type: 'turn_end' });
       const failed = await server.waitFor((envelope) => envelope.type === 'task.fail_sealed' && envelope.task_id === 'huge', 15_000);
-      expect(await openOutput(keyring, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
+      expect(await openOutput(member, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
       // The local observer sees the failure that was sent, not the completion it replaced.
       await vi.waitFor(() => expect(daemon!.tasks().find((task) => task.taskId === 'huge')).toMatchObject({ state: 'Failed', summary: 'terminal_result_unsealable' }), BUDGET_MS);
     } finally {
@@ -412,9 +507,8 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   }, 30_000);
 
   it('replaces the runtime failure class of an unsealable failure with unknown (#869)', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring, failureClass: true });
-    server.send(await sealedOffer(keyring, 'huge-classed', server.nextSeq(), deviceId, 'run'));
+    const { server, adapter, deviceId, member } = await start({ failureClass: true });
+    server.send(await sealedOffer(member, 'huge-classed', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
@@ -423,7 +517,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
         reason: 'r'.repeat(SEALED_PAYLOAD_MAX_CONTENT_LENGTH + 1024),
       }));
       const failed = await server.waitFor((envelope) => envelope.type === 'task.fail_sealed' && envelope.task_id === 'huge-classed', 15_000);
-      expect(await openOutput(keyring, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
+      expect(await openOutput(member, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
       // The replacement is the daemon's own failure: it names no runtime class.
       expect(failed.payload).toMatchObject({ failure: { class: 'unknown' } });
     } finally {
@@ -432,11 +526,10 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   }, 30_000);
 
   it('reports sealed_key_unavailable in plaintext when the sealing key is gone at the terminal', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring });
-    server.send(await sealedOffer(keyring, 'key-lost', server.nextSeq(), deviceId, 'run'));
+    const { server, adapter, deviceId, member, device, cursor } = await start();
+    server.send(await sealedOffer(member, 'key-lost', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
-    keyring.sealing = false;
+    await makeStale(member, device, cursor);
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       adapter.sessions[0]!.emit({ type: 'progress', text: 'lost output' });
@@ -452,9 +545,8 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   });
 
   it('denies locally an approval request it cannot send, so the task goes on', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring });
-    server.send(await sealedOffer(keyring, 'unsent-approval', server.nextSeq(), deviceId, 'run'));
+    const { server, adapter, deviceId, member } = await start();
+    server.send(await sealedOffer(member, 'unsent-approval', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
@@ -472,11 +564,10 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   });
 
   it('denies locally an approval request it has no sealing key for', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring });
-    server.send(await sealedOffer(keyring, 'keyless-approval', server.nextSeq(), deviceId, 'run'));
+    const { server, adapter, deviceId, member, device, cursor } = await start();
+    server.send(await sealedOffer(member, 'keyless-approval', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
-    keyring.sealing = false;
+    await makeStale(member, device, cursor);
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       adapter.sessions[0]!.emit({ type: 'needs_approval', summary: 'secret approval summary' });
@@ -488,9 +579,8 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   });
 
   it('settles a terminal whose sealed frame is over the inline maximum with a small sealed failure', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring });
-    server.send(await sealedOffer(keyring, 'over-inline', server.nextSeq(), deviceId, 'run'));
+    const { server, adapter, deviceId, member } = await start();
+    server.send(await sealedOffer(member, 'over-inline', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
@@ -498,7 +588,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
       adapter.sessions[0]!.emit({ type: 'progress', text: `large summary ${'s'.repeat(300 * 1024)}` });
       adapter.sessions[0]!.emit({ type: 'turn_end' });
       const failed = await server.waitFor((envelope) => envelope.type === 'task.fail_sealed' && envelope.task_id === 'over-inline', BUDGET_MS);
-      expect(await openOutput(keyring, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
+      expect(await openOutput(member, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
     } finally {
       diagnostic.mockRestore();
     }
@@ -507,12 +597,16 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   });
 
   it('sends a sealed terminal made at shutdown before the connection closes, without a journal', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring, journal: false });
-    server.send(await sealedOffer(keyring, 'stop-no-journal', server.nextSeq(), deviceId, 'run'));
+    const { server, adapter, deviceId, member } = await start({ journal: false });
+    server.send(await sealedOffer(member, 'stop-no-journal', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     let release!: () => void;
-    keyring.gate = new Promise<void>((resolve) => { release = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const sealingKey = DeviceMemberKeyring.prototype.sealingKey;
+    vi.spyOn(DeviceMemberKeyring.prototype, 'sealingKey').mockImplementation(async function (this: DeviceMemberKeyring, ...args) {
+      await gate;
+      return sealingKey.apply(this, args);
+    });
 
     // The shutdown failure waits for its sealing key past the empty-outbox drain.
     const stopped = daemon!.stop();
@@ -525,13 +619,11 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   });
 
   it('reports an interrupted sealed task with the plaintext daemon_interrupted terminal', async () => {
-    const keyring = new TestKeyring();
     let offer: Envelope | undefined;
     await start({
-      keyring,
       // A crash image: the sealed offer was admitted, and the process died before any terminal.
-      beforeStart: async (storeDir, deviceId) => {
-        offer = await sealedOffer(keyring, 'interrupted', 1, deviceId, 'run');
+      beforeStart: async (storeDir, deviceId, member) => {
+        offer = await sealedOffer(member, 'interrupted', 1, deviceId, 'run');
         const journal = new SqliteLocalTaskJournal({ storeDir });
         const bytes = encodeEnvelope(offer);
         await journal.appendEnvelope({ identity: { tenantId: TENANT, productId: 'sealed-daemon-test', deviceId },
@@ -545,10 +637,35 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     expect(fail.payload).toMatchObject({ reason: 'daemon_interrupted', retryable: false, recovery: { kind: 'daemon_interrupted', offerId: offer!.id } });
   });
 
+  it('reports a recovered result-reply failure of a sealed task only in a closed plaintext form (decision 74e)', async () => {
+    const taskId = 'result-reply-recovered';
+    const golden = corpus.find((line) => line.type === 'task.offer_for_agent_with_egress_sealed'
+      && (line.payload.terminalProjection as { mode?: string } | undefined)?.mode === 'result-document')!;
+    const plain = Object.fromEntries(Object.entries(golden.payload).filter(([field]) => field !== 'sealed'));
+    await start({
+      // A crash image: the turn ended without the required result, after the Host accepted the Agent message.
+      // The restart replays this terminal before the member is verified.
+      beforeStart: async (storeDir, deviceId) => {
+        const offer = createEnvelope('task.offer_for_agent_with_egress_sealed', { ...plain, instruction: 'run', sealing: OUTPUT_ONLY } as never, { taskId, seq: 1 });
+        const journal = new SqliteLocalTaskJournal({ storeDir });
+        const bytes = encodeEnvelope(offer);
+        await journal.appendEnvelope({ identity: { tenantId: TENANT, productId: 'sealed-daemon-test', deviceId },
+          taskId, envelopeId: offer.id, seq: 1, bytes, bytesHash: journalHash(bytes),
+          opensTask: true, receivedAt: new Date().toISOString() });
+        await journal.recordAdmission({ taskId, admitted: true, claimedRuntime: 'pi', decidedAt: new Date().toISOString() });
+        await journal.recordTransition({ transitionId: randomUUID(), taskId, to: 'required-reply-result-missing-accepted', occurredAt: new Date().toISOString() });
+        await journal.close();
+      },
+    });
+    const fail = await server!.waitFor((envelope) => envelope.type === 'task.fail' && envelope.task_id === taskId, BUDGET_MS);
+    expect(fail.payload).toMatchObject({ reason: 'sealed_key_unavailable', retryable: false });
+    expect(isSealedTaskPlainOutput(fail.type, fail.payload)).toBe(true);
+    expect(JSON.stringify(taskEnvelopes(taskId))).not.toContain('result_not_submitted');
+  });
+
   it('sends a sealed artifact inline with a fresh artifactId, above the plaintext 64 KB limit', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring });
-    server.send(await sealedOffer(keyring, 'artifact', server.nextSeq(), deviceId, 'run'));
+    const { server, adapter, deviceId, member } = await start();
+    server.send(await sealedOffer(member, 'artifact', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     const content = randomBytes(100 * 1024);
     await fs.writeFile(path.join(adapter.startCalls[0]!.ctx.workspaceDir, 'out.bin'), content);
@@ -556,16 +673,15 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
 
     const artifact = await server.waitFor((envelope) => envelope.type === 'task.artifact_sealed', BUDGET_MS);
     expect(artifact.payload).toMatchObject({ name: 'out.bin', contentType: 'application/octet-stream', artifactId: expect.any(String) });
-    expect(await openOutput(keyring, artifact, deviceId)).toEqual({ inline: content.toString('base64') });
+    expect(await openOutput(member, artifact, deviceId)).toEqual({ inline: content.toString('base64') });
     expect(taskEnvelopes('artifact').map((envelope) => envelope.type)).not.toContain('task.artifact');
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await server.waitFor((envelope) => envelope.type === 'task.complete_sealed', BUDGET_MS);
   });
 
   it('reports an artifact above the sealed inline limit as a sealed error and sends no artifact', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring });
-    server.send(await sealedOffer(keyring, 'too-big', server.nextSeq(), deviceId, 'run'));
+    const { server, adapter, deviceId, member } = await start();
+    server.send(await sealedOffer(member, 'too-big', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     await fs.writeFile(path.join(adapter.startCalls[0]!.ctx.workspaceDir, 'huge.bin'), randomBytes(1600 * 1024));
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -580,14 +696,13 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     expect(types).not.toContain('task.artifact_sealed');
     expect(types).not.toContain('task.artifact');
     const events = await Promise.all(taskEnvelopes('too-big').filter((envelope) => envelope.type === 'task.progress_sealed')
-      .map(async (envelope) => JSON.stringify((await openOutput(keyring, envelope, deviceId)).events)));
+      .map(async (envelope) => JSON.stringify((await openOutput(member, envelope, deviceId)).events)));
     expect(events.join('')).toContain('over the sealed inline limit');
   });
 
   it('reports an artifact whose sealed frame is over the inline maximum as a sealed error, and uploads nothing', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring });
-    server.send(await sealedOffer(keyring, 'large', server.nextSeq(), deviceId, 'run'));
+    const { server, adapter, deviceId, member } = await start();
+    server.send(await sealedOffer(member, 'large', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     await fs.writeFile(path.join(adapter.startCalls[0]!.ctx.workspaceDir, 'large.bin'), randomBytes(220 * 1024));
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -602,17 +717,16 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     expect(types).not.toContain('task.artifact_sealed');
     expect(types).not.toContain('task.artifact');
     const events = await Promise.all(taskEnvelopes('large').filter((envelope) => envelope.type === 'task.progress_sealed')
-      .map(async (envelope) => JSON.stringify((await openOutput(keyring, envelope, deviceId)).events)));
+      .map(async (envelope) => JSON.stringify((await openOutput(member, envelope, deviceId)).events)));
     expect(events.join('')).toContain('over the inline maximum');
     expect(JSON.stringify(server.received)).not.toContain('ciphertextRef');
   });
 
   it('opens a sealed offer whose ciphertext is a blob, after the hash check', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring });
+    const { server, adapter, deviceId, member } = await start();
     const instruction = 'i'.repeat(300 * 1024);
     const offerOf = async (taskId: string, corrupt: boolean): Promise<Envelope> => {
-      const { header, ciphertext } = await sealedMember(keyring, { instruction }, binding('task.offer', 'server-to-daemon', { taskId }, deviceId, BOTH));
+      const { header, ciphertext } = await sealedMember(member, { instruction }, binding('task.offer', 'server-to-daemon', { taskId }, deviceId, BOTH));
       const bytes = Buffer.from(ciphertext);
       const blobId = `blob-${taskId}`;
       server.seedBlob(blobId, bytes, 'application/octet-stream');
@@ -633,8 +747,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   });
 
   it('declines an over-bound sealed offer with sealed_open_failed', async () => {
-    const keyring = new TestKeyring();
-    const { server, cursor } = await start({ keyring });
+    const { server, cursor } = await start();
     const line = corpus.find((candidate) => candidate.type === 'task.offer_sealed' && (candidate.payload.sealed as { ciphertext?: string } | undefined)?.ciphertext !== undefined)!;
     const big = EnvelopeSchema.parse({
       v: PROTOCOL_VERSION, id: randomUUID(), ts: new Date().toISOString(), type: 'task.offer_sealed', task_id: 'big-sealed', seq: server.nextSeq(),
@@ -658,9 +771,8 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
 
 describe('sealed output by ciphertextRef on a server that holds the blob (#654 ยง58a)', () => {
   it('uploads a terminal over the inline frame as an octet-stream blob, and keeps the upload alive through the shutdown commit barrier', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true });
-    server.send(await sealedOffer(keyring, 'upload-at-stop', server.nextSeq(), deviceId, 'run'));
+    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true });
+    server.send(await sealedOffer(member, 'upload-at-stop', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     const release = server.holdBlobUploads();
     const summary = `large summary ${'s'.repeat(300 * 1024)}`;
@@ -677,13 +789,12 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
     const sealed = (complete?.payload as { sealed: { paddedLength: number; ciphertextRef?: { contentType: string } } } | undefined)?.sealed;
     expect(sealed?.paddedLength).toBeGreaterThan(SEALED_INLINE_MAX_PADDED_LENGTH);
     expect(sealed?.ciphertextRef?.contentType).toBe('application/octet-stream');
-    expect(await openOutput(keyring, complete!, deviceId)).toMatchObject({ summary });
+    expect(await openOutput(member, complete!, deviceId)).toMatchObject({ summary });
   });
 
   it.each(['with', 'without'] as const)('retries a failed terminal upload %s a journal, and never replaces the result with a sealed failure', async (journal) => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true, ...(journal === 'without' ? { journal: false as const } : {}) });
-    server.send(await sealedOffer(keyring, 'upload-retry', server.nextSeq(), deviceId, 'run'));
+    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true, ...(journal === 'without' ? { journal: false as const } : {}) });
+    server.send(await sealedOffer(member, 'upload-retry', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     server.setFailBlobUploads(true);
     const summary = `large summary ${'s'.repeat(300 * 1024)}`;
@@ -694,14 +805,13 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
 
     const complete = await server.waitFor((envelope) => envelope.type === 'task.complete_sealed' && envelope.task_id === 'upload-retry', BUDGET_MS);
     expect((complete.payload as { sealed: { ciphertextRef?: unknown } }).sealed.ciphertextRef).toBeDefined();
-    expect(await openOutput(keyring, complete, deviceId)).toMatchObject({ summary });
+    expect(await openOutput(member, complete, deviceId)).toMatchObject({ summary });
     expect(taskEnvelopes('upload-retry').map((envelope) => envelope.type)).not.toContain('task.fail_sealed');
   });
 
   it.each([409, 413, 422])('settles a terminal with a small sealed failure, without a retry, when the server refuses its ciphertext blob for good with %i', async (status) => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true });
-    server.send(await sealedOffer(keyring, 'upload-refused', server.nextSeq(), deviceId, 'run'));
+    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true });
+    server.send(await sealedOffer(member, 'upload-refused', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     server.refuseBlobCreates(status);
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -709,7 +819,7 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
       adapter.sessions[0]!.emit({ type: 'progress', text: `large summary ${'s'.repeat(300 * 1024)}` });
       adapter.sessions[0]!.emit({ type: 'turn_end' });
       const failed = await server.waitFor((envelope) => envelope.type === 'task.fail_sealed' && envelope.task_id === 'upload-refused', BUDGET_MS);
-      expect(await openOutput(keyring, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
+      expect(await openOutput(member, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
     } finally {
       diagnostic.mockRestore();
     }
@@ -725,9 +835,8 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
     { step: 'content', status: 401 },
     { step: 'content', status: 403 },
   ] as const)('retries a terminal whose ciphertext blob $step answers $status, and never replaces the result with a sealed failure', async ({ step, status }) => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true });
-    server.send(await sealedOffer(keyring, 'upload-refused-retry', server.nextSeq(), deviceId, 'run'));
+    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true });
+    server.send(await sealedOffer(member, 'upload-refused-retry', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     const refuse = (value: number | undefined): void => (step === 'create' ? server.refuseBlobCreates(value) : server.refuseBlobUploads(value));
     const refused = (): number => (step === 'create' ? server.blobCreatesRefused : server.blobUploadsRefused);
@@ -741,14 +850,13 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
 
     const complete = await server.waitFor((envelope) => envelope.type === 'task.complete_sealed' && envelope.task_id === 'upload-refused-retry', BUDGET_MS);
     expect((complete.payload as { sealed: { ciphertextRef?: unknown } }).sealed.ciphertextRef).toBeDefined();
-    expect(await openOutput(keyring, complete, deviceId)).toMatchObject({ summary });
+    expect(await openOutput(member, complete, deviceId)).toMatchObject({ summary });
     expect(taskEnvelopes('upload-refused-retry').map((envelope) => envelope.type)).not.toContain('task.fail_sealed');
   });
 
   it.each(['with', 'without'] as const)('waits for the next session to read the server flags before it seals a large terminal %s a journal', async (journal) => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true, ...(journal === 'without' ? { journal: false as const } : {}) });
-    server.send(await sealedOffer(keyring, 'between-sessions', server.nextSeq(), deviceId, 'run'));
+    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true, ...(journal === 'without' ? { journal: false as const } : {}) });
+    server.send(await sealedOffer(member, 'between-sessions', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     // A route failure withdraws the server flags until the next session advertises them.
     server.setFailMessagesSends(true);
@@ -764,32 +872,42 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
     const terminal = await server.waitFor((envelope) => (envelope.type === 'task.complete_sealed' || envelope.type === 'task.fail_sealed') && envelope.task_id === 'between-sessions', BUDGET_MS);
     expect(terminal.type).toBe('task.complete_sealed');
     expect((terminal.payload as { sealed: { ciphertextRef?: unknown } }).sealed.ciphertextRef).toBeDefined();
-    expect(await openOutput(keyring, terminal, deviceId)).toMatchObject({ summary });
+    expect(await openOutput(member, terminal, deviceId)).toMatchObject({ summary });
   });
 
-  it('settles a terminal that a failed shutdown left queued by the inline-only fallback on the next stop', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true });
-    server.send(await sealedOffer(keyring, 'upload-stop-retry', server.nextSeq(), deviceId, 'run'));
+  it('settles a terminal that a failed shutdown left queued in the closed form on the next stop', async () => {
+    const { server, adapter, deviceId, storeDir, member } = await start({ ciphertextRef: true });
+    server.send(await sealedOffer(member, 'upload-stop-retry', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     server.setFailBlobUploads(true);
-    adapter.sessions[0]!.emit({ type: 'progress', text: `large summary ${'s'.repeat(300 * 1024)}` });
+    const summary = `large summary ${'s'.repeat(300 * 1024)}`;
+    adapter.sessions[0]!.emit({ type: 'progress', text: summary });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(server.blobUploadsFailed).toBeGreaterThan(0), BUDGET_MS);
 
     const stopErrors = (): Promise<string[]> => daemon!.stop().then(() => [], (error: unknown) => (error instanceof AggregateError ? error.errors : [error]).map(String));
     expect(await stopErrors()).toContainEqual(expect.stringContaining('ciphertext upload failed'));
-    // The stopped daemon has no session that could advertise the server flags,
-    // so the terminal takes the inline-only fallback and the barrier completes.
-    // The stub runtime still reports its disposal failure.
+    // The run is stopped and its keyring retired, so the queued terminal
+    // settles in the closed form and the barrier completes. The stub runtime
+    // still reports its disposal failure.
     expect((await stopErrors()).filter((error) => !error.startsWith('RuntimeDisposalFailure'))).toEqual([]);
     daemon = undefined;
+    const db = openJournalDatabase(path.join(storeDir, JOURNAL_DB_FILENAME), DEFAULT_JOURNAL_BUSY_TIMEOUT_MS);
+    let rows: Array<{ bytes: Parameters<typeof decodeEnvelope>[0] }>;
+    try {
+      rows = db.prepare("SELECT bytes FROM journal_terminal WHERE task_id = 'upload-stop-retry'").all() as typeof rows;
+    } finally { db.close(); }
+    expect(rows).toHaveLength(1);
+    const settled = decodeEnvelope(rows[0]!.bytes);
+    expect(settled.type).toBe('task.fail');
+    expect(settled.payload).toMatchObject({ reason: 'sealed_key_unavailable', retryable: false });
+    expect(settled.payload).not.toHaveProperty('sealed');
+    expect(JSON.stringify(settled)).not.toContain(summary);
   });
 
   it('uploads a terminal that a failed shutdown left queued through the next run\'s blob client', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true });
-    server.send(await sealedOffer(keyring, 'upload-restart', server.nextSeq(), deviceId, 'run'));
+    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true });
+    server.send(await sealedOffer(member, 'upload-restart', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     server.setFailBlobUploads(true);
     const summary = `large summary ${'s'.repeat(300 * 1024)}`;
@@ -811,14 +929,13 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
       && ['task.complete_sealed', 'task.fail_sealed', 'task.fail'].includes(envelope.type), BUDGET_MS);
     expect(terminal.type).toBe('task.complete_sealed');
     expect((terminal.payload as { sealed: { ciphertextRef?: unknown } }).sealed.ciphertextRef).toBeDefined();
-    expect(await openOutput(keyring, terminal, deviceId)).toMatchObject({ summary });
+    expect(await openOutput(member, terminal, deviceId)).toMatchObject({ summary });
     expect(taskEnvelopes('upload-restart').map((envelope) => envelope.type)).not.toContain('task.fail_sealed');
   });
 
   it('keeps a terminal that a failed shutdown left queued until the next start reaches its session', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true });
-    server.send(await sealedOffer(keyring, 'upload-slow-restart', server.nextSeq(), deviceId, 'run'));
+    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true });
+    server.send(await sealedOffer(member, 'upload-slow-restart', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     server.setFailBlobUploads(true);
     const summary = `large summary ${'s'.repeat(300 * 1024)}`;
@@ -848,14 +965,47 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
       && envelope.task_id === 'upload-slow-restart', BUDGET_MS);
     expect(terminal.type).toBe('task.complete_sealed');
     expect((terminal.payload as { sealed: { ciphertextRef?: unknown } }).sealed.ciphertextRef).toBeDefined();
-    expect(await openOutput(keyring, terminal, deviceId)).toMatchObject({ summary });
+    expect(await openOutput(member, terminal, deviceId)).toMatchObject({ summary });
     expect(taskEnvelopes('upload-slow-restart').map((envelope) => envelope.type)).not.toContain('task.fail_sealed');
   }, 15_000);
 
+  it('seals a terminal that a failed shutdown left queued with the next run\'s member, at that run\'s chain head', async () => {
+    const { server, adapter, deviceId, member, device } = await start({ ciphertextRef: true });
+    server.send(await sealedOffer(member, 'restart-member', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    server.setFailBlobUploads(true);
+    const summary = `large summary ${'s'.repeat(300 * 1024)}`;
+    adapter.sessions[0]!.emit({ type: 'progress', text: summary });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(server.blobUploadsFailed).toBeGreaterThan(0), BUDGET_MS);
+    const stopErrors = await daemon!.stop().then(() => [], (error: unknown) => (error instanceof AggregateError ? error.errors : [error]).map(String));
+    expect(stopErrors).toContainEqual(expect.stringContaining('ciphertext upload failed'));
+
+    // The chain moves between the runs, and the epoch stays fresh: the policy keeps its members.
+    const stoppedHead = member.web.head!;
+    await member.web.append('scope-policy', { scopeId: SCOPE, categories: BOTH.categories, members: [member.web.member.memberId, device.memberId].sort() });
+    expect(member.web.head!.seq).toBeGreaterThan(stoppedHead.seq);
+    server.setFailBlobUploads(false);
+    await daemon!.start();
+
+    const terminal = await server.waitFor((envelope) => ['task.complete_sealed', 'task.fail_sealed', 'task.fail', 'task.complete'].includes(envelope.type)
+      && envelope.task_id === 'restart-member', BUDGET_MS);
+    expect(terminal.type).toBe('task.complete_sealed');
+    const sealed = (terminal.payload as { sealed: { chainHead: { seq: number; hash: string }; ciphertextRef?: unknown } }).sealed;
+    expect(sealed.chainHead).toEqual(member.web.head);
+    expect(sealed.ciphertextRef).toBeDefined();
+    expect(await openOutput(member, terminal, deviceId)).toMatchObject({ summary });
+    await vi.waitFor(() => expect(daemon!.status().pendingTerminalCommits).toBe(0), BUDGET_MS);
+    const sent = taskEnvelopes('restart-member');
+    expect(sent.map((envelope) => envelope.type)).not.toEqual(expect.arrayContaining(['task.complete']));
+    expect(sent.map((envelope) => envelope.type)).not.toEqual(expect.arrayContaining(['task.fail']));
+    expect(JSON.stringify(sent)).not.toContain('sealed_key_unavailable');
+    expect(JSON.stringify(sent)).not.toContain('large summary');
+  }, 15_000);
+
   it('uploads an artifact over the inline frame as an octet-stream ciphertext blob', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true });
-    server.send(await sealedOffer(keyring, 'large', server.nextSeq(), deviceId, 'run'));
+    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true });
+    server.send(await sealedOffer(member, 'large', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     const content = randomBytes(220 * 1024);
     await fs.writeFile(path.join(adapter.startCalls[0]!.ctx.workspaceDir, 'large.bin'), content);
@@ -865,14 +1015,13 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
     const ref = (artifact.payload as { sealed: { paddedLength: number; ciphertextRef?: { blobId: string; contentType: string } } }).sealed;
     expect(ref.paddedLength).toBeGreaterThan(SEALED_INLINE_MAX_PADDED_LENGTH);
     expect(ref.ciphertextRef?.contentType).toBe('application/octet-stream');
-    expect(await openOutput(keyring, artifact, deviceId)).toEqual({ inline: content.toString('base64') });
+    expect(await openOutput(member, artifact, deviceId)).toEqual({ inline: content.toString('base64') });
   });
 
   it('commits another task\'s terminal while one terminal upload is held', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true });
-    server.send(await sealedOffer(keyring, 'held-upload', server.nextSeq(), deviceId, 'run the large task'));
-    server.send(await sealedOffer(keyring, 'small-terminal', server.nextSeq(), deviceId, 'run the small task'));
+    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true });
+    server.send(await sealedOffer(member, 'held-upload', server.nextSeq(), deviceId, 'run the large task'));
+    server.send(await sealedOffer(member, 'small-terminal', server.nextSeq(), deviceId, 'run the small task'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(2), BUDGET_MS);
     const session = (instruction: string) => adapter.sessions[adapter.startCalls.findIndex((call) => call.task.instruction === instruction)]!;
     const held = session('run the large task');
@@ -894,9 +1043,8 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
   });
 
   it('keeps an approval request inline only, and denies it locally over the inline frame without an upload', async () => {
-    const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true });
-    server.send(await sealedOffer(keyring, 'inline-only-approval', server.nextSeq(), deviceId, 'run'));
+    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true });
+    server.send(await sealedOffer(member, 'inline-only-approval', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     const release = server.holdBlobUploads();
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});

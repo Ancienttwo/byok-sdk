@@ -78,10 +78,10 @@ import { assertCodexSandboxSetting, CodexAdapter, type CodexSandboxSetting } fro
 import { ApprovalNotFoundError, ApprovalRegistry } from './approvals';
 import { AuthManager, DeviceRevokedError } from './auth-manager';
 import { BlobClient } from './blob-client';
-import { SealedTasks, type SealedScopeKeyring } from './sealed-task';
+import { SealedTasks } from './sealed-task';
 import { DAEMON_TASK_FAILURE, taskFailureField } from './task-failure';
 import { resolveMachineId } from './machine-id';
-import { declares, fetchCapabilityDeclaration, PRESENCE_HINTS_CAPABILITY } from './capabilities-client';
+import { declares, E2EE_MEMBER_CAPABILITY, fetchCapabilityDeclaration, PRESENCE_HINTS_CAPABILITY } from './capabilities-client';
 import type { CapabilityDeclaration } from '@byok-sdk/core';
 import {
   assertPresenceHeartbeatCadence,
@@ -167,7 +167,7 @@ import { DeviceMemberRecords } from './device-member-custody';
 import { checkVerificationSecret, enrollDeviceMember, resumeDeviceMember } from './device-member';
 import { StoredDeviceProofSigner } from './device-proof-signer';
 import { processE2eeKeyPackageNotice, type DeviceMemberStatus } from './e2ee-key-package-notice';
-import { DeviceMemberKeyring } from './e2ee-keyring';
+import { DeviceMemberKeyring, type MemberFreshness } from './e2ee-keyring';
 import { E2eeMemberClient } from './e2ee-member-client';
 import { JournalRecordTooLargeError, JournalUnavailableError, journalHash, type JournalIdentity, type LocalTaskJournal, type ReceivedEnvelopeRecord } from './journal/journal';
 import { JournalHandleCleanupError, SqliteLocalTaskJournal } from './journal/sqlite-journal';
@@ -1317,16 +1317,6 @@ export function createDaemonWithAdapters(
 }
 
 /**
- * #654 E3c: an injected scope keyring. Only tests pass it. With it the daemon
- * opens and seals sealed task content and advertises `sealed-payload-v1`.
- * A release must not advertise that flag before the device can receive key
- * packages (E2c-3, E2d), so no public option reaches this.
- */
-export interface SealedPayloadTestSeam {
-  readonly keyring: SealedScopeKeyring;
-}
-
-/**
  * codex round-2 F3: the real builder. Exported from THIS module but NOT from
  * the package `index.ts`, so the optional `assertionProbe` (an
  * {@link AssertionIssueProbe} post-sign observer) is reachable only by tests
@@ -1339,7 +1329,6 @@ export function buildDaemonWithAdapters(
   adapters: RuntimeAdapter[],
   overrides: DaemonOverrides = {},
   assertionProbe?: AssertionIssueProbe,
-  sealedPayload?: SealedPayloadTestSeam,
 ): Daemon {
   if (overrides.deviceCredentials !== undefined && config.deviceCredentials !== undefined) {
     throw new TypeError('configure OS deviceCredentials or inject a credential backend, not both');
@@ -1659,6 +1648,14 @@ export function buildDaemonWithAdapters(
   /** This run's verified member, once the background resume finds one. */
   let deviceMember: DeviceMemberKeyring | undefined;
   let memberResuming = false;
+  /** Set by each start: binds that run's sealed tasks to a ready member. */
+  let activateSealedTasks: ((keyring: DeviceMemberKeyring) => void) | undefined;
+  /** The freshness points a retired keyring left for the next run's member (§50d); a new enrollment voids them. */
+  let carriedFreshness: MemberFreshness | undefined;
+  const sealIdentityOf = (record: DeviceRecord, member: DeviceMemberKeyring | undefined): string | undefined => {
+    const memberId = member?.session?.member.memberId;
+    return memberId === undefined ? undefined : JSON.stringify([record.tenantId, record.deviceId, memberId]);
+  };
   const memberStatus = (): DeviceMemberStatus => deviceMember ?? (memberResuming ? 'resuming' : 'none');
   let memberAbort: AbortController | undefined;
   let memberResume: Promise<void> | undefined;
@@ -1813,6 +1810,14 @@ export function buildDaemonWithAdapters(
   let sealedUploads: BlobClient | undefined;
   // A start under way opens a session, so a sealed output waits for its flags.
   let startInProgress = false;
+  // The latest run's sealed tasks. A terminal the commit queue holds past a
+  // failed stop seals through the run it runs in, never through the stopped
+  // run's keyring, which its shutdown retires.
+  let latestSealedTasks: SealedTasks | undefined;
+  /** The latest run's (tenant, device, member); `undefined` while it has no usable member. */
+  let latestSealIdentity: (() => string | undefined) | undefined;
+  /** Set by each start: retires that run's member keyring at shutdown. */
+  let retireSealedMember: (() => void) | undefined;
   let sealedOutputSettled: (() => Promise<void>) | undefined;
   let inputPreparationStatusAbort: AbortController | undefined;
   let lifecycle: DaemonLifecycle = { phase: 'stopped' };
@@ -2023,6 +2028,7 @@ export function buildDaemonWithAdapters(
       }
       observer.notePaired(record.deviceId);
       // A new enrollment is a new member (§7.5); the previous one's entries are void (10b).
+      carriedFreshness = undefined;
       try {
         await memberRecords?.clear();
       } catch (error) {
@@ -2242,6 +2248,8 @@ export function buildDaemonWithAdapters(
     // Assigned once the blob client exists. Startup recovery before that
     // writes only `daemon_interrupted`, which stays plaintext (decision 12d).
     let sealedTasks: SealedTasks | undefined;
+    /** This run's verified member, bound when it is first ready; a loss leaves it bound and keyless. */
+    let sealedMember: DeviceMemberKeyring | undefined;
     const recordRecoveryFailure = async (task: import('./journal/journal').RecoverableTask, reason: string, interrupted = false) => {
       const offer = decodeEnvelope(task.envelopeBytes);
       const { agentRef } = offer.payload as { agentRef?: AgentRef };
@@ -2427,30 +2435,42 @@ export function buildDaemonWithAdapters(
     });
 
     capabilities.push('custom-harness');
-    if (sealedPayload !== undefined) {
-      capabilities.push(SEALED_PAYLOAD_CAPABILITY);
-      sealedUploadAbort = new AbortController();
-      sealedUploads = new BlobClient(config.serverUrl, auth, { signal: sealedUploadAbort.signal });
-      const opened = new SealedTasks({
-        keyring: sealedPayload.keyring,
-        tenantId: record.tenantId,
-        deviceId: record.deviceId,
-        blobs: {
-          download: (ref) => blobClient.downloadBlob(ref, { signal: blobLifecycleAbort?.signal }),
-          upload: (ciphertext) => sealedUploads!.uploadArtifact(ciphertext, 'application/octet-stream'),
-        },
-        // Between sessions, and while a start is under way, the next
-        // session's flags are unknown. Once the daemon stopped, halted or
-        // crashed with no start under way, no session will advertise any.
-        serverCapabilities: () => {
-          if (lifecycle.phase === 'halted' || lifecycle.phase === 'crashed') return [];
-          if (lifecycle.phase === 'running') return connection?.isOpen() === true ? connection.getServerCapabilities() : undefined;
-          return startInProgress ? undefined : [];
-        },
-      });
-      sealedTasks = opened;
-      sealedOutputSettled = () => opened.settled();
-    }
+    // #654 E2d-3: sealed task content needs this run's verified member. The
+    // object exists before the restart replay, and its keyring holds no key
+    // until the member is ready, so a recovered sealed terminal is sealed or
+    // one of the closed plaintext forms (decision 74e). The member stays bound
+    // after a loss: a sealed task must never fall back to plaintext output.
+    sealedUploadAbort = new AbortController();
+    sealedUploads = new BlobClient(config.serverUrl, auth, { signal: sealedUploadAbort.signal });
+    const opened = new SealedTasks({
+      keyring: {
+        scopeCategories: async (scopeId) => sealedMember?.scopeCategories(scopeId),
+        openingKey: async (scope) => sealedMember?.openingKey(scope),
+        acceptHeader: async (header) => await sealedMember?.acceptHeader(header) === true,
+        sealingKey: async (scopeId, minEpoch) => sealedMember?.sealingKey(scopeId, minEpoch),
+      },
+      tenantId: record.tenantId,
+      deviceId: record.deviceId,
+      blobs: {
+        download: (ref) => blobClient.downloadBlob(ref, { signal: blobLifecycleAbort?.signal }),
+        upload: (ciphertext) => sealedUploads!.uploadArtifact(ciphertext, 'application/octet-stream'),
+      },
+      // Between sessions, and while a start is under way, the next
+      // session's flags are unknown. Once the daemon stopped, halted or
+      // crashed with no start under way, no session will advertise any.
+      serverCapabilities: () => {
+        if (lifecycle.phase === 'halted' || lifecycle.phase === 'crashed') return [];
+        if (lifecycle.phase === 'running') return connection?.isOpen() === true ? connection.getServerCapabilities() : undefined;
+        return startInProgress ? undefined : [];
+      },
+    });
+    sealedTasks = opened;
+    latestSealedTasks = opened;
+    sealedOutputSettled = () => opened.settled();
+    activateSealedTasks = (keyring) => { sealedMember ??= keyring; };
+    // Only the next run receives this run's points, so a run with no member leaves none.
+    retireSealedMember = () => { carriedFreshness = sealedMember?.retire(); };
+    latestSealIdentity = () => sealIdentityOf(record, sealedMember);
     // Contract §8.1 / §8.3: the device-level capability string is NOT computed
     // here. It is the one flag whose answer depends on a deployment fact this
     // daemon has not read yet at this point in `start()`, so it is added (and
@@ -2463,6 +2483,7 @@ export function buildDaemonWithAdapters(
     helloCapabilities = capabilities;
 
     const commitTerminal = (taskId: string, terminal: Envelope | (() => Promise<Envelope | undefined>)): void => {
+      const ownerIdentity = sealIdentityOf(record, sealedMember);
       const plainBytes = typeof terminal === 'function' ? undefined : encodeEnvelope(terminal);
       // A sealed terminal is sealed once and its bytes are journaled; a retry
       // of the commit reuses them and never seals or uploads again (§9.2).
@@ -2510,7 +2531,9 @@ export function buildDaemonWithAdapters(
             ...taskFailureField(DAEMON_TASK_FAILURE, connection?.getServerCapabilities() ?? []),
             ...terminalIdentity(task.claimedRuntime, offerPayload.agentRef),
           }, { taskId });
-          const failure = sealedTasks === undefined ? plainFailure : await sealedTasks.sealRecovered(offer, plainFailure);
+          // Only the owner run's tenant, device and member seal this failure.
+          const sameIdentity = ownerIdentity !== undefined && ownerIdentity === latestSealIdentity?.();
+          const failure = await latestSealedTasks!.sealRecovered(offer, plainFailure, sameIdentity);
           const failureBytes = encodeEnvelope(failure);
           await activeJournal.recordTerminal({ taskId, terminalType: 'failed', bytes: failureBytes,
             payloadHash: journalHash(failureBytes), truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });
@@ -2524,6 +2547,26 @@ export function buildDaemonWithAdapters(
           // recovery; the oversized result itself is never silently dropped.
         }
       }, seal);
+    };
+
+    /**
+     * #654: seals a sealed task's terminal when the commit queue runs it. The
+     * queue can hold it past a failed stop. Then it seals through the run it
+     * runs in, after that run's start and member resume: a throw here is a
+     * retry. A run whose resume found no member, or whose member is lost,
+     * gives the closed plaintext form.
+     */
+    const sealQueuedTerminal = async (owner: SealedTasks, ownerIdentity: string | undefined, envelope: Envelope): Promise<Envelope | undefined> => {
+      const taskId = envelope.task_id!;
+      if (startInProgress) throw new Error(`${envelope.type} for sealed task ${taskId} waits for the start under way`);
+      const current = latestSealedTasks!;
+      if (current === owner) return owner.sealOutbound(envelope);
+      if (memberResuming) throw new Error(`${envelope.type} for sealed task ${taskId} waits for this run's member`);
+      // A run under another tenant, device or member never seals this task's output.
+      if (ownerIdentity === undefined || ownerIdentity !== latestSealIdentity?.()) return current.unsealable(envelope);
+      const task = await activeJournal!.readTask(taskId, journalIdentity!);
+      if (!task || !('envelopeBytes' in task)) throw new Error(`missing durable offer of sealed task ${taskId}`);
+      return current.sealRecovered(decodeEnvelope(task.envelopeBytes), envelope);
     };
 
     // #654: a task waits on its approval request. One that cannot be sealed
@@ -2551,7 +2594,8 @@ export function buildDaemonWithAdapters(
         observer.captureOutboundApproval(envelope);
         const sealedTaskOutput = sealedTasks;
         if (terminal) {
-          commitTerminal(envelope.task_id!, () => sealedTaskOutput.sealOutbound(envelope));
+          const ownerIdentity = sealIdentityOf(record, sealedMember);
+          commitTerminal(envelope.task_id!, () => sealQueuedTerminal(sealedTaskOutput, ownerIdentity, envelope));
           return;
         }
         // Without a journal no commit queue holds a terminal, so a terminal
@@ -2596,7 +2640,7 @@ export function buildDaemonWithAdapters(
       // A sealed offer this device cannot hold is one it cannot open; a device
       // with no keyring declines every sealed offer for want of a key. The
       // closed code is a value gate on the server's `sealed-payload-v1`.
-      const code = sealedTasks === undefined ? 'sealed_key_unavailable' : 'sealed_open_failed';
+      const code = sealedMember === undefined ? 'sealed_key_unavailable' : 'sealed_open_failed';
       const serverCapabilities = connection?.getServerCapabilities() ?? [];
       const closedCode = isSealedMessageType(envelope.type)
         && requiredReceiverCapabilities('task.decline', { reason: code, code }).every((flag) => serverCapabilities.includes(flag));
@@ -2782,7 +2826,7 @@ export function buildDaemonWithAdapters(
       // capability is only known once the handshake completes, strictly
       // after this `deps` object is constructed.
       getServerCapabilities: () => connection?.getServerCapabilities() ?? [],
-      ...(sealedTasks === undefined ? {} : { sealedTasks }),
+      sealedTasks: opened,
       // Same late-binding closure as `getServerCapabilities`; with no
       // connection yet there is no advertisement, and that is an error.
       getIngressBudget: () => {
@@ -3111,12 +3155,12 @@ export function buildDaemonWithAdapters(
                 const taskId = envelope.task_id;
                 const binding = resultReplyRecoveryTasks.get(taskId)!;
                 await runner!.cancelRecoveredAgentMessage(taskId, async () => {
+                  // Without its offer the cancel cannot tell a sealed task: it is never sent.
                   const task = await activeJournal.readTask(taskId, journalIdentity);
+                  if (!task || !('envelopeBytes' in task)) throw new Error(`missing durable offer of recovered task ${taskId}`);
                   const cancelled = createEnvelope('task.cancelled', { reason: envelope.payload.reason,
-                    ...terminalIdentity(task?.claimedRuntime, binding.agentRef) }, { taskId });
-                  sendEnvelope(sealedTasks !== undefined && task !== undefined && 'envelopeBytes' in task
-                    ? await sealedTasks.sealRecovered(decodeEnvelope(task.envelopeBytes), cancelled)
-                    : cancelled);
+                    ...terminalIdentity(task.claimedRuntime, binding.agentRef) }, { taskId });
+                  sendEnvelope(await opened.sealRecovered(decodeEnvelope(task.envelopeBytes), cancelled));
                   await terminalCommits.receipt(taskId);
                 });
                 resultReplyRecoveryTasks.delete(taskId);
@@ -3292,12 +3336,20 @@ export function buildDaemonWithAdapters(
    */
   function applyCapabilityDeclaration(declaration: CapabilityDeclaration | undefined): void {
     deploymentDeclaration = declaration;
-    const wanted = taskContextCapabilityAvailable();
-    const index = helloCapabilities.indexOf(HOST_MCP_TASK_CONTEXT_CAPABILITY);
-    if (wanted === (index !== -1)) return;
-    if (wanted) helloCapabilities.push(HOST_MCP_TASK_CONTEXT_CAPABILITY);
+    const taskContext = setHelloCapability(HOST_MCP_TASK_CONTEXT_CAPABILITY, taskContextCapabilityAvailable());
+    // #654 E2d-e5: only a verified member on a Host with the E2EE member routes.
+    const sealedPayload = setHelloCapability(SEALED_PAYLOAD_CAPABILITY,
+      deviceMember?.session !== undefined && declaration !== undefined && declares(declaration, E2EE_MEMBER_CAPABILITY));
+    if (taskContext || sealedPayload) connection?.refreshHello();
+  }
+
+  /** Whether the advertisement changed. */
+  function setHelloCapability(flag: CapabilityFlag, wanted: boolean): boolean {
+    const index = helloCapabilities.indexOf(flag);
+    if (wanted === (index !== -1)) return false;
+    if (wanted) helloCapabilities.push(flag);
     else helloCapabilities.splice(index, 1);
-    connection?.refreshHello();
+    return true;
   }
 
   /** Arm before connection.start(); its first open callback starts the read. */
@@ -3451,6 +3503,9 @@ export function buildDaemonWithAdapters(
    */
   /** Resume this enrollment's member off the start path; shutdown and re-pair abort it. */
   function startDeviceMember(record: DeviceRecord): void {
+    // Points pass to the immediately next run only, even when its resume finds no member.
+    const carried = carriedFreshness;
+    carriedFreshness = undefined;
     if (memberRecords === undefined) return;
     const abort = new AbortController();
     const options = {
@@ -3463,7 +3518,16 @@ export function buildDaemonWithAdapters(
       if (abort.signal.aborted) return;
       memberResuming = false;
       if (session === undefined) return;
-      deviceMember = new DeviceMemberKeyring(session, options);
+      const member = new DeviceMemberKeyring(session, {
+        ...options,
+        carried,
+        onLost: () => {
+          if (deviceMember === member) applyCapabilityDeclaration(deploymentDeclaration);
+        },
+      });
+      deviceMember = member;
+      activateSealedTasks?.(member);
+      applyCapabilityDeclaration(deploymentDeclaration);
       console.info(`[byok/client] E2EE member ${session.member.memberId} verified at chain seq ${session.state.head!.seq}`);
     }, (error: unknown) => {
       if (abort.signal.aborted) return;
@@ -3495,6 +3559,7 @@ export function buildDaemonWithAdapters(
     memberAbort = undefined;
     deviceMember = undefined;
     memberResuming = false;
+    activateSealedTasks = undefined;
     await memberResume;
     memberResume = undefined;
     const errors: unknown[] = [];
@@ -3588,6 +3653,10 @@ export function buildDaemonWithAdapters(
     // journal, before the drain below decides the connection is idle.
     await attempt(() => sealedOutputSettled?.(), false);
     const journalTailSettled = journal ? await attempt(() => terminalCommits.stop(), true) : true;
+    // This run seals nothing after the barrier: no key or chain view of its
+    // member outlives it.
+    retireSealedMember?.();
+    retireSealedMember = undefined;
     sealedUploadAbort?.abort();
     // stop() cleared the maintenance timer synchronously above. Await the pass
     // that may already have been inside SQLite only here, immediately before
@@ -3765,6 +3834,7 @@ export function buildDaemonWithAdapters(
       }
       // The member entries go first: if their deletion fails, the device
       // stays paired, and the unpair reports the failure.
+      carriedFreshness = undefined;
       await memberRecords?.clear();
       try {
         await store.credentials.clear();

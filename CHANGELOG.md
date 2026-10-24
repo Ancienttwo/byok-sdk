@@ -57,6 +57,27 @@
   for good, and an artifact becomes a sealed error event.
   Known limit: a terminal sent by reference and refused for good by the Host
   reaches the Host as no terminal (`docs/protocol.md` §2.5).
+- **Feature (client)** — a daemon paired as an E2EE member (`byok-agent pair
+  --e2ee`) opens and seals sealed task content with its own member keyring
+  (#654 E2d-3). It advertises `sealed-payload-v1` only while the member is
+  verified and the deployment declares `e2ee.member`. The first `conn.hello`
+  of a run has no flag, a later hello adds it when the member is ready, and a
+  loss of the member withdraws it. A scope is usable only when its latest
+  `scope-policy` holds this device and no other device. The offer's
+  `sealing.categories` must include every category of the scope policy, or
+  the offer gets `sealing_policy_mismatch`. The header's `chainHead` must be
+  on the verified chain and its `sender` a member of the scope policy at that
+  head, or the offer gets `sealed_open_failed` and a steer is dropped. Output
+  is sealed at the newest epoch with no scope member `remove` and no
+  member-dropping `scope-policy` after its freshness point. An output-only
+  task with no freshness point from this run, or carried from the previous run
+  of the same process, gets `sealed_key_unavailable`. A
+  terminal that a failed `stop()` left queued is sealed by the next run in the
+  same process when that run has the same tenant, device and member, and is
+  otherwise in the closed form; the next run keeps the freshness points that
+  are on its verified chain. A terminal that the startup replay builds from the journal is in the
+  closed form. The internal `sealedPayload` test parameter of
+  `buildDaemonWithAdapters` is removed.
 - **Docs** — a pairing string `<code>.<pv>` used once without `--e2ee` is
   burned: start a new registration at the Host, do not retry it (#654 E2d).
 - **Breaking (cloud)** — the device-proof `requestId` is single-use on the

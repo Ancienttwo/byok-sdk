@@ -9,7 +9,8 @@ import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { createMemberKeyBundle, generateMemberKeyRecord, openMemberKeyRecord, type SealedContentHeaderV1 } from '@byok-sdk/core/sealed-payload';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AuthManager } from '../daemon/auth-manager';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import { DeviceMemberRecords } from '../daemon/device-member-custody';
@@ -64,7 +65,7 @@ async function member(keyringOptions: { readonly requestTimeoutMs?: number } = {
   await enrollDeviceMember({ ...options, verificationSecret: web.verificationSecret });
   const device = await web.approve(deviceId);
   const session = (await resumeDeviceMember({ ...options, minDelayMs: 5, maxDelayMs: 20 }))!;
-  return { server: server!, web, device, custody, logs, keyring: new DeviceMemberKeyring(session, { ...options, ...keyringOptions }) };
+  return { server: server!, web, device, custody, logs, options, session, keyring: new DeviceMemberKeyring(session, { ...options, ...keyringOptions }) };
 }
 
 function head(custody: InMemoryDeviceMemberCustody): unknown {
@@ -253,5 +254,204 @@ describe('device member keyring (E2d-2)', () => {
     await keyring.catchUp();
     expect(keyring.session).toBeUndefined();
     expect(logs.join('\n')).toContain('no longer a current member');
+  });
+});
+
+/** A member bundle of another device, added by the web client. */
+async function otherDevice(web: E2eeWebClient) {
+  const keys = (await openMemberKeyRecord(await generateMemberKeyRecord({ tenantId: 'tenant-test', deviceId: 'device-other' })))!;
+  const bundle = await createMemberKeyBundle({
+    signingPublicJwk: keys.signing.publicJwk, signingPrivateKey: keys.signing.privateKey, kemPublicJwk: keys.kem.publicJwk, kemEpoch: keys.kem.epoch, deviceId: 'device-other',
+  });
+  await web.append('add', { member: bundle });
+  return bundle;
+}
+
+function header(scopeId: string, epoch: number, chainHead: { seq: number; hash: string }, sender: string): SealedContentHeaderV1 {
+  return { scope: { id: scopeId, epoch }, chainHead, sender } as SealedContentHeaderV1;
+}
+
+describe('device member keyring sealing rules (E2d-3)', () => {
+  it('refuses a scope whose policy holds another device (§7.9 requirement 1)', async () => {
+    const { web, device, keyring } = await member();
+    const other = await otherDevice(web);
+    await web.putScope('scope-a', [device, other]);
+    expect(await keyring.scopeCategories('scope-a')).toBeUndefined();
+    expect(await keyring.fetch('scope-a', 1)).toEqual({ ok: false, reason: 'scope_shared_with_device' });
+    await web.putScope('scope-b', [device], { categories: ['task-output'] });
+    expect(await keyring.scopeCategories('scope-b')).toEqual(['task-output']);
+  });
+
+  it('accepts content only from a current member of the scope policy at a head on the verified chain', async () => {
+    const { web, device, logs, keyring } = await member();
+    await web.putScope('scope-a', [device]);
+    await keyring.catchUp();
+    const sender = web.member.memberId;
+    expect(await keyring.acceptHeader(header('scope-a', 1, { seq: web.head!.seq, hash: `sha256:${'0'.repeat(64)}` }, sender))).toBe(false);
+    expect(logs.at(-1)).toContain('not on the verified chain');
+    // The policy did not exist at seq 2 (the device's add).
+    expect(await keyring.acceptHeader(header('scope-a', 1, { seq: 2, hash: keyring.session!.hashes[1]! }, sender))).toBe(false);
+    expect(logs.at(-1)).toContain('not in the scope policy at its chain head');
+    expect(await keyring.acceptHeader(header('scope-a', 1, web.head!, (await stranger()).member.memberId))).toBe(false);
+    expect(logs.at(-1)).toContain('no current member');
+    expect(await keyring.acceptHeader(header('scope-a', 1, web.head!, sender))).toBe(true);
+  });
+
+  it('catches up when the content head is ahead of the verified head', async () => {
+    const { web, device, keyring } = await member();
+    await web.putScope('scope-a', [device]);
+    expect(keyring.session!.state.head!.seq).toBeLessThan(web.head!.seq);
+    expect(await keyring.acceptHeader(header('scope-a', 1, web.head!, web.member.memberId))).toBe(true);
+    expect(keyring.session!.state.head).toEqual(web.head);
+  });
+
+  it('seals only at an epoch with a freshness point and no member loss after it (§50d)', async () => {
+    const { server, web, device, keyring } = await member();
+    const scopeKey = await web.putScope('scope-a', [device]);
+    await keyring.catchUp();
+    expect(await keyring.sealingKey('scope-a', 1)).toBeUndefined();
+
+    expect(await keyring.acceptHeader(header('scope-a', 1, web.head!, web.member.memberId))).toBe(true);
+    expect(await keyring.sealingKey('scope-a', 1)).toEqual({ scopeKey, epoch: 1, sender: device.memberId, chainHead: web.head });
+    expect(await keyring.sealingKey('scope-a', 2)).toBeUndefined();
+
+    // Epoch 2, fresh at a later head: the newest fresh epoch wins.
+    const second = new Uint8Array(32).fill(9);
+    server.e2ee.clientPutPackages(await web.sealPackage('scope-a', device, second, 2));
+    const other = await otherDevice(web);
+    await keyring.catchUp();
+    expect(await keyring.acceptHeader(header('scope-a', 2, web.head!, web.member.memberId))).toBe(true);
+    expect((await keyring.sealingKey('scope-a', 1))?.epoch).toBe(2);
+
+    // A remove of a scope member after the point makes the epoch stale; a member outside the scope does not.
+    await web.append('remove', { memberId: other.memberId });
+    await keyring.catchUp();
+    expect((await keyring.sealingKey('scope-a', 1))?.epoch).toBe(2);
+    await web.append('scope-policy', { scopeId: 'scope-a', categories: ['task-input', 'task-output'], members: [device.memberId] });
+    await keyring.catchUp();
+    expect(await keyring.sealingKey('scope-a', 1)).toBeUndefined();
+  });
+
+  it('hands out a copy of the key, which a later purge does not zero', async () => {
+    const { web, device, keyring } = await member();
+    const scopeKey = await web.putScope('scope-a', [device]);
+    const opening = (await keyring.openingKey({ id: 'scope-a', epoch: 1 }))!;
+    await web.append('shred', { scopeId: 'scope-a' });
+    await keyring.catchUp();
+    expect(keyring.cached('scope-a', 1)).toBeUndefined();
+    expect(opening).toEqual(scopeKey);
+  });
+
+  it('makes an epoch stale when a scope member is removed after its point', async () => {
+    const { web, device, keyring } = await member();
+    const helper = await stranger();
+    await web.append('add', { member: helper.member });
+    await web.putScope('scope-a', [device, helper.member]);
+    await keyring.catchUp();
+    expect(await keyring.acceptHeader(header('scope-a', 1, web.head!, web.member.memberId))).toBe(true);
+    expect(await keyring.sealingKey('scope-a', 1)).toBeDefined();
+    await web.append('remove', { memberId: helper.member.memberId });
+    await keyring.catchUp();
+    expect(await keyring.sealingKey('scope-a', 1)).toBeUndefined();
+  });
+
+  it('checks freshness again after the key read caught up past a remove of a scope member', async () => {
+    const { web, device, keyring } = await member();
+    const helper = await stranger();
+    await web.append('add', { member: helper.member });
+    await web.putScope('scope-a', [device, helper.member]);
+    await keyring.catchUp();
+    expect(await keyring.acceptHeader(header('scope-a', 1, web.head!, web.member.memberId))).toBe(true);
+    // The key is not cached, so the key read catches up, and the remove arrives only there.
+    expect(keyring.cached('scope-a', 1)).toBeUndefined();
+    await web.append('remove', { memberId: helper.member.memberId });
+    expect(await keyring.sealingKey('scope-a', 1)).toBeUndefined();
+    expect(keyring.session!.state.head).toEqual(web.head);
+  });
+
+  it('copies the key where the opening read takes it, so a catch-up before the read resumes cannot zero it', async () => {
+    const { web, device, keyring } = await member();
+    const scopeKey = await web.putScope('scope-a', [device]);
+    let shredded = false;
+    const shred = async (): Promise<void> => {
+      if (shredded) return;
+      shredded = true;
+      await web.append('shred', { scopeId: 'scope-a' });
+      await keyring.catchUp();
+    };
+    // A read that takes the key through the public fetch gets the cached
+    // bytes; this catch-up zeroes them before that read resumes.
+    const fetch = keyring.fetch.bind(keyring);
+    vi.spyOn(keyring, 'fetch').mockImplementation(async (...args) => {
+      const result = await fetch(...args);
+      await shred();
+      return result;
+    });
+    const key = await keyring.openingKey({ id: 'scope-a', epoch: 1 });
+    await shred();
+    expect(keyring.cached('scope-a', 1)).toBeUndefined();
+    expect(key).toEqual(scopeKey);
+    expect(key!.some((byte) => byte !== 0)).toBe(true);
+  });
+
+  it('retires without onLost, zeroing its keys, and hands only on-chain points of the same member to the next run', async () => {
+    const { web, device, options, session } = await member();
+    let lost = 0;
+    const first = new DeviceMemberKeyring(session, { ...options, onLost: () => { lost += 1; } });
+    const scopeKey = await web.putScope('scope-a', [device]);
+    await first.catchUp();
+    expect(await first.acceptHeader(header('scope-a', 1, web.head!, web.member.memberId))).toBe(true);
+    const fetched = await first.fetch('scope-a', 1);
+    if (!fetched.ok) throw new Error(fetched.reason);
+
+    const carried = first.retire()!;
+    expect(lost).toBe(0);
+    expect(first.session).toBeUndefined();
+    expect(fetched.key.scopeKey.every((byte) => byte === 0)).toBe(true);
+    expect(await first.sealingKey('scope-a', 1)).toBeUndefined();
+    expect(carried.points.get('scope-a')?.get(1)).toEqual(web.head);
+
+    // A next run whose verified chain has no such scope yet seals nothing for it.
+    const next = new DeviceMemberKeyring(session, { ...options, carried });
+    expect(await next.sealingKey('scope-a', 1)).toBeUndefined();
+    const resumed = new DeviceMemberKeyring(next.session!, options);
+    await resumed.catchUp();
+    const current = new DeviceMemberKeyring(resumed.session!, { ...options, carried });
+    expect(await current.sealingKey('scope-a', 1)).toEqual({ scopeKey, epoch: 1, sender: device.memberId, chainHead: web.head });
+
+    const forged = { ...carried, points: new Map([['scope-a', new Map([[1, { ...web.head!, hash: `sha256:${'0'.repeat(64)}` }]])]]) };
+    expect(await new DeviceMemberKeyring(resumed.session!, { ...options, carried: forged }).sealingKey('scope-a', 1)).toBeUndefined();
+    const otherMember = { ...carried, memberId: web.member.memberId };
+    expect(await new DeviceMemberKeyring(resumed.session!, { ...options, carried: otherMember }).sealingKey('scope-a', 1)).toBeUndefined();
+  });
+
+  it('seals nothing at a carried point once a scope member is removed between the runs', async () => {
+    const { web, device, options, session } = await member();
+    const helper = await stranger();
+    await web.append('add', { member: helper.member });
+    await web.putScope('scope-a', [device, helper.member]);
+    const first = new DeviceMemberKeyring(session, options);
+    await first.catchUp();
+    expect(await first.acceptHeader(header('scope-a', 1, web.head!, web.member.memberId))).toBe(true);
+    const carried = first.retire()!;
+    expect(carried.points.get('scope-a')?.get(1)).toEqual(web.head);
+
+    await web.append('remove', { memberId: helper.member.memberId });
+    const resumed = new DeviceMemberKeyring(session, options);
+    await resumed.catchUp();
+    const next = new DeviceMemberKeyring(resumed.session!, { ...options, carried });
+    expect(await next.sealingKey('scope-a', 1)).toBeUndefined();
+  });
+
+  it.each(['tenantId', 'deviceId'] as const)('keeps no carried point of another %s', async (field) => {
+    const { web, device, options, session } = await member();
+    await web.putScope('scope-a', [device]);
+    const first = new DeviceMemberKeyring(session, options);
+    await first.catchUp();
+    expect(await first.acceptHeader(header('scope-a', 1, web.head!, web.member.memberId))).toBe(true);
+    const carried = { ...first.retire()!, [field]: 'other' };
+    const resumed = new DeviceMemberKeyring(session, options);
+    await resumed.catchUp();
+    expect(await new DeviceMemberKeyring(resumed.session!, { ...options, carried }).sealingKey('scope-a', 1)).toBeUndefined();
   });
 });
