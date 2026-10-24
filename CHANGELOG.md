@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Feature (examples)** — K8 `BotOptions.roomHistory` reads the room
+  messages of a seat ContextPack from an external authority (#883). The
+  authority selects the messages for the seat's Bot. The seat Turn stores only
+  their hash in `historyDigest`, and a failed read leaves the seat queued until
+  its deadline. K8 still writes `room.messages`. `ContextHistory` gets the
+  optional `room`, and `SyncOptions` the optional `roomHistoryMode` and
+  `roomHistory`. Without the option nothing changes.
 - **Feature (protocol, server, cloud, client)** — an ordinary Agent offer can
   select `agentMemory: 'read-write-if-admitted'` (#833). It runs exactly as
   `read-write` when the daemon admits the memory MCP, and exactly as `none`

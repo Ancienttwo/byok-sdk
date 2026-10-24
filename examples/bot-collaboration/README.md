@@ -430,6 +430,26 @@ transaction freezes only a Turn that still has no offer.
 - A read that throws or returns another shape leaves the Turn queued. The
   timer reads again after about one second.
 
+With the `roomHistory` option, the room messages of a seat ContextPack come
+from an external authority too (#883). Before a seat Turn freezes its offer,
+the Host calls `roomHistory({ roomId, botId, turnId })` outside the ledger
+transaction, in the same phase as `history`.
+
+- The authority returns the messages that this seat's Bot can see, oldest
+  first, as `{ id, from, text, late }` rows. The authority selects them for
+  that Bot, so K8 applies no `visibleFrom` of its own. Rows in another shape
+  are refused.
+- The rows replace `room.messages` in that ContextPack, in the same message
+  window. The state does not store them. The seat Turn keeps their hash in
+  `historyDigest`.
+- K8 still writes `room.messages`. Round counts, mention seats and the seat
+  request text read it.
+- A read that throws or returns another shape leaves the seat queued, and the
+  timer reads again. The seat deadline still applies, so a seat whose read
+  never succeeds is released as `busy` and its Turn expires.
+- No projection carries an accepted room post yet. The Host reads posts from
+  `snapshot().team.rooms` to write them to its authority.
+
 The team comes from this ledger, unless the `team: 'external'` option is set.
 
 ## External team authority
