@@ -8,17 +8,20 @@ import { seedCollaboration, VECTOR_NOW, type CommitSubject, type SeedTeam } from
 import type { FinishPortsFactory } from './store';
 
 /**
- * The test ports of a commit and a terminal transaction: the vector clock, the Host input admission, the snapshot Bot
- * template and a team management port that does nothing.
+ * The test ports of a commit and a terminal transaction: the vector clock, the snapshot Bot template and a team management
+ * port that does nothing. The H store admits inputs itself.
  */
 export function vectorPorts(state: CollaborationState, publish: CommandPorts['publish']): ReturnType<FinishPortsFactory> {
-  return { now: () => VECTOR_NOW, publish, admitInput: fields => admitUserInput(state, fields, undefined, VECTOR_NOW),
+  return { now: () => VECTOR_NOW, publish,
     teamBot: row => writeSnapshotBot(state, row, { default: template('device', 'main') }), manage: () => {} };
 }
-/** The vector ports with the outcome ports of a callback command, for the internal commit entry (#793 D2f-6). */
+/**
+ * The vector ports with the outcome ports of a callback command, for the internal commit entry (#793 D2f-6), and the input
+ * admission with no coalescing, for the memory subject. The H store replaces the admission with its own.
+ */
 export function callbackPorts(state: CollaborationState, publish: CommandPorts['publish']): CommandPorts {
   const { manage, ...ports } = vectorPorts(state, publish);
-  return { ...ports, outcome: { committed: { intent: () => undefined }, manage, createRoutine: () => {}, updateRoutine: () => {}, cancelRoutine: () => {} } };
+  return { ...ports, admitInput: fields => admitUserInput(state, fields, undefined, VECTOR_NOW), outcome: { committed: { intent: () => undefined }, manage, createRoutine: () => {}, updateRoutine: () => {}, cancelRoutine: () => {} } };
 }
 /**
  * The reference subject for H: the pure rules on a plain object, with callback records as in H.

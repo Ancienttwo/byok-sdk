@@ -3802,11 +3802,13 @@ export interface ToolsetsReloadParams {
 export declare const ENROLLMENT_PAIRING_CODE_MAX_BYTES = 1024;
 export interface EnrollmentPairParams {
     pairingCode: string;
+    /** The base32 E2EE pairing verification secret (#654 §7.2). The daemon decodes it; it never reaches the Host. */
+    verificationSecret?: string;
 }
 /**
  * Exact shape gate for service-identity pairing. The code is opaque server
  * authority: this only bounds transport bytes and rejects unknown fields; it
- * never parses, normalizes or logs the code.
+ * never parses, normalizes or logs the code or the verification secret.
  */
 export declare function parseEnrollmentPairParams(value: unknown): EnrollmentPairParams | undefined;
 /** Shape-only parser; executable definition validation remains registry-owned. */
@@ -4739,8 +4741,15 @@ export interface DaemonStatus {
 export interface Daemon {
     /** Present only with agentMemoryExport: true. Holds the home writer lease; AgentHomeBusyError is retryable. Raw contents remain Host-owned. */
     exportAgentMemory?(agentRef: AgentRef, options?: AgentMemoryExportOptions): Promise<AgentMemoryExport>;
-    /** Pairing result is intentionally credential-blind. */
-    pair(pairingCode: string): Promise<DeviceEnrollment>;
+    /**
+     * Pairing result is intentionally credential-blind. With
+     * `verificationSecret`, the base32 secret the web client shows after the
+     * pairing code (#654 §7.2), the device also enrolls as an E2EE member; the
+     * secret never reaches the Host. Without it the device pairs without E2EE.
+     */
+    pair(pairingCode: string, options?: {
+        readonly verificationSecret?: string;
+    }): Promise<DeviceEnrollment>;
     /**
      * Resolves once local startup is done — store ownership, storage, journal
      * recovery, the control socket and the task runner — with the reconnect
@@ -5357,16 +5366,36 @@ export interface DeviceCredentialConfig {
     /** Explicit macOS keychain file; omitted uses the operating system's default keychain. */
     readonly macosKeychainPath?: string;
 }
-export interface DeviceCredentialStoreOptions extends DeviceCredentialConfig {
+export interface OsCredentialEntryOptions extends DeviceCredentialConfig {
     readonly storeDir: string;
     readonly productId: string;
     readonly platform?: NodeJS.Platform;
     readonly commandRunner?: DeviceCommandRunner;
 }
 /**
- * Internal OS-backed authority for the bearer token and device private key.
- * Every operation targets the selected platform provider. An explicit macOS
- * keychain selects custody within that provider, without a file fallback.
+ * One named entry of this product's OS credential provider: the macOS
+ * keychain, the Windows Credential Manager or the Linux Secret Service. It
+ * moves raw strings; each owner encodes and checks its own value. An explicit
+ * macOS keychain selects custody within that provider, without a file
+ * fallback.
+ */
+export declare class OsCredentialEntry {
+    #private;
+    constructor(options: OsCredentialEntryOptions & {
+        readonly account: string;
+        readonly label: string;
+        readonly subject: string;
+    });
+    /** The stored value, or `undefined` when the entry is absent. */
+    read(): Promise<string | undefined>;
+    replace(value: string): Promise<void>;
+    /** Delete the entry. An absent entry is already deleted. */
+    delete(): Promise<void>;
+}
+export type DeviceCredentialStoreOptions = OsCredentialEntryOptions;
+/**
+ * Internal OS-backed authority for the bearer token and device private key,
+ * in the entry `device-enrollment`.
  */
 export declare class DeviceCredentialStore implements DeviceCredentialBackend {
     #private;
