@@ -538,6 +538,105 @@ describe.skipIf(!isSqliteAvailable())('SqliteLocalTaskJournal', () => {
     });
   });
 
+  describe('replacing a refused terminal (#654 §77b)', () => {
+    const terminal = (bytes: string, terminalType: 'complete' | 'failed' = 'complete', recordedAt = '2026-08-07T00:00:05.000Z') => ({
+      taskId: 'task-1', terminalType, bytes, payloadHash: journalHash(bytes), truthState: 'pending' as const, attempt: 1, recordedAt,
+    });
+    const refused = terminal('refused-terminal');
+    const replacement = terminal('replacement-terminal', 'failed', '2026-08-07T00:00:09.000Z');
+
+    async function refusedJournal(options: Partial<ConstructorParameters<typeof SqliteLocalTaskJournal>[0]> = {}) {
+      const storeDir = await tmpStore();
+      const journal = build(storeDir, options);
+      await journal.appendEnvelope(envelopeRecord());
+      await journal.recordTerminal(refused);
+      await journal.rejectTerminal('task-1', refused.payloadHash, 'payload_invalid');
+      return { storeDir, journal };
+    }
+
+    it('makes the replacement the pending terminal, and keeps the refused hash as a transition', async () => {
+      const { storeDir, journal } = await refusedJournal();
+      await journal.replaceRefusedTerminal('task-1', refused.payloadHash, replacement);
+
+      expect(await journal.listPendingTerminals(IDENTITY)).toEqual([{
+        taskId: 'task-1', terminalType: 'failed', bytes: 'replacement-terminal', payloadHash: replacement.payloadHash,
+        truthState: 'pending', attempt: 1, recordedAt: refused.recordedAt,
+      }]);
+      expect(readRows(storeDir, 'SELECT local_state FROM journal_task')).toEqual([{ local_state: 'terminal:failed' }]);
+      expect(readRows(storeDir, 'SELECT transition_id, from_state, to_state, detail FROM journal_transition')).toEqual([{
+        transition_id: `terminal-replaced:task-1:${refused.payloadHash}`, from_state: 'terminal:complete', to_state: 'terminal:failed',
+        detail: `refused ${refused.payloadHash}: payload_invalid`,
+      }]);
+      await journal.confirmTerminal('task-1', replacement.payloadHash);
+      expect(await journal.listPendingTerminals(IDENTITY)).toEqual([]);
+    });
+
+    it('ignores a late disposition of the refused bytes, and repeats of the same replacement', async () => {
+      const { storeDir, journal } = await refusedJournal();
+      await journal.replaceRefusedTerminal('task-1', refused.payloadHash, replacement);
+      await journal.rejectTerminal('task-1', refused.payloadHash, 'payload_invalid');
+      await journal.confirmTerminal('task-1', refused.payloadHash);
+      await journal.replaceRefusedTerminal('task-1', refused.payloadHash, replacement);
+
+      expect((await journal.listPendingTerminals(IDENTITY)).map((row) => [row.payloadHash, row.truthState])).toEqual([[replacement.payloadHash, 'pending']]);
+      expect(countRows(storeDir, 'journal_transition')).toBe(1);
+      await expect(journal.confirmTerminal('task-1', journalHash('never-recorded'))).rejects.toThrow('terminal acknowledgement does not match durable terminal');
+    });
+
+    it('refuses a second, different replacement once the first is current', async () => {
+      const { journal } = await refusedJournal();
+      await journal.replaceRefusedTerminal('task-1', refused.payloadHash, replacement);
+      await expect(journal.replaceRefusedTerminal('task-1', refused.payloadHash, terminal('another-replacement', 'failed')))
+        .rejects.toThrow('terminal replacement does not match a refused durable terminal');
+      expect((await journal.listPendingTerminals(IDENTITY))[0]?.bytes).toBe('replacement-terminal');
+    });
+
+    it.each([
+      ['a pending terminal', async (journal: SqliteLocalTaskJournal) => { await journal.recordTerminal(refused); }],
+      ['a confirmed terminal', async (journal: SqliteLocalTaskJournal) => {
+        await journal.recordTerminal(refused);
+        await journal.confirmTerminal('task-1', refused.payloadHash);
+      }],
+      ['a task with no terminal', async () => {}],
+    ] as const)('refuses to replace %s', async (_label, setup) => {
+      const storeDir = await tmpStore();
+      const journal = build(storeDir);
+      await journal.appendEnvelope(envelopeRecord());
+      await setup(journal);
+      const before = readRows(storeDir, 'SELECT * FROM journal_terminal');
+      await expect(journal.replaceRefusedTerminal('task-1', refused.payloadHash, replacement))
+        .rejects.toThrow('terminal replacement does not match a refused durable terminal');
+      expect(readRows(storeDir, 'SELECT * FROM journal_terminal')).toEqual(before);
+      expect(countRows(storeDir, 'journal_transition')).toBe(0);
+    });
+
+    it('refuses a replacement that names another refused hash, or whose bytes do not match their hash', async () => {
+      const { journal } = await refusedJournal();
+      await expect(journal.replaceRefusedTerminal('task-1', journalHash('other'), replacement))
+        .rejects.toThrow('terminal replacement does not match a refused durable terminal');
+      await expect(journal.replaceRefusedTerminal('task-1', refused.payloadHash, { ...replacement, payloadHash: journalHash('not-these-bytes') }))
+        .rejects.toThrow('terminal bytes do not match their canonical hash');
+      expect((await journal.listPendingTerminals(IDENTITY))[0]).toMatchObject({ bytes: 'refused-terminal', truthState: 'failed' });
+    });
+
+    it('commits the replacement and its transition together, on neither side of a failed transaction', async () => {
+      const { storeDir, journal } = await refusedJournal({ faults: faultOnce('replace:before-commit') });
+      await expect(journal.replaceRefusedTerminal('task-1', refused.payloadHash, replacement)).rejects.toThrow('injected fault at replace:before-commit');
+      expect(readRows(storeDir, 'SELECT bytes, truth_state FROM journal_terminal')).toEqual([{ bytes: 'refused-terminal', truth_state: 'failed' }]);
+      expect(countRows(storeDir, 'journal_transition')).toBe(0);
+      await journal.replaceRefusedTerminal('task-1', refused.payloadHash, replacement);
+      expect(readRows(storeDir, 'SELECT bytes, truth_state FROM journal_terminal')).toEqual([{ bytes: 'replacement-terminal', truth_state: 'pending' }]);
+    });
+
+    it('keeps the replacement after a post-commit failure, and a reopened journal replays it', async () => {
+      const { storeDir, journal } = await refusedJournal({ faults: faultOnce('replace:after-commit') });
+      await expect(journal.replaceRefusedTerminal('task-1', refused.payloadHash, replacement)).rejects.toThrow('injected fault at replace:after-commit');
+      await journal.close();
+      const reopened = build(storeDir);
+      expect((await reopened.listPendingTerminals(IDENTITY)).map((row) => [row.bytes, row.truthState])).toEqual([['replacement-terminal', 'pending']]);
+    });
+  });
+
   describe('recovery markers', () => {
     it('commits an interruption marker and its terminal together, on neither side of a failed transaction', async () => {
       const storeDir = await tmpStore('byok-journal-recovery-before-commit-');
