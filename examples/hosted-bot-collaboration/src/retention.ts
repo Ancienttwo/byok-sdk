@@ -1,12 +1,13 @@
 import type { PoolClient } from 'pg';
 import { hash, time, type Json } from '@byok-sdk/example-host-execution-core';
-import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
-import { retainRoots, type RetentionInput, type RetentionLimits, type RetentionResult,
+import type { CollaborationState, Turn } from '@byok-sdk/example-bot-collaboration/model';
+import { retainRoots, RetentionRefused, type RetentionInput, type RetentionLimits, type RetentionResult,
   type RetentionStore } from '@byok-sdk/example-bot-collaboration/retention';
 import { commitCommand, refuseRetired, retiredIdentity, type AdmittedIds, type Command, type CommandPorts,
   type RetiredNamespace } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import type { CommandRecord, CommitRequest, CommitResult } from '@byok-sdk/example-bot-collaboration/rules/commit';
-import { commandIntentFacts } from './intents';
+import { queueDelivery } from '@byok-sdk/example-bot-collaboration/delivery-routing';
+import { commandIntentFacts, intentConclusions } from './intents';
 import { storedKey } from './layout';
 import { loadSlice } from './routines';
 
@@ -20,7 +21,7 @@ function checkRow(namespace: string, id?: string): void {
 }
 
 /** One archived row of a scope, as K4 `ApplicationRows.get` reads it: an expired row stays until a retention call removes it. */
-async function archivedRow(client: PoolClient, scopeKey: string, namespace: string, id: string): Promise<Json | undefined> {
+export async function archivedRow(client: PoolClient, scopeKey: string, namespace: string, id: string): Promise<Json | undefined> {
   const found = await client.query<{ body: Json }>('SELECT body FROM archived_row WHERE scope = $1 AND namespace = $2 AND id = $3',
     [scopeKey, namespace, storedKey(id)]);
   return found.rows[0]?.body;
@@ -62,8 +63,14 @@ export async function retiredTurns(client: PoolClient, scopeKey: string, turnIds
  * retention moved still answers a replay, and an id that retention retired is refused at admission. A throw rolls back.
  */
 export async function commitStored(client: PoolClient, scope: string, state: CollaborationState, request: CommitRequest<Command>,
-  ports: Omit<CommandPorts, 'intents'>): Promise<CommitResult> {
-  const scopeKey = storedKey(scope);
+  ports: Omit<CommandPorts, 'intents' | 'deliver'>, channel: boolean): Promise<CommitResult> {
+  const scopeKey = storedKey(scope), command = request.command;
+  // The channel outbox port of a K4 callback, as L's (K8 host.ts `deliverPort`). The delivery rules read the intent
+  // conclusions committed before this command, so the view is read here, before any write of this transaction (#793 D2b-out-2).
+  const taskId = command.kind === 'message' ? command.message.taskId : command.kind === 'outcome' ? command.taskId : undefined;
+  const conclusions = channel && taskId !== undefined ? await intentConclusions(client, scope) : undefined;
+  const deliver = conclusions && taskId !== undefined
+    ? { deliver: (turn: Turn, key: string, text: string) => queueDelivery(conclusions, state, turn, taskId, key, text, ports.now())?.id } : {};
   // The intent facts come from the intent rows in this transaction, never from the caller (#793 D2f-4). So do the committed
   // intents of an outcome, which a Main Bot cancel reads.
   const intents = await commandIntentFacts(client, scope, Object.keys(state.turns));
@@ -73,7 +80,7 @@ export async function commitStored(client: PoolClient, scope: string, state: Col
   const result = commitCommand(state, request, { scope, recordCallbacks: true,
     // As K4 `rows.get` in L: a keyed command that is not in the state checks its row id here, and an over-limit id throws.
     archived: (id: string) => { checkRow('commands', id); return id === request.commandId ? archived : undefined; },
-    admitted: ids => { admitted = ids; } }, { ...ports, intents, ...(ports.outcome ? { outcome: { ...ports.outcome, committed: intents } } : {}) });
+    admitted: ids => { admitted = ids; } }, { ...ports, ...deliver, intents, ...(ports.outcome ? { outcome: { ...ports.outcome, committed: intents } } : {}) });
   if (admitted) {
     const ids = admitted as AdmittedIds;
     const isRetired = await tombstones(client, scopeKey, (['turn', 'input', 'round'] as const).flatMap(namespace =>
@@ -114,6 +121,8 @@ export async function decideRetention(client: PoolClient, scopeKey: string, stat
     retire(namespace, id) { checkRow(namespace, id); retired.add(hash([namespace, id])); },
     isRetired(namespace, id) { checkRow(namespace, id); return retired.has(hash([namespace, id])) || loaded(namespace, id); },
   };
+  // The root of each Turn before K8 moves it, for a refusal of the delivery outbox check below.
+  const rootOf = new Map(Object.values(state.turns).map(turn => [turn.id, turn.root]));
   const result = retainRoots(state, input, limits, {
     hasIntent: turnId => intents.has(storedKey(turnId)),
     occurrenceOpen: turnId => openOccurrences.has(turnId.slice('occurrence:'.length)),
@@ -124,6 +133,13 @@ export async function decideRetention(client: PoolClient, scopeKey: string, stat
     await client.query(`INSERT INTO archived_row (scope, namespace, id, body, expires_at) VALUES ($1, $2, $3, $4::json, $5)
       ON CONFLICT (scope, namespace, id) DO UPDATE SET body = excluded.body, expires_at = excluded.expires_at`,
     [scopeKey, row.namespace, storedKey(row.id), body, row.expiresAt]);
+    // A delivery leaves the state only after the sender settled its outbox row (#793 D2b-out E7). K8 already refuses an
+    // unsettled delivery entity; this keeps the index from losing a row that the sender still needs.
+    if (row.namespace === 'deliveries' && (await client.query(`SELECT 1 FROM outbox WHERE scope = $1 AND key = $2 AND kind = 'delivery'
+      AND settled_at IS NULL`, [scopeKey, storedKey(row.id)])).rowCount) {
+      const turnId = (row.value as { turnId: string }).turnId;
+      throw new RetentionRefused('protected_root', rootOf.get(turnId) ?? turnId, 'A delivery outbox row of the root is not settled');
+    }
     if (row.namespace === 'commands') await client.query('DELETE FROM command WHERE scope = $1 AND key = $2', [scopeKey, storedKey(row.id)]);
   }
   for (const identity of retired) {

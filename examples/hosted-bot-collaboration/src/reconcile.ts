@@ -190,7 +190,7 @@ function verified(input: FrozenInput, attempt: TaskAttempt | undefined): TaskAtt
  * conclusion, as K4 runs `applyOutcome` before `settle` (#793 D2f). Then a staged version that is due switches.
  */
 export async function decideFinish(client: PoolClient, scope: string, turnId: string, state: CollaborationState, publish: Publish,
-  { terminal, attempt }: TaskEvidence, ports: PortsFactory): Promise<Decision<Conclusion | undefined>> {
+  { terminal, attempt }: TaskEvidence, ports: PortsFactory, channel: boolean): Promise<Decision<Conclusion | undefined>> {
   const scopeKey = storedKey(scope), key = storedKey(turnId);
   const found = await client.query<{ task_id: string; concluded: boolean }>(
     'SELECT task_id, conclusion IS NOT NULL AS concluded FROM intent WHERE scope = $1 AND key = $2', [scopeKey, key]);
@@ -207,7 +207,7 @@ export async function decideFinish(client: PoolClient, scope: string, turnId: st
     const slice = await loadSlice(client, scopeKey), head = revisionOf(state);
     const result = await commitStored(client, scope, state, { scope, commandId: row.task_id,
       command: { kind: 'outcome', turnId, taskId: row.task_id, document: envelope.payload.document as Json } },
-    { ...base, ...(base.outcome ? { outcome: { ...base.outcome, ...outcomeRoutinePorts(slice, now, row.task_id) } } : {}) });
+    { ...base, ...(base.outcome ? { outcome: { ...base.outcome, ...outcomeRoutinePorts(slice, now, row.task_id) } } : {}) }, channel);
     await writeSlice(client, scopeKey, slice);
     outbox = result.revision === head + 1 ? result.outbox : [];
     conclusion = 'succeeded';
@@ -215,5 +215,5 @@ export async function decideFinish(client: PoolClient, scope: string, turnId: st
   await client.query('UPDATE intent SET terminal = $3::json, attempt = $4::json, conclusion = $5 WHERE scope = $1 AND key = $2',
     [scopeKey, key, JSON.stringify(terminal), JSON.stringify(attempt), conclusion]);
   await switchDueVersions(client, scopeKey, now);
-  return { value: conclusion, outbox };
+  return { value: conclusion, outbox, now };
 }

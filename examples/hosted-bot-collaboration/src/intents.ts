@@ -1,12 +1,13 @@
 import type { Pool, PoolClient } from 'pg';
-import { agentKey, canonical, fifoHeads, promoteOccurrence, queuedExpiry, submitFrozen, taskId,
+import { agentKey, canonical, fifoHeads, hash, promoteOccurrence, queuedExpiry, submitFrozen, taskId,
   type Conclusion, type ExecutionTemplate, type FrozenInput, type FrozenSubmitPort } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState, Turn } from '@byok-sdk/example-bot-collaboration/model';
 import { concludeRoutineTurn, routineOccurrence } from '@byok-sdk/example-bot-collaboration/routines';
+import type { IntentConclusions } from '@byok-sdk/example-bot-collaboration/delivery-routing';
 import type { SyncFacts, SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { activeBinding, DeviceBindingError } from './binding';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';
-import { storedKey } from './layout';
+import { idOf, storedKey } from './layout';
 import { retiredTurns } from './retention';
 import { switchDueVersions, type RoutineSlice } from './routines';
 import { inSchema, lockScope } from './store';
@@ -97,6 +98,15 @@ export async function cancelIntent(client: PoolClient, scope: string, turnId: st
     ...(row.retry_until === null ? {} : { retryUntil: Number(row.retry_until) }) }, now);
   await client.query('UPDATE intent SET conclusion = $3 WHERE scope = $1 AND key = $2', [scopeKey, key, conclusion]);
   return true;
+}
+
+/**
+ * The intent conclusions that the K8 delivery rules read (#793 D2b-out-2), keyed by K4 `hash(turnId)` as L's ledger keys
+ * its intents. The caller holds the scope lock.
+ */
+export async function intentConclusions(client: PoolClient, scope: string): Promise<IntentConclusions> {
+  const rows = await client.query<{ key: string; conclusion: Conclusion | null }>('SELECT key, conclusion FROM intent WHERE scope = $1', [storedKey(scope)]);
+  return { intents: Object.fromEntries(rows.rows.map(row => [hash(idOf(row.key)), row.conclusion === null ? {} : { conclusion: row.conclusion }])) };
 }
 
 /**

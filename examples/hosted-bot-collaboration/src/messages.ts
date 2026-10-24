@@ -22,7 +22,7 @@ export const messageCommandId = (input: AgentMessageInput): string => `${input.t
  * write nothing. They stay stable for a replay, because the frozen input never changes and an accepted reply stays.
  */
 export async function decideMessage(client: PoolClient, scope: string, state: CollaborationState, publish: Publish,
-  input: AgentMessageInput, ports: PortsFactory): Promise<Decision<MessageDecision>> {
+  input: AgentMessageInput, ports: PortsFactory, channel: boolean): Promise<Decision<MessageDecision>> {
   const refuse = (reasonCode: string): Decision<MessageDecision> => ({ value: { outcome: 'refused', reasonCode }, outbox: [] });
   const frozen = await frozenIntent(client, scope, input.taskId);
   if (!frozen) return refuse('unknown_task');
@@ -33,12 +33,12 @@ export async function decideMessage(client: PoolClient, scope: string, state: Co
   const reply = await acceptedReply(client, storedKey(scope), state, input.taskId);
   if (reply && (reply.messageId !== input.payload.messageId || reply.contentHash !== input.payload.contentHash)) return refuse('message_conflict');
   if (reply) return { value: { outcome: 'accepted' }, outbox: [] };
-  const head = revisionOf(state);
+  const head = revisionOf(state), base = ports(state, publish);
   let result: CommitResult;
   try {
     result = await commitStored(client, scope, state, { scope, commandId: messageCommandId(input),
       command: { kind: 'message', turnId: frozen.turnId, message: { taskId: input.taskId, payload: input.payload } } },
-    ports(state, publish));
+    base, channel);
   } catch (cause) {
     // Other content for the id of a refused message: the refusal that K4 gives for an accepted one.
     if (cause instanceof CommitConflict && cause.code === 'identity_conflict') return refuse('message_conflict');
@@ -46,7 +46,7 @@ export async function decideMessage(client: PoolClient, scope: string, state: Co
   }
   const value: MessageDecision = result.disposition.outcome === 'accepted' ? { outcome: 'accepted' }
     : { outcome: 'refused', reasonCode: result.disposition.reasonCode };
-  return { value, outbox: result.revision === head + 1 ? result.outbox : [] };
+  return { value, outbox: result.revision === head + 1 ? result.outbox : [], now: base.now() };
 }
 
 export interface MessageConsumerOptions {
