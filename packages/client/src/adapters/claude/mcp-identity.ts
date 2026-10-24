@@ -30,7 +30,8 @@ function isConfiguredServer(reported: unknown, configured: McpStdioServerConfig 
  * user's own configuration is not the task's server. Every other reported
  * server (the user's own configuration, SDK-reserved helpers) still counts for
  * collisions: a runtime name two reported tools share is ambiguous and gets no
- * identity. A malformed response yields no identities.
+ * identity. A malformed response yields no identities. Under
+ * `agentUserContext: 'excluded'` an Agent task's Claude reports no user servers.
  */
 export function claudeMcpEventIdentities(
   response: unknown,

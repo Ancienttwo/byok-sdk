@@ -11,6 +11,7 @@ import { storedKey } from './layout';
 import { vectorPorts } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL, VectorStore } from './postgres.test-support';
 import type { TaskEvidence } from './reconcile';
+import { HostedReplyChecker } from './replies';
 
 // #793 S4: the scope due time that each store transaction writes, and the pass that syncs the due scopes.
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
@@ -225,6 +226,21 @@ describe.skipIf(POSTGRES_URL === undefined)('H scope due time and due scheduler 
       const batch = Object.values((await coalescing.read(scope)).inputBatches ?? {})[0];
       expect(batch).toMatchObject({ state: 'sealed' });
       expect(await dueAt(scope)).toBe(String(LATER));
+      expect(await pass.run()).toEqual({ synced: 0, stalled: [], failed: [] });
+    });
+
+    it('runs a due reply check in the deployment sync before the store sync, which clears the check time (#793 S7)', async () => {
+      const h = await delegated();
+      expect(await store().finish(h.scope, h.id, evidence(taskId(h.id, 0), 'task.complete', { document: {} }), vectorPorts)).toBe('succeeded');
+      await h.sync();
+      expect(await dueAt(h.scope)).toBe(String(VECTOR_NOW));
+      // The store sync alone does not read the reply, so the scope stays due.
+      expect(await scheduler().run()).toEqual({ synced: 1, stalled: [h.scope], failed: [] });
+      const checker = new HostedReplyChecker(store(), { port: () => ({ agentMessage: async () => ({ disposition: { outcome: 'held' } }) }), now: () => clock });
+      const pass = scheduler({ sync: async (scope, now) => { await checker.check(scope, now); return sync(scope, now); } });
+      expect(await pass.run()).toEqual({ synced: 1, stalled: [], failed: [] });
+      expect(await h.delegation()).toMatchObject({ status: 'reply_held' });
+      expect(await dueAt(h.scope)).toBe(String(LATER));
       expect(await pass.run()).toEqual({ synced: 0, stalled: [], failed: [] });
     });
 

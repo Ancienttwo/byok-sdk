@@ -394,6 +394,15 @@ admitted work the Host cancels. `src/rules/commands.ts` exports both. L builds
 the facts from its K4 intents; H builds them from its intent rows. The
 `roomVectors` run on both.
 
+`checkReply(state, d, check, now, emit, uncertainAfterMs)` in
+`src/rules/delegation.ts` decides one reply check of a `reply_pending`
+delegation: a reply body that the Host holds answers it, a failed read
+retries with backoff, and otherwise the SDK readback decides.
+`replyCheckDue(d, now)` selects the due checks. `src/rules/commands.ts`
+exports both. L's `flushReplies` runs them with its own SDK read, and H runs
+them in `HostedReplyChecker` (#793 S7). The `replyVectors` hold the decision
+for L and H.
+
 Known L limit: K4 stores the whole Host ledger, with the collaboration state,
 in one JSON row per tenant. Turns, replies, audit rows and command records
 make that row grow. Command records are dedup evidence; retention must not
