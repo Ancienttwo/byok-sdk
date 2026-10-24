@@ -13,6 +13,9 @@ createInterface({ input: process.stdin }).on('line', line => {
   const command = JSON.parse(line);
   if (command.type !== 'start') throw new Error('unexpected command');
   appendFileSync(path.join(root, 'starts.jsonl'), `${JSON.stringify(command)}\n`);
+  // Opt-in: the worker ends on its own before its start receipt, or refuses the start.
+  if (plan.exitBeforeReceipt) process.exit(74);
+  if (plan.refuseStart) { send({ type: 'response', id: command.id, success: false }); return; }
   if (!command.resume) appendFileSync(path.join(root, 'model-calls'), 'synthetic-model-call\n');
   send({ type: 'response', id: command.id, success: true, workerPid: process.pid,
     projectionDigest: plan.projectionDigest ?? 'a'.repeat(64) });

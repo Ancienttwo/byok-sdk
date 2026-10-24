@@ -7,10 +7,13 @@ import path from 'node:path';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { startDurablePi, type DurableStart } from '../adapters/pi-durable/session';
 import type { Session, MessageDraftDelta } from '../types';
+import { RuntimeExecutionFailure } from '../runtime-failure';
 
 interface WorkerPlan {
   complete?: boolean;
   crash?: boolean;
+  exitBeforeReceipt?: boolean;
+  refuseStart?: boolean;
   retiredResultFrame?: boolean;
   projectionDigest?: string;
 }
@@ -21,6 +24,12 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 async function fixture(plan: WorkerPlan[]) {
+  const started = await start(plan);
+  if ('startError' in started) throw started.startError;
+  return started;
+}
+/** Starts the durable lane over the inert worker; a start failure is returned, not thrown. */
+async function start(plan: WorkerPlan[]) {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'fix-pi-durable-recovery-')));
   roots.push(root);
   const home = path.join(root, 'home');
@@ -31,7 +40,7 @@ async function fixture(plan: WorkerPlan[]) {
   const scratch = await testExecutionScratch();
   const release = vi.fn(() => scratch.release());
   // The injected spawn launches only our inert fixture, never Pi.
-  const session = await startDurablePi({
+  const starting = startDurablePi({
     input: { scratch,
       instruction: 'synthetic instruction', mcpEnv: {},
       manifest: { taskId: 'task', cwd: home,
@@ -52,6 +61,9 @@ async function fixture(plan: WorkerPlan[]) {
       return child;
     }) as typeof spawn,
   });
+  let session: Session;
+  try { session = await starting; }
+  catch (startError) { return { startError, children, release }; }
   sessions.push(session);
   const events: Array<AgentEvent | MessageDraftDelta> = [];
   let failure: unknown;
@@ -115,6 +127,7 @@ describe.skipIf(process.platform === 'win32')('F16-1 durable completion across w
     const f = await fixture([...(recovered ? [{ crash: true }] : []), { retiredResultFrame: true, complete: true }]);
     await f.collect();
     assertFailed(f);
+    expect(f.failure()).toMatchObject({ failure: { class: 'unknown' } });
     expect(f.children).toHaveLength(recovered ? 2 : 1);
   });
 
@@ -122,6 +135,8 @@ describe.skipIf(process.platform === 'win32')('F16-1 durable completion across w
     const f = await fixture([{ crash: true }, { crash: true }, { crash: true }]);
     await f.collect();
     assertFailed(f);
+    // The last worker ended on its own and could not be recovered (#869).
+    expect(f.failure()).toMatchObject({ failure: { class: 'runtime_exited' } });
     expect(f.events.map(event => event.type)).toEqual(['error']);
     expect(f.journal).toEqual(['respawn-intent:1', 'respawn-intent:2']);
     expect(f.children).toHaveLength(3);
@@ -132,7 +147,42 @@ describe.skipIf(process.platform === 'win32')('F16-1 durable completion across w
     const f = await fixture([{ crash: true }, { complete: true, projectionDigest: 'b'.repeat(64) }]);
     await f.collect();
     assertFailed(f);
+    // The respawned worker answered: its refusal, not an exit, ends the run.
+    expect(f.failure()).toMatchObject({ failure: { class: 'unknown' } });
     expect(f.events.map(event => event.type)).toEqual(['error']);
     expect(f.children).toHaveLength(2);
+  });
+  it('fails as runtime_exited when a respawned worker ends on its own before its start receipt', async () => {
+    const f = await fixture([{ crash: true }, { exitBeforeReceipt: true }]);
+    await f.collect();
+    assertFailed(f);
+    expect(f.failure()).toMatchObject({ failure: { class: 'runtime_exited' } });
+    expect(f.children).toHaveLength(2);
+  });
+});
+
+// #869: the lane's start failures are typed, never an adapter contract violation.
+describe.skipIf(process.platform === 'win32')('durable start contract', () => {
+  it('reports a worker that ends on its own before its start receipt as runtime_exited', async () => {
+    const started = await start([{ exitBeforeReceipt: true }]);
+    expect(started).toHaveProperty('startError');
+    const { startError, children, release } = started as { startError: unknown; children: ChildProcess[]; release: () => unknown };
+    expect(startError).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(startError).toMatchObject({
+      phase: 'start', category: 'infrastructure', retry: 'non-retryable',
+      message: 'durable runtime start failed', failure: { class: 'runtime_exited' },
+    });
+    expect(children).toHaveLength(1);
+    expect(release).toHaveBeenCalledOnce();
+  });
+
+  it('reports a refused start as unknown', async () => {
+    const started = await start([{ refuseStart: true }]);
+    const { startError, release } = started as { startError: unknown; release: () => unknown };
+    expect(startError).toMatchObject({
+      phase: 'start', category: 'infrastructure', retry: 'non-retryable',
+      message: 'durable runtime start failed', failure: { class: 'unknown' },
+    });
+    expect(release).toHaveBeenCalledOnce();
   });
 });
