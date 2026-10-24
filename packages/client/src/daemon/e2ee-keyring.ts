@@ -112,7 +112,7 @@ export type KemRotationFailure =
   | 'scope_epochs_exceeded'
   /** The Host read no package at an epoch whose key this run holds. */
   | 'key_package_missing'
-  /** A re-wrapped package does not read back with the next key, or a package still opens only with the old key. */
+  /** A package to keep does not read back with the next key under its `keyId`, or the package of an epoch whose key this run holds does not open. */
   | 'rewrap_unverified'
   /** The verified chain moved during each try of a scope's re-wrap. */
   | 'chain_moved';
