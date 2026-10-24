@@ -347,7 +347,9 @@ the intent cancel and the occurrence conclusion. The L sync transaction also
 runs other Host steps before and after the per-Turn steps. Before them, it
 seals due input batches, expires pending cards and advances rooms. After
 them, it settles delegations, reports card decisions and adds their action
-result Turns, cleans reply tokens and projects input batches. This contract
+result Turns, cleans reply tokens and projects input batches. The card steps
+are the K8 rule `src/rules/cards.ts` (`expireCards`, `reportCardDecisions`),
+which the `cardVectors` hold for L and H. This contract
 defines only the per-Turn step. The `syncVectors` in
 `src/commit-vectors.test-support.ts` hold these rules for the in-memory store
 and for L.

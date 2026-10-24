@@ -151,11 +151,18 @@ The terminal transaction delivers the Main Bot cancel that its outcome froze, af
 version switch, as L runs `core.cancel` after its terminal transaction. An untried target concludes `cancelled` there;
 the verdict comes at the next sync of the scope.
 
-H does not yet run these L sync and pass steps: `sealDueBatches`, card expiry, `advanceRooms`, the card decision
-projections and their `action_result` Turns, `projectInputBatches`, the reply checks (`reconcileReply`, `retryReply`),
-the device observation (`observeDevices`), and the card and Agent home flushes. Some of them (the batch seal, card
-expiry and the reply checks) need a due time per scope, which H does not store. These steps come after 0.30.0, in a
-later #793 slice, with a per-scope due index.
+### Card steps
+
+Each sync round runs the K8 card rule (`rules/cards.ts`, through `./rules/commands`) at L's positions (#793 S5):
+`expireCards` before the Turn steps, so a ContextPack frozen in that round shows each expiry, and `reportCardDecisions`
+after the settlement. A decided card is projected once as `card:<id>:<state>`; a confirmed card waits for its result or
+error. A confirmed or rejected card then adds its `action_result` Turn, so the round runs again and freezes it. An expired
+card starts no Turn. With no due index yet, a card expires at the next sync of its scope after its `expiresAt`.
+
+H does not yet run these L sync and pass steps: `sealDueBatches`, `advanceRooms`, `projectInputBatches`, the reply
+checks (`reconcileReply`, `retryReply`), the device observation (`observeDevices`), and the card and Agent home flushes.
+Some of them (the batch seal, card expiry and the reply checks) need a due time per scope, which H does not store. These
+steps come after 0.30.0, in a later #793 slice, with a per-scope due index.
 
 The projections that the rule publishes reach the outbox in the same transaction. A sync writes no command
 record and keeps the revision. A throw writes nothing. The rule's `executionStarted` fact is the intent's `started`
@@ -440,6 +447,8 @@ three and runs these suites.
   busy decline runs on L too (K4 with the sync rule's wait), and both conclude `declined` at generation 0. An SDK
   tenant in memory covers the cancel, expiry, lease and identity cases, and the scopes that a pass reports.
 - The K8 settlement vectors (`settlementVectors`) run on the store, as on L.
+- The K8 card vectors (`cardVectors`) run on the store, as on L: the expiry before a freeze, the decision projection once,
+  the `action_result` Turn of a rejected card, and a confirmed card that waits for its result.
 - The settlement tests build each delegation through the product path (an outcome `delegate`, then a sync), and cover
   each verdict, the units, `target_archived`, the timers, the late terminal audit, the Main Bot cancel in the terminal
   transaction, a rollback, the settlement facts, a verdict at the sync of a reported scope, and the refusal of invalid
