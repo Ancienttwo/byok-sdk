@@ -282,4 +282,39 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres single-use device requests share proof
       await scope.dispose();
     }
   });
+
+  it('applies two parallel writes of one requestId once: the other gets the recorded result', async () => {
+    const scope = await createDataplaneScope(4);
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const store = new PostgresE2eeMemberStore(scope.pool, createMutableClock());
+      const proof = { deviceId: 'dev-1', request: { requestId: 'parallel', operation: 'e2ee-member-chain.append', resource: '/byok/e2ee/chain', bodySha256: 'sha256-e2ee', bodySize: 7 } };
+      const append = () => store.appendChainEntries(TENANT_A, { rows: [{ seq: 1, entry: '{}' }], shreds: [], proof });
+      expect(await Promise.all([append(), append()])).toEqual([
+        { outcome: 'appended', appended: 1, replayed: 0 },
+        { outcome: 'appended', appended: 1, replayed: 0 },
+      ]);
+      expect(await store.readChainEntries(TENANT_A, { afterSeq: 0, limit: 256 })).toEqual([{ seq: 1, entry: '{}' }]);
+      const receipts = await scope.pool.query("SELECT count(*)::int AS n FROM proof_request_receipt WHERE tenant_id = $1 AND request_id = 'parallel'", [TENANT_A]);
+      expect(receipts.rows).toEqual([{ n: 1 }]);
+    } finally {
+      await scope.dispose();
+    }
+  });
+
+  it('refuses a replay whose stored result is not a valid result of that write', async () => {
+    const scope = await createDataplaneScope(2);
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const store = new PostgresE2eeMemberStore(scope.pool, createMutableClock());
+      const proof = { deviceId: 'dev-1', request: { requestId: 'corrupt', operation: 'e2ee-member-chain.append', resource: '/byok/e2ee/chain', bodySha256: 'sha256-e2ee', bodySize: 7 } };
+      const append = () => store.appendChainEntries(TENANT_A, { rows: [{ seq: 1, entry: '{}' }], shreds: [], proof });
+      await append();
+      await scope.pool.query(
+        `UPDATE proof_request_receipt SET response_body = '{"outcome":"stored","stored":1}' WHERE tenant_id = $1 AND request_id = 'corrupt'`, [TENANT_A]);
+      await expect(append()).rejects.toMatchObject({ code: 'e2ee_member_state_unreadable' });
+    } finally {
+      await scope.dispose();
+    }
+  });
 });

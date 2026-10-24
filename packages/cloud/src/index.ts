@@ -113,6 +113,7 @@ export type {
   TaskRedactionTaskResult,
 } from './task-redaction';
 
+export { parseRecordedWriteResult } from './e2ee-member';
 export type {
   E2eeMemberChainAppendInput,
   E2eeMemberChainAppendResult,
@@ -204,6 +205,7 @@ export type {
   TenantBoundDedup,
   TenantBoundDevices,
   TenantBoundMailbox,
+  TenantBoundObjects,
   TenantBoundPresence,
   TenantBoundQuota,
   TenantBoundRateLimiter,

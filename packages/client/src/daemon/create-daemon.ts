@@ -1805,6 +1805,11 @@ export function buildDaemonWithAdapters(
 
   let connection: ConnectionManager | undefined;
   let blobLifecycleAbort: AbortController | undefined;
+  // #654: sealed output uploads its ciphertext through its own blob client,
+  // which shutdown aborts only after the terminal commit barrier. A queued
+  // terminal can outlive its run, so its upload reads the current client.
+  let sealedUploadAbort: AbortController | undefined;
+  let sealedUploads: BlobClient | undefined;
   let sealedOutputSettled: (() => Promise<void>) | undefined;
   let inputPreparationStatusAbort: AbortController | undefined;
   let lifecycle: DaemonLifecycle = { phase: 'stopped' };
@@ -2406,11 +2411,22 @@ export function buildDaemonWithAdapters(
     capabilities.push('custom-harness');
     if (sealedPayload !== undefined) {
       capabilities.push(SEALED_PAYLOAD_CAPABILITY);
+      sealedUploadAbort = new AbortController();
+      sealedUploads = new BlobClient(config.serverUrl, auth, { signal: sealedUploadAbort.signal });
       const opened = new SealedTasks({
         keyring: sealedPayload.keyring,
         tenantId: record.tenantId,
         deviceId: record.deviceId,
-        blobs: { download: (ref) => blobClient.downloadBlob(ref, { signal: blobLifecycleAbort?.signal }) },
+        blobs: {
+          download: (ref) => blobClient.downloadBlob(ref, { signal: blobLifecycleAbort?.signal }),
+          upload: (ciphertext) => sealedUploads!.uploadArtifact(ciphertext, 'application/octet-stream'),
+        },
+        // Between sessions the next session's flags are unknown. Once the
+        // daemon stopped, halted or crashed, no session will advertise any.
+        serverCapabilities: () => {
+          if (lifecycle.phase !== 'running') return [];
+          return connection?.isOpen() === true ? connection.getServerCapabilities() : undefined;
+        },
       });
       sealedTasks = opened;
       sealedOutputSettled = () => opened.settled();
@@ -2431,12 +2447,19 @@ export function buildDaemonWithAdapters(
       // A sealed terminal is sealed once and its bytes are journaled; a retry
       // of the commit reuses them and never seals or uploads again (§9.2).
       let sealing: Promise<Envelope | undefined> | undefined;
+      // The seal and its upload run before the commit joins the one commit
+      // tail, so a slow upload holds no other task's terminal.
+      const seal = typeof terminal === 'function'
+        ? async (): Promise<void> => {
+          sealing ??= terminal();
+          try { await sealing; } catch (error) { sealing = undefined; throw error; }
+        }
+        : undefined;
       terminalCommits.enqueue(taskId, async () => {
         if (!activeJournal || !journalIdentity) throw new Error('durable journal unavailable');
         let envelope: Envelope | undefined;
         if (typeof terminal === 'function') {
-          sealing ??= terminal();
-          try { envelope = await sealing; } catch (error) { sealing = undefined; throw error; }
+          envelope = await sealing;
           if (envelope === undefined) return;
         } else envelope = terminal;
         const bytes = plainBytes ?? encodeEnvelope(envelope);
@@ -2479,7 +2502,7 @@ export function buildDaemonWithAdapters(
           // canonicalization failure remains visible and requires operator
           // recovery; the oversized result itself is never silently dropped.
         }
-      });
+      }, seal);
     };
 
     // #654: a task waits on its approval request. One that cannot be sealed
@@ -2510,13 +2533,23 @@ export function buildDaemonWithAdapters(
           commitTerminal(envelope.task_id!, () => sealedTaskOutput.sealOutbound(envelope));
           return;
         }
-        void sealedTaskOutput.sealOutbound(envelope).then(
+        // Without a journal no commit queue holds a terminal, so a terminal
+        // whose seal fails (its ciphertext upload) is sealed again each second
+        // here, as the queue would, until shutdown aborts the uploads.
+        const uploads = sealedUploadAbort?.signal;
+        const retries = terminalKindOf(envelope.type) !== undefined && uploads !== undefined;
+        const send = (): void => void sealedTaskOutput.sealOutbound(envelope).then(
           (sealed) => { if (sealed !== undefined) connection?.send(sealed); else denyUnsentApproval(envelope); },
           (error: unknown) => {
             console.error(`[byok/client] ${envelope.type} for sealed task ${envelope.task_id} not sent`, error);
+            if (retries && !uploads.aborted) {
+              setTimeout(() => { if (!uploads.aborted) send(); }, 1_000).unref?.();
+              return;
+            }
             denyUnsentApproval(envelope);
           },
         );
+        send();
         return;
       }
       if (!terminal) {
@@ -3531,6 +3564,7 @@ export function buildDaemonWithAdapters(
     // journal, before the drain below decides the connection is idle.
     await attempt(() => sealedOutputSettled?.(), false);
     const journalTailSettled = journal ? await attempt(() => terminalCommits.stop(), true) : true;
+    sealedUploadAbort?.abort();
     // stop() cleared the maintenance timer synchronously above. Await the pass
     // that may already have been inside SQLite only here, immediately before
     // closing the owned journal, so task interruption is not held behind a

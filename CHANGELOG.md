@@ -11,6 +11,28 @@
   refuses the Turn, and a sync that has not seen the Turn's result fails it
   as `result_retired`, as L does. Routine intents are refused. Nothing runs
   it automatically.
+- **Breaking (cloud)** — a sealed terminal (`task.complete_sealed`,
+  `task.fail_sealed`, `task.decline_sealed`, `task.cancelled_sealed`) or
+  `task.artifact_sealed` may carry `ciphertextRef` above the 256 KiB inline
+  frame (#654, owner batch §58a A). The cloud checks that the object is
+  committed in the tenant, with the declared size and content type; a failure
+  is reported as `payload_invalid`. The task holds the blob under its
+  `(sealed-task, taskId)` reference, and redaction releases it.
+  `task.progress_sealed` and `task.await_approval_sealed` stay inline only.
+  The cloud advertises the new server capability
+  `sealed-output-ciphertext-ref`. Upgrade note: `TenantStores` has a new
+  required member `objects`, the tenant-bound `get`, `addReference` and
+  `removeReference` of the core `ObjectStore`. `tenantStoresFor` builds it, so
+  only code that builds a `TenantStores` literal needs to add it.
+- **Feature (client)** — when the server advertises
+  `sealed-output-ciphertext-ref`, the daemon uploads a sealed task output
+  over the inline frame as a ciphertext blob and sends the terminal or
+  artifact by `ciphertextRef`, so the plaintext limit is 2 MiB again (#654,
+  owner batch §58a A). Without the flag, the daemon keeps the output inline:
+  a terminal over the frame becomes the sealed `task.fail` with
+  `terminal_result_unsealable`, and an artifact becomes a sealed error event.
+  Known limit: a terminal sent by reference and refused for good by the Host
+  reaches the Host as no terminal (`docs/protocol.md` §2.5).
 - **Docs** — a pairing string `<code>.<pv>` used once without `--e2ee` is
   burned: start a new registration at the Host, do not retry it (#654 E2d).
 - **Breaking (cloud)** — the device-proof `requestId` is single-use on the
@@ -24,7 +46,17 @@
   (no migration); SQLite adds that table on open. Store implementers: the
   append and put inputs take an optional `proof`, and
   `E2eeMemberRegistrationInput` takes `request`; the results can be
-  `request_conflict`.
+  `request_conflict`. A proof `requestId` longer than 120
+  characters (`TRUTH_REQUEST_ID_MAX_LENGTH`) gets 409 `proof_request_conflict`
+  before any store call, as on the truth put; the proof check already refuses
+  an empty one with 401. A store replays a recorded
+  result only after `parseRecordedWriteResult` (a new export of
+  `@byok-sdk/cloud`) accepts it; an invalid one
+  fails with `e2ee_member_state_unreadable`. Public API: the writer type
+  `E2eeMemberChainWriter` is renamed `E2eeMemberWriter`, and a device writer
+  now carries its `proof` instead of a `deviceId`;
+  `registerDeviceMemberKey(ctx, deviceId, input)` is now
+  `registerDeviceMemberKey(ctx, proof, input)`.
 - **Feature (examples)** — K8 has a Host persona mode for an external team
   (#879). With `persona: 'external'`, each snapshot Bot carries the Host's
   `profileRevision`, which K8 uses as the agentRef revision, and K8 queues no
@@ -33,6 +65,11 @@
   stores the mode. `TeamSnapshotBot` gets the optional `profileRevision`, and
   `ExternalTeam` the optional `persona`. Without the option nothing changes,
   except that a snapshot with `profileRevision` is refused.
+
+- **Fixed (examples)** — K8 validates `profileRevision` with the protocol
+  `AgentHomeProjectionProfileRevisionSchema` (#879). Before, its own copy of
+  the rule accepted `0`, so a snapshot with `profileRevision: '0'` and
+  `personaReady(botId, '0')` passed. Both are refused now.
 
 - **Feature (examples)** — K8 `BotOptions.roomHistory` reads the room
   messages of a seat ContextPack from an external authority (#883). The
@@ -134,6 +171,11 @@
   how to record the source commit. A test checks each list against the import
   graph. The shared vectors need the L files and the K4 root entry, not
   `rules/` alone. No code changes.
+- **Fixed (client)** — with `agentUserContext: 'excluded'`, an ancestor
+  directory named `**` made the literal exclude patterns match the Agent home's
+  own CLAUDE.md files. The patterns now escape glob syntax in every directory
+  part, so all of them follow one rule. The config directory exclusion is
+  decided on its real path, as Claude matches it.
 - **Fix (examples)** — in external team mode, the K8 `create_room` and
   `update_room` schemas offer only current Bots as members and admin (#881).
   Before, they also offered `new_bot_1` to `new_bot_3`, which only
@@ -141,6 +183,14 @@
   action that named one was always refused. Local mode is unchanged. A Host
   that copies K8 in external mode freezes a different schema for new owner
   Main Bot Turns.
+- **Feature (examples)** — K8 `BotOptions.outcome` narrows the outcome offer
+  of new Turns (#881). `actions.turn` and `actions.main` are allowlists for a
+  Bot Turn and for the extra actions of an owner Main Bot Turn. `timeZones`
+  sets 1 to 8 IANA zones for the routine actions. `confirmable` sets the
+  `confirmable_action` branches. Without the option, every schema is the same
+  as before. `outcomeOffer` checks an offer, and `SyncOptions.offer` takes its
+  result, so the H sync uses the same rule. Turns frozen before keep their
+  schema.
 
 ## 0.30.0 — 2026-10-24 (published)
 
